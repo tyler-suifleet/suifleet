@@ -46,15 +46,25 @@ module sui_edge::device_registry {
         owner: address,
     }
 
+    public struct RegistryCreated has copy, drop {
+        registry_id: ID,
+        admin: address,
+    }
+
     // ── Init ──────────────────────────────────────────────────────────────────
 
     fun init(ctx: &mut TxContext) {
-        transfer::share_object(DeviceRegistry {
+        let registry = DeviceRegistry {
             id: object::new(ctx),
             admin: ctx.sender(),
             device_count: 0,
             schema_version: SCHEMA_VERSION,
+        };
+        event::emit(RegistryCreated {
+            registry_id: object::id(&registry),
+            admin: ctx.sender(),
         });
+        transfer::share_object(registry);
     }
 
     #[test_only]

@@ -16,16 +16,19 @@ if [ -z "$CURRENT_ENV" ]; then
 fi
 
 if ! echo "$SUPPORTED_ENVS" | grep -qw "$CURRENT_ENV"; then
-  echo "error: environment '$CURRENT_ENV' is not supported for deployment"
+  echo "error: environment '$CURRENT_ENV' is not supported"
   echo "       supported: $SUPPORTED_ENVS"
   exit 1
 fi
 
-# Detect whether the package has already been published in this environment.
+# ── Detect publish vs upgrade ──────────────────────────────────────────────────
+
 UPGRADE_CAP=""
 if [ -f "$PUBLISHED_TOML" ] && grep -q "^\[published\.$CURRENT_ENV\]" "$PUBLISHED_TOML"; then
   UPGRADE_CAP=$(grep "upgrade-capability" "$PUBLISHED_TOML" | awk -F'"' '{print $2}')
 fi
+
+# ── Run publish or upgrade (output goes to terminal) ──────────────────────────
 
 if [ -n "$UPGRADE_CAP" ]; then
   echo "Upgrading contracts on $CURRENT_ENV (cap: $UPGRADE_CAP)..."
@@ -35,10 +38,9 @@ if [ -n "$UPGRADE_CAP" ]; then
     "$ROOT/contracts"
 
   PACKAGE_ID=$(grep "published-at" "$PUBLISHED_TOML" | awk -F'"' '{print $2}')
-  ORIGINAL_PACKAGE_ID=$(grep "original-id" "$PUBLISHED_TOML" | awk -F'"' '{print $2}')
+  ORIGINAL_PACKAGE_ID=$(grep "original-id" "$PUBLISHED_TOML" | awk -F'"' '{print $2}' || echo "")
   if [ -z "$ORIGINAL_PACKAGE_ID" ]; then ORIGINAL_PACKAGE_ID="$PACKAGE_ID"; fi
 
-  # Registry persists across upgrades — keep the existing value.
   REGISTRY_ID=$(grep "NEXT_PUBLIC_REGISTRY_ID" "$ENV_FILE" 2>/dev/null | cut -d= -f2 || echo "")
   if [ -z "$REGISTRY_ID" ]; then
     echo "error: REGISTRY_ID not found in $ENV_FILE — run a fresh publish first"
@@ -46,43 +48,61 @@ if [ -n "$UPGRADE_CAP" ]; then
   fi
 
 else
-  if [ "$CURRENT_ENV" = "testnet" ]; then
-    echo "Publishing contracts to $CURRENT_ENV..."
-    PUBLISH_JSON=$(sui client publish --gas-budget 50000000 --json "$ROOT/contracts")
-  else
-    echo "Publishing contracts to $CURRENT_ENV (dry-run)..."
-    PUBLISH_JSON=$(sui client test-publish --build-env "$CURRENT_ENV" --gas-budget 50000000 --json "$ROOT/contracts")
-  fi
+  echo "Publishing contracts to $CURRENT_ENV..."
 
-  # Parse the DeviceRegistry shared object ID from publish output.
-  REGISTRY_ID=$(echo "$PUBLISH_JSON" | python3 -c "
+  # Show all output on the terminal; also capture the digest for event querying.
+  TMPFILE=$(mktemp)
+  trap 'rm -f "$TMPFILE"' EXIT
+
+  sui client publish --gas-budget 50000000 --json "$ROOT/contracts" \
+    | tee "$TMPFILE" \
+    | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
-changes = data.get('objectChanges', [])
-for c in changes:
+# Pretty-print the object changes so the user can see what was created
+for c in data.get('objectChanges', []):
+    if c.get('type') in ('created', 'published'):
+        otype = c.get('objectType', c.get('type', ''))
+        print(f\"  {c['type']:10s}  {c.get('objectId', c.get('packageId', '?'))}  {otype}\")
+" 2>/dev/null || true
+
+  # Parse REGISTRY_ID from captured JSON using RegistryCreated event.
+  REGISTRY_ID=$(python3 -c "
+import sys, json
+data = json.load(open('$TMPFILE'))
+# Primary: find via RegistryCreated event
+for ev in data.get('events', []):
+    pj = ev.get('parsedJson', {})
+    if 'registry_id' in pj:
+        print(pj['registry_id'])
+        sys.exit(0)
+# Fallback: find shared DeviceRegistry in objectChanges
+for c in data.get('objectChanges', []):
     if c.get('type') == 'created' and 'DeviceRegistry' in c.get('objectType', ''):
         print(c['objectId'])
-        break
+        sys.exit(0)
+sys.exit(1)
 " 2>/dev/null || echo "")
 
   if [ -z "$REGISTRY_ID" ]; then
-    echo "error: could not parse DeviceRegistry object ID from publish output"
-    echo "       Check the transaction output and set REGISTRY_ID manually in $ENV_FILE"
+    echo ""
+    echo "error: could not determine DeviceRegistry ID from publish output."
+    echo "       Check the output above and set NEXT_PUBLIC_REGISTRY_ID manually in $ENV_FILE"
     exit 1
   fi
 
   PACKAGE_ID=$(grep "published-at" "$PUBLISHED_TOML" | awk -F'"' '{print $2}')
-  ORIGINAL_PACKAGE_ID=$(grep "original-id" "$PUBLISHED_TOML" | awk -F'"' '{print $2}')
+  ORIGINAL_PACKAGE_ID=$(grep "original-id" "$PUBLISHED_TOML" | awk -F'"' '{print $2}' || echo "")
   if [ -z "$ORIGINAL_PACKAGE_ID" ]; then ORIGINAL_PACKAGE_ID="$PACKAGE_ID"; fi
+
+  if [ -z "$PACKAGE_ID" ]; then
+    echo "error: could not read PackageID from $PUBLISHED_TOML"
+    exit 1
+  fi
 fi
 
-if [ -z "$PACKAGE_ID" ]; then
-  echo "error: could not read PackageID from $PUBLISHED_TOML"
-  exit 1
-fi
+# ── Write .env.local ───────────────────────────────────────────────────────────
 
-echo ""
-echo "Writing $ENV_FILE..."
 cat > "$ENV_FILE" <<EOF
 NEXT_PUBLIC_PACKAGE_ID=$PACKAGE_ID
 NEXT_PUBLIC_ORIGINAL_PACKAGE_ID=$ORIGINAL_PACKAGE_ID
