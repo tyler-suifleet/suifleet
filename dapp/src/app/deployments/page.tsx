@@ -41,7 +41,7 @@ export default function DeploymentsPage() {
                 <Th>Deployment ID</Th>
                 <Th>Component</Th>
                 <Th>Version</Th>
-                <Th>Target groups</Th>
+                <Th>Targets</Th>
                 <Th>Created</Th>
                 <Th>Actions</Th>
               </tr>
@@ -94,14 +94,16 @@ function DeploymentRow({
         <td className="py-3 pr-4 text-gray-500">{d.version}</td>
         <td className="py-3 pr-4">
           <div className="space-y-1">
-            {d.targetGroups.map((groupId) => (
-              <div key={groupId} className="flex items-center gap-2">
-                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[0]}`}>
-                  {STATUS_LABELS[0]}
-                </span>
-                <span className="text-xs text-gray-500">
-                  {groupId.slice(0, 12)}…
-                </span>
+            {d.targetGroups.map((id) => (
+              <div key={id} className="flex items-center gap-2">
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">group</span>
+                <span className="text-xs text-gray-500 font-mono">{id.slice(0, 12)}…</span>
+              </div>
+            ))}
+            {d.targetDevices.map((id) => (
+              <div key={id} className="flex items-center gap-2">
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">device</span>
+                <span className="text-xs text-gray-500 font-mono">{id.slice(0, 12)}…</span>
               </div>
             ))}
           </div>

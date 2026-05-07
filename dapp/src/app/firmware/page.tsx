@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import { useCurrentAccount, useSignAndExecuteTransaction } from "@mysten/dapp-kit";
 import { useGroups } from "@/hooks/useGroups";
+import { useDevices } from "@/hooks/useDevices";
 import { uploadArtifact, uploadRecipe, type ComponentRecipe } from "@/lib/walrus";
 import { buildCreateDeploymentTx } from "@/lib/sui";
 import { PageHeader } from "@/app/page";
@@ -19,6 +20,7 @@ interface ArtifactResult {
 export default function FirmwarePage() {
   const account = useCurrentAccount();
   const { data: groups = [] } = useGroups();
+  const { data: devices = [] } = useDevices();
   const { mutate: signAndExecute, isPending: txPending } = useSignAndExecuteTransaction();
 
   const [step, setStep] = useState<Step>("artifact");
@@ -31,6 +33,7 @@ export default function FirmwarePage() {
   const [runCmd, setRunCmd] = useState("");
   const [shutdownCmd, setShutdownCmd] = useState("");
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
+  const [selectedDevices, setSelectedDevices] = useState<Set<string>>(new Set());
   const [txDigest, setTxDigest] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
 
@@ -81,6 +84,7 @@ export default function FirmwarePage() {
       componentName, version,
       recipeBlobId, artifact.sha256,
       Array.from(selectedGroups),
+      Array.from(selectedDevices),
     );
     signAndExecute(
       { transaction: tx },
@@ -91,12 +95,10 @@ export default function FirmwarePage() {
     );
   }
 
-  function toggleGroup(id: string) {
-    setSelectedGroups((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
+  function toggle(set: Set<string>, setter: (s: Set<string>) => void, id: string) {
+    const next = new Set(set);
+    next.has(id) ? next.delete(id) : next.add(id);
+    setter(next);
   }
 
   if (!account) return <p className="text-sm text-gray-500">Connect your wallet to deploy a component.</p>;
@@ -120,7 +122,7 @@ export default function FirmwarePage() {
                 setStep("artifact"); setArtifact(null);
                 setComponentName(""); setVersion(""); setDescription("");
                 setInstallCmd(""); setRunCmd(""); setShutdownCmd("");
-                setSelectedGroups(new Set()); setTxDigest(null);
+                setSelectedGroups(new Set()); setSelectedDevices(new Set()); setTxDigest(null);
               }}
               className="text-sm text-gray-500 hover:text-gray-700"
             >
@@ -236,32 +238,56 @@ export default function FirmwarePage() {
         )}
       </Card>
 
-      {/* Step 3 — Target groups */}
-      <Card disabled={step !== "deploy"} title="3. Select target device groups">
-        {groups.length === 0 ? (
-          <p className="text-sm text-gray-400">
-            No device groups yet.{" "}
-            <Link href="/devices" className="text-[#4DA2FF] hover:underline">Create a group first.</Link>
-          </p>
-        ) : (
-          <div className="border border-gray-200 rounded divide-y divide-gray-100">
-            {groups.map((g) => (
-              <label key={g.objectId} className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-gray-50">
-                <input type="checkbox" checked={selectedGroups.has(g.objectId)} onChange={() => toggleGroup(g.objectId)} className="rounded" disabled={step !== "deploy"} />
-                <div className="flex-1">
-                  <p className="text-sm font-medium">{g.name}</p>
-                  <p className="text-xs text-gray-400">{g.deviceIds.length} device{g.deviceIds.length !== 1 ? "s" : ""}</p>
-                </div>
-              </label>
-            ))}
+      {/* Step 3 — Targets */}
+      <Card disabled={step !== "deploy"} title="3. Select targets">
+        <div className="space-y-4">
+          {/* Groups */}
+          <div>
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Device groups</p>
+            {groups.length === 0 ? (
+              <p className="text-sm text-gray-400">No groups yet. <Link href="/devices" className="text-[#4DA2FF] hover:underline">Create one.</Link></p>
+            ) : (
+              <div className="border border-gray-200 rounded divide-y divide-gray-100">
+                {groups.map((g) => (
+                  <label key={g.objectId} className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-gray-50">
+                    <input type="checkbox" checked={selectedGroups.has(g.objectId)} onChange={() => toggle(selectedGroups, setSelectedGroups, g.objectId)} className="rounded" disabled={step !== "deploy"} />
+                    <div className="flex-1">
+                      <p className="text-sm font-medium">{g.name}</p>
+                      <p className="text-xs text-gray-400">{g.deviceIds.length} device{g.deviceIds.length !== 1 ? "s" : ""}</p>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            )}
           </div>
-        )}
+
+          {/* Individual devices */}
+          <div>
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Individual devices</p>
+            {devices.length === 0 ? (
+              <p className="text-sm text-gray-400">No devices registered.</p>
+            ) : (
+              <div className="border border-gray-200 rounded divide-y divide-gray-100">
+                {devices.map((d) => (
+                  <label key={d.objectId} className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-gray-50">
+                    <input type="checkbox" checked={selectedDevices.has(d.objectId)} onChange={() => toggle(selectedDevices, setSelectedDevices, d.objectId)} className="rounded" disabled={step !== "deploy"} />
+                    <div className="flex-1">
+                      <p className="text-sm font-medium">{d.name}</p>
+                      <p className="text-xs text-gray-400">{d.arch}</p>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
         <button
           onClick={handleDeploy}
-          disabled={txPending || selectedGroups.size === 0 || !artifact || step !== "deploy"}
+          disabled={txPending || (selectedGroups.size === 0 && selectedDevices.size === 0) || !artifact || step !== "deploy"}
           className="mt-2 bg-[#4DA2FF] hover:bg-[#2e8ed4] text-white px-5 py-2 rounded text-sm disabled:opacity-40"
         >
-          {txPending ? "Submitting…" : `Deploy to ${selectedGroups.size} group${selectedGroups.size !== 1 ? "s" : ""}`}
+          {txPending ? "Submitting…" : `Deploy to ${selectedGroups.size + selectedDevices.size} target${selectedGroups.size + selectedDevices.size !== 1 ? "s" : ""}`}
         </button>
       </Card>
     </div>

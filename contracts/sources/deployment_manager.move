@@ -13,13 +13,13 @@ module sui_edge::deployment_manager {
     // ── Errors ────────────────────────────────────────────────────────────────
 
     const EInvalidStatus: u64 = 0;
-    const ENoTargetGroups: u64 = 1;
+    const ENoTargets: u64 = 1;
     const ENotCreator: u64 = 2;
 
     // ── Objects ───────────────────────────────────────────────────────────────
 
-    /// Shared deployment record. Targets device groups rather than individual
-    /// devices. Per-device statuses are populated dynamically as devices report.
+    /// Shared deployment record. Can target device groups, individual devices, or both.
+    /// Per-device statuses are populated dynamically as devices report.
     public struct DeploymentRecord has key {
         id: UID,
         creator: address,
@@ -29,6 +29,8 @@ module sui_edge::deployment_manager {
         sha256_hash: String,
         /// DeviceGroup object IDs — all members of these groups receive this deployment.
         target_groups: vector<ID>,
+        /// Individual Device object IDs targeted directly.
+        target_devices: vector<ID>,
         /// Maps device_id → status (populated as devices report; 1=applied, 2=failed).
         statuses: VecMap<ID, u8>,
         created_at: u64,
@@ -43,6 +45,7 @@ module sui_edge::deployment_manager {
         walrus_blob_id: String,
         sha256_hash: String,
         target_groups: vector<ID>,
+        target_devices: vector<ID>,
         creator: address,
     }
 
@@ -59,17 +62,18 @@ module sui_edge::deployment_manager {
 
     // ── Public functions ──────────────────────────────────────────────────────
 
-    /// Create a deployment targeting one or more DeviceGroups.
+    /// Create a deployment targeting device groups, individual devices, or both.
     public fun create_deployment(
         firmware_name: String,
         version: String,
         walrus_blob_id: String,
         sha256_hash: String,
         target_groups: vector<ID>,
+        target_devices: vector<ID>,
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
-        assert!(!target_groups.is_empty(), ENoTargetGroups);
+        assert!(!target_groups.is_empty() || !target_devices.is_empty(), ENoTargets);
 
         let record = DeploymentRecord {
             id: object::new(ctx),
@@ -79,6 +83,7 @@ module sui_edge::deployment_manager {
             walrus_blob_id,
             sha256_hash,
             target_groups,
+            target_devices,
             statuses: vec_map::empty(),
             created_at: clock.timestamp_ms(),
         };
@@ -90,6 +95,7 @@ module sui_edge::deployment_manager {
             walrus_blob_id: record.walrus_blob_id,
             sha256_hash: record.sha256_hash,
             target_groups: record.target_groups,
+            target_devices: record.target_devices,
             creator: record.creator,
         });
 
@@ -98,7 +104,7 @@ module sui_edge::deployment_manager {
 
     /// Called by the edge device after applying (or failing to apply) a deployment.
     /// Any device holding a valid DeviceCap may report; targeting is enforced by
-    /// the edge client (which only processes deployments for its groups).
+    /// the edge client (which only processes deployments for its groups/device list).
     public fun report_status(
         deployment: &mut DeploymentRecord,
         cap: &DeviceCap,
@@ -127,7 +133,7 @@ module sui_edge::deployment_manager {
         assert!(ctx.sender() == deployment.creator, ENotCreator);
         let DeploymentRecord {
             id, creator, firmware_name: _, version: _, walrus_blob_id: _,
-            sha256_hash: _, target_groups: _, statuses: _, created_at: _,
+            sha256_hash: _, target_groups: _, target_devices: _, statuses: _, created_at: _,
         } = deployment;
         event::emit(DeploymentDeleted { deployment_id: id.to_inner(), creator });
         id.delete();
@@ -136,6 +142,7 @@ module sui_edge::deployment_manager {
     // ── Read helpers ──────────────────────────────────────────────────────────
 
     public fun target_groups(d: &DeploymentRecord): &vector<ID> { &d.target_groups }
+    public fun target_devices(d: &DeploymentRecord): &vector<ID> { &d.target_devices }
     public fun walrus_blob_id(d: &DeploymentRecord): &String { &d.walrus_blob_id }
     public fun sha256_hash(d: &DeploymentRecord): &String { &d.sha256_hash }
     public fun status_applied(): u8 { STATUS_APPLIED }

@@ -28,6 +28,7 @@ export interface DeploymentEvent {
   walrusBlobId: string;
   sha256Hash: string;
   targetGroups: string[];
+  targetDevices: string[];
   creator: string;
   timestampMs: number;
 }
@@ -129,6 +130,7 @@ export function buildCreateDeploymentTx(
   walrusBlobId: string,
   sha256Hash: string,
   targetGroupIds: string[],
+  targetDeviceIds: string[] = [],
 ): Transaction {
   const tx = new Transaction();
   tx.moveCall({
@@ -139,6 +141,7 @@ export function buildCreateDeploymentTx(
       tx.pure.string(walrusBlobId),
       tx.pure.string(sha256Hash),
       tx.pure(bcs.vector(bcs.Address).serialize(targetGroupIds)),
+      tx.pure(bcs.vector(bcs.Address).serialize(targetDeviceIds)),
       tx.object("0x6"),
     ],
   });
@@ -238,6 +241,7 @@ export async function fetchDeploymentEvents(
       walrusBlobId: p.walrus_blob_id as string,
       sha256Hash: p.sha256_hash as string,
       targetGroups: (p.target_groups as string[]) ?? [],
+      targetDevices: (p.target_devices as string[]) ?? [],
       creator: p.creator as string,
       timestampMs: Number(ev.timestampMs ?? 0),
     };
