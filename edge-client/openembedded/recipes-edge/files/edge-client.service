@@ -1,0 +1,15 @@
+[Unit]
+Description=SUI Edge Deployment Client
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/edge-client
+Restart=on-failure
+RestartSec=5
+WatchdogSec=60
+NotifyAccess=main
+EnvironmentFile=-/etc/edge-client/env
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,26 @@
+services:
+  dev:
+    build:
+      context: .
+      args:
+        USER_UID: ${UID}
+        USER_GID: ${GID}
+    volumes:
+      - .:/workspace
+      - cargo-registry:/home/dev/.cargo/registry
+      - cargo-git:/home/dev/.cargo/git
+      - pnpm-store:/home/dev/.local/share/pnpm/store
+      - sui-config:/home/dev/.sui
+      - move-cache:/home/dev/.move
+    ports:
+      - "3000:3000"   # Next.js dev server
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+
+volumes:
+  cargo-registry:
+  cargo-git:
+  pnpm-store:
+  sui-config:
+  move-cache:

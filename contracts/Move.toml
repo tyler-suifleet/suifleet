@@ -1,0 +1,12 @@
+[package]
+name = "sui_edge"
+version = "0.0.1"
+edition = "2024.beta"
+
+[dependencies]
+
+[addresses]
+sui_edge = "0x0"
+
+[environments]
+devnet = "4fe43958"

@@ -1,0 +1,22 @@
+[sui]
+rpc_url = "https://fullnode.testnet.sui.io:443"
+ws_url  = "wss://fullnode.testnet.sui.io:443"
+# Latest package ID (for function calls). Updated on every upgrade.
+package_id = "0x..."
+
+[device]
+keypair_path = "/etc/edge-client/device.key"   # 32-byte hex ed25519 private key
+device_object_id = "0x..."                      # Device object ID from registration
+device_cap_id    = "0x..."                      # DeviceCap object ID
+# DeviceGroup object IDs this device belongs to.
+# Any deployment targeting one of these groups will be downloaded and applied.
+group_ids = [
+    "0x...",
+]
+
+[walrus]
+aggregator_url = "https://aggregator.walrus-testnet.walrus.space"
+
+[swupdate]
+binary  = "/usr/bin/swupdate"
+dry_run = false   # set true to skip the actual swupdate call (for testing)
