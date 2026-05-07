@@ -29,43 +29,55 @@ fi
 
 if [ -n "$UPGRADE_CAP" ]; then
   echo "Upgrading contracts on $CURRENT_ENV (cap: $UPGRADE_CAP)..."
-  # Run directly — let output print to terminal so errors are visible
   sui client upgrade \
     --upgrade-capability "$UPGRADE_CAP" \
     --gas-budget 200000000 \
     "$ROOT/contracts"
-elif [ "$CURRENT_ENV" = "testnet" ]; then
-  echo "Publishing contracts to $CURRENT_ENV..."
-  sui client publish --gas-budget 200000000 "$ROOT/contracts"
+
+  PACKAGE_ID=$(grep "published-at" "$PUBLISHED_TOML" | awk -F'"' '{print $2}')
+  ORIGINAL_PACKAGE_ID=$(grep "original-id" "$PUBLISHED_TOML" | awk -F'"' '{print $2}')
+  if [ -z "$ORIGINAL_PACKAGE_ID" ]; then ORIGINAL_PACKAGE_ID="$PACKAGE_ID"; fi
+
+  # Registry persists across upgrades — keep the existing value.
+  REGISTRY_ID=$(grep "NEXT_PUBLIC_REGISTRY_ID" "$ENV_FILE" 2>/dev/null | cut -d= -f2 || echo "")
+  if [ -z "$REGISTRY_ID" ]; then
+    echo "error: REGISTRY_ID not found in $ENV_FILE — run a fresh publish first"
+    exit 1
+  fi
+
 else
-  echo "Publishing contracts to $CURRENT_ENV..."
-  sui client test-publish --build-env "$CURRENT_ENV" --gas-budget 200000000 "$ROOT/contracts"
-fi
+  if [ "$CURRENT_ENV" = "testnet" ]; then
+    echo "Publishing contracts to $CURRENT_ENV..."
+    PUBLISH_JSON=$(sui client publish --gas-budget 200000000 --json "$ROOT/contracts")
+  else
+    echo "Publishing contracts to $CURRENT_ENV (dry-run)..."
+    PUBLISH_JSON=$(sui client test-publish --build-env "$CURRENT_ENV" --gas-budget 200000000 --json "$ROOT/contracts")
+  fi
 
-# After publish/upgrade, Published.toml has the authoritative IDs.
-# published-at = latest package ID (for function calls)
-# original-id  = first-ever package ID (for type queries — SUI preserves type origins across upgrades)
-PACKAGE_ID=$(grep "published-at" "$PUBLISHED_TOML" | awk -F'"' '{print $2}')
-ORIGINAL_PACKAGE_ID=$(grep "original-id" "$PUBLISHED_TOML" | awk -F'"' '{print $2}')
+  # Parse the DeviceRegistry shared object ID from publish output.
+  REGISTRY_ID=$(echo "$PUBLISH_JSON" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+changes = data.get('objectChanges', [])
+for c in changes:
+    if c.get('type') == 'created' and 'DeviceRegistry' in c.get('objectType', ''):
+        print(c['objectId'])
+        break
+" 2>/dev/null || echo "")
 
-# On first publish these are identical; on upgrade they differ.
-if [ -z "$ORIGINAL_PACKAGE_ID" ]; then
-  ORIGINAL_PACKAGE_ID="$PACKAGE_ID"
-fi
+  if [ -z "$REGISTRY_ID" ]; then
+    echo "error: could not parse DeviceRegistry object ID from publish output"
+    echo "       Check the transaction output and set REGISTRY_ID manually in $ENV_FILE"
+    exit 1
+  fi
 
-# Registry is a shared object that persists across upgrades — keep the existing value.
-REGISTRY_ID=""
-if [ -f "$ENV_FILE" ]; then
-  REGISTRY_ID=$(grep "NEXT_PUBLIC_REGISTRY_ID" "$ENV_FILE" | cut -d= -f2)
+  PACKAGE_ID=$(grep "published-at" "$PUBLISHED_TOML" | awk -F'"' '{print $2}')
+  ORIGINAL_PACKAGE_ID=$(grep "original-id" "$PUBLISHED_TOML" | awk -F'"' '{print $2}')
+  if [ -z "$ORIGINAL_PACKAGE_ID" ]; then ORIGINAL_PACKAGE_ID="$PACKAGE_ID"; fi
 fi
 
 if [ -z "$PACKAGE_ID" ]; then
   echo "error: could not read PackageID from $PUBLISHED_TOML"
-  exit 1
-fi
-
-if [ -z "$REGISTRY_ID" ]; then
-  echo "error: REGISTRY_ID not found in $ENV_FILE — run a fresh publish first"
   exit 1
 fi
 
@@ -83,9 +95,9 @@ echo "╔═══════════════════════�
 echo "║  SUCCEEDED                           ║"
 echo "╚══════════════════════════════════════╝"
 echo ""
-echo "  NETWORK          = $CURRENT_ENV"
-echo "  PACKAGE_ID       = $PACKAGE_ID"
+echo "  NETWORK             = $CURRENT_ENV"
+echo "  PACKAGE_ID          = $PACKAGE_ID"
 echo "  ORIGINAL_PACKAGE_ID = $ORIGINAL_PACKAGE_ID"
-echo "  REGISTRY_ID      = $REGISTRY_ID"
+echo "  REGISTRY_ID         = $REGISTRY_ID"
 echo ""
 echo "Restart the dApp dev server to pick up the new IDs."
