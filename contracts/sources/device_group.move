@@ -41,6 +41,11 @@ module sui_edge::device_group {
         device_id: ID,
     }
 
+    public struct GroupDeleted has copy, drop {
+        group_id: ID,
+        admin: address,
+    }
+
     // ── Public functions ─────────────────────────────────────────────────────────
 
     public fun create_group(
@@ -94,6 +99,13 @@ module sui_edge::device_group {
             group_id: object::id(group),
             device_id,
         });
+    }
+
+    public entry fun delete_group(group: DeviceGroup, ctx: &TxContext) {
+        assert!(ctx.sender() == group.admin, ENotAdmin);
+        let DeviceGroup { id, name: _, description: _, admin, device_ids: _, created_at: _ } = group;
+        event::emit(GroupDeleted { group_id: id.to_inner(), admin });
+        id.delete();
     }
 
     // ── Read helpers ──────────────────────────────────────────────────────────────

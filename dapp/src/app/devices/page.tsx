@@ -5,8 +5,8 @@ import { useCurrentAccount, useSignAndExecuteTransaction } from "@mysten/dapp-ki
 import { useDevices } from "@/hooks/useDevices";
 import { useGroups } from "@/hooks/useGroups";
 import {
-  buildRegisterDeviceTx, buildIssueCapTx,
-  buildCreateGroupTx, buildAddDeviceToGroupTx, buildRemoveDeviceFromGroupTx,
+  buildRegisterDeviceTx, buildIssueCapTx, buildDeregisterDeviceTx,
+  buildCreateGroupTx, buildAddDeviceToGroupTx, buildRemoveDeviceFromGroupTx, buildDeleteGroupTx,
 } from "@/lib/sui";
 import { PageHeader, StatusDot } from "@/app/page";
 
@@ -96,7 +96,7 @@ function DevicesTab() {
                   <td className="py-3 pr-4 text-gray-500">{d.arch}</td>
                   <td className="py-3 pr-4 font-mono text-xs text-gray-400 max-w-[160px] truncate">{d.deviceAddress}</td>
                   <td className="py-3 pr-4 font-mono text-xs text-gray-400">{d.objectId.slice(0, 14)}…</td>
-                  <td className="py-3">
+                  <td className="py-3 flex items-center gap-3">
                     <button
                       disabled={isPending}
                       onClick={() => {
@@ -111,6 +111,22 @@ function DevicesTab() {
                       className="text-xs text-[#0073bb] hover:underline disabled:opacity-40"
                     >
                       Issue cap
+                    </button>
+                    <button
+                      disabled={isPending}
+                      onClick={() => {
+                        if (!confirm(`Remove "${d.name}"? This cannot be undone.`)) return;
+                        signAndExecute(
+                          { transaction: buildDeregisterDeviceTx(d.objectId) },
+                          {
+                            onSuccess: () => setTimeout(() => refetch(), 3000),
+                            onError: (err) => alert(`Failed: ${err.message}`),
+                          }
+                        );
+                      }}
+                      className="text-xs text-red-500 hover:text-red-700 disabled:opacity-40"
+                    >
+                      Remove
                     </button>
                   </td>
                 </tr>
@@ -220,9 +236,25 @@ function GroupsTab() {
                   <td className="py-3 pr-4 text-gray-500 text-xs">{g.description || "—"}</td>
                   <td className="py-3 pr-4 text-gray-500">{g.deviceIds.length}</td>
                   <td className="py-3 pr-4 font-mono text-xs text-gray-400">{g.objectId.slice(0, 14)}…</td>
-                  <td className="py-3">
+                  <td className="py-3 flex items-center gap-3">
                     <button onClick={() => setManagingGroup(g.objectId)} className="text-xs text-[#0073bb] hover:underline">
                       Manage devices
+                    </button>
+                    <button
+                      disabled={isPending}
+                      onClick={() => {
+                        if (!confirm(`Delete group "${g.name}"? This cannot be undone.`)) return;
+                        signAndExecute(
+                          { transaction: buildDeleteGroupTx(g.objectId) },
+                          {
+                            onSuccess: () => setTimeout(() => refetch(), 3000),
+                            onError: (err) => alert(`Failed: ${err.message}`),
+                          }
+                        );
+                      }}
+                      className="text-xs text-red-500 hover:text-red-700 disabled:opacity-40"
+                    >
+                      Delete
                     </button>
                   </td>
                 </tr>

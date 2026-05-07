@@ -64,6 +64,15 @@ export function buildIssueCapTx(deviceObjectId: string): Transaction {
   return tx;
 }
 
+export function buildDeregisterDeviceTx(deviceObjectId: string): Transaction {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${PACKAGE_ID}::device_registry::deregister_device`,
+    arguments: [tx.object(REGISTRY_ID), tx.object(deviceObjectId)],
+  });
+  return tx;
+}
+
 // ── Group transactions ────────────────────────────────────────────────────────
 
 export function buildCreateGroupTx(name: string, description: string): Transaction {
@@ -103,6 +112,15 @@ export function buildRemoveDeviceFromGroupTx(groupObjectId: string, deviceId: st
   return tx;
 }
 
+export function buildDeleteGroupTx(groupObjectId: string): Transaction {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${PACKAGE_ID}::device_group::delete_group`,
+    arguments: [tx.object(groupObjectId)],
+  });
+  return tx;
+}
+
 // ── Deployment transactions ───────────────────────────────────────────────────
 
 export function buildCreateDeploymentTx(
@@ -123,6 +141,15 @@ export function buildCreateDeploymentTx(
       tx.pure(bcs.vector(bcs.Address).serialize(targetGroupIds)),
       tx.object("0x6"),
     ],
+  });
+  return tx;
+}
+
+export function buildDeleteDeploymentTx(deploymentObjectId: string): Transaction {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${PACKAGE_ID}::deployment_manager::delete_deployment`,
+    arguments: [tx.object(deploymentObjectId)],
   });
   return tx;
 }

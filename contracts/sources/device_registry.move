@@ -87,13 +87,12 @@ module sui_edge::device_registry {
         device
     }
 
-    public fun deregister_device(
+    public entry fun deregister_device(
         registry: &mut DeviceRegistry,
         device: Device,
         ctx: &TxContext,
     ) {
-        // Only the registry admin may deregister devices.
-        assert!(ctx.sender() == registry.admin, ENotAdmin);
+        // Ownership is proven by passing Device by value — no admin check needed.
         let Device { id, name: _, device_address: _, arch: _, meta: _, registered_at: _ } = device;
 
         event::emit(DeviceDeregistered {

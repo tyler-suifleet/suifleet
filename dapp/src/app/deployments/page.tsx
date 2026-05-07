@@ -1,12 +1,16 @@
 "use client";
 
 import { useDeployments } from "@/hooks/useDeployments";
+import { useCurrentAccount, useSignAndExecuteTransaction } from "@mysten/dapp-kit";
+import { buildDeleteDeploymentTx } from "@/lib/sui";
 import { STATUS_LABELS, STATUS_COLORS } from "@/lib/constants";
 import { PageHeader } from "@/app/page";
 import Link from "next/link";
 
 export default function DeploymentsPage() {
-  const { data: deployments = [], isLoading } = useDeployments();
+  const { data: deployments = [], isLoading, refetch } = useDeployments();
+  const account = useCurrentAccount();
+  const { mutate: signAndExecute, isPending } = useSignAndExecuteTransaction();
 
   return (
     <div className="space-y-4 max-w-5xl">
@@ -39,11 +43,27 @@ export default function DeploymentsPage() {
                 <Th>Version</Th>
                 <Th>Target groups</Th>
                 <Th>Created</Th>
+                <Th>Actions</Th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {deployments.map((d) => (
-                <DeploymentRow key={d.deploymentId} d={d} />
+                <DeploymentRow
+                  key={d.deploymentId}
+                  d={d}
+                  canDelete={account?.address === d.creator}
+                  isPending={isPending}
+                  onDelete={() => {
+                    if (!confirm(`Delete deployment "${d.firmwareName} ${d.version}"? This cannot be undone.`)) return;
+                    signAndExecute(
+                      { transaction: buildDeleteDeploymentTx(d.deploymentId) },
+                      {
+                        onSuccess: () => setTimeout(() => refetch(), 3000),
+                        onError: (err) => alert(`Failed: ${err.message}`),
+                      }
+                    );
+                  }}
+                />
               ))}
             </tbody>
           </table>
@@ -55,8 +75,14 @@ export default function DeploymentsPage() {
 
 function DeploymentRow({
   d,
+  canDelete,
+  isPending,
+  onDelete,
 }: {
   d: ReturnType<typeof useDeployments>["data"] extends (infer T)[] | undefined ? T : never;
+  canDelete: boolean;
+  isPending: boolean;
+  onDelete: () => void;
 }) {
   return (
     <>
@@ -83,9 +109,20 @@ function DeploymentRow({
         <td className="py-3 pr-4 text-xs text-gray-400">
           {new Date(d.timestampMs).toLocaleString()}
         </td>
+        <td className="py-3">
+          {canDelete && (
+            <button
+              disabled={isPending}
+              onClick={onDelete}
+              className="text-xs text-red-500 hover:text-red-700 disabled:opacity-40"
+            >
+              Delete
+            </button>
+          )}
+        </td>
       </tr>
       <tr className="bg-gray-50 border-b border-gray-200">
-        <td colSpan={5} className="px-4 pb-3">
+        <td colSpan={6} className="px-4 pb-3">
           <div className="text-xs text-gray-400 space-x-4">
             <span>Blob: <span className="font-mono text-gray-500">{d.walrusBlobId}</span></span>
             <span>SHA256: <span className="font-mono text-gray-500">{d.sha256Hash.slice(0, 16)}…</span></span>

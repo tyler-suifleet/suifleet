@@ -14,6 +14,7 @@ module sui_edge::deployment_manager {
 
     const EInvalidStatus: u64 = 0;
     const ENoTargetGroups: u64 = 1;
+    const ENotCreator: u64 = 2;
 
     // ── Objects ───────────────────────────────────────────────────────────────
 
@@ -49,6 +50,11 @@ module sui_edge::deployment_manager {
         deployment_id: ID,
         device_id: ID,
         status: u8,
+    }
+
+    public struct DeploymentDeleted has copy, drop {
+        deployment_id: ID,
+        creator: address,
     }
 
     // ── Public functions ──────────────────────────────────────────────────────
@@ -115,6 +121,16 @@ module sui_edge::deployment_manager {
             device_id,
             status,
         });
+    }
+
+    public entry fun delete_deployment(deployment: DeploymentRecord, ctx: &TxContext) {
+        assert!(ctx.sender() == deployment.creator, ENotCreator);
+        let DeploymentRecord {
+            id, creator, firmware_name: _, version: _, walrus_blob_id: _,
+            sha256_hash: _, target_groups: _, statuses: _, created_at: _,
+        } = deployment;
+        event::emit(DeploymentDeleted { deployment_id: id.to_inner(), creator });
+        id.delete();
     }
 
     // ── Read helpers ──────────────────────────────────────────────────────────
