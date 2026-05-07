@@ -4,15 +4,19 @@ module sui_edge::device_registry {
     use sui::event;
     use sui::vec_map::{Self, VecMap};
 
-    // ── Errors ──────────────────────────────────────────────────────────────
+    // ── Constants ─────────────────────────────────────────────────────────────
 
-    // ── Objects ──────────────────────────────────────────────────────────────
+    const SCHEMA_VERSION: u64 = 1;
+
+    // ── Objects ───────────────────────────────────────────────────────────────
 
     /// Shared singleton. Created once at publish time.
     public struct DeviceRegistry has key {
         id: UID,
         admin: address,
         device_count: u64,
+        /// Monotonic version bump used to gate future migrations.
+        schema_version: u64,
     }
 
     /// Owned by the wallet that registered the device.
@@ -22,11 +26,13 @@ module sui_edge::device_registry {
         /// SUI address of the keypair running on the edge device itself.
         device_address: address,
         arch: String,
+        /// Open-ended key/value metadata — extend without struct changes.
         meta: VecMap<String, String>,
         registered_at: u64,
+        schema_version: u64,
     }
 
-    // ── Events ───────────────────────────────────────────────────────────────
+    // ── Events ────────────────────────────────────────────────────────────────
 
     public struct DeviceRegistered has copy, drop {
         device_id: ID,
@@ -40,13 +46,14 @@ module sui_edge::device_registry {
         owner: address,
     }
 
-    // ── Init ─────────────────────────────────────────────────────────────────
+    // ── Init ──────────────────────────────────────────────────────────────────
 
     fun init(ctx: &mut TxContext) {
         transfer::share_object(DeviceRegistry {
             id: object::new(ctx),
             admin: ctx.sender(),
             device_count: 0,
+            schema_version: SCHEMA_VERSION,
         });
     }
 
@@ -55,7 +62,7 @@ module sui_edge::device_registry {
         init(ctx);
     }
 
-    // ── Public functions ─────────────────────────────────────────────────────
+    // ── Public functions ──────────────────────────────────────────────────────
 
     public fun register_device(
         registry: &mut DeviceRegistry,
@@ -72,6 +79,7 @@ module sui_edge::device_registry {
             arch,
             meta: vec_map::empty(),
             registered_at: clock.timestamp_ms(),
+            schema_version: SCHEMA_VERSION,
         };
 
         event::emit(DeviceRegistered {
@@ -91,7 +99,7 @@ module sui_edge::device_registry {
         ctx: &TxContext,
     ) {
         // Ownership is proven by passing Device by value — no admin check needed.
-        let Device { id, name: _, device_address: _, arch: _, meta: _, registered_at: _ } = device;
+        let Device { id, name: _, device_address: _, arch: _, meta: _, registered_at: _, schema_version: _ } = device;
 
         event::emit(DeviceDeregistered {
             device_id: id.to_inner(),
@@ -106,10 +114,8 @@ module sui_edge::device_registry {
         device: &mut Device,
         key: String,
         value: String,
-        ctx: &TxContext,
+        _ctx: &TxContext,
     ) {
-        // Only the device owner (caller) can update metadata.
-        let _ = ctx;
         if (device.meta.contains(&key)) {
             let (_k, _v) = device.meta.remove(&key);
         };

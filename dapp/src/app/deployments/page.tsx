@@ -54,7 +54,7 @@ export default function DeploymentsPage() {
                   canDelete={account?.address === d.creator}
                   isPending={isPending}
                   onDelete={() => {
-                    if (!confirm(`Delete deployment "${d.firmwareName} ${d.version}"? This cannot be undone.`)) return;
+                    if (!confirm(`Delete deployment "${d.componentName} ${d.version}"? This cannot be undone.`)) return;
                     signAndExecute(
                       { transaction: buildDeleteDeploymentTx(d.deploymentId) },
                       {
@@ -90,7 +90,7 @@ function DeploymentRow({
         <td className="py-3 px-4 font-mono text-xs text-gray-400 max-w-[140px]">
           <span title={d.deploymentId}>{d.deploymentId.slice(0, 16)}…</span>
         </td>
-        <td className="py-3 pr-4 font-medium">{d.firmwareName}</td>
+        <td className="py-3 pr-4 font-medium">{d.componentName}</td>
         <td className="py-3 pr-4 text-gray-500">{d.version}</td>
         <td className="py-3 pr-4">
           <div className="space-y-1">
@@ -126,8 +126,8 @@ function DeploymentRow({
       <tr className="bg-gray-50 border-b border-gray-200">
         <td colSpan={6} className="px-4 pb-3">
           <div className="text-xs text-gray-400 space-x-4">
-            <span>Blob: <span className="font-mono text-gray-500">{d.walrusBlobId}</span></span>
-            <span>SHA256: <span className="font-mono text-gray-500">{d.sha256Hash.slice(0, 16)}…</span></span>
+            <span>Recipe: <span className="font-mono text-gray-500">{d.recipeBlobId}</span></span>
+            <span>SHA256: <span className="font-mono text-gray-500">{d.artifactSha256.slice(0, 16)}…</span></span>
           </div>
         </td>
       </tr>

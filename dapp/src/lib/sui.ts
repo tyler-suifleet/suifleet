@@ -23,10 +23,10 @@ export interface DeviceGroup {
 
 export interface DeploymentEvent {
   deploymentId: string;
-  firmwareName: string;
+  componentName: string;
   version: string;
-  walrusBlobId: string;
-  sha256Hash: string;
+  recipeBlobId: string;
+  artifactSha256: string;
   targetGroups: string[];
   targetDevices: string[];
   creator: string;
@@ -125,10 +125,10 @@ export function buildDeleteGroupTx(groupObjectId: string): Transaction {
 // ── Deployment transactions ───────────────────────────────────────────────────
 
 export function buildCreateDeploymentTx(
-  firmwareName: string,
+  componentName: string,
   version: string,
-  walrusBlobId: string,
-  sha256Hash: string,
+  recipeBlobId: string,
+  artifactSha256: string,
   targetGroupIds: string[],
   targetDeviceIds: string[] = [],
 ): Transaction {
@@ -136,10 +136,10 @@ export function buildCreateDeploymentTx(
   tx.moveCall({
     target: `${PACKAGE_ID}::deployment_manager::create_deployment`,
     arguments: [
-      tx.pure.string(firmwareName),
+      tx.pure.string(componentName),
       tx.pure.string(version),
-      tx.pure.string(walrusBlobId),
-      tx.pure.string(sha256Hash),
+      tx.pure.string(recipeBlobId),
+      tx.pure.string(artifactSha256),
       tx.pure(bcs.vector(bcs.Address).serialize(targetGroupIds)),
       tx.pure(bcs.vector(bcs.Address).serialize(targetDeviceIds)),
       tx.object("0x6"),
@@ -236,10 +236,10 @@ export async function fetchDeploymentEvents(
     const p = ev.parsedJson as Record<string, unknown>;
     return {
       deploymentId: p.deployment_id as string,
-      firmwareName: p.firmware_name as string,
+      componentName: p.component_name as string,
       version: p.version as string,
-      walrusBlobId: p.walrus_blob_id as string,
-      sha256Hash: p.sha256_hash as string,
+      recipeBlobId: p.recipe_blob_id as string,
+      artifactSha256: p.artifact_sha256 as string,
       targetGroups: (p.target_groups as string[]) ?? [],
       targetDevices: (p.target_devices as string[]) ?? [],
       creator: p.creator as string,

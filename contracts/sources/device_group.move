@@ -4,16 +4,20 @@ module sui_edge::device_group {
     use sui::event;
     use sui_edge::device_registry::{Self, Device};
 
-    // ── Errors ───────────────────────────────────────────────────────────────────
+    // ── Constants ─────────────────────────────────────────────────────────────
+
+    const SCHEMA_VERSION: u64 = 1;
+
+    // ── Errors ────────────────────────────────────────────────────────────────
 
     const ENotAdmin: u64 = 0;
     const EDeviceAlreadyInGroup: u64 = 1;
     const EDeviceNotInGroup: u64 = 2;
 
-    // ── Objects ──────────────────────────────────────────────────────────────────
+    // ── Objects ───────────────────────────────────────────────────────────────
 
     /// Shared object. Represents a named fleet of devices that receive
-    /// deployments together — analogous to an AWS IoT Thing Group.
+    /// deployments together.
     public struct DeviceGroup has key {
         id: UID,
         name: String,
@@ -21,9 +25,11 @@ module sui_edge::device_group {
         admin: address,
         device_ids: vector<ID>,
         created_at: u64,
+        /// Monotonic version bump used to gate future migrations.
+        schema_version: u64,
     }
 
-    // ── Events ───────────────────────────────────────────────────────────────────
+    // ── Events ────────────────────────────────────────────────────────────────
 
     public struct GroupCreated has copy, drop {
         group_id: ID,
@@ -46,7 +52,7 @@ module sui_edge::device_group {
         admin: address,
     }
 
-    // ── Public functions ─────────────────────────────────────────────────────────
+    // ── Public functions ──────────────────────────────────────────────────────
 
     public fun create_group(
         name: String,
@@ -61,6 +67,7 @@ module sui_edge::device_group {
             admin: ctx.sender(),
             device_ids: vector[],
             created_at: clock.timestamp_ms(),
+            schema_version: SCHEMA_VERSION,
         };
         event::emit(GroupCreated {
             group_id: object::id(&group),
@@ -103,12 +110,12 @@ module sui_edge::device_group {
 
     public entry fun delete_group(group: DeviceGroup, ctx: &TxContext) {
         assert!(ctx.sender() == group.admin, ENotAdmin);
-        let DeviceGroup { id, name: _, description: _, admin, device_ids: _, created_at: _ } = group;
+        let DeviceGroup { id, name: _, description: _, admin, device_ids: _, created_at: _, schema_version: _ } = group;
         event::emit(GroupDeleted { group_id: id.to_inner(), admin });
         id.delete();
     }
 
-    // ── Read helpers ──────────────────────────────────────────────────────────────
+    // ── Read helpers ──────────────────────────────────────────────────────────
 
     public fun contains_device(group: &DeviceGroup, device_id: ID): bool {
         let (found, _) = group.device_ids.index_of(&device_id);

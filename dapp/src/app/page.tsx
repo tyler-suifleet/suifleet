@@ -43,7 +43,7 @@ export default function DashboardPage() {
             <tbody className="divide-y divide-gray-100">
               {deployments.slice(0, 6).map((d) => (
                 <tr key={d.deploymentId} className="hover:bg-gray-50">
-                  <td className="py-3 pr-4 font-medium">{d.firmwareName}</td>
+                  <td className="py-3 pr-4 font-medium">{d.componentName}</td>
                   <td className="py-3 pr-4 text-gray-500">{d.version}</td>
                   <td className="py-3 pr-4 text-gray-500">{d.targetGroups.length}</td>
                   <td className="py-3 text-gray-400 text-xs">{new Date(d.timestampMs).toLocaleString()}</td>
