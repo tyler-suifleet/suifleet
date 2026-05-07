@@ -2,21 +2,24 @@
 
 import { useDevices } from "@/hooks/useDevices";
 import { useDeployments } from "@/hooks/useDeployments";
+import { useGroups } from "@/hooks/useGroups";
 import Link from "next/link";
 
 export default function DashboardPage() {
   const { data: devices = [], isLoading: dl } = useDevices();
   const { data: deployments = [], isLoading: depl } = useDeployments();
+  const { data: groups = [], isLoading: gl } = useGroups();
 
-  const pending  = deployments.filter((d) => d.targetGroups.length > 0);
+  const pending = deployments.filter((d) => d.targetGroups.length > 0);
 
   return (
     <div className="space-y-6 max-w-5xl">
       <PageHeader title="Dashboard" />
 
       {/* Stat cards */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-4 gap-4">
         <StatCard label="Devices" value={dl ? "—" : devices.length} href="/devices" />
+        <StatCard label="Device groups" value={gl ? "—" : groups.length} href="/devices" />
         <StatCard label="Deployments" value={depl ? "—" : deployments.length} href="/deployments" />
         <StatCard label="Active deployments" value={depl ? "—" : pending.length} href="/deployments" />
       </div>
@@ -44,6 +47,34 @@ export default function DashboardPage() {
                   <td className="py-3 pr-4 text-gray-500">{d.version}</td>
                   <td className="py-3 pr-4 text-gray-500">{d.targetGroups.length}</td>
                   <td className="py-3 text-gray-400 text-xs">{new Date(d.timestampMs).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Section>
+
+      {/* Device groups */}
+      <Section title="Device groups" action={{ label: "Manage", href: "/devices" }}>
+        {gl ? (
+          <TableSkeleton cols={3} rows={2} />
+        ) : groups.length === 0 ? (
+          <Empty msg="No device groups yet." cta={{ label: "Create a group", href: "/devices" }} />
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-200 text-left text-xs text-gray-500 uppercase">
+                <Th>Name</Th>
+                <Th>Description</Th>
+                <Th>Devices</Th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {groups.map((g) => (
+                <tr key={g.objectId} className="hover:bg-gray-50">
+                  <td className="py-3 pr-4 font-medium">{g.name}</td>
+                  <td className="py-3 pr-4 text-gray-500 text-xs">{g.description || "—"}</td>
+                  <td className="py-3 text-gray-500">{g.deviceIds.length}</td>
                 </tr>
               ))}
             </tbody>
