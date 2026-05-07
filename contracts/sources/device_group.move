@@ -59,7 +59,7 @@ module sui_edge::device_group {
             name,
             description,
             admin: ctx.sender(),
-            device_ids: vector::empty(),
+            device_ids: vector[],
             created_at: clock.timestamp_ms(),
         };
         event::emit(GroupCreated {

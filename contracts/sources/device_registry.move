@@ -6,8 +6,6 @@ module sui_edge::device_registry {
 
     // ── Errors ──────────────────────────────────────────────────────────────
 
-    const ENotAdmin: u64 = 0;
-
     // ── Objects ──────────────────────────────────────────────────────────────
 
     /// Shared singleton. Created once at publish time.
