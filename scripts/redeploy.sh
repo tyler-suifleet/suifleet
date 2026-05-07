@@ -31,7 +31,7 @@ if [ -n "$UPGRADE_CAP" ]; then
   echo "Upgrading contracts on $CURRENT_ENV (cap: $UPGRADE_CAP)..."
   sui client upgrade \
     --upgrade-capability "$UPGRADE_CAP" \
-    --gas-budget 200000000 \
+    --gas-budget 50000000 \
     "$ROOT/contracts"
 
   PACKAGE_ID=$(grep "published-at" "$PUBLISHED_TOML" | awk -F'"' '{print $2}')
@@ -48,10 +48,10 @@ if [ -n "$UPGRADE_CAP" ]; then
 else
   if [ "$CURRENT_ENV" = "testnet" ]; then
     echo "Publishing contracts to $CURRENT_ENV..."
-    PUBLISH_JSON=$(sui client publish --gas-budget 200000000 --json "$ROOT/contracts")
+    PUBLISH_JSON=$(sui client publish --gas-budget 50000000 --json "$ROOT/contracts")
   else
     echo "Publishing contracts to $CURRENT_ENV (dry-run)..."
-    PUBLISH_JSON=$(sui client test-publish --build-env "$CURRENT_ENV" --gas-budget 200000000 --json "$ROOT/contracts")
+    PUBLISH_JSON=$(sui client test-publish --build-env "$CURRENT_ENV" --gas-budget 50000000 --json "$ROOT/contracts")
   fi
 
   # Parse the DeviceRegistry shared object ID from publish output.
