@@ -1,16 +1,12 @@
 "use client";
 
 import { useDeployments } from "@/hooks/useDeployments";
-import { useDevices } from "@/hooks/useDevices";
 import { STATUS_LABELS, STATUS_COLORS } from "@/lib/constants";
 import { PageHeader } from "@/app/page";
 import Link from "next/link";
 
 export default function DeploymentsPage() {
   const { data: deployments = [], isLoading } = useDeployments();
-  const { data: devices = [] } = useDevices();
-
-  const deviceNames = Object.fromEntries(devices.map((d) => [d.objectId, d.name]));
 
   return (
     <div className="space-y-4 max-w-5xl">
@@ -41,13 +37,13 @@ export default function DeploymentsPage() {
                 <Th>Deployment ID</Th>
                 <Th>Component</Th>
                 <Th>Version</Th>
-                <Th>Target devices</Th>
+                <Th>Target groups</Th>
                 <Th>Created</Th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {deployments.map((d) => (
-                <DeploymentRow key={d.deploymentId} d={d} deviceNames={deviceNames} />
+                <DeploymentRow key={d.deploymentId} d={d} />
               ))}
             </tbody>
           </table>
@@ -59,10 +55,8 @@ export default function DeploymentsPage() {
 
 function DeploymentRow({
   d,
-  deviceNames,
 }: {
   d: ReturnType<typeof useDeployments>["data"] extends (infer T)[] | undefined ? T : never;
-  deviceNames: Record<string, string>;
 }) {
   return (
     <>
@@ -74,13 +68,13 @@ function DeploymentRow({
         <td className="py-3 pr-4 text-gray-500">{d.version}</td>
         <td className="py-3 pr-4">
           <div className="space-y-1">
-            {d.targetDevices.map((deviceId) => (
-              <div key={deviceId} className="flex items-center gap-2">
+            {d.targetGroups.map((groupId) => (
+              <div key={groupId} className="flex items-center gap-2">
                 <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[0]}`}>
                   {STATUS_LABELS[0]}
                 </span>
                 <span className="text-xs text-gray-500">
-                  {deviceNames[deviceId] ?? deviceId.slice(0, 12) + "…"}
+                  {groupId.slice(0, 12)}…
                 </span>
               </div>
             ))}
