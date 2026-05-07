@@ -18,7 +18,7 @@ export default function DeploymentsPage() {
         <PageHeader title="Deployments" subtitle="Firmware deployments to core device groups" />
         <Link
           href="/firmware"
-          className="bg-[#ec7211] hover:bg-[#d4620e] text-white text-sm px-4 py-2 rounded"
+          className="bg-[#4DA2FF] hover:bg-[#2e8ed4] text-white text-sm px-4 py-2 rounded"
         >
           Create deployment
         </Link>
@@ -30,7 +30,7 @@ export default function DeploymentsPage() {
         ) : deployments.length === 0 ? (
           <div className="p-12 text-center">
             <p className="text-sm text-gray-500">No deployments found.</p>
-            <Link href="/firmware" className="mt-2 inline-block text-xs text-[#0073bb] hover:underline">
+            <Link href="/firmware" className="mt-2 inline-block text-xs text-[#4DA2FF] hover:underline">
               Create your first deployment
             </Link>
           </div>

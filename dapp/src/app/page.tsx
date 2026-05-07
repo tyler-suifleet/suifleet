@@ -16,7 +16,7 @@ export default function DashboardPage() {
 
       {/* Stat cards */}
       <div className="grid grid-cols-3 gap-4">
-        <StatCard label="Core devices" value={dl ? "—" : devices.length} href="/devices" />
+        <StatCard label="Devices" value={dl ? "—" : devices.length} href="/devices" />
         <StatCard label="Deployments" value={depl ? "—" : deployments.length} href="/deployments" />
         <StatCard label="Active deployments" value={depl ? "—" : pending.length} href="/deployments" />
       </div>
@@ -52,7 +52,7 @@ export default function DashboardPage() {
       </Section>
 
       {/* Devices */}
-      <Section title="Core devices" action={{ label: "Manage", href: "/devices" }}>
+      <Section title="Devices" action={{ label: "Manage", href: "/devices" }}>
         {dl ? (
           <TableSkeleton cols={3} rows={2} />
         ) : devices.length === 0 ? (
@@ -110,7 +110,7 @@ export function Section({
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
         <h2 className="text-sm font-semibold">{title}</h2>
         {action && (
-          <Link href={action.href} className="text-xs text-[#0073bb] hover:underline">
+          <Link href={action.href} className="text-xs text-[#4DA2FF] hover:underline">
             {action.label}
           </Link>
         )}
@@ -128,7 +128,7 @@ export function StatusDot({ healthy }: { healthy: boolean }) {
 
 function StatCard({ label, value, href }: { label: string; value: number | string; href: string }) {
   return (
-    <Link href={href} className="bg-white border border-gray-200 rounded p-4 hover:border-[#0073bb] transition-colors block">
+    <Link href={href} className="bg-white border border-gray-200 rounded p-4 hover:border-[#4DA2FF] transition-colors block">
       <p className="text-xs text-gray-500 uppercase tracking-wide">{label}</p>
       <p className="text-3xl font-light mt-1 text-gray-800">{value}</p>
     </Link>
@@ -158,7 +158,7 @@ function Empty({ msg, cta }: { msg: string; cta?: { label: string; href: string 
     <div className="text-center py-8 text-sm text-gray-400">
       <p>{msg}</p>
       {cta && (
-        <Link href={cta.href} className="mt-2 inline-block text-[#0073bb] hover:underline text-xs">
+        <Link href={cta.href} className="mt-2 inline-block text-[#4DA2FF] hover:underline text-xs">
           {cta.label}
         </Link>
       )}

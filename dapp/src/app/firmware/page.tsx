@@ -80,7 +80,7 @@ export default function FirmwarePage() {
           <p className="font-semibold text-gray-800">Deployment created successfully</p>
           <p className="text-xs font-mono text-gray-400">{txDigest}</p>
           <div className="flex gap-3 justify-center pt-2">
-            <Link href="/deployments" className="text-sm text-[#0073bb] hover:underline">View deployments</Link>
+            <Link href="/deployments" className="text-sm text-[#4DA2FF] hover:underline">View deployments</Link>
             <button
               onClick={() => { setStep("upload"); setUploadResult(null); setSelectedGroups(new Set()); setTxDigest(null); }}
               className="text-sm text-gray-500 hover:text-gray-700"
@@ -116,8 +116,8 @@ export default function FirmwarePage() {
           onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
           className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
             step !== "upload" ? "border-gray-100 bg-gray-50 cursor-not-allowed" :
-            dragOver ? "border-[#ec7211] bg-orange-50" :
-            "border-gray-300 hover:border-[#ec7211] cursor-pointer"
+            dragOver ? "border-[#4DA2FF] bg-blue-50" :
+            "border-gray-300 hover:border-[#4DA2FF] cursor-pointer"
           }`}
         >
           {uploading ? (
@@ -125,7 +125,7 @@ export default function FirmwarePage() {
           ) : (
             <>
               <p className="text-sm text-gray-500">Drop .swu file here</p>
-              <label className="mt-2 inline-block text-sm text-[#0073bb] cursor-pointer hover:underline">
+              <label className="mt-2 inline-block text-sm text-[#4DA2FF] cursor-pointer hover:underline">
                 or browse
                 <input type="file" className="hidden" disabled={step !== "upload"} onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
               </label>
@@ -146,7 +146,7 @@ export default function FirmwarePage() {
         {groups.length === 0 ? (
           <p className="text-sm text-gray-400">
             No device groups yet.{" "}
-            <Link href="/devices" className="text-[#0073bb] hover:underline">Create a group first.</Link>
+            <Link href="/devices" className="text-[#4DA2FF] hover:underline">Create a group first.</Link>
           </p>
         ) : (
           <div className="border border-gray-200 rounded divide-y divide-gray-100">
@@ -164,7 +164,7 @@ export default function FirmwarePage() {
         <button
           onClick={handleDeploy}
           disabled={txPending || selectedGroups.size === 0 || !uploadResult}
-          className="bg-[#ec7211] hover:bg-[#d4620e] text-white px-5 py-2 rounded text-sm disabled:opacity-40"
+          className="bg-[#4DA2FF] hover:bg-[#2e8ed4] text-white px-5 py-2 rounded text-sm disabled:opacity-40"
         >
           {txPending ? "Submitting…" : `Deploy to ${selectedGroups.size} group${selectedGroups.size !== 1 ? "s" : ""}`}
         </button>
@@ -176,7 +176,7 @@ export default function FirmwarePage() {
 function StepPip({ n, active, done, label }: { n: number; active: boolean; done: boolean; label: string }) {
   return (
     <div className="flex items-center gap-2">
-      <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${done ? "bg-green-500 text-white" : active ? "bg-[#ec7211] text-white" : "bg-gray-200 text-gray-500"}`}>
+      <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${done ? "bg-green-500 text-white" : active ? "bg-[#4DA2FF] text-white" : "bg-gray-200 text-gray-500"}`}>
         {done ? "✓" : n}
       </span>
       <span className={`text-xs ${active ? "text-gray-800 font-medium" : "text-gray-400"}`}>{label}</span>
@@ -191,7 +191,7 @@ function Field({ label, value, onChange, placeholder, disabled }: {
     <div>
       <label className="block text-xs font-medium text-gray-700 mb-1">{label}</label>
       <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} disabled={disabled}
-        className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#ec7211] disabled:bg-gray-50" />
+        className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#4DA2FF] disabled:bg-gray-50" />
     </div>
   );
 }

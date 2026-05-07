@@ -16,17 +16,17 @@ export default function DevicesPage() {
   const [tab, setTab] = useState<Tab>("devices");
   return (
     <div className="space-y-4 max-w-5xl">
-      <PageHeader title="Core devices" subtitle="Manage devices and device groups" />
+      <PageHeader title="Devices" subtitle="Manage devices and device groups" />
       <div className="flex gap-0 border-b border-gray-200">
         {(["devices", "groups"] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
             className={`px-4 py-2 text-sm capitalize border-b-2 -mb-px transition-colors ${
-              tab === t ? "border-[#ec7211] text-[#ec7211] font-medium" : "border-transparent text-gray-500 hover:text-gray-700"
+              tab === t ? "border-[#4DA2FF] text-[#4DA2FF] font-medium" : "border-transparent text-gray-500 hover:text-gray-700"
             }`}
           >
-            {t === "groups" ? "Device groups" : "Core devices"}
+            {t === "groups" ? "Device groups" : "Devices"}
           </button>
         ))}
       </div>
@@ -66,7 +66,7 @@ function DevicesTab() {
   return (
     <>
       <div className="flex justify-end">
-        <button onClick={() => setShowModal(true)} className="bg-[#ec7211] hover:bg-[#d4620e] text-white text-sm px-4 py-2 rounded">
+        <button onClick={() => setShowModal(true)} className="bg-[#4DA2FF] hover:bg-[#2e8ed4] text-white text-sm px-4 py-2 rounded">
           Register device
         </button>
       </div>
@@ -77,7 +77,7 @@ function DevicesTab() {
         ) : devices.length === 0 ? (
           <div className="p-12 text-center">
             <p className="text-sm text-gray-500">No core devices registered.</p>
-            <button onClick={() => setShowModal(true)} className="mt-2 text-xs text-[#0073bb] hover:underline">Register your first device</button>
+            <button onClick={() => setShowModal(true)} className="mt-2 text-xs text-[#4DA2FF] hover:underline">Register your first device</button>
           </div>
         ) : (
           <table className="w-full text-sm">
@@ -108,7 +108,7 @@ function DevicesTab() {
                           }
                         );
                       }}
-                      className="text-xs text-[#0073bb] hover:underline disabled:opacity-40"
+                      className="text-xs text-[#4DA2FF] hover:underline disabled:opacity-40"
                     >
                       Issue cap
                     </button>
@@ -143,7 +143,7 @@ function DevicesTab() {
             <FormField label="Device SUI address" name="deviceAddress" placeholder="0x…" required />
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Architecture</label>
-              <select name="arch" required className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#ec7211]">
+              <select name="arch" required className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#4DA2FF]">
                 <option value="aarch64">aarch64 (ARM 64-bit)</option>
                 <option value="armv7">armv7 (ARM 32-bit)</option>
                 <option value="x86_64">x86_64</option>
@@ -207,7 +207,7 @@ function GroupsTab() {
   return (
     <>
       <div className="flex justify-end">
-        <button onClick={() => setShowCreate(true)} className="bg-[#ec7211] hover:bg-[#d4620e] text-white text-sm px-4 py-2 rounded">
+        <button onClick={() => setShowCreate(true)} className="bg-[#4DA2FF] hover:bg-[#2e8ed4] text-white text-sm px-4 py-2 rounded">
           Create group
         </button>
       </div>
@@ -218,7 +218,7 @@ function GroupsTab() {
         ) : groups.length === 0 ? (
           <div className="p-12 text-center">
             <p className="text-sm text-gray-500">No device groups yet.</p>
-            <button onClick={() => setShowCreate(true)} className="mt-2 text-xs text-[#0073bb] hover:underline">Create your first group</button>
+            <button onClick={() => setShowCreate(true)} className="mt-2 text-xs text-[#4DA2FF] hover:underline">Create your first group</button>
           </div>
         ) : (
           <table className="w-full text-sm">
@@ -237,7 +237,7 @@ function GroupsTab() {
                   <td className="py-3 pr-4 text-gray-500">{g.deviceIds.length}</td>
                   <td className="py-3 pr-4 font-mono text-xs text-gray-400">{g.objectId.slice(0, 14)}…</td>
                   <td className="py-3 flex items-center gap-3">
-                    <button onClick={() => setManagingGroup(g.objectId)} className="text-xs text-[#0073bb] hover:underline">
+                    <button onClick={() => setManagingGroup(g.objectId)} className="text-xs text-[#4DA2FF] hover:underline">
                       Manage devices
                     </button>
                     <button
@@ -316,7 +316,7 @@ function GroupsTab() {
                         <button
                           disabled={isPending}
                           onClick={() => handleAddDevice(managedGroup.objectId, d.objectId)}
-                          className="text-xs text-[#0073bb] hover:underline disabled:opacity-40"
+                          className="text-xs text-[#4DA2FF] hover:underline disabled:opacity-40"
                         >
                           Add
                         </button>
@@ -350,7 +350,7 @@ function FormField({ label, name, placeholder, required }: { label: string; name
     <div>
       <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
       <input name={name} placeholder={placeholder} required={required}
-        className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#ec7211]" />
+        className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#4DA2FF]" />
     </div>
   );
 }
@@ -358,7 +358,7 @@ function FormField({ label, name, placeholder, required }: { label: string; name
 function ModalButtons({ isPending, label, onCancel }: { isPending: boolean; label: string; onCancel: () => void }) {
   return (
     <div className="flex gap-2 pt-2">
-      <button type="submit" disabled={isPending} className="bg-[#ec7211] hover:bg-[#d4620e] text-white px-4 py-2 rounded text-sm disabled:opacity-50">
+      <button type="submit" disabled={isPending} className="bg-[#4DA2FF] hover:bg-[#2e8ed4] text-white px-4 py-2 rounded text-sm disabled:opacity-50">
         {isPending ? `${label}…` : label}
       </button>
       <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">Cancel</button>

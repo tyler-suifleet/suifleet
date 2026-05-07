@@ -18,7 +18,7 @@ const networks = {
 
 const NAV = [
   { href: "/",            label: "Dashboard" },
-  { href: "/devices",     label: "Core devices" },
+  { href: "/devices",     label: "Devices" },
   { href: "/deployments", label: "Deployments" },
   { href: "/firmware",    label: "Deploy firmware" },
 ];
@@ -26,25 +26,37 @@ const NAV = [
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="min-h-screen bg-[#f2f3f3] text-gray-900 flex flex-col">
+      <head>
+        <title>SuiFleet</title>
+        <meta name="description" content="Decentralized edge fleet management on Sui" />
+      </head>
+      <body className="min-h-screen bg-[#f0f2f5] text-gray-900 flex flex-col">
         <QueryClientProvider client={queryClient}>
           <SuiClientProvider networks={networks} defaultNetwork={NETWORK}>
             <WalletProvider autoConnect>
-              {/* Top service bar */}
-              <div className="bg-[#232f3e] text-white h-10 flex items-center px-4 gap-4 shrink-0 z-20">
-                <span className="font-semibold text-sm tracking-wide">SUI Edge</span>
-                <span className="text-gray-400 text-xs">|</span>
-                <span className="text-gray-300 text-xs">IoT Greengrass</span>
+              {/* Top bar */}
+              <div className="bg-[#0b1628] text-white h-11 flex items-center px-5 gap-3 shrink-0 z-20 border-b border-white/5">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded bg-[#4DA2FF] flex items-center justify-center shrink-0">
+                    <svg viewBox="0 0 16 16" fill="none" className="w-3.5 h-3.5">
+                      <circle cx="8" cy="4.5" r="2.2" fill="white" />
+                      <circle cx="3" cy="12" r="2" fill="white" />
+                      <circle cx="13" cy="12" r="2" fill="white" />
+                      <line x1="8" y1="6.7" x2="3.8" y2="10.2" stroke="white" strokeWidth="1.2" />
+                      <line x1="8" y1="6.7" x2="12.2" y2="10.2" stroke="white" strokeWidth="1.2" />
+                    </svg>
+                  </div>
+                  <span className="font-semibold text-sm tracking-tight">SuiFleet</span>
+                </div>
+                <span className="text-white/20 text-xs">|</span>
+                <span className="text-white/40 text-xs">Edge Fleet Management</span>
                 <div className="ml-auto">
                   <ConnectButton />
                 </div>
               </div>
 
               <div className="flex flex-1 overflow-hidden">
-                {/* Sidebar */}
                 <Sidebar />
-
-                {/* Page content */}
                 <main className="flex-1 overflow-auto p-8">
                   {children}
                 </main>
@@ -60,21 +72,21 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 function Sidebar() {
   const pathname = usePathname();
   return (
-    <aside className="w-56 bg-[#1a2332] shrink-0 flex flex-col py-4 z-10">
-      <div className="px-4 mb-6">
-        <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-widest">Manage</p>
+    <aside className="w-52 bg-[#0b1628] shrink-0 flex flex-col z-10 border-r border-white/5">
+      <div className="px-3 pt-5 pb-3">
+        <p className="text-[10px] font-semibold text-white/30 uppercase tracking-widest px-1">Manage</p>
       </div>
-      <nav className="flex-1 space-y-0.5">
+      <nav className="flex-1 space-y-0.5 px-2">
         {NAV.map(({ href, label }) => {
           const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
           return (
             <Link
               key={href}
               href={href}
-              className={`flex items-center px-4 py-2 text-sm transition-colors ${
+              className={`flex items-center px-3 py-2 text-sm rounded transition-colors ${
                 active
-                  ? "bg-[#ec7211] text-white font-medium"
-                  : "text-gray-300 hover:bg-[#273547] hover:text-white"
+                  ? "bg-[#4DA2FF]/15 text-[#4DA2FF] font-medium"
+                  : "text-white/50 hover:bg-white/5 hover:text-white/80"
               }`}
             >
               {label}
@@ -82,9 +94,9 @@ function Sidebar() {
           );
         })}
       </nav>
-      <div className="px-4 pt-4 border-t border-gray-700">
-        <p className="text-[10px] text-gray-500">
-          Network: <span className="text-gray-400">{NETWORK}</span>
+      <div className="px-4 py-4 border-t border-white/5">
+        <p className="text-[10px] text-white/25">
+          Network: <span className="text-white/40">{NETWORK}</span>
         </p>
       </div>
     </aside>
