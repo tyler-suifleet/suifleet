@@ -5,19 +5,26 @@ export interface UploadResult {
   sha256: string;
 }
 
-export async function uploadFirmware(file: File): Promise<UploadResult> {
-  const buffer = await file.arrayBuffer();
+export interface ComponentRecipe {
+  schemaVersion: "1.0";
+  componentName: string;
+  componentVersion: string;
+  description?: string;
+  artifactBlobId: string;
+  artifactSha256: string;
+  lifecycle: {
+    install?: string;
+    run?: string;
+    shutdown?: string;
+  };
+  configuration: Record<string, unknown>;
+}
 
-  // Compute sha256 client-side before upload
-  const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
-  const sha256 = Array.from(new Uint8Array(hashBuffer))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-
+async function uploadBlob(body: ArrayBuffer | string, contentType: string): Promise<string> {
   const res = await fetch(`${WALRUS_PUBLISHER}/v1/blobs?epochs=5`, {
     method: "PUT",
-    headers: { "Content-Type": "application/octet-stream" },
-    body: buffer,
+    headers: { "Content-Type": contentType },
+    body,
   });
 
   if (!res.ok) {
@@ -25,9 +32,6 @@ export async function uploadFirmware(file: File): Promise<UploadResult> {
   }
 
   const json = await res.json();
-
-  // Walrus returns either { newlyCreated: { blobObject: { blobId } } }
-  // or { alreadyCertified: { blobId } }
   const blobId: string =
     json?.newlyCreated?.blobObject?.blobId ?? json?.alreadyCertified?.blobId;
 
@@ -35,7 +39,23 @@ export async function uploadFirmware(file: File): Promise<UploadResult> {
     throw new Error(`Unexpected Walrus response: ${JSON.stringify(json)}`);
   }
 
+  return blobId;
+}
+
+export async function uploadArtifact(file: File): Promise<UploadResult> {
+  const buffer = await file.arrayBuffer();
+
+  const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
+  const sha256 = Array.from(new Uint8Array(hashBuffer))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+
+  const blobId = await uploadBlob(buffer, "application/octet-stream");
   return { blobId, sha256 };
+}
+
+export async function uploadRecipe(recipe: ComponentRecipe): Promise<string> {
+  return uploadBlob(JSON.stringify(recipe, null, 2), "application/json");
 }
 
 export function blobDownloadUrl(blobId: string): string {

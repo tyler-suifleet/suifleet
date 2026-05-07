@@ -20,7 +20,7 @@ export default function DeploymentsPage() {
           href="/firmware"
           className="bg-[#4DA2FF] hover:bg-[#2e8ed4] text-white text-sm px-4 py-2 rounded"
         >
-          Create deployment
+          Deploy component
         </Link>
       </div>
 

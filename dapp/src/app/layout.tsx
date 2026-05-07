@@ -20,7 +20,7 @@ const NAV = [
   { href: "/",            label: "Dashboard" },
   { href: "/devices",     label: "Devices" },
   { href: "/deployments", label: "Deployments" },
-  { href: "/firmware",    label: "Deploy firmware" },
+  { href: "/firmware",    label: "Deploy component" },
 ];
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
