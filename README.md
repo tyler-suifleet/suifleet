@@ -2,7 +2,7 @@
 
 Decentralized edge device deployment system on the SUI blockchain — a trustless alternative to AWS Greengrass.
 
-Operators register edge devices on-chain, upload firmware to Walrus (SUI's native blob storage), and create deployment transactions via a web dApp. Edge devices run a lightweight Rust daemon that subscribes to on-chain events, downloads firmware, applies it with SWUpdate, and reports status back to the chain.
+Operators register edge devices on-chain, upload artifacts to Walrus (SUI's native blob storage), and create deployment transactions via a web dApp. Edge devices run a lightweight Rust daemon that subscribes to on-chain events, downloads the artifact, verifies it, applies it via a configurable command, and reports status back to the chain.
 
 ## Architecture
 
@@ -20,12 +20,12 @@ Operators register edge devices on-chain, upload firmware to Walrus (SUI's nativ
                           │   ├─ subscribes WS   │
                           │   ├─ downloads blob  │
                           │   ├─ verifies sha256 │
-                          │   ├─ runs swupdate   │
+                          │   ├─ runs apply cmd  │
                           │   └─ reports status  │
                           └──────────────────────┘
 ```
 
-**Stack:** Move · Next.js + @mysten/dapp-kit · Rust · SWUpdate · Walrus · SUI Testnet
+**Stack:** Move · Next.js + @mysten/dapp-kit · Rust · Walrus · SUI Testnet
 
 ---
 
@@ -170,7 +170,7 @@ The dApp is also deployable as a static site on Walrus Sites — see [Walrus hos
 
 ## Edge client
 
-Rust daemon in `suifleet-edge/`. Runs on the edge device (Pi 3 B+ / aarch64), subscribes to SUI WebSocket events, downloads firmware blobs from Walrus, verifies sha256, invokes `swupdate`, and reports status on-chain using the device's `DeviceCap`.
+Rust daemon in `suifleet-edge/`. Runs on any Linux edge device, subscribes to SUI WebSocket events, downloads artifacts from Walrus, verifies sha256, invokes a configurable apply command, and reports status on-chain using the device's `DeviceCap`.
 
 ```bash
 make edge-build      # cargo build --release
@@ -209,9 +209,9 @@ device_cap_id    = "0x<DEVICE_CAP_ID>"
 [walrus]
 aggregator_url = "https://aggregator.walrus-testnet.walrus.space"
 
-[swupdate]
-binary  = "/usr/bin/swupdate"
-dry_run = false        # set true to skip the actual flash during testing
+[apply]
+# Artifact path is appended as the final argument.
+command = "/usr/bin/swupdate -i"
 ```
 
 ```bash
@@ -241,7 +241,7 @@ https://<object-id>.wal.app
 
 ## OpenEmbedded / Yocto
 
-The `suifleet-edge/meta-suifleet/` directory is a Yocto layer ready to drop into a Yocto build targeting `raspberrypi4-64` (or any aarch64 machine):
+The `suifleet-edge/meta-suifleet/` directory is a Yocto layer ready to drop into any Yocto build:
 
 ```bash
 bitbake-layers add-layer /path/to/suifleet/suifleet-edge/meta-suifleet
@@ -249,6 +249,6 @@ echo 'IMAGE_INSTALL:append = " suifleet"' >> conf/local.conf
 bitbake core-image-minimal
 ```
 
-The recipe cross-compiles the Rust daemon via the `cargo` Yocto class, installs the systemd unit, and declares `swupdate` as a runtime dependency.
+The recipe cross-compiles the Rust daemon via the `cargo` Yocto class and installs the systemd unit. The apply command is operator-supplied — add whatever update mechanism your image uses (swupdate, RAUC, etc.) separately.
 
 TPM support can be enabled by adding `PACKAGECONFIG:append = " tpm"` to your `local.conf` and including `meta-tpm` in your layer stack.
