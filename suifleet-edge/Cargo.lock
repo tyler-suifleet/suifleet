@@ -240,31 +240,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "edge-client"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64 0.21.7",
- "bs58",
- "digest",
- "ed25519-dalek",
- "futures-util",
- "hex",
- "rand",
- "reqwest",
- "sd-notify",
- "serde",
- "serde_json",
- "sha2",
- "sha3",
- "tokio",
- "tokio-tungstenite",
- "toml",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "encoding_rs"
 version = "0.8.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1414,6 +1389,31 @@ name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
+
+[[package]]
+name = "suifleet"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.21.7",
+ "bs58",
+ "digest",
+ "ed25519-dalek",
+ "futures-util",
+ "hex",
+ "rand",
+ "reqwest",
+ "sd-notify",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sha3",
+ "tokio",
+ "tokio-tungstenite",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "syn"

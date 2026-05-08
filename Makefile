@@ -41,7 +41,7 @@ dapp-build:
 	$(RUN) bash -c "cd dapp && pnpm build"
 
 edge-build:
-	$(RUN) bash -c "cd edge-client && cargo build --release"
+	$(RUN) bash -c "cd suifleet-edge && cargo build --release"
 
 edge-test:
-	$(RUN) bash -c "cd edge-client && cargo test"
+	$(RUN) bash -c "cd suifleet-edge && cargo test"

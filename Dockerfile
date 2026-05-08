@@ -40,6 +40,8 @@ RUN groupadd --gid ${USER_GID} dev \
 # Pre-create volume mount points with dev ownership so Docker initialises
 # named volumes from these directories rather than creating them as root.
 RUN mkdir -p /home/dev/.sui /home/dev/.move \
+              /home/dev/.cargo/registry /home/dev/.cargo/git \
+              /home/dev/.local/share/pnpm/store \
     && chown -R ${USER_UID}:${USER_GID} /home/dev
 
 USER dev
@@ -52,7 +54,7 @@ ENV CARGO_HOME=/home/dev/.cargo \
 
 # Rust toolchain (installed into the dev user's home)
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-    | sh -s -- -y --profile minimal --component rust-src \
+    | sh -s -- -y --default-toolchain 1.87.0 --profile minimal --component rust-src \
     && cargo --version
 
 WORKDIR /workspace

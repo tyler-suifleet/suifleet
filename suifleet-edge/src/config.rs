@@ -6,7 +6,7 @@ pub struct Config {
     pub sui: SuiConfig,
     pub device: DeviceConfig,
     pub walrus: WalrusConfig,
-    pub swupdate: SwupdateConfig,
+    pub apply: ApplyConfig,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -33,10 +33,9 @@ pub struct WalrusConfig {
 }
 
 #[derive(Deserialize, Debug, Clone)]
-pub struct SwupdateConfig {
-    pub binary: PathBuf,
-    #[serde(default)]
-    pub dry_run: bool,
+pub struct ApplyConfig {
+    /// Command to run with the artifact path appended as the final argument.
+    pub command: String,
 }
 
 impl Config {

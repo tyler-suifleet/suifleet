@@ -1,24 +1,24 @@
+mod apply;
 mod config;
 mod sui_client;
-mod swupdate;
 mod walrus_client;
 
 use std::{path::PathBuf, time::Duration};
 
+use apply::ApplyRunner;
 use config::Config;
 use sui_client::SuiClient;
-use swupdate::SwupdateRunner;
 use tracing::{error, info, warn};
 use walrus_client::WalrusClient;
 
-const DEFAULT_CONFIG: &str = "/etc/edge-client/config.toml";
+const DEFAULT_CONFIG: &str = "/etc/suifleet/config.toml";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "edge_client=info".into()),
+                .unwrap_or_else(|_| "suifleet=info".into()),
         )
         .init();
 
@@ -31,7 +31,7 @@ async fn main() -> anyhow::Result<()> {
 
     let sui = SuiClient::load(cfg.sui.clone(), &cfg.device.keypair_path)?;
     let walrus = WalrusClient::new(cfg.walrus.aggregator_url.clone());
-    let swu = SwupdateRunner::new(cfg.swupdate.binary.clone(), cfg.swupdate.dry_run);
+    let runner = ApplyRunner::new(cfg.apply.command.clone());
 
     let device_object_id = cfg.device.device_object_id.clone();
     let device_cap_id = cfg.device.device_cap_id.clone();
@@ -64,8 +64,8 @@ async fn main() -> anyhow::Result<()> {
             event.deployment_id, event.walrus_blob_id
         );
 
-        let tmp = std::env::temp_dir().join(format!("{}.swu", &event.deployment_id[..16]));
-        let status = match handle_deployment(&walrus, &swu, &event, &tmp).await {
+        let tmp = std::env::temp_dir().join(format!("{}.artifact", &event.deployment_id[..16]));
+        let status = match handle_deployment(&walrus, &runner, &event, &tmp).await {
             Ok(()) => {
                 info!("Deployment {} applied successfully", event.deployment_id);
                 1u8 // STATUS_APPLIED
@@ -97,7 +97,7 @@ async fn main() -> anyhow::Result<()> {
 
 async fn handle_deployment(
     walrus: &WalrusClient,
-    swu: &SwupdateRunner,
+    runner: &ApplyRunner,
     event: &sui_client::DeploymentCreatedEvent,
     tmp: &std::path::Path,
 ) -> anyhow::Result<()> {
@@ -110,7 +110,7 @@ async fn handle_deployment(
         actual_hash
     );
 
-    swu.apply(tmp).await
+    runner.apply(tmp).await
 }
 
 fn notify_ready() {

@@ -126,8 +126,8 @@ function DeploymentRow({
       <tr className="bg-gray-50 border-b border-gray-200">
         <td colSpan={6} className="px-4 pb-3">
           <div className="text-xs text-gray-400 space-x-4">
-            <span>Recipe: <span className="font-mono text-gray-500">{d.recipeBlobId}</span></span>
-            <span>SHA256: <span className="font-mono text-gray-500">{d.artifactSha256.slice(0, 16)}…</span></span>
+            {d.recipeBlobId && <span>Recipe: <span className="font-mono text-gray-500">{d.recipeBlobId}</span></span>}
+            {d.artifactSha256 && <span>SHA256: <span className="font-mono text-gray-500">{d.artifactSha256.slice(0, 16)}…</span></span>}
           </div>
         </td>
       </tr>

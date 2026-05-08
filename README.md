@@ -16,7 +16,7 @@ Operators register edge devices on-chain, upload firmware to Walrus (SUI's nativ
                                      ▼
                           ┌──────────────────────┐
                           │ Edge device (Linux)  │
-                          │   edge-client daemon │
+                          │   suifleet daemon │
                           │   ├─ subscribes WS   │
                           │   ├─ downloads blob  │
                           │   ├─ verifies sha256 │
@@ -54,12 +54,12 @@ The device needs an ed25519 keypair whose private key never leaves the device:
 
 **Development / smoke test:**
 ```bash
-openssl rand -hex 32 | tee /etc/edge-client/device.key
-chmod 600 /etc/edge-client/device.key
+openssl rand -hex 32 | tee /etc/suifleet/device.key
+chmod 600 /etc/suifleet/device.key
 ```
 
 **Production — software:**
-A first-boot systemd oneshot service generates the key if it doesn't exist, derives the SUI address, and writes it to `/etc/edge-client/device.sui-address`. The operator reads this address (via SSH, local HTTP, or QR code display) and registers the device in the dApp.
+A first-boot systemd oneshot service generates the key if it doesn't exist, derives the SUI address, and writes it to `/etc/suifleet/device.sui-address`. The operator reads this address (via SSH, local HTTP, or QR code display) and registers the device in the dApp.
 
 **Production — TPM (recommended):**
 The private key is generated inside the TPM chip and never exposed to the OS. The edge daemon routes signing through the TPM via PKCS#11 instead of reading a key file. Yocto's `meta-tpm` layer provides the full software stack. OEMs enable this with the `--features tpm` cargo flag. TPM attestation can additionally prove to the operator that the key lives in genuine hardware, not a software emulator.
@@ -170,7 +170,7 @@ The dApp is also deployable as a static site on Walrus Sites — see [Walrus hos
 
 ## Edge client
 
-Rust daemon in `edge-client/`. Runs on the edge device, subscribes to SUI WebSocket events, downloads firmware blobs from Walrus, verifies sha256, invokes `swupdate`, and reports status on-chain using the device's `DeviceCap`.
+Rust daemon in `suifleet-edge/`. Runs on the edge device (Pi 3 B+ / aarch64), subscribes to SUI WebSocket events, downloads firmware blobs from Walrus, verifies sha256, invokes `swupdate`, and reports status on-chain using the device's `DeviceCap`.
 
 ```bash
 make edge-build      # cargo build --release
@@ -181,12 +181,12 @@ make edge-test       # cargo test
 
 1. Generate a keypair on the device:
    ```bash
-   openssl rand -hex 32 | tee /etc/edge-client/device.key
-   chmod 600 /etc/edge-client/device.key
+   openssl rand -hex 32 | tee /etc/suifleet/device.key
+   chmod 600 /etc/suifleet/device.key
    ```
 2. Derive the SUI address:
    ```bash
-   edge-client --derive-address /etc/edge-client/device.key
+   suifleet --derive-address /etc/suifleet/device.key
    ```
 3. In the dApp **Devices** page, register the device using that address. One transaction creates the `Device` object in your wallet and sends the `DeviceCap` to the device's address.
 4. Note the `Device` object ID from the dApp, and find the `DeviceCap` object ID:
@@ -202,7 +202,7 @@ ws_url     = "wss://fullnode.testnet.sui.io:443"
 package_id = "0x<PACKAGE_ID>"
 
 [device]
-keypair_path     = "/etc/edge-client/device.key"
+keypair_path     = "/etc/suifleet/device.key"
 device_object_id = "0x<DEVICE_OBJECT_ID>"
 device_cap_id    = "0x<DEVICE_CAP_ID>"
 
@@ -215,7 +215,7 @@ dry_run = false        # set true to skip the actual flash during testing
 ```
 
 ```bash
-EDGE_CONFIG=/etc/edge-client/config.toml edge-client
+EDGE_CONFIG=/etc/suifleet/config.toml suifleet
 ```
 
 ---
@@ -241,14 +241,14 @@ https://<object-id>.wal.app
 
 ## OpenEmbedded / Yocto
 
-The `edge-client/openembedded/` directory is a Yocto layer (`meta-sui-edge`) ready to drop into a Yocto build:
+The `suifleet-edge/meta-suifleet/` directory is a Yocto layer ready to drop into a Yocto build targeting `raspberrypi4-64` (or any aarch64 machine):
 
 ```bash
-bitbake-layers add-layer /path/to/sui/edge-client/openembedded
-echo 'IMAGE_INSTALL:append = " edge-client"' >> conf/local.conf
+bitbake-layers add-layer /path/to/suifleet/suifleet-edge/meta-suifleet
+echo 'IMAGE_INSTALL:append = " suifleet"' >> conf/local.conf
 bitbake core-image-minimal
 ```
 
-The recipe cross-compiles the Rust daemon via the `cargo` Yocto class, installs the systemd unit, and declares `swupdate` as a runtime dependency. A companion `edge-client-conf` recipe runs a first-boot provisioning service that generates the device keypair and writes the SUI address to `/etc/edge-client/device.sui-address`.
+The recipe cross-compiles the Rust daemon via the `cargo` Yocto class, installs the systemd unit, and declares `swupdate` as a runtime dependency.
 
 TPM support can be enabled by adding `PACKAGECONFIG:append = " tpm"` to your `local.conf` and including `meta-tpm` in your layer stack.

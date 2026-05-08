@@ -2,7 +2,7 @@ use std::{path::Path, time::Duration};
 
 use ed25519_dalek::{SigningKey, Signer};
 use futures_util::{SinkExt, StreamExt};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{debug, error, info, warn};
@@ -106,7 +106,7 @@ impl SuiClient {
     pub async fn report_status(
         &self,
         package_id: &str,
-        registry_id: &str,
+        _registry_id: &str,
         deployment_id: &str,
         device_cap_id: &str,
         status: u8,
