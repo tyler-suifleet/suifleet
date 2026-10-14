@@ -111,6 +111,12 @@ With `apply.mode = "privileged-helper"`, firmware without a recipe `install` scr
 3. It copies the artifact into its own root-only directory, re-hashes that copy, and runs the root-configured command on it.
 4. It hands back a result file owned by the spool owner.
 
+Claiming and withdrawal cannot both succeed, so a timeout never misreports an update:
+- The helper claims a request by locking `<id>.json` and renaming it to `<id>.claimed`, and holds the lock until its result is written. The helper's own `timeout_seconds` bounds the updater.
+- `apply.timeout_seconds` (plus 30 s for the path unit to start the helper) bounds only the wait for a claim. When it expires, the daemon withdraws by unlinking `<id>.json`. If that succeeds, the updater never ran and the deployment reports Failed. If the request was already claimed, the daemon keeps waiting while the helper holds the lock.
+- If the helper dies mid-update (crash, power loss, reboot), the outcome is unknown. The deployment gets no status: it is neither reported nor re-applied, like a daemon crash mid-update. The error is kept in the journal. The path unit also watches `*.claimed`, so the next helper run, at the latest at boot, turns the abandoned claim into an "interrupted" result without re-running the updater.
+- Request IDs are derived from the deployment ID. On every poll the daemon collects results for deployments still without a status, including updates that finished after it stopped waiting or restarted. A result is removed only after its outcome is journaled.
+
 A compromised daemon can only submit an image to that updater. Keep the updater's own image-signature verification enabled (for example SWUpdate signed images), and keep `fs.protected_hardlinks=1`, the systemd default. Recipe `install` scripts never reach root.
 
 Migrating an existing device to these units:
@@ -121,7 +127,7 @@ Migrating an existing device to these units:
 - With `direct` mode, a root-only updater now fails as a privilege failure and reports Failed.
 
 Verified locally (container, not hardware):
-- Rust tests cover privilege/timeout/environment failures and helper attacks: swapped artifact, planted symlinks, invalid IDs, missing helper.
+- Rust tests cover privilege/timeout/environment failures and helper attacks: swapped artifact, planted symlinks, invalid IDs, missing helper. They also cover the claim protocol: an update outliving the daemon's wait completes and is not Failed; an unclaimed request is withdrawn and never runs; a helper dying after its claim is indeterminate and later swept as interrupted; a live claim is not swept; late results stay until acknowledged.
 - `scripts/test_ota.py --firmware-helper` covers the helper path. `--daemon-user dev`, run as root, covers the real daemon as an unprivileged user with the helper as root.
 - `systemd-analyze verify` is clean (systemd 252).
 - `systemd-analyze security --offline`: daemon 1.7 OK (was 9.6 UNSAFE); helper 5.5 MEDIUM, by design, for device access.
