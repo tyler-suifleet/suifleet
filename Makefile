@@ -55,11 +55,16 @@ test-ota:
 dapp-typecheck:
 	$(RUN) bash -c "cd dapp && pnpm typecheck"
 
-.PHONY: check tracking-plan test-tracking
+.PHONY: check check-interfaces tracking-plan test-tracking
+
+# Client Move calls/types must exist in the compiled contracts with matching arity.
+check-interfaces:
+	$(RUN) python3 scripts/check_contract_interfaces.py
 
 # Sequential recipe: cross-layer checks must not race over shared build artifacts.
 check:
 	$(MAKE) test-contracts
+	$(MAKE) check-interfaces
 	$(MAKE) edge-test
 	$(MAKE) test-ota
 	$(MAKE) dapp-typecheck
