@@ -1,5 +1,9 @@
-use crate::config::ApplyConfig;
-use std::{path::Path, time::Duration};
+use crate::config::{ApplyConfig, ApplyMode};
+use std::{path::Path, process::Stdio, time::Duration};
+
+/// Search path for updater/recipe children; their environment is otherwise cleared.
+const CHILD_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+const CHILD_MAX_FILES: u64 = 1024;
 
 pub struct ApplyRunner {
     config: ApplyConfig,
@@ -8,19 +12,29 @@ impl ApplyRunner {
     pub fn new(config: ApplyConfig) -> Self {
         Self { config }
     }
-    pub async fn apply(&self, artifact: &Path, install: Option<&str>) -> anyhow::Result<()> {
-        let mut command = if let Some(script) = install {
+    /// `request_id` names the firmware-helper request; it must be stable for
+    /// the deployment so a late helper result can still be collected.
+    pub async fn apply(
+        &self,
+        artifact: &Path,
+        install: Option<&str>,
+        request_id: &str,
+    ) -> anyhow::Result<()> {
+        let workdir = artifact
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("artifact has no directory"))?;
+        let timeout = Duration::from_secs(self.config.timeout_seconds);
+        if let Some(script) = install {
             anyhow::ensure!(
                 self.config.allow_recipe_commands,
                 "recipe commands disabled"
             );
             // Artifact substitutions are shell-quoted; operator-authored scripts are intentional code.
+            // They never reach the privileged firmware helper.
             let path = artifact
                 .to_str()
                 .ok_or_else(|| anyhow::anyhow!("non-UTF8 artifact path"))?;
-            let parent = artifact
-                .parent()
-                .unwrap()
+            let parent = workdir
                 .to_str()
                 .ok_or_else(|| anyhow::anyhow!("non-UTF8 artifact directory"))?;
             let script = script
@@ -28,35 +42,135 @@ impl ApplyRunner {
                 .replace("{artifacts}", &shell_words::quote(parent));
             let mut cmd = tokio::process::Command::new("/bin/sh");
             cmd.arg("-c").arg(script);
-            cmd
-        } else {
-            let parts = shell_words::split(&self.config.command)?;
-            let bin = parts
-                .first()
-                .ok_or_else(|| anyhow::anyhow!("apply.command is empty"))?;
-            let mut cmd = tokio::process::Command::new(bin);
-            cmd.args(&parts[1..]).arg(artifact);
-            cmd
-        };
-        command.kill_on_drop(true);
-        #[cfg(unix)]
+            return run_bounded(cmd, workdir, timeout, self.config.max_memory_bytes).await;
+        }
+        match self.config.mode {
+            ApplyMode::Direct => {
+                let cmd = command(&self.config.command, artifact)?;
+                run_bounded(cmd, workdir, timeout, self.config.max_memory_bytes).await
+            }
+            ApplyMode::PrivilegedHelper => {
+                crate::firmware::submit(&self.config.firmware_spool, request_id, artifact, timeout)
+                    .await
+            }
+        }
+    }
+}
+
+/// `command` split as shell words, with the artifact appended as the final argument.
+pub fn command(command: &str, artifact: &Path) -> anyhow::Result<tokio::process::Command> {
+    let parts = shell_words::split(command)?;
+    let bin = parts
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("apply command is empty"))?;
+    let mut cmd = tokio::process::Command::new(bin);
+    cmd.args(&parts[1..]).arg(artifact);
+    Ok(cmd)
+}
+
+/// Run an updater/recipe child with a cleared environment, no stdin, its own
+/// working directory, no core dumps, bounded descriptors/memory and a timeout
+/// that kills the whole process group. Any non-success is an error, so a
+/// privilege failure can never be reported as Applied.
+pub async fn run_bounded(
+    mut command: tokio::process::Command,
+    workdir: &Path,
+    timeout: Duration,
+    max_memory_bytes: Option<u64>,
+) -> anyhow::Result<()> {
+    command
+        .env_clear()
+        .env("PATH", CHILD_PATH)
+        .env("LANG", "C.UTF-8")
+        .env("HOME", workdir)
+        .current_dir(workdir)
+        .stdin(Stdio::null())
+        .kill_on_drop(true);
+    #[cfg(unix)]
+    {
         command.process_group(0);
-        let mut child = command.spawn()?;
-        #[cfg(unix)]
-        let _group = ProcessGroup(
-            child
-                .id()
-                .ok_or_else(|| anyhow::anyhow!("updater has no pid"))? as i32,
-        );
-        let status = tokio::time::timeout(
-            Duration::from_secs(self.config.timeout_seconds),
-            child.wait(),
-        )
+        // SAFETY: only async-signal-safe getrlimit/setrlimit calls run between fork and exec.
+        unsafe {
+            command.pre_exec(move || limit_child(max_memory_bytes));
+        }
+    }
+    let mut child = command.spawn().map_err(spawn_error)?;
+    #[cfg(unix)]
+    let _group = ProcessGroup(
+        child
+            .id()
+            .ok_or_else(|| anyhow::anyhow!("updater has no pid"))? as i32,
+    );
+    let status = tokio::time::timeout(timeout, child.wait())
         .await
-        .map_err(|_| anyhow::anyhow!("apply command timed out"))??;
-        anyhow::ensure!(status.success(), "apply command failed: {status}");
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "apply command timed out after {}s; process group killed",
+                timeout.as_secs()
+            )
+        })??;
+    exit_result(status)
+}
+
+fn spawn_error(error: std::io::Error) -> anyhow::Error {
+    match error.kind() {
+        std::io::ErrorKind::PermissionDenied => {
+            anyhow::anyhow!("privilege failure: updater is not executable by this user ({error})")
+        }
+        std::io::ErrorKind::NotFound => anyhow::anyhow!("updater not found ({error})"),
+        _ => error.into(),
+    }
+}
+
+fn exit_result(status: std::process::ExitStatus) -> anyhow::Result<()> {
+    if status.success() {
+        return Ok(());
+    }
+    match status.code() {
+        Some(126) => {
+            anyhow::bail!("privilege failure: updater could not execute a command (exit 126)")
+        }
+        Some(127) => anyhow::bail!("updater command not found (exit 127)"),
+        Some(code) => anyhow::bail!("apply command failed with exit code {code}"),
+        None => {
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::ExitStatusExt;
+                anyhow::bail!("apply command killed by signal {:?}", status.signal())
+            }
+            #[cfg(not(unix))]
+            anyhow::bail!("apply command terminated abnormally")
+        }
+    }
+}
+
+#[cfg(unix)]
+fn limit_child(max_memory_bytes: Option<u64>) -> std::io::Result<()> {
+    fn set(resource: libc::__rlimit_resource_t, limit: u64) -> std::io::Result<()> {
+        let mut current = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        // Only ever lower limits; raising would need privileges and fail.
+        if unsafe { libc::getrlimit(resource, &mut current) } != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        let value = limit.min(current.rlim_max as u64) as libc::rlim_t;
+        let new = libc::rlimit {
+            rlim_cur: value,
+            rlim_max: value,
+        };
+        if unsafe { libc::setrlimit(resource, &new) } != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
         Ok(())
     }
+    set(libc::RLIMIT_CORE, 0)?;
+    set(libc::RLIMIT_NOFILE, CHILD_MAX_FILES)?;
+    if let Some(bytes) = max_memory_bytes {
+        set(libc::RLIMIT_AS, bytes)?;
+    }
+    Ok(())
 }
 
 /// Stop all updater descendants on timeout/cancellation, not just its shell.
@@ -75,28 +189,123 @@ impl Drop for ProcessGroup {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn runner(command: &str, allow_recipe_commands: bool) -> ApplyRunner {
+        ApplyRunner::new(ApplyConfig {
+            command: command.into(),
+            timeout_seconds: 1,
+            allow_recipe_commands,
+            mode: ApplyMode::Direct,
+            firmware_spool: "/nonexistent".into(),
+            max_memory_bytes: None,
+        })
+    }
+
+    fn workdir(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+        let dir =
+            std::env::temp_dir().join(format!("suifleet-apply-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let artifact = dir.join("artifact");
+        std::fs::write(&artifact, b"artifact").unwrap();
+        (dir, artifact)
+    }
+
     #[tokio::test]
     async fn propagates_apply_failure() {
-        let runner = ApplyRunner::new(ApplyConfig {
-            command: "/bin/false".into(),
-            timeout_seconds: 1,
-            allow_recipe_commands: false,
-        });
-        assert!(runner
-            .apply(Path::new("/tmp/artifact"), None)
+        let (_dir, artifact) = workdir("false");
+        let error = runner("/bin/false", false)
+            .apply(&artifact, None, "test")
             .await
-            .is_err());
+            .unwrap_err();
+        assert!(error.to_string().contains("exit code 1"), "{error}");
     }
+
     #[tokio::test]
     async fn times_out_hung_apply() {
-        let runner = ApplyRunner::new(ApplyConfig {
-            command: "/bin/true".into(),
-            timeout_seconds: 1,
-            allow_recipe_commands: true,
-        });
-        assert!(runner
-            .apply(Path::new("/tmp/artifact"), Some("exec sleep 10"))
+        let (_dir, artifact) = workdir("hung");
+        let error = runner("/bin/true", true)
+            .apply(&artifact, Some("exec sleep 10"), "test")
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("timed out"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn timeout_kills_background_descendants() {
+        let (dir, artifact) = workdir("descendants");
+        let marker = dir.join("survivor");
+        let script = format!("(sleep 2; touch {}) & exec sleep 10", marker.display());
+        assert!(runner("/bin/true", true)
+            .apply(&artifact, Some(&script), "test")
             .await
             .is_err());
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        assert!(
+            !marker.exists(),
+            "descendant outlived the killed process group"
+        );
+    }
+
+    #[tokio::test]
+    async fn non_executable_updater_is_a_privilege_failure() {
+        let (dir, artifact) = workdir("noexec");
+        let updater = dir.join("updater");
+        std::fs::write(&updater, "#!/bin/sh\nexit 0\n").unwrap(); // mode 0644: not executable
+        let error = runner(updater.to_str().unwrap(), false)
+            .apply(&artifact, None, "test")
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().starts_with("privilege failure"),
+            "{error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn denied_system_write_inside_updater_fails() {
+        let (_dir, artifact) = workdir("denied");
+        // An unprivileged updater cannot change kernel settings; the denial must surface.
+        let error = runner("/bin/true", true)
+            .apply(&artifact, Some("echo suifleet > /proc/sys/kernel/hostname"), "test")
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("exit code"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn exit_126_is_reported_as_privilege_failure() {
+        let (_dir, artifact) = workdir("exit126");
+        let error = runner("/bin/true", true)
+            .apply(&artifact, Some("exit 126"), "test")
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().starts_with("privilege failure"),
+            "{error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn child_gets_clean_environment_and_limits() {
+        let (dir, artifact) = workdir("env");
+        std::env::set_var("SUIFLEET_TEST_SECRET", "leak");
+        let out = dir.join("env.txt");
+        let script = format!(
+            "{{ env; echo core=$(ulimit -c); echo files=$(ulimit -n); echo cwd=$(pwd); }} > {}",
+            out.display()
+        );
+        runner("/bin/true", true)
+            .apply(&artifact, Some(&script), "test")
+            .await
+            .unwrap();
+        let seen = std::fs::read_to_string(out).unwrap();
+        assert!(!seen.contains("SUIFLEET_TEST_SECRET"), "{seen}");
+        assert!(
+            seen.contains("core=0") && seen.contains("files=1024"),
+            "{seen}"
+        );
+        assert!(seen.contains(&format!("HOME={}", dir.display())), "{seen}");
+        assert!(seen.contains(&format!("cwd={}", dir.display())), "{seen}");
     }
 }

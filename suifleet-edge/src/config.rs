@@ -179,8 +179,10 @@ pub struct DeviceConfig {
     pub device_cap_id: String,
 }
 
-#[derive(Deserialize, Debug, Clone, Default)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct WalrusConfig {
+    /// Taken from the deployment manifest; a configured value must match it.
+    #[serde(default)]
     pub aggregator_url: String,
     /// Largest artifact the device will download.
     #[serde(default = "default_max_artifact_bytes")]
@@ -196,6 +198,19 @@ pub struct WalrusConfig {
     /// slow or stalled aggregator can hold the serial deployment loop.
     #[serde(default = "default_download_timeout_seconds")]
     pub download_timeout_seconds: u64,
+}
+
+// Applies when [walrus] is omitted, as in the manifest-based configuration.
+impl Default for WalrusConfig {
+    fn default() -> Self {
+        Self {
+            aggregator_url: String::new(),
+            max_artifact_bytes: default_max_artifact_bytes(),
+            min_free_bytes: default_min_free_bytes(),
+            download_attempts: default_download_attempts(),
+            download_timeout_seconds: default_download_timeout_seconds(),
+        }
+    }
 }
 
 fn default_max_artifact_bytes() -> u64 {
@@ -219,6 +234,58 @@ pub struct ApplyConfig {
     pub timeout_seconds: u64,
     #[serde(default)]
     pub allow_recipe_commands: bool,
+    /// `direct` runs the updater as the daemon user. `privileged-helper` hands
+    /// verified firmware to the root-owned helper (suifleet-firmware.service);
+    /// recipe install scripts always stay unprivileged.
+    #[serde(default)]
+    pub mode: ApplyMode,
+    /// Spool shared with the firmware helper (daemon-writable).
+    #[serde(default = "default_firmware_spool")]
+    pub firmware_spool: PathBuf,
+    /// Optional address-space limit (RLIMIT_AS) for updater/recipe children.
+    #[serde(default)]
+    pub max_memory_bytes: Option<u64>,
+}
+
+#[derive(Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ApplyMode {
+    #[default]
+    Direct,
+    PrivilegedHelper,
+}
+
+fn default_firmware_spool() -> PathBuf {
+    "/var/lib/suifleet/firmware".into()
+}
+
+/// Root-owned configuration for `suifleet --firmware-helper`. It is separate
+/// from the daemon config so a compromised daemon cannot choose the command.
+#[derive(Deserialize, Debug, Clone)]
+pub struct FirmwareHelperConfig {
+    /// Firmware updater; the verified artifact path is appended.
+    pub command: String,
+    #[serde(default = "default_timeout")]
+    pub timeout_seconds: u64,
+    #[serde(default = "default_firmware_spool")]
+    pub spool_dir: PathBuf,
+    /// Root-only directory holding the helper's private artifact copy.
+    #[serde(default = "default_helper_work_dir")]
+    pub work_dir: PathBuf,
+    #[serde(default)]
+    pub max_memory_bytes: Option<u64>,
+}
+
+fn default_helper_work_dir() -> PathBuf {
+    "/var/lib/suifleet-firmware".into()
+}
+
+impl FirmwareHelperConfig {
+    pub fn load(path: &Path) -> anyhow::Result<Self> {
+        let cfg: Self = toml::from_str(&std::fs::read_to_string(path)?)?;
+        anyhow::ensure!(cfg.timeout_seconds > 0, "timeout_seconds must be positive");
+        Ok(cfg)
+    }
 }
 
 impl Config {
@@ -321,6 +388,21 @@ mod tests {
             }
             assert!(bad.validate().is_err(), "{field}");
         }
+    }
+    #[test]
+    fn walrus_limits_default_when_omitted_or_partial() {
+        let base = "[sui]\nmanifest_path='deployment.json'\n[device]\nkeypair_path='k'\n\
+            device_object_id='0x1'\ndevice_cap_id='0x2'\n[apply]\ncommand='true'\n";
+        let omitted: Config = toml::from_str(base).unwrap();
+        let partial: Config = toml::from_str(&format!("{base}[walrus]\ndownload_attempts=2\n")).unwrap();
+        for walrus in [&omitted.walrus, &partial.walrus] {
+            assert_eq!(walrus.aggregator_url, "");
+            assert_eq!(walrus.max_artifact_bytes, 1024 * 1024 * 1024);
+            assert_eq!(walrus.min_free_bytes, 64 * 1024 * 1024);
+            assert_eq!(walrus.download_timeout_seconds, 3600);
+        }
+        assert_eq!(omitted.walrus.download_attempts, 4);
+        assert_eq!(partial.walrus.download_attempts, 2);
     }
     #[test]
     fn legacy_network_config_rejected() {

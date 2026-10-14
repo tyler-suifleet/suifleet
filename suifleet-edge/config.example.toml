@@ -6,12 +6,11 @@ manifest_path = "deployment.json"
 keypair_path = "/etc/suifleet/device.key"   # 32-byte hex ed25519 private key
 device_object_id = "0x..."                      # Device object ID from registration
 device_cap_id    = "0x..."                      # DeviceCap object ID
-[walrus]
-aggregator_url = "https://aggregator.walrus-testnet.walrus.space"
-# Downloads go to <artifact>.partial and resume with HTTP Range after interruption.
+# The aggregator URL comes from the deployment manifest. Optional download limits:
+# [walrus]
 # max_artifact_bytes = 1073741824   # refuse larger artifacts (default 1 GiB)
 # min_free_bytes = 67108864         # keep this much free on the state filesystem (default 64 MiB)
-# download_attempts = 4             # per blob, for drops, timeouts, 5xx and 429
+# download_attempts = 4             # per blob, for drops, timeouts, 5xx and 429; resumes with HTTP Range
 # download_timeout_seconds = 3600   # give up on a blob after this long, across all attempts
 
 [apply]
@@ -25,6 +24,15 @@ command = "/usr/bin/swupdate -i"
 # Bound the updater execution time. Recipe shell commands require explicit opt-in.
 timeout_seconds = 600
 allow_recipe_commands = false
+
+# How firmware reaches the updater (see docs/OPERATIONS.md, "Execution privileges").
+# "direct" (default) runs `command` as the daemon user. Under the shipped
+# systemd unit that user is unprivileged, so use "privileged-helper" for
+# updaters that need root: suifleet-firmware.service then runs the command
+# from root-owned /etc/suifleet/firmware.toml and `command` here is unused.
+# mode = "privileged-helper"
+# firmware_spool = "/var/lib/suifleet/firmware"
+# max_memory_bytes = 268435456   # optional RLIMIT_AS for updater/recipe children
 
 [runtime]
 state_dir = "/var/lib/suifleet"
