@@ -53,12 +53,14 @@ test-ota:
 	$(RUN) python3 scripts/test_ota.py
 
 dapp-typecheck:
+	$(MAKE) test-manifest
 	$(RUN) bash -c "cd dapp && pnpm typecheck"
 
 .PHONY: check tracking-plan test-tracking
 
 # Sequential recipe: cross-layer checks must not race over shared build artifacts.
 check:
+	$(MAKE) test-manifest
 	$(MAKE) test-contracts
 	$(MAKE) edge-test
 	$(MAKE) test-ota
@@ -82,3 +84,12 @@ test-coordinator:
 
 install-ticket-coordinator:
 	python3 tools/atomic-ticketing/install.py
+
+.PHONY: test-manifest test-manifest-live
+test-manifest:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_deployment_manifest.py'
+	$(RUN) node scripts/test_deployment_manifest.cjs
+	$(RUN) node scripts/test_wallet_manifest.cjs
+
+test-manifest-live:
+	$(RUN) python3 scripts/test_manifest_upgrades.py
