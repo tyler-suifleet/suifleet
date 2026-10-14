@@ -1,0 +1,3 @@
+# Only the pinned test bundler needs an install script.
+allowBuilds:
+  esbuild: true
