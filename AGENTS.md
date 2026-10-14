@@ -20,6 +20,8 @@ SuiFleet targets functional AWS Greengrass OTA/fleet-management parity using Sui
 
 Read [the parity audit](docs/GREENGRASS_PARITY_AUDIT.md), [validation evidence](docs/VALIDATION.md), [the operational runbook](docs/OPERATIONS.md) and [tracking workflow](docs/ISSUE_TRACKING.md) as relevant. Actual code and current test results take precedence over historical checklists. The [capability-to-ticket map](docs/GREENGRASS_TICKET_COVERAGE.md) tracks the audited scope; [Raspberry Pi 3 Model B+ acceptance](docs/RASPBERRY_PI_TEST_PLAN.md) requires a BitBake-built bootable image with the client included, not only SSH deployment, and is specified in SF-029/030/031 and has not yet been implemented or run.
 
+Yocto packaging/first boot is described in [YOCTO_PACKAGING.md](docs/YOCTO_PACKAGING.md). Use the pinned Scarthgap/Rust-mixin profiles under `kas/`, preserve the fixed daemon source revision and regenerate the crate include/lock digest together when updating it. Provision device identities only at runtime; package/image builds must contain no device keys, enrollment configuration or journals. QEMU test profiles enable passwordless console login and are for disposable validation only. Record physical Pi acceptance separately.
+
 Critical known gaps:
 
 - Both clients use deprecated Sui JSON-RPC. Migrate wallet library and TypeScript SDK together; migrate the daemon reader, transaction builder and executor too.

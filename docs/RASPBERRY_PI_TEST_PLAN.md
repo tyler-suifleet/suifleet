@@ -10,7 +10,7 @@ Take `ticket --project suifleet lock hardware:raspberrypi3bplus` only for the du
 
 SF-025 must make the client BitBake recipe reproducible, package the Cargo.lock dependency graph, and install its binary/service/configuration support. SF-029 must supply a pinned build configuration and bootable SD-card test image that includes that package. The build runs on a capable development host; the Pi runs the resulting image. First boot generates a unique identity and exposes its address in an unenrolled state. After registration supplies device/capability IDs and a verified network manifest, enable the enrolled daemon. Preserve keys and journals across restart. An SSH-copied binary cannot substitute for proving image integration.
 
-The existing recipe uses `AUTOREV`, has no crates include, and installs only `config.toml.example`; the daemon expects `config.toml`. These are packaging work in SF-025, not a working image pipeline. Use the [Yocto Cargo classes](https://docs.yoctoproject.org/5.0.16/ref-manual/classes.html#cargo) and validate compiler/dependency compatibility.
+SF-025's recipe pins source/crates and separates first-boot identity generation from enrollment. The user selected Scarthgap plus the Rust mixin; pinned packaging and emulation profiles and enrollment instructions are in [YOCTO_PACKAGING.md](YOCTO_PACKAGING.md). The image installs only configuration examples, so install a verified manifest/config bundle after registering the newly generated device address. Packaging/emulation evidence is separate from this physical Pi image and live test loop.
 
 ## Live acceptance flow
 
