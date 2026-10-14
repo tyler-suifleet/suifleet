@@ -16,6 +16,7 @@ REQUIRED_TYPES = (
     "deployment_manager::TargetDevicesKey", "deployment_manager::StatusesKey",
     "deployment_manager::RecipeDigestKey", "deployment_manager::ReceiptsKey",
     "deployment_manager::Receipts", "deployment_manager::DeviceStatusReported",
+    "device_registry::IdentityKey", "device_registry::Identity", "device_registry::DeviceIdentityChanged",
 )
 CLIENT_VERSIONS = {"dapp": "0.0.2", "edge": "0.1.0"}
 
