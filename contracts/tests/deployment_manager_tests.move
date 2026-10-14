@@ -53,12 +53,14 @@ module sui_edge::deployment_manager_tests {
         );
         clock::destroy_for_testing(clock);
 
+        ts::next_tx(scenario, ADMIN);
+
         // Add device to the shared group
         let mut group = ts::take_shared<device_group::DeviceGroup>(scenario);
         let group_id = device_group::group_id(&group);
 
         // Take the device to pass as &Device
-        let device = ts::take_from_address<sui_edge::device_registry::Device>(scenario, ADMIN);
+        let device = ts::take_from_address_by_id<sui_edge::device_registry::Device>(scenario, ADMIN, device_id);
         device_group::add_device(&mut group, &device, ts::ctx(scenario));
         ts::return_to_address(ADMIN, device);
         ts::return_shared(group);
@@ -74,6 +76,7 @@ module sui_edge::deployment_manager_tests {
             string::utf8(b"abc123blobid"),
             string::utf8(b"deadbeef...sha256"),
             target_groups,
+            vector[],
             &clock,
             ts::ctx(scenario),
         );
