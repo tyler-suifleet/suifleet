@@ -19,6 +19,7 @@ module sui_edge::deployment_manager {
     const ENoTargets: u64 = 1;
     const ENotCreator: u64 = 2;
     const ENotTargeted: u64 = 3;
+    const EInvalidRecipeHash: u64 = 4;
 
     // ── Dynamic field keys ────────────────────────────────────────────────────
     //
@@ -28,6 +29,7 @@ module sui_edge::deployment_manager {
     public struct TargetGroupsKey has copy, drop, store {}
     public struct TargetDevicesKey has copy, drop, store {}
     public struct StatusesKey has copy, drop, store {}
+    public struct RecipeDigestKey has copy, drop, store {}
 
     // ── Objects ───────────────────────────────────────────────────────────────
 
@@ -88,6 +90,48 @@ module sui_edge::deployment_manager {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
+        let record = make_deployment(component_name, version, recipe_blob_id, artifact_sha256,
+            target_groups, target_devices, clock, ctx);
+        transfer::share_object(record);
+    }
+
+    /// New clients authenticate the exact recipe bytes as well as the artifact.
+    /// The original creation API is retained for compatible package upgrades.
+    public fun create_deployment_verified(
+        component_name: String,
+        version: String,
+        recipe_blob_id: String,
+        artifact_sha256: String,
+        recipe_sha256: String,
+        target_groups: vector<ID>,
+        target_devices: vector<ID>,
+        clock: &Clock,
+        ctx: &mut TxContext,
+    ) {
+        let bytes = recipe_sha256.as_bytes();
+        assert!(bytes.length() == 64, EInvalidRecipeHash);
+        let mut i = 0;
+        while (i < bytes.length()) {
+            let byte = bytes[i];
+            assert!((byte >= 48 && byte <= 57) || (byte >= 97 && byte <= 102), EInvalidRecipeHash);
+            i = i + 1;
+        };
+        let mut record = make_deployment(component_name, version, recipe_blob_id, artifact_sha256,
+            target_groups, target_devices, clock, ctx);
+        df::add(&mut record.id, RecipeDigestKey {}, recipe_sha256);
+        transfer::share_object(record);
+    }
+
+    fun make_deployment(
+        component_name: String,
+        version: String,
+        recipe_blob_id: String,
+        artifact_sha256: String,
+        target_groups: vector<ID>,
+        target_devices: vector<ID>,
+        clock: &Clock,
+        ctx: &mut TxContext,
+    ): DeploymentRecord {
         assert!(!target_groups.is_empty() || !target_devices.is_empty(), ENoTargets);
 
         let mut record = DeploymentRecord {
@@ -116,7 +160,7 @@ module sui_edge::deployment_manager {
         df::add(&mut record.id, TargetDevicesKey {}, target_devices);
         df::add(&mut record.id, StatusesKey {},      vec_map::empty<ID, u8>());
 
-        transfer::share_object(record);
+        record
     }
 
     /// Called by the edge device after applying (or failing to apply) a deployment.
@@ -175,6 +219,9 @@ module sui_edge::deployment_manager {
         let _: vector<ID>       = df::remove(&mut deployment.id, TargetGroupsKey {});
         let _: vector<ID>       = df::remove(&mut deployment.id, TargetDevicesKey {});
         let _: VecMap<ID, u8>   = df::remove(&mut deployment.id, StatusesKey {});
+        if (df::exists(&deployment.id, RecipeDigestKey {})) {
+            let _: String = df::remove(&mut deployment.id, RecipeDigestKey {});
+        };
 
         let DeploymentRecord { id, creator, component_name: _, version: _, recipe_blob_id: _, artifact_sha256: _, created_at: _, schema_version: _ } = deployment;
         event::emit(DeploymentDeleted { deployment_id: id.to_inner(), creator });
@@ -195,7 +242,9 @@ module sui_edge::deployment_manager {
         df::borrow(&d.id, StatusesKey {})
     }
 
-
+    public fun recipe_sha256(d: &DeploymentRecord): &String {
+        df::borrow(&d.id, RecipeDigestKey {})
+    }
 
     public fun recipe_blob_id(d: &DeploymentRecord): &String { &d.recipe_blob_id }
     public fun artifact_sha256(d: &DeploymentRecord): &String { &d.artifact_sha256 }

@@ -275,9 +275,35 @@ module sui_edge::deployment_manager_tests {
         ts::end(scenario);
     }
 
+    #[test]
+    fun test_verified_recipe_digest_and_cleanup() {
+        let mut scenario = ts::begin(ADMIN);
+        let clock = clock::create_for_testing(ts::ctx(&mut scenario));
+        let digest = string::utf8(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        deployment_manager::create_deployment_verified(
+            string::utf8(b"app"), string::utf8(b"1.0.0"), string::utf8(b"recipe"),
+            string::utf8(b"artifact-hash"), digest, vector[], vector[object::id_from_address(DEVICE_ADDR)],
+            &clock, ts::ctx(&mut scenario));
+        clock::destroy_for_testing(clock);
+        ts::next_tx(&mut scenario, ADMIN);
+        let record = ts::take_shared<DeploymentRecord>(&scenario);
+        assert!(*deployment_manager::recipe_sha256(&record) == digest, 100);
+        deployment_manager::delete_deployment(record, ts::ctx(&mut scenario));
+        ts::end(scenario);
+    }
 
-
-
+    #[test]
+    #[expected_failure(abort_code = 4, location = sui_edge::deployment_manager)]
+    fun test_invalid_recipe_digest_rejected() {
+        let mut scenario = ts::begin(ADMIN);
+        let clock = clock::create_for_testing(ts::ctx(&mut scenario));
+        deployment_manager::create_deployment_verified(
+            string::utf8(b"app"), string::utf8(b"1.0.0"), string::utf8(b"recipe"),
+            string::utf8(b"artifact-hash"), string::utf8(b"gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg"),
+            vector[], vector[object::id_from_address(DEVICE_ADDR)], &clock, ts::ctx(&mut scenario));
+        clock::destroy_for_testing(clock);
+        ts::end(scenario);
+    }
 
     #[test]
     #[expected_failure(abort_code = 0, location = sui_edge::device_cap)]
