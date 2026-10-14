@@ -222,6 +222,16 @@ def generate(catalog, recipe):
             calls += [f'  {module}_{name}: (tx: Transaction, packageId: string{", " if types else ""}{", ".join(types)}) => tx.moveCall({{ target: `${{packageId}}::{module}::{name}`, arguments: [{", ".join(arguments)}] }}),']
         rust += [f"pub mod {module} {{", "    use super::*;"]
         rust += [f'    pub const {name.upper()}: &str = "{name}";' for name in contents["functions"]]
+        for name, function in contents["functions"].items():
+            parameters, values = [], []
+            for index, datatype in enumerate(p for p in function["parameters"] if not p.endswith("sui::tx_context::TxContext")):
+                arg = f"a{index}"
+                base = datatype.removeprefix("&mut ").removeprefix("&")
+                datatype = "u8" if base == "u8" else "&[String]" if base == "vector<sui::object::ID>" else "&str"
+                parameters += [f"{arg}: {datatype}"]
+                value = f"{arg}.to_string()" if datatype == "u8" else arg
+                values += [f"serde_json::json!({value})"]
+            rust += [f'    pub fn {name}_args({", ".join(parameters)}) -> Vec<serde_json::Value> {{ vec![{", ".join(values)}] }}']
         for name, struct in contents["structs"].items():
             if struct["type_parameters"]:
                 raise ValueError("generic contract structs require explicit support")

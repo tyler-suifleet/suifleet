@@ -304,7 +304,7 @@ impl SuiClient {
             .await?;
         let targets = &direct["data"]["content"]["fields"]["value"];
         let mut function = protocol::deployment_manager::REPORT_STATUS;
-        let mut arguments = vec![deployment.to_string(), cap.to_string()];
+        let mut arguments = protocol::deployment_manager::report_status_args(deployment, cap, status);
         if !targets.as_array().is_some_and(|ids| {
             ids.iter()
                 .any(|id| same_id(id.as_str().unwrap_or(""), device_id))
@@ -341,10 +341,10 @@ impl SuiClient {
                     break;
                 }
             }
-            arguments.push(found.ok_or_else(|| anyhow::anyhow!("device is no longer targeted"))?);
+            let group = found.ok_or_else(|| anyhow::anyhow!("device is no longer targeted"))?;
+            arguments = protocol::deployment_manager::report_status_for_group_args(deployment, cap, &group, status);
             function = protocol::deployment_manager::REPORT_STATUS_FOR_GROUP;
         }
-        arguments.push(status.to_string());
         let built = self
             .rpc(
                 "unsafe_moveCall",

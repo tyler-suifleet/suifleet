@@ -34,6 +34,24 @@ pub mod deployment_manager {
     pub const STATUSES: &str = "statuses";
     pub const TARGET_DEVICES: &str = "target_devices";
     pub const TARGET_GROUPS: &str = "target_groups";
+    pub fn artifact_sha256_args(a0: &str) -> Vec<serde_json::Value> { vec![serde_json::json!(a0)] }
+    pub fn create_deployment_args(a0: &str, a1: &str, a2: &str, a3: &str, a4: &[String], a5: &[String], a6: &str) -> Vec<serde_json::Value> { vec![serde_json::json!(a0), serde_json::json!(a1), serde_json::json!(a2), serde_json::json!(a3), serde_json::json!(a4), serde_json::json!(a5), serde_json::json!(a6)] }
+    pub fn create_deployment_verified_args(a0: &str, a1: &str, a2: &str, a3: &str, a4: &str, a5: &[String], a6: &[String], a7: &str) -> Vec<serde_json::Value> { vec![serde_json::json!(a0), serde_json::json!(a1), serde_json::json!(a2), serde_json::json!(a3), serde_json::json!(a4), serde_json::json!(a5), serde_json::json!(a6), serde_json::json!(a7)] }
+    pub fn delete_deployment_args(a0: &str) -> Vec<serde_json::Value> { vec![serde_json::json!(a0)] }
+    pub fn has_receipts_args(a0: &str) -> Vec<serde_json::Value> { vec![serde_json::json!(a0)] }
+    pub fn migrate_args(a0: &str) -> Vec<serde_json::Value> { vec![serde_json::json!(a0)] }
+    pub fn receipt_status_args(a0: &str, a1: &str) -> Vec<serde_json::Value> { vec![serde_json::json!(a0), serde_json::json!(a1)] }
+    pub fn receipt_statuses_args(a0: &str) -> Vec<serde_json::Value> { vec![serde_json::json!(a0)] }
+    pub fn receipts_version_args(a0: &str) -> Vec<serde_json::Value> { vec![serde_json::json!(a0)] }
+    pub fn recipe_blob_id_args(a0: &str) -> Vec<serde_json::Value> { vec![serde_json::json!(a0)] }
+    pub fn recipe_sha256_args(a0: &str) -> Vec<serde_json::Value> { vec![serde_json::json!(a0)] }
+    pub fn report_status_args(a0: &str, a1: &str, a2: u8) -> Vec<serde_json::Value> { vec![serde_json::json!(a0), serde_json::json!(a1), serde_json::json!(a2.to_string())] }
+    pub fn report_status_for_group_args(a0: &str, a1: &str, a2: &str, a3: u8) -> Vec<serde_json::Value> { vec![serde_json::json!(a0), serde_json::json!(a1), serde_json::json!(a2), serde_json::json!(a3.to_string())] }
+    pub fn status_applied_args() -> Vec<serde_json::Value> { vec![] }
+    pub fn status_failed_args() -> Vec<serde_json::Value> { vec![] }
+    pub fn statuses_args(a0: &str) -> Vec<serde_json::Value> { vec![serde_json::json!(a0)] }
+    pub fn target_devices_args(a0: &str) -> Vec<serde_json::Value> { vec![serde_json::json!(a0)] }
+    pub fn target_groups_args(a0: &str) -> Vec<serde_json::Value> { vec![serde_json::json!(a0)] }
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct DeploymentCreated {
         pub deployment_id: [u8; 32],
@@ -117,6 +135,10 @@ pub mod device_cap {
     pub const DEVICE_ID: &str = "device_id";
     pub const ISSUE: &str = "issue";
     pub const ISSUE_CAP: &str = "issue_cap";
+    pub fn assert_signer_args(a0: &str) -> Vec<serde_json::Value> { vec![serde_json::json!(a0)] }
+    pub fn device_id_args(a0: &str) -> Vec<serde_json::Value> { vec![serde_json::json!(a0)] }
+    pub fn issue_args(a0: &str) -> Vec<serde_json::Value> { vec![serde_json::json!(a0)] }
+    pub fn issue_cap_args(a0: &str) -> Vec<serde_json::Value> { vec![serde_json::json!(a0)] }
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct DeviceAddressKey {
         pub dummy_field: bool,
@@ -140,6 +162,15 @@ pub mod device_group {
     pub const GROUP_ID: &str = "group_id";
     pub const NAME: &str = "name";
     pub const REMOVE_DEVICE: &str = "remove_device";
+    pub fn add_device_args(a0: &str, a1: &str) -> Vec<serde_json::Value> { vec![serde_json::json!(a0), serde_json::json!(a1)] }
+    pub fn admin_args(a0: &str) -> Vec<serde_json::Value> { vec![serde_json::json!(a0)] }
+    pub fn contains_device_args(a0: &str, a1: &str) -> Vec<serde_json::Value> { vec![serde_json::json!(a0), serde_json::json!(a1)] }
+    pub fn create_group_args(a0: &str, a1: &str, a2: &str) -> Vec<serde_json::Value> { vec![serde_json::json!(a0), serde_json::json!(a1), serde_json::json!(a2)] }
+    pub fn delete_group_args(a0: &str) -> Vec<serde_json::Value> { vec![serde_json::json!(a0)] }
+    pub fn device_ids_args(a0: &str) -> Vec<serde_json::Value> { vec![serde_json::json!(a0)] }
+    pub fn group_id_args(a0: &str) -> Vec<serde_json::Value> { vec![serde_json::json!(a0)] }
+    pub fn name_args(a0: &str) -> Vec<serde_json::Value> { vec![serde_json::json!(a0)] }
+    pub fn remove_device_args(a0: &str, a1: &str) -> Vec<serde_json::Value> { vec![serde_json::json!(a0), serde_json::json!(a1)] }
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct DeviceAddedToGroup {
         pub group_id: [u8; 32],
@@ -185,6 +216,12 @@ pub mod device_registry {
     pub const DEVICE_ID: &str = "device_id";
     pub const REGISTER_DEVICE: &str = "register_device";
     pub const SET_META: &str = "set_meta";
+    pub fn deregister_device_args(a0: &str, a1: &str) -> Vec<serde_json::Value> { vec![serde_json::json!(a0), serde_json::json!(a1)] }
+    pub fn device_address_args(a0: &str) -> Vec<serde_json::Value> { vec![serde_json::json!(a0)] }
+    pub fn device_count_args(a0: &str) -> Vec<serde_json::Value> { vec![serde_json::json!(a0)] }
+    pub fn device_id_args(a0: &str) -> Vec<serde_json::Value> { vec![serde_json::json!(a0)] }
+    pub fn register_device_args(a0: &str, a1: &str, a2: &str, a3: &str, a4: &str) -> Vec<serde_json::Value> { vec![serde_json::json!(a0), serde_json::json!(a1), serde_json::json!(a2), serde_json::json!(a3), serde_json::json!(a4)] }
+    pub fn set_meta_args(a0: &str, a1: &str, a2: &str) -> Vec<serde_json::Value> { vec![serde_json::json!(a0), serde_json::json!(a1), serde_json::json!(a2)] }
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct Device {
         pub id: [u8; 32],

@@ -1,6 +1,14 @@
 use crate::protocol;
 
 #[test]
+fn generated_daemon_calls_keep_compiled_argument_order_and_scalar_types() {
+    assert_eq!(protocol::deployment_manager::report_status_args("deployment", "cap", 1),
+        vec![serde_json::json!("deployment"), serde_json::json!("cap"), serde_json::json!("1")]);
+    assert_eq!(protocol::deployment_manager::report_status_for_group_args("deployment", "cap", "group", 2),
+        vec![serde_json::json!("deployment"), serde_json::json!("cap"), serde_json::json!("group"), serde_json::json!("2")]);
+}
+
+#[test]
 fn generated_wire_layout_matches_independent_cross_client_vector() {
     let fixture: serde_json::Value = serde_json::from_str(include_str!("../../interfaces/wire-vectors.json")).unwrap();
     let expected = hex::decode(fixture["deployment_created"]["bcs_hex"].as_str().unwrap()).unwrap();
