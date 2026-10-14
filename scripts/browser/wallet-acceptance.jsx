@@ -7,9 +7,9 @@ import { ConnectButton } from "@mysten/dapp-kit-react/ui";
 import { SuiGrpcClient } from "@mysten/sui/grpc";
 import { bcs } from "@mysten/sui/bcs";
 import { Transaction } from "@mysten/sui/transactions";
-import { normalizeSuiAddress, fromHex, toBase58 } from "@mysten/sui/utils";
+import { normalizeSuiAddress, toBase58 } from "@mysten/sui/utils";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
-import { UpgradeCapBcs } from "@/lib/move-bcs";
+import { manifestClient } from "../fixtures/manifest-client.ts";
 
 const m = ACCEPTANCE_MANIFEST, address = normalizeSuiAddress("0xa"), digest = toBase58(new Uint8Array(32));
 let reject = false, failEffects = false, chain = m.chain_identifier, signCalls = 0;
@@ -41,15 +41,9 @@ const wallet = {
 function BufferlessBase64(bytes) { return btoa(String.fromCharCode(...bytes)); }
 const client = new SuiGrpcClient({ network: m.network, baseUrl: "http://127.0.0.1:1" });
 // Only network responses are fixtures: dApp Kit and effect decoding are real.
-client.ledgerService.getServiceInfo = (async () => ({ response: { chainId: toBase58(fromHex(chain + "00".repeat(28))) } }));
-client.getObject = (async ({ objectId }) => {
-  if (objectId === m.call_package_id) return { object: { objectBcs: bcs.Object.serialize({ data: { Package: {
-    id: m.call_package_id, version: m.package_version, moduleMap: new Map(), linkageTable: new Map(),
-    typeOriginTable: Object.entries(m.type_origins).map(([name, origin]) => ({ moduleName: name.split("::")[0], datatypeName: name.split("::")[1], package: origin })),
-  } }, owner: { Immutable: true }, previousTransaction: digest, storageRebate: 0 }).toBytes() } };
-  if (objectId === m.upgrade_cap_id) return { object: { type: "0x2::package::UpgradeCap", content: UpgradeCapBcs.serialize({ id: objectId, package: m.call_package_id, version: m.package_version, policy: 0 }).toBytes() } };
-  return { object: { type: `${m.type_origins["device_registry::DeviceRegistry"]}::device_registry::DeviceRegistry`, owner: { $kind: "Shared", Shared: { initialSharedVersion: "1" } } } };
-});
+const responses = manifestClient(m, () => chain);
+client.ledgerService.getServiceInfo = responses.ledgerService.getServiceInfo;
+client.getObject = responses.getObject;
 client.waitForTransaction = (async () => ({ $kind: "Transaction", Transaction: { digest, status: { success: true } } }));
 const kit = createDAppKit({ networks: [m.network], createClient: () => client, autoConnect: false, slushWalletConfig: null, storage: null });
 window.addEventListener("wallet-standard:app-ready", (event) => event.detail.register(wallet));
