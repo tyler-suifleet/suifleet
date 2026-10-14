@@ -158,6 +158,25 @@ class MultiProjectTests(unittest.TestCase):
         self.assertEqual(calls[1][1]['env']['GH_TOKEN'],'personal-test-token')
         self.assertFalse(any('switch' in args for args, _ in calls))
 
+    def test_legacy_top_level_token_is_verified_before_any_repository_operation(self):
+        calls = []
+        def fake_run(args, **kwargs):
+            calls.append((args, kwargs))
+            if '--user' in args:
+                return subprocess.CompletedProcess(args, 1, '', 'no named token')
+            if args[1:3] == ['auth','token']:
+                return subprocess.CompletedProcess(args, 0, 'legacy-test-token', '')
+            if args[1:3] == ['api','user']:
+                self.assertEqual(kwargs['env']['GH_TOKEN'], 'legacy-test-token')
+                return subprocess.CompletedProcess(args, 0, 'tyler-suifleet', '')
+            raise AssertionError('No repo operation is needed for account verification')
+        with patch.object(m.subprocess, 'run', side_effect=fake_run):
+            gh = m.Gh('tyler-suifleet')
+            self.assertEqual(gh.env['GH_TOKEN'], 'legacy-test-token')
+            with self.assertRaisesRegex(m.CoordinationError, 'another account'):
+                m.Gh('therealtime')
+        self.assertFalse(any('switch' in args for args, _ in calls))
+
     def test_installed_cli_runs_without_repository_imports_and_preserves_other_commands(self):
         prefix = Path(self.tmp.name) / 'installation'
         installer = SOURCE.with_name('install.py')

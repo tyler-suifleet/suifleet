@@ -30,7 +30,7 @@ Local or cross-project dependencies can be declared as `KEY` or `project_id::KEY
 
 ## Credentials and Project setup
 
-Git SSH and GitHub API authentication are independent. SuiFleet retains the `suifleet` SSH alias and uses API account `tyler-suifleet`; Vortech retains `personal` and uses API account `therealtime`. `gh auth token --user ACCOUNT` is captured privately and passed as GH_TOKEN only to that project's subprocesses. The tool never runs `gh auth switch`, prints tokens or edits SSH configuration. Missing configured credentials fail closed rather than falling back to the active account. Commit author/committer identity remains the user's identity, not the API/model account.
+Git SSH and GitHub API authentication are independent. SuiFleet retains the `suifleet` SSH alias and uses API account `tyler-suifleet`; Vortech retains `personal` and uses API account `therealtime`. `gh auth token --user ACCOUNT` is captured privately and passed as GH_TOKEN only to that project's subprocesses. The tool never runs `gh auth switch`, prints tokens or edits SSH configuration. For older single-account gh credential files, the tool verifies the captured token's actual login before any repository operation. It accepts that token only when it matches the configured account. Missing or mismatched credentials fail closed rather than using a different account. Commit author/committer identity remains the user's identity, not the API/model account.
 
 Connect each account through GitHub CLI with repo/project permissions. For an existing Project set its owner/number explicitly. Codex can prepare the configured Project under the user's setup authorization:
 

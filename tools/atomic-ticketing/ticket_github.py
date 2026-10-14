@@ -10,12 +10,21 @@ class Gh:
             env.pop('GITHUB_TOKEN', None)
             result = subprocess.run(['gh', 'auth', 'token', '--hostname', 'github.com', '--user', account],
                                     text=True, capture_output=True, env=env)
-            if result.returncode:
+            legacy_lookup = bool(result.returncode)
+            if legacy_lookup:
+                # Older gh stores one top-level token instead of a users map. Capture it,
+                # then verify its actual login with that exact token before using repo APIs.
+                result = subprocess.run(['gh','auth','token','--hostname','github.com'],
+                                        text=True,capture_output=True,env=env)
+            if result.returncode or not result.stdout.strip():
                 raise CoordinationError(f'GitHub API account {account!r} is not connected; authenticate it with repo/project access')
             self.env.pop('GITHUB_TOKEN', None)
-            if not result.stdout.strip():
-                raise CoordinationError('Configured GitHub account has no usable token')
             self.env['GH_TOKEN'] = result.stdout.strip()
+            if legacy_lookup:
+                verified = subprocess.run(['gh','api','user','--jq','.login'],
+                                          text=True,capture_output=True,env=self.env)
+                if verified.returncode or verified.stdout.strip().lower() != account.lower():
+                    raise CoordinationError(f'GitHub API account {account!r} is not connected; legacy credentials belong to another account')
 
     def run(self, *args, payload=None, as_json=False):
         result = subprocess.run(['gh', *args], input=json.dumps(payload) if payload is not None else None,
