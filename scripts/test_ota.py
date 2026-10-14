@@ -247,6 +247,11 @@ def run(binary):
                 assert not any(o["reported"] for o in outcomes.values())
                 stop(process)
                 process = None
+                # A crash after journaling outcomes but before the cursor is saved
+                # redelivers processed events; the journal alone must prevent reapply.
+                journal = state()
+                journal["cursor"] = sim.events[0]["id"]
+                (root / "state" / "state.json").write_text(json.dumps(journal))
                 sim.add("0x108") # Deployment created while the device is offline.
                 sim.allow_reports = True
                 process = start()
