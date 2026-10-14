@@ -53,29 +53,33 @@ impl Shim {
         Ok(reply["result"].clone())
     }
 
+    /// Dynamic fields the simulator knows, as (parent, key type, key BCS hex),
+    /// matched by their derived object IDs.
     async fn dynamic_field(&self, id: Address) -> Result<Option<proto::Object>, Status> {
-        let parents = self.call("shim_parents", json!([])).await?;
-        let keys = self.call("shim_keyTypes", json!([])).await?;
-        for parent in parents.as_array().into_iter().flatten().filter_map(Value::as_str) {
+        let fields = self.call("shim_fields", json!([])).await?;
+        for field in fields.as_array().into_iter().flatten() {
+            let (Some(parent), Some(key), Some(key_hex)) =
+                (field[0].as_str(), field[1].as_str(), field[2].as_str())
+            else {
+                return Err(Status::internal("malformed simulator field"));
+            };
             let parent_id = Address::from_str(parent).map_err(|e| Status::internal(e.to_string()))?;
-            for key in keys.as_array().into_iter().flatten().filter_map(Value::as_str) {
-                let tag = TypeTag::from_str(key).map_err(|e| Status::internal(e.to_string()))?;
-                // Empty key structs serialize as their single `false` dummy field.
-                if parent_id.derive_dynamic_child_id(&tag, &[0]) != id {
-                    continue;
-                }
-                let field = self
-                    .call("suix_getDynamicFieldObject", json!([parent, {"type": key, "value": {}}]))
-                    .await?;
-                let value = &field["data"]["content"]["fields"]["value"];
-                if value.is_null() {
-                    return Ok(None);
-                }
-                let mut object = proto::Object::default();
-                object.object_type = Some(format!("0x2::dynamic_field::Field<{key}, unknown>"));
-                object.json = Some(Box::new(to_proto(&json!({"value": value}))));
-                return Ok(Some(object));
+            let tag = TypeTag::from_str(key).map_err(|e| Status::internal(e.to_string()))?;
+            let key_bcs = hex::decode(key_hex).map_err(|e| Status::internal(e.to_string()))?;
+            if parent_id.derive_dynamic_child_id(&tag, &key_bcs) != id {
+                continue;
             }
+            let field = self
+                .call("suix_getDynamicFieldObject", json!([parent, {"type": key, "value": key_hex}]))
+                .await?;
+            let value = &field["data"]["content"]["fields"]["value"];
+            if value.is_null() {
+                return Ok(None);
+            }
+            let mut object = proto::Object::default();
+            object.object_type = Some(format!("0x2::dynamic_field::Field<{key}, unknown>"));
+            object.json = Some(Box::new(to_proto(&json!({"value": value}))));
+            return Ok(Some(object));
         }
         Ok(None)
     }
@@ -325,8 +329,9 @@ impl proto::transaction_execution_service_server::TransactionExecutionService fo
         for (index, id) in objects.iter().enumerate() {
             let id = Address::from_str(id.as_str().unwrap_or("")).map_err(|e| Status::internal(e.to_string()))?;
             inputs.push(builder.object(match index {
+                // deployment (&mut), registry (&), cap (owned), group (&)
                 0 => sui_transaction_builder::ObjectInput::shared(id, 1, true),
-                1 => sui_transaction_builder::ObjectInput::owned(id, 1, Digest::ZERO),
+                2 => sui_transaction_builder::ObjectInput::owned(id, 1, Digest::ZERO),
                 _ => sui_transaction_builder::ObjectInput::shared(id, 1, false),
             }));
         }
