@@ -55,11 +55,15 @@ test-ota:
 dapp-typecheck:
 	$(RUN) bash -c "cd dapp && pnpm typecheck"
 
-.PHONY: check check-interfaces toolchain-versions ci tracking-plan test-tracking
+.PHONY: check check-interfaces test-interfaces toolchain-versions ci tracking-plan test-tracking
 
 # Client Move calls/types must exist in the compiled contracts with matching arity.
 check-interfaces:
 	$(RUN) python3 scripts/check_contract_interfaces.py
+
+# Offline regression tests for the drift gate itself (synthetic summaries).
+test-interfaces:
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_check_contract_interfaces.py'
 
 toolchain-versions:
 	@$(RUN) bash -c 'echo "sui: $$(sui --version)"; echo "rustc: $$(rustc --version)"; \
@@ -69,7 +73,7 @@ toolchain-versions:
 # CI entry point (run inside the dev image): each step's output is kept under
 # ci-logs/ for failure diagnostics. No step publishes, spends gas or uses secrets.
 ci: SHELL := /bin/bash
-CI_STEPS := test-contracts check-interfaces edge-test test-ota dapp-typecheck dapp-build
+CI_STEPS := test-contracts test-interfaces check-interfaces edge-test test-ota dapp-typecheck dapp-build
 ci:
 	@mkdir -p ci-logs
 	@$(MAKE) --no-print-directory toolchain-versions | tee ci-logs/toolchain-versions.txt
@@ -83,6 +87,7 @@ ci:
 # Sequential recipe: cross-layer checks must not race over shared build artifacts.
 check:
 	$(MAKE) test-contracts
+	$(MAKE) test-interfaces
 	$(MAKE) check-interfaces
 	$(MAKE) edge-test
 	$(MAKE) test-ota

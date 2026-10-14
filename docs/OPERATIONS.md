@@ -24,7 +24,7 @@ make check
 
 `make check` runs Move tests, the contract-interface drift check, Rust tests, the actual-daemon OTA simulator, frontend typecheck and static production build. It never publishes contracts or flashes hardware.
 
-`scripts/check_contract_interfaces.py` (`make check-interfaces`) compiles a summary of `contracts` and fails when the dApp or daemon references a Move function or type that no longer exists, is not transaction-callable, or (for dApp `moveCall`s) takes a different number of arguments. It does not check argument types, event fields or recipe schemas; that is SF-005.
+`scripts/check_contract_interfaces.py` (`make check-interfaces`) compiles a summary of `contracts` and fails when the dApp, daemon or deployment manifests reference a Move module, function or type that no longer exists, is not transaction-callable, or (for dApp `moveCall`s) takes a different number of arguments. It checks references after a package placeholder (`${PACKAGE_ID}::module::name`, `{}::module::Name`) and address-free type names such as `"device_cap::DeviceAddressKey"` used for per-type origins. An unknown project module is an error; address-free names are skipped only when they belong to a Sui/Move framework module. It also fails if it finds no references at all. `make test-interfaces` runs its offline regression tests. It does not check argument types, event fields or recipe schemas; that is SF-005.
 
 Inside `make shell`, the equivalent commands are:
 
@@ -55,7 +55,7 @@ If Rust files change, run `cargo fmt --manifest-path suifleet-edge/Cargo.toml` w
 
 ## Continuous integration
 
-`.github/workflows/ci.yml` runs on every pull request and push to `main`. It builds the dev image from the pinned Dockerfile and runs `make ci` inside it: frozen pnpm install, Move tests, interface drift check, Rust tests, the OTA simulator, typecheck, static build and `git diff --check`. Each step's output and `toolchain-versions.txt` are uploaded as the `ci-logs` artifact (14 days). The job has a read-only token and no secrets; it never publishes, spends gas or touches hardware.
+`.github/workflows/ci.yml` runs on every pull request and push to `main`. It builds the dev image from the pinned Dockerfile and runs `make ci` inside it: frozen pnpm install, Move tests, drift-gate regression tests, interface drift check, Rust tests, the OTA simulator, typecheck, static build and `git diff --check`. Each step's output and `toolchain-versions.txt` are uploaded as the `ci-logs` artifact (14 days). The job has a read-only token and no secrets; it never publishes, spends gas or touches hardware.
 
 All toolchain inputs are Dockerfile build arguments: base image digest, Sui release and SHA-256, Rust, Node package version and pnpm. Bump them deliberately, in their own commit, together with lockfile and compatibility-test updates; CI then runs against the new image. Workflow actions are pinned to commit SHAs.
 

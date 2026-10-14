@@ -2,8 +2,14 @@
 """Fail when client code references Move functions or types the contracts no longer provide.
 
 Compiles `contracts` with `sui move summary` and checks every `module::name`
-reference to this package in the dApp and daemon sources:
+reference to this package in the dApp, daemon and deployment-manifest sources.
+A reference belongs to this package when it follows a package placeholder
+(`${PACKAGE_ID}::`, `{}::`, `"...::`) or is an address-free string such as
+`"device_cap::DeviceAddressKey"` (manifest type-origin keys, `moveType(...)`).
+Address-free strings naming a Sui/Move framework module are skipped; any other
+unknown module is drift, never silently ignored.
 
+- modules must exist in the contracts;
 - functions must exist and be callable from a transaction (public or entry);
 - dApp `tx.moveCall` argument counts must match the parameters, excluding the
   trailing `&TxContext`/`&mut TxContext` the runtime supplies;
@@ -26,19 +32,29 @@ CLIENT_SOURCES = [
     *sorted((ROOT / "dapp/src").rglob("*.ts")),
     *sorted((ROOT / "dapp/src").rglob("*.tsx")),
     *sorted((ROOT / "suifleet-edge/src").rglob("*.rs")),
+    *sorted((ROOT / "manifests").glob("*.json")),
+    *[path for path in [ROOT / "scripts/deployment_manifest.py"] if path.exists()],
 ]
-REFERENCE = re.compile(r"::([a-z_][a-z0-9_]*)::([A-Za-z_][A-Za-z0-9_]*)")
+MODULE_NAME = r"([a-z_][a-z0-9_]*)::([A-Za-z_][A-Za-z0-9_]*)"
+# `${PACKAGE_ID}::m::n`, `{}::m::n`, `${origin(t)}::m::n`, `ID + "::m::n"`.
+PACKAGE_REFERENCE = re.compile(r"(?:\}|[\"'`])::" + MODULE_NAME)
+# `"m::N"` or `"m::N<...>"`: a type named without its (per-type origin) address.
+BARE_REFERENCE = re.compile(r"[\"'`]" + MODULE_NAME + r"(?=[\"'`<])")
 MOVE_CALL = re.compile(r"moveCall\(\{\s*target:\s*`[^`]*::([a-z_0-9]+)::([a-z_0-9]+)`\s*,\s*arguments:\s*\[")
 RUST_FUNCTION = re.compile(r'\bfunction\s*=\s*"([a-z_0-9]+)"')
 RUST_MODULE = re.compile(r'"([a-z_0-9]+)",\s*function\s*,')
 
 
 def summarize(package, summary_dir):
+    """Return this package's module summaries and the dependency module names."""
     subprocess.run(["sui", "move", "summary", "--path", str(package), "--output-directory", str(summary_dir)],
                    check=True, capture_output=True, text=True)
-    package_name = next(name for name, address in json.loads((summary_dir / "address_mapping.json").read_text()).items()
-                        if int(address, 16) == 0)
-    return {path.stem: json.loads(path.read_text()) for path in (summary_dir / package_name).glob("*.json")}
+    addresses = json.loads((summary_dir / "address_mapping.json").read_text())
+    package_name = next(name for name, address in addresses.items() if int(address, 16) == 0)
+    modules = {path.stem: json.loads(path.read_text()) for path in (summary_dir / package_name).glob("*.json")}
+    framework = {path.stem for name in addresses if name != package_name
+                 for path in (summary_dir / name).glob("*.json")}
+    return modules, framework
 
 
 def is_tx_context(param):
@@ -66,20 +82,25 @@ def top_level_items(text, start):
     return count + (1 if saw_item else 0)
 
 
-def check(modules):
+def check(modules, framework=frozenset(), sources=None):
     errors, checked = [], 0
-    for path in CLIENT_SOURCES:
+    for path in CLIENT_SOURCES if sources is None else sources:
         text = path.read_text()
-        rel = path.relative_to(ROOT)
+        rel = path.relative_to(ROOT) if path.is_relative_to(ROOT) else path
 
         def line(pos):
             return text.count("\n", 0, pos) + 1
 
-        for match in REFERENCE.finditer(text):
+        references = [(match, False) for match in PACKAGE_REFERENCE.finditer(text)]
+        references += [(match, True) for match in BARE_REFERENCE.finditer(text)]
+        for match, bare in references:
             module, name = match.groups()
-            if module not in modules:
-                continue  # Sui framework or unrelated namespace.
+            if bare and module not in modules and module in framework:
+                continue  # e.g. "package::UpgradeCap" from the Sui framework.
             checked += 1
+            if module not in modules:
+                errors.append(f"{rel}:{line(match.start())}: {module}::{name}: no module {module} in the contracts")
+                continue
             summary = modules[module]
             if name[0].isupper():
                 if name not in summary["structs"]:
@@ -95,7 +116,7 @@ def check(modules):
             module, name = match.groups()
             function = modules.get(module, {}).get("functions", {}).get(name)
             if not function:
-                continue  # Reported above.
+                continue  # Missing module/function reported above.
             expected = sum(1 for p in function["parameters"] if not is_tx_context(p))
             actual = top_level_items(text, match.end())
             if actual != expected:
@@ -118,10 +139,12 @@ def main():
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="move-summary-") as summary_dir:
         try:
-            modules = summarize(args.contracts, Path(summary_dir))
+            modules, framework = summarize(args.contracts, Path(summary_dir))
         except subprocess.CalledProcessError as error:
             sys.exit(f"sui move summary failed:\n{error.stdout}\n{error.stderr}")
-    errors, checked = check(modules)
+    errors, checked = check(modules, framework)
+    if not checked:
+        errors.append("no client references found; the scanner no longer matches the client sources")
     for error in errors:
         print("DRIFT:", error)
     print(f"{checked} client references checked against {len(modules)} compiled modules; {len(errors)} drift errors")
