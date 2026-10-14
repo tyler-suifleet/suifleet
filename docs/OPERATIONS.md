@@ -152,7 +152,7 @@ The daemon talks to the manifest's `rpc_url` over the Sui gRPC v2 API only (Myst
 - If a device's resume position is older than that, polling stops with an explicit error and nothing is skipped. Point `rpc_url` at a node that retains the history (an archival or indexed provider), or re-enroll deliberately; re-enrollment skips everything before it.
 - Plan node retention to exceed the longest expected device downtime.
 
-**Cursor migration:** a journal written by the JSON-RPC daemon (`{txDigest, eventSeq}`) resumes from that transaction's checkpoint. Deployments already in the journal are skipped, so nothing applied is replayed. This needs the node to still hold that transaction; otherwise polling stops with an explicit error.
+**Cursor migration:** a journal written by the JSON-RPC daemon (`{txDigest, eventSeq}`) resumes strictly after that exact event. The daemon reads the transaction's checkpoint and walks the filtered event stream in ledger order (transaction, then event index) to the event itself, so earlier events in the checkpoint, even in the same transaction, are never redelivered. This matters because the journal only remembers deployments that were acted on: one skipped earlier could otherwise run if its targeting changed since. If the node no longer holds that transaction, or the event cannot be found in its checkpoint, polling stops with an explicit error instead of guessing.
 
 **Status reports:**
 - The node simulates the call to resolve object versions, gas and budget.

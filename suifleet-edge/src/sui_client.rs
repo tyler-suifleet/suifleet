@@ -73,8 +73,9 @@ enum Cursor {
     /// Start of a checkpoint range (inclusive): enrollment baseline or a
     /// migrated JSON-RPC cursor. Events already journaled are deduplicated.
     Checkpoint(u64),
-    /// Cursor written by the JSON-RPC daemon: {"txDigest", "eventSeq"}.
-    Legacy(String),
+    /// Cursor written by the JSON-RPC daemon: {"txDigest", "eventSeq"}, the
+    /// last processed event. Migration resumes strictly after that event.
+    Legacy(String, u64),
     Genesis,
 }
 
@@ -91,10 +92,45 @@ impl Cursor {
             return Ok(Self::Checkpoint(checkpoint));
         }
         if let Some(digest) = value.get("txDigest").and_then(Value::as_str) {
-            return Ok(Self::Legacy(digest.to_owned()));
+            let sequence = value
+                .get("eventSeq")
+                .and_then(|v| v.as_str().and_then(|s| s.parse().ok()).or_else(|| v.as_u64()))
+                .ok_or_else(|| anyhow::anyhow!("legacy event cursor without a valid eventSeq: {value}"))?;
+            return Ok(Self::Legacy(digest.to_owned(), sequence));
         }
         anyhow::bail!("unrecognized event cursor in journal: {value}")
     }
+}
+
+enum Start {
+    After(Vec<u8>),
+    Checkpoint(u64),
+}
+
+struct RawPage {
+    events: Vec<(proto::Event, Value)>,
+    end: Value,
+    has_more: bool,
+}
+
+/// Whether `event` is the legacy cursor's event; then its resume cursor.
+/// Passing the legacy checkpoint without meeting it is an error.
+fn legacy_boundary(
+    event: &proto::Event,
+    digest: &str,
+    sequence: u64,
+    checkpoint: u64,
+    watermark: &Value,
+) -> anyhow::Result<Option<Value>> {
+    let at = event.checkpoint.unwrap_or_default();
+    anyhow::ensure!(
+        at <= checkpoint,
+        "legacy event cursor {digest}#{sequence} was not found in checkpoint {checkpoint}; \
+         refusing to guess where to resume"
+    );
+    let same = event.transaction_digest.as_deref() == Some(digest)
+        && event.event_index.map(u64::from) == Some(sequence);
+    Ok(same.then(|| watermark.clone()))
 }
 
 fn after(watermark: &proto::Watermark) -> anyhow::Result<Value> {
@@ -375,8 +411,82 @@ impl SuiClient {
 
     /// The next page of DeploymentCreated events after `cursor`.
     pub async fn deployments(&self, cursor: &Option<Value>) -> anyhow::Result<EventPage> {
+        let (start, position) = match Cursor::parse(cursor)? {
+            Cursor::After(bytes, checkpoint) => (Start::After(bytes), checkpoint),
+            Cursor::Checkpoint(checkpoint) => (Start::Checkpoint(checkpoint), Some(checkpoint)),
+            Cursor::Legacy(digest, sequence) => {
+                // Only translate the position; the next page starts after it.
+                let end = self.seek_legacy(&digest, sequence).await?;
+                return Ok(EventPage { events: Vec::new(), end, has_more: true });
+            }
+            Cursor::Genesis => (Start::Checkpoint(0), Some(0)),
+        };
+        self.ensure_retained(position).await?;
+        let page = self.event_page(start).await?;
+        let mut events = Vec::new();
+        for (event, watermark) in page.events {
+            let fields = event.json.as_deref().map(to_json).unwrap_or(Value::Null);
+            let parsed: DeploymentCreatedEvent = serde_json::from_value(fields)
+                .map_err(|e| anyhow::anyhow!("undecodable DeploymentCreated event: {e}"))?;
+            events.push((parsed, watermark));
+        }
+        Ok(EventPage { events, end: page.end, has_more: page.has_more })
+    }
+
+    async fn ensure_retained(&self, position: Option<u64>) -> anyhow::Result<()> {
+        if position.is_none() {
+            return Ok(());
+        }
+        let info = self
+            .rpc
+            .clone()
+            .ledger_client()
+            .get_service_info(proto::GetServiceInfoRequest::default())
+            .await
+            .map_err(status)?
+            .into_inner();
+        ensure_retained(position, info.lowest_available_checkpoint)
+    }
+
+    /// The exact resume cursor after a JSON-RPC-era cursor's event. Starting at
+    /// its checkpoint, walk the filtered stream in ledger order (transaction,
+    /// then event index) to that very event: earlier events in the checkpoint,
+    /// even in the same transaction, must not be redelivered, since the journal
+    /// only remembers deployments that were acted on. Fails rather than guess.
+    async fn seek_legacy(&self, digest: &str, sequence: u64) -> anyhow::Result<Value> {
+        let checkpoint = self.transaction_checkpoint(digest).await?;
+        self.ensure_retained(Some(checkpoint)).await?;
+        let mut start = Start::Checkpoint(checkpoint);
+        loop {
+            let page = self.event_page(start).await?;
+            for (event, watermark) in page.events {
+                if let Some(found) = legacy_boundary(&event, digest, sequence, checkpoint, &watermark)? {
+                    return Ok(found);
+                }
+            }
+            anyhow::ensure!(
+                page.has_more,
+                "legacy event cursor {digest}#{sequence} was not found in checkpoint {checkpoint}; \
+                 refusing to guess where to resume"
+            );
+            start = match Cursor::parse(&Some(page.end))? {
+                Cursor::After(bytes, _) => Start::After(bytes),
+                _ => anyhow::bail!("event stream returned an unusable resume cursor"),
+            };
+        }
+    }
+
+    /// One ListEvents page of DeploymentCreated events, each with the cursor
+    /// to resume after it.
+    async fn event_page(&self, start: Start) -> anyhow::Result<RawPage> {
         let mut request = proto::ListEventsRequest::default();
-        request.read_mask = Some(mask(&["event_type", "json", "checkpoint"]));
+        request.read_mask = Some(mask(&[
+            "event_type",
+            "json",
+            "checkpoint",
+            "transaction_digest",
+            "event_index",
+        ]));
         let mut literal = proto::EventLiteral::default();
         let mut by_type = proto::EventTypeFilter::default();
         by_type.event_type = Some(self.move_type("deployment_manager::DeploymentCreated"));
@@ -388,32 +498,9 @@ impl SuiClient {
         request.filter = Some(filter);
         let mut options = proto::QueryOptions::default();
         options.limit = Some(PAGE_SIZE);
-        let position = match Cursor::parse(cursor)? {
-            Cursor::After(bytes, checkpoint) => {
-                options.after = Some(bytes.into());
-                checkpoint
-            }
-            Cursor::Checkpoint(checkpoint) => {
-                request.start_checkpoint = Some(checkpoint);
-                Some(checkpoint)
-            }
-            Cursor::Legacy(digest) => {
-                let checkpoint = self.transaction_checkpoint(&digest).await?;
-                request.start_checkpoint = Some(checkpoint);
-                Some(checkpoint)
-            }
-            Cursor::Genesis => Some(0),
-        };
-        if position.is_some() {
-            let info = self
-                .rpc
-                .clone()
-                .ledger_client()
-                .get_service_info(proto::GetServiceInfoRequest::default())
-                .await
-                .map_err(status)?
-                .into_inner();
-            ensure_retained(position, info.lowest_available_checkpoint)?;
+        match start {
+            Start::After(bytes) => options.after = Some(bytes.into()),
+            Start::Checkpoint(checkpoint) => request.start_checkpoint = Some(checkpoint),
         }
         request.options = Some(options);
         let mut stream = self
@@ -426,8 +513,6 @@ impl SuiClient {
             .into_inner();
         let expected = self.move_type("deployment_manager::DeploymentCreated");
         let mut events = Vec::new();
-        let mut end = None;
-        let mut has_more = false;
         while let Some(frame) = stream.next().await {
             let frame = frame.map_err(status)?;
             let watermark = after(
@@ -436,33 +521,24 @@ impl SuiClient {
                     .as_ref()
                     .ok_or_else(|| anyhow::anyhow!("event stream frame without a watermark"))?,
             )?;
-            if let Some(event) = &frame.event {
+            if let Some(event) = frame.event {
                 anyhow::ensure!(
                     same_type(event.event_type.as_deref().unwrap_or(""), &expected),
                     "node returned an event outside the requested type"
                 );
-                let fields = event.json.as_deref().map(to_json).unwrap_or(Value::Null);
-                let parsed: DeploymentCreatedEvent = serde_json::from_value(fields)
-                    .map_err(|e| anyhow::anyhow!("undecodable DeploymentCreated event: {e}"))?;
-                events.push((parsed, watermark.clone()));
+                events.push((event, watermark.clone()));
             }
             if let Some(reason) = frame.end.as_ref().and_then(|e| e.reason) {
                 // Item or scan limits mean more may follow; ledger tip or end
                 // of range means this scan is complete for now.
-                has_more = matches!(
+                let has_more = matches!(
                     proto::QueryEndReason::try_from(reason),
                     Ok(proto::QueryEndReason::ItemLimit | proto::QueryEndReason::ScanLimit)
                 );
-                end = Some(watermark);
-                break;
+                return Ok(RawPage { events, end: watermark, has_more });
             }
         }
-        let end = end.ok_or_else(|| anyhow::anyhow!("event stream ended without completion"))?;
-        Ok(EventPage {
-            events,
-            end,
-            has_more,
-        })
+        anyhow::bail!("event stream ended without completion")
     }
 
     async fn transaction_checkpoint(&self, digest: &str) -> anyhow::Result<u64> {
@@ -821,10 +897,30 @@ mod tests {
         );
         assert!(after(&proto::Watermark::default()).is_err());
         assert_eq!(
-            Cursor::parse(&Some(json!({"txDigest": "D1", "eventSeq": "0"}))).unwrap(),
-            Cursor::Legacy("D1".into())
+            Cursor::parse(&Some(json!({"txDigest": "D1", "eventSeq": "3"}))).unwrap(),
+            Cursor::Legacy("D1".into(), 3)
         );
         assert!(Cursor::parse(&Some(json!({"unknown": 1}))).is_err());
+    }
+
+    #[test]
+    fn legacy_boundary_is_the_exact_event() {
+        let event = |checkpoint: u64, digest: &str, index: u32| {
+            let mut event = proto::Event::default();
+            event.checkpoint = Some(checkpoint);
+            event.transaction_digest = Some(digest.into());
+            event.event_index = Some(index);
+            event
+        };
+        let mark = json!({"after": "AA=="});
+        // Earlier transaction, or an earlier event of the same transaction: keep seeking.
+        assert_eq!(legacy_boundary(&event(7, "A", 0), "B", 1, 7, &mark).unwrap(), None);
+        assert_eq!(legacy_boundary(&event(7, "B", 0), "B", 1, 7, &mark).unwrap(), None);
+        // The event itself: resume strictly after it.
+        assert_eq!(legacy_boundary(&event(7, "B", 1), "B", 1, 7, &mark).unwrap(), Some(mark.clone()));
+        // Past its checkpoint without meeting it: refuse.
+        assert!(legacy_boundary(&event(8, "C", 0), "B", 1, 7, &mark).is_err());
+        assert!(Cursor::parse(&Some(json!({"txDigest": "D1"}))).is_err(), "eventSeq is required");
     }
 
     #[test]
