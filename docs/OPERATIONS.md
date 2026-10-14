@@ -115,10 +115,11 @@ Mixed clients:
 - The dApp reads `ReceiptsKey` through the deployment manifest's per-type origin (the upgrade that introduced receipts, not the original or call package). A record with no receipts is shown as **unverified**, never with its legacy statuses.
 - Clients that still read `StatusesKey` are incompatible: new records have no such field, and on legacy records it is forgeable. Upgrade the dApp together with the contracts.
 - Dynamic-field lookups by name must encode an empty key struct as `{"dummy_field": false}`; a real node rejects `{}` ("Missing field dummy_field").
-- Devices on the current daemon keep reporting through `report_status`/`report_status_for_group`, whose signatures are unchanged.
+- Since SF-008, `report_status`/`report_status_for_group` keep their signatures but always abort (`EUseVerifiedReport`). They cannot see the registry, so they cannot tell a revoked device from an active one. Devices report through `report_verified_status`/`report_verified_status_for_group`.
 
 Recovery:
 - Legacy unbound caps cannot report. Reissue them with `device_cap::issue_cap`.
+- Devices registered before SF-008 have no registry identity and cannot report until their owner calls `device_registry::activate_device` (see below).
 - Legacy records show no authoritative status until the device reports again. Redeploy if an operator needs a verified receipt.
 
 Local acceptance (throwaway localnet in the dev image; refuses non-localhost RPC):
@@ -131,6 +132,48 @@ SUI_CONFIG_DIR=/tmp/sui-config python3 scripts/upgrade_security_localnet.py --v1
 ```
 
 It publishes the prior package, creates devices and deployments (including a legacy record with only forged statuses), then upgrades. Next it attacks through old and new entry points, requiring each attack to abort at the intended check. It also verifies a later version-bumped upgrade locks out this package, then resolves a deployment manifest and runs the real dApp `fetchDeploymentEvents` against new, legacy and forged-only records. Results come from on-chain effects, object state and events. It needs `dapp/node_modules` (`make dapp-install`). This does not replace an upgrade test against an existing deployment on a public network.
+
+### Device identity lifecycle (SF-008)
+
+A device's caps are owned by the device key, so the operator cannot change them. Trust therefore lives in the shared registry: `IdentityKey { device_id } → Identity { signer, operator, revoked }`, a dynamic field whose types are introduced by the SF-008 upgrade, so older packages cannot touch it. A report is trusted only when the cap is bound to the sender **and** the registry identity is active with that sender as its signer (`device_cap::assert_active`).
+
+| Action | Call | Who | Effect |
+|---|---|---|---|
+| Register | `register_device` (+ `issue_cap`) | Anyone (becomes owner/operator) | Identity active for the device address |
+| Activate / reinstate | `activate_device(registry, &Device)` | Device owner | Identity active for the device's current address; the caller becomes operator. Use it for devices registered before SF-008, after an ownership transfer, or to undo a revocation. Existing bound caps keep working. |
+| Rotate key | `rotate_device_key(registry, &mut Device, new_address)` then `issue_cap` | Device owner | Every cap bound to the old key is distrusted; install the new key and new cap on the device |
+| Revoke | `revoke_device(registry, device_id)` | The recorded operator | No report is trusted; works by ID, even after the Device object is gone |
+| Deregister | `deregister_device(registry, Device)` | Device owner | Deletes the Device and leaves a revoked identity |
+
+The daemon checks its identity on every poll. While revoked, rotated away or without an identity, it applies nothing and logs why; it resumes once the identity is active again.
+
+**Upgrade rollout:**
+1. Upgrade the package. Old-signature reports abort from then on; devices keep their reports queued.
+2. Regenerate the manifest (the new types have the upgrade's origin) and roll out the daemon that uses `report_verified_status`.
+3. Run `activate_device` for every device registered before the upgrade.
+4. Sweep `deployment_manager::migrate` over every live deployment record. `RECEIPTS_VERSION` is now 2: records created by the upgrade and migrated records reject the previous package's report entry points, but **unswept older records stay writable by the previous package** under its signer-only checks.
+
+**Known limits:**
+- Deregistering through an older package (`deregister_device` of a previous version) cannot touch identities, so the identity stays active. The recorded operator must then call `revoke_device` by ID. Always deregister through the current package.
+- After an ownership transfer the previous operator can still revoke (denial of service, not impersonation) until the new owner calls `activate_device`.
+
+Local acceptance across a real upgrade (prior contracts, then this package):
+
+```bash
+git archive origin/main contracts | tar -x -C /tmp/prior      # contracts before SF-008
+SUI_CONFIG_DIR=/tmp/sui-config sui start --with-faucet --force-regenesis &
+SUI_CONFIG_DIR=/tmp/sui-config sui client switch --env local
+SUI_CONFIG_DIR=/tmp/sui-config python3 scripts/identity_lifecycle_localnet.py --prior /tmp/prior/contracts --new contracts
+```
+
+It checks, from on-chain effects and exact abort sites:
+- the prior package cannot write records created or migrated by the upgrade, and the retired signature aborts;
+- a pre-upgrade device is untrusted until activated, then reports with its existing cap;
+- revocation (operator only) blocks reports, and reinstatement restores them;
+- rotation distrusts the old key and trusts the new one;
+- both deregistration paths, including revoking by ID after an old-package deregistration.
+
+`scripts/upgrade_security_localnet.py` covers the earlier SF-001 transition; run it with `--v2` set to contracts before SF-008.
 
 ## Daemon chain access (gRPC)
 
