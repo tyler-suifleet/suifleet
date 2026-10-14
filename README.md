@@ -1,254 +1,103 @@
-# SUI Edge
+# SuiFleet
 
-Decentralized edge device deployment system on the SUI blockchain — a trustless alternative to AWS Greengrass.
+Decentralized edge software and firmware deployment using Sui contracts, Walrus storage, a Next.js wallet app and a Rust Linux daemon.
 
-Operators register edge devices on-chain, upload artifacts to Walrus (SUI's native blob storage), and create deployment transactions via a web dApp. Edge devices run a lightweight Rust daemon that subscribes to on-chain events, downloads the artifact, verifies it, applies it via a configurable command, and reports status back to the chain.
+**Status:** locally testable one-shot OTA foundation. Greengrass OTA/fleet feature compatibility is the product goal, not the current release claim. See [the feature audit](docs/GREENGRASS_PARITY_AUDIT.md) and [delivery plan](PLAN.md).
 
-## Architecture
+**Public-network blocker:** this baseline uses legacy Sui JSON-RPC. Current Sui API retirement requires a gRPC/GraphQL and wallet-client migration before public-network deployment. Local tests use a simulator and do not prove live network compatibility.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│ Operator (browser)                                          │
-│   dApp  ──── SUI wallet ────► Move contracts (testnet)      │
-│   uploads firmware ────────► Walrus blob storage            │
-└────────────────────────────────────┬────────────────────────┘
-                                     │ DeploymentCreated event
-                                     ▼
-                          ┌──────────────────────┐
-                          │ Edge device (Linux)  │
-                          │   suifleet daemon │
-                          │   ├─ subscribes WS   │
-                          │   ├─ downloads blob  │
-                          │   ├─ verifies sha256 │
-                          │   ├─ runs apply cmd  │
-                          │   └─ reports status  │
-                          └──────────────────────┘
-```
+## Implemented flow
 
-**Stack:** Move · Next.js + @mysten/dapp-kit · Rust · Walrus · SUI Testnet
+1. The operator registers a Device and issues a DeviceCap to the device's address in one wallet transaction.
+2. The app uploads an artifact and a schema-v1 recipe to Walrus. The deployment references the recipe, stores a digest of the exact recipe bytes and the artifact SHA-256, and targets devices/groups.
+3. The daemon polls events using the original package/type origin, retaining an atomic cursor on disk. It verifies the current Device owner, signing address and live group membership.
+4. It reads the recipe, validates its on-chain digest and component identity/hash/schema, downloads the referenced artifact, checks its SHA-256, and invokes the configured one-shot updater.
+5. It journals the result before submitting a correctly signed status transaction. Failed status submission retries across restarts. The app reads per-device statuses from the deployment's dynamic fields.
 
----
+Direct reports require a targeted DeviceCap. Group reports additionally require a targeted creator-owned group with current device membership. Reports also require the registered signing address bound to the capability. Software-key authentication does not provide hardware attestation.
 
-## How it works
-
-### On-chain objects
-
-| Object | Type | Owned by |
-|---|---|---|
-| `DeviceRegistry` | Shared | — (admin is the deployer) |
-| `Device` | Owned | Operator's wallet |
-| `DeviceCap` | Owned | Device's own SUI address |
-| `DeploymentRecord` | Shared | — |
-
-### DeviceCap — the device's on-chain identity
-
-When an operator registers a device, two things happen in one transaction:
-1. A `Device` object is created and sent to the operator's wallet
-2. A `DeviceCap` is created and sent to the device's SUI address
-
-The edge daemon holds the private key for that address. Every `report_status` call requires presenting the `DeviceCap`, proving the caller controls the device's keypair. This means status reports can only come from the real device — not from the operator, and not from an impersonator.
-
-### Device provisioning
-
-The device needs an ed25519 keypair whose private key never leaves the device:
-
-**Development / smoke test:**
-```bash
-openssl rand -hex 32 | tee /etc/suifleet/device.key
-chmod 600 /etc/suifleet/device.key
-```
-
-**Production — software:**
-A first-boot systemd oneshot service generates the key if it doesn't exist, derives the SUI address, and writes it to `/etc/suifleet/device.sui-address`. The operator reads this address (via SSH, local HTTP, or QR code display) and registers the device in the dApp.
-
-**Production — TPM (recommended):**
-The private key is generated inside the TPM chip and never exposed to the OS. The edge daemon routes signing through the TPM via PKCS#11 instead of reading a key file. Yocto's `meta-tpm` layer provides the full software stack. OEMs enable this with the `--features tpm` cargo flag. TPM attestation can additionally prove to the operator that the key lives in genuine hardware, not a software emulator.
-
-The SUI address is derived from the public key:
-```
-address = sha3_256(0x00 || ed25519_pubkey_bytes)
-```
-
----
-
-## Prerequisites
-
-- Docker (with your user in the `docker` group)
-- GNU Make
-
----
-
-## Quick start
+## Development
 
 ```bash
-# 1. Build the dev image and start the container
 make dev
-
-# 2. Open a shell inside the container
 make shell
-
-# 3. Run contract tests
 make test-contracts
-
-# 4. Install dApp deps and start the dev server (localhost:3000)
 make dapp-install
-make dapp-dev
+make dapp-build
+make edge-test
+make test-ota
 ```
 
-> **First run:** `make dev` builds the Docker image from scratch — expect ~5–10 minutes.
+Docker and GNU Make are required on the host. Make targets execute directly inside the development container and through Docker Compose on the host. `make down` removes development containers **and named volumes**, including development wallet state.
 
----
+The locked frontend uses a Sui SDK version compatible with its legacy wallet library. Updating it to a supported transport requires migrating those packages together.
 
-## Development workflow
-
-All `make` targets work from **both the host and inside the container**:
-
-| Context | How it works |
-|---|---|
-| Host | `make <target>` shells into the container via `docker compose exec` |
-| Inside container | `make <target>` runs the command directly (no Docker-in-Docker) |
-
-### Reset volumes
-
-If you see permission errors, named volumes may have stale root-owned data. Tear down and start fresh:
+## Software provisioning
 
 ```bash
-make down   # removes containers AND volumes
-make dev
+# First boot: creates a 0600 key, never overwrites an existing key.
+suifleet --provision /etc/suifleet/device.key
+suifleet --derive-address /etc/suifleet/device.key
 ```
 
----
+The systemd service runs provisioning before startup and creates `/var/lib/suifleet` for state. Register the printed address in the app, record the Device/DeviceCap IDs, and fund the device address for report gas. Fill in `suifleet-edge/config.example.toml` and install it as `/etc/suifleet/config.toml`.
 
-## Contracts
-
-Move smart contracts in `contracts/`. Three modules:
-
-- `device_registry` — register/deregister edge devices; each `Device` records the device's own SUI address
-- `device_cap` — `DeviceCap` capability object issued to the device's address at registration; authorises status reports
-- `deployment_manager` — create deployments targeting devices, track per-device status on-chain
-
-```bash
-make build-contracts      # sui move build
-make test-contracts       # sui move test (6 tests)
-make publish-contracts    # publish or upgrade via scripts/redeploy.sh
-```
-
-`scripts/redeploy.sh` auto-detects whether the package has been published before and uses `sui client upgrade` or `sui client publish` accordingly. It writes the new IDs to `dapp/.env.local`.
-
-### SUI wallet setup (first time)
-
-```bash
-make shell
-sui client new-env --alias testnet --rpc https://fullnode.testnet.sui.io:443
-sui client switch --env testnet
-sui client new-address ed25519
-sui client faucet
-```
-
----
-
-## dApp
-
-Next.js app in `dapp/`. Pages:
-
-| Route | Purpose |
-|---|---|
-| `/` | Dashboard — device count, recent deployments |
-| `/devices` | Register devices (auto-issues DeviceCap), list owned Device objects |
-| `/firmware` | Upload `.swu` to Walrus, create deployment transaction |
-| `/deployments` | Track per-device deployment status |
-
-```bash
-make dapp-install    # pnpm install (first time / after adding deps)
-make dapp-dev        # start dev server at http://localhost:3000
-make dapp-build      # production build
-```
-
-The dApp is also deployable as a static site on Walrus Sites — see [Walrus hosting](#walrus-hosting) below.
-
----
-
-## Edge client
-
-Rust daemon in `suifleet-edge/`. Runs on any Linux edge device, subscribes to SUI WebSocket events, downloads artifacts from Walrus, verifies sha256, invokes a configurable apply command, and reports status on-chain using the device's `DeviceCap`.
-
-```bash
-make edge-build      # cargo build --release
-make edge-test       # cargo test
-```
-
-### Device provisioning
-
-1. Generate a keypair on the device:
-   ```bash
-   openssl rand -hex 32 | tee /etc/suifleet/device.key
-   chmod 600 /etc/suifleet/device.key
-   ```
-2. Derive the SUI address:
-   ```bash
-   suifleet --derive-address /etc/suifleet/device.key
-   ```
-3. In the dApp **Devices** page, register the device using that address. One transaction creates the `Device` object in your wallet and sends the `DeviceCap` to the device's address.
-4. Note the `Device` object ID from the dApp, and find the `DeviceCap` object ID:
-   ```bash
-   sui client objects --address <device-sui-address>
-   ```
-5. Fill in `config.toml`:
+Sui address derivation is `Blake2b-256(0x00 || ed25519_public_key)`. Devices enrolled using this project's former SHA3 derivation need re-enrollment. TPM/HSM signing, attestation and key rotation/revocation are not implemented.
 
 ```toml
 [sui]
-rpc_url    = "https://fullnode.testnet.sui.io:443"
-ws_url     = "wss://fullnode.testnet.sui.io:443"
-package_id = "0x<PACKAGE_ID>"
+rpc_url = "http://your-compatible-legacy-rpc"
+package_id = "0x<LATEST_PACKAGE_ID>"
+original_package_id = "0x<ORIGINAL_PACKAGE_ID>"
 
 [device]
-keypair_path     = "/etc/suifleet/device.key"
-device_object_id = "0x<DEVICE_OBJECT_ID>"
-device_cap_id    = "0x<DEVICE_CAP_ID>"
+keypair_path = "/etc/suifleet/device.key"
+device_object_id = "0x<DEVICE_ID>"
+device_cap_id = "0x<CAP_ID>"
 
 [walrus]
 aggregator_url = "https://aggregator.walrus-testnet.walrus.space"
 
 [apply]
-# Artifact path is appended as the final argument.
 command = "/usr/bin/swupdate -i"
+timeout_seconds = 600
+allow_recipe_commands = false
+
+[runtime]
+state_dir = "/var/lib/suifleet"
+poll_seconds = 10
+replay_history = false
 ```
+
+Fresh enrollment skips historical events; an existing journal always catches up from its cursor. `replay_history = true` is only for deliberate historical job replay. Use separate state directories for different networks/packages/devices. Never remove the journal to fix a reporting error: that can lose recovery information.
+
+The command is parsed as executable plus quoted arguments, with the artifact path appended. It does not implicitly invoke a shell. Optional recipe `install` commands use `/bin/sh` only when explicitly enabled. `{artifact}` is the downloaded file and `{artifacts}` its directory. Recipes with `run`, `shutdown` or nonempty configuration are rejected until a supervisor/configuration service exists.
+
+An updater exit code of zero is reported as Applied. This does not establish post-reboot health or A/B rollback. Interrupted work becomes Failed with an inspection message and is not automatically applied again.
+
+## Validation
 
 ```bash
-EDGE_CONFIG=/etc/suifleet/config.toml suifleet
+# In the development container
+cargo test --manifest-path suifleet-edge/Cargo.toml
+cargo build --manifest-path suifleet-edge/Cargo.toml
+python3 scripts/test_ota.py
+sui move test --path contracts
+cd dapp && pnpm typecheck && pnpm build
 ```
 
----
+The simulator launches the real daemon and checks recipe downloads, direct/group targeting, integrity failures, rejected unsupported recipes/untrusted operators, pagination, safe enrollment, deleted objects, offline catch-up, restart deduplication and durable report retry. Signing and address behavior match an independent Mysten SDK test vector.
 
-## Walrus hosting
+See [recorded validation results](docs/VALIDATION.md). The simulator does not validate actual Sui transaction execution, Walrus certification, Yocto cross-compilation, updater hardware behavior or live wallet flows. Those remain release gates.
 
-The dApp can be deployed as a static site on [Walrus Sites](https://docs.walrus.site) — no server required, served directly from Walrus blob storage via a SUI object.
+## Contracts and packaging
 
-```bash
-# Build a static export
-make dapp-build
+Contracts are in `contracts/`; the app is in `dapp/`; the daemon and Yocto layer are in `suifleet-edge/`. The new `create_deployment_verified` and `report_status_for_group` functions are required for authenticated recipe creation and group reports. Records created through the legacy API without a recipe digest are rejected by the daemon. Existing installations need the corresponding contract upgrade/new publish, reissued signer-bound capabilities, and recreated deployments with recipe digests before using the new daemon.
 
-# Publish to Walrus Sites (requires walrus site-builder CLI)
-walrus site-builder publish dapp/out --epochs 10
-```
+`scripts/redeploy.sh` is a development publish/upgrade helper. No package is published automatically by tests. Preserve the original package ID across upgrades for object/event queries while using the latest ID for calls.
 
-The `site-builder` prints a SUI object ID. Access the site at:
-```
-https://<object-id>.wal.app
-```
+The Yocto layer installs the daemon and systemd unit. Add your updater separately. The recipe has not been validated by an actual BitBake build; source pinning and cargo dependency integration remain necessary before a production image.
 
----
+## Agent collaboration and tracking
 
-## OpenEmbedded / Yocto
-
-The `suifleet-edge/meta-suifleet/` directory is a Yocto layer ready to drop into any Yocto build:
-
-```bash
-bitbake-layers add-layer /path/to/suifleet/suifleet-edge/meta-suifleet
-echo 'IMAGE_INSTALL:append = " suifleet"' >> conf/local.conf
-bitbake core-image-minimal
-```
-
-The recipe cross-compiles the Rust daemon via the `cargo` Yocto class and installs the systemd unit. The apply command is operator-supplied — add whatever update mechanism your image uses (swupdate, RAUC, etc.) separately.
-
-TPM support can be enabled by adding `PACKAGECONFIG:append = " tpm"` to your `local.conf` and including `meta-tpm` in your layer stack.
+Read [AGENTS.md](AGENTS.md) or [CLAUDE.md](CLAUDE.md) before working. Only Codex creates new agent tickets/issues unless the user explicitly authorizes another model. Infrastructure, build/test and deployment procedures are in [OPERATIONS.md](docs/OPERATIONS.md); issue ownership and model handoffs are in [ISSUE_TRACKING.md](docs/ISSUE_TRACKING.md).
