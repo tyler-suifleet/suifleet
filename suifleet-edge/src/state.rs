@@ -139,6 +139,7 @@ mod tests {
                     outcome.firmware_request.as_deref() == Some("request-0x2")
                 })
                 .unwrap();
+            asked.sort();
             assert_eq!(asked, ["0x1", "0x2", "0x4"], "indeterminate outcomes are never re-judged");
             let states: Vec<_> = ["0x1", "0x2", "0x3", "0x4"]
                 .iter()

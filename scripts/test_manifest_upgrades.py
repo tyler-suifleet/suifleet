@@ -35,7 +35,16 @@ def run(rpc_url, faucet_url):
         # Give our endpoint a unique alias regardless of default CLI configuration.
         client("new-env", "--alias", "manifest-test", "--rpc", rpc_url)
         client("switch", "--env", "manifest-test")
-        client("faucet", "--url", faucet_url)
+        # The fullnode can answer before the disposable faucet is listening.
+        # Check balance before retrying so an accepted request is not repeated.
+        for attempt in range(30):
+            if client("gas", json_output=True): break
+            try:
+                client("faucet", "--url", faucet_url)
+                break
+            except RuntimeError:
+                if attempt == 29: raise
+                time.sleep(1)
         for _ in range(30):
             if client("gas", json_output=True): break
             time.sleep(1)

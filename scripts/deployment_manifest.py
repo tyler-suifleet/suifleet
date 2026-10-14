@@ -17,7 +17,7 @@ REQUIRED_TYPES = (
     "deployment_manager::RecipeDigestKey", "deployment_manager::ReceiptsKey",
     "deployment_manager::Receipts", "deployment_manager::DeviceStatusReported",
 )
-CLIENT_VERSIONS = {"dapp": "0.0.1", "edge": "0.1.0"}
+CLIENT_VERSIONS = {"dapp": "0.0.2", "edge": "0.1.0"}
 
 
 def object_id(value):
@@ -131,7 +131,7 @@ def resolve(args, call=rpc):
         call_package_id=package_id, upgrade_cap_id=object_id(args.upgrade_cap), package_version=str(package["data"]["version"]),
         type_origins={name: table[name] for name in REQUIRED_TYPES},
         shared_objects={"registry": {"id": object_id(args.registry), "initial_shared_version": str(registry["owner"]["Shared"]["initial_shared_version"])}},
-        supported_clients={"dapp": {"min": "0.0.1", "max_exclusive": "0.0.2"}, "edge": {"min": "0.1.0", "max_exclusive": "0.1.1"}},
+        supported_clients={"dapp": {"min": "0.0.2", "max_exclusive": "0.0.3"}, "edge": {"min": "0.1.0", "max_exclusive": "0.1.1"}},
         walrus={"publisher_url": args.publisher, "aggregator_url": args.aggregator})
     return verify(manifest, call)
 
