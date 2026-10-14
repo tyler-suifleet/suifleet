@@ -608,6 +608,52 @@
         "Recover failed startup/reboot without relying on the failed daemon."
       ],
       "validation": "Process/power-loss and broken-binary self-update recovery acceptance."
+    },
+    {
+      "key": "SF-027",
+      "title": "Provide authenticated component IPC and developer SDK",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-014",
+        "SF-015",
+        "SF-019"
+      ],
+      "paths": [
+        "suifleet-edge/src/",
+        "docs/"
+      ],
+      "evidence": "There is no component IPC or local management SDK.",
+      "acceptance": [
+        "Define local lifecycle/config/health/messaging APIs and per-component ACLs.",
+        "Support local install/list/start/stop/restart/status/logs workflows.",
+        "Publish stable SDK/interface compatibility rules."
+      ],
+      "validation": "IPC authorization and local management integration tests."
+    },
+    {
+      "key": "SF-028",
+      "title": "Specify and validate broader Greengrass compatibility adapters",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:epic",
+      "depends_on": [
+        "SF-027"
+      ],
+      "paths": [
+        "docs/",
+        "suifleet-edge/src/"
+      ],
+      "evidence": "MQTT/pubsub, shadows, durable streams, client-device auth, cloud adapters and AWS recipe/runtime compatibility are absent.",
+      "acceptance": [
+        "Define exact functional vs AWS API/recipe compatibility and supported platforms/components.",
+        "Design messaging/shadows/stream/client-device adapters and an acceptance suite.",
+        "Codex splits approved implementation scope into existing or new authorized issues; other models only report recommendations."
+      ],
+      "validation": "Reviewed compatibility matrix and executable acceptance specifications, not a parity claim."
     }
   ]
 }
