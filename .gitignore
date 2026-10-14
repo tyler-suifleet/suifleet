@@ -32,5 +32,7 @@ dapp/.env.local
 *.tsbuildinfo
 .suifleet-state/
 
-# Generated Python bytecode
+# Local test scaffolding and generated release bundles
 __pycache__/
+dapp/node_modules
+.suifleet-releases/

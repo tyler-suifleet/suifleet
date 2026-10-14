@@ -31,9 +31,10 @@ async fn main() -> anyhow::Result<()> {
         println!("{}", identity::provision(Path::new(&args[2]))?);
         return Ok(());
     }
+    let check_config = args.len() == 3 && args[1] == "--check-config";
     anyhow::ensure!(
-        args.len() == 1,
-        "usage: suifleet [--provision KEY_PATH | --derive-address KEY_PATH]"
+        args.len() == 1 || check_config,
+        "usage: suifleet [--provision KEY_PATH | --derive-address KEY_PATH | --check-config CONFIG_PATH]"
     );
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -41,14 +42,23 @@ async fn main() -> anyhow::Result<()> {
                 .unwrap_or_else(|_| "suifleet=info".into()),
         )
         .init();
-    let path = std::env::var("EDGE_CONFIG")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("/etc/suifleet/config.toml"));
+    let path = if check_config {
+        PathBuf::from(&args[2])
+    } else {
+        std::env::var("EDGE_CONFIG")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("/etc/suifleet/config.toml"))
+    };
     let cfg = Config::load(&path)?;
     let sui = SuiClient::load(cfg.sui.clone(), &cfg.device.keypair_path)?;
+    sui.validate_deployment().await?;
+    if check_config {
+        println!("Verified deployment configuration");
+        return Ok(());
+    }
     let binding = format!(
         "{}/{}/{}/{}",
-        cfg.sui.rpc_url,
+        sui.manifest().chain_identifier,
         sui.origin(),
         cfg.device.device_object_id,
         sui.address()
@@ -92,6 +102,7 @@ async fn poll(
     runner: &ApplyRunner,
     journal: &mut Journal,
 ) -> anyhow::Result<()> {
+    sui.validate_deployment().await?;
     sui.validate_cap(&cfg.device.device_cap_id, &cfg.device.device_object_id)
         .await?;
     if !journal.state.initialized {
@@ -145,11 +156,10 @@ async fn poll(
                     continue;
                 };
                 anyhow::ensure!(
-                    record["content"]["type"].as_str()
-                        == Some(&format!(
-                            "{}::deployment_manager::DeploymentRecord",
-                            sui.origin()
-                        )),
+                    sui_client::same_type(
+                        record["content"]["type"].as_str().unwrap_or(""),
+                        &sui.move_type("deployment_manager::DeploymentRecord")
+                    ),
                     "wrong deployment type"
                 );
                 let directory = cfg
@@ -205,7 +215,7 @@ async fn handle_deployment(
         .rpc(
             "suix_getDynamicFieldObject",
             serde_json::json!([event.deployment_id,
-        {"type":format!("{}::deployment_manager::RecipeDigestKey", sui.origin()),"value":{}}]),
+        {"type":sui.move_type("deployment_manager::RecipeDigestKey"),"value":{}}]),
         )
         .await?;
     let expected = digest_field["data"]["content"]["fields"]["value"].as_str()
