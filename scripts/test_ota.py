@@ -79,6 +79,7 @@ class Simulator:
         self.downloads = []
         self.built = []
         self.errors = []
+        self.chain_checks = 0
         self.truncate_next_artifact = True  # First artifact transfer drops mid-body.
         self.ranges = []
 
@@ -113,6 +114,7 @@ class Simulator:
 
     def rpc(self, method, params):
         if method == "sui_getChainIdentifier":
+            self.chain_checks += 1
             return self.chain
         # Simulator views used by the gRPC shim.
         if method == "shim_height":
@@ -275,6 +277,10 @@ def run(binary):
                 baseline = state()["cursor"]
                 # A chain reset after enrollment must stop all downloads and cursor changes.
                 sim.chain = "deadbeef"
+                # A poll that passed its chain check before the reset may still be
+                # reading events; add the next one only after a post-reset check.
+                checks = sim.chain_checks
+                wait_for(lambda: sim.chain_checks > checks, "daemon did not recheck the chain", process)
                 sim.add("0x101")
                 time.sleep(2.2)
                 assert count() == 0 and not sim.downloads
