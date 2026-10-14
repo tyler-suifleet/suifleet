@@ -17,6 +17,13 @@ const copy = () => structuredClone(fixture);
   assert.equal(moveType("deployment_manager::RecipeDigestKey"), `${fixture.type_origins["deployment_manager::RecipeDigestKey"]}::deployment_manager::RecipeDigestKey`);
   assert.equal(moveType("device_cap::DeviceAddressKey"), `${fixture.type_origins["device_cap::DeviceAddressKey"]}::device_cap::DeviceAddressKey`);
   await verifyDeployment(manifestClient(fixture), fixture);
+  const parallel = manifestClient(fixture), originalRead = parallel.getObject, started = [], release = [];
+  parallel.getObject = (args) => new Promise(resolve => {started.push(args.objectId);release.push(() => resolve(originalRead(args)));});
+  const proof = verifyDeployment(parallel, fixture);
+  await new Promise(setImmediate);
+  try { assert.deepEqual(new Set(started), new Set([fixture.call_package_id, fixture.upgrade_cap_id, fixture.shared_objects.registry.id])); }
+  finally { release.forEach(resolve => resolve()); }
+  await proof;
   for (const [key, value] of [["schema_version", 2], ["protocol_version", 2], ["call_package_id", "bad"], ["network", "unknown"]]) {
     const invalid = copy(); invalid[key] = value; assert.throws(() => parseManifest(JSON.stringify(invalid)));
   }

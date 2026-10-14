@@ -81,7 +81,12 @@ export async function verifyDeployment(client: SuiGrpcClient, m = requireManifes
   if (!response.chainId) fail("missing chain identifier");
   const digest = fromBase58(response.chainId);
   if (digest.length !== 32 || toHex(digest.slice(0, 4)) !== m.chain_identifier) fail("chain identifier mismatch; network may have reset");
-  const { object: packageObject } = await client.getObject({ objectId: m.call_package_id, include: { objectBcs: true } });
+  const registry = m.shared_objects.registry;
+  const [{ object: packageObject }, { object: cap }, { object }] = await Promise.all([
+    client.getObject({ objectId: m.call_package_id, include: { objectBcs: true } }),
+    client.getObject({ objectId: m.upgrade_cap_id, include: { content: true } }),
+    client.getObject({ objectId: registry.id }),
+  ]);
   const raw = bcs.Object.parse(packageObject.objectBcs).data;
   if (!raw.Package || raw.Package.version !== m.package_version || normalizeId(raw.Package.id) !== normalizeId(m.call_package_id)) fail("package metadata mismatch");
   for (const name of REQUIRED_TYPES) {
@@ -89,12 +94,9 @@ export async function verifyDeployment(client: SuiGrpcClient, m = requireManifes
     const entries = raw.Package.typeOriginTable.filter((entry) => entry.moduleName === module && entry.datatypeName === datatype);
     if (entries.length !== 1 || normalizeId(entries[0].package) !== normalizeId(m.type_origins[name])) fail(`type origin mismatch: ${name}`);
   }
-  const { object: cap } = await client.getObject({ objectId: m.upgrade_cap_id, include: { content: true } });
   if (normalizeStructTag(cap.type) !== normalizeStructTag("0x2::package::UpgradeCap")) fail("invalid UpgradeCap type");
   const capFields = UpgradeCapBcs.parse(cap.content);
   if (normalizeId(capFields.package) !== normalizeId(m.call_package_id) || capFields.version !== m.package_version) fail("UpgradeCap does not identify latest call package/version");
-  const registry = m.shared_objects.registry;
-  const { object } = await client.getObject({ objectId: registry.id });
   const expected = `${normalizeId(m.type_origins["device_registry::DeviceRegistry"])}::device_registry::DeviceRegistry`;
   if (normalizeStructTag(object.type) !== expected || object.owner.$kind !== "Shared" || object.owner.Shared.initialSharedVersion !== registry.initial_shared_version) fail("registry type/shared version mismatch");
 }
