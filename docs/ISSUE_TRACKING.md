@@ -10,7 +10,7 @@ GitHub authenticates an account, not an AI model. These files establish the requ
 
 ## Backlog and publication
 
-[backlog.json](tracking/backlog.json) contains 39 scoped, dependency-linked roadmap items from the parity audit and upgrade discussion. Each has evidence, owned paths, acceptance criteria and specific verification expectations. Stable keys `SF-001` etc. are local tracking keys, not GitHub issue numbers.
+[backlog.json](tracking/backlog.json) contains 39 scoped, dependency-linked roadmap items from the parity audit and upgrade discussion. Each has evidence, affected paths, acceptance criteria and specific verification expectations. Stable keys `SF-001` etc. are local tracking keys, not GitHub issue numbers.
 
 ```bash
 # Offline preview; no GitHub access or writes required
@@ -67,12 +67,12 @@ See [capability coverage](GREENGRASS_TICKET_COVERAGE.md) and [the Raspberry Pi a
 
 ## Atomic implementation claims on WSL
 
-Both models use [the shared SQLite coordinator](ATOMIC_TICKETING.md) before implementation. The installed reusable `ticket --project suifleet` CLI uses the central WSL database shared with Vortech, namespaces file ownership by repository and reserves hardware/build resources globally. It atomically filters priority, dependencies, existing ownership and conflicting paths/resources and creates one worktree per claim. Project fields mirror reservations; direct field edits are not the implementation claim mechanism. Read the runbook for heartbeat, scope expansion, local notes, review reservations and stopped-worker recovery. The atomic-ticketing repository's `make test` verifies concurrency and failure behavior without GitHub mutations.
+Both models use [the shared SQLite coordinator](ATOMIC_TICKETING.md) before implementation. The installed reusable `ticket --project suifleet` CLI uses the central WSL database shared with Vortech, namespaces file ownership by repository and reserves hardware/build resources globally. It atomically filters priority, dependencies, existing ownership and shared-resource conflicts and creates one worktree per claim. File paths are descriptive and are not reserved. Project fields mirror reservations; direct field edits are not the implementation claim mechanism. Read the runbook for heartbeat, resource reservation, local notes, review and stopped-worker recovery. `make test-coordinator` verifies concurrency and failure behavior without GitHub mutations.
 
 ## Assignment and handoff
 
 1. The user selects work or either model requests the next eligible existing issue through the coordinator. Its atomic claim assigns one implementation owner and mirrors Agent/Model, Work branch and Status to the Project. Resolve dependencies before claiming; existing human assignees are reserved and require coordinated handoff.
-2. Record scope, owned paths and test plan in the existing issue. Use a separate branch/worktree for concurrent models; agree on shared API/lockfile/manifest ownership before edits.
+2. Record scope and test plan in the existing issue. Use a separate branch/worktree for concurrent models; agree on shared API/lockfile/manifest interfaces before parallel edits.
 3. If blocked, move Blocked and report the exact dependency/evidence. If a new problem is found, report it to Codex without creating another ticket.
 4. Open/link a PR for the issue and move Review with changed behavior, exact commands/results, risks/migrations and anything unverified. Ask another model/human to review where appropriate.
 5. Close/move Done only after the issue's acceptance criteria and required local/live/hardware evidence are fulfilled. Compilation or simulator success alone does not satisfy a live-upgrade or firmware recovery issue.

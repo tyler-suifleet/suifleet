@@ -31,3 +31,6 @@ dapp/.env.local
 # Local deployment journals and TypeScript cache
 *.tsbuildinfo
 .suifleet-state/
+
+# Generated Python bytecode
+__pycache__/
