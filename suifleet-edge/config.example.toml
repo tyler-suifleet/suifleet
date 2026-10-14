@@ -1,16 +1,11 @@
 [sui]
-rpc_url = "https://fullnode.testnet.sui.io:443"
-original_package_id = "0x..." # First published package ID; event type origin
-# Latest package ID (for function calls). Updated on every upgrade.
-package_id = "0x..."
+# Generated together with frontend.env; path is relative to this config.
+manifest_path = "deployment.json"
 
 [device]
 keypair_path = "/etc/suifleet/device.key"   # 32-byte hex ed25519 private key
 device_object_id = "0x..."                      # Device object ID from registration
 device_cap_id    = "0x..."                      # DeviceCap object ID
-[walrus]
-aggregator_url = "https://aggregator.walrus-testnet.walrus.space"
-
 [apply]
 # Command to invoke when an artifact is ready. The artifact path is appended as the final argument.
 # Examples:

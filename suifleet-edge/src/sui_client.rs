@@ -34,8 +34,25 @@ pub fn same_id(a: &str, b: &str) -> bool {
     matches!((normalized(a), normalized(b)), (Some(a), Some(b)) if a == b)
 }
 
+fn decimal(value: &Value) -> String {
+    value
+        .as_str()
+        .map(str::to_owned)
+        .or_else(|| value.as_u64().map(|n| n.to_string()))
+        .unwrap_or_default()
+}
+
+pub fn same_type(a: &str, b: &str) -> bool {
+    matches!((a.split_once("::"), b.split_once("::")), (Some((aa, at)), Some((ba, bt))) if same_id(aa, ba) && at == bt)
+}
+
 impl SuiClient {
     pub fn load(config: SuiConfig, path: &Path) -> anyhow::Result<Self> {
+        config
+            .manifest
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("deployment manifest required"))?
+            .validate()?;
         Ok(Self {
             config,
             signing_key: identity::load(path)?,
@@ -47,12 +64,74 @@ impl SuiClient {
     pub fn address(&self) -> String {
         identity::address(&self.signing_key)
     }
+    pub fn manifest(&self) -> &crate::config::DeploymentManifest {
+        self.config.manifest.as_ref().expect("validated manifest")
+    }
+    pub fn move_type(&self, name: &str) -> String {
+        self.manifest().move_type(name)
+    }
     pub fn origin(&self) -> &str {
-        if self.config.original_package_id.is_empty() {
-            &self.config.package_id
-        } else {
-            &self.config.original_package_id
+        &self.manifest().type_origins["device_registry::Device"]
+    }
+    pub async fn validate_deployment(&self) -> anyhow::Result<()> {
+        let manifest = self.manifest();
+        anyhow::ensure!(
+            self.rpc("sui_getChainIdentifier", json!([])).await? == manifest.chain_identifier,
+            "chain identifier mismatch; network may have reset"
+        );
+        let package = self
+            .rpc(
+                "sui_getObject",
+                json!([manifest.call_package_id, {"showBcs":true}]),
+            )
+            .await?;
+        anyhow::ensure!(
+            decimal(&package["data"]["version"]) == manifest.package_version
+                && package["data"]["bcs"]["dataType"] == "package",
+            "package metadata mismatch"
+        );
+        let table = package["data"]["bcs"]["typeOriginTable"]
+            .as_array()
+            .ok_or_else(|| anyhow::anyhow!("missing type origin table"))?;
+        for name in crate::config::REQUIRED_TYPES {
+            let (module, datatype) = name.split_once("::").unwrap();
+            let entries: Vec<_> = table
+                .iter()
+                .filter(|entry| {
+                    entry["module_name"] == module && entry["datatype_name"] == datatype
+                })
+                .collect();
+            anyhow::ensure!(
+                entries.len() == 1
+                    && same_id(
+                        entries[0]["package"].as_str().unwrap_or(""),
+                        &manifest.type_origins[*name]
+                    ),
+                "type origin mismatch: {name}"
+            );
         }
+        let cap = self.object(&manifest.upgrade_cap_id).await?;
+        anyhow::ensure!(
+            same_type(
+                cap["content"]["type"].as_str().unwrap_or(""),
+                "0x2::package::UpgradeCap"
+            ) && same_id(
+                cap["content"]["fields"]["package"].as_str().unwrap_or(""),
+                &manifest.call_package_id
+            ) && decimal(&cap["content"]["fields"]["version"]) == manifest.package_version,
+            "UpgradeCap does not identify latest call package/version"
+        );
+        let registry = &manifest.shared_objects.registry;
+        let object = self.object(&registry.id).await?;
+        anyhow::ensure!(
+            same_type(
+                object["content"]["type"].as_str().unwrap_or(""),
+                &self.move_type("device_registry::DeviceRegistry")
+            ) && decimal(&object["owner"]["Shared"]["initial_shared_version"])
+                == registry.initial_shared_version,
+            "registry type/shared version mismatch"
+        );
+        Ok(())
     }
     pub async fn rpc(&self, method: &str, params: Value) -> anyhow::Result<Value> {
         let response = self
@@ -75,16 +154,25 @@ impl SuiClient {
             .ok_or_else(|| anyhow::anyhow!("{method}: missing result"))
     }
     pub async fn deployments(&self, cursor: &Option<Value>) -> anyhow::Result<Value> {
-        self.rpc("suix_queryEvents", json!([
-            {"MoveEventType":format!("{}::deployment_manager::DeploymentCreated", self.origin())},
-            cursor, 50, false
-        ])).await
+        self.rpc(
+            "suix_queryEvents",
+            json!([
+                {"MoveEventType":self.move_type("deployment_manager::DeploymentCreated")},
+                cursor, 50, false
+            ]),
+        )
+        .await
     }
     pub async fn latest_cursor(&self) -> anyhow::Result<Option<Value>> {
-        let response = self.rpc("suix_queryEvents", json!([
-            {"MoveEventType":format!("{}::deployment_manager::DeploymentCreated", self.origin())},
-            null, 1, true
-        ])).await?;
+        let response = self
+            .rpc(
+                "suix_queryEvents",
+                json!([
+                    {"MoveEventType":self.move_type("deployment_manager::DeploymentCreated")},
+                    null, 1, true
+                ]),
+            )
+            .await?;
         let data = response["data"]
             .as_array()
             .ok_or_else(|| anyhow::anyhow!("invalid event page"))?;
@@ -123,8 +211,10 @@ impl SuiClient {
     ) -> anyhow::Result<bool> {
         let object = self.object(device).await?;
         anyhow::ensure!(
-            object["content"]["type"].as_str()
-                == Some(&format!("{}::device_registry::Device", self.origin())),
+            same_type(
+                object["content"]["type"].as_str().unwrap_or(""),
+                &self.move_type("device_registry::Device")
+            ),
             "wrong Device type"
         );
         let owner = object["owner"]["AddressOwner"]
@@ -150,9 +240,10 @@ impl SuiClient {
                 continue;
             };
             let fields = &group["content"]["fields"];
-            if group["content"]["type"].as_str()
-                == Some(&format!("{}::device_group::DeviceGroup", self.origin()))
-                && same_id(fields["admin"].as_str().unwrap_or(""), owner)
+            if same_type(
+                group["content"]["type"].as_str().unwrap_or(""),
+                &self.move_type("device_group::DeviceGroup"),
+            ) && same_id(fields["admin"].as_str().unwrap_or(""), owner)
                 && fields["device_ids"].as_array().is_some_and(|ids| {
                     ids.iter()
                         .any(|id| same_id(id.as_str().unwrap_or(""), device))
@@ -166,8 +257,10 @@ impl SuiClient {
     pub async fn validate_cap(&self, cap_id: &str, device_id: &str) -> anyhow::Result<()> {
         let cap = self.object(cap_id).await?;
         anyhow::ensure!(
-            cap["content"]["type"].as_str()
-                == Some(&format!("{}::device_cap::DeviceCap", self.origin())),
+            same_type(
+                cap["content"]["type"].as_str().unwrap_or(""),
+                &self.move_type("device_cap::DeviceCap")
+            ),
             "wrong DeviceCap type"
         );
         anyhow::ensure!(
@@ -188,7 +281,7 @@ impl SuiClient {
             .rpc(
                 "suix_getDynamicFieldObject",
                 json!([cap_id,
-            {"type":format!("{}::device_cap::DeviceAddressKey", self.origin()),"value":{}}]),
+            {"type":self.move_type("device_cap::DeviceAddressKey"),"value":{}}]),
             )
             .await?;
         anyhow::ensure!(
@@ -213,8 +306,13 @@ impl SuiClient {
         let device_id = cap_object["content"]["fields"]["device_id"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("missing device_id"))?;
-        let direct = self.rpc("suix_getDynamicFieldObject", json!([deployment,
-            {"type":format!("{}::deployment_manager::TargetDevicesKey", self.origin()),"value":{}}])).await?;
+        let direct = self
+            .rpc(
+                "suix_getDynamicFieldObject",
+                json!([deployment,
+            {"type":self.move_type("deployment_manager::TargetDevicesKey"),"value":{}}]),
+            )
+            .await?;
         let targets = &direct["data"]["content"]["fields"]["value"];
         let mut function = "report_status";
         let mut arguments = vec![deployment.to_string(), cap.to_string()];
@@ -222,8 +320,13 @@ impl SuiClient {
             ids.iter()
                 .any(|id| same_id(id.as_str().unwrap_or(""), device_id))
         }) {
-            let groups = self.rpc("suix_getDynamicFieldObject", json!([deployment,
-                {"type":format!("{}::deployment_manager::TargetGroupsKey", self.origin()),"value":{}}])).await?;
+            let groups = self
+                .rpc(
+                    "suix_getDynamicFieldObject",
+                    json!([deployment,
+                {"type":self.move_type("deployment_manager::TargetGroupsKey"),"value":{}}]),
+                )
+                .await?;
             let ids = groups["data"]["content"]["fields"]["value"]
                 .as_array()
                 .ok_or_else(|| anyhow::anyhow!("missing target groups"))?;
