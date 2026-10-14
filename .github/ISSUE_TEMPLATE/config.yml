@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Ticket creation policy
+    url: https://github.com/tyler-suifleet/suifleet/blob/main/AGENTS.md
+    about: Only Codex creates new agent tickets unless the user explicitly authorizes another model.

@@ -1,0 +1,34 @@
+name: Scoped work item
+description: Codex-created work, or another model explicitly authorized by the user.
+body:
+  - type: markdown
+    attributes:
+      value: "Only Codex may create new agent tickets unless the user explicitly authorizes another model. Assignment to an existing issue is not permission to create more tickets."
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem and evidence
+      description: Concrete trigger, observed behavior and source evidence.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and ownership
+      description: Paths, API boundaries, Agent/Model, dependencies and exclusions.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Observable completion conditions, including compatibility and migration.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Verification
+      description: Exact local, live-network or hardware tests needed; specify unverified gates.
+    validations:
+      required: true
