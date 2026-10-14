@@ -4,7 +4,7 @@ Codex and Claude use the same coordinator before starting any implementation. Gi
 
 ## Shared database and isolation
 
-The reusable `ticket` CLI uses `~/.local/state/atomic-ticketing/coordination.sqlite3` (or the shared XDG_STATE_HOME location) across SuiFleet and Vortech. Project configuration is committed in `.atomic-ticketing.json`; the engine/installer and cross-project instructions are in [tools/atomic-ticketing](../tools/atomic-ticketing/README.md). The original Git-common-directory database is migrated and retired, with a SQLite backup and ownership tokens preserved. Transactions use SQLite `BEGIN IMMEDIATE`, WAL and full synchronization; a claim checks ticket ownership, dependency completion and all overlapping path reservations before acquiring ownership in the same transaction. Claims are sorted by P0/P1/P2 then stable SF key, after filtering dependencies and conflicts.
+The reusable `ticket` CLI uses `~/.local/state/atomic-ticketing/coordination.sqlite3` (or the shared XDG_STATE_HOME location) across SuiFleet and Vortech. Project configuration is committed in `.atomic-ticketing.json`; the engine, installer, tests and cross-project instructions live in their own repository, `git@personal:therealtime/atomic-ticketing.git` (formerly `tools/atomic-ticketing/` here). The original Git-common-directory database is migrated and retired, with a SQLite backup and ownership tokens preserved. Transactions use SQLite `BEGIN IMMEDIATE`, WAL and full synchronization; a claim checks ticket ownership, dependency completion and all overlapping path reservations before acquiring ownership in the same transaction. Claims are sorted by P0/P1/P2 then stable SF key, after filtering dependencies and conflicts.
 
 Both models must use the same central database and each project's registered canonical Git repository/linked worktrees on the WSL Linux filesystem. Registration rejects a separate clone with an already-registered project identity. Do not put the database on `/mnt/c`, a network share or a synced directory. A separate worktree is created for each claim, on a unique branch; failed worktree creation leaves the reservation intact for inspection. It does not reset or copy another worker's working changes. Broad paths and wildcard scopes deliberately reserve whole directories; expand scope before editing additional files.
 
@@ -15,12 +15,13 @@ The database stores model/session identifiers, paths, lease state and local hand
 Run from the canonical checkout after these instruction/tool changes have been committed so new worktrees contain them:
 
 ```bash
-python3 tools/atomic-ticketing/install.py
+git clone git@personal:therealtime/atomic-ticketing.git ~/dev/claude/src/atomic-ticketing   # once
+python3 ~/dev/claude/src/atomic-ticketing/install.py
 ticket --root /home/tyler/dev/codex/src/suifleet register
 ticket --project suifleet migrate
 ticket --project suifleet init
-python3 scripts/ticket_coordinator.py refresh
-python3 scripts/ticket_coordinator.py claim \
+ticket --project suifleet refresh
+ticket --project suifleet claim \
   --agent Codex --model ACTUAL_MODEL --session UNIQUE_CODEX_SESSION
 ```
 
@@ -35,12 +36,12 @@ The successful command emits one JSON result with `key`, `token`, `worktree`, `b
 Replace TICKET and TOKEN below with the returned values; tokens identify claim generations and stay local.
 
 ```bash
-python3 /absolute/canonical/checkout/scripts/ticket_coordinator.py heartbeat TICKET --token TOKEN
-python3 /absolute/canonical/checkout/scripts/ticket_coordinator.py assert TICKET --token TOKEN --path path/to/edit
-python3 /absolute/canonical/checkout/scripts/ticket_coordinator.py expand TICKET --token TOKEN --path additional/path
-python3 /absolute/canonical/checkout/scripts/ticket_coordinator.py note TICKET --token TOKEN --text 'Interface decision, test plan or handoff'
-python3 /absolute/canonical/checkout/scripts/ticket_coordinator.py list
-python3 /absolute/canonical/checkout/scripts/ticket_coordinator.py show TICKET
+ticket --project suifleet heartbeat TICKET --token TOKEN
+ticket --project suifleet assert TICKET --token TOKEN --path path/to/edit
+ticket --project suifleet expand TICKET --token TOKEN --path additional/path
+ticket --project suifleet note TICKET --token TOKEN --text 'Interface decision, test plan or handoff'
+ticket --project suifleet list
+ticket --project suifleet show TICKET
 ```
 
 Heartbeat at least every five minutes, including during long builds. The lease lasts fifteen minutes. Check ownership before an edit batch and again after long tools, before staging/committing or any deployment. `assert` rejects expired, replaced, non-implementation or unpublished claims and paths outside scope. A worker with a lost token must stop editing immediately. A still-owning expired worker may heartbeat and resume; expiry alone never transfers ownership.
@@ -50,10 +51,10 @@ Read `list` and relevant `show` events before changing shared interfaces. Local 
 ## Review, blockers and completion
 
 ```bash
-python3 scripts/ticket_coordinator.py review TICKET --token TOKEN \
+ticket --project suifleet review TICKET --token TOKEN \
   --text 'PR/branch, changed behavior, exact tests/results, limitations and acceptance evidence'
-python3 scripts/ticket_coordinator.py block TICKET --token TOKEN --text 'Concrete blocker and handoff'
-python3 scripts/ticket_coordinator.py resume TICKET --token TOKEN
+ticket --project suifleet block TICKET --token TOKEN --text 'Concrete blocker and handoff'
+ticket --project suifleet resume TICKET --token TOKEN
 ```
 
 Review and blocked work retain their path reservations. Review has no expiring lease and is not dependency completion. A session may select another independent ticket after submitting review, but may own only one active/blocked implementation across all registered projects. Resume is rejected if that session already owns another implementation. Coordinate a reviewer in the issue/Project, and integrate changes serially instead of having workers push directly to main.
@@ -61,7 +62,7 @@ Review and blocked work retain their path reservations. Review has no expiring l
 After review, required acceptance and integration, the integrator records completion:
 
 ```bash
-python3 scripts/ticket_coordinator.py complete TICKET --expect-token TOKEN \
+ticket --project suifleet complete TICKET --expect-token TOKEN \
   --reviewer REVIEWER --merged-commit COMMIT --integration-ref main \
   --text 'Review and required acceptance evidence'
 ```
@@ -73,7 +74,7 @@ The command verifies the commit exists and is an ancestor of the chosen integrat
 Claims and mutations mirror Status, Agent, Model and Work branch to the existing GitHub Project. Remote writes occur under the SQLite transaction to serialize mirrors. A network/API failure leaves the durable claim and pending revision intact; never assume a failed command means no claim was acquired. Inspect `show`, then retry:
 
 ```bash
-python3 scripts/ticket_coordinator.py publish TICKET
+ticket --project suifleet publish TICKET
 ```
 
 `--local-only` on claim/state transitions deliberately leaves publication pending; do not start editing until `publish` succeeds. It is for temporary troubleshooting, not a second coordination mode. Field writes are idempotent; partial remote writes retry the latest local revision. The script does not overwrite live issue descriptions, assignees or acceptance checkboxes.
@@ -81,7 +82,7 @@ python3 scripts/ticket_coordinator.py publish TICKET
 An expired or crashed worker is never automatically reclaimed. First stop that worker and inspect/save its branch/worktree and handoff. Then:
 
 ```bash
-python3 scripts/ticket_coordinator.py recover TICKET --expect-token OLD_TOKEN \
+ticket --project suifleet recover TICKET --expect-token OLD_TOKEN \
   --confirm-worker-stopped --text 'Stopped worker; saved work and handoff location'
 ```
 
@@ -91,4 +92,4 @@ This is cooperative coordination for trusted models on one user account, not an 
 
 ## Verification
 
-`make test-coordinator` runs offline tests using temporary databases and worktrees, including a ten-process race with exactly one winner, scope overlap, dependency gating, stale leases, token replacement, remote ownership, failed worktree setup and failed mirror retry. `make test-tracking` checks the existing backlog/publication tooling. Tests do not mutate GitHub.
+The coordinator's `make test` (in the atomic-ticketing repository) runs offline tests using temporary databases and worktrees, including a ten-process race with exactly one winner, scope overlap, dependency gating, stale leases, token replacement, remote ownership, failed worktree setup and failed mirror retry. `make test-tracking` checks the existing backlog/publication tooling. Tests do not mutate GitHub.

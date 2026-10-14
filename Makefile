@@ -71,14 +71,3 @@ tracking-plan:
 
 test-tracking:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_tracking.py'
-
-.PHONY: test-coordinator
-
-test-coordinator:
-	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_ticket_coordinator.py'
-	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/atomic-ticketing/tests -p 'test_*.py'
-
-.PHONY: install-ticket-coordinator
-
-install-ticket-coordinator:
-	python3 tools/atomic-ticketing/install.py

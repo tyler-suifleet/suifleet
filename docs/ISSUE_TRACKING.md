@@ -67,7 +67,7 @@ See [capability coverage](GREENGRASS_TICKET_COVERAGE.md) and [the Raspberry Pi a
 
 ## Atomic implementation claims on WSL
 
-Both models use [the shared SQLite coordinator](ATOMIC_TICKETING.md) before implementation. The installed reusable `ticket --project suifleet` CLI uses the central WSL database shared with Vortech, namespaces file ownership by repository and reserves hardware/build resources globally. It atomically filters priority, dependencies, existing ownership and conflicting paths/resources and creates one worktree per claim. Project fields mirror reservations; direct field edits are not the implementation claim mechanism. Read the runbook for heartbeat, scope expansion, local notes, review reservations and stopped-worker recovery. `make test-coordinator` verifies concurrency and failure behavior without GitHub mutations.
+Both models use [the shared SQLite coordinator](ATOMIC_TICKETING.md) before implementation. The installed reusable `ticket --project suifleet` CLI uses the central WSL database shared with Vortech, namespaces file ownership by repository and reserves hardware/build resources globally. It atomically filters priority, dependencies, existing ownership and conflicting paths/resources and creates one worktree per claim. Project fields mirror reservations; direct field edits are not the implementation claim mechanism. Read the runbook for heartbeat, scope expansion, local notes, review reservations and stopped-worker recovery. The atomic-ticketing repository's `make test` verifies concurrency and failure behavior without GitHub mutations.
 
 ## Assignment and handoff
 
