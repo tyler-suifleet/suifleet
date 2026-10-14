@@ -10,6 +10,9 @@ SRC_URI = " \
     file://suifleet-firmware.path \
     file://config.toml.example \
     file://firmware.toml.example \
+    file://suifleet-provision.service \
+    file://suifleet-provision \
+    file://suifleet-enrollment.path \
 "
 SRCREV = "${AUTOREV}"
 S = "${WORKDIR}/git"
@@ -27,13 +30,15 @@ EXTRA_OECARGO_FLAGS = "--features systemd"
 USERADD_PACKAGES = "${PN}"
 USERADD_PARAM:${PN} = "--system --no-create-home --home-dir /var/lib/suifleet --shell /sbin/nologin --user-group suifleet"
 
-SYSTEMD_SERVICE:${PN} = "suifleet.service suifleet-firmware.path"
+SYSTEMD_SERVICE:${PN} = "suifleet.service suifleet-provision.service suifleet-enrollment.path suifleet-firmware.path"
 SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 
 do_install:append() {
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${WORKDIR}/suifleet.service ${WORKDIR}/suifleet-firmware.service ${WORKDIR}/suifleet-firmware.path \
+        ${WORKDIR}/suifleet-provision.service ${WORKDIR}/suifleet-enrollment.path \
         ${D}${systemd_system_unitdir}/
+    install -D -m 0755 ${WORKDIR}/suifleet-provision ${D}${libexecdir}/suifleet-provision
     # /etc/suifleet is read-only to the daemon; config.toml must be root:suifleet 0640.
     install -d -m 0750 -g suifleet ${D}${sysconfdir}/suifleet
     install -m 0640 -g suifleet ${WORKDIR}/config.toml.example ${D}${sysconfdir}/suifleet/config.toml.example
@@ -41,4 +46,5 @@ do_install:append() {
     install -m 0600 ${WORKDIR}/firmware.toml.example ${D}${sysconfdir}/suifleet/firmware.toml.example
 }
 
-FILES:${PN} += "${sysconfdir}/suifleet ${systemd_system_unitdir}/suifleet*.service ${systemd_system_unitdir}/suifleet-firmware.path"
+FILES:${PN} += "${sysconfdir}/suifleet ${systemd_system_unitdir}/suifleet*.service ${systemd_system_unitdir}/suifleet*.path"
+RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_base-utils}"

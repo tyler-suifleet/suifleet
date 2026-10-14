@@ -1,0 +1,11 @@
+[Unit]
+Description=Start SuiFleet when enrollment configuration is installed
+After=suifleet-provision.service
+
+[Path]
+PathExists=/etc/suifleet/config.toml
+PathChanged=/etc/suifleet/config.toml
+Unit=suifleet.service
+
+[Install]
+WantedBy=multi-user.target

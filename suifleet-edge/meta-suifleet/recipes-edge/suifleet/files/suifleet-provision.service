@@ -1,0 +1,23 @@
+[Unit]
+Description=Provision the unique SuiFleet device identity
+Before=suifleet.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/suifleet-provision
+UMask=0077
+ProtectSystem=strict
+ReadWritePaths=/etc/suifleet
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateNetwork=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=yes
+LimitCORE=0
+
+[Install]
+WantedBy=multi-user.target
