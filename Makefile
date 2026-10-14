@@ -46,11 +46,18 @@ edge-build:
 edge-test:
 	$(RUN) bash -c "cd suifleet-edge && cargo test --locked"
 
-.PHONY: test-ota dapp-typecheck
+.PHONY: test-ota test-component dapp-typecheck
 
 test-ota:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml
 	$(RUN) python3 scripts/test_ota.py
+
+# SF-030 harmless test component: fixture tests (system shell, plus busybox when
+# installed), then the real daemon applying it through suifleet-test-updater.
+test-component:
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_test_component.py'
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_component_ota.py
 
 dapp-typecheck:
 	$(MAKE) test-manifest
@@ -74,7 +81,7 @@ toolchain-versions:
 # CI entry point (run inside the dev image): each step's output is kept under
 # ci-logs/ for failure diagnostics. No step publishes, spends gas or uses secrets.
 ci: SHELL := /bin/bash
-CI_STEPS := test-contracts test-interfaces check-interfaces edge-test test-ota dapp-typecheck dapp-build
+CI_STEPS := test-contracts test-interfaces check-interfaces edge-test test-ota test-component dapp-typecheck dapp-build
 ci:
 	@mkdir -p ci-logs
 	@$(MAKE) --no-print-directory toolchain-versions | tee ci-logs/toolchain-versions.txt
@@ -93,6 +100,7 @@ check:
 	$(MAKE) check-interfaces
 	$(MAKE) edge-test
 	$(MAKE) test-ota
+	$(MAKE) test-component
 	$(MAKE) dapp-typecheck
 	$(MAKE) dapp-build
 	git diff --check

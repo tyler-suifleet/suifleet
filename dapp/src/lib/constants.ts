@@ -10,6 +10,13 @@ export const DEVICE_TYPE = MANIFEST ? moveType("device_registry::Device") : "";
 export const DEVICE_GROUP_TYPE = MANIFEST ? moveType("device_group::DeviceGroup") : "";
 export const DEPLOYMENT_CREATED_EVENT = MANIFEST ? moveType("deployment_manager::DeploymentCreated") : "";
 export const STATUS_UPDATED_EVENT = MANIFEST ? moveType("deployment_manager::DeviceStatusUpdated") : "";
+// Storage period for new uploads, in Walrus epochs; devices cannot download after it ends.
+export const WALRUS_EPOCHS = Math.max(1, Number(process.env.NEXT_PUBLIC_WALRUS_EPOCHS ?? 5) || 5);
+// Optional per-upload storage budget in FROST (1 WAL = 1e9 FROST); exceeding it raises a warning.
+export const WALRUS_MAX_COST_FROST = process.env.NEXT_PUBLIC_WALRUS_MAX_COST_FROST
+  ? BigInt(process.env.NEXT_PUBLIC_WALRUS_MAX_COST_FROST)
+  : null;
+
 
 export const STATUS_LABELS: Record<number, string> = {
   0: "Pending",

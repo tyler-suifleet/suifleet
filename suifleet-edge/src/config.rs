@@ -179,9 +179,51 @@ pub struct DeviceConfig {
     pub device_cap_id: String,
 }
 
-#[derive(Deserialize, Debug, Clone, Default)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct WalrusConfig {
+    /// Taken from the deployment manifest; a configured value must match it.
+    #[serde(default)]
     pub aggregator_url: String,
+    /// Largest artifact the device will download.
+    #[serde(default = "default_max_artifact_bytes")]
+    pub max_artifact_bytes: u64,
+    /// Free space that must remain on the state filesystem after a download.
+    #[serde(default = "default_min_free_bytes")]
+    pub min_free_bytes: u64,
+    /// Attempts per blob for interrupted or transiently failing transfers;
+    /// partial downloads resume with HTTP Range when the aggregator supports it.
+    #[serde(default = "default_download_attempts")]
+    pub download_attempts: u32,
+    /// Deadline for fetching one blob, across all attempts. Bounds how long a
+    /// slow or stalled aggregator can hold the serial deployment loop.
+    #[serde(default = "default_download_timeout_seconds")]
+    pub download_timeout_seconds: u64,
+}
+
+// Applies when [walrus] is omitted, as in the manifest-based configuration.
+impl Default for WalrusConfig {
+    fn default() -> Self {
+        Self {
+            aggregator_url: String::new(),
+            max_artifact_bytes: default_max_artifact_bytes(),
+            min_free_bytes: default_min_free_bytes(),
+            download_attempts: default_download_attempts(),
+            download_timeout_seconds: default_download_timeout_seconds(),
+        }
+    }
+}
+
+fn default_max_artifact_bytes() -> u64 {
+    1024 * 1024 * 1024
+}
+fn default_min_free_bytes() -> u64 {
+    64 * 1024 * 1024
+}
+fn default_download_attempts() -> u32 {
+    4
+}
+fn default_download_timeout_seconds() -> u64 {
+    3600
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -224,6 +266,14 @@ impl Config {
         anyhow::ensure!(
             cfg.apply.timeout_seconds > 0,
             "apply.timeout_seconds must be positive"
+        );
+        anyhow::ensure!(
+            cfg.walrus.download_attempts > 0,
+            "walrus.download_attempts must be positive"
+        );
+        anyhow::ensure!(
+            cfg.walrus.download_timeout_seconds > 0,
+            "walrus.download_timeout_seconds must be positive"
         );
         Ok(cfg)
     }
@@ -286,6 +336,21 @@ mod tests {
             }
             assert!(bad.validate().is_err(), "{field}");
         }
+    }
+    #[test]
+    fn walrus_limits_default_when_omitted_or_partial() {
+        let base = "[sui]\nmanifest_path='deployment.json'\n[device]\nkeypair_path='k'\n\
+            device_object_id='0x1'\ndevice_cap_id='0x2'\n[apply]\ncommand='true'\n";
+        let omitted: Config = toml::from_str(base).unwrap();
+        let partial: Config = toml::from_str(&format!("{base}[walrus]\ndownload_attempts=2\n")).unwrap();
+        for walrus in [&omitted.walrus, &partial.walrus] {
+            assert_eq!(walrus.aggregator_url, "");
+            assert_eq!(walrus.max_artifact_bytes, 1024 * 1024 * 1024);
+            assert_eq!(walrus.min_free_bytes, 64 * 1024 * 1024);
+            assert_eq!(walrus.download_timeout_seconds, 3600);
+        }
+        assert_eq!(omitted.walrus.download_attempts, 4);
+        assert_eq!(partial.walrus.download_attempts, 2);
     }
     #[test]
     fn legacy_network_config_rejected() {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useDeployments } from "@/hooks/useDeployments";
+import { useDeploymentStorage } from "@/hooks/useDeploymentStorage";
 import { useCurrentAccount } from "@mysten/dapp-kit-react";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import { buildDeleteDeploymentTx } from "@/lib/sui";
@@ -141,11 +142,29 @@ function DeploymentRow({
               </span>
             )}
             {d.recipeBlobId && <span>Recipe: <span className="font-mono text-gray-500">{d.recipeBlobId}</span></span>}
+            <StorageBadge recipeBlobId={d.recipeBlobId} />
             {d.artifactSha256 && <span>SHA256: <span className="font-mono text-gray-500">{d.artifactSha256.slice(0, 16)}…</span></span>}
           </div>
         </td>
       </tr>
     </>
+  );
+}
+
+/** Flag deployments whose blobs devices can no longer fetch (storage period ended). */
+function StorageBadge({ recipeBlobId }: { recipeBlobId: string }) {
+  const { data } = useDeploymentStorage(recipeBlobId);
+  if (!data) return null;
+  const missing = [data.recipe === "unavailable" && "recipe", data.artifact === "unavailable" && "artifact"].filter(Boolean);
+  if (missing.length === 0) {
+    return data.recipe === "available" && data.artifact === "available"
+      ? <span className="inline-flex px-2 py-1 rounded bg-green-50 text-green-700">Storage available</span>
+      : null;
+  }
+  return (
+    <span className="inline-flex px-2 py-1 rounded bg-red-100 text-red-800" title="Re-upload and redeploy; devices that have not applied it will report Failed">
+      {missing.join(" and ")} expired or unavailable on Walrus
+    </span>
   );
 }
 

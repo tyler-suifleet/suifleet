@@ -49,13 +49,15 @@ The daemon executable is `suifleet-edge/target/release/suifleet`; the Next stati
 
 The simulator is stdlib Python. It uses temporary keys, local HTTP servers and a harmless updater; it never spends gas or programs hardware. It validates recipe/artifact digests, direct/live-group targeting, bad hashes, unsupported lifecycle, untrusted operators, deleted objects, pagination, enrollment baseline, offline catch-up, restart deduplication and failed status retry. It also checks identity/signature against an independent Mysten SDK vector.
 
+`make test-component` (also run by `make check` and CI) covers the harmless versioned test component in [tests/components/suifleet-test-app](../tests/components/suifleet-test-app/README.md). Its fixture tests run the real shell scripts, under a busybox-only `PATH` too when busybox is installed. It then runs the real daemon against the same simulator with `suifleet-test-updater` as `apply.command`, for v1, v2, an injected install failure and an injected health failure. It checks statuses, reports and the device receipts' version, run ID and artifact SHA-256.
+
 The historical baseline has 13 passing Move tests and 10 Rust tests; counts can legitimately change. Verify results for the actual commit rather than asserting those numbers as a release requirement. Simulator mocks are not proof of network transaction building, wallet compatibility, package upgrades or post-reboot health.
 
 If Rust files change, run `cargo fmt --manifest-path suifleet-edge/Cargo.toml` with rustfmt installed, then rerun relevant tests. The minimal container toolchain may need `rustup component add rustfmt` first. Do not silently upgrade the toolchain to make failures disappear.
 
 ## Continuous integration
 
-`.github/workflows/ci.yml` runs on every pull request and push to `main`. It builds the dev image from the pinned Dockerfile and runs `make ci` inside it: frozen pnpm install, Move tests, drift-gate regression tests, interface drift check, Rust tests, the OTA simulator, typecheck, static build and `git diff --check`. Each step's output and `toolchain-versions.txt` are uploaded as the `ci-logs` artifact (14 days). The job has a read-only token and no secrets; it never publishes, spends gas or touches hardware.
+`.github/workflows/ci.yml` runs on every pull request and push to `main`. It builds the dev image from the pinned Dockerfile and runs `make ci` inside it: frozen pnpm install, Move tests, drift-gate regression tests, interface drift check, Rust tests, the OTA simulator, the test-component checks, typecheck, static build and `git diff --check`. Each step's output and `toolchain-versions.txt` are uploaded as the `ci-logs` artifact (14 days). The job has a read-only token and no secrets; it never publishes, spends gas or touches hardware.
 
 All toolchain inputs are Dockerfile build arguments: base image digest, Sui release and SHA-256, Rust, Node package version and pnpm. Bump them deliberately, in their own commit, together with lockfile and compatibility-test updates; CI then runs against the new image. Workflow actions are pinned to commit SHAs.
 
@@ -158,6 +160,38 @@ Current frontend variables are `NEXT_PUBLIC_PACKAGE_ID`, `NEXT_PUBLIC_ORIGINAL_P
 Install the daemon, systemd service and real config through the validated image/package workflow. The service invokes `--provision` before startup and creates its state directory. Register the printed address, record Device/DeviceCap IDs, and fund report gas. Apply success currently means updater exit code zero, not post-boot health.
 
 The Yocto layer is `suifleet-edge/meta-suifleet`; it is a scaffold needing an actual build. `SRCREV = AUTOREV` and missing cargo dependency integration must be addressed before calling the image reproducible. SWUpdate/RAUC and A/B recovery remain external adapter work.
+
+## Artifact storage and downloads
+
+Walrus stores each recipe and artifact for a fixed number of epochs. After the end epoch, devices that have not applied a deployment can no longer download it.
+
+**When you upload** (dApp):
+- Uploads use `NEXT_PUBLIC_WALRUS_EPOCHS` (default 5).
+- They pass `send_object_to=<connected wallet>`, so the operator owns the Walrus `Blob` object and is the one who can renew it.
+- The upload screen shows the end epoch, the cost in FROST and the renewal command (`walrus extend --blob-obj-id <id> --epochs-extended <n>`).
+- It warns when the cost exceeds `NEXT_PUBLIC_WALRUS_MAX_COST_FROST`.
+- It warns when the bytes were already certified by someone else. Then you don't own the object and cannot renew it.
+- It warns when the publisher kept the object, or reported no end epoch.
+
+**Monitoring** (dApp): the deployments page probes each deployment's recipe and artifact through the aggregator. It flags any blob that returns 404/410 as expired or unavailable. Re-upload and redeploy, or extend storage beforehand.
+
+**Downloading** (daemon):
+- Bytes are written to `<artifact>.partial` and renamed only when complete. The SHA-256 is computed over the complete file and checked before applying.
+- A dropped connection, timeout, 5xx or 429 is retried up to `walrus.download_attempts` times with backoff. Each retry resumes with HTTP `Range` and verifies `Content-Range`, or restarts from zero if the aggregator ignores the range.
+- Each blob must finish within `walrus.download_timeout_seconds` (default 3600) across all attempts, otherwise the deployment reports Failed. The per-read timeout alone cannot catch an aggregator that trickles bytes, and deployments are processed one at a time, so a stalled transfer would otherwise block every later deployment. Raise it for large artifacts on slow links.
+- A 404/410 is permanent: the deployment reports Failed with "unavailable or expired" and is not retried.
+- Before writing, the daemon refuses artifacts over `walrus.max_artifact_bytes`, and transfers that would leave less than `walrus.min_free_bytes` free. When the aggregator sends no `Content-Length` (chunked), both limits are enforced while streaming: free space is re-checked whenever the bytes written since the last check would exceed what the reserve allows, and the partial file is deleted on refusal.
+- The artifact cache holds only the in-flight artifact. Each deployment's working directory is removed afterwards, and leftovers from a crash are removed at startup. Interrupted deployments are never re-applied.
+
+Verified locally:
+- Rust tests against a scripted aggregator cover range resume, an ignored range, transient retry, giving up without a final file, an expired blob, the size limit, insufficient disk, chunked bodies against the size limit and disk reserve, the whole-transfer deadline against a trickling server, and GC.
+- The OTA simulator checks resuming from byte 10, an expired artifact reporting Failed without running the updater, and an empty cache afterwards.
+- The publisher-response parsing and warnings were checked against the documented response shapes.
+
+Not verified:
+- Actual Walrus testnet retention, renewal with `walrus extend` and `send_object_to` ownership. These need uploads to a public network.
+- Whether the public aggregator honors `Range`; the daemon handles both cases.
+- The dApp cannot show epochs remaining until it reads the current Walrus epoch, so it reports the end epoch only.
 
 ## Troubleshooting without losing state
 
