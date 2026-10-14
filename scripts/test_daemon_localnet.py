@@ -13,6 +13,7 @@ device's version/run-ID receipts:
   - deployment for another device -> never applied
   - daemon offline while a deployment is created -> caught up after restart
   - journal with a JSON-RPC-era cursor -> migrated without replaying work
+  - device revoked in the registry -> nothing applied; reinstated -> caught up
 
 Run inside the dev image with a throwaway node and faucet:
 
@@ -312,6 +313,23 @@ def run(rpc_url, faucet_url):
                 assert not outcome(skipped[0]), "event before the legacy boundary was replayed"
                 print("PASS: legacy cursor resumes exactly after its event: an earlier, newly targeted deployment "
                       "in the same transaction is not replayed and a later one is applied once")
+
+                # Revocation is enforced on chain and honored by the daemon: while
+                # revoked it applies nothing; reinstated, it catches up.
+                transaction("--move-call", f"{package}::device_registry::revoke_device", f"@{registry}", f"@{device}")
+                applied_count = len(history())
+                revoked = deploy("7.0.0", devices=[device])
+                process = start()
+                time.sleep(10)
+                assert not outcome(revoked), "revoked device applied a deployment"
+                assert len(history()) == applied_count
+                transaction("--move-call", f"{package}::device_registry::activate_device", f"@{registry}", f"@{device}")
+                wait_for(settled(revoked, 1), "reinstated device did not apply and report", process)
+                receipt_is(revoked, 1)
+                stop(process)
+                process = None
+                assert "revoked or deregistered" in (root / "daemon.log").read_text()
+                print("PASS: on-chain revocation stops the real daemon; reinstatement resumes it with a verified receipt")
             except BaseException:
                 log.flush()
                 print((root / "daemon.log").read_text()[-4000:])
