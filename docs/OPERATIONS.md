@@ -95,6 +95,39 @@ Install the daemon, systemd service and real config through the validated image/
 
 The Yocto layer is `suifleet-edge/meta-suifleet`; it is a scaffold needing an actual build. `SRCREV = AUTOREV` and missing cargo dependency integration must be addressed before calling the image reproducible. SWUpdate/RAUC and A/B recovery remain external adapter work.
 
+## Execution privileges
+
+| Principal | Runs | Can write | Cannot |
+|---|---|---|---|
+| `suifleet` user (`suifleet.service`) | Daemon: chain polling, downloads, journal, recipe `install` scripts | `/var/lib/suifleet` only | Change its config or the helper config, use capabilities, create namespaces, see other processes, exceed 256 MiB / 64 tasks |
+| root (`suifleet-firmware.service`, path-activated) | Only the command in `/etc/suifleet/firmware.toml` | Devices and system partitions, as the firmware updater needs; its own `/var/lib/suifleet-firmware` | Use the network, accept a command from the daemon |
+| root (`ExecStartPre=+`) | Key provisioning and handing the key to `suifleet` | `/etc/suifleet/device.key` | — |
+
+Every updater/recipe child gets a cleared environment (`PATH`, `LANG`, `HOME` only), its artifact directory as working directory, no stdin, `RLIMIT_CORE=0`, at most 1024 descriptors, optional `max_memory_bytes`, and the apply timeout. On timeout or cancellation the whole process group is killed. A spawn denied with EACCES, exit code 126 or 127, a signal, or any non-zero exit is an error, so the deployment reports Failed, never Applied.
+
+With `apply.mode = "privileged-helper"`, firmware without a recipe `install` script goes through a spool in `/var/lib/suifleet/firmware`:
+1. The daemon copies the verified artifact there and publishes a request containing its SHA-256.
+2. The helper opens the spool only through `O_NOFOLLOW` directory descriptors.
+3. It copies the artifact into its own root-only directory, re-hashes that copy, and runs the root-configured command on it.
+4. It hands back a result file owned by the spool owner.
+
+A compromised daemon can only submit an image to that updater. Keep the updater's own image-signature verification enabled (for example SWUpdate signed images), and keep `fs.protected_hardlinks=1`, the systemd default. Recipe `install` scripts never reach root.
+
+Migrating an existing device to these units:
+- systemd re-owns `/var/lib/suifleet` to `suifleet` on start. The journal is preserved.
+- Make `/etc/suifleet/config.toml` `root:suifleet 0640`.
+- Install `/etc/suifleet/firmware.toml` as `root:root 0600` with the firmware command.
+- Set `apply.mode = "privileged-helper"`, then `systemctl enable --now suifleet-firmware.path`.
+- With `direct` mode, a root-only updater now fails as a privilege failure and reports Failed.
+
+Verified locally (container, not hardware):
+- Rust tests cover privilege/timeout/environment failures and helper attacks: swapped artifact, planted symlinks, invalid IDs, missing helper.
+- `scripts/test_ota.py --firmware-helper` covers the helper path. `--daemon-user dev`, run as root, covers the real daemon as an unprivileged user with the helper as root.
+- `systemd-analyze verify` is clean (systemd 252).
+- `systemd-analyze security --offline`: daemon 1.7 OK (was 9.6 UNSAFE); helper 5.5 MEDIUM, by design, for device access.
+
+Not yet verified: a BitBake build with the `useradd` class, and the units on the Raspberry Pi image. That includes DNS under `RestrictAddressFamilies`, and SWUpdate/RAUC under the helper sandbox.
+
 ## Troubleshooting without losing state
 
 - Docker unavailable/permissions: fix host daemon access; do not invoke Docker inside the dev container.
