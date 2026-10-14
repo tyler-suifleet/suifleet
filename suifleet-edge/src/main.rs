@@ -143,16 +143,7 @@ async fn poll(
     }
     loop {
         let page = sui.deployments(&journal.state.cursor).await?;
-        let events = page["data"]
-            .as_array()
-            .ok_or_else(|| anyhow::anyhow!("invalid event page"))?;
-        for raw in events {
-            let cursor = raw
-                .get("id")
-                .filter(|id| id.is_object())
-                .ok_or_else(|| anyhow::anyhow!("event missing cursor"))?
-                .clone();
-            let event: DeploymentCreatedEvent = serde_json::from_value(raw["parsedJson"].clone())?;
+        for (event, cursor) in page.events {
             if !journal.state.deployments.contains_key(&event.deployment_id)
                 && sui
                     .authorized_target(&event, &cfg.device.device_object_id)
@@ -166,7 +157,7 @@ async fn poll(
                 };
                 anyhow::ensure!(
                     sui_client::same_type(
-                        record["content"]["type"].as_str().unwrap_or(""),
+                        &record.object_type,
                         &sui.move_type("deployment_manager::DeploymentRecord")
                     ),
                     "wrong deployment type"
@@ -204,10 +195,16 @@ async fn poll(
             journal.state.cursor = Some(cursor);
             journal.save()?;
         }
-        if !page["hasNextPage"].as_bool().unwrap_or(false) {
+        // Resume after everything this page scanned, events or not.
+        let progressed = journal.state.cursor.as_ref() != Some(&page.end);
+        if progressed {
+            journal.state.cursor = Some(page.end);
+            journal.save()?;
+        }
+        if !page.has_more {
             break;
         }
-        anyhow::ensure!(!events.is_empty(), "empty event page claims more data");
+        anyhow::ensure!(progressed, "event stream claims more data without advancing");
     }
     Ok(())
 }
@@ -221,13 +218,9 @@ async fn handle_deployment(
     artifact: &Path,
 ) -> anyhow::Result<()> {
     let digest_field = sui
-        .rpc(
-            "suix_getDynamicFieldObject",
-            serde_json::json!([event.deployment_id,
-        {"type":sui.move_type("deployment_manager::RecipeDigestKey"),"value":{}}]),
-        )
+        .dynamic_field(&event.deployment_id, "deployment_manager::RecipeDigestKey")
         .await?;
-    let expected = digest_field["data"]["content"]["fields"]["value"].as_str()
+    let expected = digest_field.as_ref().and_then(|value| value.as_str())
         .ok_or_else(|| anyhow::anyhow!("deployment has no authenticated recipe digest; recreate using verified creation API"))?;
     let (recipe, actual) = walrus.recipe(&event.recipe_blob_id).await?;
     anyhow::ensure!(actual == expected, "recipe SHA-256 mismatch");
