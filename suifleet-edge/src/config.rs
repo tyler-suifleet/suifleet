@@ -182,6 +182,33 @@ pub struct DeviceConfig {
 #[derive(Deserialize, Debug, Clone, Default)]
 pub struct WalrusConfig {
     pub aggregator_url: String,
+    /// Largest artifact the device will download.
+    #[serde(default = "default_max_artifact_bytes")]
+    pub max_artifact_bytes: u64,
+    /// Free space that must remain on the state filesystem after a download.
+    #[serde(default = "default_min_free_bytes")]
+    pub min_free_bytes: u64,
+    /// Attempts per blob for interrupted or transiently failing transfers;
+    /// partial downloads resume with HTTP Range when the aggregator supports it.
+    #[serde(default = "default_download_attempts")]
+    pub download_attempts: u32,
+    /// Deadline for fetching one blob, across all attempts. Bounds how long a
+    /// slow or stalled aggregator can hold the serial deployment loop.
+    #[serde(default = "default_download_timeout_seconds")]
+    pub download_timeout_seconds: u64,
+}
+
+fn default_max_artifact_bytes() -> u64 {
+    1024 * 1024 * 1024
+}
+fn default_min_free_bytes() -> u64 {
+    64 * 1024 * 1024
+}
+fn default_download_attempts() -> u32 {
+    4
+}
+fn default_download_timeout_seconds() -> u64 {
+    3600
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -224,6 +251,14 @@ impl Config {
         anyhow::ensure!(
             cfg.apply.timeout_seconds > 0,
             "apply.timeout_seconds must be positive"
+        );
+        anyhow::ensure!(
+            cfg.walrus.download_attempts > 0,
+            "walrus.download_attempts must be positive"
+        );
+        anyhow::ensure!(
+            cfg.walrus.download_timeout_seconds > 0,
+            "walrus.download_timeout_seconds must be positive"
         );
         Ok(cfg)
     }

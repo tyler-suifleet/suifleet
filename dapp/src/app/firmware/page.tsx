@@ -5,7 +5,7 @@ import { useCurrentAccount } from "@mysten/dapp-kit";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import { useGroups } from "@/hooks/useGroups";
 import { useDevices } from "@/hooks/useDevices";
-import { uploadArtifact, uploadRecipe, type ComponentRecipe } from "@/lib/walrus";
+import { uploadArtifact, uploadRecipe, renewalCommand, storageWarnings, type ComponentRecipe, type StorageInfo } from "@/lib/walrus";
 import { buildCreateDeploymentTx } from "@/lib/sui";
 import { PageHeader } from "@/components/ui";
 import Link from "next/link";
@@ -16,6 +16,7 @@ interface ArtifactResult {
   blobId: string;
   sha256: string;
   fileName: string;
+  storage: StorageInfo;
 }
 
 export default function FirmwarePage() {
@@ -36,6 +37,7 @@ export default function FirmwarePage() {
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
   const [selectedDevices, setSelectedDevices] = useState<Set<string>>(new Set());
   const [txDigest, setTxDigest] = useState<string | null>(null);
+  const [recipeStorage, setRecipeStorage] = useState<StorageInfo | null>(null);
   const [dragOver, setDragOver] = useState(false);
 
   const handleFile = useCallback(async (file: File) => {
@@ -45,7 +47,7 @@ export default function FirmwarePage() {
     }
     setUploading(true);
     try {
-      const result = await uploadArtifact(file);
+      const result = await uploadArtifact(file, account?.address ?? null);
       setArtifact({ ...result, fileName: file.name });
       setStep("recipe");
     } catch (err) {
@@ -53,7 +55,7 @@ export default function FirmwarePage() {
     } finally {
       setUploading(false);
     }
-  }, [componentName, version]);
+  }, [componentName, version, account?.address]);
 
   async function handleDeploy() {
     if (!artifact || (selectedGroups.size === 0 && selectedDevices.size === 0)) return;
@@ -75,7 +77,8 @@ export default function FirmwarePage() {
 
     let recipeUpload: Awaited<ReturnType<typeof uploadRecipe>>;
     try {
-      recipeUpload = await uploadRecipe(recipe);
+      recipeUpload = await uploadRecipe(recipe, account?.address ?? null);
+      setRecipeStorage(recipeUpload.storage);
     } catch (err) {
       alert(`Recipe upload failed: ${err instanceof Error ? err.message : String(err)}`);
       return;
@@ -116,11 +119,15 @@ export default function FirmwarePage() {
           </div>
           <p className="font-semibold text-gray-800">Deployment created</p>
           <p className="text-xs font-mono text-gray-400">{txDigest}</p>
+          <div className="text-left space-y-2">
+            {artifact && <StorageSummary label="Artifact storage" storage={artifact.storage} />}
+            {recipeStorage && <StorageSummary label="Recipe storage" storage={recipeStorage} />}
+          </div>
           <div className="flex gap-3 justify-center pt-2">
             <Link href="/deployments" className="text-sm text-[#4DA2FF] hover:underline">View deployments</Link>
             <button
               onClick={() => {
-                setStep("artifact"); setArtifact(null);
+                setStep("artifact"); setArtifact(null); setRecipeStorage(null);
                 setComponentName(""); setVersion(""); setDescription("");
                 setInstallCmd(""); setRunCmd(""); setShutdownCmd("");
                 setSelectedGroups(new Set()); setSelectedDevices(new Set()); setTxDigest(null);
@@ -198,6 +205,7 @@ export default function FirmwarePage() {
             <p><span className="text-gray-400">SHA-256:     </span> <span className="text-gray-700">{artifact.sha256}</span></p>
           </div>
         )}
+        {artifact && <StorageSummary label="Artifact storage" storage={artifact.storage} />}
       </Card>
 
       {/* Step 2 — Recipe */}
@@ -338,6 +346,30 @@ function CmdField({ label, hint, value, onChange, placeholder, disabled }: {
       <p className="text-xs text-gray-400 mb-1">{hint}</p>
       <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} disabled={disabled}
         className="w-full border border-gray-300 rounded px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[#4DA2FF] disabled:bg-gray-50" />
+    </div>
+  );
+}
+
+/** Expiry, ownership and cost of a stored blob, with anything the operator must act on. */
+function StorageSummary({ label, storage }: { label: string; storage: StorageInfo }) {
+  const warnings = storageWarnings(storage);
+  const renew = renewalCommand(storage);
+  return (
+    <div className="border border-gray-200 rounded p-3 text-xs space-y-1">
+      <p className="font-medium text-gray-600">{label}</p>
+      <p className="text-gray-500">
+        Stored until Walrus epoch {storage.endEpoch ?? "unknown"} · renewable by{" "}
+        {storage.owner === "you" ? "your wallet" : storage.owner === "publisher" ? "the publisher only" : "another owner"}
+        {storage.costFrost !== undefined && <> · cost {storage.costFrost.toString()} FROST</>}
+      </p>
+      {renew && storage.owner === "you" && (
+        <p className="text-gray-500">
+          Renew before it expires: <code className="font-mono text-gray-700">{renew}</code>
+        </p>
+      )}
+      {warnings.map((warning) => (
+        <p key={warning} className="text-amber-700 bg-amber-50 rounded px-2 py-1">{warning}</p>
+      ))}
     </div>
   );
 }

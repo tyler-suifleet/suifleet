@@ -161,6 +161,38 @@ Install the daemon, systemd service and real config through the validated image/
 
 The Yocto layer is `suifleet-edge/meta-suifleet`; it is a scaffold needing an actual build. `SRCREV = AUTOREV` and missing cargo dependency integration must be addressed before calling the image reproducible. SWUpdate/RAUC and A/B recovery remain external adapter work.
 
+## Artifact storage and downloads
+
+Walrus stores each recipe and artifact for a fixed number of epochs. After the end epoch, devices that have not applied a deployment can no longer download it.
+
+**When you upload** (dApp):
+- Uploads use `NEXT_PUBLIC_WALRUS_EPOCHS` (default 5).
+- They pass `send_object_to=<connected wallet>`, so the operator owns the Walrus `Blob` object and is the one who can renew it.
+- The upload screen shows the end epoch, the cost in FROST and the renewal command (`walrus extend --blob-obj-id <id> --epochs-extended <n>`).
+- It warns when the cost exceeds `NEXT_PUBLIC_WALRUS_MAX_COST_FROST`.
+- It warns when the bytes were already certified by someone else. Then you don't own the object and cannot renew it.
+- It warns when the publisher kept the object, or reported no end epoch.
+
+**Monitoring** (dApp): the deployments page probes each deployment's recipe and artifact through the aggregator. It flags any blob that returns 404/410 as expired or unavailable. Re-upload and redeploy, or extend storage beforehand.
+
+**Downloading** (daemon):
+- Bytes are written to `<artifact>.partial` and renamed only when complete. The SHA-256 is computed over the complete file and checked before applying.
+- A dropped connection, timeout, 5xx or 429 is retried up to `walrus.download_attempts` times with backoff. Each retry resumes with HTTP `Range` and verifies `Content-Range`, or restarts from zero if the aggregator ignores the range.
+- Each blob must finish within `walrus.download_timeout_seconds` (default 3600) across all attempts, otherwise the deployment reports Failed. The per-read timeout alone cannot catch an aggregator that trickles bytes, and deployments are processed one at a time, so a stalled transfer would otherwise block every later deployment. Raise it for large artifacts on slow links.
+- A 404/410 is permanent: the deployment reports Failed with "unavailable or expired" and is not retried.
+- Before writing, the daemon refuses artifacts over `walrus.max_artifact_bytes`, and transfers that would leave less than `walrus.min_free_bytes` free. When the aggregator sends no `Content-Length` (chunked), both limits are enforced while streaming: free space is re-checked whenever the bytes written since the last check would exceed what the reserve allows, and the partial file is deleted on refusal.
+- The artifact cache holds only the in-flight artifact. Each deployment's working directory is removed afterwards, and leftovers from a crash are removed at startup. Interrupted deployments are never re-applied.
+
+Verified locally:
+- Rust tests against a scripted aggregator cover range resume, an ignored range, transient retry, giving up without a final file, an expired blob, the size limit, insufficient disk, chunked bodies against the size limit and disk reserve, the whole-transfer deadline against a trickling server, and GC.
+- The OTA simulator checks resuming from byte 10, an expired artifact reporting Failed without running the updater, and an empty cache afterwards.
+- The publisher-response parsing and warnings were checked against the documented response shapes.
+
+Not verified:
+- Actual Walrus testnet retention, renewal with `walrus extend` and `send_object_to` ownership. These need uploads to a public network.
+- Whether the public aggregator honors `Range`; the daemon handles both cases.
+- The dApp cannot show epochs remaining until it reads the current Walrus epoch, so it reports the end epoch only.
+
 ## Troubleshooting without losing state
 
 - Docker unavailable/permissions: fix host daemon access; do not invoke Docker inside the dev container.
