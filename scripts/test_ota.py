@@ -344,7 +344,9 @@ def run(binary, firmware_helper=False, daemon_user=None):
                 # A crash after journaling outcomes but before the cursor is saved
                 # redelivers processed events; the journal alone must prevent reapply.
                 journal = state()
-                journal["cursor"] = scanned(1)
+                # Rewind with the JSON-RPC-era cursor form: migration must resume
+                # exactly after event 0 (redelivering the rest, deduplicated).
+                journal["cursor"] = {"txDigest": "event-0", "eventSeq": "0"}
                 (root / "state" / "state.json").write_text(json.dumps(journal))
                 sim.add("0x108") # Deployment created while the device is offline.
                 sim.allow_reports = True

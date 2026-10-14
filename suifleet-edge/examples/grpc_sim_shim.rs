@@ -257,6 +257,9 @@ impl proto::ledger_service_server::LedgerService for Shim {
             event.event_type = Some(event_type.clone());
             event.json = Some(Box::new(to_proto(parsed)));
             event.checkpoint = Some(index as u64 + 1);
+            // One event per simulated transaction "event-<index>".
+            event.transaction_digest = Some(format!("event-{index}"));
+            event.event_index = Some(0);
             let mut watermark = proto::Watermark::default();
             watermark.cursor = Some(cursor(index + 1));
             let mut frame = proto::ListEventsResponse::default();

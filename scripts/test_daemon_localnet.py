@@ -147,18 +147,21 @@ def run(rpc_url, faucet_url):
 
             run_id = "localnet-" + uuid.uuid4().hex[:10]
 
-            def deploy(version, *, devices=(), groups=(), fail="none"):
+            def create_call(version, *, devices=(), groups=(), fail="none"):
+                """PTB arguments creating one deployment, with its blobs served."""
                 artifact = component.build(version, run_id, fail)
                 tag = version.replace(".", "-")  # Walrus blob IDs are [A-Za-z0-9_-]
                 artifact_blob, recipe_blob = f"artifact-{tag}", f"recipe-{tag}"
                 recipe = component.recipe(artifact, artifact_blob)
                 blobs[artifact_blob], blobs[recipe_blob] = artifact, recipe
                 ids = lambda values: "[" + ", ".join(f"@{v}" for v in values) + "]"
-                result = transaction(
-                    "--move-call", f"{package}::deployment_manager::create_deployment_verified",
-                    f'"{component.DEFAULT_COMPONENT}"', f'"{version}"', f'"{recipe_blob}"',
-                    f'"{hashlib.sha256(artifact).hexdigest()}"', f'"{hashlib.sha256(recipe).hexdigest()}"',
-                    f"vector{ids(groups)}", f"vector{ids(devices)}", CLOCK)
+                return ["--move-call", f"{package}::deployment_manager::create_deployment_verified",
+                        f'"{component.DEFAULT_COMPONENT}"', f'"{version}"', f'"{recipe_blob}"',
+                        f'"{hashlib.sha256(artifact).hexdigest()}"', f'"{hashlib.sha256(recipe).hexdigest()}"',
+                        f"vector{ids(groups)}", f"vector{ids(devices)}", CLOCK]
+
+            def deploy(version, **targets):
+                result = transaction(*create_call(version, **targets))
                 return created(result, "::deployment_manager::DeploymentRecord")[0]
 
             components = root / "state" / "test-components"
@@ -271,6 +274,39 @@ def run(rpc_url, faucet_url):
                 assert all(r["runId"] == run_id for r in history())
                 print("PASS: JSON-RPC-era cursor migrated to a gRPC cursor without replaying applied work; "
                       "pre-enrollment and other-device deployments never ran")
+
+                # Exact legacy boundary inside one transaction: A (a group the device
+                # is not in yet) precedes the cursor's event B, and C follows it.
+                # After the device joins A's group, migrating must still skip A, not
+                # replay B, and apply C exactly once.
+                late_group = created(transaction("--move-call", f"{package}::device_group::create_group",
+                                                 '"late"', '"test"', CLOCK), "::device_group::DeviceGroup")[0]
+                batch = transaction(*create_call("6.0.0", groups=[late_group]),
+                                    *create_call("6.1.0", devices=[device]),
+                                    *create_call("6.2.0", devices=[device]))
+                digest = batch["digest"]
+                records = {}
+                for e in dm.rpc(rpc_url, "suix_queryEvents", [{"Transaction": digest}])["data"]:
+                    if e["type"].endswith("::deployment_manager::DeploymentCreated"):
+                        records[e["parsedJson"]["version"]] = (e["parsedJson"]["deployment_id"], e["id"])
+                skipped, boundary, later = (records[v] for v in ("6.0.0", "6.1.0", "6.2.0"))
+                assert boundary[1]["txDigest"] == digest and boundary[1]["eventSeq"] not in ("0", 0), boundary
+                state = journal()
+                state["cursor"] = boundary[1]
+                state["deployments"][boundary[0]] = {"status": 1, "reported": True, "error": None}
+                journal_path.write_text(json.dumps(state))
+                transaction("--move-call", f"{package}::device_group::add_device", f"@{late_group}", f"@{device}")
+                before_versions = [r["version"] for r in history()]
+                process = start()
+                wait_for(settled(later[0], 1), "event after the legacy boundary was not applied", process)
+                time.sleep(3)
+                stop(process)
+                process = None
+                versions = [r["version"] for r in history()]
+                assert versions == before_versions + ["6.2.0"], versions
+                assert not outcome(skipped[0]), "event before the legacy boundary was replayed"
+                print("PASS: legacy cursor resumes exactly after its event: an earlier, newly targeted deployment "
+                      "in the same transaction is not replayed and a later one is applied once")
             except BaseException:
                 log.flush()
                 print((root / "daemon.log").read_text()[-4000:])
