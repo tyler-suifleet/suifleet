@@ -83,7 +83,7 @@ let stage = "startup";
     stage = "deployment history"; let deployments = await sui.fetchDeploymentEvents(client, operator.toSuiAddress());
     assert.equal(deployments.length, 1); assert.equal(deployments[0].receiptsVerified, true); assert.deepEqual(deployments[0].statuses, {});
     const report = new Transaction();
-    report.moveCall({ target: `${packageId}::deployment_manager::report_status`, arguments: [report.object(deployments[0].deploymentId), report.object(caps.objects[0].objectId), report.pure.u8(1)] });
+    report.moveCall({ target: `${packageId}::deployment_manager::report_verified_status`, arguments: [report.object(deployments[0].deploymentId), report.object(registryId), report.object(caps.objects[0].objectId), report.pure.u8(1)] });
     stage = "report status"; await execute(report, deviceSigner);
     deployments = await sui.fetchDeploymentEvents(client, operator.toSuiAddress());
     assert.deepEqual(deployments[0].statuses, { [devices[0].objectId]: 1 }); assert.deepEqual(deployments[0].resolvedDeviceIds, [devices[0].objectId]);
