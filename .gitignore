@@ -11,7 +11,7 @@ tmp-swu/
 contracts/build/
 
 # ── Rust build artifacts ──────────────────────────────────────────────────────
-edge-client/target/
+suifleet-edge/target/
 
 # ── Next.js ───────────────────────────────────────────────────────────────────
 dapp/.next/
@@ -27,3 +27,7 @@ dapp/.env.local
 .idea/
 .vscode/
 *.swp
+
+# Local deployment journals and TypeScript cache
+*.tsbuildinfo
+.suifleet-state/

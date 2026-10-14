@@ -32,7 +32,7 @@ publish-contracts:
 	$(RUN) bash scripts/redeploy.sh
 
 dapp-install:
-	$(RUN) bash -c "cd dapp && pnpm install"
+	$(RUN) bash -c "cd dapp && pnpm install --frozen-lockfile"
 
 dapp-dev:
 	$(RUN) bash -c "fuser -k 3000/tcp 2>/dev/null; sleep 1; cd dapp && pnpm dev --hostname 0.0.0.0"
@@ -41,7 +41,27 @@ dapp-build:
 	$(RUN) bash -c "cd dapp && pnpm build"
 
 edge-build:
-	$(RUN) bash -c "cd suifleet-edge && cargo build --release"
+	$(RUN) bash -c "cd suifleet-edge && cargo build --locked --release"
 
 edge-test:
-	$(RUN) bash -c "cd suifleet-edge && cargo test"
+	$(RUN) bash -c "cd suifleet-edge && cargo test --locked"
+
+.PHONY: test-ota dapp-typecheck
+
+test-ota:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml
+	$(RUN) python3 scripts/test_ota.py
+
+dapp-typecheck:
+	$(RUN) bash -c "cd dapp && pnpm typecheck"
+
+.PHONY: check
+
+# Sequential recipe: cross-layer checks must not race over shared build artifacts.
+check:
+	$(MAKE) test-contracts
+	$(MAKE) edge-test
+	$(MAKE) test-ota
+	$(MAKE) dapp-typecheck
+	$(MAKE) dapp-build
+	git diff --check

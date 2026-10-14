@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     build-essential \
     pkg-config \
+    python3 \
     libssl-dev \
     ca-certificates \
     xz-utils \
