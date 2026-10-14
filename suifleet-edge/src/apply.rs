@@ -12,7 +12,14 @@ impl ApplyRunner {
     pub fn new(config: ApplyConfig) -> Self {
         Self { config }
     }
-    pub async fn apply(&self, artifact: &Path, install: Option<&str>) -> anyhow::Result<()> {
+    /// `request_id` names the firmware-helper request; it must be stable for
+    /// the deployment so a late helper result can still be collected.
+    pub async fn apply(
+        &self,
+        artifact: &Path,
+        install: Option<&str>,
+        request_id: &str,
+    ) -> anyhow::Result<()> {
         let workdir = artifact
             .parent()
             .ok_or_else(|| anyhow::anyhow!("artifact has no directory"))?;
@@ -43,7 +50,8 @@ impl ApplyRunner {
                 run_bounded(cmd, workdir, timeout, self.config.max_memory_bytes).await
             }
             ApplyMode::PrivilegedHelper => {
-                crate::firmware::submit(&self.config.firmware_spool, artifact, timeout).await
+                crate::firmware::submit(&self.config.firmware_spool, request_id, artifact, timeout)
+                    .await
             }
         }
     }
@@ -207,7 +215,7 @@ mod tests {
     async fn propagates_apply_failure() {
         let (_dir, artifact) = workdir("false");
         let error = runner("/bin/false", false)
-            .apply(&artifact, None)
+            .apply(&artifact, None, "test")
             .await
             .unwrap_err();
         assert!(error.to_string().contains("exit code 1"), "{error}");
@@ -217,7 +225,7 @@ mod tests {
     async fn times_out_hung_apply() {
         let (_dir, artifact) = workdir("hung");
         let error = runner("/bin/true", true)
-            .apply(&artifact, Some("exec sleep 10"))
+            .apply(&artifact, Some("exec sleep 10"), "test")
             .await
             .unwrap_err();
         assert!(error.to_string().contains("timed out"), "{error}");
@@ -229,7 +237,7 @@ mod tests {
         let marker = dir.join("survivor");
         let script = format!("(sleep 2; touch {}) & exec sleep 10", marker.display());
         assert!(runner("/bin/true", true)
-            .apply(&artifact, Some(&script))
+            .apply(&artifact, Some(&script), "test")
             .await
             .is_err());
         tokio::time::sleep(Duration::from_secs(3)).await;
@@ -245,7 +253,7 @@ mod tests {
         let updater = dir.join("updater");
         std::fs::write(&updater, "#!/bin/sh\nexit 0\n").unwrap(); // mode 0644: not executable
         let error = runner(updater.to_str().unwrap(), false)
-            .apply(&artifact, None)
+            .apply(&artifact, None, "test")
             .await
             .unwrap_err();
         assert!(
@@ -259,7 +267,7 @@ mod tests {
         let (_dir, artifact) = workdir("denied");
         // An unprivileged updater cannot change kernel settings; the denial must surface.
         let error = runner("/bin/true", true)
-            .apply(&artifact, Some("echo suifleet > /proc/sys/kernel/hostname"))
+            .apply(&artifact, Some("echo suifleet > /proc/sys/kernel/hostname"), "test")
             .await
             .unwrap_err();
         assert!(error.to_string().contains("exit code"), "{error}");
@@ -269,7 +277,7 @@ mod tests {
     async fn exit_126_is_reported_as_privilege_failure() {
         let (_dir, artifact) = workdir("exit126");
         let error = runner("/bin/true", true)
-            .apply(&artifact, Some("exit 126"))
+            .apply(&artifact, Some("exit 126"), "test")
             .await
             .unwrap_err();
         assert!(
@@ -288,7 +296,7 @@ mod tests {
             out.display()
         );
         runner("/bin/true", true)
-            .apply(&artifact, Some(&script))
+            .apply(&artifact, Some(&script), "test")
             .await
             .unwrap();
         let seen = std::fs::read_to_string(out).unwrap();

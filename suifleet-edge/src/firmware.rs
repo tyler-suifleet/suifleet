@@ -14,12 +14,28 @@
 //!
 //! A compromised daemon can therefore only submit an image to the configured
 //! firmware updater, whose own image signature checks remain the final gate.
+//!
+//! Claiming and withdrawal race on one directory entry, so exactly one wins:
+//!
+//! - the helper locks `<id>.json` (flock) and renames it to `<id>.claimed`,
+//!   holding the lock until the result is written;
+//! - the daemon, once its wait expires, withdraws by unlinking `<id>.json`.
+//!   Success means the updater never started, so Failed is accurate. Failure
+//!   means the helper claimed it: the daemon keeps waiting while the lock is
+//!   held, and if the helper died mid-update the outcome is [`Indeterminate`],
+//!   never Failed.
+//!
+//! Request IDs derive from the deployment, so a result that arrives after the
+//! daemon stopped waiting (or restarted) is still collected and reported. A
+//! claim left by a helper that died (power loss, reboot) becomes an
+//! "interrupted" result: the updater may or may not have finished.
 
 use crate::config::FirmwareHelperConfig;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     io::Read,
+    os::fd::AsRawFd,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -40,13 +56,33 @@ struct Outcome {
     id: String,
     ok: bool,
     message: String,
+    /// The helper died while the updater ran; `ok` is meaningless.
+    #[serde(default)]
+    interrupted: bool,
 }
+
+/// The privileged update may have run, may still be running, or may have
+/// been interrupted: it must be neither reported as Failed nor re-applied.
+#[derive(Debug)]
+pub struct Indeterminate(pub String);
+
+impl std::fmt::Display for Indeterminate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+impl std::error::Error for Indeterminate {}
 
 fn requests(spool: &Path) -> PathBuf {
     spool.join("requests")
 }
 fn results(spool: &Path) -> PathBuf {
     spool.join("results")
+}
+
+/// Spool request ID for a deployment: stable across daemon restarts.
+pub fn request_id(deployment_id: &str) -> String {
+    hex::encode(Sha256::digest(deployment_id.as_bytes()))
 }
 
 fn valid_id(id: &str) -> bool {
@@ -77,49 +113,115 @@ fn publish(path: &Path, contents: &[u8]) -> anyhow::Result<()> {
 }
 
 /// Daemon side: submit a verified artifact and wait for the helper's outcome.
-pub async fn submit(spool: &Path, artifact: &Path, timeout: Duration) -> anyhow::Result<()> {
+///
+/// `timeout` bounds only the wait for the helper to claim the request. Once
+/// claimed, the helper's own timeout bounds the updater and this waits for it.
+pub async fn submit(
+    spool: &Path,
+    id: &str,
+    artifact: &Path,
+    timeout: Duration,
+) -> anyhow::Result<()> {
+    submit_within(spool, id, artifact, timeout + HELPER_START_GRACE).await
+}
+
+async fn submit_within(
+    spool: &Path,
+    id: &str,
+    artifact: &Path,
+    claim_within: Duration,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(valid_id(id), "invalid firmware request id");
     let (requests, results) = (requests(spool), results(spool));
     std::fs::create_dir_all(&requests)?;
     std::fs::create_dir_all(&results)?;
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)?
-        .as_nanos();
-    let id = format!("{:032x}-{}", nonce, std::process::id());
     let staged = requests.join(format!("{id}.artifact"));
     let request = requests.join(format!("{id}.json"));
-    let result = results.join(format!("{id}.json"));
+    let claimed = requests.join(format!("{id}.claimed"));
     std::fs::copy(artifact, &staged)?;
     let sha256 = sha256_file(&staged)?;
     publish(
         &request,
         &serde_json::to_vec(&Request {
-            id: id.clone(),
+            id: id.to_owned(),
             sha256,
         })?,
     )?;
-    let deadline = tokio::time::Instant::now() + timeout + HELPER_START_GRACE;
+    let deadline = tokio::time::Instant::now() + claim_within;
     loop {
-        if let Ok(raw) = std::fs::read(&result) {
-            let _ = std::fs::remove_file(&result);
-            let outcome: Outcome = serde_json::from_slice(&raw)?;
-            anyhow::ensure!(
-                outcome.id == id,
-                "firmware helper returned a mismatched result"
-            );
-            anyhow::ensure!(outcome.ok, "firmware helper: {}", outcome.message);
-            return Ok(());
+        if let Some(outcome) = collect(spool, id)? {
+            return outcome;
         }
         if tokio::time::Instant::now() >= deadline {
-            // Withdraw the request so a late helper cannot apply it unreported.
-            let _ = std::fs::remove_file(&request);
-            let _ = std::fs::remove_file(&staged);
-            anyhow::bail!(
-                "firmware helper did not respond within {}s; is suifleet-firmware.path enabled?",
-                (timeout + HELPER_START_GRACE).as_secs()
-            );
+            match std::fs::remove_file(&request) {
+                Ok(()) => {
+                    // Withdrawn before any claim: the updater never ran.
+                    let _ = std::fs::remove_file(&staged);
+                    anyhow::bail!(
+                        "firmware helper did not respond within {}s; is suifleet-firmware.path enabled?",
+                        claim_within.as_secs()
+                    );
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e.into()),
+            }
+            if !helper_active(&claimed) {
+                // The helper writes its result before releasing the claim.
+                return match collect(spool, id)? {
+                    Some(outcome) => outcome,
+                    None => Err(Indeterminate(format!(
+                        "firmware request {id} was claimed but the helper stopped without a result; \
+                         the update may have been applied"
+                    ))
+                    .into()),
+                };
+            }
         }
         tokio::time::sleep(POLL).await;
     }
+}
+
+/// Read the helper's result for `id`, if it has written one. The result stays
+/// in the spool until [`acknowledge`], so a crash before the outcome is
+/// journaled does not lose it.
+pub fn collect(spool: &Path, id: &str) -> anyhow::Result<Option<anyhow::Result<()>>> {
+    let raw = match std::fs::read(results(spool).join(format!("{id}.json"))) {
+        Ok(raw) => raw,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e.into()),
+    };
+    let outcome: Outcome = serde_json::from_slice(&raw)?;
+    anyhow::ensure!(
+        outcome.id == id,
+        "firmware helper returned a mismatched result"
+    );
+    Ok(Some(if outcome.interrupted {
+        Err(Indeterminate(format!("firmware helper: {}", outcome.message)).into())
+    } else if outcome.ok {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!("firmware helper: {}", outcome.message))
+    }))
+}
+
+/// Drop a collected result once its outcome is durably journaled.
+pub fn acknowledge(spool: &Path, id: &str) {
+    let _ = std::fs::remove_file(results(spool).join(format!("{id}.json")));
+}
+
+/// Whether a helper still holds the claim on a request (it locks it for the
+/// whole update). A missing claim file means the helper already finished.
+fn helper_active(claimed: &Path) -> bool {
+    match std::fs::File::open(claimed) {
+        Ok(file) => !try_lock(&file, libc::LOCK_SH),
+        Err(_) => false,
+    }
+}
+
+/// Non-blocking flock; false if another open file description holds a
+/// conflicting lock. The lock is released when `file` is closed.
+fn try_lock(file: &std::fs::File, mode: libc::c_int) -> bool {
+    unsafe { libc::flock(file.as_raw_fd(), mode | libc::LOCK_NB) == 0 }
 }
 
 /// Root side (`suifleet --firmware-helper CONFIG`): process every pending request once.
@@ -145,54 +247,97 @@ pub async fn run_helper(config: &FirmwareHelperConfig) -> anyhow::Result<usize> 
     // Results are handed back to whoever owns the spool (the daemon user).
     let (uid, gid) = spool.owner()?;
     create_private_dir(&config.work_dir)?;
-    let mut pending: Vec<String> = requests
-        .names()?
-        .into_iter()
-        .filter(|name| name.ends_with(".json"))
-        .collect();
+    let names = requests.names()?;
+    let respond = |stem: &str, outcome: &Outcome| -> anyhow::Result<()> {
+        let temporary = format!("{stem}.tmp");
+        let mut file = results.create_exclusive(&temporary)?;
+        std::io::Write::write_all(&mut file, &serde_json::to_vec(outcome)?)?;
+        fchown(&file, uid, gid)?;
+        file.sync_all()?;
+        results.rename(&temporary, &format!("{stem}.json"))?;
+        tracing::info!(id = %stem, ok = outcome.ok, interrupted = outcome.interrupted,
+            message = %outcome.message, "firmware request processed");
+        Ok(())
+    };
+    let mut processed = 0;
+    // A claim nobody holds was left by a helper that died mid-update.
+    for name in names.iter().filter(|name| name.ends_with(".claimed")) {
+        let stem = name.trim_end_matches(".claimed");
+        let abandoned = match requests.open_regular(name) {
+            Ok(file) => try_lock(&file, libc::LOCK_EX),
+            Err(_) => true,
+        };
+        if !abandoned {
+            continue; // Another helper instance is still applying it.
+        }
+        if valid_id(stem) {
+            respond(
+                stem,
+                &Outcome {
+                    id: stem.to_owned(),
+                    ok: false,
+                    message: "interrupted while the updater was running; outcome unknown".into(),
+                    interrupted: true,
+                },
+            )?;
+        }
+        let _ = requests.remove(name);
+        let _ = requests.remove(&format!("{stem}.artifact"));
+        processed += 1;
+    }
+    let mut pending: Vec<&String> = names.iter().filter(|name| name.ends_with(".json")).collect();
     pending.sort();
-    for name in &pending {
+    for name in pending {
         let stem = name.trim_end_matches(".json").to_owned();
         let staged = format!("{stem}.artifact");
-        let outcome = match process(config, &requests, &stem, name, &staged).await {
-            Ok(()) => Outcome {
-                id: stem.clone(),
-                ok: true,
-                message: "applied".into(),
+        let claim = format!("{stem}.claimed");
+        // Lock, then claim by rename: losing the rename means the daemon withdrew it.
+        let request = match requests.open_regular(name) {
+            Ok(file) if !try_lock(&file, libc::LOCK_EX) => continue,
+            Ok(file) => match requests.rename(name, &claim) {
+                Ok(()) => Ok(file),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => return Err(anyhow::anyhow!("claim {name}: {e}")),
             },
-            Err(error) => Outcome {
-                id: stem.clone(),
-                ok: false,
-                message: error.to_string(),
-            },
+            Err(e) => Err(anyhow::anyhow!("request rejected: {e}")),
         };
-        // Always consume the request, even if invalid, so the path unit settles.
-        let _ = requests.remove(name);
-        let _ = requests.remove(&staged);
+        let (result, _claim_lock) = match request {
+            Ok(mut file) => (
+                process(config, &requests, &stem, &mut file, &staged).await,
+                Some(file),
+            ),
+            Err(error) => (Err(error), None),
+        };
+        let outcome = Outcome {
+            id: stem.clone(),
+            ok: result.is_ok(),
+            message: match &result {
+                Ok(()) => "applied".into(),
+                Err(error) => error.to_string(),
+            },
+            interrupted: false,
+        };
+        // Answer while `_claim_lock` still holds the claim, then always consume
+        // the request, even if invalid, so the path unit settles.
         if valid_id(&stem) {
-            let temporary = format!("{stem}.tmp");
-            let mut file = results.create_exclusive(&temporary)?;
-            std::io::Write::write_all(&mut file, &serde_json::to_vec(&outcome)?)?;
-            fchown(&file, uid, gid)?;
-            file.sync_all()?;
-            results.rename(&temporary, &format!("{stem}.json"))?;
+            respond(&stem, &outcome)?;
         }
-        tracing::info!(id = %stem, ok = outcome.ok, message = %outcome.message, "firmware request processed");
+        let _ = requests.remove(name);
+        let _ = requests.remove(&claim);
+        let _ = requests.remove(&staged);
+        processed += 1;
     }
-    Ok(pending.len())
+    Ok(processed)
 }
 
 async fn process(
     config: &FirmwareHelperConfig,
     requests: &Dir,
     id: &str,
-    request: &str,
+    file: &mut std::fs::File,
     staged: &str,
 ) -> anyhow::Result<()> {
     anyhow::ensure!(valid_id(id), "invalid request id");
-    let mut file = requests
-        .open_regular(request)
-        .map_err(|e| anyhow::anyhow!("request rejected: {e}"))?;
     anyhow::ensure!(
         file.metadata()?.len() <= MAX_REQUEST_BYTES,
         "request is too large"
@@ -406,6 +551,8 @@ mod tests {
         }
     }
 
+    const ID: &str = "0123abcd";
+
     /// Run the helper until it has processed one request (as the path unit would).
     async fn helper_once(config: &FirmwareHelperConfig) {
         for _ in 0..200 {
@@ -426,7 +573,7 @@ mod tests {
     async fn verified_request_runs_configured_command() {
         let f = fixture("ok", copy_command());
         let (submitted, ()) = tokio::join!(
-            submit(&f.config.spool_dir, &f.artifact, Duration::from_secs(2)),
+            submit(&f.config.spool_dir, ID, &f.artifact, Duration::from_secs(2)),
             helper_once(&f.config)
         );
         submitted.unwrap();
@@ -445,7 +592,7 @@ mod tests {
     async fn updater_failure_is_reported_not_applied() {
         let f = fixture("fail", "/bin/false");
         let (submitted, ()) = tokio::join!(
-            submit(&f.config.spool_dir, &f.artifact, Duration::from_secs(2)),
+            submit(&f.config.spool_dir, ID, &f.artifact, Duration::from_secs(2)),
             helper_once(&f.config)
         );
         let error = submitted.unwrap_err().to_string();
@@ -484,7 +631,7 @@ mod tests {
             helper_once(&f.config).await;
         };
         let (submitted, ()) =
-            tokio::join!(submit(&spool, &f.artifact, Duration::from_secs(2)), tamper);
+            tokio::join!(submit(&spool, ID, &f.artifact, Duration::from_secs(2)), tamper);
         let error = submitted.unwrap_err().to_string();
         assert!(error.contains("SHA-256 mismatch"), "{error}");
         assert!(!f.marker.exists(), "updater ran on a tampered artifact");
@@ -579,6 +726,128 @@ mod tests {
         let _ = std::fs::remove_dir_all(f.root);
     }
 
+    fn entries(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .map(|d| {
+                d.filter_map(|e| e.ok()?.file_name().into_string().ok())
+                    .collect()
+            })
+            .unwrap_or_default();
+        names.sort();
+        names
+    }
+
+    #[tokio::test]
+    async fn claimed_update_outliving_the_wait_is_awaited_not_failed() {
+        // The review reproduction: the daemon's wait expires while the helper,
+        // with its own longer timeout, is still running the updater.
+        let f = fixture("inflight", r#"/bin/sh -c 'sleep 1; cat "$0" > {marker}'"#);
+        let started = std::time::Instant::now();
+        let (submitted, ()) = tokio::join!(
+            submit_within(&f.config.spool_dir, ID, &f.artifact, Duration::from_millis(200)),
+            helper_once(&f.config)
+        );
+        submitted.unwrap();
+        assert!(started.elapsed() >= Duration::from_secs(1));
+        assert_eq!(std::fs::read(&f.marker).unwrap(), b"firmware image");
+        assert!(entries(&requests(&f.config.spool_dir)).is_empty());
+        let _ = std::fs::remove_dir_all(f.root);
+    }
+
+    #[tokio::test]
+    async fn unclaimed_request_is_withdrawn_and_never_applied() {
+        // Queue delay: the helper only gets to the request after the wait.
+        let f = fixture("late", copy_command());
+        let error = submit_within(&f.config.spool_dir, ID, &f.artifact, Duration::from_millis(200))
+            .await
+            .unwrap_err();
+        assert!(error.downcast_ref::<Indeterminate>().is_none(), "{error:#}");
+        assert!(error.to_string().contains("did not respond"), "{error}");
+        assert_eq!(run_helper(&f.config).await.unwrap(), 0);
+        assert!(!f.marker.exists(), "a withdrawn request must never run");
+        assert!(entries(&requests(&f.config.spool_dir)).is_empty());
+        let _ = std::fs::remove_dir_all(f.root);
+    }
+
+    #[tokio::test]
+    async fn helper_dying_mid_update_is_indeterminate_then_interrupted() {
+        let f = fixture("died", copy_command());
+        let spool = f.config.spool_dir.clone();
+        // A helper that claims the request and dies (power loss): the claim
+        // exists but nobody holds its lock and no result is written.
+        let die_after_claim = async {
+            let request = requests(&spool).join(format!("{ID}.json"));
+            while !request.exists() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+            std::fs::rename(&request, requests(&spool).join(format!("{ID}.claimed"))).unwrap();
+        };
+        let (submitted, ()) = tokio::join!(
+            submit_within(&spool, ID, &f.artifact, Duration::from_millis(200)),
+            die_after_claim
+        );
+        let error = submitted.unwrap_err();
+        assert!(error.downcast_ref::<Indeterminate>().is_some(), "{error:#}");
+        assert!(collect(&spool, ID).unwrap().is_none());
+        // The next helper run turns the abandoned claim into an interrupted
+        // result without re-running the updater.
+        assert_eq!(run_helper(&f.config).await.unwrap(), 1);
+        assert!(!f.marker.exists());
+        assert!(entries(&requests(&spool)).is_empty());
+        let late = collect(&spool, ID).unwrap().unwrap().unwrap_err();
+        assert!(late.downcast_ref::<Indeterminate>().is_some(), "{late:#}");
+        acknowledge(&spool, ID);
+        assert!(collect(&spool, ID).unwrap().is_none());
+        let _ = std::fs::remove_dir_all(f.root);
+    }
+
+    #[tokio::test]
+    async fn live_claim_is_not_swept_as_abandoned() {
+        let f = fixture("live", "/bin/true");
+        stage_request(&f.config.spool_dir, ID);
+        let requests = requests(&f.config.spool_dir);
+        let claimed = requests.join(format!("{ID}.claimed"));
+        std::fs::rename(requests.join(format!("{ID}.json")), &claimed).unwrap();
+        let holder = std::fs::File::open(&claimed).unwrap();
+        assert!(try_lock(&holder, libc::LOCK_EX));
+        assert!(helper_active(&claimed));
+        assert_eq!(run_helper(&f.config).await.unwrap(), 0);
+        assert!(claimed.exists(), "an active claim must be left alone");
+        assert!(collect(&f.config.spool_dir, ID).unwrap().is_none());
+        drop(holder);
+        // Children forked by concurrent tests can share the lock until they exec.
+        let mut released = false;
+        for _ in 0..100 {
+            if !helper_active(&claimed) {
+                released = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(released, "the claim lock must be released with its holder");
+        let _ = std::fs::remove_dir_all(f.root);
+    }
+
+    #[tokio::test]
+    async fn late_result_is_collected_until_acknowledged() {
+        let f = fixture("collect", "/bin/true");
+        stage_request(&f.config.spool_dir, ID);
+        assert_eq!(run_helper(&f.config).await.unwrap(), 1);
+        assert!(collect(&f.config.spool_dir, ID).unwrap().unwrap().is_ok());
+        assert!(collect(&f.config.spool_dir, ID).unwrap().is_some(), "kept until acknowledged");
+        acknowledge(&f.config.spool_dir, ID);
+        assert!(collect(&f.config.spool_dir, ID).unwrap().is_none());
+        let _ = std::fs::remove_dir_all(f.root);
+    }
+
+    #[test]
+    fn request_ids_are_stable_and_valid() {
+        let id = request_id("0xabc");
+        assert_eq!(id, request_id("0xabc"));
+        assert_ne!(id, request_id("0xabd"));
+        assert!(valid_id(&id));
+    }
+
     #[tokio::test]
     async fn missing_helper_fails_and_withdraws_request() {
         let f = fixture("absent", copy_command());
@@ -586,7 +855,7 @@ mod tests {
         // Zero updater timeout: only the start grace applies; shorten it for the test.
         let error = tokio::time::timeout(
             Duration::from_secs(40),
-            submit(&f.config.spool_dir, &f.artifact, Duration::ZERO),
+            submit(&f.config.spool_dir, ID, &f.artifact, Duration::ZERO),
         )
         .await
         .unwrap()

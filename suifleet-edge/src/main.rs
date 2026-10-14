@@ -108,6 +108,9 @@ async fn poll(
         journal.state.initialized = true;
         journal.save()?;
     }
+    if cfg.apply.mode == config::ApplyMode::PrivilegedHelper {
+        collect_firmware_results(cfg, journal)?;
+    }
     // Reports remain queued across network failures and daemon restarts.
     let pending: Vec<_> = journal
         .state
@@ -183,10 +186,13 @@ async fn poll(
                     .deployments
                     .get_mut(&event.deployment_id)
                     .unwrap();
-                outcome.status = Some(if result.is_ok() { 1 } else { 2 });
-                outcome.error = result.err().map(|error| format!("{error:#}"));
+                record_result(outcome, result);
                 info!(deployment = event.deployment_id, status = outcome.status, error = ?outcome.error, "Deployment finished");
                 journal.save()?;
+                firmware::acknowledge(
+                    &cfg.apply.firmware_spool,
+                    &firmware::request_id(&event.deployment_id),
+                );
                 let _ = std::fs::remove_file(&artifact);
             }
             journal.state.cursor = Some(cursor);
@@ -228,8 +234,48 @@ async fn handle_deployment(
         actual_hash
     );
     runner
-        .apply(artifact, recipe.lifecycle.install.as_deref())
+        .apply(
+            artifact,
+            recipe.lifecycle.install.as_deref(),
+            &firmware::request_id(&event.deployment_id),
+        )
         .await
+}
+
+/// Applied/Failed, or no status when a privileged update's outcome is
+/// unknown: like a crash mid-update, that is neither reported nor re-applied.
+fn record_result(outcome: &mut Outcome, result: anyhow::Result<()>) {
+    outcome.status = match &result {
+        Ok(()) => Some(1),
+        Err(error) if error.downcast_ref::<firmware::Indeterminate>().is_some() => None,
+        Err(_) => Some(2),
+    };
+    outcome.error = result.err().map(|error| format!("{error:#}"));
+}
+
+/// Pick up firmware-helper results for deployments still without a status:
+/// updates that outlived the daemon's wait or a daemon restart.
+fn collect_firmware_results(cfg: &Config, journal: &mut Journal) -> anyhow::Result<()> {
+    let spool = &cfg.apply.firmware_spool;
+    let waiting: Vec<String> = journal
+        .state
+        .deployments
+        .iter()
+        .filter(|(_, outcome)| outcome.status.is_none())
+        .map(|(id, _)| id.clone())
+        .collect();
+    for id in waiting {
+        let request = firmware::request_id(&id);
+        let Some(result) = firmware::collect(spool, &request)? else {
+            continue;
+        };
+        let outcome = journal.state.deployments.get_mut(&id).unwrap();
+        record_result(outcome, result);
+        info!(deployment = id, status = outcome.status, error = ?outcome.error, "Late firmware result collected");
+        journal.save()?;
+        firmware::acknowledge(spool, &request);
+    }
+    Ok(())
 }
 
 async fn shutdown_signal() {
