@@ -18,13 +18,13 @@ Do not add model names as authors, committers, `Co-authored-by` trailers, sign-o
 
 SuiFleet targets functional AWS Greengrass OTA/fleet-management parity using Sui Move contracts, Walrus storage, a Next.js wallet app and a Rust Linux daemon. It currently implements a locally tested one-shot OTA foundation, not full Greengrass parity or a production release.
 
-Read [the parity audit](docs/GREENGRASS_PARITY_AUDIT.md), [validation evidence](docs/VALIDATION.md), [the operational runbook](docs/OPERATIONS.md) and [tracking workflow](docs/ISSUE_TRACKING.md) as relevant. Actual code and current test results take precedence over historical checklists. The [capability-to-ticket map](docs/GREENGRASS_TICKET_COVERAGE.md) tracks the audited scope; [Raspberry Pi 3 Model B+ acceptance](docs/RASPBERRY_PI_TEST_PLAN.md) requires a BitBake-built bootable image with the client included, not only SSH deployment, and is specified in SF-029/030/031 and has not yet been implemented or run.
+Read [the parity audit](docs/GREENGRASS_PARITY_AUDIT.md), [validation evidence](docs/VALIDATION.md), [the operational runbook](docs/OPERATIONS.md) and [tracking workflow](docs/ISSUE_TRACKING.md) as relevant. Actual code and current test results take precedence over historical checklists. The [capability-to-ticket map](docs/GREENGRASS_TICKET_COVERAGE.md) tracks the audited scope; [Raspberry Pi 3 Model B+ acceptance](docs/RASPBERRY_PI_TEST_PLAN.md) requires a BitBake-built bootable image with the client included, not only SSH deployment, and is specified in SF-029/030/031. SF-030 supplies the tested component/BitBake updater recipe; physical image and Pi acceptance remain SF-029/031.
 
 Critical known gaps:
 
-- Both clients use deprecated Sui JSON-RPC. Migrate wallet library and TypeScript SDK together; migrate the daemon reader, transaction builder and executor too.
-- Existing types keep their introduction-package origin; types introduced by later upgrades have later origins. The code still wrongly uses the first package ID for every key type, including newly added `RecipeDigestKey` and `DeviceAddressKey`.
-- Older Sui package versions remain callable. New signer/target checks alone do not prove security after upgrading an existing deployment. Old entry points must be unable to modify authoritative new state.
+- The frontend uses pinned Sui SDK 2.36.0 and dApp Kit React 2.1.40 with gRPC-Web; see [frontend compatibility and wallet acceptance](docs/FRONTEND_CLIENT.md). The daemon and publishing resolver still use deprecated JSON-RPC; migrate the daemon reader, transaction builder and executor in SF-004. Real extension-wallet acceptance remains required for SF-003.
+- Existing types keep their introduction-package origin; types introduced by later upgrades have later origins. The implemented deployment manifest records each origin, including `RecipeDigestKey`, `DeviceAddressKey` and authoritative receipts. Preserve this boundary during client/API changes.
+- Older Sui package versions remain callable. SF-001 introduced isolated authoritative receipts and local-chain old-package attack/migration tests; public-network upgrade acceptance remains SF-010. Never trust legacy StatusesKey or assume an old package is disabled.
 - Current unit tests and the HTTP simulator do not establish real chain upgrade compatibility, live wallet behavior, Walrus certification, Yocto builds or hardware OTA health.
 
 ## Infrastructure and ownership
@@ -88,7 +88,7 @@ Do not replace tests with type casts, ignored failures or mocked success. A retu
 
 ## Keeping clients and contracts synchronized
 
-- Maintain one versioned deployment manifest per network with chain identity, call package ID, per-type origins, shared object IDs, protocol/schema versions and supported client ranges. This manifest is planned, not currently implemented.
+- Maintain one versioned deployment manifest per network with chain identity, call package ID, per-type origins, shared object IDs, protocol/schema versions and supported client ranges. This manifest is implemented; see [DEPLOYMENT_MANIFEST.md](docs/DEPLOYMENT_MANIFEST.md).
 - Generate or centrally define Move calls/event/recipe schemas and test both clients against actual compiled interfaces.
 - Preserve existing public function signatures, layouts and abilities for a compatible upgrade; use additive APIs and explicit migrations where needed.
 - Do not assume an initializer reruns, objects migrate automatically, or an old package is disabled.
