@@ -38,6 +38,20 @@ const hook = loader({
   confirmation = "success";
   const oldService = service.getServiceInfo;
   service.getServiceInfo = async () => { account = { ...goodAccount }; return oldService(); };
-  const before = signs; await assert.rejects(mutate({ transaction: {} }), /account changed/); assert.equal(signs, before);
+  assert.equal((await mutate({ transaction: {} })).digest, "test-digest", "same account rebuilt by wallet is valid");
+  account = {...goodAccount, chains:[`sui:${fixture.network}`, "sui:mainnet"]};
+  service.getServiceInfo = async () => { account = {...account, chains:[...account.chains].reverse()}; return oldService(); };
+  assert.equal((await mutate({ transaction: {} })).digest, "test-digest", "chain order is not an account change");
+  for (const [change, expected] of [
+    [() => {account={...account,address:"0x2"};}, /account changed/],
+    [() => {account.address="0x2";}, /account changed/],
+    [() => {account.chains.push("sui:mainnet");}, /account changed/],
+    [() => {account=null;}, /account changed/],
+    [() => {network="mainnet";}, /network changed/],
+  ]) {
+    account = {...goodAccount, chains:[...goodAccount.chains]}; network=fixture.network;
+    service.getServiceInfo = async () => {change();return oldService();};
+    const before=signs; await assert.rejects(mutate({transaction:{}}), expected); assert.equal(signs,before);
+  }
   console.log("PASS: wallet hook network/account checks, stale chain, disconnect/rejection and wallet/node execution failures");
 })().catch((error) => { console.error(error); process.exitCode = 1; });
