@@ -1,5 +1,6 @@
 mod apply;
 mod config;
+mod firmware;
 mod identity;
 mod recipe;
 mod state;
@@ -31,16 +32,22 @@ async fn main() -> anyhow::Result<()> {
         println!("{}", identity::provision(Path::new(&args[2]))?);
         return Ok(());
     }
-    anyhow::ensure!(
-        args.len() == 1,
-        "usage: suifleet [--provision KEY_PATH | --derive-address KEY_PATH]"
-    );
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "suifleet=info".into()),
         )
         .init();
+    if args.len() == 3 && args[1] == "--firmware-helper" {
+        // Root-owned, path-activated: the only privileged operation.
+        let helper = config::FirmwareHelperConfig::load(Path::new(&args[2]))?;
+        firmware::run_helper(&helper).await?;
+        return Ok(());
+    }
+    anyhow::ensure!(
+        args.len() == 1,
+        "usage: suifleet [--provision KEY_PATH | --derive-address KEY_PATH | --firmware-helper CONFIG]"
+    );
     let path = std::env::var("EDGE_CONFIG")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("/etc/suifleet/config.toml"));
