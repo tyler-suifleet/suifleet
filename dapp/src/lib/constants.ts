@@ -1,21 +1,22 @@
-// Populated by scripts/redeploy.sh into .env.local
-export const PACKAGE_ID = process.env.NEXT_PUBLIC_PACKAGE_ID ?? "";
-// Original (first-ever) package ID — SUI preserves type origins across upgrades,
-// so object types and event types always use this ID even after upgrades.
-export const ORIGINAL_PACKAGE_ID = process.env.NEXT_PUBLIC_ORIGINAL_PACKAGE_ID || PACKAGE_ID;
-export const REGISTRY_ID = process.env.NEXT_PUBLIC_REGISTRY_ID ?? "";
+import { MANIFEST, moveType } from "./deployment-manifest";
 
-export const NETWORK = (process.env.NEXT_PUBLIC_NETWORK ?? "testnet") as "devnet" | "testnet" | "mainnet";
+export const PACKAGE_ID = MANIFEST?.call_package_id ?? "";
+export const REGISTRY_ID = MANIFEST?.shared_objects.registry.id ?? "";
+export const NETWORK = MANIFEST?.network ?? "testnet";
+export const RPC_URL = MANIFEST?.rpc_url;
+export const WALRUS_PUBLISHER = MANIFEST?.walrus.publisher_url ?? "";
+export const WALRUS_AGGREGATOR = MANIFEST?.walrus.aggregator_url ?? "";
+export const DEVICE_TYPE = MANIFEST ? moveType("device_registry::Device") : "";
+export const DEVICE_GROUP_TYPE = MANIFEST ? moveType("device_group::DeviceGroup") : "";
+export const DEPLOYMENT_CREATED_EVENT = MANIFEST ? moveType("deployment_manager::DeploymentCreated") : "";
+export const STATUS_UPDATED_EVENT = MANIFEST ? moveType("deployment_manager::DeviceStatusUpdated") : "";
+// Storage period for new uploads, in Walrus epochs; devices cannot download after it ends.
+export const WALRUS_EPOCHS = Math.max(1, Number(process.env.NEXT_PUBLIC_WALRUS_EPOCHS ?? 5) || 5);
+// Optional per-upload storage budget in FROST (1 WAL = 1e9 FROST); exceeding it raises a warning.
+export const WALRUS_MAX_COST_FROST = process.env.NEXT_PUBLIC_WALRUS_MAX_COST_FROST
+  ? BigInt(process.env.NEXT_PUBLIC_WALRUS_MAX_COST_FROST)
+  : null;
 
-// Walrus endpoints
-export const WALRUS_PUBLISHER = "https://publisher.walrus-testnet.walrus.space";
-export const WALRUS_AGGREGATOR = "https://aggregator.walrus-testnet.walrus.space";
-
-// Type queries use ORIGINAL_PACKAGE_ID; function calls use PACKAGE_ID.
-export const DEVICE_TYPE = `${ORIGINAL_PACKAGE_ID}::device_registry::Device`;
-export const DEVICE_GROUP_TYPE = `${ORIGINAL_PACKAGE_ID}::device_group::DeviceGroup`;
-export const DEPLOYMENT_CREATED_EVENT = `${ORIGINAL_PACKAGE_ID}::deployment_manager::DeploymentCreated`;
-export const STATUS_UPDATED_EVENT = `${ORIGINAL_PACKAGE_ID}::deployment_manager::DeviceStatusUpdated`;
 
 export const STATUS_LABELS: Record<number, string> = {
   0: "Pending",

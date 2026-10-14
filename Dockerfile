@@ -1,7 +1,13 @@
-FROM ubuntu:22.04
+# Every toolchain input is pinned so local builds and CI test the same versions.
+# Bump these deliberately together with lockfiles and compatibility tests.
+FROM ubuntu:22.04@sha256:5ec03bb3441e8b0bf3b4f9cd4629a1ae763010dc3035bb8da3ae6cf026486401
 
 ARG SUI_VERSION=testnet-v1.71.1
+ARG SUI_SHA256=ca6bc791596d5def88500b653b5db718e72dd0d2b58039ad118f74ef9e6761a5
 ARG NODE_MAJOR=22
+ARG NODE_VERSION=22.22.2-1nodesource1
+ARG PNPM_VERSION=11.0.8
+ARG RUST_VERSION=1.87.0
 ARG USER_UID=1000
 ARG USER_GID=1000
 
@@ -21,15 +27,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # SUI CLI → /usr/local/bin (accessible to all users)
-RUN curl -fL \
+RUN curl -fL -o /tmp/sui.tgz \
     "https://github.com/MystenLabs/sui/releases/download/${SUI_VERSION}/sui-${SUI_VERSION}-ubuntu-x86_64.tgz" \
-    | tar -xz -C /usr/local/bin \
+    && echo "${SUI_SHA256}  /tmp/sui.tgz" | sha256sum -c - \
+    && tar -xzf /tmp/sui.tgz -C /usr/local/bin \
+    && rm /tmp/sui.tgz \
     && sui --version
 
 # Node.js + pnpm (global install, any user can run them)
 RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
-    && npm install -g pnpm \
+    && apt-get install -y --no-install-recommends "nodejs=${NODE_VERSION}" \
+    && npm install -g "pnpm@${PNPM_VERSION}" \
     && rm -rf /var/lib/apt/lists/* \
     && node --version && pnpm --version
 
@@ -55,7 +63,7 @@ ENV CARGO_HOME=/home/dev/.cargo \
 
 # Rust toolchain (installed into the dev user's home)
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-    | sh -s -- -y --default-toolchain 1.87.0 --profile minimal --component rust-src \
+    | sh -s -- -y --default-toolchain "${RUST_VERSION}" --profile minimal --component rust-src \
     && cargo --version
 
 WORKDIR /workspace

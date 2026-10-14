@@ -46,23 +46,62 @@ edge-build:
 edge-test:
 	$(RUN) bash -c "cd suifleet-edge && cargo test --locked"
 
-.PHONY: test-ota dapp-typecheck
+.PHONY: test-ota test-component dapp-typecheck
 
 test-ota:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml
 	$(RUN) python3 scripts/test_ota.py
 	$(RUN) python3 scripts/test_ota.py --firmware-helper
 
+# SF-030 harmless test component: fixture tests (system shell, plus busybox when
+# installed), then the real daemon applying it through suifleet-test-updater.
+test-component:
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_test_component.py'
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_component_ota.py
+
 dapp-typecheck:
+	$(MAKE) test-manifest
 	$(RUN) bash -c "cd dapp && pnpm typecheck"
 
-.PHONY: check tracking-plan test-tracking
+.PHONY: check check-interfaces test-interfaces toolchain-versions ci tracking-plan test-tracking
+
+# Client Move calls/types must exist in the compiled contracts with matching arity.
+check-interfaces:
+	$(RUN) python3 scripts/check_contract_interfaces.py
+
+# Offline regression tests for the drift gate itself (synthetic summaries).
+test-interfaces:
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_check_contract_interfaces.py'
+
+toolchain-versions:
+	@$(RUN) bash -c 'echo "sui: $$(sui --version)"; echo "rustc: $$(rustc --version)"; \
+		echo "cargo: $$(cargo --version)"; echo "node: $$(node --version)"; echo "pnpm: $$(pnpm --version)"; \
+		echo "python3: $$(python3 --version 2>&1)"'
+
+# CI entry point (run inside the dev image): each step's output is kept under
+# ci-logs/ for failure diagnostics. No step publishes, spends gas or uses secrets.
+ci: SHELL := /bin/bash
+CI_STEPS := test-contracts test-interfaces check-interfaces edge-test test-ota test-component dapp-typecheck dapp-build
+ci:
+	@mkdir -p ci-logs
+	@$(MAKE) --no-print-directory toolchain-versions | tee ci-logs/toolchain-versions.txt
+	@set -o pipefail; for step in dapp-install $(CI_STEPS); do \
+		echo "::group::$$step"; \
+		$(MAKE) --no-print-directory $$step 2>&1 | tee ci-logs/$$step.log || { echo "::endgroup::"; echo "::error::$$step failed (see ci-logs/$$step.log)"; exit 1; }; \
+		echo "::endgroup::"; \
+	done
+	git diff --check
 
 # Sequential recipe: cross-layer checks must not race over shared build artifacts.
 check:
+	$(MAKE) test-manifest
 	$(MAKE) test-contracts
+	$(MAKE) test-interfaces
+	$(MAKE) check-interfaces
 	$(MAKE) edge-test
 	$(MAKE) test-ota
+	$(MAKE) test-component
 	$(MAKE) dapp-typecheck
 	$(MAKE) dapp-build
 	git diff --check
@@ -73,13 +112,12 @@ tracking-plan:
 test-tracking:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_tracking.py'
 
-.PHONY: test-coordinator
+.PHONY: test-manifest test-manifest-live
+test-manifest:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_deployment_manifest.py'
+	$(RUN) node scripts/test_deployment_manifest.cjs
+	$(RUN) node scripts/test_wallet_manifest.cjs
+	$(RUN) node scripts/test_deployment_receipts.cjs
 
-test-coordinator:
-	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_ticket_coordinator.py'
-	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/atomic-ticketing/tests -p 'test_*.py'
-
-.PHONY: install-ticket-coordinator
-
-install-ticket-coordinator:
-	python3 tools/atomic-ticketing/install.py
+test-manifest-live:
+	$(RUN) python3 scripts/test_manifest_upgrades.py

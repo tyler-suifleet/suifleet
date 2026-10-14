@@ -32,36 +32,56 @@ async fn main() -> anyhow::Result<()> {
         println!("{}", identity::provision(Path::new(&args[2]))?);
         return Ok(());
     }
+    let check_config = args.len() == 3 && args[1] == "--check-config";
+    let helper = args.len() == 3 && args[1] == "--firmware-helper";
+    anyhow::ensure!(
+        args.len() == 1 || check_config || helper,
+        "usage: suifleet [--provision KEY_PATH | --derive-address KEY_PATH | --check-config CONFIG_PATH | --firmware-helper CONFIG]"
+    );
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "suifleet=info".into()),
         )
         .init();
-    if args.len() == 3 && args[1] == "--firmware-helper" {
+    if helper {
         // Root-owned, path-activated: the only privileged operation.
         let helper = config::FirmwareHelperConfig::load(Path::new(&args[2]))?;
         firmware::run_helper(&helper).await?;
         return Ok(());
     }
-    anyhow::ensure!(
-        args.len() == 1,
-        "usage: suifleet [--provision KEY_PATH | --derive-address KEY_PATH | --firmware-helper CONFIG]"
-    );
-    let path = std::env::var("EDGE_CONFIG")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("/etc/suifleet/config.toml"));
+    let path = if check_config {
+        PathBuf::from(&args[2])
+    } else {
+        std::env::var("EDGE_CONFIG")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("/etc/suifleet/config.toml"))
+    };
     let cfg = Config::load(&path)?;
     let sui = SuiClient::load(cfg.sui.clone(), &cfg.device.keypair_path)?;
+    sui.validate_deployment().await?;
+    if check_config {
+        println!("Verified deployment configuration");
+        return Ok(());
+    }
     let binding = format!(
         "{}/{}/{}/{}",
-        cfg.sui.rpc_url,
+        sui.manifest().chain_identifier,
         sui.origin(),
         cfg.device.device_object_id,
         sui.address()
     );
     let mut journal = Journal::open(&cfg.runtime.state_dir, binding)?;
-    let walrus = WalrusClient::new(cfg.walrus.aggregator_url.clone());
+    let walrus = WalrusClient::new(&cfg.walrus);
+    // The artifact cache holds at most the in-flight artifact; anything left
+    // by an earlier run (e.g. a crash mid-download) is unused.
+    let freed = walrus_client::collect_garbage(&cfg.runtime.state_dir.join("artifacts"))?;
+    if freed > 0 {
+        info!(
+            bytes = freed,
+            "Removed leftover artifacts from a previous run"
+        );
+    }
     let runner = ApplyRunner::new(cfg.apply.clone());
     #[cfg(feature = "systemd")]
     tokio::spawn(async {
@@ -99,6 +119,7 @@ async fn poll(
     runner: &ApplyRunner,
     journal: &mut Journal,
 ) -> anyhow::Result<()> {
+    sui.validate_deployment().await?;
     sui.validate_cap(&cfg.device.device_cap_id, &cfg.device.device_object_id)
         .await?;
     if !journal.state.initialized {
@@ -155,11 +176,10 @@ async fn poll(
                     continue;
                 };
                 anyhow::ensure!(
-                    record["content"]["type"].as_str()
-                        == Some(&format!(
-                            "{}::deployment_manager::DeploymentRecord",
-                            sui.origin()
-                        )),
+                    sui_client::same_type(
+                        record["content"]["type"].as_str().unwrap_or(""),
+                        &sui.move_type("deployment_manager::DeploymentRecord")
+                    ),
                     "wrong deployment type"
                 );
                 let directory = cfg
@@ -193,7 +213,7 @@ async fn poll(
                     &cfg.apply.firmware_spool,
                     &firmware::request_id(&event.deployment_id),
                 );
-                let _ = std::fs::remove_file(&artifact);
+                let _ = std::fs::remove_dir_all(&directory);
             }
             journal.state.cursor = Some(cursor);
             journal.save()?;
@@ -218,7 +238,7 @@ async fn handle_deployment(
         .rpc(
             "suix_getDynamicFieldObject",
             serde_json::json!([event.deployment_id,
-        {"type":format!("{}::deployment_manager::RecipeDigestKey", sui.origin()),"value":{}}]),
+        {"type":sui.move_type("deployment_manager::RecipeDigestKey"),"value":{}}]),
         )
         .await?;
     let expected = digest_field["data"]["content"]["fields"]["value"].as_str()

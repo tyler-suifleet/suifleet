@@ -22,7 +22,9 @@ make dapp-install
 make check
 ```
 
-`make check` runs Move tests, Rust tests, the actual-daemon OTA simulator, frontend typecheck and static production build. It never publishes contracts or flashes hardware.
+`make check` runs Move tests, the contract-interface drift check, Rust tests, the actual-daemon OTA simulator, frontend typecheck and static production build. It never publishes contracts or flashes hardware.
+
+`scripts/check_contract_interfaces.py` (`make check-interfaces`) compiles a summary of `contracts` and fails when the dApp, daemon or deployment manifests reference a Move module, function or type that no longer exists, is not transaction-callable, or (for dApp `moveCall`s) takes a different number of arguments. It checks references after a package placeholder (`${PACKAGE_ID}::module::name`, `{}::module::Name`) and address-free type names such as `"device_cap::DeviceAddressKey"` used for per-type origins. An unknown project module is an error; address-free names are skipped only when they belong to a Sui/Move framework module. It also fails if it finds no references at all. `make test-interfaces` runs its offline regression tests. It does not check argument types, event fields or recipe schemas; that is SF-005.
 
 Inside `make shell`, the equivalent commands are:
 
@@ -47,9 +49,35 @@ The daemon executable is `suifleet-edge/target/release/suifleet`; the Next stati
 
 The simulator is stdlib Python. It uses temporary keys, local HTTP servers and a harmless updater; it never spends gas or programs hardware. It validates recipe/artifact digests, direct/live-group targeting, bad hashes, unsupported lifecycle, untrusted operators, deleted objects, pagination, enrollment baseline, offline catch-up, restart deduplication and failed status retry. It also checks identity/signature against an independent Mysten SDK vector.
 
+`make test-component` (also run by `make check` and CI) covers the harmless versioned test component in [tests/components/suifleet-test-app](../tests/components/suifleet-test-app/README.md). Its fixture tests run the real shell scripts, under a busybox-only `PATH` too when busybox is installed. It then runs the real daemon against the same simulator with `suifleet-test-updater` as `apply.command`, for v1, v2, an injected install failure and an injected health failure. It checks statuses, reports and the device receipts' version, run ID and artifact SHA-256.
+
 The historical baseline has 13 passing Move tests and 10 Rust tests; counts can legitimately change. Verify results for the actual commit rather than asserting those numbers as a release requirement. Simulator mocks are not proof of network transaction building, wallet compatibility, package upgrades or post-reboot health.
 
 If Rust files change, run `cargo fmt --manifest-path suifleet-edge/Cargo.toml` with rustfmt installed, then rerun relevant tests. The minimal container toolchain may need `rustup component add rustfmt` first. Do not silently upgrade the toolchain to make failures disappear.
+
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every pull request and push to `main`. It builds the dev image from the pinned Dockerfile and runs `make ci` inside it: frozen pnpm install, Move tests, drift-gate regression tests, interface drift check, Rust tests, the OTA simulator, the test-component checks, typecheck, static build and `git diff --check`. Each step's output and `toolchain-versions.txt` are uploaded as the `ci-logs` artifact (14 days). The job has a read-only token and no secrets; it never publishes, spends gas or touches hardware.
+
+All toolchain inputs are Dockerfile build arguments: base image digest, Sui release and SHA-256, Rust, Node package version and pnpm. Bump them deliberately, in their own commit, together with lockfile and compatibility-test updates; CI then runs against the new image. Workflow actions are pinned to commit SHAs.
+
+Regressions these gates have been shown to catch: renamed/re-shaped Move functions and types used by clients (interface check), treating failed execution effects as success (Rust test and simulator), and reapplying journaled deployments after a crash before the cursor is saved (simulator).
+
+### Live gates
+
+`.github/workflows/live-gates.yml` is the only path for live checks: `package-upgrade`, `wallet` or `hardware`. It runs only from a manual dispatch that repeats the gate name. Each gate deploys through the GitHub environment `live-<gate>`, which holds that gate's secrets and must require a human reviewer. A preflight job refuses to run if the environment is missing or has no required reviewer. The hardware gate runs on a self-hosted runner labelled `raspberrypi3bplus`. The suites themselves are `make live-gate-<gate>` targets supplied by SF-010 and SF-031; until then a dispatched gate fails with that message.
+
+Configure each environment once, as a repository admin:
+
+```bash
+for gate in package-upgrade wallet hardware; do
+  gh api -X PUT repos/tyler-suifleet/suifleet/environments/live-$gate --input - <<JSON
+{"prevent_self_review": true, "reviewers": [{"type": "User", "id": <human-reviewer-user-id>}]}
+JSON
+done
+```
+
+Model agents share the `tyler-suifleet` GitHub account, so the reviewer must be a separate human account with repository access, and `prevent_self_review` must stay enabled.
 
 ## Tests required beyond the local suite
 
@@ -65,6 +93,44 @@ If Rust files change, run `cargo fmt --manifest-path suifleet-edge/Cargo.toml` w
 | Yocto | Actual supported BitBake build, source pinning, cargo dependencies, installed service and first boot |
 
 Report unavailable credentials/hardware as unverified evidence. Do not erase a journal, reenroll devices or generate chain transactions merely to get a local test green.
+
+### Old package entry points and status receipts
+
+Every published package version stays callable after an upgrade, and code can only access types its own package defines. The original package's `report_status` has no signer or target check. It writes the `StatusesKey` dynamic field and emits `DeviceStatusUpdated`, and both types originate in that package. Treat them as **unauthenticated legacy data**.
+
+Authoritative status lives in state that old code cannot construct:
+
+| | Legacy (forgeable) | Authoritative |
+|---|---|---|
+| Field | `StatusesKey → VecMap<ID, u8>` | `ReceiptsKey → Receipts { version, statuses }` |
+| Event | `DeviceStatusUpdated` | `DeviceStatusReported { …, reporter }` |
+| Type origin | First package | The upgrade that introduced receipts |
+| Reader | `statuses()` | `receipt_statuses()`, `receipt_status()`, `has_receipts()` |
+
+- New records carry no `StatusesKey`, so the old `report_status` aborts on them.
+- Records created by the original package keep `StatusesKey` as unverified history. Old entry points can still write it. Their receipts are attached lazily on the first signer-checked report or by `migrate`, and legacy entries are never copied into receipts.
+- `Receipts.version` gates writers. Any later upgrade that changes report authority (revocation, new targeting rules) must bump `RECEIPTS_VERSION` and then call the new package's permissionless, idempotent `migrate` on every live record. Once a record is migrated, older packages' report and `migrate` calls abort with `EPackageOutdated`. Records not yet swept remain writable by the previous package, under that package's own checks.
+
+Mixed clients:
+- The dApp reads `ReceiptsKey` through the deployment manifest's per-type origin (the upgrade that introduced receipts, not the original or call package). A record with no receipts is shown as **unverified**, never with its legacy statuses.
+- Clients that still read `StatusesKey` are incompatible: new records have no such field, and on legacy records it is forgeable. Upgrade the dApp together with the contracts.
+- Dynamic-field lookups by name must encode an empty key struct as `{"dummy_field": false}`; a real node rejects `{}` ("Missing field dummy_field").
+- Devices on the current daemon keep reporting through `report_status`/`report_status_for_group`, whose signatures are unchanged.
+
+Recovery:
+- Legacy unbound caps cannot report. Reissue them with `device_cap::issue_cap`.
+- Legacy records show no authoritative status until the device reports again. Redeploy if an operator needs a verified receipt.
+
+Local acceptance (throwaway localnet in the dev image; refuses non-localhost RPC):
+
+```bash
+git archive <prior-ref> contracts | tar -x -C /tmp/v1
+SUI_CONFIG_DIR=/tmp/sui-config sui start --with-faucet --force-regenesis &
+SUI_CONFIG_DIR=/tmp/sui-config sui client switch --env local
+SUI_CONFIG_DIR=/tmp/sui-config python3 scripts/upgrade_security_localnet.py --v1 /tmp/v1/contracts --v2 contracts
+```
+
+It publishes the prior package, creates devices and deployments (including a legacy record with only forged statuses), then upgrades. Next it attacks through old and new entry points, requiring each attack to abort at the intended check. It also verifies a later version-bumped upgrade locks out this package, then resolves a deployment manifest and runs the real dApp `fetchDeploymentEvents` against new, legacy and forged-only records. Results come from on-chain effects, object state and events. It needs `dapp/node_modules` (`make dapp-install`). This does not replace an upgrade test against an existing deployment on a public network.
 
 ## Deployment process
 
@@ -133,6 +199,38 @@ Verified locally (container, not hardware):
 - `systemd-analyze security --offline`: daemon 1.7 OK (was 9.6 UNSAFE); helper 5.5 MEDIUM, by design, for device access.
 
 Not yet verified: a BitBake build with the `useradd` class, and the units on the Raspberry Pi image. That includes DNS under `RestrictAddressFamilies`, and SWUpdate/RAUC under the helper sandbox.
+
+## Artifact storage and downloads
+
+Walrus stores each recipe and artifact for a fixed number of epochs. After the end epoch, devices that have not applied a deployment can no longer download it.
+
+**When you upload** (dApp):
+- Uploads use `NEXT_PUBLIC_WALRUS_EPOCHS` (default 5).
+- They pass `send_object_to=<connected wallet>`, so the operator owns the Walrus `Blob` object and is the one who can renew it.
+- The upload screen shows the end epoch, the cost in FROST and the renewal command (`walrus extend --blob-obj-id <id> --epochs-extended <n>`).
+- It warns when the cost exceeds `NEXT_PUBLIC_WALRUS_MAX_COST_FROST`.
+- It warns when the bytes were already certified by someone else. Then you don't own the object and cannot renew it.
+- It warns when the publisher kept the object, or reported no end epoch.
+
+**Monitoring** (dApp): the deployments page probes each deployment's recipe and artifact through the aggregator. It flags any blob that returns 404/410 as expired or unavailable. Re-upload and redeploy, or extend storage beforehand.
+
+**Downloading** (daemon):
+- Bytes are written to `<artifact>.partial` and renamed only when complete. The SHA-256 is computed over the complete file and checked before applying.
+- A dropped connection, timeout, 5xx or 429 is retried up to `walrus.download_attempts` times with backoff. Each retry resumes with HTTP `Range` and verifies `Content-Range`, or restarts from zero if the aggregator ignores the range.
+- Each blob must finish within `walrus.download_timeout_seconds` (default 3600) across all attempts, otherwise the deployment reports Failed. The per-read timeout alone cannot catch an aggregator that trickles bytes, and deployments are processed one at a time, so a stalled transfer would otherwise block every later deployment. Raise it for large artifacts on slow links.
+- A 404/410 is permanent: the deployment reports Failed with "unavailable or expired" and is not retried.
+- Before writing, the daemon refuses artifacts over `walrus.max_artifact_bytes`, and transfers that would leave less than `walrus.min_free_bytes` free. When the aggregator sends no `Content-Length` (chunked), both limits are enforced while streaming: free space is re-checked whenever the bytes written since the last check would exceed what the reserve allows, and the partial file is deleted on refusal.
+- The artifact cache holds only the in-flight artifact. Each deployment's working directory is removed afterwards, and leftovers from a crash are removed at startup. Interrupted deployments are never re-applied.
+
+Verified locally:
+- Rust tests against a scripted aggregator cover range resume, an ignored range, transient retry, giving up without a final file, an expired blob, the size limit, insufficient disk, chunked bodies against the size limit and disk reserve, the whole-transfer deadline against a trickling server, and GC.
+- The OTA simulator checks resuming from byte 10, an expired artifact reporting Failed without running the updater, and an empty cache afterwards.
+- The publisher-response parsing and warnings were checked against the documented response shapes.
+
+Not verified:
+- Actual Walrus testnet retention, renewal with `walrus extend` and `send_object_to` ownership. These need uploads to a public network.
+- Whether the public aggregator honors `Range`; the daemon handles both cases.
+- The dApp cannot show epochs remaining until it reads the current Walrus epoch, so it reports the end epoch only.
 
 ## Troubleshooting without losing state
 

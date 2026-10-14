@@ -225,7 +225,7 @@ module sui_edge::deployment_manager_tests {
         let mut record = ts::take_shared<DeploymentRecord>(&scenario);
         let cap = ts::take_from_sender<sui_edge::device_cap::DeviceCap>(&scenario);
         deployment_manager::report_status(&mut record, &cap, 1, ts::ctx(&mut scenario));
-        assert!(*deployment_manager::statuses(&record).get(&id) == 1, 100);
+        assert!(deployment_manager::receipt_status(&record, id) == option::some(1), 100);
         ts::return_to_sender(&scenario, cap);
         ts::return_shared(record);
         ts::end(scenario);
@@ -334,4 +334,145 @@ module sui_edge::deployment_manager_tests {
         ts::end(scenario);
     }
 
+    // ── Upgrade security: old package entry points ───────────────────────────
+    //
+    // Unit tests cannot load an older package version; the `*_for_testing`
+    // helpers replay the original package's unchecked report body. The real
+    // old/new package check is scripts/upgrade_security_localnet.sh.
+
+    #[test]
+    fun test_new_record_has_receipts_and_no_legacy_statuses() {
+        let mut scenario = ts::begin(ADMIN);
+        setup_registry(&mut scenario);
+        ts::next_tx(&mut scenario, ADMIN);
+        let id = register_device_with_cap(&mut scenario, b"fresh", DEVICE_ADDR);
+        ts::next_tx(&mut scenario, ADMIN);
+        create_test_deployment(&mut scenario, vector[], vector[id]);
+        ts::next_tx(&mut scenario, DEVICE_ADDR);
+        let record = ts::take_shared<DeploymentRecord>(&scenario);
+        assert!(deployment_manager::has_receipts(&record), 100);
+        assert!(deployment_manager::receipts_version(&record) == 1, 101);
+        assert!(deployment_manager::receipt_status(&record, id).is_none(), 102);
+        ts::return_shared(record);
+        ts::end(scenario);
+    }
+
+    #[test]
+    #[expected_failure(abort_code = sui::dynamic_field::EFieldDoesNotExist)]
+    fun test_old_report_path_cannot_write_new_record() {
+        let mut scenario = ts::begin(ADMIN);
+        setup_registry(&mut scenario);
+        ts::next_tx(&mut scenario, ADMIN);
+        let id = register_device_with_cap(&mut scenario, b"fresh", DEVICE_ADDR);
+        ts::next_tx(&mut scenario, ADMIN);
+        create_test_deployment(&mut scenario, vector[], vector[id]);
+        // Anyone holding any cap could call the original report_status.
+        ts::next_tx(&mut scenario, OTHER_DEVICE_ADDR);
+        let mut record = ts::take_shared<DeploymentRecord>(&scenario);
+        deployment_manager::legacy_report_for_testing(&mut record, id, 1);
+        ts::return_shared(record);
+        ts::end(scenario);
+    }
+
+    #[test]
+    fun test_legacy_forgery_does_not_reach_receipts() {
+        let mut scenario = ts::begin(ADMIN);
+        setup_registry(&mut scenario);
+        ts::next_tx(&mut scenario, ADMIN);
+        let id = register_device_with_cap(&mut scenario, b"legacy", DEVICE_ADDR);
+        ts::next_tx(&mut scenario, ADMIN);
+        deployment_manager::create_legacy_for_testing(vector[id], ts::ctx(&mut scenario));
+
+        // Forged "applied" through the old entry point is kept as history only.
+        ts::next_tx(&mut scenario, OTHER_DEVICE_ADDR);
+        {
+            let mut record = ts::take_shared<DeploymentRecord>(&scenario);
+            deployment_manager::legacy_report_for_testing(&mut record, id, 1);
+            assert!(!deployment_manager::has_receipts(&record), 100);
+            assert!(deployment_manager::receipt_status(&record, id).is_none(), 101);
+            ts::return_shared(record);
+        };
+
+        // The real device reports failure; receipts reflect only that report.
+        ts::next_tx(&mut scenario, DEVICE_ADDR);
+        {
+            let mut record = ts::take_shared<DeploymentRecord>(&scenario);
+            let cap = ts::take_from_sender<sui_edge::device_cap::DeviceCap>(&scenario);
+            deployment_manager::report_status(&mut record, &cap, 2, ts::ctx(&mut scenario));
+            assert!(deployment_manager::receipt_status(&record, id) == option::some(2), 102);
+            assert!(*deployment_manager::statuses(&record).get(&id) == 1, 103);
+            ts::return_to_sender(&scenario, cap);
+            ts::return_shared(record);
+        };
+
+        // A later forgery still cannot change the receipt.
+        ts::next_tx(&mut scenario, OTHER_DEVICE_ADDR);
+        {
+            let mut record = ts::take_shared<DeploymentRecord>(&scenario);
+            deployment_manager::legacy_report_for_testing(&mut record, id, 1);
+            assert!(deployment_manager::receipt_status(&record, id) == option::some(2), 104);
+            ts::return_shared(record);
+        };
+        ts::end(scenario);
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 5, location = sui_edge::deployment_manager)]
+    fun test_report_aborts_after_newer_package_migration() {
+        let mut scenario = ts::begin(ADMIN);
+        setup_registry(&mut scenario);
+        ts::next_tx(&mut scenario, ADMIN);
+        let id = register_device_with_cap(&mut scenario, b"gated", DEVICE_ADDR);
+        ts::next_tx(&mut scenario, ADMIN);
+        create_test_deployment(&mut scenario, vector[], vector[id]);
+        ts::next_tx(&mut scenario, DEVICE_ADDR);
+        let mut record = ts::take_shared<DeploymentRecord>(&scenario);
+        let cap = ts::take_from_sender<sui_edge::device_cap::DeviceCap>(&scenario);
+        deployment_manager::set_receipts_version_for_testing(&mut record, 2);
+        deployment_manager::report_status(&mut record, &cap, 1, ts::ctx(&mut scenario));
+        ts::return_to_sender(&scenario, cap);
+        ts::return_shared(record);
+        ts::end(scenario);
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 5, location = sui_edge::deployment_manager)]
+    fun test_migrate_never_downgrades() {
+        let mut scenario = ts::begin(ADMIN);
+        setup_registry(&mut scenario);
+        ts::next_tx(&mut scenario, ADMIN);
+        let id = register_device_with_cap(&mut scenario, b"gated", DEVICE_ADDR);
+        ts::next_tx(&mut scenario, ADMIN);
+        create_test_deployment(&mut scenario, vector[], vector[id]);
+        ts::next_tx(&mut scenario, OTHER_DEVICE_ADDR);
+        let mut record = ts::take_shared<DeploymentRecord>(&scenario);
+        deployment_manager::set_receipts_version_for_testing(&mut record, 2);
+        deployment_manager::migrate(&mut record);
+        ts::return_shared(record);
+        ts::end(scenario);
+    }
+
+    #[test]
+    fun test_migrate_attaches_receipts_to_legacy_record_and_delete_cleans_up() {
+        let mut scenario = ts::begin(ADMIN);
+        setup_registry(&mut scenario);
+        ts::next_tx(&mut scenario, ADMIN);
+        let id = register_device_with_cap(&mut scenario, b"legacy", DEVICE_ADDR);
+        ts::next_tx(&mut scenario, ADMIN);
+        deployment_manager::create_legacy_for_testing(vector[id], ts::ctx(&mut scenario));
+        ts::next_tx(&mut scenario, OTHER_DEVICE_ADDR);
+        {
+            let mut record = ts::take_shared<DeploymentRecord>(&scenario);
+            deployment_manager::legacy_report_for_testing(&mut record, id, 1);
+            deployment_manager::migrate(&mut record);
+            deployment_manager::migrate(&mut record);
+            assert!(deployment_manager::receipts_version(&record) == 1, 100);
+            assert!(deployment_manager::receipt_statuses(&record).is_empty(), 101);
+            ts::return_shared(record);
+        };
+        ts::next_tx(&mut scenario, ADMIN);
+        let record = ts::take_shared<DeploymentRecord>(&scenario);
+        deployment_manager::delete_deployment(record, ts::ctx(&mut scenario));
+        ts::end(scenario);
+    }
 }

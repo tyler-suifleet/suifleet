@@ -594,7 +594,6 @@
       "phase": "ota",
       "kind": "type:infrastructure",
       "depends_on": [
-        "SF-004",
         "SF-009"
       ],
       "paths": [
@@ -731,7 +730,7 @@
         "Provide v1/v2 test application artifacts and deterministic recipes with recipe/artifact SHA-256 hashes; report version, run ID and architecture in a structured receipt under the dedicated test directory.",
         "Use the current one-shot apply path without requiring the future supervisor; support injected install failure and health failure without touching boot partitions or unrelated services.",
         "Test the fixture locally and expose a later supervisor/config/rollback mode as those features become available; distinguish successful install from runtime health.",
-        "Package any required test updater/fixture support through the Yocto test image; exercise a versioned application payload on the Pi 3 B+ without modifying firmware partitions."
+        "Package required test updater/fixture support through its Yocto recipe for consumption by SF-029. Physical Pi image integration and v1/v2 execution are verified in SF-029/SF-031, which depend on this fixture; they are not completion prerequisites for SF-030."
       ],
       "validation": "Local fixture tests verify exact version receipts, deterministic hashes, failure modes and isolated writes; run both versions on the Pi in SF-031.",
       "description": "Create a harmless versioned test component for Raspberry Pi OTA. Provide v1/v2 test application artifacts and deterministic recipes with recipe/artifact SHA-256 hashes; report version, run ID and architecture in a structured receipt under the dedicated test directory."

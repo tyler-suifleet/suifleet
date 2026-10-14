@@ -1,0 +1,68 @@
+# Separately authorized live gates: package upgrade, wallet and hardware.
+# Never triggered by pull requests or pushes. Each gate runs only after a human
+# reviewer approves its GitHub environment, which also holds that gate's
+# secrets. The preflight job fails closed if the environment lacks a required
+# reviewer (GitHub would otherwise auto-create it unprotected).
+name: Live gates
+
+on:
+  workflow_dispatch:
+    inputs:
+      gate:
+        description: Live gate to run
+        required: true
+        type: choice
+        options: [package-upgrade, wallet, hardware]
+      network:
+        description: Target network alias recorded in the run (e.g. testnet); the gate verifies chain identity itself
+        required: true
+        type: string
+      confirm:
+        description: Type the gate name again to confirm a live run
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-${{ inputs.gate }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Confirm request and environment protection
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE: ${{ inputs.gate }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          [ "$CONFIRM" = "$GATE" ] || { echo "::error::confirm must equal '$GATE'"; exit 1; }
+          rules=$(gh api "repos/$GITHUB_REPOSITORY/environments/live-$GATE" \
+            --jq '[.protection_rules[]? | select(.type == "required_reviewers") | .reviewers | length] | add // 0') \
+            || { echo "::error::environment live-$GATE does not exist; see docs/OPERATIONS.md"; exit 1; }
+          [ "$rules" -gt 0 ] || { echo "::error::environment live-$GATE has no required reviewers"; exit 1; }
+
+  gate:
+    needs: preflight
+    environment: live-${{ inputs.gate }}
+    # Hardware runs on a self-hosted runner attached to the test device.
+    runs-on: ${{ inputs.gate == 'hardware' && fromJSON('["self-hosted", "raspberrypi3bplus"]') || 'ubuntu-22.04' }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Run gate
+        env:
+          GATE: ${{ inputs.gate }}
+          SUIFLEET_NETWORK: ${{ inputs.network }}
+        run: |
+          # Suites are provided by SF-010 (package-upgrade, wallet) and SF-031 (hardware).
+          if ! make -n "live-gate-$GATE" >/dev/null 2>&1; then
+            echo "::error::make live-gate-$GATE is not implemented yet (SF-010/SF-031)"
+            exit 1
+          fi
+          make "live-gate-$GATE"
