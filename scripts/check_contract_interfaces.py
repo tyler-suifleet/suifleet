@@ -127,9 +127,14 @@ def check(modules, framework=frozenset(), sources=None):
         for match in RUST_FUNCTION.finditer(text):
             checked += 1
             name = match.group(1)
-            if not any(name in modules.get(module, {}).get("functions", {}) for module in rust_modules):
+            functions = [modules.get(module, {}).get("functions", {}).get(name) for module in rust_modules]
+            functions = [function for function in functions if function is not None]
+            if not functions:
                 errors.append(f"{rel}:{line(match.start())}: {'/'.join(rust_modules) or '?'}::{name} "
                               "is not a function in the contracts")
+            elif not any(function["visibility"] == "Public" or function["entry"] for function in functions):
+                errors.append(f"{rel}:{line(match.start())}: {'/'.join(rust_modules)}::{name} "
+                              "is not callable from a transaction")
     return errors, checked
 
 

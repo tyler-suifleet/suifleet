@@ -85,6 +85,25 @@ class DriftCheckTest(unittest.TestCase):
         self.assertEqual(len(errors), 1)
         self.assertIn("RecipeDigstKey", errors[0])
 
+    def test_daemon_private_non_entry_function_fails(self):
+        modules = {"deployment_manager": {"structs": {}, "functions": {
+            "report_status": function(visibility="Private", entry=False),
+        }}}
+        self.assert_drift('let mut function = "report_status"; json!(["deployment_manager", function, []]);',
+                          "is not callable from a transaction", suffix=".rs", modules=modules)
+
+    def test_daemon_public_and_private_entry_functions_pass(self):
+        for visibility, entry in (("Public", False), ("Private", True)):
+            with self.subTest(visibility=visibility, entry=entry):
+                modules = {"deployment_manager": {"structs": {}, "functions": {
+                    "report_status": function(visibility=visibility, entry=entry),
+                }}}
+                errors, checked = self.run_check(
+                    'let mut function = "report_status"; json!(["deployment_manager", function, []]);',
+                    suffix=".rs", modules=modules)
+                self.assertEqual(errors, [])
+                self.assertEqual(checked, 1)
+
     def test_framework_and_rust_paths_are_ignored(self):
         source = 'if (t !== "0x2::package::UpgradeCap" || rest !== "package::UpgradeCap") {}\n' \
                  'let x = std::fs::read(p); tokio::time::sleep(d); "0x1::string::String";'
