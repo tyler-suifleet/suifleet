@@ -4,9 +4,9 @@ Codex and Claude use the same coordinator before starting any implementation. Gi
 
 ## Shared database and isolation
 
-The reusable `ticket` CLI uses `~/.local/state/atomic-ticketing/coordination.sqlite3` (or the shared XDG_STATE_HOME location) across SuiFleet and Vortech. Project configuration is committed in `.atomic-ticketing.json`; the engine/installer and cross-project instructions are in [tools/atomic-ticketing](../tools/atomic-ticketing/README.md). The original Git-common-directory database is migrated and retired, with a SQLite backup and ownership tokens preserved. Transactions use SQLite `BEGIN IMMEDIATE`, WAL and full synchronization; a claim checks ticket ownership, dependency completion and all overlapping path reservations before acquiring ownership in the same transaction. Claims are sorted by P0/P1/P2 then stable SF key, after filtering dependencies and conflicts.
+The reusable `ticket` CLI uses `~/.local/state/atomic-ticketing/coordination.sqlite3` (or the shared XDG_STATE_HOME location) across SuiFleet and Vortech. Project configuration is committed in `.atomic-ticketing.json`; the engine/installer and cross-project instructions are in [tools/atomic-ticketing](../tools/atomic-ticketing/README.md). The original Git-common-directory database is migrated and retired, with a SQLite backup and ownership tokens preserved. Transactions use SQLite `BEGIN IMMEDIATE`, WAL and full synchronization; a claim checks ticket ownership, dependency completion and conflicting shared-resource reservations before acquiring ownership in the same transaction. Claims are sorted by P0/P1/P2 then stable SF key, after filtering dependencies and conflicts.
 
-Both models must use the same central database and each project's registered canonical Git repository/linked worktrees on the WSL Linux filesystem. Registration rejects a separate clone with an already-registered project identity. Do not put the database on `/mnt/c`, a network share or a synced directory. A separate worktree is created for each claim, on a unique branch; failed worktree creation leaves the reservation intact for inspection. It does not reset or copy another worker's working changes. Broad paths and wildcard scopes deliberately reserve whole directories; expand scope before editing additional files.
+Both models must use the same central database and each project's registered canonical Git repository/linked worktrees on the WSL Linux filesystem. Registration rejects a separate clone with an already-registered project identity. Do not put the database on `/mnt/c`, a network share or a synced directory. A separate worktree is created for each claim, on a unique branch; failed worktree creation leaves the reservation intact for inspection. It does not reset or copy another worker's working changes. File paths are not reserved: a ticket's paths describe its likely area, never block another claim and need no expansion. Overlapping edits in separate worktrees are resolved at review/merge.
 
 The database stores model/session identifiers, paths, lease state and local handoff events, not account credentials. GitHub authentication is provided by the existing `gh` setup. No dependency installation is required beyond Python 3, SQLite support, Git and authenticated GitHub CLI.
 
@@ -24,11 +24,11 @@ python3 scripts/ticket_coordinator.py claim \
   --agent Codex --model ACTUAL_MODEL --session UNIQUE_CODEX_SESSION
 ```
 
-Claude uses the same command with `--agent Claude`, its actual model and a different session identifier. Each independently asks for the next eligible ticket; the transaction prevents duplicate claims and overlapping scopes. `--ticket SF-029` requests a specific ticket but cannot bypass dependencies or reservations. `--path extra/file` adds scope at claim time. Use `--base REF` to select a tested integration baseline; the default is the canonical checkout's current HEAD. `--worktree /absolute/new/path` overrides the default sibling `suifleet-worktrees` location.
+Claude uses the same command with `--agent Claude`, its actual model and a different session identifier. Each independently asks for the next eligible ticket; the transaction prevents duplicate claims and conflicting shared-resource reservations. `--ticket SF-029` requests a specific ticket but cannot bypass dependencies or reservations. `--resource NAME` reserves a shared resource at claim time. Use `--base REF` to select a tested integration baseline; the default is the canonical checkout's current HEAD. `--worktree /absolute/new/path` overrides the default sibling `suifleet-worktrees` location.
 
 Initialization/refresh reads the live Project, all published issue states and native blocked-by dependencies (including dependencies added after seeding). Open blockers outside the catalog prevent claims. Assigned, blocked, closed and already-owned remote items are not claimed. An unclaimed remote ticket with an existing owner also reserves its catalog paths. Refresh before every new claim: snapshots older than five minutes fail closed. An older/incomplete catalog is rejected; run the canonical checkout's script with `--root /absolute/canonical/checkout` when necessary.
 
-The successful command emits one JSON result with `key`, `token`, `worktree`, `branch`, scope and ownership. Enter that worktree, read its AGENTS.md, and record a testing plan. Scope changes from a refresh can expand outstanding reservations but never shrink them. No worker should implement directly in the canonical checkout.
+The successful command emits one JSON result with `key`, `token`, `worktree`, `branch`, scope and ownership. Enter that worktree, read its AGENTS.md, and record a testing plan. A refresh never drops an outstanding claim's shared resources. No worker should implement directly in the canonical checkout.
 
 ## Work and communicate
 
@@ -36,16 +36,16 @@ Replace TICKET and TOKEN below with the returned values; tokens identify claim g
 
 ```bash
 python3 /absolute/canonical/checkout/scripts/ticket_coordinator.py heartbeat TICKET --token TOKEN
-python3 /absolute/canonical/checkout/scripts/ticket_coordinator.py assert TICKET --token TOKEN --path path/to/edit
-python3 /absolute/canonical/checkout/scripts/ticket_coordinator.py expand TICKET --token TOKEN --path additional/path
+python3 /absolute/canonical/checkout/scripts/ticket_coordinator.py assert TICKET --token TOKEN
+python3 /absolute/canonical/checkout/scripts/ticket_coordinator.py expand TICKET --token TOKEN --resource hardware:raspberrypi3bplus
 python3 /absolute/canonical/checkout/scripts/ticket_coordinator.py note TICKET --token TOKEN --text 'Interface decision, test plan or handoff'
 python3 /absolute/canonical/checkout/scripts/ticket_coordinator.py list
 python3 /absolute/canonical/checkout/scripts/ticket_coordinator.py show TICKET
 ```
 
-Heartbeat at least every five minutes, including during long builds. The lease lasts fifteen minutes. Check ownership before an edit batch and again after long tools, before staging/committing or any deployment. `assert` rejects expired, replaced, non-implementation or unpublished claims and paths outside scope. A worker with a lost token must stop editing immediately. A still-owning expired worker may heartbeat and resume; expiry alone never transfers ownership.
+Heartbeat at least every five minutes, including during long builds. The lease lasts fifteen minutes. Check ownership after long tools and before staging/committing or any deployment. `assert` rejects expired, replaced, non-implementation or unpublished claims, and resources (`--resource`) the claim does not hold. `--path` is accepted for older instructions and ignored. A worker with a lost token must stop editing immediately. A still-owning expired worker may heartbeat and resume; expiry alone never transfers ownership.
 
-Read `list` and relevant `show` events before changing shared interfaces. Local notes provide the common mailbox; GitHub issue comments may record durable human-facing handoffs under the task's authorization. Neither model has automatic access to the other's private conversation. Agree on interfaces in notes/issues; dependency declarations and path locks cannot detect every semantic conflict. Reserve shared hardware/build/port resources with `--resource NAME` on claim/expand and assert them before use; configured path rules also reserve resources. Worktrees isolate source files, not devices or ports.
+Read `list` and relevant `show` events before changing shared interfaces. Local notes provide the common mailbox; GitHub issue comments may record durable human-facing handoffs under the task's authorization. Neither model has automatic access to the other's private conversation. Agree on shared interfaces in notes/issues; dependency declarations cannot detect every semantic conflict. Reserve shared hardware/build/port resources with `--resource NAME` on claim/expand and assert them before use; configured `resource_rules` attach resources to tickets whose paths match. Worktrees isolate source files, not devices or ports.
 
 ## Review, blockers and completion
 
@@ -56,7 +56,7 @@ python3 scripts/ticket_coordinator.py block TICKET --token TOKEN --text 'Concret
 python3 scripts/ticket_coordinator.py resume TICKET --token TOKEN
 ```
 
-Review and blocked work retain their path reservations. Review has no expiring lease and is not dependency completion. A session may select another independent ticket after submitting review, but may own only one active/blocked implementation across all registered projects. Resume is rejected if that session already owns another implementation. Coordinate a reviewer in the issue/Project, and integrate changes serially instead of having workers push directly to main.
+Review and blocked work keep their claim and shared-resource reservations. Review has no expiring lease and is not dependency completion. A session may select another independent ticket after submitting review, but may own only one active/blocked implementation across all registered projects. Resume is rejected if that session already owns another implementation. Coordinate a reviewer in the issue/Project, and integrate changes serially instead of having workers push directly to main.
 
 After review, required acceptance and integration, the integrator records completion:
 
@@ -91,4 +91,4 @@ This is cooperative coordination for trusted models on one user account, not an 
 
 ## Verification
 
-`make test-coordinator` runs offline tests using temporary databases and worktrees, including a ten-process race with exactly one winner, scope overlap, dependency gating, stale leases, token replacement, remote ownership, failed worktree setup and failed mirror retry. `make test-tracking` checks the existing backlog/publication tooling. Tests do not mutate GitHub.
+`make test-coordinator` runs offline tests using temporary databases and worktrees, including a ten-process race with exactly one winner, non-blocking path overlap, resource conflicts, dependency gating, stale leases, token replacement, remote ownership, failed worktree setup and failed mirror retry. `make test-tracking` checks the existing backlog/publication tooling. Tests do not mutate GitHub.
