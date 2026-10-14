@@ -5,7 +5,7 @@ export const PACKAGE_ID = process.env.NEXT_PUBLIC_PACKAGE_ID ?? "";
 export const ORIGINAL_PACKAGE_ID = process.env.NEXT_PUBLIC_ORIGINAL_PACKAGE_ID || PACKAGE_ID;
 export const REGISTRY_ID = process.env.NEXT_PUBLIC_REGISTRY_ID ?? "";
 
-export const NETWORK = (process.env.NEXT_PUBLIC_NETWORK ?? "devnet") as "devnet" | "testnet" | "mainnet";
+export const NETWORK = (process.env.NEXT_PUBLIC_NETWORK ?? "testnet") as "devnet" | "testnet" | "mainnet";
 
 // Walrus endpoints
 export const WALRUS_PUBLISHER = "https://publisher.walrus-testnet.walrus.space";

@@ -1,5 +1,6 @@
 "use client";
 
+import { NETWORK } from "@/lib/constants";
 import { useQuery } from "@tanstack/react-query";
 import { useSuiClient, useCurrentAccount } from "@mysten/dapp-kit";
 import { fetchGroups, type DeviceGroup } from "@/lib/sui";
@@ -9,7 +10,7 @@ export function useGroups() {
   const account = useCurrentAccount();
 
   return useQuery<DeviceGroup[]>({
-    queryKey: ["groups", account?.address],
+    queryKey: ["groups", NETWORK, account?.address],
     queryFn: () => fetchGroups(client, account!.address),
     enabled: !!account?.address,
     refetchInterval: 15_000,

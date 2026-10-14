@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { useCurrentAccount, useSignAndExecuteTransaction } from "@mysten/dapp-kit";
+import { useCurrentAccount } from "@mysten/dapp-kit";
+import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import { useDevices } from "@/hooks/useDevices";
 import { useGroups } from "@/hooks/useGroups";
 import {
@@ -40,7 +41,7 @@ export default function DevicesPage() {
 function DevicesTab() {
   const account = useCurrentAccount();
   const { data: devices = [], isLoading, refetch } = useDevices();
-  const { mutate: signAndExecute, isPending } = useSignAndExecuteTransaction();
+  const { mutate: signAndExecute, isPending } = useFleetTransaction();
   const [showModal, setShowModal] = useState(false);
 
   function handleRegister(e: React.FormEvent<HTMLFormElement>) {
@@ -164,7 +165,7 @@ function GroupsTab() {
   const account = useCurrentAccount();
   const { data: groups = [], isLoading, refetch } = useGroups();
   const { data: devices = [] } = useDevices();
-  const { mutate: signAndExecute, isPending } = useSignAndExecuteTransaction();
+  const { mutate: signAndExecute, isPending } = useFleetTransaction();
   const [showCreate, setShowCreate] = useState(false);
   const [managingGroup, setManagingGroup] = useState<string | null>(null);
 

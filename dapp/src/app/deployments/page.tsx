@@ -1,16 +1,17 @@
 "use client";
 
 import { useDeployments } from "@/hooks/useDeployments";
-import { useCurrentAccount, useSignAndExecuteTransaction } from "@mysten/dapp-kit";
+import { useCurrentAccount } from "@mysten/dapp-kit";
+import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import { buildDeleteDeploymentTx } from "@/lib/sui";
 import { STATUS_LABELS, STATUS_COLORS } from "@/lib/constants";
 import { PageHeader } from "@/components/ui";
 import Link from "next/link";
 
 export default function DeploymentsPage() {
-  const { data: deployments = [], isLoading, refetch } = useDeployments();
+  const { data: deployments = [], isLoading, error, refetch } = useDeployments();
   const account = useCurrentAccount();
-  const { mutate: signAndExecute, isPending } = useSignAndExecuteTransaction();
+  const { mutate: signAndExecute, isPending } = useFleetTransaction();
 
   return (
     <div className="space-y-4 max-w-5xl">
@@ -24,6 +25,7 @@ export default function DeploymentsPage() {
         </Link>
       </div>
 
+      {error && <p role="alert" className="text-sm text-red-600">Failed to load deployments: {error.message}</p>}
       <div className="bg-white border border-gray-200 rounded">
         {isLoading ? (
           <div className="p-8 text-center text-sm text-gray-400">Loading…</div>
@@ -126,6 +128,11 @@ function DeploymentRow({
       <tr className="bg-gray-50 border-b border-gray-200">
         <td colSpan={6} className="px-4 pb-3">
           <div className="text-xs text-gray-400 space-x-4">
+            {d.resolvedDeviceIds.map((id) => (
+              <span key={id} className={`inline-flex px-2 py-1 rounded ${STATUS_COLORS[d.statuses[id] ?? 0]}`} title={id}>
+                {id.slice(0, 10)}…: {STATUS_LABELS[d.statuses[id] ?? 0]}
+              </span>
+            ))}
             {d.recipeBlobId && <span>Recipe: <span className="font-mono text-gray-500">{d.recipeBlobId}</span></span>}
             {d.artifactSha256 && <span>SHA256: <span className="font-mono text-gray-500">{d.artifactSha256.slice(0, 16)}…</span></span>}
           </div>

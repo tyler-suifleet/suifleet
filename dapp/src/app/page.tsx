@@ -11,7 +11,7 @@ export default function DashboardPage() {
   const { data: deployments = [], isLoading: depl } = useDeployments();
   const { data: groups = [], isLoading: gl } = useGroups();
 
-  const pending = deployments.filter((d) => d.targetGroups.length > 0);
+  const pending = deployments.filter((d) => d.resolvedDeviceIds.some((id) => (d.statuses[id] ?? 0) === 0));
 
   return (
     <div className="space-y-6 max-w-5xl">
@@ -46,7 +46,7 @@ export default function DashboardPage() {
                 <tr key={d.deploymentId} className="hover:bg-gray-50">
                   <td className="py-3 pr-4 font-medium">{d.componentName}</td>
                   <td className="py-3 pr-4 text-gray-500">{d.version}</td>
-                  <td className="py-3 pr-4 text-gray-500">{d.targetGroups.length}</td>
+                  <td className="py-3 pr-4 text-gray-500">{d.targetGroups.length + d.targetDevices.length}</td>
                   <td className="py-3 text-gray-400 text-xs">{new Date(d.timestampMs).toLocaleString()}</td>
                 </tr>
               ))}

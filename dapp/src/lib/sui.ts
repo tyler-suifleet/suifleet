@@ -31,6 +31,8 @@ export interface DeploymentEvent {
   targetDevices: string[];
   creator: string;
   timestampMs: number;
+  statuses: Record<string, number>;
+  resolvedDeviceIds: string[];
 }
 
 // ── Device transactions ───────────────────────────────────────────────────────
@@ -166,13 +168,16 @@ export async function fetchDevices(
   client: SuiClient,
   owner: string,
 ): Promise<DeviceObject[]> {
-  const res = await client.getOwnedObjects({
-    owner,
-    filter: { StructType: DEVICE_TYPE },
-    options: { showContent: true },
-  });
+  const data = [];
+  let cursor: string | null | undefined = null;
+  do {
+    const page = await client.getOwnedObjects({ owner, filter: { StructType: DEVICE_TYPE },
+      options: { showContent: true }, cursor, limit: 50 });
+    data.push(...page.data);
+    cursor = page.hasNextPage ? page.nextCursor : null;
+  } while (cursor);
 
-  return res.data.flatMap((obj) => {
+  return data.flatMap((obj) => {
     const content = obj.data?.content;
     if (content?.dataType !== "moveObject") return [];
     const fields = content.fields as Record<string, unknown>;
@@ -190,27 +195,15 @@ export async function fetchGroups(
   client: SuiClient,
   owner: string,
 ): Promise<DeviceGroup[]> {
-  // Groups are shared objects, but we created them so we look by event.
-  // Alternatively, query shared objects by type filtered to admin=owner.
-  // For now, query all DeviceGroup objects the owner created via events, or
-  // use getOwnedObjects with the type (works because we use dynamic field trick).
-  // Since DeviceGroup is shared (not owned), we query events for GroupCreated.
-  const res = await client.queryEvents({
-    query: { MoveEventType: `${DEVICE_GROUP_TYPE.replace("::DeviceGroup", "")}::GroupCreated` },
-    limit: 50,
-    order: "descending",
-  });
+  const data = await allEvents(client, `${DEVICE_GROUP_TYPE.replace("::DeviceGroup", "")}::GroupCreated`);
 
-  const groupIds = res.data
+  const groupIds = data
     .filter((ev) => (ev.parsedJson as Record<string, unknown>).admin === owner)
     .map((ev) => (ev.parsedJson as Record<string, unknown>).group_id as string);
 
   if (groupIds.length === 0) return [];
 
-  const objects = await client.multiGetObjects({
-    ids: groupIds,
-    options: { showContent: true },
-  });
+  const objects = await objectsInBatches(client, [...new Set(groupIds)]);
 
   return objects.flatMap((obj) => {
     const content = obj.data?.content;
@@ -226,27 +219,49 @@ export async function fetchGroups(
   });
 }
 
-export async function fetchDeploymentEvents(
-  client: SuiClient,
-): Promise<DeploymentEvent[]> {
-  const res = await client.queryEvents({
-    query: { MoveEventType: DEPLOYMENT_CREATED_EVENT },
-    order: "descending",
-    limit: 50,
-  });
+async function allEvents(client: SuiClient, type: string) {
+  const data = [];
+  let cursor: Parameters<SuiClient["queryEvents"]>[0]["cursor"] = null;
+  do {
+    const page = await client.queryEvents({ query: { MoveEventType: type }, order: "descending", limit: 50, cursor });
+    data.push(...page.data);
+    cursor = page.hasNextPage ? page.nextCursor : null;
+  } while (cursor);
+  return data;
+}
 
-  return res.data.map((ev) => {
-    const p = ev.parsedJson as Record<string, unknown>;
-    return {
-      deploymentId: p.deployment_id as string,
-      componentName: p.component_name as string,
-      version: p.version as string,
-      recipeBlobId: p.recipe_blob_id as string,
-      artifactSha256: p.artifact_sha256 as string,
-      targetGroups: (p.target_groups as string[]) ?? [],
-      targetDevices: (p.target_devices as string[]) ?? [],
-      creator: p.creator as string,
-      timestampMs: Number(ev.timestampMs ?? 0),
-    };
-  });
+async function objectsInBatches(client: SuiClient, ids: string[]) {
+  const objects = [];
+  for (let index = 0; index < ids.length; index += 50) {
+    objects.push(...await client.multiGetObjects({ ids: ids.slice(index, index + 50), options: { showContent: true } }));
+  }
+  return objects;
+}
+
+export async function fetchDeploymentEvents(client: SuiClient, owner?: string): Promise<DeploymentEvent[]> {
+  const events = (await allEvents(client, DEPLOYMENT_CREATED_EVENT))
+    .filter((event) => !owner || (event.parsedJson as Record<string, unknown>).creator === owner);
+  const objects = await objectsInBatches(client, events.map((event) => (event.parsedJson as Record<string, unknown>).deployment_id as string));
+  const live = new Set(objects.filter((object) => object.data?.content?.dataType === "moveObject").map((object) => object.data!.objectId));
+  return Promise.all(events.filter((event) => live.has((event.parsedJson as Record<string, unknown>).deployment_id as string)).map(async (event) => {
+    const p = event.parsedJson as Record<string, unknown>;
+    const id = p.deployment_id as string;
+    const groups = await objectsInBatches(client, (p.target_groups as string[]) ?? []);
+    const resolvedDeviceIds = [...new Set([
+      ...((p.target_devices as string[]) ?? []),
+      ...groups.flatMap((group) => group.data?.content?.dataType === "moveObject"
+        ? ((group.data.content.fields as Record<string, unknown>).device_ids as string[] ?? []) : []),
+    ])];
+    const statusObject = await client.getDynamicFieldObject({ parentId: id,
+      name: { type: `${DEPLOYMENT_CREATED_EVENT.replace("::DeploymentCreated", "")}::StatusesKey`, value: {} } });
+    if (statusObject.error) throw new Error(`Unable to load deployment status: ${statusObject.error.code}`);
+    const content = statusObject.data?.content;
+    const fields = content?.dataType === "moveObject" ? content.fields as Record<string, unknown> : {};
+    const value = fields.value as { fields?: { contents?: { fields: { key: string; value: number } }[] } } | undefined;
+    const statuses = Object.fromEntries((value?.fields?.contents ?? []).map((entry) => [entry.fields.key, Number(entry.fields.value)]));
+    return { deploymentId: id, componentName: p.component_name as string, version: p.version as string,
+      recipeBlobId: p.recipe_blob_id as string, artifactSha256: p.artifact_sha256 as string,
+      targetGroups: (p.target_groups as string[]) ?? [], targetDevices: (p.target_devices as string[]) ?? [],
+      creator: p.creator as string, timestampMs: Number(event.timestampMs ?? 0), statuses, resolvedDeviceIds: [...new Set([...resolvedDeviceIds, ...Object.keys(statuses)])] };
+  }));
 }
