@@ -1,0 +1,14 @@
+# Release signing trust roots (SF-039). Public keys only; never commit a
+# private key. Devices install this file root-owned (0644) and verify bundles
+# with `suifleet --verify-release BUNDLE /etc/suifleet/release-trust.toml`.
+#
+# Rotation: add the new key, sign releases with both keys, ship this file to
+# devices, then set `revoked = true` on the old key. See docs/RELEASES.md.
+#
+# Example entry:
+# [[keys]]
+# id = "release-2026-10"
+# public_key = "<64 hex chars from: cargo run --example sign_release -- public KEY_FILE>"
+# revoked = false
+
+keys = []
