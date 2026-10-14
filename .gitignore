@@ -31,3 +31,8 @@ dapp/.env.local
 # Local deployment journals and TypeScript cache
 *.tsbuildinfo
 .suifleet-state/
+
+# Local test scaffolding and generated release bundles
+__pycache__/
+dapp/node_modules
+.suifleet-releases/
