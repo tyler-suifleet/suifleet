@@ -122,8 +122,9 @@ module sui_edge::deployment_manager {
         deployment: &mut DeploymentRecord,
         cap: &DeviceCap,
         status: u8,
-        _ctx: &TxContext,
+        ctx: &TxContext,
     ) {
+        device_cap::assert_signer(cap, ctx);
         assert!(status == STATUS_APPLIED || status == STATUS_FAILED, EInvalidStatus);
 
         let device_id = device_cap::device_id(cap);

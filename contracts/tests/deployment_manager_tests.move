@@ -68,7 +68,7 @@ module sui_edge::deployment_manager_tests {
         group_id
     }
 
-    fun create_test_deployment(scenario: &mut ts::Scenario, target_groups: vector<ID>) {
+    fun create_test_deployment(scenario: &mut ts::Scenario, target_groups: vector<ID>, target_devices: vector<ID>) {
         let clock = clock::create_for_testing(ts::ctx(scenario));
         deployment_manager::create_deployment(
             string::utf8(b"my-firmware"),
@@ -76,7 +76,7 @@ module sui_edge::deployment_manager_tests {
             string::utf8(b"abc123blobid"),
             string::utf8(b"deadbeef...sha256"),
             target_groups,
-            vector[],
+            target_devices,
             &clock,
             ts::ctx(scenario),
         );
@@ -95,7 +95,7 @@ module sui_edge::deployment_manager_tests {
         let group_id = create_group_with_device(&mut scenario, _device_id);
 
         ts::next_tx(&mut scenario, ADMIN);
-        create_test_deployment(&mut scenario, vector[group_id]);
+        create_test_deployment(&mut scenario, vector[group_id], vector[]);
 
         // Device reports applied
         ts::next_tx(&mut scenario, DEVICE_ADDR);
@@ -129,7 +129,7 @@ module sui_edge::deployment_manager_tests {
         let group_id = create_group_with_device(&mut scenario, _device_id);
 
         ts::next_tx(&mut scenario, ADMIN);
-        create_test_deployment(&mut scenario, vector[group_id]);
+        create_test_deployment(&mut scenario, vector[group_id], vector[]);
 
         ts::next_tx(&mut scenario, DEVICE_ADDR);
         {
@@ -182,7 +182,7 @@ module sui_edge::deployment_manager_tests {
         let group_id = create_group_with_device(&mut scenario, _device_id);
 
         ts::next_tx(&mut scenario, ADMIN);
-        create_test_deployment(&mut scenario, vector[group_id]);
+        create_test_deployment(&mut scenario, vector[group_id], vector[]);
 
         // The other device (not in group) can still report — targeting enforced off-chain.
         // This test verifies report_status accepts any valid DeviceCap.
@@ -204,4 +204,33 @@ module sui_edge::deployment_manager_tests {
 
         ts::end(scenario);
     }
+    #[test]
+    #[expected_failure(abort_code = 0, location = sui_edge::device_cap)]
+    fun test_operator_cannot_impersonate_device() {
+        let mut scenario = ts::begin(ADMIN);
+        setup_registry(&mut scenario);
+        ts::next_tx(&mut scenario, ADMIN);
+        let mut registry = ts::take_shared<DeviceRegistry>(&scenario);
+        let clock = clock::create_for_testing(ts::ctx(&mut scenario));
+        let device = device_registry::register_device(&mut registry, string::utf8(b"bound"),
+            DEVICE_ADDR, string::utf8(b"aarch64"), &clock, ts::ctx(&mut scenario));
+        let id = device_registry::device_id(&device);
+        let cap = device_cap::issue(&device, ts::ctx(&mut scenario));
+        // Even a public capability deliberately transferred to the operator must
+        // not allow the operator to forge an applied report for the device.
+        transfer::public_transfer(cap, ADMIN);
+        transfer::public_transfer(device, ADMIN);
+        ts::return_shared(registry);
+        clock::destroy_for_testing(clock);
+        ts::next_tx(&mut scenario, ADMIN);
+        create_test_deployment(&mut scenario, vector[], vector[id]);
+        ts::next_tx(&mut scenario, ADMIN);
+        let cap = ts::take_from_sender<sui_edge::device_cap::DeviceCap>(&scenario);
+        let mut record = ts::take_shared<DeploymentRecord>(&scenario);
+        deployment_manager::report_status(&mut record, &cap, 1, ts::ctx(&mut scenario));
+        ts::return_to_sender(&scenario, cap);
+        ts::return_shared(record);
+        ts::end(scenario);
+    }
+
 }
