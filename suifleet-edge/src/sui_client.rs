@@ -20,6 +20,9 @@ use sui_rpc::field::{FieldMask, FieldMaskUtil};
 use sui_rpc::proto::sui::rpc::v2 as proto;
 use sui_sdk_types::{Address, Argument, Command, Digest, Input, StructTag, Transaction, TypeTag};
 
+/// Move module of every call this daemon signs; its functions are checked
+/// against the compiled contracts by scripts/check_contract_interfaces.py.
+const CALL_MODULE: &str = "deployment_manager";
 /// Largest gas budget the device will sign for one status report (0.05 SUI).
 const MAX_GAS_BUDGET: u64 = 50_000_000;
 /// Events requested per ListEvents call.
@@ -614,7 +617,7 @@ impl SuiClient {
         builder.move_call(
             sui_transaction_builder::Function::new(
                 package,
-                "deployment_manager".parse()?,
+                CALL_MODULE.parse()?,
                 call.function.parse()?,
             ),
             arguments,
@@ -691,7 +694,7 @@ fn check_transaction(
     };
     anyhow::ensure!(
         move_call.package == package
-            && move_call.module.as_str() == "deployment_manager"
+            && move_call.module.as_str() == CALL_MODULE
             && move_call.function.as_str() == call.function
             && move_call.type_arguments.is_empty()
             && move_call.arguments.len() == call.objects.len() + 1,
