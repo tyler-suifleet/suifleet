@@ -148,7 +148,7 @@ class Coordinator:
                 old = self.db.execute('SELECT * FROM tickets WHERE key=?', (key,)).fetchone()
                 spec = dict(issue)
                 if old and (old['token'] or old['status'] == 'done'):
-                    # Catalog edits can only expand an outstanding reservation.
+                    # Catalog edits never drop an outstanding claim's resources.
                     previous = json.loads(old['spec'])
                     spec['paths'] = sorted(set(spec['paths']) | set(previous['paths']))
                     status = old['status']
@@ -207,12 +207,14 @@ class Coordinator:
         missing = [key for key in set(spec['depends_on']) | set(remote.get('depends_on', [])) if statuses.get(key) != 'done']
         if missing:
             return 'dependencies incomplete: ' + ', '.join(missing)
+        # File paths are descriptive only; overlapping edits are resolved at
+        # review/merge. Only shared physical/build resources are exclusive.
         for other in reserved:
-            if any(overlaps(a, b) for a in spec['paths'] for b in json.loads(other['spec'])['paths']):
-                return f"scope conflicts with {other['key']} ({other['status']})"
+            if conflicting_resources(spec['paths'], json.loads(other['spec'])['paths']):
+                return f"resource conflicts with {other['key']} ({other['status']})"
         return None
 
-    def claim(self, agent, model, session, ticket=None, extra_paths=(), ttl=900, resources=()):
+    def claim(self, agent, model, session, ticket=None, ttl=900, resources=()):
         self.ensure_legacy_retired()
         if agent not in {'Codex', 'Claude', 'Other'} or not model.strip() or not session.strip() or not 60 <= ttl <= 3600:
             raise CoordinationError('Supply agent, actual model, session and a 60–3600 second lease')
@@ -231,7 +233,7 @@ class Coordinator:
             for original in candidates:
                 candidate = dict(original)
                 spec = json.loads(candidate['spec'])
-                spec['paths'] = sorted(set(spec['paths']) | set(self.paths(extra_paths, resources)))
+                spec['paths'] = sorted(set(spec['paths']) | set(self.paths((), resources)))
                 candidate['spec'] = json.dumps(spec)
                 reason = self.eligible(candidate, reserved, statuses)
                 if reason:
@@ -242,7 +244,7 @@ class Coordinator:
                 self.db.execute('''UPDATE tickets SET spec=?,status='in_progress',token=?,agent=?,model=?,session=?,
                     heartbeat=?,expires=?,worktree=NULL,branch=NULL,evidence=NULL,revision=revision+1 WHERE key=?''',
                     (candidate['spec'], token, agent, model, session, now, now + ttl, candidate['key']))
-                self.event(candidate['key'], session, 'claim', f'{agent}/{model}; token={token}; scope={spec["paths"]}')
+                self.event(candidate['key'], session, 'claim', f'{agent}/{model}; token={token}; paths={spec["paths"]}')
                 return self.view(self.row(candidate['key']))
             raise CoordinationError('No eligible ticket: ' + json.dumps(reasons, sort_keys=True))
 
@@ -266,7 +268,7 @@ class Coordinator:
             self.db.execute('UPDATE tickets SET heartbeat=?, expires=? WHERE key=?', (self.clock(), self.clock() + ttl, key))
             return self.view(self.row(key))
 
-    def assert_owner(self, key, token, paths=(), resources=()):
+    def assert_owner(self, key, token, resources=()):
         key = self.qualified(key)
         with self.transaction():
             row = self.owned(key, token)
@@ -285,27 +287,27 @@ class Coordinator:
                     raise CoordinationError('Dependency project/ticket is not initialized')
                 if dep['status'] != 'done' or dep['revision'] != dep['published_revision']:
                     raise CoordinationError(f'Dependency no longer complete: {dependency}; stop editing')
-            scope = json.loads(row['spec'])['paths']
-            for path in self.paths(paths, resources):
-                if not any(s == '.' or path == s or path.startswith(s.rstrip('/') + '/') for s in map(scope_path, scope)):
-                    raise CoordinationError(f'Path outside reserved scope: {path}')
+            held = set(json.loads(row['spec'])['paths'])
+            for resource in self.paths((), resources):
+                if resource not in held:
+                    raise CoordinationError(f'Resource not reserved: {resource[len("resources/"):]}')
             return self.view(row)
 
-    def expand(self, key, token, paths, resources=()):
+    def expand(self, key, token, resources):
         key = self.qualified(key)
-        if not paths and not resources:
-            raise CoordinationError('Supply additional paths/resources')
+        if not resources:
+            raise CoordinationError('Supply additional resources')
         with self.transaction():
             row = self.owned(key, token)
             if row['status'] != 'in_progress':
-                raise CoordinationError('Only implementation can expand scope')
+                raise CoordinationError('Only implementation can reserve resources')
             spec = json.loads(row['spec'])
-            expanded = set(spec['paths']) | set(self.paths(paths, resources))
+            expanded = set(spec['paths']) | set(self.paths((), resources))
             for other in self.db.execute('SELECT * FROM tickets WHERE key != ?', (key,)):
                 if not self.holds_scope(other):
                     continue
-                if any(overlaps(a, b) for a in expanded for b in json.loads(other['spec'])['paths']):
-                    raise CoordinationError(f"Scope conflicts with {other['key']}")
+                if conflicting_resources(expanded, json.loads(other['spec'])['paths']):
+                    raise CoordinationError(f"Resource conflicts with {other['key']}")
             spec['paths'] = sorted(expanded)
             self.db.execute('UPDATE tickets SET spec=?, revision=revision+1 WHERE key=?', (json.dumps(spec), key))
             self.event(key, row['session'], 'scope', json.dumps(spec['paths']))

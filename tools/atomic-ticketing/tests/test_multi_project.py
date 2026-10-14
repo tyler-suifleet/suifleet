@@ -92,11 +92,11 @@ class MultiProjectTests(unittest.TestCase):
         self.seed()
         a = self.a.claim('Codex', 'test-model', 'codex', resources=['hardware:shared'])
         b = self.b.claim('Claude', 'test-model', 'claude')
-        with self.assertRaisesRegex(m.CoordinationError, 'Scope conflicts'):
-            self.b.expand('ONE', b['token'], [], ['hardware:shared'])
+        with self.assertRaisesRegex(m.CoordinationError, 'Resource conflicts'):
+            self.b.expand('ONE', b['token'], ['hardware:shared'])
         self.a.transition('ONE', a['token'], 'review', 'Review evidence')
         with self.assertRaises(m.CoordinationError):
-            self.b.expand('ONE', b['token'], [], ['hardware:shared'])
+            self.b.expand('ONE', b['token'], ['hardware:shared'])
 
     def test_global_session_cannot_own_two_implementations(self):
         self.seed()

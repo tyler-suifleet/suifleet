@@ -45,6 +45,12 @@ def overlaps(left, right):
     return left == '.' or right == '.' or left == right or left.startswith(right + '/') or right.startswith(left + '/')
 
 
+def conflicting_resources(left, right):
+    """Shared hardware/build/port reservations are the only exclusive scope."""
+    return any(overlaps(a, b) for a in left if a.startswith('resources/')
+               for b in right if b.startswith('resources/'))
+
+
 def database_path(root=None):
     state_home = Path(os.environ.get('XDG_STATE_HOME', str(Path.home() / '.local/state')))
     return state_home / 'atomic-ticketing' / 'coordination.sqlite3'

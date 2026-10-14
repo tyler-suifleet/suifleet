@@ -79,11 +79,11 @@ class CoordinatorTests(unittest.TestCase):
             self.assertEqual(process.exitcode, 0)
         self.assertEqual(sum(kind == 'claimed' for kind, _ in results), 1)
 
-    def test_parallel_disjoint_claims_and_directory_conflicts(self):
+    def test_overlapping_file_paths_do_not_block_claims(self):
         self.claim()
         self.claim('SF-002', 'claude-session')
-        with self.assertRaisesRegex(m.CoordinationError, 'scope conflicts'):
-            self.claim('SF-003', 'another-session')
+        # SF-003 covers contracts/, which contains SF-001's contracts/a.move.
+        self.assertEqual(self.claim('SF-003', 'another-session')['key'], 'SF-003')
 
     def test_expired_worker_remains_reserved_and_old_token_is_fenced_after_recovery(self):
         claim = self.claim()
@@ -92,7 +92,7 @@ class CoordinatorTests(unittest.TestCase):
         with self.assertRaisesRegex(m.CoordinationError, 'expired'):
             self.c.assert_owner('SF-001', claim['token'])
         with self.assertRaises(m.CoordinationError):
-            self.claim('SF-003', 'claude-session')
+            self.claim('SF-001', 'claude-session')
         with self.assertRaises(m.CoordinationError):
             self.c.recover('SF-001', claim['token'], 'process stopped', False)
         self.c.recover('SF-001', claim['token'], 'process stopped; worktree retained', True)
@@ -113,7 +113,7 @@ class CoordinatorTests(unittest.TestCase):
         claim = self.claim()
         self.c.transition('SF-001', claim['token'], 'review', 'tests passed; PR prepared')
         self.assertIsNone(self.c.row('SF-001')['expires'])
-        for ticket in ('SF-003', 'SF-004'):
+        for ticket in ('SF-001', 'SF-004'):
             with self.assertRaises(m.CoordinationError):
                 self.claim(ticket, 'claude-session')
         with self.assertRaises(m.CoordinationError):
@@ -139,13 +139,13 @@ class CoordinatorTests(unittest.TestCase):
         with self.assertRaises(m.CoordinationError):
             self.claim('SF-004', 'claude-session')
 
-    def test_remote_owner_reserves_overlapping_scope(self):
+    def test_remote_owner_reserves_ticket_not_overlapping_paths(self):
         remote = copy.deepcopy(self.remote)
         remote['SF-003'].update(agent='Claude', status='In progress')
         self.c.import_catalog(self.config, remote)
-        with self.assertRaisesRegex(m.CoordinationError, 'scope conflicts'):
-            self.claim()
-        self.claim('SF-002', 'codex-session')
+        with self.assertRaises(m.CoordinationError):
+            self.claim('SF-003', 'codex-session')
+        self.assertEqual(self.claim()['key'], 'SF-001')
 
     def test_remote_closed_or_assigned_tickets_are_not_claimable(self):
         for fields in ({'state': 'closed'}, {'assignees': ['human']}, {'status': 'Blocked'}, {'agent': 'Claude'}):
@@ -213,18 +213,20 @@ class CoordinatorTests(unittest.TestCase):
         with self.assertRaisesRegex(m.CoordinationError, 'older/incomplete'):
             self.c.import_catalog(smaller, snapshot(smaller))
 
-    def test_expand_conflict_and_explicit_scope_assertion(self):
+    def test_resource_expansion_conflicts_and_assertion(self):
         claim = self.claim()
-        self.claim('SF-002', 'claude-session')
-        with self.assertRaises(m.CoordinationError):
-            self.c.expand('SF-001', claim['token'], ['dapp/src/'])
-        self.c.expand('SF-001', claim['token'], ['scripts/new.py'])
+        other = self.c.claim('Claude', 'test-model', 'claude-session', 'SF-002', resources=['hardware:pi'])
+        self.acknowledge('SF-002')
+        with self.assertRaisesRegex(m.CoordinationError, 'Resource conflicts'):
+            self.c.expand('SF-001', claim['token'], ['hardware:pi'])
+        self.c.expand('SF-001', claim['token'], ['port:3000'])
         self.acknowledge('SF-001')
-        self.c.assert_owner('SF-001', claim['token'], ['scripts/new.py'])
-        with self.assertRaises(m.CoordinationError):
-            self.c.assert_owner('SF-001', claim['token'], ['scripts/other.py'])
+        self.c.assert_owner('SF-001', claim['token'], ['port:3000'])
+        with self.assertRaisesRegex(m.CoordinationError, 'not reserved'):
+            self.c.assert_owner('SF-001', claim['token'], ['hardware:pi'])
         with self.assertRaises(m.CoordinationError):
             self.c.assert_owner('SF-001', claim['token'], ['../outside'])
+        self.assertTrue(other['token'])
 
     def test_one_implementation_per_session_but_review_allows_next(self):
         claim = self.claim()

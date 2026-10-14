@@ -20,7 +20,9 @@ def parser():
     claim.add_argument('--model', required=True)
     claim.add_argument('--session', required=True)
     claim.add_argument('--ticket')
-    claim.add_argument('--path', action='append', default=[])
+    # File paths are no longer reserved; --path is accepted and ignored so
+    # older instructions keep working.
+    claim.add_argument('--path', action='append', default=[], help=argparse.SUPPRESS)
     claim.add_argument('--resource', action='append', default=[])
     claim.add_argument('--worktree', type=Path)
     claim.add_argument('--base', default='HEAD')
@@ -33,7 +35,7 @@ def parser():
         command.add_argument('ticket')
         command.add_argument('--token', required=True)
         if name in {'assert','expand'}:
-            command.add_argument('--path', action='append', default=[])
+            command.add_argument('--path', action='append', default=[], help=argparse.SUPPRESS)
         if name in {'assert','expand'}:
             command.add_argument('--resource', action='append', default=[])
         if name in {'review','block','release','note'}:
@@ -119,15 +121,17 @@ def main():
             result = coordinator.view(coordinator.row(args.ticket))
             result['events'] = [dict(r) for r in coordinator.db.execute('SELECT * FROM events WHERE ticket=? ORDER BY id', (coordinator.qualified(args.ticket),))]
         elif args.command == 'claim':
-            result = coordinator.claim(args.agent, args.model, args.session, args.ticket, args.path, resources=args.resource)
+            result = coordinator.claim(args.agent, args.model, args.session, args.ticket, resources=args.resource)
             print(json.dumps({'project': config['project_id'], 'reserved': result['key'], 'token': result['token'], 'database': str(db_path)}), file=sys.stderr, flush=True)
             result = prepare_worktree(coordinator, root, result, args.worktree, args.base)
         elif args.command == 'heartbeat':
             result = coordinator.heartbeat(args.ticket, args.token)
         elif args.command == 'assert':
-            result = coordinator.assert_owner(args.ticket, args.token, args.path, args.resource)
+            result = coordinator.assert_owner(args.ticket, args.token, args.resource)
+        elif args.command == 'expand' and not args.resource:
+            result = coordinator.assert_owner(args.ticket, args.token)
         elif args.command == 'expand':
-            result = coordinator.expand(args.ticket, args.token, args.path, args.resource)
+            result = coordinator.expand(args.ticket, args.token, args.resource)
         elif args.command in {'review','block'}:
             result = coordinator.transition(args.ticket, args.token, 'review' if args.command == 'review' else 'blocked', args.text)
         elif args.command == 'resume':
