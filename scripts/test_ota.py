@@ -59,6 +59,7 @@ class Simulator:
         self.downloads = []
         self.built = []
         self.errors = []
+        self.chain_checks = 0
         self.truncate_next_artifact = True  # First artifact transfer drops mid-body.
         self.ranges = []
 
@@ -93,6 +94,7 @@ class Simulator:
 
     def rpc(self, method, params):
         if method == "sui_getChainIdentifier":
+            self.chain_checks += 1
             return self.chain
         if method == "sui_getObject" and params[0] == PACKAGE:
             return {"data": {"version": "3", "bcs": {"dataType": "package", "typeOriginTable": [
@@ -144,7 +146,10 @@ class Simulator:
         raise AssertionError(f"unexpected RPC method {method}")
 
 
-def run(binary):
+def run(binary, firmware_helper=False, daemon_user=None):
+    """With firmware_helper, updates go through `suifleet --firmware-helper`, run
+    here as the path unit would. With daemon_user (requires root), the daemon
+    runs as that user while the helper keeps root, as in the systemd units."""
     sim = Simulator()
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -217,17 +222,38 @@ def run(binary):
                 walrus={"publisher_url": url, "aggregator_url": url})
             (root / "deployment.json").write_text(json.dumps(manifest))
             config = root / "config.toml"
+            spool = root / "state" / "firmware"
+            mode = f'mode = "privileged-helper"\nfirmware_spool = {json.dumps(str(spool))}\n' if firmware_helper else ""
             config.write_text('[sui]\nmanifest_path = "deployment.json"\n'
                 f'[device]\nkeypair_path = {json.dumps(str(key))}\ndevice_object_id = "{DEVICE}"\ndevice_cap_id = "{CAP}"\n'
-                f'[walrus]\naggregator_url = "{url}"\n[apply]\ncommand = {json.dumps(command)}\ntimeout_seconds = 2\n'
+                f'[walrus]\naggregator_url = "{url}"\n[apply]\ncommand = {json.dumps("/bin/false" if firmware_helper else command)}\n'
+                f'timeout_seconds = 2\n{mode}'
                 f'[runtime]\nstate_dir = {json.dumps(str(root / "state"))}\npoll_seconds = 1\n')
+            helper_config = root / "firmware.toml"
+            # Only the root-owned helper config names the real updater.
+            helper_config.write_text(f'command = {json.dumps(command)}\ntimeout_seconds = 2\n'
+                f'spool_dir = {json.dumps(str(spool))}\nwork_dir = {json.dumps(str(root / "helper-work"))}\n')
+            account = None
+            if daemon_user:
+                import pwd
+                account = pwd.getpwnam(daemon_user)
+                for path in [root, *root.rglob("*")]:
+                    os.chown(path, account.pw_uid, account.pw_gid)
+                helper_config.chmod(0o600)
+                os.chown(helper_config, 0, 0)
+            helper_stop = threading.Event()
+            def helper_loop():
+                while not helper_stop.is_set():
+                    subprocess.run([str(binary), "--firmware-helper", str(helper_config)], stdout=log, stderr=log, check=False)
+                    helper_stop.wait(0.2)
             def state():
                 path = root / "state" / "state.json"
                 return json.loads(path.read_text()) if path.exists() else {}
             def count():
                 return len(applied.read_text().splitlines()) if applied.exists() else 0
             def start():
-                return subprocess.Popen([str(binary)], env={**os.environ, "EDGE_CONFIG":str(config)}, stdout=log, stderr=log)
+                identity = dict(user=account.pw_uid, group=account.pw_gid, extra_groups=[]) if account else {}
+                return subprocess.Popen([str(binary)], env={**os.environ, "EDGE_CONFIG":str(config)}, stdout=log, stderr=log, **identity)
             def stop(process):
                 process.send_signal(signal.SIGINT)
                 process.wait(timeout=10)
@@ -235,11 +261,17 @@ def run(binary):
             # Enrollment must not execute historical updates by accident.
             sim.add("0x100")
             with (root / "daemon.log").open("w") as log:
+                if firmware_helper:
+                    threading.Thread(target=helper_loop, daemon=True).start()
                 process = start()
                 wait_for(lambda: state().get("initialized"), "enrollment did not establish cursor", process)
                 assert count() == 0
                 # A chain reset after enrollment must stop all downloads and cursor changes.
                 sim.chain = "deadbeef"
+                # A poll that passed its chain check before the reset may still be
+                # reading events; add the next one only after a post-reset check.
+                checks = sim.chain_checks
+                wait_for(lambda: sim.chain_checks > checks, "daemon did not recheck the chain", process)
                 sim.add("0x101")
                 time.sleep(2.2)
                 assert count() == 0 and not sim.downloads
@@ -286,6 +318,11 @@ def run(binary):
                 assert not sim.errors, sim.errors
                 stop(process)
                 process = None
+                helper_stop.set()
+                if firmware_helper:
+                    assert not list(spool.glob("requests/*")), "firmware requests left behind"
+            if firmware_helper:
+                print("PASS: privileged firmware helper" + (f" (daemon as {daemon_user}, helper as root)" if daemon_user else ""))
             print("PASS: provisioning and independent signing/address vector")
             print("PASS: mixed per-type origins and runtime chain-reset/stale-call-package rejection")
             print("PASS: safe enrollment; paginated direct/group deployment and recipe-to-artifact flow")
@@ -303,4 +340,9 @@ def run(binary):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, default=Path(__file__).resolve().parents[1] / "suifleet-edge/target/debug/suifleet")
-    run(parser.parse_args().binary.resolve())
+    parser.add_argument("--firmware-helper", action="store_true", help="apply through the privileged firmware helper")
+    parser.add_argument("--daemon-user", help="run the daemon as this user; requires root (helper stays root)")
+    args = parser.parse_args()
+    if args.daemon_user and os.geteuid() != 0:
+        parser.error("--daemon-user requires root")
+    run(args.binary.resolve(), args.firmware_helper or bool(args.daemon_user), args.daemon_user)

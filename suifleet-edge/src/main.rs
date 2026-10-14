@@ -1,5 +1,6 @@
 mod apply;
 mod config;
+mod firmware;
 mod identity;
 mod recipe;
 mod state;
@@ -32,9 +33,10 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
     let check_config = args.len() == 3 && args[1] == "--check-config";
+    let helper = args.len() == 3 && args[1] == "--firmware-helper";
     anyhow::ensure!(
-        args.len() == 1 || check_config,
-        "usage: suifleet [--provision KEY_PATH | --derive-address KEY_PATH | --check-config CONFIG_PATH]"
+        args.len() == 1 || check_config || helper,
+        "usage: suifleet [--provision KEY_PATH | --derive-address KEY_PATH | --check-config CONFIG_PATH | --firmware-helper CONFIG]"
     );
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -42,6 +44,12 @@ async fn main() -> anyhow::Result<()> {
                 .unwrap_or_else(|_| "suifleet=info".into()),
         )
         .init();
+    if helper {
+        // Root-owned, path-activated: the only privileged operation.
+        let helper = config::FirmwareHelperConfig::load(Path::new(&args[2]))?;
+        firmware::run_helper(&helper).await?;
+        return Ok(());
+    }
     let path = if check_config {
         PathBuf::from(&args[2])
     } else {
@@ -64,6 +72,16 @@ async fn main() -> anyhow::Result<()> {
         sui.address()
     );
     let mut journal = Journal::open(&cfg.runtime.state_dir, binding)?;
+    // Before anything else reads the journal: a firmware update that may still
+    // finish, or already did, must not be settled as Failed.
+    let spool = cfg.apply.firmware_spool.clone();
+    journal.settle_interrupted(|id, outcome| match &outcome.firmware_request {
+        Some(request) => firmware::recover(&spool, request).unwrap_or_else(|error| {
+            warn!(deployment = id, %error, "Cannot inspect firmware spool; keeping outcome pending");
+            true
+        }),
+        None => false,
+    })?;
     let walrus = WalrusClient::new(&cfg.walrus);
     // The artifact cache holds at most the in-flight artifact; anything left
     // by an earlier run (e.g. a crash mid-download) is unused.
@@ -120,6 +138,9 @@ async fn poll(
         }
         journal.state.initialized = true;
         journal.save()?;
+    }
+    if cfg.apply.mode == config::ApplyMode::PrivilegedHelper {
+        collect_firmware_results(cfg, journal)?;
     }
     // Reports remain queued across network failures and daemon restarts.
     let pending: Vec<_> = journal
@@ -182,9 +203,9 @@ async fn poll(
                 journal.state.deployments.insert(
                     event.deployment_id.clone(),
                     Outcome {
-                        status: None,
-                        reported: false,
-                        error: None,
+                        firmware_request: (cfg.apply.mode == config::ApplyMode::PrivilegedHelper)
+                            .then(|| firmware::request_id(&event.deployment_id)),
+                        ..Outcome::default()
                     },
                 );
                 journal.save()?;
@@ -195,10 +216,13 @@ async fn poll(
                     .deployments
                     .get_mut(&event.deployment_id)
                     .unwrap();
-                outcome.status = Some(if result.is_ok() { 1 } else { 2 });
-                outcome.error = result.err().map(|error| format!("{error:#}"));
+                record_result(outcome, result);
                 info!(deployment = event.deployment_id, status = outcome.status, error = ?outcome.error, "Deployment finished");
                 journal.save()?;
+                firmware::acknowledge(
+                    &cfg.apply.firmware_spool,
+                    &firmware::request_id(&event.deployment_id),
+                );
                 let _ = std::fs::remove_dir_all(&directory);
             }
             journal.state.cursor = Some(cursor);
@@ -240,8 +264,48 @@ async fn handle_deployment(
         actual_hash
     );
     runner
-        .apply(artifact, recipe.lifecycle.install.as_deref())
+        .apply(
+            artifact,
+            recipe.lifecycle.install.as_deref(),
+            &firmware::request_id(&event.deployment_id),
+        )
         .await
+}
+
+/// Applied/Failed, or no status when a privileged update's outcome is
+/// unknown: like a crash mid-update, that is neither reported nor re-applied.
+fn record_result(outcome: &mut Outcome, result: anyhow::Result<()>) {
+    outcome.indeterminate = matches!(&result, Err(error) if error.downcast_ref::<firmware::Indeterminate>().is_some());
+    outcome.status = match &result {
+        Ok(()) => Some(1),
+        Err(_) if outcome.indeterminate => None,
+        Err(_) => Some(2),
+    };
+    outcome.error = result.err().map(|error| format!("{error:#}"));
+}
+
+/// Pick up firmware-helper results for deployments still without a status:
+/// updates that outlived the daemon's wait or a daemon restart.
+fn collect_firmware_results(cfg: &Config, journal: &mut Journal) -> anyhow::Result<()> {
+    let spool = &cfg.apply.firmware_spool;
+    let waiting: Vec<(String, String)> = journal
+        .state
+        .deployments
+        .iter()
+        .filter(|(_, outcome)| outcome.status.is_none())
+        .filter_map(|(id, outcome)| Some((id.clone(), outcome.firmware_request.clone()?)))
+        .collect();
+    for (id, request) in waiting {
+        let Some(result) = firmware::collect(spool, &request)? else {
+            continue;
+        };
+        let outcome = journal.state.deployments.get_mut(&id).unwrap();
+        record_result(outcome, result);
+        info!(deployment = id, status = outcome.status, error = ?outcome.error, "Late firmware result collected");
+        journal.save()?;
+        firmware::acknowledge(spool, &request);
+    }
+    Ok(())
 }
 
 async fn shutdown_signal() {
