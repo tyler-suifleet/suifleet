@@ -1,6 +1,6 @@
 use std::{path::Path, time::Duration};
 
-use ed25519_dalek::{SigningKey, Signer};
+use ed25519_dalek::SigningKey;
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -153,28 +153,14 @@ impl SuiClient {
     // ── Internals ─────────────────────────────────────────────────────────────
 
     fn sui_address(&self) -> String {
-        // SUI address = 0x || sha3_256(0x00 || pubkey_bytes)
-        use sha3::Digest as _;
-        let pub_bytes = self.signing_key.verifying_key().to_bytes();
-        let mut hasher = sha3::Sha3_256::new();
-        hasher.update([0x00u8]); // ed25519 flag byte
-        hasher.update(pub_bytes);
-        format!("0x{}", hex::encode(hasher.finalize()))
+        crate::identity::address(&self.signing_key)
     }
 
     async fn sign_and_execute(&self, tx_bytes_b64: &str) -> anyhow::Result<String> {
         use base64::{engine::general_purpose::STANDARD, Engine};
         let tx_bytes = STANDARD.decode(tx_bytes_b64)?;
 
-        // SUI intent prefix: [scope=Transaction(0), version=V0(0), app=Sui(0)]
-        let mut intent_msg = vec![0u8, 0, 0];
-        intent_msg.extend_from_slice(&tx_bytes);
-        let sig = self.signing_key.sign(&intent_msg);
-
-        // Serialized signature: flag(1) || sig(64) || pubkey(32), then base64
-        let mut full_sig = vec![0x00u8]; // ed25519 flag
-        full_sig.extend_from_slice(&sig.to_bytes());
-        full_sig.extend_from_slice(&self.signing_key.verifying_key().to_bytes());
+        let full_sig = crate::identity::signature(&self.signing_key, &tx_bytes);
         let sig_b64 = STANDARD.encode(&full_sig);
 
         let res = self

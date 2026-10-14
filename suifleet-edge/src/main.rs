@@ -1,5 +1,6 @@
 mod apply;
 mod config;
+mod identity;
 mod sui_client;
 mod walrus_client;
 
