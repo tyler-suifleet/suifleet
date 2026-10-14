@@ -274,13 +274,13 @@ async function objectsInBatches(client: SuiGrpcClient, ids: string[]) {
 
 // Deployment targets are arbitrary IDs on chain. An invalid group must not
 // hide unrelated deployments; transport errors still escape objectsInBatches.
-function targetGroupDevices(group: { type: string; content: Uint8Array }, creator: string): string[] {
+function supportedTargetGroup(group: { type: string; content: Uint8Array }) {
   try {
-    if (normalizeStructTag(group.type) !== normalizeStructTag(DEVICE_GROUP_TYPE)) return [];
+    if (normalizeStructTag(group.type) !== normalizeStructTag(DEVICE_GROUP_TYPE)) return undefined;
     const fields = GroupBcs.parse(group.content);
-    return fields.schema_version === "1" && fields.admin === creator ? fields.device_ids : [];
+    return fields.schema_version === "1" ? fields : undefined;
   } catch {
-    return []; // Invalid type tag or malformed BCS for this one target.
+    return undefined; // Invalid type tag or malformed BCS for this one target.
   }
 }
 
@@ -290,11 +290,16 @@ export async function fetchDeploymentEvents(client: SuiGrpcClient, owner?: strin
     .filter((event) => !owner || event.creator === owner);
   const objects = await objectsInBatches(client, [...new Set(events.map((event) => event.deployment_id))]);
   const live = new Map(objects.map((object) => [object.objectId, DeploymentBcs.parse(object.content)]));
-  return Promise.all(events.filter((event) => live.has(event.deployment_id)).map(async (event) => {
+  const liveEvents = events.filter((event) => live.has(event.deployment_id));
+  const groups = await objectsInBatches(client, [...new Set(liveEvents.flatMap((event) => event.target_groups))]);
+  const groupsById = new Map(groups.map((group) => [group.objectId, supportedTargetGroup(group)]));
+  return Promise.all(liveEvents.map(async (event) => {
     const record = live.get(event.deployment_id)!;
     if (record.schema_version !== "1") throw new Error("Unsupported DeploymentRecord schema");
-    const groups = await objectsInBatches(client, event.target_groups);
-    const resolvedDeviceIds = [...new Set([...event.target_devices, ...groups.flatMap((group) => targetGroupDevices(group, record.creator))])];
+    const resolvedDeviceIds = [...new Set([...event.target_devices, ...event.target_groups.flatMap((id) => {
+      const group = groupsById.get(id);
+      return group && group.admin === record.creator ? group.device_ids : [];
+    })])];
     const { verified, statuses } = await readReceipts(client, event.deployment_id);
     return { deploymentId: event.deployment_id, componentName: record.component_name, version: record.version,
       recipeBlobId: record.recipe_blob_id, artifactSha256: record.artifact_sha256,

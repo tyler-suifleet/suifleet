@@ -10,11 +10,11 @@ const owner = id("0xa"), other = id("0xb"), groupId = id("0xbe"), direct = id("0
 const groupType = `${m.type_origins["device_group::DeviceGroup"]}::device_group::DeviceGroup`;
 const fields = {id:groupId,name:"Lab",description:"targets",admin:owner,device_ids:[member],created_at:123,schema_version:1};
 function group(overrides = {}, type = groupType) { return {objectId:groupId,type,content:schema.GroupBcs.serialize({...fields,...overrides}).toBytes()}; }
-function client(target) {
+function client(target, creators = [owner, owner], shared = false) {
   const c = manifestClient(m);
   const events = [id("0xf1"), id("0xf2")].map((deployment, index) => ({
     deployment_id:deployment,component_name:"app",version:"1",recipe_blob_id:"recipe",artifact_sha256:"a".repeat(64),
-    target_groups:index === 0 ? [groupId] : [],target_devices:[direct],creator:owner,
+    target_groups:index === 0 || shared ? [groupId] : [],target_devices:[direct],creator:creators[index],
   }));
   const records = new Map(events.map(e => [e.deployment_id, {objectId:e.deployment_id,content:schema.DeploymentBcs.serialize({
     id:e.deployment_id,creator:e.creator,component_name:e.component_name,version:e.version,recipe_blob_id:e.recipe_blob_id,
@@ -44,5 +44,11 @@ function client(target) {
     assert.deepEqual(history[1].resolvedDeviceIds, [direct], label);
   }
   await assert.rejects(sui.fetchDeploymentEvents(client(new ObjectError("bad", "transport unavailable", {reason:"unknown"})), owner), /transport unavailable/);
+  const shared = client(group({admin:other}), [owner,other], true), read = shared.getObjects, reads = [];
+  shared.getObjects = async (args) => {reads.push(...args.objectIds);return read(args);};
+  const history = await sui.fetchDeploymentEvents(shared);
+  assert.equal(reads.filter(id => id === groupId).length, 1, "shared group read once for all deployments");
+  assert.deepEqual(history[0].resolvedDeviceIds, [direct], "foreign administrator ignored per deployment");
+  assert.deepEqual(history[1].resolvedDeviceIds, [direct,member], "matching administrator resolved per deployment");
   console.log("PASS: valid groups resolve; wrong types/layouts/versions/admins/deleted targets preserve history; transport errors remain visible");
 })().catch(error => {console.error(error);process.exitCode=1;});
