@@ -128,11 +128,18 @@ function DeploymentRow({
       <tr className="bg-gray-50 border-b border-gray-200">
         <td colSpan={6} className="px-4 pb-3">
           <div className="text-xs text-gray-400 space-x-4">
-            {d.resolvedDeviceIds.map((id) => (
+            {d.receiptsVerified ? d.resolvedDeviceIds.map((id) => (
               <span key={id} className={`inline-flex px-2 py-1 rounded ${STATUS_COLORS[d.statuses[id] ?? 0]}`} title={id}>
                 {id.slice(0, 10)}…: {STATUS_LABELS[d.statuses[id] ?? 0]}
               </span>
-            ))}
+            )) : (
+              <span
+                className="inline-flex px-2 py-1 rounded bg-gray-200 text-gray-700"
+                title="Created before verified receipts. Older contract versions let any address write its legacy statuses, so none are shown. A device report through the current contracts adds a verified receipt; redeploy if you need one now."
+              >
+                Unverified: no signed device receipts yet
+              </span>
+            )}
             {d.recipeBlobId && <span>Recipe: <span className="font-mono text-gray-500">{d.recipeBlobId}</span></span>}
             {d.artifactSha256 && <span>SHA256: <span className="font-mono text-gray-500">{d.artifactSha256.slice(0, 16)}…</span></span>}
           </div>

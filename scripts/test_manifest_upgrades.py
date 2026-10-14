@@ -49,6 +49,8 @@ def run(rpc_url, faucet_url):
             for name in dm.REQUIRED_TYPES:
                 if stage < 2 and name.endswith("RecipeDigestKey"): continue
                 if stage < 3 and name.endswith("DeviceAddressKey"): continue
+                # Receipts arrive in a later upgrade than the original package.
+                if stage < 3 and name.split("::")[1] in ("ReceiptsKey", "Receipts", "DeviceStatusReported"): continue
                 module, datatype = name.split("::")
                 modules.setdefault(module, []).append(datatype)
             for module, types in modules.items():
@@ -94,12 +96,13 @@ def run(rpc_url, faucet_url):
         third_id = published(third)
         manifest = resolve(third_id, registry, cap)
         for name, origin in manifest["type_origins"].items():
-            expected = second_id if name.endswith("RecipeDigestKey") else third_id if name.endswith("DeviceAddressKey") else first_id
+            later = name.endswith("DeviceAddressKey") or name.split("::")[1] in ("ReceiptsKey", "Receipts", "DeviceStatusReported")
+            expected = second_id if name.endswith("RecipeDigestKey") else third_id if later else first_id
             assert origin == dm.object_id(expected), (name, origin, expected)
         assert manifest["call_package_id"] == dm.object_id(third_id)
         assert manifest["package_version"] == "3"
         assert manifest["shared_objects"]["registry"]["id"] == dm.object_id(registry)
-        print("PASS: two executed upgrades retain old origins and separately introduce RecipeDigestKey/DeviceAddressKey")
+        print("PASS: two executed upgrades retain old origins and separately introduce RecipeDigestKey, DeviceAddressKey and receipts")
         template = root / "device-template.toml"
         key = root / "device.key"; key.write_text("07" * 32); key.chmod(0o600)
         template.write_text('[device]\nkeypair_path=' + json.dumps(str(key)) + '\ndevice_object_id="0xde"\ndevice_cap_id="0xca"\n[apply]\ncommand="/bin/true"\n')

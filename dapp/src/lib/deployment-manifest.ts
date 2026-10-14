@@ -8,7 +8,8 @@ export const REQUIRED_TYPES = [
   "deployment_manager::DeploymentRecord", "deployment_manager::DeploymentCreated",
   "deployment_manager::DeviceStatusUpdated", "deployment_manager::TargetGroupsKey",
   "deployment_manager::TargetDevicesKey", "deployment_manager::StatusesKey",
-  "deployment_manager::RecipeDigestKey",
+  "deployment_manager::RecipeDigestKey", "deployment_manager::ReceiptsKey",
+  "deployment_manager::Receipts", "deployment_manager::DeviceStatusReported",
 ] as const;
 export interface DeploymentManifest {
   schema_version: number;

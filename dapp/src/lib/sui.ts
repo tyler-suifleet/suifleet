@@ -32,8 +32,39 @@ export interface DeploymentEvent {
   targetDevices: string[];
   creator: string;
   timestampMs: number;
+  /** Signer- and target-checked statuses from the authoritative receipts. */
   statuses: Record<string, number>;
+  /**
+   * False for records created before receipts existed: their only statuses are
+   * legacy entries that old package versions can forge, so none are shown.
+   */
+  receiptsVerified: boolean;
   resolvedDeviceIds: string[];
+}
+
+export interface DeploymentReceipts {
+  verified: boolean;
+  statuses: Record<string, number>;
+}
+
+/**
+ * Read authoritative status receipts. Legacy `StatusesKey` entries are never
+ * used: any address can write them through the original package.
+ */
+export async function readReceipts(client: Pick<SuiClient, "getDynamicFieldObject">, deploymentId: string): Promise<DeploymentReceipts> {
+  // Empty Move structs carry an implicit `dummy_field: bool`; a real node rejects `{}`.
+  const field = await client.getDynamicFieldObject({ parentId: deploymentId,
+    name: { type: moveType("deployment_manager::ReceiptsKey"), value: { dummy_field: false } } });
+  if (field.error) {
+    if (field.error.code === "dynamicFieldNotFound") return { verified: false, statuses: {} };
+    throw new Error(`Unable to load deployment receipts: ${field.error.code}`);
+  }
+  const content = field.data?.content;
+  const fields = content?.dataType === "moveObject" ? content.fields as Record<string, unknown> : {};
+  const receipts = fields.value as { fields?: { statuses?: { fields?: { contents?: { fields: { key: string; value: number | string } }[] } } } } | undefined;
+  const contents = receipts?.fields?.statuses?.fields?.contents;
+  if (!Array.isArray(contents)) throw new Error("Unable to load deployment receipts: unexpected Receipts layout");
+  return { verified: true, statuses: Object.fromEntries(contents.map((entry) => [entry.fields.key, Number(entry.fields.value)])) };
 }
 
 // ── Device transactions ───────────────────────────────────────────────────────
@@ -265,16 +296,10 @@ export async function fetchDeploymentEvents(client: SuiClient, owner?: string): 
       ...groups.flatMap((group) => group.data?.content?.dataType === "moveObject"
         ? ((group.data.content.fields as Record<string, unknown>).device_ids as string[] ?? []) : []),
     ])];
-    const statusObject = await client.getDynamicFieldObject({ parentId: id,
-      name: { type: moveType("deployment_manager::StatusesKey"), value: {} } });
-    if (statusObject.error) throw new Error(`Unable to load deployment status: ${statusObject.error.code}`);
-    const content = statusObject.data?.content;
-    const fields = content?.dataType === "moveObject" ? content.fields as Record<string, unknown> : {};
-    const value = fields.value as { fields?: { contents?: { fields: { key: string; value: number } }[] } } | undefined;
-    const statuses = Object.fromEntries((value?.fields?.contents ?? []).map((entry) => [entry.fields.key, Number(entry.fields.value)]));
+    const { verified, statuses } = await readReceipts(client, id);
     return { deploymentId: id, componentName: p.component_name as string, version: p.version as string,
       recipeBlobId: p.recipe_blob_id as string, artifactSha256: p.artifact_sha256 as string,
       targetGroups: (p.target_groups as string[]) ?? [], targetDevices: (p.target_devices as string[]) ?? [],
-      creator: p.creator as string, timestampMs: Number(event.timestampMs ?? 0), statuses, resolvedDeviceIds: [...new Set([...resolvedDeviceIds, ...Object.keys(statuses)])] };
+      creator: p.creator as string, timestampMs: Number(event.timestampMs ?? 0), statuses, receiptsVerified: verified, resolvedDeviceIds: [...new Set([...resolvedDeviceIds, ...Object.keys(statuses)])] };
   }));
 }
