@@ -4,7 +4,7 @@ Codex and Claude use the same coordinator before starting any implementation. Gi
 
 ## Shared database and isolation
 
-The reusable `ticket` CLI uses `~/.local/state/atomic-ticketing/coordination.sqlite3` (or the shared XDG_STATE_HOME location) across SuiFleet and Vortech. Project configuration is committed in `.atomic-ticketing.json`; the engine, installer, tests and cross-project instructions live in [therealtime/atomic-ticketing](https://github.com/therealtime/atomic-ticketing) (formerly `tools/atomic-ticketing/` here). The original Git-common-directory database is migrated and retired, with a SQLite backup and ownership tokens preserved. Transactions use SQLite `BEGIN IMMEDIATE`, WAL and full synchronization; a claim checks ticket ownership, dependency completion and conflicting shared-resource reservations before acquiring ownership in the same transaction. Claims are sorted by P0/P1/P2 then stable SF key, after filtering dependencies and conflicts.
+The reusable `ticket` CLI uses `~/.local/state/atomic-ticketing/coordination.sqlite3` (or the shared XDG_STATE_HOME location) across SuiFleet and Vortech. Project configuration is committed in `.atomic-ticketing.json`; the engine, installer, tests and cross-project instructions live in [therealtime/atomic-ticketing](https://github.com/therealtime/atomic-ticketing) (formerly `tools/atomic-ticketing/` here). The original Git-common-directory database is migrated and retired, with a SQLite backup and ownership tokens preserved. Transactions use SQLite `BEGIN IMMEDIATE`, WAL and full synchronization; a claim checks ticket ownership and dependency completion before acquiring ownership in the same transaction. Claims are sorted by P0/P1/P2 then stable SF key, after filtering dependencies. Hardware never blocks a claim; it is locked separately while in use (below).
 
 Both models must use the same central database and each project's registered canonical Git repository/linked worktrees on the WSL Linux filesystem. Registration rejects a separate clone with an already-registered project identity. Do not put the database on `/mnt/c`, a network share or a synced directory. A separate worktree is created for each claim, on a unique branch; failed worktree creation leaves the reservation intact for inspection. It does not reset or copy another worker's working changes. File paths are not reserved: a ticket's paths describe its likely area, never block another claim and need no expansion. Overlapping edits in separate worktrees are resolved at review/merge.
 
@@ -25,11 +25,11 @@ ticket --project suifleet claim \
   --agent Codex --model ACTUAL_MODEL --session UNIQUE_CODEX_SESSION
 ```
 
-Claude uses the same command with `--agent Claude`, its actual model and a different session identifier. Each independently asks for the next eligible ticket; the transaction prevents duplicate claims and conflicting shared-resource reservations. `--ticket SF-029` requests a specific ticket but cannot bypass dependencies or reservations. `--resource NAME` reserves a shared resource at claim time. Use `--base REF` to select a tested integration baseline; the default is the canonical checkout's current HEAD. `--worktree /absolute/new/path` overrides the default sibling `suifleet-worktrees` location.
+Claude uses the same command with `--agent Claude`, its actual model and a different session identifier. Each independently asks for the next eligible ticket; the transaction prevents duplicate claims. `--ticket SF-029` requests a specific ticket but cannot bypass dependencies or ownership. `--resource NAME` only records that the ticket needs a resource. Use `--base REF` to select a tested integration baseline; the default is the canonical checkout's current HEAD. `--worktree /absolute/new/path` overrides the default sibling `suifleet-worktrees` location.
 
-Initialization/refresh reads the live Project, all published issue states and native blocked-by dependencies (including dependencies added after seeding). Open blockers outside the catalog prevent claims. Assigned, blocked, closed and already-owned remote items are not claimed. An unclaimed remote ticket with an existing owner retains its ticket and any configured shared-resource reservations. Refresh before every new claim: snapshots older than five minutes fail closed. An older/incomplete catalog is rejected; use the installed `ticket --project suifleet` CLI against the registered canonical checkout when necessary.
+Initialization/refresh reads the live Project, all published issue states and native blocked-by dependencies (including dependencies added after seeding). Open blockers outside the catalog prevent claims. Assigned, blocked, closed and already-owned remote items are not claimed. An unclaimed remote ticket with an existing owner retains its ticket. Refresh before every new claim: snapshots older than five minutes fail closed. An older/incomplete catalog is rejected; use the installed `ticket --project suifleet` CLI against the registered canonical checkout when necessary.
 
-The successful command emits one JSON result with `key`, `token`, `worktree`, `branch`, scope and ownership. Enter that worktree, read its AGENTS.md, and record a testing plan. A refresh never drops an outstanding claim's shared resources. No worker should implement directly in the canonical checkout.
+The successful command emits one JSON result with `key`, `token`, `worktree`, `branch`, scope and ownership. Enter that worktree, read its AGENTS.md, and record a testing plan. No worker should implement directly in the canonical checkout.
 
 ## Work and communicate
 
@@ -38,15 +38,33 @@ Replace TICKET and TOKEN below with the returned values; tokens identify claim g
 ```bash
 ticket --project suifleet heartbeat TICKET --token TOKEN
 ticket --project suifleet assert TICKET --token TOKEN
-ticket --project suifleet expand TICKET --token TOKEN --resource hardware:raspberrypi3bplus
 ticket --project suifleet note TICKET --token TOKEN --text 'Interface decision, test plan or handoff'
 ticket --project suifleet list
 ticket --project suifleet show TICKET
 ```
 
-Heartbeat at least every five minutes, including during long builds. The lease lasts fifteen minutes. Check ownership after long tools and before staging/committing or any deployment. `assert` rejects expired, replaced, non-implementation or unpublished claims, and resources (`--resource`) the claim does not hold. `--path` is accepted for older instructions and ignored. A worker with a lost token must stop editing immediately. A still-owning expired worker may heartbeat and resume; expiry alone never transfers ownership.
+Heartbeat at least every five minutes, including during long builds. The lease lasts fifteen minutes. Check ownership after long tools and before staging/committing or any deployment. `assert` rejects expired, replaced, non-implementation or unpublished claims, and, with `--resource NAME`, any resource whose lock this claim's session does not currently hold. `--path` is accepted for older instructions and ignored. A worker with a lost token must stop editing immediately. A still-owning expired worker may heartbeat and resume; expiry alone never transfers ownership.
 
-Read `list` and relevant `show` events before changing shared interfaces. Local notes provide the common mailbox; GitHub issue comments may record durable human-facing handoffs under the task's authorization. Neither model has automatic access to the other's private conversation. Agree on shared interfaces in notes/issues; dependency declarations cannot detect every semantic conflict. Reserve shared hardware/build/port resources with `--resource NAME` on claim/expand and assert them before use; configured `resource_rules` attach resources to tickets whose paths match. Worktrees isolate source files, not devices or ports.
+Read `list` and relevant `show` events before changing shared interfaces. Local notes provide the common mailbox; GitHub issue comments may record durable human-facing handoffs under the task's authorization. Neither model has automatic access to the other's private conversation. Agree on shared interfaces in notes/issues; dependency declarations cannot detect every semantic conflict. Worktrees isolate source files, not devices or ports.
+
+## Hardware and other shared resources
+
+Development is never blocked by hardware. `resource_rules` and `--resource` only label tickets with what they need (shown by `list`). The physical device, build machine or port is taken with a global lease, across SuiFleet and Vortech, only for the time it is actually in use, with or without a claim:
+
+```bash
+ticket --project suifleet lock hardware:raspberrypi3bplus --agent Claude --model ACTUAL_MODEL \
+  --session SESSION --purpose 'flash SF-029 image' --ticket SF-029   # prints a lock token
+ticket --project suifleet lock-assert hardware:raspberrypi3bplus --lock-token LOCK   # before each operation
+ticket --project suifleet lock-renew  hardware:raspberrypi3bplus --lock-token LOCK   # every five minutes
+ticket --project suifleet unlock      hardware:raspberrypi3bplus --lock-token LOCK   # when done
+ticket --project suifleet locks                                                      # current holders
+```
+
+- A live lock held by another session is refused with its holder, ticket and purpose: wait, ask the holder in a note, or work on something else.
+- Leases default to 15 minutes (`--ttl`, at most 4 hours). An expired lock can be taken by anyone; a holder whose `lock-assert` fails must stop touching the device and lock again.
+- Unlock as soon as the hardware step ends. Never keep a lock through review, blocked work or idle time.
+- `break-lock NAME --expect-token LOCK --text WHY --confirm-holder-stopped` is operator recovery for a live lock whose holder has stopped.
+- Locks coordinate trusted models; they do not physically prevent another process from using the device.
 
 ## Review, blockers and completion
 
@@ -57,7 +75,7 @@ ticket --project suifleet block TICKET --token TOKEN --text 'Concrete blocker an
 ticket --project suifleet resume TICKET --token TOKEN
 ```
 
-Review and blocked work keep their claim and shared-resource reservations. Review has no expiring lease and is not dependency completion. A session may select another independent ticket after submitting review, but may own only one active/blocked implementation across all registered projects. Resume is rejected if that session already owns another implementation. Coordinate a reviewer in the issue/Project, and integrate changes serially instead of having workers push directly to main.
+Review and blocked work keep their claim; hardware locks are released when the hardware step ends. Review has no expiring lease and is not dependency completion. A session may select another independent ticket after submitting review, but may own only one active/blocked implementation across all registered projects. Resume is rejected if that session already owns another implementation. Coordinate a reviewer in the issue/Project, and integrate changes serially instead of having workers push directly to main.
 
 After review, required acceptance and integration, the integrator records completion:
 
@@ -92,4 +110,4 @@ This is cooperative coordination for trusted models on one user account, not an 
 
 ## Verification
 
-The extracted coordinator's `make test` runs offline tests using temporary databases and worktrees, including a ten-process race with exactly one winner, non-blocking path overlap, resource conflicts, dependency gating, stale leases, token replacement, remote ownership, failed worktree setup and failed mirror retry. `make test-tracking` checks the existing backlog/publication tooling. Tests do not mutate GitHub.
+The extracted coordinator's `make test` runs offline tests using temporary databases and worktrees, including a ten-process race with exactly one winner, non-blocking path and resource overlap, a cross-process hardware-lock race, lock expiry/takeover, dependency gating, stale leases, token replacement, remote ownership, failed worktree setup and failed mirror retry. `make test-tracking` checks the existing backlog/publication tooling. Tests do not mutate GitHub.
