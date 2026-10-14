@@ -1,6 +1,6 @@
 # SuiFleet operations and verification
 
-This runbook describes current local operations and the intended release gates. It does not establish production readiness. Current release blockers include retired JSON-RPC integration, incorrect origins for newly introduced key types, and old-package entry points that can bypass new checks on shared authoritative state.
+This runbook describes current local operations and the intended release gates. It does not establish production readiness. Current release blockers include the publication resolver's retired JSON-RPC integration (SF-006; the daemon and frontend use gRPC), incorrect origins for newly introduced key types, and old-package entry points that can bypass new checks on shared authoritative state.
 
 ## Environment
 
@@ -131,6 +131,38 @@ SUI_CONFIG_DIR=/tmp/sui-config python3 scripts/upgrade_security_localnet.py --v1
 ```
 
 It publishes the prior package, creates devices and deployments (including a legacy record with only forged statuses), then upgrades. Next it attacks through old and new entry points, requiring each attack to abort at the intended check. It also verifies a later version-bumped upgrade locks out this package, then resolves a deployment manifest and runs the real dApp `fetchDeploymentEvents` against new, legacy and forged-only records. Results come from on-chain effects, object state and events. It needs `dapp/node_modules` (`make dapp-install`). This does not replace an upgrade test against an existing deployment on a public network.
+
+## Daemon chain access (gRPC)
+
+The daemon talks to the manifest's `rpc_url` over the Sui gRPC v2 API only (Mysten's Rust SDK `sui-rpc` 0.4). Walrus downloads still use plain HTTP.
+
+**Node requirements:** the node must serve indexed `LedgerService.ListEvents`. Sui 1.71.1 returns `Unimplemented`; 1.81.1 localnet, testnet (1.82.1) and mainnet (1.81.1) full nodes serve it. The dev image pins Sui 1.81.1.
+
+**Reads:**
+- The chain identity comes from `GetServiceInfo`. The manifest's 8-hex `chain_identifier` is the first four bytes of the genesis digest.
+- Package type origins are decoded from the package's own BCS.
+- Objects are read with `GetObject`. Dynamic fields are read by their derived object ID; empty key structs serialize as one `false` byte.
+
+**Discovery:**
+- `ListEvents` is filtered by the manifest's `DeploymentCreated` type.
+- The journal stores the opaque resume cursor, with its checkpoint, after every event and after every scanned page. Enrollment starts after the current checkpoint.
+
+**Retention:**
+- Full nodes prune history; `GetServiceInfo.lowest_available_checkpoint` reports the oldest retained checkpoint.
+- If a device's resume position is older than that, polling stops with an explicit error and nothing is skipped. Point `rpc_url` at a node that retains the history (an archival or indexed provider), or re-enroll deliberately; re-enrollment skips everything before it.
+- Plan node retention to exceed the longest expected device downtime.
+
+**Cursor migration:** a journal written by the JSON-RPC daemon (`{txDigest, eventSeq}`) resumes strictly after that exact event. The daemon reads the transaction's checkpoint and walks the filtered event stream in ledger order (transaction, then event index) to the event itself, so earlier events in the checkpoint, even in the same transaction, are never redelivered. This matters because the journal only remembers deployments that were acted on: one skipped earlier could otherwise run if its targeting changed since. If the node no longer holds that transaction, or the event cannot be found in its checkpoint, polling stops with an explicit error instead of guessing.
+
+**Status reports:**
+- The node simulates the call to resolve object versions, gas and budget.
+- Before signing, the daemon rejects anything but exactly one `deployment_manager::report_status` or `report_status_for_group` call. It must have the intended objects and status, be sent and paid by the device key, and have a budget of at most 0.05 SUI.
+- The device address therefore needs a small SUI balance for gas.
+- Success is read from execution effects.
+
+**Tests:**
+- `make test-ota` and `make test-component` run the daemon against the Python simulator through `suifleet-edge/examples/grpc_sim_shim.rs`, which verifies signatures with Mysten's `sui-crypto`.
+- `make test-daemon-localnet` runs it against a real disposable localnet (start `sui start --with-faucet --force-regenesis` first): direct, group, failure, offline catch-up and cursor-migration paths, judged from on-chain receipts.
 
 ## Deployment process
 

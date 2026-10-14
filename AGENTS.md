@@ -22,7 +22,7 @@ Read [the parity audit](docs/GREENGRASS_PARITY_AUDIT.md), [validation evidence](
 
 Critical known gaps:
 
-- The frontend uses pinned Sui SDK 2.36.0 and dApp Kit React 2.1.40 with gRPC-Web; see [frontend compatibility and wallet acceptance](docs/FRONTEND_CLIENT.md). The daemon and publishing resolver still use deprecated JSON-RPC; migrate the daemon reader, transaction builder and executor in SF-004. Real extension-wallet acceptance remains required for SF-003.
+- The frontend uses pinned Sui SDK 2.36.0 and dApp Kit React 2.1.40 with gRPC-Web; see [frontend compatibility and wallet acceptance](docs/FRONTEND_CLIENT.md). The daemon uses the supported gRPC v2 API through Mysten's Rust SDK (SF-004): event discovery, reads, local transaction building with a verify-before-sign check, and effects-checked execution; it needs a node serving indexed `ListEvents` (Sui ≥ 1.81 in our tests). The publishing resolver still uses deprecated JSON-RPC (SF-006). Real extension-wallet acceptance remains required for SF-003.
 - Existing types keep their introduction-package origin; types introduced by later upgrades have later origins. The implemented deployment manifest records each origin, including `RecipeDigestKey`, `DeviceAddressKey` and authoritative receipts. Preserve this boundary during client/API changes.
 - Older Sui package versions remain callable. SF-001 introduced isolated authoritative receipts and local-chain old-package attack/migration tests; public-network upgrade acceptance remains SF-010. Never trust legacy StatusesKey or assume an old package is disabled.
 - Current unit tests and the HTTP simulator do not establish real chain upgrade compatibility, live wallet behavior, Walrus certification, Yocto builds or hardware OTA health.
@@ -55,7 +55,7 @@ make edge-build
 make dapp-build
 ```
 
-`make shell` opens the container. Make detects `INSIDE_DEV_CONTAINER=1`; run the same targets there without nested Docker. The Dockerfile pins the Ubuntu base digest, Sui `testnet-v1.71.1` (checksum-verified), Rust `1.87.0`, Node `22.22.2` and pnpm `11.0.8`; these are the existing baseline, not a claim of compatibility with current public networks. Use locked dependencies. Deliberate dependency upgrades must update lockfiles and compatibility tests together.
+`make shell` opens the container. Make detects `INSIDE_DEV_CONTAINER=1`; run the same targets there without nested Docker. The Dockerfile pins the Ubuntu base digest, Sui `testnet-v1.81.1` (checksum-verified; same build as mainnet 1.81.1), Rust `1.94.0` (the lowest Rust in the supported Yocto LTS releases), Node `22.22.2` and pnpm `11.0.8`; these are the existing baseline, not a claim of compatibility with current public networks. Use locked dependencies. Deliberate dependency upgrades must update lockfiles and compatibility tests together.
 
 Do not run `make down` casually: it deletes named volumes, including Sui wallet configuration. Do not reset, clean, overwrite, stage or commit unrelated work. Inspect `git status` before editing; existing work may belong to another agent or the user.
 

@@ -1,8 +1,32 @@
+//! Sui access over the supported gRPC v2 API (sui.rpc.v2), using Mysten's
+//! official Rust SDK. JSON-RPC is no longer used.
+//!
+//! - Reads: GetServiceInfo, GetPackage, GetObject (dynamic fields by their
+//!   derived object ID), GetTransaction (legacy cursor migration).
+//! - Discovery: LedgerService.ListEvents filtered by the DeploymentCreated
+//!   type, resumed from opaque watermark cursors stored in the journal.
+//! - Writes: the transaction is built from the node's simulation (gas,
+//!   object versions, budget), checked against the exact intended call,
+//!   signed locally by `identity` and executed; success is read from the
+//!   execution effects, never inferred from a digest.
 use crate::{config::SuiConfig, identity};
+use base64::{engine::general_purpose::STANDARD, Engine};
 use ed25519_dalek::SigningKey;
+use futures_util::StreamExt;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::path::Path;
+use std::{path::Path, str::FromStr, time::Duration};
+use sui_rpc::field::{FieldMask, FieldMaskUtil};
+use sui_rpc::proto::sui::rpc::v2 as proto;
+use sui_sdk_types::{Address, Argument, Command, Digest, Input, StructTag, Transaction, TypeTag};
+
+/// Move module of every call this daemon signs; its functions are checked
+/// against the compiled contracts by scripts/check_contract_interfaces.py.
+const CALL_MODULE: &str = "deployment_manager";
+/// Largest gas budget the device will sign for one status report (0.05 SUI).
+const MAX_GAS_BUDGET: u64 = 50_000_000;
+/// Events requested per ListEvents call.
+const PAGE_SIZE: u32 = 50;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct DeploymentCreatedEvent {
@@ -16,11 +40,130 @@ pub struct DeploymentCreatedEvent {
     pub creator: String,
 }
 
+/// An on-chain object as the daemon needs it.
+#[derive(Debug, Clone)]
+pub struct Object {
+    pub object_type: String,
+    pub owner: Owner,
+    /// Move fields rendered as JSON by the node.
+    pub fields: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Owner {
+    Address(String),
+    Shared { initial_version: u64 },
+    Other,
+}
+
+/// One page of DeploymentCreated events. Each event carries the cursor to
+/// resume *after* it; `end` is the cursor after the whole scanned range.
+pub struct EventPage {
+    pub events: Vec<(DeploymentCreatedEvent, Value)>,
+    pub end: Value,
+    pub has_more: bool,
+}
+
+/// Where the next ListEvents call starts, as stored in the journal.
+#[derive(Debug, PartialEq)]
+enum Cursor {
+    /// Opaque gRPC watermark: resume strictly after it. The checkpoint it is
+    /// in (when the node reports one) lets pruned history be detected.
+    After(Vec<u8>, Option<u64>),
+    /// Start of a checkpoint range (inclusive): enrollment baseline or a
+    /// migrated JSON-RPC cursor. Events already journaled are deduplicated.
+    Checkpoint(u64),
+    /// Cursor written by the JSON-RPC daemon: {"txDigest", "eventSeq"}, the
+    /// last processed event. Migration resumes strictly after that event.
+    Legacy(String, u64),
+    Genesis,
+}
+
+impl Cursor {
+    fn parse(value: &Option<Value>) -> anyhow::Result<Self> {
+        let Some(value) = value else {
+            return Ok(Self::Genesis);
+        };
+        if let Some(after) = value.get("after").and_then(Value::as_str) {
+            let checkpoint = value.get("checkpoint").and_then(Value::as_u64);
+            return Ok(Self::After(STANDARD.decode(after)?, checkpoint));
+        }
+        if let Some(checkpoint) = value.get("checkpoint").and_then(Value::as_u64) {
+            return Ok(Self::Checkpoint(checkpoint));
+        }
+        if let Some(digest) = value.get("txDigest").and_then(Value::as_str) {
+            let sequence = value
+                .get("eventSeq")
+                .and_then(|v| v.as_str().and_then(|s| s.parse().ok()).or_else(|| v.as_u64()))
+                .ok_or_else(|| anyhow::anyhow!("legacy event cursor without a valid eventSeq: {value}"))?;
+            return Ok(Self::Legacy(digest.to_owned(), sequence));
+        }
+        anyhow::bail!("unrecognized event cursor in journal: {value}")
+    }
+}
+
+enum Start {
+    After(Vec<u8>),
+    Checkpoint(u64),
+}
+
+struct RawPage {
+    events: Vec<(proto::Event, Value)>,
+    end: Value,
+    has_more: bool,
+}
+
+/// Whether `event` is the legacy cursor's event; then its resume cursor.
+/// Passing the legacy checkpoint without meeting it is an error.
+fn legacy_boundary(
+    event: &proto::Event,
+    digest: &str,
+    sequence: u64,
+    checkpoint: u64,
+    watermark: &Value,
+) -> anyhow::Result<Option<Value>> {
+    let at = event.checkpoint.unwrap_or_default();
+    anyhow::ensure!(
+        at <= checkpoint,
+        "legacy event cursor {digest}#{sequence} was not found in checkpoint {checkpoint}; \
+         refusing to guess where to resume"
+    );
+    let same = event.transaction_digest.as_deref() == Some(digest)
+        && event.event_index.map(u64::from) == Some(sequence);
+    Ok(same.then(|| watermark.clone()))
+}
+
+fn after(watermark: &proto::Watermark) -> anyhow::Result<Value> {
+    let cursor = watermark
+        .cursor
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("event stream frame without a resume cursor"))?;
+    let mut value = json!({ "after": STANDARD.encode(cursor) });
+    if let Some(checkpoint) = watermark.checkpoint {
+        value["checkpoint"] = json!(checkpoint);
+    }
+    Ok(value)
+}
+
+/// Resuming from `position` needs the node to still hold that checkpoint's
+/// events. Pruned history is an operator decision (an archival node, or a
+/// deliberate re-enrollment), never something to skip silently.
+fn ensure_retained(position: Option<u64>, lowest: Option<u64>) -> anyhow::Result<()> {
+    if let (Some(position), Some(lowest)) = (position, lowest) {
+        anyhow::ensure!(
+            position >= lowest,
+            "event history before checkpoint {lowest} is pruned on this node, but this device resumes \
+             at checkpoint {position}; point rpc_url at a node that retains it (nothing is skipped)"
+        );
+    }
+    Ok(())
+}
+
 #[derive(Clone)]
 pub struct SuiClient {
     config: SuiConfig,
     signing_key: SigningKey,
-    http: reqwest::Client,
+    rpc: sui_rpc::Client,
 }
 
 pub fn same_id(a: &str, b: &str) -> bool {
@@ -34,31 +177,73 @@ pub fn same_id(a: &str, b: &str) -> bool {
     matches!((normalized(a), normalized(b)), (Some(a), Some(b)) if a == b)
 }
 
-fn decimal(value: &Value) -> String {
-    value
-        .as_str()
-        .map(str::to_owned)
-        .or_else(|| value.as_u64().map(|n| n.to_string()))
-        .unwrap_or_default()
-}
-
 pub fn same_type(a: &str, b: &str) -> bool {
     matches!((a.split_once("::"), b.split_once("::")), (Some((aa, at)), Some((ba, bt))) if same_id(aa, ba) && at == bt)
 }
 
+/// The 8-hex chain identifier used in manifests (and by JSON-RPC's
+/// sui_getChainIdentifier): the first four bytes of the genesis checkpoint
+/// digest, which gRPC reports in base58 as `chain_id`.
+pub fn chain_identifier(genesis_digest: &str) -> anyhow::Result<String> {
+    let digest = Digest::from_str(genesis_digest)
+        .map_err(|e| anyhow::anyhow!("invalid chain_id {genesis_digest:?}: {e}"))?;
+    Ok(hex::encode(&digest.inner()[..4]))
+}
+
+fn status(error: tonic::Status) -> anyhow::Error {
+    anyhow::anyhow!("{}: {}", error.code(), error.message())
+}
+
+fn mask(paths: &[&str]) -> FieldMask {
+    FieldMask::from_paths(paths.iter().copied())
+}
+
+/// google.protobuf.Value -> serde_json::Value.
+fn to_json(value: &prost_types::Value) -> Value {
+    use prost_types::value::Kind;
+    match &value.kind {
+        None | Some(Kind::NullValue(_)) => Value::Null,
+        Some(Kind::BoolValue(b)) => Value::Bool(*b),
+        Some(Kind::NumberValue(n)) => json!(n),
+        Some(Kind::StringValue(s)) => Value::String(s.clone()),
+        Some(Kind::ListValue(list)) => Value::Array(list.values.iter().map(to_json).collect()),
+        Some(Kind::StructValue(map)) => Value::Object(
+            map.fields
+                .iter()
+                .map(|(k, v)| (k.clone(), to_json(v)))
+                .collect(),
+        ),
+    }
+}
+
+fn number(value: &Value) -> Option<u64> {
+    value
+        .as_str()
+        .and_then(|s| s.parse().ok())
+        .or_else(|| value.as_u64())
+}
+
+fn id_list(value: &Value) -> Vec<String> {
+    value
+        .as_array()
+        .map(|ids| ids.iter().filter_map(|id| id.as_str().map(str::to_owned)).collect())
+        .unwrap_or_default()
+}
+
 impl SuiClient {
     pub fn load(config: SuiConfig, path: &Path) -> anyhow::Result<Self> {
-        config
+        let manifest = config
             .manifest
             .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("deployment manifest required"))?
-            .validate()?;
+            .ok_or_else(|| anyhow::anyhow!("deployment manifest required"))?;
+        manifest.validate()?;
+        let rpc = sui_rpc::Client::new(manifest.rpc_url.as_str())
+            .map_err(|e| anyhow::anyhow!("invalid gRPC endpoint {}: {e}", manifest.rpc_url))?
+            .with_response_headers_timeout(Duration::from_secs(30));
         Ok(Self {
             config,
             signing_key: identity::load(path)?,
-            http: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(30))
-                .build()?,
+            rpc,
         })
     }
     pub fn address(&self) -> String {
@@ -73,135 +258,307 @@ impl SuiClient {
     pub fn origin(&self) -> &str {
         &self.manifest().type_origins["device_registry::Device"]
     }
+
     pub async fn validate_deployment(&self) -> anyhow::Result<()> {
         let manifest = self.manifest();
+        let info = self
+            .rpc
+            .clone()
+            .ledger_client()
+            .get_service_info(proto::GetServiceInfoRequest::default())
+            .await
+            .map_err(status)?
+            .into_inner();
         anyhow::ensure!(
-            self.rpc("sui_getChainIdentifier", json!([])).await? == manifest.chain_identifier,
+            chain_identifier(info.chain_id.as_deref().unwrap_or_default())?
+                == manifest.chain_identifier,
             "chain identifier mismatch; network may have reset"
         );
-        let package = self
-            .rpc(
-                "sui_getObject",
-                json!([manifest.call_package_id, {"showBcs":true}]),
-            )
-            .await?;
+        let package = self.package(&manifest.call_package_id).await?;
         anyhow::ensure!(
-            decimal(&package["data"]["version"]) == manifest.package_version
-                && package["data"]["bcs"]["dataType"] == "package",
+            package.version.to_string() == manifest.package_version,
             "package metadata mismatch"
         );
-        let table = package["data"]["bcs"]["typeOriginTable"]
-            .as_array()
-            .ok_or_else(|| anyhow::anyhow!("missing type origin table"))?;
         for name in crate::config::REQUIRED_TYPES {
             let (module, datatype) = name.split_once("::").unwrap();
-            let entries: Vec<_> = table
+            let entries: Vec<_> = package
+                .type_origin_table
                 .iter()
-                .filter(|entry| {
-                    entry["module_name"] == module && entry["datatype_name"] == datatype
-                })
+                .filter(|o| o.module_name.as_str() == module && o.struct_name.as_str() == datatype)
                 .collect();
             anyhow::ensure!(
                 entries.len() == 1
-                    && same_id(
-                        entries[0]["package"].as_str().unwrap_or(""),
-                        &manifest.type_origins[*name]
-                    ),
-                "type origin mismatch: {name}"
+                    && same_id(&entries[0].package.to_string(), &manifest.type_origins[*name]),
+                "type origin mismatch: {name} (package reports {:?})",
+                entries.iter().map(|o| o.package.to_string()).collect::<Vec<_>>()
             );
         }
         let cap = self.object(&manifest.upgrade_cap_id).await?;
         anyhow::ensure!(
-            same_type(
-                cap["content"]["type"].as_str().unwrap_or(""),
-                "0x2::package::UpgradeCap"
-            ) && same_id(
-                cap["content"]["fields"]["package"].as_str().unwrap_or(""),
-                &manifest.call_package_id
-            ) && decimal(&cap["content"]["fields"]["version"]) == manifest.package_version,
+            same_type(&cap.object_type, "0x2::package::UpgradeCap")
+                && same_id(
+                    cap.fields["package"].as_str().unwrap_or(""),
+                    &manifest.call_package_id
+                )
+                && number(&cap.fields["version"]).map(|v| v.to_string()).as_deref()
+                    == Some(manifest.package_version.as_str()),
             "UpgradeCap does not identify latest call package/version"
         );
         let registry = &manifest.shared_objects.registry;
         let object = self.object(&registry.id).await?;
         anyhow::ensure!(
             same_type(
-                object["content"]["type"].as_str().unwrap_or(""),
+                &object.object_type,
                 &self.move_type("device_registry::DeviceRegistry")
-            ) && decimal(&object["owner"]["Shared"]["initial_shared_version"])
-                == registry.initial_shared_version,
+            ) && matches!(object.owner, Owner::Shared { initial_version }
+                if initial_version.to_string() == registry.initial_shared_version),
             "registry type/shared version mismatch"
         );
         Ok(())
     }
-    pub async fn rpc(&self, method: &str, params: Value) -> anyhow::Result<Value> {
-        let response = self
-            .http
-            .post(&self.config.rpc_url)
-            .json(&json!({"jsonrpc":"2.0", "id":1, "method":method, "params":params}))
-            .send()
-            .await?
-            .error_for_status()?
-            .json::<Value>()
-            .await?;
-        anyhow::ensure!(
-            response.get("error").is_none(),
-            "{method}: {}",
-            response["error"]
-        );
-        response
-            .get("result")
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("{method}: missing result"))
-    }
-    pub async fn deployments(&self, cursor: &Option<Value>) -> anyhow::Result<Value> {
-        self.rpc(
-            "suix_queryEvents",
-            json!([
-                {"MoveEventType":self.move_type("deployment_manager::DeploymentCreated")},
-                cursor, 50, false
-            ]),
-        )
-        .await
-    }
-    pub async fn latest_cursor(&self) -> anyhow::Result<Option<Value>> {
-        let response = self
-            .rpc(
-                "suix_queryEvents",
-                json!([
-                    {"MoveEventType":self.move_type("deployment_manager::DeploymentCreated")},
-                    null, 1, true
-                ]),
-            )
-            .await?;
-        let data = response["data"]
-            .as_array()
-            .ok_or_else(|| anyhow::anyhow!("invalid event page"))?;
-        Ok(data.first().map(|event| event["id"].clone()))
-    }
-    pub async fn optional_object(&self, id: &str) -> anyhow::Result<Option<Value>> {
-        let response = self
-            .rpc(
-                "sui_getObject",
-                json!([id, {"showContent":true,"showOwner":true}]),
-            )
-            .await?;
-        if let Some(error) = response.get("error") {
-            if matches!(error["code"].as_str(), Some("deleted" | "notExists")) {
-                return Ok(None);
-            }
-            anyhow::bail!("object {id}: {error}");
+
+    /// A package's on-chain contents, decoded from its BCS: the type origin
+    /// table is authoritative, not a rendering by the node.
+    async fn package(&self, id: &str) -> anyhow::Result<sui_sdk_types::MovePackage> {
+        let mut request = proto::GetObjectRequest::default();
+        request.object_id = Some(id.to_owned());
+        request.read_mask = Some(mask(&["bcs"]));
+        let bytes = self
+            .rpc
+            .clone()
+            .ledger_client()
+            .get_object(request)
+            .await
+            .map_err(status)?
+            .into_inner()
+            .object
+            .and_then(|o| o.bcs)
+            .and_then(|b| b.value)
+            .ok_or_else(|| anyhow::anyhow!("package {id} has no contents"))?;
+        let object: sui_sdk_types::Object = bcs::from_bytes(&bytes)
+            .map_err(|e| anyhow::anyhow!("undecodable package {id}: {e}"))?;
+        match object.data() {
+            sui_sdk_types::ObjectData::Package(package) => Ok(package.clone()),
+            _ => anyhow::bail!("{id} is not a package"),
         }
-        response
-            .get("data")
-            .cloned()
-            .map(Some)
-            .ok_or_else(|| anyhow::anyhow!("object {id} has no data"))
     }
-    pub async fn object(&self, id: &str) -> anyhow::Result<Value> {
+
+    pub async fn optional_object(&self, id: &str) -> anyhow::Result<Option<Object>> {
+        let mut request = proto::GetObjectRequest::default();
+        request.object_id = Some(id.to_owned());
+        request.read_mask = Some(mask(&["owner", "object_type", "json"]));
+        let object = match self.rpc.clone().ledger_client().get_object(request).await {
+            Ok(response) => response.into_inner().object,
+            // Deleted, wrapped or never created.
+            Err(e) if e.code() == tonic::Code::NotFound => return Ok(None),
+            Err(e) => return Err(status(e).context(format!("object {id}"))),
+        }
+        .ok_or_else(|| anyhow::anyhow!("object {id} has no data"))?;
+        let owner = match object.owner.as_ref() {
+            Some(o) if o.kind == Some(proto::owner::OwnerKind::Address as i32) => {
+                Owner::Address(o.address.clone().unwrap_or_default())
+            }
+            Some(o) if o.kind == Some(proto::owner::OwnerKind::Shared as i32) => Owner::Shared {
+                initial_version: o.version.unwrap_or_default(),
+            },
+            _ => Owner::Other,
+        };
+        Ok(Some(Object {
+            object_type: object.object_type.unwrap_or_default(),
+            owner,
+            fields: object.json.as_deref().map(to_json).unwrap_or(Value::Null),
+        }))
+    }
+    pub async fn object(&self, id: &str) -> anyhow::Result<Object> {
         self.optional_object(id)
             .await?
             .ok_or_else(|| anyhow::anyhow!("object {id} is deleted or absent"))
     }
+
+    /// The value of a dynamic field keyed by one of our empty key structs
+    /// (`name` like "deployment_manager::RecipeDigestKey"), read through its
+    /// derived object ID. Empty Move structs serialize as one `false` byte
+    /// (the implicit dummy_field).
+    pub async fn dynamic_field(&self, parent: &str, name: &str) -> anyhow::Result<Option<Value>> {
+        let key = TypeTag::Struct(Box::new(
+            StructTag::from_str(&self.move_type(name))
+                .map_err(|e| anyhow::anyhow!("invalid key type {name}: {e}"))?,
+        ));
+        let parent = Address::from_str(parent)
+            .map_err(|e| anyhow::anyhow!("invalid object ID {parent}: {e}"))?;
+        let id = parent.derive_dynamic_child_id(&key, &[0]);
+        Ok(self
+            .optional_object(&id.to_string())
+            .await?
+            .map(|field| field.fields["value"].clone()))
+    }
+
+    /// Enrollment baseline: deployments created before now are never applied.
+    pub async fn latest_cursor(&self) -> anyhow::Result<Option<Value>> {
+        let info = self
+            .rpc
+            .clone()
+            .ledger_client()
+            .get_service_info(proto::GetServiceInfoRequest::default())
+            .await
+            .map_err(status)?
+            .into_inner();
+        let tip = info
+            .checkpoint_height
+            .ok_or_else(|| anyhow::anyhow!("node reported no checkpoint height"))?;
+        Ok(Some(json!({ "checkpoint": tip + 1 })))
+    }
+
+    /// The next page of DeploymentCreated events after `cursor`.
+    pub async fn deployments(&self, cursor: &Option<Value>) -> anyhow::Result<EventPage> {
+        let (start, position) = match Cursor::parse(cursor)? {
+            Cursor::After(bytes, checkpoint) => (Start::After(bytes), checkpoint),
+            Cursor::Checkpoint(checkpoint) => (Start::Checkpoint(checkpoint), Some(checkpoint)),
+            Cursor::Legacy(digest, sequence) => {
+                // Only translate the position; the next page starts after it.
+                let end = self.seek_legacy(&digest, sequence).await?;
+                return Ok(EventPage { events: Vec::new(), end, has_more: true });
+            }
+            Cursor::Genesis => (Start::Checkpoint(0), Some(0)),
+        };
+        self.ensure_retained(position).await?;
+        let page = self.event_page(start).await?;
+        let mut events = Vec::new();
+        for (event, watermark) in page.events {
+            let fields = event.json.as_deref().map(to_json).unwrap_or(Value::Null);
+            let parsed: DeploymentCreatedEvent = serde_json::from_value(fields)
+                .map_err(|e| anyhow::anyhow!("undecodable DeploymentCreated event: {e}"))?;
+            events.push((parsed, watermark));
+        }
+        Ok(EventPage { events, end: page.end, has_more: page.has_more })
+    }
+
+    async fn ensure_retained(&self, position: Option<u64>) -> anyhow::Result<()> {
+        if position.is_none() {
+            return Ok(());
+        }
+        let info = self
+            .rpc
+            .clone()
+            .ledger_client()
+            .get_service_info(proto::GetServiceInfoRequest::default())
+            .await
+            .map_err(status)?
+            .into_inner();
+        ensure_retained(position, info.lowest_available_checkpoint)
+    }
+
+    /// The exact resume cursor after a JSON-RPC-era cursor's event. Starting at
+    /// its checkpoint, walk the filtered stream in ledger order (transaction,
+    /// then event index) to that very event: earlier events in the checkpoint,
+    /// even in the same transaction, must not be redelivered, since the journal
+    /// only remembers deployments that were acted on. Fails rather than guess.
+    async fn seek_legacy(&self, digest: &str, sequence: u64) -> anyhow::Result<Value> {
+        let checkpoint = self.transaction_checkpoint(digest).await?;
+        self.ensure_retained(Some(checkpoint)).await?;
+        let mut start = Start::Checkpoint(checkpoint);
+        loop {
+            let page = self.event_page(start).await?;
+            for (event, watermark) in page.events {
+                if let Some(found) = legacy_boundary(&event, digest, sequence, checkpoint, &watermark)? {
+                    return Ok(found);
+                }
+            }
+            anyhow::ensure!(
+                page.has_more,
+                "legacy event cursor {digest}#{sequence} was not found in checkpoint {checkpoint}; \
+                 refusing to guess where to resume"
+            );
+            start = match Cursor::parse(&Some(page.end))? {
+                Cursor::After(bytes, _) => Start::After(bytes),
+                _ => anyhow::bail!("event stream returned an unusable resume cursor"),
+            };
+        }
+    }
+
+    /// One ListEvents page of DeploymentCreated events, each with the cursor
+    /// to resume after it.
+    async fn event_page(&self, start: Start) -> anyhow::Result<RawPage> {
+        let mut request = proto::ListEventsRequest::default();
+        request.read_mask = Some(mask(&[
+            "event_type",
+            "json",
+            "checkpoint",
+            "transaction_digest",
+            "event_index",
+        ]));
+        let mut literal = proto::EventLiteral::default();
+        let mut by_type = proto::EventTypeFilter::default();
+        by_type.event_type = Some(self.move_type("deployment_manager::DeploymentCreated"));
+        literal.predicate = Some(proto::event_literal::Predicate::EventType(by_type));
+        let mut term = proto::EventTerm::default();
+        term.literals = vec![literal];
+        let mut filter = proto::EventFilter::default();
+        filter.terms = vec![term];
+        request.filter = Some(filter);
+        let mut options = proto::QueryOptions::default();
+        options.limit = Some(PAGE_SIZE);
+        match start {
+            Start::After(bytes) => options.after = Some(bytes.into()),
+            Start::Checkpoint(checkpoint) => request.start_checkpoint = Some(checkpoint),
+        }
+        request.options = Some(options);
+        let mut stream = self
+            .rpc
+            .clone()
+            .ledger_client()
+            .list_events(request)
+            .await
+            .map_err(status)?
+            .into_inner();
+        let expected = self.move_type("deployment_manager::DeploymentCreated");
+        let mut events = Vec::new();
+        while let Some(frame) = stream.next().await {
+            let frame = frame.map_err(status)?;
+            let watermark = after(
+                frame
+                    .watermark
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("event stream frame without a watermark"))?,
+            )?;
+            if let Some(event) = frame.event {
+                anyhow::ensure!(
+                    same_type(event.event_type.as_deref().unwrap_or(""), &expected),
+                    "node returned an event outside the requested type"
+                );
+                events.push((event, watermark.clone()));
+            }
+            if let Some(reason) = frame.end.as_ref().and_then(|e| e.reason) {
+                // Item or scan limits mean more may follow; ledger tip or end
+                // of range means this scan is complete for now.
+                let has_more = matches!(
+                    proto::QueryEndReason::try_from(reason),
+                    Ok(proto::QueryEndReason::ItemLimit | proto::QueryEndReason::ScanLimit)
+                );
+                return Ok(RawPage { events, end: watermark, has_more });
+            }
+        }
+        anyhow::bail!("event stream ended without completion")
+    }
+
+    async fn transaction_checkpoint(&self, digest: &str) -> anyhow::Result<u64> {
+        let mut request = proto::GetTransactionRequest::default();
+        request.digest = Some(digest.to_owned());
+        request.read_mask = Some(mask(&["checkpoint"]));
+        self.rpc
+            .clone()
+            .ledger_client()
+            .get_transaction(request)
+            .await
+            .map_err(status)?
+            .into_inner()
+            .transaction
+            .and_then(|t| t.checkpoint)
+            .ok_or_else(|| {
+                anyhow::anyhow!("cannot locate legacy event cursor {digest}; the node may have pruned it")
+            })
+    }
+
     /// A matching ID alone is not authority to update a device. Only its current
     /// operator may deploy; shared groups must belong to that operator too.
     pub async fn authorized_target(
@@ -211,23 +568,18 @@ impl SuiClient {
     ) -> anyhow::Result<bool> {
         let object = self.object(device).await?;
         anyhow::ensure!(
-            same_type(
-                object["content"]["type"].as_str().unwrap_or(""),
-                &self.move_type("device_registry::Device")
-            ),
+            same_type(&object.object_type, &self.move_type("device_registry::Device")),
             "wrong Device type"
         );
-        let owner = object["owner"]["AddressOwner"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("Device has no operator owner"))?;
+        let Owner::Address(owner) = &object.owner else {
+            anyhow::bail!("Device has no operator owner");
+        };
         if !same_id(owner, &event.creator) {
             return Ok(false);
         }
         anyhow::ensure!(
             same_id(
-                object["content"]["fields"]["device_address"]
-                    .as_str()
-                    .unwrap_or(""),
+                object.fields["device_address"].as_str().unwrap_or(""),
                 &self.address()
             ),
             "device key does not match registered address"
@@ -236,65 +588,53 @@ impl SuiClient {
             return Ok(true);
         }
         for id in &event.target_groups {
-            let Some(group) = self.optional_object(id).await? else {
-                continue;
-            };
-            let fields = &group["content"]["fields"];
-            if same_type(
-                group["content"]["type"].as_str().unwrap_or(""),
-                &self.move_type("device_group::DeviceGroup"),
-            ) && same_id(fields["admin"].as_str().unwrap_or(""), owner)
-                && fields["device_ids"].as_array().is_some_and(|ids| {
-                    ids.iter()
-                        .any(|id| same_id(id.as_str().unwrap_or(""), device))
-                })
-            {
+            if self.group_contains(id, owner, device).await? {
                 return Ok(true);
             }
         }
         Ok(false)
     }
+
+    async fn group_contains(&self, group: &str, admin: &str, device: &str) -> anyhow::Result<bool> {
+        let Some(group) = self.optional_object(group).await? else {
+            return Ok(false);
+        };
+        Ok(
+            same_type(&group.object_type, &self.move_type("device_group::DeviceGroup"))
+                && same_id(group.fields["admin"].as_str().unwrap_or(""), admin)
+                && id_list(&group.fields["device_ids"])
+                    .iter()
+                    .any(|id| same_id(id, device)),
+        )
+    }
+
     pub async fn validate_cap(&self, cap_id: &str, device_id: &str) -> anyhow::Result<()> {
         let cap = self.object(cap_id).await?;
         anyhow::ensure!(
-            same_type(
-                cap["content"]["type"].as_str().unwrap_or(""),
-                &self.move_type("device_cap::DeviceCap")
-            ),
+            same_type(&cap.object_type, &self.move_type("device_cap::DeviceCap")),
             "wrong DeviceCap type"
         );
         anyhow::ensure!(
-            same_id(
-                cap["owner"]["AddressOwner"].as_str().unwrap_or(""),
-                &self.address()
-            ),
+            matches!(&cap.owner, Owner::Address(owner) if same_id(owner, &self.address())),
             "DeviceCap is not owned by device key"
         );
         anyhow::ensure!(
-            same_id(
-                cap["content"]["fields"]["device_id"].as_str().unwrap_or(""),
-                device_id
-            ),
+            same_id(cap.fields["device_id"].as_str().unwrap_or(""), device_id),
             "DeviceCap belongs to another device"
         );
         let binding = self
-            .rpc(
-                "suix_getDynamicFieldObject",
-                json!([cap_id,
-            {"type":self.move_type("device_cap::DeviceAddressKey"),"value":{}}]),
-            )
+            .dynamic_field(cap_id, "device_cap::DeviceAddressKey")
             .await?;
         anyhow::ensure!(
-            same_id(
-                binding["data"]["content"]["fields"]["value"]
-                    .as_str()
-                    .unwrap_or(""),
-                &self.address()
-            ),
+            binding
+                .as_ref()
+                .and_then(Value::as_str)
+                .is_some_and(|signer| same_id(signer, &self.address())),
             "DeviceCap has no matching signer binding; reissue it with the upgraded contracts"
         );
         Ok(())
     }
+
     pub async fn report_status(
         &self,
         deployment: &str,
@@ -303,110 +643,190 @@ impl SuiClient {
     ) -> anyhow::Result<String> {
         let record = self.object(deployment).await?;
         let cap_object = self.object(cap).await?;
-        let device_id = cap_object["content"]["fields"]["device_id"]
+        let device_id = cap_object.fields["device_id"]
             .as_str()
-            .ok_or_else(|| anyhow::anyhow!("missing device_id"))?;
+            .ok_or_else(|| anyhow::anyhow!("missing device_id"))?
+            .to_owned();
         let direct = self
-            .rpc(
-                "suix_getDynamicFieldObject",
-                json!([deployment,
-            {"type":self.move_type("deployment_manager::TargetDevicesKey"),"value":{}}]),
-            )
-            .await?;
-        let targets = &direct["data"]["content"]["fields"]["value"];
-        let mut function = "report_status";
-        let mut arguments = vec![deployment.to_string(), cap.to_string()];
-        if !targets.as_array().is_some_and(|ids| {
-            ids.iter()
-                .any(|id| same_id(id.as_str().unwrap_or(""), device_id))
-        }) {
+            .dynamic_field(deployment, "deployment_manager::TargetDevicesKey")
+            .await?
+            .unwrap_or(Value::Null);
+        let mut call = Call {
+            function: "report_status",
+            objects: vec![deployment.to_owned(), cap.to_owned()],
+            status,
+        };
+        if !id_list(&direct).iter().any(|id| same_id(id, &device_id)) {
             let groups = self
-                .rpc(
-                    "suix_getDynamicFieldObject",
-                    json!([deployment,
-                {"type":self.move_type("deployment_manager::TargetGroupsKey"),"value":{}}]),
-                )
-                .await?;
-            let ids = groups["data"]["content"]["fields"]["value"]
-                .as_array()
+                .dynamic_field(deployment, "deployment_manager::TargetGroupsKey")
+                .await?
                 .ok_or_else(|| anyhow::anyhow!("missing target groups"))?;
+            let creator = record.fields["creator"].as_str().unwrap_or("").to_owned();
             let mut found = None;
-            for id in ids {
-                let id = id
-                    .as_str()
-                    .ok_or_else(|| anyhow::anyhow!("invalid group ID"))?;
-                let Some(group) = self.optional_object(id).await? else {
-                    continue;
-                };
-                let fields = &group["content"]["fields"];
-                if same_id(
-                    fields["admin"].as_str().unwrap_or(""),
-                    record["content"]["fields"]["creator"]
-                        .as_str()
-                        .unwrap_or(""),
-                ) && fields["device_ids"].as_array().is_some_and(|ids| {
-                    ids.iter()
-                        .any(|id| same_id(id.as_str().unwrap_or(""), device_id))
-                }) {
-                    found = Some(id.to_string());
+            for id in id_list(&groups) {
+                if self.group_contains(&id, &creator, &device_id).await? {
+                    found = Some(id);
                     break;
                 }
             }
-            arguments.push(found.ok_or_else(|| anyhow::anyhow!("device is no longer targeted"))?);
-            function = "report_status_for_group";
+            call.objects
+                .push(found.ok_or_else(|| anyhow::anyhow!("device is no longer targeted"))?);
+            call.function = "report_status_for_group";
         }
-        arguments.push(status.to_string());
-        let built = self
-            .rpc(
-                "unsafe_moveCall",
-                json!([
-                    self.address(),
-                    self.config.package_id,
-                    "deployment_manager",
-                    function,
-                    [],
-                    arguments,
-                    null,
-                    "10000000",
-                    null
-                ]),
-            )
-            .await?;
-        let tx = built["txBytes"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("missing txBytes"))?;
-        use base64::{engine::general_purpose::STANDARD, Engine};
-        let sig = STANDARD.encode(identity::signature(
-            &self.signing_key,
-            &STANDARD.decode(tx)?,
-        ));
+        let transaction = self.build(&call).await?;
+        self.execute(&transaction).await
+    }
+
+    /// Ask the node to resolve object versions, gas and budget for `call`,
+    /// then refuse anything other than exactly that call paid by this device.
+    async fn build(&self, call: &Call) -> anyhow::Result<Transaction> {
+        let package = Address::from_str(&self.config.package_id)
+            .map_err(|e| anyhow::anyhow!("invalid package ID: {e}"))?;
+        let sender = Address::from_str(&self.address())?;
+        let mut builder = sui_transaction_builder::TransactionBuilder::new();
+        let mut arguments = Vec::new();
+        for id in &call.objects {
+            let id = Address::from_str(id).map_err(|e| anyhow::anyhow!("invalid object ID {id}: {e}"))?;
+            arguments.push(builder.object(sui_transaction_builder::ObjectInput::new(id)));
+        }
+        arguments.push(builder.pure(&call.status));
+        builder.move_call(
+            sui_transaction_builder::Function::new(
+                package,
+                CALL_MODULE.parse()?,
+                call.function.parse()?,
+            ),
+            arguments,
+        );
+        builder.set_sender(sender);
+        let transaction = builder
+            .build(&mut self.rpc.clone())
+            .await
+            .map_err(|e| anyhow::anyhow!("transaction simulation failed: {e}"))?;
+        check_transaction(&transaction, call, package, sender)?;
+        Ok(transaction)
+    }
+
+    async fn execute(&self, transaction: &Transaction) -> anyhow::Result<String> {
+        let bytes = bcs::to_bytes(transaction)?;
+        let mut request = proto::ExecuteTransactionRequest::default();
+        let mut tx = proto::Transaction::default();
+        let mut bcs = proto::Bcs::default();
+        bcs.value = Some(bytes.clone().into());
+        tx.bcs = Some(bcs);
+        request.transaction = Some(tx);
+        let mut signature = proto::UserSignature::default();
+        let mut bcs = proto::Bcs::default();
+        bcs.value = Some(identity::signature(&self.signing_key, &bytes).into());
+        signature.bcs = Some(bcs);
+        request.signatures = vec![signature];
+        request.read_mask = Some(mask(&["digest", "effects.status"]));
         let executed = self
-            .rpc(
-                "sui_executeTransactionBlock",
-                json!([
-                    tx, [sig], {"showEffects":true}, "WaitForLocalExecution"
-                ]),
-            )
-            .await?;
+            .rpc
+            .clone()
+            .execution_client()
+            .execute_transaction(request)
+            .await
+            .map_err(status)?
+            .into_inner()
+            .transaction
+            .ok_or_else(|| anyhow::anyhow!("execution returned no transaction"))?;
         execution_digest(&executed)
     }
 }
 
-fn execution_digest(response: &Value) -> anyhow::Result<String> {
+/// The only transaction this daemon signs: one Move call of `function` in
+/// deployment_manager with the given object arguments and status.
+struct Call {
+    function: &'static str,
+    objects: Vec<String>,
+    status: u8,
+}
+
+/// The node resolved gas and versions; it must not have changed anything
+/// else. A compromised RPC endpoint could otherwise obtain a signature for an
+/// arbitrary transaction.
+fn check_transaction(
+    transaction: &Transaction,
+    call: &Call,
+    package: Address,
+    sender: Address,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(transaction.sender == sender, "simulated transaction has another sender");
     anyhow::ensure!(
-        response["effects"]["status"]["status"] == "success",
-        "transaction failed: {}",
-        response["effects"]["status"]
+        transaction.gas_payment.owner == sender,
+        "simulated transaction is paid by another address"
     );
-    response["digest"]
-        .as_str()
-        .map(str::to_owned)
+    anyhow::ensure!(
+        transaction.gas_payment.budget <= MAX_GAS_BUDGET,
+        "simulated gas budget {} exceeds the {MAX_GAS_BUDGET} MIST limit",
+        transaction.gas_payment.budget
+    );
+    let sui_sdk_types::TransactionKind::ProgrammableTransaction(ptb) = &transaction.kind else {
+        anyhow::bail!("simulated transaction is not a programmable transaction");
+    };
+    let [Command::MoveCall(move_call)] = ptb.commands.as_slice() else {
+        anyhow::bail!("simulated transaction must contain exactly the one status call");
+    };
+    anyhow::ensure!(
+        move_call.package == package
+            && move_call.module.as_str() == CALL_MODULE
+            && move_call.function.as_str() == call.function
+            && move_call.type_arguments.is_empty()
+            && move_call.arguments.len() == call.objects.len() + 1,
+        "simulated transaction calls something else"
+    );
+    anyhow::ensure!(
+        ptb.inputs.len() == move_call.arguments.len(),
+        "simulated transaction has extra inputs"
+    );
+    for (index, argument) in move_call.arguments.iter().enumerate() {
+        let Argument::Input(input) = argument else {
+            anyhow::bail!("simulated call argument is not a transaction input");
+        };
+        let input = ptb
+            .inputs
+            .get(*input as usize)
+            .ok_or_else(|| anyhow::anyhow!("simulated call refers to a missing input"))?;
+        match (call.objects.get(index), input) {
+            (Some(id), Input::ImmutableOrOwned(reference)) => anyhow::ensure!(
+                same_id(&reference.object_id().to_string(), id),
+                "simulated call swapped object argument {index}"
+            ),
+            (Some(id), Input::Shared(shared)) => anyhow::ensure!(
+                same_id(&shared.object_id().to_string(), id),
+                "simulated call swapped object argument {index}"
+            ),
+            (None, Input::Pure(value)) => anyhow::ensure!(
+                value.as_slice() == [call.status],
+                "simulated call changed the status"
+            ),
+            _ => anyhow::bail!("simulated call argument {index} has an unexpected kind"),
+        }
+    }
+    Ok(())
+}
+
+fn execution_digest(executed: &proto::ExecutedTransaction) -> anyhow::Result<String> {
+    let status = executed.effects.as_ref().and_then(|e| e.status.as_ref());
+    anyhow::ensure!(
+        status.and_then(|s| s.success) == Some(true),
+        "transaction failed: {}",
+        status
+            .and_then(|s| s.error.as_ref())
+            .and_then(|e| e.description.clone())
+            .unwrap_or_else(|| "no successful execution status".into())
+    );
+    executed
+        .digest
+        .clone()
         .ok_or_else(|| anyhow::anyhow!("missing transaction digest"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn current_contract_event_decodes() {
         let event: DeploymentCreatedEvent = serde_json::from_value(json!({
@@ -416,22 +836,180 @@ mod tests {
         assert_eq!(event.recipe_blob_id, "recipe");
         assert!(event.target_devices.iter().any(|id| same_id(id, "0x02")));
     }
+
     #[test]
     fn digest_is_not_proof_of_success() {
-        assert!(execution_digest(
-            &json!({"digest":"abc", "effects":{"status":{"status":"failure","error":"abort"}}})
-        )
-        .is_err());
-        assert_eq!(
-            execution_digest(&json!({"digest":"abc", "effects":{"status":{"status":"success"}}}))
-                .unwrap(),
-            "abc"
-        );
+        let mut executed = proto::ExecutedTransaction::default();
+        executed.digest = Some("abc".into());
+        let mut effects = proto::TransactionEffects::default();
+        let mut status = proto::ExecutionStatus::default();
+        status.success = Some(false);
+        effects.status = Some(status.clone());
+        executed.effects = Some(effects.clone());
+        assert!(execution_digest(&executed).is_err());
+        executed.effects = None;
+        assert!(execution_digest(&executed).is_err(), "missing effects are not success");
+        status.success = Some(true);
+        effects.status = Some(status);
+        executed.effects = Some(effects);
+        assert_eq!(execution_digest(&executed).unwrap(), "abc");
     }
+
     #[test]
     fn id_normalization_rejects_invalid_identifiers() {
         assert!(same_id("0x1", "0x01"));
         assert!(!same_id("", ""));
         assert!(!same_id("0xzz", "0xzz"));
+    }
+
+    #[test]
+    fn chain_identifier_matches_known_networks() {
+        // Public genesis checkpoint digests (gRPC chain_id) and their
+        // JSON-RPC/manifest chain identifiers.
+        assert_eq!(
+            chain_identifier("4btiuiMPvEENsttpZC7CZ53DruC3MAgfznDbASZ7DR6S").unwrap(),
+            "35834a8a"
+        );
+        assert_eq!(
+            chain_identifier("69WiPg3DAQiwdxfncX6wYQ2siKwAe6L9BZthQea3JNMD").unwrap(),
+            "4c78adac"
+        );
+        assert!(chain_identifier("not-a-digest").is_err());
+    }
+
+    #[test]
+    fn cursors_parse_from_every_journal_format() {
+        assert_eq!(Cursor::parse(&None).unwrap(), Cursor::Genesis);
+        assert_eq!(
+            Cursor::parse(&Some(json!({"checkpoint": 7}))).unwrap(),
+            Cursor::Checkpoint(7)
+        );
+        let mut watermark = proto::Watermark::default();
+        watermark.cursor = Some(vec![1, 2, 3].into());
+        assert_eq!(
+            Cursor::parse(&Some(after(&watermark).unwrap())).unwrap(),
+            Cursor::After(vec![1, 2, 3], None)
+        );
+        watermark.checkpoint = Some(9);
+        assert_eq!(
+            Cursor::parse(&Some(after(&watermark).unwrap())).unwrap(),
+            Cursor::After(vec![1, 2, 3], Some(9))
+        );
+        assert!(after(&proto::Watermark::default()).is_err());
+        assert_eq!(
+            Cursor::parse(&Some(json!({"txDigest": "D1", "eventSeq": "3"}))).unwrap(),
+            Cursor::Legacy("D1".into(), 3)
+        );
+        assert!(Cursor::parse(&Some(json!({"unknown": 1}))).is_err());
+    }
+
+    #[test]
+    fn legacy_boundary_is_the_exact_event() {
+        let event = |checkpoint: u64, digest: &str, index: u32| {
+            let mut event = proto::Event::default();
+            event.checkpoint = Some(checkpoint);
+            event.transaction_digest = Some(digest.into());
+            event.event_index = Some(index);
+            event
+        };
+        let mark = json!({"after": "AA=="});
+        // Earlier transaction, or an earlier event of the same transaction: keep seeking.
+        assert_eq!(legacy_boundary(&event(7, "A", 0), "B", 1, 7, &mark).unwrap(), None);
+        assert_eq!(legacy_boundary(&event(7, "B", 0), "B", 1, 7, &mark).unwrap(), None);
+        // The event itself: resume strictly after it.
+        assert_eq!(legacy_boundary(&event(7, "B", 1), "B", 1, 7, &mark).unwrap(), Some(mark.clone()));
+        // Past its checkpoint without meeting it: refuse.
+        assert!(legacy_boundary(&event(8, "C", 0), "B", 1, 7, &mark).is_err());
+        assert!(Cursor::parse(&Some(json!({"txDigest": "D1"}))).is_err(), "eventSeq is required");
+    }
+
+    #[test]
+    fn pruned_history_stops_instead_of_skipping() {
+        ensure_retained(Some(100), Some(100)).unwrap();
+        ensure_retained(Some(100), None).unwrap();
+        ensure_retained(None, Some(100)).unwrap();
+        let error = ensure_retained(Some(99), Some(100)).unwrap_err().to_string();
+        assert!(error.contains("pruned") && error.contains("nothing is skipped"), "{error}");
+        // From genesis on a pruned node is pruned too.
+        assert!(ensure_retained(Some(0), Some(1)).is_err());
+    }
+
+    fn status_call() -> (Transaction, Call, Address, Address) {
+        let package = Address::from_str("0x3").unwrap();
+        let sender = Address::from_str("0xa0").unwrap();
+        let mut builder = sui_transaction_builder::TransactionBuilder::new();
+        let record = builder.object(sui_transaction_builder::ObjectInput::shared(
+            Address::from_str("0x10").unwrap(),
+            1,
+            true,
+        ));
+        let cap = builder.object(sui_transaction_builder::ObjectInput::owned(
+            Address::from_str("0x11").unwrap(),
+            2,
+            Digest::ZERO,
+        ));
+        let value = builder.pure(&1u8);
+        builder.move_call(
+            sui_transaction_builder::Function::new(
+                package,
+                "deployment_manager".parse().unwrap(),
+                "report_status".parse().unwrap(),
+            ),
+            vec![record, cap, value],
+        );
+        builder.set_sender(sender);
+        builder.set_gas_budget(10_000_000);
+        builder.set_gas_price(1000);
+        builder.add_gas_objects([sui_transaction_builder::ObjectInput::owned(
+            Address::from_str("0x12").unwrap(),
+            3,
+            Digest::ZERO,
+        )]);
+        let call = Call {
+            function: "report_status",
+            objects: vec!["0x10".into(), "0x11".into()],
+            status: 1,
+        };
+        (builder.try_build().unwrap(), call, package, sender)
+    }
+
+    #[test]
+    fn signs_only_the_exact_intended_call() {
+        let (tx, call, package, sender) = status_call();
+        check_transaction(&tx, &call, package, sender).unwrap();
+
+        let mut other = tx.clone();
+        other.sender = Address::from_str("0xbad").unwrap();
+        assert!(check_transaction(&other, &call, package, sender).is_err());
+
+        let mut other = tx.clone();
+        other.gas_payment.owner = Address::from_str("0xbad").unwrap();
+        assert!(check_transaction(&other, &call, package, sender).is_err());
+
+        let mut other = tx.clone();
+        other.gas_payment.budget = MAX_GAS_BUDGET + 1;
+        assert!(check_transaction(&other, &call, package, sender).is_err());
+
+        let wrong_status = Call { status: 2, ..call };
+        assert!(check_transaction(&tx, &wrong_status, package, sender).is_err());
+        let call = Call { status: 1, ..wrong_status };
+
+        let swapped = Call {
+            objects: vec!["0x10".into(), "0x99".into()],
+            ..call
+        };
+        assert!(check_transaction(&tx, &swapped, package, sender).is_err());
+        let call = Call {
+            objects: vec!["0x10".into(), "0x11".into()],
+            ..swapped
+        };
+
+        assert!(check_transaction(&tx, &call, Address::from_str("0x4").unwrap(), sender).is_err());
+
+        let mut extra = tx.clone();
+        if let sui_sdk_types::TransactionKind::ProgrammableTransaction(ptb) = &mut extra.kind {
+            ptb.commands.push(ptb.commands[0].clone());
+        }
+        assert!(check_transaction(&extra, &call, package, sender).is_err());
     }
 }

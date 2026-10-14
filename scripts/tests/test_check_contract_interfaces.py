@@ -92,6 +92,20 @@ class DriftCheckTest(unittest.TestCase):
         self.assert_drift('let mut function = "report_status"; json!(["deployment_manager", function, []]);',
                           "is not callable from a transaction", suffix=".rs", modules=modules)
 
+    def test_daemon_grpc_module_constant_and_field_forms(self):
+        modules = {"deployment_manager": {"structs": {}, "functions": {
+            "report_status": function(),
+            "report_status_for_group": function(),
+        }}}
+        source = ('const CALL_MODULE: &str = "deployment_manager";\n'
+                  'let call = Call { function: "report_status" };\ncall.function = "report_status_for_group";')
+        errors, checked = self.run_check(source, suffix=".rs", modules=modules)
+        self.assertEqual((errors, checked), ([], 2))
+        self.assert_drift(source.replace("report_status_for_group", "report_status_for_grp"),
+                          "report_status_for_grp is not a function", suffix=".rs", modules=modules)
+        self.assert_drift(source.replace('"deployment_manager"', '"deployment_mgr"'),
+                          "is not a function", suffix=".rs", modules=modules)
+
     def test_daemon_public_and_private_entry_functions_pass(self):
         for visibility, entry in (("Public", False), ("Private", True)):
             with self.subTest(visibility=visibility, entry=entry):
