@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Exercise the real daemon against a local chain/Walrus simulator, without keys or gas.
 This verifies integration behavior, not public-network compatibility or hardware OTA.
+
+The daemon speaks Sui gRPC v2. The simulator below keeps scenario state and
+assertions in Python; suifleet-edge/examples/grpc_sim_shim.rs serves gRPC in
+front of it (see start_grpc). Real-chain behavior is covered separately by
+scripts/test_daemon_localnet.py.
 """
 from deployment_manifest import REQUIRED_TYPES, object_id
 import argparse
@@ -30,9 +35,24 @@ CAP = "0xca"
 OPERATOR = "0xad"
 GROUP = "0x10"
 ADDRESS = "0xa0ccc8bcc83f6c628340134f8546a21e0618fd1aaa02432bba454c4a2c2233da"
-SIGNATURE = "AGe7jkxf/S/LN1HBGv3Lbbhb+4FzdWYtt+XlzfsikT+N6RHAAxUZBeipd/iHLQofYPVZqPaSLt4WQTkmA1YnEgXqSmxj4pxSCr71UHsTLsX5lUd2rr6+e5JCHuppFEbSLA=="
+SHIM = Path(__file__).resolve().parents[1] / "suifleet-edge/target/debug/examples/grpc_sim_shim"
 ARTIFACT = b"test OTA artifact, not a recipe"
 HASH = hashlib.sha256(ARTIFACT).hexdigest()
+
+
+def start_grpc(simulator_url):
+    """Start the gRPC shim in front of a simulator; returns (process, gRPC URL)."""
+    process = subprocess.Popen([str(SHIM), simulator_url], stdout=subprocess.PIPE, text=True)
+    line = process.stdout.readline()
+    if not line.startswith("listening "):
+        process.kill()
+        raise AssertionError(f"gRPC shim did not start: {line!r}")
+    return process, f"http://127.0.0.1:{int(line.split()[1])}"
+
+
+def scanned(count):
+    """The journal cursor after the daemon has read the first `count` events."""
+    return {"after": base64.b64encode(count.to_bytes(8, "little")).decode()}
 
 
 def wait_for(condition, message, process=None):
@@ -94,6 +114,18 @@ class Simulator:
     def rpc(self, method, params):
         if method == "sui_getChainIdentifier":
             return self.chain
+        # Simulator views used by the gRPC shim.
+        if method == "shim_height":
+            return len(self.events)
+        if method == "shim_parents":
+            return [CAP] + [e["parsedJson"]["deployment_id"] for e in self.events]
+        if method == "shim_keyTypes":
+            return [f"{TYPE_ORIGINS[name]}::{name}" for name in (
+                "device_cap::DeviceAddressKey", "deployment_manager::RecipeDigestKey",
+                "deployment_manager::TargetDevicesKey", "deployment_manager::TargetGroupsKey")]
+        if method == "shim_events":
+            assert params[0] == f"{ORIGIN}::deployment_manager::DeploymentCreated"
+            return [e["parsedJson"] for e in self.events]
         if method == "sui_getObject" and params[0] == PACKAGE:
             return {"data": {"version": "3", "bcs": {"dataType": "package", "typeOriginTable": [
                 {"module_name": name.split("::")[0], "datatype_name": name.split("::")[1], "package": origin}
@@ -135,7 +167,8 @@ class Simulator:
             self.built.append((args[0], int(args[-1])))
             return {"txBytes":base64.b64encode(bytes([1,2,3,4])).decode()}
         if method == "sui_executeTransactionBlock":
-            assert params[1] == [SIGNATURE], "signature differs from independent Mysten SDK vector"
+            # The shim verified the user signature with Mysten's sui-crypto.
+            assert params[1] == [f"verified:{ADDRESS}"], params[1]
             if self.fail_execution:
                 self.fail_execution = False
                 return {"digest":"failed-digest", "effects":{"status":{"status":"failure","error":"simulated abort"}}}
@@ -193,6 +226,7 @@ def run(binary):
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     process = None
+    shim, rpc_url = start_grpc(f"http://127.0.0.1:{server.server_port}")
     try:
         with tempfile.TemporaryDirectory(prefix="suifleet-ota-") as temporary:
             root = Path(temporary)
@@ -211,7 +245,7 @@ def run(binary):
             url = f"http://127.0.0.1:{server.server_port}"
             command = f"{sys.executable} {updater}"
             manifest = dict(schema_version=1, protocol_version=1, network="localnet", chain_identifier=sim.chain,
-                rpc_url=url, call_package_id=PACKAGE, upgrade_cap_id=UPGRADE_CAP, package_version="3", type_origins=TYPE_ORIGINS,
+                rpc_url=rpc_url, call_package_id=PACKAGE, upgrade_cap_id=UPGRADE_CAP, package_version="3", type_origins=TYPE_ORIGINS,
                 shared_objects={"registry": {"id": REGISTRY, "initial_shared_version": "1"}},
                 supported_clients={"dapp": {"min":"0.0.1", "max_exclusive":"0.1.0"}, "edge": {"min":"0.1.0", "max_exclusive":"0.2.0"}},
                 walrus={"publisher_url": url, "aggregator_url": url})
@@ -238,17 +272,18 @@ def run(binary):
                 process = start()
                 wait_for(lambda: state().get("initialized"), "enrollment did not establish cursor", process)
                 assert count() == 0
+                baseline = state()["cursor"]
                 # A chain reset after enrollment must stop all downloads and cursor changes.
                 sim.chain = "deadbeef"
                 sim.add("0x101")
                 time.sleep(2.2)
                 assert count() == 0 and not sim.downloads
-                assert state()["cursor"] == sim.events[0]["id"]
+                assert state()["cursor"] == baseline
                 sim.chain = manifest["chain_identifier"]
                 sim.latest_package = object_id("0x4")
                 time.sleep(2.2)
                 assert count() == 0 and not sim.downloads
-                assert state()["cursor"] == sim.events[0]["id"]
+                assert state()["cursor"] == baseline
                 sim.latest_package = PACKAGE
                 sim.add("0x102", bad_hash=True)
                 sim.add("0x103", creator="0xbad")
@@ -260,7 +295,7 @@ def run(binary):
                 sim.add("0x106")
                 sim.deleted.add("0x999")
                 sim.add("0x107", groups=["0x999"], direct=False)
-                wait_for(lambda: len(state().get("deployments", {})) == 6 and state().get("cursor") == sim.events[-1]["id"], "paged events were not processed", process)
+                wait_for(lambda: len(state().get("deployments", {})) == 6 and state().get("cursor") == scanned(len(sim.events)), "paged events were not processed", process)
                 assert count() == 2, "untrusted/failed/unsupported/deleted update invoked the updater"
                 outcomes = state()["deployments"]
                 assert {id: outcome["status"] for id, outcome in outcomes.items()} == {"0x101":1,"0x102":2,"0x104":1,"0x105":2,"0x109":2,"0x10a":2}
@@ -272,7 +307,7 @@ def run(binary):
                 # A crash after journaling outcomes but before the cursor is saved
                 # redelivers processed events; the journal alone must prevent reapply.
                 journal = state()
-                journal["cursor"] = sim.events[0]["id"]
+                journal["cursor"] = scanned(1)
                 (root / "state" / "state.json").write_text(json.dumps(journal))
                 sim.add("0x108") # Deployment created while the device is offline.
                 sim.allow_reports = True
@@ -296,6 +331,8 @@ def run(binary):
         if process and process.poll() is None:
             process.kill()
             process.wait()
+        shim.kill()
+        shim.wait()
         server.shutdown()
         server.server_close()
 
