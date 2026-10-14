@@ -1,3 +1,4 @@
+import { calls, TYPES } from "./fleet-protocol";
 import { requireManifest, moveType, verifyDeployment } from "./deployment-manifest";
 import { Transaction } from "@mysten/sui/transactions";
 import { SuiClient } from "@mysten/sui/client";
@@ -54,7 +55,7 @@ export interface DeploymentReceipts {
 export async function readReceipts(client: Pick<SuiClient, "getDynamicFieldObject">, deploymentId: string): Promise<DeploymentReceipts> {
   // Empty Move structs carry an implicit `dummy_field: bool`; a real node rejects `{}`.
   const field = await client.getDynamicFieldObject({ parentId: deploymentId,
-    name: { type: moveType("deployment_manager::ReceiptsKey"), value: { dummy_field: false } } });
+    name: { type: moveType(TYPES.deployment_manager_ReceiptsKey), value: { dummy_field: false } } });
   if (field.error) {
     if (field.error.code === "dynamicFieldNotFound") return { verified: false, statuses: {} };
     throw new Error(`Unable to load deployment receipts: ${field.error.code}`);
@@ -77,17 +78,8 @@ export function buildRegisterDeviceTx(
 ): Transaction {
   requireManifest();
   const tx = new Transaction();
-  const [device] = tx.moveCall({
-    target: `${PACKAGE_ID}::device_registry::register_device`,
-    arguments: [
-      tx.object(REGISTRY_ID),
-      tx.pure.string(name),
-      tx.pure.address(deviceAddress),
-      tx.pure.string(arch),
-      tx.object("0x6"),
-    ],
-  });
-  tx.moveCall({ target: `${PACKAGE_ID}::device_cap::issue_cap`, arguments: [device] });
+  const [device] = calls.device_registry_register_device(tx, PACKAGE_ID, REGISTRY_ID, name, deviceAddress, arch, "0x6");
+  calls.device_cap_issue_cap(tx, PACKAGE_ID, device);
   tx.transferObjects([device], tx.pure.address(sender));
   return tx;
 }
@@ -95,20 +87,14 @@ export function buildRegisterDeviceTx(
 export function buildIssueCapTx(deviceObjectId: string): Transaction {
   requireManifest();
   const tx = new Transaction();
-  tx.moveCall({
-    target: `${PACKAGE_ID}::device_cap::issue_cap`,
-    arguments: [tx.object(deviceObjectId)],
-  });
+  calls.device_cap_issue_cap(tx, PACKAGE_ID, deviceObjectId);
   return tx;
 }
 
 export function buildDeregisterDeviceTx(deviceObjectId: string): Transaction {
   requireManifest();
   const tx = new Transaction();
-  tx.moveCall({
-    target: `${PACKAGE_ID}::device_registry::deregister_device`,
-    arguments: [tx.object(REGISTRY_ID), tx.object(deviceObjectId)],
-  });
+  calls.device_registry_deregister_device(tx, PACKAGE_ID, REGISTRY_ID, deviceObjectId);
   return tx;
 }
 
@@ -117,50 +103,28 @@ export function buildDeregisterDeviceTx(deviceObjectId: string): Transaction {
 export function buildCreateGroupTx(name: string, description: string): Transaction {
   requireManifest();
   const tx = new Transaction();
-  tx.moveCall({
-    target: `${PACKAGE_ID}::device_group::create_group`,
-    arguments: [
-      tx.pure.string(name),
-      tx.pure.string(description),
-      tx.object("0x6"),
-    ],
-  });
+  calls.device_group_create_group(tx, PACKAGE_ID, name, description, "0x6");
   return tx;
 }
 
 export function buildAddDeviceToGroupTx(groupObjectId: string, deviceObjectId: string): Transaction {
   requireManifest();
   const tx = new Transaction();
-  tx.moveCall({
-    target: `${PACKAGE_ID}::device_group::add_device`,
-    arguments: [
-      tx.object(groupObjectId),
-      tx.object(deviceObjectId),
-    ],
-  });
+  calls.device_group_add_device(tx, PACKAGE_ID, groupObjectId, deviceObjectId);
   return tx;
 }
 
 export function buildRemoveDeviceFromGroupTx(groupObjectId: string, deviceId: string): Transaction {
   requireManifest();
   const tx = new Transaction();
-  tx.moveCall({
-    target: `${PACKAGE_ID}::device_group::remove_device`,
-    arguments: [
-      tx.object(groupObjectId),
-      tx.pure(bcs.Address.serialize(deviceId)),
-    ],
-  });
+  calls.device_group_remove_device(tx, PACKAGE_ID, groupObjectId, deviceId);
   return tx;
 }
 
 export function buildDeleteGroupTx(groupObjectId: string): Transaction {
   requireManifest();
   const tx = new Transaction();
-  tx.moveCall({
-    target: `${PACKAGE_ID}::device_group::delete_group`,
-    arguments: [tx.object(groupObjectId)],
-  });
+  calls.device_group_delete_group(tx, PACKAGE_ID, groupObjectId);
   return tx;
 }
 
@@ -177,29 +141,14 @@ export function buildCreateDeploymentTx(
 ): Transaction {
   requireManifest();
   const tx = new Transaction();
-  tx.moveCall({
-    target: `${PACKAGE_ID}::deployment_manager::create_deployment_verified`,
-    arguments: [
-      tx.pure.string(componentName),
-      tx.pure.string(version),
-      tx.pure.string(recipeBlobId),
-      tx.pure.string(artifactSha256),
-      tx.pure.string(recipeSha256),
-      tx.pure(bcs.vector(bcs.Address).serialize(targetGroupIds)),
-      tx.pure(bcs.vector(bcs.Address).serialize(targetDeviceIds)),
-      tx.object("0x6"),
-    ],
-  });
+  calls.deployment_manager_create_deployment_verified(tx, PACKAGE_ID, componentName, version, recipeBlobId, artifactSha256, recipeSha256, targetGroupIds, targetDeviceIds, "0x6");
   return tx;
 }
 
 export function buildDeleteDeploymentTx(deploymentObjectId: string): Transaction {
   requireManifest();
   const tx = new Transaction();
-  tx.moveCall({
-    target: `${PACKAGE_ID}::deployment_manager::delete_deployment`,
-    arguments: [tx.object(deploymentObjectId)],
-  });
+  calls.deployment_manager_delete_deployment(tx, PACKAGE_ID, deploymentObjectId);
   return tx;
 }
 

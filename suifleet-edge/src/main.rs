@@ -3,6 +3,9 @@ mod config;
 mod firmware;
 mod identity;
 mod recipe;
+mod protocol;
+#[cfg(test)]
+mod protocol_tests;
 mod state;
 mod sui_client;
 mod walrus_client;
@@ -277,9 +280,9 @@ async fn handle_deployment(
 fn record_result(outcome: &mut Outcome, result: anyhow::Result<()>) {
     outcome.indeterminate = matches!(&result, Err(error) if error.downcast_ref::<firmware::Indeterminate>().is_some());
     outcome.status = match &result {
-        Ok(()) => Some(1),
+        Ok(()) => Some(protocol::STATUS_APPLIED),
         Err(_) if outcome.indeterminate => None,
-        Err(_) => Some(2),
+        Err(_) => Some(protocol::STATUS_FAILED),
     };
     outcome.error = result.err().map(|error| format!("{error:#}"));
 }

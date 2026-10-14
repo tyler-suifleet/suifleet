@@ -75,7 +75,7 @@ impl Journal {
             if outcome.status.is_some() || outcome.indeterminate || pending(id, outcome) {
                 continue;
             }
-            outcome.status = Some(2);
+            outcome.status = Some(crate::protocol::STATUS_FAILED);
             outcome.error = Some(
                 "daemon interrupted during apply; inspect device before explicitly redeploying"
                     .into(),

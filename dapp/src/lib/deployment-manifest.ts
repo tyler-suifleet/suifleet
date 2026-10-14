@@ -1,16 +1,8 @@
 import clientPackage from "../../package.json";
 import type { SuiClient } from "@mysten/sui/client";
 
-export const REQUIRED_TYPES = [
-  "device_registry::DeviceRegistry", "device_registry::Device",
-  "device_group::DeviceGroup", "device_group::GroupCreated",
-  "device_cap::DeviceCap", "device_cap::DeviceAddressKey",
-  "deployment_manager::DeploymentRecord", "deployment_manager::DeploymentCreated",
-  "deployment_manager::DeviceStatusUpdated", "deployment_manager::TargetGroupsKey",
-  "deployment_manager::TargetDevicesKey", "deployment_manager::StatusesKey",
-  "deployment_manager::RecipeDigestKey", "deployment_manager::ReceiptsKey",
-  "deployment_manager::Receipts", "deployment_manager::DeviceStatusReported",
-] as const;
+import { REQUIRED_TYPES, PROTOCOL_VERSION, MANIFEST_SCHEMA_VERSION } from "./protocol-version";
+export { REQUIRED_TYPES } from "./protocol-version";
 export interface DeploymentManifest {
   schema_version: number;
   protocol_version: number;
@@ -44,15 +36,15 @@ function endpoint(value: string) {
 }
 export function parseManifest(raw: string): DeploymentManifest {
   const m: DeploymentManifest = JSON.parse(raw);
-  if (m.schema_version !== 1 || m.protocol_version !== 1) fail("unsupported schema/protocol");
+  if (m.schema_version !== MANIFEST_SCHEMA_VERSION || m.protocol_version !== PROTOCOL_VERSION) fail("unsupported schema/protocol");
   if (!["localnet", "devnet", "testnet", "mainnet"].includes(m.network)) fail("unsupported network");
   if ((m.network === "mainnet" && m.chain_identifier !== "35834a8a") || (m.network === "testnet" && m.chain_identifier !== "4c78adac")) fail("network label/chain mismatch");
   if (!/^[0-9a-f]{8}$/.test(m.chain_identifier)) fail("invalid chain identifier");
-  if (!/^[1-9][0-9]*$/.test(m.package_version)) fail("invalid package version");
+  if (typeof m.package_version !== "string" || !/^[1-9][0-9]*$/.test(m.package_version)) fail("invalid package version");
   normalizeId(m.call_package_id);
   normalizeId(m.upgrade_cap_id);
   normalizeId(m.shared_objects.registry.id);
-  if (!/^[1-9][0-9]*$/.test(m.shared_objects.registry.initial_shared_version)) fail("invalid shared version");
+  if (typeof m.shared_objects.registry.initial_shared_version !== "string" || !/^[1-9][0-9]*$/.test(m.shared_objects.registry.initial_shared_version)) fail("invalid shared version");
   for (const name of REQUIRED_TYPES) normalizeId(m.type_origins[name]);
   const range = m.supported_clients.dapp;
   const current = version(clientPackage.version);

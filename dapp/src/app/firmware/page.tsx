@@ -7,6 +7,7 @@ import { useGroups } from "@/hooks/useGroups";
 import { useDevices } from "@/hooks/useDevices";
 import { uploadArtifact, uploadRecipe, renewalCommand, storageWarnings, type ComponentRecipe, type StorageInfo } from "@/lib/walrus";
 import { buildCreateDeploymentTx } from "@/lib/sui";
+import { RECIPE_VERSION } from "@/lib/protocol-version";
 import { PageHeader } from "@/components/ui";
 import Link from "next/link";
 
@@ -61,7 +62,7 @@ export default function FirmwarePage() {
     if (!artifact || (selectedGroups.size === 0 && selectedDevices.size === 0)) return;
 
     const recipe: ComponentRecipe = {
-      schemaVersion: "1.0",
+      schemaVersion: RECIPE_VERSION,
       componentName,
       componentVersion: version,
       ...(description ? { description } : {}),

@@ -1,20 +1,9 @@
-use crate::{config::SuiConfig, identity};
+use crate::{config::SuiConfig, identity, protocol};
 use ed25519_dalek::SigningKey;
-use serde::Deserialize;
 use serde_json::{json, Value};
 use std::path::Path;
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct DeploymentCreatedEvent {
-    pub deployment_id: String,
-    pub component_name: String,
-    pub version: String,
-    pub recipe_blob_id: String,
-    pub artifact_sha256: String,
-    pub target_groups: Vec<String>,
-    pub target_devices: Vec<String>,
-    pub creator: String,
-}
+pub use crate::protocol::DeploymentCreatedEvent;
 
 #[derive(Clone)]
 pub struct SuiClient {
@@ -281,7 +270,7 @@ impl SuiClient {
             .rpc(
                 "suix_getDynamicFieldObject",
                 json!([cap_id,
-            {"type":self.move_type("device_cap::DeviceAddressKey"),"value":{}}]),
+            {"type":self.move_type(protocol::device_cap::DeviceAddressKey::MOVE_TYPE),"value":{}}]),
             )
             .await?;
         anyhow::ensure!(
@@ -310,11 +299,11 @@ impl SuiClient {
             .rpc(
                 "suix_getDynamicFieldObject",
                 json!([deployment,
-            {"type":self.move_type("deployment_manager::TargetDevicesKey"),"value":{}}]),
+            {"type":self.move_type(protocol::deployment_manager::TargetDevicesKey::MOVE_TYPE),"value":{}}]),
             )
             .await?;
         let targets = &direct["data"]["content"]["fields"]["value"];
-        let mut function = "report_status";
+        let mut function = protocol::deployment_manager::REPORT_STATUS;
         let mut arguments = vec![deployment.to_string(), cap.to_string()];
         if !targets.as_array().is_some_and(|ids| {
             ids.iter()
@@ -324,7 +313,7 @@ impl SuiClient {
                 .rpc(
                     "suix_getDynamicFieldObject",
                     json!([deployment,
-                {"type":self.move_type("deployment_manager::TargetGroupsKey"),"value":{}}]),
+                {"type":self.move_type(protocol::deployment_manager::TargetGroupsKey::MOVE_TYPE),"value":{}}]),
                 )
                 .await?;
             let ids = groups["data"]["content"]["fields"]["value"]
@@ -353,7 +342,7 @@ impl SuiClient {
                 }
             }
             arguments.push(found.ok_or_else(|| anyhow::anyhow!("device is no longer targeted"))?);
-            function = "report_status_for_group";
+            function = protocol::deployment_manager::REPORT_STATUS_FOR_GROUP;
         }
         arguments.push(status.to_string());
         let built = self
