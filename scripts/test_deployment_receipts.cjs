@@ -12,10 +12,16 @@ const { normalizeSuiAddress } = appRequire("@mysten/sui/utils");
 (async () => {
   if (live) {
     const { SuiGrpcClient } = appRequire("@mysten/sui/grpc");
-    const deployments = await sui.fetchDeploymentEvents(new SuiGrpcClient({ network: fixture.network, baseUrl: fixture.rpc_url }), process.argv[5]);
+    const client = new SuiGrpcClient({ network: fixture.network, baseUrl: fixture.rpc_url });
+    const devices = await sui.fetchDevices(client, process.argv[5]);
+    const groups = await sui.fetchGroups(client, process.argv[5]);
+    assert.ok(devices.length > 0, "live acceptance must query the registered devices");
+    assert.ok(devices.every((device) => device.arch === "aarch64" && device.registeredAt > 0));
+    assert.ok(Array.isArray(groups));
+    const deployments = await sui.fetchDeploymentEvents(client, process.argv[5]);
     const seen = Object.fromEntries(deployments.map((d) => [d.deploymentId, { verified: d.receiptsVerified, statuses: d.statuses }]));
     for (const [id, expected] of Object.entries(JSON.parse(fs.readFileSync(process.argv[4], "utf8")))) assert.deepEqual(seen[id], expected);
-    console.log("PASS: gRPC live authoritative deployment receipts"); return;
+    console.log("PASS: live gRPC inventory, group history and authoritative deployment receipts"); return;
   }
   const asked = [];
   const client = { getDynamicField: async ({ parentId, name }) => {
