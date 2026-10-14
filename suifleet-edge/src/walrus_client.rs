@@ -19,7 +19,29 @@ impl WalrusClient {
         }
     }
 
-
+    pub async fn recipe(&self, blob_id: &str) -> anyhow::Result<(crate::recipe::Recipe, String)> {
+        use futures_util::StreamExt;
+        let url = format!(
+            "{}/v1/blobs/{}",
+            self.aggregator_url.trim_end_matches('/'),
+            blob_id
+        );
+        let response = self.http.get(url).send().await?.error_for_status()?;
+        let mut stream = response.bytes_stream();
+        let mut bytes = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
+            anyhow::ensure!(
+                bytes.len() + chunk.len() <= 1024 * 1024,
+                "recipe exceeds 1 MiB limit"
+            );
+            bytes.extend_from_slice(&chunk);
+        }
+        Ok((
+            serde_json::from_slice(&bytes)?,
+            hex::encode(Sha256::digest(&bytes)),
+        ))
+    }
 
     /// Download a blob and write it to `dest`. Returns the sha256 hex of the downloaded bytes.
     pub async fn download(&self, blob_id: &str, dest: &Path) -> anyhow::Result<String> {

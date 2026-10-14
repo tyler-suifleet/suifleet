@@ -11,13 +11,11 @@ path = "src/main.rs"
 # SUI JSON-RPC over HTTP/WebSocket (no heavy SDK needed for embedded targets)
 reqwest = { version = "0.12", features = ["json", "stream"] }
 tokio = { version = "1", features = ["full"] }
-tokio-tungstenite = { version = "0.23", features = ["native-tls"] }
 futures-util = "0.3"
 
 # Crypto — ed25519 signing for SUI transactions
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 rand = "0.8"
-bs58 = "0.5"
 hex = "0.4"
 
 # SHA-256 verification + SHA3-256 for SUI address derivation

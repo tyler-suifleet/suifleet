@@ -14,7 +14,6 @@ pub struct Config {
 #[derive(Deserialize, Debug, Clone)]
 pub struct SuiConfig {
     pub rpc_url: String,
-    pub ws_url: String,
     #[serde(default)]
     pub original_package_id: String,
     pub package_id: String,
@@ -25,10 +24,6 @@ pub struct DeviceConfig {
     pub keypair_path: PathBuf,
     pub device_object_id: String,
     pub device_cap_id: String,
-    /// Device group object IDs this device belongs to.
-    /// Any deployment targeting one of these groups will be applied.
-    #[serde(default)]
-    pub group_ids: Vec<String>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -50,7 +45,14 @@ impl Config {
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         let raw = std::fs::read_to_string(path)?;
         let cfg: Self = toml::from_str(&raw)?;
-        anyhow::ensure!(cfg.apply.timeout_seconds > 0, "apply.timeout_seconds must be positive");
+        anyhow::ensure!(
+            cfg.runtime.poll_seconds > 0,
+            "runtime.poll_seconds must be positive"
+        );
+        anyhow::ensure!(
+            cfg.apply.timeout_seconds > 0,
+            "apply.timeout_seconds must be positive"
+        );
         Ok(cfg)
     }
 }
