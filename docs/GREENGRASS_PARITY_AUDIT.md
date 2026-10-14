@@ -29,6 +29,10 @@ The immediate platform blocker is transport: both the app and daemon use legacy 
 - The UI advertised run/shutdown that no daemon executed. Those controls are disabled and such recipes/configurations fail explicitly; install scripts require device-side opt-in.
 - Tests had a stale function signature and invalid shared-object test timing. Those are corrected. Frontend SDK version skew is pinned to the wallet library's compatible version.
 
+## Tracking coverage
+
+See [the 51-capability ticket map](GREENGRASS_TICKET_COVERAGE.md) for current ownership scope. The expanded backlog separates Raspberry Pi build/deploy and live acceptance, messaging, shadows, streams, client-device auth, containers, recipe compatibility, managed-adapter specification and signed releases. A mapping is not proof of implementation or complete AWS compatibility.
+
 ## Feature matrix
 
 “Partial” means a meaningful subset exists but does not satisfy the full AWS behavior. “Missing” means no implementation was found. Priorities: P0 blocks safe/public-network operation; P1 is required for the requested OTA/fleet product; P2 is required for broader Greengrass equivalence.
