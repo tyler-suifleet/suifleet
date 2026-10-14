@@ -14,17 +14,29 @@ SRC_URI = " \
     file://suifleet-provision \
     file://suifleet-enrollment.path \
 "
-SRCREV = "${AUTOREV}"
+SRCREV = "c10ac76e9aae5b3ea8f92a42d8a68068c9bba71f"
 S = "${WORKDIR}/git"
 
-inherit cargo systemd pkgconfig useradd
+inherit cargo cargo-update-recipe-crates systemd pkgconfig useradd
+require suifleet-crates.inc
+SUIFLEET_LOCK_SHA256 = "965363c17c3e0106dc82411c6cb7b8fb982f13bc1259ce00720a89383c635974"
+CARGO_LOCK_SRC_DIR = "${S}/suifleet-edge"
+CARGO_BUILD_FLAGS:append = " --bin suifleet --features systemd"
+# Every compile uses the dependency graph fetched and verified by BitBake.
+export CARGO_NET_OFFLINE = "true"
 
 DEPENDS += "openssl systemd"
 RDEPENDS:${PN} += "ca-certificates"
 
 CARGO_SRC_DIR = "suifleet-edge"
 
-EXTRA_OECARGO_FLAGS = "--features systemd"
+python do_verify_lock() {
+    import hashlib
+    lock = open(d.getVar('CARGO_LOCK_PATH'), 'rb').read()
+    if hashlib.sha256(lock).hexdigest() != d.getVar('SUIFLEET_LOCK_SHA256'):
+        bb.fatal('Cargo.lock differs from the pinned crate graph; regenerate suifleet-crates.inc and its lock checksum')
+}
+addtask verify_lock after do_patch before do_configure
 
 # Unprivileged daemon user; only suifleet-firmware.service runs as root.
 USERADD_PACKAGES = "${PN}"
