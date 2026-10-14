@@ -72,6 +72,10 @@ def issue_body(issue, known):
     acceptance = "\n".join(f"- [ ] {text}" for text in issue["acceptance"])
     paths = ", ".join(f"`{path}`" for path in issue["paths"])
     return f"""{marker(issue['key'])}
+## Description
+
+{issue.get('description', issue['title'])}
+
 ## Problem and evidence
 
 {issue['evidence']}

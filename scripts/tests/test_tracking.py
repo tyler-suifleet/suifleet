@@ -19,7 +19,7 @@ class TrackingTests(unittest.TestCase):
 
     def test_seed_dependencies_are_known_acyclic_and_publishable(self):
         ordered = tracking.ordered_issues(self.config)
-        self.assertEqual(len(ordered), 28)
+        self.assertEqual(len(ordered), len(self.config["issues"]))
         seen = set()
         for issue in ordered:
             self.assertTrue(set(issue["depends_on"]) <= seen)
@@ -58,7 +58,7 @@ class TrackingTests(unittest.TestCase):
         result = subprocess.run([sys.executable, str(ROOT / "scripts/bootstrap_tracking.py")], text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("OFFLINE PLAN", result.stdout)
-        self.assertIn("28 prepared issues", result.stdout)
+        self.assertIn(f"{len(self.config['issues'])} prepared issues", result.stdout)
         after = tracking.STATE.read_bytes() if tracking.STATE.exists() else None
         self.assertEqual(before, after)
 
