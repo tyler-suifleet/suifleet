@@ -25,6 +25,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from types import SimpleNamespace
 import urllib.request
 from urllib.parse import urlparse
 
@@ -204,6 +205,11 @@ def main():
                  '"fw"', '"1.0.0"', '"recipe-blob"', '"artifact-sha"',
                  "vector[]", f"vector[@{d_legacy}]", CLOCK)
     r1 = created(tx, "::deployment_manager::DeploymentRecord")[0]
+    tx = execute("v1 create_deployment R3 -> legacy-device (never genuinely reported)",
+                 "--move-call", f"{pkg1}::deployment_manager::create_deployment",
+                 '"fw"', '"1.0.1"', '"recipe-blob"', '"artifact-sha"',
+                 "vector[]", f"vector[@{d_legacy}]", CLOCK)
+    r3 = created(tx, "::deployment_manager::DeploymentRecord")[0]
 
     # ── Upgrade to v2 ─────────────────────────────────────────────────────────
     stage(args.v2, package)
@@ -257,6 +263,9 @@ def main():
             "--move-call", f"{pkg1}::deployment_manager::report_status",
             f"@{r1}", f"@{atk_cap}", f"{APPLIED}u8")
     use(op)
+    execute("legacy write: operator forges legacy-device via v1 on R3",
+            "--move-call", f"{pkg1}::deployment_manager::report_status",
+            f"@{r3}", f"@{op_cap_v1_legacy}", f"{APPLIED}u8")
     execute("legacy write: operator forges legacy-device via v1 on R1",
             "--move-call", f"{pkg1}::deployment_manager::report_status",
             f"@{r1}", f"@{op_cap_v1_legacy}", f"{APPLIED}u8")
@@ -314,6 +323,8 @@ def main():
           vecmap(receipts2["fields"]["statuses"]) == {d_new: FAILED} and receipts2["fields"]["version"] == "2",
           json.dumps(receipts2["fields"]))
     legacy = vecmap(f1["StatusesKey"][1])
+    check("R3 has forged legacy statuses and no receipts",
+          "ReceiptsKey" not in fields_of(r3) and vecmap(fields_of(r3)["StatusesKey"][1]) == {d_legacy: APPLIED})
     check("R1 legacy history keeps forged entries", legacy == {d_atk: APPLIED, d_legacy: APPLIED},
           json.dumps(legacy))
     receipts1 = vecmap(f1["ReceiptsKey"][1]["fields"]["statuses"])
@@ -326,11 +337,35 @@ def main():
           len(reporters) == 3 and set(reporters) == {dev}, json.dumps(reporters))
     legacy_events = rpc("suix_queryEvents",
                         [{"MoveEventType": f"{pkg1}::deployment_manager::DeviceStatusUpdated"}, None, 50, False])
-    check("legacy DeviceStatusUpdated still forgeable (3 events, none from device)",
-          len(legacy_events["data"]) == 3 and all(e["sender"] != dev for e in legacy_events["data"]),
+    check("legacy DeviceStatusUpdated still forgeable (4 events, none from device)",
+          len(legacy_events["data"]) == 4 and all(e["sender"] != dev for e in legacy_events["data"]),
           str(len(legacy_events["data"])))
 
-    print(f"\npackages: v1={pkg1} v2={pkg2} v3={pkg3}\nrecords: R1={r1} R2={r2}")
+    # ── Frontend reader on these records, via per-type manifest origins ─────
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import deployment_manifest as dm
+    manifest = dm.resolve(SimpleNamespace(chain_identifier=chain, rpc=RPC_URL, package=pkg3, upgrade_cap=upgrade_cap,
+                                          registry=registry, network="localnet", publisher="http://127.0.0.1:31415",
+                                          aggregator="http://127.0.0.1:31416"))
+    origin = manifest["type_origins"]["deployment_manager::ReceiptsKey"]
+    check("manifest resolves ReceiptsKey to the upgrade that introduced it",
+          int(origin, 16) == int(pkg2, 16) and int(origin, 16) not in (int(pkg1, 16), int(pkg3, 16)), origin)
+    expected = {
+        r2: {"verified": True, "statuses": {d_new: FAILED}},
+        r1: {"verified": True, "statuses": {d_legacy: FAILED}},  # forged legacy entries ignored
+        r3: {"verified": False, "statuses": {}},  # only forged legacy statuses: unverified
+    }
+    manifest_file, expected_file = os.path.join(work, "manifest.json"), os.path.join(work, "expected.json")
+    with open(manifest_file, "w") as fh:
+        json.dump(manifest, fh)
+    with open(expected_file, "w") as fh:
+        json.dump(expected, fh)
+    reader = subprocess.run(["node", os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_deployment_receipts.cjs"),
+                             "--live", manifest_file, expected_file, op], capture_output=True, text=True)
+    check("frontend fetchDeploymentEvents: new verified, legacy receipts only, forged-only legacy unverified",
+          reader.returncode == 0, (reader.stdout + reader.stderr).strip()[-600:])
+
+    print(f"\npackages: v1={pkg1} v2={pkg2} v3={pkg3}\nrecords: R1={r1} R2={r2} R3={r3}")
     failed = [r for r in results if not r[0]]
     print(f"{len(results) - len(failed)}/{len(results)} checks passed")
     sys.exit(1 if failed else 0)
