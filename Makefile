@@ -51,6 +51,7 @@ edge-test:
 test-ota:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml
 	$(RUN) python3 scripts/test_ota.py
+	$(RUN) python3 scripts/test_ota.py --firmware-helper
 
 dapp-typecheck:
 	$(RUN) bash -c "cd dapp && pnpm typecheck"
