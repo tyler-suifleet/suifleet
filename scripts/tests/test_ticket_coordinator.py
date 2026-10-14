@@ -135,7 +135,7 @@ class CoordinatorTests(unittest.TestCase):
         self.c.import_catalog(changed, remote)
         row = self.c.row('SF-001')
         self.assertEqual(row['token'], claim['token'])
-        self.assertEqual(set(json.loads(row['spec'])['paths']), {'scripts/', 'contracts/a.move'})
+        self.assertEqual(set(json.loads(row['spec'])['paths']), {'scripts', 'contracts/a.move'})
         with self.assertRaises(m.CoordinationError):
             self.claim('SF-004', 'claude-session')
 

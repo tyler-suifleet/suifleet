@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "project_id": "suifleet",
+  "repository": "tyler-suifleet/suifleet",
+  "git_remote": "git@suifleet:tyler-suifleet/suifleet.git",
+  "github": {
+    "account": "tyler-suifleet",
+    "owner": "tyler-suifleet",
+    "project_number": 1,
+    "project_title": "SuiFleet — OTA and Fleet Management"
+  },
+  "catalog": {
+    "kind": "files",
+    "backlog": "docs/tracking/backlog.json",
+    "state": "docs/tracking/github-state.json"
+  },
+  "legacy_coordinator": true,
+  "resource_rules": [
+    {
+      "paths": ["tests/components/", "suifleet-edge/meta-suifleet/"],
+      "resources": ["hardware:raspberrypi3bplus"]
+    }
+  ]
+}
