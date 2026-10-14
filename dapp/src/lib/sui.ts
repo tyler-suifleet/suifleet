@@ -272,6 +272,18 @@ async function objectsInBatches(client: SuiGrpcClient, ids: string[]) {
   return objects;
 }
 
+// Deployment targets are arbitrary IDs on chain. An invalid group must not
+// hide unrelated deployments; transport errors still escape objectsInBatches.
+function targetGroupDevices(group: { type: string; content: Uint8Array }, creator: string): string[] {
+  try {
+    if (normalizeStructTag(group.type) !== normalizeStructTag(DEVICE_GROUP_TYPE)) return [];
+    const fields = GroupBcs.parse(group.content);
+    return fields.schema_version === "1" && fields.admin === creator ? fields.device_ids : [];
+  } catch {
+    return []; // Invalid type tag or malformed BCS for this one target.
+  }
+}
+
 export async function fetchDeploymentEvents(client: SuiGrpcClient, owner?: string): Promise<DeploymentEvent[]> {
   await verifyDeployment(client);
   const events = (await allEvents(client, DEPLOYMENT_CREATED_EVENT)).map((event) => DeploymentCreatedBcs.parse(event.bcs))
@@ -282,7 +294,7 @@ export async function fetchDeploymentEvents(client: SuiGrpcClient, owner?: strin
     const record = live.get(event.deployment_id)!;
     if (record.schema_version !== "1") throw new Error("Unsupported DeploymentRecord schema");
     const groups = await objectsInBatches(client, event.target_groups);
-    const resolvedDeviceIds = [...new Set([...event.target_devices, ...groups.flatMap((group) => GroupBcs.parse(group.content).device_ids)])];
+    const resolvedDeviceIds = [...new Set([...event.target_devices, ...groups.flatMap((group) => targetGroupDevices(group, record.creator))])];
     const { verified, statuses } = await readReceipts(client, event.deployment_id);
     return { deploymentId: event.deployment_id, componentName: record.component_name, version: record.version,
       recipeBlobId: record.recipe_blob_id, artifactSha256: record.artifact_sha256,

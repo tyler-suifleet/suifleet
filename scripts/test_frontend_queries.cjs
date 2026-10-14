@@ -24,7 +24,7 @@ const deploymentBytes = schema.DeploymentBcs.serialize({ id: deployment, creator
     const bytes = args.filter.eventType.endsWith("GroupCreated") ? schema.GroupCreatedBcs.serialize({ group_id: group, name: "Lab", admin: owner }).toBytes() : schema.DeploymentCreatedBcs.serialize(event).toBytes();
     return { events: [{ bcs: bytes, json: null }], hasNextPage: false };
   };
-  c.getObjects = async ({ objectIds }) => ({ objects: objectIds.map((objectId) => ({ objectId, content: objectId === group ? groupBytes : deploymentBytes })) });
+  c.getObjects = async ({ objectIds }) => ({ objects: objectIds.map((objectId) => ({ objectId, type: `${m.type_origins["device_group::DeviceGroup"]}::device_group::DeviceGroup`, content: objectId === group ? groupBytes : deploymentBytes })) });
   assert.deepEqual((await sui.fetchGroups(c, owner))[0].deviceIds, [device]);
   assert.deepEqual(eventCursors, [undefined, "scanned-next"]);
   c.getDynamicField = async () => ({ dynamicField: { value: { type: `${m.type_origins["deployment_manager::Receipts"]}::deployment_manager::Receipts`, bcs: schema.ReceiptsBcs.serialize({ version: 1, statuses: { contents: [{ key: device, value: 1 }] } }).toBytes() } } });
