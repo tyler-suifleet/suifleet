@@ -177,9 +177,13 @@ impl WalrusClient {
         let expected_total = response
             .content_length()
             .map(|remaining| offset + remaining);
+        let directory = partial.parent().unwrap_or(Path::new("."));
         if let Some(total) = expected_total {
-            self.check_space(partial, total, offset)?;
+            self.check_space(directory, total, offset)?;
         }
+        // Bytes writable before free space must be checked again. Covers
+        // chunked/unknown-length bodies and space consumed by other writers.
+        let mut allowance = 0u64;
         let mut file = std::fs::OpenOptions::new()
             .create(true)
             .write(true)
@@ -191,15 +195,31 @@ impl WalrusClient {
         let mut stream = response.bytes_stream();
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(|e| Failure::Transient(e.into()))?;
-            length += chunk.len() as u64;
-            if length > self.max_artifact_bytes {
-                drop(file);
-                let _ = std::fs::remove_file(partial);
-                return Err(Failure::Permanent(anyhow::anyhow!(
+            let size = chunk.len() as u64;
+            length += size;
+            let refusal = if length > self.max_artifact_bytes {
+                Some(anyhow::anyhow!(
                     "artifact exceeds the {} byte download limit",
                     self.max_artifact_bytes
-                )));
+                ))
+            } else if size > allowance {
+                allowance = self.writable(directory)?;
+                (size > allowance).then(|| {
+                    anyhow::anyhow!(
+                        "insufficient disk space: {} bytes reserved, artifact stopped at {} bytes",
+                        self.min_free_bytes,
+                        length - size
+                    )
+                })
+            } else {
+                None
+            };
+            if let Some(error) = refusal {
+                drop(file);
+                let _ = std::fs::remove_file(partial);
+                return Err(Failure::Permanent(error));
             }
+            allowance -= size;
             file.write_all(&chunk).map_err(local)?;
         }
         file.sync_all().map_err(local)?;
@@ -215,14 +235,13 @@ impl WalrusClient {
 
     /// Refuse a transfer that exceeds the artifact limit or would leave less
     /// than `min_free_bytes` free, before writing any of it.
-    fn check_space(&self, partial: &Path, total: u64, offset: u64) -> Result<(), Failure> {
+    fn check_space(&self, directory: &Path, total: u64, offset: u64) -> Result<(), Failure> {
         if total > self.max_artifact_bytes {
             return Err(Failure::Permanent(anyhow::anyhow!(
                 "artifact of {total} bytes exceeds the {} byte download limit",
                 self.max_artifact_bytes
             )));
         }
-        let directory = partial.parent().unwrap_or(Path::new("."));
         let available = available_bytes(directory).map_err(|e| Failure::Permanent(e.into()))?;
         let needed = total
             .saturating_sub(offset)
@@ -235,6 +254,12 @@ impl WalrusClient {
             )));
         }
         Ok(())
+    }
+
+    /// Bytes that can be written to `directory` while keeping `min_free_bytes`.
+    fn writable(&self, directory: &Path) -> Result<u64, Failure> {
+        let available = available_bytes(directory).map_err(|e| Failure::Permanent(e.into()))?;
+        Ok(available.saturating_sub(self.min_free_bytes))
     }
 }
 
@@ -372,6 +397,18 @@ mod tests {
         )
         .into_bytes();
         out.extend_from_slice(&BLOB[..sent]);
+        out
+    }
+
+    /// Chunked transfer encoding: no Content-Length, size unknown up front.
+    fn chunked(body: &[u8]) -> Vec<u8> {
+        let mut out = format!(
+            "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n{:x}\r\n",
+            body.len()
+        )
+        .into_bytes();
+        out.extend_from_slice(body);
+        out.extend_from_slice(b"\r\n0\r\n\r\n");
         out
     }
 
@@ -517,6 +554,44 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("insufficient disk space"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn chunked_download_succeeds_within_reserve() {
+        let (url, _) = server(|_, _| chunked(BLOB)).await;
+        let dest = dest("chunked");
+        let hash = client(url, 1 << 20, 0)
+            .download("blob", &dest)
+            .await
+            .unwrap();
+        assert_eq!(hash, expected());
+    }
+
+    #[tokio::test]
+    async fn chunked_download_respects_the_free_space_reserve() {
+        let (url, _) = server(|_, _| chunked(BLOB)).await;
+        let dest = dest("chunkeddisk");
+        let error = client(url, 1 << 20, u64::MAX / 2)
+            .download("blob", &dest)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("insufficient disk space"), "{error}");
+        assert!(!dest.exists());
+        assert!(!partial_path(&dest).exists(), "refused bytes must not stay on disk");
+    }
+
+    #[tokio::test]
+    async fn chunked_download_respects_the_size_limit() {
+        let (url, _) = server(|_, _| chunked(BLOB)).await;
+        let dest = dest("chunkedquota");
+        let error = client(url, 8, 0)
+            .download("blob", &dest)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("download limit"), "{error}");
+        assert!(!partial_path(&dest).exists());
     }
 
     #[test]
