@@ -71,3 +71,8 @@ tracking-plan:
 
 test-tracking:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_tracking.py'
+
+.PHONY: test-coordinator
+
+test-coordinator:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_ticket_coordinator.py'
