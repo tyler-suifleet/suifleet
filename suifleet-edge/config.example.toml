@@ -23,6 +23,15 @@ command = "/usr/bin/swupdate -i"
 timeout_seconds = 600
 allow_recipe_commands = false
 
+# How firmware reaches the updater (see docs/OPERATIONS.md, "Execution privileges").
+# "direct" (default) runs `command` as the daemon user. Under the shipped
+# systemd unit that user is unprivileged, so use "privileged-helper" for
+# updaters that need root: suifleet-firmware.service then runs the command
+# from root-owned /etc/suifleet/firmware.toml and `command` here is unused.
+# mode = "privileged-helper"
+# firmware_spool = "/var/lib/suifleet/firmware"
+# max_memory_bytes = 268435456   # optional RLIMIT_AS for updater/recipe children
+
 [runtime]
 state_dir = "/var/lib/suifleet"
 poll_seconds = 10

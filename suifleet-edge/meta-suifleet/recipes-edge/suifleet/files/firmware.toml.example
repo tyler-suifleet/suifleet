@@ -1,0 +1,7 @@
+# Root-owned (0600 root:root) configuration for the privileged firmware helper.
+# The daemon cannot read or change it; only this command ever runs as root.
+# The helper's verified private copy of the artifact is appended as the final argument.
+command = "/usr/bin/swupdate -i"
+timeout_seconds = 600
+spool_dir = "/var/lib/suifleet/firmware"
+work_dir = "/var/lib/suifleet-firmware"

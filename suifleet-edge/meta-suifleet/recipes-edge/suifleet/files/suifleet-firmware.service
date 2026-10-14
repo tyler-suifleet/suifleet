@@ -1,0 +1,33 @@
+[Unit]
+Description=SuiFleet privileged firmware helper
+# The only root-run SuiFleet code path: verifies a submitted artifact and runs
+# the firmware command from root-owned /etc/suifleet/firmware.toml.
+ConditionPathExists=/etc/suifleet/firmware.toml
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/suifleet --firmware-helper /etc/suifleet/firmware.toml
+StateDirectory=suifleet-firmware
+StateDirectoryMode=0700
+UMask=0077
+# Must exceed firmware.toml timeout_seconds.
+TimeoutStartSec=900
+
+# Firmware updaters need block devices and boot partitions, so devices and the
+# root filesystem stay writable; everything unrelated to flashing is removed.
+ProtectHome=yes
+PrivateTmp=yes
+PrivateNetwork=yes
+NoNewPrivileges=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX
+SystemCallArchitectures=native
+LimitCORE=0

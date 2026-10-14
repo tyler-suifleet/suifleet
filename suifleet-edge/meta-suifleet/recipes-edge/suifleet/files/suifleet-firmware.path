@@ -1,0 +1,10 @@
+[Unit]
+Description=Watch for SuiFleet firmware requests
+
+[Path]
+# Requests are published atomically by the unprivileged daemon.
+PathExistsGlob=/var/lib/suifleet/firmware/requests/*.json
+Unit=suifleet-firmware.service
+
+[Install]
+WantedBy=multi-user.target

@@ -19,6 +19,13 @@ command = "/usr/bin/swupdate -i"
 timeout_seconds = 600
 allow_recipe_commands = false
 
+# The daemon runs as the unprivileged suifleet user. "direct" runs the command
+# above as that user (unprivileged updaters only). "privileged-helper" hands the
+# verified artifact to suifleet-firmware.service, which runs the command from
+# root-owned /etc/suifleet/firmware.toml instead; recipe scripts never do.
+mode = "privileged-helper"
+# max_memory_bytes = 268435456   # optional RLIMIT_AS for updater/recipe children
+
 [runtime]
 state_dir = "/var/lib/suifleet"
 poll_seconds = 10
