@@ -204,6 +204,32 @@ pub fn collect(spool: &Path, id: &str) -> anyhow::Result<Option<anyhow::Result<(
     }))
 }
 
+/// At daemon startup, for a deployment the previous run left without a status:
+/// can its real outcome still be learned? A result or a claim means yes (the
+/// collector will reconcile it). An unclaimed request is withdrawn first, so
+/// it can never run unreported; then, like no request at all, the updater
+/// never ran.
+pub fn recover(spool: &Path, id: &str) -> anyhow::Result<bool> {
+    anyhow::ensure!(valid_id(id), "invalid firmware request id");
+    let requests = requests(spool);
+    let known = || {
+        results(spool).join(format!("{id}.json")).exists()
+            || requests.join(format!("{id}.claimed")).exists()
+    };
+    if known() {
+        return Ok(true);
+    }
+    match std::fs::remove_file(requests.join(format!("{id}.json"))) {
+        Ok(()) => {}
+        // Claimed between the checks: the helper owns it now.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound && known() => return Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e.into()),
+    }
+    let _ = std::fs::remove_file(requests.join(format!("{id}.artifact")));
+    Ok(false)
+}
+
 /// Drop a collected result once its outcome is durably journaled.
 pub fn acknowledge(spool: &Path, id: &str) {
     let _ = std::fs::remove_file(results(spool).join(format!("{id}.json")));
@@ -837,6 +863,30 @@ mod tests {
         assert!(collect(&f.config.spool_dir, ID).unwrap().is_some(), "kept until acknowledged");
         acknowledge(&f.config.spool_dir, ID);
         assert!(collect(&f.config.spool_dir, ID).unwrap().is_none());
+        let _ = std::fs::remove_dir_all(f.root);
+    }
+
+    #[tokio::test]
+    async fn recover_keeps_learnable_outcomes_and_withdraws_unclaimed_requests() {
+        let f = fixture("recover", "/bin/true");
+        let spool = &f.config.spool_dir;
+        // A written result and a claim can still be reconciled.
+        stage_request(spool, "done");
+        assert_eq!(run_helper(&f.config).await.unwrap(), 1);
+        assert!(recover(spool, "done").unwrap());
+        stage_request(spool, "claimed");
+        let requests = requests(spool);
+        std::fs::rename(requests.join("claimed.json"), requests.join("claimed.claimed")).unwrap();
+        assert!(recover(spool, "claimed").unwrap());
+        // An unclaimed request is withdrawn: it never runs, and Failed is accurate.
+        stage_request(spool, "queued");
+        assert!(!recover(spool, "queued").unwrap());
+        assert!(!requests.join("queued.json").exists() && !requests.join("queued.artifact").exists());
+        assert_eq!(run_helper(&f.config).await.unwrap(), 1, "only the abandoned claim is left");
+        assert!(collect(spool, "queued").unwrap().is_none());
+        // Never submitted.
+        assert!(!recover(spool, "absent").unwrap());
+        assert!(recover(spool, "../x").is_err());
         let _ = std::fs::remove_dir_all(f.root);
     }
 

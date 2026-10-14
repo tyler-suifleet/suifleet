@@ -72,6 +72,16 @@ async fn main() -> anyhow::Result<()> {
         sui.address()
     );
     let mut journal = Journal::open(&cfg.runtime.state_dir, binding)?;
+    // Before anything else reads the journal: a firmware update that may still
+    // finish, or already did, must not be settled as Failed.
+    let spool = cfg.apply.firmware_spool.clone();
+    journal.settle_interrupted(|id, outcome| match &outcome.firmware_request {
+        Some(request) => firmware::recover(&spool, request).unwrap_or_else(|error| {
+            warn!(deployment = id, %error, "Cannot inspect firmware spool; keeping outcome pending");
+            true
+        }),
+        None => false,
+    })?;
     let walrus = WalrusClient::new(&cfg.walrus);
     // The artifact cache holds at most the in-flight artifact; anything left
     // by an earlier run (e.g. a crash mid-download) is unused.
@@ -193,9 +203,9 @@ async fn poll(
                 journal.state.deployments.insert(
                     event.deployment_id.clone(),
                     Outcome {
-                        status: None,
-                        reported: false,
-                        error: None,
+                        firmware_request: (cfg.apply.mode == config::ApplyMode::PrivilegedHelper)
+                            .then(|| firmware::request_id(&event.deployment_id)),
+                        ..Outcome::default()
                     },
                 );
                 journal.save()?;
@@ -265,9 +275,10 @@ async fn handle_deployment(
 /// Applied/Failed, or no status when a privileged update's outcome is
 /// unknown: like a crash mid-update, that is neither reported nor re-applied.
 fn record_result(outcome: &mut Outcome, result: anyhow::Result<()>) {
+    outcome.indeterminate = matches!(&result, Err(error) if error.downcast_ref::<firmware::Indeterminate>().is_some());
     outcome.status = match &result {
         Ok(()) => Some(1),
-        Err(error) if error.downcast_ref::<firmware::Indeterminate>().is_some() => None,
+        Err(_) if outcome.indeterminate => None,
         Err(_) => Some(2),
     };
     outcome.error = result.err().map(|error| format!("{error:#}"));
@@ -277,15 +288,14 @@ fn record_result(outcome: &mut Outcome, result: anyhow::Result<()>) {
 /// updates that outlived the daemon's wait or a daemon restart.
 fn collect_firmware_results(cfg: &Config, journal: &mut Journal) -> anyhow::Result<()> {
     let spool = &cfg.apply.firmware_spool;
-    let waiting: Vec<String> = journal
+    let waiting: Vec<(String, String)> = journal
         .state
         .deployments
         .iter()
         .filter(|(_, outcome)| outcome.status.is_none())
-        .map(|(id, _)| id.clone())
+        .filter_map(|(id, outcome)| Some((id.clone(), outcome.firmware_request.clone()?)))
         .collect();
-    for id in waiting {
-        let request = firmware::request_id(&id);
+    for (id, request) in waiting {
         let Some(result) = firmware::collect(spool, &request)? else {
             continue;
         };
