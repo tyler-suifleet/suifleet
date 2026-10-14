@@ -594,7 +594,6 @@
       "phase": "ota",
       "kind": "type:infrastructure",
       "depends_on": [
-        "SF-004",
         "SF-009"
       ],
       "paths": [
