@@ -380,13 +380,18 @@ impl SuiClient {
     /// derived object ID. Empty Move structs serialize as one `false` byte
     /// (the implicit dummy_field).
     pub async fn dynamic_field(&self, parent: &str, name: &str) -> anyhow::Result<Option<Value>> {
+        self.keyed_field(parent, name, &[0]).await
+    }
+
+    /// A dynamic field whose key struct has fields, given as their BCS.
+    async fn keyed_field(&self, parent: &str, name: &str, key_bcs: &[u8]) -> anyhow::Result<Option<Value>> {
         let key = TypeTag::Struct(Box::new(
             StructTag::from_str(&self.move_type(name))
                 .map_err(|e| anyhow::anyhow!("invalid key type {name}: {e}"))?,
         ));
         let parent = Address::from_str(parent)
             .map_err(|e| anyhow::anyhow!("invalid object ID {parent}: {e}"))?;
-        let id = parent.derive_dynamic_child_id(&key, &[0]);
+        let id = parent.derive_dynamic_child_id(&key, key_bcs);
         Ok(self
             .optional_object(&id.to_string())
             .await?
@@ -632,7 +637,18 @@ impl SuiClient {
                 .is_some_and(|signer| same_id(signer, &self.address())),
             "DeviceCap has no matching signer binding; reissue it with the upgraded contracts"
         );
-        Ok(())
+        // The registry's identity decides whether this key is still trusted
+        // (revocation, rotation, deregistration); reports would abort anyway.
+        let device = Address::from_str(device_id)
+            .map_err(|e| anyhow::anyhow!("invalid device ID {device_id}: {e}"))?;
+        let identity = self
+            .keyed_field(
+                &self.manifest().shared_objects.registry.id,
+                "device_registry::IdentityKey",
+                device.inner(),
+            )
+            .await?;
+        check_identity(identity.as_ref(), &self.address())
     }
 
     pub async fn report_status(
@@ -651,9 +667,10 @@ impl SuiClient {
             .dynamic_field(deployment, "deployment_manager::TargetDevicesKey")
             .await?
             .unwrap_or(Value::Null);
+        let registry = self.manifest().shared_objects.registry.id.clone();
         let mut call = Call {
-            function: "report_status",
-            objects: vec![deployment.to_owned(), cap.to_owned()],
+            function: "report_verified_status",
+            objects: vec![deployment.to_owned(), registry, cap.to_owned()],
             status,
         };
         if !id_list(&direct).iter().any(|id| same_id(id, &device_id)) {
@@ -671,7 +688,7 @@ impl SuiClient {
             }
             call.objects
                 .push(found.ok_or_else(|| anyhow::anyhow!("device is no longer targeted"))?);
-            call.function = "report_status_for_group";
+            call.function = "report_verified_status_for_group";
         }
         let transaction = self.build(&call).await?;
         self.execute(&transaction).await
@@ -733,6 +750,22 @@ impl SuiClient {
             .ok_or_else(|| anyhow::anyhow!("execution returned no transaction"))?;
         execution_digest(&executed)
     }
+}
+
+/// Whether the registry still trusts `address` for this device.
+fn check_identity(identity: Option<&Value>, address: &str) -> anyhow::Result<()> {
+    let identity = identity.ok_or_else(|| {
+        anyhow::anyhow!("device has no registry identity; its owner must call device_registry::activate_device")
+    })?;
+    anyhow::ensure!(
+        identity["revoked"] != Value::Bool(true),
+        "device identity is revoked or deregistered; its owner must reactivate it before it reports again"
+    );
+    anyhow::ensure!(
+        same_id(identity["signer"].as_str().unwrap_or(""), address),
+        "device key was rotated away from this key; install the new key and its DeviceCap"
+    );
+    Ok(())
 }
 
 /// The only transaction this daemon signs: one Move call of `function` in
@@ -934,6 +967,19 @@ mod tests {
         assert!(ensure_retained(Some(0), Some(1)).is_err());
     }
 
+    #[test]
+    fn only_an_active_identity_for_this_key_is_trusted() {
+        let key = "0xa0";
+        let active = json!({"signer": "0x00a0", "operator": "0xad", "revoked": false});
+        check_identity(Some(&active), key).unwrap();
+        let error = check_identity(None, key).unwrap_err().to_string();
+        assert!(error.contains("activate_device"), "{error}");
+        let revoked = json!({"signer": "0xa0", "operator": "0xad", "revoked": true});
+        assert!(check_identity(Some(&revoked), key).unwrap_err().to_string().contains("revoked"));
+        let rotated = json!({"signer": "0xb1", "operator": "0xad", "revoked": false});
+        assert!(check_identity(Some(&rotated), key).unwrap_err().to_string().contains("rotated"));
+    }
+
     fn status_call() -> (Transaction, Call, Address, Address) {
         let package = Address::from_str("0x3").unwrap();
         let sender = Address::from_str("0xa0").unwrap();
@@ -942,6 +988,11 @@ mod tests {
             Address::from_str("0x10").unwrap(),
             1,
             true,
+        ));
+        let registry = builder.object(sui_transaction_builder::ObjectInput::shared(
+            Address::from_str("0x13").unwrap(),
+            1,
+            false,
         ));
         let cap = builder.object(sui_transaction_builder::ObjectInput::owned(
             Address::from_str("0x11").unwrap(),
@@ -953,9 +1004,9 @@ mod tests {
             sui_transaction_builder::Function::new(
                 package,
                 "deployment_manager".parse().unwrap(),
-                "report_status".parse().unwrap(),
+                "report_verified_status".parse().unwrap(),
             ),
-            vec![record, cap, value],
+            vec![record, registry, cap, value],
         );
         builder.set_sender(sender);
         builder.set_gas_budget(10_000_000);
@@ -966,8 +1017,8 @@ mod tests {
             Digest::ZERO,
         )]);
         let call = Call {
-            function: "report_status",
-            objects: vec!["0x10".into(), "0x11".into()],
+            function: "report_verified_status",
+            objects: vec!["0x10".into(), "0x13".into(), "0x11".into()],
             status: 1,
         };
         (builder.try_build().unwrap(), call, package, sender)
@@ -995,14 +1046,17 @@ mod tests {
         let call = Call { status: 1, ..wrong_status };
 
         let swapped = Call {
-            objects: vec!["0x10".into(), "0x99".into()],
+            objects: vec!["0x10".into(), "0x13".into(), "0x99".into()],
             ..call
         };
         assert!(check_transaction(&tx, &swapped, package, sender).is_err());
         let call = Call {
-            objects: vec!["0x10".into(), "0x11".into()],
+            objects: vec!["0x10".into(), "0x13".into(), "0x11".into()],
             ..swapped
         };
+        let unverified = Call { function: "report_status", ..call };
+        assert!(check_transaction(&tx, &unverified, package, sender).is_err());
+        let call = Call { function: "report_verified_status", ..unverified };
 
         assert!(check_transaction(&tx, &call, Address::from_str("0x4").unwrap(), sender).is_err());
 
