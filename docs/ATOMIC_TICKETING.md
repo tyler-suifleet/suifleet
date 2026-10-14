@@ -4,9 +4,9 @@ Codex and Claude use the same coordinator before starting any implementation. Gi
 
 ## Shared database and isolation
 
-The database is `<git-common-dir>/suifleet-coordinator.sqlite3`, shared automatically by the canonical checkout and every linked Git worktree. Transactions use SQLite `BEGIN IMMEDIATE`, WAL and full synchronization; a claim checks ticket ownership, dependency completion and all overlapping path reservations before acquiring ownership in the same transaction. Claims are sorted by P0/P1/P2 then stable SF key, after filtering dependencies and conflicts.
+The reusable `ticket` CLI uses `~/.local/state/atomic-ticketing/coordination.sqlite3` (or the shared XDG_STATE_HOME location) across SuiFleet and Vortech. Project configuration is committed in `.atomic-ticketing.json`; the engine/installer and cross-project instructions are in [tools/atomic-ticketing](../tools/atomic-ticketing/README.md). The original Git-common-directory database is migrated and retired, with a SQLite backup and ownership tokens preserved. Transactions use SQLite `BEGIN IMMEDIATE`, WAL and full synchronization; a claim checks ticket ownership, dependency completion and all overlapping path reservations before acquiring ownership in the same transaction. Claims are sorted by P0/P1/P2 then stable SF key, after filtering dependencies and conflicts.
 
-Both models must use this one Git repository on the WSL Linux filesystem. Separate clones have separate databases and must not be used as competing workers. Do not put the database on `/mnt/c`, a network share or a synced directory. A separate worktree is created for each claim, on a unique branch; failed worktree creation leaves the reservation intact for inspection. It does not reset or copy another worker's working changes. Broad paths and wildcard scopes deliberately reserve whole directories; expand scope before editing additional files.
+Both models must use the same central database and each project's registered canonical Git repository/linked worktrees on the WSL Linux filesystem. Registration rejects a separate clone with an already-registered project identity. Do not put the database on `/mnt/c`, a network share or a synced directory. A separate worktree is created for each claim, on a unique branch; failed worktree creation leaves the reservation intact for inspection. It does not reset or copy another worker's working changes. Broad paths and wildcard scopes deliberately reserve whole directories; expand scope before editing additional files.
 
 The database stores model/session identifiers, paths, lease state and local handoff events, not account credentials. GitHub authentication is provided by the existing `gh` setup. No dependency installation is required beyond Python 3, SQLite support, Git and authenticated GitHub CLI.
 
@@ -15,7 +15,10 @@ The database stores model/session identifiers, paths, lease state and local hand
 Run from the canonical checkout after these instruction/tool changes have been committed so new worktrees contain them:
 
 ```bash
-python3 scripts/ticket_coordinator.py init
+python3 tools/atomic-ticketing/install.py
+ticket --root /home/tyler/dev/codex/src/suifleet register
+ticket --project suifleet migrate
+ticket --project suifleet init
 python3 scripts/ticket_coordinator.py refresh
 python3 scripts/ticket_coordinator.py claim \
   --agent Codex --model ACTUAL_MODEL --session UNIQUE_CODEX_SESSION
@@ -42,7 +45,7 @@ python3 /absolute/canonical/checkout/scripts/ticket_coordinator.py show TICKET
 
 Heartbeat at least every five minutes, including during long builds. The lease lasts fifteen minutes. Check ownership before an edit batch and again after long tools, before staging/committing or any deployment. `assert` rejects expired, replaced, non-implementation or unpublished claims and paths outside scope. A worker with a lost token must stop editing immediately. A still-owning expired worker may heartbeat and resume; expiry alone never transfers ownership.
 
-Read `list` and relevant `show` events before changing shared interfaces. Local notes provide the common mailbox; GitHub issue comments may record durable human-facing handoffs under the task's authorization. Neither model has automatic access to the other's private conversation. Agree on interfaces in notes/issues; dependency declarations and path locks cannot detect every semantic conflict. Shared build outputs, ports, caches and hardware also need coordination; worktrees isolate source files, not those resources.
+Read `list` and relevant `show` events before changing shared interfaces. Local notes provide the common mailbox; GitHub issue comments may record durable human-facing handoffs under the task's authorization. Neither model has automatic access to the other's private conversation. Agree on interfaces in notes/issues; dependency declarations and path locks cannot detect every semantic conflict. Reserve shared hardware/build/port resources with `--resource NAME` on claim/expand and assert them before use; configured path rules also reserve resources. Worktrees isolate source files, not devices or ports.
 
 ## Review, blockers and completion
 
@@ -53,7 +56,7 @@ python3 scripts/ticket_coordinator.py block TICKET --token TOKEN --text 'Concret
 python3 scripts/ticket_coordinator.py resume TICKET --token TOKEN
 ```
 
-Review and blocked work retain their path reservations. Review has no expiring lease and is not dependency completion. A session may select another independent ticket after submitting review, but may own only one active/blocked implementation. Resume is rejected if that session already owns another implementation. Coordinate a reviewer in the issue/Project, and integrate changes serially instead of having workers push directly to main.
+Review and blocked work retain their path reservations. Review has no expiring lease and is not dependency completion. A session may select another independent ticket after submitting review, but may own only one active/blocked implementation across all registered projects. Resume is rejected if that session already owns another implementation. Coordinate a reviewer in the issue/Project, and integrate changes serially instead of having workers push directly to main.
 
 After review, required acceptance and integration, the integrator records completion:
 

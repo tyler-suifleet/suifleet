@@ -8,4 +8,4 @@ The imported `AGENTS.md` is the shared infrastructure, build, test, deployment a
 
 Work on existing assigned issues. Report additional findings to Codex through the existing issue or the handoff, without creating a new tracking item. Record Claude/model version, branch, owned paths, dependencies and exact test results. Keep operational instructions in `AGENTS.md` and its linked runbooks rather than maintaining a divergent copy here.
 
-For “implement the next ticket”, use the shared coordinator from AGENTS.md with `--agent Claude`, your actual model and a unique session. Enter the returned worktree; keep its lease and token valid. Do not independently claim through GitHub fields, use a separate clone, or create issues.
+For “implement the next ticket”, use `ticket --project suifleet` and the shared coordinator from AGENTS.md with `--agent Claude`, your actual model and a unique session. Enter the returned worktree; keep its lease and token valid. Do not independently claim through GitHub fields, use a separate clone, or create issues.
