@@ -55,7 +55,7 @@ make edge-build
 make dapp-build
 ```
 
-`make shell` opens the container. Make detects `INSIDE_DEV_CONTAINER=1`; run the same targets there without nested Docker. The Dockerfile pins the Ubuntu base digest, Sui `testnet-v1.71.1` (checksum-verified), Rust `1.87.0`, Node `22.22.2` and pnpm `11.0.8`; these are the existing baseline, not a claim of compatibility with current public networks. Use locked dependencies. Deliberate dependency upgrades must update lockfiles and compatibility tests together.
+`make shell` opens the container. Make detects `INSIDE_DEV_CONTAINER=1`; run the same targets there without nested Docker. The Dockerfile pins the Ubuntu base digest, Sui `testnet-v1.81.1` (checksum-verified; same build as mainnet 1.81.1), Rust `1.94.0` (the lowest Rust in the supported Yocto LTS releases), Node `22.22.2` and pnpm `11.0.8`; these are the existing baseline, not a claim of compatibility with current public networks. Use locked dependencies. Deliberate dependency upgrades must update lockfiles and compatibility tests together.
 
 Do not run `make down` casually: it deletes named volumes, including Sui wallet configuration. Do not reset, clean, overwrite, stage or commit unrelated work. Inspect `git status` before editing; existing work may belong to another agent or the user.
 
