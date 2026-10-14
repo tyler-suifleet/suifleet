@@ -84,8 +84,9 @@ Authoritative status lives in state that old code cannot construct:
 - `Receipts.version` gates writers. Any later upgrade that changes report authority (revocation, new targeting rules) must bump `RECEIPTS_VERSION` and then call the new package's permissionless, idempotent `migrate` on every live record. Once a record is migrated, older packages' report and `migrate` calls abort with `EPackageOutdated`. Records not yet swept remain writable by the previous package, under that package's own checks.
 
 Mixed clients:
-- Clients must read `ReceiptsKey`/`DeviceStatusReported` using the type origin of the upgrade package, not the original package ID.
-- Clients still reading `StatusesKey` show new deployments as pending. That is safe, but not useful.
+- The dApp reads `ReceiptsKey` through the deployment manifest's per-type origin (the upgrade that introduced receipts, not the original or call package). A record with no receipts is shown as **unverified**, never with its legacy statuses.
+- Clients that still read `StatusesKey` are incompatible: new records have no such field, and on legacy records it is forgeable. Upgrade the dApp together with the contracts.
+- Dynamic-field lookups by name must encode an empty key struct as `{"dummy_field": false}`; a real node rejects `{}` ("Missing field dummy_field").
 - Devices on the current daemon keep reporting through `report_status`/`report_status_for_group`, whose signatures are unchanged.
 
 Recovery:
@@ -101,7 +102,7 @@ SUI_CONFIG_DIR=/tmp/sui-config sui client switch --env local
 SUI_CONFIG_DIR=/tmp/sui-config python3 scripts/upgrade_security_localnet.py --v1 /tmp/v1/contracts --v2 contracts
 ```
 
-It publishes the prior package, creates a device and deployment, then upgrades. Next it attacks through old and new entry points, requiring each attack to abort at the intended check. It also verifies a later version-bumped upgrade locks out this package. Results come from on-chain effects, object state and events. This does not replace an upgrade test against an existing deployment on a public network.
+It publishes the prior package, creates devices and deployments (including a legacy record with only forged statuses), then upgrades. Next it attacks through old and new entry points, requiring each attack to abort at the intended check. It also verifies a later version-bumped upgrade locks out this package, then resolves a deployment manifest and runs the real dApp `fetchDeploymentEvents` against new, legacy and forged-only records. Results come from on-chain effects, object state and events. It needs `dapp/node_modules` (`make dapp-install`). This does not replace an upgrade test against an existing deployment on a public network.
 
 ## Deployment process
 
