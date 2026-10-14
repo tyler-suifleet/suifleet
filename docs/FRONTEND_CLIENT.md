@@ -20,6 +20,8 @@ Inventory uses `listOwnedObjects`; groups and deployment history use `listEvents
 
 `dapp/src/lib/move-bcs.ts` defines the current contract layouts. Objects, events, UpgradeCap and receipts decode BCS rather than transport-dependent JSON. Deployment timestamps come from the actual record. Missing authoritative receipts mark legacy history unverified; legacy StatusesKey is never read. Invalid receipt authority generations, unknown statuses and object schema versions are rejected. A positive receipts version is an authority generation, so an additive upgrade may bump it without changing the client layout; protocol/schema compatibility is enforced separately by the manifest. SF-005 remains responsible for generated/compiled layout compatibility; these definitions do not by themselves prove future upgrades compatible.
 
+On-chain deployment group targets are arbitrary IDs. History resolves only supported `DeviceGroup` objects administered by that deployment's creator; wrong types, malformed layouts, unsupported group schemas and deleted groups do not hide other deployments. Transport errors remain visible. Each unique group is read once per history query, and administrator checks apply separately per deployment. Package, UpgradeCap and registry proofs run concurrently after fresh chain verification. Wallet guards compare snapshots of the signer address and supported chain set, accepting equivalent rebuilt account objects while rejecting actual changes before signing.
+
 ## Verification
 
 ```bash
@@ -30,7 +32,7 @@ make dapp-build
 CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_wallet_browser.cjs
 ```
 
-The browser test uses the actual dApp Kit provider/connect UI, wallet registration, transaction/effects decoder and application hook. It checks connect, successful execution, user rejection, failed effects, chain mismatch, unsupported account chain and disconnect. Network responses and the wallet are fixtures. It never accesses an existing browser profile, funds a wallet or submits to a public chain. Its bundler/browser drivers are pinned dev dependencies; only esbuild's install script is allowed. Without `CHROME_EXECUTABLE`, Playwright uses its installed Chromium.
+The browser test uses the actual dApp Kit provider/connect UI, wallet registration, transaction/effects decoder and application hook. It checks connect, successful execution, user rejection, failed effects, chain mismatch, unsupported account chain and disconnect. Network responses and the wallet are fixtures; browser and Node tests share `scripts/fixtures/manifest-client.ts`. It never accesses an existing browser profile, funds a wallet or submits to a public chain. Its bundler/browser drivers are pinned dev dependencies; only esbuild's install script is allowed. Without `CHROME_EXECUTABLE`, Playwright uses its installed Chromium.
 
 ## Real loopback gRPC acceptance
 
@@ -42,7 +44,7 @@ node scripts/test_frontend_live.cjs
 # FLEET_TEST_RPC=http://127.0.0.1:9000 FLEET_TEST_FAUCET=http://127.0.0.1:9123 node scripts/test_frontend_live.cjs
 ```
 
-This test refuses public endpoints, uses fresh in-memory signers and isolated compiler configuration, compiles the actual contracts with the pinned build compiler, publishes locally and executes the actual frontend builders. It verifies BCS inventory/group/deployment/receipt reads, group membership, deletion, and an intentional on-chain abort with failed execution effects. History reads wait for checkpointed state. Neither an execution digest nor a preflight simulation substitutes for the failure assertion. No real wallet, Walrus upload, device or hardware is used.
+This test refuses public endpoints, uses fresh in-memory signers and an explicit empty compiler keystore, compiles offline with the pinned build compiler, publishes locally and executes the actual frontend builders. It verifies BCS inventory/group/deployment/receipt reads, group membership, deletion, and an intentional on-chain abort with failed execution effects. It also creates deployments containing a non-group Device ID and another creator's populated group, requiring readable history and no false resolved targets. Successful and failed transactions wait for checkpointed state before subsequent history reads or gas reuse. Neither an execution digest nor a preflight simulation substitutes for the failure assertion. No real wallet, Walrus upload, device or hardware is used.
 
 The verified test-node release asset was `sui-testnet-v1.82.1-ubuntu-x86_64.tgz`, SHA-256 `112bf204fab6927b135edfb316cddac07bdba754434b5f12d021ca7e8a72858c` from the official [release](https://github.com/MystenLabs/sui/releases/tag/testnet-v1.82.1). The node ran in a disposable dev-image container, with only its binary supplied separately; normal pinned images, wallets and named volumes were not replaced.
 
