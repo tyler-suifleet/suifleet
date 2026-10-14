@@ -1,0 +1,103 @@
+#!/bin/sh
+# Harmless one-shot updater for the SuiFleet test component (SF-030).
+#
+# Usage: suifleet-test-updater [--root DIR] ARTIFACT
+#
+# Configure it as `apply.command`; the daemon appends the verified artifact.
+# Everything is written under DIR (default /var/lib/suifleet/test-components,
+# inside the daemon's own state directory):
+#
+#   <component>/versions/<version>/app   installed artifact
+#   <component>/current                  installed version
+#   <component>/receipt.json             receipt of the latest attempt
+#   <component>/history.jsonl            every receipt, oldest first
+#
+# Exit codes: 0 installed and healthy; 2 rejected artifact (nothing written);
+# 10 install failed (previous version stays current); 20 installed but the
+# run or health check failed. The daemon reports any non-zero exit as Failed;
+# the receipt says which phase failed.
+set -eu
+umask 022
+
+root=/var/lib/suifleet/test-components
+if [ "${1:-}" = --root ]; then
+    [ $# -ge 2 ] || { echo "usage: $0 [--root DIR] ARTIFACT" >&2; exit 64; }
+    root=$2
+    shift 2
+fi
+[ $# -eq 1 ] || { echo "usage: $0 [--root DIR] ARTIFACT" >&2; exit 64; }
+artifact=$1
+
+reject() {
+    echo "suifleet-test-updater: $*" >&2
+    exit 2
+}
+
+[ -f "$artifact" ] && [ ! -L "$artifact" ] || reject "artifact is not a regular file"
+[ "$(wc -c <"$artifact")" -le 65536 ] || reject "artifact is larger than 64 KiB"
+[ "$(sed -n 2p "$artifact")" = "# suifleet-test-component 1" ] || reject "not a SuiFleet test component"
+
+# Header values become path components and JSON strings: allow only a safe
+# charset, starting with an alphanumeric (so never "." or "..").
+field() {
+    value=$(sed -n "3,6s/^# $1=//p" "$artifact")
+    case $value in
+    '' | [!A-Za-z0-9]* | *[!A-Za-z0-9._-]*) return 1 ;;
+    esac
+    [ ${#value} -le 64 ] || return 1
+    printf '%s' "$value"
+}
+component=$(field component) || reject "invalid component in header"
+version=$(field version) || reject "invalid version in header"
+run_id=$(field run_id) || reject "invalid run_id in header"
+sha256=$(sha256sum "$artifact" | cut -d ' ' -f 1)
+
+base=$root/$component
+mkdir -p "$base/versions"
+previous=$(cat "$base/current" 2>/dev/null || true)
+
+# $1 install result, $2 health result, $3 the app's run JSON (or null).
+receipt() {
+    if [ -n "$previous" ]; then previous_json="\"$previous\""; else previous_json=null; fi
+    line=$(printf '{"schema":1,"component":"%s","version":"%s","runId":"%s","artifactSha256":"%s","previousVersion":%s,"install":"%s","health":"%s","run":%s,"receiptAt":"%s"}' \
+        "$component" "$version" "$run_id" "$sha256" "$previous_json" "$1" "$2" "$3" \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)")
+    printf '%s\n' "$line" >"$base/receipt.json.tmp"
+    mv -f "$base/receipt.json.tmp" "$base/receipt.json"
+    printf '%s\n' "$line" >>"$base/history.jsonl"
+}
+
+staging=$base/.staging.$$
+rm -rf "$staging"
+mkdir "$staging"
+cp "$artifact" "$staging/app"
+chmod 0755 "$staging/app"
+if ! sh "$staging/app" install "$staging" >&2; then
+    rm -rf "$staging"
+    receipt failed not-run null
+    exit 10
+fi
+rm -rf "$base/versions/$version"
+mv "$staging" "$base/versions/$version"
+printf '%s\n' "$version" >"$base/current.tmp"
+mv -f "$base/current.tmp" "$base/current"
+
+app=$base/versions/$version/app
+if ! run=$(sh "$app" run "$base/versions/$version"); then
+    receipt succeeded not-run null
+    exit 20
+fi
+# The app must identify itself as exactly the artifact that was installed.
+case $run in
+*"\"version\":\"$version\""*"\"runId\":\"$run_id\""*) ;;
+*)
+    receipt succeeded not-run null
+    exit 20
+    ;;
+esac
+if sh "$app" health "$base/versions/$version" >&2; then
+    receipt succeeded passed "$run"
+    exit 0
+fi
+receipt succeeded failed "$run"
+exit 20
