@@ -32,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
 
     let sui = SuiClient::load(cfg.sui.clone(), &cfg.device.keypair_path)?;
     let walrus = WalrusClient::new(cfg.walrus.aggregator_url.clone());
-    let runner = ApplyRunner::new(cfg.apply.command.clone());
+    let runner = ApplyRunner::new(cfg.apply.clone());
 
     let device_object_id = cfg.device.device_object_id.clone();
     let device_cap_id = cfg.device.device_cap_id.clone();
@@ -111,7 +111,7 @@ async fn handle_deployment(
         actual_hash
     );
 
-    runner.apply(tmp).await
+    runner.apply(tmp, None).await
 }
 
 fn notify_ready() {

@@ -36,11 +36,21 @@ pub struct WalrusConfig {
 pub struct ApplyConfig {
     /// Command to run with the artifact path appended as the final argument.
     pub command: String,
+    #[serde(default = "default_timeout")]
+    pub timeout_seconds: u64,
+    #[serde(default)]
+    pub allow_recipe_commands: bool,
 }
 
 impl Config {
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         let raw = std::fs::read_to_string(path)?;
-        Ok(toml::from_str(&raw)?)
+        let cfg: Self = toml::from_str(&raw)?;
+        anyhow::ensure!(cfg.apply.timeout_seconds > 0, "apply.timeout_seconds must be positive");
+        Ok(cfg)
     }
+}
+
+fn default_timeout() -> u64 {
+    600
 }
