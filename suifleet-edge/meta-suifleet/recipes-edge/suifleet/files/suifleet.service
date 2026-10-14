@@ -4,6 +4,10 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
+Type=notify
+StateDirectory=suifleet
+UMask=0077
+ExecStartPre=/usr/bin/suifleet --provision /etc/suifleet/device.key
 ExecStart=/usr/bin/suifleet
 Restart=on-failure
 RestartSec=5
