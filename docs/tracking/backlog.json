@@ -22,7 +22,8 @@
         "Deploy a prior package, create objects, upgrade and demonstrate attempted old-package report/authority bypass is rejected or cannot affect trusted receipts.",
         "Document upgrade, mixed-client support and recovery."
       ],
-      "validation": "Move tests plus actual old/new package and state migration acceptance tests."
+      "validation": "Move tests plus actual old/new package and state migration acceptance tests.",
+      "description": "Prevent old Sui package entry points from bypassing upgraded authority. Define authoritative new state that old entry points cannot modify; preserve required migration/history."
     },
     {
       "key": "SF-002",
@@ -43,7 +44,8 @@
         "Generate frontend/device configuration from one manifest and reject stale network/ID combinations.",
         "Cover fresh publish, multiple upgrades and introduction of RecipeDigestKey/DeviceAddressKey in later packages."
       ],
-      "validation": "Unit/generated-fixture tests and a live multi-upgrade origin resolution test."
+      "validation": "Unit/generated-fixture tests and a live multi-upgrade origin resolution test.",
+      "description": "Introduce a network deployment manifest with per-type origins. Record verified chain identity, latest call ID, per-type origins, shared IDs, protocol version and compatible client ranges."
     },
     {
       "key": "SF-003",
@@ -67,7 +69,8 @@
         "Retain inventory/group/deployment queries, pagination, account/network handling and execution-effect checks.",
         "Remove legacy API calls and document the tested compatible dependency set."
       ],
-      "validation": "Frozen install, typecheck/build and actual wallet connect/sign/reject/chain-mismatch acceptance."
+      "validation": "Frozen install, typecheck/build and actual wallet connect/sign/reject/chain-mismatch acceptance.",
+      "description": "Migrate the frontend SDK and wallet integration to supported Sui APIs. Migrate SDK, wallet providers/hooks and transaction execution together to supported gRPC/GraphQL clients."
     },
     {
       "key": "SF-004",
@@ -90,7 +93,8 @@
         "Preserve durable cursor recovery, filtering, independent signatures and status effects checks.",
         "Define historical/archival retention and handle disconnect/cursor migration without replaying applied work."
       ],
-      "validation": "Rust tests, actual-daemon simulator adapted to new transport, and real chain success/failure/offline recovery."
+      "validation": "Rust tests, actual-daemon simulator adapted to new transport, and real chain success/failure/offline recovery.",
+      "description": "Migrate the daemon reader, transaction builder and executor to supported Sui APIs. Use supported transport and transaction building; verify chain identity and per-type origins."
     },
     {
       "key": "SF-005",
@@ -115,7 +119,8 @@
         "Compare both clients to actual compiled Move interfaces and fail CI on drift.",
         "Declare compatibility/version rules and reject unknown protocols before apply."
       ],
-      "validation": "Positive and negative schema/interface compatibility tests using compiled contract artifacts."
+      "validation": "Positive and negative schema/interface compatibility tests using compiled contract artifacts.",
+      "description": "Generate and verify shared contract, event and recipe interfaces. Provide a generated or centrally defined interface for calls, events, keys, statuses and recipes."
     },
     {
       "key": "SF-006",
@@ -138,7 +143,8 @@
         "Stop on failed publish/upgrade/effects/metadata parsing and preserve prior config on failure.",
         "Record release IDs/type origins and generate both client configs atomically."
       ],
-      "validation": "Offline parser/failure tests, dry run and explicit testnet publish/upgrade acceptance."
+      "validation": "Offline parser/failure tests, dry run and explicit testnet publish/upgrade acceptance.",
+      "description": "Harden publishing and configuration generation. Parse metadata by environment and verify actual chain identity/account/UpgradeCap."
     },
     {
       "key": "SF-007",
@@ -161,7 +167,8 @@
         "Record/pin tested toolchain/dependency versions and retain failure diagnostics without secrets.",
         "Provide separately authorized live upgrade/wallet/hardware gates; do not publish in ordinary PR CI."
       ],
-      "validation": "Successful CI plus deliberately failing contract drift, execution effect and recovery regressions."
+      "validation": "Successful CI plus deliberately failing contract drift, execution effect and recovery regressions.",
+      "description": "Add reproducible CI and release compatibility gates. Run locked Move/Rust/frontend checks and the real-daemon simulator on pull requests."
     },
     {
       "key": "SF-008",
@@ -185,7 +192,8 @@
         "Define key rotation, reissuance, ownership transfer and legacy-cap migration.",
         "A revoked or deregistered device cannot submit trusted receipts through old or new packages."
       ],
-      "validation": "Contract adversarial tests, mixed-version upgrade tests and live rotation/revocation acceptance."
+      "validation": "Contract adversarial tests, mixed-version upgrade tests and live rotation/revocation acceptance.",
+      "description": "Implement revocable device identity and capability lifecycle. Enforce active identity and revocation at authoritative on-chain reporting/update boundaries."
     },
     {
       "key": "SF-009",
@@ -205,7 +213,8 @@
         "Preserve authenticated recipes and process-tree cleanup on cancellation/timeout.",
         "Document and test privilege failures without silently reporting Applied."
       ],
-      "validation": "Negative privilege/timeout tests and service/image validation."
+      "validation": "Negative privilege/timeout tests and service/image validation.",
+      "description": "Constrain updater and component execution privileges. Define least-privilege users, filesystem/resource boundaries and required firmware-only privileged operations."
     },
     {
       "key": "SF-010",
@@ -234,7 +243,8 @@
         "Cover existing objects, later-introduced types, legacy caps and old-package attacks across upgrades.",
         "Record environment/tool versions, artifacts and recovery; never include keys in logs."
       ],
-      "validation": "Actual supported testnet/browser/device runs with positive and negative results."
+      "validation": "Actual supported testnet/browser/device runs with positive and negative results.",
+      "description": "Establish live wallet-to-device and package-upgrade acceptance suite. Exercise fresh registration, cap issuance, recipe upload, direct/group deployment and real execution effects."
     },
     {
       "key": "SF-011",
@@ -257,7 +267,8 @@
         "Resolve OS/architecture-compatible artifacts and expose version discovery.",
         "Validate hashes, invalid versions and unsupported platform errors."
       ],
-      "validation": "Catalog and selector tests plus integration deployment of different platform manifests."
+      "validation": "Catalog and selector tests plus integration deployment of different platform manifests.",
+      "description": "Create immutable component version catalog and platform manifests. Register immutable versions and recipes with semantic version/platform metadata."
     },
     {
       "key": "SF-012",
@@ -278,7 +289,8 @@
         "Reject cycles/conflicts before modifying installed state.",
         "Support locally cached candidates when the declared offline policy permits them."
       ],
-      "validation": "Resolver conflict/cycle/order tests and multi-component integration scenarios."
+      "validation": "Resolver conflict/cycle/order tests and multi-component integration scenarios.",
+      "description": "Resolve component dependency graphs and version conflicts. Resolve semver constraints, hard/soft dependencies and deterministic install ordering."
     },
     {
       "key": "SF-013",
@@ -302,7 +314,8 @@
         "Handle supersession, target removal, newly joined/offline devices and cross-group conflicts.",
         "Define atomic multi-component plan/commit semantics and idempotent recovery."
       ],
-      "validation": "Offline/new-member/supersession/removal/conflict and crash-recovery integration tests."
+      "validation": "Offline/new-member/supersession/removal/conflict and crash-recovery integration tests.",
+      "description": "Reconcile desired deployment revisions and live group membership. Represent desired revisions per target and reconcile latest applicable state."
     },
     {
       "key": "SF-014",
@@ -326,7 +339,8 @@
         "Handle shutdown/replacement/bootstrap/reboot without leaving unmanaged descendants.",
         "Expose genuine runtime state and enable UI recipe fields only after behavior is tested."
       ],
-      "validation": "Supervisor start/crash/restart/shutdown/reboot-stage integration tests."
+      "validation": "Supervisor start/crash/restart/shutdown/reboot-stage integration tests.",
+      "description": "Supervise component install, run, shutdown, bootstrap and recovery. Implement persistent versioned workspaces, process lifecycle, readiness and restart policy."
     },
     {
       "key": "SF-015",
@@ -349,7 +363,8 @@
         "Validate before applying and notify/defer components where required.",
         "Keep confidential values out of public manifests and diagnostics."
       ],
-      "validation": "Merge/reset/invalid-config/restart tests and component notification integration."
+      "validation": "Merge/reset/invalid-config/restart tests and component notification integration.",
+      "description": "Manage component configuration defaults, merge, reset and validation. Persist defaults and effective config with explicit merge/reset/JSON-pointer semantics."
     },
     {
       "key": "SF-016",
@@ -373,7 +388,8 @@
         "Implement a validated RAUC/SWUpdate A/B adapter with reboot intent and boot confirmation.",
         "Distinguish ambiguous interrupted work, installation success, healthy boot and rollback."
       ],
-      "validation": "Real-hardware power-loss/reboot/bad-image/health-failure recovery tests and simulator coverage."
+      "validation": "Real-hardware power-loss/reboot/bad-image/health-failure recovery tests and simulator coverage.",
+      "description": "Add health-based application and reboot-aware firmware rollback. Persist last-known-good state and application health rollback."
     },
     {
       "key": "SF-017",
@@ -398,7 +414,8 @@
         "Devices verify authorized rollout eligibility; coordinator state survives restart.",
         "Handle offline cohort members and audit pause/abort decisions."
       ],
-      "validation": "Multi-device simulator and coordinator crash/offline/failure-threshold acceptance."
+      "validation": "Multi-device simulator and coordinator crash/offline/failure-threshold acceptance.",
+      "description": "Coordinate canary cohorts, rollout rates and failure-threshold abort. Define cohorts, concurrency/rate limits, bake/health gates and minimum-sample failure thresholds."
     },
     {
       "key": "SF-018",
@@ -421,7 +438,8 @@
         "Notify/defer safely before disruptive work and define cancellation during apply.",
         "Expose actionable states/reasons in the operator UI."
       ],
-      "validation": "Pause/resume/cancel/offline-expiry/maintenance-window race integration tests."
+      "validation": "Pause/resume/cancel/offline-expiry/maintenance-window race integration tests.",
+      "description": "Implement deployment pause, cancel, expiry and maintenance windows. Model explicit durable control states and device-side deadlines/update windows."
     },
     {
       "key": "SF-019",
@@ -443,7 +461,8 @@
         "Buffer while offline and expose online/last-seen/degraded state without false health claims.",
         "Separate high-volume telemetry from compact authoritative chain receipts."
       ],
-      "validation": "Offline buffering/authentication/fleet status tests and dashboard acceptance."
+      "validation": "Offline buffering/authentication/fleet status tests and dashboard acceptance.",
+      "description": "Report heartbeat, installed inventory and device/component health. Publish bounded authenticated telemetry with installed versions and component health."
     },
     {
       "key": "SF-020",
@@ -466,7 +485,8 @@
         "Expose actionable deployment/device alerts and controlled support access.",
         "Never export keys, recovery phrases or confidential component config."
       ],
-      "validation": "Quota/redaction/auth/offline tests and end-to-end log/alert acceptance."
+      "validation": "Quota/redaction/auth/offline tests and end-to-end log/alert acceptance.",
+      "description": "Collect remote logs, diagnostics and operational alerts. Provide bounded rotation, redaction, authorized collection/search and diagnostic bundles."
     },
     {
       "key": "SF-021",
@@ -490,7 +510,8 @@
         "Add scoped operator/deployer roles and an identity signer abstraction.",
         "Validate supported TPM/HSM algorithms and rotation/recovery before claiming hardware identity."
       ],
-      "validation": "Unauthorized enrollment/delegation tests and software plus available hardware-signer acceptance."
+      "validation": "Unauthorized enrollment/delegation tests and software plus available hardware-signer acceptance.",
+      "description": "Provision fleets with scoped enrollment, roles and hardware signer support. Define claim enrollment/bootstrap ownership and bulk onboarding/gas sponsorship."
     },
     {
       "key": "SF-022",
@@ -515,7 +536,8 @@
         "Rotate secrets without embedding plaintext in public data or logs.",
         "Define offline cache expiry and deletion behavior."
       ],
-      "validation": "Cross-device unauthorized access/revocation/rotation/offline-cache tests."
+      "validation": "Cross-device unauthorized access/revocation/rotation/offline-cache tests.",
+      "description": "Distribute confidential artifacts, secrets and rotated credentials. Implement encrypted policy-controlled delivery/cache with scoped access and revocation."
     },
     {
       "key": "SF-023",
@@ -536,7 +558,8 @@
         "Implement bounded cache/GC, disk checks and resumable validated downloads.",
         "Handle expired/unavailable blobs and interrupted transfer without unverified apply."
       ],
-      "validation": "Actual provider retention/renewal tests plus interrupted/download/quota simulations."
+      "validation": "Actual provider retention/renewal tests plus interrupted/download/quota simulations.",
+      "description": "Manage artifact retention, resumable download, cache quotas and budgets. Track storage expiry/renewal ownership and budgets with alerts."
     },
     {
       "key": "SF-024",
@@ -560,7 +583,8 @@
         "Expose versioned fleet/bulk-operation API, CLI and integration events.",
         "Document deployment/auth/storage infrastructure and retention/recovery."
       ],
-      "validation": "Pagination/reorg-or-retention/restart/auth/load tests and API/CLI integration."
+      "validation": "Pagination/reorg-or-retention/restart/auth/load tests and API/CLI integration.",
+      "description": "Build a scalable fleet indexer, versioned API and operations CLI. Materialize chain/object changes with reliable cursors and filters/pagination."
     },
     {
       "key": "SF-025",
@@ -577,13 +601,17 @@
         "suifleet-edge/meta-suifleet/",
         "Dockerfile"
       ],
-      "evidence": "The OE recipe uses AUTOREV and has not passed an actual BitBake build.",
+      "evidence": "The current recipe uses AUTOREV, lacks a crates include/fetcher setup for Cargo.lock, installs only config.toml.example while the daemon expects config.toml, and has no verified Pi first-boot packaging.",
       "acceptance": [
         "Pin sources/toolchain/dependencies and add required Yocto cargo dependency support.",
         "Verify binary/service/config install, provisioning, network recovery and state persistence.",
-        "Document supported layer series, updater integration and reproducible build artifacts."
+        "Document supported layer series, updater integration and reproducible build artifacts.",
+        "Pin the client source revision, generate/fetch the locked crate graph through the Yocto cargo workflow, and verify the selected Rust compiler supports all locked dependencies; do not fetch crates during compile.",
+        "Package the executable, service, configuration/enrollment support and required certificates/crypto dependencies; account explicitly for config.toml.example versus the runtime config path.",
+        "Separate first-boot key provisioning from enrolled daemon startup so a fresh image can expose its address before device IDs are known, and prove keys are not cloned from image build artifacts."
       ],
-      "validation": "Actual BitBake image build and boot/service acceptance on target hardware/emulation."
+      "validation": "Actual BitBake image build and boot/service acceptance on target hardware/emulation.",
+      "description": "Validate and pin Yocto image and first-boot service packaging. Pin sources/toolchain/dependencies and add required Yocto cargo dependency support."
     },
     {
       "key": "SF-026",
@@ -607,7 +635,8 @@
         "Preserve device identity, journals and protocol compatibility across process replacement.",
         "Recover failed startup/reboot without relying on the failed daemon."
       ],
-      "validation": "Process/power-loss and broken-binary self-update recovery acceptance."
+      "validation": "Process/power-loss and broken-binary self-update recovery acceptance.",
+      "description": "Update the daemon safely with bootstrap handoff and fallback. Perform staged self-update with persistent bootstrap intent and known-good fallback."
     },
     {
       "key": "SF-027",
@@ -631,7 +660,8 @@
         "Support local install/list/start/stop/restart/status/logs workflows.",
         "Publish stable SDK/interface compatibility rules."
       ],
-      "validation": "IPC authorization and local management integration tests."
+      "validation": "IPC authorization and local management integration tests.",
+      "description": "Provide authenticated component IPC and developer SDK. Define local lifecycle/config/health/messaging APIs and per-component ACLs."
     },
     {
       "key": "SF-028",
@@ -653,7 +683,290 @@
         "Design messaging/shadows/stream/client-device adapters and an acceptance suite.",
         "Codex splits approved implementation scope into existing or new authorized issues; other models only report recommendations."
       ],
-      "validation": "Reviewed compatibility matrix and executable acceptance specifications, not a parity claim."
+      "validation": "Reviewed compatibility matrix and executable acceptance specifications, not a parity claim.",
+      "description": "Specify and validate broader Greengrass compatibility adapters. Define exact functional vs AWS API/recipe compatibility and supported platforms/components."
+    },
+    {
+      "key": "SF-029",
+      "title": "Build a bootable Yocto image for Raspberry Pi 3 B+ with the edge client",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "baseline",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-025"
+      ],
+      "paths": [
+        "suifleet-edge/meta-suifleet/",
+        "scripts/",
+        "docs/"
+      ],
+      "evidence": "The user has a Raspberry Pi 3 Model B+ with no confirmed installed image. The current meta-suifleet layer has a client recipe but no Pi image/build configuration; SSH deployment alone does not satisfy the requested boot-from-image test.",
+      "acceptance": [
+        "Provide a version-pinned BitBake build configuration for Raspberry Pi 3 Model B+ using meta-raspberrypi MACHINE=raspberrypi3-64 and a compatible Yocto/toolchain/layer set; validate the board support and locked Rust dependency requirements.",
+        "Add a bootable SuiFleet test image recipe that includes the suifleet package built through its cargo BitBake recipe, systemd service, CA certificates, networking and test diagnostics; do not substitute an SSH-copied binary for image integration.",
+        "Build and publish the SD-card image with checksum, source/layer revisions, package manifest and flashing/first-boot instructions. Flash only an explicitly selected removable device; no disk writes in ordinary builds.",
+        "Provision a unique device key on first boot, never bake private keys into the image, and retain identity/journal across restart. Provide an unenrolled first-boot state that exposes the signer address and waits for valid manifest/device IDs rather than repeatedly starting against placeholders.",
+        "Prefer wired Ethernet for the first test, document optional Wi-Fi firmware/configuration, and provide serial or authenticated SSH diagnostics after boot without committing credentials.",
+        "Boot the physical Pi from the generated image; verify board/architecture, packaged binary revision/hash, provisioning, service startup after enrollment, networking and persistent state. SSH redeploy is an optional developer loop, not image acceptance."
+      ],
+      "validation": "BitBake parse/build/package/image verification plus a real SD-card first boot on the Raspberry Pi 3 B+. Capture layer revisions, image/package manifests, binary/image hashes, board/OS/architecture and redacted logs. A cross-build or simulator alone does not pass physical-image acceptance.",
+      "description": "Build a bootable Yocto image for Raspberry Pi 3 B+ with the edge client. Provide a version-pinned BitBake build configuration for Raspberry Pi 3 Model B+ using meta-raspberrypi MACHINE=raspberrypi3-64 and a compatible Yocto/toolchain/layer set; validate the board support and locked Rust dependency requirements."
+    },
+    {
+      "key": "SF-030",
+      "title": "Create a harmless versioned test component for Raspberry Pi OTA",
+      "priority": "P1",
+      "area": "runtime",
+      "phase": "baseline",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "tests/components/",
+        "scripts/",
+        "docs/"
+      ],
+      "evidence": "There is no dedicated test payload that proves which artifact version actually ran on a device.",
+      "acceptance": [
+        "Provide v1/v2 test application artifacts and deterministic recipes with recipe/artifact SHA-256 hashes; report version, run ID and architecture in a structured receipt under the dedicated test directory.",
+        "Use the current one-shot apply path without requiring the future supervisor; support injected install failure and health failure without touching boot partitions or unrelated services.",
+        "Test the fixture locally and expose a later supervisor/config/rollback mode as those features become available; distinguish successful install from runtime health.",
+        "Package any required test updater/fixture support through the Yocto test image; exercise a versioned application payload on the Pi 3 B+ without modifying firmware partitions."
+      ],
+      "validation": "Local fixture tests verify exact version receipts, deterministic hashes, failure modes and isolated writes; run both versions on the Pi in SF-031.",
+      "description": "Create a harmless versioned test component for Raspberry Pi OTA. Provide v1/v2 test application artifacts and deterministic recipes with recipe/artifact SHA-256 hashes; report version, run ID and architecture in a structured receipt under the dedicated test directory."
+    },
+    {
+      "key": "SF-031",
+      "title": "Run wallet-to-testnet-to-Raspberry-Pi OTA acceptance tests",
+      "priority": "P0",
+      "area": "clients",
+      "phase": "baseline",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-002",
+        "SF-003",
+        "SF-004",
+        "SF-005",
+        "SF-006",
+        "SF-029",
+        "SF-030"
+      ],
+      "paths": [
+        "scripts/",
+        "tests/",
+        "dapp/",
+        "docs/"
+      ],
+      "evidence": "SF-010 specifies live acceptance but there is no concrete Pi test runner joining wallet, Sui, Walrus and a real ARM daemon.",
+      "acceptance": [
+        "Provide an opt-in test runner with local-network and Sui testnet profiles using a verified network manifest, compatible Sui/Walrus endpoints and explicitly supplied funded test accounts; fail preflight clearly when APIs or funding are unavailable.",
+        "Boot the physical Raspberry Pi 3 B+ from the SF-029 BitBake-built image containing the SF-025 client package, verify first-boot identity and enroll it, then upload the SF-030 recipe/artifact and exercise direct/group deployments through the actual frontend wallet flow.",
+        "Assert execution effects, matching on-chain status and Pi version/run-ID receipts for v1 then v2; record transaction IDs, blob IDs, binary/artifact hashes and redacted device logs.",
+        "Exercise offline catch-up, daemon restart, report retry, recipe/artifact tampering, unauthorized targets and failed updater; expected failures must not report Applied.",
+        "Keep private keys on their intended host, separate manual wallet steps from unattended test-account automation, document testnet resets/retention, and preserve device identity/journal during cleanup.",
+        "Publish a capability-based acceptance matrix so future runtime/config/rollback/self-update features add cases; do not claim this baseline tests every Greengrass feature or A/B firmware safety.",
+        "Start the enrolled client before creating the first test deployment so enrollment baseline behavior does not intentionally skip it; verify a fetched/applied test component and matching chain receipt. A read-only authenticated inventory/health query is an optional earlier connectivity smoke test, not OTA acceptance."
+      ],
+      "validation": "Offline harness tests and an actual frontend-wallet -> Sui/Walrus -> Pi -> on-chain receipt run, with reproducible evidence and explicit skipped/blocked cases. Hardware reboot/power-loss tests stay in SF-016.",
+      "description": "Run wallet-to-testnet-to-Raspberry-Pi OTA acceptance tests. Provide an opt-in test runner with local-network and Sui testnet profiles using a verified network manifest, compatible Sui/Walrus endpoints and explicitly supplied funded test accounts; fail preflight clearly when APIs or funding are unavailable."
+    },
+    {
+      "key": "SF-032",
+      "title": "Implement local pubsub and MQTT bridge with durable offline delivery",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-027"
+      ],
+      "paths": [
+        "suifleet-edge/src/",
+        "docs/"
+      ],
+      "evidence": "Greengrass provides local pubsub, MQTT brokers/bridges and offline message spooling; these are absent.",
+      "acceptance": [
+        "Define authenticated component pubsub and MQTT 3.1.1/5 broker/bridge behavior with topic ACLs and supported QoS semantics.",
+        "Implement bounded disk spooling, reconnect/backpressure policy, local-to-cloud routing and clear duplicate/order guarantees.",
+        "Validate LAN client and component messaging while disconnected; declare supported cloud adapters and broker versions."
+      ],
+      "validation": "Integration tests for ACL rejection, QoS, reconnect, spool exhaustion, restart and local/cloud routing; add Pi acceptance cases.",
+      "description": "Implement local pubsub and MQTT bridge with durable offline delivery. Define authenticated component pubsub and MQTT 3.1.1/5 broker/bridge behavior with topic ACLs and supported QoS semantics."
+    },
+    {
+      "key": "SF-033",
+      "title": "Implement local device shadows and conflict-aware cloud synchronization",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-027",
+        "SF-032"
+      ],
+      "paths": [
+        "suifleet-edge/src/",
+        "docs/"
+      ],
+      "evidence": "Local desired/reported shadow documents and cloud synchronization are missing.",
+      "acceptance": [
+        "Implement persistent named desired/reported documents, versions, delta notifications and scoped read/write ACLs.",
+        "Define merge/conflict/delete semantics, size limits and offline reconciliation with selected cloud adapters.",
+        "Provide executable compatibility cases and component SDK access."
+      ],
+      "validation": "Offline edits, reconnect conflicts, stale version rejection, deletion and restart persistence integration tests.",
+      "description": "Implement local device shadows and conflict-aware cloud synchronization. Implement persistent named desired/reported documents, versions, delta notifications and scoped read/write ACLs."
+    },
+    {
+      "key": "SF-034",
+      "title": "Implement durable stream storage and export adapters",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-027"
+      ],
+      "paths": [
+        "suifleet-edge/src/",
+        "docs/"
+      ],
+      "evidence": "Greengrass Stream Manager-style durable streams, local retention and exports are missing.",
+      "acceptance": [
+        "Provide bounded persistent streams with append/read cursors, retention and overflow/backpressure policies.",
+        "Implement resumable authenticated export with retries, batching and idempotency semantics for declared destinations.",
+        "Document resource/cost limits and compatibility differences from AWS Stream Manager."
+      ],
+      "validation": "Crash recovery, retention, quota exhaustion, offline buffering and interrupted export integration tests.",
+      "description": "Implement durable stream storage and export adapters. Provide bounded persistent streams with append/read cursors, retention and overflow/backpressure policies."
+    },
+    {
+      "key": "SF-035",
+      "title": "Authenticate and discover LAN client devices with certificate rotation",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-021",
+        "SF-032"
+      ],
+      "paths": [
+        "suifleet-edge/src/",
+        "docs/"
+      ],
+      "evidence": "Greengrass client-device authentication/discovery and local certificate lifecycle are not implemented.",
+      "acceptance": [
+        "Provide enrollment/discovery and broker authorization tied to device identity and scoped policy.",
+        "Support TLS certificate issuance, rotation, revocation and documented offline cache/expiry behavior.",
+        "Expose compatible discovery/auth interfaces where selected; reject untrusted, expired or revoked identities."
+      ],
+      "validation": "LAN discovery, TLS handshake, rotation, offline expiry and revoked-device denial tests on a Pi and a second client.",
+      "description": "Authenticate and discover LAN client devices with certificate rotation. Provide enrollment/discovery and broker authorization tied to device identity and scoped policy."
+    },
+    {
+      "key": "SF-036",
+      "title": "Run OCI container components with pinned images and recovery",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-009",
+        "SF-014",
+        "SF-022"
+      ],
+      "paths": [
+        "suifleet-edge/src/",
+        "docs/"
+      ],
+      "evidence": "External apply commands do not supply a managed container component runtime.",
+      "acceptance": [
+        "Add a supervised OCI adapter with immutable image digests, registry authentication and platform selection.",
+        "Apply declared resource/network/filesystem boundaries and readiness/restart/shutdown behavior.",
+        "Preserve offline cache and known-good recovery semantics; document supported engine and architecture."
+      ],
+      "validation": "ARM container install/start/crash/restart, registry-auth failure, bad digest, resource limits and offline recovery tests.",
+      "description": "Run OCI container components with pinned images and recovery. Add a supervised OCI adapter with immutable image digests, registry authentication and platform selection."
+    },
+    {
+      "key": "SF-037",
+      "title": "Translate AWS Greengrass recipes and validate compatibility semantics",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-011",
+        "SF-012",
+        "SF-014",
+        "SF-015",
+        "SF-027"
+      ],
+      "paths": [
+        "suifleet-edge/src/",
+        "dapp/src/",
+        "tests/",
+        "docs/"
+      ],
+      "evidence": "The proprietary recipe schema does not provide AWS JSON/YAML recipe or SDK compatibility.",
+      "acceptance": [
+        "Define the supported Greengrass V2 recipe subset and translate JSON/YAML lifecycle, platform, dependency, configuration and permission fields.",
+        "Reject unsupported fields explicitly with migration guidance; never silently execute recipes under different semantics.",
+        "Run a golden-recipe conformance suite and document IPC/SDK compatibility boundaries."
+      ],
+      "validation": "AWS-reference recipe fixtures, equivalent runtime/config outcomes and negative unsupported-field cases.",
+      "description": "Translate AWS Greengrass recipes and validate compatibility semantics. Define the supported Greengrass V2 recipe subset and translate JSON/YAML lifecycle, platform, dependency, configuration and permission fields."
+    },
+    {
+      "key": "SF-038",
+      "title": "Specify managed-component, Lambda and cloud-service adapter coverage",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-028"
+      ],
+      "paths": [
+        "docs/",
+        "suifleet-edge/src/"
+      ],
+      "evidence": "One broad compatibility epic does not define the supported AWS-managed component catalog or cloud-service contract.",
+      "acceptance": [
+        "Map AWS-managed component families to native equivalents, explicit adapters or separately approved exclusions: Lambda, ML inference, token exchange, metrics/Device Defender, secure tunneling/remote support, industrial protocols and cloud exports.",
+        "Define supported OS/architectures (including any Windows requirement), service/auth dependencies, version licensing constraints and executable acceptance for each selected adapter.",
+        "Create scoped implementation tickets for approved adapters; this specification alone cannot close full feature parity."
+      ],
+      "validation": "Reviewed catalog-to-ticket coverage matrix and executable acceptance specifications against declared AWS reference versions.",
+      "description": "Specify managed-component, Lambda and cloud-service adapter coverage. Map AWS-managed component families to native equivalents, explicit adapters or separately approved exclusions: Lambda, ML inference, token exchange, metrics/Device Defender, secure tunneling/remote support, industrial protocols and cloud exports."
+    },
+    {
+      "key": "SF-039",
+      "title": "Sign release artifacts and publish SBOMs with device verification",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "baseline",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-007",
+        "SF-009"
+      ],
+      "paths": [
+        ".github/",
+        "scripts/",
+        "suifleet-edge/src/",
+        "docs/"
+      ],
+      "evidence": "Locked local builds do not yet establish release artifact provenance, signatures or software inventory.",
+      "acceptance": [
+        "Produce reproducible ARM release artifacts, dependency SBOMs, revision/toolchain metadata and authenticated provenance.",
+        "Define signing trust roots, rotation/revocation and daemon-side verification in addition to content hashes.",
+        "Integrate release-only publication gates without publishing or exposing signing keys from ordinary PR jobs."
+      ],
+      "validation": "Tampered artifact/manifest rejection, trusted/untrusted signer and rotation tests; reproduce an ARM release and verify its SBOM/provenance.",
+      "description": "Sign release artifacts and publish SBOMs with device verification. Produce reproducible ARM release artifacts, dependency SBOMs, revision/toolchain metadata and authenticated provenance."
     }
   ]
 }

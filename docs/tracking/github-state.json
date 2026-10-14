@@ -7,7 +7,7 @@
     },
     "id": "PVT_kwHOENkcXc4Bm7my",
     "items": {
-      "totalCount": 28
+      "totalCount": 39
     },
     "number": 1,
     "owner": {
@@ -64,7 +64,7 @@
       "filter": "agent:Unassigned"
     }
   },
-  "dependency_count": 46,
+  "dependency_count": 71,
   "issues": {
     "SF-001": {
       "number": 1,
@@ -261,6 +261,83 @@
       "id": 5840152347,
       "node_id": "I_kwDOSXKBE88AAAABXBmnGw",
       "project_item_id": "PVTI_lAHOENkcXc4Bm7myzhAlBnE"
+    },
+    "SF-029": {
+      "number": 29,
+      "url": "https://github.com/tyler-suifleet/suifleet/issues/29",
+      "id": 5840891858,
+      "node_id": "I_kwDOSXKBE88AAAABXCTv0g",
+      "project_item_id": "PVTI_lAHOENkcXc4Bm7myzhAly2Q"
+    },
+    "SF-030": {
+      "number": 30,
+      "url": "https://github.com/tyler-suifleet/suifleet/issues/30",
+      "id": 5840893502,
+      "node_id": "I_kwDOSXKBE88AAAABXCT2Pg",
+      "project_item_id": "PVTI_lAHOENkcXc4Bm7myzhAly84"
+    },
+    "SF-039": {
+      "number": 31,
+      "url": "https://github.com/tyler-suifleet/suifleet/issues/31",
+      "id": 5840895389,
+      "node_id": "I_kwDOSXKBE88AAAABXCT9nQ",
+      "project_item_id": "PVTI_lAHOENkcXc4Bm7myzhAlzFE"
+    },
+    "SF-031": {
+      "number": 32,
+      "url": "https://github.com/tyler-suifleet/suifleet/issues/32",
+      "id": 5840897464,
+      "node_id": "I_kwDOSXKBE88AAAABXCUFuA",
+      "project_item_id": "PVTI_lAHOENkcXc4Bm7myzhAlzNM"
+    },
+    "SF-032": {
+      "number": 33,
+      "url": "https://github.com/tyler-suifleet/suifleet/issues/33",
+      "id": 5840900000,
+      "node_id": "I_kwDOSXKBE88AAAABXCUPoA",
+      "project_item_id": "PVTI_lAHOENkcXc4Bm7myzhAlzWk"
+    },
+    "SF-034": {
+      "number": 34,
+      "url": "https://github.com/tyler-suifleet/suifleet/issues/34",
+      "id": 5840901223,
+      "node_id": "I_kwDOSXKBE88AAAABXCUUZw",
+      "project_item_id": "PVTI_lAHOENkcXc4Bm7myzhAlzbc"
+    },
+    "SF-036": {
+      "number": 35,
+      "url": "https://github.com/tyler-suifleet/suifleet/issues/35",
+      "id": 5840902770,
+      "node_id": "I_kwDOSXKBE88AAAABXCUacg",
+      "project_item_id": "PVTI_lAHOENkcXc4Bm7myzhAlzhY"
+    },
+    "SF-037": {
+      "number": 36,
+      "url": "https://github.com/tyler-suifleet/suifleet/issues/36",
+      "id": 5840904032,
+      "node_id": "I_kwDOSXKBE88AAAABXCUfYA",
+      "project_item_id": "PVTI_lAHOENkcXc4Bm7myzhAlzn4"
+    },
+    "SF-033": {
+      "number": 37,
+      "url": "https://github.com/tyler-suifleet/suifleet/issues/37",
+      "id": 5840905316,
+      "node_id": "I_kwDOSXKBE88AAAABXCUkZA",
+      "project_item_id": "PVTI_lAHOENkcXc4Bm7myzhAlzs0"
+    },
+    "SF-035": {
+      "number": 38,
+      "url": "https://github.com/tyler-suifleet/suifleet/issues/38",
+      "id": 5840906990,
+      "node_id": "I_kwDOSXKBE88AAAABXCUq7g",
+      "project_item_id": "PVTI_lAHOENkcXc4Bm7myzhAlzyw"
+    },
+    "SF-038": {
+      "number": 39,
+      "url": "https://github.com/tyler-suifleet/suifleet/issues/39",
+      "id": 5840908337,
+      "node_id": "I_kwDOSXKBE88AAAABXCUwMQ",
+      "project_item_id": "PVTI_lAHOENkcXc4Bm7myzhAlz4A"
     }
   }
 }

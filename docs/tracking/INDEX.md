@@ -1,6 +1,6 @@
 # Published SuiFleet issue index
 
-Project: [SuiFleet — OTA and Fleet Management](https://github.com/users/tyler-suifleet/projects/1). Initial seed: 28 issues; stable SF keys are not GitHub issue numbers. Use live Project ownership/status to coordinate models.
+Project: [SuiFleet — OTA and Fleet Management](https://github.com/users/tyler-suifleet/projects/1). Expanded roadmap: 39 issues; stable SF keys are not GitHub issue numbers. Use live Project ownership/status to coordinate models.
 
 | Key | GitHub issue | Priority | Area | Dependencies |
 |---|---|---|---|---|
@@ -32,6 +32,17 @@ Project: [SuiFleet — OTA and Fleet Management](https://github.com/users/tyler-
 | SF-026 | [#26 Update the daemon safely with bootstrap handoff and fallback](https://github.com/tyler-suifleet/suifleet/issues/26) | P1 | edge | [SF-014](https://github.com/tyler-suifleet/suifleet/issues/19), [SF-016](https://github.com/tyler-suifleet/suifleet/issues/21), [SF-025](https://github.com/tyler-suifleet/suifleet/issues/16) |
 | SF-027 | [#27 Provide authenticated component IPC and developer SDK](https://github.com/tyler-suifleet/suifleet/issues/27) | P2 | compatibility | [SF-014](https://github.com/tyler-suifleet/suifleet/issues/19), [SF-015](https://github.com/tyler-suifleet/suifleet/issues/20), [SF-019](https://github.com/tyler-suifleet/suifleet/issues/22) |
 | SF-028 | [#28 Specify and validate broader Greengrass compatibility adapters](https://github.com/tyler-suifleet/suifleet/issues/28) | P2 | compatibility | [SF-027](https://github.com/tyler-suifleet/suifleet/issues/27) |
+| SF-029 | [#29 Build a bootable Yocto image for Raspberry Pi 3 B+ with the edge client](https://github.com/tyler-suifleet/suifleet/issues/29) | P1 | infra | [SF-025](https://github.com/tyler-suifleet/suifleet/issues/16) |
+| SF-030 | [#30 Create a harmless versioned test component for Raspberry Pi OTA](https://github.com/tyler-suifleet/suifleet/issues/30) | P1 | runtime | None |
+| SF-031 | [#32 Run wallet-to-testnet-to-Raspberry-Pi OTA acceptance tests](https://github.com/tyler-suifleet/suifleet/issues/32) | P0 | clients | [SF-002](https://github.com/tyler-suifleet/suifleet/issues/2), [SF-003](https://github.com/tyler-suifleet/suifleet/issues/6), [SF-004](https://github.com/tyler-suifleet/suifleet/issues/7), [SF-005](https://github.com/tyler-suifleet/suifleet/issues/8), [SF-006](https://github.com/tyler-suifleet/suifleet/issues/9), [SF-029](https://github.com/tyler-suifleet/suifleet/issues/29), [SF-030](https://github.com/tyler-suifleet/suifleet/issues/30) |
+| SF-032 | [#33 Implement local pubsub and MQTT bridge with durable offline delivery](https://github.com/tyler-suifleet/suifleet/issues/33) | P2 | compatibility | [SF-027](https://github.com/tyler-suifleet/suifleet/issues/27) |
+| SF-033 | [#37 Implement local device shadows and conflict-aware cloud synchronization](https://github.com/tyler-suifleet/suifleet/issues/37) | P2 | compatibility | [SF-027](https://github.com/tyler-suifleet/suifleet/issues/27), [SF-032](https://github.com/tyler-suifleet/suifleet/issues/33) |
+| SF-034 | [#34 Implement durable stream storage and export adapters](https://github.com/tyler-suifleet/suifleet/issues/34) | P2 | compatibility | [SF-027](https://github.com/tyler-suifleet/suifleet/issues/27) |
+| SF-035 | [#38 Authenticate and discover LAN client devices with certificate rotation](https://github.com/tyler-suifleet/suifleet/issues/38) | P2 | compatibility | [SF-021](https://github.com/tyler-suifleet/suifleet/issues/14), [SF-032](https://github.com/tyler-suifleet/suifleet/issues/33) |
+| SF-036 | [#35 Run OCI container components with pinned images and recovery](https://github.com/tyler-suifleet/suifleet/issues/35) | P2 | compatibility | [SF-009](https://github.com/tyler-suifleet/suifleet/issues/4), [SF-014](https://github.com/tyler-suifleet/suifleet/issues/19), [SF-022](https://github.com/tyler-suifleet/suifleet/issues/25) |
+| SF-037 | [#36 Translate AWS Greengrass recipes and validate compatibility semantics](https://github.com/tyler-suifleet/suifleet/issues/36) | P2 | compatibility | [SF-011](https://github.com/tyler-suifleet/suifleet/issues/12), [SF-012](https://github.com/tyler-suifleet/suifleet/issues/17), [SF-014](https://github.com/tyler-suifleet/suifleet/issues/19), [SF-015](https://github.com/tyler-suifleet/suifleet/issues/20), [SF-027](https://github.com/tyler-suifleet/suifleet/issues/27) |
+| SF-038 | [#39 Specify managed-component, Lambda and cloud-service adapter coverage](https://github.com/tyler-suifleet/suifleet/issues/39) | P2 | compatibility | [SF-028](https://github.com/tyler-suifleet/suifleet/issues/28) |
+| SF-039 | [#31 Sign release artifacts and publish SBOMs with device verification](https://github.com/tyler-suifleet/suifleet/issues/31) | P1 | infra | [SF-007](https://github.com/tyler-suifleet/suifleet/issues/3), [SF-009](https://github.com/tyler-suifleet/suifleet/issues/4) |
 
 Only Codex creates new agent tickets/issues unless the user explicitly authorizes another model. All models may work on explicitly assigned existing issues under the shared instructions.
 
