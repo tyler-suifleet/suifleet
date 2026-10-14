@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{debug, error, info, warn};
 
-use crate::config::SuiConfig;
+use crate::{config::SuiConfig, identity};
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -29,6 +29,123 @@ pub struct SuiClient {
 }
 
 impl SuiClient {
+    pub fn address(&self) -> String {
+        identity::address(&self.signing_key)
+    }
+
+    pub fn origin(&self) -> &str {
+        if self.config.original_package_id.is_empty() {
+            &self.config.package_id
+        } else {
+            &self.config.original_package_id
+        }
+    }
+
+    pub async fn rpc(&self, method: &str, params: Value) -> anyhow::Result<Value> {
+        let response = self
+            .http
+            .post(&self.config.rpc_url)
+            .json(&json!({"jsonrpc":"2.0", "id":1, "method":method, "params":params}))
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<Value>()
+            .await?;
+        anyhow::ensure!(
+            response.get("error").is_none(),
+            "{method}: {}",
+            response["error"]
+        );
+        response
+            .get("result")
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("{method}: missing result"))
+    }
+
+    pub async fn deployments(&self, cursor: &Option<Value>) -> anyhow::Result<Value> {
+        self.rpc("suix_queryEvents", json!([
+            {"MoveEventType":format!("{}::deployment_manager::DeploymentCreated", self.origin())},
+            cursor, 50, false
+        ])).await
+    }
+
+    pub async fn latest_cursor(&self) -> anyhow::Result<Option<Value>> {
+        let response = self.rpc("suix_queryEvents", json!([
+            {"MoveEventType":format!("{}::deployment_manager::DeploymentCreated", self.origin())},
+            null, 1, true
+        ])).await?;
+        let data = response["data"]
+            .as_array()
+            .ok_or_else(|| anyhow::anyhow!("invalid event page"))?;
+        Ok(data.first().map(|event| event["id"].clone()))
+    }
+
+    pub async fn optional_object(&self, id: &str) -> anyhow::Result<Option<Value>> {
+        let response = self
+            .rpc(
+                "sui_getObject",
+                json!([id, {"showContent":true,"showOwner":true}]),
+            )
+            .await?;
+        if let Some(error) = response.get("error") {
+            if matches!(error["code"].as_str(), Some("deleted" | "notExists")) {
+                return Ok(None);
+            }
+            anyhow::bail!("object {id}: {error}");
+        }
+        response
+            .get("data")
+            .cloned()
+            .map(Some)
+            .ok_or_else(|| anyhow::anyhow!("object {id} has no data"))
+    }
+
+    pub async fn object(&self, id: &str) -> anyhow::Result<Value> {
+        self.optional_object(id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("object {id} is deleted or absent"))
+    }
+
+    pub async fn validate_cap(&self, cap_id: &str, device_id: &str) -> anyhow::Result<()> {
+        let cap = self.object(cap_id).await?;
+        anyhow::ensure!(
+            cap["content"]["type"].as_str()
+                == Some(&format!("{}::device_cap::DeviceCap", self.origin())),
+            "wrong DeviceCap type"
+        );
+        anyhow::ensure!(
+            same_id(
+                cap["owner"]["AddressOwner"].as_str().unwrap_or(""),
+                &self.address()
+            ),
+            "DeviceCap is not owned by device key"
+        );
+        anyhow::ensure!(
+            same_id(
+                cap["content"]["fields"]["device_id"].as_str().unwrap_or(""),
+                device_id
+            ),
+            "DeviceCap belongs to another device"
+        );
+        let binding = self
+            .rpc(
+                "suix_getDynamicFieldObject",
+                json!([cap_id,
+            {"type":format!("{}::device_cap::DeviceAddressKey", self.origin()),"value":{}}]),
+            )
+            .await?;
+        anyhow::ensure!(
+            same_id(
+                binding["data"]["content"]["fields"]["value"]
+                    .as_str()
+                    .unwrap_or(""),
+                &self.address()
+            ),
+            "DeviceCap has no matching signer binding; reissue it with the upgraded contracts"
+        );
+        Ok(())
+    }
+
     pub fn load(config: SuiConfig, keypair_path: &Path) -> anyhow::Result<Self> {
         let raw = std::fs::read_to_string(keypair_path)?;
         let bytes = hex::decode(raw.trim())?;
@@ -38,7 +155,7 @@ impl SuiClient {
         Ok(Self {
             config,
             signing_key,
-            http: reqwest::Client::new(),
+            http: reqwest::Client::builder().timeout(Duration::from_secs(30)).build()?,
         })
     }
 
@@ -198,4 +315,15 @@ fn parse_deployment_event(text: &str, expected_type: &str) -> anyhow::Result<Dep
     let ev_type = result["type"].as_str().unwrap_or("");
     anyhow::ensure!(ev_type == expected_type, "wrong event type: {ev_type}");
     Ok(serde_json::from_value(result["parsedJson"].clone())?)
+}
+
+pub fn same_id(a: &str, b: &str) -> bool {
+    fn normalized(s: &str) -> Option<Vec<u8>> {
+        let s = s.strip_prefix("0x")?;
+        if s.is_empty() || s.len() > 64 {
+            return None;
+        }
+        hex::decode(format!("{:0>64}", s)).ok()
+    }
+    matches!((normalized(a), normalized(b)), (Some(a), Some(b)) if a == b)
 }

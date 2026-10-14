@@ -15,6 +15,8 @@ pub struct Config {
 pub struct SuiConfig {
     pub rpc_url: String,
     pub ws_url: String,
+    #[serde(default)]
+    pub original_package_id: String,
     pub package_id: String,
 }
 
