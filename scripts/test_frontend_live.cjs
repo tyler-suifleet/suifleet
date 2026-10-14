@@ -23,21 +23,26 @@ let stage = "startup";
     for (const name of ["Move.toml", "Move.lock"]) await fs.copyFile(path.resolve(__dirname, "../contracts", name), path.join(contracts, name));
     const compileEnv = { ...process.env, SUI_CONFIG_DIR: path.join(temporary, "wallet") };
     await fs.mkdir(compileEnv.SUI_CONFIG_DIR);
-    // Initialization can print a recovery phrase; capture it and never log it.
-    try { execFileSync("sui", ["client", "-y", "active-address"], { env: compileEnv, stdio: ["ignore", "pipe", "pipe"] }); }
-    catch { throw new Error("Could not initialize isolated compiler configuration"); }
-    const compiledText = execFileSync("sui", ["move", "build", "--path", contracts, "--dump-bytecode-as-base64"], { env: compileEnv, encoding: "utf8", maxBuffer: 20 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
+    const keystore = path.join(compileEnv.SUI_CONFIG_DIR, "sui.keystore");
+    await fs.writeFile(keystore, "[]\n");
+    await fs.writeFile(path.join(compileEnv.SUI_CONFIG_DIR, "client.yaml"), `keystore:\n  File: ${keystore}\nenvs:\n- alias: testnet\n  rpc: ${rpc}\n  ws: null\n  basic_auth: null\nactive_env: testnet\nactive_address: null\n`);
+    let compiledText;
+    try { compiledText = execFileSync("sui", ["move", "build", "--path", contracts, "--build-env", "testnet", "--no-tree-shaking", "--dump-bytecode-as-base64"], { env: compileEnv, encoding: "utf8", maxBuffer: 20 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] }); }
+    catch { throw new Error("Could not compile isolated contracts; CLI output suppressed"); }
     const compiled = JSON.parse(compiledText.slice(compiledText.indexOf("{")));
     async function execute(transaction, signer = operator) {
       const result = await client.signAndExecuteTransaction({ transaction, signer, include: { effects: true, objectTypes: true } });
       if (result.FailedTransaction) throw new Error(result.FailedTransaction.status.error?.message || "execution failed");
       assert.equal(result.Transaction.status.success, true);
-      // History queries see checkpointed/indexed state, not execution responses.
-      const digest = result.Transaction.digest;
+      await checkpointed(result.Transaction.digest);
+      return result.Transaction;
+    }
+    async function checkpointed(digest) {
+      // History queries and gas references see checkpointed/indexed state.
       await client.waitForTransaction({ digest });
       for (let attempt = 0; attempt < 100; attempt++) {
         const confirmed = await client.getTransaction({ digest });
-        if (confirmed.Transaction?.checkpoint != null) return result.Transaction;
+        if (confirmed.Transaction?.checkpoint != null || confirmed.FailedTransaction?.checkpoint != null) return;
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
       throw new Error("transaction did not become checkpointed for history reads");
@@ -98,9 +103,25 @@ let stage = "startup";
     const bytes = await forbidden.build(), signed = await deviceSigner.signTransaction(bytes);
     stage = "failed execution"; const failed = await client.executeTransaction({ transaction: bytes, signatures: [signed.signature], include: { effects: true } });
     assert.equal(failed.$kind, "FailedTransaction");
-    stage = "delete deployment"; await execute(sui.buildDeleteDeploymentTx(deployments[0].deploymentId));
+    await checkpointed(failed.FailedTransaction.digest);
+    // Contract creation accepts arbitrary IDs; reproduce the review's history regression.
+    const validDeployment = deployments[0].deploymentId;
+    stage = "foreign group";
+    await execute(sui.buildRegisterDeviceTx("foreign member", deviceSigner.toSuiAddress(), "aarch64", deviceSigner.toSuiAddress()), deviceSigner);
+    const foreignDevice = (await sui.fetchDevices(client, deviceSigner.toSuiAddress()))[0];
+    await execute(sui.buildCreateGroupTx("foreign lab", "owned by another creator"), deviceSigner);
+    const foreignGroup = (await sui.fetchGroups(client, deviceSigner.toSuiAddress()))[0];
+    await execute(sui.buildAddDeviceToGroupTx(foreignGroup.objectId, foreignDevice.objectId), deviceSigner);
+    stage = "arbitrary target history";
+    await execute(sui.buildCreateDeploymentTx("invalid-targets", "1.0.0", "fixture-recipe", "ab".repeat(32), "cd".repeat(32), [devices[0].objectId, foreignGroup.objectId]));
+    deployments = await sui.fetchDeploymentEvents(client, operator.toSuiAddress());
+    assert.equal(deployments.length, 2);
+    assert.deepEqual(deployments.find(deployment => deployment.componentName === "invalid-targets").resolvedDeviceIds, []);
+    assert.deepEqual(deployments.find(deployment => deployment.deploymentId === validDeployment).statuses, { [devices[0].objectId]: 1 });
+    stage = "delete deployment";
+    for (const deployment of deployments) await execute(sui.buildDeleteDeploymentTx(deployment.deploymentId));
     assert.deepEqual(await sui.fetchDeploymentEvents(client, operator.toSuiAddress()), []);
-    console.log("PASS: real gRPC publish/register/group/deployment/receipt/delete flows and failed execution effects");
+    console.log("PASS: real gRPC publish/register/group/deployment/receipt/delete, invalid and foreign target history, failed execution effects");
     console.log(JSON.stringify({ chain: manifest.chain_identifier, package: packageId, registry: registryId }));
   } finally { await fs.rm(temporary, { recursive: true, force: true }); }
 })().catch((error) => { console.error(`${stage}: ${error.message}`); process.exitCode = 1; });
