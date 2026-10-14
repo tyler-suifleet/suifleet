@@ -109,6 +109,23 @@ check:
 	$(MAKE) dapp-build
 	git diff --check
 
+# Signed releases (docs/RELEASES.md). These run on the host with Docker, not
+# in the dev container: the release builder is its own pinned image.
+.PHONY: release-image release-artifacts release-verify
+RELEASE_IMAGE ?= suifleet-release:local
+RELEASE_OUT ?= dist
+
+release-image:
+	docker build -f docker/release.Dockerfile --build-arg USER_UID=$(UID) --build-arg USER_GID=$(GID) -t $(RELEASE_IMAGE) docker/
+
+# Builds the committed HEAD twice and fails unless the bundles are identical.
+release-artifacts: release-image
+	python3 scripts/release.py build --out $(RELEASE_OUT) --image $(RELEASE_IMAGE) --reproduce
+
+# make release-verify BUNDLE=dist TRUST=release/trust.toml
+release-verify:
+	$(RUN) bash -c "cd suifleet-edge && cargo run --locked --quiet --bin suifleet -- --verify-release ../$(BUNDLE) ../$(TRUST)"
+
 tracking-plan:
 	python3 scripts/bootstrap_tracking.py
 
