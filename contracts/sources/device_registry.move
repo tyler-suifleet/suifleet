@@ -1,12 +1,18 @@
 module sui_edge::device_registry {
     use std::string::String;
     use sui::clock::Clock;
+    use sui::dynamic_field as df;
     use sui::event;
     use sui::vec_map::{Self, VecMap};
 
     // ── Constants ─────────────────────────────────────────────────────────────
 
     const SCHEMA_VERSION: u64 = 1;
+
+    // ── Errors ────────────────────────────────────────────────────────────────
+
+    const ENoIdentity: u64 = 0;
+    const ENotOperator: u64 = 1;
 
     // ── Objects ───────────────────────────────────────────────────────────────
 
@@ -32,6 +38,20 @@ module sui_edge::device_registry {
         schema_version: u64,
     }
 
+    /// Who may currently act for a device, kept on the shared registry so the
+    /// operator can change it without the device's (device-owned) cap.
+    /// Introduced by an upgrade: older package versions cannot read or write it.
+    public struct IdentityKey has copy, drop, store { device_id: ID }
+
+    public struct Identity has store, copy, drop {
+        /// The only address whose status reports are trusted for this device.
+        signer: address,
+        /// Address that last registered, activated or rotated the device; it
+        /// may revoke by ID, even after the Device object is gone.
+        operator: address,
+        revoked: bool,
+    }
+
     // ── Events ────────────────────────────────────────────────────────────────
 
     public struct DeviceRegistered has copy, drop {
@@ -44,6 +64,14 @@ module sui_edge::device_registry {
     public struct DeviceDeregistered has copy, drop {
         device_id: ID,
         owner: address,
+    }
+
+    /// Every identity change: registration, activation, rotation, revocation.
+    public struct DeviceIdentityChanged has copy, drop {
+        device_id: ID,
+        signer: address,
+        operator: address,
+        revoked: bool,
     }
 
     public struct RegistryCreated has copy, drop {
@@ -70,6 +98,12 @@ module sui_edge::device_registry {
     #[test_only]
     public fun init_for_testing(ctx: &mut TxContext) {
         init(ctx);
+    }
+
+    /// Replays a device registered before identities existed.
+    #[test_only]
+    public fun remove_identity_for_testing(registry: &mut DeviceRegistry, device_id: ID) {
+        let _: Identity = df::remove(&mut registry.id, IdentityKey { device_id });
     }
 
     // ── Public functions ──────────────────────────────────────────────────────
@@ -100,6 +134,7 @@ module sui_edge::device_registry {
         });
 
         registry.device_count = registry.device_count + 1;
+        set_identity(registry, object::id(&device), device_address, ctx.sender(), false);
         device
     }
 
@@ -109,6 +144,9 @@ module sui_edge::device_registry {
         ctx: &TxContext,
     ) {
         // Ownership is proven by passing Device by value — no admin check needed.
+        // The identity stays as a revoked tombstone: caps never outlive the device.
+        let device_id = object::id(&device);
+        set_identity(registry, device_id, device.device_address, ctx.sender(), true);
         let Device { id, name: _, device_address: _, arch: _, meta: _, registered_at: _, schema_version: _ } = device;
 
         event::emit(DeviceDeregistered {
@@ -132,9 +170,67 @@ module sui_edge::device_registry {
         device.meta.insert(key, value);
     }
 
+    // ── Identity lifecycle ────────────────────────────────────────────────────
+
+    /// Trust the device's current key: for devices registered before
+    /// identities existed, after an ownership transfer (the new owner becomes
+    /// the operator), or to reinstate a revoked device. Only the Device's
+    /// owner can pass it.
+    public fun activate_device(registry: &mut DeviceRegistry, device: &Device, ctx: &TxContext) {
+        set_identity(registry, object::id(device), device.device_address, ctx.sender(), false);
+    }
+
+    /// Move the device to a new key. Every cap bound to the old key stops
+    /// being accepted; issue a new cap for the new address afterwards.
+    public fun rotate_device_key(
+        registry: &mut DeviceRegistry,
+        device: &mut Device,
+        new_address: address,
+        ctx: &TxContext,
+    ) {
+        device.device_address = new_address;
+        set_identity(registry, object::id(device), new_address, ctx.sender(), false);
+    }
+
+    /// Stop trusting any report from the device. By ID, so the recorded
+    /// operator can still revoke after the Device was deleted or transferred.
+    public fun revoke_device(registry: &mut DeviceRegistry, device_id: ID, ctx: &TxContext) {
+        assert!(df::exists(&registry.id, IdentityKey { device_id }), ENoIdentity);
+        let identity: &Identity = df::borrow(&registry.id, IdentityKey { device_id });
+        assert!(identity.operator == ctx.sender(), ENotOperator);
+        let signer = identity.signer;
+        set_identity(registry, device_id, signer, ctx.sender(), true);
+    }
+
+    /// Whether `signer` may currently report for `device_id`. Devices without
+    /// an identity (registered before identities existed) are not trusted
+    /// until their owner calls `activate_device`.
+    public fun is_active_signer(registry: &DeviceRegistry, device_id: ID, signer: address): bool {
+        if (!df::exists(&registry.id, IdentityKey { device_id })) return false;
+        let identity: &Identity = df::borrow(&registry.id, IdentityKey { device_id });
+        !identity.revoked && identity.signer == signer
+    }
+
+    fun set_identity(registry: &mut DeviceRegistry, device_id: ID, signer: address, operator: address, revoked: bool) {
+        let identity = Identity { signer, operator, revoked };
+        if (df::exists(&registry.id, IdentityKey { device_id })) {
+            *df::borrow_mut(&mut registry.id, IdentityKey { device_id }) = identity;
+        } else {
+            df::add(&mut registry.id, IdentityKey { device_id }, identity);
+        };
+        event::emit(DeviceIdentityChanged { device_id, signer, operator, revoked });
+    }
+
     // ── Read helpers ──────────────────────────────────────────────────────────
 
     public fun device_id(device: &Device): ID { object::id(device) }
     public fun device_address(device: &Device): address { device.device_address }
     public fun device_count(registry: &DeviceRegistry): u64 { registry.device_count }
+    public fun identity(registry: &DeviceRegistry, device_id: ID): Option<Identity> {
+        if (!df::exists(&registry.id, IdentityKey { device_id })) return option::none();
+        option::some(*df::borrow(&registry.id, IdentityKey { device_id }))
+    }
+    public fun identity_signer(identity: &Identity): address { identity.signer }
+    public fun identity_operator(identity: &Identity): address { identity.operator }
+    public fun identity_revoked(identity: &Identity): bool { identity.revoked }
 }
