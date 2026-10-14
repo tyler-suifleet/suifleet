@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { useCurrentAccount, useSignAndExecuteTransaction } from "@mysten/dapp-kit";
+import { useCurrentAccount } from "@mysten/dapp-kit";
+import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import { useGroups } from "@/hooks/useGroups";
 import { useDevices } from "@/hooks/useDevices";
 import { uploadArtifact, uploadRecipe, type ComponentRecipe } from "@/lib/walrus";
@@ -21,7 +22,7 @@ export default function FirmwarePage() {
   const account = useCurrentAccount();
   const { data: groups = [] } = useGroups();
   const { data: devices = [] } = useDevices();
-  const { mutate: signAndExecute, isPending: txPending } = useSignAndExecuteTransaction();
+  const { mutate: signAndExecute, isPending: txPending } = useFleetTransaction();
 
   const [step, setStep] = useState<Step>("artifact");
   const [uploading, setUploading] = useState(false);
@@ -55,7 +56,7 @@ export default function FirmwarePage() {
   }, [componentName, version]);
 
   async function handleDeploy() {
-    if (!artifact || selectedGroups.size === 0) return;
+    if (!artifact || (selectedGroups.size === 0 && selectedDevices.size === 0)) return;
 
     const recipe: ComponentRecipe = {
       schemaVersion: "1.0",
@@ -72,9 +73,9 @@ export default function FirmwarePage() {
       configuration: {},
     };
 
-    let recipeBlobId: string;
+    let recipeUpload: Awaited<ReturnType<typeof uploadRecipe>>;
     try {
-      recipeBlobId = await uploadRecipe(recipe);
+      recipeUpload = await uploadRecipe(recipe);
     } catch (err) {
       alert(`Recipe upload failed: ${err instanceof Error ? err.message : String(err)}`);
       return;
@@ -82,7 +83,7 @@ export default function FirmwarePage() {
 
     const tx = buildCreateDeploymentTx(
       componentName, version,
-      recipeBlobId, artifact.sha256,
+      recipeUpload.blobId, artifact.sha256, recipeUpload.sha256,
       Array.from(selectedGroups),
       Array.from(selectedDevices),
     );
@@ -205,27 +206,27 @@ export default function FirmwarePage() {
         <div className="space-y-3 mt-1">
           <CmdField
             label="Install"
-            hint="Runs once after artifact is downloaded. Use {artifacts} for the artifact path."
+            hint="Optional one-shot install; requires recipe commands enabled on the device. Use {artifact} for the file and {artifacts} for its directory."
             value={installCmd}
             onChange={setInstallCmd}
-            placeholder="chmod +x {artifacts}/my-app"
+            placeholder="/usr/local/bin/install-update {artifact}"
             disabled={step !== "recipe"}
           />
           <CmdField
             label="Run"
-            hint="Starts the component process. Leave blank for one-shot artifacts."
+            hint="Managed processes are not supported yet. Leave blank for OTA updates."
             value={runCmd}
             onChange={setRunCmd}
             placeholder="{artifacts}/my-app --config /etc/my-app/config.json"
-            disabled={step !== "recipe"}
+            disabled={true}
           />
           <CmdField
             label="Shutdown"
-            hint="Gracefully stops the component. Leave blank if not applicable."
+            hint="Managed shutdown is not supported yet. Leave blank for OTA updates."
             value={shutdownCmd}
             onChange={setShutdownCmd}
-            placeholder="pkill my-app"
-            disabled={step !== "recipe"}
+            placeholder="Managed lifecycle coming later"
+            disabled={true}
           />
         </div>
         {step === "recipe" && (

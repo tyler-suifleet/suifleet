@@ -52,6 +52,7 @@ export function buildRegisterDeviceTx(
       tx.object("0x6"),
     ],
   });
+  tx.moveCall({ target: `${PACKAGE_ID}::device_cap::issue_cap`, arguments: [device] });
   tx.transferObjects([device], tx.pure.address(sender));
   return tx;
 }
@@ -129,17 +130,19 @@ export function buildCreateDeploymentTx(
   version: string,
   recipeBlobId: string,
   artifactSha256: string,
+  recipeSha256: string,
   targetGroupIds: string[],
   targetDeviceIds: string[] = [],
 ): Transaction {
   const tx = new Transaction();
   tx.moveCall({
-    target: `${PACKAGE_ID}::deployment_manager::create_deployment`,
+    target: `${PACKAGE_ID}::deployment_manager::create_deployment_verified`,
     arguments: [
       tx.pure.string(componentName),
       tx.pure.string(version),
       tx.pure.string(recipeBlobId),
       tx.pure.string(artifactSha256),
+      tx.pure.string(recipeSha256),
       tx.pure(bcs.vector(bcs.Address).serialize(targetGroupIds)),
       tx.pure(bcs.vector(bcs.Address).serialize(targetDeviceIds)),
       tx.object("0x6"),

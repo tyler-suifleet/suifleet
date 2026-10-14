@@ -54,10 +54,14 @@ export async function uploadArtifact(file: File): Promise<UploadResult> {
   return { blobId, sha256 };
 }
 
-export async function uploadRecipe(recipe: ComponentRecipe): Promise<string> {
-  return uploadBlob(JSON.stringify(recipe, null, 2), "application/json");
+export async function uploadRecipe(recipe: ComponentRecipe): Promise<UploadResult> {
+  const text = JSON.stringify(recipe, null, 2);
+  const bytes = new TextEncoder().encode(text);
+  const hash = await crypto.subtle.digest("SHA-256", bytes);
+  const sha256 = Array.from(new Uint8Array(hash)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return { blobId: await uploadBlob(text, "application/json"), sha256 };
 }
 
 export function blobDownloadUrl(blobId: string): string {
-  return `${WALRUS_AGGREGATOR}/v1/${blobId}`;
+  return `${WALRUS_AGGREGATOR}/v1/blobs/${blobId}`;
 }
