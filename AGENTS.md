@@ -32,6 +32,7 @@ Critical known gaps:
 | Path | Responsibility |
 |---|---|
 | `contracts/sources`, `contracts/tests` | Move devices/capabilities/groups/deployments and contract tests |
+| `interfaces`, `scripts/generate_interfaces.py` | Reviewed ABI/recipe schemas and generated TypeScript/Rust interfaces; see [shared interfaces](docs/SHARED_INTERFACES.md) |
 | `dapp/src` | Wallet UI, transaction builders, queries and Walrus uploads |
 | `suifleet-edge/src` | Identity, chain adapter, recipes, updater and durable journal |
 | `suifleet-edge/meta-suifleet` | Yocto recipe and systemd service |
@@ -89,7 +90,7 @@ Do not replace tests with type casts, ignored failures or mocked success. A retu
 ## Keeping clients and contracts synchronized
 
 - Maintain one versioned deployment manifest per network with chain identity, call package ID, per-type origins, shared object IDs, protocol/schema versions and supported client ranges. This manifest is planned, not currently implemented.
-- Generate or centrally define Move calls/event/recipe schemas and test both clients against actual compiled interfaces.
+- Use `make generate-interfaces` and `make check-interfaces` for the reviewed calls, ordered event/object/key layouts, status/version metadata and recipe schema in `interfaces/`. Do not edit generated client files or capture an unexplained ABI difference to silence CI. Follow [the shared-interface compatibility rules](docs/SHARED_INTERFACES.md).
 - Preserve existing public function signatures, layouts and abilities for a compatible upgrade; use additive APIs and explicit migrations where needed.
 - Do not assume an initializer reruns, objects migrate automatically, or an old package is disabled.
 - Test mixed versions, missing fields, stale IDs, revoked/legacy caps, ownership/membership changes and attempts through old entry points.
