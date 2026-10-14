@@ -121,6 +121,8 @@ test-manifest:
 	$(RUN) node scripts/test_deployment_manifest.cjs
 	$(RUN) node scripts/test_wallet_manifest.cjs
 	$(RUN) node scripts/test_deployment_receipts.cjs
+	$(RUN) node scripts/test_frontend_queries.cjs
+	$(RUN) node scripts/test_target_groups.cjs
 
 test-manifest-live:
 	$(RUN) python3 scripts/test_manifest_upgrades.py

@@ -1,6 +1,6 @@
 # SuiFleet operations and verification
 
-This runbook describes current local operations and the intended release gates. It does not establish production readiness. Current release blockers include the frontend's retired JSON-RPC integration (the daemon uses gRPC, see below), incorrect origins for newly introduced key types, and old-package entry points that can bypass new checks on shared authoritative state.
+This runbook describes current local operations and the intended release gates. It does not establish production readiness. Current release blockers include the publication resolver's retired JSON-RPC integration (SF-006; the daemon and frontend use gRPC), incorrect origins for newly introduced key types, and old-package entry points that can bypass new checks on shared authoritative state.
 
 ## Environment
 
