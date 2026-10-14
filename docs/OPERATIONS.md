@@ -22,7 +22,9 @@ make dapp-install
 make check
 ```
 
-`make check` runs Move tests, Rust tests, the actual-daemon OTA simulator, frontend typecheck and static production build. It never publishes contracts or flashes hardware.
+`make check` runs Move tests, the contract-interface drift check, Rust tests, the actual-daemon OTA simulator, frontend typecheck and static production build. It never publishes contracts or flashes hardware.
+
+`scripts/check_contract_interfaces.py` (`make check-interfaces`) compiles a summary of `contracts` and fails when the dApp, daemon or deployment manifests reference a Move module, function or type that no longer exists, is not transaction-callable, or (for dApp `moveCall`s) takes a different number of arguments. It checks references after a package placeholder (`${PACKAGE_ID}::module::name`, `{}::module::Name`) and address-free type names such as `"device_cap::DeviceAddressKey"` used for per-type origins. An unknown project module is an error; address-free names are skipped only when they belong to a Sui/Move framework module. It also fails if it finds no references at all. `make test-interfaces` runs its offline regression tests. It does not check argument types, event fields or recipe schemas; that is SF-005.
 
 Inside `make shell`, the equivalent commands are:
 
@@ -50,6 +52,30 @@ The simulator is stdlib Python. It uses temporary keys, local HTTP servers and a
 The historical baseline has 13 passing Move tests and 10 Rust tests; counts can legitimately change. Verify results for the actual commit rather than asserting those numbers as a release requirement. Simulator mocks are not proof of network transaction building, wallet compatibility, package upgrades or post-reboot health.
 
 If Rust files change, run `cargo fmt --manifest-path suifleet-edge/Cargo.toml` with rustfmt installed, then rerun relevant tests. The minimal container toolchain may need `rustup component add rustfmt` first. Do not silently upgrade the toolchain to make failures disappear.
+
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every pull request and push to `main`. It builds the dev image from the pinned Dockerfile and runs `make ci` inside it: frozen pnpm install, Move tests, drift-gate regression tests, interface drift check, Rust tests, the OTA simulator, typecheck, static build and `git diff --check`. Each step's output and `toolchain-versions.txt` are uploaded as the `ci-logs` artifact (14 days). The job has a read-only token and no secrets; it never publishes, spends gas or touches hardware.
+
+All toolchain inputs are Dockerfile build arguments: base image digest, Sui release and SHA-256, Rust, Node package version and pnpm. Bump them deliberately, in their own commit, together with lockfile and compatibility-test updates; CI then runs against the new image. Workflow actions are pinned to commit SHAs.
+
+Regressions these gates have been shown to catch: renamed/re-shaped Move functions and types used by clients (interface check), treating failed execution effects as success (Rust test and simulator), and reapplying journaled deployments after a crash before the cursor is saved (simulator).
+
+### Live gates
+
+`.github/workflows/live-gates.yml` is the only path for live checks: `package-upgrade`, `wallet` or `hardware`. It runs only from a manual dispatch that repeats the gate name. Each gate deploys through the GitHub environment `live-<gate>`, which holds that gate's secrets and must require a human reviewer. A preflight job refuses to run if the environment is missing or has no required reviewer. The hardware gate runs on a self-hosted runner labelled `raspberrypi3bplus`. The suites themselves are `make live-gate-<gate>` targets supplied by SF-010 and SF-031; until then a dispatched gate fails with that message.
+
+Configure each environment once, as a repository admin:
+
+```bash
+for gate in package-upgrade wallet hardware; do
+  gh api -X PUT repos/tyler-suifleet/suifleet/environments/live-$gate --input - <<JSON
+{"prevent_self_review": true, "reviewers": [{"type": "User", "id": <human-reviewer-user-id>}]}
+JSON
+done
+```
+
+Model agents share the `tyler-suifleet` GitHub account, so the reviewer must be a separate human account with repository access, and `prevent_self_review` must stay enabled.
 
 ## Tests required beyond the local suite
 

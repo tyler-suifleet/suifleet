@@ -36,3 +36,6 @@ dapp/.env.local
 __pycache__/
 dapp/node_modules
 .suifleet-releases/
+# CI step logs and dependency caches (make ci, .github/workflows/ci.yml)
+ci-logs/
+.ci-cache/
