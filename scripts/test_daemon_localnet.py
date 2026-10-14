@@ -101,7 +101,12 @@ def run(rpc_url, faucet_url):
             client("switch", "--env", "daemon-test", json_output=False)
             operator = client("active-address", json_output=False).strip().split()[-1]
             client("faucet", "--url", faucet_url, json_output=False)
-            wait_for(lambda: client("gas"), "local faucet did not supply gas")
+            def funded():
+                gas = client("gas")  # A coin list, or {"gasCoins", "addressMistBalance"}.
+                if isinstance(gas, dict):
+                    return bool(gas.get("gasCoins")) or int(gas.get("addressMistBalance") or 0) > 0
+                return bool(gas)
+            wait_for(funded, "local faucet did not supply gas")
             chain_id = dm.rpc(rpc_url, "sui_getChainIdentifier", [])
 
             def transaction(*ptb):
