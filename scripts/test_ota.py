@@ -274,6 +274,9 @@ def run(binary):
                 process = start()
                 wait_for(lambda: state().get("initialized"), "enrollment did not establish cursor", process)
                 assert count() == 0
+                # Enrollment stores a checkpoint; the first scan rewrites the same
+                # position as a resume cursor. Compare against the latter.
+                wait_for(lambda: "after" in state().get("cursor", {}), "first event scan did not complete", process)
                 baseline = state()["cursor"]
                 # A chain reset after enrollment must stop all downloads and cursor changes.
                 sim.chain = "deadbeef"
@@ -285,8 +288,10 @@ def run(binary):
                 time.sleep(2.2)
                 assert count() == 0 and not sim.downloads
                 assert state()["cursor"] == baseline
-                sim.chain = manifest["chain_identifier"]
+                # Stale the package before restoring the chain, so no poll sees a
+                # valid chain with the current package in between.
                 sim.latest_package = object_id("0x4")
+                sim.chain = manifest["chain_identifier"]
                 time.sleep(2.2)
                 assert count() == 0 and not sim.downloads
                 assert state()["cursor"] == baseline
