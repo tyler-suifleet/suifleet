@@ -1,0 +1,240 @@
+{
+  "schema_version": 1,
+  "repository": "tyler-suifleet/suifleet",
+  "project_title": "SuiFleet \u2014 OTA and Fleet Management",
+  "issue_creation_policy": "Only Codex may create new tickets/issues unless the user explicitly authorizes another model.",
+  "issues": [
+    {
+      "key": "SF-001",
+      "title": "Prevent old Sui package entry points from bypassing upgraded authority",
+      "priority": "P0",
+      "area": "security",
+      "phase": "baseline",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "contracts/sources/deployment_manager.move",
+        "contracts/sources/device_cap.move"
+      ],
+      "evidence": "Old package versions remain callable and can still write shared state through unchecked old functions.",
+      "acceptance": [
+        "Define authoritative new state that old entry points cannot modify; preserve required migration/history.",
+        "Deploy a prior package, create objects, upgrade and demonstrate attempted old-package report/authority bypass is rejected or cannot affect trusted receipts.",
+        "Document upgrade, mixed-client support and recovery."
+      ],
+      "validation": "Move tests plus actual old/new package and state migration acceptance tests."
+    },
+    {
+      "key": "SF-002",
+      "title": "Introduce a network deployment manifest with per-type origins",
+      "priority": "P0",
+      "area": "clients",
+      "phase": "baseline",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "dapp/src/lib/constants.ts",
+        "suifleet-edge/src/sui_client.rs",
+        "scripts/"
+      ],
+      "evidence": "All dynamic-field types use the initial package ID; newly introduced types actually originate in the upgrade package.",
+      "acceptance": [
+        "Record verified chain identity, latest call ID, per-type origins, shared IDs, protocol version and compatible client ranges.",
+        "Generate frontend/device configuration from one manifest and reject stale network/ID combinations.",
+        "Cover fresh publish, multiple upgrades and introduction of RecipeDigestKey/DeviceAddressKey in later packages."
+      ],
+      "validation": "Unit/generated-fixture tests and a live multi-upgrade origin resolution test."
+    },
+    {
+      "key": "SF-003",
+      "title": "Migrate the frontend SDK and wallet integration to supported Sui APIs",
+      "priority": "P0",
+      "area": "frontend",
+      "phase": "baseline",
+      "kind": "type:infrastructure",
+      "depends_on": [
+        "SF-002"
+      ],
+      "paths": [
+        "dapp/package.json",
+        "dapp/src/app/layout.tsx",
+        "dapp/src/hooks",
+        "dapp/src/lib/sui.ts"
+      ],
+      "evidence": "Legacy dApp Kit and Sui SDK are temporarily pinned together; the app still depends on retiring JSON-RPC.",
+      "acceptance": [
+        "Migrate SDK, wallet providers/hooks and transaction execution together to supported gRPC/GraphQL clients.",
+        "Retain inventory/group/deployment queries, pagination, account/network handling and execution-effect checks.",
+        "Remove legacy API calls and document the tested compatible dependency set."
+      ],
+      "validation": "Frozen install, typecheck/build and actual wallet connect/sign/reject/chain-mismatch acceptance."
+    },
+    {
+      "key": "SF-004",
+      "title": "Migrate the daemon reader, transaction builder and executor to supported Sui APIs",
+      "priority": "P0",
+      "area": "edge",
+      "phase": "baseline",
+      "kind": "type:infrastructure",
+      "depends_on": [
+        "SF-002"
+      ],
+      "paths": [
+        "suifleet-edge/src/sui_client.rs",
+        "suifleet-edge/src/main.rs",
+        "suifleet-edge/src/config.rs"
+      ],
+      "evidence": "Daemon queries and unsafe_moveCall execution still require deprecated JSON-RPC.",
+      "acceptance": [
+        "Use supported transport and transaction building; verify chain identity and per-type origins.",
+        "Preserve durable cursor recovery, filtering, independent signatures and status effects checks.",
+        "Define historical/archival retention and handle disconnect/cursor migration without replaying applied work."
+      ],
+      "validation": "Rust tests, actual-daemon simulator adapted to new transport, and real chain success/failure/offline recovery."
+    },
+    {
+      "key": "SF-005",
+      "title": "Generate and verify shared contract, event and recipe interfaces",
+      "priority": "P0",
+      "area": "clients",
+      "phase": "baseline",
+      "kind": "type:infrastructure",
+      "depends_on": [
+        "SF-002"
+      ],
+      "paths": [
+        "contracts/",
+        "dapp/src/lib/sui.ts",
+        "dapp/src/lib/walrus.ts",
+        "suifleet-edge/src/recipe.rs",
+        "suifleet-edge/src/sui_client.rs"
+      ],
+      "evidence": "Contract signatures/event fields previously changed independently of clients/tests.",
+      "acceptance": [
+        "Provide a generated or centrally defined interface for calls, events, keys, statuses and recipes.",
+        "Compare both clients to actual compiled Move interfaces and fail CI on drift.",
+        "Declare compatibility/version rules and reject unknown protocols before apply."
+      ],
+      "validation": "Positive and negative schema/interface compatibility tests using compiled contract artifacts."
+    },
+    {
+      "key": "SF-006",
+      "title": "Harden publishing and configuration generation",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "baseline",
+      "kind": "type:bug",
+      "depends_on": [
+        "SF-002"
+      ],
+      "paths": [
+        "scripts/redeploy.sh",
+        "contracts/Published.toml",
+        "contracts/Move.toml"
+      ],
+      "evidence": "Unscoped TOML greps can mix environments; the publish pipeline suppresses errors and only updates frontend config.",
+      "acceptance": [
+        "Parse metadata by environment and verify actual chain identity/account/UpgradeCap.",
+        "Stop on failed publish/upgrade/effects/metadata parsing and preserve prior config on failure.",
+        "Record release IDs/type origins and generate both client configs atomically."
+      ],
+      "validation": "Offline parser/failure tests, dry run and explicit testnet publish/upgrade acceptance."
+    },
+    {
+      "key": "SF-007",
+      "title": "Add reproducible CI and release compatibility gates",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "baseline",
+      "kind": "type:infrastructure",
+      "depends_on": [],
+      "paths": [
+        ".github/workflows/",
+        "Dockerfile",
+        "Makefile",
+        "dapp/pnpm-lock.yaml",
+        "suifleet-edge/Cargo.lock"
+      ],
+      "evidence": "The repository has no automated checks for the repaired cross-layer flow or upgrade compatibility.",
+      "acceptance": [
+        "Run locked Move/Rust/frontend checks and the real-daemon simulator on pull requests.",
+        "Record/pin tested toolchain/dependency versions and retain failure diagnostics without secrets.",
+        "Provide separately authorized live upgrade/wallet/hardware gates; do not publish in ordinary PR CI."
+      ],
+      "validation": "Successful CI plus deliberately failing contract drift, execution effect and recovery regressions."
+    },
+    {
+      "key": "SF-008",
+      "title": "Implement revocable device identity and capability lifecycle",
+      "priority": "P0",
+      "area": "security",
+      "phase": "baseline",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-001",
+        "SF-002"
+      ],
+      "paths": [
+        "contracts/sources/device_registry.move",
+        "contracts/sources/device_cap.move",
+        "suifleet-edge/src/sui_client.rs"
+      ],
+      "evidence": "Signer binding exists but there is no complete revocation/rotation/deregistration enforcement.",
+      "acceptance": [
+        "Enforce active identity and revocation at authoritative on-chain reporting/update boundaries.",
+        "Define key rotation, reissuance, ownership transfer and legacy-cap migration.",
+        "A revoked or deregistered device cannot submit trusted receipts through old or new packages."
+      ],
+      "validation": "Contract adversarial tests, mixed-version upgrade tests and live rotation/revocation acceptance."
+    },
+    {
+      "key": "SF-009",
+      "title": "Constrain updater and component execution privileges",
+      "priority": "P0",
+      "area": "security",
+      "phase": "baseline",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "suifleet-edge/src/apply.rs",
+        "suifleet-edge/meta-suifleet/recipes-edge/suifleet/files/suifleet.service"
+      ],
+      "evidence": "Recipe commands are opt-in and bounded, but execution lacks per-component privilege/resource isolation.",
+      "acceptance": [
+        "Define least-privilege users, filesystem/resource boundaries and required firmware-only privileged operations.",
+        "Preserve authenticated recipes and process-tree cleanup on cancellation/timeout.",
+        "Document and test privilege failures without silently reporting Applied."
+      ],
+      "validation": "Negative privilege/timeout tests and service/image validation."
+    },
+    {
+      "key": "SF-010",
+      "title": "Establish live wallet-to-device and package-upgrade acceptance suite",
+      "priority": "P0",
+      "area": "clients",
+      "phase": "baseline",
+      "kind": "type:infrastructure",
+      "depends_on": [
+        "SF-001",
+        "SF-003",
+        "SF-004",
+        "SF-005",
+        "SF-006",
+        "SF-007",
+        "SF-008"
+      ],
+      "paths": [
+        "contracts/tests/",
+        "scripts/",
+        "docs/VALIDATION.md"
+      ],
+      "evidence": "Local tests do not prove supported public-network operation, per-type origins or security against old entry points.",
+      "acceptance": [
+        "Exercise fresh registration, cap issuance, recipe upload, direct/group deployment and real execution effects.",
+        "Cover existing objects, later-introduced types, legacy caps and old-package attacks across upgrades.",
+        "Record environment/tool versions, artifacts and recovery; never include keys in logs."
+      ],
+      "validation": "Actual supported testnet/browser/device runs with positive and negative results."
+    }
+  ]
+}
