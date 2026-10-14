@@ -7,6 +7,8 @@ pub struct Config {
     pub device: DeviceConfig,
     pub walrus: WalrusConfig,
     pub apply: ApplyConfig,
+    #[serde(default)]
+    pub runtime: RuntimeConfig,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -53,4 +55,21 @@ impl Config {
 
 fn default_timeout() -> u64 {
     600
+}
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(default)]
+pub struct RuntimeConfig {
+    pub state_dir: PathBuf,
+    pub poll_seconds: u64,
+    pub replay_history: bool,
+}
+impl Default for RuntimeConfig {
+    fn default() -> Self {
+        Self {
+            state_dir: "/var/lib/suifleet".into(),
+            poll_seconds: 10,
+            replay_history: false,
+        }
+    }
 }

@@ -23,6 +23,7 @@ hex = "0.4"
 # SHA-256 verification + SHA3-256 for SUI address derivation
 sha2 = "0.10"
 blake2 = "0.10"
+fs2 = "0.4"
 libc = "0.2"
 shell-words = "1"
 digest = "0.10"
