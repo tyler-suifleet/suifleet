@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const Module = require("node:module");
 const ts = require("../dapp/node_modules/typescript");
+const sdk = Module.createRequire(process.env.PROTOCOL_SDK_PACKAGE_JSON || path.resolve(__dirname, "../dapp/package.json"));
 const cache = new Map();
 function load(file) {
   const filename = path.resolve(__dirname, "..", file);
@@ -14,6 +15,7 @@ function load(file) {
   cache.set(filename, loaded);
   const original = loaded.require.bind(loaded);
   loaded.require = (name) => {
+    if (name.startsWith("@mysten/sui/")) return sdk(name);
     const candidate = path.resolve(path.dirname(filename), name + ".ts");
     return name.startsWith(".") && fs.existsSync(candidate)
       ? load(path.relative(path.resolve(__dirname, ".."), candidate)) : original(name);
@@ -34,7 +36,7 @@ assert.equal(Buffer.from(protocol.deployment_manager_DeploymentCreatedBcs.serial
 // Supply an exact Uint8Array, not a Node pooled Buffer with unrelated backing bytes.
 assert.deepEqual(protocol.deployment_manager_DeploymentCreatedBcs.parse(Uint8Array.from(Buffer.from(vector.bcs_hex, "hex"))), vector.json);
 assert.equal(Buffer.from(protocol.deployment_manager_ReceiptsKeyBcs.serialize({dummy_field:false}).toBytes()).toString("hex"), "00");
-const { Transaction } = require("../dapp/node_modules/@mysten/sui/transactions");
+const { Transaction } = sdk("@mysten/sui/transactions");
 const tx = new Transaction();
 protocol.calls.deployment_manager_create_deployment_verified(tx, "0x1", "app", "v1", "recipe", "ab".repeat(32), "cd".repeat(32), ["0x2"], ["0x3"], "0x6");
 const data = tx.getData();
@@ -46,5 +48,9 @@ const pure = data.inputs.filter(i => i.$kind === "Pure").map(i => Buffer.from(i.
 const strings = ["app", "v1", "recipe", "ab".repeat(32), "cd".repeat(32)].map(value => Buffer.concat([Buffer.from([value.length]), Buffer.from(value)]).toString("hex"));
 assert.deepEqual(pure, [...strings, "01" + "2".padStart(64, "0"), "01" + "3".padStart(64, "0")]);
 assert.throws(() => protocol.calls.deployment_manager_report_status(new Transaction(), "0x1", "0x2", "0x3", 256));
+const registration = new Transaction();
+const [device] = protocol.calls.device_registry_register_device(registration, "0x1", "0x2", "test", "0x3", "aarch64", "0x6");
+protocol.calls.device_cap_issue_cap(registration, "0x1", device);
+assert.deepEqual(registration.getData().commands[1].MoveCall.arguments[0].NestedResult, [0, 0]);
 console.log(`PASS: ${cases.length} shared recipe cases, independent BCS event/key vector and SDK call encoder`);
 module.exports = { load };
