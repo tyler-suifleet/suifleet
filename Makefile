@@ -55,7 +55,7 @@ test-ota:
 dapp-typecheck:
 	$(RUN) bash -c "cd dapp && pnpm typecheck"
 
-.PHONY: check
+.PHONY: check tracking-plan test-tracking
 
 # Sequential recipe: cross-layer checks must not race over shared build artifacts.
 check:
@@ -65,3 +65,9 @@ check:
 	$(MAKE) dapp-typecheck
 	$(MAKE) dapp-build
 	git diff --check
+
+tracking-plan:
+	python3 scripts/bootstrap_tracking.py
+
+test-tracking:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_tracking.py'
