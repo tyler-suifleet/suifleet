@@ -64,8 +64,9 @@ pub struct EventPage {
 /// Where the next ListEvents call starts, as stored in the journal.
 #[derive(Debug, PartialEq)]
 enum Cursor {
-    /// Opaque gRPC watermark: resume strictly after it.
-    After(Vec<u8>),
+    /// Opaque gRPC watermark: resume strictly after it. The checkpoint it is
+    /// in (when the node reports one) lets pruned history be detected.
+    After(Vec<u8>, Option<u64>),
     /// Start of a checkpoint range (inclusive): enrollment baseline or a
     /// migrated JSON-RPC cursor. Events already journaled are deduplicated.
     Checkpoint(u64),
@@ -80,7 +81,8 @@ impl Cursor {
             return Ok(Self::Genesis);
         };
         if let Some(after) = value.get("after").and_then(Value::as_str) {
-            return Ok(Self::After(STANDARD.decode(after)?));
+            let checkpoint = value.get("checkpoint").and_then(Value::as_u64);
+            return Ok(Self::After(STANDARD.decode(after)?, checkpoint));
         }
         if let Some(checkpoint) = value.get("checkpoint").and_then(Value::as_u64) {
             return Ok(Self::Checkpoint(checkpoint));
@@ -92,8 +94,30 @@ impl Cursor {
     }
 }
 
-fn after(cursor: &[u8]) -> Value {
-    json!({ "after": STANDARD.encode(cursor) })
+fn after(watermark: &proto::Watermark) -> anyhow::Result<Value> {
+    let cursor = watermark
+        .cursor
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("event stream frame without a resume cursor"))?;
+    let mut value = json!({ "after": STANDARD.encode(cursor) });
+    if let Some(checkpoint) = watermark.checkpoint {
+        value["checkpoint"] = json!(checkpoint);
+    }
+    Ok(value)
+}
+
+/// Resuming from `position` needs the node to still hold that checkpoint's
+/// events. Pruned history is an operator decision (an archival node, or a
+/// deliberate re-enrollment), never something to skip silently.
+fn ensure_retained(position: Option<u64>, lowest: Option<u64>) -> anyhow::Result<()> {
+    if let (Some(position), Some(lowest)) = (position, lowest) {
+        anyhow::ensure!(
+            position >= lowest,
+            "event history before checkpoint {lowest} is pruned on this node, but this device resumes \
+             at checkpoint {position}; point rpc_url at a node that retains it (nothing is skipped)"
+        );
+    }
+    Ok(())
 }
 
 #[derive(Clone)]
@@ -361,13 +385,32 @@ impl SuiClient {
         request.filter = Some(filter);
         let mut options = proto::QueryOptions::default();
         options.limit = Some(PAGE_SIZE);
-        match Cursor::parse(cursor)? {
-            Cursor::After(bytes) => options.after = Some(bytes.into()),
-            Cursor::Checkpoint(checkpoint) => request.start_checkpoint = Some(checkpoint),
-            Cursor::Legacy(digest) => {
-                request.start_checkpoint = Some(self.transaction_checkpoint(&digest).await?)
+        let position = match Cursor::parse(cursor)? {
+            Cursor::After(bytes, checkpoint) => {
+                options.after = Some(bytes.into());
+                checkpoint
             }
-            Cursor::Genesis => {}
+            Cursor::Checkpoint(checkpoint) => {
+                request.start_checkpoint = Some(checkpoint);
+                Some(checkpoint)
+            }
+            Cursor::Legacy(digest) => {
+                let checkpoint = self.transaction_checkpoint(&digest).await?;
+                request.start_checkpoint = Some(checkpoint);
+                Some(checkpoint)
+            }
+            Cursor::Genesis => Some(0),
+        };
+        if position.is_some() {
+            let info = self
+                .rpc
+                .clone()
+                .ledger_client()
+                .get_service_info(proto::GetServiceInfoRequest::default())
+                .await
+                .map_err(status)?
+                .into_inner();
+            ensure_retained(position, info.lowest_available_checkpoint)?;
         }
         request.options = Some(options);
         let mut stream = self
@@ -384,11 +427,12 @@ impl SuiClient {
         let mut has_more = false;
         while let Some(frame) = stream.next().await {
             let frame = frame.map_err(status)?;
-            let watermark = frame
-                .watermark
-                .as_ref()
-                .and_then(|w| w.cursor.as_ref())
-                .ok_or_else(|| anyhow::anyhow!("event stream frame without a resume cursor"))?;
+            let watermark = after(
+                frame
+                    .watermark
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("event stream frame without a watermark"))?,
+            )?;
             if let Some(event) = &frame.event {
                 anyhow::ensure!(
                     same_type(event.event_type.as_deref().unwrap_or(""), &expected),
@@ -397,7 +441,7 @@ impl SuiClient {
                 let fields = event.json.as_deref().map(to_json).unwrap_or(Value::Null);
                 let parsed: DeploymentCreatedEvent = serde_json::from_value(fields)
                     .map_err(|e| anyhow::anyhow!("undecodable DeploymentCreated event: {e}"))?;
-                events.push((parsed, after(watermark)));
+                events.push((parsed, watermark.clone()));
             }
             if let Some(reason) = frame.end.as_ref().and_then(|e| e.reason) {
                 // Item or scan limits mean more may follow; ledger tip or end
@@ -406,7 +450,7 @@ impl SuiClient {
                     proto::QueryEndReason::try_from(reason),
                     Ok(proto::QueryEndReason::ItemLimit | proto::QueryEndReason::ScanLimit)
                 );
-                end = Some(after(watermark));
+                end = Some(watermark);
                 break;
             }
         }
@@ -761,15 +805,34 @@ mod tests {
             Cursor::parse(&Some(json!({"checkpoint": 7}))).unwrap(),
             Cursor::Checkpoint(7)
         );
+        let mut watermark = proto::Watermark::default();
+        watermark.cursor = Some(vec![1, 2, 3].into());
         assert_eq!(
-            Cursor::parse(&Some(after(&[1, 2, 3]))).unwrap(),
-            Cursor::After(vec![1, 2, 3])
+            Cursor::parse(&Some(after(&watermark).unwrap())).unwrap(),
+            Cursor::After(vec![1, 2, 3], None)
         );
+        watermark.checkpoint = Some(9);
+        assert_eq!(
+            Cursor::parse(&Some(after(&watermark).unwrap())).unwrap(),
+            Cursor::After(vec![1, 2, 3], Some(9))
+        );
+        assert!(after(&proto::Watermark::default()).is_err());
         assert_eq!(
             Cursor::parse(&Some(json!({"txDigest": "D1", "eventSeq": "0"}))).unwrap(),
             Cursor::Legacy("D1".into())
         );
         assert!(Cursor::parse(&Some(json!({"unknown": 1}))).is_err());
+    }
+
+    #[test]
+    fn pruned_history_stops_instead_of_skipping() {
+        ensure_retained(Some(100), Some(100)).unwrap();
+        ensure_retained(Some(100), None).unwrap();
+        ensure_retained(None, Some(100)).unwrap();
+        let error = ensure_retained(Some(99), Some(100)).unwrap_err().to_string();
+        assert!(error.contains("pruned") && error.contains("nothing is skipped"), "{error}");
+        // From genesis on a pruned node is pruned too.
+        assert!(ensure_retained(Some(0), Some(1)).is_err());
     }
 
     fn status_call() -> (Transaction, Call, Address, Address) {
