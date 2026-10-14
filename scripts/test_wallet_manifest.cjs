@@ -10,7 +10,14 @@ function load(relative, dependencies = {}) {
   const filename=path.resolve(__dirname,relative);
   const loaded=new Module(filename,module); loaded.filename=filename; loaded.paths=Module._nodeModulePaths(path.dirname(filename));
   const original=loaded.require.bind(loaded);
-  loaded.require=(name) => Object.hasOwn(dependencies,name) ? dependencies[name] : original(name);
+  loaded.require=(name) => {
+    if (Object.hasOwn(dependencies,name)) return dependencies[name];
+    if (name.startsWith(".")) {
+      const candidate = path.resolve(path.dirname(filename), name + ".ts");
+      if (fs.existsSync(candidate)) return load(path.relative(__dirname, candidate));
+    }
+    return original(name);
+  };
   loaded._compile(ts.transpileModule(fs.readFileSync(filename,"utf8"), {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020,esModuleInterop:true}}).outputText,filename);
   return loaded.exports;
 }

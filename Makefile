@@ -65,11 +65,21 @@ dapp-typecheck:
 	$(MAKE) test-manifest
 	$(RUN) bash -c "cd dapp && pnpm typecheck"
 
-.PHONY: check check-interfaces test-interfaces toolchain-versions ci tracking-plan test-tracking
+.PHONY: check check-interfaces generate-interfaces test-protocol-live test-interfaces toolchain-versions ci tracking-plan test-tracking
 
-# Client Move calls/types must exist in the compiled contracts with matching arity.
+# Compare full reviewed ABI/layouts and generated clients with compiled contracts.
 check-interfaces:
 	$(RUN) python3 scripts/check_contract_interfaces.py
+	$(RUN) python3 scripts/generate_interfaces.py --check
+	$(RUN) python3 scripts/test_generated_interfaces.py
+	$(RUN) node scripts/test_protocol.cjs
+
+generate-interfaces:
+	$(RUN) python3 scripts/generate_interfaces.py
+
+# Disposable localnet only; run inside a container with no public-network access.
+test-protocol-live:
+	$(RUN) python3 scripts/test_protocol_localnet.py
 
 # Offline regression tests for the drift gate itself (synthetic summaries).
 test-interfaces:

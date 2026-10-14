@@ -1,0 +1,174 @@
+[
+  {
+    "name": "minimal",
+    "valid": true,
+    "value": {
+      "schemaVersion": "1.0",
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {},
+      "configuration": {}
+    }
+  },
+  {
+    "name": "unsupported-version",
+    "valid": false,
+    "value": {
+      "schemaVersion": "2.0",
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {},
+      "configuration": {}
+    }
+  },
+  {
+    "name": "unknown-field",
+    "valid": false,
+    "value": {
+      "schemaVersion": "1.0",
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {},
+      "configuration": {},
+      "extra": "x"
+    }
+  },
+  {
+    "name": "invalid-hash",
+    "valid": false,
+    "value": {
+      "schemaVersion": "1.0",
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1",
+      "artifactSha256": "no",
+      "lifecycle": {},
+      "configuration": {}
+    }
+  },
+  {
+    "name": "path-blob",
+    "valid": false,
+    "value": {
+      "schemaVersion": "1.0",
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "../blob",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {},
+      "configuration": {}
+    }
+  },
+  {
+    "name": "missing-version",
+    "valid": false,
+    "value": {
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {},
+      "configuration": {}
+    }
+  },
+  {
+    "name": "bad-lifecycle",
+    "valid": false,
+    "value": {
+      "schemaVersion": "1.0",
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {
+        "mystery": "true"
+      },
+      "configuration": {}
+    }
+  },
+  {
+    "name": "array-config",
+    "valid": false,
+    "value": {
+      "schemaVersion": "1.0",
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {},
+      "configuration": []
+    }
+  },
+  {
+    "name": "missing-config",
+    "valid": false,
+    "value": {
+      "schemaVersion": "1.0",
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {}
+    }
+  },
+  {
+    "name": "missing-lifecycle",
+    "valid": false,
+    "value": {
+      "schemaVersion": "1.0",
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "configuration": {}
+    }
+  },
+  {
+    "name": "number-name",
+    "valid": false,
+    "value": {
+      "schemaVersion": "1.0",
+      "componentName": 42,
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {},
+      "configuration": {}
+    }
+  },
+  {
+    "name": "nullable-optional",
+    "valid": true,
+    "value": {
+      "schemaVersion": "1.0",
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {
+        "install": null
+      },
+      "configuration": {},
+      "description": null
+    }
+  },
+  {
+    "name": "newline-blob",
+    "valid": false,
+    "value": {
+      "schemaVersion": "1.0",
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1\n",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {},
+      "configuration": {}
+    }
+  }
+]

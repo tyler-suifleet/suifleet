@@ -11,6 +11,17 @@ const source = ts.transpileModule(fs.readFileSync(filename, "utf8"), { compilerO
 const loaded = new Module(filename, module);
 loaded.filename = filename;
 loaded.paths = Module._nodeModulePaths(path.dirname(filename));
+const originalRequire = loaded.require.bind(loaded);
+loaded.require = (name) => {
+  if (name === "./protocol-version") {
+    const dependency = new Module(path.resolve(path.dirname(filename), "protocol-version.ts"), loaded);
+    dependency._compile(ts.transpileModule(fs.readFileSync(dependency.id, "utf8"), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+    }).outputText, dependency.id);
+    return dependency.exports;
+  }
+  return originalRequire(name);
+};
 loaded._compile(source, filename);
 const { parseManifest, verifyDeployment, moveType, REQUIRED_TYPES } = loaded.exports;
 const copy = () => structuredClone(fixture);
@@ -31,9 +42,11 @@ const client = (live = fixture) => ({
   assert.equal(moveType("deployment_manager::RecipeDigestKey"), `${fixture.type_origins["deployment_manager::RecipeDigestKey"]}::deployment_manager::RecipeDigestKey`);
   assert.equal(moveType("device_cap::DeviceAddressKey"), `${fixture.type_origins["device_cap::DeviceAddressKey"]}::device_cap::DeviceAddressKey`);
   await verifyDeployment(client(), fixture);
-  for (const [key,value] of [["schema_version",2],["protocol_version",2],["call_package_id","bad"],["network","unknown"]]) {
+  for (const [key,value] of [["schema_version",2],["protocol_version",2],["call_package_id","bad"],["network","unknown"],["package_version",1]]) {
     const invalid=copy(); invalid[key]=value; assert.throws(() => parseManifest(JSON.stringify(invalid)));
   }
+  const numericShared=copy(); numericShared.shared_objects.registry.initial_shared_version=1;
+  assert.throws(() => parseManifest(JSON.stringify(numericShared)), /invalid shared version/);
   const missing=copy(); delete missing.type_origins[REQUIRED_TYPES[0]]; assert.throws(() => parseManifest(JSON.stringify(missing)));
   const incompatible=copy(); incompatible.supported_clients.dapp.max_exclusive="0.0.1"; assert.throws(() => parseManifest(JSON.stringify(incompatible)));
   const staleChain=copy(); staleChain.chain_identifier="deadbeef";
