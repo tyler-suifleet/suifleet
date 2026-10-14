@@ -235,6 +235,379 @@
         "Record environment/tool versions, artifacts and recovery; never include keys in logs."
       ],
       "validation": "Actual supported testnet/browser/device runs with positive and negative results."
+    },
+    {
+      "key": "SF-011",
+      "title": "Create immutable component version catalog and platform manifests",
+      "priority": "P1",
+      "area": "runtime",
+      "phase": "ota",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-005"
+      ],
+      "paths": [
+        "contracts/",
+        "dapp/src/",
+        "suifleet-edge/src/recipe.rs"
+      ],
+      "evidence": "Component names/versions are job strings; no candidate catalog or platform/artifact selection exists.",
+      "acceptance": [
+        "Register immutable versions and recipes with semantic version/platform metadata.",
+        "Resolve OS/architecture-compatible artifacts and expose version discovery.",
+        "Validate hashes, invalid versions and unsupported platform errors."
+      ],
+      "validation": "Catalog and selector tests plus integration deployment of different platform manifests."
+    },
+    {
+      "key": "SF-012",
+      "title": "Resolve component dependency graphs and version conflicts",
+      "priority": "P1",
+      "area": "runtime",
+      "phase": "ota",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-011"
+      ],
+      "paths": [
+        "suifleet-edge/src/"
+      ],
+      "evidence": "No dependency resolver or coordinated install ordering exists.",
+      "acceptance": [
+        "Resolve semver constraints, hard/soft dependencies and deterministic install ordering.",
+        "Reject cycles/conflicts before modifying installed state.",
+        "Support locally cached candidates when the declared offline policy permits them."
+      ],
+      "validation": "Resolver conflict/cycle/order tests and multi-component integration scenarios."
+    },
+    {
+      "key": "SF-013",
+      "title": "Reconcile desired deployment revisions and live group membership",
+      "priority": "P1",
+      "area": "fleet",
+      "phase": "ota",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-002",
+        "SF-005"
+      ],
+      "paths": [
+        "contracts/",
+        "suifleet-edge/src/main.rs",
+        "dapp/src/"
+      ],
+      "evidence": "Enrolled devices replay jobs; new group membership does not receive existing desired state and superseded versions are not coalesced.",
+      "acceptance": [
+        "Represent desired revisions per target and reconcile latest applicable state.",
+        "Handle supersession, target removal, newly joined/offline devices and cross-group conflicts.",
+        "Define atomic multi-component plan/commit semantics and idempotent recovery."
+      ],
+      "validation": "Offline/new-member/supersession/removal/conflict and crash-recovery integration tests."
+    },
+    {
+      "key": "SF-014",
+      "title": "Supervise component install, run, shutdown, bootstrap and recovery",
+      "priority": "P1",
+      "area": "runtime",
+      "phase": "ota",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-009",
+        "SF-011",
+        "SF-012"
+      ],
+      "paths": [
+        "suifleet-edge/src/",
+        "dapp/src/app/firmware/page.tsx"
+      ],
+      "evidence": "Only one-shot install/apply exists; run/shutdown are deliberately rejected.",
+      "acceptance": [
+        "Implement persistent versioned workspaces, process lifecycle, readiness and restart policy.",
+        "Handle shutdown/replacement/bootstrap/reboot without leaving unmanaged descendants.",
+        "Expose genuine runtime state and enable UI recipe fields only after behavior is tested."
+      ],
+      "validation": "Supervisor start/crash/restart/shutdown/reboot-stage integration tests."
+    },
+    {
+      "key": "SF-015",
+      "title": "Manage component configuration defaults, merge, reset and validation",
+      "priority": "P1",
+      "area": "runtime",
+      "phase": "ota",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-005",
+        "SF-014"
+      ],
+      "paths": [
+        "suifleet-edge/src/",
+        "dapp/src/"
+      ],
+      "evidence": "Nonempty recipe configuration is rejected; there is no persistent configuration service.",
+      "acceptance": [
+        "Persist defaults and effective config with explicit merge/reset/JSON-pointer semantics.",
+        "Validate before applying and notify/defer components where required.",
+        "Keep confidential values out of public manifests and diagnostics."
+      ],
+      "validation": "Merge/reset/invalid-config/restart tests and component notification integration."
+    },
+    {
+      "key": "SF-016",
+      "title": "Add health-based application and reboot-aware firmware rollback",
+      "priority": "P1",
+      "area": "edge",
+      "phase": "ota",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-013",
+        "SF-014"
+      ],
+      "paths": [
+        "suifleet-edge/src/",
+        "suifleet-edge/meta-suifleet/",
+        "scripts/"
+      ],
+      "evidence": "Applied currently means updater exit zero; no post-boot health or A/B rollback is implemented.",
+      "acceptance": [
+        "Persist last-known-good state and application health rollback.",
+        "Implement a validated RAUC/SWUpdate A/B adapter with reboot intent and boot confirmation.",
+        "Distinguish ambiguous interrupted work, installation success, healthy boot and rollback."
+      ],
+      "validation": "Real-hardware power-loss/reboot/bad-image/health-failure recovery tests and simulator coverage."
+    },
+    {
+      "key": "SF-017",
+      "title": "Coordinate canary cohorts, rollout rates and failure-threshold abort",
+      "priority": "P1",
+      "area": "fleet",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-013",
+        "SF-019",
+        "SF-024"
+      ],
+      "paths": [
+        "contracts/",
+        "dapp/src/",
+        "suifleet-edge/src/"
+      ],
+      "evidence": "No rollout eligibility, rate control, bake periods or fleet abort gates exist.",
+      "acceptance": [
+        "Define cohorts, concurrency/rate limits, bake/health gates and minimum-sample failure thresholds.",
+        "Devices verify authorized rollout eligibility; coordinator state survives restart.",
+        "Handle offline cohort members and audit pause/abort decisions."
+      ],
+      "validation": "Multi-device simulator and coordinator crash/offline/failure-threshold acceptance."
+    },
+    {
+      "key": "SF-018",
+      "title": "Implement deployment pause, cancel, expiry and maintenance windows",
+      "priority": "P1",
+      "area": "fleet",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-013"
+      ],
+      "paths": [
+        "contracts/",
+        "dapp/src/",
+        "suifleet-edge/src/"
+      ],
+      "evidence": "Deleting a deployment is not cancellation; jobs have no scheduler/expiry/deferral semantics.",
+      "acceptance": [
+        "Model explicit durable control states and device-side deadlines/update windows.",
+        "Notify/defer safely before disruptive work and define cancellation during apply.",
+        "Expose actionable states/reasons in the operator UI."
+      ],
+      "validation": "Pause/resume/cancel/offline-expiry/maintenance-window race integration tests."
+    },
+    {
+      "key": "SF-019",
+      "title": "Report heartbeat, installed inventory and device/component health",
+      "priority": "P1",
+      "area": "fleet",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-014"
+      ],
+      "paths": [
+        "suifleet-edge/src/",
+        "dapp/src/"
+      ],
+      "evidence": "No last-seen/health service exists; dashboard dots now correctly show health unreported.",
+      "acceptance": [
+        "Publish bounded authenticated telemetry with installed versions and component health.",
+        "Buffer while offline and expose online/last-seen/degraded state without false health claims.",
+        "Separate high-volume telemetry from compact authoritative chain receipts."
+      ],
+      "validation": "Offline buffering/authentication/fleet status tests and dashboard acceptance."
+    },
+    {
+      "key": "SF-020",
+      "title": "Collect remote logs, diagnostics and operational alerts",
+      "priority": "P1",
+      "area": "fleet",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-019",
+        "SF-024"
+      ],
+      "paths": [
+        "suifleet-edge/src/",
+        "dapp/src/"
+      ],
+      "evidence": "Only local tracing/systemd logs exist.",
+      "acceptance": [
+        "Provide bounded rotation, redaction, authorized collection/search and diagnostic bundles.",
+        "Expose actionable deployment/device alerts and controlled support access.",
+        "Never export keys, recovery phrases or confidential component config."
+      ],
+      "validation": "Quota/redaction/auth/offline tests and end-to-end log/alert acceptance."
+    },
+    {
+      "key": "SF-021",
+      "title": "Provision fleets with scoped enrollment, roles and hardware signer support",
+      "priority": "P1",
+      "area": "security",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-008"
+      ],
+      "paths": [
+        "contracts/",
+        "suifleet-edge/src/identity.rs",
+        "suifleet-edge/meta-suifleet/",
+        "dapp/src/"
+      ],
+      "evidence": "Software provisioning is manual; no claim enrollment, delegated roles, TPM/HSM backend or attestation exists.",
+      "acceptance": [
+        "Define claim enrollment/bootstrap ownership and bulk onboarding/gas sponsorship.",
+        "Add scoped operator/deployer roles and an identity signer abstraction.",
+        "Validate supported TPM/HSM algorithms and rotation/recovery before claiming hardware identity."
+      ],
+      "validation": "Unauthorized enrollment/delegation tests and software plus available hardware-signer acceptance."
+    },
+    {
+      "key": "SF-022",
+      "title": "Distribute confidential artifacts, secrets and rotated credentials",
+      "priority": "P1",
+      "area": "security",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-008",
+        "SF-015",
+        "SF-021"
+      ],
+      "paths": [
+        "suifleet-edge/src/",
+        "contracts/",
+        "dapp/src/"
+      ],
+      "evidence": "Walrus/chain data is public; there is no confidential secret/config service.",
+      "acceptance": [
+        "Implement encrypted policy-controlled delivery/cache with scoped access and revocation.",
+        "Rotate secrets without embedding plaintext in public data or logs.",
+        "Define offline cache expiry and deletion behavior."
+      ],
+      "validation": "Cross-device unauthorized access/revocation/rotation/offline-cache tests."
+    },
+    {
+      "key": "SF-023",
+      "title": "Manage artifact retention, resumable download, cache quotas and budgets",
+      "priority": "P1",
+      "area": "storage",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "dapp/src/lib/walrus.ts",
+        "suifleet-edge/src/walrus_client.rs",
+        "suifleet-edge/src/"
+      ],
+      "evidence": "Uploads expire after short retention; renewal, resumable downloads and disk quotas are absent.",
+      "acceptance": [
+        "Track storage expiry/renewal ownership and budgets with alerts.",
+        "Implement bounded cache/GC, disk checks and resumable validated downloads.",
+        "Handle expired/unavailable blobs and interrupted transfer without unverified apply."
+      ],
+      "validation": "Actual provider retention/renewal tests plus interrupted/download/quota simulations."
+    },
+    {
+      "key": "SF-024",
+      "title": "Build a scalable fleet indexer, versioned API and operations CLI",
+      "priority": "P1",
+      "area": "fleet",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-002",
+        "SF-005"
+      ],
+      "paths": [
+        "contracts/",
+        "dapp/src/lib/sui.ts",
+        "scripts/"
+      ],
+      "evidence": "Browser queries scan history and there is no fleet API/indexer/coordinator service.",
+      "acceptance": [
+        "Materialize chain/object changes with reliable cursors and filters/pagination.",
+        "Expose versioned fleet/bulk-operation API, CLI and integration events.",
+        "Document deployment/auth/storage infrastructure and retention/recovery."
+      ],
+      "validation": "Pagination/reorg-or-retention/restart/auth/load tests and API/CLI integration."
+    },
+    {
+      "key": "SF-025",
+      "title": "Validate and pin Yocto image and first-boot service packaging",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "ota",
+      "kind": "type:infrastructure",
+      "depends_on": [
+        "SF-004",
+        "SF-009"
+      ],
+      "paths": [
+        "suifleet-edge/meta-suifleet/",
+        "Dockerfile"
+      ],
+      "evidence": "The OE recipe uses AUTOREV and has not passed an actual BitBake build.",
+      "acceptance": [
+        "Pin sources/toolchain/dependencies and add required Yocto cargo dependency support.",
+        "Verify binary/service/config install, provisioning, network recovery and state persistence.",
+        "Document supported layer series, updater integration and reproducible build artifacts."
+      ],
+      "validation": "Actual BitBake image build and boot/service acceptance on target hardware/emulation."
+    },
+    {
+      "key": "SF-026",
+      "title": "Update the daemon safely with bootstrap handoff and fallback",
+      "priority": "P1",
+      "area": "edge",
+      "phase": "ota",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-014",
+        "SF-016",
+        "SF-025"
+      ],
+      "paths": [
+        "suifleet-edge/src/",
+        "suifleet-edge/meta-suifleet/"
+      ],
+      "evidence": "No independent recovery path exists when replacing the daemon itself.",
+      "acceptance": [
+        "Perform staged self-update with persistent bootstrap intent and known-good fallback.",
+        "Preserve device identity, journals and protocol compatibility across process replacement.",
+        "Recover failed startup/reboot without relying on the failed daemon."
+      ],
+      "validation": "Process/power-loss and broken-binary self-update recovery acceptance."
     }
   ]
 }
