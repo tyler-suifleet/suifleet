@@ -6,7 +6,7 @@ import { useGroups } from "@/hooks/useGroups";
 import { useDevices } from "@/hooks/useDevices";
 import { uploadArtifact, uploadRecipe, type ComponentRecipe } from "@/lib/walrus";
 import { buildCreateDeploymentTx } from "@/lib/sui";
-import { PageHeader } from "@/app/page";
+import { PageHeader } from "@/components/ui";
 import Link from "next/link";
 
 type Step = "artifact" | "recipe" | "deploy" | "done";

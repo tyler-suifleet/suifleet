@@ -4,7 +4,7 @@ import { useDeployments } from "@/hooks/useDeployments";
 import { useCurrentAccount, useSignAndExecuteTransaction } from "@mysten/dapp-kit";
 import { buildDeleteDeploymentTx } from "@/lib/sui";
 import { STATUS_LABELS, STATUS_COLORS } from "@/lib/constants";
-import { PageHeader } from "@/app/page";
+import { PageHeader } from "@/components/ui";
 import Link from "next/link";
 
 export default function DeploymentsPage() {

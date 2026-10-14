@@ -8,7 +8,7 @@ import {
   buildRegisterDeviceTx, buildIssueCapTx, buildDeregisterDeviceTx,
   buildCreateGroupTx, buildAddDeviceToGroupTx, buildRemoveDeviceFromGroupTx, buildDeleteGroupTx,
 } from "@/lib/sui";
-import { PageHeader, StatusDot } from "@/app/page";
+import { PageHeader, StatusDot } from "@/components/ui";
 
 type Tab = "devices" | "groups";
 
@@ -91,7 +91,7 @@ function DevicesTab() {
             <tbody className="divide-y divide-gray-100">
               {devices.map((d) => (
                 <tr key={d.objectId} className="hover:bg-gray-50">
-                  <td className="py-3 px-4"><StatusDot healthy /></td>
+                  <td className="py-3 px-4"><StatusDot /></td>
                   <td className="py-3 pr-4 font-medium">{d.name}</td>
                   <td className="py-3 pr-4 text-gray-500">{d.arch}</td>
                   <td className="py-3 pr-4 font-mono text-xs text-gray-400 max-w-[160px] truncate">{d.deviceAddress}</td>
