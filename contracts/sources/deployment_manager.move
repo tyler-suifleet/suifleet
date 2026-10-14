@@ -5,6 +5,7 @@ module sui_edge::deployment_manager {
     use sui::event;
     use sui::vec_map::{Self, VecMap};
     use sui_edge::device_cap::{Self, DeviceCap};
+    use sui_edge::device_group::{Self, DeviceGroup};
 
     // ── Constants ─────────────────────────────────────────────────────────────
 
@@ -17,6 +18,7 @@ module sui_edge::deployment_manager {
     const EInvalidStatus: u64 = 0;
     const ENoTargets: u64 = 1;
     const ENotCreator: u64 = 2;
+    const ENotTargeted: u64 = 3;
 
     // ── Dynamic field keys ────────────────────────────────────────────────────
     //
@@ -125,6 +127,29 @@ module sui_edge::deployment_manager {
         ctx: &TxContext,
     ) {
         device_cap::assert_signer(cap, ctx);
+        let device_id = device_cap::device_id(cap);
+        let targets: &vector<ID> = df::borrow(&deployment.id, TargetDevicesKey {});
+        assert!(targets.contains(&device_id), ENotTargeted);
+        record_status(deployment, cap, status);
+    }
+
+    /// Group reports prove current membership in a group targeted by this deployment.
+    public fun report_status_for_group(
+        deployment: &mut DeploymentRecord,
+        cap: &DeviceCap,
+        group: &DeviceGroup,
+        status: u8,
+        ctx: &TxContext,
+    ) {
+        device_cap::assert_signer(cap, ctx);
+        let targets: &vector<ID> = df::borrow(&deployment.id, TargetGroupsKey {});
+        assert!(targets.contains(&device_group::group_id(group)), ENotTargeted);
+        assert!(device_group::admin(group) == deployment.creator, ENotTargeted);
+        assert!(device_group::contains_device(group, device_cap::device_id(cap)), ENotTargeted);
+        record_status(deployment, cap, status);
+    }
+
+    fun record_status(deployment: &mut DeploymentRecord, cap: &DeviceCap, status: u8) {
         assert!(status == STATUS_APPLIED || status == STATUS_FAILED, EInvalidStatus);
 
         let device_id = device_cap::device_id(cap);
@@ -169,6 +194,8 @@ module sui_edge::deployment_manager {
     public fun statuses(d: &DeploymentRecord): &VecMap<ID, u8> {
         df::borrow(&d.id, StatusesKey {})
     }
+
+
 
     public fun recipe_blob_id(d: &DeploymentRecord): &String { &d.recipe_blob_id }
     public fun artifact_sha256(d: &DeploymentRecord): &String { &d.artifact_sha256 }

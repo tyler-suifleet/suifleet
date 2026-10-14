@@ -103,14 +103,17 @@ module sui_edge::deployment_manager_tests {
             let mut record = ts::take_shared<DeploymentRecord>(&scenario);
             let cap = ts::take_from_sender<sui_edge::device_cap::DeviceCap>(&scenario);
 
-            deployment_manager::report_status(
+            let group = ts::take_shared<device_group::DeviceGroup>(&scenario);
+            deployment_manager::report_status_for_group(
                 &mut record,
                 &cap,
+                &group,
                 deployment_manager::status_applied(),
                 ts::ctx(&mut scenario),
             );
 
             ts::return_to_sender(&scenario, cap);
+            ts::return_shared(group);
             ts::return_shared(record);
         };
 
@@ -136,14 +139,17 @@ module sui_edge::deployment_manager_tests {
             let mut record = ts::take_shared<DeploymentRecord>(&scenario);
             let cap = ts::take_from_sender<sui_edge::device_cap::DeviceCap>(&scenario);
 
-            deployment_manager::report_status(
+            let group = ts::take_shared<device_group::DeviceGroup>(&scenario);
+            deployment_manager::report_status_for_group(
                 &mut record,
                 &cap,
+                &group,
                 deployment_manager::status_failed(),
                 ts::ctx(&mut scenario),
             );
 
             ts::return_to_sender(&scenario, cap);
+            ts::return_shared(group);
             ts::return_shared(record);
         };
 
@@ -151,7 +157,8 @@ module sui_edge::deployment_manager_tests {
     }
 
     #[test]
-    fun test_any_capped_device_can_report() {
+    #[expected_failure(abort_code = 3, location = sui_edge::deployment_manager)]
+    fun test_non_member_cannot_report() {
         let mut scenario = ts::begin(ADMIN);
         setup_registry(&mut scenario);
 
@@ -184,26 +191,94 @@ module sui_edge::deployment_manager_tests {
         ts::next_tx(&mut scenario, ADMIN);
         create_test_deployment(&mut scenario, vector[group_id], vector[]);
 
-        // The other device (not in group) can still report — targeting enforced off-chain.
-        // This test verifies report_status accepts any valid DeviceCap.
+        // A valid cap does not grant status authority for an unrelated group.
         ts::next_tx(&mut scenario, OTHER_DEVICE_ADDR);
         {
             let mut record = ts::take_shared<DeploymentRecord>(&scenario);
             let cap = ts::take_from_sender<sui_edge::device_cap::DeviceCap>(&scenario);
 
-            deployment_manager::report_status(
+            let group = ts::take_shared<device_group::DeviceGroup>(&scenario);
+            deployment_manager::report_status_for_group(
                 &mut record,
                 &cap,
+                &group,
                 deployment_manager::status_applied(),
                 ts::ctx(&mut scenario),
             );
 
             ts::return_to_sender(&scenario, cap);
+            ts::return_shared(group);
             ts::return_shared(record);
         };
 
         ts::end(scenario);
     }
+    #[test]
+    fun test_direct_target_reports_applied() {
+        let mut scenario = ts::begin(ADMIN);
+        setup_registry(&mut scenario);
+        ts::next_tx(&mut scenario, ADMIN);
+        let id = register_device_with_cap(&mut scenario, b"direct", DEVICE_ADDR);
+        ts::next_tx(&mut scenario, ADMIN);
+        create_test_deployment(&mut scenario, vector[], vector[id]);
+        ts::next_tx(&mut scenario, DEVICE_ADDR);
+        let mut record = ts::take_shared<DeploymentRecord>(&scenario);
+        let cap = ts::take_from_sender<sui_edge::device_cap::DeviceCap>(&scenario);
+        deployment_manager::report_status(&mut record, &cap, 1, ts::ctx(&mut scenario));
+        assert!(*deployment_manager::statuses(&record).get(&id) == 1, 100);
+        ts::return_to_sender(&scenario, cap);
+        ts::return_shared(record);
+        ts::end(scenario);
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 3, location = sui_edge::deployment_manager)]
+    fun test_unrelated_direct_target_rejected() {
+        let mut scenario = ts::begin(ADMIN);
+        setup_registry(&mut scenario);
+        ts::next_tx(&mut scenario, ADMIN);
+        let _id = register_device_with_cap(&mut scenario, b"other", DEVICE_ADDR);
+        ts::next_tx(&mut scenario, ADMIN);
+        create_test_deployment(&mut scenario, vector[], vector[object::id_from_address(@0x123)]);
+        ts::next_tx(&mut scenario, DEVICE_ADDR);
+        let mut record = ts::take_shared<DeploymentRecord>(&scenario);
+        let cap = ts::take_from_sender<sui_edge::device_cap::DeviceCap>(&scenario);
+        deployment_manager::report_status(&mut record, &cap, 1, ts::ctx(&mut scenario));
+        ts::return_to_sender(&scenario, cap);
+        ts::return_shared(record);
+        ts::end(scenario);
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 0, location = sui_edge::deployment_manager)]
+    fun test_invalid_status_rejected() {
+        let mut scenario = ts::begin(ADMIN);
+        setup_registry(&mut scenario);
+        ts::next_tx(&mut scenario, ADMIN);
+        let id = register_device_with_cap(&mut scenario, b"invalid-status", DEVICE_ADDR);
+        ts::next_tx(&mut scenario, ADMIN);
+        create_test_deployment(&mut scenario, vector[], vector[id]);
+        ts::next_tx(&mut scenario, DEVICE_ADDR);
+        let mut record = ts::take_shared<DeploymentRecord>(&scenario);
+        let cap = ts::take_from_sender<sui_edge::device_cap::DeviceCap>(&scenario);
+        deployment_manager::report_status(&mut record, &cap, 7, ts::ctx(&mut scenario));
+        ts::return_to_sender(&scenario, cap);
+        ts::return_shared(record);
+        ts::end(scenario);
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 1, location = sui_edge::deployment_manager)]
+    fun test_empty_targets_rejected() {
+        let mut scenario = ts::begin(ADMIN);
+        create_test_deployment(&mut scenario, vector[], vector[]);
+        ts::end(scenario);
+    }
+
+
+
+
+
     #[test]
     #[expected_failure(abort_code = 0, location = sui_edge::device_cap)]
     fun test_operator_cannot_impersonate_device() {
