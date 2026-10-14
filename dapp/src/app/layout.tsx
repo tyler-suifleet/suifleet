@@ -4,16 +4,18 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SuiClientProvider, WalletProvider, ConnectButton } from "@mysten/dapp-kit";
 import { getFullnodeUrl } from "@mysten/sui/client";
 import { usePathname } from "next/navigation";
-import { NETWORK } from "@/lib/constants";
+import { NETWORK, RPC_URL } from "@/lib/constants";
 import "@mysten/dapp-kit/dist/index.css";
 import "./globals.css";
 import Link from "next/link";
 
 const queryClient = new QueryClient();
 const networks = {
+  localnet: { url: "http://127.0.0.1:9000" },
   devnet:  { url: getFullnodeUrl("devnet") },
   testnet: { url: getFullnodeUrl("testnet") },
   mainnet: { url: getFullnodeUrl("mainnet") },
+  ...(RPC_URL ? { [NETWORK]: { url: RPC_URL } } : {}),
 };
 
 const NAV = [

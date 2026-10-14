@@ -1,3 +1,4 @@
+import { requireManifest, moveType, verifyDeployment } from "./deployment-manifest";
 import { Transaction } from "@mysten/sui/transactions";
 import { SuiClient } from "@mysten/sui/client";
 import { bcs } from "@mysten/sui/bcs";
@@ -43,6 +44,7 @@ export function buildRegisterDeviceTx(
   arch: string,
   sender: string,
 ): Transaction {
+  requireManifest();
   const tx = new Transaction();
   const [device] = tx.moveCall({
     target: `${PACKAGE_ID}::device_registry::register_device`,
@@ -60,6 +62,7 @@ export function buildRegisterDeviceTx(
 }
 
 export function buildIssueCapTx(deviceObjectId: string): Transaction {
+  requireManifest();
   const tx = new Transaction();
   tx.moveCall({
     target: `${PACKAGE_ID}::device_cap::issue_cap`,
@@ -69,6 +72,7 @@ export function buildIssueCapTx(deviceObjectId: string): Transaction {
 }
 
 export function buildDeregisterDeviceTx(deviceObjectId: string): Transaction {
+  requireManifest();
   const tx = new Transaction();
   tx.moveCall({
     target: `${PACKAGE_ID}::device_registry::deregister_device`,
@@ -80,6 +84,7 @@ export function buildDeregisterDeviceTx(deviceObjectId: string): Transaction {
 // ── Group transactions ────────────────────────────────────────────────────────
 
 export function buildCreateGroupTx(name: string, description: string): Transaction {
+  requireManifest();
   const tx = new Transaction();
   tx.moveCall({
     target: `${PACKAGE_ID}::device_group::create_group`,
@@ -93,6 +98,7 @@ export function buildCreateGroupTx(name: string, description: string): Transacti
 }
 
 export function buildAddDeviceToGroupTx(groupObjectId: string, deviceObjectId: string): Transaction {
+  requireManifest();
   const tx = new Transaction();
   tx.moveCall({
     target: `${PACKAGE_ID}::device_group::add_device`,
@@ -105,6 +111,7 @@ export function buildAddDeviceToGroupTx(groupObjectId: string, deviceObjectId: s
 }
 
 export function buildRemoveDeviceFromGroupTx(groupObjectId: string, deviceId: string): Transaction {
+  requireManifest();
   const tx = new Transaction();
   tx.moveCall({
     target: `${PACKAGE_ID}::device_group::remove_device`,
@@ -117,6 +124,7 @@ export function buildRemoveDeviceFromGroupTx(groupObjectId: string, deviceId: st
 }
 
 export function buildDeleteGroupTx(groupObjectId: string): Transaction {
+  requireManifest();
   const tx = new Transaction();
   tx.moveCall({
     target: `${PACKAGE_ID}::device_group::delete_group`,
@@ -136,6 +144,7 @@ export function buildCreateDeploymentTx(
   targetGroupIds: string[],
   targetDeviceIds: string[] = [],
 ): Transaction {
+  requireManifest();
   const tx = new Transaction();
   tx.moveCall({
     target: `${PACKAGE_ID}::deployment_manager::create_deployment_verified`,
@@ -154,6 +163,7 @@ export function buildCreateDeploymentTx(
 }
 
 export function buildDeleteDeploymentTx(deploymentObjectId: string): Transaction {
+  requireManifest();
   const tx = new Transaction();
   tx.moveCall({
     target: `${PACKAGE_ID}::deployment_manager::delete_deployment`,
@@ -168,6 +178,7 @@ export async function fetchDevices(
   client: SuiClient,
   owner: string,
 ): Promise<DeviceObject[]> {
+  await verifyDeployment(client);
   const data = [];
   let cursor: string | null | undefined = null;
   do {
@@ -195,7 +206,8 @@ export async function fetchGroups(
   client: SuiClient,
   owner: string,
 ): Promise<DeviceGroup[]> {
-  const data = await allEvents(client, `${DEVICE_GROUP_TYPE.replace("::DeviceGroup", "")}::GroupCreated`);
+  await verifyDeployment(client);
+  const data = await allEvents(client, moveType("device_group::GroupCreated"));
 
   const groupIds = data
     .filter((ev) => (ev.parsedJson as Record<string, unknown>).admin === owner)
@@ -239,6 +251,7 @@ async function objectsInBatches(client: SuiClient, ids: string[]) {
 }
 
 export async function fetchDeploymentEvents(client: SuiClient, owner?: string): Promise<DeploymentEvent[]> {
+  await verifyDeployment(client);
   const events = (await allEvents(client, DEPLOYMENT_CREATED_EVENT))
     .filter((event) => !owner || (event.parsedJson as Record<string, unknown>).creator === owner);
   const objects = await objectsInBatches(client, events.map((event) => (event.parsedJson as Record<string, unknown>).deployment_id as string));
@@ -253,7 +266,7 @@ export async function fetchDeploymentEvents(client: SuiClient, owner?: string): 
         ? ((group.data.content.fields as Record<string, unknown>).device_ids as string[] ?? []) : []),
     ])];
     const statusObject = await client.getDynamicFieldObject({ parentId: id,
-      name: { type: `${DEPLOYMENT_CREATED_EVENT.replace("::DeploymentCreated", "")}::StatusesKey`, value: {} } });
+      name: { type: moveType("deployment_manager::StatusesKey"), value: {} } });
     if (statusObject.error) throw new Error(`Unable to load deployment status: ${statusObject.error.code}`);
     const content = statusObject.data?.content;
     const fields = content?.dataType === "moveObject" ? content.fields as Record<string, unknown> : {};
