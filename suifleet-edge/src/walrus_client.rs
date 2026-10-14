@@ -18,6 +18,7 @@ pub struct WalrusClient {
     min_free_bytes: u64,
     attempts: u32,
     backoff: Duration,
+    deadline: Duration,
 }
 
 /// Why a transfer attempt stopped.
@@ -41,6 +42,7 @@ impl WalrusClient {
             min_free_bytes: config.min_free_bytes,
             attempts: config.download_attempts.max(1),
             backoff: Duration::from_secs(1),
+            deadline: Duration::from_secs(config.download_timeout_seconds),
         }
     }
 
@@ -77,7 +79,8 @@ impl WalrusClient {
     /// Bytes land in `<dest>.partial` and are renamed only once the transfer
     /// completes; callers still verify the digest before applying anything.
     /// Interrupted transfers resume with HTTP Range (or restart if the
-    /// aggregator ignores it) up to `download_attempts` times.
+    /// aggregator ignores it) up to `download_attempts` times, all within
+    /// `download_timeout_seconds`.
     pub async fn download(&self, blob_id: &str, dest: &Path) -> anyhow::Result<String> {
         let partial = partial_path(dest);
         info!("Downloading blob {} from {}", blob_id, self.url(blob_id));
@@ -93,7 +96,25 @@ impl WalrusClient {
         Ok(hash)
     }
 
-    async fn retry<T, F, Fut>(&self, blob_id: &str, mut attempt: F) -> anyhow::Result<T>
+    /// Run `attempt` until it succeeds, fails permanently, exhausts the
+    /// attempts or overruns the deadline. `read_timeout` alone cannot bound a
+    /// transfer: an aggregator trickling a byte a minute never trips it.
+    async fn retry<T, F, Fut>(&self, blob_id: &str, attempt: F) -> anyhow::Result<T>
+    where
+        F: FnMut() -> Fut,
+        Fut: std::future::Future<Output = Result<T, Failure>>,
+    {
+        tokio::time::timeout(self.deadline, self.attempts(blob_id, attempt))
+            .await
+            .unwrap_or_else(|_| {
+                Err(anyhow::anyhow!(
+                    "blob {blob_id}: transfer did not finish within {}s",
+                    self.deadline.as_secs()
+                ))
+            })
+    }
+
+    async fn attempts<T, F, Fut>(&self, blob_id: &str, mut attempt: F) -> anyhow::Result<T>
     where
         F: FnMut() -> Fut,
         Fut: std::future::Future<Output = Result<T, Failure>>,
@@ -422,6 +443,7 @@ mod tests {
             max_artifact_bytes: max,
             min_free_bytes: free,
             download_attempts: 4,
+            download_timeout_seconds: 3600,
         });
         client.backoff = Duration::from_millis(10);
         client
@@ -592,6 +614,41 @@ mod tests {
             .to_string();
         assert!(error.contains("download limit"), "{error}");
         assert!(!partial_path(&dest).exists());
+    }
+
+    #[tokio::test]
+    async fn slow_trickle_hits_the_overall_deadline() {
+        // Each byte arrives well within read_timeout, but the whole transfer
+        // would take far longer than the deadline.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let mut request = vec![0u8; 4096];
+                    let _ = socket.read(&mut request).await;
+                    let head = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n",
+                        BLOB.len()
+                    );
+                    let _ = socket.write_all(head.as_bytes()).await;
+                    for byte in BLOB {
+                        if socket.write_all(&[*byte]).await.is_err() {
+                            return;
+                        }
+                        tokio::time::sleep(Duration::from_millis(200)).await;
+                    }
+                });
+            }
+        });
+        let dest = dest("trickle");
+        let mut client = client(url, 1 << 20, 0);
+        client.deadline = Duration::from_millis(700);
+        let started = std::time::Instant::now();
+        let error = client.download("blob", &dest).await.unwrap_err().to_string();
+        assert!(error.contains("did not finish within"), "{error}");
+        assert!(started.elapsed() < Duration::from_secs(3));
+        assert!(!dest.exists());
     }
 
     #[test]

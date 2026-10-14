@@ -39,6 +39,10 @@ pub struct WalrusConfig {
     /// partial downloads resume with HTTP Range when the aggregator supports it.
     #[serde(default = "default_download_attempts")]
     pub download_attempts: u32,
+    /// Deadline for fetching one blob, across all attempts. Bounds how long a
+    /// slow or stalled aggregator can hold the serial deployment loop.
+    #[serde(default = "default_download_timeout_seconds")]
+    pub download_timeout_seconds: u64,
 }
 
 fn default_max_artifact_bytes() -> u64 {
@@ -49,6 +53,9 @@ fn default_min_free_bytes() -> u64 {
 }
 fn default_download_attempts() -> u32 {
     4
+}
+fn default_download_timeout_seconds() -> u64 {
+    3600
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -76,6 +83,10 @@ impl Config {
         anyhow::ensure!(
             cfg.walrus.download_attempts > 0,
             "walrus.download_attempts must be positive"
+        );
+        anyhow::ensure!(
+            cfg.walrus.download_timeout_seconds > 0,
+            "walrus.download_timeout_seconds must be positive"
         );
         Ok(cfg)
     }
