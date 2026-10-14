@@ -1,6 +1,6 @@
 # Issue tracking and model ownership
 
-Repository: `tyler-suifleet/suifleet`. Live private GitHub Project: [SuiFleet — OTA and Fleet Management](https://github.com/users/tyler-suifleet/projects/1). The initial 28 issues are published. See [the issue index](tracking/INDEX.md) and [publication records](tracking/github-state.json); live GitHub state is authoritative for assignments and status.
+Repository: `tyler-suifleet/suifleet`. Live private GitHub Project: [SuiFleet — OTA and Fleet Management](https://github.com/users/tyler-suifleet/projects/1). The expanded roadmap has 39 scoped items; see publication records for live issue IDs. See [the issue index](tracking/INDEX.md) and [publication records](tracking/github-state.json); live GitHub state is authoritative for assignments and status.
 
 ## Authority
 
@@ -10,7 +10,7 @@ GitHub authenticates an account, not an AI model. These files establish the requ
 
 ## Backlog and publication
 
-[backlog.json](tracking/backlog.json) contains 28 scoped, dependency-linked seed items from the parity audit and upgrade discussion. Each has evidence, owned paths, acceptance criteria and specific verification expectations. Stable keys `SF-001` etc. are local tracking keys, not GitHub issue numbers.
+[backlog.json](tracking/backlog.json) contains 39 scoped, dependency-linked roadmap items from the parity audit and upgrade discussion. Each has evidence, owned paths, acceptance criteria and specific verification expectations. Stable keys `SF-001` etc. are local tracking keys, not GitHub issue numbers.
 
 ```bash
 # Offline preview; no GitHub access or writes required
@@ -59,9 +59,19 @@ GitHub assignees are real account owners; `Agent`/`Model` describe who performs 
 
 For a new Project, the bootstrap initializes the six Status values. For an existing Project it preserves Status options and uses Backlog or Todo for newly added items; do not overwrite an active project's workflow casually.
 
+## Priority and sequence
+
+P means priority/criticality, not issue number or a strict implementation order. P0 blocks release, P1 covers core OTA/fleet requirements, and P2 covers broader Greengrass compatibility. P2 features are still required if full Greengrass equivalence is the goal. Respect dependency edges and coordinate shared interfaces; independent work can proceed concurrently. The SF key and GitHub issue number are identifiers, not priorities.
+
+See [capability coverage](GREENGRASS_TICKET_COVERAGE.md) and [the Raspberry Pi acceptance plan](RASPBERRY_PI_TEST_PLAN.md).
+
+## Atomic implementation claims on WSL
+
+Both models use [the shared SQLite coordinator](ATOMIC_TICKETING.md) before implementation. It atomically filters priority, dependencies, existing ownership and conflicting paths and creates one worktree per claim. Project fields mirror reservations; direct field edits are not the implementation claim mechanism. Read the runbook for heartbeat, scope expansion, local notes, review reservations and stopped-worker recovery. `make test-coordinator` verifies concurrency and failure behavior without GitHub mutations.
+
 ## Assignment and handoff
 
-1. The user or Codex selects an existing issue, resolves its dependencies and assigns one implementation owner. Set Agent/Model, Work branch and human assignee as applicable; move Ready to In progress.
+1. The user selects work or either model requests the next eligible existing issue through the coordinator. Its atomic claim assigns one implementation owner and mirrors Agent/Model, Work branch and Status to the Project. Resolve dependencies before claiming; existing human assignees are reserved and require coordinated handoff.
 2. Record scope, owned paths and test plan in the existing issue. Use a separate branch/worktree for concurrent models; agree on shared API/lockfile/manifest ownership before edits.
 3. If blocked, move Blocked and report the exact dependency/evidence. If a new problem is found, report it to Codex without creating another ticket.
 4. Open/link a PR for the issue and move Review with changed behavior, exact commands/results, risks/migrations and anything unverified. Ask another model/human to review where appropriate.

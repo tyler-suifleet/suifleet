@@ -18,7 +18,7 @@ Do not add model names as authors, committers, `Co-authored-by` trailers, sign-o
 
 SuiFleet targets functional AWS Greengrass OTA/fleet-management parity using Sui Move contracts, Walrus storage, a Next.js wallet app and a Rust Linux daemon. It currently implements a locally tested one-shot OTA foundation, not full Greengrass parity or a production release.
 
-Read [the parity audit](docs/GREENGRASS_PARITY_AUDIT.md), [validation evidence](docs/VALIDATION.md), [the operational runbook](docs/OPERATIONS.md) and [tracking workflow](docs/ISSUE_TRACKING.md) as relevant. Actual code and current test results take precedence over historical checklists.
+Read [the parity audit](docs/GREENGRASS_PARITY_AUDIT.md), [validation evidence](docs/VALIDATION.md), [the operational runbook](docs/OPERATIONS.md) and [tracking workflow](docs/ISSUE_TRACKING.md) as relevant. Actual code and current test results take precedence over historical checklists. The [capability-to-ticket map](docs/GREENGRASS_TICKET_COVERAGE.md) tracks the audited scope; [Raspberry Pi 3 Model B+ acceptance](docs/RASPBERRY_PI_TEST_PLAN.md) requires a BitBake-built bootable image with the client included, not only SSH deployment, and is specified in SF-029/030/031 and has not yet been implemented or run.
 
 Critical known gaps:
 
@@ -104,6 +104,12 @@ The current `make publish-contracts` runs `scripts/redeploy.sh`, which spends ga
 A release must verify the target chain/account, run relevant checks, prepare a compatibility/migration plan, publish or upgrade under the proper UpgradeCap, validate execution effects, record all IDs/type origins, migrate required objects, generate both client configurations, rebuild the static frontend, stage the daemon rollout, and run a real end-to-end acceptance test. Full details and current blockers: [OPERATIONS.md](docs/OPERATIONS.md).
 
 ## Working across models
+
+**On this WSL machine, claim implementations through [the atomic ticket coordinator](docs/ATOMIC_TICKETING.md) before editing.** Both Codex and Claude must use the same Git repository and linked worktrees; separate clones do not share reservations. GitHub is the specification tracker; the shared SQLite database in the Git common directory is authoritative for implementation ownership. Do not claim by directly changing Project fields.
+
+For “implement the next ticket”: run `python3 scripts/ticket_coordinator.py refresh`, then `python3 scripts/ticket_coordinator.py claim --agent Codex --model ACTUAL_MODEL --session UNIQUE_SESSION` (Claude substitutes its own family/model/session). Enter the returned worktree. Claiming filters priority, completed dependencies, live ownership and overlapping paths atomically. Preserve the returned token locally and heartbeat every five minutes. Run `assert TICKET --token TOKEN --path PATH` before edit batches and after long commands, before staging/committing/deploying; reserve new paths with `expand` before editing them. Use the canonical checkout's script when a worktree contains an older catalog.
+
+Read coordinator `list`/`show` and record testing plans, shared-interface decisions and handoffs with `note`. Review and blocked work retain reservations; review is not Done. An expired claim remains reserved: stop the old worker before an explicit recovery, and never edit with an invalid token. Mirror failures retain claims; inspect and retry `publish`, then verify ownership before proceeding. Integrate reviewed changes serially. The coordinator does not create issues, merge/push/deploy, restart models, or change permission settings; follow existing authorization. Claims are cooperative, not an OS barrier against a model ignoring these instructions.
 
 Work from an existing assigned issue. Record the agent family and actual model/version, branch/worktree, dependency issues, owned paths and testing plan. GitHub assignees are human accounts; the Project's `Agent` field tracks model ownership. No issue should have two implementation owners simultaneously.
 
