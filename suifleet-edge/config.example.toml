@@ -6,6 +6,14 @@ manifest_path = "deployment.json"
 keypair_path = "/etc/suifleet/device.key"   # 32-byte hex ed25519 private key
 device_object_id = "0x..."                      # Device object ID from registration
 device_cap_id    = "0x..."                      # DeviceCap object ID
+[walrus]
+aggregator_url = "https://aggregator.walrus-testnet.walrus.space"
+# Downloads go to <artifact>.partial and resume with HTTP Range after interruption.
+# max_artifact_bytes = 1073741824   # refuse larger artifacts (default 1 GiB)
+# min_free_bytes = 67108864         # keep this much free on the state filesystem (default 64 MiB)
+# download_attempts = 4             # per blob, for drops, timeouts, 5xx and 429
+# download_timeout_seconds = 3600   # give up on a blob after this long, across all attempts
+
 [apply]
 # Command to invoke when an artifact is ready. The artifact path is appended as the final argument.
 # Examples:

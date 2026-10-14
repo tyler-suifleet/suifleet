@@ -64,7 +64,16 @@ async fn main() -> anyhow::Result<()> {
         sui.address()
     );
     let mut journal = Journal::open(&cfg.runtime.state_dir, binding)?;
-    let walrus = WalrusClient::new(cfg.walrus.aggregator_url.clone());
+    let walrus = WalrusClient::new(&cfg.walrus);
+    // The artifact cache holds at most the in-flight artifact; anything left
+    // by an earlier run (e.g. a crash mid-download) is unused.
+    let freed = walrus_client::collect_garbage(&cfg.runtime.state_dir.join("artifacts"))?;
+    if freed > 0 {
+        info!(
+            bytes = freed,
+            "Removed leftover artifacts from a previous run"
+        );
+    }
     let runner = ApplyRunner::new(cfg.apply.clone());
     #[cfg(feature = "systemd")]
     tokio::spawn(async {
@@ -190,7 +199,7 @@ async fn poll(
                 outcome.error = result.err().map(|error| format!("{error:#}"));
                 info!(deployment = event.deployment_id, status = outcome.status, error = ?outcome.error, "Deployment finished");
                 journal.save()?;
-                let _ = std::fs::remove_file(&artifact);
+                let _ = std::fs::remove_dir_all(&directory);
             }
             journal.state.cursor = Some(cursor);
             journal.save()?;
