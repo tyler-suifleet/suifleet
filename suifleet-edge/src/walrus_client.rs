@@ -12,9 +12,14 @@ impl WalrusClient {
     pub fn new(aggregator_url: String) -> Self {
         Self {
             aggregator_url,
-            http: reqwest::Client::new(),
+            http: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(300))
+                .build()
+                .expect("HTTP client"),
         }
     }
+
+
 
     /// Download a blob and write it to `dest`. Returns the sha256 hex of the downloaded bytes.
     pub async fn download(&self, blob_id: &str, dest: &Path) -> anyhow::Result<String> {
@@ -22,12 +27,27 @@ impl WalrusClient {
         info!("Downloading blob {} from {}", blob_id, url);
 
         let res = self.http.get(&url).send().await?.error_for_status()?;
-        let bytes = res.bytes().await?;
+        use futures_util::StreamExt;
+        use std::io::Write;
+        let mut file = std::fs::File::create(dest)?;
+        let mut stream = res.bytes_stream();
+        let mut hasher = Sha256::new();
+        let mut length = 0u64;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
+            length += chunk.len() as u64;
+            anyhow::ensure!(
+                length <= 1024 * 1024 * 1024,
+                "artifact exceeds 1 GiB download limit"
+            );
+            hasher.update(&chunk);
+            file.write_all(&chunk)?;
+        }
+        file.sync_all()?;
 
-        let hash = hex::encode(Sha256::digest(&bytes));
-        std::fs::write(dest, &bytes)?;
+        let hash = hex::encode(hasher.finalize());
 
-        info!("Downloaded {} bytes, sha256={}", bytes.len(), hash);
+        info!("Downloaded {} bytes, sha256={}", length, hash);
         Ok(hash)
     }
 }
