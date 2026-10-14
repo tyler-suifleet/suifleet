@@ -22,7 +22,7 @@ Read [the parity audit](docs/GREENGRASS_PARITY_AUDIT.md), [validation evidence](
 
 Critical known gaps:
 
-- Both clients use deprecated Sui JSON-RPC. Migrate wallet library and TypeScript SDK together; migrate the daemon reader, transaction builder and executor too.
+- The daemon uses the supported Sui gRPC v2 API through Mysten's Rust SDK (SF-004): event discovery, reads, local transaction building with a verify-before-sign check, and effects-checked execution. It needs a node that serves indexed `ListEvents` (Sui ≥ 1.81 in our tests). The frontend migration is SF-003; until it merges, the dApp still uses deprecated JSON-RPC.
 - Existing types keep their introduction-package origin; types introduced by later upgrades have later origins. The code still wrongly uses the first package ID for every key type, including newly added `RecipeDigestKey` and `DeviceAddressKey`.
 - Older Sui package versions remain callable. New signer/target checks alone do not prove security after upgrading an existing deployment. Old entry points must be unable to modify authoritative new state.
 - Current unit tests and the HTTP simulator do not establish real chain upgrade compatibility, live wallet behavior, Walrus certification, Yocto builds or hardware OTA health.

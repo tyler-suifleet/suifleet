@@ -4,7 +4,7 @@ Decentralized edge software and firmware deployment using Sui contracts, Walrus 
 
 **Status:** locally testable one-shot OTA foundation. Greengrass OTA/fleet feature compatibility is the product goal, not the current release claim. See [the feature audit](docs/GREENGRASS_PARITY_AUDIT.md) and [delivery plan](PLAN.md).
 
-**Public-network blocker:** this baseline uses legacy Sui JSON-RPC. Current Sui API retirement requires a gRPC/GraphQL and wallet-client migration before public-network deployment. Local tests use a simulator and do not prove live network compatibility.
+**Public-network blocker:** the edge daemon uses the supported Sui gRPC v2 API (tested on a real local network), but the web app still uses legacy Sui JSON-RPC until its migration (SF-003) lands. Local tests do not prove public-network, wallet or hardware compatibility.
 
 ## Implemented flow
 
