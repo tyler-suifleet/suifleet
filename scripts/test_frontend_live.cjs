@@ -59,7 +59,7 @@ let stage = "startup";
       call_package_id: packageId, upgrade_cap_id: capId, package_version: raw.version,
       type_origins: Object.fromEntries(raw.typeOriginTable.map((entry) => [`${entry.moduleName}::${entry.datatypeName}`, entry.package])),
       shared_objects: { registry: { id: registryId, initial_shared_version: registry.owner.Shared.initialSharedVersion } },
-      supported_clients: { dapp: { min: "0.0.1", max_exclusive: "0.1.0" }, edge: { min: "0.1.0", max_exclusive: "0.2.0" } },
+      supported_clients: { dapp: { min: "0.0.2", max_exclusive: "0.0.3" }, edge: { min: "0.1.0", max_exclusive: "0.2.0" } },
       walrus: { publisher_url: "http://127.0.0.1:31415", aggregator_url: "http://127.0.0.1:31416" },
     };
     process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST = JSON.stringify(manifest);

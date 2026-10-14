@@ -22,6 +22,8 @@ const copy = () => structuredClone(fixture);
   }
   const missing = copy(); delete missing.type_origins[REQUIRED_TYPES[0]]; assert.throws(() => parseManifest(JSON.stringify(missing)));
   const incompatible = copy(); incompatible.supported_clients.dapp.max_exclusive = "0.0.1"; assert.throws(() => parseManifest(JSON.stringify(incompatible)));
+  const oldRange = copy(); oldRange.supported_clients.dapp = { min: "0.0.1", max_exclusive: "0.0.2" };
+  assert.throws(() => parseManifest(JSON.stringify(oldRange)), /unsupported dapp client version/);
   const staleChain = copy(); staleChain.chain_identifier = "deadbeef";
   await assert.rejects(verifyDeployment(manifestClient(staleChain), fixture), /chain identifier/);
   const staleOrigin = copy(); staleOrigin.type_origins["deployment_manager::RecipeDigestKey"] = staleOrigin.call_package_id;
