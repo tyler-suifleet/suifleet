@@ -5,15 +5,60 @@ Wants=network-online.target
 
 [Service]
 Type=notify
+# Unprivileged daemon. Firmware writes go through suifleet-firmware.path;
+# recipe install scripts run as this user inside this sandbox.
+User=suifleet
+Group=suifleet
 StateDirectory=suifleet
+StateDirectoryMode=0700
 UMask=0077
-ExecStartPre=/usr/bin/suifleet --provision /etc/suifleet/device.key
+# Key provisioning is the only privileged start-up step ("+" runs it as root).
+ExecStartPre=+/usr/bin/suifleet --provision /etc/suifleet/device.key
+ExecStartPre=+/bin/chown suifleet:suifleet /etc/suifleet/device.key
 ExecStart=/usr/bin/suifleet
 Restart=on-failure
 RestartSec=5
 WatchdogSec=60
 NotifyAccess=main
 EnvironmentFile=-/etc/suifleet/env
+
+# Filesystem: everything read-only except the state directory; /etc/suifleet
+# (config, key) is read-only so the daemon cannot change its own policy.
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+
+# Privileges: no capabilities, no setuid escalation, no new namespaces.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+RemoveIPC=yes
+# Netlink is needed for address-family selection during DNS resolution.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+# Not set: MemoryDenyWriteExecute, which would also break JIT-based recipe
+# install commands that inherit this sandbox.
+
+# Resources for the daemon and every recipe/updater child.
+MemoryMax=256M
+TasksMax=64
+LimitCORE=0
+LimitNOFILE=4096
 
 [Install]
 WantedBy=multi-user.target

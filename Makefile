@@ -53,6 +53,8 @@ edge-test:
 test-ota:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
 	$(RUN) python3 scripts/test_ota.py
+	$(RUN) python3 scripts/test_ota.py --firmware-helper
+	$(RUN) python3 scripts/test_firmware_restart.py
 
 # SF-030 harmless test component: fixture tests (system shell, plus busybox when
 # installed), then the real daemon applying it through suifleet-test-updater.
