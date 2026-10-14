@@ -66,6 +66,43 @@ If Rust files change, run `cargo fmt --manifest-path suifleet-edge/Cargo.toml` w
 
 Report unavailable credentials/hardware as unverified evidence. Do not erase a journal, reenroll devices or generate chain transactions merely to get a local test green.
 
+### Old package entry points and status receipts
+
+Every published package version stays callable after an upgrade, and code can only access types its own package defines. The original package's `report_status` has no signer or target check. It writes the `StatusesKey` dynamic field and emits `DeviceStatusUpdated`, and both types originate in that package. Treat them as **unauthenticated legacy data**.
+
+Authoritative status lives in state that old code cannot construct:
+
+| | Legacy (forgeable) | Authoritative |
+|---|---|---|
+| Field | `StatusesKey → VecMap<ID, u8>` | `ReceiptsKey → Receipts { version, statuses }` |
+| Event | `DeviceStatusUpdated` | `DeviceStatusReported { …, reporter }` |
+| Type origin | First package | The upgrade that introduced receipts |
+| Reader | `statuses()` | `receipt_statuses()`, `receipt_status()`, `has_receipts()` |
+
+- New records carry no `StatusesKey`, so the old `report_status` aborts on them.
+- Records created by the original package keep `StatusesKey` as unverified history. Old entry points can still write it. Their receipts are attached lazily on the first signer-checked report or by `migrate`, and legacy entries are never copied into receipts.
+- `Receipts.version` gates writers. Any later upgrade that changes report authority (revocation, new targeting rules) must bump `RECEIPTS_VERSION` and then call the new package's permissionless, idempotent `migrate` on every live record. Once a record is migrated, older packages' report and `migrate` calls abort with `EPackageOutdated`. Records not yet swept remain writable by the previous package, under that package's own checks.
+
+Mixed clients:
+- Clients must read `ReceiptsKey`/`DeviceStatusReported` using the type origin of the upgrade package, not the original package ID.
+- Clients still reading `StatusesKey` show new deployments as pending. That is safe, but not useful.
+- Devices on the current daemon keep reporting through `report_status`/`report_status_for_group`, whose signatures are unchanged.
+
+Recovery:
+- Legacy unbound caps cannot report. Reissue them with `device_cap::issue_cap`.
+- Legacy records show no authoritative status until the device reports again. Redeploy if an operator needs a verified receipt.
+
+Local acceptance (throwaway localnet in the dev image; refuses non-localhost RPC):
+
+```bash
+git archive <prior-ref> contracts | tar -x -C /tmp/v1
+SUI_CONFIG_DIR=/tmp/sui-config sui start --with-faucet --force-regenesis &
+SUI_CONFIG_DIR=/tmp/sui-config sui client switch --env local
+SUI_CONFIG_DIR=/tmp/sui-config python3 scripts/upgrade_security_localnet.py --v1 /tmp/v1/contracts --v2 contracts
+```
+
+It publishes the prior package, creates a device and deployment, then upgrades. Next it attacks through old and new entry points, requiring each attack to abort at the intended check. It also verifies a later version-bumped upgrade locks out this package. Results come from on-chain effects, object state and events. This does not replace an upgrade test against an existing deployment on a public network.
+
 ## Deployment process
 
 1. Determine the explicit deployment scope and target network; verify the RPC's chain identity, signer address, gas and UpgradeCap ownership. Environment aliases alone are insufficient, especially after devnet resets.
