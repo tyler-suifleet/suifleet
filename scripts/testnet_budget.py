@@ -29,8 +29,10 @@ class Budget:
         self.faucet_attempts += 1
         return request()  # A credit cannot change used/remaining, even on failure.
 
-    def execute(self, client, label, command, *, gas=200_000_000, funding=0):
-        if gas <= 0 or funding < 0:
+    def execute(self, client, label, command, *, gas=200_000_000, funding=0, expect='success'):
+        """Reserve gas plus funding, execute, then settle to the effects' net
+        cost. `expect='failure'` is for calls that must abort on chain."""
+        if gas <= 0 or funding < 0 or expect not in ('success', 'failure'):
             raise ValueError('invalid gas/funding reservation')
         # Refuse a useless tiny budget before even invoking publish/upgrade.
         available = self.remaining - funding
@@ -50,8 +52,8 @@ class Budget:
                 raise RuntimeError('execution gas exceeds reserved budget')
             entry.update(digest=result['digest'], status=status, gas_mist=cost)
             self.used -= reserved - cost
-            if status != 'success':
-                raise RuntimeError(f'{label}: execution effects {effects["status"]}')
+            if status != expect:
+                raise RuntimeError(f'{label}: expected {expect}, execution effects {effects["status"]}')
             return result
         finally:
             entry['allowance_used_mist'] = self.used

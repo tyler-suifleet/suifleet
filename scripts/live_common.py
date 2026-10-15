@@ -18,6 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import deployment_manifest as dm
 import test_component as component
+from testnet_budget import Budget, Spent  # noqa: F401 (re-exported to the suites)
 
 ROOT = Path(__file__).resolve().parents[1]
 DAEMON = ROOT / "suifleet-edge/target/debug/suifleet"
@@ -46,8 +47,11 @@ class _Abort:
 ABORT = _Abort()
 
 
-class Spent(Exception):
-    pass
+# Every mutation is charged to testnet_budget's strict, non-replenishing allowance.
+DIGEST = re.compile(r"transaction '([1-9A-HJ-NP-Za-km-z]{32,44})'")
+# The dedicated testnet wallets (agent, CI) of docs/TESTNET.md.
+TESTNET_WALLETS = {"0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+                   "0x99894c1ae83e8179dd05f3f419f3967c24508159fc5ddaf232af67fdf0c2dcac"}
 
 
 def wait_for(condition, message, process=None, timeout=240):
@@ -73,7 +77,11 @@ def plain(value):
 
 
 class Live:
-    """A funded wallet on a live network, with spend accounting and evidence."""
+    """A funded wallet on a live network. Every mutation goes through a
+    `Budget` (testnet_budget): its gas budget and any funding it sends are
+    reserved against the run's ceiling before execution and settled from
+    the effects, so failures, aborts and unknown outcomes are charged and
+    rebates never replenish the allowance."""
 
     def __init__(self, wallet, network, max_spend_mist):
         self.wallet = Path(wallet).resolve()
@@ -81,9 +89,10 @@ class Live:
         self.max_spend = max_spend_mist
         self.evidence = {"started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "network": network,
                          "transactions": [], "checks": []}
+        self.ledger = Budget(max_spend_mist, self.evidence["transactions"])
 
-    def client(self, *command, json_output=True, check=True):
-        full = ["sui", "client", "--client.config", str(self.wallet), *map(str, command)]
+    def client(self, *command, json_output=True, check=True, config=None):
+        full = ["sui", "client", "--client.config", str(config or self.wallet), *map(str, command)]
         if json_output:
             full.append("--json")
         result = subprocess.run(full, text=True, capture_output=True, timeout=600)
@@ -93,6 +102,41 @@ class Live:
             return result
         out = result.stdout
         return json.loads(out[min(i for i in (out.find("{"), out.find("[")) if i >= 0):])
+
+    def executor(self, config=None):
+        """A Budget client: runs a mutating `sui client` command and returns
+        its execution effects. A failed execution is read back by digest; no
+        digest means an unknown outcome (the reservation stays charged)."""
+        def execute(*command):
+            result = self.client(*command, check=False, config=config)
+            if isinstance(result, dict) and "effects" in result:
+                return result
+            text = result.stderr + result.stdout if hasattr(result, "stderr") else json.dumps(result)
+            if '"effects"' in getattr(result, "stdout", ""):
+                try:
+                    parsed = json.loads(result.stdout[result.stdout.find("{"):])
+                    if "effects" in parsed:
+                        return parsed
+                except ValueError:
+                    pass
+            digest = DIGEST.search(text)
+            if not digest:
+                raise RuntimeError(f"sui client {command[0]}: no execution outcome\n{text[-3000:]}")
+            found = {}
+            wait_for(lambda: found.update(self.executed(digest.group(1), config)) or bool(found),
+                     f"transaction {digest.group(1)} not readable", timeout=60)
+            return found
+        return execute
+
+    def executed(self, digest, config=None):
+        result = self.client("tx-block", digest, check=False, config=config)
+        return result if isinstance(result, dict) and "effects" in result else {}
+
+    def assert_lock(self):
+        """Machine sessions hold network:suifleet-testnet for mutations."""
+        if os.environ.get("SUIFLEET_TESTNET_LOCK_TOKEN"):
+            subprocess.run(["ticket", "--project", "suifleet", "lock-assert", "network:suifleet-testnet",
+                            "--lock-token", os.environ["SUIFLEET_TESTNET_LOCK_TOKEN"]], check=True, stdout=subprocess.DEVNULL)
 
     def balance(self, address=None):
         gas = self.client("gas", *([address] if address else []))
@@ -108,47 +152,44 @@ class Live:
             assert any(h in self.rpc_url for h in ("127.0.0.1", "localhost")), "localnet profile needs a loopback node"
         else:
             assert self.chain == CHAINS[self.network], f"active env {active_env} is chain {self.chain}, not {self.network}"
+            assert self.operator in TESTNET_WALLETS, "wallet is outside the dedicated testnet grant"
         self.start_balance = self.balance()
         assert self.start_balance >= self.max_spend, (
             f"{self.operator} holds {self.start_balance} MIST; this run may spend up to {self.max_spend}. "
             "Fund it first (docs/TESTNET.md)")
         self.evidence.update(chain=self.chain, rpc=self.rpc_url, operator=self.operator, start_balance_mist=self.start_balance,
+                             max_spend_mist=self.max_spend,
                              sui=subprocess.run(["sui", "--version"], capture_output=True, text=True).stdout.strip(),
                              head=subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "HEAD"], text=True).strip())
         print(f"{self.network} chain {self.chain}, operator {self.operator}, balance {self.start_balance / 1e9:.3f} SUI")
 
-    def guard(self, label):
-        if self.start_balance - self.balance() > self.max_spend:
-            raise Spent(f"spend ceiling {self.max_spend} MIST reached before {label}")
+    def execute(self, label, command, *, gas, funding=0, expect="success", sender=None):
+        """One charged mutation. `sender` is (client.yaml, Budget) for a
+        child account the run funded: its own gas is bounded by (and
+        recorded against) that funding, which the run already charged."""
+        self.assert_lock()
+        config, ledger = sender or (None, self.ledger)
+        return ledger.execute(self.executor(config), label, command, gas=gas, funding=funding, expect=expect)
 
-    def record(self, label, result, expected="success"):
-        effects = result["effects"]
-        status = effects["status"]["status"]
-        gas = effects.get("gasUsed", {})
-        cost = sum(int(gas.get(k, 0)) for k in ("computationCost", "storageCost")) - int(gas.get("storageRebate", 0))
-        self.evidence["transactions"].append({"label": label, "digest": result["digest"], "status": status, "gas_mist": cost})
-        assert status == expected, (label, effects["status"])
+    def transaction(self, label, *ptb, budget=200_000_000, funding=0, sender=None):
+        return self.execute(label, ["ptb", *ptb], gas=budget, funding=funding, sender=sender)
 
-    def transaction(self, label, *ptb, budget=200_000_000):
-        self.guard(label)
-        result = self.client("ptb", *ptb, "--gas-budget", str(budget))
-        self.record(label, result)
-        return result
+    def child(self, config, funding):
+        """The Budget for a child account funded with `funding` MIST."""
+        return (config, Budget(funding, self.evidence["transactions"]))
 
-    def attack(self, label, *ptb, module, function, code, budget=50_000_000):
+    def attack(self, label, *ptb, module, function, code, budget=50_000_000, sender=None):
         """Submit a call that must abort on chain with exactly this Move abort
         (an explicit budget skips the CLI's dry-run gate, so it executes and
-        the failure is final, not a client-side refusal)."""
-        self.guard(label)
-        result = self.client("ptb", *ptb, "--gas-budget", str(budget), check=False)
-        text = (result.stderr + result.stdout) if hasattr(result, "stderr") else json.dumps(result["effects"]["status"])
-        digest = re.search(r"transaction '([1-9A-HJ-NP-Za-km-z]{32,44})'", text)
-        found = ABORT.search(text)
+        the failure is final, not a client-side refusal). The abort is read
+        from the transaction's effects."""
+        result = self.execute(label, ["ptb", *ptb], gas=budget, expect="failure", sender=sender)
+        found = ABORT.search(str(result["effects"]["status"].get("error", "")))
         observed = found.groups() if found else None
-        entry = {"label": label, "digest": digest.group(1) if digest else None, "status": "aborted" if found else "unexpected",
-                 "abort": observed}
-        self.evidence["transactions"].append(entry)
-        assert observed == (module, function, str(code)), f"{label}: expected abort {module}::{function} {code}, got {observed}\n{text[-1500:]}"
+        entry = next(e for e in reversed(self.evidence["transactions"]) if e.get("digest") == result["digest"])
+        entry["abort"] = observed
+        assert observed == (module, function, str(code)), (
+            f"{label}: expected abort {module}::{function} {code}, got {result['effects']['status']}")
         return entry
 
     def check(self, label):
@@ -165,12 +206,9 @@ class Live:
 
     def publish(self, label, package_dir, pubfile, upgrade_cap=None):
         """Ephemeral publication (or upgrade) of a contracts tree."""
-        self.guard(label)
-        common = ["--build-env", "testnet", "--pubfile-path", pubfile, "--gas-budget", "400000000", "--silence-warnings"]
+        common = ["--build-env", "testnet", "--pubfile-path", pubfile, "--silence-warnings"]
         args = ["test-upgrade", package_dir, "--upgrade-capability", upgrade_cap] if upgrade_cap else ["test-publish", package_dir]
-        result = self.client(*args, *common)
-        self.record(label, result)
-        return result
+        return self.execute(label, [*args, *common], gas=400_000_000)
 
     def object(self, object_id):
         return self.client("object", object_id)
@@ -193,11 +231,11 @@ class Live:
 
     def finish(self, path):
         end = self.balance()
-        self.evidence.update(end_balance_mist=end, spent_mist=self.start_balance - end,
+        self.evidence.update(end_balance_mist=end, spent_mist=self.start_balance - end, allowance_used_mist=self.ledger.used,
                              finished=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
         if path:
             Path(path).write_text(json.dumps(self.evidence, indent=2) + "\n")
-        print(f"spent {(self.start_balance - end) / 1e9:.4f} SUI; {len(self.evidence['transactions'])} transactions; "
+        print(f"spent {(self.start_balance - end) / 1e9:.4f} SUI (allowance used {self.ledger.used} MIST); {len(self.evidence['transactions'])} transactions; "
               f"evidence: {path or '(not written)'}")
 
 

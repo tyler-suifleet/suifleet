@@ -185,12 +185,14 @@ live-gate-package-upgrade:
 		$(if $(SUIFLEET_STATE),--state "$(SUIFLEET_STATE)") $(if $(SUIFLEET_WALRUS),--walrus "$(SUIFLEET_WALRUS)") \
 		--evidence "$${SUIFLEET_EVIDENCE:-live-evidence.json}"
 
-# Old-package/legacy-object attacks across a real upgrade (~0.22 SUI; per release).
+# Old-package/legacy-object attacks across a real upgrade. The package pair is
+# cached by contract content (~0.05 SUI reused; FRESH=1 republishes, ~0.22 SUI).
 live-gate-upgrade-security:
 	@test -n "$(SUIFLEET_WALLET)" || { echo "set SUIFLEET_WALLET to a funded wallet's client.yaml"; exit 1; }
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/live_upgrade_security.py --wallet "$(SUIFLEET_WALLET)" \
-		--network "$${SUIFLEET_NETWORK:-testnet}" --evidence "$${SUIFLEET_EVIDENCE:-live-security-evidence.json}"
+		--network "$${SUIFLEET_NETWORK:-testnet}" $(if $(SUIFLEET_STATE),--state "$(SUIFLEET_STATE)") $(if $(FRESH),--fresh) \
+		--evidence "$${SUIFLEET_EVIDENCE:-live-security-evidence.json}"
 
 # The dApp in headless Chromium against testnet (needs dapp deps and Playwright
 # Chromium; reuses the package-upgrade fixture, so run that gate first).
@@ -210,4 +212,5 @@ test-daemon-localnet:
 .PHONY: test-testnet
 test-testnet:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_testnet*.py'
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_live_common.py'
 	$(RUN) node scripts/test_testnet_cache.cjs

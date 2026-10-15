@@ -69,6 +69,9 @@ def sweep(live, seed, root):
         time.sleep(5)
         assert held() < 5_000_000, f"sweep failed and the test key still holds funds: {(result.stderr + result.stdout)[-500:]}"
         return 0  # Already swept (the read was stale).
+    swept = json.loads(result.stdout[result.stdout.find("{"):])
+    live.evidence["transactions"].append({"label": "sweep the test key (paid from its charged funding)", "digest": swept["digest"],
+                                          "status": swept["effects"]["status"]["status"], "sender": "browser test key"})
     return amount
 
 
@@ -109,8 +112,11 @@ def run(args):
         key.chmod(0o600)
         browser_address = subprocess.check_output([str(DAEMON), "--derive-address", str(key)], text=True).strip()
         device_address = subprocess.check_output([str(DAEMON), "--provision", str(root / "device.key")], text=True).strip()
+        # The funding is charged to the allowance in full: the browser's
+        # transactions and the sweep spend only the test key's own coins, and
+        # what the sweep returns never replenishes the allowance.
         live.transaction("fund the browser test key", "--split-coins", "gas", f"[{FUNDING}]", "--assign", "fund",
-                         "--transfer-objects", "[fund]", f"@{browser_address}", budget=10_000_000)
+                         "--transfer-objects", "[fund]", f"@{browser_address}", budget=10_000_000, funding=FUNDING)
         before_sweep = live.balance()
         evidence_file = root / "browser-evidence.json"
         env = {**os.environ, "LIVE_MANIFEST_FILE": str(root / "deployment.json"), "LIVE_SEED": seed,

@@ -23,8 +23,17 @@ Spends testnet gas from an explicitly supplied wallet (docs/TESTNET.md).
    spend). Recipes and artifacts go to real Walrus testnet storage
    (--walrus testnet) or a local stand-in.
 
-Cost: two package publications (~0.18 SUI) plus about a dozen transactions;
-run it per release candidate, not per commit.
+Cost: package storage is never refunded, so the two packages (base and its
+upgrade to head) are cached in --state, keyed by the content of the base and
+head contracts, and re-verified on chain before reuse: the UpgradeCap is still
+the operator's, at version 2 and pointing at the cached head (so nothing else
+was upgraded on top), the registry is shared, and the manifest's type origins
+split between base and head. A reused pair recreates the legacy state through
+the base package's entry points, which old packages keep after an upgrade;
+--fresh republishes (~0.18 SUI), for release candidates that must also show
+state created before the upgrade. A cached run costs about 0.05 SUI, mostly
+the legacy device's report gas. Every transaction, the device's funding and
+the device's own transactions are charged to --max-spend-mist.
 """
 import argparse
 import json
@@ -38,76 +47,123 @@ from types import SimpleNamespace
 import deployment_manifest as dm
 from live_common import (CLOCK, DAEMON, Live, Spent, Walrus, contracts_at, deployment_args, history, ids, stage,
                          start_daemon, wait_for)
+from live_package_upgrade import contracts_digest, load_state, save_state
 import subprocess
 
 DEFAULT_BASE = "f43d531^1"  # main immediately before SF-008 (#50): receipts, no identities.
 
 
+DEVICE_FUNDING = 40_000_000  # The legacy device's own report/attack gas, charged up front.
+
+
+def fixture_valid(live, fixture):
+    """Free reads: the cached packages are still this operator's lineage."""
+    try:
+        cap = live.object(fixture["upgrade_cap"])
+        registry = live.object(fixture["registry"])
+        live.object(fixture["head_package"])
+    except RuntimeError:
+        return False
+    content = cap.get("content") or {}
+    return (dm.object_id((cap.get("owner") or {}).get("AddressOwner") or "0x0") == live.operator
+            and dm.object_id(content.get("package") or "0x0") == dm.object_id(fixture["head_package"])
+            and int(content.get("version") or 0) == 2 and "Shared" in (registry.get("owner") or {}))
+
+
 def run(args):
     live = Live(args.wallet, args.network, args.max_spend_mist)
     live.preflight()
-    base = subprocess.check_output(["git", "-C", str(Path(__file__).resolve().parents[1]), "rev-parse", args.base_ref],
-                                   text=True).strip()
+    repository = Path(__file__).resolve().parents[1]
+    base = subprocess.check_output(["git", "-C", str(repository), "rev-parse", args.base_ref], text=True).strip()
     live.evidence.update(base=base, walrus=args.walrus)
+    state_path = Path(args.state) if args.state else live.wallet.parent / "live-state.json"
     walrus = Walrus(args.walrus)
     daemon = None
     try:
         with tempfile.TemporaryDirectory(prefix="suifleet-live-security-") as temporary:
             root = Path(temporary)
             package_dir, pubfile = root / "package", root / "Pub.live.toml"
-            stage(contracts_at(base, root / "base"), package_dir)
+            base_contracts = contracts_at(base, root / "base")
+            key_name = f"{contracts_digest(base_contracts)}..{contracts_digest(repository / 'contracts')}"
+            state = load_state(state_path, live.chain, live.operator)
+            fixtures = state.setdefault("security_fixtures", {})
+            fixture = None if args.fresh else fixtures.get(key_name)
+            if fixture and not fixture_valid(live, fixture):
+                print("Cached security fixture is no longer intact on chain; publishing a new one")
+                fixture = None
             run_id = "sec-" + uuid.uuid4().hex[:8]
-
-            # 1. Base package and legacy state.
-            first = live.publish("publish base (pre-identity)", package_dir, pubfile)
-            old = live.published(first)
-            registry = live.created(first, "::device_registry::DeviceRegistry")[0]
-            upgrade_cap = live.created(first, "::package::UpgradeCap")[0]
             key = root / "device.key"
             device_address = subprocess.check_output([str(DAEMON), "--provision", str(key)], text=True).strip()
-            registered = live.transaction("register legacy device + bound cap + group (base)",
-                "--move-call", f"{old}::device_registry::register_device", f"@{registry}", '"legacy-pi"',
-                f"@{device_address}", '"aarch64"', CLOCK, "--assign", "device",
-                "--move-call", f"{old}::device_cap::issue_cap", "device",
-                "--move-call", f"{old}::device_cap::issue", "device", "--assign", "minted",
-                "--transfer-objects", "[device, minted]", f"@{live.operator}",
-                "--move-call", f"{old}::device_group::create_group", '"legacy"', '"sf010"', CLOCK,
-                "--split-coins", "gas", "[40000000]", "--assign", "fee", "--transfer-objects", "[fee]", f"@{device_address}")
-            device = live.created(registered, "::device_registry::Device")[0]
-            caps = live.created(registered, "::device_cap::DeviceCap")
-            group = live.created(registered, "::device_group::DeviceGroup")[0]
-            for cap_id in caps:
-                live.readable(cap_id)
-            cap = next(c for c in caps if dm.object_id(live.owner(c)) == dm.object_id(device_address))
-            minted = next(c for c in caps if c != cap)
-            live.transaction("add legacy device to group (base)", "--move-call", f"{old}::device_group::add_device", f"@{group}", f"@{device}")
-            d0 = live.created(live.transaction("deployment via base", "--move-call", f"{old}::deployment_manager::create_deployment_verified",
-                                               *deployment_args(walrus, "0.9.0", run_id), "vector[]", ids([device]), CLOCK),
-                              "::deployment_manager::DeploymentRecord")[0]
-            device_wallet = device_client(root, key, live)
-            report = device_wallet("ptb", "--move-call", f"{old}::deployment_manager::report_status", f"@{d0}", f"@{cap}", "1u8",
-                                   "--gas-budget", "10000000")
-            assert isinstance(report, dict), f"legacy report failed:\n{report.stderr[-2000:]}\n{report.stdout[-1000:]}"
-            live.record("legacy device reports Applied via base", report)
-            wait_for(lambda: live.receipts(d0) == {dm.object_id(device): 1}, "base receipt not readable")
-            live.check(f"base {old[:12]}…: legacy device, bound cap, group and a receipted deployment created with it")
+            device_wallet = live.child(device_client(root, key, live), DEVICE_FUNDING)
 
-            # 2. Upgrade in place.
-            stage(Path(__file__).resolve().parents[1] / "contracts", package_dir)
-            upgraded = live.publish("upgrade to head", package_dir, pubfile, upgrade_cap=upgrade_cap)
-            new = live.published(upgraded)
+            def legacy_state(old, registry):
+                """A legacy device, its signer-bound cap (plus one the operator
+                keeps), a group and a receipted deployment, all through `old`."""
+                registered = live.transaction("register legacy device + bound cap + group (base)",
+                    "--move-call", f"{old}::device_registry::register_device", f"@{registry}", '"legacy-pi"',
+                    f"@{device_address}", '"aarch64"', CLOCK, "--assign", "device",
+                    "--move-call", f"{old}::device_cap::issue_cap", "device",
+                    "--move-call", f"{old}::device_cap::issue", "device", "--assign", "minted",
+                    "--transfer-objects", "[device, minted]", f"@{live.operator}",
+                    "--move-call", f"{old}::device_group::create_group", '"legacy"', '"sf010"', CLOCK,
+                    "--split-coins", "gas", f"[{DEVICE_FUNDING}]", "--assign", "fee",
+                    "--transfer-objects", "[fee]", f"@{device_address}", funding=DEVICE_FUNDING)
+                device = live.created(registered, "::device_registry::Device")[0]
+                caps = live.created(registered, "::device_cap::DeviceCap")
+                group = live.created(registered, "::device_group::DeviceGroup")[0]
+                for cap_id in caps:
+                    live.readable(cap_id)
+                cap = next(c for c in caps if dm.object_id(live.owner(c)) == dm.object_id(device_address))
+                minted = next(c for c in caps if c != cap)
+                live.transaction("add legacy device to group (base)", "--move-call", f"{old}::device_group::add_device", f"@{group}", f"@{device}")
+                d0 = live.created(live.transaction("deployment via base", "--move-call", f"{old}::deployment_manager::create_deployment_verified",
+                                                   *deployment_args(walrus, "0.9.0", run_id), "vector[]", ids([device]), CLOCK),
+                                  "::deployment_manager::DeploymentRecord")[0]
+                live.transaction("legacy device reports Applied via base", "--move-call", f"{old}::deployment_manager::report_status",
+                                 f"@{d0}", f"@{cap}", "1u8", budget=10_000_000, sender=device_wallet)
+                wait_for(lambda: live.receipts(d0) == {dm.object_id(device): 1}, "base receipt not readable")
+                return device, cap, minted, group, d0
+
+            if fixture:
+                old, new, registry, upgrade_cap = (fixture[k] for k in ("base_package", "head_package", "registry", "upgrade_cap"))
+                live.check(f"reused fixture {key_name[:12]}…: base {old[:12]}…, head {new[:12]}… (UpgradeCap version 2 still "
+                           "points at head; re-verified on chain; no package storage spent)")
+                device, cap, minted, group, d0 = legacy_state(old, registry)
+                live.check(f"base {old[:12]}…'s entry points, after the upgrade: legacy device, bound cap, group and a "
+                           "receipted deployment created with them")
+                live.evidence["legacy_state"] = "created through the base package after the cached upgrade"
+            else:
+                # 1. Base package and legacy state.
+                stage(base_contracts, package_dir)
+                first = live.publish("publish base (pre-identity)", package_dir, pubfile)
+                old = live.published(first)
+                registry = live.created(first, "::device_registry::DeviceRegistry")[0]
+                upgrade_cap = live.created(first, "::package::UpgradeCap")[0]
+                device, cap, minted, group, d0 = legacy_state(old, registry)
+                live.check(f"base {old[:12]}…: legacy device, bound cap, group and a receipted deployment created with it")
+                live.evidence["legacy_state"] = "created before the upgrade"
+
+                # 2. Upgrade in place.
+                stage(repository / "contracts", package_dir)
+                new = live.published(live.publish("upgrade to head", package_dir, pubfile, upgrade_cap=upgrade_cap))
+                fixtures[key_name] = dict(base_package=old, head_package=new, registry=registry, upgrade_cap=upgrade_cap,
+                                          base=base, created=live.evidence["started"])
+                save_state(state_path, state)
             manifest = dm.resolve(SimpleNamespace(chain_identifier=live.chain, rpc=live.rpc_url, package=new, upgrade_cap=upgrade_cap,
                                                   registry=registry, network=args.network, publisher=walrus.publisher,
                                                   aggregator=walrus.aggregator))
-            live.evidence.update(base_package=old, head_package=new, registry=registry, type_origins=manifest["type_origins"])
+            live.evidence.update(base_package=old, head_package=new, registry=registry, upgrade_cap=upgrade_cap, fixture=key_name,
+                                 type_origins=manifest["type_origins"])
             assert manifest["type_origins"]["device_registry::IdentityKey"] == dm.object_id(new), "identity types should originate in the upgrade"
+            assert manifest["type_origins"]["device_registry::Device"] == dm.object_id(old), "existing types should originate in the base"
             live.check(f"upgraded in place to {new[:12]}…; identity types originate in the upgrade, existing types in the base")
 
             # 3. Attacks (each must abort exactly as intended).
             d1 = live.created(live.transaction("deployment via head", "--move-call", f"{new}::deployment_manager::create_deployment_verified",
                                                *deployment_args(walrus, "1.0.0", run_id), "vector[]", ids([device]), CLOCK),
                               "::deployment_manager::DeploymentRecord")[0]
-            attack = lambda label, *ptb, **expected: device_attack(live, device_wallet, label, *ptb, **expected)
+            # The device holds DEVICE_FUNDING: its budgets stay well below that.
+            attack = lambda label, *ptb, **expected: live.attack(label, *ptb, budget=10_000_000, sender=device_wallet, **expected)
             attack("old package report on a new record", "--move-call", f"{old}::deployment_manager::report_status", f"@{d1}", f"@{cap}", "1u8",
                    module="deployment_manager", function="receipts_mut", code=5)
             attack("superseded report signature in the new package", "--move-call", f"{new}::deployment_manager::report_status", f"@{d1}",
@@ -120,7 +176,7 @@ def run(args):
             assert live.receipts(d1) == {}, "an attack wrote a receipt"
             live.check("old-package, superseded, pre-activation and impersonation reports all abort on chain; no receipt written")
 
-            # 4. Activation, the real daemon, revocation.
+            # 4. Activation, the real daemon (paying from the device's charged funding), revocation.
             activated = live.transaction("activate the legacy device (head)", "--move-call", f"{new}::device_registry::activate_device",
                                          f"@{registry}", f"@{device}", "--assign", "owner", "--transfer-objects", "[owner]", f"@{live.operator}")
             owner_cap = live.created(activated, "::device_registry::DeviceOwnerCap")[0]
@@ -178,30 +234,7 @@ def device_client(root, key, live):
     address = subprocess.check_output([str(DAEMON), "--derive-address", str(key)], text=True).strip()
     subprocess.run(["sui", "client", "--client.config", str(wallet / "client.yaml"), "switch", "--address", address],
                    check=True, capture_output=True)
-
-    def call(*command):
-        result = subprocess.run(["sui", "client", "--client.config", str(wallet / "client.yaml"), *command, "--json"],
-                                text=True, capture_output=True, timeout=600)
-        if result.returncode:
-            return result
-        out = result.stdout
-        return json.loads(out[out.find("{"):])
-    return call
-
-
-def device_attack(live, device_wallet, label, *ptb, module, function, code):
-    """`Live.attack`, but sent by the device's own key."""
-    # The device holds ~0.04 SUI: budgets must stay below its balance.
-    result = device_wallet("ptb", *ptb, "--gas-budget", "10000000")
-    text = (result.stderr + result.stdout) if hasattr(result, "stderr") else json.dumps(result.get("effects", {}).get("status"))
-    import re
-    from live_common import ABORT
-    digest = re.search(r"transaction '([1-9A-HJ-NP-Za-km-z]{32,44})'", text)
-    found = ABORT.search(text)
-    observed = found.groups() if found else None
-    live.evidence["transactions"].append({"label": label, "digest": digest.group(1) if digest else None,
-                                          "status": "aborted" if found else "unexpected", "abort": observed, "sender": "device"})
-    assert observed == (module, function, str(code)), f"{label}: expected abort {module}::{function} {code}, got {observed}\n{text[-1500:]}"
+    return wallet / "client.yaml"
 
 
 def bech32_suiprivkey(seed):
@@ -240,8 +273,10 @@ if __name__ == "__main__":
     parser.add_argument("--network", default="testnet", choices=["testnet", "localnet"])
     parser.add_argument("--base-ref", default=DEFAULT_BASE, help=f"pre-upgrade contracts (default {DEFAULT_BASE})")
     parser.add_argument("--walrus", default="testnet", choices=["testnet", "local"])
-    parser.add_argument("--max-spend-mist", type=int, default=600_000_000)
+    parser.add_argument("--max-spend-mist", type=int, default=600_000_000, help="strict run allowance, including device funding")
     parser.add_argument("--evidence", help="write evidence JSON here")
+    parser.add_argument("--state", help="fixture cache (default: live-state.json beside the wallet)")
+    parser.add_argument("--fresh", action="store_true", help="ignore the cache: publish and upgrade a new fixture")
     try:
         run(parser.parse_args())
     except Spent as error:
