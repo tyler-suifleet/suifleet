@@ -47,7 +47,7 @@ edge-build:
 	$(RUN) bash -c "cd suifleet-edge && cargo build --locked --release"
 
 edge-test:
-	$(RUN) bash -c "cd suifleet-edge && cargo test --locked"
+	$(RUN) bash -c "cd suifleet-edge && cargo test --locked && cargo test --locked --features pkcs11"
 
 .PHONY: test-ota test-component dapp-typecheck
 
@@ -202,6 +202,13 @@ test-indexer-localnet: indexer-build
 test-publish-localnet:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_publish_localnet.py
+
+# SF-021 on a disposable localnet (start it first): claim enrollment, delegated
+# deployer roles and a SoftHSM2 PKCS#11 signer (needs softhsm2 + opensc).
+.PHONY: test-enrollment-localnet
+test-enrollment-localnet:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts --features pkcs11
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_enrollment_localnet.py
 
 # Live gate (spends testnet gas; docs/TESTNET.md): base contracts published,
 # upgraded in place to this tree, real daemon, on-chain receipts.

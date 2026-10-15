@@ -48,6 +48,9 @@ module sui_edge::deployment_manager {
     /// Present (true) on records that a group's desired state has referenced:
     /// desired-state reconciliation applies them, not the one-shot event path.
     public struct ManagedKey has copy, drop, store {}
+    /// The delegate who created a record under a deployer role (`roles`);
+    /// the record's `creator` is the operator the role acts for.
+    public struct DelegateKey has copy, drop, store {}
 
     /// Authoritative per-device status receipts.
     ///
@@ -136,7 +139,8 @@ module sui_edge::deployment_manager {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
-        let record = make_deployment(component_name, version, recipe_blob_id, artifact_sha256,
+        let creator = ctx.sender();
+        let record = make_deployment(creator, component_name, version, recipe_blob_id, artifact_sha256,
             target_groups, target_devices, clock, ctx);
         transfer::share_object(record);
     }
@@ -172,15 +176,9 @@ module sui_edge::deployment_manager {
         clock: &Clock,
         ctx: &mut TxContext,
     ): DeploymentRecord {
-        let bytes = recipe_sha256.as_bytes();
-        assert!(bytes.length() == 64, EInvalidRecipeHash);
-        let mut i = 0;
-        while (i < bytes.length()) {
-            let byte = bytes[i];
-            assert!((byte >= 48 && byte <= 57) || (byte >= 97 && byte <= 102), EInvalidRecipeHash);
-            i = i + 1;
-        };
-        let mut record = make_deployment(component_name, version, recipe_blob_id, artifact_sha256,
+        assert_recipe_hash(&recipe_sha256);
+        let creator = ctx.sender();
+        let mut record = make_deployment(creator, component_name, version, recipe_blob_id, artifact_sha256,
             target_groups, target_devices, clock, ctx);
         df::add(&mut record.id, RecipeDigestKey {}, recipe_sha256);
         record
@@ -190,11 +188,47 @@ module sui_edge::deployment_manager {
         transfer::share_object(record);
     }
 
+    /// A verified group deployment attributed to `operator` but created by the
+    /// sender as its delegate. Only `roles::create_deployment_as`, which checks
+    /// an active deployer role scoped to these groups, may call it.
+    public(package) fun create_delegated(
+        operator: address,
+        component_name: String,
+        version: String,
+        recipe_blob_id: String,
+        artifact_sha256: String,
+        recipe_sha256: String,
+        target_groups: vector<ID>,
+        clock: &Clock,
+        ctx: &mut TxContext,
+    ): ID {
+        assert_recipe_hash(&recipe_sha256);
+        let mut record = make_deployment(operator, component_name, version, recipe_blob_id, artifact_sha256,
+            target_groups, vector[], clock, ctx);
+        df::add(&mut record.id, RecipeDigestKey {}, recipe_sha256);
+        df::add(&mut record.id, DelegateKey {}, ctx.sender());
+        let id = object::id(&record);
+        transfer::share_object(record);
+        id
+    }
+
+    fun assert_recipe_hash(recipe_sha256: &String) {
+        let bytes = recipe_sha256.as_bytes();
+        assert!(bytes.length() == 64, EInvalidRecipeHash);
+        let mut i = 0;
+        while (i < bytes.length()) {
+            let byte = bytes[i];
+            assert!((byte >= 48 && byte <= 57) || (byte >= 97 && byte <= 102), EInvalidRecipeHash);
+            i = i + 1;
+        };
+    }
+
     public(package) fun create_catalog_deployment<K: copy + drop + store, V: store>(
         name: String, version: String, groups: vector<ID>, devices: vector<ID>,
         key: K, value: V, clock: &Clock, ctx: &mut TxContext,
     ) {
-        let mut record = make_deployment(name, version, std::string::utf8(b""),
+        let creator = ctx.sender();
+        let mut record = make_deployment(creator, name, version, std::string::utf8(b""),
             std::string::utf8(b""), groups, devices, clock, ctx);
         record.schema_version = 2;
         df::add(&mut record.id, key, value);
@@ -210,6 +244,7 @@ module sui_edge::deployment_manager {
     }
 
     fun make_deployment(
+        creator: address,
         component_name: String,
         version: String,
         recipe_blob_id: String,
@@ -223,7 +258,7 @@ module sui_edge::deployment_manager {
 
         let mut record = DeploymentRecord {
             id: object::new(ctx),
-            creator: ctx.sender(),
+            creator,
             component_name,
             version,
             recipe_blob_id,
@@ -377,6 +412,9 @@ module sui_edge::deployment_manager {
         if (df::exists(&deployment.id, ManagedKey {})) {
             let _: bool = df::remove(&mut deployment.id, ManagedKey {});
         };
+        if (df::exists(&deployment.id, DelegateKey {})) {
+            let _: address = df::remove(&mut deployment.id, DelegateKey {});
+        };
 
         let DeploymentRecord { id, creator, component_name: _, version: _, recipe_blob_id: _, artifact_sha256: _, created_at: _, schema_version: _ } = deployment;
         event::emit(DeploymentDeleted { deployment_id: id.to_inner(), creator });
@@ -498,6 +536,11 @@ module sui_edge::deployment_manager {
         if (!df::exists(&d.id, ManagedKey {})) {
             df::add(&mut d.id, ManagedKey {}, true);
         };
+    }
+
+    /// The delegate behind a role-created record, if any.
+    public fun delegate(d: &DeploymentRecord): Option<address> {
+        if (df::exists(&d.id, DelegateKey {})) option::some(*df::borrow(&d.id, DelegateKey {})) else option::none()
     }
     public fun artifact_sha256(d: &DeploymentRecord): &String { &d.artifact_sha256 }
     public fun status_applied(): u8 { STATUS_APPLIED }
