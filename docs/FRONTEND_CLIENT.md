@@ -2,7 +2,9 @@
 
 The frontend client is **0.0.2**. Generated manifests admit `>=0.0.2,<0.0.3`; regenerate existing manifests/configuration before rebuilding this client. A manifest admitting only 0.0.1 fails closed.
 
-The frontend uses `@mysten/sui` **2.36.0**, `@mysten/dapp-kit-react` **2.1.40** and its locked `@mysten/dapp-kit-core` **1.6.38**. Node **22.22.2**, pnpm **11.0.8**, React **18.3.1** and Next.js **14.2.35** remain the tested baseline. Install with the committed lockfile; upgrade SDK and wallet packages together. The SDK requires Node 22 or newer. The legacy `@mysten/dapp-kit` package and frontend JSON-RPC calls are removed.
+The frontend uses `@mysten/sui` **2.36.0**, `@mysten/dapp-kit-react` **2.1.40** and its locked `@mysten/dapp-kit-core` **1.6.38**. Node **22.22.2**, pnpm **11.0.8**, React **19.3.1** and Next.js **16.4.1** remain the tested baseline. Install with the committed lockfile; upgrade SDK and wallet packages together. The SDK requires Node 22 or newer. The legacy `@mysten/dapp-kit` package and frontend JSON-RPC calls are removed.
+
+Dependency security remediation, build-stack migration and scan evidence are in [FRONTEND_SECURITY.md](FRONTEND_SECURITY.md). Tailwind 4 requires Safari 16.4+, Chrome 111+ and Firefox 128+; validate the target extension/browser combination.
 
 References: [Mysten React setup](https://sdk.mystenlabs.com/dapp-kit/getting-started/react), [Core querying/pagination](https://sdk.mystenlabs.com/sui/clients/querying), [SDK migration](https://sdk.mystenlabs.com/sui/migrations/sui-2.0/sui).
 
