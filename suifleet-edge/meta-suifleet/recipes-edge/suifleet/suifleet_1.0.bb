@@ -45,10 +45,12 @@ python do_verify_lock() {
 addtask verify_lock after do_patch before do_configure
 
 python do_verify_toolchain() {
+    import os
     import re
     import shlex
     import subprocess
-    output = subprocess.check_output(shlex.split(d.getVar("RUSTC")) + ["--version"], text=True)
+    compiler = d.getVar("RUSTC") or os.path.join(d.getVar("STAGING_BINDIR_NATIVE"), "rustc")
+    output = subprocess.check_output(shlex.split(compiler) + ["--version"], text=True)
     match = re.match(r"rustc (\d+\.\d+\.\d+)", output)
     if not match or bb.utils.vercmp_string(match.group(1), "1.90.0") < 0:
         bb.fatal("SuiFleet locked dependencies require Rust >= 1.90.0; Scarthgap needs the pinned rust mixin; got " + output)
