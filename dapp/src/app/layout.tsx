@@ -1,23 +1,17 @@
 "use client";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { SuiClientProvider, WalletProvider, ConnectButton } from "@mysten/dapp-kit";
-import { getFullnodeUrl } from "@mysten/sui/client";
+import { DAppKitProvider } from "@mysten/dapp-kit-react";
+import dynamic from "next/dynamic";
+import { dAppKit } from "@/lib/dapp-kit";
 import { usePathname } from "next/navigation";
-import { NETWORK, RPC_URL } from "@/lib/constants";
-import "@mysten/dapp-kit/dist/index.css";
+import { NETWORK } from "@/lib/constants";
 import "./globals.css";
 import Link from "next/link";
 
+// dApp Kit UI registers custom elements and must only load in the browser.
+const ConnectButton = dynamic(() => import("@mysten/dapp-kit-react/ui").then((ui) => ui.ConnectButton), { ssr: false });
 const queryClient = new QueryClient();
-const networks = {
-  localnet: { url: "http://127.0.0.1:9000" },
-  devnet:  { url: getFullnodeUrl("devnet") },
-  testnet: { url: getFullnodeUrl("testnet") },
-  mainnet: { url: getFullnodeUrl("mainnet") },
-  ...(RPC_URL ? { [NETWORK]: { url: RPC_URL } } : {}),
-};
-
 const NAV = [
   { href: "/",            label: "Dashboard" },
   { href: "/devices",     label: "Devices" },
@@ -34,8 +28,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body className="min-h-screen bg-[#f0f2f5] text-gray-900 flex flex-col">
         <QueryClientProvider client={queryClient}>
-          <SuiClientProvider networks={networks} defaultNetwork={NETWORK}>
-            <WalletProvider autoConnect>
+          <DAppKitProvider dAppKit={dAppKit}>
               {/* Top bar */}
               <div className="bg-[#0b1628] text-white h-11 flex items-center px-5 gap-3 shrink-0 z-20 border-b border-white/5">
                 <div className="flex items-center gap-2">
@@ -63,8 +56,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   {children}
                 </main>
               </div>
-            </WalletProvider>
-          </SuiClientProvider>
+            </DAppKitProvider>
         </QueryClientProvider>
       </body>
     </html>

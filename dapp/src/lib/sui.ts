@@ -1,7 +1,11 @@
-import { calls, TYPES } from "./fleet-protocol";
+import { calls } from "./fleet-protocol";
+import { DEPLOYMENT_SCHEMA_VERSION } from "./protocol-version";
 import { requireManifest, moveType, verifyDeployment } from "./deployment-manifest";
 import { Transaction } from "@mysten/sui/transactions";
-import { SuiClient } from "@mysten/sui/client";
+import type { SuiGrpcClient } from "@mysten/sui/grpc";
+import { ObjectError } from "@mysten/sui/client";
+import { normalizeStructTag } from "@mysten/sui/utils";
+import { DeviceBcs, GroupBcs, GroupCreatedBcs, DeploymentCreatedBcs, DeploymentBcs, ReceiptsBcs } from "./move-bcs";
 import { bcs } from "@mysten/sui/bcs";
 import { PACKAGE_ID, REGISTRY_ID, DEVICE_TYPE, DEVICE_GROUP_TYPE, DEPLOYMENT_CREATED_EVENT } from "./constants";
 
@@ -52,20 +56,24 @@ export interface DeploymentReceipts {
  * Read authoritative status receipts. Legacy `StatusesKey` entries are never
  * used: any address can write them through the original package.
  */
-export async function readReceipts(client: Pick<SuiClient, "getDynamicFieldObject">, deploymentId: string): Promise<DeploymentReceipts> {
-  // Empty Move structs carry an implicit `dummy_field: bool`; a real node rejects `{}`.
-  const field = await client.getDynamicFieldObject({ parentId: deploymentId,
-    name: { type: moveType(TYPES.deployment_manager_ReceiptsKey), value: { dummy_field: false } } });
-  if (field.error) {
-    if (field.error.code === "dynamicFieldNotFound") return { verified: false, statuses: {} };
-    throw new Error(`Unable to load deployment receipts: ${field.error.code}`);
+export async function readReceipts(client: Pick<SuiGrpcClient, "getDynamicField">, deploymentId: string): Promise<DeploymentReceipts> {
+  let field;
+  try {
+    field = await client.getDynamicField({ parentId: deploymentId,
+      name: { type: moveType("deployment_manager::ReceiptsKey"), bcs: bcs.bool().serialize(false).toBytes() } });
+  } catch (error) {
+    // Only a missing field is legacy-unverified; transport/permission errors
+    // must remain visible instead of masquerading as an empty receipt list.
+    if (error instanceof ObjectError && error.reason === "notFound") return { verified: false, statuses: {} };
+    throw error;
   }
-  const content = field.data?.content;
-  const fields = content?.dataType === "moveObject" ? content.fields as Record<string, unknown> : {};
-  const receipts = fields.value as { fields?: { statuses?: { fields?: { contents?: { fields: { key: string; value: number | string } }[] } } } } | undefined;
-  const contents = receipts?.fields?.statuses?.fields?.contents;
-  if (!Array.isArray(contents)) throw new Error("Unable to load deployment receipts: unexpected Receipts layout");
-  return { verified: true, statuses: Object.fromEntries(contents.map((entry) => [entry.fields.key, Number(entry.fields.value)])) };
+  if (normalizeStructTag(field.dynamicField.value.type) !== normalizeStructTag(moveType("deployment_manager::Receipts"))) throw new Error("Unexpected Receipts type");
+  const receipts = ReceiptsBcs.parse(field.dynamicField.value.bcs);
+  // This is an on-chain authority generation, not a client/layout version.
+  // Additive upgrades can bump it while retaining the same BCS layout.
+  if (BigInt(receipts.version) === BigInt(0)) throw new Error("Invalid Receipts authority version");
+  if (receipts.statuses.contents.some((entry) => entry.value !== 1 && entry.value !== 2)) throw new Error("Unsupported Receipts status");
+  return { verified: true, statuses: Object.fromEntries(receipts.statuses.contents.map((entry) => [entry.key, entry.value])) };
 }
 
 // ── Device transactions ───────────────────────────────────────────────────────
@@ -154,101 +162,99 @@ export function buildDeleteDeploymentTx(deploymentObjectId: string): Transaction
 
 // ── Queries ───────────────────────────────────────────────────────────────────
 
-export async function fetchDevices(
-  client: SuiClient,
-  owner: string,
-): Promise<DeviceObject[]> {
+export async function fetchDevices(client: SuiGrpcClient, owner: string): Promise<DeviceObject[]> {
   await verifyDeployment(client);
-  const data = [];
-  let cursor: string | null | undefined = null;
-  do {
-    const page = await client.getOwnedObjects({ owner, filter: { StructType: DEVICE_TYPE },
-      options: { showContent: true }, cursor, limit: 50 });
-    data.push(...page.data);
-    cursor = page.hasNextPage ? page.nextCursor : null;
-  } while (cursor);
-
-  return data.flatMap((obj) => {
-    const content = obj.data?.content;
-    if (content?.dataType !== "moveObject") return [];
-    const fields = content.fields as Record<string, unknown>;
-    return [{
-      objectId: obj.data!.objectId,
-      name: fields.name as string,
-      deviceAddress: fields.device_address as string,
-      arch: fields.arch as string,
-      registeredAt: Number(fields.registered_at),
-    }];
+  let page = await client.listOwnedObjects({ owner, type: DEVICE_TYPE, include: { content: true }, limit: 50 });
+  const data = [...page.objects];
+  while (page.hasNextPage) {
+    if (!page.cursor) throw new Error("Device pagination returned no cursor");
+    const cursor = page.cursor;
+    page = await client.listOwnedObjects({ owner, type: DEVICE_TYPE, include: { content: true }, limit: 50, cursor });
+    if (page.hasNextPage && page.cursor === cursor) throw new Error("Device pagination made no progress");
+    data.push(...page.objects);
+  }
+  return data.map((object) => {
+    const fields = DeviceBcs.parse(object.content);
+    if (fields.schema_version !== "1") throw new Error("Unsupported Device schema");
+    return { objectId: object.objectId, name: fields.name, deviceAddress: fields.device_address,
+      arch: fields.arch, registeredAt: Number(fields.registered_at) };
   });
 }
 
-export async function fetchGroups(
-  client: SuiClient,
-  owner: string,
-): Promise<DeviceGroup[]> {
+export async function fetchGroups(client: SuiGrpcClient, owner: string): Promise<DeviceGroup[]> {
   await verifyDeployment(client);
-  const data = await allEvents(client, moveType("device_group::GroupCreated"));
-
-  const groupIds = data
-    .filter((ev) => (ev.parsedJson as Record<string, unknown>).admin === owner)
-    .map((ev) => (ev.parsedJson as Record<string, unknown>).group_id as string);
-
-  if (groupIds.length === 0) return [];
-
-  const objects = await objectsInBatches(client, [...new Set(groupIds)]);
-
-  return objects.flatMap((obj) => {
-    const content = obj.data?.content;
-    if (content?.dataType !== "moveObject") return [];
-    const fields = content.fields as Record<string, unknown>;
-    return [{
-      objectId: obj.data!.objectId,
-      name: fields.name as string,
-      description: fields.description as string,
-      admin: fields.admin as string,
-      deviceIds: (fields.device_ids as string[]) ?? [],
-    }];
+  const events = await allEvents(client, moveType("device_group::GroupCreated"));
+  const ids = events.map((event) => GroupCreatedBcs.parse(event.bcs))
+    .filter((event) => event.admin === owner).map((event) => event.group_id);
+  const objects = await objectsInBatches(client, [...new Set(ids)]);
+  return objects.map((object) => {
+    const fields = GroupBcs.parse(object.content);
+    if (fields.schema_version !== "1") throw new Error("Unsupported DeviceGroup schema");
+    return { objectId: object.objectId, name: fields.name, description: fields.description,
+      admin: fields.admin, deviceIds: fields.device_ids };
   });
 }
 
-async function allEvents(client: SuiClient, type: string) {
-  const data = [];
-  let cursor: Parameters<SuiClient["queryEvents"]>[0]["cursor"] = null;
-  do {
-    const page = await client.queryEvents({ query: { MoveEventType: type }, order: "descending", limit: 50, cursor });
-    data.push(...page.data);
-    cursor = page.hasNextPage ? page.nextCursor : null;
-  } while (cursor);
-  return data;
+async function allEvents(client: SuiGrpcClient, type: string) {
+  let page = await client.listEvents({ filter: { eventType: type }, order: "descending", limit: 50 });
+  const events = [...page.events];
+  // A scan-limited gRPC page may be empty and still have more history.
+  while (page.hasNextPage) {
+    if (!page.endCursor) throw new Error("Event pagination returned no cursor");
+    const before = page.endCursor;
+    page = await client.listEvents({ filter: { eventType: type }, before, limit: 50 });
+    if (page.hasNextPage && page.endCursor === before) throw new Error("Event pagination made no progress");
+    events.push(...page.events);
+  }
+  return events;
 }
 
-async function objectsInBatches(client: SuiClient, ids: string[]) {
+async function objectsInBatches(client: SuiGrpcClient, ids: string[]) {
   const objects = [];
   for (let index = 0; index < ids.length; index += 50) {
-    objects.push(...await client.multiGetObjects({ ids: ids.slice(index, index + 50), options: { showContent: true } }));
+    const batch = await client.getObjects({ objectIds: ids.slice(index, index + 50), include: { content: true } });
+    for (const object of batch.objects) {
+      if (object instanceof ObjectError && (object.reason === "notFound" || object.reason === "deleted")) continue;
+      if (object instanceof Error) throw object;
+      objects.push(object);
+    }
   }
   return objects;
 }
 
-export async function fetchDeploymentEvents(client: SuiClient, owner?: string): Promise<DeploymentEvent[]> {
+// Deployment targets are arbitrary IDs on chain. An invalid group must not
+// hide unrelated deployments; transport errors still escape objectsInBatches.
+function supportedTargetGroup(group: { type: string; content: Uint8Array }) {
+  try {
+    if (normalizeStructTag(group.type) !== normalizeStructTag(DEVICE_GROUP_TYPE)) return undefined;
+    const fields = GroupBcs.parse(group.content);
+    return fields.schema_version === "1" ? fields : undefined;
+  } catch {
+    return undefined; // Invalid type tag or malformed BCS for this one target.
+  }
+}
+
+export async function fetchDeploymentEvents(client: SuiGrpcClient, owner?: string): Promise<DeploymentEvent[]> {
   await verifyDeployment(client);
-  const events = (await allEvents(client, DEPLOYMENT_CREATED_EVENT))
-    .filter((event) => !owner || (event.parsedJson as Record<string, unknown>).creator === owner);
-  const objects = await objectsInBatches(client, events.map((event) => (event.parsedJson as Record<string, unknown>).deployment_id as string));
-  const live = new Set(objects.filter((object) => object.data?.content?.dataType === "moveObject").map((object) => object.data!.objectId));
-  return Promise.all(events.filter((event) => live.has((event.parsedJson as Record<string, unknown>).deployment_id as string)).map(async (event) => {
-    const p = event.parsedJson as Record<string, unknown>;
-    const id = p.deployment_id as string;
-    const groups = await objectsInBatches(client, (p.target_groups as string[]) ?? []);
-    const resolvedDeviceIds = [...new Set([
-      ...((p.target_devices as string[]) ?? []),
-      ...groups.flatMap((group) => group.data?.content?.dataType === "moveObject"
-        ? ((group.data.content.fields as Record<string, unknown>).device_ids as string[] ?? []) : []),
-    ])];
-    const { verified, statuses } = await readReceipts(client, id);
-    return { deploymentId: id, componentName: p.component_name as string, version: p.version as string,
-      recipeBlobId: p.recipe_blob_id as string, artifactSha256: p.artifact_sha256 as string,
-      targetGroups: (p.target_groups as string[]) ?? [], targetDevices: (p.target_devices as string[]) ?? [],
-      creator: p.creator as string, timestampMs: Number(event.timestampMs ?? 0), statuses, receiptsVerified: verified, resolvedDeviceIds: [...new Set([...resolvedDeviceIds, ...Object.keys(statuses)])] };
+  const events = (await allEvents(client, DEPLOYMENT_CREATED_EVENT)).map((event) => DeploymentCreatedBcs.parse(event.bcs))
+    .filter((event) => !owner || event.creator === owner);
+  const objects = await objectsInBatches(client, [...new Set(events.map((event) => event.deployment_id))]);
+  const live = new Map(objects.map((object) => [object.objectId, DeploymentBcs.parse(object.content)]));
+  const liveEvents = events.filter((event) => live.has(event.deployment_id));
+  const groups = await objectsInBatches(client, [...new Set(liveEvents.flatMap((event) => event.target_groups))]);
+  const groupsById = new Map(groups.map((group) => [group.objectId, supportedTargetGroup(group)]));
+  return Promise.all(liveEvents.map(async (event) => {
+    const record = live.get(event.deployment_id)!;
+    if (BigInt(record.schema_version) !== BigInt(DEPLOYMENT_SCHEMA_VERSION)) throw new Error("Unsupported DeploymentRecord schema");
+    const resolvedDeviceIds = [...new Set([...event.target_devices, ...event.target_groups.flatMap((id) => {
+      const group = groupsById.get(id);
+      return group && group.admin === record.creator ? group.device_ids : [];
+    })])];
+    const { verified, statuses } = await readReceipts(client, event.deployment_id);
+    return { deploymentId: event.deployment_id, componentName: record.component_name, version: record.version,
+      recipeBlobId: record.recipe_blob_id, artifactSha256: record.artifact_sha256,
+      targetGroups: event.target_groups, targetDevices: event.target_devices,
+      creator: record.creator, timestampMs: Number(record.created_at), statuses, receiptsVerified: verified,
+      resolvedDeviceIds: [...new Set([...resolvedDeviceIds, ...Object.keys(statuses)])] };
   }));
 }

@@ -2,27 +2,8 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const Module = require("node:module");
-const ts = require("../dapp/node_modules/typescript");
-const sdk = Module.createRequire(process.env.PROTOCOL_SDK_PACKAGE_JSON || path.resolve(__dirname, "../dapp/package.json"));
-const cache = new Map();
-function load(file) {
-  const filename = path.resolve(__dirname, "..", file);
-  if (cache.has(filename)) return cache.get(filename).exports;
-  const loaded = new Module(filename, module);
-  loaded.filename = filename;
-  loaded.paths = Module._nodeModulePaths(path.resolve(__dirname, "../dapp"));
-  cache.set(filename, loaded);
-  const original = loaded.require.bind(loaded);
-  loaded.require = (name) => {
-    if (name.startsWith("@mysten/sui/")) return sdk(name);
-    const candidate = path.resolve(path.dirname(filename), name + ".ts");
-    return name.startsWith(".") && fs.existsSync(candidate)
-      ? load(path.relative(path.resolve(__dirname, ".."), candidate)) : original(name);
-  };
-  loaded._compile(ts.transpileModule(fs.readFileSync(filename, "utf8"), {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020,esModuleInterop:true}}).outputText, filename);
-  return loaded.exports;
-}
+const { loader, appRequire: sdk } = require("./frontend_test_utils.cjs");
+const load = (file) => loader()(path.relative(path.resolve(__dirname, "../dapp/src"), path.resolve(__dirname,"..",file)));
 const protocol = load("dapp/src/lib/fleet-protocol.ts");
 const recipes = load("dapp/src/lib/recipe-schema.ts");
 const cases = JSON.parse(fs.readFileSync(path.resolve(__dirname, "../interfaces/recipe-cases.json"), "utf8"));
@@ -53,4 +34,3 @@ const [device] = protocol.calls.device_registry_register_device(registration, "0
 protocol.calls.device_cap_issue_cap(registration, "0x1", device);
 assert.deepEqual(registration.getData().commands[1].MoveCall.arguments[0].NestedResult, [0, 0]);
 console.log(`PASS: ${cases.length} shared recipe cases, independent BCS event/key vector and SDK call encoder`);
-module.exports = { load };

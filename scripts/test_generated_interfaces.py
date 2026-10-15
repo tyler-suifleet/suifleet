@@ -15,7 +15,8 @@ def main():
     parser.add_argument("--summary-dir", type=Path)
     args = parser.parse_args()
     if args.summary_dir:
-        modules = {p.stem: json.loads(p.read_text()) for p in (args.summary_dir / "sui_edge").glob("*.json")}
+        from check_contract_interfaces import read_summary
+        modules, _ = read_summary(args.summary_dir)
     else:
         with tempfile.TemporaryDirectory(prefix="abi-negative-") as directory:
             modules, _ = generator.summarize(generator.ROOT / "contracts", Path(directory))
@@ -49,6 +50,15 @@ def main():
     assert generator.normalize(changed) == expected
     catalog = json.loads(generator.CATALOG.read_text())
     recipe = json.loads(generator.RECIPE.read_text())
+    for unsupported in ["u64", "bool", "vector<u8>"]:
+        changed = deepcopy(catalog)
+        changed["modules"]["deployment_manager"]["functions"]["report_status"]["parameters"][2] = unsupported
+        try:
+            generator.generate(changed, recipe)
+        except ValueError as error:
+            assert "unsupported transaction parameter" in str(error)
+        else:
+            raise AssertionError(f"generator silently accepted {unsupported}")
     with tempfile.TemporaryDirectory(prefix="generated-drift-") as directory:
         with patch.object(generator, "ROOT", Path(directory)):
             outputs = generator.generate(catalog, recipe)

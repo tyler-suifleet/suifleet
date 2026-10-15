@@ -1,0 +1,136 @@
+// Real gRPC fleet transactions and reads on a disposable loopback node only.
+const fs = require("node:fs/promises"), path = require("node:path"), os = require("node:os"), assert = require("node:assert/strict"), { execFileSync } = require("node:child_process");
+const { appRequire, loader } = require("./frontend_test_utils.cjs");
+const { SuiGrpcClient } = appRequire("@mysten/sui/grpc"), { Transaction } = appRequire("@mysten/sui/transactions"), { Ed25519Keypair } = appRequire("@mysten/sui/keypairs/ed25519");
+const { fromBase58, toHex, normalizeStructTag } = appRequire("@mysten/sui/utils"), { bcs } = appRequire("@mysten/sui/bcs"), { requestSuiFromFaucetV2 } = appRequire("@mysten/sui/faucet");
+const rpc = process.env.FLEET_TEST_RPC || "http://127.0.0.1:9000", faucet = process.env.FLEET_TEST_FAUCET || "http://127.0.0.1:9123";
+for (const endpoint of [rpc, faucet]) assert.ok(["127.0.0.1", "localhost", "[::1]"].includes(new URL(endpoint).hostname), "refusing public-network publication");
+let stage = "startup";
+(async () => {
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), "suifleet-frontend-live-"));
+  try {
+    const client = new SuiGrpcClient({ network: "localnet", baseUrl: rpc }), operator = Ed25519Keypair.generate(), deviceSigner = Ed25519Keypair.generate();
+    for (const signer of [operator, deviceSigner]) {
+      for (let attempt = 0; attempt < 30; attempt++) {
+        if ((await client.listCoins({ owner: signer.toSuiAddress() })).objects.length) break;
+        try { await requestSuiFromFaucetV2({ host: faucet, recipient: signer.toSuiAddress() }); break; }
+        catch (error) { if (attempt === 29) throw error; await new Promise((resolve) => setTimeout(resolve, 1000)); }
+      }
+    }
+    const contracts = path.join(temporary, "contracts");
+    await fs.mkdir(contracts);
+    await fs.cp(path.resolve(__dirname, "../contracts/sources"), path.join(contracts, "sources"), { recursive: true });
+    for (const name of ["Move.toml", "Move.lock"]) await fs.copyFile(path.resolve(__dirname, "../contracts", name), path.join(contracts, name));
+    const compileEnv = { ...process.env, SUI_CONFIG_DIR: path.join(temporary, "wallet") };
+    await fs.mkdir(compileEnv.SUI_CONFIG_DIR);
+    const keystore = path.join(compileEnv.SUI_CONFIG_DIR, "sui.keystore");
+    await fs.writeFile(keystore, "[]\n");
+    await fs.writeFile(path.join(compileEnv.SUI_CONFIG_DIR, "client.yaml"), `keystore:\n  File: ${keystore}\nenvs:\n- alias: testnet\n  rpc: ${rpc}\n  ws: null\n  basic_auth: null\nactive_env: testnet\nactive_address: null\n`);
+    let compiledText;
+    try { compiledText = execFileSync("sui", ["move", "build", "--path", contracts, "--build-env", "testnet", "--no-tree-shaking", "--dump-bytecode-as-base64"], { env: compileEnv, encoding: "utf8", maxBuffer: 20 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] }); }
+    catch { throw new Error("Could not compile isolated contracts; CLI output suppressed"); }
+    const compiled = JSON.parse(compiledText.slice(compiledText.indexOf("{")));
+    async function execute(transaction, signer = operator) {
+      const result = await client.signAndExecuteTransaction({ transaction, signer, include: { effects: true, objectTypes: true } });
+      if (result.FailedTransaction) throw new Error(result.FailedTransaction.status.error?.message || "execution failed");
+      assert.equal(result.Transaction.status.success, true);
+      await checkpointed(result.Transaction.digest);
+      return result.Transaction;
+    }
+    async function checkpointed(digest) {
+      // History queries and gas references see checkpointed/indexed state.
+      await client.waitForTransaction({ digest });
+      for (let attempt = 0; attempt < 100; attempt++) {
+        const confirmed = await client.getTransaction({ digest });
+        if (confirmed.Transaction?.checkpoint != null || confirmed.FailedTransaction?.checkpoint != null) return;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      throw new Error("transaction did not become checkpointed for history reads");
+    }
+    const publish = new Transaction(), [cap] = publish.publish(compiled);
+    publish.transferObjects([cap], operator.toSuiAddress());
+    stage = "publish"; const published = await execute(publish);
+    const packageId = published.effects.changedObjects.find((object) => object.outputState === "PackageWrite").objectId;
+    const types = published.objectTypes;
+    const registryId = Object.keys(types).find((id) => types[id].endsWith("::device_registry::DeviceRegistry"));
+    const capId = Object.keys(types).find((id) => types[id].includes("::") && normalizeStructTag(types[id]) === normalizeStructTag("0x2::package::UpgradeCap"));
+    assert.ok(registryId && capId);
+    stage = "package metadata"; const { object: packageObject } = await client.getObject({ objectId: packageId, include: { objectBcs: true } });
+    const raw = bcs.Object.parse(packageObject.objectBcs).data.Package;
+    stage = "registry metadata"; const { object: registry } = await client.getObject({ objectId: registryId });
+    const info = await client.ledgerService.getServiceInfo({});
+    const manifest = {
+      schema_version: 1, protocol_version: 1, network: "localnet", chain_identifier: toHex(fromBase58(info.response.chainId).slice(0, 4)), rpc_url: rpc,
+      call_package_id: packageId, upgrade_cap_id: capId, package_version: raw.version,
+      type_origins: Object.fromEntries(raw.typeOriginTable.map((entry) => [`${entry.moduleName}::${entry.datatypeName}`, entry.package])),
+      shared_objects: { registry: { id: registryId, initial_shared_version: registry.owner.Shared.initialSharedVersion } },
+      supported_clients: { dapp: { min: "0.0.2", max_exclusive: "0.0.3" }, edge: { min: "0.1.0", max_exclusive: "0.2.0" } },
+      walrus: { publisher_url: "http://127.0.0.1:31415", aggregator_url: "http://127.0.0.1:31416" },
+    };
+    process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST = JSON.stringify(manifest);
+    const sui = loader()("lib/sui.ts");
+    stage = "register device"; await execute(sui.buildRegisterDeviceTx("Pi acceptance", deviceSigner.toSuiAddress(), "aarch64", operator.toSuiAddress()));
+    stage = "device inventory"; const devices = await sui.fetchDevices(client, operator.toSuiAddress());
+    assert.equal(devices.length, 1); assert.equal(devices[0].deviceAddress, deviceSigner.toSuiAddress()); assert.equal(devices[0].arch, "aarch64");
+    stage = "create group"; await execute(sui.buildCreateGroupTx("Lab", "gRPC acceptance"));
+    stage = "group history"; let groups = await sui.fetchGroups(client, operator.toSuiAddress());
+    assert.equal(groups.length, 1);
+    stage = "group membership"; await execute(sui.buildAddDeviceToGroupTx(groups[0].objectId, devices[0].objectId));
+    groups = await sui.fetchGroups(client, operator.toSuiAddress()); assert.deepEqual(groups[0].deviceIds, [devices[0].objectId]);
+    const caps = await client.listOwnedObjects({ owner: deviceSigner.toSuiAddress(), type: `${packageId}::device_cap::DeviceCap` });
+    assert.equal(caps.objects.length, 1);
+    stage = "create deployment"; await execute(sui.buildCreateDeploymentTx("test-app", "1.0.0", "fixture-recipe", "ab".repeat(32), "cd".repeat(32), [groups[0].objectId], [devices[0].objectId]));
+    stage = "deployment history"; let deployments = await sui.fetchDeploymentEvents(client, operator.toSuiAddress());
+    assert.equal(deployments.length, 1); assert.equal(deployments[0].receiptsVerified, true); assert.deepEqual(deployments[0].statuses, {});
+    const report = new Transaction();
+    const protocol = loader()("lib/fleet-protocol.ts");
+    protocol.calls.deployment_manager_report_status(report, packageId, deployments[0].deploymentId, caps.objects[0].objectId, protocol.STATUS.applied);
+    stage = "report status"; await execute(report, deviceSigner);
+    deployments = await sui.fetchDeploymentEvents(client, operator.toSuiAddress());
+    assert.deepEqual(deployments[0].statuses, { [devices[0].objectId]: 1 }); assert.deepEqual(deployments[0].resolvedDeviceIds, [devices[0].objectId]);
+    // A non-owner group mutation must return failed execution effects.
+    // Build complete bytes offline so automatic simulation cannot stop this
+    // intentional abort before it reaches on-chain execution.
+    const { object: sharedGroup } = await client.getObject({ objectId: groups[0].objectId });
+    const gas = (await client.listCoins({ owner: deviceSigner.toSuiAddress() })).objects[0];
+    const { referenceGasPrice } = await client.getReferenceGasPrice();
+    const forbidden = new Transaction(); forbidden.setSender(deviceSigner.toSuiAddress());
+    forbidden.setGasPayment([{ objectId: gas.objectId, version: gas.version, digest: gas.digest }]);
+    forbidden.setGasPrice(referenceGasPrice); forbidden.setGasBudget(100000000);
+    forbidden.moveCall({ target: `${packageId}::device_group::remove_device`, arguments: [
+      forbidden.sharedObjectRef({ objectId: sharedGroup.objectId, initialSharedVersion: sharedGroup.owner.Shared.initialSharedVersion, mutable: true }),
+      forbidden.pure(bcs.Address.serialize(devices[0].objectId)),
+    ] });
+    const bytes = await forbidden.build(), signed = await deviceSigner.signTransaction(bytes);
+    stage = "failed execution"; const failed = await client.executeTransaction({ transaction: bytes, signatures: [signed.signature], include: { effects: true } });
+    assert.equal(failed.$kind, "FailedTransaction");
+    await checkpointed(failed.FailedTransaction.digest);
+    // Contract creation accepts arbitrary IDs; reproduce the review's history regression.
+    const validDeployment = deployments[0].deploymentId;
+    stage = "foreign group";
+    await execute(sui.buildRegisterDeviceTx("foreign member", deviceSigner.toSuiAddress(), "aarch64", deviceSigner.toSuiAddress()), deviceSigner);
+    async function indexedFirst(query, label) {
+      for (let attempt = 0; attempt < 100; attempt++) {
+        const items = await query();
+        if (items.length) return items[0];
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      throw new Error(`${label} never became indexed after checkpointed execution`);
+    }
+    const foreignDevice = await indexedFirst(() => sui.fetchDevices(client, deviceSigner.toSuiAddress()), "foreign device");
+    await execute(sui.buildCreateGroupTx("foreign lab", "owned by another creator"), deviceSigner);
+    const foreignGroup = await indexedFirst(() => sui.fetchGroups(client, deviceSigner.toSuiAddress()), "foreign group");
+    await execute(sui.buildAddDeviceToGroupTx(foreignGroup.objectId, foreignDevice.objectId), deviceSigner);
+    stage = "arbitrary target history";
+    await execute(sui.buildCreateDeploymentTx("invalid-targets", "1.0.0", "fixture-recipe", "ab".repeat(32), "cd".repeat(32), [devices[0].objectId, foreignGroup.objectId]));
+    deployments = await sui.fetchDeploymentEvents(client, operator.toSuiAddress());
+    assert.equal(deployments.length, 2);
+    assert.deepEqual(deployments.find(deployment => deployment.componentName === "invalid-targets").resolvedDeviceIds, []);
+    assert.deepEqual(deployments.find(deployment => deployment.deploymentId === validDeployment).statuses, { [devices[0].objectId]: 1 });
+    stage = "delete deployment";
+    for (const deployment of deployments) await execute(sui.buildDeleteDeploymentTx(deployment.deploymentId));
+    assert.deepEqual(await sui.fetchDeploymentEvents(client, operator.toSuiAddress()), []);
+    console.log("PASS: real gRPC publish/register/group/deployment/receipt/delete, invalid and foreign target history, failed execution effects");
+    console.log(JSON.stringify({ chain: manifest.chain_identifier, package: packageId, registry: registryId }));
+  } finally { await fs.rm(temporary, { recursive: true, force: true }); }
+})().catch((error) => { console.error(`${stage}: ${error.message}`); process.exitCode = 1; });

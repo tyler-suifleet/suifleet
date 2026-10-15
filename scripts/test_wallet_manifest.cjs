@@ -1,52 +1,57 @@
-// Exercise the actual wallet hook's network/signing/effects boundary.
 const fs = require("node:fs");
 const path = require("node:path");
 const assert = require("node:assert/strict");
-const ts = require("../dapp/node_modules/typescript");
-const Module = require("node:module");
-const fixture = JSON.parse(fs.readFileSync(path.resolve(__dirname,"../manifests/fixture.localnet.json"),"utf8"));
+const { loader, manifestClient } = require("./frontend_test_utils.cjs");
+const fixture = JSON.parse(fs.readFileSync(path.resolve(__dirname, "../manifests/fixture.localnet.json"), "utf8"));
 process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST = JSON.stringify(fixture);
-function load(relative, dependencies = {}) {
-  const filename=path.resolve(__dirname,relative);
-  const loaded=new Module(filename,module); loaded.filename=filename; loaded.paths=Module._nodeModulePaths(path.dirname(filename));
-  const original=loaded.require.bind(loaded);
-  loaded.require=(name) => {
-    if (Object.hasOwn(dependencies,name)) return dependencies[name];
-    if (name.startsWith(".")) {
-      const candidate = path.resolve(path.dirname(filename), name + ".ts");
-      if (fs.existsSync(candidate)) return load(path.relative(__dirname, candidate));
-    }
-    return original(name);
-  };
-  loaded._compile(ts.transpileModule(fs.readFileSync(filename,"utf8"), {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020,esModuleInterop:true}}).outputText,filename);
-  return loaded.exports;
-}
-const manifest = load("../dapp/src/lib/deployment-manifest.ts");
-let chain=fixture.chain_identifier, execution="success", signingError, signs=0;
-const client={
-  getChainIdentifier:async()=>chain,
-  getObject:async({id}) => id === fixture.call_package_id ? {data:{version:fixture.package_version,bcs:{dataType:"package",typeOriginTable:Object.entries(fixture.type_origins).map(([name,origin])=>({module_name:name.split("::")[0],datatype_name:name.split("::")[1],package:origin}))}}} :
-    id === fixture.upgrade_cap_id ? {data:{content:{dataType:"moveObject",type:"0x2::package::UpgradeCap",fields:{package:fixture.call_package_id,version:fixture.package_version}}}} :
-    {data:{content:{dataType:"moveObject",type:`${fixture.type_origins["device_registry::DeviceRegistry"]}::device_registry::DeviceRegistry`},owner:{Shared:{initial_shared_version:"1"}}}},
-  waitForTransaction:async()=>({effects:{status:{status:execution,error:execution==="failure"?"Move abort":undefined}}}),
+let execution = "success", signingError, signs = 0, confirmation = "success", account = { address: "0x1", chains: [`sui:${fixture.network}`] }, network = fixture.network;
+const client = manifestClient(fixture);
+function result(success) { return success ? { $kind: "Transaction", Transaction: { digest: "test-digest", status: { success: true } } } : { $kind: "FailedTransaction", FailedTransaction: { digest: "test-digest", status: { success: false, error: { message: "Move abort" } } } }; }
+client.waitForTransaction = async () => result(confirmation === "success");
+const wallet = {
+  stores: { $connection: { get: () => ({ account }) }, $currentNetwork: { get: () => network } },
+  signAndExecuteTransaction: async (args) => {
+    signs++; assert.equal(args.network, fixture.network); assert.equal(args.account, account);
+    if (signingError) throw new Error(signingError);
+    return result(execution === "success");
+  },
 };
-const hook=load("../dapp/src/hooks/useFleetTransaction.ts",{
-  "@/lib/deployment-manifest":manifest,
-  "@tanstack/react-query":{useMutation:(options)=>options},
-  "@mysten/dapp-kit":{useSuiClient:()=>client,useSignAndExecuteTransaction:()=>({mutateAsync:async(args)=>{
-    signs++; assert.equal(args.chain,`sui:${fixture.network}`);
-    if(signingError) throw new Error(signingError);
-    return {digest:"test-digest"};
-  }})},
-});
-(async()=>{
-  const mutate=hook.useFleetTransaction().mutationFn;
-  assert.equal((await mutate({transaction:{}})).digest,"test-digest");
-  assert.equal(signs,1);
-  chain="deadbeef"; await assert.rejects(mutate({transaction:{}}),/chain identifier/); assert.equal(signs,1);
-  chain=fixture.chain_identifier;
-  signingError="Wallet disconnected"; await assert.rejects(mutate({transaction:{}}),/Wallet disconnected/);
-  signingError="User rejected signing"; await assert.rejects(mutate({transaction:{}}),/User rejected signing/);
-  signingError=undefined; execution="failure"; await assert.rejects(mutate({transaction:{}}),/Move abort/);
-  console.log("PASS: wallet hook pins network, blocks stale chain before signing, propagates disconnect/rejection, verifies execution effects");
-})().catch(error=>{console.error(error);process.exitCode=1;});
+const hook = loader({
+  "@tanstack/react-query": { useMutation: (options) => options },
+  "@mysten/dapp-kit-react": { useCurrentClient: () => client, useDAppKit: () => wallet },
+})("hooks/useFleetTransaction.ts");
+(async () => {
+  const mutate = hook.useFleetTransaction().mutationFn;
+  assert.equal((await mutate({ transaction: {} })).digest, "test-digest");
+  assert.equal(signs, 1);
+  const goodAccount = account;
+  account = null; await assert.rejects(mutate({ transaction: {} }), /Connect a wallet/); assert.equal(signs, 1);
+  account = { ...goodAccount, chains: ["sui:mainnet"] }; await assert.rejects(mutate({ transaction: {} }), /does not support/); assert.equal(signs, 1);
+  account = goodAccount; network = "mainnet"; await assert.rejects(mutate({ transaction: {} }), /network/); assert.equal(signs, 1); network = fixture.network;
+  const service = client.ledgerService;
+  client.ledgerService = manifestClient({ ...fixture, chain_identifier: "deadbeef" }).ledgerService;
+  await assert.rejects(mutate({ transaction: {} }), /chain identifier/); assert.equal(signs, 1); client.ledgerService = service;
+  signingError = "Wallet disconnected"; await assert.rejects(mutate({ transaction: {} }), /Wallet disconnected/);
+  signingError = "User rejected signing"; await assert.rejects(mutate({ transaction: {} }), /User rejected signing/);
+  signingError = undefined; execution = "failure"; await assert.rejects(mutate({ transaction: {} }), /Move abort/);
+  execution = "success"; confirmation = "failure"; await assert.rejects(mutate({ transaction: {} }), /Move abort/);
+  confirmation = "success";
+  const oldService = service.getServiceInfo;
+  service.getServiceInfo = async () => { account = { ...goodAccount }; return oldService(); };
+  assert.equal((await mutate({ transaction: {} })).digest, "test-digest", "same account rebuilt by wallet is valid");
+  account = {...goodAccount, chains:[`sui:${fixture.network}`, "sui:mainnet"]};
+  service.getServiceInfo = async () => { account = {...account, chains:[...account.chains].reverse()}; return oldService(); };
+  assert.equal((await mutate({ transaction: {} })).digest, "test-digest", "chain order is not an account change");
+  for (const [change, expected] of [
+    [() => {account={...account,address:"0x2"};}, /account changed/],
+    [() => {account.address="0x2";}, /account changed/],
+    [() => {account.chains.push("sui:mainnet");}, /account changed/],
+    [() => {account=null;}, /account changed/],
+    [() => {network="mainnet";}, /network changed/],
+  ]) {
+    account = {...goodAccount, chains:[...goodAccount.chains]}; network=fixture.network;
+    service.getServiceInfo = async () => {change();return oldService();};
+    const before=signs; await assert.rejects(mutate({transaction:{}}), expected); assert.equal(signs,before);
+  }
+  console.log("PASS: wallet hook network/account checks, stale chain, disconnect/rejection and wallet/node execution failures");
+})().catch((error) => { console.error(error); process.exitCode = 1; });

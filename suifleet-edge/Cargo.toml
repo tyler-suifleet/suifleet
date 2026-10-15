@@ -8,7 +8,14 @@ name = "suifleet"
 path = "src/main.rs"
 
 [dependencies]
-# SUI JSON-RPC over HTTP/WebSocket (no heavy SDK needed for embedded targets)
+# Sui gRPC v2 API and transaction types (Mysten's official Rust SDK)
+sui-rpc = "0.4.0"
+sui-sdk-types = { version = "0.4.0", features = ["serde", "hash"] }
+sui-transaction-builder = "0.4.0"
+tonic = { version = "0.14", default-features = false }
+prost-types = "0.14"
+bcs = "0.1"
+# Walrus aggregator downloads over HTTP
 reqwest = { version = "0.12", features = ["json", "stream"] }
 tokio = { version = "1", features = ["full"] }
 futures-util = "0.3"
@@ -40,13 +47,17 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # systemd watchdog (optional; only links when building on systemd systems)
 sd-notify = { version = "0.4", optional = true }
 
+[dev-dependencies]
+# Test-only gRPC front end for the Python chain simulator (examples/grpc_sim_shim.rs).
+tonic = { version = "0.14", features = ["transport", "router"] }
+sui-crypto = { version = "0.4.0", features = ["ed25519"] }
+tokio-stream = { version = "0.1", features = ["net"] }
+prost = "0.14"
+
 [features]
 default = ["systemd"]
 systemd = ["sd-notify"]
 
-[dev-dependencies]
-# Cross-client wire vectors; no runtime dependency on the test serializer.
-bcs = "=0.1.6"
 
 [profile.release]
 opt-level = "z"

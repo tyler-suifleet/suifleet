@@ -24,7 +24,7 @@ def main():
                 raise SystemExit(f"Refusing existing loopback service on port {port}")
     with tempfile.TemporaryDirectory(prefix="protocol-localnet-") as directory:
         env = dict(os.environ, SUI_CONFIG_DIR=directory, PROTOCOL_TEST_DISPOSABLE="1",
-                   PROTOCOL_TEST_RPC="http://127.0.0.1:9000", PROTOCOL_TEST_FAUCET="http://127.0.0.1:9123")
+                   PROTOCOL_TEST_RPC="http://127.0.0.1:9000", PROTOCOL_TEST_FAUCET="http://127.0.0.1:9123", FLEET_TEST_RPC="http://127.0.0.1:9000", FLEET_TEST_FAUCET="http://127.0.0.1:9123")
         with open(Path(directory) / "node.log", "w") as log:
             node = subprocess.Popen(["sui", "start", "--with-faucet", "--force-regenesis"], env=env, stdout=log, stderr=subprocess.STDOUT)
             try:

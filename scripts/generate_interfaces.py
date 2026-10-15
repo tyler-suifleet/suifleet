@@ -13,7 +13,7 @@ from pathlib import Path
 import re
 import tempfile
 
-from check_contract_interfaces import ROOT, summarize
+from check_contract_interfaces import ROOT, summarize, read_summary
 
 CATALOG = ROOT / "interfaces/fleet-v1.json"
 RECIPE = ROOT / "interfaces/recipe.schema.json"
@@ -139,7 +139,7 @@ def recipe_rust_fields(schema, top=False):
             rust_name = "_description"
         required = name in schema.get("required", [])
         if field["type"] == "object":
-            datatype = "serde_json::Map<String, serde_json::Value>" if field.get("additionalProperties") else "Lifecycle"
+            datatype = "serde_json::Map<String, serde_json::Value>" if name == "configuration" else "Lifecycle"
         elif field["type"] == "string" or field["type"] == ["string", "null"]:
             datatype = "String"
         else:
@@ -153,11 +153,11 @@ def recipe_rust_fields(schema, top=False):
 
 
 TS_VALIDATOR = '''
-type Schema = { $schema?: string; $id?: string; type: string | string[]; const?: string; pattern?: string; required?: string[]; properties?: Record<string, Schema>; additionalProperties?: boolean };
+type Schema = { $schema?: string; $id?: string; type: string | string[]; const?: string | null; pattern?: string; required?: string[]; properties?: Record<string, Schema>; additionalProperties?: boolean };
 function validate(schema: Schema, value: unknown, path: string): void {
   const type = value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
   if (!(Array.isArray(schema.type) ? schema.type : [schema.type]).includes(type)) throw new Error(`${path}: invalid type`);
-  if (schema.const !== undefined && value !== schema.const) throw new Error(`${path}: unsupported version`);
+  if (Object.prototype.hasOwnProperty.call(schema, "const") && value !== schema.const) throw new Error(`${path}: unsupported version`);
   if (schema.pattern && (typeof value !== "string" || new RegExp(schema.pattern).exec(value)?.[0] !== value)) throw new Error(`${path}: invalid encoding`);
   if (schema.type === "object") {
     const object = value as Record<string, unknown>;
@@ -186,7 +186,7 @@ def generate(catalog, recipe):
           f'export const REQUIRED_TYPES = {json.dumps(catalog["required_type_origins"])} as const;']
     ts = [header, 'import { bcs } from "@mysten/sui/bcs";', 'import { Transaction } from "@mysten/sui/transactions";',
           'export * from "./protocol-version";',
-          "export const MOVE_ABI = " + json.dumps(abi, indent=2) + " as const;"]
+          ]
     rust = [header, "#![allow(dead_code)]", "use serde::{Deserialize, Serialize};",
             f'pub const PROTOCOL_VERSION: u64 = {catalog["protocol_version"]};',
             f'pub const MANIFEST_SCHEMA_VERSION: u64 = {catalog["manifest_schema_version"]};',
@@ -201,6 +201,8 @@ def generate(catalog, recipe):
     move_types = []
     for module, contents in abi.items():
         for name, function in contents["functions"].items():
+            if any(t.startswith("&") for t in function["returns"]):
+                continue
             params = [p for p in function["parameters"] if p not in ["&sui::tx_context::TxContext", "&mut sui::tx_context::TxContext"]]
             arguments, types = [], []
             for index, datatype in enumerate(params):
@@ -220,18 +222,8 @@ def generate(catalog, recipe):
                 else:
                     raise ValueError(f"unsupported transaction parameter {datatype}")
             calls += [f'  {module}_{name}: (tx: Transaction, packageId: string{", " if types else ""}{", ".join(types)}) => tx.moveCall({{ target: `${{packageId}}::{module}::{name}`, arguments: [{", ".join(arguments)}] }}),']
-        rust += [f"pub mod {module} {{", "    use super::*;"]
+        rust += [f"pub mod {module} {{", "    use super::*;", f'    pub const MODULE: &str = "{module}";']
         rust += [f'    pub const {name.upper()}: &str = "{name}";' for name in contents["functions"]]
-        for name, function in contents["functions"].items():
-            parameters, values = [], []
-            for index, datatype in enumerate(p for p in function["parameters"] if not p.endswith("sui::tx_context::TxContext")):
-                arg = f"a{index}"
-                base = datatype.removeprefix("&mut ").removeprefix("&")
-                datatype = "u8" if base == "u8" else "&[String]" if base == "vector<sui::object::ID>" else "&str"
-                parameters += [f"{arg}: {datatype}"]
-                value = f"{arg}.to_string()" if datatype == "u8" else arg
-                values += [f"serde_json::json!({value})"]
-            rust += [f'    pub fn {name}_args({", ".join(parameters)}) -> Vec<serde_json::Value> {{ vec![{", ".join(values)}] }}']
         for name, struct in contents["structs"].items():
             if struct["type_parameters"]:
                 raise ValueError("generic contract structs require explicit support")
@@ -245,7 +237,7 @@ def generate(catalog, recipe):
     ts += ["export const calls = {", *calls, "};", "export const TYPES = {", *move_types, "} as const;"]
     # JSON event used by the existing daemon; wire structs above serve BCS transports.
     event = abi["deployment_manager"]["structs"]["DeploymentCreated"]
-    rust += ["#[derive(Debug, Clone, Deserialize)]", "#[serde(deny_unknown_fields)]", "pub struct DeploymentCreatedEvent {"]
+    rust += ["#[derive(Debug, Clone, Deserialize)]", "pub struct DeploymentCreatedEvent {"]
     for name, datatype in event["fields"]:
         t = "Vec<String>" if datatype.startswith("vector<") else "String" if datatype in ["address", "sui::object::ID", "std::string::String"] else rust_type(datatype)
         rust += [f"    pub {name}: {t},"]
@@ -256,6 +248,7 @@ def generate(catalog, recipe):
     move = ["// Generated protocol-value acceptance; not a production entry point.", "#[test_only]", "module sui_edge::protocol_value_tests {",
             "    #[test]", "    fun status_values_match_clients() {", *[f"        assert!(sui_edge::deployment_manager::status_{name.lower()}() == {value}, {index});" for index, (name,value) in enumerate(catalog["statuses"].items())], "    }", "}"]
     return {
+        ROOT / "dapp/src/lib/fleet-abi.ts": header + "export const MOVE_ABI = " + json.dumps(abi, indent=2) + " as const;\n",
         ROOT / "dapp/src/lib/fleet-protocol.ts": "\n".join(ts) + "\n",
         ROOT / "dapp/src/lib/recipe-schema.ts": "\n".join(recipe_ts).rstrip() + "\n",
         ROOT / "dapp/src/lib/protocol-version.ts": "\n".join(metadata) + "\n",
@@ -283,7 +276,7 @@ def main():
     parser.add_argument("--summary-dir", type=Path)
     args = parser.parse_args()
     if args.summary_dir:
-        modules = {p.stem: json.loads(p.read_text()) for p in (args.summary_dir / "sui_edge").glob("*.json")}
+        modules, _ = read_summary(args.summary_dir)
     else:
         with tempfile.TemporaryDirectory(prefix="fleet-abi-") as directory:
             modules, _ = summarize(ROOT / "contracts", Path(directory))

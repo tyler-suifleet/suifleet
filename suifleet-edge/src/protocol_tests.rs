@@ -1,11 +1,10 @@
 use crate::protocol;
 
 #[test]
-fn generated_daemon_calls_keep_compiled_argument_order_and_scalar_types() {
-    assert_eq!(protocol::deployment_manager::report_status_args("deployment", "cap", 1),
-        vec![serde_json::json!("deployment"), serde_json::json!("cap"), serde_json::json!("1")]);
-    assert_eq!(protocol::deployment_manager::report_status_for_group_args("deployment", "cap", "group", 2),
-        vec![serde_json::json!("deployment"), serde_json::json!("cap"), serde_json::json!("group"), serde_json::json!("2")]);
+fn additive_event_json_fields_do_not_poison_discovery() {
+    let mut event = serde_json::json!({"deployment_id":"0x1","component_name":"app","version":"v1","recipe_blob_id":"recipe","artifact_sha256":"ab".repeat(32),"target_groups":[],"target_devices":[],"creator":"0x2"});
+    event["node_rendering_metadata"] = serde_json::json!({"extra":true});
+    assert!(serde_json::from_value::<protocol::DeploymentCreatedEvent>(event).is_ok());
 }
 
 #[test]

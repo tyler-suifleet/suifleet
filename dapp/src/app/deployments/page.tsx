@@ -2,7 +2,7 @@
 
 import { useDeployments } from "@/hooks/useDeployments";
 import { useDeploymentStorage } from "@/hooks/useDeploymentStorage";
-import { useCurrentAccount } from "@mysten/dapp-kit";
+import { useCurrentAccount } from "@mysten/dapp-kit-react";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import { buildDeleteDeploymentTx } from "@/lib/sui";
 import { STATUS_LABELS, STATUS_COLORS } from "@/lib/constants";

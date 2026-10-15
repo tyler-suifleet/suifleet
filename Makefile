@@ -48,8 +48,10 @@ edge-test:
 
 .PHONY: test-ota test-component dapp-typecheck
 
+# The daemon speaks gRPC; the simulator is served through the test-only shim
+# example (suifleet-edge/examples/grpc_sim_shim.rs).
 test-ota:
-	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
 	$(RUN) python3 scripts/test_ota.py
 	$(RUN) python3 scripts/test_ota.py --firmware-helper
 	$(RUN) python3 scripts/test_firmware_restart.py
@@ -58,7 +60,7 @@ test-ota:
 # installed), then the real daemon applying it through suifleet-test-updater.
 test-component:
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_test_component.py'
-	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_component_ota.py
 
 dapp-typecheck:
@@ -129,6 +131,15 @@ test-manifest:
 	$(RUN) node scripts/test_deployment_manifest.cjs
 	$(RUN) node scripts/test_wallet_manifest.cjs
 	$(RUN) node scripts/test_deployment_receipts.cjs
+	$(RUN) node scripts/test_frontend_queries.cjs
+	$(RUN) node scripts/test_target_groups.cjs
 
 test-manifest-live:
 	$(RUN) python3 scripts/test_manifest_upgrades.py
+
+# Real daemon over gRPC against a disposable localnet (start it first, as for
+# test-manifest-live): direct/group/failure/offline/cursor-migration paths.
+.PHONY: test-daemon-localnet
+test-daemon-localnet:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_daemon_localnet.py
