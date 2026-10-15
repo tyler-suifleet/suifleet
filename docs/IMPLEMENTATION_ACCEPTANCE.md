@@ -12,6 +12,8 @@ merging implementation does not establish them or authorize deployment.
 | SF-024 indexer | SF-010 public-node/archival integration |
 | SF-025 packaging | SF-029 bootable Pi image and SF-031 physical acceptance; final BitBake/QEMU evidence remains required for the packaging implementation |
 | SF-039 signed releases | [SF-042: provisioned signing workflow and device trust](https://github.com/tyler-suifleet/suifleet/issues/62), plus SF-031 |
+| SF-043 automatic testnet controller | First full automatic Actions execution requires reviewed main-only bootstrap; tracked in SF-043/#64 and observed before declaring the overall request complete |
+| SF-045 testnet preflight repair | First full automatic Actions success after reviewed repair integration; exact-head CI, keyless Actions metadata probe and genuine current-head/base testnet effects/status remain premerge gates; tracked in #69/#64 |
 
 The versioned machine-readable scope is
 [`tracking/acceptance-policy.json`](tracking/acceptance-policy.json). Copy its object
@@ -38,3 +40,13 @@ The coordinator remains the sole merger while enabled. Serial merges update the 
 requiring subsequent owners to integrate that base and obtain fresh tests/review.
 Verified merges close implementation issues and reconcile atomic/Project status;
 SF-010, SF-031 and SF-042 stay open until their own acceptance evidence is complete.
+
+The SF-043/SF-045 entries encode the direct user's one-time bootstrap ordering,
+not a continuing exemption from automatic CI. The main-sourced controller cannot
+execute a new repair before that repair exists on main. In recovery from the
+observed preflight failure, a truthful exact-head/base testnet status may link to
+a genuinely executed, locked machine-session receipt instead of claiming an
+Actions run occurred. A real keyless Actions probe validates the repaired metadata
+boundary before integration. No failed test is waived, no review/status receipt
+is fabricated, and the first normal CI-triggered full testnet Actions success is
+still required before the continuation declares the user's overall goal complete.
