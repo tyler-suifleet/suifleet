@@ -520,9 +520,18 @@
   },
   "checks": {
     "make check": "passed in suifleet-dev:sf004 (37 Move tests, 54 Rust tests, OTA simulator, frontend typecheck/build and local suites)",
-    "testnet_offline": "11 passed",
+    "testnet_offline": "12 passed (final)",
     "coordinator_offline": "59 passed",
-    "actionlint": "1.7.7 passed"
+    "actionlint": "1.7.7 passed",
+    "final_script_offline": "93 passed",
+    "queue_aware_actionlint": {
+      "source": "rhysd/actionlint PR654 at644076a59742c2d1540ebd4686eab3c308f0e562 (inspected parser patch)",
+      "workflows": "passed with queue:max; no ignored diagnostics",
+      "core_linter_tests": "go test . passed",
+      "broader_tool_suite": "go test ./... failed in archive-only maintenance scripts/check-checks project discovery and generate-popular-actions bad-request test; not claimed passing",
+      "released_1_7_12": "rejects new GitHub queue key; prior full-queue validation claim corrected",
+      "builder": "golang:1.26.1 sha256:cd78d88e00afadbedd272f977d375a6247455f3a4b1178f8ae8bbcb201743a8a; GOMAXPROCS=2; project toolchain unchanged"
+    }
   },
   "agent_independent_report_effects": {
     "started": "2026-10-15T05:18:55Z",
