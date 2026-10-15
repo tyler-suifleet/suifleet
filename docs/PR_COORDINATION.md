@@ -27,7 +27,7 @@ WSL must be running for this local service to poll. The user service restarts wi
 
 Only same-repository PRs whose head branch exactly matches a centrally reserved ticket are dispatched. Unknown ownership, draft PRs, blocked/in-progress tickets and missing model identity are reported and left alone. An active implementation is never resumed by a second worker. A feedback worker can resume only its existing family's published Review claim, with its unchanged token and clean worktree. The coordinator renews a running feedback claim; workers must also assert/heartbeat before edits and commits.
 
-SQLite transactions reserve one job per PR and one worker per model family across configured projects. Reviews use an isolated detached worktree of the fetched exact head. They read all issue comments/formal reviews and review threads plus the ticket acceptance/evidence. A thread exceeding the implemented 100-comment limit stops the scan, rather than silently truncating feedback. No path or hardware is reserved for development. Workers acquire shared build/port/hardware resources only when actually using them, under the existing rules.
+SQLite transactions reserve one job per PR and enforce configurable per-family review and repair limits across configured projects. Each category defaults to one worker. Reviews use an isolated detached worktree of the fetched exact head. They read all issue comments/formal reviews and review threads plus the ticket acceptance/evidence. A thread exceeding the implemented 100-comment limit stops the scan, rather than silently truncating feedback. No path or hardware is reserved for development. Workers acquire shared build/port/hardware resources only when actually using them, under the existing rules.
 
 The worker writes a structured result containing its verdict, actual model, acceptance completeness and exact verification evidence. The engine publishes that real result on the PR, optionally using the configured independent GitHub reviewer account for a formal review at the specific commit. A changes-requested result queues the implementation owner's repair worker. Repairs push scoped Tyler-authored commits, reply to feedback and return the ticket to Review; the changed head is then independently reviewed again.
 
@@ -70,14 +70,14 @@ Configure explicit slots in the existing private
 
 ```json
 "implementation_slots": [
-  {"project": "suifleet", "family": "Codex", "model": "gpt-6.1-sol", "enabled": true},
-  {"project": "suifleet", "family": "Claude", "model": "claude-opus-5-5", "enabled": true}
+  {"project": "suifleet", "family": "Codex", "model": "gpt-6.1-sol", "max_workers": 2, "enabled": true},
+  {"project": "suifleet", "family": "Claude", "model": "claude-opus-5-5", "max_workers": 2, "enabled": true}
 ]
 ```
 
 Use the actual installed worker model; these are recorded identities, not model
 selection flags. Workers must report their actual running version in evidence.
-One slot per project/family is supported. New installations have no enabled slots.
+Use one configuration entry per project/family. Its `max_workers` is an integer from 1 to 16 and defaults to 1 for existing configurations. New installations have no enabled slots. Each worker still receives a distinct atomic claim, session and worktree.
 Other repositories require their own registered atomic namespace, explicit project
 configuration, GitHub account and existing SSH alias; nothing enables Vortech
 implicitly. Commands are argv arrays, never shell-expanded PR or issue text.
@@ -90,8 +90,9 @@ python3 ~/.local/lib/pr-coordinator/dispatcher.py \
   --config ~/.config/pr-coordinator/config.json --status
 ```
 
-For an existing installation, add `--dispatcher-only` to preserve the installed
-review coordinator and worker while updating only the dispatcher.
+For dispatcher-only changes, add `--dispatcher-only` to preserve the installed
+review coordinator and worker. Concurrency changes to both engines require the full
+installer and restarting both services; their existing workers survive the restart.
 
 The service polls every 60 seconds, with durable exponential idle/pre-claim failure
 backoff from 60 to 900 seconds. A failed fetch before a claim is retried; uncertain
@@ -101,9 +102,14 @@ logs and process/exit receipts under `implementations/`. `--status` prints no to
 and performs no GitHub operations. Without `--execute`, a scan performs no actions.
 Tests run offline with `python3 -m unittest discover -s tools/pr-coordinator/tests`.
 
-An active or blocked manual claim occupies its family's implementation slot even
-if its lease expired. Active/retrying/orphaned PR review and repair jobs get priority
-over new dispatch for their family. Existing work is not preempted. A worker starts
+Active or blocked manual claims consume implementation capacity even when expired.
+Managed claims count once, alongside their durable dispatcher reservation.
+An active repair retains its ticket ownership and also counts toward the
+implementation ceiling; repair limits do not grant additional implementation capacity. Each
+uncertain/orphaned reservation consumes one worker position; remaining capacity can
+run independent tickets without recovering or restarting that worker. Review and
+repair categories have independent capacity and do not pause implementation dispatch.
+Existing work is not preempted. A worker starts
 only after a successful refresh, fetch, atomic claim, published ownership and assert.
 It inherits only the configured project's account token and existing claim; SSH
 remotes remain unchanged. It heartbeats its own claim, implements and tests, pushes
@@ -112,8 +118,8 @@ and exits after handing off to Review. Only a stopped worker with an exit-zero
 receipt, published Review/Done ownership and recorded evidence frees the slot.
 This allows another independent implementation while the previous PR is reviewed.
 
-Interrupted claims, failed launches, lost ownership or missing/failed receipts stop
-that slot and retain the ticket reservation. Restarts adopt live process identities
+Interrupted claims, failed launches, lost ownership or missing/failed receipts retain
+that worker position and ticket reservation. Restarts adopt live process identities
 using PID plus process start time; they never steal expired claims or restart an
 uncertain implementation. To recover, stop and inspect the original worker, preserve
 its worktree and evidence, then follow `docs/ATOMIC_TICKETING.md`. The dispatcher has
@@ -131,7 +137,24 @@ authority to another model.
 
 Implementation acceptance follows [the user-authorized split](IMPLEMENTATION_ACCEPTANCE.md). Its configured scope is included in each review fingerprint and worker snapshot; changing it requires fresh independent review and does not bypass source findings or CI. Claim tokens are stored only in the private local dispatcher SQLite database to allow restart ownership checks; GitHub tokens are never persisted there. Review and implementation slots are separate, so one family may briefly run an implementation and a review worker together.
 
-The PR service bounds each family to one read-only review and one feedback-repair worker, with at most one job on a given PR. A lengthy image repair/build therefore does not occupy the independent-review slot. Both categories retain durable reservations; orphaned jobs block their category until explicit recovery. New implementation dispatch still yields to active review/repair work.
+The optional top-level `review_worker_limits` config maps each model family to
+`review` and `fix` limits (integers 1–16, each defaulting to 1):
+
+```json
+"review_worker_limits": {
+  "Codex": {"review": 1, "fix": 2},
+  "Claude": {"review": 1, "fix": 2}
+}
+```
+
+A lengthy image repair can therefore run alongside an independent repair without
+occupying the read-only review category. At most one active job may own a given PR,
+regardless of family or category. Orphaned jobs retain one position until explicit
+recovery. Lowering any limit or disabling dispatch only prevents new launches; it
+does not interrupt existing workers. Merges remain serialized by the coordinator.
+These are process limits, not permission to parallelize use of a locked build,
+network or hardware resource. Review and repair workers consume memory and model
+usage too; choose bounds suited to the host.
 
 Public Sui testnet testing is user-authorized for this project through explicit private project configuration:
 

@@ -7,6 +7,7 @@ mod recipe;
 mod protocol;
 #[cfg(test)]
 mod protocol_tests;
+mod release;
 mod state;
 mod sui_client;
 mod walrus_client;
@@ -36,11 +37,19 @@ async fn main() -> anyhow::Result<()> {
         println!("{}", identity::provision(Path::new(&args[2]))?);
         return Ok(());
     }
+    if args.len() == 4 && args[1] == "--verify-release" {
+        let verified = release::verify(Path::new(&args[2]), Path::new(&args[3]))?;
+        println!(
+            "Verified {} {} ({}, commit {}) signed by {}",
+            verified.name, verified.version, verified.target, verified.commit, verified.signer
+        );
+        return Ok(());
+    }
     let check_config = args.len() == 3 && args[1] == "--check-config";
     let helper = args.len() == 3 && args[1] == "--firmware-helper";
     anyhow::ensure!(
         args.len() == 1 || check_config || helper,
-        "usage: suifleet [--provision KEY_PATH | --derive-address KEY_PATH | --check-config CONFIG_PATH | --firmware-helper CONFIG]"
+        "usage: suifleet [--provision KEY_PATH | --derive-address KEY_PATH | --check-config CONFIG_PATH | --firmware-helper CONFIG | --verify-release BUNDLE_DIR TRUST_FILE]"
     );
     tracing_subscriber::fmt()
         .with_env_filter(
