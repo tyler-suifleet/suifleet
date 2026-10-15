@@ -24,6 +24,9 @@ class Dispatcher:
         self.db.execute('''CREATE TABLE IF NOT EXISTS runs (
             session TEXT PRIMARY KEY, project TEXT, family TEXT, status TEXT,
             directory TEXT, claim TEXT, pid INTEGER, started TEXT, message TEXT)''')
+        self.db.execute('''CREATE TABLE IF NOT EXISTS backoff (
+            project TEXT, family TEXT, attempts INTEGER, retry_after REAL, reason TEXT,
+            PRIMARY KEY(project,family))''')
         for slot in config.get('implementation_slots', []):
             if slot['family'] not in ('Codex', 'Claude') or not slot['model'].strip():
                 raise ValueError('Each slot needs a known family and actual model')
@@ -40,8 +43,17 @@ class Dispatcher:
         try:
             return json.loads(run(['ticket', '--project', project['id'], *args]))
         except subprocess.CalledProcessError as error:
-            print(f"{project['id']}: ticket {args[0]} failed (exit {error.returncode}); scan retained ownership", flush=True)
+            if not (args[0] == 'claim' and 'No eligible ticket:' in (error.stderr or '')):
+                print(f"{project['id']}: ticket {args[0]} failed (exit {error.returncode}); scan retained ownership", flush=True)
             raise
+
+    def defer(self, project, family, reason):
+        old = self.db.execute('SELECT attempts FROM backoff WHERE project=? AND family=?', (project['id'],family)).fetchone()
+        attempts = old[0]+1 if old else 1
+        delay = min(900, 60 * 2**min(attempts-1,4))
+        self.db.execute('INSERT OR REPLACE INTO backoff VALUES(?,?,?,?,?)',
+                        (project['id'],family,attempts,time.time()+delay,reason))
+        print(f"{project['id']}: {family} {reason}; retry in {delay}s",flush=True)
 
     def update(self, session, status, message):
         self.db.execute('UPDATE runs SET status=?,message=? WHERE session=?', (status, message, session))
@@ -94,6 +106,9 @@ class Dispatcher:
             return db.execute("SELECT 1 FROM jobs WHERE family=? AND status IN ('reserved','running','retry','orphaned') LIMIT 1", (family,)).fetchone() is not None
 
     def available(self, slot, owners):
+        pause = self.db.execute('SELECT retry_after FROM backoff WHERE project=? AND family=?', (slot['project'],slot['family'])).fetchone()
+        if pause and pause[0] > time.time():
+            return False
         if self.db.execute("SELECT 1 FROM runs WHERE project=? AND family=? AND status!='finished' LIMIT 1", (slot['project'], slot['family'])).fetchone():
             return False
         # Expired manual implementations and blocked work still occupy their slot.
@@ -102,20 +117,25 @@ class Dispatcher:
         return not self.review_busy(slot['family'])
 
     def launch(self, project, slot):
+        # A fetch cannot acquire ownership. A transient pre-claim failure is retryable.
+        try:
+            run(['git','fetch','origin','main'], cwd=project['root'])
+        except Exception:
+            self.defer(project, slot['family'], 'fetch unavailable before claim')
+            return
         session = 'dispatch-' + uuid.uuid4().hex
         directory = self.state/'implementations'/session
         directory.mkdir(parents=True, mode=0o700)
         self.db.execute('INSERT INTO runs(session,project,family,status,directory) VALUES(?,?,?,?,?)',
                         (session, project['id'], slot['family'], 'claiming', str(directory)))
         try:
-            # Fetch before claiming; the immutable base is explicit, never stale local main.
-            run(['git','fetch','origin','main'], cwd=project['root'])
             try:
                 claim = self.ticket(project, 'claim', '--agent', slot['family'], '--model', slot['model'],
                                     '--session', session, '--base', 'origin/main')
             except subprocess.CalledProcessError as error:
                 if 'No eligible ticket:' in (error.stderr or ''):
                     self.db.execute('DELETE FROM runs WHERE session=?', (session,))
+                    self.defer(project,slot['family'],'idle: no eligible ticket')
                     return
                 raise
             self.db.execute("UPDATE runs SET status='launching',claim=? WHERE session=?", (json.dumps(claim), session))
@@ -132,6 +152,7 @@ class Dispatcher:
                                      cwd=claim['worktree'], env=env, stdin=subprocess.DEVNULL,
                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
             self.children[session] = child
+            self.db.execute('DELETE FROM backoff WHERE project=? AND family=?', (project['id'],slot['family']))
             self.db.execute("UPDATE runs SET status='running',pid=?,started=? WHERE session=?",
                             (child.pid, process_identity(child.pid), session))
             print(f"{project['id']}: {slot['family']} implementing {claim['key']}", flush=True)
@@ -147,6 +168,8 @@ Claim token is PR_COORDINATOR_CLAIM_TOKEN in the environment; never print/post s
 Immediately heartbeat/assert; heartbeat at least every five minutes and assert after long commands and before edits/commits/push.
 Read ticket show for the full specification/dependencies/notes; coordinate shared APIs in existing notes/issues.
 Implement, run required meaningful tests, record exact results and remaining acceptance gaps. Do not fake acceptance or ignore failures.
+User-authorized implementation acceptance scope: {json.dumps(project.get('acceptance_policy',{}),sort_keys=True)}
+Only when that scope names your ticket, defer its listed external integration checks to the linked acceptance issues. The user permits code-reviewed implementation merge before those checks; local tests, isolated-chain upgrade/compatibility and source correctness remain required. Record limits and links without claiming external tests passed. This newer user scope overrides blanket live/hardware requirements for those listed checks only.
 Use small scoped itemized commits with Tyler Bush <tyler.jonathan.bush@gmail.com> as BOTH author and committer; verify metadata.
 No model authorship/coauthor/signoff attribution. Push your branch and create a PR with Closes followed by this ticket's existing issue URL.
 Authorized: local builds, simulators and disposable network-none local Sui chains; publication on those disposable chains is test setup.
@@ -173,7 +196,12 @@ Specification snapshot: {json.dumps(claim['spec'])}
             owners = self.ticket(project, 'list')
             if not any(self.available(slot, owners) for slot in slots):
                 continue
-            self.ticket(project, 'refresh')
+            try:
+                self.ticket(project, 'refresh')
+            except subprocess.CalledProcessError:
+                for slot in slots:
+                    self.defer(project,slot['family'],'refresh unavailable before claim')
+                continue
             for slot in slots:
                 owners = self.ticket(project, 'list')
                 if self.available(slot, owners):
@@ -196,16 +224,21 @@ def main():
         return
     with open(args.state/'dispatcher.lock','w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX|fcntl.LOCK_NB)
+        failures = 0
         while True:
+            delay = max(10,args.interval)
             try:
                 dispatcher.tick(args.execute)
+                failures = 0
             except Exception as error:
+                failures += 1
+                delay = max(delay,min(900,60*2**min(failures-1,4)))
                 print(f'Dispatch scan stopped ({type(error).__name__}); no claims recovered', flush=True)
                 if not args.watch:
                     raise SystemExit(1)
             if not args.watch:
                 break
-            time.sleep(max(10, args.interval))
+            time.sleep(delay)
 
 
 if __name__ == '__main__':

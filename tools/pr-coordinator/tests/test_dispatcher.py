@@ -132,6 +132,40 @@ class DispatchTests(unittest.TestCase):
         with patch.object(d,'run',return_value=''):
             self.worker.launch(self.project,self.slot)
         self.assertEqual(self.worker.db.execute('SELECT count(*) FROM runs').fetchone()[0],0)
+        self.assertFalse(self.worker.available(self.slot,[]))
+        row=self.worker.db.execute('SELECT * FROM backoff').fetchone()
+        self.assertEqual(row['reason'],'idle: no eligible ticket')
+        with patch.object(d.time,'time',return_value=row['retry_after']+1):
+            self.assertTrue(self.worker.available(self.slot,[]))
+
+    def test_fetch_failure_never_creates_an_orphan_and_can_retry(self):
+        self.worker.ticket=Mock()
+        with patch.object(d,'run',side_effect=subprocess.CalledProcessError(128,['git','fetch'])):
+            self.worker.launch(self.project,self.slot)
+        self.worker.ticket.assert_not_called()
+        self.assertEqual(self.worker.db.execute('SELECT count(*) FROM runs').fetchone()[0],0)
+        row=self.worker.db.execute('SELECT * FROM backoff').fetchone()
+        with patch.object(d.time,'time',return_value=row['retry_after']+1):
+            self.assertTrue(self.worker.available(self.slot,[]))
+
+    def test_backoff_is_durable_exponential_and_bounded(self):
+        with patch.object(d.time,'time',return_value=1000):
+            for expected in [60,120,240,480,900,900]:
+                self.worker.defer(self.project,'Codex','idle')
+                row=self.worker.db.execute('SELECT retry_after FROM backoff').fetchone()
+                self.assertEqual(row[0],1000+expected)
+            restarted=d.Dispatcher(self.config,self.state)
+            self.assertFalse(restarted.available(self.slot,[]))
+
+    def test_refresh_failure_backs_off_without_claiming(self):
+        def ticket(project,*args):
+            if args[0]=='list':return []
+            if args[0]=='refresh':raise subprocess.CalledProcessError(1,['ticket'])
+            raise AssertionError('Unexpected claim')
+        self.worker.ticket=Mock(side_effect=ticket)
+        self.worker.tick(True)
+        self.assertFalse(self.worker.available(self.slot,[]))
+        self.assertEqual(self.worker.db.execute('SELECT count(*) FROM runs').fetchone()[0],0)
 
     def test_dry_run_does_not_refresh_or_claim(self):
         self.worker.ticket=Mock()
