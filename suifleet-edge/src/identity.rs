@@ -38,7 +38,33 @@ pub fn provision(path: &Path) -> anyhow::Result<String> {
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
         std::fs::create_dir_all(parent)?;
     }
-    let key = SigningKey::generate(&mut OsRng);
+    publish_key(path, |file| {
+        let key = SigningKey::generate(&mut OsRng);
+        writeln!(file, "{}", hex::encode(key.to_bytes()))?;
+        Ok(())
+    })
+}
+
+// A private staging file can be incomplete after interruption; the public path
+// only becomes visible after its complete contents have reached the filesystem.
+fn publish_key(
+    path: &Path,
+    write_key: impl FnOnce(&mut std::fs::File) -> anyhow::Result<()>,
+) -> anyhow::Result<String> {
+    use rand::RngCore;
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let mut nonce = [0u8; 16];
+    OsRng.fill_bytes(&mut nonce);
+    let temporary = parent.join(format!(".device-key.{}", hex::encode(nonce)));
+    struct Cleanup(std::path::PathBuf);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -46,16 +72,65 @@ pub fn provision(path: &Path) -> anyhow::Result<String> {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
-    let mut file = options.open(path)?;
-    writeln!(file, "{}", hex::encode(key.to_bytes()))?;
+    let mut file = options.open(&temporary)?;
+    let cleanup = Cleanup(temporary.clone());
+    write_key(&mut file)?;
     file.sync_all()?;
-    Ok(address(&key))
+    // hard_link is atomic and refuses to replace even a concurrently created
+    // destination. Both names are on the same filesystem.
+    match std::fs::hard_link(&temporary, path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error.into()),
+    }
+    drop(cleanup);
+    std::fs::File::open(parent)?.sync_all()?;
+    Ok(address(&load(path)?))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use ed25519_dalek::{Signature, Verifier};
+
+    #[test]
+    fn interrupted_key_write_leaves_no_published_key_and_can_retry() {
+        let root = std::env::temp_dir().join(format!("suifleet-key-{}", rand::random::<u128>()));
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("device.key");
+        let result = publish_key(&path, |file| {
+            file.write_all(b"partial")?;
+            anyhow::bail!("simulated interrupted write")
+        });
+        assert!(result.is_err());
+        assert!(!path.exists());
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 0);
+        // Abrupt termination may leave staging bytes, which are never loaded.
+        std::fs::write(root.join(".device-key.interrupted"), b"partial").unwrap();
+        let address = provision(&path).unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        assert_eq!(provision(&path).unwrap(), address);
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        // A competing provisioner must preserve the winner's key.
+        publish_key(&path, |file| {
+            writeln!(file, "{}", "01".repeat(32))?;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        std::fs::write(&path, b"corrupt").unwrap();
+        assert!(provision(&path).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"corrupt");
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn signs_intent_digest_and_serializes_sui_signature() {
