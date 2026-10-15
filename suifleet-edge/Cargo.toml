@@ -17,7 +17,9 @@ tonic = { version = "0.14", default-features = false }
 prost-types = "0.14"
 bcs = "0.1"
 # Walrus aggregator downloads over HTTP
-reqwest = { version = "0.12", features = ["json", "stream"] }
+# rustls with the system CA store: one TLS stack (tonic already uses rustls)
+# and no OpenSSL to cross-compile for release artifacts.
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "http2", "charset", "rustls-tls-native-roots"] }
 tokio = { version = "1", features = ["full"] }
 futures-util = "0.3"
 
