@@ -314,27 +314,27 @@ async fn reconcile(
         for (component, sources) in &effective.conflicts {
             warn!(component, ?sources, "Groups disagree on this component; leaving it as installed");
         }
-        journal.state.desired = Some(fingerprint);
-        // A new desired state lifts the stop left by a settled step; an update
-        // still in flight (privileged helper) keeps it until it settles.
-        let in_flight = journal.state.step.as_deref().and_then(|step| outcome(journal, step))
-            .is_some_and(|o| o.status.is_none() && !o.indeterminate);
-        if !in_flight {
-            journal.state.step = None;
-        }
+        journal.state.desired = Some(fingerprint.clone());
     }
     for component in reconcile::retired(&journal.state.components, &effective) {
         info!(component, "No longer desired by any group; retired from management (not uninstalled)");
         journal.state.components.remove(&component);
     }
-    // The step journaled last, read back from the journal, so a crash at any
-    // point (mid-step, or before the failure is acted on) keeps later steps
-    // stopped. No intent saved means its updater never started.
+    // The step journaled last, read back from the journal on every poll, so a
+    // crash at any point (mid-step, or before the failure is acted on) keeps
+    // later steps stopped, and a newer desired state seen while it was in
+    // flight is planned once it settles. No intent saved means its updater
+    // never started.
     if let Some(step) = journal.state.step.clone() {
-        match outcome(journal, &step) {
+        match outcome(journal, &step.deployment) {
             Some(o) if o.status != Some(protocol::STATUS_APPLIED) => {
-                journal.save()?;
-                return Ok(());
+                let settled = o.status.is_some() || o.indeterminate;
+                if reconcile::step_holds(&step.desired, &fingerprint, settled) {
+                    journal.save()?;
+                    return Ok(());
+                }
+                info!(deployment = step.deployment, "Stopped step settled; planning the newer desired state");
+                journal.state.step = None;
             }
             _ => journal.state.step = None,
         }
@@ -371,7 +371,10 @@ async fn reconcile(
             continue;
         }
         info!(component, deployment, version = event.version, "Reconciling to desired state");
-        journal.state.step = Some(deployment.clone());
+        journal.state.step = Some(state::Step {
+            deployment: deployment.clone(),
+            desired: fingerprint.clone(),
+        });
         journal.state.components.insert(component.clone(), deployment.clone());
         journal.save()?;
         let status = execute(cfg, sui, walrus, runner, journal, &event, &record).await?;

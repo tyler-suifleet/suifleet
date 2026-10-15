@@ -172,7 +172,7 @@ def run(binary):
             wait_for(lambda: outcomes().get("0x205") == 2, "failing step did not fail", process)
             settle()
             assert "0x206" not in outcomes(), "plan continued past a failed step"
-            assert state()["step"] == "0x205" and runs() == 2
+            assert state()["step"]["deployment"] == "0x205" and runs() == 2
             deploy("0x207", "alpha", [GROUP])
             desire(GROUP, 4, {"alpha": "0x207", "firmware": "0x202", "zeta": "0x206"})
             wait_for(lambda: outcomes().get("0x207") == 1 and outcomes().get("0x206") == 1, "revised plan did not complete", process)
@@ -190,7 +190,7 @@ def run(binary):
             desire(GROUP, 5, {"alpha": "0x207", "firmware": "0x208", "zeta": "0x20b"})
             pid = root / "updater.pid"; pid.unlink(missing_ok=True)
             wait_for(lambda: "0x208" in state().get("deployments", {}) and pid.exists(), "updater did not start", process)
-            assert state()["step"] == "0x208"
+            assert state()["step"]["deployment"] == "0x208"
             # Power loss mid-update: the daemon and its updater (own process group) die.
             process.send_signal(signal.SIGKILL); process.wait()
             os.killpg(int(pid.read_text()), signal.SIGKILL)
@@ -201,7 +201,7 @@ def run(binary):
             assert runs() == 4, "interrupted updater was executed again"
             assert "interrupted" in state()["deployments"]["0x208"]["error"]
             assert "0x20b" not in outcomes(), "plan continued past an interrupted step after restart"
-            assert state()["step"] == "0x208" and state()["current"]["firmware"] == "0x208"
+            assert state()["step"]["deployment"] == "0x208" and state()["current"]["firmware"] == "0x208"
             print("PASS: crash mid-step settles it Failed on restart; the updater is never re-executed and later steps stay stopped")
 
             # 7. A -> B -> A: firmware 0x202 ran, then 0x208 was started; a

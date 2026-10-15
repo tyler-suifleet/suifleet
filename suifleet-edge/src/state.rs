@@ -34,10 +34,17 @@ pub struct State {
     /// Fingerprint of the desired state last reconciled (reconcile.rs).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub desired: Option<String>,
-    /// Desired-state step started for that desired state, saved before its
-    /// intent. Until it has applied, later steps stay stopped, across restarts.
+    /// Desired-state step last started, saved before its intent. Until it has
+    /// applied, later steps stay stopped, across restarts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub step: Option<String>,
+    pub step: Option<Step>,
+}
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Step {
+    pub deployment: String,
+    /// Fingerprint of the desired state it was started for: that state stays
+    /// stopped by it, newer ones only while it is in flight.
+    pub desired: String,
 }
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Outcome {

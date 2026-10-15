@@ -16,9 +16,11 @@
 //! component currently runs (the deployment last started for it, one-shot or
 //! desired) rather than with execution history. Steps run one at a time with
 //! intent journaled first, so a crash never re-executes an updater. The step
-//! is journaled before its intent; until it has applied, later steps stay
-//! stopped, also across a crash. The same desired state is not retried (see
-//! `fingerprint`) until it changes.
+//! is journaled before its intent, with the desired state (`fingerprint`) it
+//! was started for; until it has applied, later steps stay stopped, also
+//! across a crash. That desired state is not retried until it changes, and a
+//! newer one waits only while the step's update is still in flight
+//! (`step_holds`).
 //!
 //! A deployment ID is also its execution identity (journal entry, firmware
 //! request, on-chain receipt), so a deployment never runs twice. Selecting
@@ -144,6 +146,15 @@ pub fn plan(
     steps
 }
 
+/// Whether a journaled step that has not applied still stops the plan for
+/// desired state `now`. It always does for the desired state it was started
+/// for (`owner`); a newer desired state waits only until the step's update
+/// has settled (Failed, or indeterminate), however many polls or restarts
+/// that takes, and is then planned afresh.
+pub fn step_holds(owner: &str, now: &str, settled: bool) -> bool {
+    owner == now || !settled
+}
+
 /// Managed components no group wants any more. A conflicted component is
 /// still wanted (by someone), so it is not retired.
 pub fn retired(managed: &BTreeMap<String, String>, effective: &Effective) -> Vec<String> {
@@ -236,6 +247,18 @@ mod tests {
             })
             .collect();
         assert_eq!(names, ["alpha", "zeta"]);
+    }
+
+    #[test]
+    fn step_stops_its_own_desired_state_and_newer_ones_until_settled() {
+        // A failed or indeterminate step: its own desired state stays stopped.
+        assert!(step_holds("a", "a", true));
+        // Still in flight: every desired state waits for it.
+        assert!(step_holds("a", "a", false));
+        assert!(step_holds("a", "b", false));
+        // Settled under a newer desired state: that one is planned. This holds
+        // on every later poll, not only on the one that first saw `b`.
+        assert!(!step_holds("a", "b", true));
     }
 
     #[test]
