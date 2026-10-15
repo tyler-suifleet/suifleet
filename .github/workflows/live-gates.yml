@@ -98,6 +98,17 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # The published fixture (packages, device, group) is reused while the
+      # contracts are unchanged, so most runs cost ~0.0025 SUI instead of
+      # ~0.18. The state also holds the throwaway test device's key.
+      - name: Restore live fixture state
+        if: inputs.gate == 'package-upgrade'
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: live-state
+          key: live-state-${{ github.run_id }}
+          restore-keys: live-state-
+
       - name: Run package-upgrade gate on testnet
         if: inputs.gate == 'package-upgrade'
         env:
@@ -108,7 +119,7 @@ jobs:
         run: |
           [ "$NETWORK" = testnet ] || { echo "::error::package-upgrade supports network=testnet"; exit 1; }
           [ -n "$SUIFLEET_TESTNET_KEY" ] || { echo "::error::environment secret SUIFLEET_TESTNET_KEY is not set (docs/TESTNET.md)"; exit 1; }
-          mkdir -p .ci-cache/cargo-registry .ci-cache/cargo-git evidence
+          mkdir -p .ci-cache/cargo-registry .ci-cache/cargo-git evidence live-state
           # The key only ever exists inside this container's temporary wallet.
           docker run --rm -e SUIFLEET_TESTNET_KEY -e SUIFLEET_TESTNET_ADDRESS -e BASE_REF \
             -v "$PWD:/workspace" -w /workspace \
@@ -123,8 +134,15 @@ jobs:
               unset SUIFLEET_TESTNET_KEY
               sui client --client.config "$wallet/client.yaml" switch --address "$SUIFLEET_TESTNET_ADDRESS" >/dev/null
               make live-gate-package-upgrade SUIFLEET_WALLET="$wallet/client.yaml" BASE_REF="$BASE_REF" \
-                SUIFLEET_EVIDENCE=evidence/package-upgrade.json
+                SUIFLEET_EVIDENCE=evidence/package-upgrade.json SUIFLEET_STATE=live-state/live-state.json
               rm -rf "$wallet"'
+
+      - name: Save live fixture state
+        if: always() && inputs.gate == 'package-upgrade'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: live-state
+          key: live-state-${{ github.run_id }}
 
       - name: Run other gates
         if: inputs.gate != 'package-upgrade'
