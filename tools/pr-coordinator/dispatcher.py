@@ -34,12 +34,15 @@ class Dispatcher:
                 raise ValueError('Each slot needs a known family and actual model')
             if slot['project'] not in {p['id'] for p in config['projects']}:
                 raise ValueError('Unknown slot project')
+            limit = slot.get('max_workers', 1)
+            if type(limit) is not int or not 1 <= limit <= 16:
+                raise ValueError('max_workers must be an integer from 1 to 16')
             command = config['workers'].get(slot['family'])
             if not isinstance(command, list) or not command or not all(isinstance(s, str) and s for s in command):
                 raise ValueError('Worker command must be a nonempty argv list')
         pairs = [(s['project'], s['family']) for s in config.get('implementation_slots', [])]
         if len(set(pairs)) != len(pairs):
-            raise ValueError('Only one implementation slot per project/family')
+            raise ValueError('Use one configuration entry per project/family; set max_workers for concurrency')
 
     def ticket(self, project, *args):
         try:
@@ -100,23 +103,27 @@ class Dispatcher:
                     continue
             self.update(row['session'], 'orphaned', 'Worker stopped without verified handoff; claim retained, slot stopped')
 
-    def review_busy(self, family):
-        path = self.state/'reviews.sqlite3'
-        if not path.exists():
-            return True  # Do not outrun a missing review service.
-        with sqlite3.connect(f'file:{path}?mode=ro', uri=True) as db:
-            return db.execute("SELECT 1 FROM jobs WHERE family=? AND status IN ('reserved','running','retry','orphaned') LIMIT 1", (family,)).fetchone() is not None
-
     def available(self, slot, owners):
         pause = self.db.execute('SELECT retry_after FROM backoff WHERE project=? AND family=?', (slot['project'],slot['family'])).fetchone()
         if pause and pause[0] > time.time():
             return False
-        if self.db.execute("SELECT 1 FROM runs WHERE project=? AND family=? AND status!='finished' LIMIT 1", (slot['project'], slot['family'])).fetchone():
+        # Review and repair workers have their own capacity. Require the review
+        # service database, but a lengthy review/repair must not pause a family.
+        if not (self.state/'reviews.sqlite3').exists():
             return False
-        # Expired manual implementations and blocked work still occupy their slot.
-        if any(o.get('agent') == slot['family'] and o['status'] in ('in_progress','blocked') for o in owners):
-            return False
-        return not self.review_busy(slot['family'])
+        rows = self.db.execute("SELECT session,claim FROM runs WHERE project=? AND family=? AND status!='finished'",
+                               (slot['project'], slot['family'])).fetchall()
+        managed_sessions = {r['session'] for r in rows}
+        # Real ticket responses preserve the dispatch session. Tests/legacy state
+        # may preserve it only in the persisted claim; use both identities.
+        managed_sessions.update(json.loads(r['claim']).get('session') for r in rows if r['claim'])
+        manual = sum(1 for owner in owners
+                     if owner.get('agent') == slot['family']
+                     and owner['status'] in ('in_progress', 'blocked')
+                     and (not owner.get('session') or owner['session'] not in managed_sessions))
+        # Uncertain, orphaned and expired reservations each consume capacity;
+        # none grants permission to restart or reclaim their existing ticket.
+        return len(rows) + manual < slot.get('max_workers', 1)
 
     def launch(self, project, slot):
         # A fetch cannot acquire ownership. A transient pre-claim failure is retryable.
@@ -205,8 +212,12 @@ Specification snapshot: {json.dumps(claim['spec'])}
                     self.defer(project,slot['family'],'refresh unavailable before claim')
                 continue
             for slot in slots:
-                owners = self.ticket(project, 'list')
-                if self.available(slot, owners):
+                # Bound each pass even if a claim response is malformed. Each
+                # launch persists its reservation before another capacity check.
+                for _ in range(slot.get('max_workers', 1)):
+                    owners = self.ticket(project, 'list')
+                    if not self.available(slot, owners):
+                        break
                     self.launch(project, slot)
 
 

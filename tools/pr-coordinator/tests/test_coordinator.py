@@ -41,6 +41,45 @@ class Gates(unittest.TestCase):
             self.assertIsNone(store.reserve('project',{**pr,'number':51},'Codex','review',Path(directory)/'second-review'))
             self.assertIsNone(store.reserve('project',{**pr,'number':52},'Codex','fix',Path(directory)/'second-fix'))
 
+    def test_configurable_repairs_preserve_per_pr_exclusion_and_capacity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'jobs.sqlite3'
+            store=c.Store(path, {'Codex': {'fix': 2}})
+            pr=fixture()[0]
+            first=store.reserve('one',pr,'Codex','fix',Path(directory))
+            self.assertIsNotNone(first)
+            store.db.execute("UPDATE jobs SET status='orphaned' WHERE id=?",(first,))
+            other={**pr,'number':50}
+            self.assertIsNotNone(store.reserve('one',other,'Codex','fix',Path(directory)))
+            self.assertIsNone(store.reserve('one',pr,'Claude','review',Path(directory)))
+            self.assertIsNone(store.reserve('one',{**pr,'number':51},'Codex','fix',Path(directory)))
+            restarted=c.Store(path, {'Codex': {'fix': 1}})
+            self.assertIsNone(restarted.reserve('two',{**pr,'number':52},'Codex','fix',Path(directory)))
+            self.assertEqual(restarted.db.execute("SELECT COUNT(*) FROM jobs WHERE status IN ('reserved','orphaned')").fetchone()[0],2)
+            self.assertIsNotNone(store.reserve('one',{**pr,'number':51},'Codex','review',Path(directory)))
+
+    def test_concurrent_reservations_obey_configured_capacity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'jobs.sqlite3'
+            c.Store(path)
+            barrier=threading.Barrier(4)
+            results=[]
+            def reserve(number):
+                store=c.Store(path, {'Codex': {'fix': 2}})
+                barrier.wait()
+                results.append(store.reserve('one',{**fixture()[0],'number':number},'Codex','fix',Path(directory)))
+                store.db.close()
+            threads=[threading.Thread(target=reserve,args=(number,)) for number in range(4)]
+            for thread in threads: thread.start()
+            for thread in threads: thread.join(timeout=10)
+            self.assertEqual(len(results),4)
+            self.assertEqual(sum(result is not None for result in results),2)
+
+    def test_invalid_review_worker_limits_rejected(self):
+        for limits in [{'Other':{'fix':2}}, {'Codex':{'unknown':2}}, {'Codex':{'fix':True}}, {'Claude':{'review':0}}, {'Codex':{'fix':17}}, {'Codex':[]}, ['Codex']]:
+            with self.subTest(limits=limits), tempfile.TemporaryDirectory() as directory, self.assertRaises(ValueError):
+                c.Store(Path(directory)/'state.sqlite3', limits)
+
     def test_acceptance_scope_change_requires_new_independent_review(self):
         pr,owner,review=fixture()
         pr['_acceptance_policy']={'tickets':{'SF-008':{'acceptance_issues':['https://example.test/11']}}}
