@@ -391,4 +391,10 @@ pub struct Lifecycle {
     #[serde(rename = "shutdown")]
     #[serde(default)]
     pub shutdown: Option<String>,
+    #[serde(rename = "readiness")]
+    #[serde(default)]
+    pub readiness: Option<String>,
+    #[serde(rename = "restart")]
+    #[serde(default)]
+    pub restart: Option<String>,
 }

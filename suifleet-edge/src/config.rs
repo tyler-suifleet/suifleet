@@ -329,6 +329,15 @@ pub struct RuntimeConfig {
     pub state_dir: PathBuf,
     pub poll_seconds: u64,
     pub replay_history: bool,
+    /// Supervised components without a readiness command are ready once their
+    /// run survives this long.
+    pub component_startup_seconds: u64,
+    /// How long a readiness command may keep failing before the start fails.
+    pub component_ready_timeout_seconds: u64,
+    /// Grace for the shutdown command (or SIGTERM) before SIGKILL.
+    pub component_stop_timeout_seconds: u64,
+    /// Restarts allowed within ten minutes before a component is Broken.
+    pub component_max_restarts: u32,
 }
 impl Default for RuntimeConfig {
     fn default() -> Self {
@@ -336,6 +345,10 @@ impl Default for RuntimeConfig {
             state_dir: "/var/lib/suifleet".into(),
             poll_seconds: 10,
             replay_history: false,
+            component_startup_seconds: 3,
+            component_ready_timeout_seconds: 60,
+            component_stop_timeout_seconds: 10,
+            component_max_restarts: 5,
         }
     }
 }

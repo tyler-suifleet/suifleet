@@ -10,6 +10,7 @@ mod protocol_tests;
 mod release;
 mod state;
 mod sui_client;
+mod supervisor;
 mod walrus_client;
 
 use apply::ApplyRunner;
@@ -106,6 +107,18 @@ async fn main() -> anyhow::Result<()> {
         );
     }
     let runner = ApplyRunner::new(cfg.apply.clone());
+    // Committed components start again on every daemon start (bootstrap/reboot).
+    let mut supervisor = supervisor::Supervisor::open(
+        &cfg.runtime.state_dir,
+        supervisor::Settings {
+            startup: Duration::from_secs(cfg.runtime.component_startup_seconds),
+            ready_timeout: Duration::from_secs(cfg.runtime.component_ready_timeout_seconds),
+            stop_timeout: Duration::from_secs(cfg.runtime.component_stop_timeout_seconds),
+            max_restarts: cfg.runtime.component_max_restarts,
+            max_memory_bytes: cfg.apply.max_memory_bytes,
+        },
+    )?;
+    supervisor.bootstrap().await;
     #[cfg(feature = "systemd")]
     tokio::spawn(async {
         loop {
@@ -122,7 +135,7 @@ async fn main() -> anyhow::Result<()> {
     let shutdown = shutdown_signal();
     tokio::pin!(shutdown);
     loop {
-        let cycle = poll(&cfg, &sui, &walrus, &runner, &mut journal);
+        let cycle = poll(&cfg, &sui, &walrus, &runner, &mut supervisor, &mut journal);
         tokio::select! {
             result = cycle => { if let Err(error) = result { warn!(%error, "Sync failed; retrying without advancing cursor"); } }
             _ = &mut shutdown => { info!("Stopping; interrupted apply requires inspection on restart"); break; }
@@ -132,6 +145,8 @@ async fn main() -> anyhow::Result<()> {
             _ = &mut shutdown => break,
         }
     }
+    // Components stop with the daemon (shutdown command, then the whole group).
+    supervisor.stop_all().await;
     Ok(())
 }
 
@@ -140,6 +155,7 @@ async fn poll(
     sui: &SuiClient,
     walrus: &WalrusClient,
     runner: &ApplyRunner,
+    supervisor: &mut supervisor::Supervisor,
     journal: &mut Journal,
 ) -> anyhow::Result<()> {
     sui.validate_deployment().await?;
@@ -228,7 +244,7 @@ async fn poll(
                 );
                 journal.save()?;
                 let result =
-                    handle_deployment(walrus, runner, &cfg.apply, &resolved_event, &recipe_digest, &artifact).await;
+                    handle_deployment(walrus, runner, supervisor, &cfg.apply, &resolved_event, &recipe_digest, &artifact).await;
                 let outcome = journal
                     .state
                     .deployments
@@ -263,6 +279,7 @@ async fn poll(
 async fn handle_deployment(
     walrus: &WalrusClient,
     runner: &ApplyRunner,
+    supervisor: &mut supervisor::Supervisor,
     config: &config::ApplyConfig,
     event: &DeploymentCreatedEvent,
     expected: &str,
@@ -278,12 +295,24 @@ async fn handle_deployment(
         event.artifact_sha256,
         actual_hash
     );
+    let request_id = firmware::request_id(&event.deployment_id);
+    // A run command makes it a supervised component: Applied only once ready.
+    if let Some(run) = &recipe.lifecycle.run {
+        let spec = supervisor::Spec {
+            name: recipe.component_name.clone(),
+            version: recipe.component_version.clone(),
+            deployment: event.deployment_id.clone(),
+            run: run.clone(),
+            shutdown: recipe.lifecycle.shutdown.clone(),
+            readiness: recipe.lifecycle.readiness.clone(),
+            restart: supervisor::Restart::parse(recipe.lifecycle.restart.as_deref())?,
+        };
+        return supervisor
+            .deploy(spec, artifact, recipe.lifecycle.install.as_deref(), runner, &request_id)
+            .await;
+    }
     runner
-        .apply(
-            artifact,
-            recipe.lifecycle.install.as_deref(),
-            &firmware::request_id(&event.deployment_id),
-        )
+        .apply(artifact, recipe.lifecycle.install.as_deref(), &request_id)
         .await
 }
 

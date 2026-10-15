@@ -27,7 +27,14 @@ impl Recipe {
                     .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'),
             "invalid artifact blob ID"
         );
-        anyhow::ensure!(self.lifecycle.run.is_none() && self.lifecycle.shutdown.is_none(), "managed run/shutdown lifecycle requires a component supervisor, which is not implemented");
+        let lifecycle = &self.lifecycle;
+        anyhow::ensure!(
+            lifecycle.run.is_some()
+                || (lifecycle.shutdown.is_none() && lifecycle.readiness.is_none() && lifecycle.restart.is_none()),
+            "shutdown, readiness and restart need a supervised run command"
+        );
+        crate::supervisor::Restart::parse(lifecycle.restart.as_deref())?;
+        anyhow::ensure!(lifecycle.run.is_none() || allow_commands, "recipe run commands are disabled; set apply.allow_recipe_commands only for a trusted operator");
         anyhow::ensure!(
             self.configuration.is_empty(),
             "component configuration management is not implemented"
@@ -49,7 +56,7 @@ mod tests {
         let cases: serde_json::Value = serde_json::from_str(include_str!("../../interfaces/recipe-cases.json")).unwrap();
         for case in cases.as_array().unwrap() {
             let accepted = serde_json::from_value::<Recipe>(case["value"].clone())
-                .is_ok_and(|recipe| recipe.validate(&event, false).is_ok());
+                .is_ok_and(|recipe| recipe.validate(&event, true).is_ok());
             assert_eq!(accepted, case["valid"].as_bool().unwrap(), "{}", case["name"]);
         }
     }
@@ -69,7 +76,12 @@ mod tests {
         recipe.lifecycle.install = Some("true".into());
         assert!(recipe.validate(&event, false).is_err());
         assert!(recipe.validate(&event, true).is_ok());
+        recipe.lifecycle.shutdown = Some("true".into());
+        assert!(recipe.validate(&event, true).is_err(), "shutdown without run");
         recipe.lifecycle.run = Some("sleep 60".into());
+        assert!(recipe.validate(&event, false).is_err(), "run needs trusted recipe commands");
+        assert!(recipe.validate(&event, true).is_ok());
+        recipe.lifecycle.restart = Some("sometimes".into());
         assert!(recipe.validate(&event, true).is_err());
     }
 }
