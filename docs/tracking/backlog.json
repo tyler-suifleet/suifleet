@@ -989,6 +989,29 @@
       ],
       "validation": "Offline coordinator tests, live dry-run and unattended worker execution.",
       "description": "Automate reciprocal model reviews, feedback repairs and serial merges using atomic ticket ownership."
+    },
+    {
+      "key": "SF-041",
+      "title": "Dispatch the next eligible ticket automatically after implementation handoff",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "baseline",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-040"
+      ],
+      "paths": [
+        "tools/pr-coordinator",
+        "docs/PR_COORDINATION.md"
+      ],
+      "evidence": "Implementation workers do not currently dispatch their successors.",
+      "acceptance": [
+        "Automatically dispatch atomic highest-priority eligible claims to bounded configurable Codex/Claude slots.",
+        "Preserve ownership and process identity across restarts; fail closed on uncertain launches or orphaned workers.",
+        "Respect manual workers, review repairs, deployment boundaries and per-project authentication."
+      ],
+      "validation": "Offline dispatcher failure/concurrency/restart tests and installed persistent service status.",
+      "description": "Workers currently stop after their assigned implementation; the PR coordinator reviews and merges but does not dispatch the next ticket. Add a persistent dispatcher so authorized Codex/Claude implementation slots atomically refresh and claim the highest-priority eligible ticket automatically.\n\nAcceptance:\n- Configurable project/family/model worker slots; atomic claims remain authoritative; no duplicate workers or recovery of expired/blocked claims.\n- Durable process/claim receipts survive restarts and detect failed launches; heartbeat live ownership, stop dispatch for failed/orphaned workers rather than silently reclaiming.\n- Completed implementation hands off to existing independent review/feedback/merge service; next implementation may begin once the previous process stops and ownership reaches Review/Done.\n- Existing manual workers and claims count against configured implementation concurrency; pending review repairs have priority; no new issues, deployment or hardware programming inferred.\n- Explicit enable/disable, status, bounded polling/backoff and idle handling; account/SSH isolation per project; secrets never persisted in receipts/logs.\n- Meaningful offline tests for concurrency, failures, restart, no eligible work and safe progression. Document and install the service here under user authorization.\n"
     }
   ]
 }

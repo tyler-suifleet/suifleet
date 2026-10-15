@@ -57,3 +57,71 @@ A stopped review CLI with a durable exit receipt retries usage/auth failures aft
 Under the user's merge-closes-issue policy, the service adds `Closes #N` to each owned PR using the ticket's verified same-repository issue URL. `Refs #N` alone does not close an issue. After verifying a default-branch merge and its commit ancestry, reconciliation marks the atomic ticket and Project Done, explicitly closes and verifies the GitHub issue, and retries partial failures. Periodic discovery also imports merges performed outside the service, so missed notifications and older merged PRs are reconciled. Unknown ownership, other repositories and unmerged/closed-without-merge PRs never trigger closure. Active implementation claims require their owner handoff before coordinator completion.
 
 Automatic merging still requires the existing independent-review, CI and acceptance gates. A verified external merge is treated as implementation completion under this policy, without inventing approval or test results. Any remaining live-wallet, public-network or hardware validation must remain visible in an existing acceptance ticket or explicit follow-up. SF-003/#6's merged frontend implementation is closed; its remaining real-extension acceptance is tracked in SF-010/#11 and SF-031/#32.
+# Automatic implementation dispatch
+
+The optional `ticket-dispatcher.service` starts the next highest-priority eligible
+implementation without a chat prompt. It uses the installed atomic `ticket` CLI;
+it does not assign tickets by changing GitHub Project fields. PR review, feedback
+repairs, gated integration and issue closure remain the PR coordinator's job.
+
+Configure explicit slots in the existing private
+`~/.config/pr-coordinator/config.json`, alongside `workers` and `projects`:
+
+```json
+"implementation_slots": [
+  {"project": "suifleet", "family": "Codex", "model": "gpt-6.1-sol", "enabled": true},
+  {"project": "suifleet", "family": "Claude", "model": "claude-opus-5-5", "enabled": true}
+]
+```
+
+Use the actual installed worker model; these are recorded identities, not model
+selection flags. Workers must report their actual running version in evidence.
+One slot per project/family is supported. New installations have no enabled slots.
+Other repositories require their own registered atomic namespace, explicit project
+configuration, GitHub account and existing SSH alias; nothing enables Vortech
+implicitly. Commands are argv arrays, never shell-expanded PR or issue text.
+
+```bash
+python3 tools/pr-coordinator/install.py --enable --enable-dispatcher
+systemctl --user status ticket-dispatcher.service
+journalctl --user -u ticket-dispatcher.service -n 30 --no-pager
+python3 ~/.local/lib/pr-coordinator/dispatcher.py \
+  --config ~/.config/pr-coordinator/config.json --status
+```
+
+For an existing installation, add `--dispatcher-only` to preserve the installed
+review coordinator and worker while updating only the dispatcher.
+
+The service polls every 60 seconds. A process lock serializes scans; durable private
+SQLite receipts are in `~/.local/state/pr-coordinator/dispatch.sqlite3`, with worker
+logs and process/exit receipts under `implementations/`. `--status` prints no tokens
+and performs no GitHub operations. Without `--execute`, a scan performs no actions.
+Tests run offline with `python3 -m unittest discover -s tools/pr-coordinator/tests`.
+
+An active or blocked manual claim occupies its family's implementation slot even
+if its lease expired. Active/retrying/orphaned PR review and repair jobs get priority
+over new dispatch for their family. Existing work is not preempted. A worker starts
+only after a successful refresh, fetch, atomic claim, published ownership and assert.
+It inherits only the configured project's account token and existing claim; SSH
+remotes remain unchanged. It heartbeats its own claim, implements and tests, pushes
+small user-authored commits and opens a linked PR. It writes a `review_ready` receipt
+and exits after handing off to Review. Only a stopped worker with an exit-zero
+receipt, published Review/Done ownership and recorded evidence frees the slot.
+This allows another independent implementation while the previous PR is reviewed.
+
+Interrupted claims, failed launches, lost ownership or missing/failed receipts stop
+that slot and retain the ticket reservation. Restarts adopt live process identities
+using PID plus process start time; they never steal expired claims or restart an
+uncertain implementation. To recover, stop and inspect the original worker, preserve
+its worktree and evidence, then follow `docs/ATOMIC_TICKETING.md`. The dispatcher has
+no automatic reset command: after explicit ticket recovery, an operator must archive
+or update the corresponding private dispatcher receipt before enabling that slot.
+
+Set a slot's `enabled` to `false` and restart the service to prevent its next claim,
+or run `systemctl --user disable --now ticket-dispatcher.service` to stop dispatching.
+Existing workers survive service stops; inspect them before any recovery. User
+services run while this WSL instance is running; this does not keep Windows or WSL
+awake. Watch service status and receipts for authentication, quota and external
+acceptance blockers. Automated dispatch does not grant public-chain deployment,
+physical hardware programming, release credential provisioning or issue-creation
+authority to another model.
