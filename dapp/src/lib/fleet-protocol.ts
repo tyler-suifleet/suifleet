@@ -8,12 +8,17 @@ export const deployment_manager_DeploymentDeletedBcs = bcs.struct("DeploymentDel
 export const deployment_manager_DeploymentRecordBcs = bcs.struct("DeploymentRecord", { id: bcs.Address, creator: bcs.Address, component_name: bcs.string(), version: bcs.string(), recipe_blob_id: bcs.string(), artifact_sha256: bcs.string(), created_at: bcs.u64(), schema_version: bcs.u64() });
 export const deployment_manager_DeviceStatusReportedBcs = bcs.struct("DeviceStatusReported", { deployment_id: bcs.Address, device_id: bcs.Address, status: bcs.u8(), reporter: bcs.Address });
 export const deployment_manager_DeviceStatusUpdatedBcs = bcs.struct("DeviceStatusUpdated", { deployment_id: bcs.Address, device_id: bcs.Address, status: bcs.u8() });
+export const deployment_manager_ManagedKeyBcs = bcs.struct("ManagedKey", { dummy_field: bcs.bool() });
 export const deployment_manager_ReceiptsBcs = bcs.struct("Receipts", { version: bcs.u64(), statuses: bcs.struct("VecMap", { contents: bcs.vector(bcs.struct("Entry", { key: bcs.Address, value: bcs.u8() })) }) });
 export const deployment_manager_ReceiptsKeyBcs = bcs.struct("ReceiptsKey", { dummy_field: bcs.bool() });
 export const deployment_manager_RecipeDigestKeyBcs = bcs.struct("RecipeDigestKey", { dummy_field: bcs.bool() });
 export const deployment_manager_StatusesKeyBcs = bcs.struct("StatusesKey", { dummy_field: bcs.bool() });
 export const deployment_manager_TargetDevicesKeyBcs = bcs.struct("TargetDevicesKey", { dummy_field: bcs.bool() });
 export const deployment_manager_TargetGroupsKeyBcs = bcs.struct("TargetGroupsKey", { dummy_field: bcs.bool() });
+export const desired_state_DesiredKeyBcs = bcs.struct("DesiredKey", { dummy_field: bcs.bool() });
+export const desired_state_DesiredStateBcs = bcs.struct("DesiredState", { revision: bcs.u64(), components: bcs.struct("VecMap", { contents: bcs.vector(bcs.struct("Entry", { key: bcs.string(), value: bcs.Address })) }), updated_at: bcs.u64() });
+export const desired_state_DesiredStateChangedBcs = bcs.struct("DesiredStateChanged", { group_id: bcs.Address, revision: bcs.u64(), component_names: bcs.vector(bcs.string()), deployments: bcs.vector(bcs.Address) });
+export const desired_state_RevisionPlanBcs = bcs.struct("RevisionPlan", { group_id: bcs.Address, admin: bcs.Address, base_revision: bcs.u64(), components: bcs.struct("VecMap", { contents: bcs.vector(bcs.struct("Entry", { key: bcs.string(), value: bcs.Address })) }) });
 export const device_cap_DeviceAddressKeyBcs = bcs.struct("DeviceAddressKey", { dummy_field: bcs.bool() });
 export const device_cap_DeviceCapBcs = bcs.struct("DeviceCap", { id: bcs.Address, device_id: bcs.Address });
 export const device_group_DeviceAddedToGroupBcs = bcs.struct("DeviceAddedToGroup", { group_id: bcs.Address, device_id: bcs.Address });
@@ -29,15 +34,26 @@ export const device_registry_RegistryCreatedBcs = bcs.struct("RegistryCreated", 
 export const calls = {
   deployment_manager_create_deployment: (tx: Transaction, packageId: string, a0: string, a1: string, a2: string, a3: string, a4: string[], a5: string[], a6: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::deployment_manager::create_deployment`, arguments: [tx.pure.string(a0), tx.pure.string(a1), tx.pure.string(a2), tx.pure.string(a3), tx.pure(bcs.vector(bcs.Address).serialize(a4)), tx.pure(bcs.vector(bcs.Address).serialize(a5)), tx.object(a6)] }),
   deployment_manager_create_deployment_verified: (tx: Transaction, packageId: string, a0: string, a1: string, a2: string, a3: string, a4: string, a5: string[], a6: string[], a7: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::deployment_manager::create_deployment_verified`, arguments: [tx.pure.string(a0), tx.pure.string(a1), tx.pure.string(a2), tx.pure.string(a3), tx.pure.string(a4), tx.pure(bcs.vector(bcs.Address).serialize(a5)), tx.pure(bcs.vector(bcs.Address).serialize(a6)), tx.object(a7)] }),
+  deployment_manager_creator: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::deployment_manager::creator`, arguments: [tx.object(a0)] }),
   deployment_manager_delete_deployment: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::deployment_manager::delete_deployment`, arguments: [tx.object(a0)] }),
   deployment_manager_has_receipts: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::deployment_manager::has_receipts`, arguments: [tx.object(a0)] }),
+  deployment_manager_has_recipe_digest: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::deployment_manager::has_recipe_digest`, arguments: [tx.object(a0)] }),
+  deployment_manager_is_managed: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::deployment_manager::is_managed`, arguments: [tx.object(a0)] }),
   deployment_manager_migrate: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::deployment_manager::migrate`, arguments: [tx.object(a0)] }),
+  deployment_manager_new_deployment_verified: (tx: Transaction, packageId: string, a0: string, a1: string, a2: string, a3: string, a4: string, a5: string[], a6: string[], a7: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::deployment_manager::new_deployment_verified`, arguments: [tx.pure.string(a0), tx.pure.string(a1), tx.pure.string(a2), tx.pure.string(a3), tx.pure.string(a4), tx.pure(bcs.vector(bcs.Address).serialize(a5)), tx.pure(bcs.vector(bcs.Address).serialize(a6)), tx.object(a7)] }),
   deployment_manager_receipt_status: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: string) => tx.moveCall({ target: `${packageId}::deployment_manager::receipt_status`, arguments: [tx.object(a0), tx.pure.address(a1)] }),
   deployment_manager_receipts_version: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::deployment_manager::receipts_version`, arguments: [tx.object(a0)] }),
   deployment_manager_report_status: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: number) => tx.moveCall({ target: `${packageId}::deployment_manager::report_status`, arguments: [tx.object(a0), tx.object(a1), tx.pure.u8(a2)] }),
   deployment_manager_report_status_for_group: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: Parameters<Transaction["object"]>[0], a3: number) => tx.moveCall({ target: `${packageId}::deployment_manager::report_status_for_group`, arguments: [tx.object(a0), tx.object(a1), tx.object(a2), tx.pure.u8(a3)] }),
+  deployment_manager_share_deployment: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::deployment_manager::share_deployment`, arguments: [tx.object(a0)] }),
   deployment_manager_status_applied: (tx: Transaction, packageId: string) => tx.moveCall({ target: `${packageId}::deployment_manager::status_applied`, arguments: [] }),
   deployment_manager_status_failed: (tx: Transaction, packageId: string) => tx.moveCall({ target: `${packageId}::deployment_manager::status_failed`, arguments: [] }),
+  desired_state_begin: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::desired_state::begin`, arguments: [tx.object(a0)] }),
+  desired_state_commit: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::desired_state::commit`, arguments: [tx.object(a0), tx.object(a1), tx.object(a2)] }),
+  desired_state_components: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::desired_state::components`, arguments: [tx.object(a0)] }),
+  desired_state_remove_component: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: string) => tx.moveCall({ target: `${packageId}::desired_state::remove_component`, arguments: [tx.object(a0), tx.pure.string(a1)] }),
+  desired_state_revision: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::desired_state::revision`, arguments: [tx.object(a0)] }),
+  desired_state_set_component: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::desired_state::set_component`, arguments: [tx.object(a0), tx.object(a1)] }),
   device_cap_assert_signer: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_cap::assert_signer`, arguments: [tx.object(a0)] }),
   device_cap_device_id: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_cap::device_id`, arguments: [tx.object(a0)] }),
   device_cap_issue: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_cap::issue`, arguments: [tx.object(a0)] }),
@@ -63,12 +79,17 @@ export const TYPES = {
   deployment_manager_DeploymentRecord: "deployment_manager::DeploymentRecord",
   deployment_manager_DeviceStatusReported: "deployment_manager::DeviceStatusReported",
   deployment_manager_DeviceStatusUpdated: "deployment_manager::DeviceStatusUpdated",
+  deployment_manager_ManagedKey: "deployment_manager::ManagedKey",
   deployment_manager_Receipts: "deployment_manager::Receipts",
   deployment_manager_ReceiptsKey: "deployment_manager::ReceiptsKey",
   deployment_manager_RecipeDigestKey: "deployment_manager::RecipeDigestKey",
   deployment_manager_StatusesKey: "deployment_manager::StatusesKey",
   deployment_manager_TargetDevicesKey: "deployment_manager::TargetDevicesKey",
   deployment_manager_TargetGroupsKey: "deployment_manager::TargetGroupsKey",
+  desired_state_DesiredKey: "desired_state::DesiredKey",
+  desired_state_DesiredState: "desired_state::DesiredState",
+  desired_state_DesiredStateChanged: "desired_state::DesiredStateChanged",
+  desired_state_RevisionPlan: "desired_state::RevisionPlan",
   device_cap_DeviceAddressKey: "device_cap::DeviceAddressKey",
   device_cap_DeviceCap: "device_cap::DeviceCap",
   device_group_DeviceAddedToGroup: "device_group::DeviceAddedToGroup",
