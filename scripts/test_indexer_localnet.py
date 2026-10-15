@@ -10,10 +10,14 @@ signer-checked receipt), indexes it, and checks:
   - filters and keyset pagination return every item exactly once;
   - restart resumes from durable cursors: later removals and deletions
     appear once in the change feed, earlier changes are not repeated;
+  - a plain transfer of a Device (no fleet event) is reconciled while
+    running and across a restart: owner filters, the change feed and the
+    bulk ownership precheck follow the new owner;
   - auth: no token 401, read token cannot operate (403), operate token can;
-  - bulk operations: `ctl add-devices` builds through the API, verifies,
-    signs and executes; `ctl ... --out` writes an unsigned transaction;
-    the indexer then shows the new membership;
+  - bulk operations: `ctl add-devices` and `ctl create-deployment` build
+    through the API, verify every call and argument against the request,
+    sign and execute; `ctl ... --out` writes an unsigned transaction; the
+    indexer then shows the new membership and deployment;
   - a database bound to another chain is refused; --reset re-binds it;
   - load: concurrent paginated reads over ~45k synthetic rows.
 
@@ -237,6 +241,36 @@ def run(rpc_url, faucet_url):
             print("PASS: restart resumes from durable cursors; removal and deletion recorded once, earlier changes not repeated; "
                   "deleted record kept as a tombstone")
 
+            # A plain transfer emits no fleet event; the device sweep reconciles it.
+            def owned_by(address):
+                return [d["id"] for d in every(f"/v1/devices?owner={address}")]
+            mark = get("/v1/status")["last_change"]
+            transaction("--transfer-objects", f"[@{spare}]", f"@{other}")
+            wait_for(lambda: get(f"/v1/devices/{spare}")["owner"] == n(other), "transfer not reconciled while running")
+            assert n(spare) in owned_by(other) and n(spare) not in owned_by(operator)
+            updates = [c for c in get(f"/v1/changes?after={mark}")["items"] if c["object_id"] == n(spare)]
+            assert [c["kind"] for c in updates] == ["device.updated"], updates
+            status, refused = http("POST", "/v1/transactions/add-devices", operate_token,
+                                   {"sender": operator, "group": group, "devices": [spare]})
+            assert status == 400 and "not owned by" in refused["error"], refused
+            new_owner = {"sender": other, "component_name": "fw", "version": "9.0.0", "recipe_blob_id": "recipe",
+                         "artifact_sha256": "a" * 64, "recipe_sha256": "b" * 64, "target_devices": [spare]}
+            status, built = http("POST", "/v1/transactions/create-deployment", operate_token, new_owner)
+            assert status == 200 and built["sender"] == n(other), built
+            # Transferred back while the indexer is stopped: correct as soon as it serves again.
+            server.terminate(); server.wait(timeout=30)
+            use(other)
+            transaction("--transfer-objects", f"[@{spare}]", f"@{operator}")
+            use(operator)
+            server = serve()
+            assert get(f"/v1/devices/{spare}")["owner"] == n(operator), "restart served a pre-restart owner"
+            assert n(spare) in owned_by(operator) and n(spare) not in owned_by(other)
+            updates = [c for c in get(f"/v1/changes?after={mark}")["items"] if c["object_id"] == n(spare)]
+            assert [c["kind"] for c in updates] == ["device.updated"] * 2, updates
+            assert get("/v1/status")["devices_reconciled_at"]
+            print("PASS: device transfers without fleet events reconciled while running and across a restart "
+                  "(owner filters, one change each, live bulk ownership precheck)")
+
             # Bulk via the CLI: unsigned to a file, then verified, signed and executed.
             keystore = json.loads((root / "wallet/sui.keystore").read_text())
             seeds = {}
@@ -264,8 +298,16 @@ def run(rpc_url, faucet_url):
             wait_for(lambda: n(third) in get(f"/v1/groups/{group}")["devices"], "bulk membership not indexed")
             effects = dm.rpc(rpc_url, "sui_getTransactionBlock", [executed["executed"], {"showEffects": True}])
             assert effects["effects"]["status"]["status"] == "success"
-            print("PASS: ctl add-devices: unsigned --out file, then API-built transaction verified, signed, executed "
-                  "(effects success) and indexed")
+            created_by_ctl = subprocess.run(
+                [*ctl, "--token-file", str(token_file), "create-deployment", "--sender", operator, "--component", "fw",
+                 "--version", "2.0.0", "--recipe-blob", "recipe", "--artifact-sha256", "a" * 64, "--recipe-sha256", "c" * 64,
+                 "--target-device", third, "--key", str(key), "--manifest", str(root / "deployment.json")],
+                capture_output=True, text=True, timeout=180)
+            assert created_by_ctl.returncode == 0, created_by_ctl.stderr
+            wait_for(lambda: any(d["version"] == "2.0.0" and d["recipe_sha256"] == "c" * 64
+                                 for d in every(f"/v1/deployments?device={third}")), "ctl deployment not indexed")
+            print("PASS: ctl add-devices and create-deployment: unsigned --out file, then API-built transactions verified "
+                  "call-by-call against the request, signed, executed (effects success) and indexed")
 
             # Change feed via the CLI follows sequence numbers.
             out = subprocess.run([*ctl, "--token-file", str(token_file), "changes", "--after", str(before[1])],
@@ -275,20 +317,24 @@ def run(rpc_url, faucet_url):
 
             # Load: ~45k synthetic rows, concurrent paginated reads.
             server.terminate(); server.wait(timeout=30)
+            synthetic = lambda i: f"0xfeed{i:060x}"
             connection = sqlite3.connect(db)
             with connection:
-                connection.executemany("INSERT INTO devices (id, owner, name, device_address, arch, registered_at) VALUES (?,?,?,?,?,0)",
-                    [(f"0x{i:064x}", n(operator) if i % 3 else n(other), f"load{i}", f"0x{i + 10**6:064x}", "aarch64")
+                # Not on chain (low IDs would hit system objects such as 0x1): the device sweep
+                # would tombstone them, so insert them as tombstones.
+                connection.executemany("INSERT INTO devices (id, owner, name, device_address, arch, registered_at, deleted) VALUES (?,?,?,?,?,0,1)",
+                    [(synthetic(i), n(operator) if i % 3 else n(other), f"load{i}", f"0x{i + 10**6:064x}", "aarch64")
                      for i in range(1, 20001)])
                 connection.executemany("INSERT INTO groups (id, name, description, admin, created_at) VALUES (?,?,?,?,0)",
                     [(f"0x{i + 10**7:064x}", f"g{i}", "", n(operator)) for i in range(5000)])
                 connection.executemany("INSERT INTO group_members (group_id, device_id) VALUES (?,?)",
-                    [(f"0x{(i % 5000) + 10**7:064x}", f"0x{i:064x}") for i in range(1, 20001)])
+                    [(f"0x{(i % 5000) + 10**7:064x}", synthetic(i)) for i in range(1, 20001)])
                 connection.executemany("INSERT INTO deployments (id, creator, component_name, version, recipe_blob_id, artifact_sha256, created_at, schema_version) VALUES (?,?,?,?,?,?,0,1)",
                     [(f"0x{i + 10**8:064x}", n(operator), f"c{i % 50}", "1", "r", "a" * 64) for i in range(20000)])
             server = serve()
-            paths = ["/v1/devices?limit=100", f"/v1/devices?owner={operator}&limit=100", "/v1/groups?limit=100",
-                     "/v1/deployments?component=c7&limit=100", f"/v1/deployments?device={0x10:#066x}&limit=100"]
+            paths = ["/v1/devices?include_deleted=true&limit=100", f"/v1/devices?owner={operator}&include_deleted=true&limit=100",
+                     "/v1/groups?limit=100",
+                     "/v1/deployments?component=c7&limit=100", f"/v1/deployments?device={synthetic(0x10)}&limit=100"]
             latencies = []
 
             def timed(path):
