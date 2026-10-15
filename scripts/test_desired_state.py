@@ -181,7 +181,8 @@ def run(binary):
             deploy("0x207", "alpha", [GROUP])
             desire(GROUP, 4, {"alpha": "0x207", "firmware": "0x202", "zeta": "0x206"})
             wait_for(lambda: outcomes().get("0x207") == 1 and outcomes().get("0x206") == 1, "revised plan did not complete", process)
-            assert "step" not in state() and runs() == 4
+            settle()  # The last outcome is saved just before its step is cleared.
+            assert "step" not in state() and runs() == 4, (runs(), state())
             print("PASS: atomic three-component revision; a failed step stops the plan until a new revision, which then completes")
 
             # 6. Crash during the first step of a revision that has a later,
