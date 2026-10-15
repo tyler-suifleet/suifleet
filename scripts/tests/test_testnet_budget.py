@@ -48,3 +48,14 @@ class BudgetTests(unittest.TestCase):
         self.assertFalse(hasattr(budget, 'balance'))
 
 
+
+    def test_faucet_is_bounded_and_cannot_reset_allowance(self):
+        budget = Budget(10_000_000, [])
+        budget.grant(3_000_000)
+        budget.faucet(Mock(return_value='credited'))
+        self.assertEqual(budget.remaining, 7_000_000)
+        second = Mock()
+        with self.assertRaises(Spent):
+            budget.faucet(second)
+        second.assert_not_called()
+        self.assertEqual(budget.remaining, 7_000_000)

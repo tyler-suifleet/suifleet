@@ -12,6 +12,7 @@ class Budget:
         if limit <= 0:
             raise ValueError('spend limit must be positive')
         self.limit, self.used, self.evidence = limit, 0, evidence
+        self.faucet_attempts = 0
 
     @property
     def remaining(self):
@@ -21,6 +22,12 @@ class Budget:
         if amount < 0 or amount > self.remaining:
             raise Spent('device funding exceeds remaining allowance')
         self.used += amount
+
+    def faucet(self, request):
+        if self.faucet_attempts:
+            raise Spent('one faucet attempt per run is allowed')
+        self.faucet_attempts += 1
+        return request()  # A credit cannot change used/remaining, even on failure.
 
     def execute(self, client, label, command, *, gas=200_000_000, funding=0):
         if gas <= 0 or funding < 0:

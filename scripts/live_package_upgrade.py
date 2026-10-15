@@ -44,6 +44,7 @@ import tempfile
 import threading
 import time
 import uuid
+from urllib.parse import urlparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
 
@@ -150,6 +151,7 @@ def run(args):
                 "transactions": [], "checks": []}
     if args.evidence:
         Path(args.evidence).write_text(json.dumps(evidence) + '\n')
+    ledger = Budget(args.max_spend_mist, evidence['transactions'])
     wallet = Path(args.wallet).resolve()
 
     def client(*command, json_output=True, check=True):
@@ -175,7 +177,7 @@ def run(args):
     chain = dm.chain_facts(rpc_url)["chain_identifier"]
     expected = CHAINS.get(args.network)
     if args.network == "localnet":
-        assert any(h in rpc_url for h in ("127.0.0.1", "localhost")), "localnet profile needs a loopback node"
+        assert urlparse(rpc_url).hostname in ("127.0.0.1", "localhost", "::1"), "localnet profile needs a loopback node"
     else:
         assert chain == expected, f"active env {active_env} is chain {chain}, not {args.network} ({expected})"
     if args.network == 'testnet':
@@ -187,8 +189,8 @@ def run(args):
     if start_balance < args.max_spend_mist and args.faucet_tool:
         assert args.network == 'testnet', 'faucet only on testnet'
         # At most one request; never reset the spending ledger from a faucet credit.
-        funded = subprocess.run([args.faucet_tool, 'client', '--client.config', str(wallet),
-                                 'faucet', '--address', operator], capture_output=True, timeout=180)
+        funded = ledger.faucet(lambda: subprocess.run([args.faucet_tool, 'client', '--client.config', str(wallet),
+                                 'faucet', '--address', operator], capture_output=True, timeout=180))
         evidence['faucet'] = {'attempts': 1, 'success': funded.returncode == 0}
         if funded.returncode:
             raise RuntimeError('dedicated testnet faucet unavailable (one bounded attempt)')
@@ -205,8 +207,6 @@ def run(args):
                     start_balance_mist=start_balance)
     print(f"{args.network} chain {chain}, operator {operator}, balance {start_balance / 1e9:.3f} SUI; "
           f"base {base[:12]} -> head {head[:12]}")
-
-    ledger = Budget(args.max_spend_mist, evidence['transactions'])
 
     def mutate(label, command, **kwargs):
         if os.environ.get('SUIFLEET_TESTNET_LOCK_TOKEN'):
@@ -424,7 +424,7 @@ def run(args):
             end = balance()
         except Exception:
             end = None
-        evidence.update(allowance_used_mist=ledger.used, max_spend_mist=ledger.limit, end_balance_mist=end, spent_mist=(start_balance - end if end is not None else None),
+        evidence.update(success=sys.exc_info()[0] is None, allowance_used_mist=ledger.used, max_spend_mist=ledger.limit, end_balance_mist=end, spent_mist=(start_balance - end if end is not None else None),
                         finished=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
         if args.evidence:
             Path(args.evidence).write_text(json.dumps(evidence, indent=2) + "\n")

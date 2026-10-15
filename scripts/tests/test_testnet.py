@@ -72,3 +72,20 @@ class TrustTests(unittest.TestCase):
         self.assertFalse(environment_ready(env, {'branch_policies': [{'name': '*'}]}))
         env['protection_rules'] = [{'type': 'required_reviewers'}]
         self.assertFalse(environment_ready(env, branches))
+
+    def test_ci_keystore_only_exists_in_anonymous_memory(self):
+        import os
+        import stat
+        import tempfile
+        from ci_testnet_wallet import execute
+        with tempfile.TemporaryDirectory() as root:
+            def child(command, check):
+                config = (Path(root)/'client.yaml').read_text()
+                fd_path = next(line.split('File: ')[1] for line in config.splitlines() if 'File:' in line)
+                self.assertEqual(Path(fd_path).read_bytes(), b'offline-test-keystore')
+                self.assertIn('memfd:', os.readlink(fd_path))
+                self.assertEqual(stat.S_IMODE(Path(fd_path).stat().st_mode), 0o600)
+                self.assertEqual(stat.S_IMODE((Path(root)/'client.yaml').stat().st_mode), 0o600)
+                self.assertEqual([p.name for p in Path(root).iterdir()], ['client.yaml'])
+                return type('Result', (), {'returncode': 0})()
+            self.assertEqual(execute(root, '/state', 'a'*40, b'offline-test-keystore', child), 0)

@@ -22,10 +22,10 @@ async function main() {
   const cache = path.resolve('encrypted-live-state/fixture.bin');
   let code = 1;
   try {
-    fs.writeFileSync(path.join(root, 'sui.keystore'), JSON.stringify([Buffer.concat([Buffer.from([0]), decoded.secretKey]).toString('base64')]), {mode: 0o600});
-    fs.writeFileSync(path.join(root, 'client.yaml'), `keystore:\n  File: ${root}/sui.keystore\nenvs:\n- alias: testnet\n  rpc: https://fullnode.testnet.sui.io:443\n  ws: null\n  basic_auth: null\nactive_env: testnet\nactive_address: '${expected}'\n`, {mode: 0o600});
     if (fs.existsSync(cache)) fs.writeFileSync(state, open(fs.readFileSync(cache), secret), {mode: 0o600});
-    const result = spawnSync('python3', ['scripts/live_package_upgrade.py', '--wallet', path.join(root, 'client.yaml'), '--base-ref', process.env.BASE_REF, '--state', state, '--evidence', 'evidence/package-upgrade.json', '--faucet-tool', process.env.SUIFLEET_FAUCET_TOOL || '/opt/sui-faucet/sui'], {stdio: 'inherit', env: process.env});
+    const keystore = JSON.stringify([Buffer.concat([Buffer.from([0]), decoded.secretKey]).toString('base64')]);
+    const result = spawnSync('python3', ['scripts/ci_testnet_wallet.py', root, state, process.env.BASE_REF],
+      {input: keystore, stdio: ['pipe', 'inherit', 'inherit'], env: process.env});
     code = result.status ?? 1;
   } finally {
     try {
