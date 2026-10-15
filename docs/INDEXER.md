@@ -19,6 +19,7 @@ make test-indexer-localnet               # real localnet (start a node first, as
   - the group object, for admin and members;
   - the DeploymentRecord, plus its target, recipe-digest and receipt fields.
   Legacy `StatusesKey` statuses are never used, because old package versions can forge them.
+- **Device reconciliation sweep.** A Device has `store`, so its owner can change through a plain transfer (or it can be wrapped) without any fleet event, and `set_meta` edits it silently. The indexer therefore also re-reads indexed devices in ID order, `--reconcile-batch` (default 500) per pass, from a durable position, wrapping around. Tombstones are included, because a wrapped object can return. `index` and `serve` startup run a full sweep first, so a restart never serves owners from before it. While running, an event-less change is reflected within one full sweep: about `devices / batch × interval` (for example 45k devices at 500 per 2 s pass is about 3 minutes). `GET /v1/status` reports `devices_reconciled_at` for the last completed sweep. Groups and deployments are shared, `key`-only objects that only the fleet modules change, and every such change emits a watched event.
 - **Tombstones.** An object that disappears (deleted or wrapped) becomes a tombstone (`deleted: true`). Lists hide tombstones unless asked with `include_deleted`.
 - **Atomic pages.** A page's rows, change-feed entries and stream cursor commit in one SQLite transaction. A crash at any point resumes without loss or duplication.
 - **Type origins.** Origins come from the call package's own type origin table, and are checked against the manifest. Fields introduced by later upgrades are read only once the package defines them.
@@ -27,13 +28,14 @@ make test-indexer-localnet               # real localnet (start a node first, as
 
 ```bash
 suifleet-indexer serve --manifest deployment.json --db /var/lib/suifleet-indexer/fleet.db \
-  --tokens /etc/suifleet-indexer/tokens [--listen 127.0.0.1:8650] [--interval-seconds 2]
+  --tokens /etc/suifleet-indexer/tokens [--listen 127.0.0.1:8650] [--interval-seconds 2] \
+  [--reconcile-batch 500]
 ```
 
 **Startup.**
 - The indexer reads the same deployment manifest as the dApp and the daemon ([DEPLOYMENT_MANIFEST.md](DEPLOYMENT_MANIFEST.md)), and verifies it against the chain first: chain identity, package version and origins, UpgradeCap, and registry.
-- It catches up before serving, so the API never answers from an empty index.
-- It then indexes every `--interval-seconds`, retrying a failed stream without advancing that stream's cursor.
+- It catches up, including a full device sweep, before serving, so the API never answers from an empty or pre-restart index.
+- It then indexes every `--interval-seconds`, and advances the device sweep by one batch. A failed stream or batch is retried without advancing its position.
 
 **Network.**
 - Run one instance per network and database.
@@ -58,7 +60,7 @@ suifleet-indexer serve --manifest deployment.json --db /var/lib/suifleet-indexer
 
 **Local only.** `--public-read` allows unauthenticated `GET` and still requires `operate` for `POST`. Do not combine it with a non-loopback listener.
 
-**What `operate` can and cannot do.** An `operate` token only lets a client ask the service to *build* a transaction. Signing always happens elsewhere, with the operator's wallet or `ctl --key`. Chain authority is unchanged: group admin, device owner and verified recipes are enforced by the contracts, and pre-checked by the API.
+**What `operate` can and cannot do.** An `operate` token only lets a client ask the service to *build* a transaction. Signing always happens elsewhere, with the operator's wallet or `ctl --key`. Chain authority is unchanged: group admin, device owner and verified recipes are enforced by the contracts, and pre-checked by the API. Device ownership prechecks read the devices' current owners from chain for each request, not from the index, which may still be waiting for the sweep.
 
 ## API (`/v1`, JSON)
 
@@ -100,11 +102,14 @@ suifleet-indexer ctl --token-file operate.token add-devices --sender 0xOPERATOR 
 
 `SUIFLEET_API_TOKEN` can replace `--token-file`.
 
-**Before signing, `--key` checks the returned transaction against the operator's own manifest.** It refuses unless all of these hold:
+**The API is not trusted with the operator's intent.** With `--manifest`, which `--key` requires, the CLI rebuilds the exact calls from its own command line and checks the returned transaction against them before signing (or before writing `--out`). It refuses unless all of these hold:
 - the key is the `--sender`'s key, and the transaction's sender;
 - gas is paid by the sender and stays within budget;
 - the bytes match the API's digest;
-- every command is a call into the manifest's package, to a function the operation allows (for example only `device_group::add_device` for `add-devices`), with no type arguments.
+- the transaction has exactly the requested commands, in order. Each is a call into the manifest's package to the requested module and function, with no type arguments;
+- every argument is an input holding exactly the requested value or object: the group and device objects, device IDs, component, version, blob, both digests, target lists, and the immutable shared clock. There are no unused inputs.
+
+A compromised or intercepted API can therefore not substitute another group, device, recipe or target, or add calls, under the operator's signature. `--out` without `--manifest` writes the file unverified and says so.
 
 **Signing and executing.** The key file holds a 32-byte hex ed25519 seed. Success is read from the execution effects.
 
@@ -125,25 +130,32 @@ suifleet-indexer ctl --token-file operate.token add-devices --sender 0xOPERATOR 
 
 **Crash safety.** A crash mid-page leaves neither rows nor cursor, and the page is re-read.
 
-## Verified locally (2026-10-14)
+## Verified locally (2026-10-15)
 
-- `make indexer-test`: 13 unit tests. They cover:
+- `make indexer-test`: 15 unit tests. They cover:
   - idempotent writes and the change feed;
   - a rolled-back page leaving neither rows nor cursor;
   - keyset pagination and filters;
   - creator-only group resolution;
-  - token scopes;
-  - bulk validation;
-  - verify-before-sign rejections: wrong function, other package, non-call command, sender, gas owner and budget;
+  - token scopes, including tokens padded by multiples of 256 bytes;
+  - bulk validation, with live owners overriding a stale index;
+  - verify-before-sign rejections:
+    - same function with another group, device or digest;
+    - an object replaced by its ID as pure bytes;
+    - extra, missing or reordered calls;
+    - wrong function, other package, wrong argument count;
+    - unused inputs, non-call commands, a mutable clock;
+    - sender, gas owner and budget;
   - pruned-history refusal;
   - node JSON integers.
 - `scripts/test_indexer_localnet.py` on a real Sui 1.81.1 localnet, all PASS:
   - the API matches chain state (owners, members, targets, resolved devices, a signer-checked receipt) under limit-2 pagination;
   - no or unknown token gets 401, `read` cannot operate (403), and an invalid bulk request gets 400;
   - after a restart, the removal and deletion made while stopped appear once and earlier changes are not repeated;
-  - `ctl add-devices` writes an unsigned file, then verifies, signs and executes (effects success), and the indexer shows the new membership;
+  - a Device transferred by a plain `TransferObjects` (no fleet event) is reconciled while running. Owner filters follow it, it appears once in the change feed, and the API's ownership precheck rejects the old owner and builds for the new one. When transferred back while the indexer is stopped, the new owner is served immediately after restart;
+  - `ctl add-devices` writes an unsigned file, then verifies, signs and executes (effects success), and the indexer shows the new membership. `ctl create-deployment` is verified call-by-call, signed and executed, and indexed;
   - the CLI change feed is in sequence order;
-  - load: 400 concurrent paginated reads (8 clients) over about 45k rows had p50 18 ms and p95 88 ms (debug build, laptop-class host);
+  - load: 400 concurrent paginated reads (8 clients) over about 45k rows had p50 18.5 ms and p95 90 ms (debug build, laptop-class host). The 20k synthetic devices are inserted as tombstones, since the sweep would tombstone objects that are not on chain;
   - a database bound to another chain is refused, and `--reset` re-indexes.
 
 **Not yet done:**
