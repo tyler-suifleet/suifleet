@@ -8,7 +8,7 @@ pub const DEPLOYMENT_SCHEMA_VERSION: u64 = 1;
 pub const RECIPE_VERSION: &str = "1.0";
 pub const STATUS_APPLIED: u8 = 1;
 pub const STATUS_FAILED: u8 = 2;
-pub const REQUIRED_TYPES: &[&str] = &["device_registry::DeviceRegistry", "device_registry::Device", "device_group::DeviceGroup", "device_group::GroupCreated", "device_cap::DeviceCap", "device_cap::DeviceAddressKey", "deployment_manager::DeploymentRecord", "deployment_manager::DeploymentCreated", "deployment_manager::DeviceStatusUpdated", "deployment_manager::TargetGroupsKey", "deployment_manager::TargetDevicesKey", "deployment_manager::StatusesKey", "deployment_manager::RecipeDigestKey", "deployment_manager::ReceiptsKey", "deployment_manager::Receipts", "deployment_manager::DeviceStatusReported"];
+pub const REQUIRED_TYPES: &[&str] = &["device_registry::DeviceRegistry", "device_registry::Device", "device_group::DeviceGroup", "device_group::GroupCreated", "device_cap::DeviceCap", "device_cap::DeviceAddressKey", "deployment_manager::DeploymentRecord", "deployment_manager::DeploymentCreated", "deployment_manager::DeviceStatusUpdated", "deployment_manager::TargetGroupsKey", "deployment_manager::TargetDevicesKey", "deployment_manager::StatusesKey", "deployment_manager::RecipeDigestKey", "deployment_manager::ReceiptsKey", "deployment_manager::Receipts", "deployment_manager::DeviceStatusReported", "device_registry::IdentityKey", "device_registry::Identity", "device_registry::DeviceIdentityChanged", "device_registry::CustodyKey", "device_registry::DeviceOwnerCap"];
 pub const MOVE_ABI_JSON: &str = include_str!("../../interfaces/fleet-v1.json");
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Entry<K, V> { pub key: K, pub value: V }
@@ -21,6 +21,7 @@ pub mod deployment_manager {
     pub const CREATE_DEPLOYMENT: &str = "create_deployment";
     pub const CREATE_DEPLOYMENT_VERIFIED: &str = "create_deployment_verified";
     pub const DELETE_DEPLOYMENT: &str = "delete_deployment";
+    pub const HAS_CURRENT_RECEIPTS: &str = "has_current_receipts";
     pub const HAS_RECEIPTS: &str = "has_receipts";
     pub const MIGRATE: &str = "migrate";
     pub const RECEIPT_STATUS: &str = "receipt_status";
@@ -30,6 +31,8 @@ pub mod deployment_manager {
     pub const RECIPE_SHA256: &str = "recipe_sha256";
     pub const REPORT_STATUS: &str = "report_status";
     pub const REPORT_STATUS_FOR_GROUP: &str = "report_status_for_group";
+    pub const REPORT_VERIFIED_STATUS: &str = "report_verified_status";
+    pub const REPORT_VERIFIED_STATUS_FOR_GROUP: &str = "report_verified_status_for_group";
     pub const STATUS_APPLIED: &str = "status_applied";
     pub const STATUS_FAILED: &str = "status_failed";
     pub const STATUSES: &str = "statuses";
@@ -115,6 +118,7 @@ pub mod deployment_manager {
 pub mod device_cap {
     use super::*;
     pub const MODULE: &str = "device_cap";
+    pub const ASSERT_ACTIVE: &str = "assert_active";
     pub const ASSERT_SIGNER: &str = "assert_signer";
     pub const DEVICE_ID: &str = "device_id";
     pub const ISSUE: &str = "issue";
@@ -183,12 +187,32 @@ pub mod device_group {
 pub mod device_registry {
     use super::*;
     pub const MODULE: &str = "device_registry";
+    pub const ACTIVATE_DEVICE: &str = "activate_device";
+    pub const BORROW_DEVICE: &str = "borrow_device";
+    pub const CUSTODIED_DEVICE: &str = "custodied_device";
+    pub const DEREGISTER_ACTIVATED_DEVICE: &str = "deregister_activated_device";
     pub const DEREGISTER_DEVICE: &str = "deregister_device";
     pub const DEVICE_ADDRESS: &str = "device_address";
     pub const DEVICE_COUNT: &str = "device_count";
     pub const DEVICE_ID: &str = "device_id";
+    pub const IDENTITY: &str = "identity";
+    pub const IDENTITY_OWNER_CAP: &str = "identity_owner_cap";
+    pub const IDENTITY_REVOKED: &str = "identity_revoked";
+    pub const IDENTITY_SIGNER: &str = "identity_signer";
+    pub const IS_ACTIVE_SIGNER: &str = "is_active_signer";
+    pub const IS_CUSTODIED: &str = "is_custodied";
+    pub const OWNER_CAP_DEVICE_ID: &str = "owner_cap_device_id";
     pub const REGISTER_DEVICE: &str = "register_device";
+    pub const REINSTATE_DEVICE: &str = "reinstate_device";
+    pub const RETURN_DEVICE: &str = "return_device";
+    pub const REVOKE_DEVICE: &str = "revoke_device";
+    pub const ROTATE_DEVICE_KEY: &str = "rotate_device_key";
     pub const SET_META: &str = "set_meta";
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct CustodyKey {
+        pub device_id: [u8; 32],
+    }
+    impl CustodyKey { pub const MOVE_TYPE: &'static str = "device_registry::CustodyKey"; }
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct Device {
         pub id: [u8; 32],
@@ -207,6 +231,25 @@ pub mod device_registry {
     }
     impl DeviceDeregistered { pub const MOVE_TYPE: &'static str = "device_registry::DeviceDeregistered"; }
     #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DeviceIdentityChanged {
+        pub device_id: [u8; 32],
+        pub signer: [u8; 32],
+        pub revoked: bool,
+        pub owner_cap: [u8; 32],
+    }
+    impl DeviceIdentityChanged { pub const MOVE_TYPE: &'static str = "device_registry::DeviceIdentityChanged"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DeviceLoan {
+        pub device_id: [u8; 32],
+    }
+    impl DeviceLoan { pub const MOVE_TYPE: &'static str = "device_registry::DeviceLoan"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DeviceOwnerCap {
+        pub id: [u8; 32],
+        pub device_id: [u8; 32],
+    }
+    impl DeviceOwnerCap { pub const MOVE_TYPE: &'static str = "device_registry::DeviceOwnerCap"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct DeviceRegistered {
         pub device_id: [u8; 32],
         pub name: String,
@@ -222,6 +265,18 @@ pub mod device_registry {
         pub schema_version: u64,
     }
     impl DeviceRegistry { pub const MOVE_TYPE: &'static str = "device_registry::DeviceRegistry"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Identity {
+        pub signer: [u8; 32],
+        pub revoked: bool,
+        pub owner_cap: [u8; 32],
+    }
+    impl Identity { pub const MOVE_TYPE: &'static str = "device_registry::Identity"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct IdentityKey {
+        pub device_id: [u8; 32],
+    }
+    impl IdentityKey { pub const MOVE_TYPE: &'static str = "device_registry::IdentityKey"; }
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct RegistryCreated {
         pub registry_id: [u8; 32],
