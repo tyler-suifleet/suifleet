@@ -635,7 +635,11 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
 }
 
 fn write_status(root: &Path, status: &Mutex<BTreeMap<String, Status>>) -> anyhow::Result<()> {
-    let bytes = serde_json::to_vec_pretty(&*status.lock().unwrap())?;
+    // Hold the lock until the rename: concurrent writers share the temporary
+    // file, and the last state recorded must be the last one on disk (a
+    // restarted daemon reaps leftover runs by the PIDs recorded there).
+    let status = status.lock().unwrap();
+    let bytes = serde_json::to_vec_pretty(&*status)?;
     let temporary = root.join("status.json.tmp");
     std::fs::write(&temporary, bytes)?;
     std::fs::rename(&temporary, root.join("status.json"))?;
@@ -672,6 +676,7 @@ fn reap_previous_runs(root: &Path) -> usize {
         return 0;
     };
     let mut killed = 0;
+    let mut groups = Vec::new();
     for status in previous.values() {
         let (Some(pid), Some(started)) = (status.pid, status.pid_start) else {
             continue;
@@ -688,10 +693,39 @@ fn reap_previous_runs(root: &Path) -> usize {
                     libc::kill(pid as i32, libc::SIGKILL);
                 }
             }
+            groups.push(pid);
             killed += 1;
         }
     }
+    // SIGKILL is delivered asynchronously: wait until the killed runs are
+    // really dead (gone or zombies), or a restart could overlap them.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while groups.iter().any(|&group| group_alive(group)) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
     killed
+}
+
+/// Whether the process `group` (or any member of its process group) is
+/// still alive, i.e. exists and is not a zombie.
+fn group_alive(group: u32) -> bool {
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        let Some(pid) = entry.file_name().to_str().and_then(|name| name.parse::<u32>().ok()) else {
+            return false;
+        };
+        let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+            return false;
+        };
+        let Some((_, rest)) = stat.rsplit_once(')') else {
+            return false;
+        };
+        // Fields after the command: state, ppid, pgrp, ...
+        let fields: Vec<&str> = rest.split_whitespace().collect();
+        fields.first() != Some(&"Z") && (pid == group || fields.get(2) == Some(&group.to_string().as_str()))
+    })
 }
 
 /// PIDs of children this process spawned and has not reaped yet. Anything
