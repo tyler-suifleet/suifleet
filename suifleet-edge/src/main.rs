@@ -1,6 +1,8 @@
 mod catalog;
 mod apply;
+mod components;
 mod config;
+mod deps;
 mod firmware;
 mod identity;
 mod recipe;
@@ -19,7 +21,7 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
-use sui_client::{DeploymentCreatedEvent, SuiClient};
+use sui_client::SuiClient;
 use tracing::{info, warn};
 use walrus_client::WalrusClient;
 
@@ -37,6 +39,9 @@ async fn main() -> anyhow::Result<()> {
         println!("{}", identity::provision(Path::new(&args[2]))?);
         return Ok(());
     }
+    if args.len() == 3 && args[1] == "--enroll" {
+        return enroll(Path::new(&args[2])).await;
+    }
     if args.len() == 4 && args[1] == "--verify-release" {
         let verified = release::verify(Path::new(&args[2]), Path::new(&args[3]))?;
         println!(
@@ -49,7 +54,7 @@ async fn main() -> anyhow::Result<()> {
     let helper = args.len() == 3 && args[1] == "--firmware-helper";
     anyhow::ensure!(
         args.len() == 1 || check_config || helper,
-        "usage: suifleet [--provision KEY_PATH | --derive-address KEY_PATH | --check-config CONFIG_PATH | --firmware-helper CONFIG | --verify-release BUNDLE_DIR TRUST_FILE]"
+        "usage: suifleet [--provision KEY_PATH | --derive-address KEY_PATH | --enroll ENROLL_TOML | --check-config CONFIG_PATH | --firmware-helper CONFIG | --verify-release BUNDLE_DIR TRUST_FILE]"
     );
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -71,7 +76,7 @@ async fn main() -> anyhow::Result<()> {
             .unwrap_or_else(|_| PathBuf::from("/etc/suifleet/config.toml"))
     };
     let cfg = Config::load(&path)?;
-    let sui = SuiClient::load(cfg.sui.clone(), &cfg.device.keypair_path)?;
+    let sui = SuiClient::load(cfg.sui.clone(), identity::signer(&cfg.device)?)?;
     sui.validate_deployment().await?;
     if check_config {
         println!("Verified deployment configuration");
@@ -106,6 +111,7 @@ async fn main() -> anyhow::Result<()> {
         );
     }
     let runner = ApplyRunner::new(cfg.apply.clone());
+    let store = components::Store::open(&cfg.runtime.state_dir, &cfg.components);
     #[cfg(feature = "systemd")]
     tokio::spawn(async {
         loop {
@@ -122,7 +128,7 @@ async fn main() -> anyhow::Result<()> {
     let shutdown = shutdown_signal();
     tokio::pin!(shutdown);
     loop {
-        let cycle = poll(&cfg, &sui, &walrus, &runner, &mut journal);
+        let cycle = poll(&cfg, &sui, &walrus, &runner, store.as_ref(), &mut journal);
         tokio::select! {
             result = cycle => { if let Err(error) = result { warn!(%error, "Sync failed; retrying without advancing cursor"); } }
             _ = &mut shutdown => { info!("Stopping; interrupted apply requires inspection on restart"); break; }
@@ -135,11 +141,33 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Enroll this device under an operator's enrollment policy (SF-021) and
+/// print the IDs its daemon configuration needs.
+async fn enroll(path: &Path) -> anyhow::Result<()> {
+    let (enroll, sui_config, device) = config::EnrollConfig::load(path)?;
+    let claim = identity::Ed25519File(identity::load(&enroll.claim_key_path)?);
+    let sui = SuiClient::load(sui_config, identity::signer(&device)?)?;
+    sui.validate_deployment().await?;
+    let arch = enroll.arch.clone().unwrap_or_else(|| std::env::consts::ARCH.to_owned());
+    let enrolled = sui.enroll(&enroll.policy_id, &enroll.name, &arch, &claim).await?;
+    println!("{}", serde_json::json!({
+        "digest": enrolled.digest,
+        "device_address": enrolled.device_address,
+        "device_object_id": enrolled.device_object_id,
+        "device_cap_id": enrolled.device_cap_id,
+        "owner_cap_id": enrolled.owner_cap_id,
+    }));
+    eprintln!("Enrolled. Daemon config:\n[device]\ndevice_object_id = \"{}\"\ndevice_cap_id = \"{}\"",
+              enrolled.device_object_id, enrolled.device_cap_id);
+    Ok(())
+}
+
 async fn poll(
     cfg: &Config,
     sui: &SuiClient,
     walrus: &WalrusClient,
     runner: &ApplyRunner,
+    store: Option<&components::Store>,
     journal: &mut Journal,
 ) -> anyhow::Result<()> {
     sui.validate_deployment().await?;
@@ -209,14 +237,13 @@ async fn poll(
                     journal.save()?;
                     continue;
                 }
-                let (resolved_event, recipe_digest) = resolved?;
+                let resolved = resolved?;
                 let directory = cfg
                     .runtime
                     .state_dir
                     .join("artifacts")
                     .join(hex::encode(identity::hash(event.deployment_id.as_bytes())));
                 std::fs::create_dir_all(&directory)?;
-                let artifact = directory.join("artifact");
                 // Save intent before starting work. A crash never silently re-executes an updater.
                 journal.state.deployments.insert(
                     event.deployment_id.clone(),
@@ -227,8 +254,10 @@ async fn poll(
                     },
                 );
                 journal.save()?;
-                let result =
-                    handle_deployment(walrus, runner, &cfg.apply, &resolved_event, &recipe_digest, &artifact).await;
+                let result = handle_deployment(
+                    sui, walrus, runner, &cfg.apply, store, journal, &resolved, &directory,
+                )
+                .await;
                 let outcome = journal
                     .state
                     .deployments
@@ -260,31 +289,162 @@ async fn poll(
     Ok(())
 }
 
+/// One component the deployment installs, with its verified artifact.
+struct Install {
+    component: state::Component,
+    name: String,
+    blob: String,
+    artifact: PathBuf,
+    install: Option<String>,
+    root: bool,
+}
+
+/// Resolve the deployed component's dependencies, fetch and verify every
+/// artifact the plan installs, then install dependencies first. Conflicts,
+/// cycles and unavailable candidates are rejected before anything changes.
+#[allow(clippy::too_many_arguments)]
 async fn handle_deployment(
+    sui: &SuiClient,
     walrus: &WalrusClient,
     runner: &ApplyRunner,
     config: &config::ApplyConfig,
-    event: &DeploymentCreatedEvent,
-    expected: &str,
-    artifact: &Path,
+    store: Option<&components::Store>,
+    journal: &mut Journal,
+    resolved: &catalog::Resolved,
+    directory: &Path,
 ) -> anyhow::Result<()> {
-    let (recipe, actual) = walrus.recipe(&event.recipe_blob_id).await?;
-    anyhow::ensure!(actual == expected, "recipe SHA-256 mismatch");
-    recipe.validate(event, config.allow_recipe_commands)?;
-    let actual_hash = walrus.download(&recipe.artifact_blob_id, artifact).await?;
-    anyhow::ensure!(
-        actual_hash == event.artifact_sha256,
-        "SHA-256 mismatch: expected {} got {}",
-        event.artifact_sha256,
-        actual_hash
+    let event = &resolved.event;
+    // The deployed version can later satisfy dependencies from the cache.
+    if let (Some(store), Some(catalog), Some(version)) = (store, &resolved.catalog, &resolved.version) {
+        if let Err(error) = store.save_version(&catalog.version_id, version) {
+            warn!(%error, "Cannot cache component version");
+        }
+    }
+    let bytes =
+        components::recipe(walrus, store, &event.recipe_blob_id, &resolved.recipe_sha256).await?;
+    let recipe: recipe::Recipe = serde_json::from_slice(&bytes)?;
+    let dependencies = recipe.validate(event, config.allow_recipe_commands)?;
+    let root = deps::Root {
+        name: event.component_name.clone(),
+        version: event.version.clone(),
+        dependencies,
+    };
+    let mut loader = components::Loader::new(
+        sui,
+        walrus,
+        store,
+        resolved.catalog.as_ref(),
+        config.allow_recipe_commands,
     );
-    runner
-        .apply(
-            artifact,
-            recipe.lifecycle.install.as_deref(),
-            &firmware::request_id(&event.deployment_id),
-        )
-        .await
+    let installed = components::installed(&journal.state.components);
+    let plan = components::plan(&mut loader, &root, &installed).await?;
+    if !plan.omitted.is_empty() {
+        info!(deployment = event.deployment_id, omitted = ?plan.omitted, "Unavailable soft dependencies omitted");
+    }
+    let mut installs = Vec::new();
+    for (index, planned) in plan.order.iter().filter(|p| p.install()).enumerate() {
+        let root = planned.source == deps::Source::Root;
+        let component = |version_id, recipe_sha256: &str, artifact_sha256: &str| state::Component {
+            version: planned.version.clone(),
+            deployment_id: event.deployment_id.clone(),
+            catalog_id: resolved.catalog.as_ref().map(|c| c.catalog_id.clone()),
+            version_id,
+            recipe_sha256: recipe_sha256.to_owned(),
+            artifact_sha256: artifact_sha256.to_owned(),
+            dependencies: planned.dependencies.clone(),
+            confirmed: false,
+        };
+        let (component, blob, install) = if root {
+            (
+                component(
+                    resolved.catalog.as_ref().map(|c| c.version_id.clone()),
+                    &resolved.recipe_sha256,
+                    &event.artifact_sha256,
+                ),
+                recipe.artifact_blob_id.clone(),
+                recipe.lifecycle.install.clone(),
+            )
+        } else {
+            let loaded = &loader.loaded[&(planned.name.clone(), planned.version.clone())];
+            // The privileged helper only ever receives the deployed artifact.
+            anyhow::ensure!(
+                config.mode == config::ApplyMode::Direct || loaded.install.is_some(),
+                "dependency {} {} has no install command; the firmware helper applies only the deployed component",
+                planned.name,
+                planned.version
+            );
+            (
+                component(Some(loaded.version_id.clone()), &loaded.recipe_sha256, &loaded.artifact_sha256),
+                loaded.artifact_blob_id.clone(),
+                loaded.install.clone(),
+            )
+        };
+        installs.push(Install {
+            artifact: if root {
+                directory.join("artifact")
+            } else {
+                directory.join(format!("dependency-{index}"))
+            },
+            name: planned.name.clone(),
+            blob,
+            component,
+            install,
+            root,
+        });
+    }
+    // Every artifact is verified before the first install starts.
+    for install in &installs {
+        components::artifact(walrus, store, &install.blob, &install.component.artifact_sha256, &install.artifact)
+            .await
+            .map_err(|e| {
+                if install.root {
+                    e
+                } else {
+                    e.context(format!("dependency {} {}", install.name, install.component.version))
+                }
+            })?;
+    }
+    for install in installs {
+        // Recorded unconfirmed first: an interrupted install is never reused.
+        journal
+            .state
+            .components
+            .insert(install.name.clone(), install.component.clone());
+        journal.save()?;
+        let request = if install.root {
+            firmware::request_id(&event.deployment_id)
+        } else {
+            firmware::request_id(&format!("{}/{}", event.deployment_id, install.name))
+        };
+        let result = runner
+            .apply(&install.artifact, install.install.as_deref(), &request)
+            .await;
+        if let Err(error) = result {
+            return Err(if install.root {
+                error
+            } else {
+                error.context(format!(
+                    "dependency {} {} install failed",
+                    install.name, install.component.version
+                ))
+            });
+        }
+        journal.state.components.get_mut(&install.name).unwrap().confirmed = true;
+        journal.save()?;
+        info!(deployment = event.deployment_id, component = install.name, version = install.component.version, "Component installed");
+    }
+    if let Some(store) = store {
+        let keep = journal
+            .state
+            .components
+            .values()
+            .map(|c| c.artifact_sha256.clone())
+            .collect();
+        if let Err(error) = store.evict(&keep) {
+            warn!(%error, "Cannot evict cached artifacts");
+        }
+    }
+    Ok(())
 }
 
 /// Applied/Failed, or no status when a privileged update's outcome is
@@ -317,6 +477,9 @@ fn collect_firmware_results(cfg: &Config, journal: &mut Journal) -> anyhow::Resu
         let outcome = journal.state.deployments.get_mut(&id).unwrap();
         record_result(outcome, result);
         info!(deployment = id, status = outcome.status, error = ?outcome.error, "Late firmware result collected");
+        if outcome.status == Some(protocol::STATUS_APPLIED) {
+            journal.confirm_components(&id);
+        }
         journal.save()?;
         firmware::acknowledge(spool, &request);
     }

@@ -92,6 +92,9 @@ def bcs_type(value):
         return "bcs.string()"
     if base == "sui::vec_map::VecMap":
         return f'bcs.struct("VecMap", {{ contents: bcs.vector(bcs.struct("Entry", {{ key: {bcs_type(args[0])}, value: {bcs_type(args[1])} }})) }})'
+    if base == "sui::table::Table":
+        # Entries live in dynamic fields; the struct itself is its UID and size.
+        return 'bcs.struct("Table", { id: bcs.Address, size: bcs.u64() })'
     if base in ["bool", "u8", "u16", "u32", "u64", "u128", "u256"]:
         return f"bcs.{base}()"
     if base.startswith("sui_edge::"):
@@ -109,6 +112,8 @@ def rust_type(value):
         return "String"
     if base == "sui::vec_map::VecMap":
         return f"super::VecMap<{rust_type(args[0])}, {rust_type(args[1])}>"
+    if base == "sui::table::Table":
+        return "super::Table"
     if base in ["bool", "u8", "u16", "u32", "u64", "u128"]:
         return base
     if base.startswith("sui_edge::"):
@@ -119,6 +124,8 @@ def rust_type(value):
 def recipe_ts_type(schema):
     if "const" in schema:
         return json.dumps(schema["const"])
+    if "enum" in schema:
+        return " | ".join(json.dumps(value) for value in schema["enum"])
     if isinstance(schema["type"], list):
         return " | ".join("null" if t == "null" else t for t in schema["type"])
     if schema["type"] == "string":
@@ -126,6 +133,8 @@ def recipe_ts_type(schema):
     if schema["type"] == "object":
         if schema.get("additionalProperties") is True:
             return "Record<string, unknown>"
+        if isinstance(schema.get("additionalProperties"), dict):
+            return f"Record<string, {recipe_ts_type(schema['additionalProperties'])}>"
         required = schema.get("required", [])
         return "{ " + " ".join(f"{name}{'' if name in required else '?'}: {recipe_ts_type(s)};" for name, s in schema.get("properties", {}).items()) + " }"
     raise ValueError("unsupported recipe field")
@@ -138,7 +147,9 @@ def recipe_rust_fields(schema, top=False):
         if name == "description":
             rust_name = "_description"
         required = name in schema.get("required", [])
-        if field["type"] == "object":
+        if name == "componentDependencies":
+            datatype = "std::collections::BTreeMap<String, ComponentDependency>"
+        elif field["type"] == "object":
             datatype = "serde_json::Map<String, serde_json::Value>" if name == "configuration" else "Lifecycle"
         elif field["type"] == "string" or field["type"] == ["string", "null"]:
             datatype = "String"
@@ -153,24 +164,32 @@ def recipe_rust_fields(schema, top=False):
 
 
 TS_VALIDATOR = '''
-type Schema = { $schema?: string; $id?: string; type: string | string[]; const?: string | null; pattern?: string; required?: string[]; properties?: Record<string, Schema>; additionalProperties?: boolean };
+type Schema = { $schema?: string; $id?: string; type: string | string[]; const?: string | null; enum?: string[]; pattern?: string; required?: string[]; properties?: Record<string, Schema>; propertyNames?: Schema; additionalProperties?: boolean | Schema };
 function validate(schema: Schema, value: unknown, path: string): void {
   const type = value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
   if (!(Array.isArray(schema.type) ? schema.type : [schema.type]).includes(type)) throw new Error(`${path}: invalid type`);
   if (Object.prototype.hasOwnProperty.call(schema, "const") && value !== schema.const) throw new Error(`${path}: unsupported version`);
+  if (schema.enum && !schema.enum.includes(value as string)) throw new Error(`${path}: unsupported value`);
   if (schema.pattern && (typeof value !== "string" || new RegExp(schema.pattern).exec(value)?.[0] !== value)) throw new Error(`${path}: invalid encoding`);
   if (schema.type === "object") {
     const object = value as Record<string, unknown>;
     for (const name of schema.required || []) if (!(name in object)) throw new Error(`${path}.${name}: required`);
     for (const [name, child] of Object.entries(object)) {
+      if (schema.propertyNames) validate(schema.propertyNames, name, `${path}[${JSON.stringify(name)}]`);
       const property = schema.properties?.[name];
       if (property) {
         if (child !== undefined || (schema.required || []).includes(name)) validate(property, child, `${path}.${name}`);
       } else if (schema.additionalProperties === false) throw new Error(`${path}.${name}: unknown field`);
+      else if (typeof schema.additionalProperties === "object") validate(schema.additionalProperties, child, `${path}.${name}`);
     }
   }
 }
-export function assertComponentRecipe(value: unknown): asserts value is ComponentRecipe { validate(RECIPE_SCHEMA, value, "recipe"); }
+export function assertComponentRecipe(value: unknown): asserts value is ComponentRecipe {
+  validate(RECIPE_SCHEMA, value, "recipe");
+  // Dependencies were introduced by schema 1.1; a 1.0 consumer would reject the field.
+  const recipe = value as ComponentRecipe;
+  if (recipe.schemaVersion === "1.0" && recipe.componentDependencies !== undefined) throw new Error("recipe.componentDependencies: requires schemaVersion 1.1");
+}
 '''
 
 
@@ -184,7 +203,8 @@ def generate(catalog, recipe):
           f'export const SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS = {json.dumps(catalog["supported_deployment_schema_versions"])} as const;',
           f'export const CATALOG_TYPES = {json.dumps(catalog["optional_type_origins"]["component_catalog"])} as const;',
           f'export const STATUS = {json.dumps(catalog["statuses"])} as const;',
-          f'export const RECIPE_VERSION = {json.dumps(recipe["properties"]["schemaVersion"]["const"])} as const;',
+          f'export const RECIPE_VERSION = {json.dumps(recipe["properties"]["schemaVersion"]["enum"][0])} as const;',
+          f'export const RECIPE_VERSIONS = {json.dumps(recipe["properties"]["schemaVersion"]["enum"])} as const;',
           f'export const REQUIRED_TYPES = {json.dumps(catalog["required_type_origins"])} as const;']
     ts = [header, 'import { bcs } from "@mysten/sui/bcs";', 'import { Transaction } from "@mysten/sui/transactions";',
           'export * from "./protocol-version";',
@@ -195,12 +215,15 @@ def generate(catalog, recipe):
             f'pub const DEPLOYMENT_SCHEMA_VERSION: u64 = {catalog["deployment_schema_version"]};',
             f'pub const SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS: &[u64] = &{json.dumps(catalog["supported_deployment_schema_versions"])};',
             'pub const CATALOG_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["component_catalog"]) + '];',
-            f'pub const RECIPE_VERSION: &str = {json.dumps(recipe["properties"]["schemaVersion"]["const"])};',
+            f'pub const RECIPE_VERSION: &str = {json.dumps(recipe["properties"]["schemaVersion"]["enum"][0])};',
+            'pub const RECIPE_VERSIONS: &[&str] = &[' + ', '.join(json.dumps(v) for v in recipe["properties"]["schemaVersion"]["enum"]) + '];',
             *[f"pub const STATUS_{name.upper()}: u8 = {value};" for name, value in catalog["statuses"].items()],
             'pub const REQUIRED_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["required_type_origins"]) + '];',
             'pub const MOVE_ABI_JSON: &str = include_str!("../../interfaces/fleet-v1.json");',
             '#[derive(Debug, Clone, Deserialize, Serialize)]\npub struct Entry<K, V> { pub key: K, pub value: V }',
-            '#[derive(Debug, Clone, Deserialize, Serialize)]\npub struct VecMap<K, V> { pub contents: Vec<Entry<K, V>> }']
+            '#[derive(Debug, Clone, Deserialize, Serialize)]\npub struct VecMap<K, V> { pub contents: Vec<Entry<K, V>> }',
+            '/// sui::table::Table: entries are dynamic fields; the struct is its UID and size.',
+            '#[derive(Debug, Clone, Deserialize, Serialize)]\npub struct Table { pub id: [u8; 32], pub size: u64 }']
     calls = []
     move_types = []
     for module, contents in abi.items():
@@ -221,10 +244,12 @@ def generate(catalog, recipe):
                     types += [f"{arg}: string"]; arguments += [f"tx.pure.address({arg})"]
                 elif base == "vector<std::string::String>":
                     types += [f"{arg}: string[]"]; arguments += [f"tx.pure(bcs.vector(bcs.string()).serialize({arg}))"]
-                elif base == "vector<sui::object::ID>":
+                elif base in ["vector<sui::object::ID>", "vector<address>"]:
                     types += [f"{arg}: string[]"]; arguments += [f"tx.pure(bcs.vector(bcs.Address).serialize({arg}))"]
                 elif base == "u8":
                     types += [f"{arg}: number"]; arguments += [f"tx.pure.u8({arg})"]
+                elif base == "u64":
+                    types += [f"{arg}: number | bigint | string"]; arguments += [f"tx.pure.u64({arg})"]
                 else:
                     raise ValueError(f"unsupported transaction parameter {datatype}")
             calls += [f'  {module}_{name}: (tx: Transaction, packageId: string{", " if types else ""}{", ".join(types)}) => tx.moveCall({{ target: `${{packageId}}::{module}::{name}`, arguments: [{", ".join(arguments)}] }}),']
@@ -248,7 +273,9 @@ def generate(catalog, recipe):
         t = "Vec<String>" if datatype.startswith("vector<") else "String" if datatype in ["address", "sui::object::ID", "std::string::String"] else rust_type(datatype)
         rust += [f"    pub {name}: {t},"]
     rust += ["}", "#[derive(Debug, Deserialize)]", "#[serde(deny_unknown_fields)]", "pub struct Recipe {", *recipe_rust_fields(recipe), "}",
-             "#[derive(Debug, Default, Deserialize)]", "#[serde(deny_unknown_fields)]", "pub struct Lifecycle {", *recipe_rust_fields(recipe["properties"]["lifecycle"]), "}"]
+             "#[derive(Debug, Default, Deserialize)]", "#[serde(deny_unknown_fields)]", "pub struct Lifecycle {", *recipe_rust_fields(recipe["properties"]["lifecycle"]), "}",
+             "#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]", "#[serde(deny_unknown_fields)]", "pub struct ComponentDependency {",
+             *recipe_rust_fields(recipe["properties"]["componentDependencies"]["additionalProperties"]), "}"]
     recipe_ts = [header, f"export type ComponentRecipe = {recipe_ts_type(recipe)};",
                  "const RECIPE_SCHEMA: Schema = " + json.dumps(recipe, indent=2) + ";", TS_VALIDATOR]
     move = ["// Generated protocol-value acceptance; not a production entry point.", "#[test_only]", "module sui_edge::protocol_value_tests {",

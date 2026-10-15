@@ -6,6 +6,13 @@ manifest_path = "deployment.json"
 keypair_path = "/etc/suifleet/device.key"   # 32-byte hex ed25519 private key
 device_object_id = "0x..."                      # Device object ID from registration
 device_cap_id    = "0x..."                      # DeviceCap object ID
+# Or keep the key in a PKCS#11 token (build with --features pkcs11; docs/ENROLLMENT.md):
+# [device.signer]
+# kind = "pkcs11"
+# module = "/usr/lib/softhsm/libsofthsm2.so"
+# token_label = "suifleet"
+# key_label = "device"
+# pin_file = "/etc/suifleet/pkcs11.pin"
 # The aggregator URL comes from the deployment manifest. Optional download limits:
 # [walrus]
 # max_artifact_bytes = 1073741824   # refuse larger artifacts (default 1 GiB)
@@ -41,3 +48,11 @@ poll_seconds = 10
 # First enrollment skips historical events; existing cursors always catch up.
 # Enable only if explicitly replaying old one-shot deployments is safe.
 replay_history = false
+
+# Dependency candidates: "never" (default) uses only the live catalog and
+# Walrus; "cached" keeps authenticated versions/recipes/artifacts under
+# state_dir/components for reuse and offline resolution.
+# See docs/COMPONENT_DEPENDENCIES.md.
+# [components]
+# offline_candidates = "never"
+# cache_max_bytes = 536870912
