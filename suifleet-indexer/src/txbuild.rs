@@ -210,26 +210,37 @@ pub fn calls(operation: &str, request: &Request) -> anyhow::Result<Vec<Call>> {
     Ok(calls)
 }
 
-/// The owner of indexed, live device `id`.
-fn indexed_device(db: &rusqlite::Connection, id: &str, what: &str) -> anyhow::Result<Option<String>> {
-    store::read_device(db, id)?
-        .filter(|d| !d.deleted)
-        .map(|d| d.owner)
-        .ok_or_else(|| invalid(format!("{what} {id} is not indexed or was deregistered")))
+/// The indexed, live device `id`, with its current owner from `owners` (read
+/// from chain for this request) rather than the index, which a transfer
+/// without a fleet event leaves stale until the next reconciliation sweep.
+fn live_device(
+    db: &rusqlite::Connection,
+    owners: &BTreeMap<String, Option<String>>,
+    id: &str,
+    what: &str,
+) -> anyhow::Result<Option<String>> {
+    let indexed = store::read_device(db, id)?.filter(|d| !d.deleted);
+    match (indexed, owners.get(id)) {
+        (Some(_), Some(Some(owner))) => Ok(Some(owner.clone())),
+        (Some(device), None) => Ok(device.owner),
+        _ => Err(invalid(format!(
+            "{what} {id} is not indexed, was deregistered or is no longer address-owned"
+        ))),
+    }
 }
 
-/// Validate `request` for `operation` against the index; no chain access.
+/// Validate `request` for `operation` against the index. `owners` holds the
+/// current owners of the request's devices, read from chain by the caller.
 pub fn plan(
     db: &rusqlite::Connection,
-    types: &BTreeMap<String, String>,
     package: &str,
     operation: &str,
     request: &Request,
+    owners: &BTreeMap<String, Option<String>>,
 ) -> anyhow::Result<Planned> {
     let calls = calls(operation, request)?;
     let sender = id(&request.sender, "sender")?;
     let package = id(package, "package")?;
-    let _ = types; // Origins are resolved by the node from the call package.
     let summary = match operation {
         "add-devices" | "remove-devices" => {
             let group = admin_group(db, &request.group, &sender)?;
@@ -237,7 +248,7 @@ pub fn plan(
             for device in &devices {
                 let member = group.devices.contains(device);
                 if operation == "add-devices" {
-                    let owner = indexed_device(db, device, "device")?;
+                    let owner = live_device(db, owners, device, "device")?;
                     if owner.as_deref() != Some(sender.as_str()) {
                         return Err(invalid(format!("device {device} is not owned by {sender}")));
                     }
@@ -272,7 +283,7 @@ pub fn plan(
                 }
             }
             for device in &devices {
-                let owner = indexed_device(db, device, "target device")?;
+                let owner = live_device(db, owners, device, "target device")?;
                 if owner.as_deref() != Some(sender.as_str()) {
                     return Err(invalid(format!("devices only accept their operator's deployments; {device} is not owned by {sender}")));
                 }
@@ -288,6 +299,16 @@ pub fn plan(
         calls,
         summary,
     })
+}
+
+/// The device IDs whose current owners `plan` needs for `request`.
+pub fn devices_to_check(operation: &str, request: &Request) -> Vec<String> {
+    let named = match operation {
+        "add-devices" => &request.devices,
+        "create-deployment" => &request.target_devices,
+        _ => return Vec::new(),
+    };
+    ids(named, "device").unwrap_or_default()
 }
 
 /// Build the planned calls into a sign-ready transaction.
@@ -380,7 +401,7 @@ mod tests {
         db: &rusqlite::Connection,
         request: Request,
     ) -> anyhow::Result<Planned> {
-        plan(db, &BTreeMap::new(), &hex(7), operation, &request)
+        plan(db, &hex(7), operation, &request, &BTreeMap::new())
     }
 
     fn rejected(result: anyhow::Result<Planned>, needle: &str) {
@@ -599,5 +620,44 @@ mod tests {
             "at most",
         );
         assert!(allowed("add-devices").is_some() && allowed("other").is_none());
+    }
+
+    #[test]
+    fn live_owners_override_a_stale_index() {
+        let (_dir, db) = fixture();
+        let add = |device: u32, owners: &[(u32, Option<u32>)]| {
+            let owners = owners
+                .iter()
+                .map(|(d, o)| (hex(*d), o.map(hex)))
+                .collect();
+            plan(
+                &db,
+                &hex(7),
+                "add-devices",
+                &Request {
+                    sender: hex(100),
+                    group: Some(hex(50)),
+                    devices: vec![hex(device)],
+                    ..Default::default()
+                },
+                &owners,
+            )
+        };
+        // Indexed as 999's, but transferred to the sender without a fleet event.
+        assert!(add(3, &[(3, Some(100))]).is_ok());
+        // Indexed as the sender's, but transferred away.
+        rejected(add(2, &[(2, Some(999))]), "not owned by");
+        // Indexed, but now wrapped or deleted.
+        rejected(add(2, &[(2, None)]), "no longer address-owned");
+        assert_eq!(
+            devices_to_check(
+                "create-deployment",
+                &Request {
+                    target_devices: vec!["0x3".into(), hex(3)],
+                    ..Default::default()
+                }
+            ),
+            vec![hex(3)]
+        );
     }
 }

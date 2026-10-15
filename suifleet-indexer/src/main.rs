@@ -2,8 +2,9 @@
 //!
 //!   suifleet-indexer serve --manifest deployment.json --db fleet.db
 //!                          [--listen 127.0.0.1:8650] (--tokens FILE | --public-read)
-//!                          [--interval-seconds 2] [--reset]
-//!   suifleet-indexer index --manifest deployment.json --db fleet.db [--reset] [--rebuild-from-objects]
+//!                          [--interval-seconds 2] [--reconcile-batch 500] [--reset]
+//!   suifleet-indexer index --manifest deployment.json --db fleet.db [--reconcile-batch 500]
+//!                          [--reset] [--rebuild-from-objects]
 //!   suifleet-indexer ctl ...   (see `suifleet-indexer ctl help`)
 //!
 //! docs/INDEXER.md covers deployment, auth, storage, retention and recovery.
@@ -70,12 +71,16 @@ async fn main() -> anyhow::Result<()> {
     let db = store::open(&db_path)?;
     let mut indexer =
         indexer::Indexer::open(&manifest, db, flags.iter().any(|f| f == "--reset")).await?;
+    if let Some(batch) = values.get("--reconcile-batch") {
+        indexer.reconcile_batch = batch.parse()?;
+        anyhow::ensure!(indexer.reconcile_batch > 0, "--reconcile-batch must be positive");
+    }
     match command.as_str() {
         "index" => {
             if flags.iter().any(|f| f == "--rebuild-from-objects") {
                 indexer.rebuild_from_objects().await?;
             }
-            let changed = indexer.sync().await?;
+            let changed = indexer.sync_full().await?;
             info!(changed, "Index is at the chain tip");
         }
         "serve" => {
@@ -107,8 +112,9 @@ async fn main() -> anyhow::Result<()> {
                     .transpose()?
                     .unwrap_or(2),
             );
-            // Catch up before serving, so the API never answers from an empty index.
-            indexer.sync().await?;
+            // Catch up (and re-read every device) before serving, so the API
+            // never answers from an empty or pre-restart index.
+            indexer.sync_full().await?;
             let listen = values
                 .get("--listen")
                 .cloned()

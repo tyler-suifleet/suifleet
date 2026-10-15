@@ -10,6 +10,8 @@ use sui_rpc::proto::sui::rpc::v2 as proto;
 use sui_sdk_types::{Address, Digest, StructTag, Transaction, TypeTag};
 
 pub const PAGE_SIZE: u32 = 100;
+/// Objects per BatchGetObjects request.
+pub const BATCH_SIZE: usize = 50;
 
 #[derive(Clone)]
 pub struct Chain {
@@ -30,6 +32,25 @@ pub enum Owner {
     Address(String),
     Shared(u64),
     Other,
+}
+
+impl From<proto::Object> for Object {
+    fn from(object: proto::Object) -> Self {
+        let owner = match object.owner.as_ref() {
+            Some(o) if o.kind == Some(proto::owner::OwnerKind::Address as i32) => {
+                Owner::Address(o.address.clone().unwrap_or_default())
+            }
+            Some(o) if o.kind == Some(proto::owner::OwnerKind::Shared as i32) => {
+                Owner::Shared(o.version.unwrap_or_default())
+            }
+            _ => Owner::Other,
+        };
+        Object {
+            object_type: object.object_type.unwrap_or_default(),
+            owner,
+            fields: object.json.as_deref().map(to_json).unwrap_or(Value::Null),
+        }
+    }
 }
 
 pub struct ServiceInfo {
@@ -232,20 +253,52 @@ impl Chain {
             Err(e) => return Err(status(e).context(format!("object {id}"))),
         }
         .ok_or_else(|| anyhow::anyhow!("object {id} has no data"))?;
-        let owner = match object.owner.as_ref() {
-            Some(o) if o.kind == Some(proto::owner::OwnerKind::Address as i32) => {
-                Owner::Address(o.address.clone().unwrap_or_default())
+        Ok(Some(Object::from(object)))
+    }
+
+    /// `ids` read in batches, in order; None where deleted, wrapped or never
+    /// created.
+    pub async fn objects(&self, ids: &[String]) -> anyhow::Result<Vec<Option<Object>>> {
+        let mut found = Vec::with_capacity(ids.len());
+        for chunk in ids.chunks(BATCH_SIZE) {
+            let mut request = proto::BatchGetObjectsRequest::default();
+            request.requests = chunk
+                .iter()
+                .map(|id| {
+                    let mut one = proto::GetObjectRequest::default();
+                    one.object_id = Some(id.clone());
+                    one
+                })
+                .collect();
+            request.read_mask = Some(mask(&["owner", "object_type", "json"]));
+            let results = self
+                .rpc
+                .clone()
+                .ledger_client()
+                .batch_get_objects(request)
+                .await
+                .map_err(status)?
+                .into_inner()
+                .objects;
+            anyhow::ensure!(
+                results.len() == chunk.len(),
+                "batch read returned {} results for {} objects",
+                results.len(),
+                chunk.len()
+            );
+            for (id, result) in chunk.iter().zip(results) {
+                use proto::get_object_result::Result;
+                found.push(match result.result {
+                    Some(Result::Object(object)) => Some(Object::from(object)),
+                    Some(Result::Error(e)) if e.code == tonic::Code::NotFound as i32 => None,
+                    Some(Result::Error(e)) => {
+                        anyhow::bail!("object {id}: {} {}", e.code, e.message)
+                    }
+                    _ => anyhow::bail!("object {id}: empty or unknown batch result"),
+                });
             }
-            Some(o) if o.kind == Some(proto::owner::OwnerKind::Shared as i32) => {
-                Owner::Shared(o.version.unwrap_or_default())
-            }
-            _ => Owner::Other,
-        };
-        Ok(Some(Object {
-            object_type: object.object_type.unwrap_or_default(),
-            owner,
-            fields: object.json.as_deref().map(to_json).unwrap_or(Value::Null),
-        }))
+        }
+        Ok(found)
     }
 
     /// The value of a dynamic field keyed by an empty key struct of type

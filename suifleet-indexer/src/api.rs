@@ -191,11 +191,12 @@ impl ListQuery {
 
 async fn status(State(state): State<AppState>) -> ApiResult<Json<Value>> {
     let tip = state.chain.service_info().await.ok();
-    let (rows, chain_identifier, last_change) = blocking(&state.readers, |db| {
+    let (rows, chain_identifier, last_change, reconciled) = blocking(&state.readers, |db| {
         Ok((
             store::cursors(db)?,
             store::meta(db, "chain_identifier")?,
             store::last_change(db)?,
+            store::meta(db, crate::indexer::SWEEP_COMPLETED)?,
         ))
     })
     .await?;
@@ -207,6 +208,7 @@ async fn status(State(state): State<AppState>) -> ApiResult<Json<Value>> {
         "checkpoint_height": checkpoint_height,
         "lowest_available_checkpoint": tip.as_ref().and_then(|t| t.lowest_available_checkpoint),
         "last_change": last_change,
+        "devices_reconciled_at": reconciled.and_then(|t| t.parse::<u64>().ok()),
         "streams": rows.iter().map(|(stream, checkpoint, updated_at)| json!({
             "stream": stream, "checkpoint": checkpoint, "updated_at": updated_at,
             "lag_checkpoints": checkpoint.zip(checkpoint_height).map(|(c, h)| h.saturating_sub(c)),
@@ -338,11 +340,32 @@ async fn transaction(
     Path(operation): Path<String>,
     Json(request): Json<txbuild::Request>,
 ) -> ApiResult<Json<Value>> {
+    // Ownership prechecks use the devices' current owners, not the index:
+    // a transfer emits no fleet event and waits for the reconciliation sweep.
+    let device_type = state
+        .types
+        .get("device_registry::Device")
+        .cloned()
+        .unwrap_or_default();
+    let ids = txbuild::devices_to_check(&operation, &request);
+    let mut owners = std::collections::BTreeMap::new();
+    for (id, object) in ids.iter().zip(state.chain.objects(&ids).await?) {
+        let owner = match object {
+            Some(object) if crate::chain::same_type(&object.object_type, &device_type) => {
+                match object.owner {
+                    crate::chain::Owner::Address(owner) => crate::chain::normalize(&owner),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+        owners.insert(id.clone(), owner);
+    }
     let readers = state.readers.clone();
-    let (types, package) = (state.types.clone(), state.call_package.clone());
+    let package = state.call_package.clone();
     let operation_name = operation.clone();
     let planned = blocking(&readers, move |db| {
-        txbuild::plan(db, &types, &package, &operation_name, &request)
+        txbuild::plan(db, &package, &operation_name, &request, &owners)
     })
     .await?;
     let built = txbuild::build(&state.chain, planned).await?;

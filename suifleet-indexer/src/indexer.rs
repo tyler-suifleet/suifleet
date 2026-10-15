@@ -7,6 +7,11 @@
 //! and receipt fields), so a duplicated, reordered or missed event cannot
 //! corrupt it, and deleted objects become tombstones. A page's rows, its
 //! change-feed entries and its cursor commit in one SQLite transaction.
+//!
+//! Devices have `store`, so a plain transfer (or wrapping) changes their owner
+//! without any fleet event, and `set_meta` edits them silently. A durable
+//! reconciliation sweep therefore re-reads indexed devices in ID order, a
+//! batch per pass, wrapping around; `index` and `serve` start with a full one.
 use crate::chain::{self, Chain, Owner};
 use crate::manifest::Manifest;
 use crate::store::{self, Deployment, Device, Group};
@@ -65,7 +70,16 @@ pub struct Indexer {
     db: Connection,
     /// "module::Type" → full Move type (introducing package::module::Type).
     types: BTreeMap<String, String>,
+    /// Devices the reconciliation sweep re-reads per pass.
+    pub reconcile_batch: usize,
 }
+
+/// Default devices re-read per pass (at a 2 s interval, ~15k devices/minute).
+pub const RECONCILE_BATCH: usize = 500;
+/// Meta keys: the sweep's position (last device ID read; "" = start) and when
+/// it last completed a full pass over every indexed device.
+const SWEEP_AFTER: &str = "reconcile_devices_after";
+pub const SWEEP_COMPLETED: &str = "devices_reconciled_at";
 
 fn now() -> u64 {
     std::time::SystemTime::now()
@@ -107,7 +121,12 @@ impl Indexer {
         store::set_meta(&db, "chain_identifier", &manifest.chain_identifier)?;
         store::set_meta(&db, "call_package_id", &manifest.call_package_id)?;
         store::set_meta(&db, "package_version", &manifest.package_version)?;
-        Ok(Self { chain, db, types })
+        Ok(Self {
+            chain,
+            db,
+            types,
+            reconcile_batch: RECONCILE_BATCH,
+        })
     }
 
     fn move_type(&self, name: &str) -> anyhow::Result<&str> {
@@ -117,13 +136,68 @@ impl Indexer {
             .ok_or_else(|| anyhow::anyhow!("package has no type {name}"))
     }
 
-    /// Catch every stream up to the chain tip once. Returns rows changed.
+    /// Catch every stream up to the chain tip once, then advance the device
+    /// sweep by one batch. Returns rows changed.
     pub async fn sync(&mut self) -> anyhow::Result<usize> {
         let mut changed = 0;
         for (event, field, kind) in STREAMS {
             changed += self.sync_stream(event, field, *kind).await?;
         }
-        Ok(changed)
+        Ok(changed + self.reconcile_devices(self.reconcile_batch).await?.0)
+    }
+
+    /// Catch up, then re-read every indexed device from the start: after a
+    /// restart, transfers made while stopped are reflected before serving.
+    pub async fn sync_full(&mut self) -> anyhow::Result<usize> {
+        let mut changed = 0;
+        for (event, field, kind) in STREAMS {
+            changed += self.sync_stream(event, field, *kind).await?;
+        }
+        store::set_meta(&self.db, SWEEP_AFTER, "")?;
+        loop {
+            let (more, wrapped) = self.reconcile_devices(self.reconcile_batch).await?;
+            changed += more;
+            if wrapped {
+                return Ok(changed);
+            }
+        }
+    }
+
+    /// Re-read up to `limit` indexed devices (tombstones included, as an
+    /// object can be unwrapped) after the stored sweep position, and commit
+    /// their rows, change-feed entries and the new position together.
+    /// Returns rows changed and whether this batch completed a full pass.
+    pub async fn reconcile_devices(&mut self, limit: usize) -> anyhow::Result<(usize, bool)> {
+        let after = store::meta(&self.db, SWEEP_AFTER)?.unwrap_or_default();
+        let ids: Vec<String> = self
+            .db
+            .prepare("SELECT id FROM devices WHERE id > ?1 ORDER BY id LIMIT ?2")?
+            .query_map(rusqlite::params![after, limit.max(1) as i64], |row| {
+                row.get(0)
+            })?
+            .collect::<Result<_, _>>()?;
+        let objects = self.chain.objects(&ids).await?;
+        let mut updates = Vec::new();
+        for (id, object) in ids.iter().zip(objects) {
+            updates.push(Update::Device(id.clone(), self.device(id, object)?));
+        }
+        let wrapped = ids.len() < limit.max(1);
+        let tx = self.db.transaction()?;
+        let mut changed = 0;
+        for update in &updates {
+            changed += update.apply(&tx, None)? as usize;
+        }
+        if wrapped {
+            store::set_meta(&tx, SWEEP_AFTER, "")?;
+            store::set_meta(&tx, SWEEP_COMPLETED, &now().to_string())?;
+        } else {
+            store::set_meta(&tx, SWEEP_AFTER, ids.last().map(String::as_str).unwrap_or(""))?;
+        }
+        tx.commit()?;
+        if changed > 0 {
+            info!(changed, "Device sweep found changes without fleet events");
+        }
+        Ok((changed, wrapped))
     }
 
     async fn sync_stream(&mut self, event: &str, field: &str, kind: Kind) -> anyhow::Result<usize> {
@@ -230,7 +304,12 @@ impl Indexer {
     }
 
     async fn read_device(&self, id: &str) -> anyhow::Result<Option<Device>> {
-        let Some(object) = self.chain.object(id).await? else {
+        let object = self.chain.object(id).await?;
+        self.device(id, object)
+    }
+
+    fn device(&self, id: &str, object: Option<chain::Object>) -> anyhow::Result<Option<Device>> {
+        let Some(object) = object else {
             return Ok(None);
         };
         anyhow::ensure!(
