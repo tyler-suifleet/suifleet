@@ -1037,5 +1037,126 @@
     "allowance_used_mist": 101988000,
     "finished": "2026-10-15T06:41:44Z",
     "note": "Run from the PR #70 feedback working tree (Budget-charged mutations, cached security pair) on top of c5d13cb, before it was committed; the recorded `head` is that parent."
+  },
+  "wallet_browser_sweep_charged": {
+    "started": "2026-10-15T06:59:27Z",
+    "network": "testnet",
+    "transactions": [
+      {
+        "label": "fund the browser test key",
+        "gas_budget_mist": 10000000,
+        "funding_mist": 100000000,
+        "status": "success",
+        "digest": "Ft1MBf5EGJUojjNWHLVDGkcG9c7iVavxYyMqaGoXL9kj",
+        "gas_mist": 1009880,
+        "allowance_used_mist": 101009880
+      }
+    ],
+    "checks": [
+      "browser run complete; 0.0829 SUI swept back from the test key"
+    ],
+    "chain": "4c78adac",
+    "rpc": "https://fullnode.testnet.sui.io:443",
+    "operator": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+    "start_balance_mist": 1040206572,
+    "max_spend_mist": 200000000,
+    "sui": "sui 1.81.1-e04cf9aa915c",
+    "head": "9dc797a3d8d26713fd6fa028fb963f41223d441c",
+    "package": "0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247",
+    "registry": "0xaed5cbd070dd9e7516880c9d2a05efc807deda07c9ae31d2590e758ee979eeaa",
+    "browser": {
+      "checks": [
+        "connected through the dApp Kit connect UI as 0x1118098650\u2026 on testnet",
+        "wallet rejection surfaces as an error; nothing executed",
+        "fresh registration: device registered, cap issued and activated (owner cap held by the wallet), listed by fetchDevices",
+        "group created and the activated device added (borrowed from custody and returned)",
+        "recipe and artifact uploaded to Walrus testnet by the dApp; verified deployment listed with its resolved device; blobs probed available",
+        "a transaction that would abort is refused by simulation before signing; nothing executed",
+        "a transaction executed and aborted on chain (FX1CSqCck2\u2026) is reported as failed by the hook",
+        "an account without the manifest's chain is refused before signing",
+        "cleanup through the dApp (deployment, membership, group, device) and test key swept back"
+      ],
+      "transactions": [
+        {
+          "label": "wallet rejection",
+          "status": "refused",
+          "error": "User rejected signing"
+        },
+        {
+          "label": "register + issue cap + activate device",
+          "digest": "6rHZyP9W3jvMtgF3CmfhsmdSfERHcBcUWjc4zS2sqK1v",
+          "status": "success"
+        },
+        {
+          "label": "create group",
+          "digest": "AdRFSX217bh9CiQddaHREJLLovcS2E9LCzWBm5fDzv5",
+          "status": "success"
+        },
+        {
+          "label": "add device to group",
+          "digest": "5dqjvTu3nYdHYYnCgUZQ3nNKZCu599yV2HASMto7sVPs",
+          "status": "success"
+        },
+        {
+          "label": "create verified deployment (group + device)",
+          "digest": "AiNaWQLr8J9JzY6AjgCLg5vkb62fHemixiVBBw3W4hcm",
+          "status": "success"
+        },
+        {
+          "label": "abort caught by simulation (device already in group)",
+          "status": "refused",
+          "error": "Transaction resolution failed: MoveAbort in 2nd command, abort code: 1, in '0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247::device_group::add_device' (instruction 28)"
+        },
+        {
+          "label": "on-chain abort (device already in group)",
+          "status": "refused",
+          "error": "MoveAbort in 2nd command, abort code: 1, in '0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247::device_group::add_device' (instruction 28)",
+          "digest": "FX1CSqCck2Lm7hjYPMB8A7wZpmPUaJK6nFZVrshv96LG",
+          "chain_status": {
+            "success": false,
+            "error": "MoveAbort in 2nd command, abort code: 1, in '0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247::device_group::add_device' (instruction 28)"
+          }
+        },
+        {
+          "label": "unsupported account chain",
+          "status": "refused",
+          "error": "Wallet account does not support sui:testnet"
+        },
+        {
+          "label": "delete deployment",
+          "digest": "C39uYESwZNXpSWCy3rEtfJH2oZQ7nydCzDtLKBxaUPyp",
+          "status": "success"
+        },
+        {
+          "label": "remove device from group",
+          "digest": "GHF8G3MkYZpNwgmGacq8jgA4esx9bKbPuN7jfPBu15EC",
+          "status": "success"
+        },
+        {
+          "label": "delete group",
+          "digest": "95Yzr4bCofobUykpQ6vxiSj7zhmCAgBKXTExDGcdxsNe",
+          "status": "success"
+        },
+        {
+          "label": "deregister device",
+          "digest": "AD1Q744mMrVgiCcxjkyofXbXWd7U95Kq3t1qsCzcvzZ8",
+          "status": "success"
+        }
+      ],
+      "blobs": [
+        {
+          "artifact": "KYEZbp289maeCfCB97xZwnAWY2YzX34iiUacyhiwjKE",
+          "recipe": "IxOP3ppiLhfO1QGN_AmwKpivT4YrQYM5q44FPvT23uk"
+        }
+      ],
+      "sweep": "CAmTfZUpip1A6W1Qkdt6R16Ufys27pWmLr87cvTA19qi"
+    },
+    "python_sweep_mist": 0,
+    "returned_mist": 82860712,
+    "end_balance_mist": 1022057404,
+    "spent_mist": 18149168,
+    "allowance_used_mist": 101009880,
+    "finished": "2026-10-15T07:00:12Z",
+    "note": "Wallet gate rerun on the uncommitted tree over 9dc797a after routing every test-key sweep through the strict Budget (recovered keys charged to the current run). The browser swept the key itself, so the Python sweep found under 5,000,000 MIST and submitted nothing; the recovery path is covered by scripts/tests/test_live_common.py SweepTests, not by this run."
   }
 }
