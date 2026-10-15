@@ -205,6 +205,19 @@ fn record_change(
 
 // ── Writes: each returns whether anything changed (and records the change) ──
 
+/// Keep a device ID an event named but whose object was absent on its first
+/// read (wrapped, possibly in the registering transaction). The placeholder
+/// tombstone has no fields and records no change; it exists so the sweep
+/// re-reads the ID and picks the device up when it is unwrapped.
+pub fn put_device_placeholder(tx: &Transaction, id: &str) -> anyhow::Result<bool> {
+    let inserted = tx.execute(
+        "INSERT INTO devices (id, owner, name, device_address, arch, registered_at, deleted)
+         VALUES (?1, NULL, '', '', '', 0, 1) ON CONFLICT(id) DO NOTHING",
+        params![id],
+    )?;
+    Ok(inserted > 0)
+}
+
 pub fn put_device(
     tx: &Transaction,
     device: &Device,

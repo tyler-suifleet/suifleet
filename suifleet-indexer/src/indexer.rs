@@ -12,6 +12,8 @@
 //! without any fleet event, and `set_meta` edits them silently. A durable
 //! reconciliation sweep therefore re-reads indexed devices in ID order, a
 //! batch per pass, wrapping around; `index` and `serve` start with a full one.
+//! A device that is absent on its first read (wrapped, even in the
+//! registering transaction) is kept as a placeholder tombstone for the sweep.
 use crate::chain::{self, Chain, Owner};
 use crate::manifest::Manifest;
 use crate::store::{self, Deployment, Device, Group};
@@ -169,13 +171,7 @@ impl Indexer {
     /// Returns rows changed and whether this batch completed a full pass.
     pub async fn reconcile_devices(&mut self, limit: usize) -> anyhow::Result<(usize, bool)> {
         let after = store::meta(&self.db, SWEEP_AFTER)?.unwrap_or_default();
-        let ids: Vec<String> = self
-            .db
-            .prepare("SELECT id FROM devices WHERE id > ?1 ORDER BY id LIMIT ?2")?
-            .query_map(rusqlite::params![after, limit.max(1) as i64], |row| {
-                row.get(0)
-            })?
-            .collect::<Result<_, _>>()?;
+        let ids = sweep_ids(&self.db, &after, limit)?;
         let objects = self.chain.objects(&ids).await?;
         let mut updates = Vec::new();
         for (id, object) in ids.iter().zip(objects) {
@@ -424,6 +420,17 @@ impl Indexer {
     }
 }
 
+/// The next `limit` indexed device IDs after `after`, tombstones and
+/// placeholders included.
+fn sweep_ids(db: &Connection, after: &str, limit: usize) -> anyhow::Result<Vec<String>> {
+    Ok(db
+        .prepare("SELECT id FROM devices WHERE id > ?1 ORDER BY id LIMIT ?2")?
+        .query_map(rusqlite::params![after, limit.max(1) as i64], |row| {
+            row.get(0)
+        })?
+        .collect::<Result<_, _>>()?)
+}
+
 /// An object re-read from chain; None = absent (deleted, wrapped).
 enum Update {
     Device(String, Option<Device>),
@@ -440,7 +447,8 @@ impl Update {
                     device.deleted = true;
                     store::put_device(tx, &device, checkpoint)?
                 }
-                _ => false, // Never seen alive, or already a tombstone.
+                Some(_) => false, // Already a tombstone.
+                None => store::put_device_placeholder(tx, id)?,
             },
             Update::Group(_, Some(group)) => store::put_group(tx, group, checkpoint)?,
             Update::Group(id, None) => match store::read_group(tx, id)? {
@@ -478,5 +486,64 @@ pub async fn run(mut indexer: Indexer, interval: std::time::Duration) -> anyhow:
             }
         }
         tokio::time::sleep(interval).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn id(n: u32) -> String {
+        format!("0x{n:064x}")
+    }
+
+    fn apply(db: &mut Connection, update: Update) -> bool {
+        let tx = db.transaction().unwrap();
+        let changed = update.apply(&tx, None).unwrap();
+        tx.commit().unwrap();
+        changed
+    }
+
+    #[test]
+    fn device_first_seen_wrapped_is_kept_for_the_sweep() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fleet.db");
+        let mut db = store::open(&path).unwrap();
+        // DeviceRegistered names a device that is already wrapped.
+        assert!(apply(&mut db, Update::Device(id(1), None)));
+        assert!(!apply(&mut db, Update::Device(id(1), None)), "idempotent");
+        let placeholder = store::read_device(&db, &id(1)).unwrap().unwrap();
+        assert!(placeholder.deleted && placeholder.owner.is_none());
+        assert_eq!(store::last_change(&db).unwrap(), 0, "no feed entry");
+        assert!(store::list_devices(&db, &store::Filter::default(), None, None)
+            .unwrap()
+            .items
+            .is_empty());
+        // Durable: a restarted indexer's sweep still selects the ID.
+        drop(db);
+        let mut db = store::open(&path).unwrap();
+        assert_eq!(sweep_ids(&db, "", 10).unwrap(), [id(1)]);
+        // Unwrapped later without any fleet event: the sweep's read revives it.
+        let device = Device {
+            id: id(1),
+            owner: Some(id(100)),
+            name: "wrapped".into(),
+            device_address: id(200),
+            arch: "aarch64".into(),
+            registered_at: 7,
+            deleted: false,
+            groups: vec![],
+        };
+        assert!(apply(&mut db, Update::Device(id(1), Some(device.clone()))));
+        assert_eq!(store::read_device(&db, &id(1)).unwrap().unwrap(), device);
+        let changes = store::changes_after(&db, 0, None).unwrap();
+        assert_eq!(
+            changes.iter().map(|c| c.kind.as_str()).collect::<Vec<_>>(),
+            ["device.updated"]
+        );
+        // Wrapped again: a regular tombstone, not overwritten by a placeholder.
+        assert!(apply(&mut db, Update::Device(id(1), None)));
+        let tombstone = store::read_device(&db, &id(1)).unwrap().unwrap();
+        assert!(tombstone.deleted && tombstone.name == "wrapped");
     }
 }
