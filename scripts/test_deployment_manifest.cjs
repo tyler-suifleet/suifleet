@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const { loader, appRequire, manifestClient } = require("./frontend_test_utils.cjs");
 const fixture = JSON.parse(fs.readFileSync(process.argv[2] ?? path.resolve(__dirname, "../manifests/fixture.localnet.json"), "utf8"));
 process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST = JSON.stringify(fixture);
-const { parseManifest, verifyDeployment, moveType, REQUIRED_TYPES } = loader()("lib/deployment-manifest.ts");
+const { parseManifest, verifyDeployment, moveType, REQUIRED_TYPES, CATALOG_TYPES } = loader()("lib/deployment-manifest.ts");
 const copy = () => structuredClone(fixture);
 (async () => {
   assert.deepEqual(parseManifest(JSON.stringify(fixture)), fixture);
@@ -27,6 +27,13 @@ const copy = () => structuredClone(fixture);
   for (const [key, value] of [["schema_version", 2], ["protocol_version", 2], ["call_package_id", "bad"], ["network", "unknown"]]) {
     const invalid = copy(); invalid[key] = value; assert.throws(() => parseManifest(JSON.stringify(invalid)));
   }
+  const catalog = copy(); catalog.type_origins[CATALOG_TYPES[0]] = "0x4";
+  assert.throws(() => parseManifest(JSON.stringify(catalog)), /partial catalog/);
+  for (const name of CATALOG_TYPES) catalog.type_origins[name] = "0x4";
+  parseManifest(JSON.stringify(catalog));
+  await verifyDeployment(manifestClient(catalog), catalog);
+  const forgedCatalog = structuredClone(catalog); forgedCatalog.type_origins[CATALOG_TYPES[0]] = "0x3";
+  await assert.rejects(verifyDeployment(manifestClient(forgedCatalog), catalog), /type origin/);
   const missing = copy(); delete missing.type_origins[REQUIRED_TYPES[0]]; assert.throws(() => parseManifest(JSON.stringify(missing)));
   const incompatible = copy(); incompatible.supported_clients.dapp.max_exclusive = "0.0.1"; assert.throws(() => parseManifest(JSON.stringify(incompatible)));
   const oldRange = copy(); oldRange.supported_clients.dapp = { min: "0.0.1", max_exclusive: "0.0.2" };

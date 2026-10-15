@@ -64,7 +64,7 @@ let stage = "startup";
       call_package_id: packageId, upgrade_cap_id: capId, package_version: raw.version,
       type_origins: Object.fromEntries(raw.typeOriginTable.map((entry) => [`${entry.moduleName}::${entry.datatypeName}`, entry.package])),
       shared_objects: { registry: { id: registryId, initial_shared_version: registry.owner.Shared.initialSharedVersion } },
-      supported_clients: { dapp: { min: "0.0.2", max_exclusive: "0.0.3" }, edge: { min: "0.1.0", max_exclusive: "0.2.0" } },
+      supported_clients: { dapp: { min: "0.0.2", max_exclusive: "0.2.0" }, edge: { min: "0.1.0", max_exclusive: "0.3.0" } },
       walrus: { publisher_url: "http://127.0.0.1:31415", aggregator_url: "http://127.0.0.1:31416" },
     };
     process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST = JSON.stringify(manifest);
@@ -132,8 +132,35 @@ let stage = "startup";
     stage = "deregister device"; await execute(sui.buildDeregisterDeviceTx(foreignDevice), deviceSigner);
     assert.deepEqual(await sui.fetchDevices(client, deviceSigner.toSuiAddress()), []);
     stage = "delete deployment";
-    for (const deployment of deployments) await execute(sui.buildDeleteDeploymentTx(deployment.deploymentId));
+    for (const deployment of deployments) await execute(sui.buildDeleteDeploymentTx(deployment.deploymentId, deployment.schemaVersion));
     assert.deepEqual(await sui.fetchDeploymentEvents(client, operator.toSuiAddress()), []);
+    if (process.env.CATALOG_TEST === "1") {
+      const catalog = loader()("lib/catalog.ts"), selector = loader()("lib/component-selector.ts");
+      stage = "catalog create"; await execute(catalog.buildCreateCatalogTx());
+      const catalogs = await catalog.fetchCatalogs(client, operator.toSuiAddress());
+      assert.equal(catalogs.length, 1);
+      const manifests = [
+        { os:"linux", arch:"x86_64", recipeBlobId:"x86-recipe", recipeSha256:"ab".repeat(32), artifactSha256:"cd".repeat(32) },
+        { os:"linux", arch:"aarch64", recipeBlobId:"arm-recipe", recipeSha256:"ef".repeat(32), artifactSha256:"01".repeat(32) },
+      ];
+      for (const version of ["1.0.0", "2.0.0-rc.1+build.1", "2.0.0"]) {
+        stage = "catalog register"; await execute(catalog.buildPublishVersionTx(catalogs[0].objectId,"app",version,manifests));
+      }
+      stage = "catalog discovery";
+      const versions = await catalog.discoverVersions(client,catalogs[0].objectId);
+      assert.deepEqual(versions.map(v=>v.version),["2.0.0","2.0.0-rc.1+build.1","1.0.0"]);
+      for(const v of versions) {
+        assert.equal(selector.selectManifest(v.name,v.version,v.manifests,"linux","x86_64").recipeBlobId,"x86-recipe");
+        assert.equal(selector.selectManifest(v.name,v.version,v.manifests,"linux","aarch64").recipeBlobId,"arm-recipe");
+      }
+      stage = "catalog mixed group deployment";
+      await execute(catalog.buildCatalogDeploymentTx(versions[0].objectId,[groups[0].objectId],[devices[0].objectId,foreignDevice.objectId]));
+      const catalogDeployments=await sui.fetchDeploymentEvents(client,operator.toSuiAddress());
+      assert.equal(catalogDeployments.length,1); assert.equal(catalogDeployments[0].recipeBlobId,"");
+      await execute(sui.buildDeleteDeploymentTx(catalogDeployments[0].deploymentId,catalogDeployments[0].schemaVersion));
+      assert.deepEqual(await sui.fetchDeploymentEvents(client,operator.toSuiAddress()),[]);
+      console.log("PASS: generated SDK catalog registration, immutable/type-authenticated discovery and SemVer sorting, both platform selectors, mixed targets and schema2 cleanup");
+    }
     console.log("PASS: real gRPC publish/register+activate/borrowed group add and cap reissue/deployment/receipt/deregister/delete, invalid and foreign target history, failed execution effects");
     console.log(JSON.stringify({ chain: manifest.chain_identifier, package: packageId, registry: registryId }));
   } finally { await fs.rm(temporary, { recursive: true, force: true }); }

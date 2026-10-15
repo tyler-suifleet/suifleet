@@ -11,7 +11,15 @@ from urllib.parse import urlparse
 
 _PROTOCOL = json.loads((Path(__file__).resolve().parents[1] / "interfaces/fleet-v1.json").read_text())
 REQUIRED_TYPES = tuple(_PROTOCOL["required_type_origins"])
-CLIENT_VERSIONS = {"dapp": "0.0.2", "edge": "0.1.0"}
+CATALOG_TYPES = tuple(_PROTOCOL["optional_type_origins"]["component_catalog"])
+
+def manifest_types(manifest):
+    present = [name for name in CATALOG_TYPES if name in manifest["type_origins"]]
+    if present and len(present) != len(CATALOG_TYPES):
+        raise ValueError("partial catalog type origins")
+    return REQUIRED_TYPES + tuple(present)
+
+CLIENT_VERSIONS = {"dapp": "0.1.0", "edge": "0.2.0"}
 
 
 def object_id(value):
@@ -50,7 +58,7 @@ def validate(manifest):
     object_id(manifest["call_package_id"])
     object_id(manifest["upgrade_cap_id"])
     endpoint(manifest["rpc_url"])
-    for name in REQUIRED_TYPES:
+    for name in manifest_types(manifest):
         object_id(manifest["type_origins"][name])
     registry = manifest["shared_objects"]["registry"]
     object_id(registry["id"])
@@ -137,7 +145,7 @@ def verify(manifest, read=chain_facts):
     table = origins(package)
     if str(package["version"]) != manifest["package_version"]:
         raise ValueError("package version mismatch")
-    for name in REQUIRED_TYPES:
+    for name in manifest_types(manifest):
         if table.get(name) != object_id(manifest["type_origins"][name]):
             raise ValueError("type origin mismatch: " + name)
     if upgrade_cap(objects[object_id(manifest["upgrade_cap_id"])])[:2] != (object_id(manifest["call_package_id"]), manifest["package_version"]):
@@ -162,10 +170,10 @@ def resolve(args, read=chain_facts):
     manifest = dict(schema_version=_PROTOCOL["manifest_schema_version"], protocol_version=_PROTOCOL["protocol_version"], network=args.network,
         chain_identifier=args.chain_identifier, rpc_url=args.rpc,
         call_package_id=package_id, upgrade_cap_id=object_id(args.upgrade_cap), package_version=str(package["version"]),
-        type_origins={name: table[name] for name in REQUIRED_TYPES},
+        type_origins={name: table[name] for name in REQUIRED_TYPES + tuple(n for n in CATALOG_TYPES if n in table)},
         shared_objects={"registry": {"id": object_id(args.registry),
             "initial_shared_version": shared_version(registry, table["device_registry::DeviceRegistry"])}},
-        supported_clients={"dapp": {"min": "0.0.2", "max_exclusive": "0.0.3"}, "edge": {"min": "0.1.0", "max_exclusive": "0.1.1"}},
+        supported_clients={"dapp": {"min": "0.1.0" if all(n in table for n in CATALOG_TYPES) else "0.0.2", "max_exclusive": "0.2.0"}, "edge": {"min": "0.2.0" if all(n in table for n in CATALOG_TYPES) else "0.1.0", "max_exclusive": "0.3.0"}},
         walrus={"publisher_url": args.publisher, "aggregator_url": args.aggregator})
     return verify(manifest, read)
 

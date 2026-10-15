@@ -42,6 +42,7 @@ pub struct Object {
 pub enum Owner {
     Address(String),
     Shared { initial_version: u64 },
+    Immutable,
     Other,
 }
 
@@ -268,7 +269,7 @@ impl SuiClient {
             package.version.to_string() == manifest.package_version,
             "package metadata mismatch"
         );
-        for name in crate::config::REQUIRED_TYPES {
+        for name in crate::config::REQUIRED_TYPES.iter().chain(crate::catalog::TYPES.iter().filter(|name| manifest.type_origins.contains_key(**name))) {
             let (module, datatype) = name.split_once("::").unwrap();
             let entries: Vec<_> = package
                 .type_origin_table
@@ -350,6 +351,7 @@ impl SuiClient {
             Some(o) if o.kind == Some(proto::owner::OwnerKind::Shared as i32) => Owner::Shared {
                 initial_version: o.version.unwrap_or_default(),
             },
+            Some(o) if o.kind == Some(proto::owner::OwnerKind::Immutable as i32) => Owner::Immutable,
             _ => Owner::Other,
         };
         Ok(Some(Object {

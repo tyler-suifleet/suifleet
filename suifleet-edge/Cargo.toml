@@ -1,6 +1,6 @@
 [package]
 name = "suifleet"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
 [[bin]]
@@ -8,6 +8,7 @@ name = "suifleet"
 path = "src/main.rs"
 
 [dependencies]
+semver = "=1.0.28"
 # Sui gRPC v2 API and transaction types (Mysten's official Rust SDK)
 sui-rpc = "0.4.0"
 sui-sdk-types = { version = "0.4.0", features = ["serde", "hash"] }
