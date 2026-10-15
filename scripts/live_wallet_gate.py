@@ -8,7 +8,8 @@ A throwaway ed25519 test key, generated here, acts as the browser wallet
 funded with 0.1 SUI from the supplied wallet and swept back at the end, so a
 run costs only gas and unrefunded storage. Until that sweep succeeds its seed
 is kept (0600) beside the wallet as live-browser-key.hex, and the next run
-sweeps it first, so a failed run never strands the funding.
+sweeps it first (its gas charged to that run's allowance), so a failed run
+never strands the funding.
 
 The deployment under test is the package-upgrade gate's cached fixture for
 these contracts (no package is published here): run
@@ -28,18 +29,19 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 from types import SimpleNamespace
 
 import deployment_manifest as dm
-from live_common import DAEMON, ROOT, Live, Spent, WALRUS_TESTNET
+from live_common import DAEMON, ROOT, Budget, Live, Spent, WALRUS_TESTNET
 from live_package_upgrade import contracts_digest, load_state
 
 FUNDING = 100_000_000  # 0.1 SUI for the test key; swept back afterwards.
+SWEEP_GAS = 3_000_000
 
 
-def sweep(live, seed, root):
-    """Send everything the throwaway key holds back to the operator, from
-    Python (independent of the browser run)."""
+def sweep_wallet(live, seed, root):
+    """A throwaway client.yaml holding the test key; returns (config, address)."""
     from live_upgrade_security import bech32_suiprivkey
     wallet = root / "sweep-wallet"
     wallet.mkdir(exist_ok=True)
@@ -53,25 +55,33 @@ def sweep(live, seed, root):
     key = root / "sweep.key"
     key.write_text(seed + "\n")
     address = subprocess.check_output([str(DAEMON), "--derive-address", str(key)], text=True).strip()
-    client = ["sui", "client", "--client.config", str(wallet / "client.yaml")]
-    subprocess.run([*client, "switch", "--address", address], check=True, capture_output=True)
-    def held():
-        gas = json.loads(subprocess.run([*client, "gas", "--json"], capture_output=True, text=True).stdout)
-        return sum(int(c["mistBalance"]) for c in gas.get("gasCoins", [])) + int(gas.get("addressMistBalance") or 0)
-    import time
+    subprocess.run(["sui", "client", "--client.config", str(wallet / "client.yaml"), "switch", "--address", address],
+                   check=True, capture_output=True)
+    return wallet / "client.yaml", address
+
+
+def sweep(live, seed, root, ledger):
+    """Send everything the throwaway key holds back to the operator, from
+    Python (independent of the browser run). The sweep is a charged mutation
+    like any other: its gas is reserved against `ledger` before submission
+    (this run's key: its charged funding; a previous run's key: this run's
+    own allowance, since that funding was charged to the earlier run), and
+    what it returns never replenishes either."""
+    config, address = sweep_wallet(live, seed, root)
     time.sleep(3)  # Reads trail the browser's own sweep.
-    amount = held()
+    amount = live.balance(address)
     if amount < 5_000_000:
         return 0
-    result = subprocess.run([*client, "ptb", "--transfer-objects", "[gas]", f"@{live.operator}", "--gas-budget", "3000000", "--json"],
-                            capture_output=True, text=True)
-    if result.returncode:
+    try:
+        live.execute("sweep the test key", ["ptb", "--transfer-objects", "[gas]", f"@{live.operator}"],
+                     gas=SWEEP_GAS, sender=(config, ledger))
+    except Spent:
+        raise
+    except RuntimeError as error:
+        # Charged (or, with no outcome, fully reserved) all the same.
         time.sleep(5)
-        assert held() < 5_000_000, f"sweep failed and the test key still holds funds: {(result.stderr + result.stdout)[-500:]}"
+        assert live.balance(address) < 5_000_000, f"sweep failed and the test key still holds funds: {error}"
         return 0  # Already swept (the read was stale).
-    swept = json.loads(result.stdout[result.stdout.find("{"):])
-    live.evidence["transactions"].append({"label": "sweep the test key (paid from its charged funding)", "digest": swept["digest"],
-                                          "status": swept["effects"]["status"]["status"], "sender": "browser test key"})
     return amount
 
 
@@ -98,7 +108,7 @@ def run(args):
         (root / "deployment.json").write_text(json.dumps(manifest))
         pending = pending_key_path(live)
         if pending.exists():
-            recovered = sweep(live, pending.read_text().strip(), root)
+            recovered = sweep(live, pending.read_text().strip(), root, live.ledger)
             pending.unlink()
             live.evidence["recovered_from_previous_run_mist"] = recovered
             print(f"recovered {recovered / 1e9:.4f} SUI from a previous run's test key")
@@ -131,7 +141,7 @@ def run(args):
             print(result.stderr[-4000:])
         # The browser sweeps on success; sweep any remainder (or everything,
         # after a failure) from here as well.
-        live.evidence["python_sweep_mist"] = sweep(live, seed, root)
+        live.evidence["python_sweep_mist"] = sweep(live, seed, root, Budget(FUNDING, live.evidence["transactions"]))
         pending.unlink()
         assert result.returncode == 0, "live browser acceptance failed"
         returned = live.balance() - before_sweep

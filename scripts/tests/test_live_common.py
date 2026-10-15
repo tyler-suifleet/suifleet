@@ -8,9 +8,10 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import live_common
+import live_wallet_gate
 from live_common import Live
 from live_upgrade_security import fixture_valid
-from testnet_budget import Spent
+from testnet_budget import Budget, Spent
 
 OPERATOR = "0x" + "0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965"
 ABORT = ("MoveAbort(MoveLocation { module: ModuleId { address: ab, name: Identifier(\"device_cap\") }, function: 3, "
@@ -169,6 +170,61 @@ class SecurityFixtureTests(unittest.TestCase):
         self.assertFalse(fixture_valid(self.reads(owner="0x" + "1" * 64), self.FIXTURE))
         self.assertFalse(fixture_valid(self.reads(registry_owner={"AddressOwner": OPERATOR}), self.FIXTURE))
         self.assertFalse(fixture_valid(self.reads(), {**self.FIXTURE, "head_package": "0x" + "4" * 64}))
+
+
+class SweepTests(unittest.TestCase):
+    """The wallet gate's sweep of a throwaway browser key is charged like any mutation."""
+
+    def sweep(self, chain, ledger, held=(100_000_000, 0), limit=100_000_000):
+        run = live(chain, limit)
+        run.operator = OPERATOR
+        balances = list(held)
+        run.balance = lambda address=None: balances.pop(0)
+        with patch.object(live_wallet_gate, "sweep_wallet", return_value=("/tmp/sweep.yaml", "0xkey")), \
+                patch.object(live_wallet_gate.time, "sleep"):
+            return run, live_wallet_gate.sweep(run, "00" * 32, Path("/tmp"), ledger(run))
+
+    def test_recovering_a_previous_key_reserves_this_runs_allowance(self):
+        chain = Chain(effects(cost=1_000_000))
+        run, swept = self.sweep(chain, lambda run: run.ledger)
+        self.assertEqual(swept, 100_000_000)
+        command, config = chain.calls[0]
+        self.assertEqual(config, "/tmp/sweep.yaml")
+        self.assertEqual(int(command[command.index("--gas-budget") + 1]), live_wallet_gate.SWEEP_GAS)
+        self.assertEqual(run.ledger.used, 1_000_000)  # Charged; the returned 0.1 SUI is never credited.
+
+    def test_recovery_with_an_exhausted_allowance_never_submits(self):
+        for limit in (1, 1_999_999):
+            chain = Chain()
+            with self.assertRaises(Spent):
+                self.sweep(chain, lambda run: run.ledger, limit=limit)
+            self.assertEqual(chain.calls, [])
+
+    def test_failed_recovery_is_charged_and_unknown_keeps_its_reservation(self):
+        digest = "Swep111111111111111111111111111111111111111"
+        chain = Chain(CompletedProcess([], 1, "", f"transaction '{digest}' failed"),
+                      tx_blocks={digest: effects("failure", cost=1_200_000, digest=digest)})
+        run, swept = self.sweep(chain, lambda run: run.ledger)
+        self.assertEqual((swept, run.ledger.used), (0, 1_200_000))
+        chain = Chain(CompletedProcess([], 1, "", "connection reset"))
+        run, swept = self.sweep(chain, lambda run: run.ledger)
+        self.assertEqual((swept, run.ledger.used), (0, live_wallet_gate.SWEEP_GAS))
+        with self.assertRaises(AssertionError):  # Still funded after a failure: the run fails.
+            self.sweep(Chain(CompletedProcess([], 1, "", "connection reset")), lambda run: run.ledger,
+                       held=(100_000_000, 100_000_000))
+
+    def test_this_runs_sweep_is_bounded_by_its_charged_funding(self):
+        chain = Chain(effects(cost=1_000_000))
+        funding = {}
+        run, _ = self.sweep(chain, lambda run: funding.setdefault("ledger", Budget(100_000_000, run.evidence["transactions"])))
+        self.assertEqual(run.ledger.used, 0)  # The funding transfer already charged it.
+        self.assertEqual(funding["ledger"].used, 1_000_000)
+        self.assertEqual(run.evidence["transactions"][-1]["label"], "sweep the test key")
+
+    def test_nothing_to_sweep_submits_nothing(self):
+        chain = Chain()
+        run, swept = self.sweep(chain, lambda run: run.ledger, held=(4_000_000,))
+        self.assertEqual((swept, chain.calls, run.ledger.used), (0, [], 0))
 
 
 if __name__ == "__main__":
