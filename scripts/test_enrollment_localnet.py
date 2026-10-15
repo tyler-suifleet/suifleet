@@ -137,7 +137,7 @@ def run(rpc_url, faucet_url):
                 package = next(c["packageId"] for c in published["objectChanges"] if c["type"] == "published")
                 registry = created(published, "::device_registry::DeviceRegistry")[0]
                 cap = created(published, "::package::UpgradeCap")[0]
-                chain_id = dm.rpc(rpc_url, "sui_getChainIdentifier", [])
+                chain_id = dm.chain_facts(rpc_url)["chain_identifier"]
                 manifest = dm.resolve(SimpleNamespace(chain_identifier=chain_id, rpc=rpc_url, package=package, upgrade_cap=cap,
                                                       registry=registry, network="localnet", publisher=aggregator, aggregator=aggregator))
                 (root / "deployment.json").write_text(json.dumps(manifest))

@@ -1,293 +1,104 @@
-use serde::Deserialize;
-use std::path::{Path, PathBuf};
+# Deployment manifests and publication
 
-#[derive(Deserialize, Debug, Clone)]
-pub struct Config {
-    pub sui: SuiConfig,
-    pub device: DeviceConfig,
-    #[serde(default)]
-    pub walrus: WalrusConfig,
-    pub apply: ApplyConfig,
-    #[serde(default)]
-    pub runtime: RuntimeConfig,
-}
+One manifest describes one deployment on one network. Both clients read it:
+- the frontend reads it from `NEXT_PUBLIC_DEPLOYMENT_MANIFEST`, compiled into the static build;
+- the daemon reads `deployment.json` through `[sui] manifest_path`.
 
-#[derive(Deserialize, Debug, Clone)]
-#[serde(deny_unknown_fields)]
-pub struct SuiConfig {
-    pub manifest_path: PathBuf,
-    #[serde(skip)]
-    pub rpc_url: String,
-    #[serde(skip)]
-    pub package_id: String,
-    #[serde(skip)]
-    pub manifest: Option<DeploymentManifest>,
-}
+Each client checks the manifest against the chain at startup and refuses a stale or mismatched one.
 
-pub const REQUIRED_TYPES: &[&str] = &[
-    "device_registry::DeviceRegistry",
-    "device_registry::Device",
-    "device_group::DeviceGroup",
-    "device_group::GroupCreated",
-    "device_cap::DeviceCap",
-    "device_cap::DeviceAddressKey",
-    "deployment_manager::DeploymentRecord",
-    "deployment_manager::DeploymentCreated",
-    "deployment_manager::DeviceStatusUpdated",
-    "deployment_manager::TargetGroupsKey",
-    "deployment_manager::TargetDevicesKey",
-    "deployment_manager::StatusesKey",
-    "deployment_manager::RecipeDigestKey",
-];
+## Contents
 
-#[derive(Deserialize, Debug, Clone)]
-pub struct DeploymentManifest {
-    pub schema_version: u64,
-    pub protocol_version: u64,
-    pub network: String,
-    pub chain_identifier: String,
-    pub rpc_url: String,
-    pub call_package_id: String,
-    pub upgrade_cap_id: String,
-    pub package_version: String,
-    pub type_origins: std::collections::BTreeMap<String, String>,
-    pub shared_objects: SharedObjects,
-    pub supported_clients: std::collections::BTreeMap<String, ClientRange>,
-    pub walrus: ManifestWalrus,
-}
-#[derive(Deserialize, Debug, Clone)]
-pub struct SharedObjects {
-    pub registry: SharedObject,
-}
-#[derive(Deserialize, Debug, Clone)]
-pub struct SharedObject {
-    pub id: String,
-    pub initial_shared_version: String,
-}
-#[derive(Deserialize, Debug, Clone)]
-pub struct ClientRange {
-    pub min: String,
-    pub max_exclusive: String,
-}
-#[derive(Deserialize, Debug, Clone)]
-pub struct ManifestWalrus {
-    pub publisher_url: String,
-    pub aggregator_url: String,
-}
+| Field | Meaning |
+|---|---|
+| `schema_version`, `protocol_version` | Both `1`. Clients reject other values. |
+| `network`, `chain_identifier` | `localnet`/`devnet`/`testnet`/`mainnet`, plus the first four bytes of the genesis digest (8 hex). testnet must be `4c78adac` and mainnet `35834a8a`. |
+| `rpc_url` | Sui fullnode serving gRPC v2. |
+| `call_package_id`, `package_version` | The latest package. Every call goes here. |
+| `upgrade_cap_id` | Must still name `call_package_id` at `package_version`. After a further upgrade, every client rejects this manifest as stale. |
+| `type_origins` | For each type the clients use, the package that **introduced** it. Types keep their introduction package across upgrades, so newer types such as `RecipeDigestKey` and `DeviceAddressKey` have later origins than `DeviceRegistry`. |
+| `shared_objects.registry` | The shared `DeviceRegistry` ID and its initial shared version. |
+| `supported_clients` | Client version ranges, as `min` ≤ version < `max_exclusive`. |
+| `walrus` | Publisher and aggregator URLs. |
 
-fn version(value: &str) -> anyhow::Result<(u64, u64, u64)> {
-    let parts: Vec<_> = value.split('.').collect();
-    anyhow::ensure!(
-        parts.len() == 3
-            && parts
-                .iter()
-                .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit())),
-        "invalid client version"
-    );
-    Ok((parts[0].parse()?, parts[1].parse()?, parts[2].parse()?))
-}
-fn endpoint(value: &str) -> anyhow::Result<()> {
-    let url = reqwest::Url::parse(value)?;
-    anyhow::ensure!(
-        matches!(url.scheme(), "http" | "https")
-            && url.host_str().is_some()
-            && url.username().is_empty()
-            && url.password().is_none()
-            && url.fragment().is_none(),
-        "invalid public endpoint"
-    );
-    Ok(())
-}
-fn positive(value: &str) -> bool {
-    !value.starts_with('0') && !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit())
-}
-impl DeploymentManifest {
-    pub fn validate(&self) -> anyhow::Result<()> {
-        anyhow::ensure!(
-            self.schema_version == 1 && self.protocol_version == 1,
-            "unsupported manifest schema/protocol"
-        );
-        anyhow::ensure!(
-            matches!(
-                self.network.as_str(),
-                "localnet" | "devnet" | "testnet" | "mainnet"
-            ),
-            "unsupported network"
-        );
-        anyhow::ensure!(
-            self.chain_identifier.len() == 8
-                && self
-                    .chain_identifier
-                    .bytes()
-                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
-            "invalid chain identifier"
-        );
-        anyhow::ensure!((self.network != "mainnet" || self.chain_identifier == "35834a8a") && (self.network != "testnet" || self.chain_identifier == "4c78adac"), "network label/chain mismatch");
-        anyhow::ensure!(positive(&self.package_version), "invalid package version");
-        endpoint(&self.rpc_url)?;
-        endpoint(&self.walrus.publisher_url)?;
-        endpoint(&self.walrus.aggregator_url)?;
-        anyhow::ensure!(
-            crate::sui_client::same_id(&self.call_package_id, &self.call_package_id),
-            "invalid call package ID"
-        );
-        for name in REQUIRED_TYPES {
-            let origin = self
-                .type_origins
-                .get(*name)
-                .ok_or_else(|| anyhow::anyhow!("missing type origin: {name}"))?;
-            anyhow::ensure!(
-                crate::sui_client::same_id(origin, origin),
-                "invalid type origin: {name}"
-            );
-        }
-        anyhow::ensure!(
-            crate::sui_client::same_id(&self.upgrade_cap_id, &self.upgrade_cap_id),
-            "invalid UpgradeCap ID"
-        );
-        let registry = &self.shared_objects.registry;
-        anyhow::ensure!(
-            crate::sui_client::same_id(&registry.id, &registry.id)
-                && positive(&registry.initial_shared_version),
-            "invalid shared registry"
-        );
-        let range = self
-            .supported_clients
-            .get("edge")
-            .ok_or_else(|| anyhow::anyhow!("missing edge compatibility range"))?;
-        let current = version(env!("CARGO_PKG_VERSION"))?;
-        anyhow::ensure!(
-            version(&range.min)? <= current && current < version(&range.max_exclusive)?,
-            "unsupported edge client version"
-        );
-        Ok(())
-    }
-    pub fn move_type(&self, name: &str) -> String {
-        // Called only after validating every required type; no first-package fallback.
-        format!("{}::{name}", self.type_origins[name])
-    }
-}
+`manifests/fixture.localnet.json` is a test fixture, not a deployment.
 
-#[derive(Deserialize, Debug, Clone)]
-pub struct DeviceConfig {
-    pub keypair_path: PathBuf,
-    pub device_object_id: String,
-    pub device_cap_id: String,
-}
+## Publishing: `scripts/redeploy.sh` (`make publish-contracts`)
 
-#[derive(Deserialize, Debug, Clone, Default)]
-pub struct WalrusConfig {
-    pub aggregator_url: String,
-}
+`scripts/redeploy.sh` publishes or upgrades on the **active Sui CLI environment** and spends gas. With `--dry-run` it only simulates. It builds the gRPC chain reader (`suifleet-edge/examples/chain_facts.rs`), then runs `scripts/publish.py`.
 
-#[derive(Deserialize, Debug, Clone)]
-pub struct ApplyConfig {
-    /// Command to run with the artifact path appended as the final argument.
-    pub command: String,
-    #[serde(default = "default_timeout")]
-    pub timeout_seconds: u64,
-    #[serde(default)]
-    pub allow_recipe_commands: bool,
-}
+```bash
+# In the dev container (make shell), with the CLI on the intended environment and account:
+scripts/redeploy.sh --expect-address 0xYOUR_ADDRESS --dry-run
+scripts/redeploy.sh --expect-address 0xYOUR_ADDRESS
+# or: make publish-contracts PUBLISH_ARGS="--expect-address 0xYOUR_ADDRESS --dry-run"
+```
 
-impl Config {
-    pub fn load(path: &Path) -> anyhow::Result<Self> {
-        let raw = std::fs::read_to_string(path)?;
-        let mut cfg: Self = toml::from_str(&raw)?;
-        let manifest_path = if cfg.sui.manifest_path.is_absolute() {
-            cfg.sui.manifest_path.clone()
-        } else {
-            path.parent()
-                .unwrap_or(Path::new("."))
-                .join(&cfg.sui.manifest_path)
-        };
-        let manifest: DeploymentManifest =
-            serde_json::from_str(&std::fs::read_to_string(manifest_path)?)?;
-        manifest.validate()?;
-        anyhow::ensure!(
-            cfg.walrus.aggregator_url.is_empty()
-                || cfg.walrus.aggregator_url == manifest.walrus.aggregator_url,
-            "stale Walrus configuration"
-        );
-        cfg.walrus.aggregator_url = manifest.walrus.aggregator_url.clone();
-        cfg.sui.rpc_url = manifest.rpc_url.clone();
-        cfg.sui.package_id = manifest.call_package_id.clone();
-        cfg.sui.manifest = Some(manifest);
-        anyhow::ensure!(
-            cfg.runtime.poll_seconds > 0,
-            "runtime.poll_seconds must be positive"
-        );
-        anyhow::ensure!(
-            cfg.apply.timeout_seconds > 0,
-            "apply.timeout_seconds must be positive"
-        );
-        Ok(cfg)
-    }
-}
+### Before any transaction, it stops unless all of these hold
 
-fn default_timeout() -> u64 {
-    600
-}
+All chain reads go over gRPC.
+- **Account:** the active account is `--expect-address`.
+- **Chain identifier** (the live one) matches:
+  - `contracts/Move.toml`'s `[environments]` entry for this environment. testnet and mainnet are built in; a devnet or local chain must be declared there with its current identifier.
+  - the pinned network label: testnet `4c78adac`; mainnet is refused outright, because this is not a production pipeline.
+  - this environment's `[published.ENV]` section of `contracts/Published.toml`. Only that section is read; another environment's IDs are never used. A mismatch means the network reset.
+- **Upgrade only:**
+  - the `published-at` package exists at the recorded version;
+  - the `UpgradeCap` names that package and version and is owned by the active account;
+  - the recorded deployment (`deployments/ENV/current`) agrees with `Published.toml`.
+- **Refusals:**
+  - A recorded deployment without a `Published.toml` section is refused, because a fresh publish would orphan its fleet.
+  - An unrecorded upgrade needs `--registry ID` to adopt the existing registry.
 
-#[derive(Deserialize, Debug, Clone)]
-#[serde(default)]
-pub struct RuntimeConfig {
-    pub state_dir: PathBuf,
-    pub poll_seconds: u64,
-    pub replay_history: bool,
-}
-impl Default for RuntimeConfig {
-    fn default() -> Self {
-        Self {
-            state_dir: "/var/lib/suifleet".into(),
-            poll_seconds: 10,
-            replay_history: false,
-        }
-    }
-}
+### Transaction and failure handling
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    fn fixture() -> DeploymentManifest {
-        serde_json::from_str(include_str!("../../manifests/fixture.localnet.json")).unwrap()
-    }
-    #[test]
-    fn mixed_origins_and_compatibility() {
-        let manifest = fixture();
-        manifest.validate().unwrap();
-        assert_ne!(
-            manifest
-                .move_type("deployment_manager::RecipeDigestKey")
-                .split("::")
-                .next(),
-            manifest
-                .move_type("device_cap::DeviceAddressKey")
-                .split("::")
-                .next()
-        );
-        for field in ["schema", "protocol", "chain", "origin", "client"] {
-            let mut bad = fixture();
-            match field {
-                "schema" => bad.schema_version = 2,
-                "protocol" => bad.protocol_version = 2,
-                "chain" => bad.chain_identifier = "zzzzzzzz".into(),
-                "origin" => {
-                    bad.type_origins.remove("device_cap::DeviceAddressKey");
-                }
-                "client" => {
-                    bad.supported_clients.get_mut("edge").unwrap().max_exclusive = "0.1.0".into()
-                }
-                _ => unreachable!(),
-            }
-            assert!(bad.validate().is_err(), "{field}");
-        }
-    }
-    #[test]
-    fn legacy_network_config_rejected() {
-        assert!(toml::from_str::<SuiConfig>(
-            "rpc_url='http://localhost:9000'\npackage_id='0x1'\nmanifest_path='deployment.json'"
-        )
-        .is_err());
-    }
-}
+- A failed CLI command, unparseable output, or execution effects other than `success` stop the run. Nothing is written.
+- The publish must create:
+  - exactly one package;
+  - one `UpgradeCap` owned by the account;
+  - one shared `DeviceRegistry` of the new package.
+- An upgrade must leave the same `UpgradeCap` at version + 1.
+
+### Recording a release
+
+1. **Pending record.** As soon as a transaction executes, it is saved as `deployments/ENV/pending-DIGEST.json`.
+2. **Verify.** `Published.toml` must now record it. The manifest is then resolved from the chain and verified (type origin table, `UpgradeCap`, registry).
+3. **Write the release.** It is written to `deployments/ENV/releases/vN-PACKAGE/`:
+   - `deployment.json`
+   - `frontend.env`
+   - the device `config.toml` template (`[sui]` plus the device sections of `suifleet-edge/config.example.toml`, or `--device-template`)
+4. **Switch both clients together.** The new `dapp/.env.local` is written in full beside the old one first: it gets `NEXT_PUBLIC_DEPLOYMENT_MANIFEST`, the legacy `NEXT_PUBLIC_*_ID`/`NETWORK` lines are dropped, and every other line is kept. Next, a synced journal `deployments/ENV/activating.json` names the release. Then two renames activate `deployments/ENV/current` and `.env.local`, and the journal is removed.
+   - If the second rename raises an error, the first is undone, and the undo is synced before the journal is removed.
+   - If both renames succeed but syncing them fails, nothing is undone and the journal stays, so the switch is finished as below.
+   - If the process is killed between them, the journal stays. The next run of `scripts/redeploy.sh` finishes the switch first, rolling forward to the journaled release; the release was complete and verified before the journal was written. `scripts/redeploy.sh --reconcile` does only that and sends no transaction.
+   - If finishing a journaled switch fails at any step, the journal stays, so the next run tries again.
+   - While a journal exists, `--dry-run` and `make dapp-build` refuse, so a half-switched `.env.local` is never built.
+5. **Recover.** If any step after execution fails, the previous `current` and `.env.local` stay in place. The error checks this and says so, or warns if either changed. It names the pending file. Fix the cause, then run `scripts/redeploy.sh --recover deployments/ENV/pending-DIGEST.json`. It finishes recording without another transaction.
+
+Earlier releases stay under `releases/`. Once superseded, every client rejects them as stale.
+
+Commit `contracts/Published.toml` and `deployments/ENV/` together after a public-network release: they are the record of every package, UpgradeCap, registry and type origin. Then rebuild the frontend, because `NEXT_PUBLIC_*` values are compiled in. Install `deployment.json` with each device's own `config.toml`. The template's device IDs and key path are placeholders.
+
+Options: `--network devnet|localnet` labels a non-public chain; `--publisher`/`--aggregator` (default: the previous release, or Walrus testnet); `--gas-budget` (default 0.5 SUI; a fresh publish costs about 0.07 SUI); `--package`, `--records`, `--frontend-env ''` (skip), `--client-config`, `--reconcile` (only finish an interrupted activation).
+
+## Resolving and verifying by hand
+
+`scripts/deployment_manifest.py` never spends gas:
+- `resolve` builds a manifest from a package, UpgradeCap and registry.
+- `verify` checks one against the chain.
+- `generate` writes the release bundle.
+
+All three read the chain through `chain_facts`. Build it first:
+
+```bash
+cargo build --locked --manifest-path suifleet-edge/Cargo.toml --example chain_facts
+```
+
+## Tests
+
+| Command | Covers |
+|---|---|
+| `make test-publish` | Offline, using a fake CLI and chain. The paths covered:<br>• metadata scoped to its environment<br>• account, chain and UpgradeCap checks<br>• failed, non-zero and garbled transactions<br>• post-execution failure with prior configuration kept, then `--recover`<br>• a process killed during activation, finished by `--reconcile` or the next run<br>• dry run, adoption and the strict TOML subset |
+| `make test-publish-localnet` | Real localnet, real contracts and CLI:<br>• wrong account refused<br>• dry run writes nothing<br>• fresh publish and upgrade, each verified by the daemon (`--check-config`) and the frontend SDK<br>• the superseded release rejected as stale<br>• incompatible upgrade leaves everything unchanged<br>• reset-chain metadata refused |
+| `make test-manifest`, `make test-manifest-live` | Manifest validation, and origins across real upgrades |
+
+A testnet publish and upgrade has not been run by these tests. It spends real gas, needs the release account, and must be run explicitly by the operator. Record the transaction digests and the resulting manifest in the release issue.
