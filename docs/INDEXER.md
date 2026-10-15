@@ -122,7 +122,12 @@ A compromised or intercepted API can therefore not substitute another group, dev
 - Losing it loses nothing on chain: re-run `index` against an archival node to rebuild.
 - About 1 KB per indexed object plus the change feed. The feed is never pruned yet; plan retention per deployment.
 
-**Network reset.** If the database is bound to another chain identifier, the indexer refuses to run: "the network may have reset". `--reset` discards the index and rebuilds it for the manifest's chain.
+**Network reset and other deployments.** The database is bound to one chain and one deployment: the registry and the origin of every package type. Stream cursors and rows are only valid for that deployment, so the indexer refuses to run when:
+- the chain identifier differs: "the network may have reset";
+- the registry differs, as for another publication on the same chain: "another publication is not an upgrade of the indexed one";
+- a type that is already bound has another origin, or is missing.
+
+A compatible upgrade keeps the registry and the existing origins, and may add types; it continues the same index. `--reset` discards the index (rows, change feed, cursors and sweep position) in the same transaction that records the new binding, then rebuilds it from the manifest's deployment. Without a mismatch, `--reset` changes nothing.
 
 **Pruned history.** If the node no longer holds a stream's resume checkpoint, indexing stops with an explicit error rather than skipping events. Two ways out:
 - Point `rpc_url` at a node that retains the history. This is preferred.
@@ -134,7 +139,7 @@ A compromised or intercepted API can therefore not substitute another group, dev
 
 ## Verified locally (2026-10-15)
 
-- `make indexer-test`: 20 unit tests. They cover:
+- `make indexer-test`: 21 unit tests. They cover:
   - idempotent writes and the change feed;
   - a rolled-back page leaving neither rows nor cursor;
   - keyset pagination and filters;
@@ -152,6 +157,7 @@ A compromised or intercepted API can therefore not substitute another group, dev
     - sender, gas owner and budget;
     - another device's owner cap, the loan passed as the device, a whole result or an input in place of the borrowed device, and a borrow where none is needed;
   - pruned-history refusal;
+  - the deployment binding: a compatible upgrade keeps the index, while another chain, another registry or a re-originated or dropped type is refused without changing it, and `--reset` discards rows, placeholders, cursors, the feed and the sweep position;
   - node JSON integers.
 - `scripts/test_indexer_localnet.py` on a real Sui 1.81.1 localnet, all PASS:
   - the API matches chain state under limit-2 pagination: operators of devices in registry custody, identities, an unactivated device, members, targets, resolved devices and an identity-checked receipt (`report_verified_status_for_group`);
@@ -163,7 +169,7 @@ A compromised or intercepted API can therefore not substitute another group, dev
   - `ctl add-devices` on a custodied device writes an unsigned file, then verifies the borrow/add/return calls against its own chain reads, signs and executes (effects success), and the indexer shows the new membership. `ctl create-deployment` is verified call-by-call, signed and executed, and indexed;
   - the CLI change feed is in sequence order;
   - load: 400 concurrent paginated reads (8 clients) over about 45k rows had p50 19.2 ms and p95 82.4 ms (debug build, laptop-class host). The 20k synthetic devices are inserted as tombstones, since the sweep would tombstone objects that are not on chain;
-  - a database bound to another chain is refused, and `--reset` re-indexes.
+  - a database bound to another chain, or to another publication on the same chain, is refused, and `--reset` re-indexes only the new deployment.
 
 **Not yet done:**
 - testnet, or archival nodes with real retention;
