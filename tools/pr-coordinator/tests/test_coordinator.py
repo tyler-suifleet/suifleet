@@ -50,6 +50,16 @@ class Gates(unittest.TestCase):
         review['result']['verdict']='changes_requested'
         self.assertIsNotNone(c.gate(pr,owner,review))
 
+    def test_testnet_status_required_even_before_workflow_is_queued(self):
+        pr, owner, review = fixture()
+        pr['_testnet_required'] = True
+        self.assertIn('testnet', c.gate(pr, owner, review))
+        for state, base in [('pending', pr['baseRefOid']), ('failure', pr['baseRefOid']), ('success', 'old')]:
+            pr['_testnet_status'] = dict(state=state, description='base:' + base)
+            self.assertIn('testnet', c.gate(pr, owner, review))
+        pr['_testnet_status'] = dict(state='success', description='base:' + pr['baseRefOid'])
+        self.assertIsNone(c.gate(pr, owner, review))
+
     def test_current_independent_review_passes(self):
         self.assertIsNone(c.gate(*fixture()))
 

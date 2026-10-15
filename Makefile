@@ -67,6 +67,7 @@ test-component:
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_component_ota.py
 
 dapp-typecheck:
+	$(MAKE) test-testnet
 	$(MAKE) test-manifest
 	$(RUN) bash -c "cd dapp && pnpm typecheck"
 
@@ -98,7 +99,7 @@ toolchain-versions:
 # CI entry point (run inside the dev image): each step's output is kept under
 # ci-logs/ for failure diagnostics. No step publishes, spends gas or uses secrets.
 ci: SHELL := /bin/bash
-CI_STEPS := test-publish test-contracts test-interfaces check-interfaces edge-test test-ota test-component dapp-typecheck dapp-build
+CI_STEPS := test-testnet test-publish test-contracts test-interfaces check-interfaces edge-test test-ota test-component dapp-typecheck dapp-build
 ci:
 	@mkdir -p ci-logs
 	@$(MAKE) --no-print-directory toolchain-versions | tee ci-logs/toolchain-versions.txt
@@ -172,3 +173,8 @@ live-gate-package-upgrade:
 test-daemon-localnet:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_daemon_localnet.py
+
+.PHONY: test-testnet
+test-testnet:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_testnet*.py'
+	$(RUN) node scripts/test_testnet_cache.cjs

@@ -1,15 +1,4 @@
-# Separately authorized live gates: package upgrade, wallet and hardware.
-# Never triggered by pull requests or pushes. Each gate runs only after a human
-# reviewer approves its GitHub environment, which also holds that gate's
-# secrets and only releases them to runs dispatched from main. The preflight
-# job fails closed if the environment lacks a required reviewer (GitHub would
-# otherwise auto-create it unprotected).
-#
-# package-upgrade (docs/TESTNET.md): checks out `ref`, publishes `base_ref`
-# (default: its merge base with main) to testnet, upgrades in place to `ref`,
-# runs the real daemon and judges on-chain receipts. Spends testnet gas from
-# the dedicated CI wallet whose key is the environment secret
-# SUIFLEET_TESTNET_KEY; uploads the evidence JSON (no keys).
+# Manual wallet/hardware approvals remain; package-upgrade delegates to automatic testnet.
 name: Live gates
 
 on:
@@ -41,9 +30,10 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 concurrency:
-  group: live-${{ inputs.gate }}
+  group: ${{ inputs.gate == 'package-upgrade' && 'suifleet-testnet-ci-wallet' || format('live-{0}', inputs.gate) }}
   cancel-in-progress: false
 
 jobs:
@@ -56,8 +46,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GATE: ${{ inputs.gate }}
           CONFIRM: ${{ inputs.confirm }}
+          NETWORK: ${{ inputs.network }}
+          REF: ${{ inputs.ref }}
+          BASE_REF: ${{ inputs.base_ref }}
         run: |
           [ "$CONFIRM" = "$GATE" ] || { echo "::error::confirm must equal '$GATE'"; exit 1; }
+          if [ "$GATE" = package-upgrade ]; then
+            [ "$GITHUB_REF" = refs/heads/main ] && [ "$NETWORK" = testnet ] && [ "$REF" = main ] && [ -z "$BASE_REF" ] || exit 1
+            gh workflow run testnet.yml --ref main
+            exit 0
+          fi
           rules=$(gh api "repos/$GITHUB_REPOSITORY/environments/live-$GATE" \
             --jq '[.protection_rules[]? | select(.type == "required_reviewers") | .reviewers | length] | add // 0') \
             || { echo "::error::environment live-$GATE does not exist; see docs/OPERATIONS.md"; exit 1; }
@@ -65,6 +63,7 @@ jobs:
 
   gate:
     needs: preflight
+    if: inputs.gate != 'package-upgrade'
     environment: live-${{ inputs.gate }}
     # Hardware runs on a self-hosted runner attached to the test device.
     runs-on: ${{ inputs.gate == 'hardware' && fromJSON('["self-hosted", "raspberrypi3bplus"]') || 'ubuntu-22.04' }}
@@ -78,72 +77,6 @@ jobs:
       - name: Make origin/main available for the merge base
         run: git fetch --no-tags origin main:refs/remotes/origin/main
 
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
-        if: inputs.gate == 'package-upgrade'
-
-      - name: Runner identity
-        id: ids
-        run: echo "uid=$(id -u)" >> "$GITHUB_OUTPUT" && echo "gid=$(id -g)" >> "$GITHUB_OUTPUT"
-
-      - name: Build pinned dev image
-        if: inputs.gate == 'package-upgrade'
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
-        with:
-          context: .
-          load: true
-          tags: suifleet-dev:live
-          build-args: |
-            USER_UID=${{ steps.ids.outputs.uid }}
-            USER_GID=${{ steps.ids.outputs.gid }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      # The published fixture (packages, device, group) is reused while the
-      # contracts are unchanged, so most runs cost ~0.0025 SUI instead of
-      # ~0.18. The state also holds the throwaway test device's key.
-      - name: Restore live fixture state
-        if: inputs.gate == 'package-upgrade'
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: live-state
-          key: live-state-${{ github.run_id }}
-          restore-keys: live-state-
-
-      - name: Run package-upgrade gate on testnet
-        if: inputs.gate == 'package-upgrade'
-        env:
-          SUIFLEET_TESTNET_KEY: ${{ secrets.SUIFLEET_TESTNET_KEY }}
-          SUIFLEET_TESTNET_ADDRESS: ${{ vars.SUIFLEET_TESTNET_ADDRESS }}
-          NETWORK: ${{ inputs.network }}
-          BASE_REF: ${{ inputs.base_ref }}
-        run: |
-          [ "$NETWORK" = testnet ] || { echo "::error::package-upgrade supports network=testnet"; exit 1; }
-          [ -n "$SUIFLEET_TESTNET_KEY" ] || { echo "::error::environment secret SUIFLEET_TESTNET_KEY is not set (docs/TESTNET.md)"; exit 1; }
-          mkdir -p .ci-cache/cargo-registry .ci-cache/cargo-git evidence live-state
-          # The key only ever exists inside this container's temporary wallet.
-          docker run --rm -e SUIFLEET_TESTNET_KEY -e SUIFLEET_TESTNET_ADDRESS -e BASE_REF \
-            -v "$PWD:/workspace" -w /workspace \
-            -v "$PWD/.ci-cache/cargo-registry:/home/dev/.cargo/registry" \
-            -v "$PWD/.ci-cache/cargo-git:/home/dev/.cargo/git" \
-            suifleet-dev:live bash -ec '
-              git config --global --add safe.directory /workspace
-              wallet=$(mktemp -d)
-              printf "[]\n" > "$wallet/sui.keystore"
-              printf "keystore:\n  File: %s/sui.keystore\nenvs:\n- alias: testnet\n  rpc: https://fullnode.testnet.sui.io:443\n  ws: null\n  basic_auth: null\nactive_env: testnet\nactive_address: null\n" "$wallet" > "$wallet/client.yaml"
-              sui keytool --keystore-path "$wallet/sui.keystore" import "$SUIFLEET_TESTNET_KEY" ed25519 >/dev/null
-              unset SUIFLEET_TESTNET_KEY
-              sui client --client.config "$wallet/client.yaml" switch --address "$SUIFLEET_TESTNET_ADDRESS" >/dev/null
-              make live-gate-package-upgrade SUIFLEET_WALLET="$wallet/client.yaml" BASE_REF="$BASE_REF" \
-                SUIFLEET_EVIDENCE=evidence/package-upgrade.json SUIFLEET_STATE=live-state/live-state.json
-              rm -rf "$wallet"'
-
-      - name: Save live fixture state
-        if: always() && inputs.gate == 'package-upgrade'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: live-state
-          key: live-state-${{ github.run_id }}
-
       - name: Run other gates
         if: inputs.gate != 'package-upgrade'
         env:
@@ -156,12 +89,3 @@ jobs:
             exit 1
           fi
           make "live-gate-$GATE"
-
-      - name: Upload evidence
-        if: always() && inputs.gate == 'package-upgrade'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: live-package-upgrade-evidence
-          path: evidence/
-          retention-days: 90
-          if-no-files-found: warn
