@@ -13,7 +13,7 @@ c = importlib.util.module_from_spec(spec);spec.loader.exec_module(c)
 
 def fixture():
     pr = dict(baseIncluded=True,number=49,headRefOid='a'*40,baseRefOid='b'*40,state='OPEN',isDraft=False,mergeable='MERGEABLE',comments=[],reviews=[],threads=[],statusCheckRollup=[{'__typename':'CheckRun','status':'COMPLETED','conclusion':'SUCCESS'}])
-    owner = dict(status='review',agent='Codex',publish_pending=False)
+    owner = dict(remote={'url':'https://github.com/owner/repo/issues/1'},status='review',agent='Codex',publish_pending=False)
     review = dict(head=pr['headRefOid'],feedback=c.feedback(pr),family='Claude',result=dict(verdict='approve',acceptance_complete=True,model='test',evidence='verified'))
     return pr,owner,review
 
@@ -175,7 +175,8 @@ class FullCycleTests(unittest.TestCase):
                 self.assertIn('--expect-token',args);self.assertIn('--merged-commit',args);self.assertIn(commit,args);self.assertIn('origin/main',args)
                 state['complete']=True;owner['status']='done'
             return '{}'
-        patches=[patch.object(c,'run',side_effect=command),patch.object(coordinator,'owners',return_value=[owner]),patch.object(coordinator,'pr',side_effect=lambda *args:current()),patch.object(coordinator,'prs',side_effect=lambda *args:[] if state['pushed'] and not state['lag'] else [current()]),patch.object(coordinator,'ticket',side_effect=ticket),patch.object(coordinator,'gh',return_value=json.dumps({'merge_base_commit':{'sha':commit}})),patch.object(coordinator,'launch')]
+        coordinator.discover_merged=lambda *args:None
+        patches=[patch.object(c,'run',side_effect=command),patch.object(coordinator,'owners',return_value=[owner]),patch.object(coordinator,'pr',side_effect=lambda *args:current()),patch.object(coordinator,'prs',side_effect=lambda *args:[] if state['pushed'] and not state['lag'] else [current()]),patch.object(coordinator,'ticket',side_effect=ticket),patch.object(coordinator,'gh',return_value=json.dumps({'state':'closed'})),patch.object(coordinator,'launch')]
         return coordinator,state,patches
 
     def test_successful_merge_verifies_identity_records_intent_before_push_and_completes_ticket(self):
@@ -224,7 +225,7 @@ class FullCycleTests(unittest.TestCase):
             def launch(project,pr,*args):
                 visited.append(pr['number'])
                 if pr['number']==49:raise RuntimeError('one broken checkout')
-            with patch.object(coordinator,'owners',return_value=[owner]),patch.object(coordinator,'prs',return_value=[pr,next_pr]),patch.object(coordinator,'collect'),patch.object(coordinator,'launch',side_effect=launch):coordinator.tick(True)
+            with patch.object(coordinator,'owners',return_value=[owner]),patch.object(coordinator,'prs',return_value=[pr,next_pr]),patch.object(coordinator,'collect'),patch.object(coordinator,'ensure_closing_reference'),patch.object(coordinator,'launch',side_effect=launch):coordinator.tick(True)
             self.assertEqual(visited,[49,50])
 
     def test_branch_without_current_base_cannot_merge(self):
@@ -251,6 +252,68 @@ class PushFailureTests(unittest.TestCase):
             self.assertFalse(state['pushed']);self.assertEqual(coordinator.store.db.execute('SELECT reconciled FROM integrations').fetchone()[0],0)
             coordinator.tick(True)
             mocks[-1].assert_not_called();self.assertTrue(state['complete'])
+
+
+
+class IssueClosureTests(unittest.TestCase):
+    def setup_case(self,d):
+        coordinator=c.Coordinator({'workers':{'Codex':['true'],'Claude':['true']},'projects':[]},Path(d))
+        project={'id':'test','root':d,'repository':'owner/repo'}
+        owner={'key':'T1','branch':'work/test','status':'review','token':'local','remote':{'url':'https://github.com/owner/repo/issues/6'}}
+        pr={'number':47,'state':'MERGED','headRefOid':'a'*40,'headRefName':'work/test','baseRefName':'main','mergeCommit':{'oid':'c'*40}}
+        return coordinator,project,owner,pr
+
+    def test_native_closing_keyword_preserves_description_and_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as d:
+            coordinator,project,owner,pr=self.setup_case(d);pr.update(state='OPEN',body='Details\n\nRefs #6.')
+            with patch.object(coordinator,'gh') as gh:
+                coordinator.ensure_closing_reference(project,pr,owner)
+                self.assertIn('body=Details\n\nRefs #6.\n\nCloses #6.',gh.call_args.args[1])
+                pr['body']='Details\n\nCloses #6.';gh.reset_mock();coordinator.ensure_closing_reference(project,pr,owner);gh.assert_not_called()
+
+    def test_unmerged_or_foreign_issue_cannot_be_closed(self):
+        with tempfile.TemporaryDirectory() as d:
+            coordinator,project,owner,pr=self.setup_case(d)
+            with patch.object(coordinator,'gh') as gh:
+                pr['state']='OPEN'
+                with self.assertRaises(ValueError):coordinator.close_merged_issue(project,pr,owner)
+                pr['state']='MERGED';owner['remote']['url']='https://github.com/other/repo/issues/6'
+                with self.assertRaises(ValueError):coordinator.close_merged_issue(project,pr,owner)
+                gh.assert_not_called()
+
+    def test_explicit_closure_is_verified_and_repeated_closed_state_needs_no_patch(self):
+        with tempfile.TemporaryDirectory() as d:
+            coordinator,project,owner,pr=self.setup_case(d)
+            with patch.object(coordinator,'gh',side_effect=[json.dumps({'state':'open'}),'{}',json.dumps({'state':'closed'})]) as gh:
+                coordinator.close_merged_issue(project,pr,owner)
+                self.assertIn('state=closed',gh.call_args_list[1].args[1])
+            with patch.object(coordinator,'gh',return_value=json.dumps({'state':'closed'})) as gh:
+                coordinator.close_merged_issue(project,pr,owner)
+                self.assertFalse(any('--method' in call.args[1] for call in gh.call_args_list))
+
+    def test_external_merge_discovered_without_automation_receipt_then_reconciled(self):
+        with tempfile.TemporaryDirectory() as d:
+            coordinator,project,owner,pr=self.setup_case(d)
+            source=dict(number=47,merged_at='now',base={'ref':'main'},head={'ref':'work/test','sha':pr['headRefOid'],'repo':{'full_name':'owner/repo'}},merge_commit_sha=pr['mergeCommit']['oid'])
+            with patch.object(coordinator,'gh',return_value=json.dumps([[source,{**source,'number':48,'merged_at':None}]])):
+                coordinator.discover_merged(project,[owner])
+            self.assertEqual(coordinator.store.db.execute('SELECT COUNT(*) FROM integrations').fetchone()[0],1)
+            with patch.object(c,'run',return_value=''),patch.object(coordinator,'ticket') as ticket,patch.object(coordinator,'close_merged_issue') as close:
+                coordinator.reconcile(project,pr,owner,None)
+                self.assertEqual(ticket.call_args.args[1],'complete');close.assert_called_once()
+            self.assertEqual(coordinator.store.db.execute('SELECT reconciled FROM integrations').fetchone()[0],1)
+
+    def test_failed_closure_keeps_reconciliation_pending_for_done_claim(self):
+        with tempfile.TemporaryDirectory() as d:
+            coordinator,project,owner,pr=self.setup_case(d);owner['status']='done'
+            coordinator.store.db.execute('INSERT INTO integrations VALUES(?,?,?,?,0)',('test',47,pr['headRefOid'],pr['mergeCommit']['oid']))
+            with patch.object(c,'run',return_value=''),patch.object(coordinator,'ticket'),patch.object(coordinator,'close_merged_issue',side_effect=RuntimeError('transient API error')):
+                with self.assertRaises(RuntimeError):coordinator.reconcile(project,pr,owner,None)
+            self.assertEqual(coordinator.store.db.execute('SELECT reconciled FROM integrations').fetchone()[0],0)
+            with patch.object(c,'run',return_value=''),patch.object(coordinator,'ticket') as ticket,patch.object(coordinator,'close_merged_issue'):
+                coordinator.reconcile(project,pr,owner,None)
+                self.assertEqual(ticket.call_args.args[1],'publish')
+            self.assertEqual(coordinator.store.db.execute('SELECT reconciled FROM integrations').fetchone()[0],1)
 
 
 if __name__=='__main__':unittest.main()

@@ -5,6 +5,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import sqlite3
 import subprocess
@@ -318,6 +319,7 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
     def tick_project(self, project, execute):
         owners = self.owners(project)
         if execute: self.collect(project,owners)
+        if execute: self.discover_merged(project,owners)
         prs = self.prs(project)
         def priority(pr):
             owner = self.owner(project,pr,owners)
@@ -330,6 +332,7 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                 reason = gate(pr,owner,review)
                 print(json.dumps({'project':project['id'],'pr':pr['number'],'owner':owner['agent'] if owner else None,'merge_blocker':reason}),flush=True)
                 if not execute or not owner or owner['status'] != 'review' or pr['isDraft']: continue
+                self.ensure_closing_reference(project,pr,owner)
                 intent=self.store.db.execute('SELECT * FROM integrations WHERE project=? AND pr=? AND reconciled=0',(project['id'],pr['number'])).fetchone()
                 if intent:
                     # A successful push can precede GitHub's MERGED notification.
@@ -402,14 +405,56 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
         self.store.db.execute('INSERT OR REPLACE INTO integrations(project,pr,head,commit_id,reconciled) VALUES(?,?,?,?,0)',(project['id'],pr['number'],pr['headRefOid'],commit))
         run(['git','push','origin',f"HEAD:refs/heads/{pr['baseRefName']}"],cwd=directory)
 
+    def issue_number(self,project,owner):
+        url=owner.get('remote',{}).get('url','')
+        prefix=f"https://github.com/{project['repository']}/issues/"
+        if not url.startswith(prefix) or not url[len(prefix):].isdigit():
+            raise ValueError('ticket has no verified same-repository issue URL')
+        return int(url[len(prefix):])
+
+    def ensure_closing_reference(self,project,pr,owner):
+        number=self.issue_number(project,owner)
+        body=pr.get('body','') or ''
+        if re.search(rf'(?im)^\s*(?:closes|fixes|resolves)\s+#{number}\b',body): return
+        self.gh(project,['api',f"repos/{project['repository']}/pulls/{pr['number']}",'--method','PATCH','-f',f'body={body.rstrip()}\n\nCloses #{number}.'])
+
+    def close_merged_issue(self,project,pr,owner):
+        if pr['state'] != 'MERGED' or not pr.get('mergeCommit'): raise ValueError('unmerged PR cannot close an issue')
+        number=self.issue_number(project,owner)
+        endpoint=f"repos/{project['repository']}/issues/{number}"
+        issue=json.loads(self.gh(project,['api',endpoint]))
+        if issue['state'] != 'closed':
+            self.gh(project,['api',endpoint,'--method','PATCH','-f','state=closed','-f','state_reason=completed'])
+        confirmed=json.loads(self.gh(project,['api',endpoint]))
+        if confirmed['state'] != 'closed': raise RuntimeError('issue closure not confirmed; reconciliation will retry')
+
+    def discover_merged(self,project,owners):
+        pages=json.loads(self.gh(project,['api',f"repos/{project['repository']}/pulls?state=closed&per_page=100",'--paginate','--slurp']))
+        for source in (pr for page in pages for pr in page):
+            if not source.get('merged_at') or (source['head'].get('repo') or {}).get('full_name') != project['repository'] or source['base']['ref'] != project.get('integration_branch','main'): continue
+            owner=next((o for o in owners if o.get('branch') == source['head']['ref']),None)
+            if not owner or owner['status'] not in ('review','done'): continue
+            pr=dict(number=source['number'],headRefOid=source['head']['sha'],headRefName=source['head']['ref'],baseRefName=source['base']['ref'],state='MERGED',mergeCommit={'oid':source['merge_commit_sha']})
+            row=self.store.db.execute('SELECT * FROM integrations WHERE project=? AND pr=?',(project['id'],pr['number'])).fetchone()
+            if row and row['reconciled']: continue
+            self.store.db.execute('INSERT OR IGNORE INTO integrations(project,pr,head,commit_id,reconciled) VALUES(?,?,?,?,0)',(project['id'],pr['number'],pr['headRefOid'],pr['mergeCommit']['oid']))
+
     def reconcile(self, project, pr, owner, review):
         run(['git','fetch','origin',pr['baseRefName']],cwd=project['root'])
-        if pr['state'] != 'MERGED' or not review or review['head'] != pr['headRefOid'] or review['result']['acceptance_complete'] is not True: return
+        if pr['state'] != 'MERGED' or not pr.get('mergeCommit'): return
+        if review and (review['head'] != pr['headRefOid'] or review['result']['acceptance_complete'] is not True):
+            review=None
+        # A verified external merge is completion under the user's merge-closes-issue policy.
+        evidence=review['result']['evidence'] if review else f"Verified merged PR #{pr['number']} at {pr['mergeCommit']['oid']}; reconciled under the user's merge-closes-issue policy. Existing acceptance limitations remain in the PR/ticket evidence."
+        reviewer=f"{review['family']}/{review['result']['model']}" if review else 'Verified external merge reconciliation'
+        run(['git','merge-base','--is-ancestor',pr['mergeCommit']['oid'],f"origin/{pr['baseRefName']}"],cwd=project['root'])
         if owner['status'] == 'done':
-            if owner.get('publish_pending'): self.ticket(project,'publish',owner['key'])
+            self.ticket(project,'publish',owner['key'])
+            self.close_merged_issue(project,pr,owner)
             self.store.db.execute('UPDATE integrations SET reconciled=1 WHERE project=? AND pr=?',(project['id'],pr['number']))
             return
-        self.ticket(project,'complete',owner['key'],'--expect-token',owner['token'],'--reviewer',f"{review['family']}/{review['result']['model']}",'--text',review['result']['evidence'],'--merged-commit',pr['mergeCommit']['oid'],'--integration-ref',f"origin/{pr['baseRefName']}")
+        self.ticket(project,'complete',owner['key'],'--expect-token',owner['token'],'--reviewer',reviewer,'--text',evidence,'--merged-commit',pr['mergeCommit']['oid'],'--integration-ref',f"origin/{pr['baseRefName']}")
+        self.close_merged_issue(project,pr,owner)
         self.store.db.execute('UPDATE integrations SET reconciled=1 WHERE project=? AND pr=?',(project['id'],pr['number']))
         # Match only coordinator-owned merge worktrees for this verified PR.
         for path in (self.state/project['id']).glob(f"merge-{pr['number']}-*"):
