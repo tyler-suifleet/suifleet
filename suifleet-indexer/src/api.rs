@@ -62,9 +62,11 @@ impl Tokens {
     fn scope(&self, presented: &[u8]) -> Option<Scope> {
         let mut found = None;
         for (scope, token) in self.0.iter() {
-            let mut difference = (token.len() ^ presented.len()) as u8;
+            // Full-width: any length mismatch must survive (a u8 truncation
+            // would accept the token followed by 256 extra bytes).
+            let mut difference = token.len() ^ presented.len();
             for (index, byte) in token.iter().enumerate() {
-                difference |= byte ^ presented.get(index).copied().unwrap_or(0);
+                difference |= usize::from(byte ^ presented.get(index).copied().unwrap_or(0));
             }
             if difference == 0 {
                 found = found.max(Some(*scope));
@@ -390,6 +392,13 @@ mod tests {
             "extension is not a match"
         );
         assert_eq!(tokens.scope(b""), None);
+        // Lengths differing by a multiple of 256 must not compare equal.
+        for extra in [256, 512, 768] {
+            let padded = format!("{}{}", "r".repeat(32), "x".repeat(extra));
+            assert_eq!(tokens.scope(padded.as_bytes()), None, "+{extra} bytes");
+            let padded = format!("{}{}", "o".repeat(40), "\0".repeat(extra));
+            assert_eq!(tokens.scope(padded.as_bytes()), None, "+{extra} NULs");
+        }
         assert!(Tokens::parse("admin abc").is_err());
         assert!(Tokens::parse("read short").is_err());
         assert!(Tokens::parse("read").is_err());
