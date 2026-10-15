@@ -119,4 +119,73 @@ module sui_edge::device_registry_tests {
 
         ts::end(scenario);
     }
+
+    fun register(registry: &mut DeviceRegistry, name: vector<u8>, scenario: &mut Scenario): device_registry::Device {
+        let clock = clock::create_for_testing(ts::ctx(scenario));
+        let device = device_registry::register_device(registry, string::utf8(name), DEVICE_ADDR,
+            string::utf8(b"aarch64"), &clock, ts::ctx(scenario));
+        clock::destroy_for_testing(clock);
+        device
+    }
+
+    #[test]
+    fun test_activated_device_lifecycle_through_its_owner_cap() {
+        let mut scenario = ts::begin(ADMIN);
+        setup(&mut scenario);
+        ts::next_tx(&mut scenario, ADMIN);
+        let mut registry = ts::take_shared<DeviceRegistry>(&scenario);
+        let device = register(&mut registry, b"rpi-004", &mut scenario);
+        let id = device_registry::device_id(&device);
+        assert!(!device_registry::is_active_signer(&registry, id, DEVICE_ADDR), 0);
+        let owner = device_registry::activate_device(&mut registry, device, ts::ctx(&mut scenario));
+        assert!(device_registry::is_active_signer(&registry, id, DEVICE_ADDR), 1);
+
+        // Borrowed devices serve `&Device` APIs and must come back unchanged.
+        let (mut device, loan) = device_registry::borrow_device(&mut registry, &owner);
+        assert!(!device_registry::is_active_signer(&registry, id, DEVICE_ADDR), 2);
+        device_registry::set_meta(&mut device, string::utf8(b"board"), string::utf8(b"rpi3"), ts::ctx(&mut scenario));
+        device_registry::return_device(&mut registry, device, loan);
+        assert!(device_registry::is_active_signer(&registry, id, DEVICE_ADDR), 3);
+
+        device_registry::deregister_activated_device(&mut registry, owner, ts::ctx(&mut scenario));
+        assert!(device_registry::device_count(&registry) == 0, 4);
+        assert!(!device_registry::is_active_signer(&registry, id, DEVICE_ADDR), 5);
+        ts::return_shared(registry);
+        ts::end(scenario);
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 1, location = sui_edge::device_registry)]
+    fun test_loan_cannot_be_repaid_with_another_device() {
+        let mut scenario = ts::begin(ADMIN);
+        setup(&mut scenario);
+        ts::next_tx(&mut scenario, ADMIN);
+        let mut registry = ts::take_shared<DeviceRegistry>(&scenario);
+        let device = register(&mut registry, b"custodied", &mut scenario);
+        let owner = device_registry::activate_device(&mut registry, device, ts::ctx(&mut scenario));
+        let (borrowed, loan) = device_registry::borrow_device(&mut registry, &owner);
+        let substitute = register(&mut registry, b"substitute", &mut scenario);
+        device_registry::return_device(&mut registry, substitute, loan);
+        transfer::public_transfer(borrowed, ADMIN);
+        transfer::public_transfer(owner, ADMIN);
+        ts::return_shared(registry);
+        ts::end(scenario);
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 0, location = sui_edge::device_registry)]
+    fun test_owner_cap_cannot_act_while_the_device_is_borrowed() {
+        let mut scenario = ts::begin(ADMIN);
+        setup(&mut scenario);
+        ts::next_tx(&mut scenario, ADMIN);
+        let mut registry = ts::take_shared<DeviceRegistry>(&scenario);
+        let device = register(&mut registry, b"busy", &mut scenario);
+        let owner = device_registry::activate_device(&mut registry, device, ts::ctx(&mut scenario));
+        let (device, loan) = device_registry::borrow_device(&mut registry, &owner);
+        device_registry::rotate_device_key(&mut registry, &owner, @0xD2);
+        device_registry::return_device(&mut registry, device, loan);
+        transfer::public_transfer(owner, ADMIN);
+        ts::return_shared(registry);
+        ts::end(scenario);
+    }
 }
