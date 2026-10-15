@@ -18,16 +18,17 @@ Other hosts/architectures need a deliberate profile change and validation.
 The local SuiFleet layer comes from this checkout. Archive its commit ID and
 any diff alongside the kas configuration and build artifacts. The daemon source
 is fetched independently at the recipe's fixed `SRCREV`
-`57abcd1386b309a38b1585cd595475e458b3800a`, a fixed owner-branch revision
-containing the merged SF-003/SF-004 gRPC transport, reviewed generated interfaces
-and atomic first-key publication. `nobranch=1` permits this exact revision before
+`56bbac4d3286f32cad954ad8679bf0d4acf1b838`, a fixed owner-branch revision
+containing the merged SF-003/SF-004 gRPC transport, reviewed generated interfaces,
+atomic first-key publication, registry identity enforcement and signed-release
+verification from main through `38beecd`. `nobranch=1` permits this exact revision before
 PR integration; it does not select a floating source.
 It requires a node serving indexed gRPC `ListEvents` (Sui ≥ 1.81 in SF-004
 tests). Packaging and offline boot checks do not establish real-chain OTA
 acceptance. The lockfile SHA-256 is
-`ad8c34be35ee73888a43ebee10c3b1c5d95f3b3aaa5e95bd60d9312c9ca9f294`.
+`31360ca31fc20fcfd66b0a370fc5bfd31693a1c3e036d69720cdef368f0be822`.
 
-`suifleet-crates.inc` declares all 291 registry packages/versions and SHA-256 from
+`suifleet-crates.inc` declares all 285 registry packages/versions and SHA-256 from
 that revision's Cargo.lock. BitBake fetches/unpacks them before compilation;
 Yocto's cargo class vendors them locally and passes `--frozen`. The recipe also
 sets `CARGO_NET_OFFLINE=true` and checks the lockfile digest before configure.
@@ -40,13 +41,13 @@ the package/image again. Yocto documents this workflow in its
 [Cargo classes reference](https://docs.yoctoproject.org/5.0.17/ref-manual/classes.html#cargo-update-recipe-crates).
 Do not merely disable the digest check to accommodate a lockfile change.
 
-The Wrynose candidate profiles are [packaging-wrynose.yml](../kas/packaging-wrynose.yml)
+The Wrynose profiles are [packaging-wrynose.yml](../kas/packaging-wrynose.yml)
 and [packaging-wrynose-qemu.yml](../kas/packaging-wrynose-qemu.yml). They pin
 OE-Core, BitBake 2.18, meta-openembedded and meta-raspberrypi directly and use
 `nodistro` with systemd and core Rust 1.94.1, without the Scarthgap Rust mixin.
-The layer advertises Scarthgap and Wrynose parsing compatibility. Full Wrynose
-build/boot support requires the validation recorded below; parsing alone is
-insufficient. See the [Wrynose migration guide](https://docs.yoctoproject.org/6.0/migration-guides/migration-6.0.html).
+Both series have the package/image and emulated boot validation recorded below.
+Support here covers the ARM64 Pi client package and writable-root QEMU image;
+physical Pi image/boot acceptance remains SF-029/SF-031. See the [Wrynose migration guide](https://docs.yoctoproject.org/6.0/migration-guides/migration-6.0.html).
 
 Both recipe variants preserve core's `UNPACKDIR` when present and fall back to
 `WORKDIR` only for Scarthgap. Git explicitly unpacks to `git` on both releases;
@@ -80,13 +81,16 @@ kas build kas/packaging-wrynose-qemu.yml
 The base profile cross-builds the `suifleet` package for `raspberrypi3-64`.
 It does not flash a disk. The QEMU profile builds a minimal systemd ARM64 image
 with `suifleet`, the SF-030 test updater and `coreutils` for console fixture
-transfer. It also builds `qemu-system-native`. The Pi package uses Cortex-A53; the QEMU image uses its standard Cortex-A57
+transfer. It also builds `qemu-system-native`. The Wrynose emulator omits SDL
+and audio because the acceptance runner uses only serial/disk emulation. The Pi package uses Cortex-A53; the QEMU image uses its standard Cortex-A57
 virtual-machine tune. Both are cross-built from the same pinned daemon source.
 
 Preserve the package feed, source/layer revisions, build configuration,
 `license.manifest`, image/package manifests, binary/image SHA-256 values and
-BitBake logs. `ca-certificates` is an explicit runtime dependency; OpenSSL and
-other linked libraries are resolved by Yocto's shared-library packaging/QA.
+BitBake logs. `ca-certificates` is an explicit runtime dependency; the daemon uses Rustls and has no direct OpenSSL build dependency. Systemd and
+other image/native dependencies still use OpenSSL, so the observed recursive
+install serialization workaround remains in the layer. Shared-library QA stays
+enabled.
 Use a writable persistent root filesystem for these initial profiles.
 Read-only-rootfs/data-partition migration is not implemented here.
 
@@ -181,12 +185,15 @@ enrollment and delivery on the physical Pi, real wallet/testnet/Walrus flows,
 and firmware safety remain the separately tracked acceptance work.
 
 
+<a id="recorded-target-validation-2026-10-14"></a>
+
 ## Historical target validation (2026-10-14, before atomic-key follow-up)
 
 This section records source `59149f054981b114d09e24224fb54bf720abbe92`,
 not the newer atomic-key source pin above. Its artifact hashes and boot results
 must not be attributed to the new source or the newly rebuilt images.
-The lock digest is unchanged.
+Its lock digest was `ad8c34be35ee73888a43ebee10c3b1c5d95f3b3aaa5e95bd60d9312c9ca9f294`;
+it is not the final Rustls lock digest above.
 The actual checked-out layer revisions match `kas/packaging.yml`: Poky
 `a53cae3de9f45417b97efc4c46c42e4c8ebdb939`, meta-openembedded
 `ae7dfb12245c7f9b9a353499e2688015bd4e6413`, meta-raspberrypi
@@ -286,72 +293,134 @@ waits (default 300 seconds). Provisioning signal handlers exit through the
 cleanup trap. The OpenSSL install serialization append now matches point
 releases; this does not establish compatibility with a different OpenSSL major.
 
-The follow-up adds the Wrynose candidate profiles, portable unpack layout and
+The follow-up adds the Wrynose profiles, portable unpack layout and
 actual compiler-version gate. Atomic no-overwrite key publication now has a
 failure-path regression covering partial-write failure, retry with abandoned
 staging bytes, unchanged existing keys, permissions and competing publication.
 The address helper installs cleanup/signal traps before `mktemp`, guarding an
 empty temporary name. Hardware power-loss safety is still unverified.
 
-Final image build and boot results for this follow-up must be recorded separately
-from the historical evidence above. Until both release profiles build and their
-final images pass the boot runner, acceptance remains incomplete.
+The final source, commands and tested artifacts are recorded in the next section.
+Intermediate runs of source `57abcd1` are superseded by the integrated source
+`56bbac4`; their image hashes are not the final acceptance artifacts.
 
-## Atomic-key follow-up validation (2026-10-14)
+<a id="atomic-key-follow-up-validation-2026-10-14"></a>
 
-Source pin: `57abcd1386b309a38b1585cd595475e458b3800a`. BitBake's
-`update_crates` completed successfully; all 291 entries and the lock checksum
-are unchanged. The unpacked QEMU source HEAD and lock checksum were checked
-directly. Native regression command:
+## Final LTS validation (2026-10-15 UTC)
+
+The source pin is `56bbac4d3286f32cad954ad8679bf0d4acf1b838`, containing the
+atomic identity change and reviewed main through `38beecd`. Actual BitBake
+`update_crates` regenerated 285 checksum fetch entries; the lock digest is
+`31360ca31fc20fcfd66b0a370fc5bfd31693a1c3e036d69720cdef368f0be822`.
+All four unpacked source HEADs and lock digests were checked directly.
+The daemon source/Cargo files in the feedback branch match that pin exactly.
+
+| Profile | Verified tools | Result |
+|---|---|---|
+| Scarthgap/Rust mixin | rustc 1.98.1, Cargo 1.98.0, GCC 13.4.0, systemd 255.21, Linux 6.6.123, QEMU 8.2.7 | 6666 tasks succeeded, 6611 reused; both daemon package QA tasks passed |
+| Wrynose | rustc 1.94.1, Cargo 1.94.0, GCC 15.3.0, systemd 259.5, Linux 6.18.52, QEMU 10.2.0 | 6848 tasks succeeded, 6790 reused; both daemon package QA tasks passed |
+
+Both builds returned exit 0. Scarthgap emitted the two local mirror/hash-server
+warnings and a retained forced-task warning from the compiler-gate negative
+fixture; Wrynose's final build had no warnings. The gate checks the staged
+compiler, including the explicit native-path fallback needed when Wrynose's
+Cargo class leaves `RUSTC` unset. A fixture reporting Rust 1.89.0 was rejected
+with `require Rust >= 1.90.0`; the normal compilers passed. Compile remains
+frozen and offline.
+
+The actual layer revisions match the committed kas profiles. The Scarthgap
+command used the existing Pi default plus QEMU multiconfig. Wrynose used the
+kas-generated QEMU config plus `mc:pi`, a separate `tmp-pi`, shared downloads,
+and local sstate. Its local concurrent-task limit was raised to four; compiler
+jobs remained `-j4`. These cache/concurrency settings change no source pins.
+Exact build commands (after `umask 022`):
 
 ```sh
-docker run --rm -v "$PWD:/workspace" -w /workspace \
+source /home/tyler/dev/suifleet-yocto/poky/oe-init-build-env /home/tyler/dev/codex/yocto-sf025/build
+bitbake suifleet mc:qemu:core-image-minimal mc:qemu:qemu-system-native
+
+source /home/tyler/dev/codex/yocto-sf025-wrynose/openembedded-core/oe-init-build-env /home/tyler/dev/codex/yocto-sf025-wrynose/build-qemu
+bitbake -k core-image-minimal qemu-system-native mc:pi:suifleet
+```
+
+The failed attempts were retained and corrected: the initial delayed unpack
+fallback incorrectly enlarged Scarthgap's pseudo ignore paths; Wrynose libcap
+2.77 relinked during install using host GCC; generated `xzmore` needed a declared
+Bash dependency and usrmerge interpreter path. The Wrynose-only appends preserve
+Scarthgap metadata. Scarthgap xz regression QA passed (1017 tasks, 985 reused).
+A transient Meson future timestamp (1.3055 seconds) passed on retry with clock
+checks enabled. Changes made during an earlier build caused stale task hashes;
+all final runs used stable metadata and returned success. The optional public
+hash-equivalence endpoint timed out and was removed from the local config.
+No package QA or clock check was disabled.
+
+Exact final boot commands:
+
+```sh
+LD_LIBRARY_PATH=/home/tyler/dev/codex/yocto-sf025/build/tmp-qemu/work/x86_64-linux/qemu-system-native/8.2.7/recipe-sysroot-native/usr/lib \
+python3 scripts/test_yocto_boot.py \
+  --qemu /home/tyler/dev/codex/yocto-sf025/build/tmp-qemu/sysroots-components/x86_64/qemu-system-native/usr/bin/qemu-system-aarch64 \
+  --kernel /home/tyler/dev/codex/yocto-sf025/build/tmp-qemu/deploy/images/qemuarm64/Image \
+  --image /home/tyler/dev/codex/yocto-sf025/build/tmp-qemu/deploy/images/qemuarm64/core-image-minimal-qemuarm64.rootfs.ext4
+
+LD_LIBRARY_PATH=/home/tyler/dev/codex/yocto-sf025-wrynose/build-qemu/tmp/work/x86_64-linux/qemu-system-native/10.2.0/recipe-sysroot-native/usr/lib \
+python3 scripts/test_yocto_boot.py \
+  --qemu /home/tyler/dev/codex/yocto-sf025-wrynose/build-qemu/tmp/sysroots-components/x86_64/qemu-system-native/usr/bin/qemu-system-aarch64 \
+  --kernel /home/tyler/dev/codex/yocto-sf025-wrynose/build-qemu/tmp/deploy/images/qemuarm64/Image \
+  --image /home/tyler/dev/codex/yocto-sf025-wrynose/build-qemu/tmp/deploy/images/qemuarm64/core-image-minimal-qemuarm64.rootfs.ext4
+```
+
+Both returned exit 0, three boots each. Each image provisions distinct fresh
+identities while unenrolled, exposes an unprivileged daemon unit, activates on
+config installation, retries the unavailable loopback node, preserves exact
+identity and a filesystem state sentinel across reboot, and preserves identity
+on provisioning restart. Both final input image hashes remained unchanged.
+The sentinel is not a successful OTA receipt or real-chain enrollment record.
+
+Read-only debugfs inspection found no baked private key, address, actual
+enrollment/config/policy files or live state. Executable/helper modes are 0755,
+`/etc/suifleet` is root:suifleet 0750, config example root:suifleet 0640, and policy
+example root:root 0600. Both image daemons match their packaged binaries. All
+four binaries are AArch64 PIEs, have no dynamic libssl/libcrypto dependency,
+and match the separate debug-package CRCs. The recipe retains CA certificates.
+
+| Final artifact | Scarthgap SHA-256 | Wrynose SHA-256 |
+|---|---|---|
+| Pi packaged daemon | `73b827bfbdcf05e958e35a6514d2ea205b8377df5309ac2b446cf8511c87d4eb` | `972a71ee17baefb7e20fff8bed60308a5246148e4fbd2799f873755d3ba7b222` |
+| QEMU packaged daemon | `8d6fbd39cb2c6b02d64b94b6283a74cfb6a97d4e6a4c77526beb50aec0420ee7` | `17b8dfa1a741d74419069251d4ebc4e613a6fdf9aaaf646ae4f5c7527b27f0a5` |
+| QEMU ext4 image | `944164abc99b4df128fb0495961881521964ef9c6cb0dd0be6cc399fed53de0c` | `2d1a35086ea18bb228480cf626a23b5ebb767afb94f5dff41c7599ef5606c694` |
+| QEMU kernel | `a6fabd6fb78a295210511acbf9275ac3198de96436a1a3720dfe3f77f59d2686` | `551072885a666afbfc11727372e289c066db6cdf593e5217bab6ff05fc2a3ecf` |
+| QEMU rootfs manifest | `b18d348711af65ff29a40b1be1ccdc8e05eda4e39372380371dc04b23ff33639` | `8376e4f1adac69e3964a1e8c9f7bb7dda1f1cbb51962e1aaf0920091d3bef4f9` |
+
+The final local suite uses the pinned `suifleet-dev:sf004` image (Rust/Cargo
+1.94.0, Sui 1.81.1). It covers 37 Move tests, 62 Rust tests, reviewed/generated
+interfaces, publisher/manifest/testnet-controller offline tests, direct/helper
+OTA, firmware restart recovery, component v1/v2/install/health failure cases,
+frontend typecheck and production build. Component fixtures ran 14 cases with
+five optional BusyBox cases skipped. Fresh-container provisioning checks passed
+independent identities, permissions, bounded capabilities, stable restart and
+corrupt-key refusal. The interrupted-write identity test also covers abandoned
+staging bytes, retry, unchanged existing keys and competing publication.
+
+A linked worktree needs its common Git directory mounted for the aggregate
+suite's final `git diff --check`. The first aggregate run passed every application
+check but ended at that unmapped Git path; the check was rerun successfully on
+the host and with the metadata mounted. The corrected aggregate suite and fresh-container checks returned exit 0.
+The corrected full-suite command is:
+
+```sh
+repository_git_common=$(git rev-parse --path-format=absolute --git-common-dir)
+docker run --rm -v "$PWD:/workspace" \
+  -v "$repository_git_common:$repository_git_common:ro" -w /workspace \
   -v suifleet_cargo-registry:/home/dev/.cargo/registry \
   -v suifleet_cargo-git:/home/dev/.cargo/git \
-  suifleet-dev:sf004 make edge-test test-ota test-component
+  suifleet-dev:sf004 make check
 sh scripts/test_yocto_first_boot.sh suifleet-dev:sf004
 ```
 
-Both returned exit 0: 54 Rust tests, direct/helper OTA and firmware restart
-recovery, component v1/v2/install/health failure cases, and two fresh independent
-container identities. Component fixtures ran 14 cases with five optional
-BusyBox cases skipped. After adding the abandoned-staging assertion, the four
-identity tests were rerun successfully. Python compilation, shell syntax and
-changed-document local links passed. Rust formatting commands were unavailable
-in the host/container toolchains; no successful formatting-tool check is claimed.
-
-Scarthgap used the build command and paths in the historical section above.
-Final build exit 0: 6666 tasks succeeded, 6601 reused, two local
-hash-equivalence/mirror warnings. Both daemon package QA tasks passed. The staged
-compiler gate accepted rustc 1.98.1. A post-read override selecting a fixture
-reporting rustc 1.89.0 made `bitbake -f -c verify_toolchain suifleet` fail with
-`require Rust >= 1.90.0`; removing the override and rerunning passed. Compile
-continued to use frozen offline Cargo.
-
-Earlier attempts exposed and corrected a delayed unpack fallback that made
-Scarthgap's pseudo ignore the test-component package directory. The final
-fallback is evaluated directly from core's `UNPACKDIR` or `WORKDIR`, without
-modifying core's variable. The initial crate-update attempt also observed
-changing recipe metadata; the stable-metadata rerun succeeded.
-
-Read-only `/usr/sbin/debugfs` inspection confirms the new image contains no key,
-address, actual enrollment/config/policy files or live state. Its daemon matches
-the QEMU packaged binary exactly and is an AArch64 PIE. Executable/helper are
-root:root 0755, the directory is root:suifleet 0750, the config example is
-root:suifleet 0640 and policy example root:root 0600.
-
-| New Scarthgap artifact | SHA-256 |
-|---|---|
-| Pi packaged daemon | `8b3f42ce1270b98f20767acb3cce0e098cda7dce4fd212404f84b25399cb634f` |
-| QEMU packaged daemon | `cb6718d07cc500fef2224bec1730e63490711aed3f3795c1c7c95acc46c57a92` |
-| QEMU ext4 image | `71234f8df4acae3911495f65fb012f938bac96d49c95abd7e8eb7296ab857529` |
-| QEMU kernel | `a6fabd6fb78a295210511acbf9275ac3198de96436a1a3720dfe3f77f59d2686` |
-| QEMU rootfs manifest | `b18d348711af65ff29a40b1be1ccdc8e05eda4e39372380371dc04b23ff33639` |
-
-The final Scarthgap boot command is the historical command above, now pointed
-at the newly rebuilt image with SHA-256 `71234f8df4acae3911495f65fb012f938bac96d49c95abd7e8eb7296ab857529`.
-It returned exit 0: all three boots passed unenrolled provisioning, unprivileged
-service checks, offline config activation/retry, same-disk identity/state
-persistence and independent fresh identities. The input image checksum remained
-unchanged after the runner completed. This is emulation and a filesystem state
-sentinel, not physical power-loss or real-chain enrollment evidence.
+Public-chain transactions, physical Pi programming and production signing-key
+provisioning were not performed by this worker. Physical image/OTA acceptance
+remains SF-029/SF-031 and provisioned release trust remains SF-042. Read-only
+roots, separate persistent partitions and physical power-loss/rollback safety
+remain unverified. Current-head CI and independent review are separate merge
+gates; automatic testnet status, if failing, must remain visible on the PR.
