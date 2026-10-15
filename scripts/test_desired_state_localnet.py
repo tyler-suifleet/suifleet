@@ -2,8 +2,8 @@
 """Desired-state reconciliation (SF-013) on a real local Sui network, across a
 real package upgrade.
 
-Publishes main's contracts (the merge base), creates a device, a group and a
-one-shot deployment with that old package, then upgrades to this tree's
+Publishes main's contracts (the merge base), creates an activated device, a
+group and a one-shot deployment with that old package, then upgrades to this tree's
 contracts and drives desired state on the pre-existing group through the new
 `desired_state` module. The real daemon (gRPC) runs the SF-030 test updater;
 outcomes are judged from on-chain receipts and the components' run history.
@@ -156,15 +156,25 @@ def run(rpc_url, faucet_url):
                 "--move-call", f"{old}::device_registry::register_device", f"@{registry}", '"pi"',
                 f"@{device_address}", '"aarch64"', CLOCK, "--assign", "device",
                 "--move-call", f"{old}::device_cap::issue_cap", "device",
-                "--transfer-objects", "[device]", f"@{operator}")
+                "--move-call", f"{old}::device_registry::activate_device", f"@{registry}", "device",
+                "--assign", "owner", "--transfer-objects", "[owner]", f"@{operator}")
             device = created(registered, "::device_registry::Device")[0]
             cap = created(registered, "::device_cap::DeviceCap")[0]
+            owner_cap = created(registered, "::device_registry::DeviceOwnerCap")[0]
+
+            def add_to_group(package, group):
+                """The activated Device is borrowed from registry custody for `&Device`."""
+                transaction("--move-call", f"{package}::device_registry::borrow_device", f"@{registry}", f"@{owner_cap}",
+                            "--assign", "loaned",
+                            "--move-call", f"{package}::device_group::add_device", f"@{group}", "loaned.0",
+                            "--move-call", f"{package}::device_registry::return_device", f"@{registry}",
+                            "loaned.0", "loaned.1")
 
             def new_group(package, name):
                 return created(transaction("--move-call", f"{package}::device_group::create_group",
                                            f'"{name}"', '"test"', CLOCK), "::device_group::DeviceGroup")[0]
             fleet = new_group(old, "fleet")  # Pre-upgrade group: desired state is added to it later.
-            transaction("--move-call", f"{old}::device_group::add_device", f"@{fleet}", f"@{device}")
+            add_to_group(old, fleet)
 
             # ── Upgrade to this tree's contracts ─────────────────────────────
             shutil.rmtree(package_dir)
@@ -290,7 +300,7 @@ def run(rpc_url, faucet_url):
                 [logger] = revise(later, (LOGGER, "1.0.0"))
                 settle()
                 assert not outcome(logger), "non-member applied a group's desired state"
-                transaction("--move-call", f"{new}::device_group::add_device", f"@{later}", f"@{device}")
+                add_to_group(new, later)
                 applied_and_receipted(logger)
                 print("PASS: device added to a group receives that group's existing desired state")
 
@@ -304,7 +314,7 @@ def run(rpc_url, faucet_url):
 
                 # 5. Two groups disagree on the firmware.
                 rival = new_group(new, "rival")
-                transaction("--move-call", f"{new}::device_group::add_device", f"@{rival}", f"@{device}")
+                add_to_group(new, rival)
                 [rival_fw] = revise(rival, (FIRMWARE, "9.9.9"))
                 settle()
                 assert not outcome(rival_fw) and history(FIRMWARE)[-1] == "1.2.0"
