@@ -120,15 +120,30 @@ def status(repo, head, base, state, url):
         description=f'base:{base}', target_url=url))
 
 
+def verify_checkout(expected, run=subprocess.run):
+    """Reject a changed or mismatched checkout before any revision code executes."""
+    if not isinstance(expected, str) or not SHA.fullmatch(expected):
+        raise RuntimeError('checkout expectation must be an immutable commit SHA')
+    actual = run(['git', 'rev-parse', '--verify', 'HEAD'], text=True,
+                 capture_output=True, check=True).stdout.strip()
+    if actual != expected:
+        raise RuntimeError('checkout does not match authenticated revision')
+
+
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--probe-environment', action='store_true', help='keyless public-metadata preflight; never publishes a test status or spends gas')
     parser.add_argument('--recheck', action='store_true')
+    parser.add_argument('--verify-checkout', action='store_true')
     parser.add_argument('--status', choices=['pending', 'success', 'failure'])
     args = parser.parse_args()
     repo = os.environ['GITHUB_REPOSITORY']
-    if args.probe_environment:
+    if args.verify_checkout:
+        if args.status or args.recheck or args.probe_environment:
+            parser.error('checkout verification cannot perform other operations')
+        verify_checkout(os.environ['TEST_HEAD'])
+    elif args.probe_environment:
         if args.status or args.recheck:
             parser.error('probe cannot publish status or authorize a run')
         print(json.dumps(verify_environment(repo), sort_keys=True))
