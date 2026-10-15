@@ -11,10 +11,9 @@
 //!   execution effects, never inferred from a digest.
 use crate::{config::SuiConfig, identity, protocol};
 use base64::{engine::general_purpose::STANDARD, Engine};
-use ed25519_dalek::SigningKey;
 use futures_util::StreamExt;
 use serde_json::{json, Value};
-use std::{path::Path, str::FromStr, time::Duration};
+use std::{str::FromStr, time::Duration};
 use sui_rpc::field::{FieldMask, FieldMaskUtil};
 use sui_rpc::proto::sui::rpc::v2 as proto;
 use sui_sdk_types::{Address, Argument, Command, Digest, Input, StructTag, Transaction, TypeTag};
@@ -152,9 +151,23 @@ fn ensure_retained(position: Option<u64>, lowest: Option<u64>) -> anyhow::Result
 #[derive(Clone)]
 pub struct SuiClient {
     config: SuiConfig,
-    signing_key: SigningKey,
+    signer: std::sync::Arc<dyn identity::TxSigner>,
     rpc: sui_rpc::Client,
 }
+
+/// Objects created by a successful enrollment (SF-021).
+#[derive(Debug, Clone)]
+pub struct Enrolled {
+    pub digest: String,
+    pub device_object_id: String,
+    pub device_cap_id: String,
+    pub device_address: String,
+    /// Sent to the policy's operator.
+    pub owner_cap_id: String,
+}
+
+/// Largest gas budget a claim key sponsors for one enrollment (0.05 SUI).
+const MAX_ENROLL_BUDGET: u64 = 50_000_000;
 
 pub fn same_id(a: &str, b: &str) -> bool {
     fn normalized(s: &str) -> Option<Vec<u8>> {
@@ -221,7 +234,7 @@ fn id_list(value: &Value) -> Vec<String> {
 }
 
 impl SuiClient {
-    pub fn load(config: SuiConfig, path: &Path) -> anyhow::Result<Self> {
+    pub fn load(config: SuiConfig, signer: std::sync::Arc<dyn identity::TxSigner>) -> anyhow::Result<Self> {
         let manifest = config
             .manifest
             .as_ref()
@@ -232,12 +245,12 @@ impl SuiClient {
             .with_response_headers_timeout(Duration::from_secs(30));
         Ok(Self {
             config,
-            signing_key: identity::load(path)?,
+            signer,
             rpc,
         })
     }
     pub fn address(&self) -> String {
-        identity::address(&self.signing_key)
+        self.signer.address()
     }
     pub fn manifest(&self) -> &crate::config::DeploymentManifest {
         self.config.manifest.as_ref().expect("validated manifest")
@@ -330,6 +343,44 @@ impl SuiClient {
         match object.data() {
             sui_sdk_types::ObjectData::Package(package) => Ok(package.clone()),
             _ => anyhow::bail!("{id} is not a package"),
+        }
+    }
+
+    /// A Move object's type, owner and BCS contents, decoded from the node's
+    /// object BCS rather than its JSON rendering.
+    pub async fn move_object(&self, id: &str) -> anyhow::Result<(String, Owner, Vec<u8>)> {
+        let mut request = proto::GetObjectRequest::default();
+        request.object_id = Some(id.to_owned());
+        request.read_mask = Some(mask(&["bcs"]));
+        let bytes = self
+            .rpc
+            .clone()
+            .ledger_client()
+            .get_object(request)
+            .await
+            .map_err(|e| status(e).context(format!("object {id}")))?
+            .into_inner()
+            .object
+            .and_then(|o| o.bcs)
+            .and_then(|b| b.value)
+            .ok_or_else(|| anyhow::anyhow!("object {id} has no contents"))?;
+        let object: sui_sdk_types::Object = bcs::from_bytes(&bytes)
+            .map_err(|e| anyhow::anyhow!("undecodable object {id}: {e}"))?;
+        let owner = match object.owner() {
+            sui_sdk_types::Owner::Address(address) => Owner::Address(address.to_string()),
+            sui_sdk_types::Owner::Shared(version) => Owner::Shared {
+                initial_version: *version,
+            },
+            sui_sdk_types::Owner::Immutable => Owner::Immutable,
+            _ => Owner::Other,
+        };
+        match object.data() {
+            sui_sdk_types::ObjectData::Struct(value) => Ok((
+                value.object_type().to_string(),
+                owner,
+                value.contents().to_vec(),
+            )),
+            _ => anyhow::bail!("{id} is not a Move object"),
         }
     }
 
@@ -733,6 +784,93 @@ impl SuiClient {
         Ok(transaction)
     }
 
+    /// Enroll this device's key under an enrollment policy (SF-021): one
+    /// transaction sent by the device and sponsored by the claim key, which
+    /// pays its gas. Checked against the exact intended call before either
+    /// key signs; success and the created objects come from the effects.
+    pub async fn enroll(
+        &self,
+        policy: &str,
+        name: &str,
+        arch: &str,
+        claim: &dyn identity::TxSigner,
+    ) -> anyhow::Result<Enrolled> {
+        let package = Address::from_str(&self.config.package_id)?;
+        let sender = Address::from_str(&self.address())?;
+        let sponsor = Address::from_str(&claim.address())?;
+        anyhow::ensure!(sender != sponsor, "the claim key must differ from the device key");
+        let registry = Address::from_str(&self.manifest().shared_objects.registry.id)?;
+        let mut builder = sui_transaction_builder::TransactionBuilder::new();
+        let arguments = vec![
+            builder.object(sui_transaction_builder::ObjectInput::new(Address::from_str(policy)?)),
+            builder.object(sui_transaction_builder::ObjectInput::new(registry)),
+            builder.pure(&name.to_owned()),
+            builder.pure(&arch.to_owned()),
+            builder.object(sui_transaction_builder::ObjectInput::new(Address::from_str("0x6")?)),
+        ];
+        builder.move_call(
+            sui_transaction_builder::Function::new(package, protocol::enrollment::MODULE.parse()?, protocol::enrollment::ENROLL.parse()?),
+            arguments,
+        );
+        builder.set_sender(sender);
+        builder.set_sponsor(sponsor);
+        let transaction = builder
+            .build(&mut self.rpc.clone())
+            .await
+            .map_err(|e| anyhow::anyhow!("enrollment simulation failed: {e}"))?;
+        anyhow::ensure!(transaction.sender == sender, "simulated transaction has another sender");
+        anyhow::ensure!(transaction.gas_payment.owner == sponsor, "gas is not paid by the claim key");
+        anyhow::ensure!(transaction.gas_payment.budget <= MAX_ENROLL_BUDGET, "gas budget {} exceeds the enrollment ceiling", transaction.gas_payment.budget);
+        let sui_sdk_types::TransactionKind::ProgrammableTransaction(program) = &transaction.kind else {
+            anyhow::bail!("not a programmable transaction");
+        };
+        anyhow::ensure!(
+            matches!(program.commands.as_slice(), [Command::MoveCall(call)]
+                if call.package == package && call.module.as_str() == protocol::enrollment::MODULE
+                    && call.function.as_str() == protocol::enrollment::ENROLL && call.type_arguments.is_empty()),
+            "simulated transaction is not exactly enrollment::enroll"
+        );
+        let bytes = bcs::to_bytes(&transaction)?;
+        let signature = |value: Vec<u8>| {
+            let mut out = proto::UserSignature::default();
+            let mut bcs = proto::Bcs::default();
+            bcs.value = Some(value.into());
+            out.bcs = Some(bcs);
+            out
+        };
+        let mut request = proto::ExecuteTransactionRequest::default();
+        let mut tx = proto::Transaction::default();
+        let mut tx_bcs = proto::Bcs::default();
+        tx_bcs.value = Some(bytes.clone().into());
+        tx.bcs = Some(tx_bcs);
+        request.transaction = Some(tx);
+        request.signatures = vec![signature(self.signer.sign(&bytes)?), signature(claim.sign(&bytes)?)];
+        request.read_mask = Some(mask(&["digest", "effects.status", "events"]));
+        let executed = self
+            .rpc
+            .clone()
+            .execution_client()
+            .execute_transaction(request)
+            .await
+            .map_err(status)?
+            .into_inner()
+            .transaction
+            .ok_or_else(|| anyhow::anyhow!("execution returned no transaction"))?;
+        let digest = execution_digest(&executed)?;
+        let expected = self.move_type(protocol::enrollment::DeviceEnrolled::MOVE_TYPE);
+        let event = executed
+            .events
+            .iter()
+            .flat_map(|events| events.events.iter())
+            .find(|event| same_type(event.event_type.as_deref().unwrap_or(""), &expected))
+            .and_then(|event| event.json.as_deref().map(to_json))
+            .ok_or_else(|| anyhow::anyhow!("enrollment {digest} emitted no DeviceEnrolled event"))?;
+        let field = |name: &str| event[name].as_str().map(str::to_owned).ok_or_else(|| anyhow::anyhow!("DeviceEnrolled without {name}"));
+        let enrolled = Enrolled { digest, device_object_id: field("device_id")?, device_cap_id: field("device_cap")?, device_address: field("device_address")?, owner_cap_id: field("owner_cap")? };
+        anyhow::ensure!(same_id(&enrolled.device_address, &self.address()), "enrolled another key");
+        Ok(enrolled)
+    }
+
     async fn execute(&self, transaction: &Transaction) -> anyhow::Result<String> {
         let bytes = bcs::to_bytes(transaction)?;
         let mut request = proto::ExecuteTransactionRequest::default();
@@ -743,7 +881,7 @@ impl SuiClient {
         request.transaction = Some(tx);
         let mut signature = proto::UserSignature::default();
         let mut bcs = proto::Bcs::default();
-        bcs.value = Some(identity::signature(&self.signing_key, &bytes).into());
+        bcs.value = Some(self.signer.sign(&bytes)?.into());
         signature.bcs = Some(bcs);
         request.signatures = vec![signature];
         request.read_mask = Some(mask(&["digest", "effects.status"]));

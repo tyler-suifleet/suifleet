@@ -71,7 +71,7 @@ AWS components define recipes, lifecycle, dependencies and platform selection. S
 | Recipe format | Partial: proprietary v1 JSON | Defined compatibility policy; AWS JSON/YAML adapter if format compatibility is desired | P1 |
 | Install lifecycle | Partial: one-shot opt-in shell script or apply hook | Per-version work directories, validation and install receipts | P1 |
 | Run/startup/shutdown/bootstrap/recover | Missing; unsupported fields rejected | Process supervisor, readiness, restart policy, reboot stages | P1 |
-| Dependency resolution | Missing | Semver constraints, DAG ordering, hard/soft dependencies and cycle/conflict rejection | P1 |
+| Dependency resolution | Partial: recipe 1.1 SemVer requirements, hard/soft dependencies, deterministic dependency-first installs, and cycle/conflict rejection before changes ([SF-012](COMPONENT_DEPENDENCIES.md)) | Dependency lifecycle state coupling, rollback, and public-network/hardware acceptance | P1 |
 | Platform manifests | Missing | OS/arch/platform selectors and multiple artifacts | P1 |
 | Configuration merge/reset/validation | Missing; nonempty config rejected | Persisted defaults, JSON-pointer reset, merge policy, validation and notification | P1 |
 | Runtime isolation | Missing: updater runs as service user | Per-component users, environment, resource limits and IPC ACLs | P0 |
@@ -86,14 +86,14 @@ AWS includes device/component health, operational telemetry, logs and provisioni
 | Capability | SuiFleet after fixes | Remaining requirement | Priority |
 |---|---|---|---|
 | Inventory and groups | Partial: registration and manual groups | Installed versions, tags, search, filters, dynamic groups and ownership transfer semantics | P1 |
-| Software key provisioning | Partial: idempotent key + manual chain enrollment | Claim-based enrollment, bootstrap ownership checks, bulk onboarding, gas sponsorship | P1 |
-| Hardware identity/TPM/HSM | Missing | Signer abstraction, PKCS#11/device backend, compatible signing algorithms and attestation | P1 |
+| Software key provisioning | Implemented, locally tested (SF-021): claim-sponsored self-enrollment (`suifleet --enroll`), operator ownership via DeviceOwnerCap, bulk claims funded in one PTB, quota/expiry/revocation | Image/first-boot integration (SF-025/029), public-network acceptance | P1 |
+| Hardware identity/TPM/HSM | Partial (SF-021): signer abstraction; PKCS#11 P-256 (Sui secp256r1) backend tested with SoftHSM2 | Real TPM/HSM validation, ed25519 tokens, attestation | P1 |
 | Key rotation/revocation | Missing | Revocable capability tied to active identity, migration and recovery | P0 |
 | Online/last-seen/heartbeat | Missing | Telemetry ingress with bounded offline buffering | P1 |
 | Installed component and device health | Missing | Structured health/status service and fleet aggregate API | P1 |
 | Diagnostics and remote logs | Partial: local tracing/systemd logs | Collection/rotation, upload, queries, redaction, alerts and remote support | P1 |
 | Fleet API/CLI and automation | Partial (SF-024): versioned `/v1` API with filters/keyset pagination, unsigned bulk-operation transactions, long-poll change feed and `ctl` CLI | Webhook push delivery, CI integration examples, more bulk operations | P1 |
-| Operator RBAC and delegation | Missing: wallet ownership only | Fleet roles, scoped deployment authority, multisig/change approvals and audit trails | P1 |
+| Operator RBAC and delegation | Partial (SF-021): revocable group-scoped deployer roles with on-chain delegate audit | Further roles (enrollment/lifecycle managers), multisig/change approvals | P1 |
 | Production indexer | Implemented, locally tested (SF-024): `suifleet-indexer` materializes events/objects into SQLite with durable cursors; versioned API, change feed, CLI | Hosted deployment, dApp migration onto the API, archival-node retention on public networks | P1 |
 | Secrets and confidential configuration | Missing | Encrypted distribution, policy-controlled local cache and rotation; never plaintext on public chain/Walrus | P1 |
 | Cost/network policy | Missing | Gas funding/sponsorship, storage budgets, renewal alerts and network quotas | P1 |
