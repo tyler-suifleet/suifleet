@@ -37,7 +37,11 @@ class Dispatcher:
             raise ValueError('Only one implementation slot per project/family')
 
     def ticket(self, project, *args):
-        return json.loads(run(['ticket', '--project', project['id'], *args]))
+        try:
+            return json.loads(run(['ticket', '--project', project['id'], *args]))
+        except subprocess.CalledProcessError as error:
+            print(f"{project['id']}: ticket {args[0]} failed (exit {error.returncode}); scan retained ownership", flush=True)
+            raise
 
     def update(self, session, status, message):
         self.db.execute('UPDATE runs SET status=?,message=? WHERE session=?', (status, message, session))
@@ -162,10 +166,15 @@ Specification snapshot: {json.dumps(claim['spec'])}
             return
         for project in self.config['projects']:
             self.reconcile(project)
+            slots = [s for s in self.config.get('implementation_slots', [])
+                     if s['project'] == project['id'] and s.get('enabled', False)]
+            if not slots:
+                continue
+            owners = self.ticket(project, 'list')
+            if not any(self.available(slot, owners) for slot in slots):
+                continue
             self.ticket(project, 'refresh')
-            for slot in self.config.get('implementation_slots', []):
-                if slot['project'] != project['id'] or not slot.get('enabled', False):
-                    continue
+            for slot in slots:
                 owners = self.ticket(project, 'list')
                 if self.available(slot, owners):
                     self.launch(project, slot)
