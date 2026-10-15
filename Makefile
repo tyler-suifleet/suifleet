@@ -55,6 +55,7 @@ test-ota:
 	$(RUN) python3 scripts/test_ota.py
 	$(RUN) python3 scripts/test_ota.py --firmware-helper
 	$(RUN) python3 scripts/test_firmware_restart.py
+	$(RUN) python3 scripts/test_desired_state.py
 
 # SF-030 harmless test component: fixture tests (system shell, plus busybox when
 # installed), then the real daemon applying it through suifleet-test-updater.

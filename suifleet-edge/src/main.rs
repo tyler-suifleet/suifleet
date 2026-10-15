@@ -2,6 +2,7 @@ mod apply;
 mod config;
 mod firmware;
 mod identity;
+mod reconcile;
 mod recipe;
 mod protocol;
 #[cfg(test)]
@@ -179,57 +180,13 @@ async fn poll(
                     journal.save()?;
                     continue;
                 };
-                anyhow::ensure!(
-                    sui_client::same_type(
-                        &record.object_type,
-                        &sui.move_type(protocol::deployment_manager::DeploymentRecord::MOVE_TYPE)
-                    ),
-                    "wrong deployment type"
-                );
-                if let Err(error) = ensure_deployment_schema(&record.fields) {
-                    let mut outcome = Outcome::default();
-                    record_result(&mut outcome, Err(error));
-                    warn!(deployment = event.deployment_id, error = ?outcome.error, "Deployment schema rejected");
-                    journal
-                        .state
-                        .deployments
-                        .insert(event.deployment_id.clone(), outcome);
-                    journal.state.cursor = Some(cursor);
-                    journal.save()?;
-                    continue;
+                // Desired state owns this record: reconciliation applies it
+                // only while it is the current revision's choice.
+                if sui.is_managed(&event.deployment_id).await? {
+                    info!(deployment = event.deployment_id, "Managed by desired state; left to reconciliation");
+                } else {
+                    execute(cfg, sui, walrus, runner, journal, &event, &record).await?;
                 }
-                let directory = cfg
-                    .runtime
-                    .state_dir
-                    .join("artifacts")
-                    .join(hex::encode(identity::hash(event.deployment_id.as_bytes())));
-                std::fs::create_dir_all(&directory)?;
-                let artifact = directory.join("artifact");
-                // Save intent before starting work. A crash never silently re-executes an updater.
-                journal.state.deployments.insert(
-                    event.deployment_id.clone(),
-                    Outcome {
-                        firmware_request: (cfg.apply.mode == config::ApplyMode::PrivilegedHelper)
-                            .then(|| firmware::request_id(&event.deployment_id)),
-                        ..Outcome::default()
-                    },
-                );
-                journal.save()?;
-                let result =
-                    handle_deployment(sui, walrus, runner, &cfg.apply, &event, &artifact).await;
-                let outcome = journal
-                    .state
-                    .deployments
-                    .get_mut(&event.deployment_id)
-                    .unwrap();
-                record_result(outcome, result);
-                info!(deployment = event.deployment_id, status = outcome.status, error = ?outcome.error, "Deployment finished");
-                journal.save()?;
-                firmware::acknowledge(
-                    &cfg.apply.firmware_spool,
-                    &firmware::request_id(&event.deployment_id),
-                );
-                let _ = std::fs::remove_dir_all(&directory);
             }
             journal.state.cursor = Some(cursor);
             journal.save()?;
@@ -245,7 +202,147 @@ async fn poll(
         }
         anyhow::ensure!(progressed, "event stream claims more data without advancing");
     }
-    Ok(())
+    reconcile(cfg, sui, walrus, runner, journal).await
+}
+
+/// Apply one authorized deployment, journaling intent first, and record its
+/// outcome (reported on a later poll). Returns the recorded status.
+async fn execute(
+    cfg: &Config,
+    sui: &SuiClient,
+    walrus: &WalrusClient,
+    runner: &ApplyRunner,
+    journal: &mut Journal,
+    event: &DeploymentCreatedEvent,
+    record: &sui_client::Object,
+) -> anyhow::Result<Option<u8>> {
+    anyhow::ensure!(
+        sui_client::same_type(
+            &record.object_type,
+            &sui.move_type(protocol::deployment_manager::DeploymentRecord::MOVE_TYPE)
+        ),
+        "wrong deployment type"
+    );
+    if let Err(error) = ensure_deployment_schema(&record.fields) {
+        let mut outcome = Outcome::default();
+        record_result(&mut outcome, Err(error));
+        warn!(deployment = event.deployment_id, error = ?outcome.error, "Deployment schema rejected");
+        let status = outcome.status;
+        journal.state.deployments.insert(event.deployment_id.clone(), outcome);
+        journal.save()?;
+        return Ok(status);
+    }
+    let directory = cfg
+        .runtime
+        .state_dir
+        .join("artifacts")
+        .join(hex::encode(identity::hash(event.deployment_id.as_bytes())));
+    std::fs::create_dir_all(&directory)?;
+    let artifact = directory.join("artifact");
+    // Save intent before starting work. A crash never silently re-executes an updater.
+    journal.state.deployments.insert(
+        event.deployment_id.clone(),
+        Outcome {
+            firmware_request: (cfg.apply.mode == config::ApplyMode::PrivilegedHelper)
+                .then(|| firmware::request_id(&event.deployment_id)),
+            ..Outcome::default()
+        },
+    );
+    journal.save()?;
+    let result = handle_deployment(sui, walrus, runner, &cfg.apply, event, &artifact).await;
+    let outcome = journal.state.deployments.get_mut(&event.deployment_id).unwrap();
+    record_result(outcome, result);
+    info!(deployment = event.deployment_id, status = outcome.status, error = ?outcome.error, "Deployment finished");
+    let status = outcome.status;
+    journal.save()?;
+    firmware::acknowledge(&cfg.apply.firmware_spool, &firmware::request_id(&event.deployment_id));
+    let _ = std::fs::remove_dir_all(&directory);
+    Ok(status)
+}
+
+/// Move toward the current desired state of every group this device is in
+/// (reconcile.rs describes the rules).
+async fn reconcile(
+    cfg: &Config,
+    sui: &SuiClient,
+    walrus: &WalrusClient,
+    runner: &ApplyRunner,
+    journal: &mut Journal,
+) -> anyhow::Result<()> {
+    let device = &cfg.device.device_object_id;
+    // Groups that ever added this device, scanned from genesis: membership
+    // can predate enrollment. Each group object is the authority below.
+    loop {
+        let page = sui.memberships(&journal.state.membership_cursor).await?;
+        for (group, member) in page.events {
+            if sui_client::same_id(&member, device) && journal.state.groups.insert(group.clone()) {
+                info!(group, "Device was added to a group; following its desired state");
+            }
+        }
+        let progressed = journal.state.membership_cursor.as_ref() != Some(&page.end);
+        journal.state.membership_cursor = Some(page.end);
+        journal.save()?;
+        if !page.has_more {
+            break;
+        }
+        anyhow::ensure!(progressed, "membership stream claims more data without advancing");
+    }
+    let operator = sui.operator(device).await?;
+    let mut groups = Vec::new();
+    for group in journal.state.groups.clone() {
+        if let Some(desired) = sui.group_desired(&group, &operator, device).await? {
+            groups.push(desired);
+        }
+    }
+    let effective = reconcile::effective(&groups);
+    let fingerprint = reconcile::fingerprint(&effective);
+    if journal.state.desired.as_deref() != Some(fingerprint.as_str()) {
+        for (component, sources) in &effective.conflicts {
+            warn!(component, ?sources, "Groups disagree on this component; leaving it as installed");
+        }
+        journal.state.desired = Some(fingerprint);
+        journal.state.blocked = false;
+    }
+    for component in reconcile::retired(&journal.state.components, &effective) {
+        info!(component, "No longer desired by any group; retired from management (not uninstalled)");
+        journal.state.components.remove(&component);
+    }
+    if journal.state.blocked {
+        journal.save()?;
+        return Ok(());
+    }
+    let done = |journal: &Journal, deployment: &str| {
+        journal.state.deployments.keys().any(|id| sui_client::same_id(id, deployment))
+    };
+    let steps = reconcile::plan(&effective, |deployment| done(journal, deployment));
+    for (component, deployment) in steps {
+        let Some((event, record)) = sui.deployment(&deployment).await? else {
+            warn!(component, deployment, "Desired deployment was deleted; skipping it");
+            continue;
+        };
+        // Enforced on chain too; never apply another operator's update.
+        if !sui_client::same_id(&event.creator, &operator) || event.component_name != component {
+            warn!(component, deployment, "Desired deployment is not this operator's component; skipping it");
+            continue;
+        }
+        info!(component, deployment, version = event.version, "Reconciling to desired state");
+        let status = execute(cfg, sui, walrus, runner, journal, &event, &record).await?;
+        journal.state.components.insert(component.clone(), deployment.clone());
+        if status != Some(protocol::STATUS_APPLIED) {
+            warn!(component, deployment, "Plan stopped; not retried until the desired state changes");
+            journal.state.blocked = true;
+            journal.save()?;
+            return Ok(());
+        }
+        journal.save()?;
+    }
+    // Desired deployments that already ran (as one-shot jobs or earlier steps).
+    for (component, deployment) in &effective.components {
+        if done(journal, deployment) {
+            journal.state.components.insert(component.clone(), deployment.clone());
+        }
+    }
+    journal.save()
 }
 
 async fn handle_deployment(

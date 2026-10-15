@@ -2,7 +2,7 @@ use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs::{File, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
@@ -15,6 +15,24 @@ pub struct State {
     #[serde(default)]
     pub initialized: bool,
     pub deployments: BTreeMap<String, Outcome>,
+    /// Resume point of the DeviceAddedToGroup scan, which starts at genesis
+    /// whatever the deployment baseline (membership predates enrollment).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub membership_cursor: Option<Value>,
+    /// Groups that ever added this device. Membership itself is re-read from
+    /// each group object on every poll.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub groups: BTreeSet<String>,
+    /// Component name → deployment desired-state reconciliation last acted on.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub components: BTreeMap<String, String>,
+    /// Fingerprint of the desired state last reconciled (reconcile.rs).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub desired: Option<String>,
+    /// Its plan stopped on a step that did not apply; not retried until the
+    /// desired state changes.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub blocked: bool,
 }
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Outcome {
