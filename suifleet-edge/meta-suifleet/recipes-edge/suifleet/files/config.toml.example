@@ -37,3 +37,11 @@ poll_seconds = 10
 # First enrollment skips historical events; existing cursors always catch up.
 # Enable only if explicitly replaying old one-shot deployments is safe.
 replay_history = false
+
+# Dependency candidates: "never" (default) uses only the live catalog and
+# Walrus; "cached" keeps authenticated versions/recipes/artifacts under
+# state_dir/components for reuse and offline resolution.
+# See docs/COMPONENT_DEPENDENCIES.md.
+# [components]
+# offline_candidates = "never"
+# cache_max_bytes = 536870912
