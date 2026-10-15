@@ -1160,6 +1160,55 @@
       ],
       "validation": "Offline scheduler regressions and installed-service observation.",
       "description": "Independent reviews can finish blocked solely because exact-head CI/testnet is pending. The coordinator fingerprint omits CI state; later successful checks do not trigger a new review, leaving correct implementation PRs and their dependencies stalled.\n\nAcceptance:\n- Bind review freshness to meaningful exact-head CI/status and required current-base testnet evidence, with deterministic ordering and no timestamp/receipt loops.\n- Automatically re-review when pending or failed checks become successful; never reuse a prior blocked verdict as approval.\n- Avoid expensive premature reviews while required checks are absent, pending or failing; repairs for actionable code feedback/base integration must still run.\n- Preserve independent exact head/base approval, one active worker per PR, retained genuine hardware/acceptance blockers, and serial merge gates.\n- Offline regressions cover pending-to-success, failures, missing/wrong-base testnet, stable reordered checks, restart/deduplication and actual coordinator dispatch decisions.\n- Install verified coordinator update without interrupting live workers and record review-queue behavior.\n"
+    },
+    {
+      "key": "SF-048",
+      "title": "Add automated security audits to normal CI",
+      "priority": "P1",
+      "area": "security",
+      "phase": "baseline",
+      "kind": "type:infrastructure",
+      "depends_on": [],
+      "paths": [
+        ".github",
+        "scripts",
+        "docs"
+      ],
+      "evidence": "No security audit job currently exists in normal CI.",
+      "acceptance": [
+        "- Scan every PR, main update and periodically for newly disclosed vulnerabilities, without deployment credentials or public-chain mutations.",
+        "- Add pinned official CodeQL analysis for JavaScript/TypeScript, Python, Rust and GitHub Actions; enforce actionable high/critical security results, not only successful scanner execution.",
+        "- Scan the committed frontend/Rust lockfiles, secrets and deployment configuration with a checksum-verified maintained scanner, including development dependencies where supported.",
+        "- Fail closed on scanner errors or malformed/missing reports; retain useful sanitized diagnostics without publishing secret matches or source excerpts containing credentials.",
+        "- Use minimal permissions, immutable action/tool references and safe fork events. Never execute untrusted PR code with testnet or production secrets.",
+        "- Document coverage, thresholds, remediation and limitations. Verify offline positive/negative gate behavior and run genuine scans/current-head CI. Do not silently suppress discovered vulnerabilities; fix scoped findings or track precise blockers."
+      ],
+      "validation": "Scanner/gate regression tests, genuine dependency/secrets/configuration scans and exact-head CI.",
+      "description": "Add normal automated security auditing for the deployed dApp, Rust edge client, CI/release workflows and deployment configuration. Current CI validates behavior but has no static security, dependency vulnerability or secret scan.\n\nAcceptance:\n- Scan every PR, main update and periodically for newly disclosed vulnerabilities, without deployment credentials or public-chain mutations.\n- Add pinned official CodeQL analysis for JavaScript/TypeScript, Python, Rust and GitHub Actions; enforce actionable high/critical security results, not only successful scanner execution.\n- Scan the committed frontend/Rust lockfiles, secrets and deployment configuration with a checksum-verified maintained scanner, including development dependencies where supported.\n- Fail closed on scanner errors or malformed/missing reports; retain useful sanitized diagnostics without publishing secret matches or source excerpts containing credentials.\n- Use minimal permissions, immutable action/tool references and safe fork events. Never execute untrusted PR code with testnet or production secrets.\n- Document coverage, thresholds, remediation and limitations. Verify offline positive/negative gate behavior and run genuine scans/current-head CI. Do not silently suppress discovered vulnerabilities; fix scoped findings or track precise blockers.\n"
+    },
+    {
+      "key": "SF-049",
+      "title": "Remediate high and critical frontend dependency findings",
+      "priority": "P0",
+      "area": "security",
+      "phase": "baseline",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "dapp",
+        "scripts",
+        "docs"
+      ],
+      "evidence": "Trivy0.76.0 finds19blocking frontend dependency advisories.",
+      "acceptance": [
+        "- Reproduce with the checksum-verified Trivy0.76.0 scanner and document exact findings, runtime/build applicability and fixed versions from primary advisories.",
+        "- Upgrade the supported Next/React combination and affected transitive dependencies deliberately, preserving wallet/Sui SDK pins unless a verified security fix requires changing them. Keep manifest/lockfile changes coupled.",
+        "- Resolve every HIGH/CRITICAL finding without broad ignore files, turning off scanners, skipping tests or suppressing failed audits. For unpatched advisories, implement and test a targeted mitigation/patch or report a precise real blocker; do not silently accept risk.",
+        "- Run locked frontend install, query/transaction/schema tests, typecheck and production build; test affected runtime behavior and real-wallet acceptance limits honestly.",
+        "- Re-run the genuine dependency/secret/configuration scan against the final branch; preserve both Rust lockfile and Dockerfile coverage. Record exact scan results and current-head CI."
+      ],
+      "validation": "Locked frontend checks/build, relevant regression tests and genuine final vulnerability scan.",
+      "description": "The first genuine SF-048 filesystem audit reports 19 HIGH/CRITICAL frontend dependency findings (2 CRITICAL,17 HIGH) in the locked dependency tree, including Next14.2.35, browserslist4.28.2, nanoid3.3.12, PostCSS8.4.31/8.5.13, source-map-js1.2.1 and braces3.0.3. These package advisories do not by themselves prove exploitability of the static deployed dApp, but the new no-suppression CI gate correctly blocks them.\n\nAcceptance:\n- Reproduce with the checksum-verified Trivy0.76.0 scanner and document exact findings, runtime/build applicability and fixed versions from primary advisories.\n- Upgrade the supported Next/React combination and affected transitive dependencies deliberately, preserving wallet/Sui SDK pins unless a verified security fix requires changing them. Keep manifest/lockfile changes coupled.\n- Resolve every HIGH/CRITICAL finding without broad ignore files, turning off scanners, skipping tests or suppressing failed audits. For unpatched advisories, implement and test a targeted mitigation/patch or report a precise real blocker; do not silently accept risk.\n- Run locked frontend install, query/transaction/schema tests, typecheck and production build; test affected runtime behavior and real-wallet acceptance limits honestly.\n- Re-run the genuine dependency/secret/configuration scan against the final branch; preserve both Rust lockfile and Dockerfile coverage. Record exact scan results and current-head CI.\n\nThis is the prerequisite remediation for SF-048/#78 security-gate adoption; use a standalone branch from current main so it can merge before the audit workflow. Do not include the security workflow implementation in this PR. Scope is dependency fixes, not production deployment or hardware programming.\n"
     }
   ]
 }
