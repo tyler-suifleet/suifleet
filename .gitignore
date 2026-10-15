@@ -12,6 +12,7 @@ contracts/build/
 
 # ── Rust build artifacts ──────────────────────────────────────────────────────
 suifleet-edge/target/
+suifleet-indexer/target/
 
 # ── Next.js ───────────────────────────────────────────────────────────────────
 dapp/.next/
