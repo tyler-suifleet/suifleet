@@ -966,6 +966,29 @@
       ],
       "validation": "Tampered artifact/manifest rejection, trusted/untrusted signer and rotation tests; reproduce an ARM release and verify its SBOM/provenance.",
       "description": "Sign release artifacts and publish SBOMs with device verification. Produce reproducible ARM release artifacts, dependency SBOMs, revision/toolchain metadata and authenticated provenance."
+    },
+    {
+      "key": "SF-040",
+      "title": "Automate reciprocal PR review, feedback repair and gated merges",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "baseline",
+      "kind": "type:infrastructure",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator",
+        "docs/PR_COORDINATION.md",
+        "AGENTS.md",
+        "CLAUDE.md"
+      ],
+      "evidence": "Cross-model reviews and change requests require repeated manual prompts.",
+      "acceptance": [
+        "Persistent reciprocal review and owner feedback dispatch without duplicate workers.",
+        "Exact-head independent review, checks, threads and acceptance gate serial merges; reconcile linked tickets.",
+        "Offline race/restart tests and live read-only scan plus unattended worker proof."
+      ],
+      "validation": "Offline coordinator tests, live dry-run and unattended worker execution.",
+      "description": "Automate reciprocal model reviews, feedback repairs and serial merges using atomic ticket ownership."
     }
   ]
 }
