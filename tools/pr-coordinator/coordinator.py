@@ -36,13 +36,37 @@ def publication_hash(item):
     return hashlib.sha256(json.dumps([item.get('body',''),item.get('state'),item.get('commit')],sort_keys=True).encode()).hexdigest()
 
 
+def check_evidence(pr):
+    # Fingerprint meaningful outcomes, not API ordering or display timestamps.
+    checks = [{key: check.get(key) for key in
+               ('__typename', 'name', 'workflowName', 'context', 'status', 'conclusion', 'state')}
+              for check in pr['statusCheckRollup']]
+    required = bool(pr.get('_testnet_required'))
+    testnet = pr.get('_testnet_status') or {}
+    return [sorted(checks, key=lambda value: json.dumps(value, sort_keys=True)), required,
+            {key: testnet.get(key) for key in ('state', 'description')} if required else None]
+
+
+def checks_blocker(pr):
+    if pr.get('_testnet_required'):
+        testnet = pr.get('_testnet_status') or {}
+        if (testnet.get('state') != 'success'
+                or testnet.get('description') != 'base:' + pr['baseRefOid']):
+            return 'exact-head testnet status for current base is missing or unsuccessful'
+    checks = pr['statusCheckRollup']
+    if not checks or not all((check.get('status') == 'COMPLETED' and check.get('conclusion') == 'SUCCESS')
+                             if check.get('__typename') == 'CheckRun' else check.get('state') == 'SUCCESS' for check in checks):
+        return 'checks have not all passed'
+    return None
+
+
 def feedback(pr):
     # Coordinator publications are receipts, not new requests for another review.
     comments = [(c['id'], c['body'], c.get('updatedAt', '')) for c in pr['comments'] if pr.get('_receipts',{}).get(c['id']) != publication_hash(c)]
     reviews = [(r['id'], r['state'], r.get('body', ''), r.get('commit', {}).get('oid'))
                for r in pr['reviews'] if pr.get('_receipts',{}).get(r['id']) != publication_hash(r)]
     threads = pr['threads']
-    return hashlib.sha256(json.dumps([pr['headRefOid'], pr.get('baseRefOid'), comments, reviews, threads, pr.get('_acceptance_policy',{})], sort_keys=True).encode()).hexdigest()
+    return hashlib.sha256(json.dumps([pr['headRefOid'], pr.get('baseRefOid'), comments, reviews, threads, pr.get('_acceptance_policy',{}), check_evidence(pr)], sort_keys=True).encode()).hexdigest()
 
 
 def gate(pr, owner, review):
@@ -61,15 +85,8 @@ def gate(pr, owner, review):
         return 'changes or acceptance evidence remain outstanding'
     if any(not t['isResolved'] for t in pr['threads']):
         return 'unresolved review threads'
-    if pr.get('_testnet_required'):
-        testnet = pr.get('_testnet_status') or {}
-        if (testnet.get('state') != 'success'
-                or testnet.get('description') != 'base:' + pr['baseRefOid']):
-            return 'exact-head testnet status for current base is missing or unsuccessful'
-    checks = pr['statusCheckRollup']
-    if not checks or not all((c.get('status') == 'COMPLETED' and c.get('conclusion') == 'SUCCESS')
-                             if c.get('__typename') == 'CheckRun' else c.get('state') == 'SUCCESS' for c in checks):
-        return 'checks have not all passed'
+    blocker = checks_blocker(pr)
+    if blocker: return blocker
     # Explicit changes requested remain a GitHub merge blocker until dismissed/re-reviewed.
     latest = {}
     for r in pr['reviews']:
@@ -426,7 +443,7 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                     break
                 if not pr['baseIncluded'] or (review and review['head'] == pr['headRefOid'] and review['result']['verdict'] == 'changes_requested'):
                     self.launch(project,pr,owner,'fix')
-                elif not review or review['head'] != pr['headRefOid'] or review['feedback'] != feedback(pr):
+                elif checks_blocker(pr) is None and (not review or review['head'] != pr['headRefOid'] or review['feedback'] != feedback(pr)):
                     self.launch(project,pr,owner,'review')
             except Exception as error:
                 print(f"{project['id']} PR#{pr['number']}: action deferred: {error}",flush=True)
