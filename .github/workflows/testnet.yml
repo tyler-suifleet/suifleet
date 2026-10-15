@@ -73,6 +73,14 @@ jobs:
           path: encrypted-live-state
           key: encrypted-testnet-v1-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: encrypted-testnet-v1-
+      - name: Build testnet dependencies without signing credentials
+        if: steps.plan.outputs.run == 'true'
+        run: |
+          docker run --rm -e CARGO_BUILD_JOBS=2 \
+            -v "$PWD:/workspace" -w /workspace suifleet-dev:testnet bash -ec '
+              git config --global --add safe.directory /workspace
+              pnpm --dir dapp install --frozen-lockfile
+              cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts'
       - name: Recheck head and base immediately before spending
         if: steps.plan.outputs.run == 'true'
         env:
@@ -80,7 +88,7 @@ jobs:
           TEST_HEAD: ${{ steps.plan.outputs.head }}
           BASE_REF: ${{ steps.plan.outputs.base }}
         run: python3 "$RUNNER_TEMP/testnet_ci.py" --recheck
-      - name: Build and run bounded testnet acceptance
+      - name: Run bounded testnet acceptance
         if: steps.plan.outputs.run == 'true'
         env:
           SUIFLEET_TESTNET_KEY: ${{ secrets.SUIFLEET_TESTNET_KEY }}
@@ -88,12 +96,11 @@ jobs:
           BASE_REF: ${{ steps.plan.outputs.base }}
         run: |
           mkdir -p evidence encrypted-live-state
-          docker run --rm -e SUIFLEET_TESTNET_KEY -e SUIFLEET_TESTNET_ADDRESS -e BASE_REF -e CARGO_BUILD_JOBS=2 \
+          docker run --rm -e SUIFLEET_TESTNET_KEY -e SUIFLEET_TESTNET_ADDRESS -e BASE_REF \
+            -e SUIFLEET_FAUCET_TOOL=/tmp/sui-faucet/sui \
             -v "$PWD:/workspace" -w /workspace suifleet-dev:testnet bash -ec '
               git config --global --add safe.directory /workspace
-              pnpm --dir dapp install --frozen-lockfile
-              cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
-              SUIFLEET_FAUCET_TOOL=/tmp/sui-faucet/sui node scripts/ci_testnet.cjs'
+              node scripts/ci_testnet.cjs'
       - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
         if: always() && steps.plan.outputs.run == 'true'
         with:

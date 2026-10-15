@@ -11,6 +11,29 @@ from testnet_ci import trusted_pr, plan
 
 
 class TrustTests(unittest.TestCase):
+    def test_live_gate_checkout_and_token_permissions(self):
+        workflow = (Path(__file__).resolve().parents[2]/'.github/workflows/live-gates.yml').read_text()
+        preflight, gate = workflow.split('\n  gate:\n', 1)
+        self.assertNotIn('inputs.ref', workflow)
+        self.assertNotIn('inputs.base_ref', workflow)
+        self.assertIn('persist-credentials: false', gate)
+        self.assertNotIn('          ref:', gate)
+        self.assertNotIn('actions: write', gate)
+        self.assertNotIn('actions: write', preflight.split('jobs:', 1)[0])
+        self.assertIn('      actions: write', preflight)
+
+    def test_dependency_build_step_has_no_signing_key(self):
+        workflow = (Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml').read_text()
+        build = workflow.split('      - name: Build testnet dependencies without signing credentials', 1)[1].split('      - name:', 1)[0]
+        run = workflow.split('      - name: Run bounded testnet acceptance', 1)[1].split('      - uses:', 1)[0]
+        self.assertIn('pnpm --dir dapp install --frozen-lockfile', build)
+        self.assertIn('cargo build --locked', build)
+        self.assertNotIn('SUIFLEET_TESTNET_KEY', build)
+        self.assertIn('-e SUIFLEET_TESTNET_KEY', run)
+        self.assertIn('node scripts/ci_testnet.cjs', run)
+        self.assertNotIn('pnpm ', run)
+        self.assertNotIn('cargo build', run)
+
     def fixture(self):
         return {'number': 1, 'state': 'open', 'user': {'login': 'writer'},
                 'base': {'ref': 'main', 'repo': {'full_name': 'a/b'}},

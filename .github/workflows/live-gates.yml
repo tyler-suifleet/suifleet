@@ -14,15 +14,6 @@ on:
         required: true
         type: string
         default: testnet
-      ref:
-        description: Commit, branch or PR head to test (e.g. refs/pull/58/head)
-        required: false
-        type: string
-        default: main
-      base_ref:
-        description: Contracts published before the upgrade (default merge base with main)
-        required: false
-        type: string
       confirm:
         description: Type the gate name again to confirm a live run
         required: true
@@ -30,7 +21,6 @@ on:
 
 permissions:
   contents: read
-  actions: write
 
 concurrency:
   group: ${{ inputs.gate == 'package-upgrade' && 'suifleet-testnet-ci-wallet' || format('live-{0}', inputs.gate) }}
@@ -39,6 +29,9 @@ concurrency:
 
 jobs:
   preflight:
+    permissions:
+      contents: read
+      actions: write
     runs-on: ubuntu-22.04
     timeout-minutes: 5
     steps:
@@ -48,12 +41,10 @@ jobs:
           GATE: ${{ inputs.gate }}
           CONFIRM: ${{ inputs.confirm }}
           NETWORK: ${{ inputs.network }}
-          REF: ${{ inputs.ref }}
-          BASE_REF: ${{ inputs.base_ref }}
         run: |
           [ "$CONFIRM" = "$GATE" ] || { echo "::error::confirm must equal '$GATE'"; exit 1; }
           if [ "$GATE" = package-upgrade ]; then
-            [ "$GITHUB_REF" = refs/heads/main ] && [ "$NETWORK" = testnet ] && [ "$REF" = main ] && [ -z "$BASE_REF" ] || exit 1
+            [ "$GITHUB_REF" = refs/heads/main ] && [ "$NETWORK" = testnet ] || exit 1
             gh workflow run testnet.yml --ref main
             exit 0
           fi
@@ -72,7 +63,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: ${{ inputs.ref }}
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Make origin/main available for the merge base
