@@ -14,14 +14,14 @@ SRC_URI = " \
     file://suifleet-provision \
     file://suifleet-enrollment.path \
 "
-SRCREV = "57abcd1386b309a38b1585cd595475e458b3800a"
+SRCREV = "56bbac4d3286f32cad954ad8679bf0d4acf1b838"
 # Preserve core's unpack root; Scarthgap predates UNPACKDIR.
 SUIFLEET_UNPACKDIR = "${@d.getVar('UNPACKDIR') or d.getVar('WORKDIR')}"
 S = "${SUIFLEET_UNPACKDIR}/git"
 
 inherit cargo cargo-update-recipe-crates systemd pkgconfig useradd
 require suifleet-crates.inc
-SUIFLEET_LOCK_SHA256 = "ad8c34be35ee73888a43ebee10c3b1c5d95f3b3aaa5e95bd60d9312c9ca9f294"
+SUIFLEET_LOCK_SHA256 = "31360ca31fc20fcfd66b0a370fc5bfd31693a1c3e036d69720cdef368f0be822"
 CARGO_LOCK_SRC_DIR = "${S}/suifleet-edge"
 CARGO_BUILD_FLAGS:append = " --bin suifleet --features systemd"
 # Every compile uses the dependency graph fetched and verified by BitBake.
@@ -31,7 +31,7 @@ export CARGO_PROFILE_RELEASE_STRIP = "false"
 # Native C/assembly in vendored crates lives outside ${S} and ${B}.
 CFLAGS:append = " -fdebug-prefix-map=${CARGO_HOME}/bitbake=/usr/src/debug/${PN}/${PV}/vendor -fmacro-prefix-map=${CARGO_HOME}/bitbake=/usr/src/debug/${PN}/${PV}/vendor"
 
-DEPENDS += "openssl systemd"
+DEPENDS += "systemd"
 RDEPENDS:${PN} += "ca-certificates"
 
 CARGO_SRC_DIR = "suifleet-edge"
