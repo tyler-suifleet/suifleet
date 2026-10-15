@@ -1,6 +1,6 @@
 # Shared fleet interfaces
 
-SF-005 defines the protocol in [fleet-v1.json](../interfaces/fleet-v1.json) and the recipe wire format in [recipe.schema.json](../interfaces/recipe.schema.json). The fleet catalog records public/entry calls, complete parameter and return types, reference mutability, struct abilities, ordered fields, required type origins, protocol/schema versions and status codes. It covers the four project modules; Sui framework objects such as `UpgradeCap` remain SDK/deployment-manifest responsibilities.
+SF-005 defines the protocol in [fleet-v1.json](../interfaces/fleet-v1.json) and the recipe wire format in [recipe.schema.json](../interfaces/recipe.schema.json). The fleet catalog records public/entry calls, complete parameter and return types, reference mutability, struct abilities, ordered fields, required type origins, protocol/schema versions and status codes. It covers the five project modules; Sui framework objects such as `UpgradeCap` remain SDK/deployment-manifest responsibilities.
 
 `scripts/generate_interfaces.py` produces:
 
