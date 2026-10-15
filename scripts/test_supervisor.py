@@ -45,7 +45,10 @@ RUN = ("rm -f ready middle detached; echo $SUIFLEET_COMPONENT_VERSION >> runs; e
        "sh -c 'env -i setsid sleep 300 & echo $! > detached; echo $$ > middle; exec sleep 300' & "
        "env -i sleep 300 & echo $! > cleared; "
        "while [ ! -s middle ] || [ ! -s detached ]; do sleep 0.05; done; "
-       "trap 'echo graceful > stopped; exit 0' TERM; touch ready; while true; do sleep 0.2; done")
+       "trap 'echo graceful > stopped; exit 0' TERM; echo $$ > ready; while true; do sleep 0.2; done")
+# Ready only once this run (not a previous one, whose marker may persist in
+# the shared work directory) has installed its TERM trap.
+READY = 'test "$(cat ready 2>/dev/null)" = {pid}'
 RECORDED = ("pid", "grouped", "escaped", "middle", "detached", "cleared")
 
 
@@ -172,7 +175,7 @@ def run(binary):
                 wait_for(lambda: journal().get("initialized"), "daemon did not establish its cursor", process)
 
                 # Start and readiness.
-                deploy("0x401", "1.0.0", run=RUN, readiness="test -e ready", shutdown="kill -TERM {pid}")
+                deploy("0x401", "1.0.0", run=RUN, readiness=READY, shutdown="kill -TERM {pid}")
                 wait_for(lambda: outcome("0x401").get("status") == 1, "v1 was not applied", process)
                 assert running("1.0.0"), status()
                 first = recorded()
@@ -196,7 +199,7 @@ def run(binary):
 
                 # Successful replacement.
                 before = recorded()
-                deploy("0x403", "3.0.0", run=RUN, readiness="test -e ready", shutdown="kill -TERM {pid}")
+                deploy("0x403", "3.0.0", run=RUN, readiness=READY, shutdown="kill -TERM {pid}")
                 wait_for(lambda: outcome("0x403").get("status") == 1, "v3 was not applied", process)
                 assert running("3.0.0"), status()
                 assert not any(map(alive, before)), "v1's processes survived its replacement"
