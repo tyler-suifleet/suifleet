@@ -188,6 +188,9 @@ def run(args):
     start_balance = balance()
     if start_balance < args.max_spend_mist and args.faucet_tool:
         assert args.network == 'testnet', 'faucet only on testnet'
+        if not Path(args.faucet_tool).is_file():
+            subprocess.run(['bash', str(ROOT / 'scripts/install_faucet.sh'),
+                            str(Path(args.faucet_tool).parent)], capture_output=True, check=True, timeout=600)
         # At most one request; never reset the spending ledger from a faucet credit.
         funded = ledger.faucet(lambda: subprocess.run([args.faucet_tool, 'client', '--client.config', str(wallet),
                                  'faucet', '--address', operator], capture_output=True, timeout=180))

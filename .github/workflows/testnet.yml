@@ -92,7 +92,6 @@ jobs:
               git config --global --add safe.directory /workspace
               pnpm --dir dapp install --frozen-lockfile
               cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
-              bash scripts/install_faucet.sh /tmp/sui-faucet
               SUIFLEET_FAUCET_TOOL=/tmp/sui-faucet/sui node scripts/ci_testnet.cjs'
       - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
         if: always() && steps.plan.outputs.run == 'true'
