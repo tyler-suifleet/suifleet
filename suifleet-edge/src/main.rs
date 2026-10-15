@@ -3,6 +3,9 @@ mod config;
 mod firmware;
 mod identity;
 mod recipe;
+mod protocol;
+#[cfg(test)]
+mod protocol_tests;
 mod state;
 mod sui_client;
 mod walrus_client;
@@ -179,10 +182,22 @@ async fn poll(
                 anyhow::ensure!(
                     sui_client::same_type(
                         &record.object_type,
-                        &sui.move_type("deployment_manager::DeploymentRecord")
+                        &sui.move_type(protocol::deployment_manager::DeploymentRecord::MOVE_TYPE)
                     ),
                     "wrong deployment type"
                 );
+                if let Err(error) = ensure_deployment_schema(&record.fields) {
+                    let mut outcome = Outcome::default();
+                    record_result(&mut outcome, Err(error));
+                    warn!(deployment = event.deployment_id, error = ?outcome.error, "Deployment schema rejected");
+                    journal
+                        .state
+                        .deployments
+                        .insert(event.deployment_id.clone(), outcome);
+                    journal.state.cursor = Some(cursor);
+                    journal.save()?;
+                    continue;
+                }
                 let directory = cfg
                     .runtime
                     .state_dir
@@ -270,9 +285,9 @@ async fn handle_deployment(
 fn record_result(outcome: &mut Outcome, result: anyhow::Result<()>) {
     outcome.indeterminate = matches!(&result, Err(error) if error.downcast_ref::<firmware::Indeterminate>().is_some());
     outcome.status = match &result {
-        Ok(()) => Some(1),
+        Ok(()) => Some(protocol::STATUS_APPLIED),
         Err(_) if outcome.indeterminate => None,
-        Err(_) => Some(2),
+        Err(_) => Some(protocol::STATUS_FAILED),
     };
     outcome.error = result.err().map(|error| format!("{error:#}"));
 }
@@ -314,5 +329,23 @@ async fn shutdown_signal() {
     #[cfg(not(unix))]
     {
         let _ = tokio::signal::ctrl_c().await;
+    }
+}
+
+fn ensure_deployment_schema(fields: &serde_json::Value) -> anyhow::Result<()> {
+    let version = fields["schema_version"].as_str().and_then(|s| s.parse::<u64>().ok())
+        .or_else(|| fields["schema_version"].as_u64());
+    anyhow::ensure!(version == Some(protocol::DEPLOYMENT_SCHEMA_VERSION), "unsupported DeploymentRecord schema version");
+    Ok(())
+}
+#[cfg(test)]
+mod deployment_schema_tests {
+    use super::*;
+    #[test]
+    fn reject_unknown_or_missing_schema_before_apply() {
+        for value in [serde_json::json!({}), serde_json::json!({"schema_version":"2"}), serde_json::json!({"schema_version":"invalid"})] {
+            assert!(ensure_deployment_schema(&value).is_err());
+        }
+        assert!(ensure_deployment_schema(&serde_json::json!({"schema_version":"1"})).is_ok());
     }
 }

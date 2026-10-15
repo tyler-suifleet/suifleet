@@ -8,6 +8,9 @@ front of it (see start_grpc). Real-chain behavior is covered separately by
 scripts/test_daemon_localnet.py.
 """
 from deployment_manifest import REQUIRED_TYPES, object_id
+from pathlib import Path
+import json
+_PROTOCOL_RECIPE_VERSION = json.loads((Path(__file__).resolve().parents[1] / "interfaces/recipe.schema.json").read_text())["properties"]["schemaVersion"]["const"]
 import argparse
 import base64
 import hashlib
@@ -76,6 +79,7 @@ class Simulator:
         self.allow_reports = False
         self.fail_execution = True
         self.deleted = set()
+        self.schema_fields = {}
         self.downloads = []
         self.built = []
         self.errors = []
@@ -88,7 +92,7 @@ class Simulator:
         event = dict(deployment_id=id, component_name=f"app-{id}", version="1.0.0",
             recipe_blob_id=f"recipe-{id}", artifact_sha256=digest,
             target_groups=groups or [], target_devices=[DEVICE] if direct else [], creator=creator)
-        recipe = dict(schemaVersion="1.0", componentName=event["component_name"], componentVersion="1.0.0",
+        recipe = dict(schemaVersion=_PROTOCOL_RECIPE_VERSION, componentName=event["component_name"], componentVersion="1.0.0",
             artifactBlobId="expired" if expired else "artifact", artifactSha256=digest, lifecycle={"run": "sleep 10"} if run else {}, configuration={})
         self.recipes[event["recipe_blob_id"]] = recipe
         self.events.append(dict(id={"txDigest":f"event-{len(self.events)}", "eventSeq":"0"}, parsedJson=event))
@@ -108,7 +112,10 @@ class Simulator:
             type, fields, owner = "device_group::DeviceGroup", {"admin":OPERATOR,"device_ids":[DEVICE]}, None
         else:
             event = next(e["parsedJson"] for e in self.events if e["parsedJson"]["deployment_id"] == id)
-            type, fields, owner = "deployment_manager::DeploymentRecord", {"creator":event["creator"]}, None
+            type, fields, owner = "deployment_manager::DeploymentRecord", {"creator":event["creator"],"schema_version":"1"}, None
+        fields.update(self.schema_fields.get(id, {}))
+        if fields.get("schema_version") is None:
+            fields.pop("schema_version", None)
         return {"data":{"objectId":id,"owner":{"AddressOwner":owner} if owner else {"Shared":{"initial_shared_version":"1"}},
             "content":{"type":f"{TYPE_ORIGINS[type]}::{type}","fields":fields}}}
 
@@ -324,6 +331,11 @@ def run(binary, firmware_helper=False, daemon_user=None):
                 sim.latest_package = PACKAGE
                 sim.add("0x102", bad_hash=True)
                 sim.add("0x103", creator="0xbad")
+                # Unsupported records must fail individually, with no downloads,
+                # and must not poison discovery of the valid group deployment.
+                for id, version in (("0x10b", "2"), ("0x10c", None), ("0x10d", "invalid")):
+                    sim.schema_fields[id] = {"schema_version": version}
+                    sim.add(id)
                 sim.add("0x104", groups=[GROUP], direct=False)
                 sim.add("0x105", run=True)
                 sim.add("0x109") # Tampered recipe must never reach the updater.
@@ -332,11 +344,16 @@ def run(binary, firmware_helper=False, daemon_user=None):
                 sim.add("0x106")
                 sim.deleted.add("0x999")
                 sim.add("0x107", groups=["0x999"], direct=False)
-                wait_for(lambda: len(state().get("deployments", {})) == 6 and state().get("cursor") == scanned(len(sim.events)), "paged events were not processed", process)
+                wait_for(lambda: len(state().get("deployments", {})) == 9 and state().get("cursor") == scanned(len(sim.events)), "paged events were not processed", process)
                 assert count() == 2, "untrusted/failed/unsupported/deleted update invoked the updater"
                 outcomes = state()["deployments"]
-                assert {id: outcome["status"] for id, outcome in outcomes.items()} == {"0x101":1,"0x102":2,"0x104":1,"0x105":2,"0x109":2,"0x10a":2}
+                assert {id: outcome["status"] for id, outcome in outcomes.items()} == {"0x101":1,"0x102":2,"0x104":1,"0x105":2,"0x109":2,"0x10a":2,"0x10b":2,"0x10c":2,"0x10d":2}
                 assert "unavailable or expired" in outcomes["0x10a"]["error"], outcomes["0x10a"]
+                for id in ("0x10b", "0x10c", "0x10d"):
+                    assert "unsupported DeploymentRecord schema version" in outcomes[id]["error"], outcomes[id]
+                    assert outcomes[id].get("firmware_request") is None
+                    assert f"/v1/blobs/recipe-{id}" not in sim.downloads
+                    assert not (root / "state" / "artifacts" / hashlib.sha256(id.encode()).hexdigest()).exists()
                 assert sim.ranges[:2] == [0, 10], f"interrupted transfer did not resume: {sim.ranges}"
                 assert not any(o["reported"] for o in outcomes.values())
                 stop(process)
@@ -351,9 +368,9 @@ def run(binary, firmware_helper=False, daemon_user=None):
                 sim.add("0x108") # Deployment created while the device is offline.
                 sim.allow_reports = True
                 process = start()
-                wait_for(lambda: len(state().get("deployments", {})) == 7 and all(o["reported"] for o in state()["deployments"].values()), "restart failed to catch up and retry reports", process)
+                wait_for(lambda: len(state().get("deployments", {})) == 10 and all(o["reported"] for o in state()["deployments"].values()), "restart failed to catch up and retry reports", process)
                 assert count() == 3, "restart duplicated an already-applied deployment"
-                assert len(sim.reports) == 7
+                assert len(sim.reports) == 10
                 assert not list((root / "state" / "artifacts").iterdir()), "artifact cache not cleaned"
                 assert all(json.loads(line) == ARTIFACT.decode() for line in applied.read_text().splitlines())
                 assert "/v1/blobs/recipe-0x101" in sim.downloads and "/v1/blobs/artifact" in sim.downloads
@@ -369,6 +386,7 @@ def run(binary, firmware_helper=False, daemon_user=None):
             print("PASS: mixed per-type origins and runtime chain-reset/stale-call-package rejection")
             print("PASS: safe enrollment; paginated direct/group deployment and recipe-to-artifact flow")
             print("PASS: artifact/recipe hash mismatch, unsupported lifecycle, untrusted creator and deleted targets rejected")
+            print("PASS: future/missing/malformed deployment schemas failed without downloads; later v1 applied and cursor advanced")
             print("PASS: offline catch-up, restart deduplication, failed execution and durable report retry")
             print("PASS: interrupted artifact transfer resumed; expired blob reported Failed; artifact cache emptied")
     finally:

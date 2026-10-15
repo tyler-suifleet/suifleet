@@ -51,6 +51,11 @@ def summarize(package, summary_dir):
     """Return this package's module summaries and the dependency module names."""
     subprocess.run(["sui", "move", "summary", "--path", str(package), "--output-directory", str(summary_dir)],
                    check=True, capture_output=True, text=True)
+    return read_summary(summary_dir)
+
+
+def read_summary(summary_dir):
+    """Resolve the package name from compiler address metadata."""
     addresses = json.loads((summary_dir / "address_mapping.json").read_text())
     package_name = next(name for name, address in addresses.items() if int(address, 16) == 0)
     modules = {path.stem: json.loads(path.read_text()) for path in (summary_dir / package_name).glob("*.json")}
