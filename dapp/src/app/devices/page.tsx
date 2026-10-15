@@ -5,6 +5,9 @@ import { useCurrentAccount } from "@mysten/dapp-kit-react";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import { useDevices } from "@/hooks/useDevices";
 import { useGroups } from "@/hooks/useGroups";
+import { useDeployments } from "@/hooks/useDeployments";
+import { useDesiredStates } from "@/hooks/useDesiredStates";
+import { buildDesiredRevisionTx, desiredConflicts } from "@/lib/desired-state";
 import {
   buildRegisterDeviceTx, buildIssueCapTx, buildDeregisterDeviceTx,
   buildCreateGroupTx, buildAddDeviceToGroupTx, buildRemoveDeviceFromGroupTx, buildDeleteGroupTx,
@@ -168,6 +171,24 @@ function GroupsTab() {
   const { mutate: signAndExecute, isPending } = useFleetTransaction();
   const [showCreate, setShowCreate] = useState(false);
   const [managingGroup, setManagingGroup] = useState<string | null>(null);
+  const { data: desired = {}, refetch: refetchDesired } = useDesiredStates(groups.map((g) => g.objectId));
+  const { data: deployments = [] } = useDeployments();
+  const conflicts = desiredConflicts(groups, desired);
+  const label = (deploymentId: string) => {
+    const deployment = deployments.find((d) => d.deploymentId === deploymentId);
+    return deployment ? `v${deployment.version}` : `${deploymentId.slice(0, 10)}… (deleted or not yours)`;
+  };
+
+  function handleStopDesiring(groupId: string, component: string) {
+    if (!confirm(`Stop desiring "${component}" in this group? Devices retire it from management; it is not uninstalled.`)) return;
+    signAndExecute(
+      { transaction: buildDesiredRevisionTx([groupId], undefined, [component]) },
+      {
+        onSuccess: () => { setTimeout(() => refetchDesired(), 3000); },
+        onError: (err) => alert(`Failed: ${err.message}`),
+      }
+    );
+  }
 
   function handleCreateGroup(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -213,6 +234,19 @@ function GroupsTab() {
         </button>
       </div>
 
+      {conflicts.length > 0 && (
+        <div className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded px-4 py-3 space-y-1">
+          <p className="font-medium">Groups disagree on desired components. Affected devices keep what they have installed until the groups agree:</p>
+          {conflicts.map((c) => (
+            <p key={`${c.deviceId}-${c.component}`} className="text-xs">
+              {devices.find((d) => d.objectId === c.deviceId)?.name ?? c.deviceId.slice(0, 14) + "…"}: {c.component} —{" "}
+              {Object.entries(c.choices).map(([group, deployment]) =>
+                `${groups.find((g) => g.objectId === group)?.name ?? group.slice(0, 10)} wants ${label(deployment)}`).join("; ")}
+            </p>
+          ))}
+        </div>
+      )}
+
       <div className="bg-white border border-gray-200 rounded">
         {isLoading ? (
           <div className="p-8 text-center text-sm text-gray-400">Loading…</div>
@@ -225,7 +259,7 @@ function GroupsTab() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-200 text-left text-xs text-gray-500 bg-gray-50">
-                {["Group name", "Description", "Devices", "Object ID", "Actions"].map((h) => (
+                {["Group name", "Description", "Devices", "Desired state", "Object ID", "Actions"].map((h) => (
                   <th key={h} className="py-2 px-4 font-medium">{h}</th>
                 ))}
               </tr>
@@ -236,10 +270,15 @@ function GroupsTab() {
                   <td className="py-3 px-4 font-medium">{g.name}</td>
                   <td className="py-3 pr-4 text-gray-500 text-xs">{g.description || "—"}</td>
                   <td className="py-3 pr-4 text-gray-500">{g.deviceIds.length}</td>
+                  <td className="py-3 pr-4 text-gray-500 text-xs">
+                    {desired[g.objectId]
+                      ? `revision ${desired[g.objectId].revision} · ${Object.keys(desired[g.objectId].components).length} component(s)`
+                      : "—"}
+                  </td>
                   <td className="py-3 pr-4 font-mono text-xs text-gray-400">{g.objectId.slice(0, 14)}…</td>
                   <td className="py-3 flex items-center gap-3">
                     <button onClick={() => setManagingGroup(g.objectId)} className="text-xs text-[#4DA2FF] hover:underline">
-                      Manage devices
+                      Manage
                     </button>
                     <button
                       disabled={isPending}
@@ -276,8 +315,32 @@ function GroupsTab() {
       )}
 
       {managedGroup && (
-        <Modal title={`Manage devices — ${managedGroup.name}`} onClose={() => setManagingGroup(null)}>
+        <Modal title={`Manage — ${managedGroup.name}`} onClose={() => setManagingGroup(null)}>
           <div className="space-y-4">
+            <div>
+              <p className="text-xs font-medium text-gray-500 uppercase mb-2">
+                Desired state{desired[managedGroup.objectId] ? ` (revision ${desired[managedGroup.objectId].revision})` : ""}
+              </p>
+              {!desired[managedGroup.objectId] || Object.keys(desired[managedGroup.objectId].components).length === 0 ? (
+                <p className="text-sm text-gray-400">None. Deploy firmware with &ldquo;desired version&rdquo; selected to set one.</p>
+              ) : (
+                <div className="space-y-1">
+                  {Object.entries(desired[managedGroup.objectId].components).map(([component, deployment]) => (
+                    <div key={component} className="flex items-center justify-between py-1.5 px-3 bg-gray-50 rounded text-sm">
+                      <span>{component} <span className="text-xs text-gray-500">{label(deployment)}</span></span>
+                      <button
+                        disabled={isPending}
+                        onClick={() => handleStopDesiring(managedGroup.objectId, component)}
+                        className="text-xs text-red-500 hover:text-red-700 disabled:opacity-40"
+                      >
+                        Stop desiring
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <div>
               <p className="text-xs font-medium text-gray-500 uppercase mb-2">Members</p>
               {managedGroup.deviceIds.length === 0 ? (

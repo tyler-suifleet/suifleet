@@ -134,6 +134,7 @@ test-manifest:
 	$(RUN) node scripts/test_deployment_receipts.cjs
 	$(RUN) node scripts/test_frontend_queries.cjs
 	$(RUN) node scripts/test_target_groups.cjs
+	$(RUN) node scripts/test_desired_state.cjs
 
 test-manifest-live:
 	$(RUN) python3 scripts/test_manifest_upgrades.py
