@@ -6,10 +6,11 @@ import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import { useDevices } from "@/hooks/useDevices";
 import { useGroups } from "@/hooks/useGroups";
 import {
-  buildRegisterDeviceTx, buildIssueCapTx, buildDeregisterDeviceTx,
+  buildRegisterDeviceTx, buildActivateDeviceTx, buildIssueCapTx, buildDeregisterDeviceTx,
   buildCreateGroupTx, buildAddDeviceToGroupTx, buildRemoveDeviceFromGroupTx, buildDeleteGroupTx,
 } from "@/lib/sui";
 import { PageHeader, StatusDot } from "@/components/ui";
+import type { DeviceRef } from "@/lib/sui";
 
 type Tab = "devices" | "groups";
 
@@ -92,17 +93,40 @@ function DevicesTab() {
             <tbody className="divide-y divide-gray-100">
               {devices.map((d) => (
                 <tr key={d.objectId} className="hover:bg-gray-50">
-                  <td className="py-3 px-4"><StatusDot /></td>
+                  <td className="py-3 px-4">
+                    {d.ownerCapId ? <StatusDot /> : (
+                      <span className="text-xs text-amber-600" title="Registered before device identities: its reports are rejected until you activate it.">
+                        Not activated
+                      </span>
+                    )}
+                  </td>
                   <td className="py-3 pr-4 font-medium">{d.name}</td>
                   <td className="py-3 pr-4 text-gray-500">{d.arch}</td>
                   <td className="py-3 pr-4 font-mono text-xs text-gray-400 max-w-[160px] truncate">{d.deviceAddress}</td>
                   <td className="py-3 pr-4 font-mono text-xs text-gray-400">{d.objectId.slice(0, 14)}…</td>
                   <td className="py-3 flex items-center gap-3">
+                    {!d.ownerCapId && (
+                      <button
+                        disabled={isPending}
+                        onClick={() => {
+                          signAndExecute(
+                            { transaction: buildActivateDeviceTx(d.objectId, account!.address) },
+                            {
+                              onSuccess: () => setTimeout(() => refetch(), 3000),
+                              onError: (err) => alert(`Failed: ${err.message}`),
+                            }
+                          );
+                        }}
+                        className="text-xs text-[#4DA2FF] hover:underline disabled:opacity-40"
+                      >
+                        Activate
+                      </button>
+                    )}
                     <button
                       disabled={isPending}
                       onClick={() => {
                         signAndExecute(
-                          { transaction: buildIssueCapTx(d.objectId) },
+                          { transaction: buildIssueCapTx(d) },
                           {
                             onSuccess: () => alert(`DeviceCap issued to ${d.deviceAddress}`),
                             onError: (err) => alert(`Failed: ${err.message}`),
@@ -118,7 +142,7 @@ function DevicesTab() {
                       onClick={() => {
                         if (!confirm(`Remove "${d.name}"? This cannot be undone.`)) return;
                         signAndExecute(
-                          { transaction: buildDeregisterDeviceTx(d.objectId) },
+                          { transaction: buildDeregisterDeviceTx(d) },
                           {
                             onSuccess: () => setTimeout(() => refetch(), 3000),
                             onError: (err) => alert(`Failed: ${err.message}`),
@@ -181,9 +205,9 @@ function GroupsTab() {
     );
   }
 
-  function handleAddDevice(groupId: string, deviceObjectId: string) {
+  function handleAddDevice(groupId: string, device: DeviceRef) {
     signAndExecute(
-      { transaction: buildAddDeviceToGroupTx(groupId, deviceObjectId) },
+      { transaction: buildAddDeviceToGroupTx(groupId, device) },
       {
         onSuccess: () => { setTimeout(() => refetch(), 3000); },
         onError: (err) => alert(`Failed: ${err.message}`),
@@ -316,7 +340,7 @@ function GroupsTab() {
                         <span>{d.name} <span className="text-xs text-gray-400">{d.arch}</span></span>
                         <button
                           disabled={isPending}
-                          onClick={() => handleAddDevice(managedGroup.objectId, d.objectId)}
+                          onClick={() => handleAddDevice(managedGroup.objectId, d)}
                           className="text-xs text-[#4DA2FF] hover:underline disabled:opacity-40"
                         >
                           Add
