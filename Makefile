@@ -39,6 +39,8 @@ dapp-dev:
 	$(RUN) bash -c "fuser -k 3000/tcp 2>/dev/null; sleep 1; cd dapp && pnpm dev --hostname 0.0.0.0"
 
 dapp-build:
+	@if ls deployments/*/activating.json >/dev/null 2>&1; then \
+		echo "deployments: an interrupted activation left $$(ls deployments/*/activating.json); run scripts/redeploy.sh --reconcile to finish it" >&2; exit 1; fi
 	$(RUN) bash -c "cd dapp && pnpm build"
 
 edge-build:

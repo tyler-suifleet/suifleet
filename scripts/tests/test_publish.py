@@ -3,6 +3,7 @@ facts. Nothing here touches a network or spends gas."""
 import contextlib
 import io
 import json
+import os
 from pathlib import Path
 import shutil
 import sys
@@ -418,6 +419,98 @@ class PublishTests(unittest.TestCase):
         with self.assertRaisesRegex(publish.PublishError, "different manifest"):
             publish.install(different, self.records, "dev", ROOT / "suifleet-edge/config.example.toml", self.env_file)
 
+    def killed_after(self, destination, *extra):
+        """Run publish in a child that dies (no cleanup, no except blocks)
+        right after os.replace makes DESTINATION live."""
+        real = publish.os.replace
+        def replace(source, target):
+            real(source, target)
+            if Path(target) == destination:
+                os._exit(73)
+        child = os.fork()
+        if child == 0:
+            try:
+                with unittest.mock.patch.object(publish.os, "replace", replace):
+                    self.run_publish(*extra)
+            finally:
+                os._exit(1)
+        self.assertEqual(os.waitstatus_to_exitcode(os.waitpid(child, 0)[1]), 73)
+
+    def replay_upgrade(self, version):
+        """The fake chain lives in memory: repeat a child's upgrade here
+        (Published.toml and the records it wrote are already on disk)."""
+        package, cap = oid(0x100 + version), oid(0xc0)
+        self.chain.package(package, version, oid(0x100))
+        self.chain.cap(cap, package, version)
+
+    def test_killed_between_renames_is_finished_by_reconcile(self):
+        # Review of c514eaf: process death after the current rename left
+        # current at v2 and .env.local at v1 with nothing to repair it.
+        self.run_publish()
+        self.killed_after(self.records / "dev/current")
+        journal = self.records / "dev" / publish.JOURNAL
+        self.assertTrue(journal.is_file(), "the journal must survive the kill")
+        self.assertEqual(self.manifest()["package_version"], "2")
+        self.assertEqual(self.frontend_manifest()["package_version"], "1")
+        before = self.snapshot()
+        with self.assertRaisesRegex(publish.PublishError, "activation was interrupted"):
+            self.run_publish("--dry-run")
+        self.assertEqual(self.snapshot(), before)
+        publish.run(self.args("--reconcile"), self.cli, self.chain)
+        self.assertFalse(journal.exists())
+        self.assertEqual(self.frontend_manifest(), self.manifest())
+        self.assertEqual(self.manifest()["package_version"], "2")
+        self.assertIn("NEXT_PUBLIC_WALRUS_EPOCHS=7", self.env_file.read_text())
+        self.assertEqual(self.leftovers(), [])
+        self.assertEqual(len(self.transactions()), 1, "reconcile sends no transaction")
+        self.replay_upgrade(2)
+        [pending] = (self.records / "dev").glob("pending-*.json")
+        publish.run(self.args("--recover", str(pending)), self.cli, self.chain)
+        self.assertFalse(pending.exists())
+        self.assertEqual(self.frontend_manifest(), self.manifest())
+
+    def test_next_publish_finishes_an_interrupted_activation_first(self):
+        self.run_publish()
+        self.killed_after(self.records / "dev/current")
+        self.replay_upgrade(2)
+        self.run_publish()
+        self.assertFalse((self.records / "dev" / publish.JOURNAL).exists())
+        self.assertEqual(self.manifest()["package_version"], "3")
+        self.assertEqual(self.frontend_manifest(), self.manifest())
+
+    def test_killed_before_any_rename_rolls_forward(self):
+        self.run_publish()
+        real = publish.os.symlink
+        def symlink(source, target):
+            if Path(target).name == ".current.new":
+                os._exit(73)
+            return real(source, target)
+        child = os.fork()
+        if child == 0:
+            try:
+                with unittest.mock.patch.object(publish.os, "symlink", symlink):
+                    self.run_publish()
+            finally:
+                os._exit(1)
+        self.assertEqual(os.waitstatus_to_exitcode(os.waitpid(child, 0)[1]), 73)
+        self.assertEqual(self.manifest()["package_version"], "1")
+        publish.run(self.args("--reconcile"), self.cli, self.chain)
+        self.assertEqual(self.manifest()["package_version"], "2")
+        self.assertEqual(self.frontend_manifest(), self.manifest())
+        self.assertEqual(self.leftovers(), [])
+
+    def test_failed_roll_forward_keeps_the_journal(self):
+        self.run_publish()
+        self.killed_after(self.records / "dev/current")
+        with self.failing_frontend_rename():
+            with self.assertRaises(OSError):
+                publish.run(self.args("--reconcile"), self.cli, self.chain)
+        self.assertTrue((self.records / "dev" / publish.JOURNAL).is_file())
+        self.assertEqual(self.manifest()["package_version"], "2", "a roll forward is never undone")
+        publish.run(self.args("--reconcile"), self.cli, self.chain)
+        self.assertFalse((self.records / "dev" / publish.JOURNAL).exists())
+        self.assertEqual(self.frontend_manifest(), self.manifest())
+
     # ── metadata parsing ─────────────────────────────────────────────────────
 
     def test_toml_subset_is_strict(self):
@@ -440,6 +533,9 @@ class PublishTests(unittest.TestCase):
     def test_cli_requires_expected_address(self):
         with self.assertRaises(SystemExit):
             publish.main(["--dry-run"])
+
+    def test_reconcile_alone_needs_no_address_and_sends_nothing(self):
+        self.assertEqual(publish.main(["--reconcile", "--records", str(self.records)]), 0)
 
 
 if __name__ == "__main__":

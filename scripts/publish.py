@@ -15,10 +15,13 @@ metadata. Prior configuration is replaced only after a complete, verified
 release exists: each release is recorded under RECORDS/ENV/releases/ with its
 manifest (all IDs and type origins), frontend.env and device config.toml,
 and RECORDS/ENV/current and the frontend's .env.local are then switched to it
-together (both prepared first; two renames, the first undone if the second
-fails), so both clients always name the same release. If anything fails after
-the transaction executed, the transaction is kept in RECORDS/ENV/pending-*.json
-and `--recover FILE` finishes recording it without another transaction.
+together: both are prepared first and a durable journal names the release
+before the two renames. A raised error undoes the first rename. A killed
+process leaves the journal: the next run of this tool (or `--reconcile`)
+finishes the switch before anything else, and `make dapp-build` refuses to
+build until it has. If anything fails after the transaction executed, the
+transaction is kept in RECORDS/ENV/pending-*.json and `--recover FILE`
+finishes recording it without another transaction.
 """
 import argparse
 import json
@@ -42,6 +45,10 @@ WALRUS_DEFAULTS = {"testnet": ("https://publisher.walrus-testnet.walrus.space",
 # The NEXT_PUBLIC_*_ID/NETWORK lines are the pre-manifest format, now unused.
 OWNED_ENV = ("NEXT_PUBLIC_DEPLOYMENT_MANIFEST", "NEXT_PUBLIC_PACKAGE_ID", "NEXT_PUBLIC_ORIGINAL_PACKAGE_ID",
              "NEXT_PUBLIC_REGISTRY_ID", "NEXT_PUBLIC_NETWORK")
+
+
+# Present only while (or because) an activation was interrupted; see activate().
+JOURNAL = "activating.json"
 
 
 class PublishError(Exception):
@@ -174,7 +181,7 @@ def current_manifest(records, env):
 
 def install(manifest, records, env, template, frontend_env):
     """Record the release, then switch RECORDS/ENV/current and .env.local to
-    it together: either both change or neither does. Rerunnable."""
+    it together (see activate). Rerunnable."""
     name = f"v{manifest['package_version']}-{manifest['call_package_id'][2:14]}"
     release = records / env / "releases" / name
     if release.exists():
@@ -189,40 +196,98 @@ def install(manifest, records, env, template, frontend_env):
             raise PublishError(f"cannot generate client configs: {error}")
         finally:
             os.unlink(device.name)
-    # Prepare everything that can fail before activating anything: the
-    # frontend file is fully written beside .env.local, and the new pointer
-    # beside current. Activation is then two renames; if the second fails,
-    # the first is undone, so both clients stay on the same release.
+    activate(records, env, name, frontend_env)
+    return release
+
+
+def sync_directory(path):
+    handle = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(handle)
+    finally:
+        os.close(handle)
+
+
+def activate(records, env, name, frontend_env):
+    """Switch RECORDS/ENV/current and .env.local to the complete release NAME.
+
+    Everything that can fail is prepared first: the frontend file is fully
+    written beside .env.local. A durable journal, RECORDS/ENV/activating.json,
+    then names the release before either rename. If the second rename raises,
+    the first is undone; if the process dies between them, the journal stays
+    and reconcile() rolls forward to the named release before this tool does
+    anything else (and `make dapp-build` refuses to build until it has).
+    The journal is removed only when both clients name the same release."""
     frontend = None
     if frontend_env:
         kept = []
         if frontend_env.exists():
             kept = [line for line in frontend_env.read_text().splitlines()
                     if line.split("=", 1)[0].strip() not in OWNED_ENV]
-        frontend = stage(frontend_env, "\n".join(kept + [(release / "frontend.env").read_text().rstrip("\n")]) + "\n")
+        release_env = (records / env / "releases" / name / "frontend.env").read_text()
+        frontend = stage(frontend_env, "\n".join(kept + [release_env.rstrip("\n")]) + "\n")
+    journal = records / env / JOURNAL
     link = records / env / "current"
     previous = os.readlink(link) if link.is_symlink() else None
+    target = str(Path("releases") / name)
     pointer = records / env / ".current.new"
+    consistent = True  # whether both clients still name the same release
     try:
+        write_atomic(journal, json.dumps({"release": name, "frontend_env": str(frontend_env.resolve()) if frontend_env
+                                          else None, "staged": str(frontend) if frontend else None}, indent=2) + "\n")
+        sync_directory(journal.parent)
         pointer.unlink(missing_ok=True)
-        os.symlink(Path("releases") / name, pointer)
+        os.symlink(target, pointer)
         os.replace(pointer, link)
-        try:
-            if frontend:
+        consistent = False
+        if frontend:
+            try:
                 os.replace(frontend, frontend_env)
-        except BaseException:
-            if previous is None:
-                link.unlink(missing_ok=True)
-            else:
-                pointer.unlink(missing_ok=True)
-                os.symlink(previous, pointer)
-                os.replace(pointer, link)
-            raise
+                sync_directory(frontend_env.parent)
+            except BaseException:
+                # Undo the pointer, unless it already named this release
+                # (a roll forward): then only finishing can make it whole.
+                if previous != target:
+                    if previous is None:
+                        link.unlink(missing_ok=True)
+                    else:
+                        pointer.unlink(missing_ok=True)
+                        os.symlink(previous, pointer)
+                        os.replace(pointer, link)
+                    consistent = True
+                raise
+        sync_directory(link.parent)
+        consistent = True
+        journal.unlink()
+    except BaseException:
+        if consistent:
+            journal.unlink(missing_ok=True)
+        raise
     finally:
         pointer.unlink(missing_ok=True)
         if frontend:
             frontend.unlink(missing_ok=True)
-    return release
+
+
+def interrupted(records):
+    return sorted(records.glob(f"*/{JOURNAL}"))
+
+
+def reconcile(records):
+    """Finish every activation a killed run left half done: roll forward to the
+    journaled release, which was complete and verified before its journal was
+    written. Returns the environments repaired."""
+    repaired = []
+    for journal in interrupted(records):
+        entry = json.loads(journal.read_text())
+        env = journal.parent.name
+        if entry.get("staged"):
+            Path(entry["staged"]).unlink(missing_ok=True)
+        if not (records / env / "releases" / entry["release"] / "deployment.json").is_file():
+            raise PublishError(f"{journal} names missing release {entry['release']}; inspect it by hand")
+        activate(records, env, entry["release"], Path(entry["frontend_env"]) if entry.get("frontend_env") else None)
+        repaired.append(env)
+    return repaired
 
 
 def device_template(path):
@@ -361,6 +426,13 @@ def active_configuration(args, env):
 
 def run(args, cli=None, read=dm.chain_facts):
     cli = cli or Cli(args.client_config)
+    if args.dry_run and interrupted(args.records):
+        raise PublishError(f"activation was interrupted ({', '.join(map(str, interrupted(args.records)))}); "
+                           f"run --reconcile to finish it first")
+    for env in reconcile(args.records):
+        print(f"finished an interrupted activation of {args.records / env / 'current'} and the frontend env")
+    if args.reconcile:
+        return None
     if args.recover:
         pending = json.loads(args.recover.read_text())
         release = finish(pending, args, read)
@@ -426,6 +498,8 @@ def parser():
                    help="frontend env file to update; pass '' to skip")
     p.add_argument("--client-config", type=Path, help="Sui client.yaml (default: the CLI's)")
     p.add_argument("--recover", type=Path, metavar="PENDING_JSON", help="finish recording an executed transaction")
+    p.add_argument("--reconcile", action="store_true",
+                   help="only finish an interrupted activation (RECORDS/ENV/activating.json); no transaction")
     return p
 
 
@@ -433,7 +507,7 @@ def main(argv=None):
     args = parser().parse_args(argv)
     if args.frontend_env == Path(""):
         args.frontend_env = None
-    if not args.expect_address and not args.recover:
+    if not args.expect_address and not args.recover and not args.reconcile:
         parser().error("--expect-address is required: the account that must sign")
     try:
         release = run(args)
