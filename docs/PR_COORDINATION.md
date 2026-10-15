@@ -57,7 +57,7 @@ A stopped review CLI with a durable exit receipt retries usage/auth failures aft
 Under the user's merge-closes-issue policy, the service adds `Closes #N` to each owned PR using the ticket's verified same-repository issue URL. `Refs #N` alone does not close an issue. After verifying a default-branch merge and its commit ancestry, reconciliation marks the atomic ticket and Project Done, explicitly closes and verifies the GitHub issue, and retries partial failures. Periodic discovery also imports merges performed outside the service, so missed notifications and older merged PRs are reconciled. Unknown ownership, other repositories and unmerged/closed-without-merge PRs never trigger closure. Active implementation claims require their owner handoff before coordinator completion.
 
 Automatic merging still requires the existing independent-review, CI and acceptance gates. A verified external merge is treated as implementation completion under this policy, without inventing approval or test results. Any remaining live-wallet, public-network or hardware validation must remain visible in an existing acceptance ticket or explicit follow-up. SF-003/#6's merged frontend implementation is closed; its remaining real-extension acceptance is tracked in SF-010/#11 and SF-031/#32.
-# Automatic implementation dispatch
+## Automatic implementation dispatch
 
 The optional `ticket-dispatcher.service` starts the next highest-priority eligible
 implementation without a chat prompt. It uses the installed atomic `ticket` CLI;
@@ -92,7 +92,9 @@ python3 ~/.local/lib/pr-coordinator/dispatcher.py \
 For an existing installation, add `--dispatcher-only` to preserve the installed
 review coordinator and worker while updating only the dispatcher.
 
-The service polls every 60 seconds. A process lock serializes scans; durable private
+The service polls every 60 seconds, with durable exponential idle/pre-claim failure
+backoff from 60 to 900 seconds. A failed fetch before a claim is retried; uncertain
+claim or worker failures still retain ownership and stop the slot. A process lock serializes scans; durable private
 SQLite receipts are in `~/.local/state/pr-coordinator/dispatch.sqlite3`, with worker
 logs and process/exit receipts under `implementations/`. `--status` prints no tokens
 and performs no GitHub operations. Without `--execute`, a scan performs no actions.
@@ -125,3 +127,5 @@ awake. Watch service status and receipts for authentication, quota and external
 acceptance blockers. Automated dispatch does not grant public-chain deployment,
 physical hardware programming, release credential provisioning or issue-creation
 authority to another model.
+
+Implementation acceptance follows [the user-authorized split](IMPLEMENTATION_ACCEPTANCE.md). Its configured scope is included in each review fingerprint and worker snapshot; changing it requires fresh independent review and does not bypass source findings or CI. Claim tokens are stored only in the private local dispatcher SQLite database to allow restart ownership checks; GitHub tokens are never persisted there. Review and implementation slots are separate, so one family may briefly run an implementation and a review worker together.
