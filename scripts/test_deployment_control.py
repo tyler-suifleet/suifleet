@@ -150,7 +150,7 @@ def run(binary):
                 process = start()
                 wait(lambda: deferred("0x50b", "paused"), "desired pause ignored")
                 stop()
-                sim.managed.add("0x50c"); add("0x50c")
+                sim.managed.add("0x50c"); add("0x50c", notice_ms=2500)
                 event = sim.events[-1]["parsedJson"]; event["component_name"] = "app-0x50b"
                 sim.recipes[event["recipe_blob_id"]]["componentName"] = "app-0x50b"
                 sim.desired[GROUP] = (2, {"app-0x50b": "0x50c"}); control("0x50b")
@@ -204,7 +204,13 @@ def run(binary):
                 assert "control_time_ms" not in state()
                 print("PASS: corrected forward clock cannot bypass later start/window/expiry; future notice recovers; observed expiry stays terminal")
 
-
+                add("0x511", state=1); add("0x512", state=1)
+                wait(lambda: deferred("0x511", "paused") and deferred("0x512", "paused"), "pruning fixtures not observed")
+                sim.deleted.add("0x511"); sim.managed.add("0x512")
+                wait(lambda: "0x511" not in state().get("deferred", {}) and
+                    "0x512" not in state().get("deferred", {}), "obsolete one-shot deferrals not pruned")
+                assert count() == 9 and not outcome("0x511") and not outcome("0x512")
+                print("PASS: deleted and newly managed one-shot deferrals are pruned without apply")
 
 
             except Exception:

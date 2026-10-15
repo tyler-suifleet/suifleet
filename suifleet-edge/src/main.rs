@@ -243,13 +243,21 @@ async fn poll(
     }
     // Deferred one-shot events survive cursor advancement and restarts.
     for id in journal.state.deferred.keys().cloned().collect::<Vec<_>>() {
-        if journal.state.deferred[&id].terminal || journal.state.deployments.contains_key(&id) {
+        if journal.state.deferred[&id].terminal || journal.state.deployments.contains_key(&id)
+            || journal.state.managed.values().any(|managed| managed == &id) {
+            // Reconciliation owns managed notices, including their durable timer.
             continue;
         }
-        if let Some((event, record)) = sui.deployment(&id).await? {
-            if !sui.is_managed(&id).await? && sui.authorized_target(&event, &cfg.device.device_object_id).await? {
-                execute(cfg, sui, walrus, runner, store, journal, &event, &record).await?;
-            }
+        let Some((event, record)) = sui.deployment(&id).await? else {
+            journal.state.deferred.remove(&id);
+            journal.save()?;
+            continue;
+        };
+        if sui.is_managed(&id).await? {
+            journal.state.deferred.remove(&id);
+            journal.save()?;
+        } else if sui.authorized_target(&event, &cfg.device.device_object_id).await? {
+            execute(cfg, sui, walrus, runner, store, journal, &event, &record).await?;
         }
     }
     reconcile(cfg, sui, walrus, runner, store, journal).await
@@ -456,7 +464,11 @@ async fn reconcile(
         journal.save()?;
         let status = execute(cfg, sui, walrus, runner, store, journal, &event, &record).await?;
         if status != Some(protocol::STATUS_APPLIED) {
-            warn!(component, deployment, "Plan stopped; not retried until the desired state changes");
+            if status.is_none() {
+                info!(component, deployment, "Plan deferred; admission reconsidered on the next poll");
+            } else {
+                warn!(component, deployment, "Plan stopped; not retried until the desired state changes");
+            }
             return Ok(());
         }
         journal.state.step = None;
