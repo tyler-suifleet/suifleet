@@ -45,6 +45,9 @@ module sui_edge::deployment_manager {
     public struct StatusesKey has copy, drop, store {}
     public struct RecipeDigestKey has copy, drop, store {}
     public struct ReceiptsKey has copy, drop, store {}
+    /// Present (true) on records that a group's desired state has referenced:
+    /// desired-state reconciliation applies them, not the one-shot event path.
+    public struct ManagedKey has copy, drop, store {}
     /// The delegate who created a record under a deployer role (`roles`);
     /// the record's `creator` is the operator the role acts for.
     public struct DelegateKey has copy, drop, store {}
@@ -155,11 +158,33 @@ module sui_edge::deployment_manager {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
+        share_deployment(new_deployment_verified(component_name, version, recipe_blob_id, artifact_sha256,
+            recipe_sha256, target_groups, target_devices, clock, ctx));
+    }
+
+    /// As `create_deployment_verified`, but returns the record so the same
+    /// transaction can reference it (e.g. in a desired-state revision) before
+    /// `share_deployment` publishes it.
+    public fun new_deployment_verified(
+        component_name: String,
+        version: String,
+        recipe_blob_id: String,
+        artifact_sha256: String,
+        recipe_sha256: String,
+        target_groups: vector<ID>,
+        target_devices: vector<ID>,
+        clock: &Clock,
+        ctx: &mut TxContext,
+    ): DeploymentRecord {
         assert_recipe_hash(&recipe_sha256);
         let creator = ctx.sender();
         let mut record = make_deployment(creator, component_name, version, recipe_blob_id, artifact_sha256,
             target_groups, target_devices, clock, ctx);
         df::add(&mut record.id, RecipeDigestKey {}, recipe_sha256);
+        record
+    }
+
+    public fun share_deployment(record: DeploymentRecord) {
         transfer::share_object(record);
     }
 
@@ -384,6 +409,9 @@ module sui_edge::deployment_manager {
         if (df::exists(&deployment.id, RecipeDigestKey {})) {
             let _: String = df::remove(&mut deployment.id, RecipeDigestKey {});
         };
+        if (df::exists(&deployment.id, ManagedKey {})) {
+            let _: bool = df::remove(&mut deployment.id, ManagedKey {});
+        };
         if (df::exists(&deployment.id, DelegateKey {})) {
             let _: address = df::remove(&mut deployment.id, DelegateKey {});
         };
@@ -499,6 +527,17 @@ module sui_edge::deployment_manager {
 
     public fun recipe_blob_id(d: &DeploymentRecord): &String { &d.recipe_blob_id }
     public fun creator(d: &DeploymentRecord): address { d.creator }
+    public fun component_name(d: &DeploymentRecord): &String { &d.component_name }
+    public fun has_recipe_digest(d: &DeploymentRecord): bool { df::exists(&d.id, RecipeDigestKey {}) }
+    public fun is_managed(d: &DeploymentRecord): bool { df::exists(&d.id, ManagedKey {}) }
+
+    /// Marks a record as owned by desired-state reconciliation (idempotent).
+    public(package) fun mark_managed(d: &mut DeploymentRecord) {
+        if (!df::exists(&d.id, ManagedKey {})) {
+            df::add(&mut d.id, ManagedKey {}, true);
+        };
+    }
+
     /// The delegate behind a role-created record, if any.
     public fun delegate(d: &DeploymentRecord): Option<address> {
         if (df::exists(&d.id, DelegateKey {})) option::some(*df::borrow(&d.id, DelegateKey {})) else option::none()

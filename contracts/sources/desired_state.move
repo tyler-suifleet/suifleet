@@ -1,0 +1,136 @@
+/// Desired fleet state (SF-013): what each device group should be running.
+///
+/// A group's `DesiredState` maps component names to the DeploymentRecord
+/// each member should have applied. Changing it is one revision: a
+/// `RevisionPlan` is begun, edited and committed in a single transaction (it
+/// has no abilities, so it cannot outlive that transaction), so every
+/// component change in a revision becomes desired together or not at all.
+///
+/// Devices reconcile toward the latest revision of every group they belong
+/// to: a superseded deployment is never applied, a device that joins a group
+/// receives its current desired state, and one that leaves stops following it.
+/// Records referenced by a revision are marked managed, so devices apply them
+/// through reconciliation rather than as one-shot creation events.
+///
+/// Introduced by a package upgrade: older package versions cannot read or
+/// write any of these types.
+module sui_edge::desired_state {
+    use std::string::String;
+    use sui::clock::Clock;
+    use sui::dynamic_field as df;
+    use sui::event;
+    use sui::vec_map::{Self, VecMap};
+    use sui_edge::deployment_manager::{Self, DeploymentRecord};
+    use sui_edge::device_group::{Self, DeviceGroup};
+
+    // ── Errors ────────────────────────────────────────────────────────────────
+
+    const ENotAdmin: u64 = 0;
+    const ENotCreator: u64 = 1;
+    const ENotTargeted: u64 = 2;
+    const EUnverifiedRecipe: u64 = 3;
+    const EWrongGroup: u64 = 4;
+    const EStaleRevision: u64 = 5;
+    const EUnknownComponent: u64 = 6;
+
+    // ── State ─────────────────────────────────────────────────────────────────
+
+    /// Dynamic-field key on a DeviceGroup.
+    public struct DesiredKey has copy, drop, store {}
+
+    public struct DesiredState has store, drop {
+        /// 1 for the first committed revision; +1 per commit.
+        revision: u64,
+        /// Component name → DeploymentRecord ID.
+        components: VecMap<String, ID>,
+        updated_at: u64,
+    }
+
+    /// An uncommitted revision of one group's desired state.
+    public struct RevisionPlan {
+        group_id: ID,
+        admin: address,
+        base_revision: u64,
+        components: VecMap<String, ID>,
+    }
+
+    public struct DesiredStateChanged has copy, drop {
+        group_id: ID,
+        revision: u64,
+        component_names: vector<String>,
+        deployments: vector<ID>,
+    }
+
+    // ── Revisions ─────────────────────────────────────────────────────────────
+
+    /// Start a revision from the group's current desired state. Admin only.
+    public fun begin(group: &DeviceGroup, ctx: &TxContext): RevisionPlan {
+        let admin = device_group::admin(group);
+        assert!(ctx.sender() == admin, ENotAdmin);
+        let (base_revision, components) = if (df::exists(device_group::uid(group), DesiredKey {})) {
+            let state: &DesiredState = df::borrow(device_group::uid(group), DesiredKey {});
+            (state.revision, state.components)
+        } else {
+            (0, vec_map::empty())
+        };
+        RevisionPlan { group_id: device_group::group_id(group), admin, base_revision, components }
+    }
+
+    /// Make `deployment` the desired version of its component. The record must
+    /// be the admin's own, target this group and authenticate its recipe.
+    public fun set_component(plan: &mut RevisionPlan, deployment: &mut DeploymentRecord) {
+        assert!(deployment_manager::creator(deployment) == plan.admin, ENotCreator);
+        assert!(deployment_manager::target_groups(deployment).contains(&plan.group_id), ENotTargeted);
+        assert!(deployment_manager::has_recipe_digest(deployment), EUnverifiedRecipe);
+        deployment_manager::mark_managed(deployment);
+        let name = *deployment_manager::component_name(deployment);
+        let id = object::id(deployment);
+        if (plan.components.contains(&name)) {
+            *plan.components.get_mut(&name) = id;
+        } else {
+            plan.components.insert(name, id);
+        };
+    }
+
+    /// Stop desiring a component. Devices retire it from management.
+    public fun remove_component(plan: &mut RevisionPlan, name: String) {
+        assert!(plan.components.contains(&name), EUnknownComponent);
+        plan.components.remove(&name);
+    }
+
+    /// Store the revision on the group. Aborts if the group changed since `begin`.
+    public fun commit(plan: RevisionPlan, group: &mut DeviceGroup, clock: &Clock, ctx: &TxContext) {
+        let RevisionPlan { group_id, admin, base_revision, components } = plan;
+        assert!(device_group::group_id(group) == group_id, EWrongGroup);
+        assert!(ctx.sender() == admin && device_group::admin(group) == admin, ENotAdmin);
+        assert!(revision(group) == base_revision, EStaleRevision);
+        let state = DesiredState { revision: base_revision + 1, components, updated_at: clock.timestamp_ms() };
+        let (component_names, deployments) = state.components.into_keys_values();
+        event::emit(DesiredStateChanged { group_id, revision: state.revision, component_names, deployments });
+        let uid = device_group::uid_mut(group);
+        if (df::exists(uid, DesiredKey {})) {
+            let _: DesiredState = df::remove(uid, DesiredKey {});
+        };
+        df::add(uid, DesiredKey {}, state);
+    }
+
+    // ── Reads ─────────────────────────────────────────────────────────────────
+
+    /// 0 until the first commit.
+    public fun revision(group: &DeviceGroup): u64 {
+        if (df::exists(device_group::uid(group), DesiredKey {})) {
+            let state: &DesiredState = df::borrow(device_group::uid(group), DesiredKey {});
+            state.revision
+        } else { 0 }
+    }
+
+    /// Empty until the first commit.
+    public fun components(group: &DeviceGroup): VecMap<String, ID> {
+        if (df::exists(device_group::uid(group), DesiredKey {})) {
+            let state: &DesiredState = df::borrow(device_group::uid(group), DesiredKey {});
+            state.components
+        } else { vec_map::empty() }
+    }
+
+    public fun plan_components(plan: &RevisionPlan): &VecMap<String, ID> { &plan.components }
+}

@@ -7,6 +7,7 @@ import { useGroups } from "@/hooks/useGroups";
 import { useDevices } from "@/hooks/useDevices";
 import { uploadArtifact, uploadRecipe, renewalCommand, storageWarnings, type ComponentRecipe, type StorageInfo } from "@/lib/walrus";
 import { buildCreateDeploymentTx } from "@/lib/sui";
+import { buildDesiredRevisionTx } from "@/lib/desired-state";
 import { fetchVersion, buildCatalogDeploymentTx, type ComponentVersion } from "@/lib/catalog";
 import { useCurrentClient } from "@mysten/dapp-kit-react";
 import { RECIPE_VERSION } from "@/lib/protocol-version";
@@ -44,6 +45,9 @@ export default function FirmwarePage() {
   const [installCmd, setInstallCmd] = useState("");
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
   const [selectedDevices, setSelectedDevices] = useState<Set<string>>(new Set());
+  // Desired state: the groups' current version of this component, superseding
+  // earlier ones and reaching devices that join later. Groups only.
+  const [desired, setDesired] = useState(true);
   const [txDigest, setTxDigest] = useState<string | null>(null);
   const [recipeStorage, setRecipeStorage] = useState<StorageInfo | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -65,14 +69,22 @@ export default function FirmwarePage() {
     }
   }, [componentName, version, account?.address]);
 
+  const desiredTargets = desired && selectedDevices.size === 0 && selectedGroups.size > 0;
+
   async function handleDeploy() {
     if (selectedGroups.size === 0 && selectedDevices.size === 0) return;
+    // Catalog versions carry no recipe digest on the record, so desired state
+    // cannot select them yet: they deploy one-shot.
     if (catalogVersion) {
       signAndExecute({transaction:buildCatalogDeploymentTx(catalogVersion.objectId,[...selectedGroups],[...selectedDevices])}, {
         onSuccess:res=>{setTxDigest(res.digest);setStep("done");},onError:err=>alert(err.message),
       }); return;
     }
     if (!artifact) return;
+    if (desired && selectedDevices.size > 0) {
+      alert("Desired state targets groups only. Clear the individual devices, or untick desired state for a one-shot deployment.");
+      return;
+    }
 
     const recipe: ComponentRecipe = {
       schemaVersion: RECIPE_VERSION,
@@ -96,12 +108,17 @@ export default function FirmwarePage() {
       return;
     }
 
-    const tx = buildCreateDeploymentTx(
-      componentName, version,
-      recipeUpload.blobId, artifact.sha256, recipeUpload.sha256,
-      Array.from(selectedGroups),
-      Array.from(selectedDevices),
-    );
+    const tx = desiredTargets
+      ? buildDesiredRevisionTx(Array.from(selectedGroups), {
+          componentName, version, recipeBlobId: recipeUpload.blobId,
+          artifactSha256: artifact.sha256, recipeSha256: recipeUpload.sha256,
+        })
+      : buildCreateDeploymentTx(
+          componentName, version,
+          recipeUpload.blobId, artifact.sha256, recipeUpload.sha256,
+          Array.from(selectedGroups),
+          Array.from(selectedDevices),
+        );
     signAndExecute(
       { transaction: tx },
       {
@@ -267,6 +284,27 @@ export default function FirmwarePage() {
               </div>
             )}
           </div>
+
+          {catalogVersion ? (
+            <p className="text-xs text-gray-500">Catalog versions deploy one-shot; desired state does not select them yet.</p>
+          ) : (
+          <label className="flex items-start gap-3 text-sm">
+            <input type="checkbox" checked={desired} onChange={() => setDesired(!desired)} className="rounded mt-0.5" disabled={step !== "deploy"} />
+            <span>
+              <span className="font-medium">Make this the groups&apos; desired version of {componentName || "this component"}</span>
+              <span className="block text-xs text-gray-500">
+                Devices converge on the latest desired version: offline devices skip superseded ones, devices added
+                to a group later receive it, and removed devices stop following it. Untick for a one-shot deployment
+                (required when targeting individual devices).
+              </span>
+              {desired && selectedDevices.size > 0 && (
+                <span className="block text-xs text-amber-700 bg-amber-50 rounded px-2 py-1 mt-1">
+                  Desired state targets groups only: clear the individual devices or untick this option.
+                </span>
+              )}
+            </span>
+          </label>
+          )}
 
           {/* Individual devices */}
           <div>
