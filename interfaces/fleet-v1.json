@@ -7,6 +7,260 @@
     "failed": 2
   },
   "modules": {
+    "component_catalog": {
+      "functions": {
+        "create_catalog": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "create_deployment": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::component_catalog::ComponentVersion",
+            "vector<sui::object::ID>",
+            "vector<sui::object::ID>",
+            "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "delete_deployment": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "sui_edge::deployment_manager::DeploymentRecord",
+            "&sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "publish_version": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::component_catalog::ComponentCatalog",
+            "std::string::String",
+            "std::string::String",
+            "vector<std::string::String>",
+            "vector<std::string::String>",
+            "vector<std::string::String>",
+            "vector<std::string::String>",
+            "vector<std::string::String>",
+            "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "publisher": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::component_catalog::ComponentCatalog"
+          ],
+          "returns": [
+            "address"
+          ]
+        },
+        "validate_hash": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&std::string::String"
+          ],
+          "returns": []
+        },
+        "validate_name": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&std::string::String"
+          ],
+          "returns": []
+        },
+        "validate_version": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&std::string::String"
+          ],
+          "returns": []
+        },
+        "versions": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::component_catalog::ComponentCatalog"
+          ],
+          "returns": [
+            "&sui::vec_map::VecMap<std::string::String,sui::object::ID>"
+          ]
+        }
+      },
+      "structs": {
+        "CatalogBinding": {
+          "abilities": [
+            "Drop",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "version_id",
+              "sui::object::ID"
+            ]
+          ]
+        },
+        "CatalogBindingKey": {
+          "abilities": [
+            "Copy",
+            "Drop",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "dummy_field",
+              "bool"
+            ]
+          ]
+        },
+        "CatalogCreated": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "catalog_id",
+              "sui::object::ID"
+            ],
+            [
+              "publisher",
+              "address"
+            ]
+          ]
+        },
+        "ComponentCatalog": {
+          "abilities": [
+            "Key"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "id",
+              "sui::object::UID"
+            ],
+            [
+              "publisher",
+              "address"
+            ],
+            [
+              "versions",
+              "sui::vec_map::VecMap<std::string::String,sui::object::ID>"
+            ]
+          ]
+        },
+        "ComponentVersion": {
+          "abilities": [
+            "Key"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "id",
+              "sui::object::UID"
+            ],
+            [
+              "catalog_id",
+              "sui::object::ID"
+            ],
+            [
+              "publisher",
+              "address"
+            ],
+            [
+              "component_name",
+              "std::string::String"
+            ],
+            [
+              "version",
+              "std::string::String"
+            ],
+            [
+              "schema_version",
+              "u64"
+            ],
+            [
+              "created_at",
+              "u64"
+            ],
+            [
+              "platform_os",
+              "vector<std::string::String>"
+            ],
+            [
+              "platform_arch",
+              "vector<std::string::String>"
+            ],
+            [
+              "recipe_blob_ids",
+              "vector<std::string::String>"
+            ],
+            [
+              "recipe_sha256s",
+              "vector<std::string::String>"
+            ],
+            [
+              "artifact_sha256s",
+              "vector<std::string::String>"
+            ]
+          ]
+        },
+        "VersionPublished": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "catalog_id",
+              "sui::object::ID"
+            ],
+            [
+              "version_id",
+              "sui::object::ID"
+            ],
+            [
+              "publisher",
+              "address"
+            ],
+            [
+              "component_name",
+              "std::string::String"
+            ],
+            [
+              "version",
+              "std::string::String"
+            ]
+          ]
+        }
+      }
+    },
     "deployment_manager": {
       "functions": {
         "artifact_sha256": {
@@ -960,5 +1214,19 @@
     "deployment_manager::Receipts",
     "deployment_manager::DeviceStatusReported"
   ],
-  "manifest_schema_version": 1
+  "manifest_schema_version": 1,
+  "optional_type_origins": {
+    "component_catalog": [
+      "component_catalog::ComponentCatalog",
+      "component_catalog::ComponentVersion",
+      "component_catalog::CatalogCreated",
+      "component_catalog::VersionPublished",
+      "component_catalog::CatalogBindingKey",
+      "component_catalog::CatalogBinding"
+    ]
+  },
+  "supported_deployment_schema_versions": [
+    1,
+    2
+  ]
 }
