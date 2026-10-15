@@ -96,7 +96,7 @@ jobs:
           BASE_REF: ${{ steps.plan.outputs.base }}
         run: |
           mkdir -p evidence encrypted-live-state
-          docker run --rm -e SUIFLEET_TESTNET_KEY -e SUIFLEET_TESTNET_ADDRESS -e BASE_REF \
+          docker run --rm -e SUIFLEET_TESTNET_KEY -e SUIFLEET_TESTNET_ADDRESS -e BASE_REF -e GITHUB_EVENT_NAME \
             -e SUIFLEET_FAUCET_TOOL=/tmp/sui-faucet/sui \
             -v "$PWD:/workspace" -w /workspace suifleet-dev:testnet bash -ec '
               git config --global --add safe.directory /workspace
@@ -114,7 +114,7 @@ jobs:
         if: always() && steps.plan.outputs.run == 'true'
         with:
           name: testnet-effects-${{ steps.plan.outputs.head }}
-          path: evidence/package-upgrade.json
+          path: evidence/*.json
           retention-days: 90
       - name: Publish final exact-head status
         if: always() && steps.plan.outputs.run == 'true'
