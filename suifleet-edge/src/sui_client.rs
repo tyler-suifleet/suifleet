@@ -9,11 +9,10 @@
 //!   object versions, budget), checked against the exact intended call,
 //!   signed locally by `identity` and executed; success is read from the
 //!   execution effects, never inferred from a digest.
-use crate::{config::SuiConfig, identity};
+use crate::{config::SuiConfig, identity, protocol};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use ed25519_dalek::SigningKey;
 use futures_util::StreamExt;
-use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{path::Path, str::FromStr, time::Duration};
 use sui_rpc::field::{FieldMask, FieldMaskUtil};
@@ -22,23 +21,13 @@ use sui_sdk_types::{Address, Argument, Command, Digest, Input, StructTag, Transa
 
 /// Move module of every call this daemon signs; its functions are checked
 /// against the compiled contracts by scripts/check_contract_interfaces.py.
-const CALL_MODULE: &str = "deployment_manager";
+const CALL_MODULE: &str = protocol::deployment_manager::MODULE;
 /// Largest gas budget the device will sign for one status report (0.05 SUI).
 const MAX_GAS_BUDGET: u64 = 50_000_000;
 /// Events requested per ListEvents call.
 const PAGE_SIZE: u32 = 50;
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct DeploymentCreatedEvent {
-    pub deployment_id: String,
-    pub component_name: String,
-    pub version: String,
-    pub recipe_blob_id: String,
-    pub artifact_sha256: String,
-    pub target_groups: Vec<String>,
-    pub target_devices: Vec<String>,
-    pub creator: String,
-}
+pub use crate::protocol::DeploymentCreatedEvent;
 
 /// An on-chain object as the daemon needs it.
 #[derive(Debug, Clone)]
@@ -652,7 +641,7 @@ impl SuiClient {
             .await?
             .unwrap_or(Value::Null);
         let mut call = Call {
-            function: "report_status",
+            function: protocol::deployment_manager::REPORT_STATUS,
             objects: vec![deployment.to_owned(), cap.to_owned()],
             status,
         };
@@ -671,7 +660,7 @@ impl SuiClient {
             }
             call.objects
                 .push(found.ok_or_else(|| anyhow::anyhow!("device is no longer targeted"))?);
-            call.function = "report_status_for_group";
+            call.function = protocol::deployment_manager::REPORT_STATUS_FOR_GROUP;
         }
         let transaction = self.build(&call).await?;
         self.execute(&transaction).await
@@ -966,7 +955,7 @@ mod tests {
             Digest::ZERO,
         )]);
         let call = Call {
-            function: "report_status",
+            function: protocol::deployment_manager::REPORT_STATUS,
             objects: vec!["0x10".into(), "0x11".into()],
             status: 1,
         };
