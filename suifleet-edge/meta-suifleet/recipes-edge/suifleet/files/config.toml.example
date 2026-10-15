@@ -1,15 +1,16 @@
 [sui]
-rpc_url = "https://fullnode.testnet.sui.io:443"
-original_package_id = "0x..." # First published package ID; event type origin
-package_id = "0x<PACKAGE_ID>"
+# Generate and install a verified deployment.json before installing config.toml.
+# The image ships only this example; no account, network IDs or private key.
+manifest_path = "deployment.json"
 
 [device]
 keypair_path = "/etc/suifleet/device.key"
 device_object_id = "0x<DEVICE_OBJECT_ID>"
 device_cap_id = "0x<DEVICE_CAP_ID>"
 
-[walrus]
-aggregator_url = "https://aggregator.walrus-testnet.walrus.space"
+# Walrus endpoints come from the deployment manifest.
+# Uncomment this table together with any optional limits below.
+# [walrus]
 # Downloads go to <artifact>.partial and resume with HTTP Range after interruption.
 # max_artifact_bytes = 1073741824   # refuse larger artifacts (default 1 GiB)
 # min_free_bytes = 67108864         # keep this much free on the state filesystem (default 64 MiB)
@@ -17,7 +18,9 @@ aggregator_url = "https://aggregator.walrus-testnet.walrus.space"
 
 [apply]
 # Command to invoke when an artifact is ready. The artifact path is appended as the final argument.
-command = "/usr/bin/swupdate -i"
+# Choose an installed updater explicitly. This default safely refuses updates.
+# For the SF-030 test package: /usr/bin/suifleet-test-updater
+command = "/usr/bin/false"
 
 # Bound the updater execution time. Recipe shell commands require explicit opt-in.
 timeout_seconds = 600
@@ -27,7 +30,7 @@ allow_recipe_commands = false
 # above as that user (unprivileged updaters only). "privileged-helper" hands the
 # verified artifact to suifleet-firmware.service, which runs the command from
 # root-owned /etc/suifleet/firmware.toml instead; recipe scripts never do.
-mode = "privileged-helper"
+mode = "direct"
 # max_memory_bytes = 268435456   # optional RLIMIT_AS for updater/recipe children
 
 [runtime]

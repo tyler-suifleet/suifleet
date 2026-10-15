@@ -6,6 +6,7 @@ producing run, so persisting encrypted fixture state needs no cache write grant.
 The runtime decryptor still rejects tampering and wrong keys before mutation.
 """
 import argparse
+from datetime import datetime
 import json
 import os
 from pathlib import Path
@@ -25,23 +26,37 @@ def restore(repo, destination, get=api, download=None):
         raise RuntimeError('ciphertext restore destination must be empty')
     # Query by artifact name, not recent run count: skipped/untrusted runs must
     # not evict a valid fixture from discovery and force fresh publication.
+    candidates = []
     for page in range(1, 6):
         listing = get(f'repos/{repo}/actions/artifacts?name={NAME}&per_page=100&page={page}')
         for artifact in listing['artifacts']:
             if artifact.get('name') != NAME or artifact.get('expired') is not False:
                 continue
-            run_id = artifact['workflow_run']['id']
-            if type(run_id) is not int or run_id <= 0:
-                raise RuntimeError('invalid fixture-producing run identity')
-            run = get(f'repos/{repo}/actions/runs/{run_id}')
-            if (run.get('head_branch') != 'main' or run.get('path') != WORKFLOW
-                    or (run.get('repository') or {}).get('full_name') != repo
-                    or run.get('event') not in ('workflow_run', 'workflow_dispatch', 'schedule')):
-                continue
-            return download_fixture(repo, destination, run_id, artifact['id'], download)
+            try:
+                created = datetime.strptime(artifact['created_at'], '%Y-%m-%dT%H:%M:%SZ')
+            except (KeyError, TypeError, ValueError) as error:
+                raise RuntimeError('invalid fixture artifact creation time') from error
+            artifact_id = artifact['id']
+            if type(artifact_id) is not int or artifact_id <= 0:
+                raise RuntimeError('invalid fixture artifact identity')
+            candidates.append((created, artifact_id, artifact))
         if listing['total_count'] <= page * 100:
-            return {'restored': False, 'reason': 'no prior main-workflow ciphertext artifact'}
-    raise RuntimeError('fixture artifact history exceeds bounded discovery; refusing to republish blindly')
+            break
+    else:
+        raise RuntimeError('fixture artifact history exceeds bounded discovery; refusing to republish blindly')
+    # GitHub's response/ID ordering differs from creation time across reruns.
+    # Search the complete bounded history before selecting the newest state.
+    for _, artifact_id, artifact in sorted(candidates, key=lambda item: item[:2], reverse=True):
+        run_id = artifact['workflow_run']['id']
+        if type(run_id) is not int or run_id <= 0:
+            raise RuntimeError('invalid fixture-producing run identity')
+        run = get(f'repos/{repo}/actions/runs/{run_id}')
+        if (run.get('head_branch') != 'main' or run.get('path') != WORKFLOW
+                or (run.get('repository') or {}).get('full_name') != repo
+                or run.get('event') not in ('workflow_run', 'workflow_dispatch', 'schedule')):
+            continue
+        return download_fixture(repo, destination, run_id, artifact_id, download)
+    return {'restored': False, 'reason': 'no prior main-workflow ciphertext artifact'}
 
 
 def download_fixture(repo, destination, run_id, artifact_id, download):

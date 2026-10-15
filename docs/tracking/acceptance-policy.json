@@ -102,6 +102,25 @@
         "mandatory status remains enforced; no fabricated status or waiver of a failing test",
         "overall SF043 goal remains incomplete until actual automatic full testnet Actions success is recorded"
       ]
+    },
+    "SF-046": {
+      "deferred_checks": [
+        "first automatic POST-INTEGRATION execution of the updated main-sourced artifact restore helper with unchanged-fixture reuse"
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/72",
+        "https://github.com/tyler-suifleet/suifleet/issues/64"
+      ],
+      "bootstrap_only": true,
+      "authorization": "The direct SF043 user task explicitly permits reviewed integration before main-only automatic execution, requires continuing through the actual resulting run, and authorizes narrowly necessary postmerge reliability follow-ups through the same review process. This entry records only that unavoidable ordering for the SF046 main-sourced helper. Existing automatic CI already works; no failing test or mandatory status is waived.",
+      "retained_gates": [
+        "source/security review and artifact-ordering/producer/authentication regressions",
+        "full exact-head ordinary CI",
+        "genuine successful exact-head/current-base automatic testnet status with independent effects and budget evidence",
+        "fresh independent review of exact head/base/feedback/policy",
+        "mandatory testnet status enforcement and sole-orchestrator integration",
+        "overall SF043 request incomplete until actual automatic updated-helper restoration/reuse after integration is observed and recorded"
+      ]
     }
   }
 }

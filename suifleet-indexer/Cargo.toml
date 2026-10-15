@@ -1,0 +1,36 @@
+[package]
+name = "suifleet-indexer"
+version = "0.1.0"
+edition = "2021"
+description = "SuiFleet fleet indexer, versioned HTTP API and operations CLI (SF-024)"
+
+[[bin]]
+name = "suifleet-indexer"
+path = "src/main.rs"
+
+[dependencies]
+# Sui gRPC v2 API, transaction building and signing (the daemon's SDK versions)
+sui-rpc = "0.4.0"
+sui-sdk-types = { version = "0.4.0", features = ["serde", "hash"] }
+sui-transaction-builder = "0.4.0"
+sui-crypto = { version = "0.4.0", features = ["ed25519"] }
+tonic = { version = "0.14", default-features = false }
+prost-types = "0.14"
+bcs = "0.1"
+tokio = { version = "1", features = ["full"] }
+futures-util = "0.3"
+# Materialized state
+rusqlite = { version = "0.32", features = ["bundled"] }
+# HTTP API and its client (ctl)
+axum = "0.8"
+reqwest = { version = "0.12", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+base64 = "0.21"
+hex = "0.4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tempfile = "3"
