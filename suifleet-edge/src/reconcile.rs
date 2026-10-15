@@ -12,11 +12,19 @@
 //! - when groups name different deployments for one component, that is a
 //!   conflict: the component is left as installed until they agree.
 //!
-//! A plan is the name-ordered list of desired deployments the journal has no
-//! outcome for. Steps run one at a time with intent journaled first, so a
-//! crash never re-executes an updater; the first step that does not apply
-//! stops the plan, and the same desired state is not retried (see
+//! A plan compares each desired deployment, in name order, with what the
+//! component currently runs (the deployment last started for it, one-shot or
+//! desired) rather than with execution history. Steps run one at a time with
+//! intent journaled first, so a crash never re-executes an updater. The step
+//! is journaled before its intent; until it has applied, later steps stay
+//! stopped, also across a crash. The same desired state is not retried (see
 //! `fingerprint`) until it changes.
+//!
+//! A deployment ID is also its execution identity (journal entry, firmware
+//! request, on-chain receipt), so a deployment never runs twice. Selecting
+//! one again after the component moved on (A → B → A, or a one-shot update
+//! after a desired one) is reported as unsupported and left as installed: a
+//! new deployment record of that version is needed.
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
@@ -91,14 +99,49 @@ pub fn fingerprint(effective: &Effective) -> String {
     hex::encode(Sha256::digest(encoded))
 }
 
-/// Desired deployments still to apply, in deterministic (name) order.
-pub fn plan(effective: &Effective, done: impl Fn(&str) -> bool) -> Vec<(String, String)> {
-    effective
-        .components
-        .iter()
-        .filter(|(_, deployment)| !done(deployment))
-        .map(|(name, deployment)| (name.clone(), deployment.clone()))
-        .collect()
+/// What the journal knows about one deployment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum History {
+    Never,
+    Applied,
+    /// Failed, indeterminate or still pending: never re-run.
+    NotApplied,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Step {
+    /// Never started here: run it.
+    Apply(String, String),
+    /// Applied here, and the journal predates tracking of what the component
+    /// currently runs: record it as current without running it.
+    Adopt(String, String),
+    /// Applied here, but the component has run something else since.
+    Reselected(String, String),
+}
+
+/// Steps toward the effective desired state, in deterministic (name) order.
+/// Components already at their desired deployment, and desired deployments
+/// that did not apply here, have none.
+pub fn plan(
+    effective: &Effective,
+    current: &BTreeMap<String, String>,
+    history: impl Fn(&str) -> History,
+) -> Vec<Step> {
+    let mut steps = Vec::new();
+    for (name, deployment) in &effective.components {
+        let last = current.get(name);
+        if last.is_some_and(|last| id(last) == id(deployment)) {
+            continue;
+        }
+        let step = (name.clone(), deployment.clone());
+        match (history(deployment), last) {
+            (History::Never, _) => steps.push(Step::Apply(step.0, step.1)),
+            (History::NotApplied, _) => {}
+            (History::Applied, None) => steps.push(Step::Adopt(step.0, step.1)),
+            (History::Applied, Some(_)) => steps.push(Step::Reselected(step.0, step.1)),
+        }
+    }
+    steps
 }
 
 /// Managed components no group wants any more. A conflicted component is
@@ -151,33 +194,79 @@ mod tests {
         let managed = BTreeMap::from([("firmware".to_string(), id("0x1"))]);
         assert!(retired(&managed, &result).is_empty());
         assert_eq!(
-            plan(&result, |_| false),
-            vec![("agent".to_string(), "0x2".to_string())]
+            plan(&result, &BTreeMap::new(), |_| History::Never),
+            vec![Step::Apply("agent".into(), "0x2".into())]
         );
+    }
+
+    fn applied_only(applied: &'static [&'static str]) -> impl Fn(&str) -> History {
+        move |d| match applied.iter().any(|a| id(a) == id(d)) {
+            true => History::Applied,
+            false => History::Never,
+        }
     }
 
     #[test]
     fn only_the_current_revision_is_planned() {
         // Offline through revisions 1..3: only revision 3's deployment runs.
         let latest = effective(&[group("0xa", 3, &[("firmware", "0x13")])]);
-        let steps = plan(&latest, |_| false);
-        assert_eq!(steps, vec![("firmware".to_string(), "0x13".to_string())]);
-        // Already applied (or failed) deployments are never re-run.
-        assert!(plan(&latest, |d| id(d) == id("0x0013")).is_empty());
+        let steps = plan(&latest, &BTreeMap::new(), |_| History::Never);
+        assert_eq!(steps, vec![Step::Apply("firmware".into(), "0x13".into())]);
+        // Already the component's current deployment: nothing to do, whatever
+        // its outcome (a failed one is not retried).
+        let current = BTreeMap::from([("firmware".to_string(), "0x0013".to_string())]);
+        for history in [History::Applied, History::NotApplied] {
+            assert!(plan(&latest, &current, |_| history).is_empty());
+        }
     }
 
     #[test]
-    fn plans_are_name_ordered_and_skip_done_steps() {
+    fn plans_are_name_ordered_and_skip_converged_steps() {
         let result = effective(&[group(
             "0xa",
             1,
             &[("zeta", "0x3"), ("alpha", "0x1"), ("mid", "0x2")],
         )]);
-        let names: Vec<_> = plan(&result, |d| d == "0x2")
+        let current = BTreeMap::from([("mid".to_string(), "0x2".to_string())]);
+        let names: Vec<_> = plan(&result, &current, applied_only(&["0x2"]))
             .into_iter()
-            .map(|(n, _)| n)
+            .map(|step| match step {
+                Step::Apply(name, _) => name,
+                other => panic!("unexpected {other:?}"),
+            })
             .collect();
         assert_eq!(names, ["alpha", "zeta"]);
+    }
+
+    #[test]
+    fn history_is_not_installation() {
+        // A applied, then B; a revision selecting A again must not be taken as
+        // converged: A cannot run twice, so it is reported, not recorded.
+        let back = effective(&[group("0xa", 3, &[("firmware", "0xa")])]);
+        let current = BTreeMap::from([("firmware".to_string(), "0xb".to_string())]);
+        assert_eq!(
+            plan(&back, &current, applied_only(&["0xa", "0xb"])),
+            vec![Step::Reselected("firmware".into(), "0xa".into())]
+        );
+        // Same after a one-shot update of the component.
+        let current = BTreeMap::from([("firmware".to_string(), "0xc".to_string())]);
+        assert_eq!(
+            plan(&back, &current, applied_only(&["0xa", "0xc"])),
+            vec![Step::Reselected("firmware".into(), "0xa".into())]
+        );
+        // A desired deployment that failed here is not retried either way.
+        assert!(plan(&back, &current, |_| History::NotApplied).is_empty());
+        // A journal that predates `current` adopts what already applied.
+        assert_eq!(
+            plan(&back, &BTreeMap::new(), applied_only(&["0xa"])),
+            vec![Step::Adopt("firmware".into(), "0xa".into())]
+        );
+        // A new version is applied normally.
+        let next = effective(&[group("0xa", 4, &[("firmware", "0xd")])]);
+        assert_eq!(
+            plan(&next, &current, applied_only(&["0xa", "0xc"])),
+            vec![Step::Apply("firmware".into(), "0xd".into())]
+        );
     }
 
     #[test]

@@ -239,7 +239,12 @@ async fn execute(
         .join(hex::encode(identity::hash(event.deployment_id.as_bytes())));
     std::fs::create_dir_all(&directory)?;
     let artifact = directory.join("artifact");
-    // Save intent before starting work. A crash never silently re-executes an updater.
+    // Save intent before starting work. A crash never silently re-executes an
+    // updater. From here on this is what the component runs, or tried to.
+    journal
+        .state
+        .current
+        .insert(event.component_name.clone(), event.deployment_id.clone());
     journal.state.deployments.insert(
         event.deployment_id.clone(),
         Outcome {
@@ -296,26 +301,66 @@ async fn reconcile(
     }
     let effective = reconcile::effective(&groups);
     let fingerprint = reconcile::fingerprint(&effective);
-    if journal.state.desired.as_deref() != Some(fingerprint.as_str()) {
+    let outcome = |journal: &Journal, deployment: &str| {
+        journal
+            .state
+            .deployments
+            .iter()
+            .find(|(id, _)| sui_client::same_id(id, deployment))
+            .map(|(_, outcome)| outcome.clone())
+    };
+    let changed = journal.state.desired.as_deref() != Some(fingerprint.as_str());
+    if changed {
         for (component, sources) in &effective.conflicts {
             warn!(component, ?sources, "Groups disagree on this component; leaving it as installed");
         }
         journal.state.desired = Some(fingerprint);
-        journal.state.blocked = false;
+        // A new desired state lifts the stop left by a settled step; an update
+        // still in flight (privileged helper) keeps it until it settles.
+        let in_flight = journal.state.step.as_deref().and_then(|step| outcome(journal, step))
+            .is_some_and(|o| o.status.is_none() && !o.indeterminate);
+        if !in_flight {
+            journal.state.step = None;
+        }
     }
     for component in reconcile::retired(&journal.state.components, &effective) {
         info!(component, "No longer desired by any group; retired from management (not uninstalled)");
         journal.state.components.remove(&component);
     }
-    if journal.state.blocked {
-        journal.save()?;
-        return Ok(());
+    // The step journaled last, read back from the journal, so a crash at any
+    // point (mid-step, or before the failure is acted on) keeps later steps
+    // stopped. No intent saved means its updater never started.
+    if let Some(step) = journal.state.step.clone() {
+        match outcome(journal, &step) {
+            Some(o) if o.status != Some(protocol::STATUS_APPLIED) => {
+                journal.save()?;
+                return Ok(());
+            }
+            _ => journal.state.step = None,
+        }
     }
-    let done = |journal: &Journal, deployment: &str| {
-        journal.state.deployments.keys().any(|id| sui_client::same_id(id, deployment))
+    let history = |journal: &Journal, deployment: &str| match outcome(journal, deployment) {
+        None => reconcile::History::Never,
+        Some(o) if o.status == Some(protocol::STATUS_APPLIED) => reconcile::History::Applied,
+        Some(_) => reconcile::History::NotApplied,
     };
-    let steps = reconcile::plan(&effective, |deployment| done(journal, deployment));
-    for (component, deployment) in steps {
+    let steps = reconcile::plan(&effective, &journal.state.current, |deployment| history(journal, deployment));
+    for step in steps {
+        let (component, deployment) = match step {
+            reconcile::Step::Adopt(component, deployment) => {
+                journal.state.current.insert(component.clone(), deployment.clone());
+                journal.state.components.insert(component, deployment);
+                continue;
+            }
+            reconcile::Step::Reselected(component, deployment) => {
+                if changed {
+                    warn!(component, deployment, current = journal.state.current.get(&component),
+                        "Desired deployment already ran here and the component has changed since; a deployment never runs twice, so create a new record for this version. Leaving it as installed");
+                }
+                continue;
+            }
+            reconcile::Step::Apply(component, deployment) => (component, deployment),
+        };
         let Some((event, record)) = sui.deployment(&deployment).await? else {
             warn!(component, deployment, "Desired deployment was deleted; skipping it");
             continue;
@@ -326,21 +371,16 @@ async fn reconcile(
             continue;
         }
         info!(component, deployment, version = event.version, "Reconciling to desired state");
-        let status = execute(cfg, sui, walrus, runner, journal, &event, &record).await?;
+        journal.state.step = Some(deployment.clone());
         journal.state.components.insert(component.clone(), deployment.clone());
+        journal.save()?;
+        let status = execute(cfg, sui, walrus, runner, journal, &event, &record).await?;
         if status != Some(protocol::STATUS_APPLIED) {
             warn!(component, deployment, "Plan stopped; not retried until the desired state changes");
-            journal.state.blocked = true;
-            journal.save()?;
             return Ok(());
         }
+        journal.state.step = None;
         journal.save()?;
-    }
-    // Desired deployments that already ran (as one-shot jobs or earlier steps).
-    for (component, deployment) in &effective.components {
-        if done(journal, deployment) {
-            journal.state.components.insert(component.clone(), deployment.clone());
-        }
     }
     journal.save()
 }

@@ -26,13 +26,18 @@ pub struct State {
     /// Component name → deployment desired-state reconciliation last acted on.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub components: BTreeMap<String, String>,
+    /// Component name → deployment this daemon last started for it, one-shot
+    /// or desired, saved with that deployment's intent. Its outcome in
+    /// `deployments` says whether it is what the component now runs.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub current: BTreeMap<String, String>,
     /// Fingerprint of the desired state last reconciled (reconcile.rs).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub desired: Option<String>,
-    /// Its plan stopped on a step that did not apply; not retried until the
-    /// desired state changes.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub blocked: bool,
+    /// Desired-state step started for that desired state, saved before its
+    /// intent. Until it has applied, later steps stay stopped, across restarts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step: Option<String>,
 }
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Outcome {
