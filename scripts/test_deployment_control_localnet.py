@@ -104,10 +104,16 @@ def run(rpc, faucet):
                 set_control(0); assert int(read()["state"]) == 0 and int(read()["revision"]) == 2
                 wait_for(lambda: state().get("deployments",{}).get(record,{}).get("reported"), "real-chain resumed apply/report did not finish", process)
                 assert applied.exists() and state()["deployments"][record]["status"] == 1
-                receipt = dm.rpc(rpc, "suix_getDynamicFieldObject", [record, {"type":f"{origins['deployment_manager::ReceiptsKey']}::deployment_manager::ReceiptsKey", "value":{"dummy_field":False}}])
-                values = receipt["data"]["content"]["fields"]["value"]["fields"]["statuses"]["fields"]["contents"]
-                assert any(v["fields"]["key"] == device and int(v["fields"]["value"]) == 1 for v in values), "missing authoritative on-chain Applied receipt"
-                reported = dm.rpc(rpc, "sui_getObject", [record, {"showPreviousTransaction":True}])["data"]["previousTransaction"]
+                def receipt_state():
+                    receipt = dm.rpc(rpc, "suix_getDynamicFieldObject", [record, {"type":f"{origins['deployment_manager::ReceiptsKey']}::deployment_manager::ReceiptsKey", "value":{"dummy_field":False}}])
+                    fields = receipt["data"]["content"]["fields"]["value"]["fields"]
+                    values = fields["statuses"]["fields"]["contents"]
+                    statuses = {dm.object_id(v["fields"]["key"]):int(v["fields"]["value"]) for v in values}
+                    return receipt["data"]["objectId"], int(fields["version"]), statuses
+                wait_for(lambda: receipt_state()[2] == {dm.object_id(device):1}, "missing authoritative on-chain Applied receipt", process)
+                receipt_id, authority, statuses = receipt_state()
+                assert authority >= 2
+                reported = dm.rpc(rpc, "sui_getObject", [receipt_id, {"showPreviousTransaction":True}])["data"]["previousTransaction"]
                 effects = dm.rpc(rpc, "sui_getTransactionBlock", [reported, {"showEffects":True}])["effects"]
                 assert effects["status"]["status"] == "success", effects["status"]
                 digests.append(reported)

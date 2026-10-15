@@ -39,7 +39,7 @@ def run(binary):
                 gate = gates.get(name)
                 if gate:
                     gate[0].set()
-                    assert gate[1].wait(20), "test did not release download"
+                    assert gate[1].wait(40), "test did not release download"
                 self.respond(ARTIFACT)
             elif name in sim.recipes: self.respond(json.dumps(sim.recipes[name]).encode())
             else: self.respond(b"absent", 404)
@@ -117,12 +117,17 @@ def run(binary):
                 for id, action in [("0x505", "pause"), ("0x506", "cancel"), ("0x507", "window"), ("0x508", "expiry")]:
                     download, release = threading.Event(), threading.Event()
                     gates[f"artifact-{id}"] = (download, release)
-                    times = {"window_end_ms": now()+2000, "window_start_ms": now()-1000} if action == "window" else {"expires_ms": now()+2000} if action == "expiry" else {}
+                    times = {"window_end_ms": now()+6000, "window_start_ms": now()-1000} if action == "window" else {"expires_ms": now()+6000} if action == "expiry" else {}
                     add(id, **times)
                     wait(download.is_set, f"{action} did not reach download")
                     if action == "pause": control(id, state=1)
                     elif action == "cancel": control(id, state=2)
-                    else: time.sleep(2.2)
+                    else:
+                        end = times.get("window_end_ms", times.get("expires_ms"))
+                        # WSL may step CLOCK_REALTIME backwards while sleep uses
+                        # CLOCK_MONOTONIC. Wait for the actual UTC deadline and
+                        # leave clock-adjustment margin before releasing bytes.
+                        wait(lambda: now() >= end + 5000, f"{action} UTC deadline did not elapse")
                     release.set()
                     reason = {"pause":"paused", "cancel":"cancelled", "window":"outside maintenance window", "expiry":"expired"}[action]
                     wait(lambda: deferred(id, reason), f"{action} final admission failed")
