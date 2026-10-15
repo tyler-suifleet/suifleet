@@ -222,22 +222,30 @@ def run(rpc_url, faucet_url, catalog_upgrade=False):
                 result = transaction(*create_call(version, **targets))
                 return created(result, "::deployment_manager::DeploymentRecord")[0]
 
-            def deploy_catalog(version, *, devices=(), groups=(), unsupported=False):
-                artifact = component.build(version, run_id)
-                selected = "catalog-artifact-" + version.replace(".", "-")
-                recipe_blob = "catalog-recipe-" + version.replace(".", "-")
+            def deploy_catalog(version, *, devices=(), groups=(), unsupported=False,
+                               name=component.DEFAULT_COMPONENT, dependencies=None, register_only=False):
+                artifact = component.build(version, run_id, component=name)
+                tag = (version if name == component.DEFAULT_COMPONENT else f"{name}-{version}").replace(".", "-")
+                selected = "catalog-artifact-" + tag
+                recipe_blob = "catalog-recipe-" + tag
                 recipe = component.recipe(artifact, selected)
+                if dependencies is not None:  # Recipe schema 1.1 (SF-012).
+                    document = json.loads(recipe)
+                    document.update(schemaVersion="1.1", componentDependencies=dependencies)
+                    recipe = json.dumps(document).encode()
                 blobs[selected], blobs[recipe_blob] = artifact, recipe
                 # First manifest is intentionally incompatible on this x86_64 test host.
                 strings = lambda values: "vector[" + ",".join(json.dumps(v) for v in values) + "]"
                 registration = transaction("--move-call", f"{package}::component_catalog::publish_version", f"@{catalog}",
-                    json.dumps(component.DEFAULT_COMPONENT), json.dumps(version), strings(["linux", "linux"]),
+                    json.dumps(name), json.dumps(version), strings(["linux", "linux"]),
                     strings(["aarch64", "arm" if unsupported else "x86_64"]), strings(["never-download", recipe_blob]),
                     strings(["a"*64, hashlib.sha256(recipe).hexdigest()]), strings(["b"*64, hashlib.sha256(artifact).hexdigest()]), CLOCK)
                 version_id = created(registration, "::component_catalog::ComponentVersion")[0]
                 obj = dm.rpc(rpc_url,"sui_getObject",[version_id,{"showOwner":True,"showContent":True}])["data"]
                 assert obj["owner"] == "Immutable"
                 assert dm.object_id(obj["content"]["type"].split("::")[0]) == dm.object_id(package)
+                if register_only:
+                    return version_id
                 ids = lambda values: "vector[" + ",".join("@"+v for v in values) + "]"
                 result = transaction("--move-call", f"{package}::component_catalog::create_deployment", f"@{version_id}", ids(groups), ids(devices), CLOCK)
                 deployment = created(result,"::deployment_manager::DeploymentRecord")[0]
@@ -320,6 +328,32 @@ def run(rpc_url, faucet_url, catalog_upgrade=False):
                 v2 = (deploy_catalog if catalog_upgrade else deploy)("2.0.0", groups=[group])
                 wait_for(settled(v2, 1), "group v2 was not applied and reported", process)
                 receipt_is(v2, 1)
+
+                if catalog_upgrade:
+                    # SF-012: dependencies resolved from the real shared catalog's BCS index.
+                    lib, app = "suifleet-dep-lib", "suifleet-dep-app"
+                    for version in ("1.0.0", "1.5.0", "2.0.0"):
+                        deploy_catalog(version, name=lib, register_only=True)
+                    with_lib = deploy_catalog("1.0.0", name=app, devices=[device],
+                                              dependencies={lib: {"versionRequirement": "^1.0.0"}})
+                    wait_for(settled(with_lib, 1), "dependency deployment was not applied and reported", process)
+                    receipt_is(with_lib, 1)
+                    installed = journal()["components"]
+                    assert (installed[lib]["version"], installed[lib]["confirmed"]) == ("1.5.0", True), installed
+                    assert (installed[app]["version"], installed[app]["confirmed"]) == ("1.0.0", True), installed
+                    for name, version in ((lib, "1.5.0"), (app, "1.0.0")):
+                        receipts_seen = (components / name / "history.jsonl").read_text().splitlines()
+                        assert [json.loads(r)["version"] for r in receipts_seen] == [version], receipts_seen
+                    conflict = deploy_catalog("2.0.0", name=app, devices=[device],
+                                              dependencies={lib: {"versionRequirement": "^2.0.0"}, "suifleet-dep-absent": {"versionRequirement": "*"}})
+                    wait_for(settled(conflict, 2), "unresolvable dependencies were not rejected and reported", process)
+                    receipt_is(conflict, 2)
+                    assert "no available version of suifleet-dep-absent" in outcome(conflict)["error"], outcome(conflict)
+                    assert not any(p.endswith(("catalog-artifact-suifleet-dep-lib-2-0-0", "catalog-artifact-suifleet-dep-app-2-0-0"))
+                                   for p in downloads), downloads
+                    assert journal()["components"] == installed, "a rejected deployment changed installed components"
+                    print("PASS: live catalog BCS index resolved a schema-1.1 dependency (highest matching 1.5.0) "
+                          "before its dependent, with on-chain receipt; unresolvable dependencies rejected before artifact downloads")
 
                 bad = deploy("3.0.0", devices=[device], fail="health")
                 elsewhere = deploy("3.1.0", devices=[other])

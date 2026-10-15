@@ -70,6 +70,9 @@ an unreachable dynamic field. This does not permit changing a frozen version or
 forging an authoritative receipt. Do not assume old package entry points are
 disabled or that deletion implements cancellation.
 
+Recipe schema 1.1 dependencies, resolution and install ordering for catalog
+deployments are documented in [COMPONENT_DEPENDENCIES.md](COMPONENT_DEPENDENCIES.md).
+
 ## Validation
 
 `make check` includes contract tests, shared TypeScript/Rust selector cases in

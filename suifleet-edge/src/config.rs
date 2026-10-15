@@ -10,6 +10,38 @@ pub struct Config {
     pub apply: ApplyConfig,
     #[serde(default)]
     pub runtime: RuntimeConfig,
+    #[serde(default)]
+    pub components: ComponentsConfig,
+}
+
+/// Where component dependency candidates may come from.
+#[derive(Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum OfflinePolicy {
+    /// Only the live catalog and Walrus; nothing is cached.
+    #[default]
+    Never,
+    /// Keep authenticated versions, recipes and artifacts under
+    /// `state_dir/components`, reuse them by digest, and resolve from them
+    /// when the catalog or Walrus is unreachable.
+    Cached,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(default, deny_unknown_fields)]
+pub struct ComponentsConfig {
+    pub offline_candidates: OfflinePolicy,
+    /// Cached artifacts beyond this are evicted oldest first, except those
+    /// of installed versions.
+    pub cache_max_bytes: u64,
+}
+impl Default for ComponentsConfig {
+    fn default() -> Self {
+        Self {
+            offline_candidates: OfflinePolicy::Never,
+            cache_max_bytes: 512 * 1024 * 1024,
+        }
+    }
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -461,6 +493,12 @@ mod tests {
             assert_eq!(walrus.download_timeout_seconds, 3600);
         }
         assert_eq!(omitted.walrus.download_attempts, 4);
+        assert_eq!(omitted.components.offline_candidates, OfflinePolicy::Never);
+        let cached: Config = toml::from_str(&format!("{base}[components]\noffline_candidates='cached'\ncache_max_bytes=10\n")).unwrap();
+        assert_eq!(cached.components.offline_candidates, OfflinePolicy::Cached);
+        assert_eq!(cached.components.cache_max_bytes, 10);
+        assert!(toml::from_str::<Config>(&format!("{base}[components]\noffline_candidates='always'\n")).is_err());
+        assert!(toml::from_str::<Config>(&format!("{base}[components]\noffline='cached'\n")).is_err());
         assert_eq!(partial.walrus.download_attempts, 2);
     }
     #[test]
