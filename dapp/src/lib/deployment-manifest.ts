@@ -1,16 +1,11 @@
 import clientPackage from "../../package.json";
-import type { SuiClient } from "@mysten/sui/client";
+import type { SuiGrpcClient } from "@mysten/sui/grpc";
+import { bcs } from "@mysten/sui/bcs";
+import { fromBase58, toHex, normalizeStructTag } from "@mysten/sui/utils";
+import { UpgradeCapBcs } from "./move-bcs";
 
-export const REQUIRED_TYPES = [
-  "device_registry::DeviceRegistry", "device_registry::Device",
-  "device_group::DeviceGroup", "device_group::GroupCreated",
-  "device_cap::DeviceCap", "device_cap::DeviceAddressKey",
-  "deployment_manager::DeploymentRecord", "deployment_manager::DeploymentCreated",
-  "deployment_manager::DeviceStatusUpdated", "deployment_manager::TargetGroupsKey",
-  "deployment_manager::TargetDevicesKey", "deployment_manager::StatusesKey",
-  "deployment_manager::RecipeDigestKey", "deployment_manager::ReceiptsKey",
-  "deployment_manager::Receipts", "deployment_manager::DeviceStatusReported",
-] as const;
+import { REQUIRED_TYPES, PROTOCOL_VERSION, MANIFEST_SCHEMA_VERSION } from "./protocol-version";
+export { REQUIRED_TYPES } from "./protocol-version";
 export interface DeploymentManifest {
   schema_version: number;
   protocol_version: number;
@@ -44,15 +39,15 @@ function endpoint(value: string) {
 }
 export function parseManifest(raw: string): DeploymentManifest {
   const m: DeploymentManifest = JSON.parse(raw);
-  if (m.schema_version !== 1 || m.protocol_version !== 1) fail("unsupported schema/protocol");
+  if (m.schema_version !== MANIFEST_SCHEMA_VERSION || m.protocol_version !== PROTOCOL_VERSION) fail("unsupported schema/protocol");
   if (!["localnet", "devnet", "testnet", "mainnet"].includes(m.network)) fail("unsupported network");
   if ((m.network === "mainnet" && m.chain_identifier !== "35834a8a") || (m.network === "testnet" && m.chain_identifier !== "4c78adac")) fail("network label/chain mismatch");
   if (!/^[0-9a-f]{8}$/.test(m.chain_identifier)) fail("invalid chain identifier");
-  if (!/^[1-9][0-9]*$/.test(m.package_version)) fail("invalid package version");
+  if (typeof m.package_version !== "string" || !/^[1-9][0-9]*$/.test(m.package_version)) fail("invalid package version");
   normalizeId(m.call_package_id);
   normalizeId(m.upgrade_cap_id);
   normalizeId(m.shared_objects.registry.id);
-  if (!/^[1-9][0-9]*$/.test(m.shared_objects.registry.initial_shared_version)) fail("invalid shared version");
+  if (typeof m.shared_objects.registry.initial_shared_version !== "string" || !/^[1-9][0-9]*$/.test(m.shared_objects.registry.initial_shared_version)) fail("invalid shared version");
   for (const name of REQUIRED_TYPES) normalizeId(m.type_origins[name]);
   const range = m.supported_clients.dapp;
   const current = version(clientPackage.version);
@@ -71,30 +66,29 @@ export function moveType(name: typeof REQUIRED_TYPES[number]): string {
   return `${normalizeId(m.type_origins[name])}::${name}`;
 }
 // Recheck before each operation: cached network proof cannot detect a devnet reset.
-export async function verifyDeployment(client: SuiClient, m = requireManifest()): Promise<void> {
-  if (await client.getChainIdentifier() !== m.chain_identifier) fail("chain identifier mismatch; network may have reset");
-  const packageObject = await client.getObject({ id: m.call_package_id, options: { showBcs: true } });
-  const raw = packageObject.data?.bcs;
-  if (raw?.dataType !== "package" || String(packageObject.data?.version) !== m.package_version) fail("package metadata mismatch");
+export async function verifyDeployment(client: SuiGrpcClient, m = requireManifest()): Promise<void> {
+  // SDK getChainIdentifier caches service info. Read it directly every time so
+  // a local/devnet reset cannot reuse an earlier proof.
+  const { response } = await client.ledgerService.getServiceInfo({});
+  if (!response.chainId) fail("missing chain identifier");
+  const digest = fromBase58(response.chainId);
+  if (digest.length !== 32 || toHex(digest.slice(0, 4)) !== m.chain_identifier) fail("chain identifier mismatch; network may have reset");
+  const registry = m.shared_objects.registry;
+  const [{ object: packageObject }, { object: cap }, { object }] = await Promise.all([
+    client.getObject({ objectId: m.call_package_id, include: { objectBcs: true } }),
+    client.getObject({ objectId: m.upgrade_cap_id, include: { content: true } }),
+    client.getObject({ objectId: registry.id }),
+  ]);
+  const raw = bcs.Object.parse(packageObject.objectBcs).data;
+  if (!raw.Package || raw.Package.version !== m.package_version || normalizeId(raw.Package.id) !== normalizeId(m.call_package_id)) fail("package metadata mismatch");
   for (const name of REQUIRED_TYPES) {
     const [module, datatype] = name.split("::");
-    const entries = raw.typeOriginTable.filter((entry) => entry.module_name === module && entry.datatype_name === datatype);
+    const entries = raw.Package.typeOriginTable.filter((entry) => entry.moduleName === module && entry.datatypeName === datatype);
     if (entries.length !== 1 || normalizeId(entries[0].package) !== normalizeId(m.type_origins[name])) fail(`type origin mismatch: ${name}`);
   }
-  const cap = await client.getObject({ id: m.upgrade_cap_id, options: { showContent: true } });
-  const capContent = cap.data?.content;
-  if (capContent?.dataType !== "moveObject") fail("missing UpgradeCap");
-  const capFields = capContent.fields;
-  if (Array.isArray(capFields) || !("package" in capFields) || !("version" in capFields)) fail("invalid UpgradeCap fields");
-  const capType = capContent.type.split("::");
-  if (capType.length !== 3 || normalizeId(capType[0]) !== normalizeId("0x2") || capType.slice(1).join("::") !== "package::UpgradeCap" ||
-      normalizeId(String(capFields.package)) !== normalizeId(m.call_package_id) || String(capFields.version) !== m.package_version) fail("UpgradeCap does not identify latest call package/version");
-  const registry = m.shared_objects.registry;
-  const object = await client.getObject({ id: registry.id, options: { showContent: true, showOwner: true } });
-  const content = object.data?.content;
-  const owner = object.data?.owner;
+  if (normalizeStructTag(cap.type) !== normalizeStructTag("0x2::package::UpgradeCap")) fail("invalid UpgradeCap type");
+  const capFields = UpgradeCapBcs.parse(cap.content);
+  if (normalizeId(capFields.package) !== normalizeId(m.call_package_id) || capFields.version !== m.package_version) fail("UpgradeCap does not identify latest call package/version");
   const expected = `${normalizeId(m.type_origins["device_registry::DeviceRegistry"])}::device_registry::DeviceRegistry`;
-  const parts = content?.dataType === "moveObject" ? content.type.split("::") : [];
-  if (parts.length !== 3 || `${normalizeId(parts[0])}::${parts.slice(1).join("::")}` !== expected ||
-      typeof owner !== "object" || owner === null || !("Shared" in owner) || String(owner.Shared.initial_shared_version) !== registry.initial_shared_version) fail("registry type/shared version mismatch");
+  if (normalizeStructTag(object.type) !== expected || object.owner.$kind !== "Shared" || object.owner.Shared.initialSharedVersion !== registry.initial_shared_version) fail("registry type/shared version mismatch");
 }

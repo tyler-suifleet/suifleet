@@ -14,7 +14,7 @@ def fixture():
         rpc_url="http://127.0.0.1:9000", call_package_id=dm.object_id("0x3"), upgrade_cap_id=dm.object_id("0xc0"), package_version="3",
         type_origins={name: dm.object_id("0x2" if name.endswith("RecipeDigestKey") else "0x3" if name.endswith("DeviceAddressKey") else "0x1") for name in dm.REQUIRED_TYPES},
         shared_objects={"registry": {"id":dm.object_id("0xbe"), "initial_shared_version":"1"}},
-        supported_clients={"dapp": {"min":"0.0.1", "max_exclusive":"0.0.2"}, "edge": {"min":"0.1.0", "max_exclusive":"0.1.1"}},
+        supported_clients={"dapp": {"min":"0.0.2", "max_exclusive":"0.0.3"}, "edge": {"min":"0.1.0", "max_exclusive":"0.1.1"}},
         walrus={"publisher_url":"https://publisher.example", "aggregator_url":"https://aggregator.example"})
 
 

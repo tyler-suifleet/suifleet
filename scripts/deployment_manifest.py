@@ -7,17 +7,9 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.parse import urlparse
 
-REQUIRED_TYPES = (
-    "device_registry::DeviceRegistry", "device_registry::Device",
-    "device_group::DeviceGroup", "device_group::GroupCreated",
-    "device_cap::DeviceCap", "device_cap::DeviceAddressKey",
-    "deployment_manager::DeploymentRecord", "deployment_manager::DeploymentCreated",
-    "deployment_manager::DeviceStatusUpdated", "deployment_manager::TargetGroupsKey",
-    "deployment_manager::TargetDevicesKey", "deployment_manager::StatusesKey",
-    "deployment_manager::RecipeDigestKey", "deployment_manager::ReceiptsKey",
-    "deployment_manager::Receipts", "deployment_manager::DeviceStatusReported",
-)
-CLIENT_VERSIONS = {"dapp": "0.0.1", "edge": "0.1.0"}
+_PROTOCOL = json.loads((Path(__file__).resolve().parents[1] / "interfaces/fleet-v1.json").read_text())
+REQUIRED_TYPES = tuple(_PROTOCOL["required_type_origins"])
+CLIENT_VERSIONS = {"dapp": "0.0.2", "edge": "0.1.0"}
 
 
 def object_id(value):
@@ -42,7 +34,7 @@ def endpoint(value):
 
 
 def validate(manifest):
-    if type(manifest["schema_version"]) is not int or type(manifest["protocol_version"]) is not int or manifest["schema_version"] != 1 or manifest["protocol_version"] != 1:
+    if type(manifest["schema_version"]) is not int or type(manifest["protocol_version"]) is not int or manifest["schema_version"] != _PROTOCOL["manifest_schema_version"] or manifest["protocol_version"] != _PROTOCOL["protocol_version"]:
         raise ValueError("unsupported manifest schema/protocol")
     if manifest["network"] not in ("localnet", "devnet", "testnet", "mainnet"):
         raise ValueError("unsupported network")
@@ -126,12 +118,12 @@ def resolve(args, call=rpc):
     package = call(args.rpc, "sui_getObject", [package_id, {"showBcs": True}])
     table = origins(package)
     registry = call(args.rpc, "sui_getObject", [object_id(args.registry), {"showContent": True, "showOwner": True}])["data"]
-    manifest = dict(schema_version=1, protocol_version=1, network=args.network,
+    manifest = dict(schema_version=_PROTOCOL["manifest_schema_version"], protocol_version=_PROTOCOL["protocol_version"], network=args.network,
         chain_identifier=args.chain_identifier, rpc_url=args.rpc,
         call_package_id=package_id, upgrade_cap_id=object_id(args.upgrade_cap), package_version=str(package["data"]["version"]),
         type_origins={name: table[name] for name in REQUIRED_TYPES},
         shared_objects={"registry": {"id": object_id(args.registry), "initial_shared_version": str(registry["owner"]["Shared"]["initial_shared_version"])}},
-        supported_clients={"dapp": {"min": "0.0.1", "max_exclusive": "0.0.2"}, "edge": {"min": "0.1.0", "max_exclusive": "0.1.1"}},
+        supported_clients={"dapp": {"min": "0.0.2", "max_exclusive": "0.0.3"}, "edge": {"min": "0.1.0", "max_exclusive": "0.1.1"}},
         walrus={"publisher_url": args.publisher, "aggregator_url": args.aggregator})
     return verify(manifest, call)
 

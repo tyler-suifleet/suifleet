@@ -41,14 +41,21 @@ PACKAGE_REFERENCE = re.compile(r"(?:\}|[\"'`])::" + MODULE_NAME)
 # `"m::N"` or `"m::N<...>"`: a type named without its (per-type origin) address.
 BARE_REFERENCE = re.compile(r"[\"'`]" + MODULE_NAME + r"(?=[\"'`<])")
 MOVE_CALL = re.compile(r"moveCall\(\{\s*target:\s*`[^`]*::([a-z_0-9]+)::([a-z_0-9]+)`\s*,\s*arguments:\s*\[")
-RUST_FUNCTION = re.compile(r'\bfunction\s*=\s*"([a-z_0-9]+)"')
-RUST_MODULE = re.compile(r'"([a-z_0-9]+)",\s*function\s*,')
+# Daemon calls: `function = "name"` or `function: "name"`, in the module named
+# by `"module", function,` (JSON-RPC era) or `const ..._MODULE: &str = "module";`.
+RUST_FUNCTION = re.compile(r'\bfunction\s*[:=]\s*"([a-z_0-9]+)"')
+RUST_MODULE = re.compile(r'"([a-z_0-9]+)",\s*function\s*,|\bconst\s+\w*MODULE\w*\s*:\s*&str\s*=\s*"([a-z_0-9]+)"')
 
 
 def summarize(package, summary_dir):
     """Return this package's module summaries and the dependency module names."""
     subprocess.run(["sui", "move", "summary", "--path", str(package), "--output-directory", str(summary_dir)],
                    check=True, capture_output=True, text=True)
+    return read_summary(summary_dir)
+
+
+def read_summary(summary_dir):
+    """Resolve the package name from compiler address metadata."""
     addresses = json.loads((summary_dir / "address_mapping.json").read_text())
     package_name = next(name for name, address in addresses.items() if int(address, 16) == 0)
     modules = {path.stem: json.loads(path.read_text()) for path in (summary_dir / package_name).glob("*.json")}
@@ -123,7 +130,7 @@ def check(modules, framework=frozenset(), sources=None):
                 errors.append(f"{rel}:{line(match.start())}: {module}::{name} takes {expected} arguments; "
                               f"client passes {actual}")
 
-        rust_modules = RUST_MODULE.findall(text)
+        rust_modules = [old or new for old, new in RUST_MODULE.findall(text)]
         for match in RUST_FUNCTION.finditer(text):
             checked += 1
             name = match.group(1)

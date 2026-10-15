@@ -2,11 +2,11 @@
 
 import { NETWORK } from "@/lib/constants";
 import { useQuery } from "@tanstack/react-query";
-import { useSuiClient, useCurrentAccount } from "@mysten/dapp-kit";
+import { useCurrentClient, useCurrentAccount } from "@mysten/dapp-kit-react";
 import { fetchDevices, type DeviceObject } from "@/lib/sui";
 
 export function useDevices() {
-  const client = useSuiClient();
+  const client = useCurrentClient();
   const account = useCurrentAccount();
 
   return useQuery<DeviceObject[]>({

@@ -1,3 +1,4 @@
+import { STATUS } from "./protocol-version";
 import { MANIFEST, moveType } from "./deployment-manifest";
 
 export const PACKAGE_ID = MANIFEST?.call_package_id ?? "";
@@ -20,12 +21,12 @@ export const WALRUS_MAX_COST_FROST = process.env.NEXT_PUBLIC_WALRUS_MAX_COST_FRO
 
 export const STATUS_LABELS: Record<number, string> = {
   0: "Pending",
-  1: "Applied",
-  2: "Failed",
+  [STATUS.applied]: "Applied",
+  [STATUS.failed]: "Failed",
 };
 
 export const STATUS_COLORS: Record<number, string> = {
   0: "bg-yellow-100 text-yellow-800",
-  1: "bg-green-100 text-green-800",
-  2: "bg-red-100 text-red-800",
+  [STATUS.applied]: "bg-green-100 text-green-800",
+  [STATUS.failed]: "bg-red-100 text-red-800",
 };

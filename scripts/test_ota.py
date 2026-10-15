@@ -1,8 +1,16 @@
 #!/usr/bin/env python3
 """Exercise the real daemon against a local chain/Walrus simulator, without keys or gas.
 This verifies integration behavior, not public-network compatibility or hardware OTA.
+
+The daemon speaks Sui gRPC v2. The simulator below keeps scenario state and
+assertions in Python; suifleet-edge/examples/grpc_sim_shim.rs serves gRPC in
+front of it (see start_grpc). Real-chain behavior is covered separately by
+scripts/test_daemon_localnet.py.
 """
 from deployment_manifest import REQUIRED_TYPES, object_id
+from pathlib import Path
+import json
+_PROTOCOL_RECIPE_VERSION = json.loads((Path(__file__).resolve().parents[1] / "interfaces/recipe.schema.json").read_text())["properties"]["schemaVersion"]["const"]
 import argparse
 import base64
 import hashlib
@@ -30,9 +38,24 @@ CAP = "0xca"
 OPERATOR = "0xad"
 GROUP = "0x10"
 ADDRESS = "0xa0ccc8bcc83f6c628340134f8546a21e0618fd1aaa02432bba454c4a2c2233da"
-SIGNATURE = "AGe7jkxf/S/LN1HBGv3Lbbhb+4FzdWYtt+XlzfsikT+N6RHAAxUZBeipd/iHLQofYPVZqPaSLt4WQTkmA1YnEgXqSmxj4pxSCr71UHsTLsX5lUd2rr6+e5JCHuppFEbSLA=="
+SHIM = Path(__file__).resolve().parents[1] / "suifleet-edge/target/debug/examples/grpc_sim_shim"
 ARTIFACT = b"test OTA artifact, not a recipe"
 HASH = hashlib.sha256(ARTIFACT).hexdigest()
+
+
+def start_grpc(simulator_url):
+    """Start the gRPC shim in front of a simulator; returns (process, gRPC URL)."""
+    process = subprocess.Popen([str(SHIM), simulator_url], stdout=subprocess.PIPE, text=True)
+    line = process.stdout.readline()
+    if not line.startswith("listening "):
+        process.kill()
+        raise AssertionError(f"gRPC shim did not start: {line!r}")
+    return process, f"http://127.0.0.1:{int(line.split()[1])}"
+
+
+def scanned(count):
+    """The journal cursor after the daemon has read the first `count` events."""
+    return {"after": base64.b64encode(count.to_bytes(8, "little")).decode()}
 
 
 def wait_for(condition, message, process=None):
@@ -56,6 +79,7 @@ class Simulator:
         self.allow_reports = False
         self.fail_execution = True
         self.deleted = set()
+        self.schema_fields = {}
         self.downloads = []
         self.built = []
         self.errors = []
@@ -68,7 +92,7 @@ class Simulator:
         event = dict(deployment_id=id, component_name=f"app-{id}", version="1.0.0",
             recipe_blob_id=f"recipe-{id}", artifact_sha256=digest,
             target_groups=groups or [], target_devices=[DEVICE] if direct else [], creator=creator)
-        recipe = dict(schemaVersion="1.0", componentName=event["component_name"], componentVersion="1.0.0",
+        recipe = dict(schemaVersion=_PROTOCOL_RECIPE_VERSION, componentName=event["component_name"], componentVersion="1.0.0",
             artifactBlobId="expired" if expired else "artifact", artifactSha256=digest, lifecycle={"run": "sleep 10"} if run else {}, configuration={})
         self.recipes[event["recipe_blob_id"]] = recipe
         self.events.append(dict(id={"txDigest":f"event-{len(self.events)}", "eventSeq":"0"}, parsedJson=event))
@@ -88,7 +112,10 @@ class Simulator:
             type, fields, owner = "device_group::DeviceGroup", {"admin":OPERATOR,"device_ids":[DEVICE]}, None
         else:
             event = next(e["parsedJson"] for e in self.events if e["parsedJson"]["deployment_id"] == id)
-            type, fields, owner = "deployment_manager::DeploymentRecord", {"creator":event["creator"]}, None
+            type, fields, owner = "deployment_manager::DeploymentRecord", {"creator":event["creator"],"schema_version":"1"}, None
+        fields.update(self.schema_fields.get(id, {}))
+        if fields.get("schema_version") is None:
+            fields.pop("schema_version", None)
         return {"data":{"objectId":id,"owner":{"AddressOwner":owner} if owner else {"Shared":{"initial_shared_version":"1"}},
             "content":{"type":f"{TYPE_ORIGINS[type]}::{type}","fields":fields}}}
 
@@ -96,6 +123,18 @@ class Simulator:
         if method == "sui_getChainIdentifier":
             self.chain_checks += 1
             return self.chain
+        # Simulator views used by the gRPC shim.
+        if method == "shim_height":
+            return len(self.events)
+        if method == "shim_parents":
+            return [CAP] + [e["parsedJson"]["deployment_id"] for e in self.events]
+        if method == "shim_keyTypes":
+            return [f"{TYPE_ORIGINS[name]}::{name}" for name in (
+                "device_cap::DeviceAddressKey", "deployment_manager::RecipeDigestKey",
+                "deployment_manager::TargetDevicesKey", "deployment_manager::TargetGroupsKey")]
+        if method == "shim_events":
+            assert params[0] == f"{ORIGIN}::deployment_manager::DeploymentCreated"
+            return [e["parsedJson"] for e in self.events]
         if method == "sui_getObject" and params[0] == PACKAGE:
             return {"data": {"version": "3", "bcs": {"dataType": "package", "typeOriginTable": [
                 {"module_name": name.split("::")[0], "datatype_name": name.split("::")[1], "package": origin}
@@ -137,7 +176,8 @@ class Simulator:
             self.built.append((args[0], int(args[-1])))
             return {"txBytes":base64.b64encode(bytes([1,2,3,4])).decode()}
         if method == "sui_executeTransactionBlock":
-            assert params[1] == [SIGNATURE], "signature differs from independent Mysten SDK vector"
+            # The shim verified the user signature with Mysten's sui-crypto.
+            assert params[1] == [f"verified:{ADDRESS}"], params[1]
             if self.fail_execution:
                 self.fail_execution = False
                 return {"digest":"failed-digest", "effects":{"status":{"status":"failure","error":"simulated abort"}}}
@@ -198,6 +238,7 @@ def run(binary, firmware_helper=False, daemon_user=None):
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     process = None
+    shim, rpc_url = start_grpc(f"http://127.0.0.1:{server.server_port}")
     try:
         with tempfile.TemporaryDirectory(prefix="suifleet-ota-") as temporary:
             root = Path(temporary)
@@ -216,7 +257,7 @@ def run(binary, firmware_helper=False, daemon_user=None):
             url = f"http://127.0.0.1:{server.server_port}"
             command = f"{sys.executable} {updater}"
             manifest = dict(schema_version=1, protocol_version=1, network="localnet", chain_identifier=sim.chain,
-                rpc_url=url, call_package_id=PACKAGE, upgrade_cap_id=UPGRADE_CAP, package_version="3", type_origins=TYPE_ORIGINS,
+                rpc_url=rpc_url, call_package_id=PACKAGE, upgrade_cap_id=UPGRADE_CAP, package_version="3", type_origins=TYPE_ORIGINS,
                 shared_objects={"registry": {"id": REGISTRY, "initial_shared_version": "1"}},
                 supported_clients={"dapp": {"min":"0.0.1", "max_exclusive":"0.1.0"}, "edge": {"min":"0.1.0", "max_exclusive":"0.2.0"}},
                 walrus={"publisher_url": url, "aggregator_url": url})
@@ -266,6 +307,10 @@ def run(binary, firmware_helper=False, daemon_user=None):
                 process = start()
                 wait_for(lambda: state().get("initialized"), "enrollment did not establish cursor", process)
                 assert count() == 0
+                # Enrollment stores a checkpoint; the first scan rewrites the same
+                # position as a resume cursor. Compare against the latter.
+                wait_for(lambda: "after" in state().get("cursor", {}), "first event scan did not complete", process)
+                baseline = state()["cursor"]
                 # A chain reset after enrollment must stop all downloads and cursor changes.
                 sim.chain = "deadbeef"
                 # A poll that passed its chain check before the reset may still be
@@ -275,15 +320,22 @@ def run(binary, firmware_helper=False, daemon_user=None):
                 sim.add("0x101")
                 time.sleep(2.2)
                 assert count() == 0 and not sim.downloads
-                assert state()["cursor"] == sim.events[0]["id"]
-                sim.chain = manifest["chain_identifier"]
+                assert state()["cursor"] == baseline
+                # Stale the package before restoring the chain, so no poll sees a
+                # valid chain with the current package in between.
                 sim.latest_package = object_id("0x4")
+                sim.chain = manifest["chain_identifier"]
                 time.sleep(2.2)
                 assert count() == 0 and not sim.downloads
-                assert state()["cursor"] == sim.events[0]["id"]
+                assert state()["cursor"] == baseline
                 sim.latest_package = PACKAGE
                 sim.add("0x102", bad_hash=True)
                 sim.add("0x103", creator="0xbad")
+                # Unsupported records must fail individually, with no downloads,
+                # and must not poison discovery of the valid group deployment.
+                for id, version in (("0x10b", "2"), ("0x10c", None), ("0x10d", "invalid")):
+                    sim.schema_fields[id] = {"schema_version": version}
+                    sim.add(id)
                 sim.add("0x104", groups=[GROUP], direct=False)
                 sim.add("0x105", run=True)
                 sim.add("0x109") # Tampered recipe must never reach the updater.
@@ -292,11 +344,16 @@ def run(binary, firmware_helper=False, daemon_user=None):
                 sim.add("0x106")
                 sim.deleted.add("0x999")
                 sim.add("0x107", groups=["0x999"], direct=False)
-                wait_for(lambda: len(state().get("deployments", {})) == 6 and state().get("cursor") == sim.events[-1]["id"], "paged events were not processed", process)
+                wait_for(lambda: len(state().get("deployments", {})) == 9 and state().get("cursor") == scanned(len(sim.events)), "paged events were not processed", process)
                 assert count() == 2, "untrusted/failed/unsupported/deleted update invoked the updater"
                 outcomes = state()["deployments"]
-                assert {id: outcome["status"] for id, outcome in outcomes.items()} == {"0x101":1,"0x102":2,"0x104":1,"0x105":2,"0x109":2,"0x10a":2}
+                assert {id: outcome["status"] for id, outcome in outcomes.items()} == {"0x101":1,"0x102":2,"0x104":1,"0x105":2,"0x109":2,"0x10a":2,"0x10b":2,"0x10c":2,"0x10d":2}
                 assert "unavailable or expired" in outcomes["0x10a"]["error"], outcomes["0x10a"]
+                for id in ("0x10b", "0x10c", "0x10d"):
+                    assert "unsupported DeploymentRecord schema version" in outcomes[id]["error"], outcomes[id]
+                    assert outcomes[id].get("firmware_request") is None
+                    assert f"/v1/blobs/recipe-{id}" not in sim.downloads
+                    assert not (root / "state" / "artifacts" / hashlib.sha256(id.encode()).hexdigest()).exists()
                 assert sim.ranges[:2] == [0, 10], f"interrupted transfer did not resume: {sim.ranges}"
                 assert not any(o["reported"] for o in outcomes.values())
                 stop(process)
@@ -304,14 +361,16 @@ def run(binary, firmware_helper=False, daemon_user=None):
                 # A crash after journaling outcomes but before the cursor is saved
                 # redelivers processed events; the journal alone must prevent reapply.
                 journal = state()
-                journal["cursor"] = sim.events[0]["id"]
+                # Rewind with the JSON-RPC-era cursor form: migration must resume
+                # exactly after event 0 (redelivering the rest, deduplicated).
+                journal["cursor"] = {"txDigest": "event-0", "eventSeq": "0"}
                 (root / "state" / "state.json").write_text(json.dumps(journal))
                 sim.add("0x108") # Deployment created while the device is offline.
                 sim.allow_reports = True
                 process = start()
-                wait_for(lambda: len(state().get("deployments", {})) == 7 and all(o["reported"] for o in state()["deployments"].values()), "restart failed to catch up and retry reports", process)
+                wait_for(lambda: len(state().get("deployments", {})) == 10 and all(o["reported"] for o in state()["deployments"].values()), "restart failed to catch up and retry reports", process)
                 assert count() == 3, "restart duplicated an already-applied deployment"
-                assert len(sim.reports) == 7
+                assert len(sim.reports) == 10
                 assert not list((root / "state" / "artifacts").iterdir()), "artifact cache not cleaned"
                 assert all(json.loads(line) == ARTIFACT.decode() for line in applied.read_text().splitlines())
                 assert "/v1/blobs/recipe-0x101" in sim.downloads and "/v1/blobs/artifact" in sim.downloads
@@ -327,12 +386,15 @@ def run(binary, firmware_helper=False, daemon_user=None):
             print("PASS: mixed per-type origins and runtime chain-reset/stale-call-package rejection")
             print("PASS: safe enrollment; paginated direct/group deployment and recipe-to-artifact flow")
             print("PASS: artifact/recipe hash mismatch, unsupported lifecycle, untrusted creator and deleted targets rejected")
+            print("PASS: future/missing/malformed deployment schemas failed without downloads; later v1 applied and cursor advanced")
             print("PASS: offline catch-up, restart deduplication, failed execution and durable report retry")
             print("PASS: interrupted artifact transfer resumed; expired blob reported Failed; artifact cache emptied")
     finally:
         if process and process.poll() is None:
             process.kill()
             process.wait()
+        shim.kill()
+        shim.wait()
         server.shutdown()
         server.server_close()
 

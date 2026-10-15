@@ -18,15 +18,15 @@ Do not add model names as authors, committers, `Co-authored-by` trailers, sign-o
 
 SuiFleet targets functional AWS Greengrass OTA/fleet-management parity using Sui Move contracts, Walrus storage, a Next.js wallet app and a Rust Linux daemon. It currently implements a locally tested one-shot OTA foundation, not full Greengrass parity or a production release.
 
-Read [the parity audit](docs/GREENGRASS_PARITY_AUDIT.md), [validation evidence](docs/VALIDATION.md), [the operational runbook](docs/OPERATIONS.md) and [tracking workflow](docs/ISSUE_TRACKING.md) as relevant. Actual code and current test results take precedence over historical checklists. The [capability-to-ticket map](docs/GREENGRASS_TICKET_COVERAGE.md) tracks the audited scope; [Raspberry Pi 3 Model B+ acceptance](docs/RASPBERRY_PI_TEST_PLAN.md) requires a BitBake-built bootable image with the client included, not only SSH deployment, and is specified in SF-029/030/031 and has not yet been implemented or run.
+Read [the parity audit](docs/GREENGRASS_PARITY_AUDIT.md), [validation evidence](docs/VALIDATION.md), [the operational runbook](docs/OPERATIONS.md) and [tracking workflow](docs/ISSUE_TRACKING.md) as relevant. Actual code and current test results take precedence over historical checklists. The [capability-to-ticket map](docs/GREENGRASS_TICKET_COVERAGE.md) tracks the audited scope; [Raspberry Pi 3 Model B+ acceptance](docs/RASPBERRY_PI_TEST_PLAN.md) requires a BitBake-built bootable image with the client included, not only SSH deployment, and is specified in SF-029/030/031. SF-030 supplies the tested component/BitBake updater recipe; physical image and Pi acceptance remain SF-029/031.
 
 Yocto packaging/first boot is described in [YOCTO_PACKAGING.md](docs/YOCTO_PACKAGING.md). Use the pinned Scarthgap/Rust-mixin profiles under `kas/`, preserve the fixed daemon source revision and regenerate the crate include/lock digest together when updating it. Provision device identities only at runtime; package/image builds must contain no device keys, enrollment configuration or journals. QEMU test profiles enable passwordless console login and are for disposable validation only. Record physical Pi acceptance separately.
 
 Critical known gaps:
 
-- Both clients use deprecated Sui JSON-RPC. Migrate wallet library and TypeScript SDK together; migrate the daemon reader, transaction builder and executor too.
-- Existing types keep their introduction-package origin; types introduced by later upgrades have later origins. The code still wrongly uses the first package ID for every key type, including newly added `RecipeDigestKey` and `DeviceAddressKey`.
-- Older Sui package versions remain callable. New signer/target checks alone do not prove security after upgrading an existing deployment. Old entry points must be unable to modify authoritative new state.
+- The frontend uses pinned Sui SDK 2.36.0 and dApp Kit React 2.1.40 with gRPC-Web; see [frontend compatibility and wallet acceptance](docs/FRONTEND_CLIENT.md). The daemon uses the supported gRPC v2 API through Mysten's Rust SDK (SF-004): event discovery, reads, local transaction building with a verify-before-sign check, and effects-checked execution; it needs a node serving indexed `ListEvents` (Sui ≥ 1.81 in our tests). The publishing resolver still uses deprecated JSON-RPC (SF-006). Real extension-wallet acceptance remains required for SF-003.
+- Existing types keep their introduction-package origin; types introduced by later upgrades have later origins. The implemented deployment manifest records each origin, including `RecipeDigestKey`, `DeviceAddressKey` and authoritative receipts. Preserve this boundary during client/API changes.
+- Older Sui package versions remain callable. SF-001 introduced isolated authoritative receipts and local-chain old-package attack/migration tests; public-network upgrade acceptance remains SF-010. Never trust legacy StatusesKey or assume an old package is disabled.
 - Current unit tests and the HTTP simulator do not establish real chain upgrade compatibility, live wallet behavior, Walrus certification, Yocto builds or hardware OTA health.
 
 ## Infrastructure and ownership
@@ -34,6 +34,7 @@ Critical known gaps:
 | Path | Responsibility |
 |---|---|
 | `contracts/sources`, `contracts/tests` | Move devices/capabilities/groups/deployments and contract tests |
+| `interfaces`, `scripts/generate_interfaces.py` | Reviewed ABI/recipe schemas and generated TypeScript/Rust interfaces; see [shared interfaces](docs/SHARED_INTERFACES.md) |
 | `dapp/src` | Wallet UI, transaction builders, queries and Walrus uploads |
 | `suifleet-edge/src` | Identity, chain adapter, recipes, updater and durable journal |
 | `suifleet-edge/meta-suifleet` | Yocto recipe and systemd service |
@@ -57,7 +58,7 @@ make edge-build
 make dapp-build
 ```
 
-`make shell` opens the container. Make detects `INSIDE_DEV_CONTAINER=1`; run the same targets there without nested Docker. The Dockerfile pins the Ubuntu base digest, Sui `testnet-v1.71.1` (checksum-verified), Rust `1.87.0`, Node `22.22.2` and pnpm `11.0.8`; these are the existing baseline, not a claim of compatibility with current public networks. Use locked dependencies. Deliberate dependency upgrades must update lockfiles and compatibility tests together.
+`make shell` opens the container. Make detects `INSIDE_DEV_CONTAINER=1`; run the same targets there without nested Docker. The Dockerfile pins the Ubuntu base digest, Sui `testnet-v1.81.1` (checksum-verified; same build as mainnet 1.81.1), Rust `1.94.0` (the lowest Rust in the supported Yocto LTS releases), Node `22.22.2` and pnpm `11.0.8`; these are the existing baseline, not a claim of compatibility with current public networks. Use locked dependencies. Deliberate dependency upgrades must update lockfiles and compatibility tests together.
 
 Do not run `make down` casually: it deletes named volumes, including Sui wallet configuration. Do not reset, clean, overwrite, stage or commit unrelated work. Inspect `git status` before editing; existing work may belong to another agent or the user.
 
@@ -90,8 +91,8 @@ Do not replace tests with type casts, ignored failures or mocked success. A retu
 
 ## Keeping clients and contracts synchronized
 
-- Maintain one versioned deployment manifest per network with chain identity, call package ID, per-type origins, shared object IDs, protocol/schema versions and supported client ranges. This manifest is planned, not currently implemented.
-- Generate or centrally define Move calls/event/recipe schemas and test both clients against actual compiled interfaces.
+- Maintain one versioned deployment manifest per network with chain identity, call package ID, per-type origins, shared object IDs, protocol/schema versions and supported client ranges. This manifest is implemented; see [DEPLOYMENT_MANIFEST.md](docs/DEPLOYMENT_MANIFEST.md).
+- Use `make generate-interfaces` and `make check-interfaces` for the reviewed ABI and recipe schemas in `interfaces/`; follow [SHARED_INTERFACES.md](docs/SHARED_INTERFACES.md).
 - Preserve existing public function signatures, layouts and abilities for a compatible upgrade; use additive APIs and explicit migrations where needed.
 - Do not assume an initializer reruns, objects migrate automatically, or an old package is disabled.
 - Test mixed versions, missing fields, stale IDs, revoked/legacy caps, ownership/membership changes and attempts through old entry points.

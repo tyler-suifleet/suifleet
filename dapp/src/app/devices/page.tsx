@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useCurrentAccount } from "@mysten/dapp-kit";
+import { useCurrentAccount } from "@mysten/dapp-kit-react";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import { useDevices } from "@/hooks/useDevices";
 import { useGroups } from "@/hooks/useGroups";

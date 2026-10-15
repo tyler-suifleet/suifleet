@@ -75,7 +75,7 @@ impl Journal {
             if outcome.status.is_some() || outcome.indeterminate || pending(id, outcome) {
                 continue;
             }
-            outcome.status = Some(2);
+            outcome.status = Some(crate::protocol::STATUS_FAILED);
             outcome.error = Some(
                 "daemon interrupted during apply; inspect device before explicitly redeploying"
                     .into(),
@@ -101,6 +101,18 @@ impl Journal {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Reopen after the previous journal was dropped. A child forked by a
+    /// concurrently running test can hold the inherited lock until it execs.
+    fn reopen(path: &Path) -> Journal {
+        for _ in 0..200 {
+            if let Ok(journal) = Journal::open(path, "network/device".into()) {
+                return journal;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        Journal::open(path, "network/device".into()).unwrap()
+    }
     #[test]
     fn restart_retains_cursor_and_does_not_reapply_uncertain_update() {
         let path = std::env::temp_dir().join(format!(
@@ -129,7 +141,7 @@ mod tests {
             journal.save().unwrap();
         }
         {
-            let mut journal = Journal::open(&path, "network/device".into()).unwrap();
+            let mut journal = reopen(&path);
             assert!(journal.state.cursor.is_some());
             assert_eq!(journal.state.deployments["0x1"].status, None, "open alone never settles");
             let mut asked = Vec::new();
@@ -139,6 +151,7 @@ mod tests {
                     outcome.firmware_request.as_deref() == Some("request-0x2")
                 })
                 .unwrap();
+            asked.sort();
             assert_eq!(asked, ["0x1", "0x2", "0x4"], "indeterminate outcomes are never re-judged");
             let states: Vec<_> = ["0x1", "0x2", "0x3", "0x4"]
                 .iter()
@@ -148,7 +161,7 @@ mod tests {
             assert!(!journal.state.deployments["0x1"].reported);
         }
         {
-            let journal = Journal::open(&path, "network/device".into()).unwrap();
+            let journal = reopen(&path);
             assert_eq!(journal.state.deployments["0x1"].status, Some(2), "settled outcome is durable");
             assert!(journal.state.deployments["0x3"].indeterminate);
         }
