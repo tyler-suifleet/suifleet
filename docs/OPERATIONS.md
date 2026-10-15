@@ -57,6 +57,10 @@ If Rust files change, run `cargo fmt --manifest-path suifleet-edge/Cargo.toml` w
 
 ## Continuous integration
 
+Move-specific compiler/linter controls, the source audit and the unresolved
+release-framework formal-verification blocker are recorded in
+[Move security](MOVE_SECURITY.md). Compiler success is not a security proof.
+
 `.github/workflows/ci.yml` runs on every pull request and push to `main`. It builds the dev image from the pinned Dockerfile and runs `make ci` inside it: frozen pnpm install, Move tests, drift-gate regression tests, interface drift check, Rust tests, the OTA simulator, the test-component checks, typecheck, static build and `git diff --check`. Each step's output and `toolchain-versions.txt` are uploaded as the `ci-logs` artifact (14 days). The job has a read-only token and no secrets; it never publishes, spends gas or touches hardware.
 
 All toolchain inputs are Dockerfile build arguments: base image digest, Sui release and SHA-256, Rust, Node package version and pnpm. Bump them deliberately, in their own commit, together with lockfile and compatibility-test updates; CI then runs against the new image. Workflow actions are pinned to commit SHAs.
