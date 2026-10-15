@@ -523,5 +523,153 @@
     "testnet_offline": "11 passed",
     "coordinator_offline": "59 passed",
     "actionlint": "1.7.7 passed"
+  },
+  "agent_independent_report_effects": {
+    "started": "2026-10-15T05:18:55Z",
+    "network": "testnet",
+    "transactions": [
+      {
+        "label": "create 3 deployments via head",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "Gi7i66cWAV55A5D1xhFe9x4GBPqEgnE1AjS1rRNf5xkd",
+        "gas_mist": 38072800,
+        "allowance_used_mist": 58789988
+      },
+      {
+        "label": "create 1 deployment via base",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "8vx9cUMD3W5BDsHRtEZSKD2yVWj37kD2mBz9HQ4qupNR",
+        "gas_mist": 13357600,
+        "allowance_used_mist": 72147588
+      },
+      {
+        "label": "delete 4 deployments",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "Gb8VEhJvbgj1C1zXey67WDfU1rqXLXjiq2YeVQmT8zk3",
+        "gas_mist": 0,
+        "allowance_used_mist": 72147588
+      }
+    ],
+    "checks": [
+      "reused fixture 45c90c60c2c5\u2026: base 0xfdcc063658\u2026, head 0xe9b3b00b3c\u2026 (re-verified on chain; no package storage spent)",
+      "head package 0xe9b3b00b3c3f05e4ae95361d5aee37a25a0debdce9bf2c828e99e6d6e57704c5 (package version 2); manifest verified over gRPC",
+      "head-package deployment to the device: applied, receipt Applied on chain",
+      "head-package deployment to the pre-upgrade group: applied via report_status_for_group",
+      "deployment created through the OLD package's entry point: applied and receipted (mixed versions)",
+      "injected health failure reported Failed on chain",
+      "independent gRPC reader confirmed all four receipt-writing transaction effects",
+      "deployments deleted (storage rebate)"
+    ],
+    "chain": "4c78adac",
+    "rpc": "https://fullnode.testnet.sui.io:443",
+    "operator": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+    "sui": "sui 1.81.1-e04cf9aa915c",
+    "head": "e98a24e8167e352b4451e3236a1264933cd113e1",
+    "base": "14b351b9389c058117297343ced34f262db6f3c3",
+    "start_balance_mist": 1155047888,
+    "base_package": "0xfdcc063658957047823af7db010d5c28c93d6afe1e005bbccfdc286e2d977c48",
+    "head_package": "0xe9b3b00b3c3f05e4ae95361d5aee37a25a0debdce9bf2c828e99e6d6e57704c5",
+    "registry": "0x9eee9fb2e0669573eef110932ea6857fab5b9b55c6655671e81e6536cf76072f",
+    "upgrade_cap": "0x7d37b204ca84346bcadf0669378343c11857a6435452f0efb7f083e326855999",
+    "fixture": "45c90c60c2c5095491a764c4..bde66f056256536cc93d186f",
+    "type_origins": {
+      "device_registry::DeviceRegistry": "0xfdcc063658957047823af7db010d5c28c93d6afe1e005bbccfdc286e2d977c48",
+      "device_registry::Device": "0xfdcc063658957047823af7db010d5c28c93d6afe1e005bbccfdc286e2d977c48",
+      "device_group::DeviceGroup": "0xfdcc063658957047823af7db010d5c28c93d6afe1e005bbccfdc286e2d977c48",
+      "device_group::GroupCreated": "0xfdcc063658957047823af7db010d5c28c93d6afe1e005bbccfdc286e2d977c48",
+      "device_cap::DeviceCap": "0xfdcc063658957047823af7db010d5c28c93d6afe1e005bbccfdc286e2d977c48",
+      "device_cap::DeviceAddressKey": "0xfdcc063658957047823af7db010d5c28c93d6afe1e005bbccfdc286e2d977c48",
+      "deployment_manager::DeploymentRecord": "0xfdcc063658957047823af7db010d5c28c93d6afe1e005bbccfdc286e2d977c48",
+      "deployment_manager::DeploymentCreated": "0xfdcc063658957047823af7db010d5c28c93d6afe1e005bbccfdc286e2d977c48",
+      "deployment_manager::DeviceStatusUpdated": "0xfdcc063658957047823af7db010d5c28c93d6afe1e005bbccfdc286e2d977c48",
+      "deployment_manager::TargetGroupsKey": "0xfdcc063658957047823af7db010d5c28c93d6afe1e005bbccfdc286e2d977c48",
+      "deployment_manager::TargetDevicesKey": "0xfdcc063658957047823af7db010d5c28c93d6afe1e005bbccfdc286e2d977c48",
+      "deployment_manager::StatusesKey": "0xfdcc063658957047823af7db010d5c28c93d6afe1e005bbccfdc286e2d977c48",
+      "deployment_manager::RecipeDigestKey": "0xfdcc063658957047823af7db010d5c28c93d6afe1e005bbccfdc286e2d977c48",
+      "deployment_manager::ReceiptsKey": "0xfdcc063658957047823af7db010d5c28c93d6afe1e005bbccfdc286e2d977c48",
+      "deployment_manager::Receipts": "0xfdcc063658957047823af7db010d5c28c93d6afe1e005bbccfdc286e2d977c48",
+      "deployment_manager::DeviceStatusReported": "0xfdcc063658957047823af7db010d5c28c93d6afe1e005bbccfdc286e2d977c48",
+      "device_registry::IdentityKey": "0xe9b3b00b3c3f05e4ae95361d5aee37a25a0debdce9bf2c828e99e6d6e57704c5",
+      "device_registry::Identity": "0xe9b3b00b3c3f05e4ae95361d5aee37a25a0debdce9bf2c828e99e6d6e57704c5",
+      "device_registry::DeviceIdentityChanged": "0xe9b3b00b3c3f05e4ae95361d5aee37a25a0debdce9bf2c828e99e6d6e57704c5",
+      "device_registry::CustodyKey": "0xe9b3b00b3c3f05e4ae95361d5aee37a25a0debdce9bf2c828e99e6d6e57704c5",
+      "device_registry::DeviceOwnerCap": "0xe9b3b00b3c3f05e4ae95361d5aee37a25a0debdce9bf2c828e99e6d6e57704c5"
+    },
+    "receipts": {
+      "0x3e92edeb711f577231a78d90dacb77d4c2b36dee4ef2544e0aa8120b3d55599c": {
+        "0x6efe6eca5895d92fe5fcfbdaad41050f788e25ea78e8b58849cce54d183f8718": 1
+      },
+      "0x7c76d6d5049386f1106e8e506e030a868600495cc27f667cc0b49082542e8279": {
+        "0x6efe6eca5895d92fe5fcfbdaad41050f788e25ea78e8b58849cce54d183f8718": 1
+      },
+      "0xcce95f66cf2d7dd0243cd7db85805f5645c7694c74f8a6c5fe4be01749dbd3d5": {
+        "0x6efe6eca5895d92fe5fcfbdaad41050f788e25ea78e8b58849cce54d183f8718": 1
+      },
+      "0x614c83bfa88b54ca0b0aa1af9b6eab92288847c6cd8b5a865df2aa93b0a1f135": {
+        "0x6efe6eca5895d92fe5fcfbdaad41050f788e25ea78e8b58849cce54d183f8718": 2
+      }
+    },
+    "report_transactions": [
+      {
+        "deployment": "0x3e92edeb711f577231a78d90dacb77d4c2b36dee4ef2544e0aa8120b3d55599c",
+        "digest": "6sJpDGVVo9JEE12YJxKbHa3jdNj2T6bD3NYVuWAmHdaL",
+        "status": "success",
+        "checkpoint": "395072760",
+        "gas_used": {
+          "computationCost": "1000000",
+          "storageCost": "7782400",
+          "storageRebate": "7456284",
+          "nonRefundableStorageFee": "75316"
+        }
+      },
+      {
+        "deployment": "0x7c76d6d5049386f1106e8e506e030a868600495cc27f667cc0b49082542e8279",
+        "digest": "7QdnjzaRGyuCSdQbGfjuvu6xDVorZCXDkhRDMxNwYfxK",
+        "status": "success",
+        "checkpoint": "395072767",
+        "gas_used": {
+          "computationCost": "1000000",
+          "storageCost": "7782400",
+          "storageRebate": "7456284",
+          "nonRefundableStorageFee": "75316"
+        }
+      },
+      {
+        "deployment": "0xcce95f66cf2d7dd0243cd7db85805f5645c7694c74f8a6c5fe4be01749dbd3d5",
+        "digest": "C94fxveEMfVsUxUB1khduWbCE8Y61xhmxuxVUUcWb1qU",
+        "status": "success",
+        "checkpoint": "395072787",
+        "gas_used": {
+          "computationCost": "1000000",
+          "storageCost": "7782400",
+          "storageRebate": "7456284",
+          "nonRefundableStorageFee": "75316"
+        }
+      },
+      {
+        "deployment": "0x614c83bfa88b54ca0b0aa1af9b6eab92288847c6cd8b5a865df2aa93b0a1f135",
+        "digest": "5Eexp5itEsmi2kgi4kwqBxWgPWzQmf2Vtg1k2y6S8eRC",
+        "status": "success",
+        "checkpoint": "395072763",
+        "gas_used": {
+          "computationCost": "1000000",
+          "storageCost": "7782400",
+          "storageRebate": "7456284",
+          "nonRefundableStorageFee": "75316"
+        }
+      }
+    ],
+    "success": true,
+    "allowance_used_mist": 72147588,
+    "max_spend_mist": 600000000,
+    "end_balance_mist": 1152546752,
+    "spent_mist": 2501136,
+    "finished": "2026-10-15T05:19:22Z"
   }
 }
