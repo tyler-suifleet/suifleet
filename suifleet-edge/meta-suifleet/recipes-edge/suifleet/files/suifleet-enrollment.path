@@ -1,6 +1,6 @@
 [Unit]
 Description=Start SuiFleet when enrollment configuration is installed
-After=suifleet-provision.service
+# Path units start before basic.target; the triggered service orders provisioning.
 
 [Path]
 PathExists=/etc/suifleet/config.toml
