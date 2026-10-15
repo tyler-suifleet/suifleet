@@ -90,7 +90,7 @@ class TrustTests(unittest.TestCase):
         from testnet_ci import environment_ready
         env = dict(can_admins_bypass=False, protection_rules=[],
                    deployment_branch_policy=dict(custom_branch_policies=True, protected_branches=False))
-        branches = {'branch_policies': [{'name': 'main', 'type': 'branch'}]}
+        branches = {'total_count': 1, 'branch_policies': [{'id': 1, 'name': 'main', 'type': 'branch'}]}
         self.assertTrue(environment_ready(env, branches))
         self.assertFalse(environment_ready(env, {'branch_policies': [{'name': '*'}]}))
         env['protection_rules'] = [{'type': 'required_reviewers'}]
@@ -135,3 +135,71 @@ class TrustTests(unittest.TestCase):
             owners['0x3'] = {'AddressOwner':'0xd'}
             self.assertFalse(live.fixture_alive(reused, '0xa', client))
             self.assertEqual(live.load_state(path, '4c78adac', '0xd')['fixtures'], {})
+
+class PublicEnvironmentTests(unittest.TestCase):
+    def environment(self):
+        return dict(can_admins_bypass=False, protection_rules=[],
+                    deployment_branch_policy=dict(custom_branch_policies=True, protected_branches=False))
+
+    def branches(self):
+        return {'total_count': 1, 'branch_policies': [{'id': 7, 'name': 'main', 'type': 'branch'}]}
+
+    def test_policy_read_does_not_use_the_restricted_authenticated_endpoint(self):
+        from testnet_ci import verify_environment
+        def workflow_token(path):
+            if path.endswith('/deployment-branch-policies'):
+                raise AssertionError('the observed Actions-token path is forbidden')
+            self.assertEqual(path, 'repos/a/b/environments/live-package-upgrade')
+            return self.environment()
+        public = Mock(return_value=self.branches())
+        proof = verify_environment('a/b', workflow_token, public)
+        public.assert_called_once_with('repos/a/b/environments/live-package-upgrade/deployment-branch-policies')
+        self.assertEqual(proof['branch'], 'main')
+        self.assertFalse(proof['required_reviewers'])
+
+    def test_public_request_never_forwards_workflow_credentials(self):
+        import io
+        from unittest.mock import patch
+        from testnet_ci import public_api
+        def opener(request, timeout):
+            self.assertEqual(timeout, 30)
+            self.assertEqual(request.full_url, 'https://api.github.com/repos/a/b/environments/live-package-upgrade/deployment-branch-policies?per_page=100')
+            self.assertFalse(request.has_header('Authorization'))
+            self.assertNotIn('offline-token', str(request.header_items()))
+            return io.BytesIO(json.dumps(self.branches()).encode())
+        with patch.dict('os.environ', {'GH_TOKEN': 'offline-token', 'GITHUB_TOKEN': 'offline-token'}):
+            self.assertEqual(public_api('repos/a/b/environments/live-package-upgrade/deployment-branch-policies', opener), self.branches())
+        with self.assertRaises(ValueError):
+            public_api('repos/a/b/environments/release/deployment-branch-policies', opener)
+
+    def test_public_denial_or_unavailable_metadata_never_passes(self):
+        from urllib.error import HTTPError, URLError
+        from testnet_ci import public_api, verify_environment
+        path = 'repos/a/b/environments/live-package-upgrade/deployment-branch-policies'
+        for error in (HTTPError('https://api.github.com/', 403, 'denied', {}, None), URLError('offline')):
+            with self.subTest(error=type(error).__name__), self.assertRaises(RuntimeError):
+                public_api(path, Mock(side_effect=error))
+        for branches in ({'total_count':2,'branch_policies':self.branches()['branch_policies']},
+                         {'total_count':1,'branch_policies':[{'id':7,'name':'*','type':'branch'}]},
+                         {'total_count':1,'branch_policies':[{'id':7,'name':'main','type':'tag'}]}):
+            with self.subTest(branches=branches), self.assertRaises(RuntimeError):
+                verify_environment('a/b', Mock(return_value=self.environment()), Mock(return_value=branches))
+
+    def test_authenticated_failures_have_sanitized_useful_errors(self):
+        from unittest.mock import patch
+        from testnet_ci import api
+        result = type('Result', (), {'returncode':1,'stdout':json.dumps({'message':'denied offline-token'})})()
+        with patch.dict('os.environ', {'GH_TOKEN':'offline-token'}), patch('testnet_ci.subprocess.run', return_value=result):
+            with self.assertRaisesRegex(RuntimeError, r'denied \[redacted\]') as error:
+                api('repos/a/b/environments/live-package-upgrade')
+            self.assertNotIn('offline-token', str(error.exception))
+
+    def test_real_ci_metadata_probe_has_no_wallet_or_environment(self):
+        workflow = (Path(__file__).resolve().parents[2]/'.github/workflows/ci.yml').read_text()
+        probe = workflow.split('\n  testnet-preflight:\n', 1)[1]
+        self.assertIn('github.event.pull_request.head.repo.full_name == github.repository', probe)
+        self.assertIn('actions: read', probe)
+        self.assertIn('--probe-environment', probe)
+        self.assertNotIn('secrets.', probe)
+        self.assertNotIn('environment:', probe)
+        self.assertNotIn('SUIFLEET_TESTNET_KEY', probe)

@@ -1085,6 +1085,31 @@
       ],
       "validation": "Offline scheduler regressions and installed-service dispatch inspection.",
       "description": "Allow multiple independent implementation workers per model family/project. The current single-slot scheduler and family-wide review/repair pauses prevent eligible work from progressing.\n\nAcceptance:\n- Add a validated configurable implementation concurrency limit per project/family, backward compatible with existing single-slot configuration.\n- Count active manual and managed ownership exactly once; each uncertain/orphaned reservation consumes capacity without blocking unrelated free capacity. Never steal claims or restart uncertain workers.\n- Use unique sessions, atomic claims and isolated worktrees. Keep review/repair capacity independent, shared resource locks and serial gated merges.\n- Fill available capacity safely across polling/restart; disabling/lowering limits never interrupts existing workers.\n- Offline tests cover capacity, manual/managed deduplication, orphaned/expired claims, restarts, isolation and invalid limits.\n- Document operation, install verified changes and configure SuiFleet for two concurrent implementation workers per family; inspect actual dispatch/review status.\n\nUser requested this concurrency change explicitly. Closes only implementation scope; no hardware or production deployment permission."
+    },
+    {
+      "key": "SF-045",
+      "title": "Repair automatic testnet environment-policy preflight",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "baseline",
+      "kind": "type:bug",
+      "depends_on": [
+        "SF-043"
+      ],
+      "paths": [
+        "scripts/testnet_ci.py",
+        ".github/workflows",
+        "scripts/tests",
+        "docs/TESTNET.md"
+      ],
+      "evidence": "Automatic workflow_run 38690277887 failed before mutation at the authenticated deployment-branch-policy request; the public endpoint returns 200. Needed to finish SF043 automatic CI acceptance.",
+      "acceptance": [
+        "Least-privileged automated environment-policy preflight works and fails closed for invalid main/ref/trust/policy boundaries.",
+        "Offline regressions, exact-head CI and genuine bounded testnet effects evidence pass without privileged GitHub CI credentials or secret leakage.",
+        "Normal main CI triggers a successful real public-testnet Actions run without human approval; record exact revision/base/effects/cost and run URL in #69/#64."
+      ],
+      "validation": "Offline safety tests, keyless real Actions metadata probe, exact-head CI, bounded locked recovery validation if necessary, and actual automatic post-integration testnet execution.",
+      "description": "<!-- suifleet-tracking:SF-045 -->\n\nSF-043/#64 follow-up, narrowly required to finish the user's automatic public-testnet CI request. The user explicitly authorizes a necessary post-merge reliability fix through the same atomic ownership and independent review process.\n\nFirst real automatic workflow_run execution https://github.com/tyler-suifleet/suifleet/actions/runs/38690277887 failed before any testnet mutation in scripts/testnet_ci.py:94: the workflow GITHUB_TOKEN's authenticated deployment-branch-policy request exited 1. The helper captures stderr, so the precise HTTP error is not yet exposed. The public unauthenticated endpoint returns HTTP 200 and the configured single main branch policy. GitHub documents this public metadata as readable without authentication and with Actions:read; do not add an administrator credential to CI or weaken the policy checks to obtain a pass.\n\nScope:\n- Diagnose and repair public environment-policy preflight with the ordinary least-privileged workflow token. Preserve exact main-only/no-reviewer/no-admin-bypass checks, dedicated address, authenticated originating CI/PR authority and exact head/base binding.\n- Keep secret/address isolation, strict mutation budgets, encrypted cache and global CI wallet serialization unchanged. No mainnet, production credentials/services, unrelated wallets or physical programming.\n- Add offline regressions for the actual token/public-metadata boundary and useful sanitized API failure diagnostics. Validate the repaired preflight from real unprivileged GitHub CI without exposing signing keys.\n- Preserve the mandatory exact-head/base testnet gate. Any recovery validation/status must reflect a genuinely executed exact-revision public-testnet test with verifiable effects; never forge a successful Actions run or silently bypass a failing test.\n- Independently review and integrate through the sole orchestrator. Observe and record successful normal CI-triggered automatic testnet execution after integration, including exact head/base, receipt-writing effects, cost and run URL. The SF-043 overall goal is not complete until that real execution succeeds.\n\nAcceptance:\n- Automated preflight works without a privileged GitHub credential and still rejects incorrect environment/ref/policy/trust boundaries.\n- Meaningful offline regressions and exact-head CI pass; authorized genuine testnet evidence is retained with no secret leakage.\n- Normal main CI triggers a successful real public-testnet run without human approval; record the actual URL/effects/cost in this issue and #64.\n\nTesting: offline script/coordinator regressions and queue-aware actionlint; real keyless Actions metadata preflight; bounded, locked machine testnet validation if needed for recovery; actual post-integration automatic Actions run. No remote mutation in unit tests.\n"
     }
   ]
 }
