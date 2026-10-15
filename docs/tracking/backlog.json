@@ -144,7 +144,7 @@
         "Record release IDs/type origins and generate both client configs atomically."
       ],
       "validation": "Offline parser/failure tests, dry run and explicit testnet publish/upgrade acceptance.",
-      "description": "Harden publishing and configuration generation. Parse metadata by environment and verify actual chain identity/account/UpgradeCap."
+      "description": "Harden publishing and configuration generation. Parse metadata by environment and verify actual chain identity/account/UpgradeCap.\n\nUser-authorized acceptance split: code review, required local/isolated-chain compatibility and regression tests remain implementation merge gates. External integration acceptance is tracked separately at https://github.com/tyler-suifleet/suifleet/issues/11. Implementation merge is not evidence of physical/public/production acceptance."
     },
     {
       "key": "SF-007",
@@ -193,7 +193,7 @@
         "A revoked or deregistered device cannot submit trusted receipts through old or new packages."
       ],
       "validation": "Contract adversarial tests, mixed-version upgrade tests and live rotation/revocation acceptance.",
-      "description": "Implement revocable device identity and capability lifecycle. Enforce active identity and revocation at authoritative on-chain reporting/update boundaries."
+      "description": "Implement revocable device identity and capability lifecycle. Enforce active identity and revocation at authoritative on-chain reporting/update boundaries.\n\nUser-authorized acceptance split: code review, required local/isolated-chain compatibility and regression tests remain implementation merge gates. External integration acceptance is tracked separately at https://github.com/tyler-suifleet/suifleet/issues/11, https://github.com/tyler-suifleet/suifleet/issues/32. Implementation merge is not evidence of physical/public/production acceptance."
     },
     {
       "key": "SF-009",
@@ -244,7 +244,7 @@
         "Record environment/tool versions, artifacts and recovery; never include keys in logs."
       ],
       "validation": "Actual supported testnet/browser/device runs with positive and negative results.",
-      "description": "Establish live wallet-to-device and package-upgrade acceptance suite. Exercise fresh registration, cap issuance, recipe upload, direct/group deployment and real execution effects."
+      "description": "Establish live wallet-to-device and package-upgrade acceptance suite. Exercise fresh registration, cap issuance, recipe upload, direct/group deployment and real execution effects.\n\nThis is a deferred integration acceptance ticket. It must not be used as a blanket dependency for unrelated implementation merges; its own live/hardware/production evidence is still required before completion."
     },
     {
       "key": "SF-011",
@@ -268,7 +268,7 @@
         "Validate hashes, invalid versions and unsupported platform errors."
       ],
       "validation": "Catalog and selector tests plus integration deployment of different platform manifests.",
-      "description": "Create immutable component version catalog and platform manifests. Register immutable versions and recipes with semantic version/platform metadata."
+      "description": "Create immutable component version catalog and platform manifests. Register immutable versions and recipes with semantic version/platform metadata.\n\nUser-authorized acceptance split: code review, required local/isolated-chain compatibility and regression tests remain implementation merge gates. External integration acceptance is tracked separately at https://github.com/tyler-suifleet/suifleet/issues/11, https://github.com/tyler-suifleet/suifleet/issues/32. Implementation merge is not evidence of physical/public/production acceptance."
     },
     {
       "key": "SF-012",
@@ -315,7 +315,7 @@
         "Define atomic multi-component plan/commit semantics and idempotent recovery."
       ],
       "validation": "Offline/new-member/supersession/removal/conflict and crash-recovery integration tests.",
-      "description": "Reconcile desired deployment revisions and live group membership. Represent desired revisions per target and reconcile latest applicable state."
+      "description": "Reconcile desired deployment revisions and live group membership. Represent desired revisions per target and reconcile latest applicable state.\n\nUser-authorized acceptance split: code review, required local/isolated-chain compatibility and regression tests remain implementation merge gates. External integration acceptance is tracked separately at https://github.com/tyler-suifleet/suifleet/issues/11, https://github.com/tyler-suifleet/suifleet/issues/32. Implementation merge is not evidence of physical/public/production acceptance."
     },
     {
       "key": "SF-014",
@@ -584,7 +584,7 @@
         "Document deployment/auth/storage infrastructure and retention/recovery."
       ],
       "validation": "Pagination/reorg-or-retention/restart/auth/load tests and API/CLI integration.",
-      "description": "Build a scalable fleet indexer, versioned API and operations CLI. Materialize chain/object changes with reliable cursors and filters/pagination."
+      "description": "Build a scalable fleet indexer, versioned API and operations CLI. Materialize chain/object changes with reliable cursors and filters/pagination.\n\nUser-authorized acceptance split: code review, required local/isolated-chain compatibility and regression tests remain implementation merge gates. External integration acceptance is tracked separately at https://github.com/tyler-suifleet/suifleet/issues/11. Implementation merge is not evidence of physical/public/production acceptance."
     },
     {
       "key": "SF-025",
@@ -610,7 +610,7 @@
         "Separate first-boot key provisioning from enrolled daemon startup so a fresh image can expose its address before device IDs are known, and prove keys are not cloned from image build artifacts."
       ],
       "validation": "Actual BitBake image build and boot/service acceptance on target hardware/emulation.",
-      "description": "Validate and pin Yocto image and first-boot service packaging. Pin sources/toolchain/dependencies and add required Yocto cargo dependency support."
+      "description": "Validate and pin Yocto image and first-boot service packaging. Pin sources/toolchain/dependencies and add required Yocto cargo dependency support.\n\nUser-authorized acceptance split: code review, required local/isolated-chain compatibility and regression tests remain implementation merge gates. External integration acceptance is tracked separately at https://github.com/tyler-suifleet/suifleet/issues/29, https://github.com/tyler-suifleet/suifleet/issues/32. Implementation merge is not evidence of physical/public/production acceptance."
     },
     {
       "key": "SF-026",
@@ -768,7 +768,7 @@
         "Start the enrolled client before creating the first test deployment so enrollment baseline behavior does not intentionally skip it; verify a fetched/applied test component and matching chain receipt. A read-only authenticated inventory/health query is an optional earlier connectivity smoke test, not OTA acceptance."
       ],
       "validation": "Offline harness tests and an actual frontend-wallet -> Sui/Walrus -> Pi -> on-chain receipt run, with reproducible evidence and explicit skipped/blocked cases. Hardware reboot/power-loss tests stay in SF-016.",
-      "description": "Run wallet-to-testnet-to-Raspberry-Pi OTA acceptance tests. Provide an opt-in test runner with local-network and Sui testnet profiles using a verified network manifest, compatible Sui/Walrus endpoints and explicitly supplied funded test accounts; fail preflight clearly when APIs or funding are unavailable."
+      "description": "Run wallet-to-testnet-to-Raspberry-Pi OTA acceptance tests. Provide an opt-in test runner with local-network and Sui testnet profiles using a verified network manifest, compatible Sui/Walrus endpoints and explicitly supplied funded test accounts; fail preflight clearly when APIs or funding are unavailable.\n\nThis is a deferred integration acceptance ticket. It must not be used as a blanket dependency for unrelated implementation merges; its own live/hardware/production evidence is still required before completion."
     },
     {
       "key": "SF-032",
@@ -965,7 +965,7 @@
         "Integrate release-only publication gates without publishing or exposing signing keys from ordinary PR jobs."
       ],
       "validation": "Tampered artifact/manifest rejection, trusted/untrusted signer and rotation tests; reproduce an ARM release and verify its SBOM/provenance.",
-      "description": "Sign release artifacts and publish SBOMs with device verification. Produce reproducible ARM release artifacts, dependency SBOMs, revision/toolchain metadata and authenticated provenance."
+      "description": "Sign release artifacts and publish SBOMs with device verification. Produce reproducible ARM release artifacts, dependency SBOMs, revision/toolchain metadata and authenticated provenance.\n\nUser-authorized acceptance split: code review, required local/isolated-chain compatibility and regression tests remain implementation merge gates. External integration acceptance is tracked separately at https://github.com/tyler-suifleet/suifleet/issues/62, https://github.com/tyler-suifleet/suifleet/issues/32. Implementation merge is not evidence of physical/public/production acceptance."
     },
     {
       "key": "SF-040",
@@ -989,6 +989,102 @@
       ],
       "validation": "Offline coordinator tests, live dry-run and unattended worker execution.",
       "description": "Automate reciprocal model reviews, feedback repairs and serial merges using atomic ticket ownership."
+    },
+    {
+      "key": "SF-041",
+      "title": "Dispatch the next eligible ticket automatically after implementation handoff",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "baseline",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-040"
+      ],
+      "paths": [
+        "tools/pr-coordinator",
+        "docs/PR_COORDINATION.md"
+      ],
+      "evidence": "Implementation workers do not currently dispatch their successors.",
+      "acceptance": [
+        "Automatically dispatch atomic highest-priority eligible claims to bounded configurable Codex/Claude slots.",
+        "Preserve ownership and process identity across restarts; fail closed on uncertain launches or orphaned workers.",
+        "Respect manual workers, review repairs, deployment boundaries and per-project authentication."
+      ],
+      "validation": "Offline dispatcher failure/concurrency/restart tests and installed persistent service status.",
+      "description": "Workers currently stop after their assigned implementation; the PR coordinator reviews and merges but does not dispatch the next ticket. Add a persistent dispatcher so authorized Codex/Claude implementation slots atomically refresh and claim the highest-priority eligible ticket automatically.\n\nAcceptance:\n- Configurable project/family/model worker slots; atomic claims remain authoritative; no duplicate workers or recovery of expired/blocked claims.\n- Durable process/claim receipts survive restarts and detect failed launches; heartbeat live ownership, stop dispatch for failed/orphaned workers rather than silently reclaiming.\n- Completed implementation hands off to existing independent review/feedback/merge service; next implementation may begin once the previous process stops and ownership reaches Review/Done.\n- Existing manual workers and claims count against configured implementation concurrency; pending review repairs have priority; no new issues, deployment or hardware programming inferred.\n- Explicit enable/disable, status, bounded polling/backoff and idle handling; account/SSH isolation per project; secrets never persisted in receipts/logs.\n- Meaningful offline tests for concurrency, failures, restart, no eligible work and safe progression. Document and install the service here under user authorization.\n"
+    },
+    {
+      "key": "SF-042",
+      "title": "Validate production release signing and device trust integration",
+      "priority": "P2",
+      "area": "security",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-039"
+      ],
+      "paths": [
+        ".github/workflows/release.yml",
+        "release",
+        "docs/RELEASES.md"
+      ],
+      "evidence": "Production release environment, provisioned trust roots and exact workflow execution are unverified.",
+      "acceptance": [
+        "Provision an explicitly authorized protected release environment and matching public trust roots.",
+        "Record exact-revision signing, provenance, publication-gate, rejection and key-rotation execution evidence.",
+        "Integrate verified release artifacts with the Pi acceptance loop."
+      ],
+      "validation": "Authorized production-workflow execution and Pi trust acceptance; no private keys in evidence.",
+      "description": "Validate the production signed-release workflow and device trust integration after SF-039 implementation merges. This acceptance ticket is deliberately separate from implementation merge under the user-authorized integration deferral.\n\nAcceptance:\n- Under explicit administrator/deployment authorization, configure a protected release environment with a required reviewer, signing key ID/secret and committed matching public trust root; never store private keys in git/issues/logs.\n- Execute the exact-revision release workflow and verify signing, device verification, authenticated provenance/attestations and release-only publication gates.\n- Exercise missing/unprotected environment rejection, untrusted/revoked signer and key rotation.\n- Feed verified artifacts into the BitBake-built Pi test loop and record actual binary/image versions and effects; coordinate SF-029/SF-031.\n\nDepends on SF-039 implementation. Production environment/key provisioning and publication remain explicitly authorized operations; ticket creation is not deployment permission. Ordinary CI/ephemeral keys are implementation evidence, not completed production acceptance.\n\n\nThis is a deferred integration acceptance ticket. It must not be used as a blanket dependency for unrelated implementation merges; its own live/hardware/production evidence is still required before completion."
+    },
+    {
+      "key": "SF-043",
+      "title": "Make bounded public testnet validation part of normal CI",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "baseline",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        ".github/workflows",
+        "scripts/live_package_upgrade.py",
+        "scripts/tests",
+        "docs/TESTNET.md",
+        "AGENTS.md",
+        "CLAUDE.md"
+      ],
+      "evidence": "Public testnet gates still require manual dispatch and reviewer approval; runner is stacked in PR63.",
+      "acceptance": [
+        "Automatically validate trusted main changes and periodic reliability checks on public testnet without human approvals.",
+        "Keep CI credentials away from untrusted PRs, enforce budget and shared-wallet concurrency, preserve exact-revision effects evidence.",
+        "Integrate the reviewed existing live runner and record actual public-testnet CI execution."
+      ],
+      "validation": "Offline workflow/budget/secret-boundary tests, public-testnet runner checks and actual post-merge CI execution.",
+      "description": "User explicitly requests public Sui testnet testing as a normal automated CI/reliability process, without manual environment approvals.\n\nAcceptance:\n- Remove only the dedicated live-package-upgrade testnet reviewer gate; preserve main-only environment, wallet isolation and all other live/hardware/production protections.\n- Automatically exercise trusted main changes on push and periodically; provide exact-head premerge testnet validation for trusted same-repository PRs without exposing CI credentials to untrusted refs/forks. Test failures surface as CI failures and retain exact-revision transaction/effects evidence.\n- Reuse Claude PR63 live runner/cached fixtures; serialize shared CI wallet, enforce real run spending ceilings and avoid package republish on every run when contracts are unchanged.\n- Coordinate with Claude rather than edit its active worktree; PR63 is stacked on56 and supplies the agreed make live-gate-package-upgrade interface. Integrate those reviewed prerequisites before claiming final CI operation.\n- Offline workflow/planner/budget regression tests plus actual public-testnet CI execution; no fabricated wallet/Pi/Walrus acceptance.\n- Record authorization, normal testnet expectations, budgets and remaining hardware/wallet limitations in AGENTS/CLAUDE/runbooks.\n\nImplementation can proceed against the existing runner interface; publication/review integration must include reviewed56/63 and target main. Only Codex creates tickets. All commits authored/committed by Tyler Bush.\n"
+    },
+    {
+      "key": "SF-044",
+      "title": "Configurable concurrent implementation workers per model family",
+      "priority": "P1",
+      "area": "infrastructure",
+      "phase": "baseline",
+      "kind": "type:infrastructure",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator",
+        "docs/PR_COORDINATION.md"
+      ],
+      "evidence": "Single family slot blocks independent work.",
+      "acceptance": [
+        "- Add a validated configurable implementation concurrency limit per project/family, backward compatible with existing single-slot configuration.",
+        "- Count active manual and managed ownership exactly once; each uncertain/orphaned reservation consumes capacity without blocking unrelated free capacity. Never steal claims or restart uncertain workers.",
+        "- Use unique sessions, atomic claims and isolated worktrees. Keep review/repair capacity independent, shared resource locks and serial gated merges.",
+        "- Fill available capacity safely across polling/restart; disabling/lowering limits never interrupts existing workers.",
+        "- Offline tests cover capacity, manual/managed deduplication, orphaned/expired claims, restarts, isolation and invalid limits.",
+        "- Document operation, install verified changes and configure SuiFleet for two concurrent implementation workers per family; inspect actual dispatch/review status."
+      ],
+      "validation": "Offline scheduler regressions and installed-service dispatch inspection.",
+      "description": "Allow multiple independent implementation workers per model family/project. The current single-slot scheduler and family-wide review/repair pauses prevent eligible work from progressing.\n\nAcceptance:\n- Add a validated configurable implementation concurrency limit per project/family, backward compatible with existing single-slot configuration.\n- Count active manual and managed ownership exactly once; each uncertain/orphaned reservation consumes capacity without blocking unrelated free capacity. Never steal claims or restart uncertain workers.\n- Use unique sessions, atomic claims and isolated worktrees. Keep review/repair capacity independent, shared resource locks and serial gated merges.\n- Fill available capacity safely across polling/restart; disabling/lowering limits never interrupts existing workers.\n- Offline tests cover capacity, manual/managed deduplication, orphaned/expired claims, restarts, isolation and invalid limits.\n- Document operation, install verified changes and configure SuiFleet for two concurrent implementation workers per family; inspect actual dispatch/review status.\n\nUser requested this concurrency change explicitly. Closes only implementation scope; no hardware or production deployment permission."
     }
   ]
 }
