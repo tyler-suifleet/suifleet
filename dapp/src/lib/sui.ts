@@ -1,11 +1,11 @@
 import { requireManifest, moveType, verifyDeployment } from "./deployment-manifest";
-import { Transaction } from "@mysten/sui/transactions";
+import { Transaction, type TransactionArgument } from "@mysten/sui/transactions";
 import type { SuiGrpcClient } from "@mysten/sui/grpc";
 import { ObjectError } from "@mysten/sui/client";
 import { normalizeStructTag } from "@mysten/sui/utils";
-import { DeviceBcs, GroupBcs, GroupCreatedBcs, DeploymentCreatedBcs, DeploymentBcs, ReceiptsBcs } from "./move-bcs";
+import { DeviceBcs, DeviceOwnerCapBcs, GroupBcs, GroupCreatedBcs, DeploymentCreatedBcs, DeploymentBcs, ReceiptsBcs } from "./move-bcs";
 import { bcs } from "@mysten/sui/bcs";
-import { PACKAGE_ID, REGISTRY_ID, DEVICE_TYPE, DEVICE_GROUP_TYPE, DEPLOYMENT_CREATED_EVENT } from "./constants";
+import { PACKAGE_ID, REGISTRY_ID, DEVICE_TYPE, DEVICE_OWNER_CAP_TYPE, DEVICE_GROUP_TYPE, DEPLOYMENT_CREATED_EVENT } from "./constants";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -15,7 +15,16 @@ export interface DeviceObject {
   deviceAddress: string;
   arch: string;
   registeredAt: number;
+  /**
+   * Set once the device is activated: the registry holds the Device and this
+   * owner cap controls it. Unactivated devices (all those registered before
+   * identities existed) cannot submit trusted reports.
+   */
+  ownerCapId?: string;
 }
+
+/** Only the fields transaction builders need. */
+export type DeviceRef = Pick<DeviceObject, "objectId" | "ownerCapId">;
 
 export interface DeviceGroup {
   objectId: string;
@@ -38,8 +47,9 @@ export interface DeploymentEvent {
   /** Signer- and target-checked statuses from the authoritative receipts. */
   statuses: Record<string, number>;
   /**
-   * False for records created before receipts existed: their only statuses are
-   * legacy entries that old package versions can forge, so none are shown.
+   * False for records created before receipts existed, or whose receipts were
+   * last written by an older package: old package versions can forge legacy
+   * statuses or accept reports from revoked keys, so none are shown.
    */
   receiptsVerified: boolean;
   resolvedDeviceIds: string[];
@@ -49,6 +59,14 @@ export interface DeploymentReceipts {
   verified: boolean;
   statuses: Record<string, number>;
 }
+
+/**
+ * Receipts authority version of the contracts this client targets. Lower
+ * versions are written by older packages, which accept reports from revoked,
+ * rotated-out or deregistered keys; the current package discards them on
+ * migration. Higher versions lock older packages out and stay trusted.
+ */
+export const RECEIPTS_AUTHORITY_VERSION = BigInt(2);
 
 /**
  * Read authoritative status receipts. Legacy `StatusesKey` entries are never
@@ -71,11 +89,13 @@ export async function readReceipts(client: Pick<SuiGrpcClient, "getDynamicField"
   // Additive upgrades can bump it while retaining the same BCS layout.
   if (BigInt(receipts.version) === BigInt(0)) throw new Error("Invalid Receipts authority version");
   if (receipts.statuses.contents.some((entry) => entry.value !== 1 && entry.value !== 2)) throw new Error("Unsupported Receipts status");
+  if (BigInt(receipts.version) < RECEIPTS_AUTHORITY_VERSION) return { verified: false, statuses: {} };
   return { verified: true, statuses: Object.fromEntries(receipts.statuses.contents.map((entry) => [entry.key, entry.value])) };
 }
 
 // ── Device transactions ───────────────────────────────────────────────────────
 
+/** Register, issue the device's cap and activate it; the owner cap goes to `sender`. */
 export function buildRegisterDeviceTx(
   name: string,
   deviceAddress: string,
@@ -95,27 +115,70 @@ export function buildRegisterDeviceTx(
     ],
   });
   tx.moveCall({ target: `${PACKAGE_ID}::device_cap::issue_cap`, arguments: [device] });
-  tx.transferObjects([device], tx.pure.address(sender));
-  return tx;
-}
-
-export function buildIssueCapTx(deviceObjectId: string): Transaction {
-  requireManifest();
-  const tx = new Transaction();
-  tx.moveCall({
-    target: `${PACKAGE_ID}::device_cap::issue_cap`,
-    arguments: [tx.object(deviceObjectId)],
+  const [owner] = tx.moveCall({
+    target: `${PACKAGE_ID}::device_registry::activate_device`,
+    arguments: [tx.object(REGISTRY_ID), device],
   });
+  tx.transferObjects([owner], tx.pure.address(sender));
   return tx;
 }
 
-export function buildDeregisterDeviceTx(deviceObjectId: string): Transaction {
+/** Take an owned (unactivated) Device into registry custody so it is trusted. */
+export function buildActivateDeviceTx(deviceObjectId: string, sender: string): Transaction {
   requireManifest();
   const tx = new Transaction();
-  tx.moveCall({
-    target: `${PACKAGE_ID}::device_registry::deregister_device`,
+  const [owner] = tx.moveCall({
+    target: `${PACKAGE_ID}::device_registry::activate_device`,
     arguments: [tx.object(REGISTRY_ID), tx.object(deviceObjectId)],
   });
+  tx.transferObjects([owner], tx.pure.address(sender));
+  return tx;
+}
+
+/**
+ * Pass the Device to a `&Device` call. An activated Device is borrowed from
+ * custody and returned in the same transaction.
+ */
+function withDevice(tx: Transaction, device: DeviceRef, use: (device: TransactionArgument) => void) {
+  if (!device.ownerCapId) return use(tx.object(device.objectId));
+  const [borrowed, loan] = tx.moveCall({
+    target: `${PACKAGE_ID}::device_registry::borrow_device`,
+    arguments: [tx.object(REGISTRY_ID), tx.object(device.ownerCapId)],
+  });
+  use(borrowed);
+  tx.moveCall({
+    target: `${PACKAGE_ID}::device_registry::return_device`,
+    arguments: [tx.object(REGISTRY_ID), borrowed, loan],
+  });
+}
+
+export function buildIssueCapTx(device: DeviceRef): Transaction {
+  requireManifest();
+  const tx = new Transaction();
+  withDevice(tx, device, (target) => {
+    tx.moveCall({
+      target: `${PACKAGE_ID}::device_cap::issue_cap`,
+      arguments: [target],
+    });
+  });
+  return tx;
+}
+
+/** Deregistering an activated device leaves a revoked identity tombstone. */
+export function buildDeregisterDeviceTx(device: DeviceRef): Transaction {
+  requireManifest();
+  const tx = new Transaction();
+  if (device.ownerCapId) {
+    tx.moveCall({
+      target: `${PACKAGE_ID}::device_registry::deregister_activated_device`,
+      arguments: [tx.object(REGISTRY_ID), tx.object(device.ownerCapId)],
+    });
+  } else {
+    tx.moveCall({
+      target: `${PACKAGE_ID}::device_registry::deregister_device`,
+      arguments: [tx.object(REGISTRY_ID), tx.object(device.objectId)],
+    });
+  }
   return tx;
 }
 
@@ -135,15 +198,17 @@ export function buildCreateGroupTx(name: string, description: string): Transacti
   return tx;
 }
 
-export function buildAddDeviceToGroupTx(groupObjectId: string, deviceObjectId: string): Transaction {
+export function buildAddDeviceToGroupTx(groupObjectId: string, device: DeviceRef): Transaction {
   requireManifest();
   const tx = new Transaction();
-  tx.moveCall({
-    target: `${PACKAGE_ID}::device_group::add_device`,
-    arguments: [
-      tx.object(groupObjectId),
-      tx.object(deviceObjectId),
-    ],
+  withDevice(tx, device, (target) => {
+    tx.moveCall({
+      target: `${PACKAGE_ID}::device_group::add_device`,
+      arguments: [
+        tx.object(groupObjectId),
+        target,
+      ],
+    });
   });
   return tx;
 }
@@ -212,22 +277,32 @@ export function buildDeleteDeploymentTx(deploymentObjectId: string): Transaction
 
 // ── Queries ───────────────────────────────────────────────────────────────────
 
-export async function fetchDevices(client: SuiGrpcClient, owner: string): Promise<DeviceObject[]> {
-  await verifyDeployment(client);
-  let page = await client.listOwnedObjects({ owner, type: DEVICE_TYPE, include: { content: true }, limit: 50 });
+async function allOwned(client: SuiGrpcClient, owner: string, type: string) {
+  let page = await client.listOwnedObjects({ owner, type, include: { content: true }, limit: 50 });
   const data = [...page.objects];
   while (page.hasNextPage) {
     if (!page.cursor) throw new Error("Device pagination returned no cursor");
     const cursor = page.cursor;
-    page = await client.listOwnedObjects({ owner, type: DEVICE_TYPE, include: { content: true }, limit: 50, cursor });
+    page = await client.listOwnedObjects({ owner, type, include: { content: true }, limit: 50, cursor });
     if (page.hasNextPage && page.cursor === cursor) throw new Error("Device pagination made no progress");
     data.push(...page.objects);
   }
-  return data.map((object) => {
+  return data;
+}
+
+/** Activated devices (through their owner caps) and owned, unactivated ones. */
+export async function fetchDevices(client: SuiGrpcClient, owner: string): Promise<DeviceObject[]> {
+  await verifyDeployment(client);
+  const caps = (await allOwned(client, owner, DEVICE_OWNER_CAP_TYPE)).map((object) => ({
+    ownerCapId: object.objectId, deviceId: DeviceOwnerCapBcs.parse(object.content).device_id }));
+  const custodied = await objectsInBatches(client, caps.map((cap) => cap.deviceId));
+  const ownerCaps = new Map(caps.map((cap) => [cap.deviceId, cap.ownerCapId]));
+  const devices = [...custodied, ...await allOwned(client, owner, DEVICE_TYPE)];
+  return devices.map((object) => {
     const fields = DeviceBcs.parse(object.content);
     if (fields.schema_version !== "1") throw new Error("Unsupported Device schema");
     return { objectId: object.objectId, name: fields.name, deviceAddress: fields.device_address,
-      arch: fields.arch, registeredAt: Number(fields.registered_at) };
+      arch: fields.arch, registeredAt: Number(fields.registered_at), ownerCapId: ownerCaps.get(object.objectId) };
   });
 }
 

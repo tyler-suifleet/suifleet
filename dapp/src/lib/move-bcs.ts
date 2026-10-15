@@ -8,6 +8,7 @@ export const DeviceBcs = bcs.struct("Device", {
   meta: bcs.struct("Metadata", { contents: bcs.vector(strings) }),
   registered_at: bcs.u64(), schema_version: bcs.u64(),
 });
+export const DeviceOwnerCapBcs = bcs.struct("DeviceOwnerCap", { id, device_id: id });
 export const GroupBcs = bcs.struct("DeviceGroup", {
   id, name: bcs.string(), description: bcs.string(), admin: id,
   device_ids: bcs.vector(id), created_at: bcs.u64(), schema_version: bcs.u64(),
