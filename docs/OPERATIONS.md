@@ -316,7 +316,8 @@ A recipe with `lifecycle.run` is a supervised component rather than a one-shot u
 - **Bootstrap and reboot:** the versions in `supervised/active.json` (written only after readiness) start on every daemon start. A crash mid-replacement therefore restarts the previous version, and the interrupted deployment settles as Failed. Runs left by a daemon that was killed outright are killed (matched by PID and kernel start time) before anything starts again.
 - **Runtime state:** `supervised/status.json` holds each component's version, deployment, phase (`starting`, `running`, `backoff`, `stopping`, `stopped`, `exited`, `broken`), PID, restart count, last exit and transition time. It is local only; on-chain health reporting is a later ticket.
 - **Sandbox:** components run inside the daemon's systemd sandbox (`ProtectSystem=strict`, same user), so they can write only the state directory.
-- **Not yet:** a Greengrass-style `bootstrap` step that requests a reboot, start ordering by dependencies, and component configuration.
+- **Dependencies (SF-012):** a dependency recipe with `run` is supervised too. Dependencies are installed and become ready before their dependents start, and bootstrap starts committed components in dependency order. A dependent is not stopped when a dependency fails.
+- **Not yet:** a Greengrass-style `bootstrap` step that requests a reboot, coupling a dependency's failure to its dependents, and component configuration.
 
 `make test-ota` runs `scripts/test_supervisor.py`: the real daemon against the simulator, through readiness, a crash restart, an unready replacement rolled back, a graceful replacement, daemon SIGTERM with grouped and escaped descendants, a daemon restart, and a daemon SIGKILL. Hardware reboot and power loss are not covered.
 
