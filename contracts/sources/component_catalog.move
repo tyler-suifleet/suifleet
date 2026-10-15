@@ -83,6 +83,14 @@ module sui_edge::component_catalog {
         deployment_manager::create_catalog_deployment(value.component_name, value.version, groups, devices,
             CatalogBindingKey {}, CatalogBinding { version_id: object::id(value) }, clock, ctx);
     }
+    /// Publish with admission paused atomically, so operators can configure a
+    /// schedule before any device is eligible to start.
+    public fun create_deployment_paused(value: &ComponentVersion, groups: vector<ID>, devices: vector<ID>, clock: &Clock, ctx: &mut TxContext) {
+        let mut record = deployment_manager::new_catalog_deployment(value.component_name, value.version, groups, devices,
+            CatalogBindingKey {}, CatalogBinding { version_id: object::id(value) }, clock, ctx);
+        deployment_manager::set_control(&mut record, 1, 0, 0, 0, 0, 0, ctx);
+        deployment_manager::share_deployment(record);
+    }
     public fun delete_deployment(mut deployment: DeploymentRecord, ctx: &TxContext) {
         deployment_manager::remove_catalog_binding<CatalogBindingKey, CatalogBinding>(&mut deployment, CatalogBindingKey {}, ctx);
         deployment_manager::delete_deployment(deployment, ctx);
