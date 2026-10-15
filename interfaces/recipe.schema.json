@@ -51,19 +51,21 @@
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "const": null
         },
         "shutdown": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "const": null
         }
       }
     },
     "configuration": {
       "type": "object",
-      "additionalProperties": true
+      "additionalProperties": false
     }
   }
 }

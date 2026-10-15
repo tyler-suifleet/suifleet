@@ -170,5 +170,50 @@
       "lifecycle": {},
       "configuration": {}
     }
+  },
+  {
+    "name": "unsupported-run",
+    "valid": false,
+    "value": {
+      "schemaVersion": "1.0",
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {
+        "run": "sleep 60"
+      },
+      "configuration": {}
+    }
+  },
+  {
+    "name": "unsupported-shutdown",
+    "valid": false,
+    "value": {
+      "schemaVersion": "1.0",
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {
+        "shutdown": "true"
+      },
+      "configuration": {}
+    }
+  },
+  {
+    "name": "unsupported-configuration",
+    "valid": false,
+    "value": {
+      "schemaVersion": "1.0",
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {},
+      "configuration": {
+        "x": 1
+      }
+    }
   }
 ]
