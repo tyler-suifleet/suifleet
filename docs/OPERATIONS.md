@@ -65,7 +65,7 @@ Regressions these gates have been shown to catch: renamed/re-shaped Move functio
 
 ### Live gates
 
-`.github/workflows/live-gates.yml` is the only path for live checks: `package-upgrade`, `wallet` or `hardware`. It runs only from a manual dispatch that repeats the gate name. Each gate deploys through the GitHub environment `live-<gate>`, which holds that gate's secrets and must require a human reviewer. A preflight job refuses to run if the environment is missing or has no required reviewer. The hardware gate runs on a self-hosted runner labelled `raspberrypi3bplus`. The suites themselves are `make live-gate-<gate>` targets supplied by SF-010 and SF-031; until then a dispatched gate fails with that message.
+`.github/workflows/live-gates.yml` is the only path for live checks: `package-upgrade`, `wallet` or `hardware`. It runs only from a manual dispatch that repeats the gate name. Each gate deploys through the GitHub environment `live-<gate>`, which holds that gate's secrets and must require a human reviewer. A preflight job refuses to run if the environment is missing or has no required reviewer. The hardware gate runs on a self-hosted runner labelled `raspberrypi3bplus`. `package-upgrade` is implemented: it runs `make live-gate-package-upgrade` on testnet from the dedicated CI wallet, and accepts `ref`/`base_ref` inputs ([TESTNET.md](TESTNET.md)). The `wallet` (SF-010) and `hardware` (SF-031) suites are not yet supplied, so dispatching them fails with that message.
 
 Configure each environment once, as a repository admin:
 

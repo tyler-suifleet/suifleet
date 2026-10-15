@@ -104,6 +104,25 @@ A task to edit code/docs or implement an issue does not itself authorize live pu
 
 A release must verify the target chain/account, run relevant checks, prepare a compatibility/migration plan, publish or upgrade under the proper UpgradeCap, validate execution effects, record all IDs/type origins, migrate required objects, generate both client configurations, rebuild the static frontend, stage the daemon rollout, and run a real end-to-end acceptance test. Full details and current blockers: [OPERATIONS.md](docs/OPERATIONS.md).
 
+## Testnet accounts
+
+The user authorized agents to spend **testnet** SUI from two dedicated accounts on acceptance runs, such as publishing and upgrading test packages ([TESTNET.md](docs/TESTNET.md)).
+- **Machine sessions:** the `agent` wallet, `0x0e499424…6965`, at `~/.config/suifleet/testnet/agent/client.yaml`.
+- **CI:** the `ci` wallet, `0x99894c1a…dcac`, whose key exists only as a GitHub environment secret.
+
+**Rules:**
+- Testnet only.
+- Never print, log or commit keys or recovery phrases.
+- Pass the wallet's `client.yaml` explicitly.
+- Let the live scripts' preflight and spend ceiling stand.
+- Record digests and evidence in the PR or issue.
+
+**Funding.** Use `sui client faucet --address …` with Sui ≥ 1.82.1, which solves a proof of work. The pinned CLI cannot.
+
+**No JSON-RPC.** Public fullnodes no longer serve JSON-RPC, so live checks must use gRPC or the Sui CLI.
+
+**Mainnet** and any other account still need explicit user authorization.
+
 ## Working across models
 
 **On this WSL machine, claim implementations through [the atomic ticket coordinator](docs/ATOMIC_TICKETING.md) before editing.** Both Codex and Claude use the shared installed `ticket` CLI, central WSL database, committed `.atomic-ticketing.json` and this project's registered repository/linked worktrees. SuiFleet and Vortech have separate namespaces, API accounts and unchanged SSH aliases; shared hardware/build/port resources are locked globally across projects, only while in use. GitHub is the specification tracker; the central SQLite database is authoritative for implementation ownership. Do not claim by directly changing Project fields.
