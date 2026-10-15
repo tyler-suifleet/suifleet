@@ -52,7 +52,6 @@ pub struct Request {
     pub target_devices: Vec<String>,
 }
 
-/// One Move call into the fleet package: module, function, arguments.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Argument {
     Object(String),
@@ -63,11 +62,14 @@ pub enum Argument {
     Ids(Vec<String>),
 }
 
+/// One Move call into the fleet package: module, function, arguments.
+pub type Call = (&'static str, &'static str, Vec<Argument>);
+
 #[derive(Debug, Clone)]
 pub struct Planned {
     pub sender: String,
     pub package: String,
-    pub calls: Vec<(&'static str, &'static str, Vec<Argument>)>,
+    pub calls: Vec<Call>,
     pub summary: Value,
 }
 
@@ -139,6 +141,83 @@ fn admin_group(
     Ok(group)
 }
 
+/// The exact calls `request` asks for, from the request alone (no index or
+/// chain): the API builds these after validating them against the index, and
+/// `ctl` rebuilds them from the operator's own request to check what the API
+/// returned before signing it.
+pub fn calls(operation: &str, request: &Request) -> anyhow::Result<Vec<Call>> {
+    allowed(operation).ok_or_else(|| invalid(format!("unknown operation {operation}")))?;
+    let calls: Vec<Call> = match operation {
+        "add-devices" | "remove-devices" => {
+            let group = id(
+                request
+                    .group
+                    .as_deref()
+                    .ok_or_else(|| invalid("group is required"))?,
+                "group",
+            )?;
+            let devices = ids(&request.devices, "device")?;
+            if devices.is_empty() {
+                return Err(invalid("devices must not be empty"));
+            }
+            devices
+                .into_iter()
+                .map(|device| {
+                    if operation == "add-devices" {
+                        (
+                            "device_group",
+                            "add_device",
+                            vec![Argument::Object(group.clone()), Argument::Object(device)],
+                        )
+                    } else {
+                        (
+                            "device_group",
+                            "remove_device",
+                            vec![Argument::Object(group.clone()), Argument::Id(device)],
+                        )
+                    }
+                })
+                .collect()
+        }
+        "create-deployment" => {
+            let groups = ids(&request.target_groups, "target group")?;
+            let devices = ids(&request.target_devices, "target device")?;
+            if groups.is_empty() && devices.is_empty() {
+                return Err(invalid("a deployment needs at least one target"));
+            }
+            vec![(
+                "deployment_manager",
+                "create_deployment_verified",
+                vec![
+                    Argument::Text(text(&request.component_name, "component_name")?),
+                    Argument::Text(text(&request.version, "version")?),
+                    Argument::Text(text(&request.recipe_blob_id, "recipe_blob_id")?),
+                    Argument::Text(hex64(&request.artifact_sha256, "artifact_sha256")?),
+                    Argument::Text(hex64(&request.recipe_sha256, "recipe_sha256")?),
+                    Argument::Ids(groups),
+                    Argument::Ids(devices),
+                    Argument::Clock,
+                ],
+            )]
+        }
+        _ => unreachable!(),
+    };
+    if calls.len() > MAX_CALLS {
+        return Err(invalid(format!(
+            "at most {MAX_CALLS} calls per transaction; split the request"
+        )));
+    }
+    Ok(calls)
+}
+
+/// The owner of indexed, live device `id`.
+fn indexed_device(db: &rusqlite::Connection, id: &str, what: &str) -> anyhow::Result<Option<String>> {
+    store::read_device(db, id)?
+        .filter(|d| !d.deleted)
+        .map(|d| d.owner)
+        .ok_or_else(|| invalid(format!("{what} {id} is not indexed or was deregistered")))
+}
+
 /// Validate `request` for `operation` against the index; no chain access.
 pub fn plan(
     db: &rusqlite::Connection,
@@ -147,29 +226,19 @@ pub fn plan(
     operation: &str,
     request: &Request,
 ) -> anyhow::Result<Planned> {
-    allowed(operation).ok_or_else(|| invalid(format!("unknown operation {operation}")))?;
+    let calls = calls(operation, request)?;
     let sender = id(&request.sender, "sender")?;
     let package = id(package, "package")?;
     let _ = types; // Origins are resolved by the node from the call package.
-    let mut calls = Vec::new();
     let summary = match operation {
         "add-devices" | "remove-devices" => {
             let group = admin_group(db, &request.group, &sender)?;
             let devices = ids(&request.devices, "device")?;
-            if devices.is_empty() {
-                return Err(invalid("devices must not be empty"));
-            }
             for device in &devices {
                 let member = group.devices.contains(device);
                 if operation == "add-devices" {
-                    let found = store::read_device(db, device)?
-                        .filter(|d| !d.deleted)
-                        .ok_or_else(|| {
-                            invalid(format!(
-                                "device {device} is not indexed or was deregistered"
-                            ))
-                        })?;
-                    if found.owner.as_deref() != Some(sender.as_str()) {
+                    let owner = indexed_device(db, device, "device")?;
+                    if owner.as_deref() != Some(sender.as_str()) {
                         return Err(invalid(format!("device {device} is not owned by {sender}")));
                     }
                     if member {
@@ -178,29 +247,11 @@ pub fn plan(
                             group.id
                         )));
                     }
-                    calls.push((
-                        "device_group",
-                        "add_device",
-                        vec![
-                            Argument::Object(group.id.clone()),
-                            Argument::Object(device.clone()),
-                        ],
-                    ));
-                } else {
-                    if !member {
-                        return Err(invalid(format!(
-                            "device {device} is not in group {}",
-                            group.id
-                        )));
-                    }
-                    calls.push((
-                        "device_group",
-                        "remove_device",
-                        vec![
-                            Argument::Object(group.id.clone()),
-                            Argument::Id(device.clone()),
-                        ],
-                    ));
+                } else if !member {
+                    return Err(invalid(format!(
+                        "device {device} is not in group {}",
+                        group.id
+                    )));
                 }
             }
             json!({ "operation": operation, "group": group.id, "devices": devices })
@@ -208,9 +259,6 @@ pub fn plan(
         "create-deployment" => {
             let groups = ids(&request.target_groups, "target group")?;
             let devices = ids(&request.target_devices, "target device")?;
-            if groups.is_empty() && devices.is_empty() {
-                return Err(invalid("a deployment needs at least one target"));
-            }
             for group in &groups {
                 let found = store::read_group(db, group)?
                     .filter(|g| !g.deleted)
@@ -224,46 +272,16 @@ pub fn plan(
                 }
             }
             for device in &devices {
-                let found = store::read_device(db, device)?
-                    .filter(|d| !d.deleted)
-                    .ok_or_else(|| {
-                        invalid(format!(
-                            "target device {device} is not indexed or was deregistered"
-                        ))
-                    })?;
-                if found.owner.as_deref() != Some(sender.as_str()) {
+                let owner = indexed_device(db, device, "target device")?;
+                if owner.as_deref() != Some(sender.as_str()) {
                     return Err(invalid(format!("devices only accept their operator's deployments; {device} is not owned by {sender}")));
                 }
             }
-            let component = text(&request.component_name, "component_name")?;
-            let version = text(&request.version, "version")?;
-            let recipe_blob = text(&request.recipe_blob_id, "recipe_blob_id")?;
-            let artifact = hex64(&request.artifact_sha256, "artifact_sha256")?;
-            let recipe = hex64(&request.recipe_sha256, "recipe_sha256")?;
-            calls.push((
-                "deployment_manager",
-                "create_deployment_verified",
-                vec![
-                    Argument::Text(component.clone()),
-                    Argument::Text(version.clone()),
-                    Argument::Text(recipe_blob),
-                    Argument::Text(artifact),
-                    Argument::Text(recipe),
-                    Argument::Ids(groups.clone()),
-                    Argument::Ids(devices.clone()),
-                    Argument::Clock,
-                ],
-            ));
-            json!({ "operation": operation, "component_name": component, "version": version,
-                    "target_groups": groups, "target_devices": devices })
+            json!({ "operation": operation, "component_name": request.component_name,
+                    "version": request.version, "target_groups": groups, "target_devices": devices })
         }
         _ => unreachable!(),
     };
-    if calls.len() > MAX_CALLS {
-        return Err(invalid(format!(
-            "at most {MAX_CALLS} calls per transaction; split the request"
-        )));
-    }
     Ok(Planned {
         sender,
         package,
@@ -567,7 +585,6 @@ mod tests {
     fn bulk_size_is_bounded() {
         let (_dir, db) = fixture();
         let many: Vec<String> = (1000..1000 + MAX_CALLS as u32 + 1).map(hex).collect();
-        // Unknown devices fail first; the bound itself is checked after validation.
         rejected(
             request(
                 "add-devices",
@@ -579,7 +596,7 @@ mod tests {
                     ..Default::default()
                 },
             ),
-            "not indexed",
+            "at most",
         );
         assert!(allowed("add-devices").is_some() && allowed("other").is_none());
     }
