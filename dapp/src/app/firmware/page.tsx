@@ -42,6 +42,10 @@ export default function FirmwarePage() {
   const [version, setVersion] = useState("");
   const [description, setDescription] = useState("");
   const [installCmd, setInstallCmd] = useState("");
+  const [runCmd, setRunCmd] = useState("");
+  const [shutdownCmd, setShutdownCmd] = useState("");
+  const [readinessCmd, setReadinessCmd] = useState("");
+  const [restartPolicy, setRestartPolicy] = useState<"on-failure" | "never" | "always">("on-failure");
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
   const [selectedDevices, setSelectedDevices] = useState<Set<string>>(new Set());
   const [txDigest, setTxDigest] = useState<string | null>(null);
@@ -83,6 +87,13 @@ export default function FirmwarePage() {
       artifactSha256: artifact.sha256,
       lifecycle: {
         ...(installCmd ? { install: installCmd } : {}),
+        // Supervised component (SF-014): shutdown, readiness and restart need a run command.
+        ...(runCmd ? {
+          run: runCmd,
+          ...(shutdownCmd ? { shutdown: shutdownCmd } : {}),
+          ...(readinessCmd ? { readiness: readinessCmd } : {}),
+          restart: restartPolicy,
+        } : {}),
       },
       configuration: {},
     };
@@ -141,7 +152,7 @@ export default function FirmwarePage() {
               onClick={() => {
                 setStep("artifact"); setArtifact(null); setRecipeStorage(null);
                 setComponentName(""); setVersion(""); setDescription("");
-                setInstallCmd("");
+                setInstallCmd(""); setRunCmd(""); setShutdownCmd(""); setReadinessCmd(""); setRestartPolicy("on-failure");
                 setSelectedGroups(new Set()); setSelectedDevices(new Set()); setTxDigest(null);
               }}
               className="text-sm text-gray-500 hover:text-gray-700"
@@ -234,6 +245,47 @@ export default function FirmwarePage() {
             placeholder="/usr/local/bin/install-update {artifact}"
             disabled={step !== "recipe"}
           />
+          <CmdField
+            label="Run"
+            hint="Optional supervised process; must stay in the foreground. Reported Applied only once ready; a failed replacement rolls back to the previous version. Use {work} for its persistent directory."
+            value={runCmd}
+            onChange={setRunCmd}
+            placeholder="exec {artifact}"
+            disabled={step !== "recipe"}
+          />
+          {runCmd && (
+            <>
+              <CmdField
+                label="Readiness"
+                hint="Optional check repeated until it succeeds; without one, a run that survives a few seconds is ready. {pid} is the run's process."
+                value={readinessCmd}
+                onChange={setReadinessCmd}
+                placeholder="test -e {work}/ready"
+                disabled={step !== "recipe"}
+              />
+              <CmdField
+                label="Shutdown"
+                hint="Optional graceful stop before SIGTERM/SIGKILL of the whole process group. {pid} is the run's process."
+                value={shutdownCmd}
+                onChange={setShutdownCmd}
+                placeholder="kill -TERM {pid}"
+                disabled={step !== "recipe"}
+              />
+              <label className="block text-sm">
+                <span className="text-gray-600">Restart</span>
+                <select
+                  value={restartPolicy}
+                  onChange={(e) => setRestartPolicy(e.target.value as typeof restartPolicy)}
+                  disabled={step !== "recipe"}
+                  className="ml-3 border border-gray-200 rounded px-2 py-1 text-sm"
+                >
+                  <option value="on-failure">on failure</option>
+                  <option value="always">always</option>
+                  <option value="never">never</option>
+                </select>
+              </label>
+            </>
+          )}
         </div>
         {step === "recipe" && (
           <button
