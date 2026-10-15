@@ -3,6 +3,7 @@
     "Codex": ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "-"],
     "Claude": ["claude", "-p", "--dangerously-skip-permissions"]
   },
+  "implementation_slots": [],
   "projects": [
     {
       "id": "suifleet",
