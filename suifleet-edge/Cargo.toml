@@ -58,7 +58,6 @@ prost = "0.14"
 default = ["systemd"]
 systemd = ["sd-notify"]
 
-
 [profile.release]
 opt-level = "z"
 lto = true
