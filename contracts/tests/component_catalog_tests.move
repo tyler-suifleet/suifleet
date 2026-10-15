@@ -36,6 +36,24 @@ module sui_edge::component_catalog_tests {
         catalog::delete_deployment(d, ts::ctx(&mut s));
         ts::end(s);
     }
+    #[test]
+    fun paused_catalog_creation_and_cleanup() {
+        let mut s = ts::begin(@0xAD);
+        catalog::create_catalog(ts::ctx(&mut s));
+        ts::next_tx(&mut s, @0xAD); publish(&mut s, b"1.0.0");
+        ts::next_tx(&mut s, @0xAD);
+        let v = ts::take_immutable<ComponentVersion>(&s);
+        let clock = clock::create_for_testing(ts::ctx(&mut s));
+        catalog::create_deployment_paused(&v, vector[], vector[object::id_from_address(@0xD)], &clock, ts::ctx(&mut s));
+        clock::destroy_for_testing(clock); ts::return_immutable(v);
+        ts::next_tx(&mut s, @0xAD);
+        let mut d = ts::take_shared<DeploymentRecord>(&s);
+        let paused = sui_edge::deployment_manager::control(&d);
+        sui_edge::deployment_manager::set_control(&mut d, 0, 0, 0, 0, 0, 0, ts::ctx(&mut s));
+        assert!(paused != sui_edge::deployment_manager::control(&d));
+        catalog::delete_deployment(d, ts::ctx(&mut s));
+        ts::end(s);
+    }
     #[test, expected_failure(abort_code = 0, location = sui_edge::component_catalog)]
     fun unauthorized_registration() {
         let mut s = ts::begin(@0xAD); catalog::create_catalog(ts::ctx(&mut s));

@@ -61,6 +61,7 @@ test-ota:
 	$(RUN) python3 scripts/test_ota.py --firmware-helper
 	$(RUN) python3 scripts/test_firmware_restart.py
 	$(RUN) python3 scripts/test_desired_state.py
+	$(RUN) python3 scripts/test_deployment_control.py
 
 # SF-030 harmless test component: fixture tests (system shell, plus busybox when
 # installed), then the real daemon applying it through suifleet-test-updater.
@@ -83,6 +84,7 @@ check-interfaces:
 	$(RUN) python3 scripts/test_generated_interfaces.py
 	$(RUN) node scripts/test_protocol.cjs
 	$(RUN) node scripts/test_component_catalog.cjs
+	$(RUN) node scripts/test_deployment_control.cjs
 
 generate-interfaces:
 	$(RUN) python3 scripts/generate_interfaces.py
@@ -233,3 +235,8 @@ test-daemon-localnet:
 test-testnet:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_testnet*.py'
 	$(RUN) node scripts/test_testnet_cache.cjs
+
+.PHONY: test-deployment-control-localnet
+test-deployment-control-localnet:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+	$(RUN) python3 scripts/test_deployment_control_localnet.py

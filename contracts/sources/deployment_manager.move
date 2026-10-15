@@ -34,6 +34,9 @@ module sui_edge::deployment_manager {
     const ENoReceipts: u64 = 6;
     const EUseVerifiedReport: u64 = 7;
     const EStaleReceipts: u64 = 8;
+    const EInvalidControlState: u64 = 9;
+    const EInvalidSchedule: u64 = 10;
+    const ECancelled: u64 = 11;
 
     // ── Dynamic field keys ────────────────────────────────────────────────────
     //
@@ -61,6 +64,54 @@ module sui_edge::deployment_manager {
     public struct Receipts has store {
         version: u64,
         statuses: VecMap<ID, u8>,
+    }
+
+    /// SF-018 controls have their own introduction-package origin. An absent
+    /// field preserves existing immediate-deployment behaviour.
+    public struct ControlKey has copy, drop, store {}
+    public struct Control has copy, drop, store {
+        revision: u64,
+        state: u8, // 0 active, 1 paused, 2 permanently cancelled
+        not_before_ms: u64,
+        expires_ms: u64, // 0 means no expiry
+        window_start_ms: u64,
+        window_end_ms: u64, // 0 means no maintenance window
+        notice_ms: u64,
+    }
+
+    /// Creator-only, additive control API for existing and new records.
+    /// Cancellation is irreversible. Expiry and windows gate admission, not
+    /// an updater already admitted; cancelling never kills an in-flight apply.
+    public fun set_control(
+        deployment: &mut DeploymentRecord, state: u8,
+        not_before_ms: u64, expires_ms: u64,
+        window_start_ms: u64, window_end_ms: u64, notice_ms: u64,
+        ctx: &TxContext,
+    ) {
+        assert!(ctx.sender() == deployment.creator, ENotCreator);
+        assert!(state <= 2, EInvalidControlState);
+        assert!(expires_ms == 0 || expires_ms > not_before_ms, EInvalidSchedule);
+        assert!((window_start_ms == 0 && window_end_ms == 0) ||
+            window_end_ms > window_start_ms, EInvalidSchedule);
+        assert!(notice_ms <= 604800000, EInvalidSchedule); // at most seven days
+        let revision = if (df::exists(&deployment.id, ControlKey {})) {
+            let previous: Control = df::remove(&mut deployment.id, ControlKey {});
+            assert!(previous.state != 2, ECancelled);
+            previous.revision + 1
+        } else { 1 };
+        df::add(&mut deployment.id, ControlKey {}, Control {
+            revision, state, not_before_ms, expires_ms,
+            window_start_ms, window_end_ms, notice_ms,
+        });
+    }
+
+    public fun control(deployment: &DeploymentRecord): Control {
+        if (df::exists(&deployment.id, ControlKey {})) {
+            *df::borrow(&deployment.id, ControlKey {})
+        } else {
+            Control { revision: 0, state: 0, not_before_ms: 0, expires_ms: 0,
+                window_start_ms: 0, window_end_ms: 0, notice_ms: 0 }
+        }
     }
 
     // ── Objects ───────────────────────────────────────────────────────────────
@@ -227,12 +278,19 @@ module sui_edge::deployment_manager {
         name: String, version: String, groups: vector<ID>, devices: vector<ID>,
         key: K, value: V, clock: &Clock, ctx: &mut TxContext,
     ) {
+        transfer::share_object(new_catalog_deployment(name, version, groups, devices, key, value, clock, ctx));
+    }
+
+    public(package) fun new_catalog_deployment<K: copy + drop + store, V: store>(
+        name: String, version: String, groups: vector<ID>, devices: vector<ID>,
+        key: K, value: V, clock: &Clock, ctx: &mut TxContext,
+    ): DeploymentRecord {
         let creator = ctx.sender();
         let mut record = make_deployment(creator, name, version, std::string::utf8(b""),
             std::string::utf8(b""), groups, devices, clock, ctx);
         record.schema_version = 2;
         df::add(&mut record.id, key, value);
-        transfer::share_object(record);
+        record
     }
 
     public(package) fun remove_catalog_binding<K: copy + drop + store, V: store + drop>(
@@ -397,6 +455,9 @@ module sui_edge::deployment_manager {
 
         // Catalog records require their defining module to remove the binding first.
         assert!(deployment.schema_version == SCHEMA_VERSION, EPackageOutdated);
+        if (df::exists(&deployment.id, ControlKey {})) {
+            let _: Control = df::remove(&mut deployment.id, ControlKey {});
+        };
         // Remove dynamic fields before destroying the object.
         let _: vector<ID>       = df::remove(&mut deployment.id, TargetGroupsKey {});
         let _: vector<ID>       = df::remove(&mut deployment.id, TargetDevicesKey {});

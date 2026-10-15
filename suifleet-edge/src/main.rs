@@ -1,4 +1,5 @@
 mod catalog;
+mod control;
 mod apply;
 mod components;
 mod config;
@@ -240,6 +241,25 @@ async fn poll(
         }
         anyhow::ensure!(progressed, "event stream claims more data without advancing");
     }
+    // Deferred one-shot events survive cursor advancement and restarts.
+    for id in journal.state.deferred.keys().cloned().collect::<Vec<_>>() {
+        if journal.state.deferred[&id].terminal || journal.state.deployments.contains_key(&id)
+            || journal.state.managed.values().any(|managed| managed == &id) {
+            // Reconciliation owns managed notices, including their durable timer.
+            continue;
+        }
+        let Some((event, record)) = sui.deployment(&id).await? else {
+            journal.state.deferred.remove(&id);
+            journal.save()?;
+            continue;
+        };
+        if sui.is_managed(&id).await? {
+            journal.state.deferred.remove(&id);
+            journal.save()?;
+        } else if sui.authorized_target(&event, &cfg.device.device_object_id).await? {
+            execute(cfg, sui, walrus, runner, store, journal, &event, &record).await?;
+        }
+    }
     reconcile(cfg, sui, walrus, runner, store, journal).await
 }
 
@@ -263,6 +283,9 @@ async fn execute(
         ),
         "wrong deployment type"
     );
+    if !admit(sui, journal, &event.deployment_id).await? {
+        return Ok(None);
+    }
     let resolved = catalog::resolve(sui, event, &record.fields).await;
     if let Err(error) = &resolved {
         let mut outcome = Outcome::default();
@@ -280,24 +303,13 @@ async fn execute(
         .join("artifacts")
         .join(hex::encode(identity::hash(event.deployment_id.as_bytes())));
     std::fs::create_dir_all(&directory)?;
-    // Save intent before starting work. A crash never silently re-executes an
-    // updater. From here on this is what the component runs, or tried to.
-    journal
-        .state
-        .current
-        .insert(event.component_name.clone(), event.deployment_id.clone());
-    journal.state.deployments.insert(
-        event.deployment_id.clone(),
-        Outcome {
-            firmware_request: (cfg.apply.mode == config::ApplyMode::PrivilegedHelper)
-                .then(|| firmware::request_id(&event.deployment_id)),
-            ..Outcome::default()
-        },
-    );
-    journal.save()?;
     let result =
         handle_deployment(sui, walrus, runner, &cfg.apply, store, journal, &resolved, &directory).await;
-    let outcome = journal.state.deployments.get_mut(&event.deployment_id).unwrap();
+    if matches!(&result, Err(error) if error.downcast_ref::<control::NotAdmitted>().is_some()) {
+        let _ = std::fs::remove_dir_all(&directory);
+        return Ok(None);
+    }
+    let outcome = journal.state.deployments.entry(event.deployment_id.clone()).or_default();
     record_result(outcome, result);
     info!(deployment = event.deployment_id, status = outcome.status, error = ?outcome.error, "Deployment finished");
     let status = outcome.status;
@@ -305,6 +317,36 @@ async fn execute(
     firmware::acknowledge(&cfg.apply.firmware_spool, &firmware::request_id(&event.deployment_id));
     let _ = std::fs::remove_dir_all(&directory);
     Ok(status)
+}
+
+/// Persist notice and deferral independently of execution outcomes. A terminal
+/// observation is never forgotten if the device clock subsequently moves back.
+async fn admit(sui: &SuiClient, journal: &mut Journal, id: &str) -> anyhow::Result<bool> {
+    if journal.state.deferred.get(id).is_some_and(|d| d.terminal) { return Ok(false); }
+    // A missing record (including old-package deletion) is never permission.
+    anyhow::ensure!(sui.optional_object(id).await?.is_some(), "deployment deleted before admission");
+    let control = sui.deployment_control(id).await?;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis();
+    let now = u64::try_from(now)?;
+    // Use corrected UTC for schedule/window checks. Only a deployment's
+    // terminal observation survives clock rollback, never a global clock floor.
+    // Restart notice if its saved timestamp is ahead of the corrected clock.
+    let notified = journal.state.deferred.get(id)
+        .filter(|d| d.control == control && d.notified_ms <= now)
+        .map(|d| d.notified_ms).unwrap_or(now);
+    let reason = control.reason(now, notified)?;
+    let entry = control::Deferred {
+        control, notified_ms: notified,
+        reason: reason.unwrap_or("ready for admission").to_owned(),
+        terminal: matches!(reason, Some("cancelled" | "expired")),
+    };
+    if journal.state.deferred.get(id).is_none_or(|old| old.reason != entry.reason || old.control != entry.control) {
+        info!(deployment = id, reason = entry.reason, notice_ms = entry.control.notice_ms,
+            "Deployment admission notice (UTC); no disruptive work started");
+    }
+    journal.state.deferred.insert(id.to_owned(), entry);
+    journal.save()?;
+    Ok(reason.is_none())
 }
 
 /// Move toward the current desired state of every group this device is in
@@ -422,7 +464,11 @@ async fn reconcile(
         journal.save()?;
         let status = execute(cfg, sui, walrus, runner, store, journal, &event, &record).await?;
         if status != Some(protocol::STATUS_APPLIED) {
-            warn!(component, deployment, "Plan stopped; not retried until the desired state changes");
+            if status.is_none() {
+                info!(component, deployment, "Plan deferred; admission reconsidered on the next poll");
+            } else {
+                warn!(component, deployment, "Plan stopped; not retried until the desired state changes");
+            }
             return Ok(());
         }
         journal.state.step = None;
@@ -546,6 +592,25 @@ async fn handle_deployment(
                 }
             })?;
     }
+    // Re-read after downloads: a pause/cancel/window closing during fetch
+    // cannot pass a stale initial check. Read failure fails closed before intent.
+    match admit(sui, journal, &event.deployment_id).await {
+        Ok(true) => {},
+        Ok(false) => return Err(control::NotAdmitted.into()),
+        Err(error) => {
+            warn!(%error, "Admission unavailable; retrying before apply");
+            return Err(control::NotAdmitted.into());
+        }
+    }
+    journal.state.current.insert(event.component_name.clone(), event.deployment_id.clone());
+    journal.state.deployments.insert(event.deployment_id.clone(), Outcome {
+        firmware_request: (config.mode == config::ApplyMode::PrivilegedHelper)
+            .then(|| firmware::request_id(&event.deployment_id)),
+        ..Outcome::default()
+    });
+    journal.state.deferred.remove(&event.deployment_id);
+    journal.save()?;
+    info!(deployment = event.deployment_id, "Apply admitted; subsequent control changes do not interrupt this plan");
     for install in installs {
         // Recorded unconfirmed first: an interrupted install is never reused.
         // A dependency install changes what that component runs as well.
