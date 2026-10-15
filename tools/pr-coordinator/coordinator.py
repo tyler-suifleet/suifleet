@@ -61,6 +61,11 @@ def gate(pr, owner, review):
         return 'changes or acceptance evidence remain outstanding'
     if any(not t['isResolved'] for t in pr['threads']):
         return 'unresolved review threads'
+    if pr.get('_testnet_required'):
+        testnet = pr.get('_testnet_status') or {}
+        if (testnet.get('state') != 'success'
+                or testnet.get('description') != 'base:' + pr['baseRefOid']):
+            return 'exact-head testnet status for current base is missing or unsuccessful'
     checks = pr['statusCheckRollup']
     if not checks or not all((c.get('status') == 'COMPLETED' and c.get('conclusion') == 'SUCCESS')
                              if c.get('__typename') == 'CheckRun' else c.get('state') == 'SUCCESS' for c in checks):
@@ -76,7 +81,16 @@ def gate(pr, owner, review):
 
 
 class Store:
-    def __init__(self, path):
+    def __init__(self, path, worker_limits=None):
+        self.worker_limits = {} if worker_limits is None else worker_limits
+        if not isinstance(self.worker_limits, dict):
+            raise ValueError('review_worker_limits must map model families to category limits')
+        for family, limits in self.worker_limits.items():
+            if family not in FAMILIES or not isinstance(limits, dict):
+                raise ValueError('Unknown review worker family or invalid category limits')
+            for kind, limit in limits.items():
+                if kind not in ('review', 'fix') or type(limit) is not int or not 1 <= limit <= 16:
+                    raise ValueError('Review/fix limits must be integers from 1 to 16')
         path.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(path, isolation_level=None, timeout=30)
         self.db.row_factory = sqlite3.Row
@@ -105,8 +119,10 @@ class Store:
     def reserve(self, project, pr, family, kind, directory):
         self.db.execute('BEGIN IMMEDIATE')
         try:
-            active = self.db.execute("SELECT 1 FROM jobs WHERE status IN ('reserved','running','orphaned') AND ((family=? AND kind=?) OR (project=? AND pr=?))", (family, kind, project, pr['number'])).fetchone()
-            if active:
+            active = self.db.execute("SELECT 1 FROM jobs WHERE status IN ('reserved','running','orphaned') AND project=? AND pr=?", (project, pr['number'])).fetchone()
+            count = self.db.execute("SELECT COUNT(*) FROM jobs WHERE status IN ('reserved','running','orphaned') AND family=? AND kind=?", (family, kind)).fetchone()[0]
+            limit = self.worker_limits.get(family, {}).get(kind, 1)
+            if active or count >= limit:
                 self.db.execute('COMMIT'); return None
             previous = self.db.execute("SELECT * FROM jobs WHERE project=? AND pr=? AND kind=? AND head=? AND feedback=?",(project,pr['number'],kind,pr['headRefOid'],feedback(pr))).fetchone()
             if previous and previous['status'] == 'retry' and previous['retry_after'] <= time.time():
@@ -147,7 +163,7 @@ class Coordinator:
         self.config, self.state = config, state
         for project in config['projects']:
             network_authorization(project)
-        self.store = Store(state / 'reviews.sqlite3')
+        self.store = Store(state / 'reviews.sqlite3', config.get('review_worker_limits'))
         self.children = {}
 
     def gh(self, project, args):
@@ -171,6 +187,14 @@ class Coordinator:
         pr['baseRefOid']=reference['object']['sha']
         comparison=json.loads(self.gh(project,['api',f"repos/{project['repository']}/compare/{pr['baseRefOid']}...{pr['headRefOid']}"]))
         pr['baseIncluded']=comparison['merge_base_commit']['sha'] == pr['baseRefOid']
+        # Bootstrap only before the controller exists on the integration base.
+        # Missing/pending status then blocks even before workflow_run is queued.
+        tree = json.loads(self.gh(project, ['api', f"repos/{project['repository']}/git/trees/{pr['baseRefOid']}?recursive=1"]))
+        if tree.get('truncated'): raise RuntimeError('cannot determine required testnet workflow from truncated tree')
+        pr['_testnet_required'] = any(row['path'] == '.github/workflows/testnet.yml' for row in tree['tree'])
+        if pr['_testnet_required']:
+            statuses = json.loads(self.gh(project, ['api', f"repos/{project['repository']}/commits/{pr['headRefOid']}/status"]))
+            pr['_testnet_status'] = next((row for row in statuses['statuses'] if row['context'] == 'testnet/package-upgrade'), None)
         owner, repo = project['repository'].split('/')
         query = '''query($owner:String!,$repo:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100,after:$cursor){nodes{id isResolved comments(first:100){nodes{id body updatedAt} pageInfo{hasNextPage}}} pageInfo{hasNextPage endCursor}}}}}'''
         threads, cursor = [], None
