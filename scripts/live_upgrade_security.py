@@ -52,7 +52,7 @@ from types import SimpleNamespace
 
 import deployment_manifest as dm
 from live_common import (CLOCK, DAEMON, Live, Spent, Walrus, contracts_at, deployment_args, history, ids, key_wallet,
-                         pending_key, recover_key, stage, start_daemon, sweep, wait_for)
+                         pending_key, recover_key, stage, start_daemon, stop_daemon, sweep, wait_for)
 from live_package_upgrade import contracts_digest, load_state, save_state
 import subprocess
 
@@ -224,8 +224,8 @@ def run(args):
             live.evidence["receipts"] = {"d0": {dm.object_id(device): 1}, "d2": {dm.object_id(device): 1}}
             passed = True
         finally:
-            if daemon and daemon.poll() is None:
-                daemon.kill()
+            if daemon:
+                stop_daemon(daemon)
             # 5. Cleanup, after a failure too: storage rebates on the run's
             # objects, then the device's unspent funding back to the operator.
             failure = teardown(live, made)

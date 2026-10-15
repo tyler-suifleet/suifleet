@@ -1,11 +1,12 @@
 """Offline spend-accounting and fixture-reuse checks for the SF-010 live suites."""
 import json
+from contextlib import nullcontext
 import sys
 import tempfile
 from pathlib import Path
 from subprocess import CompletedProcess
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import live_common
@@ -314,6 +315,50 @@ class TeardownTests(unittest.TestCase):
         chain = Chain()
         run, _, failure, kept = self.teardown(chain, {}, held=(0,))
         self.assertEqual((failure, chain.calls, kept, run.ledger.used), (None, [], False, 0))
+
+
+class DaemonStartupTests(unittest.TestCase):
+    """A daemon whose startup fails is killed and reaped before the error
+    reaches the caller, which never receives its handle."""
+
+    def start(self, journal=None, failure=None):
+        self.process = Mock()
+        self.process.poll.return_value = None
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            if journal is not None:
+                (root / "state-legacy").mkdir()
+                (root / "state-legacy" / "state.json").write_text(journal)
+            with patch.object(live_common.dm, "generate"), \
+                    patch.object(live_common.subprocess, "Popen", return_value=self.process), \
+                    patch.object(live_common, "wait_for", side_effect=failure) if failure else nullcontext():
+                return live_common.start_daemon(root, "legacy", {}, "")
+
+    def assert_reaped(self):
+        self.process.kill.assert_called_once()
+        self.process.wait.assert_called_once()
+
+    def test_a_startup_timeout_kills_and_reaps_the_daemon(self):
+        with self.assertRaisesRegex(AssertionError, "initialization timeout"):
+            self.start(failure=AssertionError("initialization timeout"))
+        self.assert_reaped()
+
+    def test_an_unreadable_journal_kills_and_reaps_the_daemon(self):
+        with self.assertRaises(json.JSONDecodeError):
+            self.start(journal="{not json")
+        self.assert_reaped()
+
+    def test_an_exited_daemon_is_still_reaped(self):
+        with self.assertRaisesRegex(AssertionError, "daemon exited"):
+            self.start(failure=AssertionError("daemon exited (1): legacy daemon did not enroll"))
+        self.process.wait.assert_called_once()
+
+    def test_an_enrolled_daemon_is_returned_running(self):
+        process, _ = self.start(journal=json.dumps({"initialized": True}))
+        self.assertIs(process, self.process)
+        process.kill.assert_not_called()
+        process.wait.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

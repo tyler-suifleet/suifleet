@@ -417,12 +417,26 @@ def start_daemon(root, name, manifest, device_section):
                         f'timeout_seconds = 60\n[runtime]\nstate_dir = {json.dumps(str(state))}\npoll_seconds = 3\n')
     release = root / f"release-{name}"
     dm.generate(manifest, release, template)
-    log = (root / f"daemon-{name}.log").open("w")
-    process = subprocess.Popen([str(DAEMON)], env={**os.environ, "EDGE_CONFIG": str(release / "config.toml")},
-                               stdout=log, stderr=log)
+    # The child keeps its own copy of the log descriptor; the parent's closes here.
+    with (root / f"daemon-{name}.log").open("w") as log:
+        process = subprocess.Popen([str(DAEMON)], env={**os.environ, "EDGE_CONFIG": str(release / "config.toml")},
+                                   stdout=log, stderr=log)
     journal = state / "state.json"
-    wait_for(lambda: journal.exists() and json.loads(journal.read_text()).get("initialized"), f"{name} daemon did not enroll", process)
+    try:
+        wait_for(lambda: journal.exists() and json.loads(journal.read_text()).get("initialized"), f"{name} daemon did not enroll", process)
+    except BaseException:
+        # The caller never receives the handle, so a funded daemon must not
+        # outlive a failed startup (or the run's network lock).
+        stop_daemon(process)
+        raise
     return process, components
+
+
+def stop_daemon(process):
+    """Kill and reap a daemon that is still running."""
+    if process.poll() is None:
+        process.kill()
+    process.wait(timeout=30)
 
 
 def history(components):
