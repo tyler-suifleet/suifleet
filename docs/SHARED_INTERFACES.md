@@ -22,18 +22,18 @@ make ci                    # also Move/Rust, OTA/restart/component, manifest/wal
 
 The checker uses actual `sui move summary` compiler output, rather than matching field names in Move source. It compares complete callable signatures and ordered struct fields, including compiler-generated `dummy_field: bool` for empty dynamic-field keys. The older name/arity scanner remains an additional guard for references outside the generated helpers.
 
-Negative tests mutate real compiler summaries to change field types/order, key layouts, argument types/mutability, returns, abilities and callable visibility. CI fails on any drift or stale generated file. Independent fixed BCS bytes are encoded/decoded by the actual TypeScript SDK and Rust `bcs` test serializer. Both clients consume the same positive/negative recipe cases. The Rust BCS serializer is a pinned development dependency, not part of the daemon runtime.
+Negative tests mutate real compiler summaries to change field types/order, key layouts, argument types/mutability, returns, abilities and callable visibility. CI fails on any drift or stale generated file. Independent fixed BCS bytes are encoded/decoded by the actual TypeScript SDK and Rust `bcs` test serializer. Both clients consume the same positive/negative recipe cases. The daemon uses its existing runtime BCS dependency for generated wire vectors.
 
-For real generated calls against the existing pinned 1.71.1 localnet, without public-network access or user wallets:
+For real generated calls against the pinned 1.81.1 localnet, without public-network access or user wallets:
 
 ```bash
 docker run --rm --network none --user "$(id -u):$(id -g)" \
   -e INSIDE_DEV_CONTAINER=1 -v "$PWD":/workspace \
-  -v sui_move-cache:/home/dev/.move -w /workspace sui-dev:latest \
+  -v sui_move-cache:/home/dev/.move -w /workspace suifleet-dev:sf004 \
   make test-protocol-live
 ```
 
-Install locked frontend dependencies first. This test creates temporary keys/state and compiles a temporary copy of the contracts, publishes only on the disposable loopback network, then exercises enrollment, groups, verified deployment, authoritative reporting and cleanup through the generated encoders. It checks execution effects. The compiler uses the implicit testnet build environment with RPC tree shaking disabled; transaction execution targets the owned local chain. Its explicit empty keystore prevents compiler key generation, and CLI output is suppressed. The runner rejects an existing service or any container network beyond loopback. This is interface acceptance using the baseline JSON-RPC client, not proof of current public-network transport compatibility, a browser-extension wallet, Walrus or a Pi.
+Install locked frontend dependencies first. This test creates temporary keys/state and compiles a temporary copy of the contracts, publishes only on the disposable loopback network, then exercises enrollment, groups, verified deployment, authoritative reporting and cleanup through the generated encoders. It checks execution effects. The compiler uses the implicit testnet build environment with RPC tree shaking disabled; transaction execution targets the owned local chain. Its explicit empty keystore prevents compiler key generation, and CLI output is suppressed. The runner rejects an existing service or any container network beyond loopback. This exercises the generated interfaces through the supported gRPC client on an isolated chain. Public networks, browser-extension wallets, Walrus and physical Pi acceptance remain separate.
 
 ## Deliberate changes and compatibility
 
@@ -41,10 +41,10 @@ Install locked frontend dependencies first. This test creates temporary keys/sta
 2. Edit the contracts and reviewed catalog metadata/recipe schema. To capture an intentional compiled ABI change, run `python3 scripts/generate_interfaces.py --capture`; this preserves version/status/required-origin metadata and explicitly updates the ABI snapshot. Review that diff rather than accepting a failing check automatically.
 3. Regenerate both clients, run the checks above and the relevant live upgrade/mixed-client acceptance. Update deployment manifests/client version ranges together. Never run `--capture` in CI or to silence unexplained drift.
 
-Catalog format version, manifest schema, fleet protocol, deployment object schema, recipe version and receipt authority generation have different meanings. The current supported fleet protocol and manifest schema are 1; recipe wire version is `1.0`. Unknown manifest protocols fail during configuration validation and unknown recipe versions fail before apply. `Receipts.version` is an authority generation; it is not the recipe or fleet protocol version.
+Catalog format version, manifest schema, fleet protocol, deployment object schema, recipe version and receipt authority generation have different meanings. The current supported fleet protocol and manifest schema are 1; recipe wire version is `1.0`. Unknown manifest protocols fail during configuration validation; unknown deployment schemas and recipe versions fail before apply. `Receipts.version` is an authority generation; it is not the recipe or fleet protocol version.
 
 An additive layout/API change still needs explicit client/catalog review and per-type introduction origins. A breaking layout is not made safe by changing a version number. Package upgrades do not rerun initializers, migrate objects or disable old entry points; authoritative-state migration and old-package bypass tests remain required.
 
-The recipe schema describes wire fields, not a claim that every lifecycle feature is implemented. The daemon still refuses managed run/shutdown lifecycle and nonempty component configuration. Authentication of recipe and artifact digests remains required.
+The shared recipe schema rejects managed run/shutdown commands and nonempty component configuration in the frontend before upload and in the daemon before apply. Optional run/shutdown fields can only be absent or null. Authentication of recipe and artifact digests remains required.
 
-SF-003's new gRPC reader should import/reexport these generated BCS layouts when integrated; SF-004's Rust transport can use the generated wire structs and call/type constants. Neither migration is implemented by SF-005. The current schema and manifest format remain compatible; no live release or hardware programming is performed by generation.
+Both clients consume the generated interfaces after integrating SF-003 and SF-004. The Rust transaction builder uses generated module/function names with typed object IDs and u8 statuses, and verifies the simulated transaction before signing. Obsolete JSON-RPC argument encoders were removed. Reference-returning Move helpers have no generated transaction encoders. The full ABI snapshot lives separately in `fleet-abi.ts` and is not imported into application bundles.
