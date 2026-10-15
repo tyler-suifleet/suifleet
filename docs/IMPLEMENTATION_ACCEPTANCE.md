@@ -14,6 +14,7 @@ merging implementation does not establish them or authorize deployment.
 | SF-039 signed releases | [SF-042: provisioned signing workflow and device trust](https://github.com/tyler-suifleet/suifleet/issues/62), plus SF-031 |
 | SF-043 automatic testnet controller | First full automatic Actions execution requires reviewed main-only bootstrap; tracked in SF-043/#64 and observed before declaring the overall request complete |
 | SF-045 testnet preflight repair | First full automatic Actions success after reviewed repair integration; exact-head CI, keyless Actions metadata probe and genuine current-head/base testnet effects/status remain premerge gates; tracked in #69/#64 |
+| SF-046 encrypted fixture restore | First automatic post-integration execution of the updated main-sourced helper with unchanged-fixture reuse; exact-head CI and genuine current-head/base automatic testnet effects/status remain premerge gates; tracked in [#72](https://github.com/tyler-suifleet/suifleet/issues/72)/[#64](https://github.com/tyler-suifleet/suifleet/issues/64) |
 
 The versioned machine-readable scope is
 [`tracking/acceptance-policy.json`](tracking/acceptance-policy.json). Copy its object
@@ -50,3 +51,13 @@ Actions run occurred. A real keyless Actions probe validates the repaired metada
 boundary before integration. No failed test is waived, no review/status receipt
 is fabricated, and the first normal CI-triggered full testnet Actions success is
 still required before the continuation declares the user's overall goal complete.
+
+SF-046 records only the ordering needed to observe the updated main-sourced
+artifact restore helper after reviewed integration. Existing automatic CI already
+works. Source/security and artifact-ordering, producer and authentication regressions,
+full exact-head ordinary CI, genuine successful exact-head/current-base automatic
+testnet status with independently verified effects and budget evidence, fresh
+independent review and sole-coordinator integration remain required. No failing
+test or mandatory status is waived. Observe and record the actual automatic
+updated-helper restoration and unchanged-fixture reuse after integration in
+#72/#64 before declaring the overall SF-043 request complete.
