@@ -8,6 +8,8 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  schedule:
+    - cron: '17 11 * * 1'
 
 permissions:
   contents: read
@@ -22,6 +24,9 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Offline security gate tests
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_security_audit.py -v
 
       - name: Offline PR coordinator tests
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/pr-coordinator/tests -v
@@ -93,3 +98,91 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/testnet_ci.py --probe-environment
+
+  security-dependencies:
+    name: Security dependencies, secrets and configuration
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Verify and install pinned security scanner
+        run: python3 scripts/install_security_scanner.py "$RUNNER_TEMP/security-tools/trivy"
+      - name: Scan source, lockfiles and deployment configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '{}\n' > "$RUNNER_TEMP/security-empty.yaml"
+          "$RUNNER_TEMP/security-tools/trivy" filesystem \
+            --config "$RUNNER_TEMP/security-empty.yaml" \
+            --secret-config "$RUNNER_TEMP/security-empty.yaml" \
+            --ignorefile /dev/null --include-dev-deps \
+            --scanners vuln,secret,misconfig \
+            --skip-dirs '.git,**/node_modules,**/.next,**/target,.ci-cache' \
+            --format json --output "$RUNNER_TEMP/trivy-private.json" --quiet .
+          python3 scripts/security_audit.py trivy "$RUNNER_TEMP/trivy-private.json" \
+            --output security-reports/dependencies.json
+      - name: Publish sanitized findings only
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: security-dependencies
+          path: security-reports/dependencies.json
+          retention-days: 14
+          if-no-files-found: warn
+
+  security-codeql:
+    name: Security CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript, python, rust, actions]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Install baseline Rust toolchain
+        if: matrix.language == 'rust'
+        run: rustup toolchain install 1.94.0 --profile minimal
+      - name: Initialize security analysis
+        uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee
+        env:
+          RUSTUP_TOOLCHAIN: 1.94.0
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+          queries: security-extended
+      - name: Analyze without publishing source excerpts
+        uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee
+        env:
+          RUSTUP_TOOLCHAIN: 1.94.0
+        with:
+          upload: never
+          output: ${{ runner.temp }}/codeql-${{ matrix.language }}
+      - name: Enforce security findings threshold
+        env:
+          REPORT_DIRECTORY: ${{ runner.temp }}/codeql-${{ matrix.language }}
+          REPORT_LANGUAGE: ${{ matrix.language }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          reports=("$REPORT_DIRECTORY"/*.sarif)
+          if (( ${#reports[@]} == 0 )); then
+            echo 'CodeQL produced no SARIF report.' >&2
+            exit 2
+          fi
+          python3 scripts/security_audit.py sarif "${reports[@]}" \
+            --output "security-reports/codeql-$REPORT_LANGUAGE.json"
+      - name: Publish sanitized findings only
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: security-codeql-${{ matrix.language }}
+          path: security-reports/codeql-${{ matrix.language }}.json
+          retention-days: 14
+          if-no-files-found: warn

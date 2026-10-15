@@ -11,6 +11,28 @@ from testnet_ci import trusted_pr, plan
 
 
 class TrustTests(unittest.TestCase):
+    def test_checkout_must_match_immutable_authenticated_commit(self):
+        from testnet_ci import verify_checkout
+        run = Mock(return_value=type('Result', (), {'stdout': 'a'*40 + '\n'})())
+        verify_checkout('a'*40, run)
+        run.assert_called_once_with(['git', 'rev-parse', '--verify', 'HEAD'],
+                                    text=True, capture_output=True, check=True)
+        with self.assertRaises(RuntimeError):
+            verify_checkout('b'*40, run)
+        for ref in ['main', 'refs/pull/1/head', '', 'a'*39, 'a'*40 + '\n']:
+            with self.assertRaises(RuntimeError):
+                verify_checkout(ref, run)
+
+    def test_workflow_checks_immutable_event_commit_before_revision_execution(self):
+        workflow = (Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml').read_text()
+        self.assertIn('ref: ${{ github.workflow_sha }}', workflow)
+        checkout = workflow.split('      - name: Checkout authenticated test revision', 1)[1]
+        self.assertIn('github.event.workflow_run.head_sha || github.sha', checkout)
+        self.assertNotIn('ref: ${{ steps.plan.outputs.head }}', checkout)
+        verify = checkout.index('--verify-checkout')
+        self.assertLess(verify, checkout.index('docker/setup-buildx-action'))
+        self.assertLess(verify, checkout.index('SUIFLEET_TESTNET_KEY'))
+
     def test_live_gate_checkout_and_token_permissions(self):
         workflow = (Path(__file__).resolve().parents[2]/'.github/workflows/live-gates.yml').read_text()
         preflight, gate = workflow.split('\n  gate:\n', 1)
