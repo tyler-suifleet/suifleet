@@ -66,8 +66,8 @@ All chain reads go over gRPC.
    - `deployment.json`
    - `frontend.env`
    - the device `config.toml` template (`[sui]` plus the device sections of `suifleet-edge/config.example.toml`, or `--device-template`)
-4. **Switch.** `deployments/ENV/current` moves to the new release with one atomic rename. `dapp/.env.local` is then rewritten atomically: it gets `NEXT_PUBLIC_DEPLOYMENT_MANIFEST`, the legacy `NEXT_PUBLIC_*_ID`/`NETWORK` lines are dropped, and every other line is kept.
-5. **Recover.** If any step after execution fails, the previous `current` and `.env.local` stay in place. The error names the pending file. Fix the cause, then run `scripts/redeploy.sh --recover deployments/ENV/pending-DIGEST.json`. It finishes recording without another transaction.
+4. **Switch both clients together.** The new `dapp/.env.local` is written in full beside the old one first: it gets `NEXT_PUBLIC_DEPLOYMENT_MANIFEST`, the legacy `NEXT_PUBLIC_*_ID`/`NETWORK` lines are dropped, and every other line is kept. Then two renames activate `deployments/ENV/current` and `.env.local`. If the second rename fails, the first is undone, so both clients always name the same release.
+5. **Recover.** If any step after execution fails, the previous `current` and `.env.local` stay in place. The error checks this and says so, or warns if either changed. It names the pending file. Fix the cause, then run `scripts/redeploy.sh --recover deployments/ENV/pending-DIGEST.json`. It finishes recording without another transaction.
 
 Earlier releases stay under `releases/`. Once superseded, every client rejects them as stale.
 
