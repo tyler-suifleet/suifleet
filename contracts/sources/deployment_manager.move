@@ -198,6 +198,26 @@ module sui_edge::deployment_manager {
         };
     }
 
+    public(package) fun create_catalog_deployment<K: copy + drop + store, V: store>(
+        name: String, version: String, groups: vector<ID>, devices: vector<ID>,
+        key: K, value: V, clock: &Clock, ctx: &mut TxContext,
+    ) {
+        let creator = ctx.sender();
+        let mut record = make_deployment(creator, name, version, std::string::utf8(b""),
+            std::string::utf8(b""), groups, devices, clock, ctx);
+        record.schema_version = 2;
+        df::add(&mut record.id, key, value);
+        transfer::share_object(record);
+    }
+
+    public(package) fun remove_catalog_binding<K: copy + drop + store, V: store + drop>(
+        deployment: &mut DeploymentRecord, key: K, ctx: &TxContext,
+    ) {
+        assert!(ctx.sender() == deployment.creator, ENotCreator);
+        let _: V = df::remove(&mut deployment.id, key);
+        deployment.schema_version = SCHEMA_VERSION;
+    }
+
     fun make_deployment(
         creator: address,
         component_name: String,
@@ -350,6 +370,8 @@ module sui_edge::deployment_manager {
     public entry fun delete_deployment(mut deployment: DeploymentRecord, ctx: &TxContext) {
         assert!(ctx.sender() == deployment.creator, ENotCreator);
 
+        // Catalog records require their defining module to remove the binding first.
+        assert!(deployment.schema_version == SCHEMA_VERSION, EPackageOutdated);
         // Remove dynamic fields before destroying the object.
         let _: vector<ID>       = df::remove(&mut deployment.id, TargetGroupsKey {});
         let _: vector<ID>       = df::remove(&mut deployment.id, TargetDevicesKey {});

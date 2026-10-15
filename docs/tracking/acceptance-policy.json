@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "authorization": "User explicitly permits reviewed implementation merges before Pi/Sui-network integration; external acceptance remains separately tracked. No code/test/CI/review gate is waived.",
+  "authorization": "User explicitly permits reviewed implementation merges before Pi/Sui-network integration; external acceptance remains separately tracked. No code/test/CI/review gate is waived. The direct SF043 task also authorizes one-time reviewed main-only controller bootstrap and its narrowly necessary SF045 repair before the first full automatic Actions execution; that execution remains mandatory to complete the overall request.",
   "tickets": {
     "SF-006": {
       "deferred_checks": [
@@ -65,6 +65,42 @@
       "acceptance_issues": [
         "https://github.com/tyler-suifleet/suifleet/issues/62",
         "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ]
+    },
+    "SF-043": {
+      "deferred_checks": [
+        "first genuine automatic public-testnet GitHub Actions execution, which requires the reviewed main-only controller to exist on main"
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/64"
+      ],
+      "bootstrap_only": true,
+      "authorization": "Direct user task explicitly authorizes reviewed main integration before the first main-only automatic run; continuation must observe the real automatic run and record URL/effects/cost before declaring the overall request complete. This is a one-time bootstrap ordering, not a normal-CI bypass.",
+      "retained_gates": [
+        "all source/security findings repaired",
+        "exact-head local/regression and GitHub CI checks successful",
+        "fresh independent review of exact head/base/policy",
+        "mandatory exact-head/base testnet status once workflow exists on main",
+        "no mainnet/production/physical programming/unrelated-wallet authorization"
+      ]
+    },
+    "SF-045": {
+      "deferred_checks": [
+        "first successful normal CI-triggered full testnet Actions run after reviewed repair integration"
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/69",
+        "https://github.com/tyler-suifleet/suifleet/issues/64"
+      ],
+      "bootstrap_only": true,
+      "authorization": "User explicitly authorizes narrowly necessary post-merge reliability follow-ups for the SF043 automatic-CI goal through the same review process. The old main controller fails before test submission; full automatic success must be observed after the reviewed repair is on main, not invented before it.",
+      "retained_gates": [
+        "source/security and offline regressions",
+        "exact-head ordinary GitHub CI and real keyless workflow-token metadata probe",
+        "genuinely executed exact-head/current-base public-testnet validation with independent receipt effects and truthful status provenance",
+        "fresh independent review",
+        "mandatory status remains enforced; no fabricated status or waiver of a failing test",
+        "overall SF043 goal remains incomplete until actual automatic full testnet Actions success is recorded"
       ]
     }
   }

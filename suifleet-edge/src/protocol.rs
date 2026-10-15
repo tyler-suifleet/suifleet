@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 pub const PROTOCOL_VERSION: u64 = 1;
 pub const MANIFEST_SCHEMA_VERSION: u64 = 1;
 pub const DEPLOYMENT_SCHEMA_VERSION: u64 = 1;
+pub const SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS: &[u64] = &[1, 2];
+pub const CATALOG_TYPES: &[&str] = &["component_catalog::ComponentCatalog", "component_catalog::ComponentVersion", "component_catalog::CatalogCreated", "component_catalog::VersionPublished", "component_catalog::CatalogBindingKey", "component_catalog::CatalogBinding"];
 pub const RECIPE_VERSION: &str = "1.0";
 pub const STATUS_APPLIED: u8 = 1;
 pub const STATUS_FAILED: u8 = 2;
@@ -17,6 +19,67 @@ pub struct VecMap<K, V> { pub contents: Vec<Entry<K, V>> }
 /// sui::table::Table: entries are dynamic fields; the struct is its UID and size.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Table { pub id: [u8; 32], pub size: u64 }
+pub mod component_catalog {
+    use super::*;
+    pub const MODULE: &str = "component_catalog";
+    pub const CREATE_CATALOG: &str = "create_catalog";
+    pub const CREATE_DEPLOYMENT: &str = "create_deployment";
+    pub const DELETE_DEPLOYMENT: &str = "delete_deployment";
+    pub const PUBLISH_VERSION: &str = "publish_version";
+    pub const PUBLISHER: &str = "publisher";
+    pub const VALIDATE_HASH: &str = "validate_hash";
+    pub const VALIDATE_NAME: &str = "validate_name";
+    pub const VALIDATE_VERSION: &str = "validate_version";
+    pub const VERSIONS: &str = "versions";
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct CatalogBinding {
+        pub version_id: [u8; 32],
+    }
+    impl CatalogBinding { pub const MOVE_TYPE: &'static str = "component_catalog::CatalogBinding"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct CatalogBindingKey {
+        pub dummy_field: bool,
+    }
+    impl CatalogBindingKey { pub const MOVE_TYPE: &'static str = "component_catalog::CatalogBindingKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct CatalogCreated {
+        pub catalog_id: [u8; 32],
+        pub publisher: [u8; 32],
+    }
+    impl CatalogCreated { pub const MOVE_TYPE: &'static str = "component_catalog::CatalogCreated"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct ComponentCatalog {
+        pub id: [u8; 32],
+        pub publisher: [u8; 32],
+        pub versions: super::VecMap<String, [u8; 32]>,
+    }
+    impl ComponentCatalog { pub const MOVE_TYPE: &'static str = "component_catalog::ComponentCatalog"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct ComponentVersion {
+        pub id: [u8; 32],
+        pub catalog_id: [u8; 32],
+        pub publisher: [u8; 32],
+        pub component_name: String,
+        pub version: String,
+        pub schema_version: u64,
+        pub created_at: u64,
+        pub platform_os: Vec<String>,
+        pub platform_arch: Vec<String>,
+        pub recipe_blob_ids: Vec<String>,
+        pub recipe_sha256s: Vec<String>,
+        pub artifact_sha256s: Vec<String>,
+    }
+    impl ComponentVersion { pub const MOVE_TYPE: &'static str = "component_catalog::ComponentVersion"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct VersionPublished {
+        pub catalog_id: [u8; 32],
+        pub version_id: [u8; 32],
+        pub publisher: [u8; 32],
+        pub component_name: String,
+        pub version: String,
+    }
+    impl VersionPublished { pub const MOVE_TYPE: &'static str = "component_catalog::VersionPublished"; }
+}
 pub mod deployment_manager {
     use super::*;
     pub const MODULE: &str = "deployment_manager";

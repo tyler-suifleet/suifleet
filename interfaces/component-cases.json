@@ -1,0 +1,562 @@
+[
+  {
+    "name": "exact x86",
+    "value": {
+      "catalog_id": "0x1",
+      "publisher": "0x2",
+      "component_name": "app",
+      "version": "1.2.3-rc.1+build.1",
+      "schema_version": "1",
+      "platform_os": [
+        "linux",
+        "linux"
+      ],
+      "platform_arch": [
+        "x86_64",
+        "aarch64"
+      ],
+      "recipe_blob_ids": [
+        "recipe_x86",
+        "recipe_arm"
+      ],
+      "recipe_sha256s": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "artifact_sha256s": [
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      ]
+    },
+    "os": "linux",
+    "arch": "x86_64",
+    "selected": 0
+  },
+  {
+    "name": "exact arm64",
+    "value": {
+      "catalog_id": "0x1",
+      "publisher": "0x2",
+      "component_name": "app",
+      "version": "1.2.3-rc.1+build.1",
+      "schema_version": "1",
+      "platform_os": [
+        "linux",
+        "linux"
+      ],
+      "platform_arch": [
+        "x86_64",
+        "aarch64"
+      ],
+      "recipe_blob_ids": [
+        "recipe_x86",
+        "recipe_arm"
+      ],
+      "recipe_sha256s": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "artifact_sha256s": [
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      ]
+    },
+    "os": "linux",
+    "arch": "aarch64",
+    "selected": 1
+  },
+  {
+    "name": "unsupported",
+    "value": {
+      "catalog_id": "0x1",
+      "publisher": "0x2",
+      "component_name": "app",
+      "version": "1.2.3-rc.1+build.1",
+      "schema_version": "1",
+      "platform_os": [
+        "linux",
+        "linux"
+      ],
+      "platform_arch": [
+        "x86_64",
+        "aarch64"
+      ],
+      "recipe_blob_ids": [
+        "recipe_x86",
+        "recipe_arm"
+      ],
+      "recipe_sha256s": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "artifact_sha256s": [
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      ]
+    },
+    "os": "linux",
+    "arch": "arm",
+    "selected": null
+  },
+  {
+    "name": "ordered wildcard wins",
+    "value": {
+      "catalog_id": "0x1",
+      "publisher": "0x2",
+      "component_name": "app",
+      "version": "1.2.3-rc.1+build.1",
+      "schema_version": "1",
+      "platform_os": [
+        "*",
+        "linux"
+      ],
+      "platform_arch": [
+        "*",
+        "aarch64"
+      ],
+      "recipe_blob_ids": [
+        "recipe_x86",
+        "recipe_arm"
+      ],
+      "recipe_sha256s": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "artifact_sha256s": [
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      ]
+    },
+    "os": "linux",
+    "arch": "aarch64",
+    "selected": 0
+  },
+  {
+    "name": "reject version 1.02.3",
+    "value": {
+      "catalog_id": "0x1",
+      "publisher": "0x2",
+      "component_name": "app",
+      "version": "1.02.3",
+      "schema_version": "1",
+      "platform_os": [
+        "linux",
+        "linux"
+      ],
+      "platform_arch": [
+        "x86_64",
+        "aarch64"
+      ],
+      "recipe_blob_ids": [
+        "recipe_x86",
+        "recipe_arm"
+      ],
+      "recipe_sha256s": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "artifact_sha256s": [
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      ]
+    },
+    "os": "linux",
+    "arch": "x86_64",
+    "selected": null
+  },
+  {
+    "name": "reject version 1.0.0-01",
+    "value": {
+      "catalog_id": "0x1",
+      "publisher": "0x2",
+      "component_name": "app",
+      "version": "1.0.0-01",
+      "schema_version": "1",
+      "platform_os": [
+        "linux",
+        "linux"
+      ],
+      "platform_arch": [
+        "x86_64",
+        "aarch64"
+      ],
+      "recipe_blob_ids": [
+        "recipe_x86",
+        "recipe_arm"
+      ],
+      "recipe_sha256s": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "artifact_sha256s": [
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      ]
+    },
+    "os": "linux",
+    "arch": "x86_64",
+    "selected": null
+  },
+  {
+    "name": "reject version 18446744073709551616.0.0",
+    "value": {
+      "catalog_id": "0x1",
+      "publisher": "0x2",
+      "component_name": "app",
+      "version": "18446744073709551616.0.0",
+      "schema_version": "1",
+      "platform_os": [
+        "linux",
+        "linux"
+      ],
+      "platform_arch": [
+        "x86_64",
+        "aarch64"
+      ],
+      "recipe_blob_ids": [
+        "recipe_x86",
+        "recipe_arm"
+      ],
+      "recipe_sha256s": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "artifact_sha256s": [
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      ]
+    },
+    "os": "linux",
+    "arch": "x86_64",
+    "selected": null
+  },
+  {
+    "name": "reject version 1.0.0+",
+    "value": {
+      "catalog_id": "0x1",
+      "publisher": "0x2",
+      "component_name": "app",
+      "version": "1.0.0+",
+      "schema_version": "1",
+      "platform_os": [
+        "linux",
+        "linux"
+      ],
+      "platform_arch": [
+        "x86_64",
+        "aarch64"
+      ],
+      "recipe_blob_ids": [
+        "recipe_x86",
+        "recipe_arm"
+      ],
+      "recipe_sha256s": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "artifact_sha256s": [
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      ]
+    },
+    "os": "linux",
+    "arch": "x86_64",
+    "selected": null
+  },
+  {
+    "name": "reject version v1.0.0",
+    "value": {
+      "catalog_id": "0x1",
+      "publisher": "0x2",
+      "component_name": "app",
+      "version": "v1.0.0",
+      "schema_version": "1",
+      "platform_os": [
+        "linux",
+        "linux"
+      ],
+      "platform_arch": [
+        "x86_64",
+        "aarch64"
+      ],
+      "recipe_blob_ids": [
+        "recipe_x86",
+        "recipe_arm"
+      ],
+      "recipe_sha256s": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "artifact_sha256s": [
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      ]
+    },
+    "os": "linux",
+    "arch": "x86_64",
+    "selected": null
+  },
+  {
+    "name": "reject component_name bad@name",
+    "value": {
+      "catalog_id": "0x1",
+      "publisher": "0x2",
+      "component_name": "bad@name",
+      "version": "1.2.3-rc.1+build.1",
+      "schema_version": "1",
+      "platform_os": [
+        "linux",
+        "linux"
+      ],
+      "platform_arch": [
+        "x86_64",
+        "aarch64"
+      ],
+      "recipe_blob_ids": [
+        "recipe_x86",
+        "recipe_arm"
+      ],
+      "recipe_sha256s": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "artifact_sha256s": [
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      ]
+    },
+    "os": "linux",
+    "arch": "x86_64",
+    "selected": null
+  },
+  {
+    "name": "reject schema_version 2",
+    "value": {
+      "catalog_id": "0x1",
+      "publisher": "0x2",
+      "component_name": "app",
+      "version": "1.2.3-rc.1+build.1",
+      "schema_version": "2",
+      "platform_os": [
+        "linux",
+        "linux"
+      ],
+      "platform_arch": [
+        "x86_64",
+        "aarch64"
+      ],
+      "recipe_blob_ids": [
+        "recipe_x86",
+        "recipe_arm"
+      ],
+      "recipe_sha256s": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "artifact_sha256s": [
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      ]
+    },
+    "os": "linux",
+    "arch": "x86_64",
+    "selected": null
+  },
+  {
+    "name": "reject platform_arch['x86_64']",
+    "value": {
+      "catalog_id": "0x1",
+      "publisher": "0x2",
+      "component_name": "app",
+      "version": "1.2.3-rc.1+build.1",
+      "schema_version": "1",
+      "platform_os": [
+        "linux",
+        "linux"
+      ],
+      "platform_arch": [
+        "x86_64"
+      ],
+      "recipe_blob_ids": [
+        "recipe_x86",
+        "recipe_arm"
+      ],
+      "recipe_sha256s": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "artifact_sha256s": [
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      ]
+    },
+    "os": "linux",
+    "arch": "x86_64",
+    "selected": null
+  },
+  {
+    "name": "reject platform_arch['x86_64', 'x86_64']",
+    "value": {
+      "catalog_id": "0x1",
+      "publisher": "0x2",
+      "component_name": "app",
+      "version": "1.2.3-rc.1+build.1",
+      "schema_version": "1",
+      "platform_os": [
+        "linux",
+        "linux"
+      ],
+      "platform_arch": [
+        "x86_64",
+        "x86_64"
+      ],
+      "recipe_blob_ids": [
+        "recipe_x86",
+        "recipe_arm"
+      ],
+      "recipe_sha256s": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "artifact_sha256s": [
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      ]
+    },
+    "os": "linux",
+    "arch": "x86_64",
+    "selected": null
+  },
+  {
+    "name": "reject platform_arch['x86_64', 'armv7']",
+    "value": {
+      "catalog_id": "0x1",
+      "publisher": "0x2",
+      "component_name": "app",
+      "version": "1.2.3-rc.1+build.1",
+      "schema_version": "1",
+      "platform_os": [
+        "linux",
+        "linux"
+      ],
+      "platform_arch": [
+        "x86_64",
+        "armv7"
+      ],
+      "recipe_blob_ids": [
+        "recipe_x86",
+        "recipe_arm"
+      ],
+      "recipe_sha256s": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "artifact_sha256s": [
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      ]
+    },
+    "os": "linux",
+    "arch": "x86_64",
+    "selected": null
+  },
+  {
+    "name": "reject recipe_sha256s['aaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "value": {
+      "catalog_id": "0x1",
+      "publisher": "0x2",
+      "component_name": "app",
+      "version": "1.2.3-rc.1+build.1",
+      "schema_version": "1",
+      "platform_os": [
+        "linux",
+        "linux"
+      ],
+      "platform_arch": [
+        "x86_64",
+        "aarch64"
+      ],
+      "recipe_blob_ids": [
+        "recipe_x86",
+        "recipe_arm"
+      ],
+      "recipe_sha256s": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "BAD"
+      ],
+      "artifact_sha256s": [
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      ]
+    },
+    "os": "linux",
+    "arch": "x86_64",
+    "selected": null
+  },
+  {
+    "name": "reject recipe_blob_ids['recipe', 'https://invalid']",
+    "value": {
+      "catalog_id": "0x1",
+      "publisher": "0x2",
+      "component_name": "app",
+      "version": "1.2.3-rc.1+build.1",
+      "schema_version": "1",
+      "platform_os": [
+        "linux",
+        "linux"
+      ],
+      "platform_arch": [
+        "x86_64",
+        "aarch64"
+      ],
+      "recipe_blob_ids": [
+        "recipe",
+        "https://invalid"
+      ],
+      "recipe_sha256s": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "artifact_sha256s": [
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      ]
+    },
+    "os": "linux",
+    "arch": "x86_64",
+    "selected": null
+  },
+  {
+    "name": "reject artifact_sha256s['AAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "value": {
+      "catalog_id": "0x1",
+      "publisher": "0x2",
+      "component_name": "app",
+      "version": "1.2.3-rc.1+build.1",
+      "schema_version": "1",
+      "platform_os": [
+        "linux",
+        "linux"
+      ],
+      "platform_arch": [
+        "x86_64",
+        "aarch64"
+      ],
+      "recipe_blob_ids": [
+        "recipe_x86",
+        "recipe_arm"
+      ],
+      "recipe_sha256s": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "artifact_sha256s": [
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ]
+    },
+    "os": "linux",
+    "arch": "x86_64",
+    "selected": null
+  }
+]

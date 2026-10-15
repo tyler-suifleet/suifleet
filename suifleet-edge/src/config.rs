@@ -121,7 +121,9 @@ impl DeploymentManifest {
             crate::sui_client::same_id(&self.call_package_id, &self.call_package_id),
             "invalid call package ID"
         );
-        for name in REQUIRED_TYPES {
+        let catalog_count = crate::catalog::TYPES.iter().filter(|name| self.type_origins.contains_key(**name)).count();
+        anyhow::ensure!(catalog_count == 0 || catalog_count == crate::catalog::TYPES.len(), "partial catalog type origins");
+        for name in REQUIRED_TYPES.iter().chain(crate::catalog::TYPES.iter().filter(|name| self.type_origins.contains_key(**name))) {
             let origin = self
                 .type_origins
                 .get(*name)
@@ -460,6 +462,16 @@ mod tests {
         }
         assert_eq!(omitted.walrus.download_attempts, 4);
         assert_eq!(partial.walrus.download_attempts, 2);
+    }
+    #[test]
+    fn optional_catalog_origins_are_complete_and_valid() {
+        let mut m = fixture();
+        m.type_origins.insert(crate::catalog::TYPES[0].into(), "0x4".into());
+        assert!(m.validate().is_err());
+        for name in crate::catalog::TYPES { m.type_origins.insert((*name).into(), "0x4".into()); }
+        m.validate().unwrap();
+        m.type_origins.insert(crate::catalog::TYPES[0].into(), "bad".into());
+        assert!(m.validate().is_err());
     }
     #[test]
     fn legacy_network_config_rejected() {

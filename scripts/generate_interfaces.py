@@ -186,6 +186,8 @@ def generate(catalog, recipe):
           f'export const PROTOCOL_VERSION = {catalog["protocol_version"]} as const;',
           f'export const MANIFEST_SCHEMA_VERSION = {catalog["manifest_schema_version"]} as const;',
           f'export const DEPLOYMENT_SCHEMA_VERSION = {catalog["deployment_schema_version"]} as const;',
+          f'export const SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS = {json.dumps(catalog["supported_deployment_schema_versions"])} as const;',
+          f'export const CATALOG_TYPES = {json.dumps(catalog["optional_type_origins"]["component_catalog"])} as const;',
           f'export const STATUS = {json.dumps(catalog["statuses"])} as const;',
           f'export const RECIPE_VERSION = {json.dumps(recipe["properties"]["schemaVersion"]["const"])} as const;',
           f'export const REQUIRED_TYPES = {json.dumps(catalog["required_type_origins"])} as const;']
@@ -196,6 +198,8 @@ def generate(catalog, recipe):
             f'pub const PROTOCOL_VERSION: u64 = {catalog["protocol_version"]};',
             f'pub const MANIFEST_SCHEMA_VERSION: u64 = {catalog["manifest_schema_version"]};',
             f'pub const DEPLOYMENT_SCHEMA_VERSION: u64 = {catalog["deployment_schema_version"]};',
+            f'pub const SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS: &[u64] = &{json.dumps(catalog["supported_deployment_schema_versions"])};',
+            'pub const CATALOG_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["component_catalog"]) + '];',
             f'pub const RECIPE_VERSION: &str = {json.dumps(recipe["properties"]["schemaVersion"]["const"])};',
             *[f"pub const STATUS_{name.upper()}: u8 = {value};" for name, value in catalog["statuses"].items()],
             'pub const REQUIRED_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["required_type_origins"]) + '];',
@@ -222,6 +226,8 @@ def generate(catalog, recipe):
                     types += [f"{arg}: string"]; arguments += [f"tx.pure.string({arg})"]
                 elif base in ["address", "sui::object::ID"]:
                     types += [f"{arg}: string"]; arguments += [f"tx.pure.address({arg})"]
+                elif base == "vector<std::string::String>":
+                    types += [f"{arg}: string[]"]; arguments += [f"tx.pure(bcs.vector(bcs.string()).serialize({arg}))"]
                 elif base in ["vector<sui::object::ID>", "vector<address>"]:
                     types += [f"{arg}: string[]"]; arguments += [f"tx.pure(bcs.vector(bcs.Address).serialize({arg}))"]
                 elif base == "u8":
