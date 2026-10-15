@@ -104,6 +104,37 @@ A task to edit code/docs or implement an issue does not itself authorize live pu
 
 A release must verify the target chain/account, run relevant checks, prepare a compatibility/migration plan, publish or upgrade under the proper UpgradeCap, validate execution effects, record all IDs/type origins, migrate required objects, generate both client configurations, rebuild the static frontend, stage the daemon rollout, and run a real end-to-end acceptance test. Full details and current blockers: [OPERATIONS.md](docs/OPERATIONS.md).
 
+## Testnet accounts
+
+The user authorized agents to spend **testnet** SUI from two dedicated accounts on acceptance runs, such as publishing and upgrading test packages ([TESTNET.md](docs/TESTNET.md)).
+- **Machine sessions:** the `agent` wallet, `0x0e499424…6965`, at `~/.config/suifleet/testnet/agent/client.yaml`.
+- **CI:** the `ci` wallet, `0x99894c1a…dcac`, whose key exists only as a GitHub environment secret.
+
+**Rules:**
+- Testnet only.
+- Never print, log or commit keys or recovery phrases.
+- Pass the wallet's `client.yaml` explicitly.
+- Let the live scripts' preflight and spend ceiling stand.
+- Record digests and evidence in the PR or issue.
+
+**Funding.** Use `sui client faucet --address …` with Sui ≥ 1.82.1, which solves a proof of work. The pinned CLI cannot.
+
+**No JSON-RPC.** Public fullnodes no longer serve JSON-RPC, so live checks must use gRPC or the Sui CLI.
+
+**Keep live runs cheap.** The faucet should be a rare top-up, not a per-run step. These were measured on testnet; details are in [TESTNET.md](docs/TESTNET.md#cost-findings):
+- **Package storage is never refunded.** Publishing or upgrading this package costs about 0.087 SUI each time, which made up about 95% of an unoptimized run.
+  - Reuse published packages. Cache fixtures by a content hash of the contracts, and re-verify them on chain (free reads) before reuse.
+  - Never republish identical code.
+- **Object storage is rebated** (about 99%) when an object is deleted. Delete transient objects (deployments, groups) at the end of a run.
+- **Every transaction pays a minimum computation fee** (about 0.001 SUI). Batch calls into one PTB.
+- **One PTB cannot call two versions of the same package** (`InvalidLinkage`). Use one transaction per package version.
+- **The gas budget is not the cost, but it must not exceed the balance.** Gas selection fails before execution otherwise, and a failed execution still charges. Keep budgets near real cost (0.4 SUI is ample for a publish).
+- **Upgrades only chain from the latest version.** To test a base→head upgrade, key the fixture by the (base, head) pair. Never test X→Y in place of base→Y.
+- **Reuse funded test identities.** For example, keep the test device's key and gas, and top it up only when low.
+- **Record each transaction's net gas** in the run's evidence. A cached package-upgrade run costs about 0.0025 SUI; a fresh fixture about 0.18 SUI.
+
+**Mainnet** and any other account still need explicit user authorization.
+
 ## Working across models
 
 **On this WSL machine, claim implementations through [the atomic ticket coordinator](docs/ATOMIC_TICKETING.md) before editing.** Both Codex and Claude use the shared installed `ticket` CLI, central WSL database, committed `.atomic-ticketing.json` and this project's registered repository/linked worktrees. SuiFleet and Vortech have separate namespaces, API accounts and unchanged SSH aliases; shared hardware/build/port resources are locked globally across projects, only while in use. GitHub is the specification tracker; the central SQLite database is authoritative for implementation ownership. Do not claim by directly changing Project fields.
