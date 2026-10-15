@@ -511,6 +511,54 @@ class PublishTests(unittest.TestCase):
         self.assertFalse((self.records / "dev" / publish.JOURNAL).exists())
         self.assertEqual(self.frontend_manifest(), self.manifest())
 
+    def failing_sync(self, directory, after=0):
+        """sync_directory that fails (EIO) for DIRECTORY, after AFTER
+        successful syncs of it."""
+        real, seen = publish.sync_directory, []
+        def sync(path):
+            if Path(path) == directory:
+                seen.append(path)
+                if len(seen) > after:
+                    raise OSError(5, "Input/output error")
+            return real(path)
+        return unittest.mock.patch.object(publish, "sync_directory", sync)
+
+    def test_sync_failure_after_both_renames_keeps_the_journal(self):
+        # Review of 3fe8d24: an fsync error after the frontend rename undid
+        # current, left .env.local at v2 and removed the journal.
+        self.run_publish()
+        journal = self.records / "dev" / publish.JOURNAL
+        with self.failing_sync(self.env_file.parent):
+            with self.assertRaisesRegex(publish.PublishError, "Input/output error(.|\n)*WARNING"):
+                self.run_publish()
+        self.assertTrue(journal.is_file(), "the journal must outlive a failed sync")
+        self.assertEqual(self.manifest()["package_version"], "2", "the pointer is not undone after .env.local moved")
+        self.assertEqual(self.frontend_manifest(), self.manifest())
+        self.assertEqual(self.leftovers(), [])
+        with self.assertRaisesRegex(publish.PublishError, "activation was interrupted"):
+            self.run_publish("--dry-run")
+        [pending] = (self.records / "dev").glob("pending-*.json")
+        publish.run(self.args("--recover", str(pending)), self.cli, self.chain)
+        self.assertFalse(journal.exists())
+        self.assertFalse(pending.exists())
+        self.assertEqual(self.manifest()["package_version"], "2")
+        self.assertEqual(self.frontend_manifest(), self.manifest())
+
+    def test_unsynced_undo_keeps_the_journal(self):
+        # A frontend rename fails and the undo of current cannot be synced:
+        # the journal stays so reconcile rolls forward instead. (The first
+        # sync of deployments/dev is the journal's own, before any rename.)
+        self.run_publish()
+        journal = self.records / "dev" / publish.JOURNAL
+        with self.failing_frontend_rename(), self.failing_sync(self.records / "dev", after=1):
+            with self.assertRaises(publish.PublishError):
+                self.run_publish()
+        self.assertTrue(journal.is_file())
+        publish.run(self.args("--reconcile"), self.cli, self.chain)
+        self.assertFalse(journal.exists())
+        self.assertEqual(self.manifest()["package_version"], "2")
+        self.assertEqual(self.frontend_manifest(), self.manifest())
+
     # ── metadata parsing ─────────────────────────────────────────────────────
 
     def test_toml_subset_is_strict(self):

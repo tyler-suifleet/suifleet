@@ -67,7 +67,8 @@ All chain reads go over gRPC.
    - `frontend.env`
    - the device `config.toml` template (`[sui]` plus the device sections of `suifleet-edge/config.example.toml`, or `--device-template`)
 4. **Switch both clients together.** The new `dapp/.env.local` is written in full beside the old one first: it gets `NEXT_PUBLIC_DEPLOYMENT_MANIFEST`, the legacy `NEXT_PUBLIC_*_ID`/`NETWORK` lines are dropped, and every other line is kept. Next, a synced journal `deployments/ENV/activating.json` names the release. Then two renames activate `deployments/ENV/current` and `.env.local`, and the journal is removed.
-   - If the second rename raises an error, the first is undone.
+   - If the second rename raises an error, the first is undone, and the undo is synced before the journal is removed.
+   - If both renames succeed but syncing them fails, nothing is undone and the journal stays, so the switch is finished as below.
    - If the process is killed between them, the journal stays. The next run of `scripts/redeploy.sh` finishes the switch first, rolling forward to the journaled release; the release was complete and verified before the journal was written. `scripts/redeploy.sh --reconcile` does only that and sends no transaction.
    - While a journal exists, `--dry-run` and `make dapp-build` refuse, so a half-switched `.env.local` is never built.
 5. **Recover.** If any step after execution fails, the previous `current` and `.env.local` stay in place. The error checks this and says so, or warns if either changed. It names the pending file. Fix the cause, then run `scripts/redeploy.sh --recover deployments/ENV/pending-DIGEST.json`. It finishes recording without another transaction.

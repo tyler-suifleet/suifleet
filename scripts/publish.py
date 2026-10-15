@@ -16,10 +16,10 @@ release exists: each release is recorded under RECORDS/ENV/releases/ with its
 manifest (all IDs and type origins), frontend.env and device config.toml,
 and RECORDS/ENV/current and the frontend's .env.local are then switched to it
 together: both are prepared first and a durable journal names the release
-before the two renames. A raised error undoes the first rename. A killed
-process leaves the journal: the next run of this tool (or `--reconcile`)
-finishes the switch before anything else, and `make dapp-build` refuses to
-build until it has. If anything fails after the transaction executed, the
+before the two renames. An error from the second rename undoes the first;
+an error after both (syncing them) keeps the journal. So does a killed
+process: the next run of this tool (or `--reconcile`) finishes the switch
+before anything else, and `make dapp-build` refuses to build until it has. If anything fails after the transaction executed, the
 transaction is kept in RECORDS/ENV/pending-*.json and `--recover FILE`
 finishes recording it without another transaction.
 """
@@ -231,7 +231,7 @@ def activate(records, env, name, frontend_env):
     previous = os.readlink(link) if link.is_symlink() else None
     target = str(Path("releases") / name)
     pointer = records / env / ".current.new"
-    consistent = True  # whether both clients still name the same release
+    consistent = True  # False while only a roll forward can make the clients agree durably
     try:
         write_atomic(journal, json.dumps({"release": name, "frontend_env": str(frontend_env.resolve()) if frontend_env
                                           else None, "staged": str(frontend) if frontend else None}, indent=2) + "\n")
@@ -243,10 +243,11 @@ def activate(records, env, name, frontend_env):
         if frontend:
             try:
                 os.replace(frontend, frontend_env)
-                sync_directory(frontend_env.parent)
             except BaseException:
                 # Undo the pointer, unless it already named this release
                 # (a roll forward): then only finishing can make it whole.
+                # The undo is synced before the journal goes, so a crash
+                # cannot keep the removal but lose the undo.
                 if previous != target:
                     if previous is None:
                         link.unlink(missing_ok=True)
@@ -254,8 +255,14 @@ def activate(records, env, name, frontend_env):
                         pointer.unlink(missing_ok=True)
                         os.symlink(previous, pointer)
                         os.replace(pointer, link)
+                    sync_directory(link.parent)
                     consistent = True
                 raise
+        # Both renames are done. If syncing them fails, keep the journal:
+        # reconcile() repeats the (idempotent) switch and its syncs. Never
+        # undo here, since .env.local already names the new release.
+        if frontend:
+            sync_directory(frontend_env.parent)
         sync_directory(link.parent)
         consistent = True
         journal.unlink()
