@@ -2,24 +2,29 @@
 """The fleet indexer, API and CLI (SF-024) against a real local Sui network.
 
 Publishes the actual contracts to a disposable localnet, builds real fleet
-state (devices of two operators, a group, direct and group deployments, a
-signer-checked receipt), indexes it, and checks:
+state (activated devices in registry custody and an unactivated one, of two
+operators, a group, direct and group deployments, an identity-checked
+receipt), indexes it, and checks:
 
-  - the API matches chain state: devices, owners, groups and members,
-    deployments, targets, resolved devices and authoritative receipts;
+  - the API matches chain state: devices, operators (DeviceOwnerCap owners
+    for activated devices), identities, groups and members, deployments,
+    targets, resolved devices and authoritative receipts;
+  - an identity change (revocation) is indexed from its event;
   - filters and keyset pagination return every item exactly once;
   - restart resumes from durable cursors: later removals and deletions
     appear once in the change feed, earlier changes are not repeated;
-  - a plain transfer of a Device (no fleet event) is reconciled while
-    running and across a restart: owner filters, the change feed and the
-    bulk ownership precheck follow the new owner;
+  - a plain transfer of an unactivated Device or of an activated device's
+    DeviceOwnerCap (no fleet event) is reconciled while running and across
+    a restart: owner filters, the change feed and the bulk ownership and
+    identity prechecks follow the new operator;
   - devices wrapped in their registering transaction (the event names an
     absent object) are kept and indexed once unwrapped, while running and
     across a restart;
   - auth: no token 401, read token cannot operate (403), operate token can;
-  - bulk operations: `ctl add-devices` and `ctl create-deployment` build
-    through the API, verify every call and argument against the request,
-    sign and execute; `ctl ... --out` writes an unsigned transaction; the
+  - bulk operations: `ctl add-devices` (an activated device, borrowed from
+    custody with its owner cap) and `ctl create-deployment` build through
+    the API, verify every call and argument against the request and the
+    CLI's own chain reads, sign and execute; `ctl ... --out` writes an unsigned transaction; the
     indexer then shows the new membership and deployment;
   - a database bound to another chain is refused; --reset re-binds it;
   - load: concurrent paginated reads over ~45k synthetic rows.
@@ -140,22 +145,34 @@ def run(rpc_url, faucet_url):
                                               aggregator="http://127.0.0.1:1"))
         (root / "deployment.json").write_text(json.dumps(manifest))
 
-        def register(name, address, owner):
+        def register(name, address, owner, activate=True):
+            """Register and issue a cap; activated devices go into registry custody."""
+            keep = (["--move-call", f"{package}::device_registry::activate_device", f"@{registry}", "device",
+                     "--assign", "owner", "--transfer-objects", "[owner]", f"@{owner}"] if activate
+                    else ["--transfer-objects", "[device]", f"@{owner}"])
             result = transaction("--move-call", f"{package}::device_registry::register_device", f"@{registry}", f'"{name}"',
                                  f"@{address}", '"aarch64"', CLOCK, "--assign", "device",
-                                 "--move-call", f"{package}::device_cap::issue_cap", "device",
-                                 "--transfer-objects", "[device]", f"@{owner}")
-            return created(result, "::device_registry::Device")[0], created(result, "::device_cap::DeviceCap")[0]
+                                 "--move-call", f"{package}::device_cap::issue_cap", "device", *keep)
+            device = next(e["parsedJson"]["device_id"] for e in result["events"]
+                          if e["type"].endswith("::device_registry::DeviceRegistered"))
+            owner_cap = created(result, "::device_registry::DeviceOwnerCap")[0] if activate else None
+            return device, created(result, "::device_cap::DeviceCap")[0], owner_cap
         use(operator)
-        pi, pi_cap = register("pi", device_signer, operator)
-        spare, _ = register("spare", operator, operator)
-        third, _ = register("third", operator, operator)
+        pi, pi_cap, pi_owner = register("pi", device_signer, operator)
+        spare, _, _ = register("spare", operator, operator, activate=False)
+        third, _, third_owner = register("third", operator, operator)
         use(other)
-        foreign, _ = register("foreign", other, other)
+        foreign, _, foreign_owner = register("foreign", other, other)
         use(operator)
+
+        def borrowed(owner_cap, *call):
+            """A `&Device` call on a custodied device: borrow, call, return."""
+            return ["--move-call", f"{package}::device_registry::borrow_device", f"@{registry}", f"@{owner_cap}",
+                    "--assign", "loan", *call, "--move-call", f"{package}::device_registry::return_device",
+                    f"@{registry}", "loan.0", "loan.1"]
         group = created(transaction("--move-call", f"{package}::device_group::create_group", '"lab"', '"indexer"', CLOCK),
                         "::device_group::DeviceGroup")[0]
-        transaction("--move-call", f"{package}::device_group::add_device", f"@{group}", f"@{pi}")
+        transaction(*borrowed(pi_owner, "--move-call", f"{package}::device_group::add_device", f"@{group}", "loan.0"))
         transaction("--move-call", f"{package}::device_group::add_device", f"@{group}", f"@{spare}")
 
         def deploy(version, groups=(), devices=()):
@@ -166,8 +183,8 @@ def run(rpc_url, faucet_url):
                            "::deployment_manager::DeploymentRecord")[0]
         by_group, direct = deploy("1.0.0", groups=[group]), deploy("1.1.0", devices=[third])
         use(device_signer)
-        transaction("--move-call", f"{package}::deployment_manager::report_status_for_group", f"@{by_group}", f"@{pi_cap}",
-                    f"@{group}", "1u8")
+        transaction("--move-call", f"{package}::deployment_manager::report_verified_status_for_group", f"@{by_group}",
+                    f"@{registry}", f"@{pi_cap}", f"@{group}", "1u8")
         use(operator)
         n = dm.object_id
 
@@ -205,6 +222,9 @@ def run(rpc_url, faucet_url):
             assert set(devices) == {n(pi), n(spare), n(third), n(foreign)}, devices.keys()
             assert devices[n(pi)]["owner"] == n(operator) and devices[n(foreign)]["owner"] == n(other)
             assert devices[n(pi)]["device_address"] == n(device_signer) and devices[n(pi)]["groups"] == [n(group)]
+            assert (devices[n(pi)]["activated"], devices[n(pi)]["revoked"], devices[n(pi)]["signer"],
+                    devices[n(pi)]["owner_cap"]) == (True, False, n(device_signer), n(pi_owner)), devices[n(pi)]
+            assert not devices[n(spare)]["activated"] and devices[n(spare)]["owner_cap"] is None
             assert [d["id"] for d in every(f"/v1/devices?owner={operator}")] == sorted([n(pi), n(spare), n(third)])
             assert sorted(get(f"/v1/groups/{group}")["devices"]) == sorted([n(pi), n(spare)])
             deployment = get(f"/v1/deployments/{by_group}")
@@ -216,8 +236,16 @@ def run(rpc_url, faucet_url):
             assert [d["id"] for d in every(f"/v1/deployments?device={third}")] == [n(direct)]
             assert every(f"/v1/deployments?device={foreign}") == []
             assert sorted(d["version"] for d in every("/v1/deployments?component=fw")) == ["1.0.0", "1.1.0"]
-            print("PASS: API matches chain state (owners, members, targets, resolved devices, signer-checked receipt); "
-                  "filters and limit=2 pagination return every item once")
+            print("PASS: API matches chain state (custodied devices' operators and identities, members, targets, "
+                  "resolved devices, identity-checked receipt); filters and limit=2 pagination return every item once")
+
+            # An identity change is its own event stream.
+            use(other)
+            transaction("--move-call", f"{package}::device_registry::revoke_device", f"@{registry}", f"@{foreign_owner}")
+            use(operator)
+            wait_for(lambda: get(f"/v1/devices/{foreign}")["revoked"], "revocation not indexed")
+            assert get(f"/v1/devices/{foreign}")["owner"] == n(other)
+            print("PASS: a revocation (DeviceIdentityChanged) is indexed")
 
             # Auth.
             assert http("GET", "/v1/devices")[0] == 401
@@ -247,32 +275,40 @@ def run(rpc_url, faucet_url):
             # A plain transfer emits no fleet event; the device sweep reconciles it.
             def owned_by(address):
                 return [d["id"] for d in every(f"/v1/devices?owner={address}")]
+            # The unactivated Device moves itself; the activated one moves with its owner cap.
             mark = get("/v1/status")["last_change"]
-            transaction("--transfer-objects", f"[@{spare}]", f"@{other}")
-            wait_for(lambda: get(f"/v1/devices/{spare}")["owner"] == n(other), "transfer not reconciled while running")
-            assert n(spare) in owned_by(other) and n(spare) not in owned_by(operator)
-            updates = [c for c in get(f"/v1/changes?after={mark}")["items"] if c["object_id"] == n(spare)]
-            assert [c["kind"] for c in updates] == ["device.updated"], updates
+            transaction("--transfer-objects", f"[@{spare}, @{third_owner}]", f"@{other}")
+            for device in (spare, third):
+                wait_for(lambda: get(f"/v1/devices/{device}")["owner"] == n(other), "transfer not reconciled while running")
+                assert n(device) in owned_by(other) and n(device) not in owned_by(operator)
+            updates = [c for c in get(f"/v1/changes?after={mark}")["items"] if c["object_id"] in (n(spare), n(third))]
+            assert sorted(c["object_id"] for c in updates) == sorted([n(spare), n(third)]), updates
+            assert all(c["kind"] == "device.updated" for c in updates), updates
             status, refused = http("POST", "/v1/transactions/add-devices", operate_token,
                                    {"sender": operator, "group": group, "devices": [spare]})
             assert status == 400 and "not owned by" in refused["error"], refused
             new_owner = {"sender": other, "component_name": "fw", "version": "9.0.0", "recipe_blob_id": "recipe",
-                         "artifact_sha256": "a" * 64, "recipe_sha256": "b" * 64, "target_devices": [spare]}
+                         "artifact_sha256": "a" * 64, "recipe_sha256": "b" * 64, "target_devices": [third]}
             status, built = http("POST", "/v1/transactions/create-deployment", operate_token, new_owner)
             assert status == 200 and built["sender"] == n(other), built
+            status, refused = http("POST", "/v1/transactions/create-deployment", operate_token,
+                                   {**new_owner, "target_devices": [spare]})
+            assert status == 400 and "no active registry identity" in refused["error"], refused
             # Transferred back while the indexer is stopped: correct as soon as it serves again.
             server.terminate(); server.wait(timeout=30)
             use(other)
-            transaction("--transfer-objects", f"[@{spare}]", f"@{operator}")
+            transaction("--transfer-objects", f"[@{spare}, @{third_owner}]", f"@{operator}")
             use(operator)
             server = serve()
-            assert get(f"/v1/devices/{spare}")["owner"] == n(operator), "restart served a pre-restart owner"
-            assert n(spare) in owned_by(operator) and n(spare) not in owned_by(other)
-            updates = [c for c in get(f"/v1/changes?after={mark}")["items"] if c["object_id"] == n(spare)]
-            assert [c["kind"] for c in updates] == ["device.updated"] * 2, updates
+            for device in (spare, third):
+                assert get(f"/v1/devices/{device}")["owner"] == n(operator), "restart served a pre-restart owner"
+                assert n(device) in owned_by(operator) and n(device) not in owned_by(other)
+            updates = [c for c in get(f"/v1/changes?after={mark}")["items"] if c["object_id"] in (n(spare), n(third))]
+            assert len(updates) == 4 and all(c["kind"] == "device.updated" for c in updates), updates
             assert get("/v1/status")["devices_reconciled_at"]
-            print("PASS: device transfers without fleet events reconciled while running and across a restart "
-                  "(owner filters, one change each, live bulk ownership precheck)")
+            print("PASS: transfers of an unactivated Device and of an activated device's owner cap, without fleet "
+                  "events, reconciled while running and across a restart (owner filters, one change each, live "
+                  "bulk ownership and identity prechecks)")
 
             # Registered and wrapped (into a Bag) in one transaction: the event names an absent object.
             device_type = f"{package}::device_registry::Device"
@@ -341,8 +377,9 @@ def run(rpc_url, faucet_url):
             assert created_by_ctl.returncode == 0, created_by_ctl.stderr
             wait_for(lambda: any(d["version"] == "2.0.0" and d["recipe_sha256"] == "c" * 64
                                  for d in every(f"/v1/deployments?device={third}")), "ctl deployment not indexed")
-            print("PASS: ctl add-devices and create-deployment: unsigned --out file, then API-built transactions verified "
-                  "call-by-call against the request, signed, executed (effects success) and indexed")
+            print("PASS: ctl add-devices (custodied device: borrow/add/return) and create-deployment: unsigned --out file, "
+                  "then API-built transactions verified call-by-call against the request and the CLI's chain reads, "
+                  "signed, executed (effects success) and indexed")
 
             # Change feed via the CLI follows sequence numbers.
             out = subprocess.run([*ctl, "--token-file", str(token_file), "changes", "--after", str(before[1])],

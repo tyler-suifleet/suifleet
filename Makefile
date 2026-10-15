@@ -159,6 +159,7 @@ indexer-test:
 # Against a disposable localnet (start it first): API vs chain, restart,
 # auth, signed CLI bulk operation, chain-binding refusal and load.
 test-indexer-localnet: indexer-build
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --example chain_facts
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_indexer_localnet.py
 
 # SF-006 publisher against a disposable localnet (start it first): refusals, dry
