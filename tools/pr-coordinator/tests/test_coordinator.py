@@ -19,6 +19,15 @@ def fixture():
 
 
 class Gates(unittest.TestCase):
+    def test_acceptance_scope_change_requires_new_independent_review(self):
+        pr,owner,review=fixture()
+        pr['_acceptance_policy']={'tickets':{'SF-008':{'acceptance_issues':['https://example.test/11']}}}
+        self.assertIsNotNone(c.gate(pr,owner,review))
+        review['feedback']=c.feedback(pr)
+        self.assertIsNone(c.gate(pr,owner,review))
+        review['result']['verdict']='changes_requested'
+        self.assertIsNotNone(c.gate(pr,owner,review))
+
     def test_current_independent_review_passes(self):
         self.assertIsNone(c.gate(*fixture()))
 
