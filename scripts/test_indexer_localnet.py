@@ -13,6 +13,9 @@ signer-checked receipt), indexes it, and checks:
   - a plain transfer of a Device (no fleet event) is reconciled while
     running and across a restart: owner filters, the change feed and the
     bulk ownership precheck follow the new owner;
+  - devices wrapped in their registering transaction (the event names an
+    absent object) are kept and indexed once unwrapped, while running and
+    across a restart;
   - auth: no token 401, read token cannot operate (403), operate token can;
   - bulk operations: `ctl add-devices` and `ctl create-deployment` build
     through the API, verify every call and argument against the request,
@@ -271,6 +274,38 @@ def run(rpc_url, faucet_url):
             print("PASS: device transfers without fleet events reconciled while running and across a restart "
                   "(owner filters, one change each, live bulk ownership precheck)")
 
+            # Registered and wrapped (into a Bag) in one transaction: the event names an absent object.
+            device_type = f"{package}::device_registry::Device"
+            wrapping = transaction(
+                "--move-call", "0x2::bag::new", "--assign", "bag",
+                *[arg for name, key in (("live", 0), ("restart", 1)) for arg in (
+                    "--move-call", f"{package}::device_registry::register_device", f"@{registry}", f'"{name}"',
+                    f"@{operator}", '"aarch64"', CLOCK, "--assign", f"d{key}",
+                    "--move-call", "0x2::bag::add", f"<u64,{device_type}>", "bag", f"{key}u64", f"d{key}")],
+                "--transfer-objects", "[bag]", f"@{operator}")
+            live, later = [e["parsedJson"]["device_id"] for e in wrapping["events"]
+                           if e["type"].endswith("::device_registry::DeviceRegistered")]
+            bag = created(wrapping, "::bag::Bag")[0]
+            assert not created(wrapping, "::device_registry::Device"), "devices should be wrapped, not created"
+            wait_for(lambda: all(http("GET", f"/v1/devices/{d}", read_token)[0] == 200 for d in (live, later)),
+                     "wrapped registrations not kept")
+            assert all(get(f"/v1/devices/{d}")["deleted"] for d in (live, later))
+            assert n(live) not in owned_by(operator)
+
+            def unwrap(key):
+                transaction("--move-call", "0x2::bag::remove", f"<u64,{device_type}>", f"@{bag}", f"{key}u64",
+                            "--assign", "d", "--transfer-objects", "[d]", f"@{operator}")
+            unwrap(0)
+            wait_for(lambda: not get(f"/v1/devices/{live}")["deleted"], "unwrapped device not reconciled while running")
+            assert get(f"/v1/devices/{live}")["name"] == "live" and n(live) in owned_by(operator)
+            server.terminate(); server.wait(timeout=30)
+            unwrap(1)
+            server = serve()
+            restarted = get(f"/v1/devices/{later}")
+            assert not restarted["deleted"] and restarted["owner"] == n(operator), restarted
+            print("PASS: devices wrapped in their registering transaction are kept and indexed once unwrapped, "
+                  "while running and across a restart")
+
             # Bulk via the CLI: unsigned to a file, then verified, signed and executed.
             keystore = json.loads((root / "wallet/sui.keystore").read_text())
             seeds = {}
@@ -359,7 +394,7 @@ def run(rpc_url, faucet_url):
             subprocess.run([str(INDEXER), "index", *common, "--reset"], check=True, capture_output=True, timeout=300)
             rebound = sqlite3.connect(db)
             assert rebound.execute("SELECT value FROM meta WHERE key='chain_identifier'").fetchone()[0] == chain_id
-            assert rebound.execute("SELECT COUNT(*) FROM devices").fetchone()[0] == 4, "reset did not rebuild from chain only"
+            assert rebound.execute("SELECT COUNT(*) FROM devices").fetchone()[0] == 6, "reset did not rebuild from chain only"
             print("PASS: database bound to another chain refused; --reset discards it and re-indexes this chain")
         except BaseException:
             log.flush()
