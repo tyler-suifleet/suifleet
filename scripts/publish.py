@@ -217,7 +217,9 @@ def activate(records, env, name, frontend_env):
     the first is undone; if the process dies between them, the journal stays
     and reconcile() rolls forward to the named release before this tool does
     anything else (and `make dapp-build` refuses to build until it has).
-    The journal is removed only when both clients name the same release."""
+    The journal is removed only when both clients name the same release, and
+    a journal this run did not write (a roll forward by reconcile(), whose
+    clients may already disagree) is kept on any failure."""
     frontend = None
     if frontend_env:
         kept = []
@@ -231,6 +233,7 @@ def activate(records, env, name, frontend_env):
     previous = os.readlink(link) if link.is_symlink() else None
     target = str(Path("releases") / name)
     pointer = records / env / ".current.new"
+    resumed = journal.exists()  # an earlier activation may have left the clients split
     consistent = True  # False while only a roll forward can make the clients agree durably
     try:
         write_atomic(journal, json.dumps({"release": name, "frontend_env": str(frontend_env.resolve()) if frontend_env
@@ -267,7 +270,7 @@ def activate(records, env, name, frontend_env):
         consistent = True
         journal.unlink()
     except BaseException:
-        if consistent:
+        if consistent and not resumed:
             journal.unlink(missing_ok=True)
         raise
     finally:
