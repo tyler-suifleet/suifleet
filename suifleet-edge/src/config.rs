@@ -160,9 +160,76 @@ impl DeploymentManifest {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct DeviceConfig {
+    /// ed25519 key file; unused when `signer` is set.
+    #[serde(default)]
     pub keypair_path: PathBuf,
     pub device_object_id: String,
     pub device_cap_id: String,
+    /// A key held in a PKCS#11 token instead of `keypair_path` (SF-021).
+    #[serde(default)]
+    pub signer: Option<SignerConfig>,
+}
+
+/// `suifleet --enroll FILE` (SF-021): enroll this device's key under an
+/// operator's enrollment policy, sponsored by a claim key.
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct EnrollConfig {
+    /// The network deployment manifest (relative paths: to this file).
+    pub manifest_path: PathBuf,
+    pub policy_id: String,
+    /// The claim key (32-byte hex ed25519 seed) from provisioning media.
+    pub claim_key_path: PathBuf,
+    pub name: String,
+    /// Defaults to this machine's architecture.
+    #[serde(default)]
+    pub arch: Option<String>,
+    #[serde(default)]
+    pub keypair_path: PathBuf,
+    #[serde(default)]
+    pub signer: Option<SignerConfig>,
+}
+
+impl EnrollConfig {
+    pub fn load(path: &Path) -> anyhow::Result<(Self, SuiConfig, DeviceConfig)> {
+        let cfg: Self = toml::from_str(&std::fs::read_to_string(path)?)?;
+        let base = path.parent().unwrap_or(Path::new("."));
+        let resolve = |p: &Path| if p.is_absolute() { p.to_owned() } else { base.join(p) };
+        let manifest: DeploymentManifest = serde_json::from_str(&std::fs::read_to_string(resolve(&cfg.manifest_path))?)?;
+        manifest.validate()?;
+        let sui = SuiConfig {
+            manifest_path: cfg.manifest_path.clone(),
+            rpc_url: manifest.rpc_url.clone(),
+            package_id: manifest.call_package_id.clone(),
+            manifest: Some(manifest),
+        };
+        anyhow::ensure!(cfg.signer.is_some() || !cfg.keypair_path.as_os_str().is_empty(), "enrollment needs keypair_path or a [signer]");
+        let device = DeviceConfig {
+            keypair_path: if cfg.keypair_path.as_os_str().is_empty() { PathBuf::new() } else { resolve(&cfg.keypair_path) },
+            device_object_id: String::new(),
+            device_cap_id: String::new(),
+            signer: cfg.signer.clone(),
+        };
+        let claim = resolve(&cfg.claim_key_path);
+        Ok((Self { claim_key_path: claim, ..cfg }, sui, device))
+    }
+}
+
+/// `[device.signer]`: a P-256 key in a PKCS#11 token (HSM, SoftHSM2, or a
+/// TPM's PKCS#11 provider). Requires a build with `--features pkcs11`.
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(not(feature = "pkcs11"), allow(dead_code))]
+pub struct SignerConfig {
+    /// Only "pkcs11".
+    pub kind: String,
+    /// The token's PKCS#11 module, e.g. /usr/lib/softhsm/libsofthsm2.so.
+    pub module: PathBuf,
+    pub token_label: String,
+    /// CKA_LABEL of both the private and the public key object.
+    pub key_label: String,
+    /// File holding the user PIN (root-only readable).
+    pub pin_file: PathBuf,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -297,6 +364,10 @@ impl Config {
         cfg.sui.rpc_url = manifest.rpc_url.clone();
         cfg.sui.package_id = manifest.call_package_id.clone();
         cfg.sui.manifest = Some(manifest);
+        anyhow::ensure!(
+            cfg.device.signer.is_some() || !cfg.device.keypair_path.as_os_str().is_empty(),
+            "[device] needs keypair_path or a [device.signer]"
+        );
         anyhow::ensure!(
             cfg.runtime.poll_seconds > 0,
             "runtime.poll_seconds must be positive"

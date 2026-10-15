@@ -44,7 +44,7 @@ edge-build:
 	$(RUN) bash -c "cd suifleet-edge && cargo build --locked --release"
 
 edge-test:
-	$(RUN) bash -c "cd suifleet-edge && cargo test --locked"
+	$(RUN) bash -c "cd suifleet-edge && cargo test --locked && cargo test --locked --features pkcs11"
 
 .PHONY: test-ota test-component dapp-typecheck
 
