@@ -92,10 +92,10 @@ class DispatchTests(unittest.TestCase):
             self.assertFalse(self.worker.available(self.slot,[dict(agent='Codex',status=status,expired=True)]))
         self.assertTrue(self.worker.available(self.slot,[dict(agent='Codex',status='review')]))
 
-    def test_review_repairs_have_priority_across_projects(self):
+    def test_review_repairs_do_not_block_implementation_capacity(self):
         with sqlite3.connect(self.state/'reviews.sqlite3') as db:
             db.execute("INSERT INTO jobs VALUES('Codex','running')")
-        self.assertFalse(self.worker.available(self.slot,[]))
+        self.assertTrue(self.worker.available(self.slot,[]))
         self.assertTrue(self.worker.available({**self.slot,'family':'Claude'},[]))
 
     def test_missing_review_database_fails_closed(self):
@@ -182,6 +182,47 @@ class DispatchTests(unittest.TestCase):
         self.worker.ticket=Mock(return_value=[dict(agent='Codex',status='in_progress')])
         self.worker.tick(True)
         self.worker.ticket.assert_called_once_with(self.project,'list')
+
+    def test_capacity_counts_manual_and_managed_claim_once(self):
+        self.slot['max_workers'] = 2
+        self.receipt()
+        owner = {**self.claim, 'expired': True}
+        self.assertTrue(self.worker.available(self.slot, [owner]))
+        other = {**owner, 'session': 'manual-worker', 'key': 'SF-100'}
+        self.assertFalse(self.worker.available(self.slot, [owner, other]))
+        self.worker.db.execute("UPDATE runs SET status='orphaned'")
+        self.assertTrue(self.worker.available(self.slot, [owner]))
+        restarted = d.Dispatcher(self.config, self.state)
+        self.assertFalse(restarted.available(self.slot, [owner, other]))
+        self.slot['max_workers'] = 1
+        self.assertFalse(restarted.available(self.slot, [owner]))
+        self.assertEqual(self.state_of_run(), 'orphaned')
+
+    def test_invalid_capacity_rejected(self):
+        for limit in [0, -1, True, 1.5, '2', 17, None]:
+            with self.subTest(limit=limit), self.assertRaises(ValueError):
+                d.Dispatcher({**self.config, 'implementation_slots':[{**self.slot, 'max_workers':limit}]}, self.state)
+
+    def test_tick_fills_capacity_without_duplicate_claims(self):
+        self.worker.reconcile = Mock()  # Reconciliation has separate real-receipt tests.
+        self.slot['max_workers'] = 3
+        self.worker.ticket = Mock(return_value=[])
+        def launch(project, slot):
+            session = 'worker-' + str(self.worker.db.execute('SELECT COUNT(*) FROM runs').fetchone()[0])
+            self.worker.db.execute('INSERT INTO runs(session,project,family,status) VALUES(?,?,?,?)',
+                                   (session, 'suifleet', 'Codex', 'running'))
+        self.worker.launch = Mock(side_effect=launch)
+        self.worker.tick(True)
+        self.assertEqual(self.worker.launch.call_count, 3)
+        self.worker.tick(True)
+        self.assertEqual(self.worker.launch.call_count, 3)
+        restarted = d.Dispatcher(self.config, self.state)
+        self.assertFalse(restarted.available(self.slot, []))
+
+    def test_other_family_and_project_do_not_consume_capacity(self):
+        self.receipt(status='orphaned')
+        self.assertTrue(self.worker.available({**self.slot, 'family':'Claude'}, []))
+        self.assertTrue(self.worker.available({**self.slot, 'project':'another'}, []))
 
     def test_duplicate_slots_rejected(self):
         self.config['implementation_slots'].append(dict(self.slot))
