@@ -79,6 +79,15 @@ pub async fn run_bounded(
     max_memory_bytes: Option<u64>,
 ) -> anyhow::Result<()> {
     harden(&mut command, workdir, max_memory_bytes);
+    run_hardened(command, timeout).await
+}
+
+/// [`run_bounded`] for a command already passed through [`harden`] (and
+/// possibly given deliberate environment variables afterwards).
+pub async fn run_hardened(
+    mut command: tokio::process::Command,
+    timeout: Duration,
+) -> anyhow::Result<()> {
     let mut child = crate::supervisor::spawn_tracked(&mut command).map_err(spawn_error)?;
     #[cfg(unix)]
     let _group = ProcessGroup(child.pid() as i32);

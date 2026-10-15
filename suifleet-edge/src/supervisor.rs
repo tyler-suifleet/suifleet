@@ -462,10 +462,10 @@ impl Context {
     }
 
     /// A bounded helper command (readiness check or shutdown).
+    /// Hardened once, by [`Context::command`], so it keeps the component's
+    /// environment and recovery marker.
     async fn helper(&self, template: &str, pid: u32, timeout: Duration) -> anyhow::Result<()> {
-        let work = self.component.join("work");
-        let command = self.command(template, Some(pid));
-        apply::run_bounded(command, &work, timeout, self.settings.max_memory_bytes).await
+        apply::run_hardened(self.command(template, Some(pid)), timeout).await
     }
 
     async fn ready(&self, pid: u32) -> Result<(), String> {
@@ -1236,6 +1236,25 @@ mod tests {
             libc::kill(other.pid() as i32, libc::SIGKILL);
         }
         let _ = other.wait().await;
+    }
+
+    #[tokio::test]
+    async fn readiness_and_shutdown_keep_the_component_environment() {
+        std::env::set_var("SUIFLEET_TEST_SECRET", "leak");
+        let mut f = Fixture::new("helper-env");
+        let mut s = f.open();
+        let mut spec = f.spec("1.0.0", "trap 'exit 0' TERM; while true; do sleep 0.1; done");
+        let check = "test \"$SUIFLEET_COMPONENT/$SUIFLEET_COMPONENT_VERSION\" = app/1.0.0";
+        spec.readiness = Some(format!("{check} && env > {{work}}/readiness"));
+        spec.shutdown = Some(format!("{check} && env > {{work}}/shutdown; kill -TERM {{pid}}"));
+        f.deploy(&mut s, spec, None).await.unwrap();
+        s.stop_all().await;
+        let entry = format!("{MARKER}={}", marker(&f.dir.join("supervised")));
+        for helper in ["readiness", "shutdown"] {
+            let env = f.read(helper);
+            assert!(env.lines().any(|line| line == entry), "{helper} lost the recovery marker: {env}");
+            assert!(!env.contains("SUIFLEET_TEST"), "{helper} inherited the daemon environment: {env}");
+        }
     }
 
     #[tokio::test]
