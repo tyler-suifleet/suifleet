@@ -333,6 +333,44 @@ impl SuiClient {
         }
     }
 
+    /// A Move object's type, owner and BCS contents, decoded from the node's
+    /// object BCS rather than its JSON rendering.
+    pub async fn move_object(&self, id: &str) -> anyhow::Result<(String, Owner, Vec<u8>)> {
+        let mut request = proto::GetObjectRequest::default();
+        request.object_id = Some(id.to_owned());
+        request.read_mask = Some(mask(&["bcs"]));
+        let bytes = self
+            .rpc
+            .clone()
+            .ledger_client()
+            .get_object(request)
+            .await
+            .map_err(|e| status(e).context(format!("object {id}")))?
+            .into_inner()
+            .object
+            .and_then(|o| o.bcs)
+            .and_then(|b| b.value)
+            .ok_or_else(|| anyhow::anyhow!("object {id} has no contents"))?;
+        let object: sui_sdk_types::Object = bcs::from_bytes(&bytes)
+            .map_err(|e| anyhow::anyhow!("undecodable object {id}: {e}"))?;
+        let owner = match object.owner() {
+            sui_sdk_types::Owner::Address(address) => Owner::Address(address.to_string()),
+            sui_sdk_types::Owner::Shared(version) => Owner::Shared {
+                initial_version: *version,
+            },
+            sui_sdk_types::Owner::Immutable => Owner::Immutable,
+            _ => Owner::Other,
+        };
+        match object.data() {
+            sui_sdk_types::ObjectData::Struct(value) => Ok((
+                value.object_type().to_string(),
+                owner,
+                value.contents().to_vec(),
+            )),
+            _ => anyhow::bail!("{id} is not a Move object"),
+        }
+    }
+
     pub async fn optional_object(&self, id: &str) -> anyhow::Result<Option<Object>> {
         let mut request = proto::GetObjectRequest::default();
         request.object_id = Some(id.to_owned());
