@@ -186,7 +186,18 @@ async fn poll(
                     ),
                     "wrong deployment type"
                 );
-                ensure_deployment_schema(&record.fields)?;
+                if let Err(error) = ensure_deployment_schema(&record.fields) {
+                    let mut outcome = Outcome::default();
+                    record_result(&mut outcome, Err(error));
+                    warn!(deployment = event.deployment_id, error = ?outcome.error, "Deployment schema rejected");
+                    journal
+                        .state
+                        .deployments
+                        .insert(event.deployment_id.clone(), outcome);
+                    journal.state.cursor = Some(cursor);
+                    journal.save()?;
+                    continue;
+                }
                 let directory = cfg
                     .runtime
                     .state_dir
