@@ -84,3 +84,5 @@ Installers (for example a daemon self-update recipe, or the image build) must ru
 - The release workflow has not run, because it needs the environment and secret above.
 - The aarch64 binary has not run on hardware (SF-029/SF-031).
 - The Yocto image does not yet install the trust file (SF-025/SF-029).
+
+The protected signing environment, provisioned trust roots, the first release workflow run (including rejection without a protected environment) and Pi trust delivery are tracked as external acceptance in [#62](https://github.com/tyler-suifleet/suifleet/issues/62) and [#32](https://github.com/tyler-suifleet/suifleet/issues/32). Merging this implementation is not evidence that they passed.
