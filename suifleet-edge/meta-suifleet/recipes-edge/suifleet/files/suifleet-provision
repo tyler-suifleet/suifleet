@@ -1,0 +1,18 @@
+#!/bin/sh
+# Runs at boot, never at image build time. Only the public address is printed.
+set -eu
+directory=/etc/suifleet
+umask 077
+address=$(/usr/bin/suifleet --provision "$directory/device.key")
+printf '%s\n' "$address" | grep -Eq '^0x[0-9a-f]{64}$'
+chown suifleet:suifleet "$directory/device.key"
+chmod 0600 "$directory/device.key"
+temporary=
+trap '[ -z "$temporary" ] || rm -f "$temporary"' EXIT
+trap 'exit 1' HUP INT TERM
+temporary=$(mktemp "$directory/.device-address.XXXXXX")
+printf '%s\n' "$address" > "$temporary"
+chown root:suifleet "$temporary"
+chmod 0640 "$temporary"
+mv -f "$temporary" "$directory/device.address"
+printf 'SuiFleet device address: %s\n' "$address"

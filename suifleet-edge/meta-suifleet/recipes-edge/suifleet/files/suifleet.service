@@ -1,7 +1,9 @@
 [Unit]
 Description=SuiFleet Edge Deployment Client
-After=network-online.target
+After=network-online.target suifleet-provision.service
 Wants=network-online.target
+Requires=suifleet-provision.service
+ConditionPathExists=/etc/suifleet/config.toml
 
 [Service]
 Type=notify
@@ -12,9 +14,7 @@ Group=suifleet
 StateDirectory=suifleet
 StateDirectoryMode=0700
 UMask=0077
-# Key provisioning is the only privileged start-up step ("+" runs it as root).
-ExecStartPre=+/usr/bin/suifleet --provision /etc/suifleet/device.key
-ExecStartPre=+/bin/chown suifleet:suifleet /etc/suifleet/device.key
+# Provisioning runs independently before enrollment; this service is unprivileged.
 ExecStart=/usr/bin/suifleet
 Restart=on-failure
 RestartSec=5
