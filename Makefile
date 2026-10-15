@@ -174,6 +174,7 @@ test-publish-localnet:
 
 # Live gate (spends testnet gas; docs/TESTNET.md): base contracts published,
 # upgraded in place to this tree, real daemon, on-chain receipts.
+# SUIFLEET_WALRUS=testnet stores recipes/artifacts in real Walrus testnet.
 #   make live-gate-package-upgrade SUIFLEET_WALLET=~/.config/suifleet/testnet/agent/client.yaml
 .PHONY: live-gate-package-upgrade live-gate-upgrade-security live-gate-wallet
 live-gate-package-upgrade:
@@ -181,7 +182,7 @@ live-gate-package-upgrade:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/live_package_upgrade.py --wallet "$(SUIFLEET_WALLET)" \
 		--network "$${SUIFLEET_NETWORK:-testnet}" $(if $(BASE_REF),--base-ref "$(BASE_REF)") \
-		$(if $(SUIFLEET_STATE),--state "$(SUIFLEET_STATE)") \
+		$(if $(SUIFLEET_STATE),--state "$(SUIFLEET_STATE)") $(if $(SUIFLEET_WALRUS),--walrus "$(SUIFLEET_WALRUS)") \
 		--evidence "$${SUIFLEET_EVIDENCE:-live-evidence.json}"
 
 # Old-package/legacy-object attacks across a real upgrade (~0.22 SUI; per release).
