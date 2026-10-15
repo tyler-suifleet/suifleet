@@ -108,9 +108,13 @@ def run(rpc_url, faucet_url):
                 out = result.stdout
                 return json.loads(out[min(i for i in (out.find("{"), out.find("[")) if i >= 0):])
 
-            client("-y", "active-address", json_output=False)
-            client("new-env", "--alias", "desired-test", "--rpc", rpc_url, json_output=False)
-            client("switch", "--env", "desired-test", json_output=False)
+            # Configure loopback before any CLI operation: the default generated
+            # wallet points at public testnet and cannot be used network-none.
+            wallet = root / "wallet"
+            (wallet / "sui.keystore").write_text("[]")
+            (wallet / "client.yaml").write_text(f"keystore:\n  File: {wallet / 'sui.keystore'}\nenvs:\n- alias: desired-test\n  rpc: {rpc_url}\nactive_env: desired-test\nactive_address: null\n")
+            address = client("new-address", "ed25519")["address"]
+            client("switch", "--address", address, json_output=False)
             operator = client("active-address", json_output=False).stdout.strip().split()[-1]
 
             def fund(address):
