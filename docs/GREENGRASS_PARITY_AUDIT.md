@@ -92,9 +92,9 @@ AWS includes device/component health, operational telemetry, logs and provisioni
 | Online/last-seen/heartbeat | Missing | Telemetry ingress with bounded offline buffering | P1 |
 | Installed component and device health | Missing | Structured health/status service and fleet aggregate API | P1 |
 | Diagnostics and remote logs | Partial: local tracing/systemd logs | Collection/rotation, upload, queries, redaction, alerts and remote support | P1 |
-| Fleet API/CLI and automation | Missing | Versioned API, filters/pagination, bulk operations, CI integration and webhook/event delivery | P1 |
+| Fleet API/CLI and automation | Partial (SF-024): versioned `/v1` API with filters/keyset pagination, unsigned bulk-operation transactions, long-poll change feed and `ctl` CLI | Webhook push delivery, CI integration examples, more bulk operations | P1 |
 | Operator RBAC and delegation | Partial (SF-021): revocable group-scoped deployer roles with on-chain delegate audit | Further roles (enrollment/lifecycle managers), multisig/change approvals | P1 |
-| Production indexer | Missing | Event/object materialization; browser scans of all history do not scale | P1 |
+| Production indexer | Implemented, locally tested (SF-024): `suifleet-indexer` materializes events/objects into SQLite with durable cursors; versioned API, change feed, CLI | Hosted deployment, dApp migration onto the API, archival-node retention on public networks | P1 |
 | Secrets and confidential configuration | Missing | Encrypted distribution, policy-controlled local cache and rotation; never plaintext on public chain/Walrus | P1 |
 | Cost/network policy | Missing | Gas funding/sponsorship, storage budgets, renewal alerts and network quotas | P1 |
 | Packaging/provisioning lifecycle | Partial: systemd and OE recipe | Pinned source, Yocto cargo dependency support and actual image/device test | P1 |
