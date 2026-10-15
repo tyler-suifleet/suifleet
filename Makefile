@@ -137,6 +137,13 @@ test-manifest:
 test-manifest-live:
 	$(RUN) python3 scripts/test_manifest_upgrades.py
 
+# SF-021 on a disposable localnet (start it first): claim enrollment, delegated
+# deployer roles and a SoftHSM2 PKCS#11 signer (needs softhsm2 + opensc).
+.PHONY: test-enrollment-localnet
+test-enrollment-localnet:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --features pkcs11
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_enrollment_localnet.py
+
 # Real daemon over gRPC against a disposable localnet (start it first, as for
 # test-manifest-live): direct/group/failure/offline/cursor-migration paths.
 .PHONY: test-daemon-localnet
