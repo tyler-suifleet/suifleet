@@ -118,7 +118,7 @@ file's installation; the service also starts on subsequent enrolled boots.
 
 Register the address through the current registry flow and obtain the
 device/capability IDs. Existing fleets must complete the registry-identity
-activation and receipt migration described in [the deployment runbook](DEPLOYMENT_MANIFEST.md)
+activation and receipt migration described in [the operational runbook](OPERATIONS.md#device-identity-lifecycle-sf-008)
 before switching to this client. Provisioning preserves key bytes; it does not
 activate on-chain identities or migrate objects. Generate a verified
 manifest/config bundle using the deployment-manifest workflow, choosing the
