@@ -157,7 +157,7 @@ test-publish-localnet:
 # Live gate (spends testnet gas; docs/TESTNET.md): base contracts published,
 # upgraded in place to this tree, real daemon, on-chain receipts.
 #   make live-gate-package-upgrade SUIFLEET_WALLET=~/.config/suifleet/testnet/agent/client.yaml
-.PHONY: live-gate-package-upgrade
+.PHONY: live-gate-package-upgrade live-gate-upgrade-security
 live-gate-package-upgrade:
 	@test -n "$(SUIFLEET_WALLET)" || { echo "set SUIFLEET_WALLET to a funded wallet's client.yaml"; exit 1; }
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
@@ -165,6 +165,13 @@ live-gate-package-upgrade:
 		--network "$${SUIFLEET_NETWORK:-testnet}" $(if $(BASE_REF),--base-ref "$(BASE_REF)") \
 		$(if $(SUIFLEET_STATE),--state "$(SUIFLEET_STATE)") \
 		--evidence "$${SUIFLEET_EVIDENCE:-live-evidence.json}"
+
+# Old-package/legacy-object attacks across a real upgrade (~0.22 SUI; per release).
+live-gate-upgrade-security:
+	@test -n "$(SUIFLEET_WALLET)" || { echo "set SUIFLEET_WALLET to a funded wallet's client.yaml"; exit 1; }
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/live_upgrade_security.py --wallet "$(SUIFLEET_WALLET)" \
+		--network "$${SUIFLEET_NETWORK:-testnet}" --evidence "$${SUIFLEET_EVIDENCE:-live-security-evidence.json}"
 
 # Real daemon over gRPC against a disposable localnet (start it first, as for
 # test-manifest-live): direct/group/failure/offline/cursor-migration paths.
