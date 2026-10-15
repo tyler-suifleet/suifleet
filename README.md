@@ -67,6 +67,9 @@ allow_recipe_commands = false
 state_dir = "/var/lib/suifleet"
 poll_seconds = 10
 replay_history = false
+
+[components]
+offline_candidates = "never"   # or "cached"; see docs/COMPONENT_DEPENDENCIES.md
 ```
 
 Fresh enrollment skips historical events; an existing journal always catches up from its cursor. `replay_history = true` is only for deliberate historical job replay. Use separate state directories for different networks/packages/devices. Never remove the journal to fix a reporting error: that can lose recovery information.

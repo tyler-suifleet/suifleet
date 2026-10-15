@@ -220,5 +220,265 @@
         "x": 1
       }
     }
+  },
+  {
+    "name": "schema-1.1-without-dependencies",
+    "valid": true,
+    "value": {
+      "schemaVersion": "1.1",
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {},
+      "configuration": {}
+    }
+  },
+  {
+    "name": "dependencies",
+    "valid": true,
+    "value": {
+      "schemaVersion": "1.1",
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {},
+      "configuration": {},
+      "componentDependencies": {
+        "lib.core": {
+          "versionRequirement": ">=1.0.0 <2.0.0",
+          "dependencyType": "HARD"
+        },
+        "metrics": {
+          "versionRequirement": "^0.3.1-rc.1",
+          "dependencyType": "SOFT"
+        },
+        "tool_x": {
+          "versionRequirement": "*"
+        },
+        "exact": {
+          "versionRequirement": "1.2.3"
+        }
+      }
+    }
+  },
+  {
+    "name": "dependencies-require-1.1",
+    "valid": false,
+    "value": {
+      "schemaVersion": "1.0",
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {},
+      "configuration": {},
+      "componentDependencies": {
+        "lib": {
+          "versionRequirement": "1.0.0"
+        }
+      }
+    }
+  },
+  {
+    "name": "dependency-unknown-type",
+    "valid": false,
+    "value": {
+      "schemaVersion": "1.1",
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {},
+      "configuration": {},
+      "componentDependencies": {
+        "lib": {
+          "versionRequirement": "1.0.0",
+          "dependencyType": "OPTIONAL"
+        }
+      }
+    }
+  },
+  {
+    "name": "dependency-missing-requirement",
+    "valid": false,
+    "value": {
+      "schemaVersion": "1.1",
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {},
+      "configuration": {},
+      "componentDependencies": {
+        "lib": {
+          "dependencyType": "HARD"
+        }
+      }
+    }
+  },
+  {
+    "name": "dependency-unknown-field",
+    "valid": false,
+    "value": {
+      "schemaVersion": "1.1",
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {},
+      "configuration": {},
+      "componentDependencies": {
+        "lib": {
+          "versionRequirement": "1.0.0",
+          "extra": 1
+        }
+      }
+    }
+  },
+  {
+    "name": "dependency-invalid-name",
+    "valid": false,
+    "value": {
+      "schemaVersion": "1.1",
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {},
+      "configuration": {},
+      "componentDependencies": {
+        "lib@1": {
+          "versionRequirement": "1.0.0"
+        }
+      }
+    }
+  },
+  {
+    "name": "dependency-requirement-partial-version",
+    "valid": false,
+    "value": {
+      "schemaVersion": "1.1",
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {},
+      "configuration": {},
+      "componentDependencies": {
+        "lib": {
+          "versionRequirement": "^1.2"
+        }
+      }
+    }
+  },
+  {
+    "name": "dependency-requirement-or-range",
+    "valid": false,
+    "value": {
+      "schemaVersion": "1.1",
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {},
+      "configuration": {},
+      "componentDependencies": {
+        "lib": {
+          "versionRequirement": "1.0.0 || 2.0.0"
+        }
+      }
+    }
+  },
+  {
+    "name": "dependency-requirement-comma-range",
+    "valid": false,
+    "value": {
+      "schemaVersion": "1.1",
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {},
+      "configuration": {},
+      "componentDependencies": {
+        "lib": {
+          "versionRequirement": ">=1.0.0, <2.0.0"
+        }
+      }
+    }
+  },
+  {
+    "name": "dependency-requirement-build-metadata",
+    "valid": false,
+    "value": {
+      "schemaVersion": "1.1",
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {},
+      "configuration": {},
+      "componentDependencies": {
+        "lib": {
+          "versionRequirement": "1.0.0+build"
+        }
+      }
+    }
+  },
+  {
+    "name": "dependency-requirement-leading-zero",
+    "valid": false,
+    "value": {
+      "schemaVersion": "1.1",
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {},
+      "configuration": {},
+      "componentDependencies": {
+        "lib": {
+          "versionRequirement": "01.0.0"
+        }
+      }
+    }
+  },
+  {
+    "name": "dependency-requirement-double-space",
+    "valid": false,
+    "value": {
+      "schemaVersion": "1.1",
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {},
+      "configuration": {},
+      "componentDependencies": {
+        "lib": {
+          "versionRequirement": ">=1.0.0  <2.0.0"
+        }
+      }
+    }
+  },
+  {
+    "name": "dependency-requirement-empty",
+    "valid": false,
+    "value": {
+      "schemaVersion": "1.1",
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {},
+      "configuration": {},
+      "componentDependencies": {
+        "lib": {
+          "versionRequirement": ""
+        }
+      }
+    }
   }
 ]

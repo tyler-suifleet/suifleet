@@ -52,6 +52,28 @@ impl Restart {
     }
 }
 
+/// A recipe's supervised lifecycle (present when it has a run command).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Lifecycle {
+    pub run: String,
+    pub shutdown: Option<String>,
+    pub readiness: Option<String>,
+    pub restart: Restart,
+}
+impl Lifecycle {
+    pub fn of(lifecycle: &crate::protocol::Lifecycle) -> anyhow::Result<Option<Self>> {
+        let Some(run) = &lifecycle.run else {
+            return Ok(None);
+        };
+        Ok(Some(Self {
+            run: run.clone(),
+            shutdown: lifecycle.shutdown.clone(),
+            readiness: lifecycle.readiness.clone(),
+            restart: Restart::parse(lifecycle.restart.as_deref())?,
+        }))
+    }
+}
+
 /// One supervised component version, as committed in `active.json`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Spec {
@@ -62,6 +84,23 @@ pub struct Spec {
     pub shutdown: Option<String>,
     pub readiness: Option<String>,
     pub restart: Restart,
+    /// Components this one depends on; started (and ready) first at bootstrap.
+    #[serde(default)]
+    pub after: Vec<String>,
+}
+impl Spec {
+    pub fn new(name: &str, version: &str, deployment: &str, lifecycle: Lifecycle, after: Vec<String>) -> Self {
+        Self {
+            name: name.to_owned(),
+            version: version.to_owned(),
+            deployment: deployment.to_owned(),
+            run: lifecycle.run,
+            shutdown: lifecycle.shutdown,
+            readiness: lifecycle.readiness,
+            restart: lifecycle.restart,
+            after,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -144,13 +183,12 @@ impl Supervisor {
         Ok(supervisor)
     }
 
-    /// Start every committed component (daemon start, including after a reboot).
+    /// Start every committed component (daemon start, including after a
+    /// reboot), dependencies first: each waits until its supervised
+    /// dependencies were started and became ready (or failed to).
     pub async fn bootstrap(&mut self) {
-        let specs: Vec<Spec> = self.active.values().cloned().collect();
-        for spec in &specs {
+        for spec in start_order(&self.active) {
             self.start(spec.clone());
-        }
-        for spec in specs {
             match self.wait_ready(&spec.name).await {
                 Ok(()) => info!(component = spec.name, version = spec.version, "Component started"),
                 Err(error) => warn!(component = spec.name, version = spec.version, %error, "Component did not become ready; its restart policy applies"),
@@ -213,9 +251,11 @@ impl Supervisor {
         }
     }
 
-    /// Stop every component (daemon shutdown), newest name last started first.
+    /// Stop every component (daemon shutdown), dependents before their
+    /// dependencies.
     pub async fn stop_all(&mut self) {
-        let names: Vec<String> = self.running.keys().rev().cloned().collect();
+        let mut names: Vec<String> = start_order(&self.active).into_iter().rev().map(|spec| spec.name).collect();
+        names.extend(self.running.keys().filter(|name| !self.active.contains_key(*name)).cloned());
         for name in names {
             self.stop(&name).await;
         }
@@ -311,6 +351,27 @@ impl Supervisor {
             }
         }
     }
+}
+
+/// Committed specs ordered so dependencies come before their dependents
+/// (names break ties; a cycle, which the resolver rejects, falls back to name
+/// order rather than skipping anything).
+fn start_order(active: &BTreeMap<String, Spec>) -> Vec<Spec> {
+    let mut order: Vec<Spec> = Vec::new();
+    let mut placed = BTreeSet::new();
+    while order.len() < active.len() {
+        let ready = active.values().find(|spec| {
+            !placed.contains(&spec.name)
+                && spec.after.iter().all(|dep| placed.contains(dep) || !active.contains_key(dep))
+        });
+        let next = ready
+            .or_else(|| active.values().find(|spec| !placed.contains(&spec.name)))
+            .unwrap()
+            .clone();
+        placed.insert(next.name.clone());
+        order.push(next);
+    }
+    order
 }
 
 struct Context {
@@ -792,6 +853,7 @@ mod tests {
                 shutdown: None,
                 readiness: None,
                 restart: Restart::OnFailure,
+                after: Vec::new(),
             }
         }
         async fn deploy(&self, supervisor: &mut Supervisor, spec: Spec, install: Option<&str>) -> anyhow::Result<()> {
@@ -1014,6 +1076,26 @@ mod tests {
         let new = s.status()["app"].pid.unwrap();
         assert_ne!(new, old);
         s.stop_all().await;
+    }
+
+    #[test]
+    fn bootstrap_starts_dependencies_first() {
+        let spec = |name: &str, after: &[&str]| Spec {
+            name: name.into(),
+            version: "1".into(),
+            deployment: "0x1".into(),
+            run: "true".into(),
+            shutdown: None,
+            readiness: None,
+            restart: Restart::Never,
+            after: after.iter().map(|a| a.to_string()).collect(),
+        };
+        let active: BTreeMap<String, Spec> = [spec("app", &["db", "net"]), spec("db", &["net"]), spec("net", &[]), spec("aux", &["gone"])]
+            .into_iter()
+            .map(|s| (s.name.clone(), s))
+            .collect();
+        let order: Vec<String> = start_order(&active).into_iter().map(|s| s.name).collect();
+        assert_eq!(order, ["aux", "net", "db", "app"]);
     }
 
     #[tokio::test]
