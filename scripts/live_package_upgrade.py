@@ -397,6 +397,13 @@ def run(args):
             check("injected health failure reported Failed on chain")
             assert sorted(history()) == ["1.0.0", "2.0.0", "3.0.0", "4.0.0"], history()
             evidence["receipts"] = {d: receipts(d) for d in (direct, via_group, via_old, failed)}
+            if args.network == 'testnet':
+                proof = subprocess.run(['node', str(ROOT / 'scripts/testnet_receipt_effects.cjs'),
+                                        str(root / 'release/deployment.json'), direct, via_group, via_old, failed],
+                                       capture_output=True, text=True, timeout=120, check=True)
+                evidence['report_transactions'] = json.loads(proof.stdout)
+                assert len(evidence['report_transactions']) == 4
+                check('independent gRPC reader confirmed all four receipt-writing transaction effects')
             process.send_signal(signal.SIGINT)
             process.wait(timeout=60)
             process = None
