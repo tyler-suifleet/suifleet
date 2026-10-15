@@ -61,6 +61,11 @@ def gate(pr, owner, review):
         return 'changes or acceptance evidence remain outstanding'
     if any(not t['isResolved'] for t in pr['threads']):
         return 'unresolved review threads'
+    if pr.get('_testnet_required'):
+        testnet = pr.get('_testnet_status') or {}
+        if (testnet.get('state') != 'success'
+                or testnet.get('description') != 'base:' + pr['baseRefOid']):
+            return 'exact-head testnet status for current base is missing or unsuccessful'
     checks = pr['statusCheckRollup']
     if not checks or not all((c.get('status') == 'COMPLETED' and c.get('conclusion') == 'SUCCESS')
                              if c.get('__typename') == 'CheckRun' else c.get('state') == 'SUCCESS' for c in checks):
@@ -182,6 +187,14 @@ class Coordinator:
         pr['baseRefOid']=reference['object']['sha']
         comparison=json.loads(self.gh(project,['api',f"repos/{project['repository']}/compare/{pr['baseRefOid']}...{pr['headRefOid']}"]))
         pr['baseIncluded']=comparison['merge_base_commit']['sha'] == pr['baseRefOid']
+        # Bootstrap only before the controller exists on the integration base.
+        # Missing/pending status then blocks even before workflow_run is queued.
+        tree = json.loads(self.gh(project, ['api', f"repos/{project['repository']}/git/trees/{pr['baseRefOid']}?recursive=1"]))
+        if tree.get('truncated'): raise RuntimeError('cannot determine required testnet workflow from truncated tree')
+        pr['_testnet_required'] = any(row['path'] == '.github/workflows/testnet.yml' for row in tree['tree'])
+        if pr['_testnet_required']:
+            statuses = json.loads(self.gh(project, ['api', f"repos/{project['repository']}/commits/{pr['headRefOid']}/status"]))
+            pr['_testnet_status'] = next((row for row in statuses['statuses'] if row['context'] == 'testnet/package-upgrade'), None)
         owner, repo = project['repository'].split('/')
         query = '''query($owner:String!,$repo:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100,after:$cursor){nodes{id isResolved comments(first:100){nodes{id body updatedAt} pageInfo{hasNextPage}}} pageInfo{hasNextPage endCursor}}}}}'''
         threads, cursor = [], None

@@ -67,6 +67,7 @@ test-component:
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_component_ota.py
 
 dapp-typecheck:
+	$(MAKE) test-testnet
 	$(MAKE) test-manifest
 	$(RUN) bash -c "cd dapp && pnpm typecheck"
 
@@ -98,7 +99,7 @@ toolchain-versions:
 # CI entry point (run inside the dev image): each step's output is kept under
 # ci-logs/ for failure diagnostics. No step publishes, spends gas or uses secrets.
 ci: SHELL := /bin/bash
-CI_STEPS := test-publish test-contracts test-interfaces check-interfaces edge-test test-ota test-component dapp-typecheck dapp-build
+CI_STEPS := test-testnet test-publish test-contracts test-interfaces check-interfaces edge-test test-ota test-component dapp-typecheck dapp-build
 ci:
 	@mkdir -p ci-logs
 	@$(MAKE) --no-print-directory toolchain-versions | tee ci-logs/toolchain-versions.txt
@@ -127,6 +128,23 @@ check:
 .PHONY: test-publish
 test-publish:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_publish.py'
+
+# Signed releases (docs/RELEASES.md). These run on the host with Docker, not
+# in the dev container: the release builder is its own pinned image.
+.PHONY: release-image release-artifacts release-verify
+RELEASE_IMAGE ?= suifleet-release:local
+RELEASE_OUT ?= dist
+
+release-image:
+	docker build -f docker/release.Dockerfile --build-arg USER_UID=$(UID) --build-arg USER_GID=$(GID) -t $(RELEASE_IMAGE) docker/
+
+# Builds the committed HEAD twice and fails unless the bundles are identical.
+release-artifacts: release-image
+	python3 scripts/release.py build --out $(RELEASE_OUT) --image $(RELEASE_IMAGE) --reproduce
+
+# make release-verify BUNDLE=dist TRUST=release/trust.toml
+release-verify:
+	$(RUN) bash -c "cd suifleet-edge && cargo run --locked --quiet --bin suifleet -- --verify-release ../$(BUNDLE) ../$(TRUST)"
 
 tracking-plan:
 	python3 scripts/bootstrap_tracking.py
@@ -187,3 +205,8 @@ live-gate-wallet:
 test-daemon-localnet:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_daemon_localnet.py
+
+.PHONY: test-testnet
+test-testnet:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_testnet*.py'
+	$(RUN) node scripts/test_testnet_cache.cjs
