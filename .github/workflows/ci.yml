@@ -65,6 +65,7 @@ jobs:
             suifleet-dev:ci make ci
 
       - name: First-boot identity and permissions
+        shell: bash
         run: sh scripts/test_yocto_first_boot.sh suifleet-dev:ci | tee ci-logs/first-boot.log
 
       - name: Upload diagnostics

@@ -20,7 +20,8 @@ import uuid
 
 
 class Guest:
-    def __init__(self, qemu, kernel, disk):
+    def __init__(self, qemu, kernel, disk, console_timeout=300):
+        self.console_timeout = console_timeout
         self.process = subprocess.Popen([
             qemu, "-machine", "virt", "-cpu", "cortex-a57", "-m", "512", "-smp", "2",
             "-kernel", str(kernel), "-append", "root=/dev/vda rw console=ttyAMA0",
@@ -31,7 +32,8 @@ class Guest:
         self.selector.register(self.process.stdout, selectors.EVENT_READ)
         self.pending = b""
 
-    def expect(self, pattern, timeout=120):
+    def expect(self, pattern, timeout=None):
+        timeout = self.console_timeout if timeout is None else timeout
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             match = re.search(pattern, self.pending)
@@ -59,7 +61,7 @@ class Guest:
         self.send("root")
         self.expect(rb"root@[^\r\n]+[#] ")
 
-    def command(self, shell, timeout=120):
+    def command(self, shell, timeout=None):
         token = "SF025_" + uuid.uuid4().hex
         # Encode the command so the echoed input cannot match its output marker.
         payload = f"( set -eu; {shell} ); result=$?; printf '\\n{token}:%s\\n' \"$result\""
@@ -134,8 +136,8 @@ poll_seconds = 1
                   "systemctl stop suifleet.service; systemctl reset-failed; sync")
 
 
-def boot(qemu, kernel, disk, reboot=False):
-    guest = Guest(qemu, kernel, disk)
+def boot(qemu, kernel, disk, reboot=False, console_timeout=300):
+    guest = Guest(qemu, kernel, disk, console_timeout)
     try:
         guest.login()
         # Console login may precede completion of the automatic boot units.
@@ -147,7 +149,8 @@ def boot(qemu, kernel, disk, reboot=False):
         guest.command("systemctl is-active --quiet suifleet-provision.service; "
                       "systemctl is-active --quiet suifleet-enrollment.path; "
                       "test ! -e /etc/suifleet/config.toml; "
-                      "! systemctl is-active --quiet suifleet.service; "
+                      "if systemctl is-active --quiet suifleet.service; then exit 1; fi; "
+                      "test $(systemctl show -p NRestarts --value suifleet.service) = 0; "
                       "test $(stat -c %a /etc/suifleet/device.key) = 600; "
                       "test $(stat -c %U /etc/suifleet/device.key) = suifleet; "
                       "test $(systemctl show -p User --value suifleet.service) = suifleet; "
@@ -183,14 +186,18 @@ def main():
     parser.add_argument("--qemu", required=True)
     parser.add_argument("--kernel", required=True, type=Path)
     parser.add_argument("--image", required=True, type=Path)
+    parser.add_argument("--console-timeout", type=float, default=300,
+                        help="Console/login/command deadline in seconds (default: 300)")
     args = parser.parse_args()
+    if args.console_timeout <= 0:
+        parser.error("--console-timeout must be positive")
     with tempfile.TemporaryDirectory(prefix="suifleet-packaging-boot-") as temporary:
         first, second = [Path(temporary) / name for name in ("first.ext4", "second.ext4")]
         shutil.copyfile(args.image, first)
         shutil.copyfile(args.image, second)
-        address = boot(args.qemu, args.kernel, first)
-        assert boot(args.qemu, args.kernel, first, reboot=True) == address
-        assert boot(args.qemu, args.kernel, second) != address, "image cloned the private identity"
+        address = boot(args.qemu, args.kernel, first, console_timeout=args.console_timeout)
+        assert boot(args.qemu, args.kernel, first, reboot=True, console_timeout=args.console_timeout) == address
+        assert boot(args.qemu, args.kernel, second, console_timeout=args.console_timeout) != address, "image cloned the private identity"
     print("PASS: actual QEMU image boots unenrolled, retries offline startup, provisions independent keys, preserves identity/state across reboot")
 
 
