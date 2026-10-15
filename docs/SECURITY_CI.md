@@ -35,10 +35,21 @@ The installer currently targets Linux x86-64, matching the GitHub runner. Scanne
 
 ## Findings and limits
 
-The initial real filesystem scan reported **2 critical and 17 high frontend dependency findings**, plus lower-severity findings, on the pre-remediation lockfile. They include Next.js 14.2.35 and transitive build dependencies. SF-049 tracks remediation before a green security-gate rollout; SF-048 tracks this audit implementation. Do not claim the audit passes or waive these findings to merge it. Package advisories require applicability review: a reported server-side vulnerability does not establish exploitability of a static browser deployment.
+The initial real filesystem scan reported **2 critical and 17 high frontend dependency findings**, plus lower-severity findings, on the pre-remediation lockfile. SF-049/PR #81 resolved those findings with reviewed dependency changes; see [the advisory inventory and compatibility limits](FRONTEND_SECURITY.md). A fresh checksum-verified Trivy 0.76.0 scan after integrating that remediation on 2026-10-15 reported **6 findings, zero blocking**. No findings were suppressed. Package advisories require applicability review: a reported server-side vulnerability does not establish exploitability of a static browser deployment.
+
+The remaining findings stay visible in sanitized artifacts and [SF-048/#78](https://github.com/tyler-suifleet/suifleet/issues/78):
+
+| Advisory/rule | Severity | Committed target |
+|---|---|---|
+| CVE-2026-69153 (PostCSS) | MEDIUM | frontend lockfile |
+| GHSA-2mjx-qc3c-rqvc (rustls) | MEDIUM | both Rust lockfiles (two records) |
+| CVE-2026-45784 (OpenSSL) | MEDIUM | indexer lockfile |
+| DS-0026 (missing healthcheck) | LOW | both Dockerfiles (two records) |
+
+Real Actions CodeQL analysis initially exposed four critical checkout TOCTOU results in the automatic testnet workflow. The controller now checks out its immutable workflow commit, selects test code by immutable event commit, and verifies actual Git HEAD against the independent server-authenticated planner selection before building or using credentials. Existing same-repository writer/actor, successful originating CI, environment and pre-spend checks remain. All four CodeQL languages subsequently reported zero findings on that repair; fresh current-head CI remains a merge gate. SARIF rule metadata is resolved through the referenced driver or extension component, with identity and bounds checks; taxonomy extensions may legitimately omit rules.
 
 Fix vulnerable dependencies with manifest/lockfile changes and relevant regression/build evidence, then rerun the real scan. Track unpatched advisories and source findings explicitly. New suppressions or accepted risks require reviewed, specific rationale; no broad ignore file is configured here.
 
 These checks do not prove AWS Greengrass parity, Move-contract authority safety, real wallet/device security, complete application security, or absence of vulnerabilities. Filesystem scanning does not inspect the installed OS packages in a built dev/release image or a final Yocto image. Existing Move tests, upgrade attack tests, effects checks, wallet acceptance and Pi testing remain required for their respective claims.
 
-Sources: [CodeQL language support](https://codeql.github.com/docs/codeql-overview/supported-languages-and-frameworks/), [CodeQL query suites](https://docs.github.com/en/code-security/reference/code-scanning/codeql/codeql-queries), [Trivy filesystem scanning](https://trivy.dev/docs/dev/target/filesystem/), and [Trivy secret scanning](https://www.trivy.dev/docs/latest/guide/scanner/secret/).
+Sources: [CodeQL language support](https://codeql.github.com/docs/codeql-overview/supported-languages-and-frameworks/), [CodeQL query suites](https://docs.github.com/en/code-security/reference/code-scanning/codeql/codeql-queries), [SARIF 2.1.0 sections 3.19.23, 3.52 and 3.54](https://docs.oasis-open.org/sarif/sarif/v2.1.0/os/sarif-v2.1.0-os.html), [CodeQL checkout TOCTOU guidance](https://codeql.github.com/codeql-query-help/actions/actions-untrusted-checkout-toctou-critical/), [Trivy filesystem scanning](https://trivy.dev/docs/dev/target/filesystem/), and [Trivy secret scanning](https://www.trivy.dev/docs/latest/guide/scanner/secret/).
