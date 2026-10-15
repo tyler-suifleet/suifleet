@@ -3,10 +3,12 @@ header:
   includes:
     - packaging.yml
 machine: qemuarm64
-target: core-image-minimal
+target:
+  - core-image-minimal
+  - qemu-system-native
 local_conf_header:
   suifleet-packaging-emulation: |
-    IMAGE_INSTALL:append = " suifleet suifleet-test-component"
+    IMAGE_INSTALL:append = " suifleet suifleet-test-component coreutils"
     IMAGE_FSTYPES = "ext4"
     EXTRA_IMAGE_FEATURES:append = " debug-tweaks"
     QEMU_TARGETS = "aarch64"
