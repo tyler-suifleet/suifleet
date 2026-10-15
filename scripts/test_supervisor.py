@@ -10,7 +10,9 @@ One component, `svc`, across daemon lifetimes:
   daemon SIGTERM                       -> shutdown command ran; run, its grouped
                                           child and a setsid-escaped child all gone
   daemon start (reboot stage)          -> v3 started again from active.json
-  daemon SIGKILL, then start           -> the orphaned run is killed; one instance
+  daemon SIGKILL, then start           -> the orphaned run and every descendant
+                                          (setsid, reparented, env-cleared) killed;
+                                          one instance
 """
 import argparse
 import json
@@ -25,10 +27,23 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import test_ota
 from test_ota import CAP, DEVICE, PACKAGE, REGISTRY, TYPE_ORIGINS, UPGRADE_CAP, Simulator, start_grpc, wait_for
 
-# The run records itself, keeps a child in its group and one that escapes it.
-RUN = ("rm -f ready; echo $SUIFLEET_COMPONENT_VERSION >> runs; echo $$ > pid; "
+# The run records itself, keeps a child in its group, one that escapes it with
+# setsid, one under a middle process (so it can be reparented away from the
+# run's tree) and one that clears its environment.
+RUN = ("rm -f ready middle detached; echo $SUIFLEET_COMPONENT_VERSION >> runs; echo $$ > pid; "
        "sleep 300 & echo $! > grouped; setsid sleep 300 & echo $! > escaped; "
+       "sh -c 'setsid sleep 300 & echo $! > detached; echo $$ > middle; exec sleep 300' & "
+       "env -i sleep 300 & echo $! > cleared; "
+       "while [ ! -s middle ] || [ ! -s detached ]; do sleep 0.05; done; "
        "trap 'echo graceful > stopped; exit 0' TERM; touch ready; while true; do sleep 0.2; done")
+RECORDED = ("pid", "grouped", "escaped", "middle", "detached", "cleared")
+
+
+def parent(pid):
+    try:
+        return int(Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[1])
+    except (OSError, ValueError):
+        return None
 
 
 def alive(pid):
@@ -83,6 +98,7 @@ def run(binary):
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     process = None
+    seen = set()
     shim, rpc_url = start_grpc(f"http://127.0.0.1:{server.server_port}")
     try:
         with tempfile.TemporaryDirectory(prefix="suifleet-supervisor-") as temporary:
@@ -129,7 +145,9 @@ def run(binary):
                     return ""
 
             def recorded():
-                return [int(read(name)) for name in ("pid", "grouped", "escaped")]
+                pids = [int(read(name)) for name in RECORDED]
+                seen.update(pids)
+                return pids
 
             def running(version):
                 current = status()
@@ -155,8 +173,8 @@ def run(binary):
                 wait_for(lambda: running("1.0.0") and status().get("restarts") == 1, "crashed run was not restarted", process)
                 assert read("runs").splitlines() == ["1.0.0", "1.0.0"], read("runs")
                 assert not alive(first[1]), "the crashed run's grouped child survived"
-                wait_for(lambda: not alive(first[2]), "the crashed run's escaped child survived", process)
-                print("PASS: crashed run restarted (on-failure); its grouped and escaped descendants were killed")
+                wait_for(lambda: not any(map(alive, first)), "a descendant of the crashed run survived", process)
+                print("PASS: crashed run restarted (on-failure); all of its descendants were killed")
 
                 # Replacement that never becomes ready: Failed, rolled back to v1.
                 deploy("0x402", "2.0.0", run="exit 1")
@@ -197,15 +215,22 @@ def run(binary):
                 orphan = recorded()
                 process.send_signal(signal.SIGKILL)
                 process.wait(timeout=10)
-                assert alive(orphan[0]), "the run did not outlive the killed daemon (nothing to recover)"
+                assert all(map(alive, orphan)), "the run did not outlive the killed daemon (nothing to recover)"
+                # Break one descendant away from the run's tree as well.
+                middle, detached = orphan[3], orphan[4]
+                os.kill(middle, signal.SIGKILL)
+                wait_for(lambda: parent(detached) != middle, "the detached descendant was not reparented")
+                assert alive(detached)
                 process = start()
                 wait_for(lambda: running("3.0.0") and status().get("pid") != orphan[0], "v3 did not restart after a daemon kill", process)
-                wait_for(lambda: not alive(orphan[0]) and not alive(orphan[1]), "the orphaned run survived a daemon restart", process)
+                assert not any(map(alive, orphan)), ("a pre-crash descendant survived daemon recovery",
+                                                     dict(zip(RECORDED, map(alive, orphan))))
                 instances = [pid for pid in map(int, filter(str.isdigit, os.listdir("/proc")))
                              if alive(pid) and (Path(f"/proc/{pid}/cwd").exists() and os.readlink(f"/proc/{pid}/cwd") == str(work))
                              and Path(f"/proc/{pid}/cmdline").read_bytes().startswith(b"/bin/sh")]
                 assert len(instances) == 1, f"expected one running instance, found {instances}"
-                print("PASS: after a daemon SIGKILL the orphaned run was killed; exactly one instance runs")
+                print("PASS: after a daemon SIGKILL every pre-crash process (setsid, reparented, env-cleared) "
+                      "was killed before the restart; exactly one instance runs")
 
                 # Reports queued across the stops and the kill go out on the next poll.
                 wait_for(lambda: outcome("0x403").get("reported"), "v3's queued report was not sent", process)
@@ -220,6 +245,14 @@ def run(binary):
         if process and process.poll() is None:
             process.kill()
             process.wait()
+        # Leave nothing behind when an assertion failed mid-run (only processes
+        # that still look like the component's, not a reused PID).
+        for pid in seen:
+            try:
+                if Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")[0] in (b"sleep", b"/bin/sh", b"sh"):
+                    os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
         shim.kill()
         server.shutdown()
 

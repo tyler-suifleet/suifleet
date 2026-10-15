@@ -16,6 +16,8 @@
 //! Run commands must stay in the foreground. Each runs in its own process
 //! group, which is killed when it exits or stops; the daemon is also a child
 //! subreaper and kills any process that escaped its group and was orphaned.
+//! Component processes carry a marker in their environment, so a daemon
+//! restarted after a crash also finds and kills ones reparented away from it.
 use crate::apply::{self, ApplyRunner};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -169,7 +171,7 @@ impl Supervisor {
             Err(error) => return Err(error.into()),
         };
         contain_descendants()?;
-        let left = reap_previous_runs(&root);
+        let left = reap_previous_runs(&root)?;
         if left > 0 {
             warn!(left, "Killed component runs left by a previous daemon instance");
         }
@@ -431,6 +433,7 @@ impl Context {
         command.arg("-c").arg(script);
         apply::harden(&mut command, &work, self.settings.max_memory_bytes);
         command
+            .env(MARKER, marker(&self.root))
             .env("SUIFLEET_COMPONENT", &self.spec.name)
             .env("SUIFLEET_COMPONENT_VERSION", &self.spec.version);
         command
@@ -658,25 +661,68 @@ fn start_time(pid: u32) -> Option<u64> {
     fields.get(19)?.parse().ok()
 }
 
-fn is_zombie(pid: u32) -> bool {
-    std::fs::read_to_string(format!("/proc/{pid}/stat"))
-        .ok()
-        .and_then(|stat| stat.rsplit_once(')').map(|(_, rest)| rest.split_whitespace().next() == Some("Z")))
+/// Environment variable naming the supervisor that started a process. Every
+/// component process inherits it (across setsid too), so a later daemon can
+/// find runs left behind even after they were reparented away from it.
+const MARKER: &str = "SUIFLEET_SUPERVISOR";
+
+/// This state root's marker value.
+fn marker(root: &Path) -> String {
+    hex::encode(&crate::identity::hash(root.as_os_str().as_encoded_bytes())[..16])
+}
+
+struct Proc {
+    pid: u32,
+    ppid: u32,
+    pgrp: u32,
+}
+
+/// Every live (non-zombie) process, from /proc.
+fn processes() -> Vec<Proc> {
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| {
+            let pid = entry.file_name().to_str()?.parse::<u32>().ok()?;
+            let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+            // Fields after the parenthesised command: state ppid pgrp ...
+            let fields: Vec<&str> = stat.rsplit_once(')')?.1.split_whitespace().collect();
+            (fields.first() != Some(&"Z")).then_some(())?;
+            Some(Proc {
+                pid,
+                ppid: fields.get(1)?.parse().ok()?,
+                pgrp: fields.get(2)?.parse().ok()?,
+            })
+        })
+        .collect()
+}
+
+fn carries(pid: u32, marker: &str) -> bool {
+    let entry = format!("{MARKER}={marker}");
+    std::fs::read(format!("/proc/{pid}/environ"))
+        .map(|environ| environ.split(|b| *b == 0).any(|var| var == entry.as_bytes()))
         .unwrap_or(false)
 }
 
 /// A daemon that died without stopping its components (crash, SIGKILL)
-/// leaves their runs behind; kill each recorded run and its process group
-/// before starting them again, so no component runs twice.
-fn reap_previous_runs(root: &Path) -> usize {
-    let Ok(bytes) = std::fs::read(root.join("status.json")) else {
-        return 0;
-    };
-    let Ok(previous) = serde_json::from_slice::<BTreeMap<String, Status>>(&bytes) else {
-        return 0;
-    };
-    let mut killed = 0;
-    let mut groups = Vec::new();
+/// leaves their runs behind, and descendants reparented away from it. Before
+/// anything starts again, find every leftover: the recorded runs, their
+/// process groups, every process carrying this root's marker (including ones
+/// that left the group with setsid and lost their parent) and all of their
+/// descendants (including ones that cleared their environment). They are
+/// frozen with SIGSTOP until the set is closed, so none can fork away, then
+/// killed. Fails if any survives: no component may run twice.
+fn reap_previous_runs(root: &Path) -> anyhow::Result<usize> {
+    let me = std::process::id();
+    let marker = marker(root);
+    let previous: BTreeMap<String, Status> = std::fs::read(root.join("status.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default();
+    let mut runs = BTreeSet::new();
+    let mut groups = BTreeSet::new();
     for status in previous.values() {
         let (Some(pid), Some(started)) = (status.pid, status.pid_start) else {
             continue;
@@ -685,47 +731,74 @@ fn reap_previous_runs(root: &Path) -> usize {
         // does not reuse a PID while it is still a process-group ID); a
         // different process under a reused PID is left alone.
         let current = start_time(pid);
-        let gone = !Path::new(&format!("/proc/{pid}")).exists() || is_zombie(pid);
-        if current == Some(started) || gone {
-            apply::kill_group(pid as i32);
-            if !gone {
-                unsafe {
-                    libc::kill(pid as i32, libc::SIGKILL);
-                }
-            }
-            groups.push(pid);
-            killed += 1;
+        if current == Some(started) {
+            runs.insert(pid);
+        }
+        if current == Some(started) || current.is_none() {
+            groups.insert(pid);
         }
     }
-    // SIGKILL is delivered asynchronously: wait until the killed runs are
-    // really dead (gone or zombies), or a restart could overlap them.
+    let leftovers = |table: &[Proc]| -> BTreeSet<u32> {
+        let mut found: BTreeSet<u32> = table
+            .iter()
+            .filter(|p| p.pid != me)
+            .filter(|p| runs.contains(&p.pid) || groups.contains(&p.pgrp) || carries(p.pid, &marker))
+            .map(|p| p.pid)
+            .collect();
+        loop {
+            let more: Vec<u32> = table
+                .iter()
+                .filter(|p| p.pid != me && !found.contains(&p.pid) && found.contains(&p.ppid))
+                .map(|p| p.pid)
+                .collect();
+            if more.is_empty() {
+                return found;
+            }
+            found.extend(more);
+        }
+    };
     let deadline = Instant::now() + Duration::from_secs(5);
-    while groups.iter().any(|&group| group_alive(group)) && Instant::now() < deadline {
+    // Each frozen process with its start time, so a PID reused once it died
+    // is never signalled.
+    let mut frozen: BTreeMap<u32, Option<u64>> = BTreeMap::new();
+    loop {
+        let found = leftovers(&processes());
+        let new: Vec<u32> = found.into_iter().filter(|pid| !frozen.contains_key(pid)).collect();
+        if new.is_empty() {
+            break;
+        }
+        for pid in new {
+            let started = start_time(pid);
+            unsafe {
+                libc::kill(pid as i32, libc::SIGSTOP);
+            }
+            frozen.insert(pid, started);
+        }
+        anyhow::ensure!(Instant::now() < deadline, "cannot freeze component runs left by a previous daemon");
+    }
+    let killed = frozen.len();
+    // SIGKILL is delivered asynchronously: wait until every leftover is really
+    // dead (gone or a zombie), or a restart could overlap them.
+    loop {
+        frozen.retain(|pid, started| start_time(*pid).is_some() && start_time(*pid) == *started);
+        for &pid in frozen.keys() {
+            unsafe {
+                libc::kill(pid as i32, libc::SIGKILL);
+            }
+        }
+        let late = leftovers(&processes());
+        if frozen.is_empty() && late.is_empty() {
+            return Ok(killed);
+        }
+        if Instant::now() >= deadline {
+            let alive: BTreeSet<u32> = frozen.keys().copied().chain(late).collect();
+            anyhow::bail!("component processes left by a previous daemon survived SIGKILL: {alive:?}");
+        }
+        for pid in late {
+            frozen.entry(pid).or_insert_with(|| start_time(pid));
+        }
         std::thread::sleep(Duration::from_millis(10));
     }
-    killed
-}
-
-/// Whether the process `group` (or any member of its process group) is
-/// still alive, i.e. exists and is not a zombie.
-fn group_alive(group: u32) -> bool {
-    let Ok(entries) = std::fs::read_dir("/proc") else {
-        return false;
-    };
-    entries.flatten().any(|entry| {
-        let Some(pid) = entry.file_name().to_str().and_then(|name| name.parse::<u32>().ok()) else {
-            return false;
-        };
-        let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
-            return false;
-        };
-        let Some((_, rest)) = stat.rsplit_once(')') else {
-            return false;
-        };
-        // Fields after the command: state, ppid, pgrp, ...
-        let fields: Vec<&str> = rest.split_whitespace().collect();
-        fields.first() != Some(&"Z") && (pid == group || fields.get(2) == Some(&group.to_string().as_str()))
-    })
 }
 
 /// PIDs of children this process spawned and has not reaped yet. Anything
@@ -1111,6 +1184,36 @@ mod tests {
         let new = s.status()["app"].pid.unwrap();
         assert_ne!(new, old);
         s.stop_all().await;
+    }
+
+    #[tokio::test]
+    async fn recovery_finds_marked_runs_and_their_descendants() {
+        let f = Fixture::new("marked");
+        let root = f.dir.join("supervised");
+        std::fs::create_dir_all(&root).unwrap();
+        // A leftover run (no status.json records it) with a setsid-escaped
+        // child and one that cleared its environment; and an unrelated process.
+        let script = "setsid sleep 300 & echo $! > escaped; env -i sleep 300 & echo $! > cleared; exec sleep 300";
+        let mut leftover = tokio::process::Command::new("/bin/sh");
+        leftover.arg("-c").arg(script).current_dir(&f.dir).env(MARKER, marker(&root));
+        let mut leftover = spawn_tracked(&mut leftover).unwrap();
+        let mut other = tokio::process::Command::new("sleep");
+        other.arg("300").env(MARKER, "another-supervisor");
+        let mut other = spawn_tracked(&mut other).unwrap();
+        let read = |file: &str| -> u32 { std::fs::read_to_string(f.dir.join(file)).unwrap_or_default().trim().parse().unwrap_or(0) };
+        until("the leftover's children to start", || read("escaped") > 0 && read("cleared") > 0).await;
+        let (escaped, cleared) = (read("escaped"), read("cleared"));
+        until("the children to exec", || carries(escaped, &marker(&root)) && alive(cleared)).await;
+        assert!(!carries(cleared, &marker(&root)));
+
+        assert!(reap_previous_runs(&root).unwrap() >= 3);
+        assert!(!alive(leftover.pid()) && !alive(escaped) && !alive(cleared), "a leftover survived recovery");
+        let _ = leftover.wait().await;
+        assert!(alive(other.pid()), "recovery killed another supervisor's process");
+        unsafe {
+            libc::kill(other.pid() as i32, libc::SIGKILL);
+        }
+        let _ = other.wait().await;
     }
 
     #[test]
