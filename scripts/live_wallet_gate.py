@@ -3,18 +3,20 @@
 dApp Kit connect UI, transaction hook, builders, queries and Walrus upload
 code in headless Chromium against Sui testnet and Walrus testnet.
 
-A throwaway ed25519 test key, generated here and never written outside the
-run's temp directory, acts as the browser wallet (scripted Wallet Standard
-wallet; the one stand-in for an extension). It is funded with 0.1 SUI from
-the supplied wallet and swept back at the end, so a run costs only gas and
-unrefunded storage.
+A throwaway ed25519 test key, generated here, acts as the browser wallet
+(scripted Wallet Standard wallet; the one stand-in for an extension). It is
+funded with 0.1 SUI from the supplied wallet and swept back at the end, so a
+run costs only gas and unrefunded storage. Until that sweep succeeds its seed
+is kept (0600) beside the wallet as live-browser-key.hex, and the next run
+sweeps it first, so a failed run never strands the funding.
 
 The deployment under test is the package-upgrade gate's cached fixture for
 these contracts (no package is published here): run
 `make live-gate-package-upgrade` first. Checks: connect UI, wallet rejection,
 fresh registration + cap + activation, group membership, Walrus upload and
 a verified deployment (listed with its resolved device; blobs available),
-an on-chain abort reported as failure, wrong-chain refusal, and cleanup.
+an abort refused by simulation before signing, an abort executed on chain
+and reported as failure, wrong-chain refusal, and cleanup.
 
 A real browser-extension wallet (Slush etc.) still needs a person:
 docs/TESTNET.md, "Manual extension-wallet check".

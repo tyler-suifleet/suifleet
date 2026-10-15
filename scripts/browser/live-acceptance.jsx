@@ -21,6 +21,7 @@ const keypair = Ed25519Keypair.fromSecretKey(fromHex(LIVE_SEED));
 const chain = `sui:${m.network}`;
 const client = new SuiGrpcClient({ network: m.network, baseUrl: m.rpc_url });
 let reject = false;
+let lastDigest = null; // Last transaction this wallet executed (success or abort).
 const listeners = new Set();
 const account = { address: keypair.getPublicKey().toSuiAddress(), publicKey: keypair.getPublicKey().toSuiBytes(), chains: [chain],
   features: ["sui:signTransaction", "sui:signAndExecuteTransaction"] };
@@ -41,6 +42,7 @@ const wallet = {
       const bytes = await parsed.build({ client });
       const result = await keypair.signAndExecuteTransaction({ transaction: parsed, client });
       const tx = result.Transaction ?? result.FailedTransaction;
+      lastDigest = tx.digest;
       return { bytes: toBase64(bytes), signature: tx.signatures[0], digest: tx.digest, effects: toBase64(tx.effects.bcs) };
     } },
   },
@@ -70,6 +72,13 @@ window.live = {
     const result = await keypair.signAndExecuteTransaction({ transaction: tx, client });
     return (result.Transaction ?? result.FailedTransaction).digest;
   },
+  lastDigest: () => lastDigest, resetDigest: () => { lastDigest = null; },
+  // Execution status read back from the network, independently of the hook.
+  async executed(digest) {
+    const result = await client.core.waitForTransaction({ digest, include: { effects: true } });
+    const tx = result.Transaction ?? result.FailedTransaction;
+    return { success: Boolean(tx.status.success), error: tx.status.error?.message ?? null };
+  },
   builders: sui,
 };
 
@@ -81,11 +90,23 @@ function App() {
       const transaction = typeof builder === "function" ? builder() : sui[builder](...args);
       return mutation.mutateAsync({ transaction });
     };
-    // A transaction that executes and aborts on chain: an explicit budget skips
-    // the build-time simulation that would otherwise refuse it.
+    // A transaction that executes and aborts on chain. The SDK simulates any
+    // transaction that still needs resolution and refuses an abort before
+    // signing, so resolve the dApp builder's commands without execution checks
+    // and pay gas explicitly: the fully resolved transaction is then signed,
+    // executed and judged by the hook like any other.
     window.live.submitAborting = async (builder, ...args) => {
-      const transaction = sui[builder](...args);
+      const built = sui[builder](...args);
+      built.setSender(account.address);
+      const transaction = Transaction.fromKind(await built.build({ client, onlyTransactionKind: true }));
+      const [{ referenceGasPrice }, { objects }] = await Promise.all([client.core.getReferenceGasPrice(),
+        client.core.listCoins({ owner: account.address })]);
+      const coin = objects.reduce((a, b) => (BigInt(b.balance) > BigInt(a.balance) ? b : a));
+      transaction.setSender(account.address);
+      transaction.setGasPrice(referenceGasPrice);
       transaction.setGasBudget(20_000_000);
+      transaction.setGasPayment([{ objectId: coin.objectId, version: coin.version, digest: coin.digest }]);
+      lastDigest = null;
       return mutation.mutateAsync({ transaction });
     };
     window.live.ready = true;

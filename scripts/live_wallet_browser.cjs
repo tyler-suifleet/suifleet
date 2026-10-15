@@ -95,10 +95,23 @@ const component = (version, run) => `#!/bin/sh\n# suifleet live browser acceptan
     assert.ok(JSON.stringify(storage).includes("available"), JSON.stringify(storage));
     pass(`recipe and artifact uploaded to Walrus ${manifest.network} by the dApp; verified deployment listed with its resolved device; blobs probed available`);
 
-    // An on-chain abort is reported as a failure, not success.
+    // A transaction that would abort is refused before signing (simulation),
+    // and one that does execute and abort on chain is reported as a failure.
+    const again = { group: group.objectId, device: { objectId: device.objectId, ownerCapId: device.ownerCapId } };
+    await live(() => window.live.resetDigest());
+    await fails("abort caught by simulation (device already in group)", (a) => window.live.submit("buildAddDeviceToGroupTx", a.group, a.device),
+      again, /resolution failed|abort/i);
+    assert.equal(await live(() => window.live.lastDigest()), null, "a simulated abort must not be executed");
+    pass("a transaction that would abort is refused by simulation before signing; nothing executed");
     await fails("on-chain abort (device already in group)", (a) => window.live.submitAborting("buildAddDeviceToGroupTx", a.group, a.device),
-      { group: group.objectId, device: { objectId: device.objectId, ownerCapId: device.ownerCapId } }, /fail|abort|not successful/i);
-    pass("a transaction that aborts on chain is reported as failed by the hook");
+      again, /abort|fail|not successful/i);
+    const aborted = await live(() => window.live.lastDigest());
+    assert.ok(aborted, "the aborting transaction was never executed");
+    const status = await live((digest) => window.live.executed(digest), aborted);
+    assert.equal(status.success, false, JSON.stringify(status));
+    evidence.transactions.at(-1).digest = aborted;
+    evidence.transactions.at(-1).chain_status = status;
+    pass(`a transaction executed and aborted on chain (${aborted.slice(0, 10)}…) is reported as failed by the hook`);
 
     // Wrong network: the hook refuses before signing.
     await live(() => window.live.unsupportedChain());
