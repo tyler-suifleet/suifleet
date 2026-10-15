@@ -11,20 +11,21 @@ Use Scarthgap plus the user's selected `meta-lts-mixins` `scarthgap/rust`
 layer. Plain Scarthgap Rust 1.75 cannot compile this lockfile. The committed
 [kas packaging profile](../kas/packaging.yml) pins Poky, meta-openembedded,
 meta-raspberrypi and the Rust mixin to full Git revisions. The mixin revision
-`eedcdc7486ff15c3510c2ceff68c87d9db141312` selects Rust/Cargo 1.98.1.
+`eedcdc7486ff15c3510c2ceff68c87d9db141312` selects Rust 1.98.1 (the built Cargo reports 1.98.0).
 LLVM backends are limited to AArch64 and X86 for this ARM64 target/x86 build host.
 Other hosts/architectures need a deliberate profile change and validation.
 
 The local SuiFleet layer comes from this checkout. Archive its commit ID and
 any diff alongside the kas configuration and build artifacts. The daemon source
 is fetched independently at the recipe's fixed `SRCREV`
-`c10ac76e9aae5b3ea8f92a42d8a68068c9bba71f`. This is the pre-SF-004 client:
-packaging work does not establish supported public-network transport. Bump the
-source pin and crate graph together after SF-004 integration, before SF-031.
-The pre-migration daemon also lacks the corrected real-node dynamic-field read
-path; the local HTTP simulator does not establish real-chain OTA acceptance.
+`59149f054981b114d09e24224fb54bf720abbe92`, an already merged main revision
+containing SF-003/SF-004 gRPC transport and the reviewed generated interfaces.
+It requires a node serving indexed gRPC `ListEvents` (Sui ≥ 1.81 in SF-004
+tests). Packaging and offline boot checks do not establish real-chain OTA
+acceptance. The lockfile SHA-256 is
+`ad8c34be35ee73888a43ebee10c3b1c5d95f3b3aaa5e95bd60d9312c9ca9f294`.
 
-`suifleet-crates.inc` declares every registry package/version and SHA-256 from
+`suifleet-crates.inc` declares all 291 registry packages/versions and SHA-256 from
 that revision's Cargo.lock. BitBake fetches/unpacks them before compilation;
 Yocto's cargo class vendors them locally and passes `--frozen`. The recipe also
 sets `CARGO_NET_OFFLINE=true` and checks the lockfile digest before configure.
@@ -55,7 +56,8 @@ kas build kas/packaging-qemu.yml
 
 The base profile cross-builds the `suifleet` package for `raspberrypi3-64`.
 It does not flash a disk. The QEMU profile builds a minimal systemd ARM64 image
-with `suifleet` and the SF-030 test updater. The Pi package uses Cortex-A53; the QEMU image uses its standard Cortex-A57
+with `suifleet`, the SF-030 test updater and `coreutils` for console fixture
+transfer. It also builds `qemu-system-native`. The Pi package uses Cortex-A53; the QEMU image uses its standard Cortex-A57
 virtual-machine tune. Both are cross-built from the same pinned daemon source.
 
 Preserve the package feed, source/layer revisions, build configuration,
@@ -113,6 +115,8 @@ After building the QEMU profile, point the test at its deployed kernel and
 ext4 image and the Yocto native `qemu-system-aarch64`:
 
 ```sh
+# Yocto native QEMU needs the libraries from its recipe native sysroot.
+export LD_LIBRARY_PATH=/absolute/path/to/tmp/work/x86_64-linux/qemu-system-native/8.2.7/recipe-sysroot-native/usr/lib
 python3 scripts/test_yocto_boot.py \
   --qemu /absolute/path/to/qemu-system-aarch64 \
   --kernel /absolute/path/to/deploy/images/qemuarm64/Image \
@@ -142,6 +146,104 @@ the serialized compile/install task chain passes. The
 [upstream parallel-build issue](https://github.com/openssl/openssl/issues/27074)
 describes the dependency-race context.
 
+Cargo release stripping is disabled in the recipe so Yocto performs symbol
+splitting and stripping. C debug/macro prefix mappings also cover Cargo vendor
+sources (including ring assembly); package QA is kept enabled.
+
 Run the OTA simulator for client reconnect/report/cursor coverage. Actual
 enrollment and delivery on the physical Pi, real wallet/testnet/Walrus flows,
 and firmware safety remain the separately tracked acceptance work.
+
+
+## Recorded target validation (2026-10-14)
+
+The final source is the merged gRPC revision and lock digest listed above.
+The actual checked-out layer revisions match `kas/packaging.yml`: Poky
+`a53cae3de9f45417b97efc4c46c42e4c8ebdb939`, meta-openembedded
+`ae7dfb12245c7f9b9a353499e2688015bd4e6413`, meta-raspberrypi
+`2c646d29912dcc873469a57b1c207e1549c5094d` and the pinned Rust mixin.
+Actual tools: rustc `1.98.1 (48a229cea 2026-09-01)`, Cargo
+`1.98.0 (797e8a9bc 2026-08-05)`, GCC 13.4.0, systemd 255.21,
+Linux 6.6.123 and QEMU 8.2.7. The unpacked Git HEAD and Cargo.lock digest
+were checked directly. Both compile scripts use `--frozen` and
+`CARGO_NET_OFFLINE=true`; all 291 registry crates have checksum fetch entries.
+
+The owned build used the same pinned profile settings, with Pi as the default
+machine and a separate `qemu` multiconfig/TMPDIR. Its shared download cache uses
+Yocto file locks; outputs and local sstate live outside the checkout. Exact
+final build command (exit 0, all 6664 tasks succeeded, 6613 reused):
+
+```sh
+source /home/tyler/dev/suifleet-yocto/poky/oe-init-build-env /home/tyler/dev/codex/yocto-sf025/build
+bitbake suifleet mc:qemu:core-image-minimal mc:qemu:qemu-system-native > /tmp/sf025-bitbake-ordering.log 2>&1
+```
+
+Both package QA tasks passed. The only two warnings concern the local
+hash-equivalence server plus sstate-mirror configuration. Earlier actual
+failures were corrected: Cargo pre-stripping, ring vendor debug paths,
+missing console-transfer utility and a systemd ordering cycle. Path units
+start before `basic.target`; they must not wait for the provisioning service
+that starts after it. The triggered daemon still requires/orders provisioning.
+
+Exact final boot command (exit 0):
+
+```sh
+LD_LIBRARY_PATH=/home/tyler/dev/codex/yocto-sf025/build/tmp-qemu/work/x86_64-linux/qemu-system-native/8.2.7/recipe-sysroot-native/usr/lib \
+python3 scripts/test_yocto_boot.py \
+  --qemu /home/tyler/dev/codex/yocto-sf025/build/tmp-qemu/sysroots-components/x86_64/qemu-system-native/usr/bin/qemu-system-aarch64 \
+  --kernel /home/tyler/dev/codex/yocto-sf025/build/tmp-qemu/deploy/images/qemuarm64/Image \
+  --image /home/tyler/dev/codex/yocto-sf025/build/tmp-qemu/deploy/images/qemuarm64/core-image-minimal-qemuarm64.rootfs.ext4 \
+  > /tmp/sf025-qemu-boot.log 2>&1
+```
+
+All three boots passed. Both fresh disks automatically provisioned independent
+keys/addresses without enrollment, and the daemon unit runs as `suifleet`.
+Installing a valid disposable config activated the service; unavailable loopback
+gRPC produced `currently unavailable: tcp connect error` and a systemd restart.
+The test waits for actual restart rather than assuming `network-online.target`
+completes within 12 seconds. Rebooting the same disk preserved the exact key
+hash, address and filesystem state sentinel, and provisioning restart preserved
+identity. The sentinel is not an OTA journal or successful enrollment receipt.
+The test uses `-nic none` and copies disks; input-image hashes stayed unchanged.
+
+`file`, `readelf`, package metadata and read-only `debugfs` inspection passed
+(`/tmp/sf025-final-artifact-inspection.log`). Both binaries are AArch64 PIEs.
+The image binary matches the QEMU package binary. Root owns the executable
+and helper (0755), all five units (0644), the config example (root:suifleet
+0640), the policy example (root:root 0600) and `/etc/suifleet`
+(root:suifleet 0750). The image has no key, address, actual config/manifest,
+firmware policy or `/var/lib/suifleet`. Runtime dependencies include
+ca-certificates 20260223, OpenSSL 3.5.6, glibc 2.39, libgcc 13.4.0 and
+zstd 1.5.5; the manifest also contains the SF-030 test component and coreutils.
+
+| Final artifact | SHA-256 |
+|---|---|
+| Pi Cortex-A53 packaged daemon | `24b64bd1860b7f62401d87f05122630d8ddeb7b45a2e76b040432db3cff11482` |
+| QEMU Cortex-A57 packaged daemon | `77ebc8bfbe2b89457d2ad24222aa7a7c65203ed11117d8b3711fd610d8bb6ff2` |
+| QEMU ext4 image | `3985f4808f782ae10031ec8cfda42b645148e0cbe34d94afe2fc272950a1481c` |
+| QEMU kernel Image | `a6fabd6fb78a295210511acbf9275ac3198de96436a1a3720dfe3f77f59d2686` |
+| QEMU rootfs manifest | `b18d348711af65ff29a40b1be1ccdc8e05eda4e39372380371dc04b23ff33639` |
+
+Current-source regression checks also passed (exit 0):
+
+```sh
+docker run --rm -v "$PWD:/workspace" -w /workspace \
+  -v suifleet_cargo-registry:/home/dev/.cargo/registry \
+  -v suifleet_cargo-git:/home/dev/.cargo/git \
+  suifleet-dev:sf004 make edge-test test-ota test-component \
+  > /tmp/sf025-grpc-native-checks.log 2>&1
+sh scripts/test_yocto_first_boot.sh suifleet-dev:sf004 > /tmp/sf025-grpc-first-boot.log 2>&1
+```
+
+That image reports Rust/Cargo 1.94.0 and Sui 1.81.1. All 53 Rust tests,
+direct/helper OTA, firmware restart recovery and component OTA checks passed.
+Component fixtures ran 14 cases, with five optional BusyBox cases skipped.
+Two fresh containers passed independent identities, bounded provisioning
+capabilities, unprivileged reads, policy permissions, existing-key preservation
+and corrupt-key refusal. Kas 4.7 dump validation, Python syntax and
+`git diff --check` also passed.
+
+This validates writable-root emulation and the Pi-machine client package.
+A bootable physical Pi image/flash is SF-029; hardware/live-chain/Walrus/wallet
+OTA acceptance is SF-031. Read-only roots, separate persistent partitions,
+firmware rollback, power-loss safety and physical reboot remain unverified.
