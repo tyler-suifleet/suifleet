@@ -98,6 +98,7 @@ class Simulator:
         self.memberships = []
         self.desired = {}
         self.managed = set()
+        self.controls = {}
 
     def add(self, id, *, creator=OPERATOR, groups=None, direct=True, bad_hash=False, run=False, expired=False):
         digest = "f" * 64 if bad_hash else HASH
@@ -153,7 +154,7 @@ class Simulator:
                 parent = event["parsedJson"]["deployment_id"]
                 fields += [[parent, key(name), empty] for name in (
                     "deployment_manager::RecipeDigestKey", "deployment_manager::TargetDevicesKey",
-                    "deployment_manager::TargetGroupsKey", "deployment_manager::ManagedKey")]
+                    "deployment_manager::TargetGroupsKey", "deployment_manager::ManagedKey", "deployment_manager::ControlKey")]
             return fields
         if method == "shim_events":
             if params[0] == f"{ORIGIN}::device_group::DeviceAddedToGroup":
@@ -187,6 +188,8 @@ class Simulator:
                 value = state and {"revision": str(state[0]), "updated_at": "0",
                     "components": {"contents": [{"key": k, "value": v} for k, v in state[1].items()]}}
                 return {"data":{"content":{"fields":{"value":value}}}}
+            if params[1]["type"].endswith("::deployment_manager::ControlKey"):
+                return {"data":{"content":{"fields":{"value":self.controls.get(params[0])}}}}
             if params[1]["type"].endswith("::deployment_manager::ManagedKey"):
                 return {"data":{"content":{"fields":{"value":True if params[0] in self.managed else None}}}}
             event = next(e["parsedJson"] for e in self.events if e["parsedJson"]["deployment_id"] == params[0])
