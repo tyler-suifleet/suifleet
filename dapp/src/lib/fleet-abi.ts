@@ -267,6 +267,17 @@ export const MOVE_ABI = {
           "&std::string::String"
         ]
       },
+      "component_name": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::deployment_manager::DeploymentRecord"
+        ],
+        "returns": [
+          "&std::string::String"
+        ]
+      },
       "create_deployment": {
         "visibility": "Public",
         "entry": false,
@@ -354,6 +365,28 @@ export const MOVE_ABI = {
           "bool"
         ]
       },
+      "has_recipe_digest": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::deployment_manager::DeploymentRecord"
+        ],
+        "returns": [
+          "bool"
+        ]
+      },
+      "is_managed": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::deployment_manager::DeploymentRecord"
+        ],
+        "returns": [
+          "bool"
+        ]
+      },
       "migrate": {
         "visibility": "Public",
         "entry": false,
@@ -362,6 +395,25 @@ export const MOVE_ABI = {
           "&mut sui_edge::deployment_manager::DeploymentRecord"
         ],
         "returns": []
+      },
+      "new_deployment_verified": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "std::string::String",
+          "std::string::String",
+          "std::string::String",
+          "std::string::String",
+          "std::string::String",
+          "vector<sui::object::ID>",
+          "vector<sui::object::ID>",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": [
+          "sui_edge::deployment_manager::DeploymentRecord"
+        ]
       },
       "receipt_status": {
         "visibility": "Public",
@@ -468,6 +520,15 @@ export const MOVE_ABI = {
           "&sui_edge::device_group::DeviceGroup",
           "u8",
           "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "share_deployment": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "sui_edge::deployment_manager::DeploymentRecord"
         ],
         "returns": []
       },
@@ -682,6 +743,20 @@ export const MOVE_ABI = {
           ]
         ]
       },
+      "ManagedKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "dummy_field",
+            "bool"
+          ]
+        ]
+      },
       "Receipts": {
         "abilities": [
           "Store"
@@ -765,6 +840,171 @@ export const MOVE_ABI = {
           [
             "dummy_field",
             "bool"
+          ]
+        ]
+      }
+    }
+  },
+  "desired_state": {
+    "functions": {
+      "begin": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::device_group::DeviceGroup",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": [
+          "sui_edge::desired_state::RevisionPlan"
+        ]
+      },
+      "commit": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "sui_edge::desired_state::RevisionPlan",
+          "&mut sui_edge::device_group::DeviceGroup",
+          "&sui::clock::Clock",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "components": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::device_group::DeviceGroup"
+        ],
+        "returns": [
+          "sui::vec_map::VecMap<std::string::String,sui::object::ID>"
+        ]
+      },
+      "plan_components": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::desired_state::RevisionPlan"
+        ],
+        "returns": [
+          "&sui::vec_map::VecMap<std::string::String,sui::object::ID>"
+        ]
+      },
+      "remove_component": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::desired_state::RevisionPlan",
+          "std::string::String"
+        ],
+        "returns": []
+      },
+      "revision": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::device_group::DeviceGroup"
+        ],
+        "returns": [
+          "u64"
+        ]
+      },
+      "set_component": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::desired_state::RevisionPlan",
+          "&mut sui_edge::deployment_manager::DeploymentRecord"
+        ],
+        "returns": []
+      }
+    },
+    "structs": {
+      "DesiredKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "dummy_field",
+            "bool"
+          ]
+        ]
+      },
+      "DesiredState": {
+        "abilities": [
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "revision",
+            "u64"
+          ],
+          [
+            "components",
+            "sui::vec_map::VecMap<std::string::String,sui::object::ID>"
+          ],
+          [
+            "updated_at",
+            "u64"
+          ]
+        ]
+      },
+      "DesiredStateChanged": {
+        "abilities": [
+          "Copy",
+          "Drop"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "group_id",
+            "sui::object::ID"
+          ],
+          [
+            "revision",
+            "u64"
+          ],
+          [
+            "component_names",
+            "vector<std::string::String>"
+          ],
+          [
+            "deployments",
+            "vector<sui::object::ID>"
+          ]
+        ]
+      },
+      "RevisionPlan": {
+        "abilities": [],
+        "type_parameters": [],
+        "fields": [
+          [
+            "group_id",
+            "sui::object::ID"
+          ],
+          [
+            "admin",
+            "address"
+          ],
+          [
+            "base_revision",
+            "u64"
+          ],
+          [
+            "components",
+            "sui::vec_map::VecMap<std::string::String,sui::object::ID>"
           ]
         ]
       }

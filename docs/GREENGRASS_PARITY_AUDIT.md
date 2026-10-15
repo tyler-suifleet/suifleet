@@ -45,12 +45,12 @@ AWS provides device/group targets, component dependency resolution, deployment r
 |---|---|---|---|
 | Individual and static group targeting | Implemented, locally tested | Public-network/hardware acceptance | P0 |
 | Artifact distribution and integrity | Partial: Walrus download + on-chain recipe/artifact digests | Storage renewal, confidential artifacts and live network validation | P0 |
-| Durable offline delivery | Partial: cursor catch-up for an enrolled device | Supported transport; retention/indexer guarantees; desired-state reconciliation | P0 |
+| Durable offline delivery | Partial: cursor catch-up for an enrolled device; group desired state converges on the latest revision (SF-013) | Supported transport; retention/indexer guarantees | P0 |
 | Trusted update authorization | Partial: current operator/group checks | On-chain creation authorization, key rotation/revocation and delegated roles | P0 |
 | Deployment statuses | Partial: pending/applied/failed | Queued/downloading/installing/rebooting/healthy/rolled-back/cancelled; reasons and timestamps | P1 |
-| Desired fleet state and revisions | Missing | Latest revision per target, supersession and cross-group conflict handling | P1 |
-| Newly joined devices receive desired state | Missing | Membership reconciliation must trigger delivery even without a new creation event | P1 |
-| Multi-component atomic deployments | Missing | Deployment manifest, install plan, coordinated commit/recovery | P1 |
+| Desired fleet state and revisions | Implemented for groups, locally tested (SF-013): revisioned component → deployment map per group; supersession; cross-group conflicts left as installed | Device-level desired state (after SF-008 custody); public-network/hardware acceptance | P1 |
+| Newly joined devices receive desired state | Implemented, locally tested (SF-013): membership from DeviceAddedToGroup events, verified against the group object each poll | Event retention for long-lived fleets; public-network acceptance | P1 |
+| Multi-component atomic deployments | Partial (SF-013): one revision commits several components atomically on chain; devices run an ordered, journaled plan that stops at the first failed step; each step installs its dependencies first (SF-012) | Ordering across desired components by dependency (steps run in name order), device-side rollback and lifecycle supervision (SF-014) | P1 |
 | Staged/canary rollout | Missing | Cohorts, concurrency/rate limits, bake period and release gates | P1 |
 | Failure-threshold abort | Missing | Fleet aggregation, minimum sample size and threshold evaluation | P1 |
 | Pause/resume/cancel | Missing | Durable state transitions; deletion is not cancellation | P1 |
@@ -135,7 +135,7 @@ For each feature, completion requires contract/API semantics, daemon behavior, o
 - `contracts/Published.toml` is empty. Separate ephemeral devnet metadata exists in `Pub.devnet.toml`, but no current live deployment was verified. Nothing was published or hardware-programmed during this change.
 - Ownership and membership checks use a trusted RPC response and can race changes before apply. The on-chain group report checks current membership, which can reject a report after removal. Such reports remain queued and need lifecycle/terminal error policy.
 - Deregistering a device stops this daemon from accepting new work because the Device lookup fails, but existing transferable caps are not fully revoked on-chain.
-- Events are one-shot work, not desired state. Enrolled offline devices replay queued events in order; they do not coalesce superseded firmware versions. New group membership alone does not trigger an old deployment.
+- Deployments not referenced by a group's desired state are still one-shot work: enrolled offline devices replay them in order. Desired state (SF-013) coalesces superseded versions and reaches newly joined members, for groups only; component removal retires management but does not uninstall (SF-014).
 - Status retry is durable but has no terminal dead-letter/backoff policy; deleted records, revoked caps or exhausted gas need operator resolution.
 - A crash between successful hardware apply and journal completion is ambiguous. Recovery reports failure and requests inspection; automatic rollback is absent.
 - Apply success means command exit status, not firmware boot health. Interrupted or timed-out commands can leave partial changes; the updater must provide its own atomicity/recovery.

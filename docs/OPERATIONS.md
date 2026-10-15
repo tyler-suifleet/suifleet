@@ -210,6 +210,38 @@ The daemon talks to the manifest's `rpc_url` over the Sui gRPC v2 API only (Myst
 - `make test-ota` and `make test-component` run the daemon against the Python simulator through `suifleet-edge/examples/grpc_sim_shim.rs`, which verifies signatures with Mysten's `sui-crypto`.
 - `make test-daemon-localnet` runs it against a real disposable localnet (start `sui start --with-faucet --force-regenesis` first): direct, group, failure, offline catch-up and cursor-migration paths, judged from on-chain receipts.
 
+## Desired state (SF-013)
+
+A group can carry a **desired state**: a revisioned map from component name to the deployment its members should run (`desired_state` module, a `DesiredKey` field on the group).
+
+**Changing it on chain:**
+- Only the group admin can change it, one revision at a time. In a PTB: `begin`, then `set_component`/`remove_component`, then `commit`.
+- A revision's changes commit together.
+- `set_component` accepts only the admin's own, verified-recipe deployments that target the group, and marks them managed.
+- The dApp's firmware page creates the deployment and commits it as the groups' desired version in one transaction, by default. Targeting individual devices stays a one-shot deployment.
+
+**How the daemon reconciles each poll:**
+- **Group discovery.** It finds its groups from `DeviceAddedToGroup` events, scanned from genesis with their own journal cursor.
+- **Membership check.** It confirms membership, and that the group's admin is the device's operator, from each group object.
+- **Merge.** It merges the groups' current revisions. Groups naming different deployments for one component are a conflict: the component is left as installed, and the dApp shows it.
+- **Plan.** In name order, it compares each desired deployment with what the component currently runs: the deployment it last started for that component, one-shot or desired, recorded with that deployment's intent. It applies desired deployments that have never run here, journaling the step and then the intent before the updater starts.
+  - The first step that does not apply stops the plan, and that desired state is not retried until it changes. The step is journaled with the desired state it was started for, and the stop is read back from the journal on every poll, so it holds across a crash. A newer desired state waits while the step's update is still in flight in the privileged helper. Once that update settles (Failed or indeterminate), the newer state is planned, even with no further change and across restarts.
+  - A crash mid-step is settled Failed on restart and never re-executed. Later steps of the same desired state stay stopped.
+  - A deployment never runs twice: its ID is also its journal entry, firmware request and receipt. If a revision selects a deployment again after the component has moved on (A → B → A, or a one-shot update after a desired one), the daemon logs that this is unsupported and leaves the component as installed, without recording it as converged. To return to a version, create a new deployment record for it.
+- **Results.** Superseded deployments are never applied. New members receive the current state.
+  - Members that leave, and components removed from a revision, are retired from management. They are not uninstalled: there are no lifecycle hooks yet (SF-014).
+- **One-shot path.** It ignores records marked managed. Unmanaged deployments keep their one-shot behaviour.
+
+**Limits:**
+- There is no device-level desired state yet. It waits for SF-008's device custody; use a one-device group meanwhile.
+- Membership discovery needs the node to retain `DeviceAddedToGroup` history. Pruned history stops reconciliation with an explicit error, as for deployment events.
+- No public-network or hardware acceptance has been run.
+
+**Tests:**
+- Simulator: `scripts/test_desired_state.py` (in `make test-ota`).
+- Real localnet across an upgrade of main's contracts: `make test-desired-state-localnet`.
+- dApp builder executed on chain: `scripts/test_frontend_live.cjs`.
+
 ## Deployment process
 
 1. Determine the explicit deployment scope and target network; verify the RPC's chain identity, signer address, gas and UpgradeCap ownership. Environment aliases alone are insufficient, especially after devnet resets.

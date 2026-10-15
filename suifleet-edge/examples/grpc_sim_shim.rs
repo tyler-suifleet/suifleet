@@ -75,7 +75,8 @@ impl Shim {
                 .await?;
             let value = &field["data"]["content"]["fields"]["value"];
             if value.is_null() {
-                return Ok(None);
+                // A known field that does not exist: absent, as a node reports it.
+                return Err(Status::not_found(format!("dynamic field {id} not found")));
             }
             let mut object = proto::Object::default();
             object.object_type = Some(format!("0x2::dynamic_field::Field<{key}, unknown>"));
