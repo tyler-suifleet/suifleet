@@ -112,7 +112,7 @@ class Simulator:
             type, fields, owner = "device_group::DeviceGroup", {"admin":OPERATOR,"device_ids":[DEVICE]}, None
         else:
             event = next(e["parsedJson"] for e in self.events if e["parsedJson"]["deployment_id"] == id)
-            type, fields, owner = "deployment_manager::DeploymentRecord", {"creator":event["creator"],"schema_version":"1"}, None
+            type, fields, owner = "deployment_manager::DeploymentRecord", {**event,"schema_version":"1"}, None
         fields.update(self.schema_fields.get(id, {}))
         if fields.get("schema_version") is None:
             fields.pop("schema_version", None)
@@ -259,7 +259,7 @@ def run(binary, firmware_helper=False, daemon_user=None):
             manifest = dict(schema_version=1, protocol_version=1, network="localnet", chain_identifier=sim.chain,
                 rpc_url=rpc_url, call_package_id=PACKAGE, upgrade_cap_id=UPGRADE_CAP, package_version="3", type_origins=TYPE_ORIGINS,
                 shared_objects={"registry": {"id": REGISTRY, "initial_shared_version": "1"}},
-                supported_clients={"dapp": {"min":"0.0.1", "max_exclusive":"0.1.0"}, "edge": {"min":"0.1.0", "max_exclusive":"0.2.0"}},
+                supported_clients={"dapp": {"min":"0.0.1", "max_exclusive":"0.1.0"}, "edge": {"min":"0.1.0", "max_exclusive":"0.3.0"}},
                 walrus={"publisher_url": url, "aggregator_url": url})
             (root / "deployment.json").write_text(json.dumps(manifest))
             config = root / "config.toml"
@@ -333,7 +333,7 @@ def run(binary, firmware_helper=False, daemon_user=None):
                 sim.add("0x103", creator="0xbad")
                 # Unsupported records must fail individually, with no downloads,
                 # and must not poison discovery of the valid group deployment.
-                for id, version in (("0x10b", "2"), ("0x10c", None), ("0x10d", "invalid")):
+                for id, version in (("0x10b", "3"), ("0x10c", None), ("0x10d", "invalid")):
                     sim.schema_fields[id] = {"schema_version": version}
                     sim.add(id)
                 sim.add("0x104", groups=[GROUP], direct=False)

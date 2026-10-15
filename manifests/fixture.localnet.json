@@ -34,11 +34,11 @@
   "supported_clients": {
     "dapp": {
       "min": "0.0.2",
-      "max_exclusive": "0.0.3"
+      "max_exclusive": "0.2.0"
     },
     "edge": {
       "min": "0.1.0",
-      "max_exclusive": "0.1.1"
+      "max_exclusive": "0.3.0"
     }
   },
   "walrus": {
