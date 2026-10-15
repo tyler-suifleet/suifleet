@@ -84,6 +84,14 @@ def sarif_findings(report):
             index = result.get('ruleIndex', result.get('rule', {}).get('index'))
             if index is not None:
                 if type(index) is not int or not 0 <= index < len(rules):
+                    # Schema-only diagnostics: never emit identifiers, messages or source.
+                    print(json.dumps({'sarif_schema': {
+                        'driver_rule_count': len(rules),
+                        'extension_count': len(run['tool'].get('extensions', [])),
+                        'nested_rule_present': isinstance(result.get('rule'), dict),
+                        'component_reference_present': isinstance(result.get('rule', {}).get('toolComponent'), dict),
+                        'index_is_integer': type(index) is int,
+                    }}), file=sys.stderr)
                     raise ReportError('invalid SARIF rule index')
                 rule = rules[index]
                 if rule_id is not None and rule_id != rule['id']:
