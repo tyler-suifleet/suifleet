@@ -7,6 +7,7 @@ import { useGroups } from "@/hooks/useGroups";
 import { useDevices } from "@/hooks/useDevices";
 import { uploadArtifact, uploadRecipe, renewalCommand, storageWarnings, type ComponentRecipe, type StorageInfo } from "@/lib/walrus";
 import { buildCreateDeploymentTx } from "@/lib/sui";
+import { RECIPE_VERSION } from "@/lib/protocol-version";
 import { PageHeader } from "@/components/ui";
 import Link from "next/link";
 
@@ -32,8 +33,6 @@ export default function FirmwarePage() {
   const [version, setVersion] = useState("");
   const [description, setDescription] = useState("");
   const [installCmd, setInstallCmd] = useState("");
-  const [runCmd, setRunCmd] = useState("");
-  const [shutdownCmd, setShutdownCmd] = useState("");
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
   const [selectedDevices, setSelectedDevices] = useState<Set<string>>(new Set());
   const [txDigest, setTxDigest] = useState<string | null>(null);
@@ -61,7 +60,7 @@ export default function FirmwarePage() {
     if (!artifact || (selectedGroups.size === 0 && selectedDevices.size === 0)) return;
 
     const recipe: ComponentRecipe = {
-      schemaVersion: "1.0",
+      schemaVersion: RECIPE_VERSION,
       componentName,
       componentVersion: version,
       ...(description ? { description } : {}),
@@ -69,8 +68,6 @@ export default function FirmwarePage() {
       artifactSha256: artifact.sha256,
       lifecycle: {
         ...(installCmd ? { install: installCmd } : {}),
-        ...(runCmd ? { run: runCmd } : {}),
-        ...(shutdownCmd ? { shutdown: shutdownCmd } : {}),
       },
       configuration: {},
     };
@@ -129,7 +126,7 @@ export default function FirmwarePage() {
               onClick={() => {
                 setStep("artifact"); setArtifact(null); setRecipeStorage(null);
                 setComponentName(""); setVersion(""); setDescription("");
-                setInstallCmd(""); setRunCmd(""); setShutdownCmd("");
+                setInstallCmd("");
                 setSelectedGroups(new Set()); setSelectedDevices(new Set()); setTxDigest(null);
               }}
               className="text-sm text-gray-500 hover:text-gray-700"
@@ -219,22 +216,6 @@ export default function FirmwarePage() {
             onChange={setInstallCmd}
             placeholder="/usr/local/bin/install-update {artifact}"
             disabled={step !== "recipe"}
-          />
-          <CmdField
-            label="Run"
-            hint="Managed processes are not supported yet. Leave blank for OTA updates."
-            value={runCmd}
-            onChange={setRunCmd}
-            placeholder="{artifacts}/my-app --config /etc/my-app/config.json"
-            disabled={true}
-          />
-          <CmdField
-            label="Shutdown"
-            hint="Managed shutdown is not supported yet. Leave blank for OTA updates."
-            value={shutdownCmd}
-            onChange={setShutdownCmd}
-            placeholder="Managed lifecycle coming later"
-            disabled={true}
           />
         </div>
         {step === "recipe" && (

@@ -1,0 +1,1292 @@
+{
+  "interface_version": 1,
+  "protocol_version": 1,
+  "deployment_schema_version": 1,
+  "statuses": {
+    "applied": 1,
+    "failed": 2
+  },
+  "modules": {
+    "deployment_manager": {
+      "functions": {
+        "artifact_sha256": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::deployment_manager::DeploymentRecord"
+          ],
+          "returns": [
+            "&std::string::String"
+          ]
+        },
+        "create_deployment": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "std::string::String",
+            "std::string::String",
+            "std::string::String",
+            "std::string::String",
+            "vector<sui::object::ID>",
+            "vector<sui::object::ID>",
+            "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "create_deployment_verified": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "std::string::String",
+            "std::string::String",
+            "std::string::String",
+            "std::string::String",
+            "std::string::String",
+            "vector<sui::object::ID>",
+            "vector<sui::object::ID>",
+            "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "delete_deployment": {
+          "visibility": "Public",
+          "entry": true,
+          "type_parameters": [],
+          "parameters": [
+            "sui_edge::deployment_manager::DeploymentRecord",
+            "&sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "has_current_receipts": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::deployment_manager::DeploymentRecord"
+          ],
+          "returns": [
+            "bool"
+          ]
+        },
+        "has_receipts": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::deployment_manager::DeploymentRecord"
+          ],
+          "returns": [
+            "bool"
+          ]
+        },
+        "migrate": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::deployment_manager::DeploymentRecord"
+          ],
+          "returns": []
+        },
+        "receipt_status": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::deployment_manager::DeploymentRecord",
+            "sui::object::ID"
+          ],
+          "returns": [
+            "std::option::Option<u8>"
+          ]
+        },
+        "receipt_statuses": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::deployment_manager::DeploymentRecord"
+          ],
+          "returns": [
+            "&sui::vec_map::VecMap<sui::object::ID,u8>"
+          ]
+        },
+        "receipts_version": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::deployment_manager::DeploymentRecord"
+          ],
+          "returns": [
+            "u64"
+          ]
+        },
+        "recipe_blob_id": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::deployment_manager::DeploymentRecord"
+          ],
+          "returns": [
+            "&std::string::String"
+          ]
+        },
+        "recipe_sha256": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::deployment_manager::DeploymentRecord"
+          ],
+          "returns": [
+            "&std::string::String"
+          ]
+        },
+        "report_status": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::deployment_manager::DeploymentRecord",
+            "&sui_edge::device_cap::DeviceCap",
+            "u8",
+            "&sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "report_status_for_group": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::deployment_manager::DeploymentRecord",
+            "&sui_edge::device_cap::DeviceCap",
+            "&sui_edge::device_group::DeviceGroup",
+            "u8",
+            "&sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "report_verified_status": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::deployment_manager::DeploymentRecord",
+            "&sui_edge::device_registry::DeviceRegistry",
+            "&sui_edge::device_cap::DeviceCap",
+            "u8",
+            "&sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "report_verified_status_for_group": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::deployment_manager::DeploymentRecord",
+            "&sui_edge::device_registry::DeviceRegistry",
+            "&sui_edge::device_cap::DeviceCap",
+            "&sui_edge::device_group::DeviceGroup",
+            "u8",
+            "&sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "status_applied": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [],
+          "returns": [
+            "u8"
+          ]
+        },
+        "status_failed": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [],
+          "returns": [
+            "u8"
+          ]
+        },
+        "statuses": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::deployment_manager::DeploymentRecord"
+          ],
+          "returns": [
+            "&sui::vec_map::VecMap<sui::object::ID,u8>"
+          ]
+        },
+        "target_devices": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::deployment_manager::DeploymentRecord"
+          ],
+          "returns": [
+            "&vector<sui::object::ID>"
+          ]
+        },
+        "target_groups": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::deployment_manager::DeploymentRecord"
+          ],
+          "returns": [
+            "&vector<sui::object::ID>"
+          ]
+        }
+      },
+      "structs": {
+        "DeploymentCreated": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "deployment_id",
+              "sui::object::ID"
+            ],
+            [
+              "component_name",
+              "std::string::String"
+            ],
+            [
+              "version",
+              "std::string::String"
+            ],
+            [
+              "recipe_blob_id",
+              "std::string::String"
+            ],
+            [
+              "artifact_sha256",
+              "std::string::String"
+            ],
+            [
+              "target_groups",
+              "vector<sui::object::ID>"
+            ],
+            [
+              "target_devices",
+              "vector<sui::object::ID>"
+            ],
+            [
+              "creator",
+              "address"
+            ]
+          ]
+        },
+        "DeploymentDeleted": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "deployment_id",
+              "sui::object::ID"
+            ],
+            [
+              "creator",
+              "address"
+            ]
+          ]
+        },
+        "DeploymentRecord": {
+          "abilities": [
+            "Key"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "id",
+              "sui::object::UID"
+            ],
+            [
+              "creator",
+              "address"
+            ],
+            [
+              "component_name",
+              "std::string::String"
+            ],
+            [
+              "version",
+              "std::string::String"
+            ],
+            [
+              "recipe_blob_id",
+              "std::string::String"
+            ],
+            [
+              "artifact_sha256",
+              "std::string::String"
+            ],
+            [
+              "created_at",
+              "u64"
+            ],
+            [
+              "schema_version",
+              "u64"
+            ]
+          ]
+        },
+        "DeviceStatusReported": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "deployment_id",
+              "sui::object::ID"
+            ],
+            [
+              "device_id",
+              "sui::object::ID"
+            ],
+            [
+              "status",
+              "u8"
+            ],
+            [
+              "reporter",
+              "address"
+            ]
+          ]
+        },
+        "DeviceStatusUpdated": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "deployment_id",
+              "sui::object::ID"
+            ],
+            [
+              "device_id",
+              "sui::object::ID"
+            ],
+            [
+              "status",
+              "u8"
+            ]
+          ]
+        },
+        "Receipts": {
+          "abilities": [
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "version",
+              "u64"
+            ],
+            [
+              "statuses",
+              "sui::vec_map::VecMap<sui::object::ID,u8>"
+            ]
+          ]
+        },
+        "ReceiptsKey": {
+          "abilities": [
+            "Copy",
+            "Drop",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "dummy_field",
+              "bool"
+            ]
+          ]
+        },
+        "RecipeDigestKey": {
+          "abilities": [
+            "Copy",
+            "Drop",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "dummy_field",
+              "bool"
+            ]
+          ]
+        },
+        "StatusesKey": {
+          "abilities": [
+            "Copy",
+            "Drop",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "dummy_field",
+              "bool"
+            ]
+          ]
+        },
+        "TargetDevicesKey": {
+          "abilities": [
+            "Copy",
+            "Drop",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "dummy_field",
+              "bool"
+            ]
+          ]
+        },
+        "TargetGroupsKey": {
+          "abilities": [
+            "Copy",
+            "Drop",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "dummy_field",
+              "bool"
+            ]
+          ]
+        }
+      }
+    },
+    "device_cap": {
+      "functions": {
+        "assert_active": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::device_cap::DeviceCap",
+            "&sui_edge::device_registry::DeviceRegistry",
+            "&sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "assert_signer": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::device_cap::DeviceCap",
+            "&sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "device_id": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::device_cap::DeviceCap"
+          ],
+          "returns": [
+            "sui::object::ID"
+          ]
+        },
+        "issue": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::device_registry::Device",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": [
+            "sui_edge::device_cap::DeviceCap"
+          ]
+        },
+        "issue_cap": {
+          "visibility": "Public",
+          "entry": true,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::device_registry::Device",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        }
+      },
+      "structs": {
+        "DeviceAddressKey": {
+          "abilities": [
+            "Copy",
+            "Drop",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "dummy_field",
+              "bool"
+            ]
+          ]
+        },
+        "DeviceCap": {
+          "abilities": [
+            "Key",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "id",
+              "sui::object::UID"
+            ],
+            [
+              "device_id",
+              "sui::object::ID"
+            ]
+          ]
+        }
+      }
+    },
+    "device_group": {
+      "functions": {
+        "add_device": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::device_group::DeviceGroup",
+            "&sui_edge::device_registry::Device",
+            "&sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "admin": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::device_group::DeviceGroup"
+          ],
+          "returns": [
+            "address"
+          ]
+        },
+        "contains_device": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::device_group::DeviceGroup",
+            "sui::object::ID"
+          ],
+          "returns": [
+            "bool"
+          ]
+        },
+        "create_group": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "std::string::String",
+            "std::string::String",
+            "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "delete_group": {
+          "visibility": "Public",
+          "entry": true,
+          "type_parameters": [],
+          "parameters": [
+            "sui_edge::device_group::DeviceGroup",
+            "&sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "device_ids": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::device_group::DeviceGroup"
+          ],
+          "returns": [
+            "&vector<sui::object::ID>"
+          ]
+        },
+        "group_id": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::device_group::DeviceGroup"
+          ],
+          "returns": [
+            "sui::object::ID"
+          ]
+        },
+        "name": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::device_group::DeviceGroup"
+          ],
+          "returns": [
+            "std::string::String"
+          ]
+        },
+        "remove_device": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::device_group::DeviceGroup",
+            "sui::object::ID",
+            "&sui::tx_context::TxContext"
+          ],
+          "returns": []
+        }
+      },
+      "structs": {
+        "DeviceAddedToGroup": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "group_id",
+              "sui::object::ID"
+            ],
+            [
+              "device_id",
+              "sui::object::ID"
+            ]
+          ]
+        },
+        "DeviceGroup": {
+          "abilities": [
+            "Key"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "id",
+              "sui::object::UID"
+            ],
+            [
+              "name",
+              "std::string::String"
+            ],
+            [
+              "description",
+              "std::string::String"
+            ],
+            [
+              "admin",
+              "address"
+            ],
+            [
+              "device_ids",
+              "vector<sui::object::ID>"
+            ],
+            [
+              "created_at",
+              "u64"
+            ],
+            [
+              "schema_version",
+              "u64"
+            ]
+          ]
+        },
+        "DeviceRemovedFromGroup": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "group_id",
+              "sui::object::ID"
+            ],
+            [
+              "device_id",
+              "sui::object::ID"
+            ]
+          ]
+        },
+        "GroupCreated": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "group_id",
+              "sui::object::ID"
+            ],
+            [
+              "name",
+              "std::string::String"
+            ],
+            [
+              "admin",
+              "address"
+            ]
+          ]
+        },
+        "GroupDeleted": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "group_id",
+              "sui::object::ID"
+            ],
+            [
+              "admin",
+              "address"
+            ]
+          ]
+        }
+      }
+    },
+    "device_registry": {
+      "functions": {
+        "activate_device": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::device_registry::DeviceRegistry",
+            "sui_edge::device_registry::Device",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": [
+            "sui_edge::device_registry::DeviceOwnerCap"
+          ]
+        },
+        "borrow_device": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::device_registry::DeviceRegistry",
+            "&sui_edge::device_registry::DeviceOwnerCap"
+          ],
+          "returns": [
+            "sui_edge::device_registry::Device",
+            "sui_edge::device_registry::DeviceLoan"
+          ]
+        },
+        "custodied_device": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::device_registry::DeviceRegistry",
+            "sui::object::ID"
+          ],
+          "returns": [
+            "&sui_edge::device_registry::Device"
+          ]
+        },
+        "deregister_activated_device": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::device_registry::DeviceRegistry",
+            "sui_edge::device_registry::DeviceOwnerCap",
+            "&sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "deregister_device": {
+          "visibility": "Public",
+          "entry": true,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::device_registry::DeviceRegistry",
+            "sui_edge::device_registry::Device",
+            "&sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "device_address": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::device_registry::Device"
+          ],
+          "returns": [
+            "address"
+          ]
+        },
+        "device_count": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::device_registry::DeviceRegistry"
+          ],
+          "returns": [
+            "u64"
+          ]
+        },
+        "device_id": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::device_registry::Device"
+          ],
+          "returns": [
+            "sui::object::ID"
+          ]
+        },
+        "identity": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::device_registry::DeviceRegistry",
+            "sui::object::ID"
+          ],
+          "returns": [
+            "std::option::Option<sui_edge::device_registry::Identity>"
+          ]
+        },
+        "identity_owner_cap": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::device_registry::Identity"
+          ],
+          "returns": [
+            "sui::object::ID"
+          ]
+        },
+        "identity_revoked": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::device_registry::Identity"
+          ],
+          "returns": [
+            "bool"
+          ]
+        },
+        "identity_signer": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::device_registry::Identity"
+          ],
+          "returns": [
+            "address"
+          ]
+        },
+        "is_active_signer": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::device_registry::DeviceRegistry",
+            "sui::object::ID",
+            "address"
+          ],
+          "returns": [
+            "bool"
+          ]
+        },
+        "is_custodied": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::device_registry::DeviceRegistry",
+            "sui::object::ID"
+          ],
+          "returns": [
+            "bool"
+          ]
+        },
+        "owner_cap_device_id": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::device_registry::DeviceOwnerCap"
+          ],
+          "returns": [
+            "sui::object::ID"
+          ]
+        },
+        "register_device": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::device_registry::DeviceRegistry",
+            "std::string::String",
+            "address",
+            "std::string::String",
+            "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": [
+            "sui_edge::device_registry::Device"
+          ]
+        },
+        "reinstate_device": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::device_registry::DeviceRegistry",
+            "&sui_edge::device_registry::DeviceOwnerCap"
+          ],
+          "returns": []
+        },
+        "return_device": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::device_registry::DeviceRegistry",
+            "sui_edge::device_registry::Device",
+            "sui_edge::device_registry::DeviceLoan"
+          ],
+          "returns": []
+        },
+        "revoke_device": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::device_registry::DeviceRegistry",
+            "&sui_edge::device_registry::DeviceOwnerCap"
+          ],
+          "returns": []
+        },
+        "rotate_device_key": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::device_registry::DeviceRegistry",
+            "&sui_edge::device_registry::DeviceOwnerCap",
+            "address"
+          ],
+          "returns": []
+        },
+        "set_meta": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::device_registry::Device",
+            "std::string::String",
+            "std::string::String",
+            "&sui::tx_context::TxContext"
+          ],
+          "returns": []
+        }
+      },
+      "structs": {
+        "CustodyKey": {
+          "abilities": [
+            "Copy",
+            "Drop",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "device_id",
+              "sui::object::ID"
+            ]
+          ]
+        },
+        "Device": {
+          "abilities": [
+            "Key",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "id",
+              "sui::object::UID"
+            ],
+            [
+              "name",
+              "std::string::String"
+            ],
+            [
+              "device_address",
+              "address"
+            ],
+            [
+              "arch",
+              "std::string::String"
+            ],
+            [
+              "meta",
+              "sui::vec_map::VecMap<std::string::String,std::string::String>"
+            ],
+            [
+              "registered_at",
+              "u64"
+            ],
+            [
+              "schema_version",
+              "u64"
+            ]
+          ]
+        },
+        "DeviceDeregistered": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "device_id",
+              "sui::object::ID"
+            ],
+            [
+              "owner",
+              "address"
+            ]
+          ]
+        },
+        "DeviceIdentityChanged": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "device_id",
+              "sui::object::ID"
+            ],
+            [
+              "signer",
+              "address"
+            ],
+            [
+              "revoked",
+              "bool"
+            ],
+            [
+              "owner_cap",
+              "sui::object::ID"
+            ]
+          ]
+        },
+        "DeviceLoan": {
+          "abilities": [],
+          "type_parameters": [],
+          "fields": [
+            [
+              "device_id",
+              "sui::object::ID"
+            ]
+          ]
+        },
+        "DeviceOwnerCap": {
+          "abilities": [
+            "Key",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "id",
+              "sui::object::UID"
+            ],
+            [
+              "device_id",
+              "sui::object::ID"
+            ]
+          ]
+        },
+        "DeviceRegistered": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "device_id",
+              "sui::object::ID"
+            ],
+            [
+              "name",
+              "std::string::String"
+            ],
+            [
+              "device_address",
+              "address"
+            ],
+            [
+              "owner",
+              "address"
+            ]
+          ]
+        },
+        "DeviceRegistry": {
+          "abilities": [
+            "Key"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "id",
+              "sui::object::UID"
+            ],
+            [
+              "admin",
+              "address"
+            ],
+            [
+              "device_count",
+              "u64"
+            ],
+            [
+              "schema_version",
+              "u64"
+            ]
+          ]
+        },
+        "Identity": {
+          "abilities": [
+            "Copy",
+            "Drop",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "signer",
+              "address"
+            ],
+            [
+              "revoked",
+              "bool"
+            ],
+            [
+              "owner_cap",
+              "sui::object::ID"
+            ]
+          ]
+        },
+        "IdentityKey": {
+          "abilities": [
+            "Copy",
+            "Drop",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "device_id",
+              "sui::object::ID"
+            ]
+          ]
+        },
+        "RegistryCreated": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "registry_id",
+              "sui::object::ID"
+            ],
+            [
+              "admin",
+              "address"
+            ]
+          ]
+        }
+      }
+    }
+  },
+  "required_type_origins": [
+    "device_registry::DeviceRegistry",
+    "device_registry::Device",
+    "device_group::DeviceGroup",
+    "device_group::GroupCreated",
+    "device_cap::DeviceCap",
+    "device_cap::DeviceAddressKey",
+    "deployment_manager::DeploymentRecord",
+    "deployment_manager::DeploymentCreated",
+    "deployment_manager::DeviceStatusUpdated",
+    "deployment_manager::TargetGroupsKey",
+    "deployment_manager::TargetDevicesKey",
+    "deployment_manager::StatusesKey",
+    "deployment_manager::RecipeDigestKey",
+    "deployment_manager::ReceiptsKey",
+    "deployment_manager::Receipts",
+    "deployment_manager::DeviceStatusReported",
+    "device_registry::IdentityKey",
+    "device_registry::Identity",
+    "device_registry::DeviceIdentityChanged",
+    "device_registry::CustodyKey",
+    "device_registry::DeviceOwnerCap"
+  ],
+  "manifest_schema_version": 1
+}

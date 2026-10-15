@@ -85,7 +85,8 @@ let stage = "startup";
     stage = "deployment history"; let deployments = await sui.fetchDeploymentEvents(client, operator.toSuiAddress());
     assert.equal(deployments.length, 1); assert.equal(deployments[0].receiptsVerified, true); assert.deepEqual(deployments[0].statuses, {});
     const report = new Transaction();
-    report.moveCall({ target: `${packageId}::deployment_manager::report_verified_status`, arguments: [report.object(deployments[0].deploymentId), report.object(registryId), report.object(caps.objects[0].objectId), report.pure.u8(1)] });
+    const protocol = loader()("lib/fleet-protocol.ts");
+    protocol.calls.deployment_manager_report_verified_status(report, packageId, deployments[0].deploymentId, registryId, caps.objects[0].objectId, protocol.STATUS.applied);
     stage = "report status"; await execute(report, deviceSigner);
     deployments = await sui.fetchDeploymentEvents(client, operator.toSuiAddress());
     assert.deepEqual(deployments[0].statuses, { [devices[0].objectId]: 1 }); assert.deepEqual(deployments[0].resolvedDeviceIds, [devices[0].objectId]);
@@ -110,9 +111,17 @@ let stage = "startup";
     const validDeployment = deployments[0].deploymentId;
     stage = "foreign group";
     await execute(sui.buildRegisterDeviceTx("foreign member", deviceSigner.toSuiAddress(), "aarch64", deviceSigner.toSuiAddress()), deviceSigner);
-    const foreignDevice = (await sui.fetchDevices(client, deviceSigner.toSuiAddress()))[0];
+    async function indexedFirst(query, label) {
+      for (let attempt = 0; attempt < 100; attempt++) {
+        const items = await query();
+        if (items.length) return items[0];
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      throw new Error(`${label} never became indexed after checkpointed execution`);
+    }
+    const foreignDevice = await indexedFirst(() => sui.fetchDevices(client, deviceSigner.toSuiAddress()), "foreign device");
     await execute(sui.buildCreateGroupTx("foreign lab", "owned by another creator"), deviceSigner);
-    const foreignGroup = (await sui.fetchGroups(client, deviceSigner.toSuiAddress()))[0];
+    const foreignGroup = await indexedFirst(() => sui.fetchGroups(client, deviceSigner.toSuiAddress()), "foreign group");
     await execute(sui.buildAddDeviceToGroupTx(foreignGroup.objectId, foreignDevice), deviceSigner);
     stage = "arbitrary target history";
     await execute(sui.buildCreateDeploymentTx("invalid-targets", "1.0.0", "fixture-recipe", "ab".repeat(32), "cd".repeat(32), [devices[0].objectId, foreignGroup.objectId]));

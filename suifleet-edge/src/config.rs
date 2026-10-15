@@ -24,23 +24,7 @@ pub struct SuiConfig {
     pub manifest: Option<DeploymentManifest>,
 }
 
-pub const REQUIRED_TYPES: &[&str] = &[
-    "device_registry::DeviceRegistry",
-    "device_registry::Device",
-    "device_group::DeviceGroup",
-    "device_group::GroupCreated",
-    "device_cap::DeviceCap",
-    "device_cap::DeviceAddressKey",
-    "deployment_manager::DeploymentRecord",
-    "deployment_manager::DeploymentCreated",
-    "deployment_manager::DeviceStatusUpdated",
-    "deployment_manager::TargetGroupsKey",
-    "deployment_manager::TargetDevicesKey",
-    "deployment_manager::StatusesKey",
-    "deployment_manager::RecipeDigestKey",
-    "device_registry::IdentityKey",
-    "device_registry::DeviceOwnerCap",
-];
+pub use crate::protocol::REQUIRED_TYPES;
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct DeploymentManifest {
@@ -106,7 +90,7 @@ fn positive(value: &str) -> bool {
 impl DeploymentManifest {
     pub fn validate(&self) -> anyhow::Result<()> {
         anyhow::ensure!(
-            self.schema_version == 1 && self.protocol_version == 1,
+            self.schema_version == crate::protocol::MANIFEST_SCHEMA_VERSION && self.protocol_version == crate::protocol::PROTOCOL_VERSION,
             "unsupported manifest schema/protocol"
         );
         anyhow::ensure!(

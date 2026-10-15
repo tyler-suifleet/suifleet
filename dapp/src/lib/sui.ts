@@ -1,5 +1,7 @@
+import { calls } from "./fleet-protocol";
+import { DEPLOYMENT_SCHEMA_VERSION } from "./protocol-version";
 import { requireManifest, moveType, verifyDeployment } from "./deployment-manifest";
-import { Transaction, type TransactionArgument } from "@mysten/sui/transactions";
+import { Transaction } from "@mysten/sui/transactions";
 import type { SuiGrpcClient } from "@mysten/sui/grpc";
 import { ObjectError } from "@mysten/sui/client";
 import { normalizeStructTag } from "@mysten/sui/utils";
@@ -104,21 +106,9 @@ export function buildRegisterDeviceTx(
 ): Transaction {
   requireManifest();
   const tx = new Transaction();
-  const [device] = tx.moveCall({
-    target: `${PACKAGE_ID}::device_registry::register_device`,
-    arguments: [
-      tx.object(REGISTRY_ID),
-      tx.pure.string(name),
-      tx.pure.address(deviceAddress),
-      tx.pure.string(arch),
-      tx.object("0x6"),
-    ],
-  });
-  tx.moveCall({ target: `${PACKAGE_ID}::device_cap::issue_cap`, arguments: [device] });
-  const [owner] = tx.moveCall({
-    target: `${PACKAGE_ID}::device_registry::activate_device`,
-    arguments: [tx.object(REGISTRY_ID), device],
-  });
+  const [device] = calls.device_registry_register_device(tx, PACKAGE_ID, REGISTRY_ID, name, deviceAddress, arch, "0x6");
+  calls.device_cap_issue_cap(tx, PACKAGE_ID, device);
+  const [owner] = calls.device_registry_activate_device(tx, PACKAGE_ID, REGISTRY_ID, device);
   tx.transferObjects([owner], tx.pure.address(sender));
   return tx;
 }
@@ -127,10 +117,7 @@ export function buildRegisterDeviceTx(
 export function buildActivateDeviceTx(deviceObjectId: string, sender: string): Transaction {
   requireManifest();
   const tx = new Transaction();
-  const [owner] = tx.moveCall({
-    target: `${PACKAGE_ID}::device_registry::activate_device`,
-    arguments: [tx.object(REGISTRY_ID), tx.object(deviceObjectId)],
-  });
+  const [owner] = calls.device_registry_activate_device(tx, PACKAGE_ID, REGISTRY_ID, deviceObjectId);
   tx.transferObjects([owner], tx.pure.address(sender));
   return tx;
 }
@@ -139,28 +126,17 @@ export function buildActivateDeviceTx(deviceObjectId: string, sender: string): T
  * Pass the Device to a `&Device` call. An activated Device is borrowed from
  * custody and returned in the same transaction.
  */
-function withDevice(tx: Transaction, device: DeviceRef, use: (device: TransactionArgument) => void) {
-  if (!device.ownerCapId) return use(tx.object(device.objectId));
-  const [borrowed, loan] = tx.moveCall({
-    target: `${PACKAGE_ID}::device_registry::borrow_device`,
-    arguments: [tx.object(REGISTRY_ID), tx.object(device.ownerCapId)],
-  });
+function withDevice(tx: Transaction, device: DeviceRef, use: (device: Parameters<Transaction["object"]>[0]) => void) {
+  if (!device.ownerCapId) return use(device.objectId);
+  const [borrowed, loan] = calls.device_registry_borrow_device(tx, PACKAGE_ID, REGISTRY_ID, device.ownerCapId);
   use(borrowed);
-  tx.moveCall({
-    target: `${PACKAGE_ID}::device_registry::return_device`,
-    arguments: [tx.object(REGISTRY_ID), borrowed, loan],
-  });
+  calls.device_registry_return_device(tx, PACKAGE_ID, REGISTRY_ID, borrowed, loan);
 }
 
 export function buildIssueCapTx(device: DeviceRef): Transaction {
   requireManifest();
   const tx = new Transaction();
-  withDevice(tx, device, (target) => {
-    tx.moveCall({
-      target: `${PACKAGE_ID}::device_cap::issue_cap`,
-      arguments: [target],
-    });
-  });
+  withDevice(tx, device, (target) => calls.device_cap_issue_cap(tx, PACKAGE_ID, target));
   return tx;
 }
 
@@ -168,17 +144,8 @@ export function buildIssueCapTx(device: DeviceRef): Transaction {
 export function buildDeregisterDeviceTx(device: DeviceRef): Transaction {
   requireManifest();
   const tx = new Transaction();
-  if (device.ownerCapId) {
-    tx.moveCall({
-      target: `${PACKAGE_ID}::device_registry::deregister_activated_device`,
-      arguments: [tx.object(REGISTRY_ID), tx.object(device.ownerCapId)],
-    });
-  } else {
-    tx.moveCall({
-      target: `${PACKAGE_ID}::device_registry::deregister_device`,
-      arguments: [tx.object(REGISTRY_ID), tx.object(device.objectId)],
-    });
-  }
+  if (device.ownerCapId) calls.device_registry_deregister_activated_device(tx, PACKAGE_ID, REGISTRY_ID, device.ownerCapId);
+  else calls.device_registry_deregister_device(tx, PACKAGE_ID, REGISTRY_ID, device.objectId);
   return tx;
 }
 
@@ -187,52 +154,28 @@ export function buildDeregisterDeviceTx(device: DeviceRef): Transaction {
 export function buildCreateGroupTx(name: string, description: string): Transaction {
   requireManifest();
   const tx = new Transaction();
-  tx.moveCall({
-    target: `${PACKAGE_ID}::device_group::create_group`,
-    arguments: [
-      tx.pure.string(name),
-      tx.pure.string(description),
-      tx.object("0x6"),
-    ],
-  });
+  calls.device_group_create_group(tx, PACKAGE_ID, name, description, "0x6");
   return tx;
 }
 
 export function buildAddDeviceToGroupTx(groupObjectId: string, device: DeviceRef): Transaction {
   requireManifest();
   const tx = new Transaction();
-  withDevice(tx, device, (target) => {
-    tx.moveCall({
-      target: `${PACKAGE_ID}::device_group::add_device`,
-      arguments: [
-        tx.object(groupObjectId),
-        target,
-      ],
-    });
-  });
+  withDevice(tx, device, (target) => calls.device_group_add_device(tx, PACKAGE_ID, groupObjectId, target));
   return tx;
 }
 
 export function buildRemoveDeviceFromGroupTx(groupObjectId: string, deviceId: string): Transaction {
   requireManifest();
   const tx = new Transaction();
-  tx.moveCall({
-    target: `${PACKAGE_ID}::device_group::remove_device`,
-    arguments: [
-      tx.object(groupObjectId),
-      tx.pure(bcs.Address.serialize(deviceId)),
-    ],
-  });
+  calls.device_group_remove_device(tx, PACKAGE_ID, groupObjectId, deviceId);
   return tx;
 }
 
 export function buildDeleteGroupTx(groupObjectId: string): Transaction {
   requireManifest();
   const tx = new Transaction();
-  tx.moveCall({
-    target: `${PACKAGE_ID}::device_group::delete_group`,
-    arguments: [tx.object(groupObjectId)],
-  });
+  calls.device_group_delete_group(tx, PACKAGE_ID, groupObjectId);
   return tx;
 }
 
@@ -249,29 +192,14 @@ export function buildCreateDeploymentTx(
 ): Transaction {
   requireManifest();
   const tx = new Transaction();
-  tx.moveCall({
-    target: `${PACKAGE_ID}::deployment_manager::create_deployment_verified`,
-    arguments: [
-      tx.pure.string(componentName),
-      tx.pure.string(version),
-      tx.pure.string(recipeBlobId),
-      tx.pure.string(artifactSha256),
-      tx.pure.string(recipeSha256),
-      tx.pure(bcs.vector(bcs.Address).serialize(targetGroupIds)),
-      tx.pure(bcs.vector(bcs.Address).serialize(targetDeviceIds)),
-      tx.object("0x6"),
-    ],
-  });
+  calls.deployment_manager_create_deployment_verified(tx, PACKAGE_ID, componentName, version, recipeBlobId, artifactSha256, recipeSha256, targetGroupIds, targetDeviceIds, "0x6");
   return tx;
 }
 
 export function buildDeleteDeploymentTx(deploymentObjectId: string): Transaction {
   requireManifest();
   const tx = new Transaction();
-  tx.moveCall({
-    target: `${PACKAGE_ID}::deployment_manager::delete_deployment`,
-    arguments: [tx.object(deploymentObjectId)],
-  });
+  calls.deployment_manager_delete_deployment(tx, PACKAGE_ID, deploymentObjectId);
   return tx;
 }
 
@@ -370,7 +298,7 @@ export async function fetchDeploymentEvents(client: SuiGrpcClient, owner?: strin
   const groupsById = new Map(groups.map((group) => [group.objectId, supportedTargetGroup(group)]));
   return Promise.all(liveEvents.map(async (event) => {
     const record = live.get(event.deployment_id)!;
-    if (record.schema_version !== "1") throw new Error("Unsupported DeploymentRecord schema");
+    if (BigInt(record.schema_version) !== BigInt(DEPLOYMENT_SCHEMA_VERSION)) throw new Error("Unsupported DeploymentRecord schema");
     const resolvedDeviceIds = [...new Set([...event.target_devices, ...event.target_groups.flatMap((id) => {
       const group = groupsById.get(id);
       return group && group.admin === record.creator ? group.device_ids : [];
