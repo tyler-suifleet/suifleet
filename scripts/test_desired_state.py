@@ -4,8 +4,10 @@ simulator of scripts/test_ota.py (through the gRPC shim), without keys or gas.
 
 Covers supersession while offline, a newly joined member, group removal,
 cross-group conflicts, an atomic multi-component plan whose failing step stops
-the rest until the desired state changes, crash recovery without re-executing
-an updater, and coexistence with one-shot (unmanaged) deployments.
+the rest until the desired state changes, crash recovery that neither
+re-executes an updater nor runs later steps, reselection of an already-run
+deployment (A -> B -> A) and one-shot updates of a managed component, which
+are never recorded as convergence, and coexistence with one-shot deployments.
 Real-chain behaviour is covered by scripts/test_desired_state_localnet.py.
 """
 import argparse
@@ -170,20 +172,25 @@ def run(binary):
             wait_for(lambda: outcomes().get("0x205") == 2, "failing step did not fail", process)
             settle()
             assert "0x206" not in outcomes(), "plan continued past a failed step"
-            assert state()["blocked"] is True and runs() == 2
+            assert state()["step"] == "0x205" and runs() == 2
             deploy("0x207", "alpha", [GROUP])
             desire(GROUP, 4, {"alpha": "0x207", "firmware": "0x202", "zeta": "0x206"})
             wait_for(lambda: outcomes().get("0x207") == 1 and outcomes().get("0x206") == 1, "revised plan did not complete", process)
-            assert "blocked" not in state() and runs() == 4
+            assert "step" not in state() and runs() == 4
             print("PASS: atomic three-component revision; a failed step stops the plan until a new revision, which then completes")
 
-            # 6. Crash during a desired step: never re-executed after restart.
+            # 6. Crash during the first step of a revision that has a later,
+            #    unexecuted step: the interrupted updater is never re-run, and
+            #    the later step stays stopped after restart.
             hang.touch()
             deploy("0x208", "firmware", [GROUP])
-            desire(GROUP, 5, {"alpha": "0x207", "firmware": "0x208", "zeta": "0x206"})
+            deploy("0x20b", "zeta", [GROUP])
+            # G2 first: until GROUP agrees, firmware is only a conflict.
             desire(G2, 3, {"firmware": "0x208"})
+            desire(GROUP, 5, {"alpha": "0x207", "firmware": "0x208", "zeta": "0x20b"})
             pid = root / "updater.pid"; pid.unlink(missing_ok=True)
             wait_for(lambda: "0x208" in state().get("deployments", {}) and pid.exists(), "updater did not start", process)
+            assert state()["step"] == "0x208"
             # Power loss mid-update: the daemon and its updater (own process group) die.
             process.send_signal(signal.SIGKILL); process.wait()
             os.killpg(int(pid.read_text()), signal.SIGKILL)
@@ -193,15 +200,41 @@ def run(binary):
             settle()
             assert runs() == 4, "interrupted updater was executed again"
             assert "interrupted" in state()["deployments"]["0x208"]["error"]
-            print("PASS: crash mid-step settles it Failed on restart; the updater is never re-executed")
+            assert "0x20b" not in outcomes(), "plan continued past an interrupted step after restart"
+            assert state()["step"] == "0x208" and state()["current"]["firmware"] == "0x208"
+            print("PASS: crash mid-step settles it Failed on restart; the updater is never re-executed and later steps stay stopped")
 
-            # 7. One-shot jobs still work; a managed record outside any desired
+            # 7. A -> B -> A: firmware 0x202 ran, then 0x208 was started; a
+            #    revision selecting 0x202 again is not taken as converged (a
+            #    deployment never runs twice). The new state lifts the stop, so
+            #    the other step proceeds.
+            desire(GROUP, 6, {"alpha": "0x207", "firmware": "0x202", "zeta": "0x20b"})
+            desire(G2, 4, {"firmware": "0x202"})
+            wait_for(lambda: outcomes().get("0x20b") == 1, "new desired state did not lift the stop", process)
+            settle()
+            assert runs() == 5 and state()["current"]["firmware"] == "0x208", ("reselection recorded as convergence", state())
+            assert "already ran here" in (root / "daemon.log").read_text()
+            print("PASS: reselecting an already-run deployment (A -> B -> A) is reported, not recorded as installed")
+
+            # 8. A one-shot update of a managed component is what it now runs;
+            #    the next desired version converges it again.
+            deploy("0x20c", "zeta", [GROUP], managed=False)
+            wait_for(lambda: outcomes().get("0x20c") == 1, "one-shot update of a managed component not applied", process)
+            settle()
+            assert runs() == 6 and state()["current"]["zeta"] == "0x20c"
+            deploy("0x20d", "zeta", [GROUP])
+            desire(GROUP, 7, {"alpha": "0x207", "firmware": "0x202", "zeta": "0x20d"})
+            wait_for(lambda: outcomes().get("0x20d") == 1, "next desired version did not converge", process)
+            assert state()["current"]["zeta"] == "0x20d" and state()["components"]["zeta"] == "0x20d"
+            print("PASS: one-shot update of a managed component is tracked; the next desired version converges it")
+
+            # 9. One-shot jobs still work; a managed record outside any desired
             #    state is left alone by the event path.
             deploy("0x209", "tool", [GROUP], managed=False)
             deploy("0x20a", "orphan", [GROUP])
             wait_for(lambda: outcomes().get("0x209") == 1, "unmanaged one-shot deployment not applied", process)
             settle()
-            assert "0x20a" not in outcomes() and runs() == 5
+            assert "0x20a" not in outcomes() and runs() == 8
             print("PASS: unmanaged deployments stay one-shot jobs; managed records apply only through desired state")
             assert not sim.errors, sim.errors
             process.send_signal(signal.SIGINT); process.wait(timeout=10)
