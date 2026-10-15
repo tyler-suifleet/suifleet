@@ -64,6 +64,14 @@ test-ota:
 	$(RUN) python3 scripts/test_desired_state.py
 	$(RUN) python3 scripts/test_deployment_control.py
 
+# Supervised components under the shipped systemd units on real systemd and
+# cgroup v2 (SF-014): a disposable privileged container with systemd as PID 1.
+# Runs on the host (needs Docker), not inside the dev container.
+.PHONY: test-supervisor-systemd
+test-supervisor-systemd:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+	PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_supervisor_systemd.py --evidence "$${SUIFLEET_EVIDENCE:-supervisor-systemd-evidence.json}"
+
 # SF-030 harmless test component: fixture tests (system shell, plus busybox when
 # installed), then the real daemon applying it through suifleet-test-updater.
 test-component:
