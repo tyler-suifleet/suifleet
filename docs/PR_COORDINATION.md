@@ -132,3 +132,16 @@ authority to another model.
 Implementation acceptance follows [the user-authorized split](IMPLEMENTATION_ACCEPTANCE.md). Its configured scope is included in each review fingerprint and worker snapshot; changing it requires fresh independent review and does not bypass source findings or CI. Claim tokens are stored only in the private local dispatcher SQLite database to allow restart ownership checks; GitHub tokens are never persisted there. Review and implementation slots are separate, so one family may briefly run an implementation and a review worker together.
 
 The PR service bounds each family to one read-only review and one feedback-repair worker, with at most one job on a given PR. A lengthy image repair/build therefore does not occupy the independent-review slot. Both categories retain durable reservations; orphaned jobs block their category until explicit recovery. New implementation dispatch still yields to active review/repair work.
+
+Public Sui testnet testing is user-authorized for this project through explicit private project configuration:
+
+```json
+"testnet_authorization": {
+  "network": "testnet",
+  "chain_identifier": "4c78adac",
+  "wallet": "/home/tyler/.config/suifleet/testnet/agent/client.yaml",
+  "lock_resource": "network:suifleet-testnet"
+}
+```
+
+This grant is absent by default and validated before claiming/launching. Worker prompts permit planned testnet publication/upgrades and test-gas funding, require chain/account/authority verification and coordinated machine mutation locks, and retain the mainnet/production/hardware boundaries. Account setup and the live runner are supplied by [PR #63](https://github.com/tyler-suifleet/suifleet/pull/63), tracked in [SF-010](https://github.com/tyler-suifleet/suifleet/issues/11). Do not duplicate Claude's active testnet run or expose wallet contents. CI still follows its configured environment controls; this does not provision CI secrets or production signing credentials.
