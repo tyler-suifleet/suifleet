@@ -280,9 +280,9 @@ The frontend reads only `NEXT_PUBLIC_DEPLOYMENT_MANIFEST`; the daemon reads the 
 
 `pnpm build` produces `dapp/out`; serve that directory through the selected static host. Walrus Sites is an intended option, but no hosting account/site or current site-builder version is verified here. Select/validate its current publish procedure in a hosting issue before publishing.
 
-Install the daemon, systemd service and real config through the validated image/package workflow. The service invokes `--provision` before startup and creates its state directory. Register the printed address, record Device/DeviceCap IDs, and fund report gas. Apply success currently means updater exit code zero, not post-boot health.
+Install the daemon, systemd service and real config through the validated image/package workflow. The separate root first-boot provisioning service invokes `--provision`; the unprivileged daemon starts after enrollment config appears and creates its state directory. Register the printed address, record Device/DeviceCap IDs, and fund report gas. Apply success currently means updater exit code zero, not post-boot health.
 
-The Yocto layer is `suifleet-edge/meta-suifleet`; it is a scaffold needing an actual build. `SRCREV = AUTOREV` and missing cargo dependency integration must be addressed before calling the image reproducible. SWUpdate/RAUC and A/B recovery remain external adapter work.
+The Yocto layer is `suifleet-edge/meta-suifleet`. [YOCTO_PACKAGING.md](YOCTO_PACKAGING.md) describes its pinned source/crate graph, Scarthgap Rust-mixin and Wrynose build profiles and separate first-boot provisioning/enrollment services. The source pin includes the merged SF-004 gRPC migration; offline packaging/boot acceptance remains distinct from supported-network OTA acceptance. Record actual build and boot results rather than inferring them from recipe presence. SWUpdate/RAUC and A/B recovery remain external adapter work.
 
 ## Execution privileges
 
@@ -290,7 +290,7 @@ The Yocto layer is `suifleet-edge/meta-suifleet`; it is a scaffold needing an ac
 |---|---|---|---|
 | `suifleet` user (`suifleet.service`) | Daemon: chain polling, downloads, journal, recipe `install` scripts | `/var/lib/suifleet` only | Change its config or the helper config, use capabilities, create namespaces, see other processes, exceed 256 MiB / 64 tasks |
 | root (`suifleet-firmware.service`, path-activated) | Only the command in `/etc/suifleet/firmware.toml` | Devices and system partitions, as the firmware updater needs; its own `/var/lib/suifleet-firmware` | Use the network, accept a command from the daemon |
-| root (`ExecStartPre=+`) | Key provisioning and handing the key to `suifleet` | `/etc/suifleet/device.key` | — |
+| root (`suifleet-provision.service`) | First-boot key provisioning and handing the key to `suifleet` | `/etc/suifleet/device.key`, public address | Regenerate an existing corrupt key |
 
 Every updater/recipe child gets a cleared environment (`PATH`, `LANG`, `HOME` only), its artifact directory as working directory, no stdin, `RLIMIT_CORE=0`, at most 1024 descriptors, optional `max_memory_bytes`, and the apply timeout. On timeout or cancellation the whole process group is killed. A spawn denied with EACCES, exit code 126 or 127, a signal, or any non-zero exit is an error, so the deployment reports Failed, never Applied.
 
@@ -323,7 +323,7 @@ Verified locally (container, not hardware):
 - `systemd-analyze verify` is clean (systemd 252).
 - `systemd-analyze security --offline`: daemon 1.7 OK (was 9.6 UNSAFE); helper 5.5 MEDIUM, by design, for device access.
 
-Not yet verified: a BitBake build with the `useradd` class, and the units on the Raspberry Pi image. That includes DNS under `RestrictAddressFamilies`, and SWUpdate/RAUC under the helper sandbox.
+SF-025 verified the actual BitBake `useradd` package for `raspberrypi3-64` and booted the ARM64 QEMU image with provisioning/enrollment units; see [packaging evidence](YOCTO_PACKAGING.md#recorded-target-validation-2026-10-14). Physical Pi boot, DNS under `RestrictAddressFamilies`, and SWUpdate/RAUC under the helper sandbox remain unverified.
 
 ## Artifact storage and downloads
 
