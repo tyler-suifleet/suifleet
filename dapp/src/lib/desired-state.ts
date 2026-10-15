@@ -19,6 +19,7 @@ export interface DesiredState {
 }
 
 export interface DesiredChange {
+  initiallyPaused?: boolean;
   componentName: string;
   version: string;
   recipeBlobId: string;
@@ -54,6 +55,7 @@ export function buildDesiredRevisionTx(groupIds: string[], change?: DesiredChang
     for (const name of remove) calls.desired_state_remove_component(tx, PACKAGE_ID, plan, name);
     calls.desired_state_commit(tx, PACKAGE_ID, plan, group, "0x6");
   }
+  if (record && change?.initiallyPaused) calls.deployment_manager_set_control(tx, PACKAGE_ID, record, 1, 0, 0, 0, 0, 0);
   if (record) calls.deployment_manager_share_deployment(tx, PACKAGE_ID, record);
   return tx;
 }

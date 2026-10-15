@@ -35,7 +35,10 @@ const deploymentBytes = schema.DeploymentBcs.serialize({ id: deployment, creator
   c.getObjects = async ({ objectIds }) => ({ objects: objectIds.map((objectId) => ({ objectId, type: `${m.type_origins["device_group::DeviceGroup"]}::device_group::DeviceGroup`, content: objectId === group ? groupBytes : deploymentBytes })) });
   assert.deepEqual((await sui.fetchGroups(c, owner))[0].deviceIds, [device]);
   assert.deepEqual(eventCursors, [undefined, "scanned-next"]);
-  c.getDynamicField = async () => ({ dynamicField: { value: { type: `${m.type_origins["deployment_manager::Receipts"]}::deployment_manager::Receipts`, bcs: schema.ReceiptsBcs.serialize({ version: 2, statuses: { contents: [{ key: device, value: 1 }] } }).toBytes() } } });
+  c.getDynamicField = async ({name}) => {
+    if (name.type.endsWith("::ControlKey")) throw new ObjectError("missing", "missing", {reason:"notFound"});
+    return ({ dynamicField: { value: { type: `${m.type_origins["deployment_manager::Receipts"]}::deployment_manager::Receipts`, bcs: schema.ReceiptsBcs.serialize({ version: 2, statuses: { contents: [{ key: device, value: 1 }] } }).toBytes() } } });
+  };
   const deployments = await sui.fetchDeploymentEvents(c, owner);
   assert.equal(deployments[0].timestampMs, 456); assert.equal(deployments[0].receiptsVerified, true);
   assert.deepEqual(deployments[0].resolvedDeviceIds, [device]);
