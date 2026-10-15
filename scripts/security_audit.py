@@ -63,6 +63,59 @@ def trivy_findings(report):
     return findings
 
 
+def sarif_rule(tool, result):
+    """Resolve SARIF 2.1.0 sections 3.27.6, 3.52 and 3.54, including extensions."""
+    reference = result.get('rule', {})
+    if not isinstance(reference, dict):
+        raise ReportError('invalid SARIF rule reference')
+    component_ref = reference.get('toolComponent', {})
+    if not isinstance(component_ref, dict):
+        raise ReportError('invalid SARIF component reference')
+    driver = tool['driver']
+    extensions = tool.get('extensions', [])
+    if not isinstance(extensions, list):
+        raise ReportError('invalid SARIF extensions')
+    if 'index' in component_ref:
+        index = component_ref['index']
+        if type(index) is not int or not 0 <= index < len(extensions):
+            raise ReportError('invalid SARIF component index')
+        component = extensions[index]
+    elif 'guid' in component_ref:
+        matches = [c for c in [driver, *extensions] if c.get('guid') == component_ref['guid']]
+        if len(matches) != 1:
+            raise ReportError('SARIF component identity is missing or ambiguous')
+        component = matches[0]
+    else:
+        component = driver
+    for key in ('guid', 'name'):
+        if key in component_ref and component_ref[key] != component.get(key):
+            raise ReportError('SARIF component identity mismatch')
+    rules = component.get('rules', [])
+    if not isinstance(rules, list):
+        raise ReportError('invalid SARIF rules')
+    for rule in rules:
+        identifier(rule['id'])
+    for outer, inner in [('ruleId', 'id'), ('ruleIndex', 'index')]:
+        if outer in result and inner in reference and result[outer] != reference[inner]:
+            raise ReportError('SARIF rule reference mismatch')
+    rule_id = result.get('ruleId', reference.get('id'))
+    index = result.get('ruleIndex', reference.get('index'))
+    if index is not None:
+        if type(index) is not int or not 0 <= index < len(rules):
+            raise ReportError('invalid SARIF rule index')
+        rule = rules[index]
+    else:
+        matches = [r for r in rules if r['id'] == rule_id]
+        if len(matches) != 1:
+            raise ReportError('SARIF result lacks a unique matching rule')
+        rule = matches[0]
+    if rule_id is not None and rule_id != rule['id']:
+        raise ReportError('SARIF rule identity mismatch')
+    if 'guid' in reference and reference['guid'] != rule.get('guid'):
+        raise ReportError('SARIF rule identity mismatch')
+    return rule
+
+
 def sarif_findings(report):
     if (not isinstance(report, dict) or report.get('version') != '2.1.0'
             or not isinstance(report.get('runs'), list) or not report['runs']):
@@ -72,35 +125,24 @@ def sarif_findings(report):
         invocations = run.get('invocations')
         if not isinstance(invocations, list) or not invocations or any(i.get('executionSuccessful') is not True for i in invocations):
             raise ReportError('CodeQL analysis execution failed or is unproven')
-        rules = run['tool']['driver']['rules']
+        tool = run['tool']
+        extensions = tool.get('extensions', [])
+        if not isinstance(extensions, list):
+            raise ReportError('invalid SARIF extensions')
+        for component in [tool['driver'], *extensions]:
+            rules = component['rules']
+            if not isinstance(rules, list):
+                raise ReportError('invalid SARIF rules')
+            for rule in rules:
+                identifier(rule['id'])
         results = run['results']
-        if not isinstance(rules, list) or not isinstance(results, list):
-            raise ReportError('invalid SARIF rules or results')
-        by_id = {identifier(rule['id']): rule for rule in rules}
+        if not isinstance(results, list):
+            raise ReportError('invalid SARIF results')
         for result in results:
             if not isinstance(result, dict):
                 raise ReportError('invalid SARIF result')
-            rule_id = result.get('ruleId', result.get('rule', {}).get('id'))
-            index = result.get('ruleIndex', result.get('rule', {}).get('index'))
-            if index is not None:
-                if type(index) is not int or not 0 <= index < len(rules):
-                    # Schema-only diagnostics: never emit identifiers, messages or source.
-                    print(json.dumps({'sarif_schema': {
-                        'driver_rule_count': len(rules),
-                        'extension_count': len(run['tool'].get('extensions', [])),
-                        'nested_rule_present': isinstance(result.get('rule'), dict),
-                        'component_reference_present': isinstance(result.get('rule', {}).get('toolComponent'), dict),
-                        'index_is_integer': type(index) is int,
-                    }}), file=sys.stderr)
-                    raise ReportError('invalid SARIF rule index')
-                rule = rules[index]
-                if rule_id is not None and rule_id != rule['id']:
-                    raise ReportError('SARIF rule identity mismatch')
-                rule_id = rule['id']
-            elif rule_id in by_id:
-                rule = by_id[rule_id]
-            else:
-                raise ReportError('SARIF result lacks a matching rule')
+            rule = sarif_rule(run['tool'], result)
+            rule_id = rule['id']
             level = result.get('level', rule.get('defaultConfiguration', {}).get('level', 'warning'))
             if level not in ('none', 'note', 'warning', 'error'):
                 raise ReportError('invalid SARIF result level')

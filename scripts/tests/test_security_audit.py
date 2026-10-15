@@ -151,6 +151,42 @@ class SecurityGateTests(unittest.TestCase):
                 {'rule': {'id': 'py/fixture', 'index': 0}} if nested else {'ruleId': 'py/fixture'}]
             self.assertEqual(self.run_gate('sarif', report)[0], 1)
 
+    def test_sarif_extension_rule_metadata_controls_threshold(self):
+        for score, expected in [('9.5', 1), ('4.5', 0)]:
+            report = sarif(score)
+            run = report['runs'][0]
+            run['tool']['extensions'] = [run['tool']['driver']]
+            run['tool']['driver'] = {'rules': []}
+            run['results'][0]['rule'] = {'index': 0, 'toolComponent': {'index': 0}}
+            self.assertEqual(self.run_gate('sarif', report)[0], expected)
+
+    def test_sarif_extension_references_reject_invalid_or_conflicting_identity(self):
+        for reference in [None, {'index': -1}, {'index': 1}, {'index': True},
+                          {'index': '0'}, {'index': 0, 'name': 'wrong'},
+                          {'index': 0, 'guid': 'wrong'}, {'guid': 'missing'}]:
+            report = sarif()
+            run = report['runs'][0]
+            run['tool']['extensions'] = [run['tool']['driver']]
+            run['tool']['driver'] = {'rules': []}
+            run['results'][0]['rule'] = {'index': 0, 'toolComponent': reference}
+            self.assertEqual(self.run_gate('sarif', report)[0], 2)
+        for reference in [{'id': 'different/rule'}, {'index': 1}]:
+            report = sarif()
+            report['runs'][0]['results'][0]['rule'] = reference
+            self.assertEqual(self.run_gate('sarif', report)[0], 2)
+
+    def test_sarif_component_guid_lookup_and_consistency(self):
+        report = sarif()
+        run = report['runs'][0]
+        component = dict(run['tool']['driver'], guid='fixture-guid', name='fixture-pack')
+        run['tool']['extensions'] = [component]
+        run['tool']['driver'] = {'rules': []}
+        run['results'][0]['rule'] = {'index': 0, 'toolComponent': {
+            'guid': 'fixture-guid', 'name': 'fixture-pack'}}
+        self.assertEqual(self.run_gate('sarif', report)[0], 1)
+        run['tool']['extensions'].append(component)
+        self.assertEqual(self.run_gate('sarif', report)[0], 2)
+
     def test_sarif_reports_safe_locations_without_source_excerpts(self):
         report = sarif()
         report['runs'][0]['results'][0]['locations'] = [
