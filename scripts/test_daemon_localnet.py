@@ -142,9 +142,14 @@ def run(rpc_url, faucet_url, catalog_upgrade=False):
             package = next(c["packageId"] for c in published["objectChanges"] if c["type"] == "published")
             registry = created(published, "::device_registry::DeviceRegistry")[0]
             upgrade_cap = created(published, "::package::UpgradeCap")[0]
-            manifest = dm.resolve(SimpleNamespace(chain_identifier=chain_id, rpc=rpc_url, package=package,
-                                                  upgrade_cap=upgrade_cap, registry=registry, network="localnet",
-                                                  publisher=aggregator, aggregator=aggregator))
+            if catalog_upgrade:
+                # The baseline predates later required types, so read its origins
+                # directly; the full manifest is resolved after the upgrade.
+                original_origins = dm.origins(dm.chain_facts(rpc_url, package)["objects"][dm.object_id(package)])
+            else:
+                manifest = dm.resolve(SimpleNamespace(chain_identifier=chain_id, rpc=rpc_url, package=package,
+                                                      upgrade_cap=upgrade_cap, registry=registry, network="localnet",
+                                                      publisher=aggregator, aggregator=aggregator))
 
             # Device identity is provisioned by the daemon; it never leaves the device.
             key = root / "device.key"
@@ -178,7 +183,6 @@ def run(rpc_url, faucet_url, catalog_upgrade=False):
 
             if catalog_upgrade:
                 original_package = package
-                original_origins = manifest["type_origins"].copy()
                 # Existing objects were created by the baseline package before upgrade.
                 shutil.copytree(ROOT / "contracts/sources", contracts / "sources", dirs_exist_ok=True)
                 upgraded = client("test-upgrade", contracts, "--build-env", "testnet", "--pubfile-path",
@@ -188,14 +192,16 @@ def run(rpc_url, faucet_url, catalog_upgrade=False):
                 package = next(c["packageId"] for c in upgraded["objectChanges"] if c["type"] == "published")
                 manifest = dm.resolve(SimpleNamespace(chain_identifier=chain_id, rpc=rpc_url, package=package,
                     upgrade_cap=upgrade_cap, registry=registry, network="localnet", publisher=aggregator, aggregator=aggregator))
-                assert all(manifest["type_origins"][n] == o for n,o in original_origins.items())
-                assert all(manifest["type_origins"][n] == dm.object_id(package) for n in dm.CATALOG_TYPES)
+                assert all(manifest["type_origins"][n] == o for n,o in original_origins.items() if n in manifest["type_origins"])
+                introduced = [n for n in manifest["type_origins"] if n not in original_origins]
+                assert set(dm.CATALOG_TYPES) <= set(introduced), introduced
+                assert all(manifest["type_origins"][n] == dm.object_id(package) for n in introduced)
                 # Old package stays callable; existing-object compatible APIs still execute.
                 transaction("--move-call", f"{original_package}::deployment_manager::create_deployment_verified",
                     '\"old-call\"', '\"1.0.0\"', '\"old-recipe\"', '\"'+"a"*64+'\"', '\"'+"b"*64+'\"',
                     "vector[]", f"vector[@{other}]", CLOCK)
                 catalog = created(transaction("--move-call", f"{package}::component_catalog::create_catalog"), "::component_catalog::ComponentCatalog")[0]
-                print("PASS: compatible upgrade from 9c69582bd040cf82169940a6d14a1a288fd0bda4, existing registry/device/group objects, old call remains callable, new catalog introduction origins")
+                print("PASS: compatible upgrade from 9c69582bd040cf82169940a6d14a1a288fd0bda4, existing registry/device/group objects, old call remains callable, new catalog and enrollment/role introduction origins")
 
             run_id = "localnet-" + uuid.uuid4().hex[:10]
 
