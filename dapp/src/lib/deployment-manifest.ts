@@ -6,6 +6,13 @@ import { UpgradeCapBcs } from "./move-bcs";
 
 import { REQUIRED_TYPES, PROTOCOL_VERSION, MANIFEST_SCHEMA_VERSION } from "./protocol-version";
 export { REQUIRED_TYPES } from "./protocol-version";
+import { CATALOG_TYPES } from "./protocol-version";
+export { CATALOG_TYPES } from "./protocol-version";
+function manifestTypes(m: DeploymentManifest): string[] {
+  const present = CATALOG_TYPES.filter(name => name in m.type_origins);
+  if (present.length && present.length !== CATALOG_TYPES.length) fail("partial catalog type origins");
+  return [...REQUIRED_TYPES, ...present];
+}
 export interface DeploymentManifest {
   schema_version: number;
   protocol_version: number;
@@ -48,7 +55,7 @@ export function parseManifest(raw: string): DeploymentManifest {
   normalizeId(m.upgrade_cap_id);
   normalizeId(m.shared_objects.registry.id);
   if (typeof m.shared_objects.registry.initial_shared_version !== "string" || !/^[1-9][0-9]*$/.test(m.shared_objects.registry.initial_shared_version)) fail("invalid shared version");
-  for (const name of REQUIRED_TYPES) normalizeId(m.type_origins[name]);
+  for (const name of manifestTypes(m)) normalizeId(m.type_origins[name]);
   const range = m.supported_clients.dapp;
   const current = version(clientPackage.version);
   if (compare(version(range.min), current) > 0 || compare(current, version(range.max_exclusive)) >= 0) fail("unsupported dapp client version");
@@ -61,7 +68,7 @@ export const MANIFEST = process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST
 export function requireManifest(): DeploymentManifest {
   return MANIFEST ?? fail("not configured; generate frontend.env from a verified manifest");
 }
-export function moveType(name: typeof REQUIRED_TYPES[number]): string {
+export function moveType(name: typeof REQUIRED_TYPES[number] | typeof CATALOG_TYPES[number]): string {
   const m = requireManifest();
   return `${normalizeId(m.type_origins[name])}::${name}`;
 }
@@ -81,7 +88,7 @@ export async function verifyDeployment(client: SuiGrpcClient, m = requireManifes
   ]);
   const raw = bcs.Object.parse(packageObject.objectBcs).data;
   if (!raw.Package || raw.Package.version !== m.package_version || normalizeId(raw.Package.id) !== normalizeId(m.call_package_id)) fail("package metadata mismatch");
-  for (const name of REQUIRED_TYPES) {
+  for (const name of manifestTypes(m)) {
     const [module, datatype] = name.split("::");
     const entries = raw.Package.typeOriginTable.filter((entry) => entry.moduleName === module && entry.datatypeName === datatype);
     if (entries.length !== 1 || normalizeId(entries[0].package) !== normalizeId(m.type_origins[name])) fail(`type origin mismatch: ${name}`);

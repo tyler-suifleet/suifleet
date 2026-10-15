@@ -16,6 +16,7 @@ const NAV = [
   { href: "/",            label: "Dashboard" },
   { href: "/devices",     label: "Devices" },
   { href: "/deployments", label: "Deployments" },
+  { href: "/components", label: "Components" },
   { href: "/firmware",    label: "Deploy component" },
 ];
 
