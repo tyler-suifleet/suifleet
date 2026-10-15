@@ -243,7 +243,7 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                     self.store.db.execute("UPDATE jobs SET status='failed',error='launch interrupted before worker started' WHERE id=?",(row['id'],))
                 continue
             child = self.children.get(row['id'])
-            alive = child.poll() is None if child else process_identity(row['pid']) == row['started']
+            alive = (child.poll() is None if child else process_identity(row['pid']) == row['started']) and not (Path(row['directory'])/'exit.json').exists()
             if alive:
                 if row['kind'] == 'fix':
                     # Locate by branch from fresh PR; never renew somebody else's claim.
@@ -321,6 +321,13 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
         if base != pr['baseRefOid']: raise RuntimeError('base changed before integration; re-review required')
         current = self.pr(project,pr['number'])
         if gate(current,owner,review) is not None: raise RuntimeError('PR changed before integration')
+        self.ticket(project,'assert',owner['key'],'--token',owner['token'])
+        expected = 'Tyler Bush <tyler.jonathan.bush@gmail.com>'
+        metadata = run(['git','log','--format=%an <%ae>|%cn <%ce>',f"{base}..{pr['headRefOid']}"],cwd=project['root']).splitlines()
+        if not metadata or any(value != expected+'|'+expected for value in metadata):
+            raise RuntimeError('PR commit authorship violates the configured user identity')
+        trailers = run(['git','log','--format=%B',f"{base}..{pr['headRefOid']}"],cwd=project['root'])
+        if 'co-authored-by:' in trailers.lower(): raise RuntimeError('PR contains additional authorship attribution')
         directory = self.state/project['id']/f"merge-{pr['number']}-{base[:12]}-{pr['headRefOid'][:12]}"
         if directory.exists():
             run(['git','worktree','remove',str(directory)],cwd=project['root'])
@@ -335,7 +342,8 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
         if metadata != expected+'|'+expected: raise RuntimeError('merge identity mismatch')
         # Check again after merge preparation. Push is never forced.
         current = self.pr(project,pr['number']); current_owner=json.loads(self.ticket(project,'show',owner['key']))
-        if gate(current,current_owner,review) is not None: raise RuntimeError('review gates changed before push')
+        if current_owner['token'] != owner['token'] or gate(current,current_owner,review) is not None: raise RuntimeError('review gates or ownership changed before push')
+        self.ticket(project,'assert',owner['key'],'--token',owner['token'])
         remote = run(['git','ls-remote','origin',f"refs/heads/{pr['baseRefName']}"],cwd=directory).split()[0]
         if remote != base: raise RuntimeError('main changed before push; discard prepared integration and re-review')
         commit = run(['git','rev-parse','HEAD'],cwd=directory).strip()
