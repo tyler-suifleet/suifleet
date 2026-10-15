@@ -1,6 +1,7 @@
 mod catalog;
 mod apply;
 mod config;
+mod deps;
 mod firmware;
 mod identity;
 mod recipe;
