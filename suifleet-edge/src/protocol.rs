@@ -8,18 +8,23 @@ pub const DEPLOYMENT_SCHEMA_VERSION: u64 = 1;
 pub const RECIPE_VERSION: &str = "1.0";
 pub const STATUS_APPLIED: u8 = 1;
 pub const STATUS_FAILED: u8 = 2;
-pub const REQUIRED_TYPES: &[&str] = &["device_registry::DeviceRegistry", "device_registry::Device", "device_group::DeviceGroup", "device_group::GroupCreated", "device_cap::DeviceCap", "device_cap::DeviceAddressKey", "deployment_manager::DeploymentRecord", "deployment_manager::DeploymentCreated", "deployment_manager::DeviceStatusUpdated", "deployment_manager::TargetGroupsKey", "deployment_manager::TargetDevicesKey", "deployment_manager::StatusesKey", "deployment_manager::RecipeDigestKey", "deployment_manager::ReceiptsKey", "deployment_manager::Receipts", "deployment_manager::DeviceStatusReported", "device_registry::IdentityKey", "device_registry::Identity", "device_registry::DeviceIdentityChanged", "device_registry::CustodyKey", "device_registry::DeviceOwnerCap"];
+pub const REQUIRED_TYPES: &[&str] = &["device_registry::DeviceRegistry", "device_registry::Device", "device_group::DeviceGroup", "device_group::GroupCreated", "device_cap::DeviceCap", "device_cap::DeviceAddressKey", "deployment_manager::DeploymentRecord", "deployment_manager::DeploymentCreated", "deployment_manager::DeviceStatusUpdated", "deployment_manager::TargetGroupsKey", "deployment_manager::TargetDevicesKey", "deployment_manager::StatusesKey", "deployment_manager::RecipeDigestKey", "deployment_manager::ReceiptsKey", "deployment_manager::Receipts", "deployment_manager::DeviceStatusReported", "device_registry::IdentityKey", "device_registry::Identity", "device_registry::DeviceIdentityChanged", "device_registry::CustodyKey", "device_registry::DeviceOwnerCap", "deployment_manager::DelegateKey", "enrollment::EnrollmentPolicy", "enrollment::DeviceEnrolled", "roles::DeployerRole", "roles::RoleKey", "roles::RoleGranted"];
 pub const MOVE_ABI_JSON: &str = include_str!("../../interfaces/fleet-v1.json");
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Entry<K, V> { pub key: K, pub value: V }
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct VecMap<K, V> { pub contents: Vec<Entry<K, V>> }
+/// sui::table::Table: entries are dynamic fields; the struct is its UID and size.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Table { pub id: [u8; 32], pub size: u64 }
 pub mod deployment_manager {
     use super::*;
     pub const MODULE: &str = "deployment_manager";
     pub const ARTIFACT_SHA256: &str = "artifact_sha256";
     pub const CREATE_DEPLOYMENT: &str = "create_deployment";
     pub const CREATE_DEPLOYMENT_VERIFIED: &str = "create_deployment_verified";
+    pub const CREATOR: &str = "creator";
+    pub const DELEGATE: &str = "delegate";
     pub const DELETE_DEPLOYMENT: &str = "delete_deployment";
     pub const HAS_CURRENT_RECEIPTS: &str = "has_current_receipts";
     pub const HAS_RECEIPTS: &str = "has_receipts";
@@ -38,6 +43,11 @@ pub mod deployment_manager {
     pub const STATUSES: &str = "statuses";
     pub const TARGET_DEVICES: &str = "target_devices";
     pub const TARGET_GROUPS: &str = "target_groups";
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DelegateKey {
+        pub dummy_field: bool,
+    }
+    impl DelegateKey { pub const MOVE_TYPE: &'static str = "deployment_manager::DelegateKey"; }
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct DeploymentCreated {
         pub deployment_id: [u8; 32],
@@ -283,6 +293,103 @@ pub mod device_registry {
         pub admin: [u8; 32],
     }
     impl RegistryCreated { pub const MOVE_TYPE: &'static str = "device_registry::RegistryCreated"; }
+}
+pub mod enrollment {
+    use super::*;
+    pub const MODULE: &str = "enrollment";
+    pub const ADD_CLAIMS: &str = "add_claims";
+    pub const CLOSE: &str = "close";
+    pub const CREATE_POLICY: &str = "create_policy";
+    pub const ENROLL: &str = "enroll";
+    pub const ENROLLED: &str = "enrolled";
+    pub const IS_CLAIM: &str = "is_claim";
+    pub const IS_OPEN: &str = "is_open";
+    pub const OPERATOR: &str = "operator";
+    pub const REMAINING: &str = "remaining";
+    pub const REVOKE_CLAIM: &str = "revoke_claim";
+    pub const SET_LIMITS: &str = "set_limits";
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DeviceEnrolled {
+        pub policy_id: [u8; 32],
+        pub device_id: [u8; 32],
+        pub device_address: [u8; 32],
+        pub claim: [u8; 32],
+        pub operator: [u8; 32],
+        pub owner_cap: [u8; 32],
+        pub device_cap: [u8; 32],
+    }
+    impl DeviceEnrolled { pub const MOVE_TYPE: &'static str = "enrollment::DeviceEnrolled"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct EnrollmentPolicy {
+        pub id: [u8; 32],
+        pub operator: [u8; 32],
+        pub registry: [u8; 32],
+        pub claims: super::Table,
+        pub remaining: u64,
+        pub expires_at_ms: u64,
+        pub open: bool,
+        pub enrolled: u64,
+    }
+    impl EnrollmentPolicy { pub const MOVE_TYPE: &'static str = "enrollment::EnrollmentPolicy"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct PolicyCreated {
+        pub policy_id: [u8; 32],
+        pub operator: [u8; 32],
+        pub registry: [u8; 32],
+    }
+    impl PolicyCreated { pub const MOVE_TYPE: &'static str = "enrollment::PolicyCreated"; }
+}
+pub mod roles {
+    use super::*;
+    pub const MODULE: &str = "roles";
+    pub const ALLOW_GROUP: &str = "allow_group";
+    pub const CREATE_DEPLOYMENT_AS: &str = "create_deployment_as";
+    pub const GRANT: &str = "grant";
+    pub const IS_ACTIVE: &str = "is_active";
+    pub const NEW_DEPLOYER_ROLE: &str = "new_deployer_role";
+    pub const REVOKE: &str = "revoke";
+    pub const ROLE_GROUPS: &str = "role_groups";
+    pub const ROLE_OPERATOR: &str = "role_operator";
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DelegatedDeployment {
+        pub deployment_id: [u8; 32],
+        pub role_id: [u8; 32],
+        pub operator: [u8; 32],
+        pub delegate: [u8; 32],
+    }
+    impl DelegatedDeployment { pub const MOVE_TYPE: &'static str = "roles::DelegatedDeployment"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DeployerRole {
+        pub id: [u8; 32],
+        pub operator: [u8; 32],
+        pub groups: Vec<[u8; 32]>,
+    }
+    impl DeployerRole { pub const MOVE_TYPE: &'static str = "roles::DeployerRole"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct RoleBuilder {
+        pub operator: [u8; 32],
+        pub groups: Vec<[u8; 32]>,
+    }
+    impl RoleBuilder { pub const MOVE_TYPE: &'static str = "roles::RoleBuilder"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct RoleGranted {
+        pub role_id: [u8; 32],
+        pub operator: [u8; 32],
+        pub delegate: [u8; 32],
+        pub groups: Vec<[u8; 32]>,
+    }
+    impl RoleGranted { pub const MOVE_TYPE: &'static str = "roles::RoleGranted"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct RoleKey {
+        pub role_id: [u8; 32],
+    }
+    impl RoleKey { pub const MOVE_TYPE: &'static str = "roles::RoleKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct RoleRevoked {
+        pub role_id: [u8; 32],
+        pub operator: [u8; 32],
+    }
+    impl RoleRevoked { pub const MOVE_TYPE: &'static str = "roles::RoleRevoked"; }
 }
 #[derive(Debug, Clone, Deserialize)]
 pub struct DeploymentCreatedEvent {

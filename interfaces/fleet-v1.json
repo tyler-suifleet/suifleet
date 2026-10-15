@@ -53,6 +53,28 @@
           ],
           "returns": []
         },
+        "creator": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::deployment_manager::DeploymentRecord"
+          ],
+          "returns": [
+            "address"
+          ]
+        },
+        "delegate": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::deployment_manager::DeploymentRecord"
+          ],
+          "returns": [
+            "std::option::Option<address>"
+          ]
+        },
         "delete_deployment": {
           "visibility": "Public",
           "entry": true,
@@ -255,6 +277,20 @@
         }
       },
       "structs": {
+        "DelegateKey": {
+          "abilities": [
+            "Copy",
+            "Drop",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "dummy_field",
+              "bool"
+            ]
+          ]
+        },
         "DeploymentCreated": {
           "abilities": [
             "Copy",
@@ -1263,6 +1299,454 @@
           ]
         }
       }
+    },
+    "enrollment": {
+      "functions": {
+        "add_claims": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::enrollment::EnrollmentPolicy",
+            "vector<address>",
+            "&sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "close": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::enrollment::EnrollmentPolicy",
+            "&sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "create_policy": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::device_registry::DeviceRegistry",
+            "u64",
+            "u64",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "enroll": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::enrollment::EnrollmentPolicy",
+            "&mut sui_edge::device_registry::DeviceRegistry",
+            "std::string::String",
+            "std::string::String",
+            "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "enrolled": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::enrollment::EnrollmentPolicy"
+          ],
+          "returns": [
+            "u64"
+          ]
+        },
+        "is_claim": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::enrollment::EnrollmentPolicy",
+            "address"
+          ],
+          "returns": [
+            "bool"
+          ]
+        },
+        "is_open": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::enrollment::EnrollmentPolicy"
+          ],
+          "returns": [
+            "bool"
+          ]
+        },
+        "operator": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::enrollment::EnrollmentPolicy"
+          ],
+          "returns": [
+            "address"
+          ]
+        },
+        "remaining": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::enrollment::EnrollmentPolicy"
+          ],
+          "returns": [
+            "u64"
+          ]
+        },
+        "revoke_claim": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::enrollment::EnrollmentPolicy",
+            "address",
+            "&sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "set_limits": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::enrollment::EnrollmentPolicy",
+            "u64",
+            "u64",
+            "&sui::tx_context::TxContext"
+          ],
+          "returns": []
+        }
+      },
+      "structs": {
+        "DeviceEnrolled": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "policy_id",
+              "sui::object::ID"
+            ],
+            [
+              "device_id",
+              "sui::object::ID"
+            ],
+            [
+              "device_address",
+              "address"
+            ],
+            [
+              "claim",
+              "address"
+            ],
+            [
+              "operator",
+              "address"
+            ],
+            [
+              "owner_cap",
+              "sui::object::ID"
+            ],
+            [
+              "device_cap",
+              "sui::object::ID"
+            ]
+          ]
+        },
+        "EnrollmentPolicy": {
+          "abilities": [
+            "Key"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "id",
+              "sui::object::UID"
+            ],
+            [
+              "operator",
+              "address"
+            ],
+            [
+              "registry",
+              "sui::object::ID"
+            ],
+            [
+              "claims",
+              "sui::table::Table<address,bool>"
+            ],
+            [
+              "remaining",
+              "u64"
+            ],
+            [
+              "expires_at_ms",
+              "u64"
+            ],
+            [
+              "open",
+              "bool"
+            ],
+            [
+              "enrolled",
+              "u64"
+            ]
+          ]
+        },
+        "PolicyCreated": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "policy_id",
+              "sui::object::ID"
+            ],
+            [
+              "operator",
+              "address"
+            ],
+            [
+              "registry",
+              "sui::object::ID"
+            ]
+          ]
+        }
+      }
+    },
+    "roles": {
+      "functions": {
+        "allow_group": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::roles::RoleBuilder",
+            "&sui_edge::device_group::DeviceGroup"
+          ],
+          "returns": []
+        },
+        "create_deployment_as": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::roles::DeployerRole",
+            "&sui_edge::device_registry::DeviceRegistry",
+            "std::string::String",
+            "std::string::String",
+            "std::string::String",
+            "std::string::String",
+            "std::string::String",
+            "vector<sui::object::ID>",
+            "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "grant": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "sui_edge::roles::RoleBuilder",
+            "&mut sui_edge::device_registry::DeviceRegistry",
+            "address",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "is_active": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::device_registry::DeviceRegistry",
+            "&sui_edge::roles::DeployerRole"
+          ],
+          "returns": [
+            "bool"
+          ]
+        },
+        "new_deployer_role": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui::tx_context::TxContext"
+          ],
+          "returns": [
+            "sui_edge::roles::RoleBuilder"
+          ]
+        },
+        "revoke": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::device_registry::DeviceRegistry",
+            "sui::object::ID",
+            "&sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "role_groups": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::roles::DeployerRole"
+          ],
+          "returns": [
+            "&vector<sui::object::ID>"
+          ]
+        },
+        "role_operator": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::roles::DeployerRole"
+          ],
+          "returns": [
+            "address"
+          ]
+        }
+      },
+      "structs": {
+        "DelegatedDeployment": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "deployment_id",
+              "sui::object::ID"
+            ],
+            [
+              "role_id",
+              "sui::object::ID"
+            ],
+            [
+              "operator",
+              "address"
+            ],
+            [
+              "delegate",
+              "address"
+            ]
+          ]
+        },
+        "DeployerRole": {
+          "abilities": [
+            "Key",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "id",
+              "sui::object::UID"
+            ],
+            [
+              "operator",
+              "address"
+            ],
+            [
+              "groups",
+              "vector<sui::object::ID>"
+            ]
+          ]
+        },
+        "RoleBuilder": {
+          "abilities": [],
+          "type_parameters": [],
+          "fields": [
+            [
+              "operator",
+              "address"
+            ],
+            [
+              "groups",
+              "vector<sui::object::ID>"
+            ]
+          ]
+        },
+        "RoleGranted": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "role_id",
+              "sui::object::ID"
+            ],
+            [
+              "operator",
+              "address"
+            ],
+            [
+              "delegate",
+              "address"
+            ],
+            [
+              "groups",
+              "vector<sui::object::ID>"
+            ]
+          ]
+        },
+        "RoleKey": {
+          "abilities": [
+            "Copy",
+            "Drop",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "role_id",
+              "sui::object::ID"
+            ]
+          ]
+        },
+        "RoleRevoked": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "role_id",
+              "sui::object::ID"
+            ],
+            [
+              "operator",
+              "address"
+            ]
+          ]
+        }
+      }
     }
   },
   "required_type_origins": [
@@ -1286,7 +1770,13 @@
     "device_registry::Identity",
     "device_registry::DeviceIdentityChanged",
     "device_registry::CustodyKey",
-    "device_registry::DeviceOwnerCap"
+    "device_registry::DeviceOwnerCap",
+    "deployment_manager::DelegateKey",
+    "enrollment::EnrollmentPolicy",
+    "enrollment::DeviceEnrolled",
+    "roles::DeployerRole",
+    "roles::RoleKey",
+    "roles::RoleGranted"
   ],
   "manifest_schema_version": 1
 }
