@@ -68,7 +68,8 @@ def run(rpc_url, faucet_url):
                 if stage < 3 and name.endswith("DeviceAddressKey"): continue
                 # Receipts arrive in a later upgrade than the original package.
                 if stage < 3 and name.split("::")[1] in ("ReceiptsKey", "Receipts", "DeviceStatusReported",
-                                                         "IdentityKey", "Identity", "DeviceIdentityChanged"): continue
+                                                         "IdentityKey", "Identity", "DeviceIdentityChanged",
+                                                         "CustodyKey", "DeviceOwnerCap"): continue
                 module, datatype = name.split("::")
                 modules.setdefault(module, []).append(datatype)
             for module, types in modules.items():
@@ -115,7 +116,8 @@ def run(rpc_url, faucet_url):
         manifest = resolve(third_id, registry, cap)
         for name, origin in manifest["type_origins"].items():
             later = name.endswith("DeviceAddressKey") or name.split("::")[1] in ("ReceiptsKey", "Receipts", "DeviceStatusReported",
-                                                                             "IdentityKey", "Identity", "DeviceIdentityChanged")
+                                                                             "IdentityKey", "Identity", "DeviceIdentityChanged",
+                                                         "CustodyKey", "DeviceOwnerCap")
             expected = second_id if name.endswith("RecipeDigestKey") else third_id if later else first_id
             assert origin == dm.object_id(expected), (name, origin, expected)
         assert manifest["call_package_id"] == dm.object_id(third_id)

@@ -39,6 +39,7 @@ pub const REQUIRED_TYPES: &[&str] = &[
     "deployment_manager::StatusesKey",
     "deployment_manager::RecipeDigestKey",
     "device_registry::IdentityKey",
+    "device_registry::DeviceOwnerCap",
 ];
 
 #[derive(Deserialize, Debug, Clone)]
