@@ -1133,6 +1133,33 @@
       ],
       "validation": "Offline regressions, exact-head CI/testnet, independent review, actual automatic reuse evidence.",
       "description": "<!-- suifleet-tracking:SF-046 -->\n\nNarrow SF-043 automatic-testnet reliability follow-up authorized by the original user request. Actual Actions artifact discovery returned fixture artifact 11955229354 (created 07:28:18Z, run38697912560) before newer artifact11954559410 (created07:32:10Z, run38697500271). The merged helper selects the first API result, losing fixtures added by the later run and causing unnecessary publication/spend. IDs/API response ordering are not a trustworthy creation-time ordering, especially across reruns.\n\nScope: select the newest valid main-workflow ciphertext by explicit validated creation timestamp across bounded artifact discovery, preserving producer trust, authentication, safe modes and fail-closed behavior. Add offline regression for this real out-of-order response and bounded pagination. No secrets or live writes in unit tests.\n\nAcceptance: offline regressions and exact-head CI/testnet pass; independent review and sole-orchestrator integration; observe actual restored unchanged-fixture reuse without publish/upgrade afterward. Preserve no-human-approval automation, budget, wallet isolation and mandatory exact-head gate. No bootstrap gate exemption is requested: the existing main workflow now works.\n\nExisting actual normal automatic successes remain valid: PR run38697912560 and main run38697500271 attempt2. Local Walrus/host updater only; wallet/Pi/public-Walrus acceptance remains #11/#32.\n"
+    },
+    {
+      "key": "SF-047",
+      "title": "Refresh blocked reviews when exact-head CI completes",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "baseline",
+      "kind": "type:bug",
+      "depends_on": [
+        "SF-044",
+        "SF-043"
+      ],
+      "paths": [
+        "tools/pr-coordinator",
+        "docs/PR_COORDINATION.md"
+      ],
+      "evidence": "Blocked reviews117/116/114 demonstrate review staleness after CI success.",
+      "acceptance": [
+        "- Bind review freshness to meaningful exact-head CI/status and required current-base testnet evidence, with deterministic ordering and no timestamp/receipt loops.",
+        "- Automatically re-review when pending or failed checks become successful; never reuse a prior blocked verdict as approval.",
+        "- Avoid expensive premature reviews while required checks are absent, pending or failing; repairs for actionable code feedback/base integration must still run.",
+        "- Preserve independent exact head/base approval, one active worker per PR, retained genuine hardware/acceptance blockers, and serial merge gates.",
+        "- Offline regressions cover pending-to-success, failures, missing/wrong-base testnet, stable reordered checks, restart/deduplication and actual coordinator dispatch decisions.",
+        "- Install verified coordinator update without interrupting live workers and record review-queue behavior."
+      ],
+      "validation": "Offline scheduler regressions and installed-service observation.",
+      "description": "Independent reviews can finish blocked solely because exact-head CI/testnet is pending. The coordinator fingerprint omits CI state; later successful checks do not trigger a new review, leaving correct implementation PRs and their dependencies stalled.\n\nAcceptance:\n- Bind review freshness to meaningful exact-head CI/status and required current-base testnet evidence, with deterministic ordering and no timestamp/receipt loops.\n- Automatically re-review when pending or failed checks become successful; never reuse a prior blocked verdict as approval.\n- Avoid expensive premature reviews while required checks are absent, pending or failing; repairs for actionable code feedback/base integration must still run.\n- Preserve independent exact head/base approval, one active worker per PR, retained genuine hardware/acceptance blockers, and serial merge gates.\n- Offline regressions cover pending-to-success, failures, missing/wrong-base testnet, stable reordered checks, restart/deduplication and actual coordinator dispatch decisions.\n- Install verified coordinator update without interrupting live workers and record review-queue behavior.\n"
     }
   ]
 }
