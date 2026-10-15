@@ -201,6 +201,9 @@ impl proto::ledger_service_server::LedgerService for Shim {
         if let Some(address) = data["owner"]["AddressOwner"].as_str() {
             owner.kind = Some(proto::owner::OwnerKind::Address as i32);
             owner.address = Some(address.to_owned());
+        } else if let Some(parent) = data["owner"]["ObjectOwner"].as_str() {
+            owner.kind = Some(proto::owner::OwnerKind::Object as i32);
+            owner.address = Some(parent.to_owned());
         } else if let Some(shared) = data["owner"].get("Shared") {
             owner.kind = Some(proto::owner::OwnerKind::Shared as i32);
             owner.version = Some(number(&shared["initial_shared_version"]));

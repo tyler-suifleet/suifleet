@@ -566,6 +566,8 @@ impl SuiClient {
 
     /// A matching ID alone is not authority to update a device. Only its current
     /// operator may deploy; shared groups must belong to that operator too.
+    /// An activated Device is held by the registry; its operator is whoever
+    /// owns the DeviceOwnerCap that its identity names.
     pub async fn authorized_target(
         &self,
         event: &DeploymentCreatedEvent,
@@ -576,8 +578,20 @@ impl SuiClient {
             same_type(&object.object_type, &self.move_type("device_registry::Device")),
             "wrong Device type"
         );
-        let Owner::Address(owner) = &object.owner else {
-            anyhow::bail!("Device has no operator owner");
+        let identity = self
+            .identity(device)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("device has no registry identity"))?;
+        let owner_cap = self
+            .object(identity["owner_cap"].as_str().unwrap_or(""))
+            .await?;
+        anyhow::ensure!(
+            same_type(&owner_cap.object_type, &self.move_type("device_registry::DeviceOwnerCap"))
+                && same_id(owner_cap.fields["device_id"].as_str().unwrap_or(""), device),
+            "identity names a wrong DeviceOwnerCap"
+        );
+        let Owner::Address(owner) = &owner_cap.owner else {
+            anyhow::bail!("DeviceOwnerCap has no operator owner");
         };
         if !same_id(owner, &event.creator) {
             return Ok(false);
@@ -639,16 +653,20 @@ impl SuiClient {
         );
         // The registry's identity decides whether this key is still trusted
         // (revocation, rotation, deregistration); reports would abort anyway.
+        let identity = self.identity(device_id).await?;
+        check_identity(identity.as_ref(), &self.address())
+    }
+
+    /// The device's registry identity, if it was ever activated.
+    async fn identity(&self, device_id: &str) -> anyhow::Result<Option<Value>> {
         let device = Address::from_str(device_id)
             .map_err(|e| anyhow::anyhow!("invalid device ID {device_id}: {e}"))?;
-        let identity = self
-            .keyed_field(
-                &self.manifest().shared_objects.registry.id,
-                "device_registry::IdentityKey",
-                device.inner(),
-            )
-            .await?;
-        check_identity(identity.as_ref(), &self.address())
+        self.keyed_field(
+            &self.manifest().shared_objects.registry.id,
+            "device_registry::IdentityKey",
+            device.inner(),
+        )
+        .await
     }
 
     pub async fn report_status(
@@ -759,7 +777,7 @@ fn check_identity(identity: Option<&Value>, address: &str) -> anyhow::Result<()>
     })?;
     anyhow::ensure!(
         identity["revoked"] != Value::Bool(true),
-        "device identity is revoked or deregistered; its owner must reactivate it before it reports again"
+        "device identity is revoked or deregistered; its owner must reinstate it before it reports again"
     );
     anyhow::ensure!(
         same_id(identity["signer"].as_str().unwrap_or(""), address),
@@ -970,13 +988,13 @@ mod tests {
     #[test]
     fn only_an_active_identity_for_this_key_is_trusted() {
         let key = "0xa0";
-        let active = json!({"signer": "0x00a0", "operator": "0xad", "revoked": false});
+        let active = json!({"signer": "0x00a0", "owner_cap": "0xc1", "revoked": false});
         check_identity(Some(&active), key).unwrap();
         let error = check_identity(None, key).unwrap_err().to_string();
         assert!(error.contains("activate_device"), "{error}");
-        let revoked = json!({"signer": "0xa0", "operator": "0xad", "revoked": true});
+        let revoked = json!({"signer": "0xa0", "owner_cap": "0xc1", "revoked": true});
         assert!(check_identity(Some(&revoked), key).unwrap_err().to_string().contains("revoked"));
-        let rotated = json!({"signer": "0xb1", "operator": "0xad", "revoked": false});
+        let rotated = json!({"signer": "0xb1", "owner_cap": "0xc1", "revoked": false});
         assert!(check_identity(Some(&rotated), key).unwrap_err().to_string().contains("rotated"));
     }
 

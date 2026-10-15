@@ -30,10 +30,13 @@ UPGRADE_CAP = "0xc0"
 TYPE_ORIGINS = {name: ORIGIN for name in REQUIRED_TYPES}
 TYPE_ORIGINS["deployment_manager::RecipeDigestKey"] = RECIPE_ORIGIN
 TYPE_ORIGINS["device_cap::DeviceAddressKey"] = PACKAGE
-for _name in ("device_registry::IdentityKey", "device_registry::Identity", "device_registry::DeviceIdentityChanged"):
+for _name in ("device_registry::IdentityKey", "device_registry::Identity", "device_registry::DeviceIdentityChanged",
+              "device_registry::CustodyKey", "device_registry::DeviceOwnerCap"):
     TYPE_ORIGINS[_name] = PACKAGE  # Introduced by a later upgrade.
 DEVICE = "0xde"
 CAP = "0xca"
+OWNER_CAP = "0xc1"
+CUSTODY_FIELD = "0xcf"
 OPERATOR = "0xad"
 GROUP = "0x10"
 ADDRESS = "0xa0ccc8bcc83f6c628340134f8546a21e0618fd1aaa02432bba454c4a2c2233da"
@@ -81,7 +84,7 @@ class Simulator:
         self.downloads = []
         self.built = []
         self.errors = []
-        self.identity = {"signer": ADDRESS, "operator": OPERATOR, "revoked": False}
+        self.identity = {"signer": ADDRESS, "revoked": False, "owner_cap": OWNER_CAP}
         self.chain_checks = 0
         self.truncate_next_artifact = True  # First artifact transfer drops mid-body.
         self.ranges = []
@@ -103,8 +106,10 @@ class Simulator:
             return {"data":{"content":{"type":"0x2::package::UpgradeCap","fields":{"package":self.latest_package,"version":"3"}}}}
         if id == REGISTRY:
             type, fields, owner = "device_registry::DeviceRegistry", {}, None
-        elif id == DEVICE:
-            type, fields, owner = "device_registry::Device", {"device_address":ADDRESS}, OPERATOR
+        elif id == DEVICE:  # Activated: held by the registry, operated through OWNER_CAP.
+            type, fields, owner = "device_registry::Device", {"device_address":ADDRESS}, {"ObjectOwner":CUSTODY_FIELD}
+        elif id == OWNER_CAP:
+            type, fields, owner = "device_registry::DeviceOwnerCap", {"device_id":DEVICE}, OPERATOR
         elif id == CAP:
             type, fields, owner = "device_cap::DeviceCap", {"device_id":DEVICE}, ADDRESS
         elif id == GROUP:
@@ -112,7 +117,8 @@ class Simulator:
         else:
             event = next(e["parsedJson"] for e in self.events if e["parsedJson"]["deployment_id"] == id)
             type, fields, owner = "deployment_manager::DeploymentRecord", {"creator":event["creator"]}, None
-        return {"data":{"objectId":id,"owner":{"AddressOwner":owner} if owner else {"Shared":{"initial_shared_version":"1"}},
+        owner = {"AddressOwner":owner} if isinstance(owner, str) else owner or {"Shared":{"initial_shared_version":"1"}}
+        return {"data":{"objectId":id,"owner":owner,
             "content":{"type":f"{TYPE_ORIGINS[type]}::{type}","fields":fields}}}
 
     def rpc(self, method, params):
@@ -370,7 +376,11 @@ def run(binary, firmware_helper=False, daemon_user=None):
                 assert "/v1/blobs/recipe-0x101" in sim.downloads and "/v1/blobs/artifact" in sim.downloads
                 assert not sim.errors, sim.errors
                 # A revoked device stops: nothing new is applied or reported.
+                # Identity is checked once per poll: let a poll start after the
+                # revocation so one already in flight cannot see the new event.
                 sim.identity = dict(sim.identity, revoked=True)
+                checks = sim.chain_checks
+                wait_for(lambda: sim.chain_checks > checks, "daemon stopped polling", process)
                 sim.add("0x10b")
                 checks = sim.chain_checks
                 wait_for(lambda: sim.chain_checks >= checks + 4, "daemon stopped polling after revocation", process)
