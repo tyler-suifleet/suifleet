@@ -3,6 +3,12 @@
 import { bcs } from "@mysten/sui/bcs";
 import { Transaction } from "@mysten/sui/transactions";
 export * from "./protocol-version";
+export const component_catalog_CatalogBindingBcs = bcs.struct("CatalogBinding", { version_id: bcs.Address });
+export const component_catalog_CatalogBindingKeyBcs = bcs.struct("CatalogBindingKey", { dummy_field: bcs.bool() });
+export const component_catalog_CatalogCreatedBcs = bcs.struct("CatalogCreated", { catalog_id: bcs.Address, publisher: bcs.Address });
+export const component_catalog_ComponentCatalogBcs = bcs.struct("ComponentCatalog", { id: bcs.Address, publisher: bcs.Address, versions: bcs.struct("VecMap", { contents: bcs.vector(bcs.struct("Entry", { key: bcs.string(), value: bcs.Address })) }) });
+export const component_catalog_ComponentVersionBcs = bcs.struct("ComponentVersion", { id: bcs.Address, catalog_id: bcs.Address, publisher: bcs.Address, component_name: bcs.string(), version: bcs.string(), schema_version: bcs.u64(), created_at: bcs.u64(), platform_os: bcs.vector(bcs.string()), platform_arch: bcs.vector(bcs.string()), recipe_blob_ids: bcs.vector(bcs.string()), recipe_sha256s: bcs.vector(bcs.string()), artifact_sha256s: bcs.vector(bcs.string()) });
+export const component_catalog_VersionPublishedBcs = bcs.struct("VersionPublished", { catalog_id: bcs.Address, version_id: bcs.Address, publisher: bcs.Address, component_name: bcs.string(), version: bcs.string() });
 export const deployment_manager_DeploymentCreatedBcs = bcs.struct("DeploymentCreated", { deployment_id: bcs.Address, component_name: bcs.string(), version: bcs.string(), recipe_blob_id: bcs.string(), artifact_sha256: bcs.string(), target_groups: bcs.vector(bcs.Address), target_devices: bcs.vector(bcs.Address), creator: bcs.Address });
 export const deployment_manager_DeploymentDeletedBcs = bcs.struct("DeploymentDeleted", { deployment_id: bcs.Address, creator: bcs.Address });
 export const deployment_manager_DeploymentRecordBcs = bcs.struct("DeploymentRecord", { id: bcs.Address, creator: bcs.Address, component_name: bcs.string(), version: bcs.string(), recipe_blob_id: bcs.string(), artifact_sha256: bcs.string(), created_at: bcs.u64(), schema_version: bcs.u64() });
@@ -33,6 +39,14 @@ export const device_registry_IdentityBcs = bcs.struct("Identity", { signer: bcs.
 export const device_registry_IdentityKeyBcs = bcs.struct("IdentityKey", { device_id: bcs.Address });
 export const device_registry_RegistryCreatedBcs = bcs.struct("RegistryCreated", { registry_id: bcs.Address, admin: bcs.Address });
 export const calls = {
+  component_catalog_create_catalog: (tx: Transaction, packageId: string) => tx.moveCall({ target: `${packageId}::component_catalog::create_catalog`, arguments: [] }),
+  component_catalog_create_deployment: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: string[], a2: string[], a3: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::component_catalog::create_deployment`, arguments: [tx.object(a0), tx.pure(bcs.vector(bcs.Address).serialize(a1)), tx.pure(bcs.vector(bcs.Address).serialize(a2)), tx.object(a3)] }),
+  component_catalog_delete_deployment: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::component_catalog::delete_deployment`, arguments: [tx.object(a0)] }),
+  component_catalog_publish_version: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: string, a2: string, a3: string[], a4: string[], a5: string[], a6: string[], a7: string[], a8: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::component_catalog::publish_version`, arguments: [tx.object(a0), tx.pure.string(a1), tx.pure.string(a2), tx.pure(bcs.vector(bcs.string()).serialize(a3)), tx.pure(bcs.vector(bcs.string()).serialize(a4)), tx.pure(bcs.vector(bcs.string()).serialize(a5)), tx.pure(bcs.vector(bcs.string()).serialize(a6)), tx.pure(bcs.vector(bcs.string()).serialize(a7)), tx.object(a8)] }),
+  component_catalog_publisher: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::component_catalog::publisher`, arguments: [tx.object(a0)] }),
+  component_catalog_validate_hash: (tx: Transaction, packageId: string, a0: string) => tx.moveCall({ target: `${packageId}::component_catalog::validate_hash`, arguments: [tx.pure.string(a0)] }),
+  component_catalog_validate_name: (tx: Transaction, packageId: string, a0: string) => tx.moveCall({ target: `${packageId}::component_catalog::validate_name`, arguments: [tx.pure.string(a0)] }),
+  component_catalog_validate_version: (tx: Transaction, packageId: string, a0: string) => tx.moveCall({ target: `${packageId}::component_catalog::validate_version`, arguments: [tx.pure.string(a0)] }),
   deployment_manager_create_deployment: (tx: Transaction, packageId: string, a0: string, a1: string, a2: string, a3: string, a4: string[], a5: string[], a6: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::deployment_manager::create_deployment`, arguments: [tx.pure.string(a0), tx.pure.string(a1), tx.pure.string(a2), tx.pure.string(a3), tx.pure(bcs.vector(bcs.Address).serialize(a4)), tx.pure(bcs.vector(bcs.Address).serialize(a5)), tx.object(a6)] }),
   deployment_manager_create_deployment_verified: (tx: Transaction, packageId: string, a0: string, a1: string, a2: string, a3: string, a4: string, a5: string[], a6: string[], a7: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::deployment_manager::create_deployment_verified`, arguments: [tx.pure.string(a0), tx.pure.string(a1), tx.pure.string(a2), tx.pure.string(a3), tx.pure.string(a4), tx.pure(bcs.vector(bcs.Address).serialize(a5)), tx.pure(bcs.vector(bcs.Address).serialize(a6)), tx.object(a7)] }),
   deployment_manager_delete_deployment: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::deployment_manager::delete_deployment`, arguments: [tx.object(a0)] }),
@@ -82,6 +96,12 @@ export const calls = {
   device_registry_set_meta: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: string, a2: string) => tx.moveCall({ target: `${packageId}::device_registry::set_meta`, arguments: [tx.object(a0), tx.pure.string(a1), tx.pure.string(a2)] }),
 };
 export const TYPES = {
+  component_catalog_CatalogBinding: "component_catalog::CatalogBinding",
+  component_catalog_CatalogBindingKey: "component_catalog::CatalogBindingKey",
+  component_catalog_CatalogCreated: "component_catalog::CatalogCreated",
+  component_catalog_ComponentCatalog: "component_catalog::ComponentCatalog",
+  component_catalog_ComponentVersion: "component_catalog::ComponentVersion",
+  component_catalog_VersionPublished: "component_catalog::VersionPublished",
   deployment_manager_DeploymentCreated: "deployment_manager::DeploymentCreated",
   deployment_manager_DeploymentDeleted: "deployment_manager::DeploymentDeleted",
   deployment_manager_DeploymentRecord: "deployment_manager::DeploymentRecord",

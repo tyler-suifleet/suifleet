@@ -57,17 +57,19 @@ def wait_for(condition, message, process=None, timeout=90):
     raise AssertionError(message)
 
 
-def run(rpc_url, faucet_url):
+def run(rpc_url, faucet_url, catalog_upgrade=False):
     for url in (rpc_url, faucet_url):
         if urlparse(url).hostname not in ("localhost", "127.0.0.1", "::1"):
             raise ValueError("this test requires an isolated loopback node and faucet")
     blobs = {}
+    downloads = []
 
     class Walrus(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
 
         def do_GET(self):
+            downloads.append(self.path)
             body = blobs.get(self.path.removeprefix("/v1/blobs/"))
             self.send_response(200 if body is not None else 404)
             self.send_header("Content-Length", str(len(body or b"")))
@@ -97,9 +99,12 @@ def run(rpc_url, faucet_url):
                 out = result.stdout
                 return json.loads(out[min(i for i in (out.find("{"), out.find("[")) if i >= 0):])
 
-            client("-y", "active-address", json_output=False)
-            client("new-env", "--alias", "daemon-test", "--rpc", rpc_url, json_output=False)
-            client("switch", "--env", "daemon-test", json_output=False)
+            # Configure loopback before any CLI operation: the default generated
+            # wallet points at public testnet and cannot be used network-none.
+            (config_dir / "sui.keystore").write_text("[]")
+            (config_dir / "client.yaml").write_text(f"keystore:\n  File: {config_dir / 'sui.keystore'}\nenvs:\n- alias: daemon-test\n  rpc: {rpc_url}\nactive_env: daemon-test\nactive_address: null\n")
+            address = client("new-address", "ed25519")["address"]
+            client("switch", "--address", address, json_output=False)
             operator = client("active-address", json_output=False).strip().split()[-1]
             client("faucet", "--url", faucet_url, json_output=False)
             def funded():
@@ -122,6 +127,15 @@ def run(rpc_url, faucet_url):
             # The actual contracts, as a fresh publish.
             contracts = root / "contracts"
             shutil.copytree(ROOT / "contracts", contracts, ignore=shutil.ignore_patterns("build", "Published.toml"))
+            if catalog_upgrade:
+                # Pre-catalog main includes registry custody and identity activation.
+                # Upgrade these existing objects rather than calling new identity APIs
+                # against the earlier pre-identity package.
+                for source in (contracts / "sources").glob("*.move"):
+                    source.unlink()
+                names = subprocess.check_output(["git", "ls-tree", "--name-only", "9c69582bd040cf82169940a6d14a1a288fd0bda4:contracts/sources"], cwd=ROOT, text=True).splitlines()
+                for name in names:
+                    (contracts / "sources" / name).write_bytes(subprocess.check_output(["git", "show", f"9c69582bd040cf82169940a6d14a1a288fd0bda4:contracts/sources/{name}"], cwd=ROOT))
             published = client("test-publish", contracts, "--build-env", "testnet", "--pubfile-path",
                                root / "Pub.local.toml", "--gas-budget", "500000000", "--silence-warnings")
             assert published["effects"]["status"]["status"] == "success", published["effects"]["status"]
@@ -162,6 +176,27 @@ def run(rpc_url, faucet_url):
             group = created(group_tx, "::device_group::DeviceGroup")[0]
             add_to_group(group)
 
+            if catalog_upgrade:
+                original_package = package
+                original_origins = manifest["type_origins"].copy()
+                # Existing objects were created by the baseline package before upgrade.
+                shutil.copytree(ROOT / "contracts/sources", contracts / "sources", dirs_exist_ok=True)
+                upgraded = client("test-upgrade", contracts, "--build-env", "testnet", "--pubfile-path",
+                                  root / "Pub.local.toml", "--upgrade-capability", upgrade_cap,
+                                  "--gas-budget", "500000000", "--silence-warnings")
+                assert upgraded["effects"]["status"]["status"] == "success", upgraded["effects"]["status"]
+                package = next(c["packageId"] for c in upgraded["objectChanges"] if c["type"] == "published")
+                manifest = dm.resolve(SimpleNamespace(chain_identifier=chain_id, rpc=rpc_url, package=package,
+                    upgrade_cap=upgrade_cap, registry=registry, network="localnet", publisher=aggregator, aggregator=aggregator))
+                assert all(manifest["type_origins"][n] == o for n,o in original_origins.items())
+                assert all(manifest["type_origins"][n] == dm.object_id(package) for n in dm.CATALOG_TYPES)
+                # Old package stays callable; existing-object compatible APIs still execute.
+                transaction("--move-call", f"{original_package}::deployment_manager::create_deployment_verified",
+                    '\"old-call\"', '\"1.0.0\"', '\"old-recipe\"', '\"'+"a"*64+'\"', '\"'+"b"*64+'\"',
+                    "vector[]", f"vector[@{other}]", CLOCK)
+                catalog = created(transaction("--move-call", f"{package}::component_catalog::create_catalog"), "::component_catalog::ComponentCatalog")[0]
+                print("PASS: compatible upgrade from 9c69582bd040cf82169940a6d14a1a288fd0bda4, existing registry/device/group objects, old call remains callable, new catalog introduction origins")
+
             run_id = "localnet-" + uuid.uuid4().hex[:10]
 
             def create_call(version, *, devices=(), groups=(), fail="none"):
@@ -180,6 +215,29 @@ def run(rpc_url, faucet_url):
             def deploy(version, **targets):
                 result = transaction(*create_call(version, **targets))
                 return created(result, "::deployment_manager::DeploymentRecord")[0]
+
+            def deploy_catalog(version, *, devices=(), groups=(), unsupported=False):
+                artifact = component.build(version, run_id)
+                selected = "catalog-artifact-" + version.replace(".", "-")
+                recipe_blob = "catalog-recipe-" + version.replace(".", "-")
+                recipe = component.recipe(artifact, selected)
+                blobs[selected], blobs[recipe_blob] = artifact, recipe
+                # First manifest is intentionally incompatible on this x86_64 test host.
+                strings = lambda values: "vector[" + ",".join(json.dumps(v) for v in values) + "]"
+                registration = transaction("--move-call", f"{package}::component_catalog::publish_version", f"@{catalog}",
+                    json.dumps(component.DEFAULT_COMPONENT), json.dumps(version), strings(["linux", "linux"]),
+                    strings(["aarch64", "arm" if unsupported else "x86_64"]), strings(["never-download", recipe_blob]),
+                    strings(["a"*64, hashlib.sha256(recipe).hexdigest()]), strings(["b"*64, hashlib.sha256(artifact).hexdigest()]), CLOCK)
+                version_id = created(registration, "::component_catalog::ComponentVersion")[0]
+                obj = dm.rpc(rpc_url,"sui_getObject",[version_id,{"showOwner":True,"showContent":True}])["data"]
+                assert obj["owner"] == "Immutable"
+                assert dm.object_id(obj["content"]["type"].split("::")[0]) == dm.object_id(package)
+                ids = lambda values: "vector[" + ",".join("@"+v for v in values) + "]"
+                result = transaction("--move-call", f"{package}::component_catalog::create_deployment", f"@{version_id}", ids(groups), ids(devices), CLOCK)
+                deployment = created(result,"::deployment_manager::DeploymentRecord")[0]
+                binding = dm.rpc(rpc_url,"suix_getDynamicFieldObject",[deployment,{"type":f"{package}::component_catalog::CatalogBindingKey","value":{"dummy_field":False}}])["data"]["content"]["fields"]["value"]["fields"]
+                assert dm.object_id(binding["version_id"]) == dm.object_id(version_id)
+                return deployment
 
             components = root / "state" / "test-components"
             template = root / "device-template.toml"
@@ -242,11 +300,18 @@ def run(rpc_url, faucet_url):
                 process = start()
                 wait_for(lambda: journal().get("initialized"), "enrollment did not establish a cursor", process)
 
-                v1 = deploy("1.0.0", devices=[device])
+                if catalog_upgrade:
+                    unsupported = deploy_catalog("0.9.5", devices=[device], unsupported=True)
+                    wait_for(settled(unsupported, 2), "unsupported platform did not fail and report", process)
+                    receipt_is(unsupported, 2)
+                    assert not downloads, downloads
+                    assert not outcome(unsupported).get("firmware_request")
+                    print("PASS: live unsupported platform Failed with on-chain receipt and no downloads, then valid deployment follows")
+                v1 = (deploy_catalog if catalog_upgrade else deploy)("1.0.0", devices=[device])
                 wait_for(settled(v1, 1), "direct v1 was not applied and reported", process)
                 receipt_is(v1, 1)
 
-                v2 = deploy("2.0.0", groups=[group])
+                v2 = (deploy_catalog if catalog_upgrade else deploy)("2.0.0", groups=[group])
                 wait_for(settled(v2, 1), "group v2 was not applied and reported", process)
                 receipt_is(v2, 1)
 
@@ -357,5 +422,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--rpc", default="http://127.0.0.1:9000")
     parser.add_argument("--faucet", default="http://127.0.0.1:9123/v2/gas")
+    parser.add_argument("--catalog-upgrade", action="store_true")
     args = parser.parse_args()
-    run(args.rpc, args.faucet)
+    run(args.rpc, args.faucet, args.catalog_upgrade)
