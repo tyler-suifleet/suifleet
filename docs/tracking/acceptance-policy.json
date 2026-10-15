@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "authorization": "User explicitly permits reviewed implementation merges before Pi/Sui-network integration; external acceptance remains separately tracked. No code/test/CI/review gate is waived.",
+  "tickets": {
+    "SF-006": {
+      "deferred_checks": [
+        "public-testnet publish/upgrade, execution effects and generated-client acceptance"
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/11"
+      ]
+    },
+    "SF-008": {
+      "deferred_checks": [
+        "public-network existing-object mixed-client identity lifecycle",
+        "real extension-wallet connect/sign/network/error flows"
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/11",
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ]
+    },
+    "SF-011": {
+      "deferred_checks": [
+        "real extension-wallet catalog/deploy/delete acceptance",
+        "physical ARM/Pi and public-network interoperability"
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/11",
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ]
+    },
+    "SF-013": {
+      "deferred_checks": [
+        "public-network desired-state upgrade and real extension-wallet acceptance",
+        "physical Pi reconciliation and recovery"
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/11",
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ]
+    },
+    "SF-024": {
+      "deferred_checks": [
+        "hosted/public-node and archival-retention integration"
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/11"
+      ]
+    },
+    "SF-025": {
+      "deferred_checks": [
+        "physical Pi boot, reboot, power-loss and OTA recovery"
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/29",
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ]
+    },
+    "SF-039": {
+      "deferred_checks": [
+        "production protected signing environment and provisioned trust roots",
+        "exact production release workflow execution and Pi trust delivery"
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/62",
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ]
+    }
+  }
+}

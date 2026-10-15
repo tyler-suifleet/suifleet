@@ -1,9 +1,10 @@
 module sui_edge::device_cap {
-    use sui_edge::device_registry::{Self, Device};
+    use sui_edge::device_registry::{Self, Device, DeviceRegistry};
     use sui::dynamic_field as df;
 
     const EWrongSigner: u64 = 0;
     const EUnboundLegacyCap: u64 = 1;
+    const EInactiveIdentity: u64 = 2;
     public struct DeviceAddressKey has copy, drop, store {}
 
     // ── Objects ──────────────────────────────────────────────────────────────
@@ -45,6 +46,14 @@ module sui_edge::device_cap {
         assert!(df::exists(&cap.id, DeviceAddressKey {}), EUnboundLegacyCap);
         let signer: &address = df::borrow(&cap.id, DeviceAddressKey {});
         assert!(ctx.sender() == *signer, EWrongSigner);
+    }
+
+    /// The signer check plus the registry's current identity: the device must
+    /// be registered or activated, not revoked or deregistered, and the
+    /// sender must be its current key (a rotation invalidates older caps).
+    public fun assert_active(cap: &DeviceCap, registry: &DeviceRegistry, ctx: &TxContext) {
+        assert_signer(cap, ctx);
+        assert!(device_registry::is_active_signer(registry, cap.device_id, ctx.sender()), EInactiveIdentity);
     }
 
     public fun device_id(cap: &DeviceCap): ID { cap.device_id }

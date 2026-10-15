@@ -19,6 +19,76 @@ def fixture():
 
 
 class Gates(unittest.TestCase):
+    def test_public_testnet_requires_explicit_validated_project_grant(self):
+        self.assertIn('not authorized',c.network_authorization({}))
+        grant=dict(network='testnet',chain_identifier='4c78adac',wallet='/dedicated/client.yaml',lock_resource='network:suifleet-testnet')
+        message=c.network_authorization({'testnet_authorization':grant})
+        self.assertIn('automatic public Sui testnet testing only',message)
+        self.assertIn('network:suifleet-testnet',message)
+        self.assertIn('Mainnet',message)
+        for field,value in [('network','mainnet'),('chain_identifier','35834a8a'),('lock_resource','')]:
+            with self.subTest(field=field),self.assertRaises(ValueError):
+                c.network_authorization({'testnet_authorization':{**grant,field:value}})
+
+    def test_long_feedback_build_does_not_occupy_readonly_review_slot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store=c.Store(Path(directory)/'jobs.sqlite3')
+            pr=fixture()[0]
+            self.assertIsNotNone(store.reserve('project',pr,'Codex','fix',Path(directory)/'fix'))
+            other={**pr,'number':50}
+            self.assertIsNotNone(store.reserve('project',other,'Codex','review',Path(directory)/'review'))
+            self.assertIsNone(store.reserve('project',pr,'Claude','review',Path(directory)/'same-pr'))
+            self.assertIsNone(store.reserve('project',{**pr,'number':51},'Codex','review',Path(directory)/'second-review'))
+            self.assertIsNone(store.reserve('project',{**pr,'number':52},'Codex','fix',Path(directory)/'second-fix'))
+
+    def test_configurable_repairs_preserve_per_pr_exclusion_and_capacity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'jobs.sqlite3'
+            store=c.Store(path, {'Codex': {'fix': 2}})
+            pr=fixture()[0]
+            first=store.reserve('one',pr,'Codex','fix',Path(directory))
+            self.assertIsNotNone(first)
+            store.db.execute("UPDATE jobs SET status='orphaned' WHERE id=?",(first,))
+            other={**pr,'number':50}
+            self.assertIsNotNone(store.reserve('one',other,'Codex','fix',Path(directory)))
+            self.assertIsNone(store.reserve('one',pr,'Claude','review',Path(directory)))
+            self.assertIsNone(store.reserve('one',{**pr,'number':51},'Codex','fix',Path(directory)))
+            restarted=c.Store(path, {'Codex': {'fix': 1}})
+            self.assertIsNone(restarted.reserve('two',{**pr,'number':52},'Codex','fix',Path(directory)))
+            self.assertEqual(restarted.db.execute("SELECT COUNT(*) FROM jobs WHERE status IN ('reserved','orphaned')").fetchone()[0],2)
+            self.assertIsNotNone(store.reserve('one',{**pr,'number':51},'Codex','review',Path(directory)))
+
+    def test_concurrent_reservations_obey_configured_capacity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'jobs.sqlite3'
+            c.Store(path)
+            barrier=threading.Barrier(4)
+            results=[]
+            def reserve(number):
+                store=c.Store(path, {'Codex': {'fix': 2}})
+                barrier.wait()
+                results.append(store.reserve('one',{**fixture()[0],'number':number},'Codex','fix',Path(directory)))
+                store.db.close()
+            threads=[threading.Thread(target=reserve,args=(number,)) for number in range(4)]
+            for thread in threads: thread.start()
+            for thread in threads: thread.join(timeout=10)
+            self.assertEqual(len(results),4)
+            self.assertEqual(sum(result is not None for result in results),2)
+
+    def test_invalid_review_worker_limits_rejected(self):
+        for limits in [{'Other':{'fix':2}}, {'Codex':{'unknown':2}}, {'Codex':{'fix':True}}, {'Claude':{'review':0}}, {'Codex':{'fix':17}}, {'Codex':[]}, ['Codex']]:
+            with self.subTest(limits=limits), tempfile.TemporaryDirectory() as directory, self.assertRaises(ValueError):
+                c.Store(Path(directory)/'state.sqlite3', limits)
+
+    def test_acceptance_scope_change_requires_new_independent_review(self):
+        pr,owner,review=fixture()
+        pr['_acceptance_policy']={'tickets':{'SF-008':{'acceptance_issues':['https://example.test/11']}}}
+        self.assertIsNotNone(c.gate(pr,owner,review))
+        review['feedback']=c.feedback(pr)
+        self.assertIsNone(c.gate(pr,owner,review))
+        review['result']['verdict']='changes_requested'
+        self.assertIsNotNone(c.gate(pr,owner,review))
+
     def test_current_independent_review_passes(self):
         self.assertIsNone(c.gate(*fixture()))
 

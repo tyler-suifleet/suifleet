@@ -80,7 +80,7 @@ def use(addr):
     sui("switch", "--address", addr)
 
 
-def execute(label, *ptb, expect_success=True, abort=None):
+def execute(label, *ptb, expect_success=True, abort=None, error_text=None):
     """Submit for real (explicit budget skips the CLI's dry-run gate) and judge
     the transaction's on-chain effects, fetched from the node by digest."""
     proc = sui("ptb", *ptb, "--gas-budget", "100000000", "--json", check=False)
@@ -103,6 +103,8 @@ def execute(label, *ptb, expect_success=True, abort=None):
         # Only the intended check counts; e.g. a type mismatch must not pass.
         function, code = abort
         passed = passed and f'function_name: Some("{function}") }}, {code})' in error
+    if error_text and not ok:
+        passed = passed and error_text in error
     results.append((passed, label, "success" if ok else f"failure: {error}", digest))
     print(f"[{'PASS' if passed else 'FAIL'}] {label}: {'success' if ok else 'aborted'} {digest}")
     if not ok:

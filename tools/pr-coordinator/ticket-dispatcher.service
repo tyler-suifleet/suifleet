@@ -1,0 +1,16 @@
+[Unit]
+Description=Dispatch highest-priority eligible atomic tickets to model workers
+After=network-online.target pr-coordinator.service
+Wants=network-online.target pr-coordinator.service
+
+[Service]
+Type=simple
+Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/python3 %h/.local/lib/pr-coordinator/dispatcher.py --config %h/.config/pr-coordinator/config.json --execute --watch
+Restart=on-failure
+RestartSec=30
+KillMode=process
+UMask=0077
+
+[Install]
+WantedBy=default.target
