@@ -26,7 +26,7 @@ The immediate platform blocker is transport. The daemon now uses the supported g
 - Artifact downloads buffered whole firmware in memory. They now stream, with a 1 GiB limit; recipes have a 1 MiB limit. HTTP and apply timeouts are bounded.
 - The deployments page did not load/display per-device status. It now reads the live dynamic status field, expands current group members, and omits deleted records. Queries paginate instead of truncating the fleet at 50 records.
 - Provisioning/address CLI commands were documented but absent. Software provisioning is now idempotent, creates a 0600 key, and runs before daemon startup under systemd.
-- The UI advertised run/shutdown that no daemon executed. Those controls are disabled and such recipes/configurations fail explicitly; install scripts require device-side opt-in.
+- The UI advertised run/shutdown that no daemon executed. SF-014 added the supervisor; the run/readiness/shutdown/restart controls are enabled again now that the behavior is tested. Configuration still fails explicitly, and install and run commands both require device-side opt-in.
 - Tests had a stale function signature and invalid shared-object test timing. Those are corrected. Frontend SDK version skew is pinned to the wallet library's compatible version.
 
 ## Tracking coverage
@@ -69,8 +69,8 @@ AWS components define recipes, lifecycle, dependencies and platform selection. S
 |---|---|---|---|
 | Component versions/catalog | Partial: name/version strings in jobs | Immutable version registry, semantic versions, discover/resolve candidates | P1 |
 | Recipe format | Partial: proprietary v1 JSON | Defined compatibility policy; AWS JSON/YAML adapter if format compatibility is desired | P1 |
-| Install lifecycle | Partial: one-shot opt-in shell script or apply hook | Per-version work directories, validation and install receipts | P1 |
-| Run/startup/shutdown/bootstrap/recover | Missing; unsupported fields rejected | Process supervisor, readiness, restart policy, reboot stages | P1 |
+| Install lifecycle | Partial: one-shot opt-in shell script or apply hook; supervised components install into per-version workspaces (SF-014) | Validation and install receipts | P1 |
+| Run/startup/shutdown/bootstrap/recover | Partial (SF-014): supervised run with readiness, restart policy and budget, graceful shutdown, rollback of an unready replacement, restart of committed versions on daemon start and after a daemon crash, no unmanaged descendants; simulator-tested | Greengrass-style bootstrap step with reboot request, dependency start ordering, health reporting on chain, hardware reboot/power-loss tests | P1 |
 | Dependency resolution | Missing | Semver constraints, DAG ordering, hard/soft dependencies and cycle/conflict rejection | P1 |
 | Platform manifests | Missing | OS/arch/platform selectors and multiple artifacts | P1 |
 | Configuration merge/reset/validation | Missing; nonempty config rejected | Persisted defaults, JSON-pointer reset, merge policy, validation and notification | P1 |
