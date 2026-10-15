@@ -87,6 +87,8 @@ make check
 | Packaging/toolchain | Rebuild the relevant image or Yocto recipe and record exact versions |
 | Tracking bootstrap | Offline tracking tests and dry run; no remote mutation in tests |
 
+Normal CI also runs CodeQL and dependency/secret/configuration security gates; see [SECURITY_CI.md](docs/SECURITY_CI.md). Keep raw scanner reports private and publish only sanitized diagnostics. Do not suppress findings or treat a successful scanner process as a clean result.
+
 Do not replace tests with type casts, ignored failures or mocked success. A returned digest does not prove transaction success; inspect execution effects. Record exact commands, results, limitations and changed behavior in the PR/handoff. Do not claim tests ran when they did not. [VALIDATION.md](docs/VALIDATION.md) is historical evidence and must not be treated as a current test run.
 
 ## Keeping clients and contracts synchronized
