@@ -1,0 +1,16 @@
+[Unit]
+Description=Reciprocal model PR reviews, feedback repairs and gated merges
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/python3 %h/.local/lib/pr-coordinator/coordinator.py --config %h/.config/pr-coordinator/config.json --execute --watch
+Restart=on-failure
+RestartSec=30
+KillMode=process
+UMask=0077
+
+[Install]
+WantedBy=default.target
