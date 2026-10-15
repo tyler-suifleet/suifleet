@@ -16,7 +16,7 @@ async function main() {
   const { decodeSuiPrivateKey } = await import(pathToFileURL(req.resolve('@mysten/sui/cryptography')));
   const { Ed25519Keypair } = await import(pathToFileURL(req.resolve('@mysten/sui/keypairs/ed25519')));
   const decoded = decodeSuiPrivateKey(secret);
-  if (decoded.schema !== 'ED25519' || Ed25519Keypair.fromSecretKey(decoded.secretKey).toSuiAddress() !== expected) throw Error('wrong CI wallet');
+  if (decoded.scheme !== 'ED25519' || Ed25519Keypair.fromSecretKey(decoded.secretKey).toSuiAddress() !== expected) throw Error('wrong CI wallet');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'suifleet-testnet-'));
   const state = path.join(root, 'state.json');
   const cache = path.resolve('encrypted-live-state/fixture.bin');
@@ -28,11 +28,14 @@ async function main() {
     const result = spawnSync('python3', ['scripts/live_package_upgrade.py', '--wallet', path.join(root, 'client.yaml'), '--base-ref', process.env.BASE_REF, '--state', state, '--evidence', 'evidence/package-upgrade.json', '--faucet-tool', process.env.SUIFLEET_FAUCET_TOOL || '/opt/sui-faucet/sui'], {stdio: 'inherit', env: process.env});
     code = result.status ?? 1;
   } finally {
-    if (fs.existsSync(state)) {
-      fs.mkdirSync(path.dirname(cache), {recursive: true, mode: 0o700});
-      fs.writeFileSync(cache, seal(fs.readFileSync(state), secret), {mode: 0o600});
+    try {
+      if (fs.existsSync(state)) {
+        fs.mkdirSync(path.dirname(cache), {recursive: true, mode: 0o700});
+        fs.writeFileSync(cache, seal(fs.readFileSync(state), secret), {mode: 0o600});
+      }
+    } finally {
+      fs.rmSync(root, {recursive: true, force: true});
     }
-    fs.rmSync(root, {recursive: true, force: true});
   }
   process.exitCode = code;
 }

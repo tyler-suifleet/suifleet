@@ -23,6 +23,8 @@ class Budget:
         self.used += amount
 
     def execute(self, client, label, command, *, gas=200_000_000, funding=0):
+        if gas <= 0 or funding < 0:
+            raise ValueError('invalid gas/funding reservation')
         # Refuse a useless tiny budget before even invoking publish/upgrade.
         available = self.remaining - funding
         if available < 2_000_000:

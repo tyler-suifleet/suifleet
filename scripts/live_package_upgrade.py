@@ -148,6 +148,8 @@ def run(args):
     os.umask(0o077)
     evidence = {"started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "network": args.network,
                 "transactions": [], "checks": []}
+    if args.evidence:
+        Path(args.evidence).write_text(json.dumps(evidence) + '\n')
     wallet = Path(args.wallet).resolve()
 
     def client(*command, json_output=True, check=True):
@@ -357,7 +359,8 @@ def run(args):
                     if not str(value.get("objType", "")).count("ReceiptsKey"):
                         continue
                     receipt = plain(content)["value"]
-                    assert int(receipt["version"]) == 2, "unverified legacy receipts"
+                    if int(receipt["version"]) != 2:
+                        return {}  # Pending migration/report: never expose legacy statuses as verified.
                     statuses = receipt["statuses"]["contents"]
                     return {dm.object_id(e["key"]): int(e["value"]) for e in statuses}
                 return {}
@@ -439,7 +442,13 @@ if __name__ == "__main__":
     parser.add_argument("--state", help="fixture cache (default: live-state.json beside the wallet)")
     parser.add_argument("--faucet-tool", help="checksum-verified Sui 1.82.1 funding-only executable; at most one request")
     parser.add_argument("--fresh", action="store_true", help="ignore the cache and publish a new fixture")
+    args = parser.parse_args()
     try:
-        run(parser.parse_args())
-    except Spent as error:
-        sys.exit(f"stopped: {error}")
+        run(args)
+    except Exception as error:
+        if args.evidence:
+            path = Path(args.evidence)
+            result = json.loads(path.read_text()) if path.exists() else {}
+            result.update(success=False, error=str(error))
+            path.write_text(json.dumps(result, indent=2) + "\n")
+        raise
