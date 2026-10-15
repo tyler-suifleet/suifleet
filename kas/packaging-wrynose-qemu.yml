@@ -12,4 +12,4 @@ local_conf_header:
     IMAGE_FSTYPES = "ext4"
     EXTRA_IMAGE_FEATURES:append = " allow-empty-password allow-root-login empty-root-password"
     QEMU_TARGETS = "aarch64"
-    PACKAGECONFIG:remove:pn-qemu-system-native = "virglrenderer epoxy"
+    PACKAGECONFIG:remove:pn-qemu-system-native = "virglrenderer epoxy sdl sdl-image alsa"
