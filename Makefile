@@ -28,8 +28,9 @@ build-contracts:
 test-contracts:
 	$(RUN) sui move test --path contracts
 
+# Spends gas: PUBLISH_ARGS="--expect-address 0x... [--dry-run]" (docs/DEPLOYMENT_MANIFEST.md).
 publish-contracts:
-	$(RUN) bash scripts/redeploy.sh
+	$(RUN) bash scripts/redeploy.sh $(PUBLISH_ARGS)
 
 dapp-install:
 	$(RUN) bash -c "cd dapp && pnpm install --frozen-lockfile"
@@ -85,7 +86,7 @@ toolchain-versions:
 # CI entry point (run inside the dev image): each step's output is kept under
 # ci-logs/ for failure diagnostics. No step publishes, spends gas or uses secrets.
 ci: SHELL := /bin/bash
-CI_STEPS := test-contracts test-interfaces check-interfaces edge-test test-ota test-component dapp-typecheck dapp-build
+CI_STEPS := test-publish test-contracts test-interfaces check-interfaces edge-test test-ota test-component dapp-typecheck dapp-build
 ci:
 	@mkdir -p ci-logs
 	@$(MAKE) --no-print-directory toolchain-versions | tee ci-logs/toolchain-versions.txt
@@ -99,6 +100,7 @@ ci:
 # Sequential recipe: cross-layer checks must not race over shared build artifacts.
 check:
 	$(MAKE) test-manifest
+	$(MAKE) test-publish
 	$(MAKE) test-contracts
 	$(MAKE) test-interfaces
 	$(MAKE) check-interfaces
@@ -108,6 +110,11 @@ check:
 	$(MAKE) dapp-typecheck
 	$(MAKE) dapp-build
 	git diff --check
+
+# Offline: publisher metadata parsing, verification and failure handling.
+.PHONY: test-publish
+test-publish:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_publish.py'
 
 tracking-plan:
 	python3 scripts/bootstrap_tracking.py
@@ -127,6 +134,13 @@ test-manifest:
 test-manifest-live:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
 	$(RUN) python3 scripts/test_manifest_upgrades.py
+
+# SF-006 publisher against a disposable localnet (start it first): refusals, dry
+# run, fresh publish, upgrade, incompatible upgrade; both clients verify.
+.PHONY: test-publish-localnet
+test-publish-localnet:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_publish_localnet.py
 
 # Real daemon over gRPC against a disposable localnet (start it first, as for
 # test-manifest-live): direct/group/failure/offline/cursor-migration paths.
