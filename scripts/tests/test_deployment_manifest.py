@@ -14,7 +14,7 @@ def fixture():
         rpc_url="http://127.0.0.1:9000", call_package_id=dm.object_id("0x3"), upgrade_cap_id=dm.object_id("0xc0"), package_version="3",
         type_origins={name: dm.object_id("0x2" if name.endswith("RecipeDigestKey") else "0x3" if name.endswith("DeviceAddressKey") else "0x1") for name in dm.REQUIRED_TYPES},
         shared_objects={"registry": {"id":dm.object_id("0xbe"), "initial_shared_version":"1"}},
-        supported_clients={"dapp": {"min":"0.0.2", "max_exclusive":"0.0.3"}, "edge": {"min":"0.1.0", "max_exclusive":"0.1.1"}},
+        supported_clients={"dapp": {"min":"0.0.2", "max_exclusive":"0.2.0"}, "edge": {"min":"0.1.0", "max_exclusive":"0.3.0"}},
         walrus={"publisher_url":"https://publisher.example", "aggregator_url":"https://aggregator.example"})
 
 
@@ -37,11 +37,37 @@ def chain(manifest, cap_owner="0xa11ce"):
 
 
 class ManifestTests(unittest.TestCase):
+    def test_optional_catalog_origin_group(self):
+        manifest = fixture()
+        manifest["type_origins"][dm.CATALOG_TYPES[0]] = dm.object_id("0x4")
+        with self.assertRaisesRegex(ValueError, "partial catalog"):
+            dm.validate(manifest)
+        manifest["type_origins"].update({n:dm.object_id("0x4") for n in dm.CATALOG_TYPES})
+        dm.verify(manifest, chain(manifest))
+        forged = copy.deepcopy(manifest)
+        forged["type_origins"][dm.CATALOG_TYPES[-1]] = dm.object_id("0x3")
+        with self.assertRaisesRegex(ValueError, "type origin mismatch"):
+            dm.verify(forged, chain(manifest))
+
     def test_resolves_mixed_origins(self):
         manifest = fixture()
         args = SimpleNamespace(chain_identifier=manifest["chain_identifier"], upgrade_cap=manifest["upgrade_cap_id"], rpc=manifest["rpc_url"], package=manifest["call_package_id"], registry=manifest["shared_objects"]["registry"]["id"],
             publisher=manifest["walrus"]["publisher_url"], aggregator=manifest["walrus"]["aggregator_url"], network="localnet")
         self.assertEqual(dm.resolve(args, chain(manifest)), manifest)
+
+    def test_resolves_catalog_origins_with_grpc_facts(self):
+        manifest = fixture()
+        manifest["type_origins"].update({name: dm.object_id("0x4") for name in dm.CATALOG_TYPES})
+        manifest["supported_clients"]["dapp"]["min"] = "0.1.0"
+        manifest["supported_clients"]["edge"]["min"] = "0.2.0"
+        args = SimpleNamespace(chain_identifier=manifest["chain_identifier"], upgrade_cap=manifest["upgrade_cap_id"],
+            rpc=manifest["rpc_url"], package=manifest["call_package_id"],
+            registry=manifest["shared_objects"]["registry"]["id"], network="localnet",
+            publisher=manifest["walrus"]["publisher_url"], aggregator=manifest["walrus"]["aggregator_url"])
+        self.assertEqual(dm.resolve(args, chain(manifest)), manifest)
+        manifest["type_origins"].pop(dm.CATALOG_TYPES[-1])
+        with self.assertRaisesRegex(ValueError, "partial catalog"):
+            dm.resolve(args, chain(manifest))
 
     def test_stale_metadata_rejected(self):
         live = fixture()

@@ -56,6 +56,7 @@ edge-test:
 test-ota:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
 	$(RUN) python3 scripts/test_ota.py
+	$(RUN) python3 scripts/test_catalog_ota.py
 	$(RUN) python3 scripts/test_ota.py --firmware-helper
 	$(RUN) python3 scripts/test_firmware_restart.py
 	$(RUN) python3 scripts/test_desired_state.py
@@ -80,6 +81,7 @@ check-interfaces:
 	$(RUN) python3 scripts/generate_interfaces.py --check
 	$(RUN) python3 scripts/test_generated_interfaces.py
 	$(RUN) node scripts/test_protocol.cjs
+	$(RUN) node scripts/test_component_catalog.cjs
 
 generate-interfaces:
 	$(RUN) python3 scripts/generate_interfaces.py
@@ -87,6 +89,10 @@ generate-interfaces:
 # Disposable localnet only; run inside a container with no public-network access.
 test-protocol-live:
 	$(RUN) python3 scripts/test_protocol_localnet.py
+
+.PHONY: test-catalog-live
+test-catalog-live:
+	$(RUN) python3 scripts/test_catalog_localnet.py
 
 # Offline regression tests for the drift gate itself (synthetic summaries).
 test-interfaces:

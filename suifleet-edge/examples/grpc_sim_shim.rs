@@ -208,9 +208,10 @@ impl proto::ledger_service_server::LedgerService for Shim {
         } else if let Some(shared) = data["owner"].get("Shared") {
             owner.kind = Some(proto::owner::OwnerKind::Shared as i32);
             owner.version = Some(number(&shared["initial_shared_version"]));
-        } else {
+        } else if data["owner"] == "Immutable" {
             owner.kind = Some(proto::owner::OwnerKind::Immutable as i32);
         }
+        // Missing/unknown ownership stays unspecified, never proof of freezing.
         let mut object = proto::Object::default();
         object.object_id = Some(id);
         object.owner = Some(owner);

@@ -1,3 +1,4 @@
+mod catalog;
 mod apply;
 mod config;
 mod firmware;
@@ -232,15 +233,17 @@ async fn execute(
         ),
         "wrong deployment type"
     );
-    if let Err(error) = ensure_deployment_schema(&record.fields) {
+    let resolved = catalog::resolve(sui, event, &record.fields).await;
+    if let Err(error) = &resolved {
         let mut outcome = Outcome::default();
-        record_result(&mut outcome, Err(error));
+        record_result(&mut outcome, Err(anyhow::anyhow!("{error:#}")));
         warn!(deployment = event.deployment_id, error = ?outcome.error, "Deployment schema rejected");
         let status = outcome.status;
         journal.state.deployments.insert(event.deployment_id.clone(), outcome);
         journal.save()?;
         return Ok(status);
     }
+    let (resolved_event, recipe_digest) = resolved?;
     let directory = cfg
         .runtime
         .state_dir
@@ -263,7 +266,8 @@ async fn execute(
         },
     );
     journal.save()?;
-    let result = handle_deployment(sui, walrus, runner, &cfg.apply, event, &artifact).await;
+    let result =
+        handle_deployment(walrus, runner, &cfg.apply, &resolved_event, &recipe_digest, &artifact).await;
     let outcome = journal.state.deployments.get_mut(&event.deployment_id).unwrap();
     record_result(outcome, result);
     info!(deployment = event.deployment_id, status = outcome.status, error = ?outcome.error, "Deployment finished");
@@ -398,18 +402,13 @@ async fn reconcile(
 }
 
 async fn handle_deployment(
-    sui: &SuiClient,
     walrus: &WalrusClient,
     runner: &ApplyRunner,
     config: &config::ApplyConfig,
     event: &DeploymentCreatedEvent,
+    expected: &str,
     artifact: &Path,
 ) -> anyhow::Result<()> {
-    let digest_field = sui
-        .dynamic_field(&event.deployment_id, "deployment_manager::RecipeDigestKey")
-        .await?;
-    let expected = digest_field.as_ref().and_then(|value| value.as_str())
-        .ok_or_else(|| anyhow::anyhow!("deployment has no authenticated recipe digest; recreate using verified creation API"))?;
     let (recipe, actual) = walrus.recipe(&event.recipe_blob_id).await?;
     anyhow::ensure!(actual == expected, "recipe SHA-256 mismatch");
     recipe.validate(event, config.allow_recipe_commands)?;
@@ -478,23 +477,5 @@ async fn shutdown_signal() {
     #[cfg(not(unix))]
     {
         let _ = tokio::signal::ctrl_c().await;
-    }
-}
-
-fn ensure_deployment_schema(fields: &serde_json::Value) -> anyhow::Result<()> {
-    let version = fields["schema_version"].as_str().and_then(|s| s.parse::<u64>().ok())
-        .or_else(|| fields["schema_version"].as_u64());
-    anyhow::ensure!(version == Some(protocol::DEPLOYMENT_SCHEMA_VERSION), "unsupported DeploymentRecord schema version");
-    Ok(())
-}
-#[cfg(test)]
-mod deployment_schema_tests {
-    use super::*;
-    #[test]
-    fn reject_unknown_or_missing_schema_before_apply() {
-        for value in [serde_json::json!({}), serde_json::json!({"schema_version":"2"}), serde_json::json!({"schema_version":"invalid"})] {
-            assert!(ensure_deployment_schema(&value).is_err());
-        }
-        assert!(ensure_deployment_schema(&serde_json::json!({"schema_version":"1"})).is_ok());
     }
 }

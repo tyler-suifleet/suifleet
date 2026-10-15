@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useCurrentAccount } from "@mysten/dapp-kit-react";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import { useGroups } from "@/hooks/useGroups";
@@ -8,6 +8,8 @@ import { useDevices } from "@/hooks/useDevices";
 import { uploadArtifact, uploadRecipe, renewalCommand, storageWarnings, type ComponentRecipe, type StorageInfo } from "@/lib/walrus";
 import { buildCreateDeploymentTx } from "@/lib/sui";
 import { buildDesiredRevisionTx } from "@/lib/desired-state";
+import { fetchVersion, buildCatalogDeploymentTx, type ComponentVersion } from "@/lib/catalog";
+import { useCurrentClient } from "@mysten/dapp-kit-react";
 import { RECIPE_VERSION } from "@/lib/protocol-version";
 import { PageHeader } from "@/components/ui";
 import Link from "next/link";
@@ -23,6 +25,13 @@ interface ArtifactResult {
 
 export default function FirmwarePage() {
   const account = useCurrentAccount();
+  const client = useCurrentClient();
+  const [catalogVersion, setCatalogVersion] = useState<ComponentVersion | null>(null);
+  const [catalogError, setCatalogError] = useState("");
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("componentVersion");
+    if (id) fetchVersion(client, id).then(v => { setCatalogVersion(v); setComponentName(v.name); setVersion(v.version); setStep("deploy"); }).catch(e => setCatalogError(String(e)));
+  }, [client]);
   const { data: groups = [] } = useGroups();
   const { data: devices = [] } = useDevices();
   const { mutate: signAndExecute, isPending: txPending } = useFleetTransaction();
@@ -63,7 +72,15 @@ export default function FirmwarePage() {
   const desiredTargets = desired && selectedDevices.size === 0 && selectedGroups.size > 0;
 
   async function handleDeploy() {
-    if (!artifact || (selectedGroups.size === 0 && selectedDevices.size === 0)) return;
+    if (selectedGroups.size === 0 && selectedDevices.size === 0) return;
+    // Catalog versions carry no recipe digest on the record, so desired state
+    // cannot select them yet: they deploy one-shot.
+    if (catalogVersion) {
+      signAndExecute({transaction:buildCatalogDeploymentTx(catalogVersion.objectId,[...selectedGroups],[...selectedDevices])}, {
+        onSuccess:res=>{setTxDigest(res.digest);setStep("done");},onError:err=>alert(err.message),
+      }); return;
+    }
+    if (!artifact) return;
     if (desired && selectedDevices.size > 0) {
       alert("Desired state targets groups only. Clear the individual devices, or untick desired state for a one-shot deployment.");
       return;
@@ -164,6 +181,8 @@ export default function FirmwarePage() {
     <div className="max-w-2xl space-y-4">
       <PageHeader title="Deploy component" subtitle="Upload an artifact, define its lifecycle recipe, and deploy to device groups" />
 
+      {catalogError && <p role="alert">{catalogError}</p>}
+      {catalogVersion && <p>{catalogVersion.name} {catalogVersion.version} · immutable catalog version. Each device selects its own platform.</p>}
       {/* Step indicators */}
       <div className="flex items-center gap-2 text-sm">
         {steps.map((s, i) => (
@@ -266,6 +285,9 @@ export default function FirmwarePage() {
             )}
           </div>
 
+          {catalogVersion ? (
+            <p className="text-xs text-gray-500">Catalog versions deploy one-shot; desired state does not select them yet.</p>
+          ) : (
           <label className="flex items-start gap-3 text-sm">
             <input type="checkbox" checked={desired} onChange={() => setDesired(!desired)} className="rounded mt-0.5" disabled={step !== "deploy"} />
             <span>
@@ -282,6 +304,7 @@ export default function FirmwarePage() {
               )}
             </span>
           </label>
+          )}
 
           {/* Individual devices */}
           <div>
@@ -306,7 +329,7 @@ export default function FirmwarePage() {
 
         <button
           onClick={handleDeploy}
-          disabled={txPending || (selectedGroups.size === 0 && selectedDevices.size === 0) || !artifact || step !== "deploy"}
+          disabled={txPending || (selectedGroups.size === 0 && selectedDevices.size === 0) || (!artifact && !catalogVersion) || step !== "deploy"}
           className="mt-2 bg-[#4DA2FF] hover:bg-[#2e8ed4] text-white px-5 py-2 rounded text-sm disabled:opacity-40"
         >
           {txPending ? "Submitting…" : `Deploy to ${selectedGroups.size + selectedDevices.size} target${selectedGroups.size + selectedDevices.size !== 1 ? "s" : ""}`}

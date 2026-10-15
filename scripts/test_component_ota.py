@@ -90,7 +90,7 @@ def run(binary):
             manifest = dict(schema_version=1, protocol_version=1, network="localnet", chain_identifier=sim.chain,
                 rpc_url=rpc_url, call_package_id=PACKAGE, upgrade_cap_id=UPGRADE_CAP, package_version="3", type_origins=TYPE_ORIGINS,
                 shared_objects={"registry": {"id": REGISTRY, "initial_shared_version": "1"}},
-                supported_clients={"dapp": {"min": "0.0.1", "max_exclusive": "0.1.0"}, "edge": {"min": "0.1.0", "max_exclusive": "0.2.0"}},
+                supported_clients={"dapp": {"min": "0.0.1", "max_exclusive": "0.1.0"}, "edge": {"min": "0.1.0", "max_exclusive": "0.3.0"}},
                 walrus={"publisher_url": url, "aggregator_url": url})
             (root / "deployment.json").write_text(json.dumps(manifest))
             components = root / "state" / "test-components"
