@@ -176,7 +176,7 @@ class FullCycleTests(unittest.TestCase):
                 state['complete']=True;owner['status']='done'
             return '{}'
         coordinator.discover_merged=lambda *args:None
-        patches=[patch.object(c,'run',side_effect=command),patch.object(coordinator,'owners',return_value=[owner]),patch.object(coordinator,'pr',side_effect=lambda *args:current()),patch.object(coordinator,'prs',side_effect=lambda *args:[] if state['pushed'] and not state['lag'] else [current()]),patch.object(coordinator,'ticket',side_effect=ticket),patch.object(coordinator,'gh',return_value=json.dumps({'state':'closed'})),patch.object(coordinator,'launch')]
+        patches=[patch.object(c,'run',side_effect=command),patch.object(coordinator,'owners',return_value=[owner]),patch.object(coordinator,'pr',side_effect=lambda *args:current()),patch.object(coordinator,'prs',side_effect=lambda *args:[] if state['pushed'] and not state['lag'] else [current()]),patch.object(coordinator,'ticket',side_effect=ticket),patch.object(coordinator,'gh',side_effect=lambda *args:json.dumps({'state':'closed' if state['pushed'] else 'open'})),patch.object(coordinator,'launch')]
         return coordinator,state,patches
 
     def test_successful_merge_verifies_identity_records_intent_before_push_and_completes_ticket(self):
@@ -187,7 +187,7 @@ class FullCycleTests(unittest.TestCase):
             coordinator.tick(True)
             self.assertTrue(state['pushed']);self.assertTrue(state['complete'])
             self.assertEqual(coordinator.store.db.execute('SELECT reconciled FROM integrations').fetchone()[0],1)
-            self.assertEqual(sum(args[0]=='assert' for args in state['tickets']),2)
+            self.assertGreaterEqual(sum(args[0]=='show' for args in state['tickets']),4)
             self.assertEqual(sum(args[:2]==['git','push'] for args in state['commands']),1)
 
     def test_delayed_github_merge_notification_does_not_dispatch_a_second_worker(self):
@@ -314,6 +314,27 @@ class IssueClosureTests(unittest.TestCase):
                 coordinator.reconcile(project,pr,owner,None)
                 self.assertEqual(ticket.call_args.args[1],'publish')
             self.assertEqual(coordinator.store.db.execute('SELECT reconciled FROM integrations').fetchone()[0],1)
+
+
+
+class ReviewOwnershipTests(unittest.TestCase):
+    def test_review_is_valid_for_merge_but_active_or_changed_claim_is_rejected(self):
+        with tempfile.TemporaryDirectory() as d:
+            coordinator=c.Coordinator({'workers':{'Codex':['true'],'Claude':['true']},'projects':[]},Path(d))
+            project={'repository':'owner/repo'}
+            owner={'key':'T1','token':'claim','status':'review','remote':{'url':'https://github.com/owner/repo/issues/6'}}
+            with patch.object(coordinator,'ticket',return_value=json.dumps(owner)),patch.object(coordinator,'gh',return_value='{"state":"open"}'):
+                coordinator.assert_review_owner(project,owner)
+            for changed in ({**owner,'status':'in_progress'},{**owner,'token':'different'},{**owner,'publish_pending':True}):
+                with patch.object(coordinator,'ticket',return_value=json.dumps(changed)):
+                    with self.assertRaises(RuntimeError):coordinator.assert_review_owner(project,owner)
+
+    def test_dependency_regression_blocks_integration(self):
+        with tempfile.TemporaryDirectory() as d:
+            coordinator=c.Coordinator({'workers':{'Codex':['true'],'Claude':['true']},'projects':[]},Path(d))
+            owner={'key':'T1','token':'claim','status':'review','spec':{'depends_on':['T0']}}
+            with patch.object(coordinator,'ticket',side_effect=[json.dumps(owner),json.dumps({'status':'review'})]):
+                with self.assertRaisesRegex(RuntimeError,'dependency'):coordinator.assert_review_owner({},owner)
 
 
 if __name__=='__main__':unittest.main()

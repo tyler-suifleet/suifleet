@@ -368,6 +368,22 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
             except Exception as error:
                 print(f"{project['id']} PR#{row['pr']}: completion retry deferred: {error}",flush=True)
 
+    def assert_review_owner(self,project,owner):
+        # `ticket assert` intentionally authorizes implementation edits only.
+        # Integration must preserve Review instead of resuming another worker.
+        current=json.loads(self.ticket(project,'show',owner['key']))
+        if current['token'] != owner['token'] or current['status'] != 'review' or current.get('publish_pending') or current.get('expired'):
+            raise RuntimeError('review ownership changed or is unpublished')
+        dependencies=set(current.get('spec',{}).get('depends_on',[])) | set(current.get('remote',{}).get('depends_on',[]))
+        for key in dependencies:
+            dependency=json.loads(self.ticket(project,'show',key))
+            if dependency['status'] != 'done' or dependency.get('publish_pending'):
+                raise RuntimeError('review dependency is no longer completed')
+        if current.get('remote',{}).get('external_blockers'): raise RuntimeError('external dependency is incomplete')
+        number=self.issue_number(project,current)
+        issue=json.loads(self.gh(project,['api',f"repos/{project['repository']}/issues/{number}"]))
+        if issue['state'] != 'open': raise RuntimeError('implementation issue was closed before integration')
+
     def merge(self, project, pr, owner, review):
         # Local merge preserves the user's author AND committer identity.
         # A guarded fast-forward push rejects any competing update to main.
@@ -376,7 +392,7 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
         if base != pr['baseRefOid']: raise RuntimeError('base changed before integration; re-review required')
         current = self.pr(project,pr['number'])
         if gate(current,owner,review) is not None: raise RuntimeError('PR changed before integration')
-        self.ticket(project,'assert',owner['key'],'--token',owner['token'])
+        self.assert_review_owner(project,owner)
         expected = 'Tyler Bush <tyler.jonathan.bush@gmail.com>'
         metadata = run(['git','log','--format=%an <%ae>|%cn <%ce>',f"{base}..{pr['headRefOid']}"],cwd=project['root']).splitlines()
         if not metadata or any(value != expected+'|'+expected for value in metadata):
@@ -398,7 +414,7 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
         # Check again after merge preparation. Push is never forced.
         current = self.pr(project,pr['number']); current_owner=json.loads(self.ticket(project,'show',owner['key']))
         if current_owner['token'] != owner['token'] or gate(current,current_owner,review) is not None: raise RuntimeError('review gates or ownership changed before push')
-        self.ticket(project,'assert',owner['key'],'--token',owner['token'])
+        self.assert_review_owner(project,owner)
         remote = run(['git','ls-remote','origin',f"refs/heads/{pr['baseRefName']}"],cwd=directory).split()[0]
         if remote != base: raise RuntimeError('main changed before push; discard prepared integration and re-review')
         commit = run(['git','rev-parse','HEAD'],cwd=directory).strip()
