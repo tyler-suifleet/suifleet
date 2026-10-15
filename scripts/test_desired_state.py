@@ -8,6 +8,8 @@ the rest until the desired state changes, crash recovery that neither
 re-executes an updater nor runs later steps, reselection of an already-run
 deployment (A -> B -> A) and one-shot updates of a managed component, which
 are never recorded as convergence, and coexistence with one-shot deployments.
+In privileged-helper mode, a newer desired state seen while a step is still in
+flight is planned once that step settles, across restarts.
 Real-chain behaviour is covered by scripts/test_desired_state_localnet.py.
 """
 import argparse
@@ -61,6 +63,14 @@ def serve(sim):
     return server
 
 
+def manifest(sim, url, rpc_url):
+    return dict(schema_version=1, protocol_version=1, network="localnet", chain_identifier=sim.chain,
+        rpc_url=rpc_url, call_package_id=PACKAGE, upgrade_cap_id=UPGRADE_CAP, package_version="3",
+        type_origins=TYPE_ORIGINS, shared_objects={"registry": {"id": REGISTRY, "initial_shared_version": "1"}},
+        supported_clients={"dapp": {"min": "0.0.1", "max_exclusive": "0.1.0"}, "edge": {"min": "0.1.0", "max_exclusive": "0.2.0"}},
+        walrus={"publisher_url": url, "aggregator_url": url})
+
+
 def run(binary):
     sim = Simulator()
     sim.truncate_next_artifact = False
@@ -96,12 +106,7 @@ def run(binary):
                                f"while pathlib.Path({str(hang)!r}).exists(): time.sleep(0.1)\n"
                                f"open({str(applied)!r}, 'a').write(sys.argv[1] + '\\n')\n")
             url = f"http://127.0.0.1:{server.server_port}"
-            manifest = dict(schema_version=1, protocol_version=1, network="localnet", chain_identifier=sim.chain,
-                rpc_url=rpc_url, call_package_id=PACKAGE, upgrade_cap_id=UPGRADE_CAP, package_version="3",
-                type_origins=TYPE_ORIGINS, shared_objects={"registry": {"id": REGISTRY, "initial_shared_version": "1"}},
-                supported_clients={"dapp": {"min": "0.0.1", "max_exclusive": "0.1.0"}, "edge": {"min": "0.1.0", "max_exclusive": "0.2.0"}},
-                walrus={"publisher_url": url, "aggregator_url": url})
-            (root / "deployment.json").write_text(json.dumps(manifest))
+            (root / "deployment.json").write_text(json.dumps(manifest(sim, url, rpc_url)))
             config = root / "config.toml"
             config.write_text('[sui]\nmanifest_path = "deployment.json"\n'
                 f'[device]\nkeypair_path = {json.dumps(str(key))}\ndevice_object_id = "{DEVICE}"\ndevice_cap_id = "{CAP}"\n'
@@ -247,7 +252,131 @@ def run(binary):
         server.shutdown(); server.server_close()
 
 
+def run_helper(binary):
+    """A step in flight in the privileged helper, then a newer desired state:
+    it waits for the step, and is planned once the step fails, although no
+    further change arrives and the daemon restarts in between."""
+    sim = Simulator()
+    sim.truncate_next_artifact = False
+    sim.allow_reports = True
+    sim.fail_execution = False
+    sim.memberships.append((GROUP, DEVICE))
+    server = serve(sim)
+    shim, rpc_url = start_grpc(f"http://127.0.0.1:{server.server_port}")
+    process, helper = None, None
+    stop_helper, pause_helper = threading.Event(), threading.Event()
+    try:
+        with tempfile.TemporaryDirectory(prefix="suifleet-desired-helper-") as temporary:
+            root = Path(temporary)
+            key = root / "device.key"; key.write_text("07" * 32); key.chmod(0o600)
+            state_dir = root / "state"
+            spool = state_dir / "firmware"
+            requests = spool / "requests"
+            applied, hold, fail = root / "applied", root / "hold", root / "fail"
+            url = f"http://127.0.0.1:{server.server_port}"
+            (root / "deployment.json").write_text(json.dumps(manifest(sim, url, rpc_url)))
+            config = root / "config.toml"
+            config.write_text('[sui]\nmanifest_path = "deployment.json"\n'
+                f'[device]\nkeypair_path = {json.dumps(str(key))}\ndevice_object_id = "{DEVICE}"\ndevice_cap_id = "{CAP}"\n'
+                f'[apply]\ncommand = "/bin/false"\ntimeout_seconds = 5\nmode = "privileged-helper"\n'
+                f'firmware_spool = {json.dumps(str(spool))}\n'
+                f'[runtime]\nstate_dir = {json.dumps(str(state_dir))}\npoll_seconds = 1\n')
+            # The firmware updater: records each run, blocks while `hold` exists
+            # (the helper holds its claim meanwhile), fails while `fail` exists.
+            script = f"echo ran >> {applied}; while [ -e {hold} ]; do sleep 0.1; done; [ ! -e {fail} ]"
+            helper_config = root / "firmware.toml"
+            helper_config.write_text(f'command = {json.dumps("/bin/sh -c " + chr(39) + script + chr(39))}\n'
+                f'timeout_seconds = 60\nspool_dir = {json.dumps(str(spool))}\nwork_dir = {json.dumps(str(root / "helper-work"))}\n')
+            log = (root / "daemon.log").open("w")
+
+            def helper_loop():
+                # Like suifleet-firmware.path: run the helper when a request appears.
+                while not stop_helper.is_set():
+                    if not pause_helper.is_set() and requests.is_dir() and any(requests.glob("*.json")):
+                        subprocess.run([str(binary), "--firmware-helper", str(helper_config)], stdout=log, stderr=log)
+                    time.sleep(0.1)
+
+            def state():
+                path = state_dir / "state.json"
+                return json.loads(path.read_text()) if path.exists() else {}
+
+            def outcomes():
+                return {id: o["status"] for id, o in state().get("deployments", {}).items()}
+
+            def runs():
+                return len(applied.read_text().splitlines()) if applied.exists() else 0
+
+            def start():
+                return subprocess.Popen([str(binary)], env={**os.environ, "EDGE_CONFIG": str(config)}, stdout=log, stderr=log)
+
+            def settle():
+                for _ in range(2):
+                    checks = sim.chain_checks
+                    wait_for(lambda: sim.chain_checks > checks, "daemon stopped polling", process)
+                time.sleep(0.3)
+
+            def deploy(id, component):
+                sim.add(id, groups=[GROUP], direct=False)
+                sim.events[-1]["parsedJson"]["component_name"] = component
+                sim.recipes[sim.events[-1]["parsedJson"]["recipe_blob_id"]]["componentName"] = component
+                sim.managed.add(id)
+
+            helper = threading.Thread(target=helper_loop, daemon=True)
+            helper.start()
+            hold.touch(); fail.touch()
+            # Revision 1: alpha (A) then beta. A's update is held in the helper.
+            deploy("0x401", "alpha"); deploy("0x402", "beta")
+            sim.desired[GROUP] = (1, {"alpha": "0x401", "beta": "0x402"})
+            process = start()
+            wait_for(lambda: runs() == 1 and "0x401" in outcomes(), "first step was not handed to the helper", process)
+            # The daemon dies while the helper is still applying A.
+            process.send_signal(signal.SIGKILL); process.wait()
+            process = start()
+            settle()
+            assert outcomes() == {"0x401": None}, ("in-flight step settled or later step ran", outcomes())
+            first = state()["step"]
+            assert first["deployment"] == "0x401"
+            # Revision 2 replaces A while it is still in flight: it waits.
+            deploy("0x403", "alpha")
+            sim.desired[GROUP] = (2, {"alpha": "0x403", "beta": "0x402"})
+            settle()
+            assert outcomes() == {"0x401": None} and state()["step"] == first, ("newer state did not wait", state())
+            # A restart between seeing revision 2 and A settling.
+            process.send_signal(signal.SIGINT); process.wait(timeout=10)
+            assert process.returncode == 0
+            process = start()
+            settle()
+            assert outcomes() == {"0x401": None} and state()["step"] == first
+            # A fails. Nothing changes on chain; revision 2 is still planned.
+            pause_helper.set()
+            hold.unlink()
+            wait_for(lambda: outcomes().get("0x401") == 2, "failed helper result was not collected", process)
+            fail.unlink()
+            pause_helper.clear()
+            wait_for(lambda: outcomes().get("0x403") == 1 and outcomes().get("0x402") == 1,
+                     "newer desired state was not planned after the in-flight step settled", process)
+            settle()
+            assert runs() == 3 and "step" not in state(), (runs(), state())
+            assert state()["current"] == {"alpha": "0x403", "beta": "0x402"}
+            wait_for(lambda: dict(sim.reports).get("0x401") == 2, "failed step not reported", process)
+            assert not sim.errors, sim.errors
+            process.send_signal(signal.SIGINT); process.wait(timeout=10)
+            assert process.returncode == 0
+            process = None
+            print("PASS: a newer desired state waits for an in-flight helper step and is planned once it fails, across restarts")
+    finally:
+        stop_helper.set()
+        if helper:
+            helper.join(timeout=70)
+        if process and process.poll() is None:
+            process.kill(); process.wait()
+        shim.kill(); shim.wait()
+        server.shutdown(); server.server_close()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, default=Path(__file__).resolve().parents[1] / "suifleet-edge/target/debug/suifleet")
-    run(parser.parse_args().binary.resolve())
+    binary = parser.parse_args().binary.resolve()
+    run(binary)
+    run_helper(binary)
