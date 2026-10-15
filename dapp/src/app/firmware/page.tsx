@@ -75,12 +75,14 @@ export default function FirmwarePage() {
 
   const desiredTargets = desired && selectedDevices.size === 0 && selectedGroups.size > 0;
 
+  const [initiallyPaused, setInitiallyPaused] = useState(false);
+
   async function handleDeploy() {
     if (selectedGroups.size === 0 && selectedDevices.size === 0) return;
     // Catalog versions carry no recipe digest on the record, so desired state
     // cannot select them yet: they deploy one-shot.
     if (catalogVersion) {
-      signAndExecute({transaction:buildCatalogDeploymentTx(catalogVersion.objectId,[...selectedGroups],[...selectedDevices])}, {
+      signAndExecute({transaction:buildCatalogDeploymentTx(catalogVersion.objectId,[...selectedGroups],[...selectedDevices],initiallyPaused)}, {
         onSuccess:res=>{setTxDigest(res.digest);setStep("done");},onError:err=>alert(err.message),
       }); return;
     }
@@ -121,7 +123,7 @@ export default function FirmwarePage() {
 
     const tx = desiredTargets
       ? buildDesiredRevisionTx(Array.from(selectedGroups), {
-          componentName, version, recipeBlobId: recipeUpload.blobId,
+          componentName, version, initiallyPaused, recipeBlobId: recipeUpload.blobId,
           artifactSha256: artifact.sha256, recipeSha256: recipeUpload.sha256,
         })
       : buildCreateDeploymentTx(
@@ -129,6 +131,7 @@ export default function FirmwarePage() {
           recipeUpload.blobId, artifact.sha256, recipeUpload.sha256,
           Array.from(selectedGroups),
           Array.from(selectedDevices),
+          initiallyPaused,
         );
     signAndExecute(
       { transaction: tx },
@@ -316,6 +319,9 @@ export default function FirmwarePage() {
 
       {/* Step 3 — Targets */}
       <Card disabled={step !== "deploy"} title="3. Select targets">
+        <label className="flex gap-2 text-sm mb-3"><input type="checkbox" checked={initiallyPaused} onChange={e => setInitiallyPaused(e.target.checked)} />
+          Create paused. Configure UTC schedule, expiry, maintenance window and advance notice on Deployments, then resume.
+        </label>
         <div className="space-y-4">
           {/* Groups */}
           <div>

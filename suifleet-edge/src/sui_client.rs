@@ -738,6 +738,15 @@ impl SuiClient {
 
     /// Whether desired state references this record; reconciliation then
     /// applies it, never the one-shot creation-event path.
+    pub async fn deployment_control(&self, deployment: &str) -> anyhow::Result<crate::control::Control> {
+        match self.dynamic_field(deployment, "deployment_manager::ControlKey").await? {
+            None => Ok(crate::control::Control::default()),
+            Some(value) => Ok(serde_json::from_value(
+                value.get("fields").cloned().unwrap_or(value)
+            )?),
+        }
+    }
+
     pub async fn is_managed(&self, deployment: &str) -> anyhow::Result<bool> {
         Ok(self
             .dynamic_field(deployment, "deployment_manager::ManagedKey")

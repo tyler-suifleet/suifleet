@@ -24,6 +24,19 @@ export const MOVE_ABI = {
         ],
         "returns": []
       },
+      "create_deployment_paused": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::component_catalog::ComponentVersion",
+          "vector<sui::object::ID>",
+          "vector<sui::object::ID>",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
       "delete_deployment": {
         "visibility": "Public",
         "entry": false,
@@ -278,6 +291,17 @@ export const MOVE_ABI = {
           "&std::string::String"
         ]
       },
+      "control": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::deployment_manager::DeploymentRecord"
+        ],
+        "returns": [
+          "sui_edge::deployment_manager::Control"
+        ]
+      },
       "create_deployment": {
         "visibility": "Public",
         "entry": false,
@@ -523,6 +547,22 @@ export const MOVE_ABI = {
         ],
         "returns": []
       },
+      "set_control": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::deployment_manager::DeploymentRecord",
+          "u8",
+          "u64",
+          "u64",
+          "u64",
+          "u64",
+          "u64",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
       "share_deployment": {
         "visibility": "Public",
         "entry": false,
@@ -585,6 +625,58 @@ export const MOVE_ABI = {
       }
     },
     "structs": {
+      "Control": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "revision",
+            "u64"
+          ],
+          [
+            "state",
+            "u8"
+          ],
+          [
+            "not_before_ms",
+            "u64"
+          ],
+          [
+            "expires_ms",
+            "u64"
+          ],
+          [
+            "window_start_ms",
+            "u64"
+          ],
+          [
+            "window_end_ms",
+            "u64"
+          ],
+          [
+            "notice_ms",
+            "u64"
+          ]
+        ]
+      },
+      "ControlKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "dummy_field",
+            "bool"
+          ]
+        ]
+      },
       "DelegateKey": {
         "abilities": [
           "Copy",

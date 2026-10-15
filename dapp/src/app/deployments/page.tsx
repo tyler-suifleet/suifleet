@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+import { buildDeploymentControlTx, controlReason, type DeploymentControl } from "@/lib/deployment-control";
 import { useDeployments } from "@/hooks/useDeployments";
 import { useDeploymentStorage } from "@/hooks/useDeploymentStorage";
 import { useCurrentAccount } from "@mysten/dapp-kit-react";
@@ -56,6 +58,10 @@ export default function DeploymentsPage() {
                   d={d}
                   canDelete={account?.address === d.creator}
                   isPending={isPending}
+                  onControl={(control) => signAndExecute(
+                    { transaction: buildDeploymentControlTx(d.deploymentId, control) },
+                    { onSuccess: () => refetch(), onError: (err) => alert(`Failed: ${err.message}`) }
+                  )}
                   onDelete={() => {
                     if (!confirm(`Delete deployment "${d.componentName} ${d.version}"? This cannot be undone.`)) return;
                     signAndExecute(
@@ -81,11 +87,13 @@ function DeploymentRow({
   canDelete,
   isPending,
   onDelete,
+  onControl,
 }: {
   d: ReturnType<typeof useDeployments>["data"] extends (infer T)[] | undefined ? T : never;
   canDelete: boolean;
   isPending: boolean;
   onDelete: () => void;
+  onControl: (control: DeploymentControl) => void;
 }) {
   return (
     <>
@@ -128,6 +136,7 @@ function DeploymentRow({
       </tr>
       <tr className="bg-gray-50 border-b border-gray-200">
         <td colSpan={6} className="px-4 pb-3">
+          <ControlEditor key={`${d.deploymentId}/${d.control.revision}`} control={d.control} canEdit={canDelete} pending={isPending} onSave={onControl} />
           <div className="text-xs text-gray-400 space-x-4">
             {d.receiptsVerified ? d.resolvedDeviceIds.map((id) => (
               <span key={id} className={`inline-flex px-2 py-1 rounded ${STATUS_COLORS[d.statuses[id] ?? 0]}`} title={id}>
@@ -170,4 +179,41 @@ function StorageBadge({ recipeBlobId }: { recipeBlobId: string }) {
 
 function Th({ children }: { children: React.ReactNode }) {
   return <th className="py-2 px-4 font-medium">{children}</th>;
+}
+
+function ControlEditor({ control, canEdit, pending, onSave }: {
+  control: DeploymentControl; canEdit: boolean; pending: boolean; onSave: (c: DeploymentControl) => void;
+}) {
+  const [draft, setDraft] = useState(control);
+  const [editing, setEditing] = useState(false);
+  const send = (c: DeploymentControl) => {
+    try { onSave(c); } catch (error) { alert(error instanceof Error ? error.message : String(error)); }
+  };
+  const dateFields = ["not_before_ms", "expires_ms", "window_start_ms", "window_end_ms"] as const;
+  return <div className="py-3 text-xs space-y-2 text-gray-700">
+    <p role="status">{controlReason(control)}</p>
+    <p>Cancellation/pause/expiry stop admission. An admitted apply finishes; they never roll it back. Device deferral reasons and advance notices are recorded in its journal/log.</p>
+    <p>Extending an expired schedule cannot reopen admission on devices that already observed expiry. Create a new deployment to reach the whole fleet.</p>
+    <p>Not before: {displayTime(control.not_before_ms)} · Expires: {displayTime(control.expires_ms)} · Window: {displayTime(control.window_start_ms)} – {displayTime(control.window_end_ms)} · Notice: {Number(control.notice_ms) / 1000}s</p>
+    {canEdit && control.state !== 2 && <div className="flex gap-3">
+      <button disabled={pending} onClick={() => send({ ...control, state: control.state === 1 ? 0 : 1 })}>{control.state === 1 ? "Resume" : "Pause"}</button>
+      <button disabled={pending} onClick={() => { if (confirm("Permanently cancel admission? Already admitted applies may finish.")) send({ ...control, state: 2 }); }}>Cancel permanently</button>
+      <button disabled={pending} onClick={() => setEditing(!editing)}>Edit schedule / notice</button>
+    </div>}
+    {editing && <form className="flex flex-wrap gap-3" onSubmit={(e) => { e.preventDefault(); send(draft); }}>
+      {dateFields.map((field) => <label key={field}>{field.replaceAll("_", " ")} (UTC)
+        <input aria-label={field} className="block border p-1" type="datetime-local" step="1"
+          value={draft[field] === "0" || Number.isNaN(new Date(Number(draft[field])).getTime()) ? "" : new Date(Number(draft[field])).toISOString().slice(0, 19)}
+          onChange={(e) => setDraft({ ...draft, [field]: e.target.value ? String(Date.parse(`${e.target.value}Z`)) : "0" })} />
+      </label>)}
+      <label>Advance notice (seconds, 0–604800)<input className="block border p-1" type="number" min="0" max="604800" step="1" value={Number(draft.notice_ms) / 1000}
+        onChange={(e) => setDraft({ ...draft, notice_ms: String(Number(e.target.value) * 1000) })} /></label>
+      <button disabled={pending} type="submit">Save schedule</button>
+    </form>}
+  </div>;
+}
+function displayTime(value: string) {
+  if (value === "0") return "unset";
+  const time = new Date(Number(value));
+  return Number.isNaN(time.getTime()) ? `UTC milliseconds ${value}` : time.toISOString();
 }

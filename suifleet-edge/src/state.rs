@@ -11,6 +11,9 @@ use std::{
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct State {
     pub binding: String,
+    /// Pre-apply notices/deferrals are not execution intents or status receipts.
+    #[serde(default)]
+    pub deferred: BTreeMap<String, crate::control::Deferred>,
     pub cursor: Option<Value>,
     #[serde(default)]
     pub initialized: bool,
