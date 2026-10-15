@@ -192,7 +192,7 @@ It runs `scripts/redeploy.sh` (`scripts/publish.py`). Without `--dry-run`, it sp
 - A failed command, failed effects or bad metadata stops it.
 - If a later step fails after the transaction has executed, the transaction is kept in a pending record. Prior configuration is preserved.
 
-**On success**, it records the release under `deployments/ENV/releases/`. The record holds all IDs and type origins, plus generated frontend and device configs, and the switch to it is atomic. It then rewrites `dapp/.env.local`.
+**On success**, it records the release under `deployments/ENV/releases/`. The record holds all IDs and type origins, plus generated frontend and device configs. `deployments/ENV/current` and `dapp/.env.local` are then switched to it together, under a journal: if the process is killed mid-switch, the next run (or `scripts/redeploy.sh --reconcile`) finishes it, and `make dapp-build` refuses until then.
 
 Details and recovery are in [DEPLOYMENT_MANIFEST.md](DEPLOYMENT_MANIFEST.md). `make test-publish` and `make test-publish-localnet` cover it. It has not yet been run against testnet.
 

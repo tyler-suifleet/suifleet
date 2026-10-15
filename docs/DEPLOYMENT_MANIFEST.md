@@ -66,14 +66,17 @@ All chain reads go over gRPC.
    - `deployment.json`
    - `frontend.env`
    - the device `config.toml` template (`[sui]` plus the device sections of `suifleet-edge/config.example.toml`, or `--device-template`)
-4. **Switch both clients together.** The new `dapp/.env.local` is written in full beside the old one first: it gets `NEXT_PUBLIC_DEPLOYMENT_MANIFEST`, the legacy `NEXT_PUBLIC_*_ID`/`NETWORK` lines are dropped, and every other line is kept. Then two renames activate `deployments/ENV/current` and `.env.local`. If the second rename fails, the first is undone, so both clients always name the same release.
+4. **Switch both clients together.** The new `dapp/.env.local` is written in full beside the old one first: it gets `NEXT_PUBLIC_DEPLOYMENT_MANIFEST`, the legacy `NEXT_PUBLIC_*_ID`/`NETWORK` lines are dropped, and every other line is kept. Next, a synced journal `deployments/ENV/activating.json` names the release. Then two renames activate `deployments/ENV/current` and `.env.local`, and the journal is removed.
+   - If the second rename raises an error, the first is undone.
+   - If the process is killed between them, the journal stays. The next run of `scripts/redeploy.sh` finishes the switch first, rolling forward to the journaled release; the release was complete and verified before the journal was written. `scripts/redeploy.sh --reconcile` does only that and sends no transaction.
+   - While a journal exists, `--dry-run` and `make dapp-build` refuse, so a half-switched `.env.local` is never built.
 5. **Recover.** If any step after execution fails, the previous `current` and `.env.local` stay in place. The error checks this and says so, or warns if either changed. It names the pending file. Fix the cause, then run `scripts/redeploy.sh --recover deployments/ENV/pending-DIGEST.json`. It finishes recording without another transaction.
 
 Earlier releases stay under `releases/`. Once superseded, every client rejects them as stale.
 
 Commit `contracts/Published.toml` and `deployments/ENV/` together after a public-network release: they are the record of every package, UpgradeCap, registry and type origin. Then rebuild the frontend, because `NEXT_PUBLIC_*` values are compiled in. Install `deployment.json` with each device's own `config.toml`. The template's device IDs and key path are placeholders.
 
-Options: `--network devnet|localnet` labels a non-public chain; `--publisher`/`--aggregator` (default: the previous release, or Walrus testnet); `--gas-budget` (default 0.5 SUI; a fresh publish costs about 0.07 SUI); `--package`, `--records`, `--frontend-env ''` (skip), `--client-config`.
+Options: `--network devnet|localnet` labels a non-public chain; `--publisher`/`--aggregator` (default: the previous release, or Walrus testnet); `--gas-budget` (default 0.5 SUI; a fresh publish costs about 0.07 SUI); `--package`, `--records`, `--frontend-env ''` (skip), `--client-config`, `--reconcile` (only finish an interrupted activation).
 
 ## Resolving and verifying by hand
 
@@ -92,7 +95,7 @@ cargo build --locked --manifest-path suifleet-edge/Cargo.toml --example chain_fa
 
 | Command | Covers |
 |---|---|
-| `make test-publish` | Offline, using a fake CLI and chain. The paths covered:<br>• metadata scoped to its environment<br>• account, chain and UpgradeCap checks<br>• failed, non-zero and garbled transactions<br>• post-execution failure with prior configuration kept, then `--recover`<br>• dry run, adoption and the strict TOML subset |
+| `make test-publish` | Offline, using a fake CLI and chain. The paths covered:<br>• metadata scoped to its environment<br>• account, chain and UpgradeCap checks<br>• failed, non-zero and garbled transactions<br>• post-execution failure with prior configuration kept, then `--recover`<br>• a process killed during activation, finished by `--reconcile` or the next run<br>• dry run, adoption and the strict TOML subset |
 | `make test-publish-localnet` | Real localnet, real contracts and CLI:<br>• wrong account refused<br>• dry run writes nothing<br>• fresh publish and upgrade, each verified by the daemon (`--check-config`) and the frontend SDK<br>• the superseded release rejected as stale<br>• incompatible upgrade leaves everything unchanged<br>• reset-chain metadata refused |
 | `make test-manifest`, `make test-manifest-live` | Manifest validation, and origins across real upgrades |
 
