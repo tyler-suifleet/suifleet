@@ -44,3 +44,4 @@ live-state/
 encrypted-live-state/
 evidence/
 live-evidence.json
+/dist/
