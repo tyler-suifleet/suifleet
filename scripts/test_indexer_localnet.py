@@ -248,6 +248,28 @@ def run(rpc_url, faucet_url):
             assert get(f"/v1/devices/{foreign}")["owner"] == n(other)
             print("PASS: a revocation (DeviceIdentityChanged) is indexed")
 
+            # A catalog deployment (SF-011) names its ComponentVersion, not a recipe.
+            catalog = created(transaction("--move-call", f"{package}::component_catalog::create_catalog"),
+                              "::component_catalog::ComponentCatalog")[0]
+            version = created(transaction("--move-call", f"{package}::component_catalog::publish_version", f"@{catalog}",
+                                          '"cat-fw"', '"2.0.0"', 'vector["linux"]', 'vector["aarch64"]',
+                                          'vector["recipe"]', f'vector["{"c" * 64}"]', f'vector["{"d" * 64}"]', CLOCK),
+                              "::component_catalog::ComponentVersion")[0]
+            bound = created(transaction("--move-call", f"{package}::component_catalog::create_deployment", f"@{version}",
+                                        "vector[]", f"vector[@{third}]", CLOCK),
+                            "::deployment_manager::DeploymentRecord")[0]
+            wait_for(lambda: http("GET", f"/v1/deployments/{bound}", read_token)[0] == 200, "catalog deployment not indexed")
+            catalogued = get(f"/v1/deployments/{bound}")
+            assert (catalogued["schema_version"], catalogued["catalog_version"], catalogued["component_name"],
+                    catalogued["version"], catalogued["recipe_sha256"], catalogued["resolved_devices"]) == (
+                        2, n(version), "cat-fw", "2.0.0", None, [n(third)]), catalogued
+            assert deployment["catalog_version"] is None
+            transaction("--move-call", f"{package}::component_catalog::delete_deployment", f"@{bound}")
+            wait_for(lambda: get(f"/v1/deployments/{bound}")["deleted"], "catalog deployment deletion not indexed")
+            assert get(f"/v1/deployments/{bound}")["catalog_version"] == n(version)
+            print("PASS: a catalog deployment is indexed with its ComponentVersion and no recipe digest; "
+                  "its deletion keeps a tombstone")
+
             # Auth.
             assert http("GET", "/v1/devices")[0] == 401
             assert http("GET", "/v1/devices", "x" * 40)[0] == 401
@@ -269,7 +291,7 @@ def run(rpc_url, faucet_url):
             kinds = sorted(c["kind"] for c in new)
             assert kinds == ["deployment.deleted", "group.updated"], kinds
             assert sqlite3.connect(db).execute("SELECT COUNT(*) FROM changes WHERE seq <= ?", (before[1],)).fetchone()[0] == before[0]
-            assert every(f"/v1/deployments?device={third}") == [] and len(every("/v1/deployments?include_deleted=true")) == 2
+            assert every(f"/v1/deployments?device={third}") == [] and len(every("/v1/deployments?include_deleted=true")) == 3
             print("PASS: restart resumes from durable cursors; removal and deletion recorded once, earlier changes not repeated; "
                   "deleted record kept as a tombstone")
 

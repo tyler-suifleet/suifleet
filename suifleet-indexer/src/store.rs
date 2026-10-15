@@ -25,7 +25,7 @@ CREATE INDEX IF NOT EXISTS members_device ON group_members(device_id);
 CREATE TABLE IF NOT EXISTS deployments (
   id TEXT PRIMARY KEY, creator TEXT, component_name TEXT, version TEXT, recipe_blob_id TEXT,
   artifact_sha256 TEXT, recipe_sha256 TEXT, created_at INTEGER, schema_version INTEGER,
-  deleted INTEGER NOT NULL DEFAULT 0);
+  deleted INTEGER NOT NULL DEFAULT 0, catalog_version TEXT);
 CREATE INDEX IF NOT EXISTS deployments_creator ON deployments(creator, id);
 CREATE INDEX IF NOT EXISTS deployments_component ON deployments(component_name, id);
 CREATE TABLE IF NOT EXISTS deployment_targets (
@@ -85,6 +85,9 @@ pub struct Deployment {
     pub recipe_sha256: Option<String>,
     pub created_at: u64,
     pub schema_version: u64,
+    /// The ComponentVersion a catalog deployment (schema 2, SF-011) binds;
+    /// its recipe and artifact digests are per platform on that object.
+    pub catalog_version: Option<String>,
     pub deleted: bool,
     pub target_groups: Vec<String>,
     pub target_devices: Vec<String>,
@@ -136,6 +139,15 @@ pub fn open(path: &Path) -> anyhow::Result<Connection> {
              ALTER TABLE devices ADD COLUMN signer TEXT;
              ALTER TABLE devices ADD COLUMN owner_cap TEXT;",
         )?;
+    }
+    // Databases from before the component catalog (SF-011) gain its column.
+    let has_catalog: bool = connection.query_row(
+        "SELECT COUNT(*) > 0 FROM pragma_table_info('deployments') WHERE name = 'catalog_version'",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_catalog {
+        connection.execute_batch("ALTER TABLE deployments ADD COLUMN catalog_version TEXT;")?;
     }
     Ok(connection)
 }
@@ -347,15 +359,16 @@ pub fn put_deployment(
     }
     tx.execute(
         "INSERT INTO deployments (id, creator, component_name, version, recipe_blob_id, artifact_sha256,
-           recipe_sha256, created_at, schema_version, deleted)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+           recipe_sha256, created_at, schema_version, deleted, catalog_version)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
          ON CONFLICT(id) DO UPDATE SET creator = excluded.creator, component_name = excluded.component_name,
            version = excluded.version, recipe_blob_id = excluded.recipe_blob_id,
            artifact_sha256 = excluded.artifact_sha256, recipe_sha256 = excluded.recipe_sha256,
-           created_at = excluded.created_at, schema_version = excluded.schema_version, deleted = excluded.deleted",
+           created_at = excluded.created_at, schema_version = excluded.schema_version, deleted = excluded.deleted,
+           catalog_version = excluded.catalog_version",
         params![wanted.id, wanted.creator, wanted.component_name, wanted.version, wanted.recipe_blob_id,
                 wanted.artifact_sha256, wanted.recipe_sha256, wanted.created_at as i64,
-                wanted.schema_version as i64, wanted.deleted],
+                wanted.schema_version as i64, wanted.deleted, wanted.catalog_version],
     )?;
     tx.execute(
         "DELETE FROM deployment_targets WHERE deployment_id = ?1",
@@ -476,12 +489,12 @@ pub fn read_group(connection: &Connection, id: &str) -> anyhow::Result<Option<Gr
 pub fn read_deployment(connection: &Connection, id: &str) -> anyhow::Result<Option<Deployment>> {
     let row = connection
         .query_row("SELECT id, creator, component_name, version, recipe_blob_id, artifact_sha256, recipe_sha256,
-                created_at, schema_version, deleted FROM deployments WHERE id = ?1",
+                created_at, schema_version, deleted, catalog_version FROM deployments WHERE id = ?1",
             [id], |row| Ok(Deployment {
                 id: row.get(0)?, creator: row.get(1)?, component_name: row.get(2)?, version: row.get(3)?,
                 recipe_blob_id: row.get(4)?, artifact_sha256: row.get(5)?, recipe_sha256: row.get(6)?,
                 created_at: row.get::<_, i64>(7)? as u64, schema_version: row.get::<_, i64>(8)? as u64,
-                deleted: row.get(9)?, target_groups: vec![], target_devices: vec![],
+                deleted: row.get(9)?, catalog_version: row.get(10)?, target_groups: vec![], target_devices: vec![],
             }))
         .optional()?;
     row.map(|mut deployment| {
@@ -746,6 +759,37 @@ mod tests {
     }
 
     #[test]
+    fn databases_from_before_the_catalog_gain_its_column() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fleet.db");
+        let old = Connection::open(&path).unwrap();
+        old.execute_batch(
+            "CREATE TABLE deployments (id TEXT PRIMARY KEY, creator TEXT, component_name TEXT, version TEXT,
+               recipe_blob_id TEXT, artifact_sha256 TEXT, recipe_sha256 TEXT, created_at INTEGER,
+               schema_version INTEGER, deleted INTEGER NOT NULL DEFAULT 0);
+             INSERT INTO deployments VALUES ('0x7', '0x1', 'fw', '1', 'r', 'a', 'b', 0, 1, 0);",
+        )
+        .unwrap();
+        drop(old);
+        let mut connection = open(&path).unwrap();
+        let migrated = read_deployment(&connection, "0x7").unwrap().unwrap();
+        assert!(migrated.catalog_version.is_none() && migrated.component_name == "fw");
+        let catalogued = Deployment {
+            id: id(71),
+            catalog_version: Some(id(72)),
+            schema_version: 2,
+            recipe_sha256: None,
+            ..migrated
+        };
+        let tx = connection.transaction().unwrap();
+        assert!(put_deployment(&tx, &catalogued, None).unwrap());
+        tx.commit().unwrap();
+        assert_eq!(read_deployment(&connection, &id(71)).unwrap().unwrap(), catalogued);
+        drop(connection);
+        open(&path).unwrap(); // Reopening an upgraded database is a no-op.
+    }
+
+    #[test]
     fn rolled_back_page_leaves_neither_rows_nor_cursor() {
         let dir = tempfile::tempdir().unwrap();
         let mut connection = open(&dir.path().join("fleet.db")).unwrap();
@@ -845,6 +889,7 @@ mod tests {
             recipe_sha256: Some("b".into()),
             created_at: 1,
             schema_version: 1,
+            catalog_version: None,
             deleted: false,
             target_groups: vec![id(50), id(51)],
             target_devices: vec![id(3)],

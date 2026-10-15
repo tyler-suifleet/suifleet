@@ -355,6 +355,9 @@ impl Indexer {
         let digest = self
             .field(id, "deployment_manager::RecipeDigestKey")
             .await?;
+        let binding = self
+            .field(id, "component_catalog::CatalogBindingKey")
+            .await?;
         Ok(Some(Deployment {
             id: id.to_owned(),
             creator: chain::normalize(&text(&f["creator"])).unwrap_or_default(),
@@ -365,6 +368,10 @@ impl Indexer {
             recipe_sha256: digest.as_ref().and_then(Value::as_str).map(str::to_owned),
             created_at: chain::number(&f["created_at"]).unwrap_or_default(),
             schema_version: chain::number(&f["schema_version"]).unwrap_or_default(),
+            catalog_version: binding
+                .as_ref()
+                .and_then(|b| b["version_id"].as_str())
+                .and_then(chain::normalize),
             deleted: false,
             target_groups: groups.as_ref().map(chain::id_list).unwrap_or_default(),
             target_devices: devices.as_ref().map(chain::id_list).unwrap_or_default(),
