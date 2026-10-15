@@ -26,6 +26,8 @@ CARGO_BUILD_FLAGS:append = " --bin suifleet --features systemd"
 export CARGO_NET_OFFLINE = "true"
 # Let Yocto split debug symbols and strip the packaged executable itself.
 export CARGO_PROFILE_RELEASE_STRIP = "false"
+# Native C/assembly in vendored crates lives outside ${S} and ${B}.
+CFLAGS:append = " -fdebug-prefix-map=${CARGO_HOME}/bitbake=/usr/src/debug/${PN}/${PV}/vendor -fmacro-prefix-map=${CARGO_HOME}/bitbake=/usr/src/debug/${PN}/${PV}/vendor"
 
 DEPENDS += "openssl systemd"
 RDEPENDS:${PN} += "ca-certificates"
