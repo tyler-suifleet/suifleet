@@ -33,8 +33,13 @@ UPGRADE_CAP = "0xc0"
 TYPE_ORIGINS = {name: ORIGIN for name in REQUIRED_TYPES}
 TYPE_ORIGINS["deployment_manager::RecipeDigestKey"] = RECIPE_ORIGIN
 TYPE_ORIGINS["device_cap::DeviceAddressKey"] = PACKAGE
+for _name in ("device_registry::IdentityKey", "device_registry::Identity", "device_registry::DeviceIdentityChanged",
+              "device_registry::CustodyKey", "device_registry::DeviceOwnerCap"):
+    TYPE_ORIGINS[_name] = PACKAGE  # Introduced by a later upgrade.
 DEVICE = "0xde"
 CAP = "0xca"
+OWNER_CAP = "0xc1"
+CUSTODY_FIELD = "0xcf"
 OPERATOR = "0xad"
 GROUP = "0x10"
 ADDRESS = "0xa0ccc8bcc83f6c628340134f8546a21e0618fd1aaa02432bba454c4a2c2233da"
@@ -83,6 +88,7 @@ class Simulator:
         self.downloads = []
         self.built = []
         self.errors = []
+        self.identity = {"signer": ADDRESS, "revoked": False, "owner_cap": OWNER_CAP}
         self.chain_checks = 0
         self.truncate_next_artifact = True  # First artifact transfer drops mid-body.
         self.ranges = []
@@ -110,8 +116,10 @@ class Simulator:
             return {"data":{"content":{"type":"0x2::package::UpgradeCap","fields":{"package":self.latest_package,"version":"3"}}}}
         if id == REGISTRY:
             type, fields, owner = "device_registry::DeviceRegistry", {}, None
-        elif id == DEVICE:
-            type, fields, owner = "device_registry::Device", {"device_address":ADDRESS}, OPERATOR
+        elif id == DEVICE:  # Activated: held by the registry, operated through OWNER_CAP.
+            type, fields, owner = "device_registry::Device", {"device_address":ADDRESS}, {"ObjectOwner":CUSTODY_FIELD}
+        elif id == OWNER_CAP:
+            type, fields, owner = "device_registry::DeviceOwnerCap", {"device_id":DEVICE}, OPERATOR
         elif id == CAP:
             type, fields, owner = "device_cap::DeviceCap", {"device_id":DEVICE}, ADDRESS
         elif id in self.groups:
@@ -124,7 +132,8 @@ class Simulator:
         fields.update(self.schema_fields.get(id, {}))
         if fields.get("schema_version") is None:
             fields.pop("schema_version", None)
-        return {"data":{"objectId":id,"owner":{"AddressOwner":owner} if owner else {"Shared":{"initial_shared_version":"1"}},
+        owner = {"AddressOwner":owner} if isinstance(owner, str) else owner or {"Shared":{"initial_shared_version":"1"}}
+        return {"data":{"objectId":id,"owner":owner,
             "content":{"type":f"{TYPE_ORIGINS[type]}::{type}","fields":fields}}}
 
     def rpc(self, method, params):
@@ -134,13 +143,18 @@ class Simulator:
         # Simulator views used by the gRPC shim.
         if method == "shim_height":
             return len(self.events)
-        if method == "shim_parents":
-            return [CAP] + list(self.groups) + [e["parsedJson"]["deployment_id"] for e in self.events]
-        if method == "shim_keyTypes":
-            return [f"{TYPE_ORIGINS[name]}::{name}" for name in (
-                "device_cap::DeviceAddressKey", "deployment_manager::RecipeDigestKey",
-                "deployment_manager::TargetDevicesKey", "deployment_manager::TargetGroupsKey",
-                "deployment_manager::ManagedKey", "desired_state::DesiredKey")]
+        if method == "shim_fields":
+            key = lambda name: f"{TYPE_ORIGINS[name]}::{name}"
+            empty = "00"  # An empty key struct is one `false` dummy byte.
+            fields = [[CAP, key("device_cap::DeviceAddressKey"), empty],
+                      [REGISTRY, key("device_registry::IdentityKey"), object_id(DEVICE)[2:]]]
+            fields += [[group, key("desired_state::DesiredKey"), empty] for group in self.groups]
+            for event in self.events:
+                parent = event["parsedJson"]["deployment_id"]
+                fields += [[parent, key(name), empty] for name in (
+                    "deployment_manager::RecipeDigestKey", "deployment_manager::TargetDevicesKey",
+                    "deployment_manager::TargetGroupsKey", "deployment_manager::ManagedKey")]
+            return fields
         if method == "shim_events":
             if params[0] == f"{ORIGIN}::device_group::DeviceAddedToGroup":
                 return [dict(group_id=group, device_id=device) for group, device in self.memberships]
@@ -162,6 +176,9 @@ class Simulator:
         if method == "sui_getObject":
             return self.obj(params[0])
         if method == "suix_getDynamicFieldObject":
+            if params[0] == REGISTRY:
+                assert params[1]["type"] == f"{PACKAGE}::device_registry::IdentityKey"
+                return {"data":{"content":{"fields":{"value":self.identity}}}}
             if params[0] == CAP:
                 assert params[1]["type"] == f"{PACKAGE}::device_cap::DeviceAddressKey"
                 return {"data":{"content":{"fields":{"value":ADDRESS}}}}
@@ -187,8 +204,8 @@ class Simulator:
             assert params[0] == ADDRESS and params[1] == PACKAGE
             assert params[2] == "deployment_manager"
             args = params[5]
-            assert args[1] == CAP
-            assert (params[3] == "report_status" and len(args) == 3) or (params[3] == "report_status_for_group" and args[2] in self.groups and len(args) == 4)
+            assert args[1] == REGISTRY and args[2] == CAP
+            assert (params[3] == "report_verified_status" and len(args) == 4) or (params[3] == "report_verified_status_for_group" and args[3] in self.groups and len(args) == 5)
             if not self.allow_reports:
                 raise ConnectionError("simulated unavailable transaction service")
             self.built.append((args[0], int(args[-1])))
@@ -393,6 +410,17 @@ def run(binary, firmware_helper=False, daemon_user=None):
                 assert all(json.loads(line) == ARTIFACT.decode() for line in applied.read_text().splitlines())
                 assert "/v1/blobs/recipe-0x101" in sim.downloads and "/v1/blobs/artifact" in sim.downloads
                 assert not sim.errors, sim.errors
+                # A revoked device stops: nothing new is applied or reported.
+                # Identity is checked once per poll: let a poll start after the
+                # revocation so one already in flight cannot see the new event.
+                sim.identity = dict(sim.identity, revoked=True)
+                checks = sim.chain_checks
+                wait_for(lambda: sim.chain_checks > checks, "daemon stopped polling", process)
+                sim.add("0x10e")
+                checks = sim.chain_checks
+                wait_for(lambda: sim.chain_checks >= checks + 4, "daemon stopped polling after revocation", process)
+                assert count() == 3 and "0x10e" not in state()["deployments"], "revoked device applied an update"
+                assert len(sim.reports) == 10
                 stop(process)
                 process = None
                 helper_stop.set()
@@ -406,6 +434,7 @@ def run(binary, firmware_helper=False, daemon_user=None):
             print("PASS: artifact/recipe hash mismatch, unsupported lifecycle, untrusted creator and deleted targets rejected")
             print("PASS: future/missing/malformed deployment schemas failed without downloads; later v1 applied and cursor advanced")
             print("PASS: offline catch-up, restart deduplication, failed execution and durable report retry")
+            print("PASS: revoked registry identity stops applying and reporting")
             print("PASS: interrupted artifact transfer resumed; expired blob reported Failed; artifact cache emptied")
     finally:
         if process and process.poll() is None:

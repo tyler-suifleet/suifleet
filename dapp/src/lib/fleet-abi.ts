@@ -78,6 +78,17 @@ export const MOVE_ABI = {
         ],
         "returns": []
       },
+      "has_current_receipts": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::deployment_manager::DeploymentRecord"
+        ],
+        "returns": [
+          "bool"
+        ]
+      },
       "has_receipts": {
         "visibility": "Public",
         "entry": false,
@@ -213,6 +224,33 @@ export const MOVE_ABI = {
         "type_parameters": [],
         "parameters": [
           "&mut sui_edge::deployment_manager::DeploymentRecord",
+          "&sui_edge::device_cap::DeviceCap",
+          "&sui_edge::device_group::DeviceGroup",
+          "u8",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "report_verified_status": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::deployment_manager::DeploymentRecord",
+          "&sui_edge::device_registry::DeviceRegistry",
+          "&sui_edge::device_cap::DeviceCap",
+          "u8",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "report_verified_status_for_group": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::deployment_manager::DeploymentRecord",
+          "&sui_edge::device_registry::DeviceRegistry",
           "&sui_edge::device_cap::DeviceCap",
           "&sui_edge::device_group::DeviceGroup",
           "u8",
@@ -695,6 +733,17 @@ export const MOVE_ABI = {
   },
   "device_cap": {
     "functions": {
+      "assert_active": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::device_cap::DeviceCap",
+          "&sui_edge::device_registry::DeviceRegistry",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
       "assert_signer": {
         "visibility": "Public",
         "entry": false,
@@ -989,6 +1038,55 @@ export const MOVE_ABI = {
   },
   "device_registry": {
     "functions": {
+      "activate_device": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::device_registry::DeviceRegistry",
+          "sui_edge::device_registry::Device",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": [
+          "sui_edge::device_registry::DeviceOwnerCap"
+        ]
+      },
+      "borrow_device": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::device_registry::DeviceRegistry",
+          "&sui_edge::device_registry::DeviceOwnerCap"
+        ],
+        "returns": [
+          "sui_edge::device_registry::Device",
+          "sui_edge::device_registry::DeviceLoan"
+        ]
+      },
+      "custodied_device": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::device_registry::DeviceRegistry",
+          "sui::object::ID"
+        ],
+        "returns": [
+          "&sui_edge::device_registry::Device"
+        ]
+      },
+      "deregister_activated_device": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::device_registry::DeviceRegistry",
+          "sui_edge::device_registry::DeviceOwnerCap",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
       "deregister_device": {
         "visibility": "Public",
         "entry": true,
@@ -1033,6 +1131,87 @@ export const MOVE_ABI = {
           "sui::object::ID"
         ]
       },
+      "identity": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::device_registry::DeviceRegistry",
+          "sui::object::ID"
+        ],
+        "returns": [
+          "std::option::Option<sui_edge::device_registry::Identity>"
+        ]
+      },
+      "identity_owner_cap": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::device_registry::Identity"
+        ],
+        "returns": [
+          "sui::object::ID"
+        ]
+      },
+      "identity_revoked": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::device_registry::Identity"
+        ],
+        "returns": [
+          "bool"
+        ]
+      },
+      "identity_signer": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::device_registry::Identity"
+        ],
+        "returns": [
+          "address"
+        ]
+      },
+      "is_active_signer": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::device_registry::DeviceRegistry",
+          "sui::object::ID",
+          "address"
+        ],
+        "returns": [
+          "bool"
+        ]
+      },
+      "is_custodied": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::device_registry::DeviceRegistry",
+          "sui::object::ID"
+        ],
+        "returns": [
+          "bool"
+        ]
+      },
+      "owner_cap_device_id": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::device_registry::DeviceOwnerCap"
+        ],
+        "returns": [
+          "sui::object::ID"
+        ]
+      },
       "register_device": {
         "visibility": "Public",
         "entry": false,
@@ -1049,6 +1228,48 @@ export const MOVE_ABI = {
           "sui_edge::device_registry::Device"
         ]
       },
+      "reinstate_device": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::device_registry::DeviceRegistry",
+          "&sui_edge::device_registry::DeviceOwnerCap"
+        ],
+        "returns": []
+      },
+      "return_device": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::device_registry::DeviceRegistry",
+          "sui_edge::device_registry::Device",
+          "sui_edge::device_registry::DeviceLoan"
+        ],
+        "returns": []
+      },
+      "revoke_device": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::device_registry::DeviceRegistry",
+          "&sui_edge::device_registry::DeviceOwnerCap"
+        ],
+        "returns": []
+      },
+      "rotate_device_key": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::device_registry::DeviceRegistry",
+          "&sui_edge::device_registry::DeviceOwnerCap",
+          "address"
+        ],
+        "returns": []
+      },
       "set_meta": {
         "visibility": "Public",
         "entry": false,
@@ -1063,6 +1284,20 @@ export const MOVE_ABI = {
       }
     },
     "structs": {
+      "CustodyKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "device_id",
+            "sui::object::ID"
+          ]
+        ]
+      },
       "Device": {
         "abilities": [
           "Key",
@@ -1117,6 +1352,58 @@ export const MOVE_ABI = {
           ]
         ]
       },
+      "DeviceIdentityChanged": {
+        "abilities": [
+          "Copy",
+          "Drop"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "device_id",
+            "sui::object::ID"
+          ],
+          [
+            "signer",
+            "address"
+          ],
+          [
+            "revoked",
+            "bool"
+          ],
+          [
+            "owner_cap",
+            "sui::object::ID"
+          ]
+        ]
+      },
+      "DeviceLoan": {
+        "abilities": [],
+        "type_parameters": [],
+        "fields": [
+          [
+            "device_id",
+            "sui::object::ID"
+          ]
+        ]
+      },
+      "DeviceOwnerCap": {
+        "abilities": [
+          "Key",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "id",
+            "sui::object::UID"
+          ],
+          [
+            "device_id",
+            "sui::object::ID"
+          ]
+        ]
+      },
       "DeviceRegistered": {
         "abilities": [
           "Copy",
@@ -1163,6 +1450,42 @@ export const MOVE_ABI = {
           [
             "schema_version",
             "u64"
+          ]
+        ]
+      },
+      "Identity": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "signer",
+            "address"
+          ],
+          [
+            "revoked",
+            "bool"
+          ],
+          [
+            "owner_cap",
+            "sui::object::ID"
+          ]
+        ]
+      },
+      "IdentityKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "device_id",
+            "sui::object::ID"
           ]
         ]
       },
