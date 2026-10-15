@@ -57,6 +57,7 @@ A stopped review CLI with a durable exit receipt retries usage/auth failures aft
 Under the user's merge-closes-issue policy, the service adds `Closes #N` to each owned PR using the ticket's verified same-repository issue URL. `Refs #N` alone does not close an issue. After verifying a default-branch merge and its commit ancestry, reconciliation marks the atomic ticket and Project Done, explicitly closes and verifies the GitHub issue, and retries partial failures. Periodic discovery also imports merges performed outside the service, so missed notifications and older merged PRs are reconciled. Unknown ownership, other repositories and unmerged/closed-without-merge PRs never trigger closure. Active implementation claims require their owner handoff before coordinator completion.
 
 Automatic merging still requires the existing independent-review, CI and acceptance gates. A verified external merge is treated as implementation completion under this policy, without inventing approval or test results. Any remaining live-wallet, public-network or hardware validation must remain visible in an existing acceptance ticket or explicit follow-up. SF-003/#6's merged frontend implementation is closed; its remaining real-extension acceptance is tracked in SF-010/#11 and SF-031/#32.
+
 ## Automatic implementation dispatch
 
 The optional `ticket-dispatcher.service` starts the next highest-priority eligible
