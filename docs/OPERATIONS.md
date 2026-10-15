@@ -178,9 +178,10 @@ A group can carry a **desired state**: a revisioned map from component name to t
 - **Group discovery.** It finds its groups from `DeviceAddedToGroup` events, scanned from genesis with their own journal cursor.
 - **Membership check.** It confirms membership, and that the group's admin is the device's operator, from each group object.
 - **Merge.** It merges the groups' current revisions. Groups naming different deployments for one component are a conflict: the component is left as installed, and the dApp shows it.
-- **Plan.** It applies desired deployments it has no outcome for, in name order, journaling intent first.
-  - The first step that does not apply stops the plan, and that desired state is not retried until it changes.
-  - A crash mid-step is settled Failed on restart and never re-executed.
+- **Plan.** In name order, it compares each desired deployment with what the component currently runs: the deployment it last started for that component, one-shot or desired, recorded with that deployment's intent. It applies desired deployments that have never run here, journaling the step and then the intent before the updater starts.
+  - The first step that does not apply stops the plan, and that desired state is not retried until it changes. The stop is read back from the journal, so it holds across a crash. An update still in flight in the privileged helper keeps it until the update settles.
+  - A crash mid-step is settled Failed on restart and never re-executed. Later steps of the same desired state stay stopped.
+  - A deployment never runs twice: its ID is also its journal entry, firmware request and receipt. If a revision selects a deployment again after the component has moved on (A → B → A, or a one-shot update after a desired one), the daemon logs that this is unsupported and leaves the component as installed, without recording it as converged. To return to a version, create a new deployment record for it.
 - **Results.** Superseded deployments are never applied. New members receive the current state.
   - Members that leave, and components removed from a revision, are retired from management. They are not uninstalled: there are no lifecycle hooks yet (SF-014).
 - **One-shot path.** It ignores records marked managed. Unmanaged deployments keep their one-shot behaviour.
