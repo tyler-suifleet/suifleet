@@ -22,20 +22,8 @@ export interface UploadResult {
   storage: StorageInfo;
 }
 
-export interface ComponentRecipe {
-  schemaVersion: "1.0";
-  componentName: string;
-  componentVersion: string;
-  description?: string;
-  artifactBlobId: string;
-  artifactSha256: string;
-  lifecycle: {
-    install?: string;
-    run?: string;
-    shutdown?: string;
-  };
-  configuration: Record<string, unknown>;
-}
+export type { ComponentRecipe } from "./recipe-schema";
+import { ComponentRecipe, assertComponentRecipe } from "./recipe-schema";
 
 type PublisherResponse = {
   newlyCreated?: {
@@ -125,6 +113,7 @@ export async function uploadArtifact(file: File, owner: string | null): Promise<
 }
 
 export async function uploadRecipe(recipe: ComponentRecipe, owner: string | null): Promise<UploadResult> {
+  assertComponentRecipe(recipe);
   const text = JSON.stringify(recipe, null, 2);
   const sha256 = await sha256Hex(new TextEncoder().encode(text));
   const storage = await uploadBlob(text, "application/json", owner);
