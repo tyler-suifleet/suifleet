@@ -366,3 +366,74 @@ Not verified:
 - Persistent report failures: inspect effects, target membership, chain/IDs and gas. The journal preserves pending reports.
 - Stale frontend IDs: regenerate config and rebuild the static app.
 - `make down`: removes cache and wallet volumes; use only when deliberately discarding them, after preserving required state.
+
+## Deployment admission controls (SF-018)
+
+The deployment creator can pause/resume admission, permanently cancel admission,
+and set UTC Unix-millisecond not-before, expiry, a single absolute maintenance
+window `[start,end)`, and an advance-notice duration (at most seven days).
+Zero disables the respective deadline/window/notice. These are admission times,
+not promises that an update finishes before the window closes. A closed window
+waits for an operator to edit it; it does not recur automatically. Expiry and
+cancellation observed by a device are terminal: create a new deployment to retry.
+Removing a desired component or deleting a record remains distinct from cancellation.
+
+On **Deploy component**, select **Create paused** to publish the control in the
+same transaction as the deployment (including catalog and desired-state creation).
+Then use **Deployments → Edit schedule / notice**, save while paused, and resume.
+This prevents immediate admission before a schedule is configured. Pause, resume,
+cancel and schedule editing require the creator's wallet; deployer roles do not
+grant control authority. The UI displays the control state, actionable reason,
+UTC times and notice. It does not imply every device has received the change:
+check device logs/journals and authoritative final receipts separately.
+
+The daemon persists notices and deferrals in `state.json` separately from apply
+outcomes. A deferred one-shot deployment survives event-cursor advancement and
+restarts. Desired-state deferrals are reconsidered under the current group plan;
+a superseded revision is never selected from the deferred queue. The notice timer
+starts when this device first observes a control revision and survives restarts;
+editing controls (including resume) starts a new notice. Notices are structured
+local log messages before disruptive work, not an interactive approval prompt.
+Devices need a synchronized UTC clock. The durable time high-water mark prevents
+clock rollback from reopening an observed deadline; correct a bad clock before
+creating a replacement deployment. No offline or cached admission is allowed.
+
+Controls are checked before preparation, then read again after all artifacts are
+verified and immediately before journaling apply intent. Read/validation failures
+fail closed. The last successful read is the **admission boundary**: later pause,
+cancel, expiry or window closure does not interrupt the admitted dependency plan,
+kill its updater, roll it back or change its actual success/failure receipt. A
+control transaction racing after that read can therefore coexist with a successful
+apply. A crash after intent retains the existing no-reapply/helper reconciliation
+rules. There is no distributed atomic transaction spanning Sui and a local updater.
+
+This is an additive compatible contract upgrade: record layouts/signatures remain
+stable. `deployment_manager::ControlKey` and `Control` originate in the upgrade;
+regenerate manifests and both clients rather than assigning their original package
+origin. Absence of the field preserves immediate admission on existing records.
+Deploy the supporting daemon to the fleet before relying on controls: older daemons
+cannot enforce fields introduced later. Old package entry points remain callable;
+status writes do not change controls, and deletion still prevents later object
+reads. Do not interpret deleting a record through an older package as acknowledged
+cancellation or retain a deleted record as an apply authorization.
+
+Validation commands (disposable network only for the final two):
+
+```bash
+make test-contracts
+make check-interfaces
+make edge-test
+make test-ota                         # includes SF-018 race/restart tests
+make dapp-typecheck
+make dapp-build
+make test-deployment-control-localnet # start isolated loopback node/faucet first
+node scripts/test_frontend_live.cjs   # actual gRPC control builders/BCS reads
+```
+
+The simulator covers pause/resume across restart/cursor advancement, offline
+expiry/cancel, not-before plus notice, pause/cancel/expiry/window closure during
+fetch, window editing and cancellation during an admitted updater. The local-chain
+test upgrades main's package with an existing record, checks distinct control type
+origins, old-package calls, irreversible cancellation and cleanup. These do not
+establish public-network interoperability, real extension-wallet acceptance or
+physical firmware/power-loss safety.
