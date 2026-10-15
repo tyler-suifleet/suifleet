@@ -254,6 +254,28 @@ impl Supervisor {
         }
     }
 
+    /// Whether `name` is a committed or running supervised component.
+    pub fn supervises(&self, name: &str) -> bool {
+        self.active.contains_key(name) || self.running.contains_key(name)
+    }
+
+    /// End supervision of `name` (replaced by a version without a run
+    /// command): stop it with its descendants and uncommit it, so no later
+    /// daemon start brings it back. Its work directory and log are kept.
+    pub async fn retire(&mut self, name: &str) -> anyhow::Result<()> {
+        self.stop(name).await;
+        if self.active.remove(name).is_some() {
+            self.save_active()?;
+        }
+        self.status.lock().unwrap().remove(name);
+        write_status(&self.root, &self.status)?;
+        if safe_segment(name) {
+            let _ = std::fs::remove_dir_all(self.root.join(name).join("versions"));
+        }
+        info!(component = name, "Component no longer supervised");
+        Ok(())
+    }
+
     /// Stop every component (daemon shutdown), dependents before their
     /// dependencies.
     pub async fn stop_all(&mut self) {
@@ -1214,6 +1236,30 @@ mod tests {
             libc::kill(other.pid() as i32, libc::SIGKILL);
         }
         let _ = other.wait().await;
+    }
+
+    #[tokio::test]
+    async fn retired_component_is_stopped_and_not_restarted() {
+        let mut f = Fixture::new("retire");
+        let mut s = f.open();
+        let v1 = f.spec("1.0.0", "echo run >> {work}/runs; setsid sleep 300 & echo $! > {work}/escaped; exec sleep 300");
+        f.deploy(&mut s, v1, None).await.unwrap();
+        let main = s.status()["app"].pid.unwrap();
+        let escaped: u32 = f.read("escaped").trim().parse().unwrap();
+        assert!(s.supervises("app"));
+        s.retire("app").await.unwrap();
+        assert!(!s.supervises("app"));
+        assert!(!alive(main));
+        until("the escaped descendant to be killed", || !alive(escaped)).await;
+        assert!(f.active().is_empty(), "a retired version stayed committed");
+        assert!(!s.status().contains_key("app"));
+        assert!(!f.dir.join("supervised/app/versions").exists());
+        s.stop_all().await;
+        drop(s);
+        let mut s = f.open();
+        s.bootstrap().await;
+        assert!(s.status().is_empty());
+        assert_eq!(f.read("runs").lines().count(), 1, "a retired version started again");
     }
 
     #[test]

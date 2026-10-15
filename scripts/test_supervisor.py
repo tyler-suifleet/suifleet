@@ -13,6 +13,8 @@ One component, `svc`, across daemon lifetimes:
   daemon SIGKILL, then start           -> the orphaned run and every descendant
                                           (setsid, reparented, env-cleared) killed;
                                           one instance
+  0x404 v4  no run (one-shot install)  -> Applied; v3 stopped and uncommitted,
+                                          not started again by a daemon restart
 """
 import argparse
 import json
@@ -232,15 +234,30 @@ def run(binary):
                 print("PASS: after a daemon SIGKILL every pre-crash process (setsid, reparented, env-cleared) "
                       "was killed before the restart; exactly one instance runs")
 
+                # A same-name version without a run command ends supervision.
+                wait_for(lambda: recorded()[0] == status().get("pid"), "the recovered run did not record itself", process)
+                fourth = recorded()
+                runs = len(read("runs").splitlines())
+                deploy("0x404", "4.0.0", install="true")
+                wait_for(lambda: outcome("0x404").get("status") == 1, "one-shot v4 was not applied", process)
+                wait_for(lambda: not any(map(alive, fourth)), "v3 kept running after one-shot v4 was applied", process)
+                assert "svc" not in json.loads((components / "active.json").read_text()), "v3 stayed committed"
+                assert status() == {}, status()
+                process.send_signal(signal.SIGTERM)
+                assert process.wait(timeout=20) == 0
+                process = start()
+                wait_for(lambda: outcome("0x404").get("reported"), "v4's report was not sent", process)
+                assert status() == {} and len(read("runs").splitlines()) == runs, "a daemon restart resurrected v3"
+                print("PASS: one-shot v4 replaced supervised v3: v3 stopped, uncommitted, not restarted")
+
                 # Reports queued across the stops and the kill go out on the next poll.
-                wait_for(lambda: outcome("0x403").get("reported"), "v3's queued report was not sent", process)
                 process.send_signal(signal.SIGTERM)
                 assert process.wait(timeout=20) == 0
                 process = None
                 assert not sim.errors, sim.errors
                 reported = sorted(id for id, _ in sim.reports)
-                assert reported == ["0x401", "0x402", "0x403"], reported
-                print("PASS: all three outcomes reported on chain")
+                assert reported == ["0x401", "0x402", "0x403", "0x404"], reported
+                print("PASS: all four outcomes reported on chain")
     finally:
         if process and process.poll() is None:
             process.kill()

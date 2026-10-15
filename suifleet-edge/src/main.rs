@@ -449,7 +449,16 @@ async fn handle_deployment(
                     .deploy(spec, &install.artifact, install.install.as_deref(), runner, &request)
                     .await
             }
-            None => runner.apply(&install.artifact, install.install.as_deref(), &request).await,
+            // Installed while a supervised version of the same name keeps
+            // running; once it succeeds, that version is stopped and
+            // uncommitted, or the deployment fails.
+            None => match runner.apply(&install.artifact, install.install.as_deref(), &request).await {
+                Ok(()) if supervisor.supervises(&install.name) => supervisor
+                    .retire(&install.name)
+                    .await
+                    .map_err(|error| error.context("installed, but cannot stop the supervised version it replaces")),
+                result => result,
+            },
         };
         if let Err(error) = result {
             return Err(if install.root {
