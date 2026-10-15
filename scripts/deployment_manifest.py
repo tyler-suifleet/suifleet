@@ -19,7 +19,7 @@ def manifest_types(manifest):
         raise ValueError("partial catalog type origins")
     return REQUIRED_TYPES + tuple(present)
 
-CLIENT_VERSIONS = {"dapp": "0.1.0", "edge": "0.2.0"}
+CLIENT_VERSIONS = {"dapp": "0.1.0", "edge": "0.2.1"}
 
 
 def object_id(value):
@@ -173,7 +173,7 @@ def resolve(args, read=chain_facts):
         type_origins={name: table[name] for name in REQUIRED_TYPES + tuple(n for n in CATALOG_TYPES if n in table)},
         shared_objects={"registry": {"id": object_id(args.registry),
             "initial_shared_version": shared_version(registry, table["device_registry::DeviceRegistry"])}},
-        supported_clients={"dapp": {"min": "0.1.0" if all(n in table for n in CATALOG_TYPES) else "0.0.2", "max_exclusive": "0.2.0"}, "edge": {"min": "0.2.0" if all(n in table for n in CATALOG_TYPES) else "0.1.0", "max_exclusive": "0.3.0"}},
+        supported_clients={"dapp": {"min": "0.1.0" if all(n in table for n in CATALOG_TYPES) else "0.0.2", "max_exclusive": "0.2.0"}, "edge": {"min": "0.2.1", "max_exclusive": "0.3.0"}},
         walrus={"publisher_url": args.publisher, "aggregator_url": args.aggregator})
     return verify(manifest, read)
 

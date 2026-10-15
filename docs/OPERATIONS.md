@@ -411,7 +411,8 @@ This is an additive compatible contract upgrade: record layouts/signatures remai
 stable. `deployment_manager::ControlKey` and `Control` originate in the upgrade;
 regenerate manifests and both clients rather than assigning their original package
 origin. Absence of the field preserves immediate admission on existing records.
-Deploy the supporting daemon to the fleet before relying on controls: older daemons
+Deploy daemon **0.2.1** to the fleet before relying on controls. Newly generated
+manifests require edge >= 0.2.1 and reject earlier daemons; older daemons
 cannot enforce fields introduced later. Old package entry points remain callable;
 status writes do not change controls, and deletion still prevents later object
 reads. Do not interpret deleting a record through an older package as acknowledged

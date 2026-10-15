@@ -55,7 +55,7 @@
       "max_exclusive": "0.2.0"
     },
     "edge": {
-      "min": "0.1.0",
+      "min": "0.2.1",
       "max_exclusive": "0.3.0"
     }
   },
