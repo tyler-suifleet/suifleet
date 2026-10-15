@@ -65,19 +65,11 @@ Regressions these gates have been shown to catch: renamed/re-shaped Move functio
 
 ### Live gates
 
-`.github/workflows/live-gates.yml` is the only path for live checks: `package-upgrade`, `wallet` or `hardware`. It runs only from a manual dispatch that repeats the gate name. Each gate deploys through the GitHub environment `live-<gate>`, which holds that gate's secrets and must require a human reviewer. A preflight job refuses to run if the environment is missing or has no required reviewer. The hardware gate runs on a self-hosted runner labelled `raspberrypi3bplus`. The suites themselves are `make live-gate-<gate>` targets supplied by SF-010 and SF-031; until then a dispatched gate fails with that message.
+Public Sui testnet is normal automated validation under the user's standing authorization. `.github/workflows/testnet.yml` runs after successful ordinary CI on trusted main pushes and authenticated same-repository PR heads, daily, and on main-only dispatch. The dedicated `live-package-upgrade` environment is main-only, has no human reviewers, and cannot be bypassed by administrators. It holds only the dedicated testnet wallet. The runner verifies testnet chain `4c78adac`, the wallet, UpgradeCap, per-type origins and execution effects. See [TESTNET.md](TESTNET.md) for spending, encrypted cache and exact-head status rules.
 
-Configure each environment once, as a repository admin:
+`.github/workflows/live-gates.yml` delegates manual `package-upgrade` requests to the same automatic controller (main/testnet only, no arbitrary ref). All paths share concurrency `suifleet-testnet-ci-wallet` with cancellation disabled. Wallet and hardware environments retain required human approvals; their suites remain SF-010/SF-031 work. Mainnet, production credentials/services, physical Pi programming and unrelated wallets remain outside the testnet grant.
 
-```bash
-for gate in package-upgrade wallet hardware; do
-  gh api -X PUT repos/tyler-suifleet/suifleet/environments/live-$gate --input - <<JSON
-{"prevent_self_review": true, "reviewers": [{"type": "User", "id": <human-reviewer-user-id>}]}
-JSON
-done
-```
-
-Model agents share the `tyler-suifleet` GitHub account, so the reviewer must be a separate human account with repository access, and `prevent_self_review` must stay enabled.
+The sole PR orchestrator requires `testnet/package-upgrade` success bound to the current head and base once the controller exists on the integration base. Bootstrap is limited to the first reviewed workflow merge; missing or pending status blocks subsequent merges. Install the reviewed coordinator after integration, retaining its private configuration. A green offline CI result alone cannot satisfy this gate.
 
 ## Tests required beyond the local suite
 

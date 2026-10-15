@@ -1,0 +1,122 @@
+# Privileged controller is always sourced from main. No PR artifacts consumed.
+name: Automatic testnet
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  schedule:
+    - cron: '23 8 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+  statuses: write
+concurrency:
+  group: suifleet-testnet-ci-wallet
+  cancel-in-progress: false
+  queue: max
+jobs:
+  validate:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-22.04
+    environment: live-package-upgrade
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Authenticate exact revision and skip superseded work
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/testnet_ci.py
+      - name: Publish pending exact-head status
+        if: steps.plan.outputs.run == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TEST_HEAD: ${{ steps.plan.outputs.head }}
+          BASE_REF: ${{ steps.plan.outputs.base }}
+        run: python3 scripts/testnet_ci.py --status pending
+      - name: Preserve trusted controller
+        if: steps.plan.outputs.run == 'true'
+        run: cp scripts/testnet_ci.py "$RUNNER_TEMP/testnet_ci.py"
+      - name: Checkout authenticated test revision
+        if: steps.plan.outputs.run == 'true'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ steps.plan.outputs.head }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+        if: steps.plan.outputs.run == 'true'
+      - name: Runner identity
+        if: steps.plan.outputs.run == 'true'
+        id: ids
+        run: echo "uid=$(id -u)" >> "$GITHUB_OUTPUT" && echo "gid=$(id -g)" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        if: steps.plan.outputs.run == 'true'
+        with:
+          context: .
+          load: true
+          tags: suifleet-dev:testnet
+          build-args: |
+            USER_UID=${{ steps.ids.outputs.uid }}
+            USER_GID=${{ steps.ids.outputs.gid }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        if: steps.plan.outputs.run == 'true'
+        with:
+          path: encrypted-live-state
+          key: encrypted-testnet-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: encrypted-testnet-v1-
+      - name: Build testnet dependencies without signing credentials
+        if: steps.plan.outputs.run == 'true'
+        run: |
+          docker run --rm -e CARGO_BUILD_JOBS=2 \
+            -v "$PWD:/workspace" -w /workspace suifleet-dev:testnet bash -ec '
+              git config --global --add safe.directory /workspace
+              pnpm --dir dapp install --frozen-lockfile
+              cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts'
+      - name: Recheck head and base immediately before spending
+        if: steps.plan.outputs.run == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TEST_HEAD: ${{ steps.plan.outputs.head }}
+          BASE_REF: ${{ steps.plan.outputs.base }}
+        run: python3 "$RUNNER_TEMP/testnet_ci.py" --recheck
+      - name: Run bounded testnet acceptance
+        if: steps.plan.outputs.run == 'true'
+        env:
+          SUIFLEET_TESTNET_KEY: ${{ secrets.SUIFLEET_TESTNET_KEY }}
+          SUIFLEET_TESTNET_ADDRESS: ${{ vars.SUIFLEET_TESTNET_ADDRESS }}
+          BASE_REF: ${{ steps.plan.outputs.base }}
+        run: |
+          mkdir -p evidence encrypted-live-state
+          docker run --rm -e SUIFLEET_TESTNET_KEY -e SUIFLEET_TESTNET_ADDRESS -e BASE_REF \
+            -e SUIFLEET_FAUCET_TOOL=/tmp/sui-faucet/sui \
+            -v "$PWD:/workspace" -w /workspace suifleet-dev:testnet bash -ec '
+              git config --global --add safe.directory /workspace
+              node scripts/ci_testnet.cjs'
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        if: always() && steps.plan.outputs.run == 'true'
+        with:
+          path: encrypted-live-state
+          key: encrypted-testnet-v1-${{ github.run_id }}-${{ github.run_attempt }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always() && steps.plan.outputs.run == 'true'
+        with:
+          name: testnet-effects-${{ steps.plan.outputs.head }}
+          path: evidence/package-upgrade.json
+          retention-days: 90
+      - name: Publish final exact-head status
+        if: always() && steps.plan.outputs.run == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TEST_HEAD: ${{ steps.plan.outputs.head }}
+          BASE_REF: ${{ steps.plan.outputs.base }}
+          RESULT: ${{ job.status == 'success' && 'success' || 'failure' }}
+        run: python3 "$RUNNER_TEMP/testnet_ci.py" --status "$RESULT"
