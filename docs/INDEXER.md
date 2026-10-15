@@ -13,13 +13,15 @@ make test-indexer-localnet               # real localnet (start a node first, as
 
 ## How it indexes
 
-- **Events as hints.** Each event type is its own `ListEvents` stream with a durable cursor. The streams are `DeviceRegistered`, `DeviceDeregistered`, `GroupCreated`, `DeviceAddedToGroup`, `DeviceRemovedFromGroup`, `GroupDeleted`, `DeploymentCreated`, `DeploymentDeleted` and `DeviceStatusReported`. An event only names an object to re-read.
+- **Events as hints.** Each event type is its own `ListEvents` stream with a durable cursor. The streams are `DeviceRegistered`, `DeviceDeregistered`, `DeviceIdentityChanged`, `GroupCreated`, `DeviceAddedToGroup`, `DeviceRemovedFromGroup`, `GroupDeleted`, `DeploymentCreated`, `DeploymentDeleted` and `DeviceStatusReported`. An event only names an object to re-read.
 - **Authoritative state.** The stored state comes from the objects themselves, so a duplicated or reordered event cannot corrupt it:
-  - the Device object, for owner and key;
+  - the Device object, for its key, and whether it is in registry custody;
+  - its registry identity (SF-008), for the trusted signer and revocation, and the `DeviceOwnerCap` it names;
   - the group object, for admin and members;
   - the DeploymentRecord, plus its target, recipe-digest and receipt fields.
-  Legacy `StatusesKey` statuses are never used, because old package versions can forge them.
-- **Device reconciliation sweep.** A Device has `store`, so its owner can change through a plain transfer (or it can be wrapped) without any fleet event, and `set_meta` edits it silently. The indexer therefore also re-reads indexed devices in ID order, `--reconcile-batch` (default 500) per pass, from a durable position, wrapping around. Tombstones are included, because a wrapped object can return. A device whose event names an object that is already absent on first read (for example wrapped in the registering transaction) is kept as a placeholder tombstone, without a change-feed entry, so the sweep finds it once it is unwrapped. `index` and `serve` startup run a full sweep first, so a restart never serves owners from before it. While running, an event-less change is reflected within one full sweep: about `devices / batch × interval` (for example 45k devices at 500 per 2 s pass is about 3 minutes). `GET /v1/status` reports `devices_reconciled_at` for the last completed sweep. Groups and deployments are shared, `key`-only objects that only the fleet modules change, and every such change emits a watched event.
+  Legacy `StatusesKey` statuses are never used, because old package versions can forge them. Receipts written under an authority version below 2 are not used either, just as the dApp's `readReceipts` ignores them: older packages accepted those reports from revoked or rotated-out keys.
+- **Operators.** An activated device sits in registry custody, so the Device object has no address owner. Its `owner` (the operator) is whoever owns the `DeviceOwnerCap` its identity names. That is the daemon's rule for whose deployments it applies. A device that was never activated is address-owned; `owner` is that address, `activated` is false, and it takes no deployments. Devices also carry `activated`, `revoked`, `signer` and `owner_cap`.
+- **Device reconciliation sweep.** A Device and a `DeviceOwnerCap` both have `store`, so an unactivated device's owner, or an activated device's operator, can change through a plain transfer (or wrapping) without any fleet event, and `set_meta` edits a device silently. The indexer therefore also re-reads indexed devices, with their identities and owner caps, in ID order, `--reconcile-batch` (default 500) per pass, from a durable position, wrapping around. Tombstones are included, because a wrapped object can return. A device whose event names an object that is already absent on first read (for example wrapped in the registering transaction) is kept as a placeholder tombstone, without a change-feed entry, so the sweep finds it once it is unwrapped. `index` and `serve` startup run a full sweep first, so a restart never serves owners from before it. While running, an event-less change is reflected within one full sweep: about `devices / batch × interval` (for example 45k devices at 500 per 2 s pass is about 3 minutes). `GET /v1/status` reports `devices_reconciled_at` for the last completed sweep. Groups and deployments are shared, `key`-only objects that only the fleet modules change, and every such change emits a watched event.
 - **Tombstones.** An object that disappears (deleted or wrapped) becomes a tombstone (`deleted: true`). Lists hide tombstones unless asked with `include_deleted`.
 - **Atomic pages.** A page's rows, change-feed entries and stream cursor commit in one SQLite transaction. A crash at any point resumes without loss or duplication.
 - **Type origins.** Origins come from the call package's own type origin table, and are checked against the manifest. Fields introduced by later upgrades are read only once the package defines them.
@@ -60,14 +62,14 @@ suifleet-indexer serve --manifest deployment.json --db /var/lib/suifleet-indexer
 
 **Local only.** `--public-read` allows unauthenticated `GET` and still requires `operate` for `POST`. Do not combine it with a non-loopback listener.
 
-**What `operate` can and cannot do.** An `operate` token only lets a client ask the service to *build* a transaction. Signing always happens elsewhere, with the operator's wallet or `ctl --key`. Chain authority is unchanged: group admin, device owner and verified recipes are enforced by the contracts, and pre-checked by the API. Device ownership prechecks read the devices' current owners from chain for each request, not from the index, which may still be waiting for the sweep.
+**What `operate` can and cannot do.** An `operate` token only lets a client ask the service to *build* a transaction. Signing always happens elsewhere, with the operator's wallet or `ctl --key`. Chain authority is unchanged: group admin, device owner and verified recipes are enforced by the contracts, and pre-checked by the API. Device ownership and identity prechecks read the devices (custody, identity, owner cap) from chain for each request, not from the index, which may still be waiting for the sweep.
 
 ## API (`/v1`, JSON)
 
 | Request | Returns |
 |---|---|
 | `GET /v1/status` | Chain, call package, tip and lowest retained checkpoint, last change sequence, per-stream checkpoint and lag |
-| `GET /v1/devices?owner=&group=` | Devices (owner, key address, arch, current groups) |
+| `GET /v1/devices?owner=&group=` | Devices (operator as `owner`, key address, arch, `activated`, `revoked`, `signer`, `owner_cap`, current groups) |
 | `GET /v1/groups?admin=&device=` | Groups and members |
 | `GET /v1/deployments?creator=&component=&group=&device=` | Deployments. `device=` matches direct targets and groups whose admin created the deployment, the same rule devices apply |
 | `GET /v1/{devices,groups,deployments}/{id}` | One item. A deployment adds `resolved_devices` and authoritative `receipts` |
@@ -82,9 +84,9 @@ suifleet-indexer serve --manifest deployment.json --db /var/lib/suifleet-indexer
 **Bulk requests.**
 - Each is checked against the index before building, and rejected with 400 and a reason.
   - **Group changes:** the sender must be the group admin.
-  - **Adds:** devices must be the sender's, and not already members.
-  - **Deployments:** need the sender's own targets and lowercase-hex SHA-256 digests.
-- At most 200 calls per transaction.
+  - **Adds:** devices must be the sender's, and not already members. An activated device is borrowed from custody with its `DeviceOwnerCap` (`borrow_device`, `add_device`, `return_device` in one transaction); an unactivated one is passed directly.
+  - **Deployments:** need the sender's own targets and lowercase-hex SHA-256 digests. Direct target devices must be activated and not revoked, since only those apply deployments.
+- At most 200 devices per transaction.
 
 **Change kinds:** `device.updated`, `device.deleted`, `group.updated`, `group.deleted`, `deployment.updated`, `deployment.deleted`, `receipts.updated`.
 
@@ -102,12 +104,12 @@ suifleet-indexer ctl --token-file operate.token add-devices --sender 0xOPERATOR 
 
 `SUIFLEET_API_TOKEN` can replace `--token-file`.
 
-**The API is not trusted with the operator's intent.** With `--manifest`, which `--key` requires, the CLI rebuilds the exact calls from its own command line and checks the returned transaction against them before signing (or before writing `--out`). It refuses unless all of these hold:
+**The API is not trusted with the operator's intent.** With `--manifest`, which `--key` requires, the CLI verifies the manifest against the chain, reads the requested devices itself (custody and owner caps), rebuilds the exact calls from its own command line and checks the returned transaction against them before signing (or before writing `--out`). It refuses unless all of these hold:
 - the key is the `--sender`'s key, and the transaction's sender;
 - gas is paid by the sender and stays within budget;
 - the bytes match the API's digest;
 - the transaction has exactly the requested commands, in order. Each is a call into the manifest's package to the requested module and function, with no type arguments;
-- every argument is an input holding exactly the requested value or object: the group and device objects, device IDs, component, version, blob, both digests, target lists, and the immutable shared clock. There are no unused inputs.
+- every argument is an input holding exactly the requested value or object: the group and device objects, the registry and each custodied device's own owner cap, device IDs, component, version, blob, both digests, target lists, and the immutable shared clock. The borrowed device and its loan must be exactly the matching results of that device's `borrow_device`. There are no unused inputs.
 
 A compromised or intercepted API can therefore not substitute another group, device, recipe or target, or add calls, under the operator's signature. `--out` without `--manifest` writes the file unverified and says so.
 
@@ -132,13 +134,15 @@ A compromised or intercepted API can therefore not substitute another group, dev
 
 ## Verified locally (2026-10-15)
 
-- `make indexer-test`: 15 unit tests. They cover:
+- `make indexer-test`: 20 unit tests. They cover:
   - idempotent writes and the change feed;
   - a rolled-back page leaving neither rows nor cursor;
   - keyset pagination and filters;
+  - adding the identity columns to a database from before SF-008;
+  - receipts below authority version 2 ignored, and invalid versions rejected;
   - creator-only group resolution;
   - token scopes, including tokens padded by multiples of 256 bytes;
-  - bulk validation, with live owners overriding a stale index;
+  - bulk validation, with live owners overriding a stale index, custodied devices borrowed with their owner cap, and inactive or revoked direct targets rejected;
   - verify-before-sign rejections:
     - same function with another group, device or digest;
     - an object replaced by its ID as pure bytes;
@@ -146,21 +150,24 @@ A compromised or intercepted API can therefore not substitute another group, dev
     - wrong function, other package, wrong argument count;
     - unused inputs, non-call commands, a mutable clock;
     - sender, gas owner and budget;
+    - another device's owner cap, the loan passed as the device, a whole result or an input in place of the borrowed device, and a borrow where none is needed;
   - pruned-history refusal;
   - node JSON integers.
 - `scripts/test_indexer_localnet.py` on a real Sui 1.81.1 localnet, all PASS:
-  - the API matches chain state (owners, members, targets, resolved devices, a signer-checked receipt) under limit-2 pagination;
+  - the API matches chain state under limit-2 pagination: operators of devices in registry custody, identities, an unactivated device, members, targets, resolved devices and an identity-checked receipt (`report_verified_status_for_group`);
+  - a revocation is indexed from its `DeviceIdentityChanged` event;
   - no or unknown token gets 401, `read` cannot operate (403), and an invalid bulk request gets 400;
   - after a restart, the removal and deletion made while stopped appear once and earlier changes are not repeated;
-  - a Device transferred by a plain `TransferObjects` (no fleet event) is reconciled while running. Owner filters follow it, it appears once in the change feed, and the API's ownership precheck rejects the old owner and builds for the new one. When transferred back while the indexer is stopped, the new owner is served immediately after restart;
+  - an unactivated Device, and an activated device's `DeviceOwnerCap`, transferred by a plain `TransferObjects` (no fleet event) are reconciled while running. Owner filters follow them, each appears once in the change feed, and the API's prechecks reject the old owner, build for the new one, and refuse the unactivated device as a deployment target. When they are transferred back while the indexer is stopped, the new owner is served immediately after restart;
   - two Devices registered and wrapped into a `Bag` in the same transaction (their events name absent objects) are kept as placeholders; one unwrapped while running is reconciled by the sweep, and one unwrapped while stopped is served as live immediately after restart;
-  - `ctl add-devices` writes an unsigned file, then verifies, signs and executes (effects success), and the indexer shows the new membership. `ctl create-deployment` is verified call-by-call, signed and executed, and indexed;
+  - `ctl add-devices` on a custodied device writes an unsigned file, then verifies the borrow/add/return calls against its own chain reads, signs and executes (effects success), and the indexer shows the new membership. `ctl create-deployment` is verified call-by-call, signed and executed, and indexed;
   - the CLI change feed is in sequence order;
-  - load: 400 concurrent paginated reads (8 clients) over about 45k rows had p50 18.5 ms and p95 90 ms (debug build, laptop-class host). The 20k synthetic devices are inserted as tombstones, since the sweep would tombstone objects that are not on chain;
+  - load: 400 concurrent paginated reads (8 clients) over about 45k rows had p50 19.2 ms and p95 82.4 ms (debug build, laptop-class host). The 20k synthetic devices are inserted as tombstones, since the sweep would tombstone objects that are not on chain;
   - a database bound to another chain is refused, and `--reset` re-indexes.
 
 **Not yet done:**
 - testnet, or archival nodes with real retention;
-- desired state (SF-013) and identity (SF-008) streams, to be added after those merge;
+- desired state (SF-013), to be added after it merges;
+- a localnet exercise of receipts written by an older package (covered by a unit test);
 - dApp migration onto the API;
 - packaging.
