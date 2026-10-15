@@ -2,11 +2,13 @@
 //!
 //! Lists follow pagination to the end and print one JSON object per line.
 //! Bulk operations are built by the API, which is not trusted with intent:
-//! with `--manifest` the CLI rebuilds the exact calls from the operator's own
-//! request and requires the returned transaction to be exactly those calls
-//! into the manifest's package, every argument bound to the requested value
-//! or object, from and paid by the sender within the gas ceiling. Only then
-//! does `--key` sign and execute it, reading success from its effects.
+//! with `--manifest` the CLI verifies the manifest against the chain, reads
+//! the requested devices itself (custody and owner caps), rebuilds the exact
+//! calls from the operator's own request and requires the returned
+//! transaction to be exactly those calls into the manifest's package, every
+//! argument bound to the requested value, object or earlier result, from and
+//! paid by the sender within the gas ceiling. Only then does `--key` sign and
+//! execute it, reading success from its effects.
 use crate::chain::{self, Chain};
 use crate::manifest::Manifest;
 use crate::txbuild;
@@ -194,10 +196,17 @@ pub fn verify(
             arguments.len()
         );
         for (position, (argument, wanted)) in call.arguments.iter().zip(arguments).enumerate() {
-            let Argument::Input(input) = argument else {
-                anyhow::bail!("command {index} argument {position} is not an input: {argument:?}");
+            let input = match (argument, wanted) {
+                (Argument::Input(input), _) => *input as usize,
+                (Argument::NestedResult(command, result), txbuild::Argument::Result(c, r))
+                    if (command, result) == (c, r) =>
+                {
+                    continue
+                }
+                _ => anyhow::bail!(
+                    "command {index} argument {position} is not the requested {wanted:?}: {argument:?}"
+                ),
             };
-            let input = *input as usize;
             let value = program.inputs.get(input).ok_or_else(|| {
                 anyhow::anyhow!("command {index} argument {position} names a missing input")
             })?;
@@ -222,9 +231,26 @@ fn load_key(path: &str) -> anyhow::Result<sui_crypto::ed25519::Ed25519PrivateKey
     Ok(sui_crypto::ed25519::Ed25519PrivateKey::new(seed))
 }
 
+/// The calls `request` needs, from the operator's own reads of the chain the
+/// manifest names (verified first): which devices are in custody, and their
+/// owner caps.
+async fn expected_calls(
+    manifest: &Manifest,
+    operation: &str,
+    request: &txbuild::Request,
+) -> anyhow::Result<Vec<txbuild::Call>> {
+    let chain = Chain::new(&manifest.rpc_url)?;
+    let types = manifest.verify(&chain).await?;
+    let registry = chain::normalize(&manifest.shared_objects.registry.id).unwrap_or_default();
+    let ids = txbuild::devices_to_check(operation, request);
+    let read = crate::devices::read(&chain, &types, &registry, &ids).await?;
+    let live: BTreeMap<_, _> = ids.into_iter().zip(read).collect();
+    txbuild::calls(operation, request, &registry, &crate::devices::owner_caps(&live))
+}
+
 async fn bulk(api: &Api, args: &Args, operation: &str, request: txbuild::Request) -> anyhow::Result<()> {
-    // The operator's intent, rebuilt locally; the API's answer must match it.
-    let expected = txbuild::calls(operation, &request)?;
+    // Reject a malformed request before asking the API.
+    txbuild::calls(operation, &request, "", &BTreeMap::new())?;
     let built = api
         .post(
             &format!("/v1/transactions/{operation}"),
@@ -247,6 +273,8 @@ async fn bulk(api: &Api, args: &Args, operation: &str, request: txbuild::Request
             .map(str::parse)
             .transpose()?
             .unwrap_or(MAX_GAS);
+        // The operator's intent, rebuilt locally; the API's answer must match it.
+        let expected = expected_calls(manifest, operation, &request).await?;
         verify(
             &transaction,
             &expected,
@@ -496,6 +524,8 @@ mod tests {
                 devices: vec![hex(2), hex(1)],
                 ..Default::default()
             },
+            &hex(60),
+            &BTreeMap::new(),
         )
         .unwrap()
     }
@@ -646,6 +676,61 @@ mod tests {
     }
 
     #[test]
+    fn verify_binds_custody_borrows_to_the_devices_owner_cap() {
+        let (registry, group, cap) = (hex(60), hex(50), hex(804));
+        let request = txbuild::Request {
+            sender: SENDER.into(),
+            group: Some(group.clone()),
+            devices: vec![hex(4)],
+            ..Default::default()
+        };
+        let caps = BTreeMap::from([(hex(4), cap.clone())]);
+        let expected = txbuild::calls("add-devices", &request, &registry, &caps).unwrap();
+        let in_module = |module: &str, function: &str, arguments: Vec<Argument>| {
+            Command::MoveCall(MoveCall {
+                package: address(PACKAGE),
+                module: Identifier::from_str(module).unwrap(),
+                function: Identifier::from_str(function).unwrap(),
+                type_arguments: vec![],
+                arguments,
+            })
+        };
+        let build = |cap: &str, add: Argument, loan: Argument| {
+            transaction(
+                vec![shared(&registry), owned(cap), shared(&group)],
+                vec![
+                    in_module("device_registry", "borrow_device", vec![Argument::Input(0), Argument::Input(1)]),
+                    in_module("device_group", "add_device", vec![Argument::Input(2), add]),
+                    in_module(
+                        "device_registry",
+                        "return_device",
+                        vec![Argument::Input(0), Argument::NestedResult(0, 0), loan],
+                    ),
+                ],
+                SENDER,
+                SENDER,
+                1_000,
+            )
+        };
+        let (device, loan) = (Argument::NestedResult(0, 0), Argument::NestedResult(0, 1));
+        check(&build(&cap, device, loan), &expected).unwrap();
+        // Another device's cap, the loan passed as the device, a whole-result
+        // argument, or an input in place of the borrowed device.
+        for (tx, needle) in [
+            (build(&hex(805), device, loan), "argument 1"),
+            (build(&cap, loan, loan), "command 1 argument 1"),
+            (build(&cap, device, Argument::Result(0)), "command 2 argument 2"),
+            (build(&cap, Argument::Input(1), loan), "command 1 argument 1"),
+        ] {
+            let error = check(&tx, &expected).unwrap_err().to_string();
+            assert!(error.contains(needle), "{error} does not mention {needle}");
+        }
+        // Without custody the same request is a direct add_device: a borrow is refused.
+        let direct = txbuild::calls("add-devices", &request, &registry, &BTreeMap::new()).unwrap();
+        assert!(check(&build(&cap, device, loan), &direct).is_err());
+    }
+
+    #[test]
     fn verify_binds_deployment_values() {
         let request = txbuild::Request {
             sender: SENDER.into(),
@@ -657,7 +742,8 @@ mod tests {
             target_groups: vec![hex(50)],
             ..Default::default()
         };
-        let expected = txbuild::calls("create-deployment", &request).unwrap();
+        let expected =
+            txbuild::calls("create-deployment", &request, &hex(60), &BTreeMap::new()).unwrap();
         let pure = |v: &str| Input::Pure(bcs::to_bytes(&v.to_owned()).unwrap());
         let build = |recipe: &str, groups: Vec<Address>, clock_mutable: bool| {
             let inputs = vec![

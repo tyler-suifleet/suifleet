@@ -11,6 +11,7 @@
 mod api;
 mod chain;
 mod ctl;
+mod devices;
 mod indexer;
 mod manifest;
 mod store;
@@ -103,6 +104,7 @@ async fn main() -> anyhow::Result<()> {
                 public_read,
                 chain,
                 call_package: chain::normalize(&manifest.call_package_id).unwrap_or_default(),
+                registry: chain::normalize(&manifest.shared_objects.registry.id).unwrap_or_default(),
                 types: Arc::new(types),
             };
             let interval = std::time::Duration::from_secs(

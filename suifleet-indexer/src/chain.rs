@@ -30,6 +30,8 @@ pub struct Object {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Owner {
     Address(String),
+    /// A child object: the ID of the field object that holds it.
+    Object(String),
     Shared(u64),
     Other,
 }
@@ -39,6 +41,9 @@ impl From<proto::Object> for Object {
         let owner = match object.owner.as_ref() {
             Some(o) if o.kind == Some(proto::owner::OwnerKind::Address as i32) => {
                 Owner::Address(o.address.clone().unwrap_or_default())
+            }
+            Some(o) if o.kind == Some(proto::owner::OwnerKind::Object as i32) => {
+                Owner::Object(o.address.clone().unwrap_or_default())
             }
             Some(o) if o.kind == Some(proto::owner::OwnerKind::Shared as i32) => {
                 Owner::Shared(o.version.unwrap_or_default())
@@ -165,6 +170,35 @@ fn start_of(cursor: &Option<Value>) -> anyhow::Result<(Option<Vec<u8>>, u64)> {
             checkpoint.ok_or_else(|| anyhow::anyhow!("unrecognized cursor {value}"))?,
         )),
     }
+}
+
+/// The ID of `parent`'s dynamic field whose key has Move type `key_type`
+/// (full "0x…::module::Type<…>") and BCS bytes `key`.
+pub fn field_id(parent: &str, key_type: &str, key: &[u8]) -> anyhow::Result<String> {
+    let tag = TypeTag::Struct(Box::new(
+        StructTag::from_str(key_type).map_err(|e| anyhow::anyhow!("invalid key type {key_type}: {e}"))?,
+    ));
+    let parent =
+        Address::from_str(parent).map_err(|e| anyhow::anyhow!("invalid object ID {parent}: {e}"))?;
+    Ok(parent.derive_dynamic_child_id(&tag, key).to_string())
+}
+
+/// The BCS bytes of an object ID (a struct key holding only an ID).
+pub fn id_bytes(id: &str) -> anyhow::Result<Vec<u8>> {
+    Ok(Address::from_str(id)
+        .map_err(|e| anyhow::anyhow!("invalid object ID {id}: {e}"))?
+        .into_inner()
+        .to_vec())
+}
+
+/// The ID of `parent`'s dynamic object field keyed by an ID-only struct of
+/// type `key_type`: the field object that owns the child object.
+pub fn object_field_id(parent: &str, key_type: &str, id: &str) -> anyhow::Result<String> {
+    field_id(
+        parent,
+        &format!("0x2::dynamic_object_field::Wrapper<{key_type}>"),
+        &id_bytes(id)?,
+    )
 }
 
 /// A stream resuming at `checkpoint` needs the node to still hold it.
@@ -308,15 +342,9 @@ impl Chain {
         parent: &str,
         key_type: &str,
     ) -> anyhow::Result<Option<Value>> {
-        let key = TypeTag::Struct(Box::new(
-            StructTag::from_str(key_type)
-                .map_err(|e| anyhow::anyhow!("invalid key type {key_type}: {e}"))?,
-        ));
-        let parent = Address::from_str(parent)
-            .map_err(|e| anyhow::anyhow!("invalid object ID {parent}: {e}"))?;
-        let id = parent.derive_dynamic_child_id(&key, &[0]);
+        let id = field_id(parent, key_type, &[0])?;
         Ok(self
-            .object(&id.to_string())
+            .object(&id)
             .await?
             .map(|field| field.fields["value"].clone()))
     }

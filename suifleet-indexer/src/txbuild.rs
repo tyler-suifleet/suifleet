@@ -2,8 +2,12 @@
 //! indexed state, then built (gas, object versions and budget resolved by the
 //! node's simulation) for the operator to sign elsewhere: a wallet, or
 //! `suifleet-indexer ctl`, which re-checks the transaction before signing.
+//!
+//! An activated device (SF-008) is in registry custody: `add_device` gets it
+//! through `borrow_device` with the operator's DeviceOwnerCap, and the same
+//! transaction returns it with `return_device`.
 use crate::chain::{self, Chain};
-use crate::store;
+use crate::store::{self, Device};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -12,7 +16,7 @@ use std::str::FromStr;
 use sui_sdk_types::Address;
 use sui_transaction_builder::{Function, ObjectInput, TransactionBuilder};
 
-/// Most calls in one bulk transaction.
+/// Most devices in one bulk transaction (up to three calls each).
 pub const MAX_CALLS: usize = 200;
 
 /// A request the indexed state rejects (HTTP 400), not a server failure.
@@ -60,6 +64,8 @@ pub enum Argument {
     /// An object ID passed by value (pure), not the object itself.
     Id(String),
     Ids(Vec<String>),
+    /// Result `.1` of the transaction's command `.0`.
+    Result(u16, u16),
 }
 
 /// One Move call into the fleet package: module, function, arguments.
@@ -73,15 +79,8 @@ pub struct Planned {
     pub summary: Value,
 }
 
-/// Operation → the only (module, function) pairs its transaction may call.
-pub fn allowed(operation: &str) -> Option<&'static [(&'static str, &'static str)]> {
-    Some(match operation {
-        "add-devices" => &[("device_group", "add_device")],
-        "remove-devices" => &[("device_group", "remove_device")],
-        "create-deployment" => &[("deployment_manager", "create_deployment_verified")],
-        _ => return None,
-    })
-}
+/// The bulk operations.
+pub const OPERATIONS: &[&str] = &["add-devices", "remove-devices", "create-deployment"];
 
 fn id(value: &str, what: &str) -> anyhow::Result<String> {
     chain::normalize(value).ok_or_else(|| invalid(format!("invalid {what} ID {value:?}")))
@@ -141,12 +140,20 @@ fn admin_group(
     Ok(group)
 }
 
-/// The exact calls `request` asks for, from the request alone (no index or
-/// chain): the API builds these after validating them against the index, and
-/// `ctl` rebuilds them from the operator's own request to check what the API
-/// returned before signing it.
-pub fn calls(operation: &str, request: &Request) -> anyhow::Result<Vec<Call>> {
-    allowed(operation).ok_or_else(|| invalid(format!("unknown operation {operation}")))?;
+/// The exact calls `request` asks for, from the request, the manifest's
+/// `registry` and `owner_caps` (device → DeviceOwnerCap of each activated
+/// device, read from chain) alone: the API builds these after validating them
+/// against the index, and `ctl` rebuilds them from the operator's own request
+/// and its own chain reads to check what the API returned before signing it.
+pub fn calls(
+    operation: &str,
+    request: &Request,
+    registry: &str,
+    owner_caps: &BTreeMap<String, String>,
+) -> anyhow::Result<Vec<Call>> {
+    if !OPERATIONS.contains(&operation) {
+        return Err(invalid(format!("unknown operation {operation}")));
+    }
     let calls: Vec<Call> = match operation {
         "add-devices" | "remove-devices" => {
             let group = id(
@@ -160,24 +167,52 @@ pub fn calls(operation: &str, request: &Request) -> anyhow::Result<Vec<Call>> {
             if devices.is_empty() {
                 return Err(invalid("devices must not be empty"));
             }
-            devices
-                .into_iter()
-                .map(|device| {
-                    if operation == "add-devices" {
-                        (
-                            "device_group",
-                            "add_device",
-                            vec![Argument::Object(group.clone()), Argument::Object(device)],
-                        )
-                    } else {
-                        (
-                            "device_group",
-                            "remove_device",
-                            vec![Argument::Object(group.clone()), Argument::Id(device)],
-                        )
-                    }
-                })
-                .collect()
+            if devices.len() > MAX_CALLS {
+                return Err(invalid(format!(
+                    "at most {MAX_CALLS} devices per transaction; split the request"
+                )));
+            }
+            let mut calls: Vec<Call> = Vec::new();
+            for device in devices {
+                if operation == "remove-devices" {
+                    calls.push((
+                        "device_group",
+                        "remove_device",
+                        vec![Argument::Object(group.clone()), Argument::Id(device)],
+                    ));
+                    continue;
+                }
+                let Some(cap) = owner_caps.get(&device) else {
+                    calls.push((
+                        "device_group",
+                        "add_device",
+                        vec![Argument::Object(group.clone()), Argument::Object(device)],
+                    ));
+                    continue;
+                };
+                let borrow = calls.len() as u16;
+                let registry = id(registry, "registry")?;
+                calls.push((
+                    "device_registry",
+                    "borrow_device",
+                    vec![Argument::Object(registry.clone()), Argument::Object(cap.clone())],
+                ));
+                calls.push((
+                    "device_group",
+                    "add_device",
+                    vec![Argument::Object(group.clone()), Argument::Result(borrow, 0)],
+                ));
+                calls.push((
+                    "device_registry",
+                    "return_device",
+                    vec![
+                        Argument::Object(registry),
+                        Argument::Result(borrow, 0),
+                        Argument::Result(borrow, 1),
+                    ],
+                ));
+            }
+            calls
         }
         "create-deployment" => {
             let groups = ids(&request.target_groups, "target group")?;
@@ -202,43 +237,38 @@ pub fn calls(operation: &str, request: &Request) -> anyhow::Result<Vec<Call>> {
         }
         _ => unreachable!(),
     };
-    if calls.len() > MAX_CALLS {
-        return Err(invalid(format!(
-            "at most {MAX_CALLS} calls per transaction; split the request"
-        )));
-    }
     Ok(calls)
 }
 
-/// The indexed, live device `id`, with its current owner from `owners` (read
-/// from chain for this request) rather than the index, which a transfer
-/// without a fleet event leaves stale until the next reconciliation sweep.
+/// The device `id` as read from chain for this request (`live`), provided
+/// the index knows it: the index's owner may be stale (a transfer of the
+/// Device or its owner cap emits no fleet event until the sweep).
 fn live_device(
     db: &rusqlite::Connection,
-    owners: &BTreeMap<String, Option<String>>,
+    live: &BTreeMap<String, Option<Device>>,
     id: &str,
     what: &str,
-) -> anyhow::Result<Option<String>> {
+) -> anyhow::Result<Device> {
     let indexed = store::read_device(db, id)?.filter(|d| !d.deleted);
-    match (indexed, owners.get(id)) {
-        (Some(_), Some(Some(owner))) => Ok(Some(owner.clone())),
-        (Some(device), None) => Ok(device.owner),
+    match (indexed, live.get(id)) {
+        (Some(_), Some(Some(device))) => Ok(device.clone()),
         _ => Err(invalid(format!(
-            "{what} {id} is not indexed, was deregistered or is no longer address-owned"
+            "{what} {id} is not indexed, was deregistered or is wrapped"
         ))),
     }
 }
 
-/// Validate `request` for `operation` against the index. `owners` holds the
-/// current owners of the request's devices, read from chain by the caller.
+/// Validate `request` for `operation` against the index. `live` holds the
+/// request's devices (`devices_to_check`), read from chain by the caller.
 pub fn plan(
     db: &rusqlite::Connection,
     package: &str,
+    registry: &str,
     operation: &str,
     request: &Request,
-    owners: &BTreeMap<String, Option<String>>,
+    live: &BTreeMap<String, Option<Device>>,
 ) -> anyhow::Result<Planned> {
-    let calls = calls(operation, request)?;
+    let calls = calls(operation, request, registry, &crate::devices::owner_caps(live))?;
     let sender = id(&request.sender, "sender")?;
     let package = id(package, "package")?;
     let summary = match operation {
@@ -248,7 +278,7 @@ pub fn plan(
             for device in &devices {
                 let member = group.devices.contains(device);
                 if operation == "add-devices" {
-                    let owner = live_device(db, owners, device, "device")?;
+                    let owner = live_device(db, live, device, "device")?.owner;
                     if owner.as_deref() != Some(sender.as_str()) {
                         return Err(invalid(format!("device {device} is not owned by {sender}")));
                     }
@@ -283,9 +313,15 @@ pub fn plan(
                 }
             }
             for device in &devices {
-                let owner = live_device(db, owners, device, "target device")?;
-                if owner.as_deref() != Some(sender.as_str()) {
+                let found = live_device(db, live, device, "target device")?;
+                if found.owner.as_deref() != Some(sender.as_str()) {
                     return Err(invalid(format!("devices only accept their operator's deployments; {device} is not owned by {sender}")));
+                }
+                if !found.activated || found.revoked {
+                    return Err(invalid(format!(
+                        "target device {device} has no active registry identity (activate or reinstate it); \
+                         devices only apply deployments while active"
+                    )));
                 }
             }
             json!({ "operation": operation, "component_name": request.component_name,
@@ -301,7 +337,7 @@ pub fn plan(
     })
 }
 
-/// The device IDs whose current owners `plan` needs for `request`.
+/// The device IDs `plan` needs read from chain for `request`.
 pub fn devices_to_check(operation: &str, request: &Request) -> Vec<String> {
     let named = match operation {
         "add-devices" => &request.devices,
@@ -316,10 +352,17 @@ pub async fn build(chain: &Chain, planned: Planned) -> anyhow::Result<Value> {
     let package = Address::from_str(&planned.package)?;
     let sender = Address::from_str(&planned.sender)?;
     let mut builder = TransactionBuilder::new();
+    let mut results = Vec::new();
     for (module, function, arguments) in &planned.calls {
         let mut inputs = Vec::new();
         for argument in arguments {
             inputs.push(match argument {
+                Argument::Result(command, index) => {
+                    let result: &sui_transaction_builder::Argument = results
+                        .get(*command as usize)
+                        .ok_or_else(|| anyhow::anyhow!("result of a later command"))?;
+                    result.to_nested(*index as usize + 1)[*index as usize]
+                }
                 Argument::Object(id) => builder.object(ObjectInput::new(Address::from_str(id)?)),
                 Argument::Clock => builder.object(ObjectInput::new(Address::from_str("0x6")?)),
                 Argument::Text(value) => builder.pure(value),
@@ -333,10 +376,10 @@ pub async fn build(chain: &Chain, planned: Planned) -> anyhow::Result<Value> {
                 }
             });
         }
-        builder.move_call(
+        results.push(builder.move_call(
             Function::new(package, module.parse()?, function.parse()?),
             inputs,
-        );
+        ));
     }
     let transaction = chain.build(builder, sender).await?;
     let bytes = bcs::to_bytes(&transaction)?;
@@ -361,7 +404,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut db = store::open(&dir.path().join("fleet.db")).unwrap();
         let tx = db.transaction().unwrap();
-        for (n, owner) in [(1, 100), (2, 100), (3, 999)] {
+        // 2 was never activated (address-owned); 5 is activated but revoked.
+        for (n, owner) in [(1, 100), (2, 100), (3, 999), (4, 100), (5, 100)] {
             store::put_device(
                 &tx,
                 &Device {
@@ -372,6 +416,10 @@ mod tests {
                     arch: "aarch64".into(),
                     registered_at: 0,
                     deleted: false,
+                    activated: n != 2,
+                    revoked: n == 5,
+                    signer: (n != 2).then(|| hex(n + 500)),
+                    owner_cap: (n != 2).then(|| hex(n + 800)),
                     groups: vec![],
                 },
                 None,
@@ -396,12 +444,30 @@ mod tests {
         (dir, db)
     }
 
+    const REGISTRY: u32 = 60;
+
+    /// The request's devices as chain reads would return them: as indexed.
+    fn live(
+        db: &rusqlite::Connection,
+        operation: &str,
+        request: &Request,
+    ) -> BTreeMap<String, Option<Device>> {
+        devices_to_check(operation, request)
+            .into_iter()
+            .map(|id| {
+                let device = store::read_device(db, &id).unwrap().filter(|d| !d.deleted);
+                (id, device)
+            })
+            .collect()
+    }
+
     fn request(
         operation: &str,
         db: &rusqlite::Connection,
         request: Request,
     ) -> anyhow::Result<Planned> {
-        plan(db, &hex(7), operation, &request, &BTreeMap::new())
+        let live = live(db, operation, &request);
+        plan(db, &hex(7), &hex(REGISTRY), operation, &request, &live)
     }
 
     fn rejected(result: anyhow::Result<Planned>, needle: &str) {
@@ -468,7 +534,7 @@ mod tests {
                 "add-devices",
                 &db,
                 Request {
-                    devices: vec![hex(4)],
+                    devices: vec![hex(9)],
                     ..base.clone()
                 },
             ),
@@ -534,6 +600,29 @@ mod tests {
         let planned = request("create-deployment", &db, base.clone()).unwrap();
         assert_eq!(planned.calls[0].1, "create_deployment_verified");
         assert_eq!(planned.calls[0].2.len(), 8);
+        // Direct targets need an active identity: activated and not revoked.
+        assert!(request(
+            "create-deployment",
+            &db,
+            Request {
+                target_devices: vec![hex(4)],
+                ..base.clone()
+            }
+        )
+        .is_ok());
+        for inactive in [2, 5] {
+            rejected(
+                request(
+                    "create-deployment",
+                    &db,
+                    Request {
+                        target_devices: vec![hex(inactive)],
+                        ..base.clone()
+                    },
+                ),
+                "no active registry identity",
+            );
+        }
         rejected(
             request(
                 "create-deployment",
@@ -619,36 +708,80 @@ mod tests {
             ),
             "at most",
         );
-        assert!(allowed("add-devices").is_some() && allowed("other").is_none());
+        assert!(OPERATIONS.contains(&"add-devices") && !OPERATIONS.contains(&"other"));
+    }
+
+    #[test]
+    fn custodied_devices_are_borrowed_with_their_owner_cap() {
+        let (_dir, db) = fixture();
+        let planned = request(
+            "add-devices",
+            &db,
+            Request {
+                sender: hex(100),
+                group: Some(hex(50)),
+                devices: vec![hex(4), hex(2)],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        // Sorted by ID: 2 is address-owned and passed directly; 4 is in custody.
+        assert_eq!(
+            planned.calls,
+            vec![
+                (
+                    "device_group",
+                    "add_device",
+                    vec![Argument::Object(hex(50)), Argument::Object(hex(2))]
+                ),
+                (
+                    "device_registry",
+                    "borrow_device",
+                    vec![Argument::Object(hex(REGISTRY)), Argument::Object(hex(804))]
+                ),
+                (
+                    "device_group",
+                    "add_device",
+                    vec![Argument::Object(hex(50)), Argument::Result(1, 0)]
+                ),
+                (
+                    "device_registry",
+                    "return_device",
+                    vec![
+                        Argument::Object(hex(REGISTRY)),
+                        Argument::Result(1, 0),
+                        Argument::Result(1, 1)
+                    ]
+                ),
+            ]
+        );
     }
 
     #[test]
     fn live_owners_override_a_stale_index() {
         let (_dir, db) = fixture();
-        let add = |device: u32, owners: &[(u32, Option<u32>)]| {
-            let owners = owners
-                .iter()
-                .map(|(d, o)| (hex(*d), o.map(hex)))
-                .collect();
-            plan(
-                &db,
-                &hex(7),
-                "add-devices",
-                &Request {
-                    sender: hex(100),
-                    group: Some(hex(50)),
-                    devices: vec![hex(device)],
-                    ..Default::default()
-                },
-                &owners,
-            )
+        let add = |device: u32, owner: Option<u32>| {
+            let request = Request {
+                sender: hex(100),
+                group: Some(hex(50)),
+                devices: vec![hex(device)],
+                ..Default::default()
+            };
+            let mut live = live(&db, "add-devices", &request);
+            for found in live.values_mut() {
+                match owner {
+                    Some(owner) => found.as_mut().unwrap().owner = Some(hex(owner)),
+                    None => *found = None,
+                }
+            }
+            plan(&db, &hex(7), &hex(REGISTRY), "add-devices", &request, &live)
         };
-        // Indexed as 999's, but transferred to the sender without a fleet event.
-        assert!(add(3, &[(3, Some(100))]).is_ok());
+        // Indexed as 999's, but its owner cap moved to the sender without a fleet event.
+        assert!(add(3, Some(100)).is_ok());
         // Indexed as the sender's, but transferred away.
-        rejected(add(2, &[(2, Some(999))]), "not owned by");
+        rejected(add(2, Some(999)), "not owned by");
         // Indexed, but now wrapped or deleted.
-        rejected(add(2, &[(2, None)]), "no longer address-owned");
+        rejected(add(2, None), "is wrapped");
         assert_eq!(
             devices_to_check(
                 "create-deployment",

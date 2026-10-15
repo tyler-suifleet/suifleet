@@ -14,7 +14,11 @@
 //! batch per pass, wrapping around; `index` and `serve` start with a full one.
 //! A device that is absent on its first read (wrapped, even in the
 //! registering transaction) is kept as a placeholder tombstone for the sweep.
-use crate::chain::{self, Chain, Owner};
+//! Identity changes (SF-008) are their own stream; the operator of an
+//! activated device is its DeviceOwnerCap's owner (see `devices`), and the
+//! sweep re-reads that cap too, since it also transfers without events.
+use crate::chain::{self, Chain};
+use crate::devices;
 use crate::manifest::Manifest;
 use crate::store::{self, Deployment, Device, Group};
 use rusqlite::Connection;
@@ -39,6 +43,11 @@ const STREAMS: &[(&str, &str, Kind)] = &[
     ),
     (
         "device_registry::DeviceDeregistered",
+        "device_id",
+        Kind::Device,
+    ),
+    (
+        "device_registry::DeviceIdentityChanged",
         "device_id",
         Kind::Device,
     ),
@@ -72,9 +81,15 @@ pub struct Indexer {
     db: Connection,
     /// "module::Type" → full Move type (introducing package::module::Type).
     types: BTreeMap<String, String>,
+    registry: String,
     /// Devices the reconciliation sweep re-reads per pass.
     pub reconcile_batch: usize,
 }
+
+/// Receipts authority version of the contracts this indexer targets (as the
+/// dApp's RECEIPTS_AUTHORITY_VERSION). Lower versions were written by older
+/// packages that accept reports from revoked or rotated-out keys.
+pub const RECEIPTS_AUTHORITY_VERSION: u64 = 2;
 
 /// Default devices re-read per pass (at a 2 s interval, ~15k devices/minute).
 pub const RECONCILE_BATCH: usize = 500;
@@ -127,6 +142,7 @@ impl Indexer {
             chain,
             db,
             types,
+            registry: chain::normalize(&manifest.shared_objects.registry.id).unwrap_or_default(),
             reconcile_batch: RECONCILE_BATCH,
         })
     }
@@ -172,11 +188,12 @@ impl Indexer {
     pub async fn reconcile_devices(&mut self, limit: usize) -> anyhow::Result<(usize, bool)> {
         let after = store::meta(&self.db, SWEEP_AFTER)?.unwrap_or_default();
         let ids = sweep_ids(&self.db, &after, limit)?;
-        let objects = self.chain.objects(&ids).await?;
-        let mut updates = Vec::new();
-        for (id, object) in ids.iter().zip(objects) {
-            updates.push(Update::Device(id.clone(), self.device(id, object)?));
-        }
+        let read = devices::read(&self.chain, &self.types, &self.registry, &ids).await?;
+        let updates: Vec<Update> = ids
+            .iter()
+            .zip(read)
+            .map(|(id, device)| Update::Device(id.clone(), device))
+            .collect();
         let wrapped = ids.len() < limit.max(1);
         let tx = self.db.transaction()?;
         let mut changed = 0;
@@ -300,35 +317,9 @@ impl Indexer {
     }
 
     async fn read_device(&self, id: &str) -> anyhow::Result<Option<Device>> {
-        let object = self.chain.object(id).await?;
-        self.device(id, object)
-    }
-
-    fn device(&self, id: &str, object: Option<chain::Object>) -> anyhow::Result<Option<Device>> {
-        let Some(object) = object else {
-            return Ok(None);
-        };
-        anyhow::ensure!(
-            chain::same_type(
-                &object.object_type,
-                self.move_type("device_registry::Device")?
-            ),
-            "{id} is not a Device"
-        );
-        let f = &object.fields;
-        Ok(Some(Device {
-            id: id.to_owned(),
-            owner: match &object.owner {
-                Owner::Address(owner) => chain::normalize(owner),
-                _ => None,
-            },
-            name: text(&f["name"]),
-            device_address: chain::normalize(&text(&f["device_address"])).unwrap_or_default(),
-            arch: text(&f["arch"]),
-            registered_at: chain::number(&f["registered_at"]).unwrap_or_default(),
-            deleted: false,
-            groups: vec![],
-        }))
+        let ids = [id.to_owned()];
+        let mut read = devices::read(&self.chain, &self.types, &self.registry, &ids).await?;
+        Ok(read.pop().flatten())
     }
 
     async fn read_group(&self, id: &str) -> anyhow::Result<Option<Group>> {
@@ -403,6 +394,9 @@ impl Indexer {
         let Some(receipts) = self.field(id, "deployment_manager::ReceiptsKey").await? else {
             return Ok(Vec::new());
         };
+        if !current_receipts(id, &receipts)? {
+            return Ok(Vec::new());
+        }
         let entries = receipts["statuses"]["contents"]
             .as_array()
             .ok_or_else(|| anyhow::anyhow!("undecodable receipts of {id}: {receipts}"))?;
@@ -418,6 +412,16 @@ impl Indexer {
             })
             .collect()
     }
+}
+
+/// Whether receipts were written under the current report authority. Older
+/// versions stay writable through older packages until migrated, which
+/// discards them; they are never evidence (as the dApp's `readReceipts`).
+fn current_receipts(id: &str, receipts: &Value) -> anyhow::Result<bool> {
+    let version = chain::number(&receipts["version"])
+        .filter(|v| *v > 0)
+        .ok_or_else(|| anyhow::anyhow!("invalid receipts authority version of {id}: {receipts}"))?;
+    Ok(version >= RECEIPTS_AUTHORITY_VERSION)
 }
 
 /// The next `limit` indexed device IDs after `after`, tombstones and
@@ -505,6 +509,17 @@ mod tests {
     }
 
     #[test]
+    fn only_current_authority_receipts_are_evidence() {
+        let receipts = |version: Value| serde_json::json!({ "version": version, "statuses": { "contents": [] } });
+        assert!(!current_receipts("d", &receipts(serde_json::json!("1"))).unwrap());
+        assert!(current_receipts("d", &receipts(serde_json::json!("2"))).unwrap());
+        assert!(current_receipts("d", &receipts(serde_json::json!("3"))).unwrap());
+        for invalid in [serde_json::json!("0"), Value::Null, serde_json::json!("x")] {
+            assert!(current_receipts("d", &receipts(invalid)).is_err());
+        }
+    }
+
+    #[test]
     fn device_first_seen_wrapped_is_kept_for_the_sweep() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("fleet.db");
@@ -532,6 +547,10 @@ mod tests {
             arch: "aarch64".into(),
             registered_at: 7,
             deleted: false,
+            activated: true,
+            revoked: false,
+            signer: Some(id(200)),
+            owner_cap: Some(id(300)),
             groups: vec![],
         };
         assert!(apply(&mut db, Update::Device(id(1), Some(device.clone()))));

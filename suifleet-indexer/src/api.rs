@@ -83,6 +83,7 @@ pub struct AppState {
     pub public_read: bool,
     pub chain: Chain,
     pub call_package: String,
+    pub registry: String,
     pub types: Arc<std::collections::BTreeMap<String, String>>,
 }
 
@@ -340,32 +341,18 @@ async fn transaction(
     Path(operation): Path<String>,
     Json(request): Json<txbuild::Request>,
 ) -> ApiResult<Json<Value>> {
-    // Ownership prechecks use the devices' current owners, not the index:
-    // a transfer emits no fleet event and waits for the reconciliation sweep.
-    let device_type = state
-        .types
-        .get("device_registry::Device")
-        .cloned()
-        .unwrap_or_default();
+    // Ownership and identity prechecks use the devices as they are on chain
+    // now, not the index: a transfer of a Device or its owner cap emits no
+    // fleet event and waits for the reconciliation sweep.
     let ids = txbuild::devices_to_check(&operation, &request);
-    let mut owners = std::collections::BTreeMap::new();
-    for (id, object) in ids.iter().zip(state.chain.objects(&ids).await?) {
-        let owner = match object {
-            Some(object) if crate::chain::same_type(&object.object_type, &device_type) => {
-                match object.owner {
-                    crate::chain::Owner::Address(owner) => crate::chain::normalize(&owner),
-                    _ => None,
-                }
-            }
-            _ => None,
-        };
-        owners.insert(id.clone(), owner);
-    }
+    let read = crate::devices::read(&state.chain, &state.types, &state.registry, &ids).await?;
+    let live: std::collections::BTreeMap<_, _> = ids.into_iter().zip(read).collect();
     let readers = state.readers.clone();
     let package = state.call_package.clone();
+    let registry = state.registry.clone();
     let operation_name = operation.clone();
     let planned = blocking(&readers, move |db| {
-        txbuild::plan(db, &package, &operation_name, &request, &owners)
+        txbuild::plan(db, &package, &registry, &operation_name, &request, &live)
     })
     .await?;
     let built = txbuild::build(&state.chain, planned).await?;

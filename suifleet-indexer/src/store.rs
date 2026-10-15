@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS cursors (
   stream TEXT PRIMARY KEY, cursor TEXT NOT NULL, checkpoint INTEGER, updated_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS devices (
   id TEXT PRIMARY KEY, owner TEXT, name TEXT, device_address TEXT, arch TEXT,
-  registered_at INTEGER, deleted INTEGER NOT NULL DEFAULT 0);
+  registered_at INTEGER, deleted INTEGER NOT NULL DEFAULT 0, activated INTEGER NOT NULL DEFAULT 0,
+  revoked INTEGER NOT NULL DEFAULT 0, signer TEXT, owner_cap TEXT);
 CREATE INDEX IF NOT EXISTS devices_owner ON devices(owner, id);
 CREATE TABLE IF NOT EXISTS groups (
   id TEXT PRIMARY KEY, name TEXT, description TEXT, admin TEXT, created_at INTEGER,
@@ -41,6 +42,8 @@ CREATE TABLE IF NOT EXISTS changes (
 
 pub const MAX_LIMIT: usize = 500;
 
+/// `owner` is the operator: the DeviceOwnerCap's owner for an activated
+/// device, otherwise the address that owns the (untrusted) Device object.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Device {
     pub id: String,
@@ -50,6 +53,13 @@ pub struct Device {
     pub arch: String,
     pub registered_at: u64,
     pub deleted: bool,
+    /// In registry custody with an identity (SF-008).
+    pub activated: bool,
+    /// The identity is revoked (or the device deregistered).
+    pub revoked: bool,
+    /// The only address whose reports the registry accepts.
+    pub signer: Option<String>,
+    pub owner_cap: Option<String>,
     pub groups: Vec<String>,
 }
 
@@ -112,6 +122,21 @@ pub fn open(path: &Path) -> anyhow::Result<Connection> {
     connection.pragma_update(None, "foreign_keys", "ON")?;
     connection.busy_timeout(std::time::Duration::from_secs(10))?;
     connection.execute_batch(SCHEMA)?;
+    // Databases from before identities (SF-008) gain the columns; the startup
+    // sweep re-reads every device and fills them in.
+    let has_identity: bool = connection.query_row(
+        "SELECT COUNT(*) > 0 FROM pragma_table_info('devices') WHERE name = 'activated'",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_identity {
+        connection.execute_batch(
+            "ALTER TABLE devices ADD COLUMN activated INTEGER NOT NULL DEFAULT 0;
+             ALTER TABLE devices ADD COLUMN revoked INTEGER NOT NULL DEFAULT 0;
+             ALTER TABLE devices ADD COLUMN signer TEXT;
+             ALTER TABLE devices ADD COLUMN owner_cap TEXT;",
+        )?;
+    }
     Ok(connection)
 }
 
@@ -233,11 +258,14 @@ pub fn put_device(
         return Ok(false);
     }
     tx.execute(
-        "INSERT INTO devices (id, owner, name, device_address, arch, registered_at, deleted)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        "INSERT INTO devices (id, owner, name, device_address, arch, registered_at, deleted, activated,
+           revoked, signer, owner_cap)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
          ON CONFLICT(id) DO UPDATE SET owner = excluded.owner, name = excluded.name,
            device_address = excluded.device_address, arch = excluded.arch,
-           registered_at = excluded.registered_at, deleted = excluded.deleted",
+           registered_at = excluded.registered_at, deleted = excluded.deleted,
+           activated = excluded.activated, revoked = excluded.revoked, signer = excluded.signer,
+           owner_cap = excluded.owner_cap",
         params![
             device.id,
             device.owner,
@@ -245,7 +273,11 @@ pub fn put_device(
             device.device_address,
             device.arch,
             device.registered_at as i64,
-            device.deleted
+            device.deleted,
+            device.activated,
+            device.revoked,
+            device.signer,
+            device.owner_cap
         ],
     )?;
     let kind = if device.deleted {
@@ -391,10 +423,13 @@ fn ids(connection: &Connection, sql: &str, id: &str) -> anyhow::Result<Vec<Strin
 
 pub fn read_device(connection: &Connection, id: &str) -> anyhow::Result<Option<Device>> {
     let row = connection
-        .query_row("SELECT id, owner, name, device_address, arch, registered_at, deleted FROM devices WHERE id = ?1",
+        .query_row("SELECT id, owner, name, device_address, arch, registered_at, deleted, activated, revoked,
+                signer, owner_cap FROM devices WHERE id = ?1",
             [id], |row| Ok(Device {
                 id: row.get(0)?, owner: row.get(1)?, name: row.get(2)?, device_address: row.get(3)?,
-                arch: row.get(4)?, registered_at: row.get::<_, i64>(5)? as u64, deleted: row.get(6)?, groups: vec![],
+                arch: row.get(4)?, registered_at: row.get::<_, i64>(5)? as u64, deleted: row.get(6)?,
+                activated: row.get(7)?, revoked: row.get(8)?, signer: row.get(9)?, owner_cap: row.get(10)?,
+                groups: vec![],
             }))
         .optional()?;
     row.map(|mut device| {
@@ -640,6 +675,10 @@ mod tests {
             arch: "aarch64".into(),
             registered_at: n as u64,
             deleted: false,
+            activated: true,
+            revoked: false,
+            signer: Some(id(9000 + n)),
+            owner_cap: Some(id(8000 + n)),
             groups: vec![],
         }
     }
@@ -681,6 +720,29 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[test]
+    fn databases_from_before_identities_gain_the_columns() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fleet.db");
+        let old = Connection::open(&path).unwrap();
+        old.execute_batch(
+            "CREATE TABLE devices (id TEXT PRIMARY KEY, owner TEXT, name TEXT, device_address TEXT, arch TEXT,
+               registered_at INTEGER, deleted INTEGER NOT NULL DEFAULT 0);
+             INSERT INTO devices VALUES ('0x1', '0x2', 'old', '0x3', 'aarch64', 0, 0);",
+        )
+        .unwrap();
+        drop(old);
+        let mut connection = open(&path).unwrap();
+        let migrated = read_device(&connection, "0x1").unwrap().unwrap();
+        assert!(!migrated.activated && migrated.signer.is_none() && migrated.name == "old");
+        let tx = connection.transaction().unwrap();
+        assert!(put_device(&tx, &device(1, 100), None).unwrap());
+        tx.commit().unwrap();
+        assert_eq!(read_device(&connection, &id(1)).unwrap().unwrap(), device(1, 100));
+        drop(connection);
+        open(&path).unwrap(); // Reopening an upgraded database is a no-op.
     }
 
     #[test]
