@@ -193,6 +193,7 @@ function ControlEditor({ control, canEdit, pending, onSave }: {
   return <div className="py-3 text-xs space-y-2 text-gray-700">
     <p role="status">{controlReason(control)}</p>
     <p>Cancellation/pause/expiry stop admission. An admitted apply finishes; they never roll it back. Device deferral reasons and advance notices are recorded in its journal/log.</p>
+    <p>Extending an expired schedule cannot reopen admission on devices that already observed expiry. Create a new deployment to reach the whole fleet.</p>
     <p>Not before: {displayTime(control.not_before_ms)} · Expires: {displayTime(control.expires_ms)} · Window: {displayTime(control.window_start_ms)} – {displayTime(control.window_end_ms)} · Notice: {Number(control.notice_ms) / 1000}s</p>
     {canEdit && control.state !== 2 && <div className="flex gap-3">
       <button disabled={pending} onClick={() => send({ ...control, state: control.state === 1 ? 0 : 1 })}>{control.state === 1 ? "Resume" : "Pause"}</button>
