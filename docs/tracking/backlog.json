@@ -1036,6 +1036,55 @@
       ],
       "validation": "Authorized production-workflow execution and Pi trust acceptance; no private keys in evidence.",
       "description": "Validate the production signed-release workflow and device trust integration after SF-039 implementation merges. This acceptance ticket is deliberately separate from implementation merge under the user-authorized integration deferral.\n\nAcceptance:\n- Under explicit administrator/deployment authorization, configure a protected release environment with a required reviewer, signing key ID/secret and committed matching public trust root; never store private keys in git/issues/logs.\n- Execute the exact-revision release workflow and verify signing, device verification, authenticated provenance/attestations and release-only publication gates.\n- Exercise missing/unprotected environment rejection, untrusted/revoked signer and key rotation.\n- Feed verified artifacts into the BitBake-built Pi test loop and record actual binary/image versions and effects; coordinate SF-029/SF-031.\n\nDepends on SF-039 implementation. Production environment/key provisioning and publication remain explicitly authorized operations; ticket creation is not deployment permission. Ordinary CI/ephemeral keys are implementation evidence, not completed production acceptance.\n\n\nThis is a deferred integration acceptance ticket. It must not be used as a blanket dependency for unrelated implementation merges; its own live/hardware/production evidence is still required before completion."
+    },
+    {
+      "key": "SF-043",
+      "title": "Make bounded public testnet validation part of normal CI",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "baseline",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        ".github/workflows",
+        "scripts/live_package_upgrade.py",
+        "scripts/tests",
+        "docs/TESTNET.md",
+        "AGENTS.md",
+        "CLAUDE.md"
+      ],
+      "evidence": "Public testnet gates still require manual dispatch and reviewer approval; runner is stacked in PR63.",
+      "acceptance": [
+        "Automatically validate trusted main changes and periodic reliability checks on public testnet without human approvals.",
+        "Keep CI credentials away from untrusted PRs, enforce budget and shared-wallet concurrency, preserve exact-revision effects evidence.",
+        "Integrate the reviewed existing live runner and record actual public-testnet CI execution."
+      ],
+      "validation": "Offline workflow/budget/secret-boundary tests, public-testnet runner checks and actual post-merge CI execution.",
+      "description": "User explicitly requests public Sui testnet testing as a normal automated CI/reliability process, without manual environment approvals.\n\nAcceptance:\n- Remove only the dedicated live-package-upgrade testnet reviewer gate; preserve main-only environment, wallet isolation and all other live/hardware/production protections.\n- Automatically exercise trusted main changes on push and periodically; provide exact-head premerge testnet validation for trusted same-repository PRs without exposing CI credentials to untrusted refs/forks. Test failures surface as CI failures and retain exact-revision transaction/effects evidence.\n- Reuse Claude PR63 live runner/cached fixtures; serialize shared CI wallet, enforce real run spending ceilings and avoid package republish on every run when contracts are unchanged.\n- Coordinate with Claude rather than edit its active worktree; PR63 is stacked on56 and supplies the agreed make live-gate-package-upgrade interface. Integrate those reviewed prerequisites before claiming final CI operation.\n- Offline workflow/planner/budget regression tests plus actual public-testnet CI execution; no fabricated wallet/Pi/Walrus acceptance.\n- Record authorization, normal testnet expectations, budgets and remaining hardware/wallet limitations in AGENTS/CLAUDE/runbooks.\n\nImplementation can proceed against the existing runner interface; publication/review integration must include reviewed56/63 and target main. Only Codex creates tickets. All commits authored/committed by Tyler Bush.\n"
+    },
+    {
+      "key": "SF-044",
+      "title": "Configurable concurrent implementation workers per model family",
+      "priority": "P1",
+      "area": "infrastructure",
+      "phase": "baseline",
+      "kind": "type:infrastructure",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator",
+        "docs/PR_COORDINATION.md"
+      ],
+      "evidence": "Single family slot blocks independent work.",
+      "acceptance": [
+        "- Add a validated configurable implementation concurrency limit per project/family, backward compatible with existing single-slot configuration.",
+        "- Count active manual and managed ownership exactly once; each uncertain/orphaned reservation consumes capacity without blocking unrelated free capacity. Never steal claims or restart uncertain workers.",
+        "- Use unique sessions, atomic claims and isolated worktrees. Keep review/repair capacity independent, shared resource locks and serial gated merges.",
+        "- Fill available capacity safely across polling/restart; disabling/lowering limits never interrupts existing workers.",
+        "- Offline tests cover capacity, manual/managed deduplication, orphaned/expired claims, restarts, isolation and invalid limits.",
+        "- Document operation, install verified changes and configure SuiFleet for two concurrent implementation workers per family; inspect actual dispatch/review status."
+      ],
+      "validation": "Offline scheduler regressions and installed-service dispatch inspection.",
+      "description": "Allow multiple independent implementation workers per model family/project. The current single-slot scheduler and family-wide review/repair pauses prevent eligible work from progressing.\n\nAcceptance:\n- Add a validated configurable implementation concurrency limit per project/family, backward compatible with existing single-slot configuration.\n- Count active manual and managed ownership exactly once; each uncertain/orphaned reservation consumes capacity without blocking unrelated free capacity. Never steal claims or restart uncertain workers.\n- Use unique sessions, atomic claims and isolated worktrees. Keep review/repair capacity independent, shared resource locks and serial gated merges.\n- Fill available capacity safely across polling/restart; disabling/lowering limits never interrupts existing workers.\n- Offline tests cover capacity, manual/managed deduplication, orphaned/expired claims, restarts, isolation and invalid limits.\n- Document operation, install verified changes and configure SuiFleet for two concurrent implementation workers per family; inspect actual dispatch/review status.\n\nUser requested this concurrency change explicitly. Closes only implementation scope; no hardware or production deployment permission."
     }
   ]
 }
