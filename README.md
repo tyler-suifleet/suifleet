@@ -4,7 +4,7 @@ Decentralized edge software and firmware deployment using Sui contracts, Walrus 
 
 **Status:** locally testable one-shot OTA foundation. Greengrass OTA/fleet feature compatibility is the product goal, not the current release claim. See [the feature audit](docs/GREENGRASS_PARITY_AUDIT.md) and [delivery plan](PLAN.md).
 
-**Transport:** the edge daemon and the web app use the supported Sui gRPC APIs (tested on real local networks). The publication resolver still uses legacy JSON-RPC (SF-006). Local tests do not prove public-network, extension-wallet or hardware compatibility.
+**Transport:** the edge daemon and the web app use the supported Sui gRPC APIs (tested on real local networks). Local tests do not prove public-network, extension-wallet or hardware compatibility.
 
 ## Implemented flow
 
@@ -94,7 +94,7 @@ See [recorded validation results](docs/VALIDATION.md). The simulator does not va
 
 Contracts are in `contracts/`; the app is in `dapp/`; the daemon and Yocto layer are in `suifleet-edge/`. The new `create_deployment_verified` and `report_status_for_group` functions are required for authenticated recipe creation and group reports. Records created through the legacy API without a recipe digest are rejected by the daemon. Existing installations need the corresponding contract upgrade/new publish, reissued signer-bound capabilities, and recreated deployments with recipe digests before using the new daemon.
 
-`scripts/redeploy.sh` is a development publish/upgrade helper. No package is published automatically by tests. Preserve the original package ID across upgrades for object/event queries while using the latest ID for calls.
+`scripts/redeploy.sh` publishes or upgrades the contracts on the active Sui CLI environment after verifying the chain, account and UpgradeCap. It records each release and generates both client configs ([docs/DEPLOYMENT_MANIFEST.md](docs/DEPLOYMENT_MANIFEST.md)). No package is published automatically by tests. Calls use the latest package ID; types use the package that introduced them (per-type origins in the manifest).
 
 The Yocto layer installs the daemon and systemd unit. Add your updater separately. The recipe has not been validated by an actual BitBake build; source pinning and cargo dependency integration remain necessary before a production image.
 
