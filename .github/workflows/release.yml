@@ -1,0 +1,116 @@
+# Signed, reproducible daemon releases (SF-039). Never runs for pull requests or
+# branch pushes. The build job has no secrets and a read-only token: it builds
+# the aarch64 bundle twice from the tagged commit and fails unless both builds
+# are byte-identical. Only the sign job sees the signing key, through the
+# protected `release` environment (a human reviewer must approve it). It signs
+# release.json, verifies the bundle with the daemon's own verifier against the
+# committed trust roots, attests build provenance and, for version tags,
+# publishes a GitHub release. Setup and key rotation: docs/RELEASES.md.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - name: Runner identity
+        id: ids
+        run: echo "uid=$(id -u)" >> "$GITHUB_OUTPUT" && echo "gid=$(id -g)" >> "$GITHUB_OUTPUT"
+
+      - name: Build pinned release image
+        run: |
+          docker build -f docker/release.Dockerfile \
+            --build-arg USER_UID=${{ steps.ids.outputs.uid }} --build-arg USER_GID=${{ steps.ids.outputs.gid }} \
+            -t suifleet-release:ci docker/
+
+      - name: Build twice and require identical bundles
+        run: python3 scripts/release.py build --out dist --ref "$GITHUB_SHA" --image suifleet-release:ci --reproduce
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: unsigned-release
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
+
+  preflight:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Require a protected release environment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rules=$(gh api "repos/$GITHUB_REPOSITORY/environments/release" \
+            --jq '[.protection_rules[]? | select(.type == "required_reviewers") | .reviewers | length] | add // 0') \
+            || { echo "::error::environment 'release' does not exist; see docs/RELEASES.md"; exit 1; }
+          [ "$rules" -gt 0 ] || { echo "::error::environment 'release' has no required reviewers"; exit 1; }
+
+  sign:
+    needs: [build, preflight]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    environment: release
+    permissions:
+      contents: write      # attach files to the GitHub release (tags only)
+      id-token: write      # Sigstore-backed build provenance
+      attestations: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: unsigned-release
+          path: dist
+
+      - name: Runner identity
+        id: ids
+        run: echo "uid=$(id -u)" >> "$GITHUB_OUTPUT" && echo "gid=$(id -g)" >> "$GITHUB_OUTPUT"
+
+      - name: Sign and verify against the committed trust roots
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+          RELEASE_SIGNING_KEY_ID: ${{ vars.RELEASE_SIGNING_KEY_ID }}
+        run: |
+          [ -n "$RELEASE_SIGNING_KEY" ] && [ -n "$RELEASE_SIGNING_KEY_ID" ] \
+            || { echo "::error::RELEASE_SIGNING_KEY secret / RELEASE_SIGNING_KEY_ID variable not configured"; exit 1; }
+          docker build -f docker/release.Dockerfile \
+            --build-arg USER_UID=${{ steps.ids.outputs.uid }} --build-arg USER_GID=${{ steps.ids.outputs.gid }} \
+            -t suifleet-release:ci docker/
+          key_dir=$(mktemp -d) && chmod 700 "$key_dir"
+          trap 'shred -u "$key_dir/key" 2>/dev/null; rm -rf "$key_dir"' EXIT
+          printf '%s\n' "$RELEASE_SIGNING_KEY" > "$key_dir/key" && chmod 600 "$key_dir/key"
+          docker run --rm -v "$PWD:/workspace" -v "$key_dir:/key:ro" -w /workspace/suifleet-edge \
+            -e KEY_ID="$RELEASE_SIGNING_KEY_ID" suifleet-release:ci bash -ec '
+              cargo run --locked --release --example sign_release -- sign /key/key "$KEY_ID" ../dist
+              cargo run --locked --release --bin suifleet -- --verify-release ../dist ../release/trust.toml'
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/sbom.spdx.json
+            dist/provenance.json
+            dist/release.json
+
+      - name: Publish the GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --notes "Signed release; verify with suifleet --verify-release (docs/RELEASES.md)."
