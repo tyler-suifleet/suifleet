@@ -18,7 +18,7 @@ def run(rpc_url, faucet_url):
     for url in (rpc_url, faucet_url):
         if urlparse(url).hostname not in ("localhost", "127.0.0.1", "::1"):
             raise ValueError("acceptance test requires an isolated loopback node/faucet")
-    chain_id = dm.rpc(rpc_url, "sui_getChainIdentifier", [])
+    chain_id = dm.chain_facts(rpc_url)["chain_identifier"]
     with tempfile.TemporaryDirectory(prefix="suifleet-manifest-upgrades-") as tmp:
         root = Path(tmp); wallet = root / "wallet"; wallet.mkdir()
         config = wallet / "client.yaml"

@@ -107,7 +107,7 @@ def run(rpc_url, faucet_url):
                     return bool(gas.get("gasCoins")) or int(gas.get("addressMistBalance") or 0) > 0
                 return bool(gas)
             wait_for(funded, "local faucet did not supply gas")
-            chain_id = dm.rpc(rpc_url, "sui_getChainIdentifier", [])
+            chain_id = dm.chain_facts(rpc_url)["chain_identifier"]
 
             def transaction(*ptb):
                 result = client("ptb", *ptb, "--gas-budget", "200000000")

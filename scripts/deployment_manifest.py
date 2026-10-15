@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Resolve and verify Sui deployment metadata; never publishes or spends gas."""
+"""Resolve and verify Sui deployment metadata over gRPC; never publishes or spends gas."""
 import argparse
 import json
+import os
 import re
+import subprocess
 from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.parse import urlparse
@@ -72,6 +74,8 @@ def validate(manifest):
 
 
 def rpc(url, method, params):
+    """Legacy JSON-RPC. Only localnet tests use it, to inspect chain state
+    independently of the gRPC clients; resolution and verification use gRPC."""
     request = Request(url, json.dumps(dict(jsonrpc="2.0", id=1, method=method, params=params)).encode(),
                       {"Content-Type": "application/json"})
     with urlopen(request, timeout=30) as response:
@@ -81,59 +85,97 @@ def rpc(url, method, params):
     return result["result"]
 
 
-def origins(package):
-    raw = package["data"]["bcs"]
-    if raw["dataType"] != "package":
+FACTS_TOOL = Path(__file__).resolve().parents[1] / "suifleet-edge/target/debug/examples/chain_facts"
+
+
+def chain_facts(url, *ids):
+    """Chain identifier and BCS-decoded objects, read over Sui gRPC v2 by the
+    chain_facts example (build: cargo build --example chain_facts)."""
+    tool = os.environ.get("SUIFLEET_CHAIN_FACTS", str(FACTS_TOOL))
+    if not Path(tool).exists():
+        raise ValueError(f"{tool} not built; run: cargo build --locked --example chain_facts (in suifleet-edge)")
+    result = subprocess.run([tool, url, *ids], text=True, capture_output=True, timeout=120)
+    if result.returncode:
+        raise ValueError("chain read failed: " + result.stderr.strip()[-2000:])
+    return json.loads(result.stdout)
+
+
+def same_type(actual, expected):
+    address, _, rest = actual.partition("::")
+    want_address, _, want_rest = expected.partition("::")
+    return object_id(address) == object_id(want_address) and rest == want_rest
+
+
+def origins(fact):
+    if fact.get("kind") != "package":
         raise ValueError("call ID is not a package")
     table = {}
-    for entry in raw["typeOriginTable"]:
-        name = entry["module_name"] + "::" + entry["datatype_name"]
+    for entry in fact["type_origins"]:
+        name = entry["module"] + "::" + entry["datatype"]
         if name in table:
             raise ValueError("duplicate type origin: " + name)
         table[name] = object_id(entry["package"])
     return table
 
 
-def verify(manifest, call=rpc):
+def upgrade_cap(fact):
+    """(package, version, owner address) of an UpgradeCap fact."""
+    if fact.get("kind") != "object" or not same_type(fact["type"], "0x2::package::UpgradeCap"):
+        raise ValueError("UpgradeCap object not found")
+    cap = fact["upgrade_cap"]
+    return object_id(cap["package"]), str(cap["version"]), fact["owner"].get("address")
+
+
+def shared_version(fact, origin):
+    if fact.get("kind") != "object" or not same_type(fact["type"], origin + "::device_registry::DeviceRegistry"):
+        raise ValueError("registry type/shared version mismatch")
+    if "shared" not in fact["owner"]:
+        raise ValueError("registry is not shared")
+    return str(fact["owner"]["shared"])
+
+
+def verify(manifest, read=chain_facts):
     validate(manifest)
-    url = manifest["rpc_url"]
-    if call(url, "sui_getChainIdentifier", []) != manifest["chain_identifier"]:
+    registry = manifest["shared_objects"]["registry"]
+    facts = read(manifest["rpc_url"], manifest["call_package_id"], manifest["upgrade_cap_id"], registry["id"])
+    objects = facts["objects"]
+    if facts["chain_identifier"] != manifest["chain_identifier"]:
         raise ValueError("chain identifier mismatch; network may have reset")
-    package = call(url, "sui_getObject", [manifest["call_package_id"], {"showBcs": True}])
+    package = objects[object_id(manifest["call_package_id"])]
     table = origins(package)
-    if str(package["data"]["version"]) != manifest["package_version"]:
+    if str(package["version"]) != manifest["package_version"]:
         raise ValueError("package version mismatch")
     for name in REQUIRED_TYPES:
         if table.get(name) != object_id(manifest["type_origins"][name]):
             raise ValueError("type origin mismatch: " + name)
-    cap = call(url, "sui_getObject", [manifest["upgrade_cap_id"], {"showContent": True}])["data"]["content"]
-    if cap["type"].split("::")[1:] != ["package", "UpgradeCap"] or object_id(cap["type"].split("::")[0]) != object_id("0x2") or object_id(cap["fields"]["package"]) != object_id(manifest["call_package_id"]) or str(cap["fields"]["version"]) != manifest["package_version"]:
+    if upgrade_cap(objects[object_id(manifest["upgrade_cap_id"])])[:2] != (object_id(manifest["call_package_id"]), manifest["package_version"]):
         raise ValueError("UpgradeCap does not identify the latest call package/version")
-    registry = manifest["shared_objects"]["registry"]
-    obj = call(url, "sui_getObject", [registry["id"], {"showContent": True, "showOwner": True}])["data"]
-    expected = object_id(manifest["type_origins"]["device_registry::DeviceRegistry"]) + "::device_registry::DeviceRegistry"
-    parts = obj["content"]["type"].split("::")
-    actual = object_id(parts[0]) + "::" + "::".join(parts[1:])
-    if actual != expected or str(obj["owner"].get("Shared", {}).get("initial_shared_version")) != registry["initial_shared_version"]:
+    origin = object_id(manifest["type_origins"]["device_registry::DeviceRegistry"])
+    if shared_version(objects[object_id(registry["id"])], origin) != registry["initial_shared_version"]:
         raise ValueError("registry type/shared version mismatch")
     return manifest
 
 
-def resolve(args, call=rpc):
-    if call(args.rpc, "sui_getChainIdentifier", []) != args.chain_identifier:
-        raise ValueError("expected chain identifier mismatch")
+def resolve(args, read=chain_facts):
     package_id = object_id(args.package)
-    package = call(args.rpc, "sui_getObject", [package_id, {"showBcs": True}])
+    facts = read(args.rpc, package_id, object_id(args.upgrade_cap), object_id(args.registry))
+    if facts["chain_identifier"] != args.chain_identifier:
+        raise ValueError("expected chain identifier mismatch")
+    package = facts["objects"][package_id]
     table = origins(package)
-    registry = call(args.rpc, "sui_getObject", [object_id(args.registry), {"showContent": True, "showOwner": True}])["data"]
+    missing = [name for name in REQUIRED_TYPES if name not in table]
+    if missing:
+        raise ValueError("package lacks required types: " + ", ".join(missing))
+    registry = facts["objects"][object_id(args.registry)]
     manifest = dict(schema_version=1, protocol_version=1, network=args.network,
         chain_identifier=args.chain_identifier, rpc_url=args.rpc,
-        call_package_id=package_id, upgrade_cap_id=object_id(args.upgrade_cap), package_version=str(package["data"]["version"]),
+        call_package_id=package_id, upgrade_cap_id=object_id(args.upgrade_cap), package_version=str(package["version"]),
         type_origins={name: table[name] for name in REQUIRED_TYPES},
-        shared_objects={"registry": {"id": object_id(args.registry), "initial_shared_version": str(registry["owner"]["Shared"]["initial_shared_version"])}},
+        shared_objects={"registry": {"id": object_id(args.registry),
+            "initial_shared_version": shared_version(registry, table["device_registry::DeviceRegistry"])}},
         supported_clients={"dapp": {"min": "0.0.2", "max_exclusive": "0.0.3"}, "edge": {"min": "0.1.0", "max_exclusive": "0.1.1"}},
         walrus={"publisher_url": args.publisher, "aggregator_url": args.aggregator})
-    return verify(manifest, call)
+    return verify(manifest, read)
 
 
 def generate(manifest, output, device_template):

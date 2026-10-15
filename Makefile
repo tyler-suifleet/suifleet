@@ -125,11 +125,12 @@ test-manifest:
 	$(RUN) node scripts/test_target_groups.cjs
 
 test-manifest-live:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
 	$(RUN) python3 scripts/test_manifest_upgrades.py
 
 # Real daemon over gRPC against a disposable localnet (start it first, as for
 # test-manifest-live): direct/group/failure/offline/cursor-migration paths.
 .PHONY: test-daemon-localnet
 test-daemon-localnet:
-	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_daemon_localnet.py
