@@ -1,5 +1,5 @@
 import { calls } from "./fleet-protocol";
-import { DEPLOYMENT_SCHEMA_VERSION } from "./protocol-version";
+import { SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS } from "./protocol-version";
 import { requireManifest, moveType, verifyDeployment } from "./deployment-manifest";
 import { Transaction } from "@mysten/sui/transactions";
 import type { SuiGrpcClient } from "@mysten/sui/grpc";
@@ -153,10 +153,11 @@ export function buildCreateDeploymentTx(
   return tx;
 }
 
-export function buildDeleteDeploymentTx(deploymentObjectId: string): Transaction {
+export function buildDeleteDeploymentTx(deploymentObjectId: string, catalog = false): Transaction {
   requireManifest();
   const tx = new Transaction();
-  calls.deployment_manager_delete_deployment(tx, PACKAGE_ID, deploymentObjectId);
+  if (catalog) calls.component_catalog_delete_deployment(tx, PACKAGE_ID, deploymentObjectId);
+  else calls.deployment_manager_delete_deployment(tx, PACKAGE_ID, deploymentObjectId);
   return tx;
 }
 
@@ -195,7 +196,7 @@ export async function fetchGroups(client: SuiGrpcClient, owner: string): Promise
   });
 }
 
-async function allEvents(client: SuiGrpcClient, type: string) {
+export async function allEvents(client: SuiGrpcClient, type: string) {
   let page = await client.listEvents({ filter: { eventType: type }, order: "descending", limit: 50 });
   const events = [...page.events];
   // A scan-limited gRPC page may be empty and still have more history.
@@ -245,7 +246,7 @@ export async function fetchDeploymentEvents(client: SuiGrpcClient, owner?: strin
   const groupsById = new Map(groups.map((group) => [group.objectId, supportedTargetGroup(group)]));
   return Promise.all(liveEvents.map(async (event) => {
     const record = live.get(event.deployment_id)!;
-    if (BigInt(record.schema_version) !== BigInt(DEPLOYMENT_SCHEMA_VERSION)) throw new Error("Unsupported DeploymentRecord schema");
+    if (!SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS.some(v => BigInt(v) === BigInt(record.schema_version))) throw new Error("Unsupported DeploymentRecord schema");
     const resolvedDeviceIds = [...new Set([...event.target_devices, ...event.target_groups.flatMap((id) => {
       const group = groupsById.get(id);
       return group && group.admin === record.creator ? group.device_ids : [];
