@@ -153,7 +153,7 @@ let stage = "startup";
       await execute(catalog.buildCatalogDeploymentTx(versions[0].objectId,[groups[0].objectId],[devices[0].objectId,foreignDevice.objectId]));
       const catalogDeployments=await sui.fetchDeploymentEvents(client,operator.toSuiAddress());
       assert.equal(catalogDeployments.length,1); assert.equal(catalogDeployments[0].recipeBlobId,"");
-      await execute(sui.buildDeleteDeploymentTx(catalogDeployments[0].deploymentId,true));
+      await execute(sui.buildDeleteDeploymentTx(catalogDeployments[0].deploymentId,catalogDeployments[0].schemaVersion));
       assert.deepEqual(await sui.fetchDeploymentEvents(client,operator.toSuiAddress()),[]);
       console.log("PASS: generated SDK catalog registration, immutable/type-authenticated discovery and SemVer sorting, both platform selectors, mixed targets and schema2 cleanup");
     }

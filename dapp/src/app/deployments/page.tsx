@@ -59,7 +59,7 @@ export default function DeploymentsPage() {
                   onDelete={() => {
                     if (!confirm(`Delete deployment "${d.componentName} ${d.version}"? This cannot be undone.`)) return;
                     signAndExecute(
-                      { transaction: buildDeleteDeploymentTx(d.deploymentId, !d.recipeBlobId) },
+                      { transaction: buildDeleteDeploymentTx(d.deploymentId, d.schemaVersion) },
                       {
                         onSuccess: () => setTimeout(() => refetch(), 3000),
                         onError: (err) => alert(`Failed: ${err.message}`),
@@ -142,7 +142,7 @@ function DeploymentRow({
               </span>
             )}
             {d.recipeBlobId && <span>Recipe: <span className="font-mono text-gray-500">{d.recipeBlobId}</span></span>}
-            {d.recipeBlobId ? <StorageBadge recipeBlobId={d.recipeBlobId} /> : <span>Catalog deployment · each device selects its platform recipe</span>}
+            {d.schemaVersion === "2" ? <span>Catalog deployment · each device selects its platform recipe</span> : d.recipeBlobId ? <StorageBadge recipeBlobId={d.recipeBlobId} /> : <span>No recipe blob</span>}
             {d.artifactSha256 && <span>SHA256: <span className="font-mono text-gray-500">{d.artifactSha256.slice(0, 16)}…</span></span>}
           </div>
         </td>

@@ -29,6 +29,7 @@ export interface DeviceGroup {
 
 export interface DeploymentEvent {
   deploymentId: string;
+  schemaVersion: string;
   componentName: string;
   version: string;
   recipeBlobId: string;
@@ -153,10 +154,11 @@ export function buildCreateDeploymentTx(
   return tx;
 }
 
-export function buildDeleteDeploymentTx(deploymentObjectId: string, catalog = false): Transaction {
+export function buildDeleteDeploymentTx(deploymentObjectId: string, schemaVersion = "1"): Transaction {
   requireManifest();
+  if (schemaVersion !== "1" && schemaVersion !== "2") throw new Error("Unsupported DeploymentRecord schema");
   const tx = new Transaction();
-  if (catalog) calls.component_catalog_delete_deployment(tx, PACKAGE_ID, deploymentObjectId);
+  if (schemaVersion === "2") calls.component_catalog_delete_deployment(tx, PACKAGE_ID, deploymentObjectId);
   else calls.deployment_manager_delete_deployment(tx, PACKAGE_ID, deploymentObjectId);
   return tx;
 }
@@ -252,7 +254,7 @@ export async function fetchDeploymentEvents(client: SuiGrpcClient, owner?: strin
       return group && group.admin === record.creator ? group.device_ids : [];
     })])];
     const { verified, statuses } = await readReceipts(client, event.deployment_id);
-    return { deploymentId: event.deployment_id, componentName: record.component_name, version: record.version,
+    return { deploymentId: event.deployment_id, schemaVersion: record.schema_version, componentName: record.component_name, version: record.version,
       recipeBlobId: record.recipe_blob_id, artifactSha256: record.artifact_sha256,
       targetGroups: event.target_groups, targetDevices: event.target_devices,
       creator: record.creator, timestampMs: Number(record.created_at), statuses, receiptsVerified: verified,
