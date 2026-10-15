@@ -138,6 +138,13 @@ test-manifest:
 test-manifest-live:
 	$(RUN) python3 scripts/test_manifest_upgrades.py
 
+# SF-013 desired state on a disposable localnet (start it first): main's
+# contracts upgraded in place, then reconciliation judged by on-chain receipts.
+.PHONY: test-desired-state-localnet
+test-desired-state-localnet:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_desired_state_localnet.py
+
 # Real daemon over gRPC against a disposable localnet (start it first, as for
 # test-manifest-live): direct/group/failure/offline/cursor-migration paths.
 .PHONY: test-daemon-localnet
