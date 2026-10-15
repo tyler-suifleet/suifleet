@@ -1,0 +1,33 @@
+{
+  "reason": "Existing callable signatures and legacy event layouts are release compatibility boundaries; enrollment intentionally sends its cap to the authenticated enrolling device. Review every baseline change.",
+  "diagnostics": [
+    "component_catalog.move::delete_deployment:ESL06010",
+    "deployment_manager.move::DeviceStatusUpdated:EC09009",
+    "deployment_manager.move::DeviceStatusUpdated:EC09009",
+    "deployment_manager.move::DeviceStatusUpdated:EC09009",
+    "deployment_manager.move::delete_deployment:ESL01011",
+    "deployment_manager.move::delete_deployment:ESL06010",
+    "deployment_manager.move::report_status:ESL06010",
+    "deployment_manager.move::report_status_for_group:ESL06010",
+    "deployment_manager.move::report_verified_status:ESL06010",
+    "deployment_manager.move::report_verified_status_for_group:ESL06010",
+    "device_cap.move::assert_active:ESL06010",
+    "device_cap.move::assert_signer:ESL06010",
+    "device_cap.move::issue_cap:ESL01011",
+    "device_group.move::add_device:ESL06010",
+    "device_group.move::delete_group:ESL01011",
+    "device_group.move::delete_group:ESL06010",
+    "device_group.move::remove_device:ESL06010",
+    "device_registry.move::deregister_activated_device:ESL06010",
+    "device_registry.move::deregister_device:ESL01011",
+    "device_registry.move::deregister_device:ESL06010",
+    "device_registry.move::set_meta:ESL06010",
+    "enrollment.move::add_claims:ESL06010",
+    "enrollment.move::close:ESL06010",
+    "enrollment.move::enroll:ESL06002",
+    "enrollment.move::revoke_claim:ESL06010",
+    "enrollment.move::set_limits:ESL06010",
+    "roles.move::new_deployer_role:ESL06010",
+    "roles.move::revoke:ESL06010"
+  ]
+}

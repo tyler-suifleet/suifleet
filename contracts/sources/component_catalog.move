@@ -83,6 +83,7 @@ module sui_edge::component_catalog {
         deployment_manager::create_catalog_deployment(value.component_name, value.version, groups, devices,
             CatalogBindingKey {}, CatalogBinding { version_id: object::id(value) }, clock, ctx);
     }
+    #[allow(lint(prefer_mut_tx_context))]
     public fun delete_deployment(mut deployment: DeploymentRecord, ctx: &TxContext) {
         deployment_manager::remove_catalog_binding<CatalogBindingKey, CatalogBinding>(&mut deployment, CatalogBindingKey {}, ctx);
         deployment_manager::delete_deployment(deployment, ctx);
@@ -111,7 +112,7 @@ module sui_edge::component_catalog {
     /// SemVer 2.0 with bounded u64 core numbers, <=128 ASCII bytes.
     public fun validate_version(s: &String) {
         let b = s.as_bytes(); let n = b.length(); assert!(n > 0 && n <= 128, EVersion);
-        let mut i = 0; let mut part = 0;
+        let mut i = 0; let mut part = 0u64;
         while (part < 3) {
             let start = i; let mut number: u64 = 0;
             while (i < n && digit(b[i])) {

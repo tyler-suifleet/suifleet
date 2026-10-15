@@ -69,6 +69,7 @@ module sui_edge::roles {
 
     // ── Operator ──────────────────────────────────────────────────────────────
 
+    #[allow(lint(prefer_mut_tx_context))]
     public fun new_deployer_role(ctx: &TxContext): RoleBuilder {
         RoleBuilder { operator: ctx.sender(), groups: vector[] }
     }
@@ -93,6 +94,7 @@ module sui_edge::roles {
     }
 
     /// Deactivate a role; it can never be reactivated.
+    #[allow(lint(prefer_mut_tx_context))]
     public fun revoke(registry: &mut DeviceRegistry, role_id: ID, ctx: &TxContext) {
         let key = RoleKey { role_id };
         assert!(df::exists(device_registry::uid(registry), key), ERoleRevoked);

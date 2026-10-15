@@ -101,6 +101,7 @@ module sui_edge::deployment_manager {
 
     /// Legacy event. Its type originates in the first package, so old entry
     /// points can still emit it for any device without authorization.
+    #[allow(unused_field)]
     public struct DeviceStatusUpdated has copy, drop {
         deployment_id: ID,
         device_id: ID,
@@ -263,6 +264,7 @@ module sui_edge::deployment_manager {
 
     /// Superseded: this signature cannot see the registry, so it cannot tell a
     /// revoked or rotated device from an active one. Use `report_verified_status`.
+    #[allow(lint(prefer_mut_tx_context))]
     public fun report_status(
         _deployment: &mut DeploymentRecord,
         _cap: &DeviceCap,
@@ -273,6 +275,7 @@ module sui_edge::deployment_manager {
     }
 
     /// Superseded: use `report_verified_status_for_group`.
+    #[allow(lint(prefer_mut_tx_context))]
     public fun report_status_for_group(
         _deployment: &mut DeploymentRecord,
         _cap: &DeviceCap,
@@ -284,6 +287,7 @@ module sui_edge::deployment_manager {
     }
 
     /// Called by the edge device after applying (or failing to apply) a deployment.
+    #[allow(lint(prefer_mut_tx_context))]
     public fun report_verified_status(
         deployment: &mut DeploymentRecord,
         registry: &DeviceRegistry,
@@ -299,6 +303,7 @@ module sui_edge::deployment_manager {
     }
 
     /// Group reports prove current membership in a group targeted by this deployment.
+    #[allow(lint(prefer_mut_tx_context))]
     public fun report_verified_status_for_group(
         deployment: &mut DeploymentRecord,
         registry: &DeviceRegistry,
@@ -367,6 +372,7 @@ module sui_edge::deployment_manager {
         receipts
     }
 
+    #[allow(lint(prefer_mut_tx_context, public_entry))]
     public entry fun delete_deployment(mut deployment: DeploymentRecord, ctx: &TxContext) {
         assert!(ctx.sender() == deployment.creator, ENotCreator);
 
