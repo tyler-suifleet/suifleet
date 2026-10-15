@@ -134,6 +134,20 @@ let stage = "startup";
     stage = "delete deployment";
     for (const deployment of deployments) await execute(sui.buildDeleteDeploymentTx(deployment.deploymentId, deployment.schemaVersion));
     assert.deepEqual(await sui.fetchDeploymentEvents(client, operator.toSuiAddress()), []);
+    // SF-013: the dApp's own desired-state revision builder, executed for real.
+    const desired = loader()("lib/desired-state.ts"), group = groups[0].objectId;
+    stage = "desired revision"; await execute(desired.buildDesiredRevisionTx([group], { componentName: "test-app", version: "2.0.0",
+      recipeBlobId: "fixture-recipe-2", artifactSha256: "ab".repeat(32), recipeSha256: "cd".repeat(32) }));
+    let states = await desired.fetchDesiredStates(client, [group]);
+    assert.equal(states[group].revision, 1); assert.deepEqual(Object.keys(states[group].components), ["test-app"]);
+    const managed = states[group].components["test-app"];
+    deployments = await sui.fetchDeploymentEvents(client, operator.toSuiAddress());
+    assert.deepEqual(deployments.map((d) => [d.deploymentId, d.version, d.targetGroups, d.targetDevices]), [[managed, "2.0.0", [group], []]]);
+    stage = "desired removal"; await execute(desired.buildDesiredRevisionTx([group], undefined, ["test-app"]));
+    states = await desired.fetchDesiredStates(client, [group]);
+    assert.equal(states[group].revision, 2); assert.deepEqual(states[group].components, {});
+    stage = "delete managed deployment"; await execute(sui.buildDeleteDeploymentTx(managed));
+    assert.deepEqual(await sui.fetchDeploymentEvents(client, operator.toSuiAddress()), []);
     if (process.env.CATALOG_TEST === "1") {
       const catalog = loader()("lib/catalog.ts"), selector = loader()("lib/component-selector.ts");
       stage = "catalog create"; await execute(catalog.buildCreateCatalogTx());
@@ -162,6 +176,7 @@ let stage = "startup";
       console.log("PASS: generated SDK catalog registration, immutable/type-authenticated discovery and SemVer sorting, both platform selectors, mixed targets and schema2 cleanup");
     }
     console.log("PASS: real gRPC publish/register+activate/borrowed group add and cap reissue/deployment/receipt/deregister/delete, invalid and foreign target history, failed execution effects");
+    console.log("PASS: dApp desired-state revision (create+commit in one transaction), removal revision and managed-record deletion on chain");
     console.log(JSON.stringify({ chain: manifest.chain_identifier, package: packageId, registry: registryId }));
   } finally { await fs.rm(temporary, { recursive: true, force: true }); }
 })().catch((error) => { console.error(`${stage}: ${error.message}`); process.exitCode = 1; });

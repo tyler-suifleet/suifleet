@@ -25,6 +25,8 @@ const CALL_MODULE: &str = protocol::deployment_manager::MODULE;
 const MAX_GAS_BUDGET: u64 = 50_000_000;
 /// Events requested per ListEvents call.
 const PAGE_SIZE: u32 = 50;
+const DEPLOYMENT_CREATED: &str = "deployment_manager::DeploymentCreated";
+const DEVICE_ADDED_TO_GROUP: &str = "device_group::DeviceAddedToGroup";
 
 pub use crate::protocol::DeploymentCreatedEvent;
 
@@ -49,6 +51,13 @@ pub enum Owner {
 /// resume *after* it; `end` is the cursor after the whole scanned range.
 pub struct EventPage {
     pub events: Vec<(DeploymentCreatedEvent, Value)>,
+    pub end: Value,
+    pub has_more: bool,
+}
+
+/// One page of DeviceAddedToGroup events as (group ID, device ID).
+pub struct MembershipPage {
+    pub events: Vec<(String, String)>,
     pub end: Value,
     pub has_more: bool,
 }
@@ -469,7 +478,7 @@ impl SuiClient {
             Cursor::Genesis => (Start::Checkpoint(0), Some(0)),
         };
         self.ensure_retained(position).await?;
-        let page = self.event_page(start).await?;
+        let page = self.event_page(start, DEPLOYMENT_CREATED).await?;
         let mut events = Vec::new();
         for (event, watermark) in page.events {
             let fields = event.json.as_deref().map(to_json).unwrap_or(Value::Null);
@@ -505,7 +514,7 @@ impl SuiClient {
         self.ensure_retained(Some(checkpoint)).await?;
         let mut start = Start::Checkpoint(checkpoint);
         loop {
-            let page = self.event_page(start).await?;
+            let page = self.event_page(start, DEPLOYMENT_CREATED).await?;
             for (event, watermark) in page.events {
                 if let Some(found) = legacy_boundary(&event, digest, sequence, checkpoint, &watermark)? {
                     return Ok(found);
@@ -523,9 +532,10 @@ impl SuiClient {
         }
     }
 
-    /// One ListEvents page of DeploymentCreated events, each with the cursor
-    /// to resume after it.
-    async fn event_page(&self, start: Start) -> anyhow::Result<RawPage> {
+    /// One ListEvents page of `event_type` events (e.g.
+    /// "deployment_manager::DeploymentCreated"), each with the cursor to
+    /// resume after it.
+    async fn event_page(&self, start: Start, event_type: &str) -> anyhow::Result<RawPage> {
         let mut request = proto::ListEventsRequest::default();
         request.read_mask = Some(mask(&[
             "event_type",
@@ -536,7 +546,7 @@ impl SuiClient {
         ]));
         let mut literal = proto::EventLiteral::default();
         let mut by_type = proto::EventTypeFilter::default();
-        by_type.event_type = Some(self.move_type("deployment_manager::DeploymentCreated"));
+        by_type.event_type = Some(self.move_type(event_type));
         literal.predicate = Some(proto::event_literal::Predicate::EventType(by_type));
         let mut term = proto::EventTerm::default();
         term.literals = vec![literal];
@@ -558,7 +568,7 @@ impl SuiClient {
             .await
             .map_err(status)?
             .into_inner();
-        let expected = self.move_type("deployment_manager::DeploymentCreated");
+        let expected = self.move_type(event_type);
         let mut events = Vec::new();
         while let Some(frame) = stream.next().await {
             let frame = frame.map_err(status)?;
@@ -606,15 +616,32 @@ impl SuiClient {
             })
     }
 
-    /// A matching ID alone is not authority to update a device. Only its current
-    /// operator may deploy; shared groups must belong to that operator too.
-    /// An activated Device is held by the registry; its operator is whoever
-    /// owns the DeviceOwnerCap that its identity names.
-    pub async fn authorized_target(
-        &self,
-        event: &DeploymentCreatedEvent,
-        device: &str,
-    ) -> anyhow::Result<bool> {
+    /// The next page of DeviceAddedToGroup events after `cursor` (from
+    /// genesis when None). Pruned history fails loudly, as for deployments.
+    pub async fn memberships(&self, cursor: &Option<Value>) -> anyhow::Result<MembershipPage> {
+        let (start, position) = match Cursor::parse(cursor)? {
+            Cursor::After(bytes, checkpoint) => (Start::After(bytes), checkpoint),
+            Cursor::Checkpoint(checkpoint) => (Start::Checkpoint(checkpoint), Some(checkpoint)),
+            Cursor::Genesis => (Start::Checkpoint(0), Some(0)),
+            Cursor::Legacy(..) => anyhow::bail!("membership cursor cannot be a JSON-RPC cursor"),
+        };
+        self.ensure_retained(position).await?;
+        let page = self.event_page(start, DEVICE_ADDED_TO_GROUP).await?;
+        let mut events = Vec::new();
+        for (event, _) in page.events {
+            let fields = event.json.as_deref().map(to_json).unwrap_or(Value::Null);
+            match (fields["group_id"].as_str(), fields["device_id"].as_str()) {
+                (Some(group), Some(device)) => events.push((group.to_owned(), device.to_owned())),
+                _ => anyhow::bail!("undecodable DeviceAddedToGroup event: {fields}"),
+            }
+        }
+        Ok(MembershipPage { events, end: page.end, has_more: page.has_more })
+    }
+
+    /// The device's operator. An activated Device is held by the registry; its
+    /// operator is whoever owns the DeviceOwnerCap that its identity names.
+    /// Also checks that the Device is registered to this daemon's key.
+    pub async fn operator(&self, device: &str) -> anyhow::Result<String> {
         let object = self.object(device).await?;
         anyhow::ensure!(
             same_type(&object.object_type, &self.move_type("device_registry::Device")),
@@ -635,16 +662,100 @@ impl SuiClient {
         let Owner::Address(owner) = &owner_cap.owner else {
             anyhow::bail!("DeviceOwnerCap has no operator owner");
         };
+        anyhow::ensure!(
+            same_id(object.fields["device_address"].as_str().unwrap_or(""), &self.address()),
+            "device key does not match registered address"
+        );
+        Ok(owner.clone())
+    }
+
+    /// The group's current desired state, if this device must follow it:
+    /// None when the group is gone, belongs to another operator, or no longer
+    /// contains the device. A group without desired state is revision 0.
+    pub async fn group_desired(
+        &self,
+        group: &str,
+        operator: &str,
+        device: &str,
+    ) -> anyhow::Result<Option<crate::reconcile::GroupDesired>> {
+        if !self.group_contains(group, operator, device).await? {
+            return Ok(None);
+        }
+        let mut desired = crate::reconcile::GroupDesired {
+            group: group.to_owned(),
+            revision: 0,
+            components: Default::default(),
+        };
+        if let Some(state) = self.dynamic_field(group, "desired_state::DesiredKey").await? {
+            desired.revision = number(&state["revision"])
+                .ok_or_else(|| anyhow::anyhow!("desired state of {group} has no revision"))?;
+            let entries = state["components"]["contents"]
+                .as_array()
+                .ok_or_else(|| anyhow::anyhow!("undecodable desired state of {group}: {state}"))?;
+            for entry in entries {
+                match (entry["key"].as_str(), entry["value"].as_str()) {
+                    (Some(name), Some(deployment)) => {
+                        desired.components.insert(name.to_owned(), deployment.to_owned());
+                    }
+                    _ => anyhow::bail!("undecodable desired state of {group}: {state}"),
+                }
+            }
+        }
+        Ok(Some(desired))
+    }
+
+    /// A DeploymentRecord as its creation event would describe it, or None
+    /// when it was deleted. Fails on any other type.
+    pub async fn deployment(
+        &self,
+        id: &str,
+    ) -> anyhow::Result<Option<(DeploymentCreatedEvent, Object)>> {
+        let Some(record) = self.optional_object(id).await? else {
+            return Ok(None);
+        };
+        anyhow::ensure!(
+            same_type(
+                &record.object_type,
+                &self.move_type(protocol::deployment_manager::DeploymentRecord::MOVE_TYPE)
+            ),
+            "{id} is not a DeploymentRecord"
+        );
+        let field = |name: &str| record.fields[name].as_str().unwrap_or_default().to_owned();
+        let groups = self.dynamic_field(id, "deployment_manager::TargetGroupsKey").await?;
+        let devices = self.dynamic_field(id, "deployment_manager::TargetDevicesKey").await?;
+        let event = DeploymentCreatedEvent {
+            deployment_id: id.to_owned(),
+            component_name: field("component_name"),
+            version: field("version"),
+            recipe_blob_id: field("recipe_blob_id"),
+            artifact_sha256: field("artifact_sha256"),
+            target_groups: groups.as_ref().map(id_list).unwrap_or_default(),
+            target_devices: devices.as_ref().map(id_list).unwrap_or_default(),
+            creator: field("creator"),
+        };
+        Ok(Some((event, record)))
+    }
+
+    /// Whether desired state references this record; reconciliation then
+    /// applies it, never the one-shot creation-event path.
+    pub async fn is_managed(&self, deployment: &str) -> anyhow::Result<bool> {
+        Ok(self
+            .dynamic_field(deployment, "deployment_manager::ManagedKey")
+            .await?
+            .is_some())
+    }
+
+    /// A matching ID alone is not authority to update a device. Only its current
+    /// operator may deploy; shared groups must belong to that operator too.
+    pub async fn authorized_target(
+        &self,
+        event: &DeploymentCreatedEvent,
+        device: &str,
+    ) -> anyhow::Result<bool> {
+        let owner = &self.operator(device).await?;
         if !same_id(owner, &event.creator) {
             return Ok(false);
         }
-        anyhow::ensure!(
-            same_id(
-                object.fields["device_address"].as_str().unwrap_or(""),
-                &self.address()
-            ),
-            "device key does not match registered address"
-        );
         if event.target_devices.iter().any(|id| same_id(id, device)) {
             return Ok(true);
         }
