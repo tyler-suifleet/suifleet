@@ -212,6 +212,11 @@ impl Supervisor {
                     root.join(INSTANCE).display()
                 );
             }
+            info!(
+                previous = previous.pid,
+                rebooted = !previous.same_boot(&current),
+                "Previous daemon instance ended without stopping its components; none of its processes can remain"
+            );
         }
         let record = Record {
             path: root.join(INSTANCE),
