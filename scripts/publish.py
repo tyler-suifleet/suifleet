@@ -14,8 +14,9 @@ It stops on any failed command, failed execution effects or unparseable
 metadata. Prior configuration is replaced only after a complete, verified
 release exists: each release is recorded under RECORDS/ENV/releases/ with its
 manifest (all IDs and type origins), frontend.env and device config.toml,
-RECORDS/ENV/current is switched to it with one atomic rename, and only then is
-the frontend's .env.local rewritten (also atomically). If anything fails after
+and RECORDS/ENV/current and the frontend's .env.local are then switched to it
+together (both prepared first; two renames, the first undone if the second
+fails), so both clients always name the same release. If anything fails after
 the transaction executed, the transaction is kept in RECORDS/ENV/pending-*.json
 and `--recover FILE` finishes recording it without another transaction.
 """
@@ -142,7 +143,8 @@ def environment(cli):
 
 # ── Records ───────────────────────────────────────────────────────────────────
 
-def write_atomic(path, text):
+def stage(path, text):
+    """Write text to a synced temporary file beside path; os.replace makes it live."""
     path.parent.mkdir(parents=True, exist_ok=True)
     handle, temporary = tempfile.mkstemp(prefix="." + path.name + ".", dir=path.parent)
     try:
@@ -150,9 +152,18 @@ def write_atomic(path, text):
             stream.write(text)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
     except BaseException:
         Path(temporary).unlink(missing_ok=True)
+        raise
+    return Path(temporary)
+
+
+def write_atomic(path, text):
+    temporary = stage(path, text)
+    try:
+        os.replace(temporary, path)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
         raise
 
 
@@ -162,8 +173,8 @@ def current_manifest(records, env):
 
 
 def install(manifest, records, env, template, frontend_env):
-    """Record the release, switch RECORDS/ENV/current to it atomically, then
-    rewrite .env.local atomically. Rerunnable after a partial failure."""
+    """Record the release, then switch RECORDS/ENV/current and .env.local to
+    it together: either both change or neither does. Rerunnable."""
     name = f"v{manifest['package_version']}-{manifest['call_package_id'][2:14]}"
     release = records / env / "releases" / name
     if release.exists():
@@ -178,18 +189,39 @@ def install(manifest, records, env, template, frontend_env):
             raise PublishError(f"cannot generate client configs: {error}")
         finally:
             os.unlink(device.name)
-    link = records / env / "current"
-    staging = records / env / ".current.new"
-    staging.unlink(missing_ok=True)
-    os.symlink(Path("releases") / name, staging)
-    os.replace(staging, link)
-    frontend = (release / "frontend.env").read_text()
+    # Prepare everything that can fail before activating anything: the
+    # frontend file is fully written beside .env.local, and the new pointer
+    # beside current. Activation is then two renames; if the second fails,
+    # the first is undone, so both clients stay on the same release.
+    frontend = None
     if frontend_env:
         kept = []
         if frontend_env.exists():
             kept = [line for line in frontend_env.read_text().splitlines()
                     if line.split("=", 1)[0].strip() not in OWNED_ENV]
-        write_atomic(frontend_env, "\n".join(kept + [frontend.rstrip("\n")]) + "\n")
+        frontend = stage(frontend_env, "\n".join(kept + [(release / "frontend.env").read_text().rstrip("\n")]) + "\n")
+    link = records / env / "current"
+    previous = os.readlink(link) if link.is_symlink() else None
+    pointer = records / env / ".current.new"
+    try:
+        pointer.unlink(missing_ok=True)
+        os.symlink(Path("releases") / name, pointer)
+        os.replace(pointer, link)
+        try:
+            if frontend:
+                os.replace(frontend, frontend_env)
+        except BaseException:
+            if previous is None:
+                link.unlink(missing_ok=True)
+            else:
+                pointer.unlink(missing_ok=True)
+                os.symlink(previous, pointer)
+                os.replace(pointer, link)
+            raise
+    finally:
+        pointer.unlink(missing_ok=True)
+        if frontend:
+            frontend.unlink(missing_ok=True)
     return release
 
 
@@ -319,6 +351,14 @@ def finish(pending, args, read):
     return install(manifest, args.records, pending["env"], args.device_template, args.frontend_env)
 
 
+def active_configuration(args, env):
+    """What the clients currently use: the current pointer and .env.local."""
+    link = args.records / env / "current"
+    frontend = args.frontend_env
+    return (os.readlink(link) if link.is_symlink() else None,
+            frontend.read_bytes() if frontend and frontend.exists() else None)
+
+
 def run(args, cli=None, read=dm.chain_facts):
     cli = cli or Cli(args.client_config)
     if args.recover:
@@ -352,6 +392,7 @@ def run(args, cli=None, read=dm.chain_facts):
                    digest=digest, package_path=str(args.package.resolve()), walrus=list(walrus),
                    object_changes=output.get("objectChanges"))
     write_atomic(pending_path, json.dumps(pending, indent=2) + "\n")
+    configuration = active_configuration(args, step.env)
     try:
         package, version, cap, registry = changes(output, step)
         pending.update(package=package, version=version, cap=cap, registry=registry)
@@ -360,7 +401,10 @@ def run(args, cli=None, read=dm.chain_facts):
             raise PublishError("the Sui CLI did not update Published.toml")
         release = finish(pending, args, read)
     except Exception as error:
-        raise PublishError(f"{error}\nTransaction {digest} EXECUTED; previous configuration is unchanged. "
+        # Report what is actually live, not what should be.
+        state = ("previous configuration is unchanged" if active_configuration(args, step.env) == configuration
+                 else "WARNING: deployments/current or .env.local changed; check both before rebuilding")
+        raise PublishError(f"{error}\nTransaction {digest} EXECUTED; {state}. "
                            f"Fix the cause, then run: {Path(sys.argv[0]).name} --recover {pending_path}") from error
     pending_path.unlink()
     return release

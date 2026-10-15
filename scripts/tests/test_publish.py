@@ -8,6 +8,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+import unittest.mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import deployment_manifest as dm
 import publish
@@ -345,6 +346,67 @@ class PublishTests(unittest.TestCase):
             publish.time.sleep = sleep
         self.assertEqual(self.env_file.read_bytes(), prior[str(self.env_file.relative_to(self.tmp))])
         self.assertEqual(len(list((self.records / "dev").glob("pending-*.json"))), 1)
+
+    def failing_frontend_rename(self):
+        """os.replace that fails only when it would make .env.local live."""
+        real = publish.os.replace
+        def replace(source, destination):
+            if Path(destination) == self.env_file:
+                raise OSError(28, "No space left on device")
+            return real(source, destination)
+        return unittest.mock.patch.object(publish.os, "replace", replace)
+
+    def leftovers(self):
+        return sorted(p.name for p in [*self.tmp.iterdir(), *(self.records / "dev").iterdir()]
+                      if p.name.startswith(".") and p != self.env_file)
+
+    def test_frontend_activation_failure_keeps_both_clients_on_prior_release(self):
+        # Review of 501484d: current advanced to v2 while .env.local stayed v1.
+        self.run_publish()
+        prior_env, prior_current = self.env_file.read_bytes(), (self.records / "dev/current").readlink()
+        with self.failing_frontend_rename():
+            with self.assertRaisesRegex(publish.PublishError, "previous configuration is unchanged") as caught:
+                self.run_publish()
+        self.assertIn("No space left on device", str(caught.exception))
+        self.assertEqual((self.records / "dev/current").readlink(), prior_current)
+        self.assertEqual(self.env_file.read_bytes(), prior_env)
+        self.assertEqual(self.leftovers(), [])
+        [pending] = (self.records / "dev").glob("pending-*.json")
+        publish.run(self.args("--recover", str(pending)), self.cli, self.chain)
+        self.assertEqual(self.manifest()["package_version"], "2")
+        self.assertEqual(self.frontend_manifest(), self.manifest())
+
+    def test_unwritable_frontend_env_activates_nothing(self):
+        self.run_publish()
+        prior_env, prior_current = self.env_file.read_bytes(), (self.records / "dev/current").readlink()
+        real = publish.stage
+        def full(path, text):
+            if path == self.env_file:
+                raise OSError(28, "No space left on device")
+            return real(path, text)
+        with unittest.mock.patch.object(publish, "stage", full):
+            with self.assertRaisesRegex(publish.PublishError, "previous configuration is unchanged"):
+                self.run_publish()
+        self.assertEqual((self.records / "dev/current").readlink(), prior_current)
+        self.assertEqual(self.env_file.read_bytes(), prior_env)
+        self.assertEqual(self.leftovers(), [])
+
+    def test_fresh_publish_frontend_failure_leaves_no_current(self):
+        with self.failing_frontend_rename():
+            with self.assertRaisesRegex(publish.PublishError, "previous configuration is unchanged"):
+                self.run_publish()
+        self.assertFalse((self.records / "dev/current").is_symlink())
+        self.assertIn("NEXT_PUBLIC_PACKAGE_ID=0xold", self.env_file.read_text())
+
+    def test_failure_message_reports_a_changed_configuration(self):
+        self.run_publish()
+        real = publish.install
+        def half(*args):
+            (self.records / "dev/current").unlink()
+            raise publish.PublishError("simulated crash mid-activation")
+        with unittest.mock.patch.object(publish, "install", half):
+            with self.assertRaisesRegex(publish.PublishError, "WARNING: deployments/current or .env.local changed"):
+                self.run_publish()
 
     def test_partial_install_is_rerunnable(self):
         self.run_publish()
