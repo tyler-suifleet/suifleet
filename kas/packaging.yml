@@ -1,0 +1,37 @@
+header:
+  version: 14
+machine: raspberrypi3-64
+distro: poky
+target: suifleet
+repos:
+  suifleet:
+    layers:
+      suifleet-edge/meta-suifleet:
+  poky:
+    url: https://git.yoctoproject.org/poky
+    commit: a53cae3de9f45417b97efc4c46c42e4c8ebdb939
+    layers:
+      meta:
+      meta-poky:
+  meta-openembedded:
+    url: https://github.com/openembedded/meta-openembedded
+    commit: ae7dfb12245c7f9b9a353499e2688015bd4e6413
+    layers:
+      meta-oe:
+  meta-raspberrypi:
+    url: https://github.com/agherzan/meta-raspberrypi
+    commit: 2c646d29912dcc873469a57b1c207e1549c5094d
+  meta-lts-mixins:
+    url: https://git.yoctoproject.org/meta-lts-mixins
+    branch: scarthgap/rust
+    commit: eedcdc7486ff15c3510c2ceff68c87d9db141312
+local_conf_header:
+  suifleet-packaging: |
+    BB_NUMBER_THREADS = "2"
+    PARALLEL_MAKE = "-j4"
+    RUST_LLVM_TARGETS = "AArch64;X86"
+    DISTRO_FEATURES:append = " systemd usrmerge"
+    DISTRO_FEATURES_BACKFILL_CONSIDERED:append = " sysvinit"
+    VIRTUAL-RUNTIME_init_manager = "systemd"
+    VIRTUAL-RUNTIME_initscripts = ""
+    LICENSE_FLAGS_ACCEPTED = "synaptics-killswitch"

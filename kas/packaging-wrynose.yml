@@ -1,0 +1,36 @@
+header:
+  version: 14
+machine: raspberrypi3-64
+distro: nodistro
+target: suifleet
+repos:
+  suifleet:
+    layers:
+      suifleet-edge/meta-suifleet:
+  openembedded-core:
+    url: https://git.openembedded.org/openembedded-core
+    commit: 0f03c732a0a2d0506b41b1abe60b3f368b2300dc
+    layers:
+      meta:
+  bitbake:
+    url: https://git.openembedded.org/bitbake
+    commit: 51fd94a67fa17650a9ff623492005972bbc7d26f
+    path: openembedded-core/bitbake
+    layers:
+      .: disabled
+  meta-openembedded:
+    url: https://github.com/openembedded/meta-openembedded
+    commit: f28a144aa0a0ae05ca2ee91e1aef6aa05f6a12db
+    layers:
+      meta-oe:
+  meta-raspberrypi:
+    url: https://github.com/agherzan/meta-raspberrypi
+    commit: 919588393f41b48cb6c5d832aa35e58a19b6762d
+local_conf_header:
+  suifleet-packaging: |
+    BB_NUMBER_THREADS = "2"
+    PARALLEL_MAKE = "-j4"
+    RUST_LLVM_TARGETS = "AArch64;X86"
+    INIT_MANAGER = "systemd"
+    DISTRO_FEATURES:append = " usrmerge"
+    LICENSE_FLAGS_ACCEPTED = "synaptics-killswitch"
