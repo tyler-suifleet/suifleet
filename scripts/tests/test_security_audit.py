@@ -160,6 +160,15 @@ class SecurityGateTests(unittest.TestCase):
             run['results'][0]['rule'] = {'index': 0, 'toolComponent': {'index': 0}}
             self.assertEqual(self.run_gate('sarif', report)[0], expected)
 
+    def test_sarif_taxonomy_components_need_no_rules(self):
+        report = sarif()
+        report['runs'][0]['tool']['extensions'] = [{'name': 'taxonomy', 'taxa': []}]
+        self.assertEqual(self.run_gate('sarif', report)[0], 1)
+        report['runs'][0]['results'] = []
+        self.assertEqual(self.run_gate('sarif', report)[0], 0)
+        report['runs'][0]['tool']['extensions'][0]['rules'] = None
+        self.assertEqual(self.run_gate('sarif', report)[0], 2)
+
     def test_sarif_extension_references_reject_invalid_or_conflicting_identity(self):
         for reference in [None, {'index': -1}, {'index': 1}, {'index': True},
                           {'index': '0'}, {'index': 0, 'name': 'wrong'},

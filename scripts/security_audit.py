@@ -130,7 +130,8 @@ def sarif_findings(report):
         if not isinstance(extensions, list):
             raise ReportError('invalid SARIF extensions')
         for component in [tool['driver'], *extensions]:
-            rules = component['rules']
+            # Taxonomy extensions have taxa rather than rules (SARIF 3.19.23).
+            rules = component.get('rules', [])
             if not isinstance(rules, list):
                 raise ReportError('invalid SARIF rules')
             for rule in rules:
