@@ -8,6 +8,10 @@ ARG NODE_MAJOR=22
 ARG NODE_VERSION=22.22.2-1nodesource1
 ARG PNPM_VERSION=11.0.8
 ARG RUST_VERSION=1.94.0
+# Chrome for Testing headless shell for the SF-010 wallet gate: the build
+# Playwright 1.64.1 (dapp/package.json) drives, revision 1248.
+ARG CHROME_VERSION=156.0.8078.4
+ARG CHROME_SHA256=c3e50596aef52c58f8fda3c6b3411c33d34c88b177b3ed1c2243359fd3b8ba20
 ARG USER_UID=1000
 ARG USER_GID=1000
 
@@ -33,6 +37,19 @@ RUN curl -fL -o /tmp/sui.tgz \
     && tar -xzf /tmp/sui.tgz -C /usr/local/bin \
     && rm /tmp/sui.tgz \
     && sui --version
+
+# Headless Chromium → /opt/chrome-headless-shell (libraries from its deb.deps)
+RUN apt-get update && apt-get install -y --no-install-recommends unzip fonts-liberation \
+    libasound2 libatk-bridge2.0-0 libatk1.0-0 libatspi2.0-0 libcups2 libdbus-1-3 libexpat1 \
+    libgbm1 libglib2.0-0 libnspr4 libnss3 libpango-1.0-0 libx11-6 libxcb1 libxcomposite1 \
+    libxdamage1 libxext6 libxfixes3 libxkbcommon0 libxrandr2 \
+    && curl -fL -o /tmp/chrome.zip \
+    "https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VERSION}/linux64/chrome-headless-shell-linux64.zip" \
+    && echo "${CHROME_SHA256}  /tmp/chrome.zip" | sha256sum -c - \
+    && unzip -q /tmp/chrome.zip -d /opt && mv /opt/chrome-headless-shell-linux64 /opt/chrome-headless-shell \
+    && rm /tmp/chrome.zip && rm -rf /var/lib/apt/lists/* \
+    && /opt/chrome-headless-shell/chrome-headless-shell --version
+ENV CHROME_EXECUTABLE=/opt/chrome-headless-shell/chrome-headless-shell
 
 # Node.js + pnpm (global install, any user can run them)
 RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - \
