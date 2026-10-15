@@ -111,38 +111,20 @@ fn text(value: &Value) -> String {
 
 impl Indexer {
     /// Verify the manifest against the chain and bind the database to its
-    /// chain identity. A database bound to another chain (e.g. a reset
-    /// network) is refused unless `reset` explicitly wipes it.
-    pub async fn open(manifest: &Manifest, db: Connection, reset: bool) -> anyhow::Result<Self> {
+    /// deployment (see `bind`). An index of another chain or deployment is
+    /// refused unless `reset` explicitly wipes it.
+    pub async fn open(manifest: &Manifest, mut db: Connection, reset: bool) -> anyhow::Result<Self> {
         let chain = Chain::new(&manifest.rpc_url)?;
         let types = manifest.verify(&chain).await?;
-        let bound = store::meta(&db, "chain_identifier")?;
-        if bound
-            .as_deref()
-            .is_some_and(|bound| bound != manifest.chain_identifier)
-        {
-            anyhow::ensure!(
-                reset,
-                "database is bound to chain {} but the manifest names {}; the network may have reset. \
-                 Re-run with --reset to discard the old index",
-                bound.unwrap_or_default(),
-                manifest.chain_identifier
-            );
-            warn!("Discarding the index of another chain");
-            db.execute_batch(
-                "DELETE FROM cursors; DELETE FROM devices; DELETE FROM groups; DELETE FROM group_members;
-                 DELETE FROM deployments; DELETE FROM deployment_targets; DELETE FROM receipts;
-                 DELETE FROM changes; DELETE FROM meta;",
-            )?;
-        }
-        store::set_meta(&db, "chain_identifier", &manifest.chain_identifier)?;
+        let registry = chain::normalize(&manifest.shared_objects.registry.id).unwrap_or_default();
+        bind(&mut db, &manifest.chain_identifier, &registry, &types, reset)?;
         store::set_meta(&db, "call_package_id", &manifest.call_package_id)?;
         store::set_meta(&db, "package_version", &manifest.package_version)?;
         Ok(Self {
             chain,
             db,
             types,
-            registry: chain::normalize(&manifest.shared_objects.registry.id).unwrap_or_default(),
+            registry,
             reconcile_batch: RECONCILE_BATCH,
         })
     }
@@ -414,6 +396,87 @@ impl Indexer {
     }
 }
 
+/// Meta key: the deployment the index materializes, as its registry and
+/// every type of its package ("module::Type" → full type).
+const BINDING: &str = "deployment_binding";
+
+/// Bind the database to a chain and deployment. Cursors are keyed by
+/// "module::Type" and objects by ID alone, so they are only valid for the
+/// deployment that produced them: the same registry and, for every type
+/// already bound, the same origin. A compatible upgrade keeps both and may
+/// add types; another publication (even on the same chain) changes both.
+/// Anything else is refused, or with `reset` discarded in the same
+/// transaction that records the new binding.
+fn bind(
+    db: &mut Connection,
+    chain_identifier: &str,
+    registry: &str,
+    types: &BTreeMap<String, String>,
+    reset: bool,
+) -> anyhow::Result<()> {
+    let tx = db.transaction()?;
+    if let Some(reason) = incompatible(&tx, chain_identifier, registry, types)? {
+        anyhow::ensure!(reset, "{reason}. Re-run with --reset to discard the old index");
+        warn!(%reason, "Discarding the index");
+        tx.execute_batch(
+            "DELETE FROM cursors; DELETE FROM devices; DELETE FROM groups; DELETE FROM group_members;
+             DELETE FROM deployments; DELETE FROM deployment_targets; DELETE FROM receipts;
+             DELETE FROM changes; DELETE FROM meta;",
+        )?;
+    }
+    store::set_meta(&tx, "chain_identifier", chain_identifier)?;
+    let binding = serde_json::json!({ "registry": registry, "types": types });
+    store::set_meta(&tx, BINDING, &binding.to_string())?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// Why an existing index cannot continue with this deployment, if it cannot.
+fn incompatible(
+    db: &Connection,
+    chain_identifier: &str,
+    registry: &str,
+    types: &BTreeMap<String, String>,
+) -> anyhow::Result<Option<String>> {
+    let Some(bound_chain) = store::meta(db, "chain_identifier")? else {
+        return Ok(None); // A new database.
+    };
+    if bound_chain != chain_identifier {
+        return Ok(Some(format!(
+            "database is bound to chain {bound_chain} but the manifest names {chain_identifier}; \
+             the network may have reset"
+        )));
+    }
+    let Some(binding) = store::meta(db, BINDING)? else {
+        return Ok(Some("database does not record which deployment it indexes".into()));
+    };
+    let binding: Value = serde_json::from_str(&binding)?;
+    let bound_registry = text(&binding["registry"]);
+    if !chain::same_id(&bound_registry, registry) {
+        return Ok(Some(format!(
+            "database indexes the deployment with registry {bound_registry} but the manifest names \
+             registry {registry}; another publication is not an upgrade of the indexed one"
+        )));
+    }
+    let bound_types = binding["types"]
+        .as_object()
+        .ok_or_else(|| anyhow::anyhow!("undecodable deployment binding: {binding}"))?;
+    for (name, bound_type) in bound_types {
+        let bound_type = bound_type.as_str().unwrap_or_default();
+        match types.get(name) {
+            Some(full) if chain::same_type(full, bound_type) => {}
+            other => {
+                return Ok(Some(format!(
+                    "indexed type {bound_type} is {} in the manifest's package; \
+                     it is not a compatible upgrade of the indexed deployment",
+                    other.map(String::as_str).unwrap_or("absent")
+                )))
+            }
+        }
+    }
+    Ok(None)
+}
+
 /// Whether receipts were written under the current report authority. Older
 /// versions stay writable through older packages until migrated, which
 /// discards them; they are never evidence (as the dApp's `readReceipts`).
@@ -564,5 +627,72 @@ mod tests {
         assert!(apply(&mut db, Update::Device(id(1), None)));
         let tombstone = store::read_device(&db, &id(1)).unwrap().unwrap();
         assert!(tombstone.deleted && tombstone.name == "wrapped");
+    }
+
+    #[test]
+    fn index_is_bound_to_its_deployment() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = store::open(&dir.path().join("fleet.db")).unwrap();
+        let types = |origin: u32, extra: Option<(u32, &str)>| {
+            let mut types: BTreeMap<String, String> = ["device_registry::Device", "device_group::DeviceGroup"]
+                .into_iter()
+                .map(|name| (name.to_owned(), format!("{}::{name}", id(origin))))
+                .collect();
+            if let Some((origin, name)) = extra {
+                types.insert(name.to_owned(), format!("{}::{name}", id(origin)));
+            }
+            types
+        };
+        let populated = |db: &mut Connection| {
+            let tx = db.transaction().unwrap();
+            store::set_cursor(&tx, "device_group::GroupCreated", &serde_json::json!({ "checkpoint": 9 }), 1).unwrap();
+            tx.commit().unwrap();
+            apply(db, Update::Device(id(1), None));
+        };
+        let kept = |db: &Connection| {
+            store::cursor(db, "device_group::GroupCreated").unwrap().is_some()
+                && store::read_device(db, &id(1)).unwrap().is_some()
+        };
+        let (chain, registry, published) = ("4c78adac", id(50), types(10, None));
+        bind(&mut db, chain, &registry, &published, false).unwrap();
+        populated(&mut db);
+        bind(&mut db, chain, &registry, &published, false).unwrap();
+        assert!(kept(&db), "reopening the same deployment keeps the index");
+
+        // A compatible upgrade: same registry and origins, plus a new type.
+        let upgraded = types(10, Some((20, "device_registry::DeviceIdentityChanged")));
+        bind(&mut db, chain, &registry, &upgraded, false).unwrap();
+        assert!(kept(&db), "a compatible upgrade keeps the index");
+        // The new type is now bound too: dropping it is incompatible.
+        assert!(bind(&mut db, chain, &registry, &published, false).is_err());
+
+        // Another publication on the same chain: new registry and origins.
+        let other = (id(51), types(30, Some((30, "device_registry::DeviceIdentityChanged"))));
+        let refused = bind(&mut db, chain, &other.0, &other.1, false).unwrap_err().to_string();
+        assert!(refused.contains("another publication") && refused.contains("--reset"), "{refused}");
+        assert!(kept(&db), "a refusal leaves the index untouched");
+        // Same registry but a re-originated type is not an upgrade either.
+        let refused = bind(&mut db, chain, &registry, &other.1, false).unwrap_err().to_string();
+        assert!(refused.contains("not a compatible upgrade"), "{refused}");
+        // Another chain.
+        let refused = bind(&mut db, "deadbeef", &registry, &upgraded, false).unwrap_err().to_string();
+        assert!(refused.contains("network may have reset"), "{refused}");
+        assert!(kept(&db));
+
+        // --reset discards rows, placeholders, cursors, feed and sweep state.
+        store::set_meta(&db, SWEEP_AFTER, &id(1)).unwrap();
+        bind(&mut db, chain, &other.0, &other.1, true).unwrap();
+        assert!(!kept(&db));
+        assert!(sweep_ids(&db, "", 10).unwrap().is_empty());
+        assert!(store::cursors(&db).unwrap().is_empty());
+        assert_eq!(store::meta(&db, SWEEP_AFTER).unwrap(), None);
+        bind(&mut db, chain, &other.0, &other.1, false).unwrap();
+        assert!(bind(&mut db, chain, &registry, &upgraded, false).is_err(), "rebound to the new deployment");
+
+        // A database bound to a chain without a deployment binding (indexed
+        // before deployments were bound) cannot be trusted either.
+        db.execute("DELETE FROM meta WHERE key = ?1", [BINDING]).unwrap();
+        let refused = bind(&mut db, chain, &other.0, &other.1, false).unwrap_err().to_string();
+        assert!(refused.contains("does not record which deployment"), "{refused}");
     }
 }

@@ -26,7 +26,8 @@ receipt), indexes it, and checks:
     the API, verify every call and argument against the request and the
     CLI's own chain reads, sign and execute; `ctl ... --out` writes an unsigned transaction; the
     indexer then shows the new membership and deployment;
-  - a database bound to another chain is refused; --reset re-binds it;
+  - a database bound to another chain, or to another publication on the
+    same chain, is refused; --reset discards it and indexes only the new one;
   - load: concurrent paginated reads over ~45k synthetic rows.
 
 Run inside the dev image with a throwaway node and faucet (make test-indexer-localnet):
@@ -433,6 +434,44 @@ def run(rpc_url, faucet_url):
             assert rebound.execute("SELECT value FROM meta WHERE key='chain_identifier'").fetchone()[0] == chain_id
             assert rebound.execute("SELECT COUNT(*) FROM devices").fetchone()[0] == 6, "reset did not rebuild from chain only"
             print("PASS: database bound to another chain refused; --reset discards it and re-indexes this chain")
+
+            # Another publication on the same chain is not an upgrade: its event
+            # types and objects differ, so the old cursors and rows are refused.
+            contracts2 = root / "contracts2"
+            shutil.copytree(ROOT / "contracts", contracts2, ignore=shutil.ignore_patterns("build", "Published.toml"))
+            second = client("test-publish", contracts2, "--build-env", "testnet", "--pubfile-path", root / "Pub2.local.toml",
+                            "--gas-budget", "500000000", "--silence-warnings")
+            assert second["effects"]["status"]["status"] == "success"
+            package2 = next(c["packageId"] for c in second["objectChanges"] if c["type"] == "published")
+            registry2 = created(second, "::device_registry::DeviceRegistry")[0]
+            manifest2 = dm.resolve(SimpleNamespace(chain_identifier=chain_id, rpc=rpc_url, package=package2,
+                                                   upgrade_cap=created(second, "::package::UpgradeCap")[0], registry=registry2,
+                                                   network="localnet", publisher="http://127.0.0.1:1",
+                                                   aggregator="http://127.0.0.1:1"))
+            (root / "deployment2.json").write_text(json.dumps(manifest2))
+            only = transaction("--move-call", f"{package2}::device_registry::register_device", f"@{registry2}", '"only"',
+                               f"@{operator}", '"aarch64"', CLOCK, "--assign", "device",
+                               "--transfer-objects", "[device]", f"@{operator}")
+            only = next(e["parsedJson"]["device_id"] for e in only["events"]
+                        if e["type"].endswith("::device_registry::DeviceRegistered"))
+            common2 = ["--manifest", str(root / "deployment2.json"), "--db", str(db)]
+            rebound.close()
+            refused = subprocess.run([str(INDEXER), "index", *common2], capture_output=True, text=True, timeout=120)
+            assert refused.returncode != 0 and "another publication" in refused.stderr, refused.stderr
+            with sqlite3.connect(db) as connection:
+                assert connection.execute("SELECT COUNT(*) FROM devices").fetchone()[0] == 6, "refusal changed the index"
+            reset = subprocess.run([str(INDEXER), "index", *common2, "--reset"], capture_output=True, text=True, timeout=300)
+            assert reset.returncode == 0, reset.stderr[-3000:]
+            with sqlite3.connect(db) as connection:
+                ids = [row[0] for row in connection.execute("SELECT id FROM devices")]
+                assert ids == [n(only)], f"reset index is not exactly the second publication: {ids}"
+                assert connection.execute("SELECT COUNT(*) FROM groups").fetchone()[0] == 0
+                assert connection.execute("SELECT COUNT(*) FROM deployments").fetchone()[0] == 0
+                binding = json.loads(connection.execute("SELECT value FROM meta WHERE key='deployment_binding'").fetchone()[0])
+                assert binding["registry"] == n(registry2), binding
+            refused = subprocess.run([str(INDEXER), "index", *common], capture_output=True, text=True, timeout=120)
+            assert refused.returncode != 0 and "another publication" in refused.stderr, refused.stderr
+            print("PASS: another publication on the same chain refused; --reset indexes exactly the new deployment")
         except BaseException:
             log.flush()
             print((root / "indexer.log").read_text()[-4000:])
