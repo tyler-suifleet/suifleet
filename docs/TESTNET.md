@@ -86,6 +86,35 @@ make live-gate-package-upgrade SUIFLEET_WALLET=$HOME/.config/suifleet/testnet/ag
 - The device keeps its unused report gas, about 0.03 SUI per run.
 - **No JSON-RPC.** Public testnet fullnodes no longer serve JSON-RPC (gRPC and GraphQL only). Live tooling must read over gRPC (`chain_facts`, the daemon, the frontend SDK) or through the Sui CLI. The localnet tests' JSON-RPC helper does not work there.
 
+## Cost findings
+
+These were measured on Sui testnet on 2026-10-15 with Sui CLI 1.81.1 and this repository's package. They apply to any live-network work: acceptance gates, release rehearsals and frontend live tests.
+
+| Item | Measured | Consequence |
+|---|---|---|
+| Publish or upgrade of `sui_edge` | about 0.087 SUI of storage each, **never refunded** (packages are immutable) | The dominant cost. Reuse packages across runs, keyed by contract content, and skip the upgrade when base and head are identical |
+| Creating objects (deployments, groups, devices) | storage charged up front, **about 99% rebated on deletion** | Delete transient objects in the run's cleanup. A delete batch returned more than its two creates cost (net −0.049 SUI) |
+| Any transaction | a minimum computation fee of about 0.001 SUI at the reference gas price | Batch calls into one PTB: 8 single-call transactions became 3 |
+| A PTB calling two versions of one package | rejected with `InvalidLinkage`, and the failed execution still charged about 0.001 SUI | Group calls by package version: one transaction for head calls, one for base calls |
+| Gas budget | not spent; reserved from the balance at selection | A 0.9 SUI budget on a 0.89 SUI wallet failed at the upgrade, after the publish had already spent 0.11 SUI. Keep budgets realistic, and check the balance against the whole run before starting |
+| Package upgrades | chain linearly from the latest version only (the UpgradeCap's current package) | A cached fixture can only test the exact (base, head) pair it was built for. Upgrading it again would test head₁→head₂, not base→head₂ |
+| Device report gas | about 0.001 SUI per status report, paid by the device | Fund the device once and top it up below a floor. Don't send fresh funding each run (that lost about 0.03 SUI per run) |
+| Faucet | Sui ≥ 1.82.1 `client faucet` solves a proof of work: 1 SUI per request, credited to the address balance | Budget for occasional top-ups. Sui 1.81.1 can spend address-balance gas, but cannot request it |
+
+| Run type | Transactions | Net cost |
+|---|---|---|
+| Original harness (fresh packages every run, unbatched) | 13 | 0.181 SUI |
+| Fresh fixture: first run, or contracts changed | 8 | 0.176 SUI |
+| Cached fixture: contracts unchanged | 3 | **0.0025 SUI** |
+
+**Rules of thumb for new live tooling:**
+- Content-address anything expensive.
+- Verify cached on-chain state with free reads before trusting it.
+- Invalidate on a chain-identifier or account change.
+- Batch per package version.
+- Clean up for rebates.
+- Write each transaction's net gas into the evidence so regressions show up.
+
 ## Runs
 
 | Date (UTC) | Base → head | Result | Spent | Notes |

@@ -121,6 +121,18 @@ The user authorized agents to spend **testnet** SUI from two dedicated accounts 
 
 **No JSON-RPC.** Public fullnodes no longer serve JSON-RPC, so live checks must use gRPC or the Sui CLI.
 
+**Keep live runs cheap.** The faucet should be a rare top-up, not a per-run step. These were measured on testnet; details are in [TESTNET.md](docs/TESTNET.md#cost-findings):
+- **Package storage is never refunded.** Publishing or upgrading this package costs about 0.087 SUI each time, which made up about 95% of an unoptimized run.
+  - Reuse published packages. Cache fixtures by a content hash of the contracts, and re-verify them on chain (free reads) before reuse.
+  - Never republish identical code.
+- **Object storage is rebated** (about 99%) when an object is deleted. Delete transient objects (deployments, groups) at the end of a run.
+- **Every transaction pays a minimum computation fee** (about 0.001 SUI). Batch calls into one PTB.
+- **One PTB cannot call two versions of the same package** (`InvalidLinkage`). Use one transaction per package version.
+- **The gas budget is not the cost, but it must not exceed the balance.** Gas selection fails before execution otherwise, and a failed execution still charges. Keep budgets near real cost (0.4 SUI is ample for a publish).
+- **Upgrades only chain from the latest version.** To test a base→head upgrade, key the fixture by the (base, head) pair. Never test X→Y in place of base→Y.
+- **Reuse funded test identities.** For example, keep the test device's key and gas, and top it up only when low.
+- **Record each transaction's net gas** in the run's evidence. A cached package-upgrade run costs about 0.0025 SUI; a fresh fixture about 0.18 SUI.
+
 **Mainnet** and any other account still need explicit user authorization.
 
 ## Working across models
