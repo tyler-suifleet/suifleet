@@ -15,6 +15,7 @@ permissions:
 concurrency:
   group: suifleet-testnet-ci-wallet
   cancel-in-progress: false
+  queue: max
 jobs:
   validate:
     if: github.ref == 'refs/heads/main'

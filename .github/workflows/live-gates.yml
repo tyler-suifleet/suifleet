@@ -35,6 +35,7 @@ permissions:
 concurrency:
   group: ${{ inputs.gate == 'package-upgrade' && 'suifleet-testnet-ci-wallet' || format('live-{0}', inputs.gate) }}
   cancel-in-progress: false
+  queue: max
 
 jobs:
   preflight:
