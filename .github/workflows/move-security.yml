@@ -47,7 +47,7 @@ jobs:
       - name: Compiler, Sui linters, tests and deliberately failing controls
         run: |
           mkdir -p .ci-move-security
-          docker run --rm -e CARGO_BUILD_JOBS=2 \
+          docker run --rm --user "$(id -u):$(id -g)" -e CARGO_BUILD_JOBS=2 \
             -v "$PWD:/workspace:ro" -w /workspace \
             -v "$PWD/.ci-move-security:/home/dev/.move" \
             suifleet-move-security:ci python3 scripts/check_move_security.py
