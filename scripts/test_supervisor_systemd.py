@@ -3,7 +3,7 @@
 cgroup v2 (SF-014), against the local chain/Walrus simulator: no keys, gas,
 public network or hardware.
 
-On the host (needs Docker): builds scripts/systemd/Dockerfile, boots it with
+On the host (needs Docker): builds the harness image below, boots it with
 systemd as PID 1 in a disposable privileged container with a private cgroup
 namespace, and reruns this script inside it with --inside. The daemon runs as
 suifleet.service exactly as shipped (User=suifleet, ProtectControlGroups,
@@ -43,6 +43,19 @@ ROOT = Path(__file__).resolve().parents[1]
 FILES = ROOT / "suifleet-edge/meta-suifleet/recipes-edge/suifleet/files"
 IMAGE = "suifleet-systemd:test"
 CONTAINER = "suifleet-supervisor-systemd"
+# A disposable systemd host, not a service or development image: systemd must
+# run as root (PID 1) in a privileged test container, so this recipe has no
+# USER. That root requirement is an accepted risk recorded in
+# docs/SECURITY_CI.md; it is kept inline, never shipped, and used only here.
+HARNESS = """\
+FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
+RUN apt-get update \\
+ && apt-get install -y --no-install-recommends systemd systemd-sysv python3 procps \\
+ && rm -rf /var/lib/apt/lists/* \\
+ && systemctl mask systemd-logind.service getty.target console-getty.service systemd-udevd.service
+STOPSIGNAL SIGRTMIN+3
+CMD ["/sbin/init"]
+"""
 UNIT_CGROUP = "/system.slice/suifleet.service"
 
 # The run records itself and keeps four kinds of descendants: one in its
@@ -70,7 +83,8 @@ def sh(*command, check=True, capture=True):
 def host(args):
     for binary in ("suifleet", "examples/grpc_sim_shim"):
         assert (ROOT / "suifleet-edge/target/debug" / binary).exists(), f"build {binary} first (make test-supervisor-systemd)"
-    sh("docker", "build", "-q", "-t", IMAGE, str(ROOT / "scripts/systemd"))
+    built = subprocess.run(["docker", "build", "-q", "-t", IMAGE, "-"], input=HARNESS, text=True, capture_output=True)
+    assert built.returncode == 0, built.stderr
     sh("docker", "rm", "-f", CONTAINER, check=False)
     sh("docker", "run", "-d", "--name", CONTAINER, "--privileged", "--cgroupns=private",
        "--tmpfs", "/run", "--tmpfs", "/run/lock", "-v", f"{ROOT}:/workspace:ro", IMAGE)
