@@ -18,6 +18,10 @@
 //! subreaper and kills any process that escaped its group and was orphaned.
 //! Component processes carry a marker in their environment, so a daemon
 //! restarted after a crash also finds and kills ones reparented away from it.
+//! `instance.json` records the daemon supervising this state root until it
+//! stopped every component. A daemon that finds the record of one that did
+//! not, and cannot prove that none of its processes survived (a sealed cgroup
+//! with nothing left in it, or a reboot), refuses to start.
 use crate::apply::{self, ApplyRunner};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -170,11 +174,41 @@ impl Supervisor {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
             Err(error) => return Err(error.into()),
         };
+        let current = Instance::current();
+        let previous = Instance::recorded(&root)?;
+        if let Some(previous) = &previous {
+            anyhow::ensure!(
+                !previous.still_running(&current),
+                "another daemon instance (pid {}) is supervising the components in {}",
+                previous.pid,
+                root.display()
+            );
+        }
+        let previous_status: BTreeMap<String, Status> = std::fs::read(root.join("status.json"))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default();
         contain_descendants()?;
-        let left = reap_previous_runs(&root)?;
+        let left = reap_previous_runs(&root, &previous_status)?;
         if left > 0 {
             warn!(left, "Killed component runs left by a previous daemon instance");
         }
+        // The previous instance ended without stopping the components it
+        // started. What the recovery above cannot see (a descendant that
+        // cleared its environment and lost its parent chain) must be ruled
+        // out some other way, or nothing may start.
+        if let (Some(previous), false) = (&previous, previous_status.is_empty()) {
+            if let Err(reason) = previous.left_nothing(&current, Path::new(CGROUP_ROOT), cgroup_writable) {
+                anyhow::bail!(
+                    "refusing to start components: the previous daemon instance (pid {}) ended without \
+                     stopping them and none of its descendants may still run, but {reason}. Reboot, or \
+                     make sure no process it started remains and remove {}",
+                    previous.pid,
+                    root.join(INSTANCE).display()
+                );
+            }
+        }
+        atomic_write(&root.join(INSTANCE), &serde_json::to_vec_pretty(&current)?)?;
         let supervisor = Self {
             root,
             settings,
@@ -289,6 +323,12 @@ impl Supervisor {
         for _ in 0..3 {
             sweep_orphans();
             tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        // Everything stopped: the next daemon start needs no proof of that.
+        if let Err(error) = std::fs::remove_file(self.root.join(INSTANCE)) {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                warn!(%error, "Cannot clear the daemon instance record");
+            }
         }
     }
 
@@ -736,13 +776,9 @@ fn carries(pid: u32, marker: &str) -> bool {
 /// descendants (including ones that cleared their environment). They are
 /// frozen with SIGSTOP until the set is closed, so none can fork away, then
 /// killed. Fails if any survives: no component may run twice.
-fn reap_previous_runs(root: &Path) -> anyhow::Result<usize> {
+fn reap_previous_runs(root: &Path, previous: &BTreeMap<String, Status>) -> anyhow::Result<usize> {
     let me = std::process::id();
     let marker = marker(root);
-    let previous: BTreeMap<String, Status> = std::fs::read(root.join("status.json"))
-        .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default();
     let mut runs = BTreeSet::new();
     let mut groups = BTreeSet::new();
     for status in previous.values() {
@@ -821,6 +857,117 @@ fn reap_previous_runs(root: &Path) -> anyhow::Result<usize> {
         }
         std::thread::sleep(Duration::from_millis(10));
     }
+}
+
+/// File (under the state root) recording the daemon instance that supervises
+/// components, from its start until it stopped all of them.
+const INSTANCE: &str = "instance.json";
+const CGROUP_ROOT: &str = "/sys/fs/cgroup";
+
+/// A daemon instance, as recorded in `instance.json`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct Instance {
+    pid: u32,
+    pid_start: Option<u64>,
+    /// Kernel boot ID, when readable: a later boot ended every process.
+    boot_id: Option<String>,
+    /// Its cgroup v2 path, when known.
+    cgroup: Option<String>,
+}
+impl Instance {
+    fn current() -> Self {
+        let pid = std::process::id();
+        Self {
+            pid,
+            pid_start: start_time(pid),
+            boot_id: std::fs::read_to_string("/proc/sys/kernel/random/boot_id")
+                .ok()
+                .map(|id| id.trim().to_owned()),
+            cgroup: std::fs::read_to_string("/proc/self/cgroup").ok().and_then(|text| {
+                text.lines()
+                    .find_map(|line| line.strip_prefix("0::"))
+                    .map(str::to_owned)
+            }),
+        }
+    }
+
+    /// The record left by an instance that did not stop its components. An
+    /// unreadable one proves nothing, so it counts as such an instance.
+    fn recorded(root: &Path) -> anyhow::Result<Option<Self>> {
+        match std::fs::read(root.join(INSTANCE)) {
+            Ok(bytes) => Ok(Some(serde_json::from_slice(&bytes).unwrap_or_default())),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    fn same_boot(&self, current: &Self) -> bool {
+        match (&self.boot_id, &current.boot_id) {
+            (Some(then), Some(now)) => then == now,
+            _ => true,
+        }
+    }
+
+    /// Another live daemon (not this process reopening the state root).
+    fn still_running(&self, current: &Self) -> bool {
+        self.pid != current.pid
+            && self.pid_start.is_some()
+            && self.same_boot(current)
+            && start_time(self.pid) == self.pid_start
+    }
+
+    /// Ok when no process this instance started can still run: the system
+    /// rebooted since, or its cgroup (inherited by every descendant) is one
+    /// none of them can leave and holds no process but this one.
+    fn left_nothing(&self, current: &Self, cgroups: &Path, writable: impl Fn(&Path) -> bool) -> Result<(), String> {
+        if !self.same_boot(current) {
+            return Ok(());
+        }
+        let Some(path) = &self.cgroup else {
+            return Err("its cgroup is unknown".into());
+        };
+        let relative = path.trim_start_matches('/');
+        if relative.split('/').any(|part| part == "..") {
+            return Err(format!("its cgroup {path:?} is not a cgroup path"));
+        }
+        let dir = cgroups.join(relative);
+        // Moving a process out needs write access to the common ancestor's
+        // cgroup.procs, which is this cgroup or one of its ancestors.
+        for ancestor in dir.ancestors().take_while(|a| a.starts_with(cgroups)) {
+            let procs = ancestor.join("cgroup.procs");
+            if procs.exists() && writable(&procs) {
+                return Err(format!("its processes could leave its cgroup ({} is writable)", procs.display()));
+            }
+        }
+        let mut members = BTreeSet::new();
+        let mut pending = vec![dir.clone()];
+        while let Some(next) = pending.pop() {
+            let procs = match std::fs::read_to_string(next.join("cgroup.procs")) {
+                Ok(procs) => procs,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound && next == dir => break,
+                Err(error) => return Err(format!("{} cannot be read ({error})", next.join("cgroup.procs").display())),
+            };
+            members.extend(procs.lines().filter_map(|pid| pid.trim().parse::<u32>().ok()));
+            let entries = std::fs::read_dir(&next).map_err(|error| format!("{} cannot be read ({error})", next.display()))?;
+            pending.extend(entries.flatten().map(|entry| entry.path()).filter(|path| path.is_dir()));
+        }
+        members.remove(&current.pid);
+        if members.is_empty() {
+            Ok(())
+        } else {
+            Err(format!("its cgroup {path} still holds {} other process(es)", members.len()))
+        }
+    }
+}
+
+/// Whether this process may write a cgroup file (so move processes with it).
+fn cgroup_writable(path: &Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(path) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+        return true;
+    };
+    // SAFETY: a valid NUL-terminated path.
+    unsafe { libc::access(path.as_ptr(), libc::W_OK) == 0 }
 }
 
 /// PIDs of children this process spawned and has not reaped yet. Anything
@@ -1200,8 +1347,17 @@ mod tests {
         }
         // (Dropping the task's handle kills the run itself; its group remains.)
         assert!(alive(grouped));
+        // The test process shares its cgroup with others, so nothing proves
+        // that no descendant escaped: the leftovers it can find are killed,
+        // then it refuses to start, and keeps refusing.
+        for _ in 0..2 {
+            let error = Supervisor::open(&f.dir, s.settings.clone()).err().expect("started over an unproven leftover");
+            assert!(format!("{error:#}").contains("refusing to start components"), "{error:#}");
+            assert!(!alive(old) && !alive(grouped), "the previous run survived a restart");
+        }
+        // An operator who made sure nothing remains clears the record.
+        std::fs::remove_file(f.dir.join("supervised").join(INSTANCE)).unwrap();
         let mut s = f.open();
-        assert!(!alive(old) && !alive(grouped), "the previous run survived a restart");
         s.bootstrap().await;
         let new = s.status()["app"].pid.unwrap();
         assert_ne!(new, old);
@@ -1228,7 +1384,7 @@ mod tests {
         until("the children to exec", || carries(escaped, &marker(&root)) && alive(cleared)).await;
         assert!(!carries(cleared, &marker(&root)));
 
-        assert!(reap_previous_runs(&root).unwrap() >= 3);
+        assert!(reap_previous_runs(&root, &BTreeMap::new()).unwrap() >= 3);
         assert!(!alive(leftover.pid()) && !alive(escaped) && !alive(cleared), "a leftover survived recovery");
         let _ = leftover.wait().await;
         assert!(alive(other.pid()), "recovery killed another supervisor's process");
@@ -1236,6 +1392,69 @@ mod tests {
             libc::kill(other.pid() as i32, libc::SIGKILL);
         }
         let _ = other.wait().await;
+    }
+
+    #[tokio::test]
+    async fn another_live_instance_is_not_disturbed() {
+        let mut f = Fixture::new("second-instance");
+        let mut s = f.open();
+        let v1 = f.spec("1.0.0", "exec sleep 300");
+        f.deploy(&mut s, v1, None).await.unwrap();
+        let run = s.status()["app"].pid.unwrap();
+        // Recorded as run by another live process (the parent of this one).
+        let mut other = Instance::current();
+        other.pid = std::os::unix::process::parent_id();
+        other.pid_start = start_time(other.pid);
+        let record = f.dir.join("supervised").join(INSTANCE);
+        let own = std::fs::read(&record).unwrap();
+        std::fs::write(&record, serde_json::to_vec(&other).unwrap()).unwrap();
+        let error = Supervisor::open(&f.dir, s.settings.clone()).err().expect("a second instance started");
+        assert!(format!("{error:#}").contains("another daemon instance"), "{error:#}");
+        assert!(alive(run), "a second instance killed the first one's run");
+        std::fs::write(&record, own).unwrap();
+        s.stop_all().await;
+        assert!(!record.exists(), "a clean stop kept the instance record");
+    }
+
+    #[test]
+    fn leftovers_are_ruled_out_only_by_a_sealed_empty_cgroup_or_a_reboot() {
+        let cgroups = std::env::temp_dir().join(format!("suifleet-cgroups-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&cgroups);
+        let service = cgroups.join("system.slice/suifleet.service");
+        std::fs::create_dir_all(service.join("sub")).unwrap();
+        for dir in [&cgroups, &cgroups.join("system.slice")] {
+            std::fs::write(dir.join("cgroup.procs"), "1\n2\n").unwrap();
+        }
+        let current = Instance { pid: 40, pid_start: Some(1), boot_id: Some("b".into()), cgroup: Some("/system.slice/suifleet.service".into()) };
+        let previous = Instance { pid: 30, ..current.clone() };
+        let sealed = |_: &Path| false;
+        let procs = |dir: &Path, pids: &str| std::fs::write(dir.join("cgroup.procs"), pids).unwrap();
+
+        // Only the new instance left in the old one's sealed cgroup.
+        procs(&service, "40\n");
+        procs(&service.join("sub"), "");
+        assert_eq!(previous.left_nothing(&current, &cgroups, sealed), Ok(()));
+        // A survivor, even in a child cgroup.
+        procs(&service.join("sub"), "77\n");
+        let error = previous.left_nothing(&current, &cgroups, sealed).unwrap_err();
+        assert!(error.contains("1 other process"), "{error}");
+        // A different boot ended everything.
+        let rebooted = Instance { boot_id: Some("a".into()), ..previous.clone() };
+        assert_eq!(rebooted.left_nothing(&current, &cgroups, sealed), Ok(()));
+        // A cgroup its processes could leave (here the slice) proves nothing.
+        procs(&service.join("sub"), "");
+        let slice = cgroups.join("system.slice/cgroup.procs");
+        let error = previous.left_nothing(&current, &cgroups, |path: &Path| path == slice).unwrap_err();
+        assert!(error.contains("could leave"), "{error}");
+        // Neither does an unknown cgroup, or a shared one (as in a container).
+        let unknown = Instance { cgroup: None, ..previous.clone() };
+        assert!(unknown.left_nothing(&current, &cgroups, sealed).is_err());
+        let shared = Instance { cgroup: Some("/".into()), ..previous.clone() };
+        assert!(shared.left_nothing(&current, &cgroups, sealed).unwrap_err().contains("other process"));
+        // A removed cgroup holds nothing.
+        let gone = Instance { cgroup: Some("/system.slice/old.service".into()), ..previous.clone() };
+        assert_eq!(gone.left_nothing(&current, &cgroups, sealed), Ok(()));
+        let _ = std::fs::remove_dir_all(&cgroups);
     }
 
     #[tokio::test]

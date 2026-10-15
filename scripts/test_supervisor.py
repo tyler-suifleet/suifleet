@@ -10,9 +10,12 @@ One component, `svc`, across daemon lifetimes:
   daemon SIGTERM                       -> shutdown command ran; run, its grouped
                                           child and a setsid-escaped child all gone
   daemon start (reboot stage)          -> v3 started again from active.json
-  daemon SIGKILL, then start           -> the orphaned run and every descendant
-                                          (setsid, reparented, env-cleared) killed;
-                                          one instance
+  daemon SIGKILL, then start           -> every leftover it can find (the run,
+                                          setsid, env-cleared) killed; one that also
+                                          lost its parent chain cannot be ruled out
+                                          outside a sealed cgroup, so it refuses
+                                          to start, until the record is cleared;
+                                          then one instance
   0x404 v4  no run (one-shot install)  -> Applied; v3 stopped and uncommitted,
                                           not started again by a daemon restart
 """
@@ -30,11 +33,11 @@ import test_ota
 from test_ota import CAP, DEVICE, PACKAGE, REGISTRY, TYPE_ORIGINS, UPGRADE_CAP, Simulator, start_grpc, wait_for
 
 # The run records itself, keeps a child in its group, one that escapes it with
-# setsid, one under a middle process (so it can be reparented away from the
-# run's tree) and one that clears its environment.
+# setsid, one that clears its environment, and one that does both under a
+# middle process (so it can be reparented away from the run's tree as well).
 RUN = ("rm -f ready middle detached; echo $SUIFLEET_COMPONENT_VERSION >> runs; echo $$ > pid; "
        "sleep 300 & echo $! > grouped; setsid sleep 300 & echo $! > escaped; "
-       "sh -c 'setsid sleep 300 & echo $! > detached; echo $$ > middle; exec sleep 300' & "
+       "sh -c 'env -i setsid sleep 300 & echo $! > detached; echo $$ > middle; exec sleep 300' & "
        "env -i sleep 300 & echo $! > cleared; "
        "while [ ! -s middle ] || [ ! -s detached ]; do sleep 0.05; done; "
        "trap 'echo graceful > stopped; exit 0' TERM; touch ready; while true; do sleep 0.2; done")
@@ -223,6 +226,22 @@ def run(binary):
                 os.kill(middle, signal.SIGKILL)
                 wait_for(lambda: parent(detached) != middle, "the detached descendant was not reparented")
                 assert alive(detached)
+                # Nothing ties the detached descendant (no parent chain, own
+                # session, cleared environment) to the dead daemon, and this
+                # test's cgroup is shared: the successor kills every leftover it
+                # can find, then refuses to start rather than risk a second
+                # instance. It keeps refusing.
+                for _ in range(2):
+                    process = start()
+                    assert process.wait(timeout=30) != 0, "started without ruling out a pre-crash descendant"
+                    process = None
+                    assert "refusing to start components" in (root / "daemon.log").read_text()
+                    found = dict(zip(RECORDED, map(alive, orphan)))
+                    assert found.pop("detached") and not any(found.values()), ("recovery missed a leftover it can find", found)
+                assert running("3.0.0") and status()["pid"] == orphan[0], "the refused start rewrote status.json"
+                # The operator makes sure nothing remains and clears the record.
+                os.kill(detached, signal.SIGKILL)
+                (components / "instance.json").unlink()
                 process = start()
                 wait_for(lambda: running("3.0.0") and status().get("pid") != orphan[0], "v3 did not restart after a daemon kill", process)
                 assert not any(map(alive, orphan)), ("a pre-crash descendant survived daemon recovery",
@@ -231,8 +250,8 @@ def run(binary):
                              if alive(pid) and (Path(f"/proc/{pid}/cwd").exists() and os.readlink(f"/proc/{pid}/cwd") == str(work))
                              and Path(f"/proc/{pid}/cmdline").read_bytes().startswith(b"/bin/sh")]
                 assert len(instances) == 1, f"expected one running instance, found {instances}"
-                print("PASS: after a daemon SIGKILL every pre-crash process (setsid, reparented, env-cleared) "
-                      "was killed before the restart; exactly one instance runs")
+                print("PASS: after a daemon SIGKILL the successor killed every leftover it can find and refused to start "
+                      "over an undetectable (env-cleared, setsid, reparented) one; once cleared, exactly one instance runs")
 
                 # A same-name version without a run command ends supervision.
                 wait_for(lambda: recorded()[0] == status().get("pid"), "the recovered run did not record itself", process)
