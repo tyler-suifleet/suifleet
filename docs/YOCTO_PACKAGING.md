@@ -247,3 +247,21 @@ This validates writable-root emulation and the Pi-machine client package.
 A bootable physical Pi image/flash is SF-029; hardware/live-chain/Walrus/wallet
 OTA acceptance is SF-031. Read-only roots, separate persistent partitions,
 firmware rollback, power-loss safety and physical reboot remain unverified.
+
+## PR feedback follow-up (2026-10-14)
+
+The first-boot CI step explicitly selects Bash so a failing test before `tee`
+fails the step. The QEMU runner explicitly rejects an active unenrolled daemon
+and a nonzero restart count; `--console-timeout` controls console/login/command
+waits (default 300 seconds). Provisioning signal handlers exit through the
+cleanup trap. The OpenSSL install serialization append now matches point
+releases; this does not establish compatibility with a different OpenSSL major.
+
+Remaining review blockers: this layer still advertises only Scarthgap and
+requires its Rust mixin. Wrynose needs a pinned OE-Core/BitBake profile, portable
+unpack paths, a compiler-version gate and actual package/image/boot validation
+before it can be declared supported. First-key creation in the pinned daemon
+still writes the final path directly; atomic no-overwrite publication and parent
+directory synchronization need implementation and failure-path validation. The
+existing corrupt-key refusal is intentional and does not prove power-loss
+safety. Do not treat the earlier emulation evidence as resolving either gap.
