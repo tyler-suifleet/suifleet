@@ -22,7 +22,7 @@ Read [the parity audit](docs/GREENGRASS_PARITY_AUDIT.md), [validation evidence](
 
 Critical known gaps:
 
-- The frontend uses pinned Sui SDK 2.36.0 and dApp Kit React 2.1.40 with gRPC-Web; see [frontend compatibility and wallet acceptance](docs/FRONTEND_CLIENT.md). The daemon uses the supported gRPC v2 API through Mysten's Rust SDK (SF-004): event discovery, reads, local transaction building with a verify-before-sign check, and effects-checked execution; it needs a node serving indexed `ListEvents` (Sui ≥ 1.81 in our tests). The publishing resolver still uses deprecated JSON-RPC (SF-006). Real extension-wallet acceptance remains in SF-010/SF-031 after the SF-003 implementation merge.
+- The frontend uses pinned Sui SDK 2.36.0 and dApp Kit React 2.1.40 with gRPC-Web; see [frontend compatibility and wallet acceptance](docs/FRONTEND_CLIENT.md). The daemon uses the supported gRPC v2 API through Mysten's Rust SDK (SF-004): event discovery, reads, local transaction building with a verify-before-sign check, and effects-checked execution; it needs a node serving indexed `ListEvents` (Sui ≥ 1.81 in our tests). The publishing resolver and `scripts/publish.py` read the chain over gRPC too (SF-006). Real extension-wallet acceptance remains in SF-010/SF-031 after the SF-003 implementation merge.
 - Existing types keep their introduction-package origin; types introduced by later upgrades have later origins. The implemented deployment manifest records each origin, including `RecipeDigestKey`, `DeviceAddressKey` and authoritative receipts. Preserve this boundary during client/API changes.
 - Older Sui package versions remain callable. SF-001 introduced isolated authoritative receipts and local-chain old-package attack/migration tests; public-network upgrade acceptance remains SF-010. Never trust legacy StatusesKey or assume an old package is disabled.
 - Current unit tests and the HTTP simulator do not establish real chain upgrade compatibility, live wallet behavior, Walrus certification, Yocto builds or hardware OTA health.
@@ -36,7 +36,7 @@ Critical known gaps:
 | `dapp/src` | Wallet UI, transaction builders, queries and Walrus uploads |
 | `suifleet-edge/src` | Identity, chain adapter, recipes, updater and durable journal |
 | `suifleet-edge/meta-suifleet` | Yocto recipe and systemd service |
-| `scripts/redeploy.sh` | Development publish/upgrade helper; currently needs hardening |
+| `scripts/redeploy.sh`, `scripts/publish.py` | Verified publish/upgrade; records releases and generates both client configs |
 | `scripts/test_ota.py` | Real daemon against local chain/Walrus simulators |
 | `Dockerfile`, `docker-compose.yml`, `Makefile` | Development environment and build/test entry points |
 | `docs/tracking/backlog.json` | Codex-maintained seed backlog; not evidence of published issues |
@@ -100,7 +100,7 @@ Do not replace tests with type casts, ignored failures or mocked success. A retu
 
 A task to edit code/docs or implement an issue does not itself authorize live publication or hardware programming. Follow the user's actual deployment scope; do not add another approval step if the session already authorizes that deployment. Never place keys, recovery phrases or tokens in source, issues, logs or PRs.
 
-The current `make publish-contracts` runs `scripts/redeploy.sh`, which spends gas and mutates chain state. It only writes frontend `.env.local`; it does not synchronize device configuration. It also has unscoped metadata parsing and error-suppression risks. Do not use it as a production release pipeline until those issues are fixed.
+`make publish-contracts` runs `scripts/redeploy.sh`, which spends gas and mutates chain state (use `--dry-run` first). It verifies chain identity, account and UpgradeCap before the transaction and stops on failed effects. It records the release under `deployments/ENV/` and generates both client configs; see [DEPLOYMENT_MANIFEST.md](docs/DEPLOYMENT_MANIFEST.md). It refuses mainnet and has not been run against testnet; it is not yet a production release pipeline.
 
 A release must verify the target chain/account, run relevant checks, prepare a compatibility/migration plan, publish or upgrade under the proper UpgradeCap, validate execution effects, record all IDs/type origins, migrate required objects, generate both client configurations, rebuild the static frontend, stage the daemon rollout, and run a real end-to-end acceptance test. Full details and current blockers: [OPERATIONS.md](docs/OPERATIONS.md).
 
