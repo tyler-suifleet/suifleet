@@ -151,11 +151,11 @@ def run():
                                f'exec /bin/sh {component.UPDATER} --root {root / "components"} "$1"\n')
             config = root / 'config.toml'
 
-            def configure(policy):
+            def configure(policy, walrus=''):
                 config.write_text(f'[sui]\nmanifest_path="deployment.json"\n[device]\nkeypair_path={json.dumps(str(key))}\n'
                     f'device_object_id="{ota.DEVICE}"\ndevice_cap_id="{ota.CAP}"\n[apply]\ncommand={json.dumps("/bin/sh " + str(wrapper))}\n'
                     f'[runtime]\nstate_dir={json.dumps(str(root / "state"))}\npoll_seconds=1\n'
-                    f'[components]\noffline_candidates="{policy}"\n')
+                    f'[components]\noffline_candidates="{policy}"\n' + (f'[walrus]\n{walrus}\n' if walrus else ''))
 
             def state():
                 p = root / 'state/state.json'; return json.loads(p.read_text()) if p.exists() else {}
@@ -256,6 +256,21 @@ def run():
             assert not any('lib-gfx' in p for p in sim.downloads[downloads:]), sim.downloads[downloads:]
             stop(process)
 
+            # Cached copies obey a tightened artifact size limit and free-space reserve:
+            # with ui 1.0.0 gone from Walrus, only the cache could satisfy it.
+            del sim.blobs[f'artifact-{tag("ui", "1.0.0")}'], sim.blobs[f'recipe-{tag("ui", "1.0.0")}']
+            for id, limit, refusal in [('0x60a', 'max_artifact_bytes=1', 'download limit'),
+                                       ('0x60b', 'min_free_bytes=1000000000000000', 'insufficient disk space')]:
+                configure('cached', limit)
+                process = start()
+                before, downloads = (installs(), registry()), len(sim.downloads)
+                sim.deploy(id, 'ui', '1.0.0')
+                outcome = settle(id)
+                assert outcome['status'] == 2 and refusal in outcome['error'], outcome
+                assert (installs(), registry()) == before
+                assert not any('artifact-' in p for p in sim.downloads[downloads:]), sim.downloads[downloads:]
+                stop(process)
+
             # The never policy does not use those cached candidates.
             configure('never')
             process = start()
@@ -269,7 +284,7 @@ def run():
             log.close()
         print('PASS: actual-daemon dependency-first multi-component install; unavailable platform/soft omission; '
               'installed-dependent conflict and cycle rejected before downloads/installs; installed reuse; '
-              'failed dependency stops dependent; cached offline candidates only under the cached policy')
+              'failed dependency stops dependent; cached offline candidates only under the cached policy and download limits')
     finally:
         if process and process.poll() is None:
             process.kill(); process.wait()

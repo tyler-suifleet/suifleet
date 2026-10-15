@@ -57,6 +57,15 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Copy `source` to `dest`, leaving no partial file when the copy fails.
+fn copy_or_remove(source: &Path, dest: &Path) -> anyhow::Result<()> {
+    if let Err(error) = std::fs::copy(source, dest) {
+        let _ = std::fs::remove_file(dest);
+        return Err(error.into());
+    }
+    Ok(())
+}
+
 impl Store {
     /// The store exists only when the offline policy permits cached candidates.
     pub fn open(state_dir: &Path, config: &ComponentsConfig) -> Option<Self> {
@@ -129,12 +138,15 @@ impl Store {
     }
 
     /// Copy a cached artifact to `dest` if one with this digest verifies.
-    fn artifact(&self, sha256: &str, dest: &Path) -> anyhow::Result<bool> {
+    /// The copy is held to the download size limit and free-space reserve.
+    fn artifact(&self, walrus: &WalrusClient, sha256: &str, dest: &Path) -> anyhow::Result<bool> {
         let source = self.root.join("artifacts").join(sha256);
         if !digest(sha256) || !source.exists() {
             return Ok(false);
         }
-        std::fs::copy(&source, dest)?;
+        let size = std::fs::metadata(&source)?.len();
+        walrus.ensure_room(dest.parent().unwrap_or(Path::new(".")), size)?;
+        copy_or_remove(&source, dest)?;
         if sha256_file(dest)? != sha256 {
             warn!(sha256, "Discarding corrupt cached artifact");
             let _ = std::fs::remove_file(dest);
@@ -149,15 +161,18 @@ impl Store {
         Ok(true)
     }
 
-    fn save_artifact(&self, sha256: &str, path: &Path) -> anyhow::Result<()> {
+    /// Keep a verified artifact, refused when the copy would eat into the
+    /// free-space reserve.
+    fn save_artifact(&self, walrus: &WalrusClient, sha256: &str, path: &Path) -> anyhow::Result<()> {
         anyhow::ensure!(digest(sha256), "invalid artifact digest");
         let target = self.root.join("artifacts").join(sha256);
         if target.exists() {
             return Ok(());
         }
         std::fs::create_dir_all(target.parent().unwrap())?;
+        walrus.ensure_room(target.parent().unwrap(), std::fs::metadata(path)?.len())?;
         let temporary = target.with_extension("tmp");
-        std::fs::copy(path, &temporary)?;
+        copy_or_remove(path, &temporary)?;
         std::fs::File::open(&temporary)?.sync_all()?;
         std::fs::rename(temporary, target)?;
         Ok(())
@@ -219,7 +234,7 @@ pub async fn artifact(
     dest: &Path,
 ) -> anyhow::Result<()> {
     if let Some(store) = store {
-        if store.artifact(sha256, dest)? {
+        if store.artifact(walrus, sha256, dest)? {
             return Ok(());
         }
     }
@@ -231,7 +246,7 @@ pub async fn artifact(
         actual
     );
     if let Some(store) = store {
-        if let Err(error) = store.save_artifact(sha256, dest) {
+        if let Err(error) = store.save_artifact(walrus, sha256, dest) {
             warn!(%error, "Cannot cache artifact");
         }
     }
@@ -414,6 +429,9 @@ mod tests {
         assert!(Store::open(&dir, &ComponentsConfig::default()).is_none(), "never policy keeps no store");
         (dir.clone(), Store::open(&dir, &config).unwrap())
     }
+    fn limits(max_artifact_bytes: u64, min_free_bytes: u64) -> WalrusClient {
+        WalrusClient::new(&crate::config::WalrusConfig { max_artifact_bytes, min_free_bytes, ..Default::default() })
+    }
     fn version(name: &str, version: &str) -> catalog::Version {
         serde_json::from_value(serde_json::json!({
             "catalog_id": "0xCAFE", "publisher": "0x1", "component_name": name, "version": version,
@@ -453,26 +471,54 @@ mod tests {
 
         let work = dir.join("work");
         std::fs::create_dir_all(&work).unwrap();
+        let walrus = limits(1 << 20, 0);
         let mut digests = Vec::new();
         for (i, content) in [b"12345".as_slice(), b"abcde", b"vwxyz"].iter().enumerate() {
             let path = work.join(format!("a{i}"));
             std::fs::write(&path, content).unwrap();
             let sha = sha256_file(&path).unwrap();
-            store.save_artifact(&sha, &path).unwrap();
+            store.save_artifact(&walrus, &sha, &path).unwrap();
             digests.push(sha);
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
         let out = work.join("out");
-        assert!(store.artifact(&digests[0], &out).unwrap());
+        assert!(store.artifact(&walrus, &digests[0], &out).unwrap());
         assert_eq!(std::fs::read(&out).unwrap(), b"12345");
         // 15 bytes > 10: the oldest unprotected entry goes; a kept one stays.
         let keep = BTreeSet::from([digests[1].clone()]);
         assert_eq!(store.evict(&keep).unwrap(), 5);
-        assert!(!store.artifact(&digests[2], &out).unwrap());
-        assert!(store.artifact(&digests[1], &out).unwrap() && store.artifact(&digests[0], &out).unwrap());
+        assert!(!store.artifact(&walrus, &digests[2], &out).unwrap());
+        assert!(store.artifact(&walrus, &digests[1], &out).unwrap() && store.artifact(&walrus, &digests[0], &out).unwrap());
         std::fs::write(store.root.join("artifacts").join(&digests[0]), b"corrupt").unwrap();
-        assert!(!store.artifact(&digests[0], &out).unwrap(), "corrupt cache entries are discarded");
+        assert!(!store.artifact(&walrus, &digests[0], &out).unwrap(), "corrupt cache entries are discarded");
         assert!(!store.root.join("artifacts").join(&digests[0]).exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn cached_artifacts_respect_the_download_limits() {
+        let (dir, store) = store("limits", 1 << 20);
+        let work = dir.join("work");
+        std::fs::create_dir_all(&work).unwrap();
+        let path = work.join("a");
+        std::fs::write(&path, b"12345").unwrap();
+        let sha = sha256_file(&path).unwrap();
+        let cached = store.root.join("artifacts").join(&sha);
+
+        // Populating the cache never eats into the free-space reserve.
+        let error = store.save_artifact(&limits(1 << 20, u64::MAX / 2), &sha, &path).unwrap_err();
+        assert!(error.to_string().contains("insufficient disk space"), "{error}");
+        assert!(!cached.exists() && !cached.with_extension("tmp").exists());
+        store.save_artifact(&limits(1 << 20, 0), &sha, &path).unwrap();
+
+        // A warm cache is refused under a tightened size limit or reserve.
+        let out = work.join("out");
+        let error = store.artifact(&limits(4, 0), &sha, &out).unwrap_err();
+        assert!(error.to_string().contains("download limit"), "{error}");
+        let error = store.artifact(&limits(1 << 20, u64::MAX / 2), &sha, &out).unwrap_err();
+        assert!(error.to_string().contains("insufficient disk space"), "{error}");
+        assert!(!out.exists() && cached.exists(), "a refusal writes nothing and keeps the entry");
+        assert!(store.artifact(&limits(5, 0), &sha, &out).unwrap());
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

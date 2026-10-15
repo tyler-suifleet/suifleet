@@ -275,6 +275,13 @@ impl WalrusClient {
         Ok(())
     }
 
+    /// The same limits for a local copy of `size` bytes into `directory`,
+    /// such as a cached artifact, which never passes through `download`.
+    pub fn ensure_room(&self, directory: &Path, size: u64) -> anyhow::Result<()> {
+        self.check_space(directory, size, 0)
+            .map_err(|(Failure::Permanent(e) | Failure::Transient(e))| e)
+    }
+
     /// Bytes that can be written to `directory` while keeping `min_free_bytes`.
     fn writable(&self, directory: &Path) -> Result<u64, Failure> {
         let available = available_bytes(directory).map_err(|e| Failure::Permanent(e.into()))?;
