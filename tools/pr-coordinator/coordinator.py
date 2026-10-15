@@ -41,6 +41,7 @@ def gate(pr, owner, review):
         return 'implementation ownership is not in published Review'
     if review is None or review['head'] != pr['headRefOid'] or review['feedback'] != feedback(pr):
         return 'independent review is missing or stale'
+    if review.get('publication_pending'): return 'independent review publication is pending'
     result = review['result']
     if review['family'] == owner['agent'] or review['family'] not in FAMILIES:
         return 'reviewer is not the other model family'
@@ -82,8 +83,12 @@ class Store:
         ''')
 
         columns = {row[1] for row in self.db.execute('PRAGMA table_info(jobs)')}
-        for name, declaration in [('retry_after','REAL'),('attempts','INTEGER DEFAULT 0')]:
-            if name not in columns: self.db.execute(f'ALTER TABLE jobs ADD COLUMN {name} {declaration}')
+        for name, declaration in [('retry_after','REAL'),('attempts','INTEGER DEFAULT 0'),('comment_id','TEXT'),('review_id','TEXT'),('publication_done','INTEGER DEFAULT 0'),('publication_attempts','INTEGER DEFAULT 0')]:
+            if name not in columns:
+                self.db.execute(f'ALTER TABLE jobs ADD COLUMN {name} {declaration}')
+                if name == 'publication_done':
+                    # Legacy done rows were already published; never replay them.
+                    self.db.execute("UPDATE jobs SET publication_done=1 WHERE status='done'")
 
     def reserve(self, project, pr, family, kind, directory):
         self.db.execute('BEGIN IMMEDIATE')
@@ -103,7 +108,7 @@ class Store:
 
     def review(self, project, number):
         row = self.db.execute("SELECT * FROM jobs WHERE project=? AND pr=? AND kind='review' AND status='done' ORDER BY id DESC LIMIT 1", (project, number)).fetchone()
-        return {**dict(row), 'result': json.loads(row['result'])} if row else None
+        return {**dict(row), 'publication_pending':not row['publication_done'], 'result': json.loads(row['result'])} if row else None
 
 
 def normalize_result(result):
@@ -287,26 +292,48 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                 if receipt['returncode'] != 0: raise RuntimeError(f"worker exited {receipt['returncode']}")
                 result = normalize_result(json.loads(path.read_text()))
                 self.store.db.execute("UPDATE jobs SET status='done',result=? WHERE id=?", (json.dumps(result), row['id']))
-                pr = self.pr(project, row['pr'])
-                if row['kind'] == 'review' and pr['headRefOid'] == row['head'] and feedback(pr) == row['feedback']:
-                    body = f"{MARKER}\n{row['family']}/{result['model']} independent review of `{row['head']}`: **{result['verdict']}**.\n\n{result['evidence']}"
-                    posted = json.loads(self.gh(project,['api',f"repos/{project['repository']}/issues/{row['pr']}/comments",'--method','POST','-f',f'body={body}']))
-                    self.store.db.execute('INSERT OR REPLACE INTO publications VALUES(?,?,?,?)',(project['id'],row['pr'],posted['node_id'],publication_hash({'body':posted['body']})))
-                    if project.get('review_github_account'):
-                        review_project = {**project, 'github_account':project['review_github_account']}
-                        event = 'APPROVE' if result['verdict'] == 'approve' and result['acceptance_complete'] else 'REQUEST_CHANGES'
-                        posted=json.loads(self.gh(review_project, ['api',f"repos/{project['repository']}/pulls/{row['pr']}/reviews",'--method','POST','-f',f"commit_id={row['head']}",'-f',f'event={event}','-f',f'body={body}']))
-                        self.store.db.execute('INSERT OR REPLACE INTO publications VALUES(?,?,?,?)',(project['id'],row['pr'],posted['node_id'],publication_hash({'body':posted['body'],'state':posted['state'],'commit':{'oid':posted['commit_id']}})))
-                if row['kind'] == 'review': self.cleanup(project,Path(row['directory'])/'checkout')
             except Exception as error:
                 # A disappeared process with no trustworthy receipt is not automatically restarted.
                 receipt_path = Path(row['directory'])/'exit.json'
                 # An actual stopped read-only CLI with a durable exit receipt can retry usage/auth errors.
-                retry = row['kind'] == 'review' and receipt_path.exists() and not process_identity(row['pid'])
+                retry = row['kind'] == 'review' and receipt_path.exists() and process_identity(row['pid']) != row['started']
                 status = 'retry' if retry else 'orphaned'
                 delay = min(3600,300*(2**min(row['attempts'],4)))
                 self.store.db.execute("UPDATE jobs SET status=?,error=?,retry_after=? WHERE id=?", (status,str(error),time.time()+delay,row['id']))
                 print(f"{project['id']} PR#{row['pr']}: worker needs recovery: {error}", flush=True)
+
+        # Publication failures must never discard a validated worker result.
+        self.publish_results(project)
+
+    def publish_results(self, project):
+        rows = self.store.db.execute("SELECT * FROM jobs WHERE project=? AND status='done' AND publication_done=0 AND (retry_after IS NULL OR retry_after<=?)", (project['id'],time.time())).fetchall()
+        for row in rows:
+            try:
+                result = json.loads(row['result'])
+                pr = self.pr(project, row['pr'])
+                if row['kind'] == 'review' and pr['headRefOid'] == row['head'] and feedback(pr) == row['feedback']:
+                    body = f"{MARKER}\n{row['family']}/{result['model']} independent review of `{row['head']}`: **{result['verdict']}**.\n\n{result['evidence']}"
+                    if not row['comment_id']:
+                        posted = json.loads(self.gh(project,['api',f"repos/{project['repository']}/issues/{row['pr']}/comments",'--method','POST','-f',f'body={body}']))
+                        self.record_publication(project,row,posted,'comment_id',{'body':posted['body']})
+                    if project.get('review_github_account') and not row['review_id']:
+                        review_project = {**project, 'github_account':project['review_github_account']}
+                        event = 'APPROVE' if result['verdict'] == 'approve' and result['acceptance_complete'] else 'REQUEST_CHANGES'
+                        posted=json.loads(self.gh(review_project, ['api',f"repos/{project['repository']}/pulls/{row['pr']}/reviews",'--method','POST','-f',f"commit_id={row['head']}",'-f',f'event={event}','-f',f'body={body}']))
+                        self.record_publication(project,row,posted,'review_id',{'body':posted['body'],'state':posted['state'],'commit':{'oid':posted['commit_id']}})
+                self.store.db.execute("UPDATE jobs SET publication_done=1,error=NULL,retry_after=NULL WHERE id=?",(row['id'],))
+                if row['kind'] == 'review': self.cleanup(project,Path(row['directory'])/'checkout')
+            except Exception as error:
+                delay=min(3600,300*(2**min(row['publication_attempts'],4)))
+                self.store.db.execute("UPDATE jobs SET error=?,retry_after=?,publication_attempts=publication_attempts+1 WHERE id=?",(str(error),time.time()+delay,row['id']))
+                print(f"{project['id']} PR#{row['pr']}: publication pending: {error}",flush=True)
+
+    def record_publication(self,project,row,posted,column,item):
+        # Save the feedback exclusion receipt and delivery progress atomically.
+        with self.store.db:
+            self.store.db.execute('BEGIN IMMEDIATE')
+            self.store.db.execute('INSERT OR REPLACE INTO publications VALUES(?,?,?,?)',(project['id'],row['pr'],posted['node_id'],publication_hash(item)))
+            self.store.db.execute(f'UPDATE jobs SET {column}=? WHERE id=?',(posted['node_id'],row['id']))
 
     def tick(self, execute=False):
         for project in self.config['projects']:
@@ -446,10 +473,14 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
 
     def discover_merged(self,project,owners):
         pages=json.loads(self.gh(project,['api',f"repos/{project['repository']}/pulls?state=closed&per_page=100",'--paginate','--slurp']))
+        open_pages=json.loads(self.gh(project,['api',f"repos/{project['repository']}/pulls?state=open&per_page=100",'--paginate','--slurp']))
+        open_branches={pr['head']['ref'] for page in open_pages for pr in page}
         for source in (pr for page in pages for pr in page):
             if not source.get('merged_at') or (source['head'].get('repo') or {}).get('full_name') != project['repository'] or source['base']['ref'] != project.get('integration_branch','main'): continue
             owner=next((o for o in owners if o.get('branch') == source['head']['ref']),None)
-            if not owner or owner['status'] not in ('review','done'): continue
+            if not owner or owner['status'] not in ('review','done') or source['head']['ref'] in open_branches: continue
+            tip=run(['git','ls-remote','origin',f"refs/heads/{source['head']['ref']}"],cwd=project['root']).split()
+            if tip and tip[0] != source['head']['sha']: continue
             pr=dict(number=source['number'],headRefOid=source['head']['sha'],headRefName=source['head']['ref'],baseRefName=source['base']['ref'],state='MERGED',mergeCommit={'oid':source['merge_commit_sha']})
             row=self.store.db.execute('SELECT * FROM integrations WHERE project=? AND pr=?',(project['id'],pr['number'])).fetchone()
             if row and row['reconciled']: continue

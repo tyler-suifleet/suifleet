@@ -69,7 +69,7 @@ class Reservations(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             store=c.Store(Path(d)/'state.sqlite3');pr=fixture()[0];job=store.reserve('one',pr,'Claude','review',Path(d))
             self.assertIsNone(store.reserve('one',pr,'Codex','fix',Path(d)))
-            store.db.execute("UPDATE jobs SET status='done',result=? WHERE id=?",(json.dumps(fixture()[2]['result']),job))
+            store.db.execute("UPDATE jobs SET status='done',publication_done=1,result=? WHERE id=?",(json.dumps(fixture()[2]['result']),job))
             self.assertIsNone(store.reserve('one',pr,'Claude','review',Path(d)))
             pr['headRefOid']='new';self.assertIsNotNone(store.reserve('one',pr,'Claude','review',Path(d)))
 
@@ -141,7 +141,7 @@ class FullCycleTests(unittest.TestCase):
         project={'id':'test','root':d,'repository':'owner/repo'}
         coordinator=c.Coordinator({'workers':{'Codex':['true'],'Claude':['true']},'projects':[project]},Path(d))
         job=coordinator.store.reserve('test',pr,'Claude','review',Path(d)/'review')
-        coordinator.store.db.execute("UPDATE jobs SET status='done',result=? WHERE id=?",(json.dumps(review['result']),job))
+        coordinator.store.db.execute("UPDATE jobs SET status='done',publication_done=1,result=? WHERE id=?",(json.dumps(review['result']),job))
         state={'pushed':False,'lag':lag,'complete':False,'commands':[],'tickets':[]}
         commit='c'*40;identity='Tyler Bush <tyler.jonathan.bush@gmail.com>'
         def current():
@@ -295,7 +295,7 @@ class IssueClosureTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             coordinator,project,owner,pr=self.setup_case(d)
             source=dict(number=47,merged_at='now',base={'ref':'main'},head={'ref':'work/test','sha':pr['headRefOid'],'repo':{'full_name':'owner/repo'}},merge_commit_sha=pr['mergeCommit']['oid'])
-            with patch.object(coordinator,'gh',return_value=json.dumps([[source,{**source,'number':48,'merged_at':None}]])):
+            with patch.object(coordinator,'gh',side_effect=[json.dumps([[source,{**source,'number':48,'merged_at':None}]]), '[[]]']),patch.object(c,'run',return_value=pr['headRefOid']+' refs/heads/work/test'):
                 coordinator.discover_merged(project,[owner])
             self.assertEqual(coordinator.store.db.execute('SELECT COUNT(*) FROM integrations').fetchone()[0],1)
             with patch.object(c,'run',return_value=''),patch.object(coordinator,'ticket') as ticket,patch.object(coordinator,'close_merged_issue') as close:
@@ -335,6 +335,83 @@ class ReviewOwnershipTests(unittest.TestCase):
             owner={'key':'T1','token':'claim','status':'review','spec':{'depends_on':['T0']}}
             with patch.object(coordinator,'ticket',side_effect=[json.dumps(owner),json.dumps({'status':'review'})]):
                 with self.assertRaisesRegex(RuntimeError,'dependency'):coordinator.assert_review_owner({},owner)
+
+
+class PublicationTests(unittest.TestCase):
+    def test_formal_review_failure_preserves_result_and_never_reposts_comment(self):
+        for failures in (1,3):
+            with self.subTest(failures=failures),tempfile.TemporaryDirectory() as d:
+                directory=Path(d);pr,_,review=fixture()
+                coordinator=c.Coordinator({'workers':{'Codex':['true'],'Claude':['true']},'projects':[]},directory)
+                project={'id':'test','repository':'owner/repo','review_github_account':'reviewer'}
+                job=coordinator.store.reserve('test',pr,'Claude','review',directory)
+                coordinator.store.db.execute("UPDATE jobs SET status='running',pid=999999,started='old' WHERE id=?",(job,))
+                (directory/'exit.json').write_text('{"returncode":0}')
+                (directory/'result.json').write_text(json.dumps(review['result']))
+                comments=[];reviews=[]
+                def gh(project,args):
+                    body=next(a[5:] for a in args if a.startswith('body='))
+                    if '/comments' in args[1]:
+                        comments.append(body);return json.dumps({'node_id':'comment','body':body})
+                    reviews.append(body)
+                    if len(reviews)<=failures:raise RuntimeError('formal review unavailable')
+                    return json.dumps({'node_id':'review','body':body,'state':'APPROVED','commit_id':pr['headRefOid']})
+                with patch.object(coordinator,'pr',return_value=pr),patch.object(coordinator,'gh',side_effect=gh),patch.object(c,'process_identity',return_value=None):
+                    coordinator.collect(project,[])
+                    for attempt in range(failures):
+                        row=coordinator.store.db.execute('SELECT * FROM jobs').fetchone()
+                        self.assertEqual(row['status'],'done')
+                        self.assertEqual(coordinator.store.review('test',pr['number'])['result'],review['result'])
+                        # Restart between publication attempts; no worker rerun.
+                        coordinator=c.Coordinator(coordinator.config,directory)
+                        with patch.object(coordinator,'pr',return_value=pr),patch.object(coordinator,'gh',side_effect=gh),patch.object(c.time,'time',return_value=row['retry_after']+1):
+                            coordinator.collect(project,[])
+                    self.assertEqual(len(comments),1)
+                    self.assertEqual(len(reviews),failures+1)
+                    self.assertEqual(coordinator.store.db.execute('SELECT publication_done FROM jobs').fetchone()[0],1)
+
+    def test_schema_upgrade_does_not_republish_legacy_done_jobs(self):
+        with tempfile.TemporaryDirectory() as d:
+            path=Path(d)/'reviews.sqlite3'
+            db=c.sqlite3.connect(path)
+            db.execute('CREATE TABLE jobs (id INTEGER PRIMARY KEY, project TEXT, pr INTEGER, family TEXT, kind TEXT, head TEXT, feedback TEXT, status TEXT, directory TEXT, pid INTEGER, started TEXT, result TEXT, error TEXT, created REAL)')
+            db.execute("INSERT INTO jobs(id,status) VALUES(1,'done')")
+            db.commit();db.close()
+            store=c.Store(path)
+            self.assertEqual(store.db.execute('SELECT publication_done FROM jobs').fetchone()[0],1)
+            store.db.close()
+            self.assertEqual(c.Store(path).db.execute('SELECT publication_done FROM jobs').fetchone()[0],1)
+
+    def test_refetch_failure_keeps_done_result_and_blocks_gate_until_published(self):
+        with tempfile.TemporaryDirectory() as d:
+            directory=Path(d);pr,owner,review=fixture()
+            coordinator=c.Coordinator({'workers':{'Codex':['true'],'Claude':['true']},'projects':[]},directory)
+            job=coordinator.store.reserve('test',pr,'Claude','review',directory)
+            coordinator.store.db.execute("UPDATE jobs SET status='done',result=? WHERE id=?",(json.dumps(review['result']),job))
+            with patch.object(coordinator,'pr',side_effect=RuntimeError('refetch unavailable')):
+                coordinator.collect({'id':'test'},[])
+            collected=coordinator.store.review('test',pr['number'])
+            self.assertEqual(collected['result'],review['result'])
+            self.assertIn('publication',c.gate(pr,owner,collected))
+            self.assertEqual(coordinator.store.db.execute('SELECT status FROM jobs').fetchone()[0],'done')
+
+    def test_reused_pid_does_not_orphan_retryable_review(self):
+        with tempfile.TemporaryDirectory() as d:
+            directory=Path(d);coordinator=c.Coordinator({'workers':{'Codex':['true'],'Claude':['true']},'projects':[]},directory)
+            job=coordinator.store.reserve('test',fixture()[0],'Claude','review',directory)
+            coordinator.store.db.execute("UPDATE jobs SET status='running',pid=123,started='old' WHERE id=?",(job,))
+            (directory/'exit.json').write_text('{"returncode":1}')
+            with patch.object(c,'process_identity',return_value='reused'):coordinator.collect({'id':'test'},[])
+            self.assertEqual(coordinator.store.db.execute('SELECT status FROM jobs').fetchone()[0],'retry')
+
+    def test_external_old_merge_does_not_complete_reused_branch(self):
+        with tempfile.TemporaryDirectory() as d:
+            coordinator,project,owner,pr=IssueClosureTests().setup_case(d)
+            source=dict(number=47,merged_at='now',base={'ref':'main'},head={'ref':'work/test','sha':pr['headRefOid'],'repo':{'full_name':'owner/repo'}},merge_commit_sha=pr['mergeCommit']['oid'])
+            for open_prs,tip in (([[source]],pr['headRefOid']),([[]],'new-tip')):
+                with patch.object(coordinator,'gh',side_effect=[json.dumps([[source]]),json.dumps(open_prs)]),patch.object(c,'run',return_value=tip+' refs/heads/work/test'):
+                    coordinator.discover_merged(project,[owner])
+                self.assertEqual(coordinator.store.db.execute('SELECT COUNT(*) FROM integrations').fetchone()[0],0)
 
 
 if __name__=='__main__':unittest.main()
