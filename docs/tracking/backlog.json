@@ -1209,6 +1209,33 @@
       ],
       "validation": "Locked frontend checks/build, relevant regression tests and genuine final vulnerability scan.",
       "description": "The first genuine SF-048 filesystem audit reports 19 HIGH/CRITICAL frontend dependency findings (2 CRITICAL,17 HIGH) in the locked dependency tree, including Next14.2.35, browserslist4.28.2, nanoid3.3.12, PostCSS8.4.31/8.5.13, source-map-js1.2.1 and braces3.0.3. These package advisories do not by themselves prove exploitability of the static deployed dApp, but the new no-suppression CI gate correctly blocks them.\n\nAcceptance:\n- Reproduce with the checksum-verified Trivy0.76.0 scanner and document exact findings, runtime/build applicability and fixed versions from primary advisories.\n- Upgrade the supported Next/React combination and affected transitive dependencies deliberately, preserving wallet/Sui SDK pins unless a verified security fix requires changing them. Keep manifest/lockfile changes coupled.\n- Resolve every HIGH/CRITICAL finding without broad ignore files, turning off scanners, skipping tests or suppressing failed audits. For unpatched advisories, implement and test a targeted mitigation/patch or report a precise real blocker; do not silently accept risk.\n- Run locked frontend install, query/transaction/schema tests, typecheck and production build; test affected runtime behavior and real-wallet acceptance limits honestly.\n- Re-run the genuine dependency/secret/configuration scan against the final branch; preserve both Rust lockfile and Dockerfile coverage. Record exact scan results and current-head CI.\n\nThis is the prerequisite remediation for SF-048/#78 security-gate adoption; use a standalone branch from current main so it can merge before the audit workflow. Do not include the security workflow implementation in this PR. Scope is dependency fixes, not production deployment or hardware programming.\n"
+    },
+    {
+      "key": "SF-050",
+      "title": "Audit Move contracts and add security analysis gates",
+      "priority": "P1",
+      "area": "security",
+      "phase": "baseline",
+      "kind": "type:infrastructure",
+      "depends_on": [],
+      "paths": [
+        "contracts",
+        "scripts",
+        ".github",
+        "docs"
+      ],
+      "evidence": "Current securityCI lacks Move contract analysis; user explicitly clarified scope.",
+      "acceptance": [
+        "- Audit current contracts and security boundaries: authoritative receipts/old-package isolation, device/enrollment capabilities, scoped role revocation, group/deployment authority, artifact/recipe binding and upgrade compatibility. Record concrete findings by file/function and severity, plus coverage limits.",
+        "- Add pinned Sui Move compiler/linter checks as meaningful normal CI gates, with negative fixtures showing the checks actually reject violations. Do not present compiler success as a complete security audit.",
+        "- Evaluate a maintained Sui-specific formal/static analysis tool (Asymptotic Sui Prover is a candidate) against the project pinned Sui1.81.1/Move2024 framework. Pin tooling and dependencies; do not assume Aptos Move Prover or editor language servers establish Sui security.",
+        "- Implement explicit non-vacuous specifications/checks for critical security invariants where supported, demonstrate genuine passing verification and deliberately failing negative cases. Preserve public layouts, type origins and release compatibility.",
+        "- If essential language/native/dynamic-field modeling is unsupported, record exact reproducible compatibility limits and retain the unmet proof scope as a real blocker; do not claim unsupported properties verified or silently waive formal acceptance.",
+        "- Keep authority/upgrade adversarial regression tests and genuine effects evidence where applicable. No production/mainnet/hardware programming; no keys in source/logs; shared build/network resources only while used.",
+        "- Wire applicable checks into CI for contract changes, document exact coverage and commands, and hand off through independent review with truthful tool/test evidence."
+      ],
+      "validation": "Pinned Move/static/formal checks, genuine positive/negative verification, authority/upgrade regressions and exact CI evidence.",
+      "description": "The user explicitly requested security auditing of the dApp including Sui Move smart contracts. SF-048 web/dependency/secret/CodeQL scans do not analyze Move authorization or business logic.\n\nAcceptance:\n- Audit current contracts and security boundaries: authoritative receipts/old-package isolation, device/enrollment capabilities, scoped role revocation, group/deployment authority, artifact/recipe binding and upgrade compatibility. Record concrete findings by file/function and severity, plus coverage limits.\n- Add pinned Sui Move compiler/linter checks as meaningful normal CI gates, with negative fixtures showing the checks actually reject violations. Do not present compiler success as a complete security audit.\n- Evaluate a maintained Sui-specific formal/static analysis tool (Asymptotic Sui Prover is a candidate) against the project pinned Sui1.81.1/Move2024 framework. Pin tooling and dependencies; do not assume Aptos Move Prover or editor language servers establish Sui security.\n- Implement explicit non-vacuous specifications/checks for critical security invariants where supported, demonstrate genuine passing verification and deliberately failing negative cases. Preserve public layouts, type origins and release compatibility.\n- If essential language/native/dynamic-field modeling is unsupported, record exact reproducible compatibility limits and retain the unmet proof scope as a real blocker; do not claim unsupported properties verified or silently waive formal acceptance.\n- Keep authority/upgrade adversarial regression tests and genuine effects evidence where applicable. No production/mainnet/hardware programming; no keys in source/logs; shared build/network resources only while used.\n- Wire applicable checks into CI for contract changes, document exact coverage and commands, and hand off through independent review with truthful tool/test evidence.\n\nThis fills the Move-specific gap in SF-048/#78. Other Codex workers own the web security audit and frontend remediation; do not edit their worktrees or recreate their tasks.\n"
     }
   ]
 }
