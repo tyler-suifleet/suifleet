@@ -10,12 +10,14 @@ import subprocess
 import time
 import uuid
 
-from coordinator import process_identity, run
+from coordinator import network_authorization, process_identity, run
 
 
 class Dispatcher:
     def __init__(self, config, state):
         self.config, self.state = config, Path(state)
+        for project in config['projects']:
+            network_authorization(project)
         self.state.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.db = sqlite3.connect(self.state/'dispatch.sqlite3', isolation_level=None)
         self.children = {}
@@ -173,7 +175,7 @@ Only when that scope names your ticket, defer its listed external integration ch
 Use small scoped itemized commits with Tyler Bush <tyler.jonathan.bush@gmail.com> as BOTH author and committer; verify metadata.
 No model authorship/coauthor/signoff attribution. Push your branch and create a PR with Closes followed by this ticket's existing issue URL.
 Authorized: local builds, simulators and disposable network-none local Sui chains; publication on those disposable chains is test setup.
-Not authorized: public-chain transactions, production deployment, physical hardware programming or release-signing credentials.
+{network_authorization(project)}
 Lock shared build/port/hardware resources only during actual use, renew while used and release before Review. Do not touch others' work.
 Do not create any new issues, start model workers, merge PRs or relax test/review gates. Report newly discovered work in this issue.
 If genuine external acceptance is unavailable, record it honestly and retain/block your claim; do not claim the next ticket yourself.

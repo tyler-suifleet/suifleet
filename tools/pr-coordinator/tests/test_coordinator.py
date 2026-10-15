@@ -19,6 +19,17 @@ def fixture():
 
 
 class Gates(unittest.TestCase):
+    def test_public_testnet_requires_explicit_validated_project_grant(self):
+        self.assertIn('not authorized',c.network_authorization({}))
+        grant=dict(network='testnet',chain_identifier='4c78adac',wallet='/dedicated/client.yaml',lock_resource='network:suifleet-testnet')
+        message=c.network_authorization({'testnet_authorization':grant})
+        self.assertIn('automatic public Sui testnet testing only',message)
+        self.assertIn('network:suifleet-testnet',message)
+        self.assertIn('Mainnet',message)
+        for field,value in [('network','mainnet'),('chain_identifier','35834a8a'),('lock_resource','')]:
+            with self.subTest(field=field),self.assertRaises(ValueError):
+                c.network_authorization({'testnet_authorization':{**grant,field:value}})
+
     def test_long_feedback_build_does_not_occupy_readonly_review_slot(self):
         with tempfile.TemporaryDirectory() as directory:
             store=c.Store(Path(directory)/'jobs.sqlite3')
