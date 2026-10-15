@@ -17,9 +17,11 @@ def execute(root, state, base, keydata, run=subprocess.run):
         os.fchmod(handle, 0o600)
         os.write(handle, keydata)
         keydata = None
+        keystore = Path(root) / 'sui.keystore'
+        keystore.symlink_to(f'/proc/{os.getpid()}/fd/{handle}')
         wallet = Path(root) / 'client.yaml'
         wallet.write_text(f'''keystore:
-  File: /proc/{os.getpid()}/fd/{handle}
+  File: {keystore}
 envs:
 - alias: testnet
   rpc: https://fullnode.testnet.sui.io:443
