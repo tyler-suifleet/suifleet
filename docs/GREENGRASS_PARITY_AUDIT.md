@@ -50,7 +50,7 @@ AWS provides device/group targets, component dependency resolution, deployment r
 | Deployment statuses | Partial: pending/applied/failed | Queued/downloading/installing/rebooting/healthy/rolled-back/cancelled; reasons and timestamps | P1 |
 | Desired fleet state and revisions | Implemented for groups, locally tested (SF-013): revisioned component → deployment map per group; supersession; cross-group conflicts left as installed | Device-level desired state (after SF-008 custody); public-network/hardware acceptance | P1 |
 | Newly joined devices receive desired state | Implemented, locally tested (SF-013): membership from DeviceAddedToGroup events, verified against the group object each poll | Event retention for long-lived fleets; public-network acceptance | P1 |
-| Multi-component atomic deployments | Partial (SF-013): one revision commits several components atomically on chain; devices run an ordered, journaled plan that stops at the first failed step | Dependency ordering (SF-012), device-side rollback and lifecycle supervision (SF-014) | P1 |
+| Multi-component atomic deployments | Partial (SF-013): one revision commits several components atomically on chain; devices run an ordered, journaled plan that stops at the first failed step; each step installs its dependencies first (SF-012) | Ordering across desired components by dependency (steps run in name order), device-side rollback and lifecycle supervision (SF-014) | P1 |
 | Staged/canary rollout | Missing | Cohorts, concurrency/rate limits, bake period and release gates | P1 |
 | Failure-threshold abort | Missing | Fleet aggregation, minimum sample size and threshold evaluation | P1 |
 | Pause/resume/cancel | Missing | Durable state transitions; deletion is not cancellation | P1 |
@@ -71,7 +71,7 @@ AWS components define recipes, lifecycle, dependencies and platform selection. S
 | Recipe format | Partial: proprietary v1 JSON | Defined compatibility policy; AWS JSON/YAML adapter if format compatibility is desired | P1 |
 | Install lifecycle | Partial: one-shot opt-in shell script or apply hook | Per-version work directories, validation and install receipts | P1 |
 | Run/startup/shutdown/bootstrap/recover | Missing; unsupported fields rejected | Process supervisor, readiness, restart policy, reboot stages | P1 |
-| Dependency resolution | Missing | Semver constraints, DAG ordering, hard/soft dependencies and cycle/conflict rejection | P1 |
+| Dependency resolution | Partial: recipe 1.1 SemVer requirements, hard/soft dependencies, deterministic dependency-first installs, and cycle/conflict rejection before changes ([SF-012](COMPONENT_DEPENDENCIES.md)) | Dependency lifecycle state coupling, rollback, and public-network/hardware acceptance | P1 |
 | Platform manifests | Missing | OS/arch/platform selectors and multiple artifacts | P1 |
 | Configuration merge/reset/validation | Missing; nonempty config rejected | Persisted defaults, JSON-pointer reset, merge policy, validation and notification | P1 |
 | Runtime isolation | Missing: updater runs as service user | Per-component users, environment, resource limits and IPC ACLs | P0 |

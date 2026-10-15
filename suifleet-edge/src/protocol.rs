@@ -8,6 +8,7 @@ pub const DEPLOYMENT_SCHEMA_VERSION: u64 = 1;
 pub const SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS: &[u64] = &[1, 2];
 pub const CATALOG_TYPES: &[&str] = &["component_catalog::ComponentCatalog", "component_catalog::ComponentVersion", "component_catalog::CatalogCreated", "component_catalog::VersionPublished", "component_catalog::CatalogBindingKey", "component_catalog::CatalogBinding"];
 pub const RECIPE_VERSION: &str = "1.0";
+pub const RECIPE_VERSIONS: &[&str] = &["1.0", "1.1"];
 pub const STATUS_APPLIED: u8 = 1;
 pub const STATUS_FAILED: u8 = 2;
 pub const REQUIRED_TYPES: &[&str] = &["device_registry::DeviceRegistry", "device_registry::Device", "device_group::DeviceGroup", "device_group::GroupCreated", "device_cap::DeviceCap", "device_cap::DeviceAddressKey", "deployment_manager::DeploymentRecord", "deployment_manager::DeploymentCreated", "deployment_manager::DeviceStatusUpdated", "deployment_manager::TargetGroupsKey", "deployment_manager::TargetDevicesKey", "deployment_manager::StatusesKey", "deployment_manager::RecipeDigestKey", "deployment_manager::ReceiptsKey", "deployment_manager::Receipts", "deployment_manager::DeviceStatusReported", "device_registry::IdentityKey", "device_registry::Identity", "device_registry::DeviceIdentityChanged", "device_registry::CustodyKey", "device_registry::DeviceOwnerCap", "device_group::DeviceAddedToGroup", "deployment_manager::ManagedKey", "desired_state::DesiredKey", "desired_state::DesiredState", "desired_state::DesiredStateChanged"];
@@ -428,6 +429,9 @@ pub struct Recipe {
     pub lifecycle: Lifecycle,
     #[serde(rename = "configuration")]
     pub configuration: serde_json::Map<String, serde_json::Value>,
+    #[serde(rename = "componentDependencies")]
+    #[serde(default)]
+    pub component_dependencies: Option<std::collections::BTreeMap<String, ComponentDependency>>,
 }
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -441,4 +445,13 @@ pub struct Lifecycle {
     #[serde(rename = "shutdown")]
     #[serde(default)]
     pub shutdown: Option<String>,
+}
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ComponentDependency {
+    #[serde(rename = "versionRequirement")]
+    pub version_requirement: String,
+    #[serde(rename = "dependencyType")]
+    #[serde(default)]
+    pub dependency_type: Option<String>,
 }

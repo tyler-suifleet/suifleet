@@ -15,6 +15,9 @@ pub struct State {
     #[serde(default)]
     pub initialized: bool,
     pub deployments: BTreeMap<String, Outcome>,
+    /// Components on this device by name, maintained by every deployment.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub components: BTreeMap<String, Component>,
     /// Resume point of the DeviceAddedToGroup scan, which starts at genesis
     /// whatever the deployment baseline (membership predates enrollment).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -25,7 +28,7 @@ pub struct State {
     pub groups: BTreeSet<String>,
     /// Component name → deployment desired-state reconciliation last acted on.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub components: BTreeMap<String, String>,
+    pub managed: BTreeMap<String, String>,
     /// Component name → deployment this daemon last started for it, one-shot
     /// or desired, saved with that deployment's intent. Its outcome in
     /// `deployments` says whether it is what the component now runs.
@@ -45,6 +48,23 @@ pub struct Step {
     /// Fingerprint of the desired state it was started for: that state stays
     /// stopped by it, newer ones only while it is in flight.
     pub desired: String,
+}
+/// An installed component. It is recorded unconfirmed before its install
+/// starts and confirmed only once the install is known to have succeeded;
+/// an unconfirmed entry is never reused to satisfy a dependency.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct Component {
+    pub version: String,
+    pub deployment_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version_id: Option<String>,
+    pub recipe_sha256: String,
+    pub artifact_sha256: String,
+    #[serde(default)]
+    pub dependencies: crate::deps::Dependencies,
+    pub confirmed: bool,
 }
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Outcome {
@@ -112,6 +132,14 @@ impl Journal {
             );
         }
         self.save()
+    }
+    /// Confirm the root component a deployment installed once it is Applied.
+    pub fn confirm_components(&mut self, deployment_id: &str) {
+        for component in self.state.components.values_mut() {
+            if component.deployment_id == deployment_id {
+                component.confirmed = true;
+            }
+        }
     }
     pub fn save(&self) -> anyhow::Result<()> {
         let temporary = self.path.with_extension("json.tmp");

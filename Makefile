@@ -57,6 +57,7 @@ test-ota:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
 	$(RUN) python3 scripts/test_ota.py
 	$(RUN) python3 scripts/test_catalog_ota.py
+	$(RUN) python3 scripts/test_dependency_ota.py
 	$(RUN) python3 scripts/test_ota.py --firmware-helper
 	$(RUN) python3 scripts/test_firmware_restart.py
 	$(RUN) python3 scripts/test_desired_state.py

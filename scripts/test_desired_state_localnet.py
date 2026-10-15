@@ -310,7 +310,7 @@ def run(rpc_url, faucet_url):
 
                 # 4. Leaving the group: retired, never re-applied.
                 transaction("--move-call", f"{old}::device_group::remove_device", f"@{later}", f"@{device}")
-                wait_for(lambda: LOGGER not in journal().get("components", {}), "removed member kept following", process)
+                wait_for(lambda: LOGGER not in journal().get("managed", {}), "removed member kept following", process)
                 [logger2] = revise(later, (LOGGER, "2.0.0"))
                 settle()
                 assert not outcome(logger2) and history(LOGGER) == ["1.0.0"]
@@ -359,7 +359,7 @@ def run(rpc_url, faucet_url):
                 stop(process)
                 process = None
                 assert history(FIRMWARE) == ["1.1.0", "1.2.0"], history(FIRMWARE)
-                assert journal()["components"] == {FIRMWARE: fw3, AGENT: agent}, journal()["components"]
+                assert journal()["managed"] == {FIRMWARE: fw3, AGENT: agent}, journal()["managed"]
                 print("PASS: unmanaged one-shot deployment applied alongside desired state")
             except BaseException:
                 log.flush()

@@ -10,7 +10,7 @@ scripts/test_daemon_localnet.py.
 from deployment_manifest import REQUIRED_TYPES, object_id
 from pathlib import Path
 import json
-_PROTOCOL_RECIPE_VERSION = json.loads((Path(__file__).resolve().parents[1] / "interfaces/recipe.schema.json").read_text())["properties"]["schemaVersion"]["const"]
+_PROTOCOL_RECIPE_VERSION = json.loads((Path(__file__).resolve().parents[1] / "interfaces/recipe.schema.json").read_text())["properties"]["schemaVersion"]["enum"][0]
 import argparse
 import base64
 import hashlib

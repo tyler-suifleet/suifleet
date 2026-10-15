@@ -142,7 +142,7 @@ def run(binary):
             wait_for(lambda: outcomes().get("0x202") == 1, "latest desired firmware was not applied", process)
             settle()
             assert "0x201" not in outcomes() and runs() == 1, ("superseded revision applied", outcomes())
-            assert state()["components"] == {"firmware": "0x202"}
+            assert state()["managed"] == {"firmware": "0x202"}
             wait_for(lambda: ("0x202", 1) in sim.reports, "desired deployment not reported through its group", process)
             print("PASS: offline device applies only the latest revision (superseded firmware skipped) and reports it")
 
@@ -156,14 +156,14 @@ def run(binary):
 
             # 3. Leaving the group retires its component; nothing is applied.
             sim.groups[G3]["device_ids"].remove(DEVICE)
-            wait_for(lambda: "logger" not in state().get("components", {}), "removed member kept following the group", process)
+            wait_for(lambda: "logger" not in state().get("managed", {}), "removed member kept following the group", process)
             assert runs() == 2
             print("PASS: device removed from a group stops following it (component retired, not re-applied)")
 
             # 4. Two groups disagree on a component: neither is applied.
             deploy("0x204", "firmware", [G2]); desire(G2, 1, {"firmware": "0x204"})
             settle()
-            assert "0x204" not in outcomes() and state()["components"]["firmware"] == "0x202"
+            assert "0x204" not in outcomes() and state()["managed"]["firmware"] == "0x202"
             desire(G2, 2, {"firmware": "0x202"})  # Agreement again: already applied.
             settle()
             assert runs() == 2
@@ -231,7 +231,7 @@ def run(binary):
             deploy("0x20d", "zeta", [GROUP])
             desire(GROUP, 7, {"alpha": "0x207", "firmware": "0x202", "zeta": "0x20d"})
             wait_for(lambda: outcomes().get("0x20d") == 1, "next desired version did not converge", process)
-            assert state()["current"]["zeta"] == "0x20d" and state()["components"]["zeta"] == "0x20d"
+            assert state()["current"]["zeta"] == "0x20d" and state()["managed"]["zeta"] == "0x20d"
             print("PASS: one-shot update of a managed component is tracked; the next desired version converges it")
 
             # 9. One-shot jobs still work; a managed record outside any desired
