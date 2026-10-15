@@ -8,6 +8,7 @@ export const RPC_URL = MANIFEST?.rpc_url;
 export const WALRUS_PUBLISHER = MANIFEST?.walrus.publisher_url ?? "";
 export const WALRUS_AGGREGATOR = MANIFEST?.walrus.aggregator_url ?? "";
 export const DEVICE_TYPE = MANIFEST ? moveType("device_registry::Device") : "";
+export const DEVICE_OWNER_CAP_TYPE = MANIFEST ? moveType("device_registry::DeviceOwnerCap") : "";
 export const DEVICE_GROUP_TYPE = MANIFEST ? moveType("device_group::DeviceGroup") : "";
 export const DEPLOYMENT_CREATED_EVENT = MANIFEST ? moveType("deployment_manager::DeploymentCreated") : "";
 export const STATUS_UPDATED_EVENT = MANIFEST ? moveType("deployment_manager::DeviceStatusUpdated") : "";

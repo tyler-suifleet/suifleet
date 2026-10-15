@@ -3,10 +3,10 @@ name = "sui_edge"
 version = "0.0.1"
 edition = "2024.beta"
 
-[dependencies]
-
-[addresses]
-sui_edge = "0x0"
-
+# The package's named address is its name (sui_edge), and the Sui framework
+# dependencies are implicit. Publication is recorded per environment in
+# Published.toml by `sui client publish/upgrade` (scripts/publish.py).
+# testnet and mainnet are built in. A non-public chain needs its alias here,
+# mapped to its current chain identifier, e.g.:
+#   devnet = "<8-hex chain identifier>"
 [environments]
-devnet = "4fe43958"

@@ -13,6 +13,7 @@ device's version/run-ID receipts:
   - deployment for another device -> never applied
   - daemon offline while a deployment is created -> caught up after restart
   - journal with a JSON-RPC-era cursor -> migrated without replaying work
+  - device revoked in the registry -> nothing applied; reinstated -> caught up
 
 Run inside the dev image with a throwaway node and faucet:
 
@@ -112,7 +113,7 @@ def run(rpc_url, faucet_url, catalog_upgrade=False):
                     return bool(gas.get("gasCoins")) or int(gas.get("addressMistBalance") or 0) > 0
                 return bool(gas)
             wait_for(funded, "local faucet did not supply gas")
-            chain_id = dm.rpc(rpc_url, "sui_getChainIdentifier", [])
+            chain_id = dm.chain_facts(rpc_url)["chain_identifier"]
 
             def transaction(*ptb):
                 result = client("ptb", *ptb, "--gas-budget", "200000000")
@@ -127,11 +128,14 @@ def run(rpc_url, faucet_url, catalog_upgrade=False):
             contracts = root / "contracts"
             shutil.copytree(ROOT / "contracts", contracts, ignore=shutil.ignore_patterns("build", "Published.toml"))
             if catalog_upgrade:
+                # Pre-catalog main includes registry custody and identity activation.
+                # Upgrade these existing objects rather than calling new identity APIs
+                # against the earlier pre-identity package.
                 for source in (contracts / "sources").glob("*.move"):
                     source.unlink()
-                names = subprocess.check_output(["git", "ls-tree", "--name-only", "2d2a01e:contracts/sources"], cwd=ROOT, text=True).splitlines()
+                names = subprocess.check_output(["git", "ls-tree", "--name-only", "9c69582bd040cf82169940a6d14a1a288fd0bda4:contracts/sources"], cwd=ROOT, text=True).splitlines()
                 for name in names:
-                    (contracts / "sources" / name).write_bytes(subprocess.check_output(["git", "show", f"2d2a01e:contracts/sources/{name}"], cwd=ROOT))
+                    (contracts / "sources" / name).write_bytes(subprocess.check_output(["git", "show", f"9c69582bd040cf82169940a6d14a1a288fd0bda4:contracts/sources/{name}"], cwd=ROOT))
             published = client("test-publish", contracts, "--build-env", "testnet", "--pubfile-path",
                                root / "Pub.local.toml", "--gas-budget", "500000000", "--silence-warnings")
             assert published["effects"]["status"]["status"] == "success", published["effects"]["status"]
@@ -150,16 +154,27 @@ def run(rpc_url, faucet_url, catalog_upgrade=False):
                 "--move-call", f"{package}::device_registry::register_device", f"@{registry}", '"pi"',
                 f"@{device_address}", '"aarch64"', CLOCK, "--assign", "device",
                 "--move-call", f"{package}::device_cap::issue_cap", "device",
-                "--transfer-objects", "[device]", f"@{operator}")
+                "--move-call", f"{package}::device_registry::activate_device", f"@{registry}", "device",
+                "--assign", "owner", "--transfer-objects", "[owner]", f"@{operator}")
             device = created(registered, "::device_registry::Device")[0]
             cap = created(registered, "::device_cap::DeviceCap")[0]
+            owner_cap = created(registered, "::device_registry::DeviceOwnerCap")[0]
+
+            def add_to_group(group):
+                """The activated Device is borrowed from registry custody for `&Device`."""
+                transaction("--move-call", f"{package}::device_registry::borrow_device", f"@{registry}", f"@{owner_cap}",
+                            "--assign", "loaned",
+                            "--move-call", f"{package}::device_group::add_device", f"@{group}", "loaned.0",
+                            "--move-call", f"{package}::device_registry::return_device", f"@{registry}",
+                            "loaned.0", "loaned.1")
+
             other = created(transaction(
                 "--move-call", f"{package}::device_registry::register_device", f"@{registry}", '"other"',
                 f"@{operator}", '"x86_64"', CLOCK, "--assign", "device",
                 "--transfer-objects", "[device]", f"@{operator}"), "::device_registry::Device")[0]
             group_tx = transaction("--move-call", f"{package}::device_group::create_group", '"fleet"', '"test"', CLOCK)
             group = created(group_tx, "::device_group::DeviceGroup")[0]
-            transaction("--move-call", f"{package}::device_group::add_device", f"@{group}", f"@{device}")
+            add_to_group(group)
 
             if catalog_upgrade:
                 original_package = package
@@ -180,7 +195,7 @@ def run(rpc_url, faucet_url, catalog_upgrade=False):
                     '\"old-call\"', '\"1.0.0\"', '\"old-recipe\"', '\"'+"a"*64+'\"', '\"'+"b"*64+'\"',
                     "vector[]", f"vector[@{other}]", CLOCK)
                 catalog = created(transaction("--move-call", f"{package}::component_catalog::create_catalog"), "::component_catalog::ComponentCatalog")[0]
-                print("PASS: compatible upgrade from 2d2a01e, existing registry/device/group objects, old call remains callable, new catalog introduction origins")
+                print("PASS: compatible upgrade from 9c69582bd040cf82169940a6d14a1a288fd0bda4, existing registry/device/group objects, old call remains callable, new catalog introduction origins")
 
             run_id = "localnet-" + uuid.uuid4().hex[:10]
 
@@ -362,7 +377,7 @@ def run(rpc_url, faucet_url, catalog_upgrade=False):
                 state["cursor"] = boundary[1]
                 state["deployments"][boundary[0]] = {"status": 1, "reported": True, "error": None}
                 journal_path.write_text(json.dumps(state))
-                transaction("--move-call", f"{package}::device_group::add_device", f"@{late_group}", f"@{device}")
+                add_to_group(late_group)
                 before_versions = [r["version"] for r in history()]
                 process = start()
                 wait_for(settled(later[0], 1), "event after the legacy boundary was not applied", process)
@@ -374,6 +389,23 @@ def run(rpc_url, faucet_url, catalog_upgrade=False):
                 assert not outcome(skipped[0]), "event before the legacy boundary was replayed"
                 print("PASS: legacy cursor resumes exactly after its event: an earlier, newly targeted deployment "
                       "in the same transaction is not replayed and a later one is applied once")
+
+                # Revocation is enforced on chain and honored by the daemon: while
+                # revoked it applies nothing; reinstated, it catches up.
+                transaction("--move-call", f"{package}::device_registry::revoke_device", f"@{registry}", f"@{owner_cap}")
+                applied_count = len(history())
+                revoked = deploy("7.0.0", devices=[device])
+                process = start()
+                time.sleep(10)
+                assert not outcome(revoked), "revoked device applied a deployment"
+                assert len(history()) == applied_count
+                transaction("--move-call", f"{package}::device_registry::reinstate_device", f"@{registry}", f"@{owner_cap}")
+                wait_for(settled(revoked, 1), "reinstated device did not apply and report", process)
+                receipt_is(revoked, 1)
+                stop(process)
+                process = None
+                assert "revoked or deregistered" in (root / "daemon.log").read_text()
+                print("PASS: on-chain revocation stops the real daemon; reinstatement resumes it with a verified receipt")
             except BaseException:
                 log.flush()
                 print((root / "daemon.log").read_text()[-4000:])

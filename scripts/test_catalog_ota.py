@@ -34,7 +34,9 @@ class CatalogSimulator(ComponentSimulator):
                 'content':{'type':f'{ota.TYPE_ORIGINS["component_catalog::ComponentVersion"]}::component_catalog::'+('ComponentCatalog' if mode=='wrong_type' else 'ComponentVersion'),'fields':value}}}
         return super().obj(id)
     def rpc(self,method,params):
-        if method=='shim_keyTypes':return super().rpc(method,params)+[f'{ota.TYPE_ORIGINS["component_catalog::CatalogBindingKey"]}::component_catalog::CatalogBindingKey']
+        if method=='shim_fields':
+            key=f'{ota.TYPE_ORIGINS["component_catalog::CatalogBindingKey"]}::component_catalog::CatalogBindingKey'
+            return super().rpc(method,params)+[[parent,key,'00'] for parent in self.bindings]
         if method=='suix_getDynamicFieldObject' and params[1]['type'].endswith('CatalogBindingKey'):
             return {'data':{'content':{'fields':{'value':{'version_id':self.bindings[params[0]]}}}}}
         return super().rpc(method,params)

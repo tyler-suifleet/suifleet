@@ -27,10 +27,16 @@ export const device_group_DeviceGroupBcs = bcs.struct("DeviceGroup", { id: bcs.A
 export const device_group_DeviceRemovedFromGroupBcs = bcs.struct("DeviceRemovedFromGroup", { group_id: bcs.Address, device_id: bcs.Address });
 export const device_group_GroupCreatedBcs = bcs.struct("GroupCreated", { group_id: bcs.Address, name: bcs.string(), admin: bcs.Address });
 export const device_group_GroupDeletedBcs = bcs.struct("GroupDeleted", { group_id: bcs.Address, admin: bcs.Address });
+export const device_registry_CustodyKeyBcs = bcs.struct("CustodyKey", { device_id: bcs.Address });
 export const device_registry_DeviceBcs = bcs.struct("Device", { id: bcs.Address, name: bcs.string(), device_address: bcs.Address, arch: bcs.string(), meta: bcs.struct("VecMap", { contents: bcs.vector(bcs.struct("Entry", { key: bcs.string(), value: bcs.string() })) }), registered_at: bcs.u64(), schema_version: bcs.u64() });
 export const device_registry_DeviceDeregisteredBcs = bcs.struct("DeviceDeregistered", { device_id: bcs.Address, owner: bcs.Address });
+export const device_registry_DeviceIdentityChangedBcs = bcs.struct("DeviceIdentityChanged", { device_id: bcs.Address, signer: bcs.Address, revoked: bcs.bool(), owner_cap: bcs.Address });
+export const device_registry_DeviceLoanBcs = bcs.struct("DeviceLoan", { device_id: bcs.Address });
+export const device_registry_DeviceOwnerCapBcs = bcs.struct("DeviceOwnerCap", { id: bcs.Address, device_id: bcs.Address });
 export const device_registry_DeviceRegisteredBcs = bcs.struct("DeviceRegistered", { device_id: bcs.Address, name: bcs.string(), device_address: bcs.Address, owner: bcs.Address });
 export const device_registry_DeviceRegistryBcs = bcs.struct("DeviceRegistry", { id: bcs.Address, admin: bcs.Address, device_count: bcs.u64(), schema_version: bcs.u64() });
+export const device_registry_IdentityBcs = bcs.struct("Identity", { signer: bcs.Address, revoked: bcs.bool(), owner_cap: bcs.Address });
+export const device_registry_IdentityKeyBcs = bcs.struct("IdentityKey", { device_id: bcs.Address });
 export const device_registry_RegistryCreatedBcs = bcs.struct("RegistryCreated", { registry_id: bcs.Address, admin: bcs.Address });
 export const calls = {
   component_catalog_create_catalog: (tx: Transaction, packageId: string) => tx.moveCall({ target: `${packageId}::component_catalog::create_catalog`, arguments: [] }),
@@ -44,14 +50,18 @@ export const calls = {
   deployment_manager_create_deployment: (tx: Transaction, packageId: string, a0: string, a1: string, a2: string, a3: string, a4: string[], a5: string[], a6: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::deployment_manager::create_deployment`, arguments: [tx.pure.string(a0), tx.pure.string(a1), tx.pure.string(a2), tx.pure.string(a3), tx.pure(bcs.vector(bcs.Address).serialize(a4)), tx.pure(bcs.vector(bcs.Address).serialize(a5)), tx.object(a6)] }),
   deployment_manager_create_deployment_verified: (tx: Transaction, packageId: string, a0: string, a1: string, a2: string, a3: string, a4: string, a5: string[], a6: string[], a7: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::deployment_manager::create_deployment_verified`, arguments: [tx.pure.string(a0), tx.pure.string(a1), tx.pure.string(a2), tx.pure.string(a3), tx.pure.string(a4), tx.pure(bcs.vector(bcs.Address).serialize(a5)), tx.pure(bcs.vector(bcs.Address).serialize(a6)), tx.object(a7)] }),
   deployment_manager_delete_deployment: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::deployment_manager::delete_deployment`, arguments: [tx.object(a0)] }),
+  deployment_manager_has_current_receipts: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::deployment_manager::has_current_receipts`, arguments: [tx.object(a0)] }),
   deployment_manager_has_receipts: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::deployment_manager::has_receipts`, arguments: [tx.object(a0)] }),
   deployment_manager_migrate: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::deployment_manager::migrate`, arguments: [tx.object(a0)] }),
   deployment_manager_receipt_status: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: string) => tx.moveCall({ target: `${packageId}::deployment_manager::receipt_status`, arguments: [tx.object(a0), tx.pure.address(a1)] }),
   deployment_manager_receipts_version: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::deployment_manager::receipts_version`, arguments: [tx.object(a0)] }),
   deployment_manager_report_status: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: number) => tx.moveCall({ target: `${packageId}::deployment_manager::report_status`, arguments: [tx.object(a0), tx.object(a1), tx.pure.u8(a2)] }),
   deployment_manager_report_status_for_group: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: Parameters<Transaction["object"]>[0], a3: number) => tx.moveCall({ target: `${packageId}::deployment_manager::report_status_for_group`, arguments: [tx.object(a0), tx.object(a1), tx.object(a2), tx.pure.u8(a3)] }),
+  deployment_manager_report_verified_status: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: Parameters<Transaction["object"]>[0], a3: number) => tx.moveCall({ target: `${packageId}::deployment_manager::report_verified_status`, arguments: [tx.object(a0), tx.object(a1), tx.object(a2), tx.pure.u8(a3)] }),
+  deployment_manager_report_verified_status_for_group: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: Parameters<Transaction["object"]>[0], a3: Parameters<Transaction["object"]>[0], a4: number) => tx.moveCall({ target: `${packageId}::deployment_manager::report_verified_status_for_group`, arguments: [tx.object(a0), tx.object(a1), tx.object(a2), tx.object(a3), tx.pure.u8(a4)] }),
   deployment_manager_status_applied: (tx: Transaction, packageId: string) => tx.moveCall({ target: `${packageId}::deployment_manager::status_applied`, arguments: [] }),
   deployment_manager_status_failed: (tx: Transaction, packageId: string) => tx.moveCall({ target: `${packageId}::deployment_manager::status_failed`, arguments: [] }),
+  device_cap_assert_active: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_cap::assert_active`, arguments: [tx.object(a0), tx.object(a1)] }),
   device_cap_assert_signer: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_cap::assert_signer`, arguments: [tx.object(a0)] }),
   device_cap_device_id: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_cap::device_id`, arguments: [tx.object(a0)] }),
   device_cap_issue: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_cap::issue`, arguments: [tx.object(a0)] }),
@@ -64,11 +74,25 @@ export const calls = {
   device_group_group_id: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_group::group_id`, arguments: [tx.object(a0)] }),
   device_group_name: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_group::name`, arguments: [tx.object(a0)] }),
   device_group_remove_device: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: string) => tx.moveCall({ target: `${packageId}::device_group::remove_device`, arguments: [tx.object(a0), tx.pure.address(a1)] }),
+  device_registry_activate_device: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_registry::activate_device`, arguments: [tx.object(a0), tx.object(a1)] }),
+  device_registry_borrow_device: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_registry::borrow_device`, arguments: [tx.object(a0), tx.object(a1)] }),
+  device_registry_deregister_activated_device: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_registry::deregister_activated_device`, arguments: [tx.object(a0), tx.object(a1)] }),
   device_registry_deregister_device: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_registry::deregister_device`, arguments: [tx.object(a0), tx.object(a1)] }),
   device_registry_device_address: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_registry::device_address`, arguments: [tx.object(a0)] }),
   device_registry_device_count: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_registry::device_count`, arguments: [tx.object(a0)] }),
   device_registry_device_id: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_registry::device_id`, arguments: [tx.object(a0)] }),
+  device_registry_identity: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: string) => tx.moveCall({ target: `${packageId}::device_registry::identity`, arguments: [tx.object(a0), tx.pure.address(a1)] }),
+  device_registry_identity_owner_cap: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_registry::identity_owner_cap`, arguments: [tx.object(a0)] }),
+  device_registry_identity_revoked: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_registry::identity_revoked`, arguments: [tx.object(a0)] }),
+  device_registry_identity_signer: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_registry::identity_signer`, arguments: [tx.object(a0)] }),
+  device_registry_is_active_signer: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: string, a2: string) => tx.moveCall({ target: `${packageId}::device_registry::is_active_signer`, arguments: [tx.object(a0), tx.pure.address(a1), tx.pure.address(a2)] }),
+  device_registry_is_custodied: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: string) => tx.moveCall({ target: `${packageId}::device_registry::is_custodied`, arguments: [tx.object(a0), tx.pure.address(a1)] }),
+  device_registry_owner_cap_device_id: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_registry::owner_cap_device_id`, arguments: [tx.object(a0)] }),
   device_registry_register_device: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: string, a2: string, a3: string, a4: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_registry::register_device`, arguments: [tx.object(a0), tx.pure.string(a1), tx.pure.address(a2), tx.pure.string(a3), tx.object(a4)] }),
+  device_registry_reinstate_device: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_registry::reinstate_device`, arguments: [tx.object(a0), tx.object(a1)] }),
+  device_registry_return_device: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_registry::return_device`, arguments: [tx.object(a0), tx.object(a1), tx.object(a2)] }),
+  device_registry_revoke_device: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_registry::revoke_device`, arguments: [tx.object(a0), tx.object(a1)] }),
+  device_registry_rotate_device_key: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: string) => tx.moveCall({ target: `${packageId}::device_registry::rotate_device_key`, arguments: [tx.object(a0), tx.object(a1), tx.pure.address(a2)] }),
   device_registry_set_meta: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: string, a2: string) => tx.moveCall({ target: `${packageId}::device_registry::set_meta`, arguments: [tx.object(a0), tx.pure.string(a1), tx.pure.string(a2)] }),
 };
 export const TYPES = {
@@ -96,9 +120,15 @@ export const TYPES = {
   device_group_DeviceRemovedFromGroup: "device_group::DeviceRemovedFromGroup",
   device_group_GroupCreated: "device_group::GroupCreated",
   device_group_GroupDeleted: "device_group::GroupDeleted",
+  device_registry_CustodyKey: "device_registry::CustodyKey",
   device_registry_Device: "device_registry::Device",
   device_registry_DeviceDeregistered: "device_registry::DeviceDeregistered",
+  device_registry_DeviceIdentityChanged: "device_registry::DeviceIdentityChanged",
+  device_registry_DeviceLoan: "device_registry::DeviceLoan",
+  device_registry_DeviceOwnerCap: "device_registry::DeviceOwnerCap",
   device_registry_DeviceRegistered: "device_registry::DeviceRegistered",
   device_registry_DeviceRegistry: "device_registry::DeviceRegistry",
+  device_registry_Identity: "device_registry::Identity",
+  device_registry_IdentityKey: "device_registry::IdentityKey",
   device_registry_RegistryCreated: "device_registry::RegistryCreated",
 } as const;

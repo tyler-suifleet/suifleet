@@ -136,7 +136,7 @@ function DeploymentRow({
             )) : (
               <span
                 className="inline-flex px-2 py-1 rounded bg-gray-200 text-gray-700"
-                title="Created before verified receipts. Older contract versions let any address write its legacy statuses, so none are shown. A device report through the current contracts adds a verified receipt; redeploy if you need one now."
+                title="No receipts from the current contracts. Older contract versions let any address write legacy statuses, or accepted reports from since-revoked device keys, so none are shown. A device report through the current contracts discards them and adds a verified receipt; redeploy if you need one now."
               >
                 Unverified: no signed device receipts yet
               </span>

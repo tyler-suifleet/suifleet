@@ -5,6 +5,7 @@ module sui_edge::deployment_manager {
     use sui::event;
     use sui::vec_map::{Self, VecMap};
     use sui_edge::device_cap::{Self, DeviceCap};
+    use sui_edge::device_registry::DeviceRegistry;
     use sui_edge::device_group::{Self, DeviceGroup};
 
     // ── Constants ─────────────────────────────────────────────────────────────
@@ -13,7 +14,12 @@ module sui_edge::deployment_manager {
     /// Version of the authoritative receipt state written by this package.
     /// A future upgrade that changes report authority must bump this so that
     /// this package's (still callable) entry points abort on migrated records.
-    const RECEIPTS_VERSION: u64 = 1;
+    /// Version 2: reports require an active registry identity (revocation,
+    /// rotation, deregistration). Locks the version-1 package out of new and
+    /// migrated records. Statuses written under an older version are discarded
+    /// on migration and never returned as receipts: an older package may have
+    /// accepted them from a since-revoked key.
+    const RECEIPTS_VERSION: u64 = 2;
     const STATUS_APPLIED: u8 = 1;
     const STATUS_FAILED: u8 = 2;
 
@@ -26,6 +32,8 @@ module sui_edge::deployment_manager {
     const EInvalidRecipeHash: u64 = 4;
     const EPackageOutdated: u64 = 5;
     const ENoReceipts: u64 = 6;
+    const EUseVerifiedReport: u64 = 7;
+    const EStaleReceipts: u64 = 8;
 
     // ── Dynamic field keys ────────────────────────────────────────────────────
     //
@@ -96,8 +104,10 @@ module sui_edge::deployment_manager {
         status: u8,
     }
 
-    /// Authoritative status event, emitted only after signer and target checks.
-    /// Introduced by an upgrade, so older package versions cannot emit it.
+    /// Status event, emitted after this package's identity and target checks.
+    /// Packages from receipts version 1 also emit it under signer-only checks
+    /// (even for a since-revoked key), so it is a notification, not evidence:
+    /// trust current-version receipt state (`has_current_receipts`).
     public struct DeviceStatusReported has copy, drop {
         deployment_id: ID,
         device_id: ID,
@@ -216,14 +226,37 @@ module sui_edge::deployment_manager {
         record
     }
 
-    /// Called by the edge device after applying (or failing to apply) a deployment.
+    /// Superseded: this signature cannot see the registry, so it cannot tell a
+    /// revoked or rotated device from an active one. Use `report_verified_status`.
     public fun report_status(
+        _deployment: &mut DeploymentRecord,
+        _cap: &DeviceCap,
+        _status: u8,
+        _ctx: &TxContext,
+    ) {
+        abort EUseVerifiedReport
+    }
+
+    /// Superseded: use `report_verified_status_for_group`.
+    public fun report_status_for_group(
+        _deployment: &mut DeploymentRecord,
+        _cap: &DeviceCap,
+        _group: &DeviceGroup,
+        _status: u8,
+        _ctx: &TxContext,
+    ) {
+        abort EUseVerifiedReport
+    }
+
+    /// Called by the edge device after applying (or failing to apply) a deployment.
+    public fun report_verified_status(
         deployment: &mut DeploymentRecord,
+        registry: &DeviceRegistry,
         cap: &DeviceCap,
         status: u8,
         ctx: &TxContext,
     ) {
-        device_cap::assert_signer(cap, ctx);
+        device_cap::assert_active(cap, registry, ctx);
         let device_id = device_cap::device_id(cap);
         let targets: &vector<ID> = df::borrow(&deployment.id, TargetDevicesKey {});
         assert!(targets.contains(&device_id), ENotTargeted);
@@ -231,14 +264,15 @@ module sui_edge::deployment_manager {
     }
 
     /// Group reports prove current membership in a group targeted by this deployment.
-    public fun report_status_for_group(
+    public fun report_verified_status_for_group(
         deployment: &mut DeploymentRecord,
+        registry: &DeviceRegistry,
         cap: &DeviceCap,
         group: &DeviceGroup,
         status: u8,
         ctx: &TxContext,
     ) {
-        device_cap::assert_signer(cap, ctx);
+        device_cap::assert_active(cap, registry, ctx);
         let targets: &vector<ID> = df::borrow(&deployment.id, TargetGroupsKey {});
         assert!(targets.contains(&device_group::group_id(group)), ENotTargeted);
         assert!(device_group::admin(group) == deployment.creator, ENotTargeted);
@@ -247,10 +281,11 @@ module sui_edge::deployment_manager {
     }
 
     /// Attach or upgrade authoritative receipts without recording a status.
-    /// Permissionless and idempotent: it never changes statuses, and it aborts
-    /// rather than downgrade a record migrated by a newer package. After a
-    /// future authority upgrade, sweep live records with the new package's
-    /// `migrate` so this package's entry points can no longer write them.
+    /// Permissionless and idempotent: it only discards statuses written under
+    /// an older authority version, and it aborts rather than downgrade a record
+    /// migrated by a newer package. After an authority upgrade, sweep live
+    /// records with the new package's `migrate` so older entry points can no
+    /// longer write them.
     public fun migrate(deployment: &mut DeploymentRecord) {
         receipts_mut(deployment);
     }
@@ -282,14 +317,18 @@ module sui_edge::deployment_manager {
     }
 
     /// Records created before receipts existed get them lazily; a record
-    /// already migrated by a newer package aborts here.
+    /// already migrated by a newer package aborts here. Statuses from an older
+    /// authority version are dropped: devices must report again.
     fun receipts_mut(deployment: &mut DeploymentRecord): &mut Receipts {
         if (!df::exists(&deployment.id, ReceiptsKey {})) {
             df::add(&mut deployment.id, ReceiptsKey {}, new_receipts());
         };
         let receipts: &mut Receipts = df::borrow_mut(&mut deployment.id, ReceiptsKey {});
         assert!(receipts.version <= RECEIPTS_VERSION, EPackageOutdated);
-        receipts.version = RECEIPTS_VERSION;
+        if (receipts.version < RECEIPTS_VERSION) {
+            receipts.statuses = vec_map::empty();
+            receipts.version = RECEIPTS_VERSION;
+        };
         receipts
     }
 
@@ -337,15 +376,22 @@ module sui_edge::deployment_manager {
         df::exists(&d.id, ReceiptsKey {})
     }
 
-    /// Authoritative statuses: only signer- and target-checked reports.
+    /// Receipts written under this package's report authority. Older versions
+    /// (still writable by older packages until migrated) are not evidence.
+    public fun has_current_receipts(d: &DeploymentRecord): bool {
+        has_receipts(d) && receipts_version(d) >= RECEIPTS_VERSION
+    }
+
+    /// Authoritative statuses: only reports from an active device identity.
     public fun receipt_statuses(d: &DeploymentRecord): &VecMap<ID, u8> {
         assert!(has_receipts(d), ENoReceipts);
+        assert!(has_current_receipts(d), EStaleReceipts);
         let receipts: &Receipts = df::borrow(&d.id, ReceiptsKey {});
         &receipts.statuses
     }
 
     public fun receipt_status(d: &DeploymentRecord, device_id: ID): Option<u8> {
-        if (!has_receipts(d)) return option::none();
+        if (!has_current_receipts(d)) return option::none();
         let statuses = receipt_statuses(d);
         if (statuses.contains(&device_id)) option::some(*statuses.get(&device_id))
         else option::none()
@@ -387,6 +433,19 @@ module sui_edge::deployment_manager {
             statuses.insert(device_id, status);
         };
         event::emit(DeviceStatusUpdated { deployment_id: object::id(deployment), device_id, status });
+    }
+
+    /// Replays an older package's signer-only report on a record it can still
+    /// write (receipts at an older version).
+    #[test_only]
+    public fun old_package_report_for_testing(d: &mut DeploymentRecord, device_id: ID, status: u8) {
+        let receipts: &mut Receipts = df::borrow_mut(&mut d.id, ReceiptsKey {});
+        assert!(receipts.version < RECEIPTS_VERSION, EPackageOutdated);
+        if (receipts.statuses.contains(&device_id)) {
+            *receipts.statuses.get_mut(&device_id) = status;
+        } else {
+            receipts.statuses.insert(device_id, status);
+        };
     }
 
     /// Simulates a newer package having migrated this record's receipts.

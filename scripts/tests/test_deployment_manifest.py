@@ -18,18 +18,22 @@ def fixture():
         walrus={"publisher_url":"https://publisher.example", "aggregator_url":"https://aggregator.example"})
 
 
-def chain(manifest):
-    def call(url, method, params):
-        if method == "sui_getChainIdentifier": return manifest["chain_identifier"]
-        if params[0] == manifest["call_package_id"]:
-            return {"data": {"version": manifest["package_version"], "bcs": {"dataType":"package", "typeOriginTable":[
-                {"module_name":name.split("::")[0], "datatype_name":name.split("::")[1], "package":origin}
-                for name, origin in manifest["type_origins"].items()]}}}
-        if params[0] == manifest["upgrade_cap_id"]:
-            return {"data":{"content":{"type":"0x2::package::UpgradeCap","fields":{"package":manifest["call_package_id"],"version":manifest["package_version"]}}}}
-        return {"data": {"owner":{"Shared":{"initial_shared_version":"1"}}, "content":{
-            "type":manifest["type_origins"]["device_registry::DeviceRegistry"] + "::device_registry::DeviceRegistry"}}}
-    return call
+def chain(manifest, cap_owner="0xa11ce"):
+    """gRPC chain facts (the chain_facts tool's output) for a deployed manifest."""
+    def read(url, *ids):
+        objects = {
+            manifest["call_package_id"]: {"kind": "package", "version": int(manifest["package_version"]), "type_origins": [
+                {"module": name.split("::")[0], "datatype": name.split("::")[1], "package": origin}
+                for name, origin in manifest["type_origins"].items()]},
+            manifest["upgrade_cap_id"]: {"kind": "object", "type": dm.object_id("0x2") + "::package::UpgradeCap", "version": 9,
+                "owner": {"address": dm.object_id(cap_owner)},
+                "upgrade_cap": {"package": manifest["call_package_id"], "version": int(manifest["package_version"]), "policy": 0}},
+            manifest["shared_objects"]["registry"]["id"]: {"kind": "object", "version": 5, "owner": {"shared": 1},
+                "type": manifest["type_origins"]["device_registry::DeviceRegistry"] + "::device_registry::DeviceRegistry"},
+        }
+        return {"chain_identifier": manifest["chain_identifier"],
+                "objects": {dm.object_id(i): objects.get(dm.object_id(i), {"kind": "absent"}) for i in ids}}
+    return read
 
 
 class ManifestTests(unittest.TestCase):
@@ -50,6 +54,20 @@ class ManifestTests(unittest.TestCase):
         args = SimpleNamespace(chain_identifier=manifest["chain_identifier"], upgrade_cap=manifest["upgrade_cap_id"], rpc=manifest["rpc_url"], package=manifest["call_package_id"], registry=manifest["shared_objects"]["registry"]["id"],
             publisher=manifest["walrus"]["publisher_url"], aggregator=manifest["walrus"]["aggregator_url"], network="localnet")
         self.assertEqual(dm.resolve(args, chain(manifest)), manifest)
+
+    def test_resolves_catalog_origins_with_grpc_facts(self):
+        manifest = fixture()
+        manifest["type_origins"].update({name: dm.object_id("0x4") for name in dm.CATALOG_TYPES})
+        manifest["supported_clients"]["dapp"]["min"] = "0.1.0"
+        manifest["supported_clients"]["edge"]["min"] = "0.2.0"
+        args = SimpleNamespace(chain_identifier=manifest["chain_identifier"], upgrade_cap=manifest["upgrade_cap_id"],
+            rpc=manifest["rpc_url"], package=manifest["call_package_id"],
+            registry=manifest["shared_objects"]["registry"]["id"], network="localnet",
+            publisher=manifest["walrus"]["publisher_url"], aggregator=manifest["walrus"]["aggregator_url"])
+        self.assertEqual(dm.resolve(args, chain(manifest)), manifest)
+        manifest["type_origins"].pop(dm.CATALOG_TYPES[-1])
+        with self.assertRaisesRegex(ValueError, "partial catalog"):
+            dm.resolve(args, chain(manifest))
 
     def test_stale_metadata_rejected(self):
         live = fixture()
@@ -85,13 +103,32 @@ class ManifestTests(unittest.TestCase):
 
     def test_latest_package_checked_against_upgrade_cap(self):
         manifest = fixture(); ordinary = chain(manifest)
-        def newer_cap(url, method, params):
-            result = ordinary(url, method, params)
-            if method == "sui_getObject" and params[0] == manifest["upgrade_cap_id"]:
-                result["data"]["content"]["fields"] = {"package":"0x4", "version":"4"}
-            return result
+        def newer_cap(url, *ids):
+            facts = ordinary(url, *ids)
+            facts["objects"][manifest["upgrade_cap_id"]]["upgrade_cap"].update(package=dm.object_id("0x4"), version=4)
+            return facts
         with self.assertRaisesRegex(ValueError, "UpgradeCap"):
             dm.verify(manifest, newer_cap)
+
+    def test_missing_or_unshared_objects_rejected(self):
+        manifest = fixture(); ordinary = chain(manifest)
+        for object_key, change in [("upgrade_cap_id", {"kind": "absent"}),
+                                   ("upgrade_cap_id", {"type": dm.object_id("0x2") + "::coin::Coin"}),
+                                   ("call_package_id", {"kind": "object"}),
+                                   ("registry", {"owner": {"address": dm.object_id("0x1")}})]:
+            def altered(url, *ids):
+                facts = ordinary(url, *ids)
+                key = manifest["shared_objects"]["registry"]["id"] if object_key == "registry" else manifest[object_key]
+                facts["objects"][key].update(change)
+                return facts
+            with self.assertRaises((ValueError, KeyError), msg=object_key): dm.verify(manifest, altered)
+
+    def test_resolve_requires_every_type(self):
+        manifest = fixture(); partial = copy.deepcopy(manifest)
+        partial["type_origins"].pop("deployment_manager::RecipeDigestKey")
+        args = SimpleNamespace(chain_identifier=manifest["chain_identifier"], upgrade_cap=manifest["upgrade_cap_id"], rpc=manifest["rpc_url"], package=manifest["call_package_id"], registry=manifest["shared_objects"]["registry"]["id"],
+            publisher=manifest["walrus"]["publisher_url"], aggregator=manifest["walrus"]["aggregator_url"], network="localnet")
+        with self.assertRaisesRegex(ValueError, "RecipeDigestKey"): dm.resolve(args, chain(partial))
 
     def test_declared_client_versions_match_packages(self):
         root = Path(__file__).resolve().parents[2]
@@ -101,8 +138,8 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(dm.CLIENT_VERSIONS["edge"], actual)
 
     def test_duplicate_origin_rejected(self):
-        raw = chain(fixture())("", "sui_getObject", [fixture()["call_package_id"]])
-        raw["data"]["bcs"]["typeOriginTable"].append(raw["data"]["bcs"]["typeOriginTable"][0])
-        with self.assertRaises(ValueError): dm.origins(raw)
+        package = chain(fixture())("", fixture()["call_package_id"])["objects"][fixture()["call_package_id"]]
+        package["type_origins"].append(package["type_origins"][0])
+        with self.assertRaises(ValueError): dm.origins(package)
 
 if __name__ == "__main__": unittest.main()
