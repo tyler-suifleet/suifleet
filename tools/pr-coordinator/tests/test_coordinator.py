@@ -12,7 +12,7 @@ c = importlib.util.module_from_spec(spec);spec.loader.exec_module(c)
 
 
 def fixture():
-    pr = dict(number=49,headRefOid='a'*40,baseRefOid='b'*40,state='OPEN',isDraft=False,mergeable='MERGEABLE',comments=[],reviews=[],threads=[],statusCheckRollup=[{'__typename':'CheckRun','status':'COMPLETED','conclusion':'SUCCESS'}])
+    pr = dict(baseIncluded=True,number=49,headRefOid='a'*40,baseRefOid='b'*40,state='OPEN',isDraft=False,mergeable='MERGEABLE',comments=[],reviews=[],threads=[],statusCheckRollup=[{'__typename':'CheckRun','status':'COMPLETED','conclusion':'SUCCESS'}])
     owner = dict(status='review',agent='Codex',publish_pending=False)
     review = dict(head=pr['headRefOid'],feedback=c.feedback(pr),family='Claude',result=dict(verdict='approve',acceptance_complete=True,model='test',evidence='verified'))
     return pr,owner,review
@@ -85,7 +85,6 @@ class Reservations(unittest.TestCase):
                 self.assertIn('started',json.loads((directory/'process.json').read_text()))
 
 
-if __name__=='__main__':unittest.main()
 
 class IntegrationRaces(unittest.TestCase):
     def coordinator(self,d):
@@ -134,3 +133,124 @@ class ResultTests(unittest.TestCase):
         self.assertEqual(result['verdict'],'blocked');self.assertFalse(result['acceptance_complete']);self.assertIn('missing release acceptance',result['evidence'])
         for invalid in ([],[''],[{'untrusted':'object'}],None):
             with self.assertRaises(ValueError): c.normalize_result(dict(verdict='approve',acceptance_complete=True,model='GPT-6',evidence=invalid))
+
+class FullCycleTests(unittest.TestCase):
+    def build(self,d,lag=False):
+        pr,owner,review=fixture();pr.update(headRefName='work/test',baseRefName='main',title='test',mergeCommit=None)
+        owner.update(key='T1',token='local-claim',branch=pr['headRefName'],spec={'priority':'P0'})
+        project={'id':'test','root':d,'repository':'owner/repo'}
+        coordinator=c.Coordinator({'workers':{'Codex':['true'],'Claude':['true']},'projects':[project]},Path(d))
+        job=coordinator.store.reserve('test',pr,'Claude','review',Path(d)/'review')
+        coordinator.store.db.execute("UPDATE jobs SET status='done',result=? WHERE id=?",(json.dumps(review['result']),job))
+        state={'pushed':False,'lag':lag,'complete':False,'commands':[],'tickets':[]}
+        commit='c'*40;identity='Tyler Bush <tyler.jonathan.bush@gmail.com>'
+        def current():
+            result=copy.deepcopy(pr)
+            if state['pushed']:
+                result['baseRefOid']=commit;result['baseIncluded']=False
+                if not state['lag']:result.update(state='MERGED',mergeCommit={'oid':commit})
+            return result
+        def command(args,cwd=None,env=None):
+            state['commands'].append(args)
+            if args[:3]==['git','rev-parse','origin/main']:return pr['baseRefOid']
+            if args[:3]==['git','rev-parse','HEAD']:return commit
+            if args[:3]==['git','merge-base','--is-ancestor']:
+                if not state['pushed']: raise c.subprocess.CalledProcessError(1,args)
+                return ''
+            if args[:2]==['git','ls-remote']:return pr['baseRefOid']+'\trefs/heads/main\n'
+            if args[:2]==['git','show'] or (args[:2]==['git','log'] and '--format=%B' not in args):return identity+'|'+identity+'\n'
+            if args[:2]==['git','merge']:
+                self.assertEqual(env['GIT_AUTHOR_NAME'],'Tyler Bush');self.assertEqual(env['GIT_COMMITTER_EMAIL'],'tyler.jonathan.bush@gmail.com')
+            if args[:2]==['git','push']:
+                self.assertEqual(args,['git','push','origin','HEAD:refs/heads/main'])
+                row=coordinator.store.db.execute('SELECT * FROM integrations').fetchone()
+                self.assertEqual(row['commit_id'],commit);self.assertEqual(row['reconciled'],0)
+                state['pushed']=True
+            return ''
+        def ticket(project,*args):
+            state['tickets'].append(args)
+            if args[0]=='show':return json.dumps(owner)
+            if args[0]=='complete':
+                self.assertEqual(current()['state'],'MERGED')
+                self.assertIn('--expect-token',args);self.assertIn('--merged-commit',args);self.assertIn(commit,args);self.assertIn('origin/main',args)
+                state['complete']=True;owner['status']='done'
+            return '{}'
+        patches=[patch.object(c,'run',side_effect=command),patch.object(coordinator,'owners',return_value=[owner]),patch.object(coordinator,'pr',side_effect=lambda *args:current()),patch.object(coordinator,'prs',side_effect=lambda *args:[] if state['pushed'] and not state['lag'] else [current()]),patch.object(coordinator,'ticket',side_effect=ticket),patch.object(coordinator,'gh',return_value=json.dumps({'merge_base_commit':{'sha':commit}})),patch.object(coordinator,'launch')]
+        return coordinator,state,patches
+
+    def test_successful_merge_verifies_identity_records_intent_before_push_and_completes_ticket(self):
+        from contextlib import ExitStack
+        with tempfile.TemporaryDirectory() as d,ExitStack() as stack:
+            coordinator,state,patches=self.build(d)
+            for p in patches:stack.enter_context(p)
+            coordinator.tick(True)
+            self.assertTrue(state['pushed']);self.assertTrue(state['complete'])
+            self.assertEqual(coordinator.store.db.execute('SELECT reconciled FROM integrations').fetchone()[0],1)
+            self.assertEqual(sum(args[0]=='assert' for args in state['tickets']),2)
+            self.assertEqual(sum(args[:2]==['git','push'] for args in state['commands']),1)
+
+    def test_delayed_github_merge_notification_does_not_dispatch_a_second_worker(self):
+        from contextlib import ExitStack
+        with tempfile.TemporaryDirectory() as d,ExitStack() as stack:
+            coordinator,state,patches=self.build(d,lag=True)
+            mocks=[stack.enter_context(p) for p in patches]
+            coordinator.tick(True);self.assertTrue(state['pushed']);self.assertFalse(state['complete'])
+            coordinator.tick(True);mocks[-1].assert_not_called()
+            self.assertEqual(sum(args[:2]==['git','push'] for args in state['commands']),1)
+            state['lag']=False;coordinator.tick(True)
+            self.assertTrue(state['complete']);self.assertEqual(coordinator.store.db.execute('SELECT reconciled FROM integrations').fetchone()[0],1)
+
+    def test_exit_zero_without_result_relaunches_after_backoff_without_resetting_deadline(self):
+        with tempfile.TemporaryDirectory() as d:
+            directory=Path(d);coordinator=c.Coordinator({'workers':{'Codex':['true'],'Claude':['true']},'projects':[]},directory)
+            pr=fixture()[0];job=coordinator.store.reserve('test',pr,'Claude','review',directory)
+            coordinator.store.db.execute("UPDATE jobs SET status='running',pid=999999,started='missing' WHERE id=?",(job,))
+            (directory/'exit.json').write_text('{"returncode":0}')
+            with patch.object(c,'process_identity',return_value=None):
+                coordinator.collect({'id':'test'},[])
+                deadline=coordinator.store.db.execute('SELECT retry_after FROM jobs').fetchone()[0]
+                with patch.object(c.time,'time',return_value=deadline+1):
+                    coordinator.collect({'id':'test'},[])
+                    self.assertEqual(coordinator.store.db.execute('SELECT retry_after FROM jobs').fetchone()[0],deadline)
+                    self.assertEqual(coordinator.store.reserve('test',pr,'Claude','review',directory),job)
+
+    def test_launch_failure_does_not_abort_remaining_prs(self):
+        with tempfile.TemporaryDirectory() as d:
+            coordinator,state,patches=self.build(d)
+            pr,owner,_=fixture();pr.update(headRefName='work',baseRefName='main');owner.update(branch='work',spec={'priority':'P0'})
+            next_pr={**pr,'number':50}
+            coordinator.store.db.execute('DELETE FROM jobs')
+            visited=[]
+            def launch(project,pr,*args):
+                visited.append(pr['number'])
+                if pr['number']==49:raise RuntimeError('one broken checkout')
+            with patch.object(coordinator,'owners',return_value=[owner]),patch.object(coordinator,'prs',return_value=[pr,next_pr]),patch.object(coordinator,'collect'),patch.object(coordinator,'launch',side_effect=launch):coordinator.tick(True)
+            self.assertEqual(visited,[49,50])
+
+    def test_branch_without_current_base_cannot_merge(self):
+        pr,owner,review=fixture();pr['baseIncluded']=False
+        self.assertIn('integrate current base',c.gate(pr,owner,review))
+
+
+
+class PushFailureTests(unittest.TestCase):
+    build = FullCycleTests.build
+    def test_prepared_but_unpushed_commit_is_retried_without_dispatching_worker(self):
+        from contextlib import ExitStack
+        with tempfile.TemporaryDirectory() as d,ExitStack() as stack:
+            coordinator,state,patches=self.build(d)
+            mocks=[stack.enter_context(p) for p in patches]
+            original=mocks[0].side_effect
+            failed=[False]
+            def command(args,**kwargs):
+                if args[:2]==['git','push'] and not failed[0]:
+                    failed[0]=True;raise c.subprocess.CalledProcessError(128,args)
+                return original(args,**kwargs)
+            mocks[0].side_effect=command
+            coordinator.tick(True)
+            self.assertFalse(state['pushed']);self.assertEqual(coordinator.store.db.execute('SELECT reconciled FROM integrations').fetchone()[0],0)
+            coordinator.tick(True)
+            mocks[-1].assert_not_called();self.assertTrue(state['complete'])
+
+
+if __name__=='__main__':unittest.main()

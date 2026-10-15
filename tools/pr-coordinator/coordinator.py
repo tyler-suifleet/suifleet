@@ -33,6 +33,7 @@ def feedback(pr):
 
 
 def gate(pr, owner, review):
+    if pr.get('baseIncluded') is not True: return 'owner must integrate current base and rerun checks'
     if pr['state'] != 'OPEN' or pr['isDraft'] or pr['mergeable'] != 'MERGEABLE':
         return 'not an open, ready, mergeable PR'
     if not owner or owner['status'] != 'review' or owner.get('publish_pending'):
@@ -148,6 +149,8 @@ class Coordinator:
         # Approval must bind to the actual current integration branch tip.
         reference=json.loads(self.gh(project,['api',f"repos/{project['repository']}/git/ref/heads/{quote(pr['baseRefName'],safe='/')}"]))
         pr['baseRefOid']=reference['object']['sha']
+        comparison=json.loads(self.gh(project,['api',f"repos/{project['repository']}/compare/{pr['baseRefOid']}...{pr['headRefOid']}"]))
+        pr['baseIncluded']=comparison['merge_base_commit']['sha'] == pr['baseRefOid']
         owner, repo = project['repository'].split('/')
         query = '''query($owner:String!,$repo:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100,after:$cursor){nodes{id isResolved comments(first:100){nodes{id body updatedAt} pageInfo{hasNextPage}}} pageInfo{hasNextPage endCursor}}}}}'''
         threads, cursor = [], None
@@ -171,7 +174,7 @@ class Coordinator:
     def owners(self, project):
         rows = json.loads(run(['ticket', '--project', project['id'], 'list']))
         # list returns compact rows; show preserves lease, evidence and branch fields.
-        return [json.loads(run(['ticket', '--project', project['id'], 'show', row['key']])) for row in rows if row.get('agent') in FAMILIES and (row.get('status') != 'done' or row.get('publish_pending'))]
+        return [json.loads(run(['ticket', '--project', project['id'], 'show', row['key']])) for row in rows if row.get('agent') in FAMILIES]
 
     def owner(self, project, pr, owners):
         if pr.get('isCrossRepository'): return None
@@ -245,16 +248,22 @@ Do not edit the coordinator database or forge another model's review. Only this 
             return common + f'''Independently review this exact detached commit against origin/{pr['baseRefName']}. Check correctness, security, compatibility, all existing change requests and acceptance evidence. Run meaningful scoped tests using globally locked build/port resources only while in use. Do not modify the implementation branch or post GitHub reviews yourself. Return approve only when all feedback and acceptance are resolved; otherwise changes_requested or blocked with precise file/line findings. Independent source review is required even when CI passes.
 '''
         return common + f'''You inherit the existing {owner['agent']} claim for {owner['key']}; token is PR_COORDINATOR_CLAIM_TOKEN in the environment, never print/post it.
-The service renewed/resumed this reserved Review claim; assert before edits and commits and heartbeat every five minutes. Fix all review feedback on the owner branch, integrate current main carefully, run required tests, commit and push contained Tyler-authored changes. Do not claim another ticket or resolve threads merely to hide findings. Post a detailed feedback reply on the existing PR. Mark ticket Review with exact evidence after push. Return fixed only after verifying the pushed head and required checks; if blocked retain the claim and report the next step. The coordinator will request a fresh independent review automatically.
+The service renewed/resumed this reserved Review claim; assert before edits and commits and heartbeat every five minutes. Fix all review feedback on the owner branch, merge/rebase the snapshot's current base into this branch even when the only upstream changes are tracking documents, ensure the pushed head contains that base, then run required tests, commit and push contained Tyler-authored changes. Do not claim another ticket or resolve threads merely to hide findings. Post a detailed feedback reply on the existing PR. Mark ticket Review with exact evidence after push. Return fixed only after verifying the pushed head and required checks; if blocked retain the claim and report the next step. The coordinator will request a fresh independent review automatically.
 '''
 
     def collect(self, project, owners):
         rows = self.store.db.execute("SELECT * FROM jobs WHERE project=? AND status IN ('running','reserved','retry')", (project['id'],)).fetchall()
         for row in rows:
             if row['status'] == 'retry':
+                if row['retry_after'] > time.time(): continue
                 receipt=Path(row['directory'])/'exit.json'
-                if not receipt.exists() or json.loads(receipt.read_text()).get('returncode') != 0:
+                try:
+                    if json.loads(receipt.read_text()).get('returncode') != 0: continue
+                    normalize_result(json.loads((Path(row['directory'])/'result.json').read_text()))
+                except (OSError,ValueError,TypeError):
+                    # Leave the original deadline intact: reserve() can now relaunch.
                     continue
+                self.store.db.execute('UPDATE jobs SET attempts=attempts+1 WHERE id=?',(row['id'],))
             if row['status'] == 'reserved':
                 process = Path(row['directory'])/'process.json'
                 if process.exists():
@@ -287,6 +296,7 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                         event = 'APPROVE' if result['verdict'] == 'approve' and result['acceptance_complete'] else 'REQUEST_CHANGES'
                         posted=json.loads(self.gh(review_project, ['api',f"repos/{project['repository']}/pulls/{row['pr']}/reviews",'--method','POST','-f',f"commit_id={row['head']}",'-f',f'event={event}','-f',f'body={body}']))
                         self.store.db.execute('INSERT OR REPLACE INTO publications VALUES(?,?,?,?)',(project['id'],row['pr'],posted['node_id'],publication_hash({'body':posted['body'],'state':posted['state'],'commit':{'oid':posted['commit_id']}})))
+                if row['kind'] == 'review': self.cleanup(project,Path(row['directory'])/'checkout')
             except Exception as error:
                 # A disappeared process with no trustworthy receipt is not automatically restarted.
                 receipt_path = Path(row['directory'])/'exit.json'
@@ -299,38 +309,61 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
 
     def tick(self, execute=False):
         for project in self.config['projects']:
-            owners = self.owners(project)
-            if execute: self.collect(project, owners)
-            prs = self.prs(project)
-            def priority(pr):
+            try:
+                self.tick_project(project,execute)
+            except Exception as error:
+                print(f"{project['id']}: scan failed: {error}",flush=True)
+                if not execute: raise
+
+    def tick_project(self, project, execute):
+        owners = self.owners(project)
+        if execute: self.collect(project,owners)
+        prs = self.prs(project)
+        def priority(pr):
+            owner = self.owner(project,pr,owners)
+            return ((owner or {}).get('spec',{}).get('priority','P9'),pr['number'])
+        pushed = False
+        for pr in sorted(prs,key=priority):
+            try:
                 owner = self.owner(project,pr,owners)
-                return ((owner or {}).get('spec',{}).get('priority','P9'),pr['number'])
-            for pr in sorted(prs,key=priority):
-                owner = self.owner(project, pr, owners)
                 review = self.store.review(project['id'],pr['number'])
                 reason = gate(pr,owner,review)
-                print(json.dumps({'project':project['id'],'pr':pr['number'],'owner':owner['agent'] if owner else None,'merge_blocker':reason}), flush=True)
+                print(json.dumps({'project':project['id'],'pr':pr['number'],'owner':owner['agent'] if owner else None,'merge_blocker':reason}),flush=True)
                 if not execute or not owner or owner['status'] != 'review' or pr['isDraft']: continue
-                if reason is None:
-                    # Re-read ALL gates immediately before preparing the guarded fast-forward integration. No merge queue/auto flag.
-                    fresh = self.pr(project,pr['number']); current = json.loads(self.ticket(project,'show',owner['key']))
+                intent=self.store.db.execute('SELECT * FROM integrations WHERE project=? AND pr=? AND reconciled=0',(project['id'],pr['number'])).fetchone()
+                if intent:
+                    # A successful push can precede GitHub's MERGED notification.
+                    # Never start a second review/repair while confirming that integration.
+                    run(['git','fetch','origin',pr['baseRefName']],cwd=project['root'])
+                    try:
+                        run(['git','merge-base','--is-ancestor',intent['commit_id'],f"origin/{pr['baseRefName']}"],cwd=project['root'])
+                        continue
+                    except subprocess.CalledProcessError as error:
+                        if error.returncode != 1: raise
+                        # Prepared but unpushed (e.g. network failure): retry the guarded merge.
+
+                if reason is None and not pushed:
+                    fresh=self.pr(project,pr['number']);current=json.loads(self.ticket(project,'show',owner['key']))
                     if gate(fresh,current,review) is not None: continue
                     self.merge(project,fresh,current,review)
-                    merged = self.pr(project,pr['number'])
-                    if merged['state'] != 'MERGED' or merged['headRefOid'] != fresh['headRefOid']: raise RuntimeError('merge could not be verified')
-                    commit = merged['mergeCommit']['oid']
-                    self.store.db.execute('INSERT OR REPLACE INTO integrations(project,pr,head,commit_id,reconciled) VALUES(?,?,?,?,0)',(project['id'],pr['number'],fresh['headRefOid'],commit))
-                    self.reconcile(project, merged, current, review)
-                    # One integration per scan; re-review against changed main on next cycle.
+                    pushed=True
+                    merged=self.pr(project,pr['number'])
+                    if merged['state'] == 'MERGED' and merged['headRefOid'] == fresh['headRefOid']:
+                        self.reconcile(project,merged,current,review)
+                    # Reconciliation below retries delayed GitHub state without a second merge.
                     break
-                if review and review['head'] == pr['headRefOid'] and review['feedback'] == feedback(pr) and review['result']['verdict'] == 'changes_requested':
+                if not pr['baseIncluded'] or (review and review['head'] == pr['headRefOid'] and review['result']['verdict'] == 'changes_requested'):
                     self.launch(project,pr,owner,'fix')
                 elif not review or review['head'] != pr['headRefOid'] or review['feedback'] != feedback(pr):
                     self.launch(project,pr,owner,'review')
-            # Retry completion after a crash/mirror failure, without merging again.
-            for row in self.store.db.execute('SELECT * FROM integrations WHERE project=? AND reconciled=0',(project['id'],)).fetchall():
-                merged = self.pr(project,row['pr']); owner = self.owner(project,merged,owners)
+            except Exception as error:
+                print(f"{project['id']} PR#{pr['number']}: action deferred: {error}",flush=True)
+        for row in self.store.db.execute('SELECT * FROM integrations WHERE project=? AND reconciled=0',(project['id'],)).fetchall():
+            try:
+                merged=self.pr(project,row['pr']);owner=self.owner(project,merged,owners)
                 if execute and owner: self.reconcile(project,merged,owner,self.store.review(project['id'],row['pr']))
+            except Exception as error:
+                print(f"{project['id']} PR#{row['pr']}: completion retry deferred: {error}",flush=True)
 
     def merge(self, project, pr, owner, review):
         # Local merge preserves the user's author AND committer identity.
@@ -378,6 +411,15 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
             return
         self.ticket(project,'complete',owner['key'],'--expect-token',owner['token'],'--reviewer',f"{review['family']}/{review['result']['model']}",'--text',review['result']['evidence'],'--merged-commit',pr['mergeCommit']['oid'],'--integration-ref',f"origin/{pr['baseRefName']}")
         self.store.db.execute('UPDATE integrations SET reconciled=1 WHERE project=? AND pr=?',(project['id'],pr['number']))
+        # Match only coordinator-owned merge worktrees for this verified PR.
+        for path in (self.state/project['id']).glob(f"merge-{pr['number']}-*"):
+            self.cleanup(project,path)
+
+    def cleanup(self,project,path):
+        if not path.exists(): return
+        try: run(['git','worktree','remove',str(path)],cwd=project['root'])
+        except subprocess.CalledProcessError:
+            print(f"{project['id']}: retained non-clean scratch worktree {path}",flush=True)
 
 
 def main():
