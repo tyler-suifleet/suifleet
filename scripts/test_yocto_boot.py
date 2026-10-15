@@ -36,16 +36,19 @@ class Guest:
         while time.monotonic() < deadline:
             match = re.search(pattern, self.pending)
             if match:
+                self.before_match = self.pending[:match.start()]
                 self.pending = self.pending[match.end():]
                 return match
             if self.process.poll() is not None:
-                raise RuntimeError(f"QEMU exited with {self.process.returncode}")
+                raise RuntimeError(f"QEMU exited with {self.process.returncode}: "
+                                   f"{self.pending[-4096:].decode(errors='replace')}")
             if self.selector.select(1):
                 chunk = os.read(self.process.stdout.fileno(), 65536)
                 if not chunk:
                     raise RuntimeError("QEMU console closed")
                 self.pending += chunk
-        raise TimeoutError("QEMU console deadline expired")
+        raise TimeoutError("QEMU console deadline expired: " +
+                           self.pending[-4096:].decode(errors="replace"))
 
     def send(self, command):
         self.process.stdin.write(command.encode() + b"\n")
@@ -56,15 +59,24 @@ class Guest:
         self.send("root")
         self.expect(rb"root@[^\r\n]+[#] ")
 
-    def command(self, shell):
+    def command(self, shell, timeout=120):
         token = "SF025_" + uuid.uuid4().hex
         # Encode the command so the echoed input cannot match its output marker.
         payload = f"( set -eu; {shell} ); result=$?; printf '\\n{token}:%s\\n' \"$result\""
         encoded = base64.b64encode(payload.encode()).decode()
-        self.send(f"echo {encoded} | base64 -d | /bin/sh")
-        match = self.expect(token.encode() + rb":([0-9]+)")
+        if len(encoded) > 768:
+            # BusyBox's interactive shell may truncate lines below the tty limit.
+            temporary = "/tmp/command-" + uuid.uuid4().hex
+            self.command(f": > {temporary}")
+            for offset in range(0, len(encoded), 256):
+                self.command(f"printf '%s' {encoded[offset:offset + 256]} >> {temporary}")
+            self.send(f"base64 -d < {temporary} | /bin/sh; rm -f {temporary}")
+        else:
+            self.send(f"echo {encoded} | base64 -d | /bin/sh")
+        match = self.expect(token.encode() + rb":([0-9]+)", timeout=timeout)
         if match[1] != b"0":
-            raise AssertionError(f"guest acceptance command failed ({match[1].decode()})")
+            raise AssertionError(f"guest acceptance command failed ({match[1].decode()}): "
+                                 f"{self.before_match[-4096:].decode(errors='replace')}")
 
     def close(self):
         if self.process.poll() is None:
@@ -83,8 +95,8 @@ class Guest:
         encoded = base64.b64encode(contents).decode()
         self.command(f": > {temporary}")
         # Stay below the serial terminal's canonical input limit.
-        for offset in range(0, len(encoded), 1024):
-            self.command(f"echo {encoded[offset:offset + 1024]} >> {temporary}")
+        for offset in range(0, len(encoded), 256):
+            self.command(f"echo {encoded[offset:offset + 256]} >> {temporary}")
         self.command(f"base64 -d < {temporary} > {destination}; rm {temporary}")
 
 
@@ -108,9 +120,13 @@ poll_seconds = 1
     guest.command("chown root:suifleet /etc/suifleet/deployment.json /etc/suifleet/config.toml.new; "
                   "chmod 640 /etc/suifleet/deployment.json /etc/suifleet/config.toml.new; "
                   "mv /etc/suifleet/config.toml.new /etc/suifleet/config.toml; "
-                  "sleep 12; "
+                  "attempt=0; until test $(systemctl show -p NRestarts --value suifleet.service) -gt 0; do "
+                  "attempt=$((attempt + 1)); test $attempt -lt 180 || { "
+                  "systemctl status suifleet.service suifleet-enrollment.path network-online.target --no-pager || :; "
+                  "journalctl -u suifleet.service --no-pager; exit 1; }; sleep 1; done; "
+                  "journalctl -u suifleet.service --no-pager; "
                   "test $(systemctl show -p NRestarts --value suifleet.service) -gt 0; "
-                  "journalctl -u suifleet.service --no-pager | grep -qi 'connection refused'")
+                  "journalctl -u suifleet.service --no-pager | grep -qi 'currently unavailable: tcp connect error'", timeout=240)
     # Return to the unenrolled state before the next boot. No node was running,
     # so this proves offline startup/retry, not successful chain enrollment.
     guest.command("systemctl stop suifleet-enrollment.path; "
@@ -122,27 +138,37 @@ def boot(qemu, kernel, disk, reboot=False):
     guest = Guest(qemu, kernel, disk)
     try:
         guest.login()
+        # Console login may precede completion of the automatic boot units.
+        guest.command("attempt=0; until systemctl is-active --quiet suifleet-provision.service "
+                      "&& systemctl is-active --quiet suifleet-enrollment.path; do "
+                      "attempt=$((attempt + 1)); test $attempt -lt 60 || { "
+                      "systemctl status suifleet-provision.service suifleet-enrollment.path --no-pager || :; "
+                      "journalctl -u suifleet-provision.service --no-pager; exit 1; }; sleep 1; done")
         guest.command("systemctl is-active --quiet suifleet-provision.service; "
                       "systemctl is-active --quiet suifleet-enrollment.path; "
                       "test ! -e /etc/suifleet/config.toml; "
                       "! systemctl is-active --quiet suifleet.service; "
                       "test $(stat -c %a /etc/suifleet/device.key) = 600; "
                       "test $(stat -c %U /etc/suifleet/device.key) = suifleet; "
+                      "test $(systemctl show -p User --value suifleet.service) = suifleet; "
                       "test $(suifleet --derive-address /etc/suifleet/device.key) = "
                       "$(cat /etc/suifleet/device.address)")
         guest.send("printf 'DEVICE:%s\\n' \"$(cat /etc/suifleet/device.address)\"")
         address = guest.expect(rb"DEVICE:(0x[0-9a-f]{64})")[1].decode()
+        print("PASS: automatic unenrolled provisioning and unprivileged daemon unit", flush=True)
         if reboot:
             guest.command("test $(cat /etc/suifleet/device.address) = $(cat /var/lib/suifleet/boot-address); "
                           "test $(sha256sum /etc/suifleet/device.key | cut -d' ' -f1) = "
                           "$(cat /var/lib/suifleet/boot-key-hash); "
                           "test $(cat /var/lib/suifleet/packaging-journal) = preserved")
+            print("PASS: same disk preserves key, address and state across reboot", flush=True)
         else:
             guest.command("mkdir -p /var/lib/suifleet; "
                           "cp /etc/suifleet/device.address /var/lib/suifleet/boot-address; "
                           "sha256sum /etc/suifleet/device.key | cut -d' ' -f1 > /var/lib/suifleet/boot-key-hash; "
                           "echo preserved > /var/lib/suifleet/packaging-journal")
             offline_enrollment(guest)
+            print("PASS: config installation activates daemon; unavailable loopback node causes retry", flush=True)
         # Stop normally and sync the disk before testing another boot.
         guest.command("systemctl restart suifleet-provision.service; sync")
         guest.send("poweroff")
