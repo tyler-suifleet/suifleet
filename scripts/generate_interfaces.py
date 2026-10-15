@@ -92,6 +92,9 @@ def bcs_type(value):
         return "bcs.string()"
     if base == "sui::vec_map::VecMap":
         return f'bcs.struct("VecMap", {{ contents: bcs.vector(bcs.struct("Entry", {{ key: {bcs_type(args[0])}, value: {bcs_type(args[1])} }})) }})'
+    if base == "sui::table::Table":
+        # Entries live in dynamic fields; the struct itself is its UID and size.
+        return 'bcs.struct("Table", { id: bcs.Address, size: bcs.u64() })'
     if base in ["bool", "u8", "u16", "u32", "u64", "u128", "u256"]:
         return f"bcs.{base}()"
     if base.startswith("sui_edge::"):
@@ -109,6 +112,8 @@ def rust_type(value):
         return "String"
     if base == "sui::vec_map::VecMap":
         return f"super::VecMap<{rust_type(args[0])}, {rust_type(args[1])}>"
+    if base == "sui::table::Table":
+        return "super::Table"
     if base in ["bool", "u8", "u16", "u32", "u64", "u128"]:
         return base
     if base.startswith("sui_edge::"):
@@ -216,7 +221,9 @@ def generate(catalog, recipe):
             'pub const REQUIRED_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["required_type_origins"]) + '];',
             'pub const MOVE_ABI_JSON: &str = include_str!("../../interfaces/fleet-v1.json");',
             '#[derive(Debug, Clone, Deserialize, Serialize)]\npub struct Entry<K, V> { pub key: K, pub value: V }',
-            '#[derive(Debug, Clone, Deserialize, Serialize)]\npub struct VecMap<K, V> { pub contents: Vec<Entry<K, V>> }']
+            '#[derive(Debug, Clone, Deserialize, Serialize)]\npub struct VecMap<K, V> { pub contents: Vec<Entry<K, V>> }',
+            '/// sui::table::Table: entries are dynamic fields; the struct is its UID and size.',
+            '#[derive(Debug, Clone, Deserialize, Serialize)]\npub struct Table { pub id: [u8; 32], pub size: u64 }']
     calls = []
     move_types = []
     for module, contents in abi.items():
@@ -237,10 +244,12 @@ def generate(catalog, recipe):
                     types += [f"{arg}: string"]; arguments += [f"tx.pure.address({arg})"]
                 elif base == "vector<std::string::String>":
                     types += [f"{arg}: string[]"]; arguments += [f"tx.pure(bcs.vector(bcs.string()).serialize({arg}))"]
-                elif base == "vector<sui::object::ID>":
+                elif base in ["vector<sui::object::ID>", "vector<address>"]:
                     types += [f"{arg}: string[]"]; arguments += [f"tx.pure(bcs.vector(bcs.Address).serialize({arg}))"]
                 elif base == "u8":
                     types += [f"{arg}: number"]; arguments += [f"tx.pure.u8({arg})"]
+                elif base == "u64":
+                    types += [f"{arg}: number | bigint | string"]; arguments += [f"tx.pure.u64({arg})"]
                 else:
                     raise ValueError(f"unsupported transaction parameter {datatype}")
             calls += [f'  {module}_{name}: (tx: Transaction, packageId: string{", " if types else ""}{", ".join(types)}) => tx.moveCall({{ target: `${{packageId}}::{module}::{name}`, arguments: [{", ".join(arguments)}] }}),']
