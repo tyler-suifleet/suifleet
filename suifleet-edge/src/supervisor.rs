@@ -19,9 +19,10 @@
 //! Component processes carry a marker in their environment, so a daemon
 //! restarted after a crash also finds and kills ones reparented away from it.
 //! `instance.json` records the daemon supervising this state root until it
-//! stopped every component. A daemon that finds the record of one that did
-//! not, and cannot prove that none of its processes survived (a sealed cgroup
-//! with nothing left in it, or a reboot), refuses to start.
+//! stopped every component, and is marked before it starts the first component
+//! process (install or run). A daemon that finds the marked record of one that
+//! did not stop them, and cannot prove that none of its processes survived (a
+//! sealed cgroup with nothing left in it, or a reboot), refuses to start.
 use crate::apply::{self, ApplyRunner};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -163,6 +164,7 @@ pub struct Supervisor {
     active: BTreeMap<String, Spec>,
     running: BTreeMap<String, Handle>,
     status: Arc<Mutex<BTreeMap<String, Status>>>,
+    record: Record,
 }
 
 impl Supervisor {
@@ -195,9 +197,12 @@ impl Supervisor {
         }
         // The previous instance ended without stopping the components it
         // started. What the recovery above cannot see (a descendant that
-        // cleared its environment and lost its parent chain) must be ruled
-        // out some other way, or nothing may start.
-        if let (Some(previous), false) = (&previous, previous_status.is_empty()) {
+        // cleared its environment and lost its parent chain, of a run or of an
+        // install that recorded no status) must be ruled out some other way,
+        // or nothing may start. Only a record written before its first
+        // component process proves there were none.
+        let proven_idle = previous.as_ref().is_some_and(|previous| previous.idle) && previous_status.is_empty();
+        if let (Some(previous), false) = (&previous, proven_idle) {
             if let Err(reason) = previous.left_nothing(&current, Path::new(CGROUP_ROOT), cgroup_writable) {
                 anyhow::bail!(
                     "refusing to start components: the previous daemon instance (pid {}) ended without \
@@ -208,13 +213,18 @@ impl Supervisor {
                 );
             }
         }
-        atomic_write(&root.join(INSTANCE), &serde_json::to_vec_pretty(&current)?)?;
+        let record = Record {
+            path: root.join(INSTANCE),
+            instance: Arc::new(Mutex::new(current)),
+        };
+        record.save()?;
         let supervisor = Self {
             root,
             settings,
             active,
             running: BTreeMap::new(),
             status: Arc::new(Mutex::new(BTreeMap::new())),
+            record,
         };
         write_status(&supervisor.root, &supervisor.status)?;
         Ok(supervisor)
@@ -252,6 +262,7 @@ impl Supervisor {
         let installed = workspace.join("artifact");
         std::fs::rename(artifact, &installed)?;
         if let Some(script) = install {
+            self.record.arm().map_err(|error| error.context("install not started"))?;
             // The old version keeps running until the new one is installed.
             if let Err(error) = runner.apply(&installed, Some(script), request_id).await {
                 let _ = std::fs::remove_dir_all(&workspace);
@@ -354,6 +365,7 @@ impl Supervisor {
             root: self.root.clone(),
             settings: self.settings.clone(),
             status: self.status.clone(),
+            record: self.record.clone(),
             phase: phase_tx,
             spec: spec.clone(),
         };
@@ -446,6 +458,7 @@ struct Context {
     root: PathBuf,
     settings: Settings,
     status: Arc<Mutex<BTreeMap<String, Status>>>,
+    record: Record,
     phase: watch::Sender<Phase>,
 }
 impl Context {
@@ -533,6 +546,7 @@ impl Context {
     fn spawn(&self) -> anyhow::Result<Tracked> {
         let work = self.component.join("work");
         std::fs::create_dir_all(&work)?;
+        self.record.arm()?;
         let log = open_log(&self.component.join("component.log"))?;
         let mut command = self.command(&self.spec.run, None);
         command.stdout(log.try_clone()?).stderr(log);
@@ -873,6 +887,10 @@ struct Instance {
     boot_id: Option<String>,
     /// Its cgroup v2 path, when known.
     cgroup: Option<String>,
+    /// Recorded before it started any component process: none can remain.
+    /// Missing (or an unreadable record) proves nothing.
+    #[serde(default)]
+    idle: bool,
 }
 impl Instance {
     fn current() -> Self {
@@ -888,6 +906,7 @@ impl Instance {
                     .find_map(|line| line.strip_prefix("0::"))
                     .map(str::to_owned)
             }),
+            idle: true,
         }
     }
 
@@ -957,6 +976,34 @@ impl Instance {
         } else {
             Err(format!("its cgroup {path} still holds {} other process(es)", members.len()))
         }
+    }
+}
+
+/// This daemon's `instance.json`, shared by everything that starts component
+/// processes.
+#[derive(Clone)]
+struct Record {
+    path: PathBuf,
+    instance: Arc<Mutex<Instance>>,
+}
+impl Record {
+    fn save(&self) -> anyhow::Result<()> {
+        let instance = self.instance.lock().unwrap();
+        atomic_write(&self.path, &serde_json::to_vec_pretty(&*instance)?)
+    }
+
+    /// Mark the record before the first component process starts (on disk
+    /// first, so a crash right after leaves the marked record behind).
+    fn arm(&self) -> anyhow::Result<()> {
+        let mut instance = self.instance.lock().unwrap();
+        if !instance.idle && self.path.exists() {
+            return Ok(());
+        }
+        let marked = Instance { idle: false, ..instance.clone() };
+        atomic_write(&self.path, &serde_json::to_vec_pretty(&marked)?)
+            .map_err(|error| error.context("cannot record that component processes start"))?;
+        *instance = marked;
+        Ok(())
     }
 }
 
@@ -1395,6 +1442,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_daemon_killed_during_a_first_install_is_not_taken_for_idle() {
+        let mut f = Fixture::new("install-crash");
+        let s = f.open();
+        let settings = s.settings.clone();
+        // A daemon that started nothing restarts without any proof needed,
+        // even though it never stopped cleanly.
+        drop(s);
+        let mut s = f.open();
+        // Killed while the first install runs: no status was ever recorded.
+        let v1 = f.spec("1.0.0", "exec sleep 300");
+        let started = f.dir.join("installing");
+        let install = format!("echo $$ > {}; exec sleep 300", quote(&started));
+        let deploy = f.deploy(&mut s, v1, Some(&install));
+        tokio::select! {
+            _ = deploy => panic!("the install finished"),
+            _ = until("the install to start", || started.exists()) => {}
+        }
+        let status = std::fs::read(f.dir.join("supervised/status.json")).unwrap();
+        assert_eq!(serde_json::from_slice::<BTreeMap<String, Status>>(&status).unwrap().len(), 0);
+        let record: Instance = serde_json::from_slice(&std::fs::read(f.dir.join("supervised").join(INSTANCE)).unwrap()).unwrap();
+        assert!(!record.idle, "the install started before its record was marked");
+        drop(s);
+        for _ in 0..2 {
+            let error = Supervisor::open(&f.dir, settings.clone()).err().expect("started over a crashed install");
+            assert!(format!("{error:#}").contains("refusing to start components"), "{error:#}");
+        }
+        // So does an unreadable record.
+        std::fs::write(f.dir.join("supervised").join(INSTANCE), b"{").unwrap();
+        assert!(Supervisor::open(&f.dir, settings.clone()).is_err(), "an unreadable record proved nothing ran");
+        std::fs::remove_file(f.dir.join("supervised").join(INSTANCE)).unwrap();
+        f.open().stop_all().await;
+    }
+
+    #[tokio::test]
     async fn another_live_instance_is_not_disturbed() {
         let mut f = Fixture::new("second-instance");
         let mut s = f.open();
@@ -1425,7 +1506,7 @@ mod tests {
         for dir in [&cgroups, &cgroups.join("system.slice")] {
             std::fs::write(dir.join("cgroup.procs"), "1\n2\n").unwrap();
         }
-        let current = Instance { pid: 40, pid_start: Some(1), boot_id: Some("b".into()), cgroup: Some("/system.slice/suifleet.service".into()) };
+        let current = Instance { pid: 40, pid_start: Some(1), boot_id: Some("b".into()), cgroup: Some("/system.slice/suifleet.service".into()), idle: false };
         let previous = Instance { pid: 30, ..current.clone() };
         let sealed = |_: &Path| false;
         let procs = |dir: &Path, pids: &str| std::fs::write(dir.join("cgroup.procs"), pids).unwrap();

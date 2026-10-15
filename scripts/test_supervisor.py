@@ -18,6 +18,11 @@ One component, `svc`, across daemon lifetimes:
                                           then one instance
   0x404 v4  no run (one-shot install)  -> Applied; v3 stopped and uncommitted,
                                           not started again by a daemon restart
+  0x405 v5  daemon SIGKILL during its  -> no status recorded yet, but the marked
+            first install                 instance record still makes the
+                                          successor refuse over the install's
+                                          undetectable descendant; once cleared,
+                                          v5 is reported Failed (interrupted)
 """
 import argparse
 import json
@@ -103,6 +108,7 @@ def run(binary):
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     process = None
+    install_group = None
     seen = set()
     shim, rpc_url = start_grpc(f"http://127.0.0.1:{server.server_port}")
     try:
@@ -269,18 +275,59 @@ def run(binary):
                 assert status() == {} and len(read("runs").splitlines()) == runs, "a daemon restart resurrected v3"
                 print("PASS: one-shot v4 replaced supervised v3: v3 stopped, uncommitted, not restarted")
 
-                # Reports queued across the stops and the kill go out on the next poll.
+                # Daemon killed during a first install, before any status exists:
+                # the install's descendant (env-cleared, setsid, reparented) is
+                # as undetectable as a run's, and the marked record says so.
+                pids = {name: root / f"install-{name}" for name in ("shell", "middle", "detached")}
+                install = (f"echo $$ > {pids['shell']}; "
+                           f"sh -c 'env -i setsid sleep 300 & echo $! > {pids['detached']}; "
+                           f"echo $$ > {pids['middle']}; exec sleep 300' & wait")
+                deploy("0x405", "5.0.0", install=install, run="exec sleep 300")
+                wait_for(lambda: all(path.exists() and path.read_text().strip() for path in pids.values()),
+                         "v5's install did not start", process)
+                shell, middle, detached = (int(path.read_text()) for path in pids.values())
+                seen.update([shell, middle, detached])
+                install_group = os.getpgid(shell)
+                assert json.loads((components / "status.json").read_text()) == {}, "a status was recorded"
+                assert json.loads((components / "instance.json").read_text())["idle"] is False
+                process.send_signal(signal.SIGKILL)
+                process.wait(timeout=10)
+                os.kill(middle, signal.SIGKILL)
+                wait_for(lambda: parent(detached) != middle, "the install's descendant was not reparented")
+                for _ in range(2):
+                    process = start()
+                    assert process.wait(timeout=30) != 0, "started without ruling out an install's descendant"
+                    process = None
+                    assert alive(detached)
+                assert (root / "daemon.log").read_text().count("refusing to start components") >= 4
+                print("PASS: after a daemon SIGKILL during a first install (no status yet) the successor "
+                      "refused to start over the install's undetectable descendant, repeatedly")
+                os.killpg(install_group, signal.SIGKILL)
+                os.kill(detached, signal.SIGKILL)
+                (components / "instance.json").unlink()
+                process = start()
+                wait_for(lambda: outcome("0x405").get("reported"), "v5's interrupted outcome was not sent", process)
+                assert outcome("0x405").get("status") == 2 and "interrupted" in outcome("0x405")["error"], outcome("0x405")
+                assert status() == {} and "svc" not in json.loads((components / "active.json").read_text())
+                print("PASS: once cleared, the interrupted v5 was reported Failed and not committed")
+
+                # Reports queued across the stops and the kills go out on the next poll.
                 process.send_signal(signal.SIGTERM)
                 assert process.wait(timeout=20) == 0
                 process = None
                 assert not sim.errors, sim.errors
                 reported = sorted(id for id, _ in sim.reports)
-                assert reported == ["0x401", "0x402", "0x403", "0x404"], reported
-                print("PASS: all four outcomes reported on chain")
+                assert reported == ["0x401", "0x402", "0x403", "0x404", "0x405"], reported
+                print("PASS: all five outcomes reported on chain")
     finally:
         if process and process.poll() is None:
             process.kill()
             process.wait()
+        if install_group:
+            try:
+                os.killpg(install_group, signal.SIGKILL)
+            except OSError:
+                pass
         # Leave nothing behind when an assertion failed mid-run (only processes
         # that still look like the component's, not a reused PID).
         for pid in seen:
