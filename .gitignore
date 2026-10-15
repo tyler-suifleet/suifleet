@@ -39,4 +39,9 @@ dapp/node_modules
 # CI step logs and dependency caches (make ci, .github/workflows/ci.yml)
 ci-logs/
 .ci-cache/
+# Live acceptance state and evidence (device signing credentials stay private)
+live-state/
+encrypted-live-state/
+evidence/
+live-evidence.json
 /dist/

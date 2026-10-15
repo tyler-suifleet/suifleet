@@ -1,8 +1,4 @@
-# Separately authorized live gates: package upgrade, wallet and hardware.
-# Never triggered by pull requests or pushes. Each gate runs only after a human
-# reviewer approves its GitHub environment, which also holds that gate's
-# secrets. The preflight job fails closed if the environment lacks a required
-# reviewer (GitHub would otherwise auto-create it unprotected).
+# Manual wallet/hardware approvals remain; package-upgrade delegates to automatic testnet.
 name: Live gates
 
 on:
@@ -14,9 +10,10 @@ on:
         type: choice
         options: [package-upgrade, wallet, hardware]
       network:
-        description: Target network alias recorded in the run (e.g. testnet); the gate verifies chain identity itself
+        description: Target network (package-upgrade supports testnet); the gate verifies chain identity itself
         required: true
         type: string
+        default: testnet
       confirm:
         description: Type the gate name again to confirm a live run
         required: true
@@ -26,11 +23,15 @@ permissions:
   contents: read
 
 concurrency:
-  group: live-${{ inputs.gate }}
+  group: ${{ inputs.gate == 'package-upgrade' && 'suifleet-testnet-ci-wallet' || format('live-{0}', inputs.gate) }}
   cancel-in-progress: false
+  queue: max
 
 jobs:
   preflight:
+    permissions:
+      contents: read
+      actions: write
     runs-on: ubuntu-22.04
     timeout-minutes: 5
     steps:
@@ -39,8 +40,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GATE: ${{ inputs.gate }}
           CONFIRM: ${{ inputs.confirm }}
+          NETWORK: ${{ inputs.network }}
         run: |
           [ "$CONFIRM" = "$GATE" ] || { echo "::error::confirm must equal '$GATE'"; exit 1; }
+          if [ "$GATE" = package-upgrade ]; then
+            [ "$GITHUB_REF" = refs/heads/main ] && [ "$NETWORK" = testnet ] || exit 1
+            gh workflow run testnet.yml --ref main
+            exit 0
+          fi
           rules=$(gh api "repos/$GITHUB_REPOSITORY/environments/live-$GATE" \
             --jq '[.protection_rules[]? | select(.type == "required_reviewers") | .reviewers | length] | add // 0') \
             || { echo "::error::environment live-$GATE does not exist; see docs/OPERATIONS.md"; exit 1; }
@@ -48,19 +55,27 @@ jobs:
 
   gate:
     needs: preflight
+    if: inputs.gate != 'package-upgrade'
     environment: live-${{ inputs.gate }}
     # Hardware runs on a self-hosted runner attached to the test device.
     runs-on: ${{ inputs.gate == 'hardware' && fromJSON('["self-hosted", "raspberrypi3bplus"]') || 'ubuntu-22.04' }}
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
 
-      - name: Run gate
+      - name: Make origin/main available for the merge base
+        run: git fetch --no-tags origin main:refs/remotes/origin/main
+
+      - name: Run other gates
+        if: inputs.gate != 'package-upgrade'
         env:
           GATE: ${{ inputs.gate }}
           SUIFLEET_NETWORK: ${{ inputs.network }}
         run: |
-          # Suites are provided by SF-010 (package-upgrade, wallet) and SF-031 (hardware).
+          # Suites are provided by SF-010 (wallet) and SF-031 (hardware).
           if ! make -n "live-gate-$GATE" >/dev/null 2>&1; then
             echo "::error::make live-gate-$GATE is not implemented yet (SF-010/SF-031)"
             exit 1
