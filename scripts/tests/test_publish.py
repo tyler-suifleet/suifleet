@@ -1,0 +1,542 @@
+"""Offline tests for scripts/publish.py: a fake Sui CLI and fake gRPC chain
+facts. Nothing here touches a network or spends gas."""
+import contextlib
+import io
+import json
+import os
+from pathlib import Path
+import shutil
+import sys
+import tempfile
+import unittest
+import unittest.mock
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import deployment_manifest as dm
+import publish
+
+ROOT = Path(__file__).resolve().parents[2]
+CHAIN = "1234abcd"
+ME, OTHER = dm.object_id("0xa11ce"), dm.object_id("0xb0b")
+TWO = dm.object_id("0x2")
+
+
+def oid(n):
+    return dm.object_id(hex(n))
+
+
+class Chain:
+    """Packages, UpgradeCaps and registries as chain_facts reports them."""
+    def __init__(self, chain=CHAIN):
+        self.chain, self.objects = chain, {}
+
+    def package(self, package, version, origin):
+        self.objects[package] = {"kind": "package", "version": version, "type_origins": [
+            {"module": n.split("::")[0], "datatype": n.split("::")[1], "package": origin} for n in dm.REQUIRED_TYPES]}
+
+    def cap(self, cap, package, version, owner=ME):
+        self.objects[cap] = {"kind": "object", "type": TWO + "::package::UpgradeCap", "version": 3,
+                             "owner": {"address": owner},
+                             "upgrade_cap": {"package": package, "version": version, "policy": 0}}
+
+    def registry(self, registry, origin):
+        self.objects[registry] = {"kind": "object", "type": origin + "::device_registry::DeviceRegistry",
+                                  "version": 3, "owner": {"shared": 3}}
+
+    def __call__(self, url, *ids):
+        return {"chain_identifier": self.chain,
+                "objects": {dm.object_id(i): self.objects.get(dm.object_id(i), {"kind": "absent"}) for i in ids}}
+
+
+class Cli:
+    """`sui client` with one active environment. publish/upgrade "execute"
+    by updating the chain and Published.toml like the real CLI."""
+    def __init__(self, test, env="dev", address=ME, rpc="http://127.0.0.1:9000"):
+        self.test, self.env, self.address, self.rpc = test, env, address, rpc
+        self.calls, self.result, self.write_published = [], "success", True
+
+    def __call__(self, *args, check=True):
+        args = [str(a) for a in args]
+        self.calls.append(args)
+        out = lambda stdout: type("Result", (), {"stdout": stdout, "stderr": "", "returncode": 0})()
+        if args[0] == "envs":
+            return out(json.dumps([[{"alias": self.env, "rpc": self.rpc}], self.env]))
+        if args[0] == "active-address":
+            return out(self.address + "\n")
+        if self.result == "exit":
+            raise publish.PublishError("`sui client publish` failed (exit 1)")
+        if self.result == "garbage":
+            return out("Error: insufficient gas\n")
+        if "--dry-run" in args:
+            return out(json.dumps({"effects": {"status": {"status": "success"}, "gasUsed": {"computationCost": "1"}}}))
+        chain, package_path = self.test.chain, Path(args[args.index("--json") - 1])
+        if self.result == "abort":
+            return out(json.dumps({"digest": "D", "effects": {"status": {"status": "failure", "error": "MoveAbort"}}}))
+        if args[0] == "publish":
+            package, version, cap, registry = oid(0x100), 1, oid(0xc0), oid(0xbe)
+            changes = [{"type": "created", "objectType": "0x2::package::UpgradeCap", "objectId": cap,
+                        "owner": {"AddressOwner": self.address}},
+                       {"type": "created", "objectType": package + "::device_registry::DeviceRegistry",
+                        "objectId": registry, "owner": {"Shared": {"initial_shared_version": 3}}}]
+            chain.registry(registry, package)
+            origin = package
+        else:
+            cap = dm.object_id(args[args.index("--upgrade-capability") + 1])
+            previous = chain.objects[cap]["upgrade_cap"]
+            version = previous["version"] + 1
+            package = oid(0x100 + version)
+            origin = chain.objects[previous["package"]]["type_origins"][0]["package"]
+            changes = [{"type": "mutated", "objectType": "0x2::package::UpgradeCap", "objectId": cap,
+                        "owner": {"AddressOwner": self.address}}]
+        chain.package(package, version, origin)
+        chain.cap(cap, package, version, self.address)
+        changes.append({"type": "published", "packageId": package, "version": str(version)})
+        if self.write_published:
+            write_published(package_path, self.env, chain.chain, package, origin, version, cap)
+        return out(json.dumps({"digest": f"Tx{version}", "effects": {"status": {"status": "success"}},
+                               "objectChanges": changes}))
+
+
+def write_published(package_path, env, chain, package, original, version, cap, other=True):
+    # Another environment's section first: an unscoped grep would read it.
+    text = "# Generated by Move\n\n"
+    if other:
+        text += ('[published.testnet]\nchain-id = "4c78adac"\npublished-at = "0xdead"\noriginal-id = "0xdead"\n'
+                 'version = 9\ntoolchain-version = "1.81.1"\nbuild-config = { flavor = "sui", edition = "2024" }\n'
+                 'upgrade-capability = "0xbad"\n\n')
+    text += (f'[published.{env}]\nchain-id = "{chain}"\npublished-at = "{package}"\noriginal-id = "{original}"\n'
+             f'version = {version}\ntoolchain-version = "1.81.1"\nbuild-config = {{ flavor = "sui", edition = "2024" }}\n'
+             f'upgrade-capability = "{cap}"\n')
+    (package_path / "Published.toml").write_text(text)
+
+
+class PublishTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="publish-test-"))
+        self.package = self.tmp / "contracts"; self.package.mkdir()
+        (self.package / "Move.toml").write_text(
+            f'[package]\nname = "sui_edge"\nedition = "2024.beta"\n\n[environments]\ndev = "{CHAIN}"\n')
+        self.records = self.tmp / "deployments"
+        self.env_file = self.tmp / ".env.local"
+        self.env_file.write_text("NEXT_PUBLIC_WALRUS_EPOCHS=7\nNEXT_PUBLIC_PACKAGE_ID=0xold\nNEXT_PUBLIC_DEPLOYMENT_MANIFEST='{}'\n")
+        self.chain = Chain()
+        self.cli = Cli(self)
+        quiet = contextlib.redirect_stdout(io.StringIO())
+        quiet.__enter__()
+        self.addCleanup(quiet.__exit__, None, None, None)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def args(self, *extra):
+        args = publish.parser().parse_args([
+            "--expect-address", ME, "--network", "localnet", "--publisher", "http://127.0.0.1:31415",
+            "--aggregator", "http://127.0.0.1:31416", "--package", str(self.package), "--records", str(self.records),
+            "--frontend-env", str(self.env_file), "--device-template", str(ROOT / "suifleet-edge/config.example.toml"),
+            *extra])
+        return args
+
+    def run_publish(self, *extra):
+        return publish.run(self.args(*extra), self.cli, self.chain)
+
+    def snapshot(self):
+        return {str(p.relative_to(self.tmp)): (p.readlink() if p.is_symlink() else p.read_bytes() if p.is_file() else None)
+                for p in sorted(self.tmp.rglob("*"))}
+
+    def transactions(self):
+        return [c for c in self.cli.calls if c[0] in ("publish", "upgrade")]
+
+    def assert_refused(self, pattern, *extra):
+        before = self.snapshot()
+        with self.assertRaisesRegex(publish.PublishError, pattern):
+            self.run_publish(*extra)
+        self.assertEqual(self.transactions(), [], "no transaction may be attempted")
+        self.assertEqual(self.snapshot(), before, "nothing may be written")
+
+    def manifest(self):
+        return json.loads((self.records / "dev/current/deployment.json").read_text())
+
+    def frontend_manifest(self):
+        lines = self.env_file.read_text().splitlines()
+        values = [l.split("=", 1)[1].strip("'") for l in lines if l.startswith("NEXT_PUBLIC_DEPLOYMENT_MANIFEST=")]
+        self.assertEqual(len(values), 1)
+        return json.loads(values[0])
+
+    # ── success paths ─────────────────────────────────────────────────────────
+
+    def test_fresh_publish_records_and_generates_both_configs(self):
+        release = self.run_publish()
+        manifest = self.manifest()
+        self.assertEqual(release, self.records / "dev/releases" / f"v1-{oid(0x100)[2:14]}")
+        self.assertEqual((manifest["call_package_id"], manifest["upgrade_cap_id"], manifest["package_version"]),
+                         (oid(0x100), oid(0xc0), "1"))
+        self.assertEqual(manifest["shared_objects"]["registry"], {"id": oid(0xbe), "initial_shared_version": "3"})
+        self.assertEqual(set(manifest["type_origins"].values()), {oid(0x100)})
+        self.assertEqual(self.frontend_manifest(), manifest)
+        env = self.env_file.read_text()
+        self.assertIn("NEXT_PUBLIC_WALRUS_EPOCHS=7\n", env)
+        self.assertNotIn("NEXT_PUBLIC_PACKAGE_ID", env)
+        config = (self.records / "dev/current/config.toml").read_text()
+        self.assertTrue(config.startswith('[sui]\nmanifest_path = "deployment.json"\n'))
+        self.assertEqual(config.count("[sui]"), 1)
+        self.assertEqual(list((self.records / "dev").glob("pending-*")), [])
+        self.assertEqual(self.transactions()[0][:2], ["publish", str(self.package)])
+
+    def test_upgrade_uses_this_environments_cap_and_keeps_origins_and_registry(self):
+        self.run_publish()
+        first = self.manifest()
+        self.cli.calls.clear()
+        self.run_publish("--gas-budget", "123")
+        upgrade = self.transactions()
+        self.assertEqual(upgrade[0][:3], ["upgrade", "--upgrade-capability", oid(0xc0)])
+        self.assertIn("123", upgrade[0])
+        manifest = self.manifest()
+        self.assertEqual((manifest["call_package_id"], manifest["package_version"]), (oid(0x102), "2"))
+        self.assertEqual(manifest["type_origins"], first["type_origins"])
+        self.assertEqual(manifest["shared_objects"], first["shared_objects"])
+        self.assertEqual(manifest["walrus"], first["walrus"])
+        self.assertEqual(self.frontend_manifest(), manifest)
+        # The prior release stays recorded; only the pointer moved.
+        self.assertEqual(sorted(p.name for p in (self.records / "dev/releases").iterdir()),
+                         [f"v1-{oid(0x100)[2:14]}", f"v2-{oid(0x102)[2:14]}"])
+        self.assertEqual(json.loads((self.records / "dev/releases" / f"v1-{oid(0x100)[2:14]}" / "deployment.json").read_text()), first)
+
+    def test_upgrade_defaults_walrus_urls_from_previous_release(self):
+        self.run_publish()
+        args = self.args(); args.publisher = args.aggregator = None
+        publish.run(args, self.cli, self.chain)
+        self.assertEqual(self.manifest()["walrus"]["aggregator_url"], "http://127.0.0.1:31416")
+
+    def test_dry_run_writes_nothing(self):
+        before = self.snapshot()
+        self.assertIsNone(self.run_publish("--dry-run"))
+        self.assertIn("--dry-run", self.transactions()[0])
+        self.assertEqual(self.snapshot(), before)
+
+    # ── refusals before any transaction ──────────────────────────────────────
+
+    def test_wrong_account_refused(self):
+        self.cli.address = OTHER
+        self.assert_refused("not the expected")
+
+    def test_move_toml_chain_mismatch_refused(self):
+        self.chain.chain = "feedf00d"
+        self.assert_refused("network may have reset")
+
+    def test_undeclared_environment_refused(self):
+        self.cli.env = "elsewhere"
+        self.assert_refused("declares no environment 'elsewhere'")
+
+    def test_mainnet_and_mislabeled_chains_refused(self):
+        self.chain.chain = "35834a8a"
+        (self.package / "Move.toml").write_text('[package]\nname = "x"\n[environments]\ndev = "35834a8a"\n')
+        self.assert_refused("--network localnet does not match")
+        self.cli.env = "mainnet"
+        args = self.args(); args.network = None
+        with self.assertRaisesRegex(publish.PublishError, "mainnet publication is not supported"):
+            publish.run(args, self.cli, self.chain)
+        self.cli.env, self.chain.chain = "testnet", CHAIN
+        with self.assertRaisesRegex(publish.PublishError, "points at chain"):
+            publish.run(self.args(), self.cli, self.chain)
+
+    def test_unlabelled_chain_needs_network(self):
+        args = self.args(); args.network = None
+        with self.assertRaisesRegex(publish.PublishError, "pass --network"):
+            publish.run(args, self.cli, self.chain)
+
+    def test_published_section_for_reset_chain_refused(self):
+        self.run_publish()
+        write_published(self.package, "dev", "0badc0de", oid(0x100), oid(0x100), 1, oid(0xc0))
+        self.cli.calls.clear()
+        self.assert_refused("is for chain 0badc0de")
+
+    def test_upgrade_cap_checks(self):
+        self.run_publish()
+        self.cli.calls.clear()
+        for change, pattern in [(dict(owner=OTHER), "not owned by the active account"),
+                                (dict(version=5), "identifies"),
+                                (dict(package=oid(0x999)), "identifies")]:
+            saved = json.loads(json.dumps(self.chain.objects))
+            cap = self.chain.objects[oid(0xc0)]
+            if "owner" in change:
+                cap["owner"] = {"address": change["owner"]}
+            else:
+                cap["upgrade_cap"].update(change)
+            self.assert_refused(pattern)
+            self.chain.objects = saved
+        self.chain.objects[oid(0xc0)] = {"kind": "absent"}
+        with self.assertRaises((publish.PublishError, ValueError)):
+            self.run_publish()
+        self.assertEqual(self.transactions(), [])
+
+    def test_published_package_version_must_match_chain(self):
+        self.run_publish()
+        self.cli.calls.clear()
+        self.chain.objects[oid(0x100)]["version"] = 7
+        self.assert_refused("is not package version 1")
+
+    def test_record_and_publication_must_agree(self):
+        self.run_publish()
+        self.cli.calls.clear()
+        (self.package / "Published.toml").unlink()
+        self.assert_refused("refusing a fresh publish that would orphan it")
+        write_published(self.package, "dev", CHAIN, oid(0x777), oid(0x777), 1, oid(0xc0))
+        self.assert_refused("does not match")
+
+    def test_adopting_an_unrecorded_deployment_requires_registry(self):
+        write_published(self.package, "dev", CHAIN, oid(0x100), oid(0x100), 1, oid(0xc0))
+        self.chain.package(oid(0x100), 1, oid(0x100))
+        self.chain.cap(oid(0xc0), oid(0x100), 1)
+        self.chain.registry(oid(0xbe), oid(0x100))
+        self.assert_refused("pass --registry")
+        self.run_publish("--registry", "0xbe")
+        self.assertEqual(self.manifest()["shared_objects"]["registry"]["id"], oid(0xbe))
+        self.assertEqual(self.manifest()["package_version"], "2")
+
+    # ── failures of the transaction itself ───────────────────────────────────
+
+    def test_failed_transactions_change_nothing(self):
+        self.run_publish()
+        for result, pattern in [("abort", "failed on chain"), ("exit", "failed"), ("garbage", "not JSON")]:
+            self.cli.result = result
+            before = self.snapshot()
+            with self.assertRaisesRegex(publish.PublishError, pattern):
+                self.run_publish()
+            self.assertEqual(self.snapshot(), before, result)
+
+    # ── failures after the transaction executed ──────────────────────────────
+
+    def test_unrecorded_metadata_keeps_pending_and_prior_config_then_recovers(self):
+        self.run_publish()
+        prior_env, prior_current = self.env_file.read_text(), (self.records / "dev/current").readlink()
+        self.cli.write_published = False
+        with self.assertRaisesRegex(publish.PublishError, "EXECUTED") as caught:
+            self.run_publish()
+        self.assertIn("did not update Published.toml", str(caught.exception))
+        self.assertEqual(self.env_file.read_text(), prior_env)
+        self.assertEqual((self.records / "dev/current").readlink(), prior_current)
+        [pending] = (self.records / "dev").glob("pending-*.json")
+        recorded = json.loads(pending.read_text())
+        self.assertEqual((recorded["package"], recorded["version"], recorded["digest"]), (oid(0x102), 2, "Tx2"))
+        # Recovery refuses until Published.toml records the transaction...
+        with self.assertRaisesRegex(publish.PublishError, "does not record transaction"):
+            publish.run(self.args("--recover", str(pending)), self.cli, self.chain)
+        self.assertTrue(pending.exists())
+        # ...then finishes without another transaction.
+        write_published(self.package, "dev", CHAIN, oid(0x102), oid(0x100), 2, oid(0xc0))
+        self.cli.calls.clear()
+        publish.run(self.args("--recover", str(pending)), self.cli, self.chain)
+        self.assertEqual(self.transactions(), [])
+        self.assertFalse(pending.exists())
+        self.assertEqual(self.manifest()["call_package_id"], oid(0x102))
+        self.assertEqual(self.frontend_manifest(), self.manifest())
+
+    def test_unverifiable_new_deployment_keeps_prior_config(self):
+        self.run_publish()
+        prior = self.snapshot()
+        original = self.chain.__call__
+        def stale(url, *ids):
+            facts = original(url, *ids)
+            if oid(0x102) in facts["objects"]:
+                facts["objects"][oid(0x102)] = {"kind": "absent"}
+            return facts
+        publish.time.sleep, sleep = (lambda s: None), publish.time.sleep
+        try:
+            with self.assertRaisesRegex(publish.PublishError, "cannot verify the new deployment"):
+                publish.run(self.args(), self.cli, stale)
+        finally:
+            publish.time.sleep = sleep
+        self.assertEqual(self.env_file.read_bytes(), prior[str(self.env_file.relative_to(self.tmp))])
+        self.assertEqual(len(list((self.records / "dev").glob("pending-*.json"))), 1)
+
+    def failing_frontend_rename(self):
+        """os.replace that fails only when it would make .env.local live."""
+        real = publish.os.replace
+        def replace(source, destination):
+            if Path(destination) == self.env_file:
+                raise OSError(28, "No space left on device")
+            return real(source, destination)
+        return unittest.mock.patch.object(publish.os, "replace", replace)
+
+    def leftovers(self):
+        return sorted(p.name for p in [*self.tmp.iterdir(), *(self.records / "dev").iterdir()]
+                      if p.name.startswith(".") and p != self.env_file)
+
+    def test_frontend_activation_failure_keeps_both_clients_on_prior_release(self):
+        # Review of 501484d: current advanced to v2 while .env.local stayed v1.
+        self.run_publish()
+        prior_env, prior_current = self.env_file.read_bytes(), (self.records / "dev/current").readlink()
+        with self.failing_frontend_rename():
+            with self.assertRaisesRegex(publish.PublishError, "previous configuration is unchanged") as caught:
+                self.run_publish()
+        self.assertIn("No space left on device", str(caught.exception))
+        self.assertEqual((self.records / "dev/current").readlink(), prior_current)
+        self.assertEqual(self.env_file.read_bytes(), prior_env)
+        self.assertEqual(self.leftovers(), [])
+        [pending] = (self.records / "dev").glob("pending-*.json")
+        publish.run(self.args("--recover", str(pending)), self.cli, self.chain)
+        self.assertEqual(self.manifest()["package_version"], "2")
+        self.assertEqual(self.frontend_manifest(), self.manifest())
+
+    def test_unwritable_frontend_env_activates_nothing(self):
+        self.run_publish()
+        prior_env, prior_current = self.env_file.read_bytes(), (self.records / "dev/current").readlink()
+        real = publish.stage
+        def full(path, text):
+            if path == self.env_file:
+                raise OSError(28, "No space left on device")
+            return real(path, text)
+        with unittest.mock.patch.object(publish, "stage", full):
+            with self.assertRaisesRegex(publish.PublishError, "previous configuration is unchanged"):
+                self.run_publish()
+        self.assertEqual((self.records / "dev/current").readlink(), prior_current)
+        self.assertEqual(self.env_file.read_bytes(), prior_env)
+        self.assertEqual(self.leftovers(), [])
+
+    def test_fresh_publish_frontend_failure_leaves_no_current(self):
+        with self.failing_frontend_rename():
+            with self.assertRaisesRegex(publish.PublishError, "previous configuration is unchanged"):
+                self.run_publish()
+        self.assertFalse((self.records / "dev/current").is_symlink())
+        self.assertIn("NEXT_PUBLIC_PACKAGE_ID=0xold", self.env_file.read_text())
+
+    def test_failure_message_reports_a_changed_configuration(self):
+        self.run_publish()
+        real = publish.install
+        def half(*args):
+            (self.records / "dev/current").unlink()
+            raise publish.PublishError("simulated crash mid-activation")
+        with unittest.mock.patch.object(publish, "install", half):
+            with self.assertRaisesRegex(publish.PublishError, "WARNING: deployments/current or .env.local changed"):
+                self.run_publish()
+
+    def test_partial_install_is_rerunnable(self):
+        self.run_publish()
+        manifest = self.manifest()
+        self.env_file.unlink()
+        publish.install(manifest, self.records, "dev", ROOT / "suifleet-edge/config.example.toml", self.env_file)
+        self.assertEqual(self.frontend_manifest(), manifest)
+        different = json.loads(json.dumps(manifest)); different["walrus"]["publisher_url"] = "http://other.example"
+        with self.assertRaisesRegex(publish.PublishError, "different manifest"):
+            publish.install(different, self.records, "dev", ROOT / "suifleet-edge/config.example.toml", self.env_file)
+
+    def killed_after(self, destination, *extra):
+        """Run publish in a child that dies (no cleanup, no except blocks)
+        right after os.replace makes DESTINATION live."""
+        real = publish.os.replace
+        def replace(source, target):
+            real(source, target)
+            if Path(target) == destination:
+                os._exit(73)
+        child = os.fork()
+        if child == 0:
+            try:
+                with unittest.mock.patch.object(publish.os, "replace", replace):
+                    self.run_publish(*extra)
+            finally:
+                os._exit(1)
+        self.assertEqual(os.waitstatus_to_exitcode(os.waitpid(child, 0)[1]), 73)
+
+    def replay_upgrade(self, version):
+        """The fake chain lives in memory: repeat a child's upgrade here
+        (Published.toml and the records it wrote are already on disk)."""
+        package, cap = oid(0x100 + version), oid(0xc0)
+        self.chain.package(package, version, oid(0x100))
+        self.chain.cap(cap, package, version)
+
+    def test_killed_between_renames_is_finished_by_reconcile(self):
+        # Review of c514eaf: process death after the current rename left
+        # current at v2 and .env.local at v1 with nothing to repair it.
+        self.run_publish()
+        self.killed_after(self.records / "dev/current")
+        journal = self.records / "dev" / publish.JOURNAL
+        self.assertTrue(journal.is_file(), "the journal must survive the kill")
+        self.assertEqual(self.manifest()["package_version"], "2")
+        self.assertEqual(self.frontend_manifest()["package_version"], "1")
+        before = self.snapshot()
+        with self.assertRaisesRegex(publish.PublishError, "activation was interrupted"):
+            self.run_publish("--dry-run")
+        self.assertEqual(self.snapshot(), before)
+        publish.run(self.args("--reconcile"), self.cli, self.chain)
+        self.assertFalse(journal.exists())
+        self.assertEqual(self.frontend_manifest(), self.manifest())
+        self.assertEqual(self.manifest()["package_version"], "2")
+        self.assertIn("NEXT_PUBLIC_WALRUS_EPOCHS=7", self.env_file.read_text())
+        self.assertEqual(self.leftovers(), [])
+        self.assertEqual(len(self.transactions()), 1, "reconcile sends no transaction")
+        self.replay_upgrade(2)
+        [pending] = (self.records / "dev").glob("pending-*.json")
+        publish.run(self.args("--recover", str(pending)), self.cli, self.chain)
+        self.assertFalse(pending.exists())
+        self.assertEqual(self.frontend_manifest(), self.manifest())
+
+    def test_next_publish_finishes_an_interrupted_activation_first(self):
+        self.run_publish()
+        self.killed_after(self.records / "dev/current")
+        self.replay_upgrade(2)
+        self.run_publish()
+        self.assertFalse((self.records / "dev" / publish.JOURNAL).exists())
+        self.assertEqual(self.manifest()["package_version"], "3")
+        self.assertEqual(self.frontend_manifest(), self.manifest())
+
+    def test_killed_before_any_rename_rolls_forward(self):
+        self.run_publish()
+        real = publish.os.symlink
+        def symlink(source, target):
+            if Path(target).name == ".current.new":
+                os._exit(73)
+            return real(source, target)
+        child = os.fork()
+        if child == 0:
+            try:
+                with unittest.mock.patch.object(publish.os, "symlink", symlink):
+                    self.run_publish()
+            finally:
+                os._exit(1)
+        self.assertEqual(os.waitstatus_to_exitcode(os.waitpid(child, 0)[1]), 73)
+        self.assertEqual(self.manifest()["package_version"], "1")
+        publish.run(self.args("--reconcile"), self.cli, self.chain)
+        self.assertEqual(self.manifest()["package_version"], "2")
+        self.assertEqual(self.frontend_manifest(), self.manifest())
+        self.assertEqual(self.leftovers(), [])
+
+    def test_failed_roll_forward_keeps_the_journal(self):
+        self.run_publish()
+        self.killed_after(self.records / "dev/current")
+        with self.failing_frontend_rename():
+            with self.assertRaises(OSError):
+                publish.run(self.args("--reconcile"), self.cli, self.chain)
+        self.assertTrue((self.records / "dev" / publish.JOURNAL).is_file())
+        self.assertEqual(self.manifest()["package_version"], "2", "a roll forward is never undone")
+        publish.run(self.args("--reconcile"), self.cli, self.chain)
+        self.assertFalse((self.records / "dev" / publish.JOURNAL).exists())
+        self.assertEqual(self.frontend_manifest(), self.manifest())
+
+    # ── metadata parsing ─────────────────────────────────────────────────────
+
+    def test_toml_subset_is_strict(self):
+        parsed = publish.parse_toml('[a.b]\nx = "1" # c\ny = 2\nz = { k = "v" }\n[c]\n"q" = true\n', "t")
+        self.assertEqual(parsed, {"a": {"b": {"x": "1", "y": 2, "z": '{ k = "v" }'}}, "c": {"q": True}})
+        for bad in ['x = [1, 2]', 'x = """', 'x = 1\nx = 2', 'x = 1.5', '[a]\n[[b]]', 'x = "a\\"b"']:
+            with self.assertRaises(publish.PublishError, msg=bad):
+                publish.parse_toml(bad, "t")
+
+    def test_repository_metadata_parses(self):
+        publish.parse_toml((ROOT / "contracts/Move.toml").read_text(), "Move.toml")
+        publish.parse_toml((ROOT / "contracts/Published.toml").read_text(), "Published.toml")
+        self.assertIsNone(publish.publication(ROOT / "contracts", "testnet"))
+
+    def test_malformed_section_rejected(self):
+        (self.package / "Published.toml").write_text('[published.dev]\nchain-id = "x"\n')
+        with self.assertRaisesRegex(publish.PublishError, "malformed"):
+            publish.publication(self.package, "dev")
+
+    def test_cli_requires_expected_address(self):
+        with self.assertRaises(SystemExit):
+            publish.main(["--dry-run"])
+
+    def test_reconcile_alone_needs_no_address_and_sends_nothing(self):
+        self.assertEqual(publish.main(["--reconcile", "--records", str(self.records)]), 0)
+
+
+if __name__ == "__main__":
+    unittest.main()
