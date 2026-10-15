@@ -95,7 +95,7 @@ toolchain-versions:
 # CI entry point (run inside the dev image): each step's output is kept under
 # ci-logs/ for failure diagnostics. No step publishes, spends gas or uses secrets.
 ci: SHELL := /bin/bash
-CI_STEPS := test-contracts test-interfaces check-interfaces edge-test test-ota test-component dapp-typecheck dapp-build
+CI_STEPS := indexer-test test-contracts test-interfaces check-interfaces edge-test test-ota test-component dapp-typecheck dapp-build
 ci:
 	@mkdir -p ci-logs
 	@$(MAKE) --no-print-directory toolchain-versions | tee ci-logs/toolchain-versions.txt
@@ -108,6 +108,7 @@ ci:
 
 # Sequential recipe: cross-layer checks must not race over shared build artifacts.
 check:
+	$(MAKE) indexer-test
 	$(MAKE) test-manifest
 	$(MAKE) test-contracts
 	$(MAKE) test-interfaces
@@ -136,6 +137,19 @@ test-manifest:
 
 test-manifest-live:
 	$(RUN) python3 scripts/test_manifest_upgrades.py
+
+# SF-024 fleet indexer, API and CLI (suifleet-indexer/, docs/INDEXER.md).
+.PHONY: indexer-build indexer-test test-indexer-localnet
+indexer-build:
+	$(RUN) cargo build --locked --manifest-path suifleet-indexer/Cargo.toml
+
+indexer-test:
+	$(RUN) cargo test --locked --manifest-path suifleet-indexer/Cargo.toml
+
+# Against a disposable localnet (start it first): API vs chain, restart,
+# auth, signed CLI bulk operation, chain-binding refusal and load.
+test-indexer-localnet: indexer-build
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_indexer_localnet.py
 
 # Real daemon over gRPC against a disposable localnet (start it first, as for
 # test-manifest-live): direct/group/failure/offline/cursor-migration paths.
