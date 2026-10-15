@@ -151,6 +151,22 @@ class SecurityGateTests(unittest.TestCase):
                 {'rule': {'id': 'py/fixture', 'index': 0}} if nested else {'ruleId': 'py/fixture'}]
             self.assertEqual(self.run_gate('sarif', report)[0], 1)
 
+    def test_sarif_reports_safe_locations_without_source_excerpts(self):
+        report = sarif()
+        report['runs'][0]['results'][0]['locations'] = [
+            {'physicalLocation': {'artifactLocation': {'uri': '.github/workflows/ci.yml'},
+             'region': {'startLine': 12, 'snippet': {'text': SENSITIVE}}}},
+            {'physicalLocation': {'artifactLocation': {'uri': '/private/' + SENSITIVE}}}]
+        code, result = self.run_gate('sarif', report)
+        self.assertEqual(code, 1)
+        self.assertEqual(result['findings'][0]['locations'], [
+            {'path': '.github/workflows/ci.yml', 'line': 12}, {'path': '<redacted path>'}])
+
+    def test_report_errors_publish_only_constant_diagnostics(self):
+        code, result = self.run_gate('sarif', {'version': '2.1.0', 'runs': [], 'payload': SENSITIVE})
+        self.assertEqual(code, 2)
+        self.assertEqual(result, {'scanner': 'sarif', 'status': 'error', 'reason': 'invalid or empty SARIF report'})
+
     def test_invalid_sarif_scores_fail_closed(self):
         for score in [True, 'nan', 'Infinity', '-Infinity', '-0.1', '10.1', 'invalid', {}, []]:
             with self.subTest(score=score):
