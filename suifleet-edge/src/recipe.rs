@@ -1,34 +1,12 @@
 use crate::sui_client::DeploymentCreatedEvent;
-use serde::Deserialize;
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct Recipe {
-    pub schema_version: String,
-    pub component_name: String,
-    pub component_version: String,
-    #[serde(default)]
-    #[serde(rename = "description")]
-    pub _description: Option<String>,
-    pub artifact_blob_id: String,
-    pub artifact_sha256: String,
-    pub lifecycle: Lifecycle,
-    pub configuration: serde_json::Map<String, serde_json::Value>,
-}
-#[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Lifecycle {
-    pub install: Option<String>,
-    pub run: Option<String>,
-    pub shutdown: Option<String>,
-}
+pub use crate::protocol::Recipe;
 impl Recipe {
     pub fn validate(
         &self,
         event: &DeploymentCreatedEvent,
         allow_commands: bool,
     ) -> anyhow::Result<()> {
-        anyhow::ensure!(self.schema_version == "1.0", "unsupported recipe schema");
+        anyhow::ensure!(self.schema_version == crate::protocol::RECIPE_VERSION, "unsupported recipe schema");
         anyhow::ensure!(
             self.component_name == event.component_name && self.component_version == event.version,
             "recipe component identity differs from deployment"
@@ -63,6 +41,18 @@ impl Recipe {
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn shares_frontend_recipe_compatibility_cases() {
+        let event: DeploymentCreatedEvent = serde_json::from_str(
+            r#"{"deployment_id":"0x1","component_name":"app","version":"v1","recipe_blob_id":"recipe","artifact_sha256":"abababababababababababababababababababababababababababababababab","target_groups":[],"target_devices":["0x2"],"creator":"0x3"}"#,
+        ).unwrap();
+        let cases: serde_json::Value = serde_json::from_str(include_str!("../../interfaces/recipe-cases.json")).unwrap();
+        for case in cases.as_array().unwrap() {
+            let accepted = serde_json::from_value::<Recipe>(case["value"].clone())
+                .is_ok_and(|recipe| recipe.validate(&event, false).is_ok());
+            assert_eq!(accepted, case["valid"].as_bool().unwrap(), "{}", case["name"]);
+        }
+    }
     #[test]
     fn rejects_unbound_or_unsupported_recipes() {
         let event: DeploymentCreatedEvent = serde_json::from_value(json!({
