@@ -1158,5 +1158,248 @@
     "allowance_used_mist": 101009880,
     "finished": "2026-10-15T07:00:12Z",
     "note": "Wallet gate rerun on the uncommitted tree over 9dc797a after routing every test-key sweep through the strict Budget (recovered keys charged to the current run). The browser swept the key itself, so the Python sweep found under 5,000,000 MIST and submitted nothing; the recovery path is covered by scripts/tests/test_live_common.py SweepTests, not by this run."
+  },
+  "upgrade_security_cleanup_swept": {
+    "started": "2026-10-15T07:23:27Z",
+    "network": "testnet",
+    "transactions": [
+      {
+        "label": "register legacy device + bound cap + group (base)",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 40000000,
+        "status": "success",
+        "digest": "DvPhLzQjqat1eQc7rEuL3pp782dgfzX44BUNiDeuZ7Gz",
+        "gas_mist": 12009664,
+        "allowance_used_mist": 52009664
+      },
+      {
+        "label": "add legacy device to group (base)",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "7yQxwDgLnveqPdTqLSrJNGdqAnb9uoLENFTovMiy4dp6",
+        "gas_mist": 1280212,
+        "allowance_used_mist": 53289876
+      },
+      {
+        "label": "deployment via base",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "Cbd8NomsK7yAkxdyt7noR9NERd2vhvSQ473RwkMSNsnf",
+        "gas_mist": 13593200,
+        "allowance_used_mist": 66883076
+      },
+      {
+        "label": "legacy device reports Applied via base",
+        "gas_budget_mist": 10000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "9EBMB18psVTMoRT44j4k3WFT2nEtyc46KRXX9utaZHTG",
+        "gas_mist": 1328472,
+        "allowance_used_mist": 1328472
+      },
+      {
+        "label": "deployment via head",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "AZd5FPsUDBLhyWdjYdUz2gYJZkk6XEg81aqjnKuGZ3X9",
+        "gas_mist": 13593200,
+        "allowance_used_mist": 80476276
+      },
+      {
+        "label": "old package report on a new record",
+        "gas_budget_mist": 10000000,
+        "funding_mist": 0,
+        "status": "failure",
+        "digest": "AfgWm6GrunbmEN9AuwPe88iyKXWcAiBfiMQkkhvH85VF",
+        "gas_mist": 1053960,
+        "allowance_used_mist": 2382432,
+        "abort": [
+          "deployment_manager",
+          "receipts_mut",
+          "5"
+        ]
+      },
+      {
+        "label": "superseded report signature in the new package",
+        "gas_budget_mist": 10000000,
+        "funding_mist": 0,
+        "status": "failure",
+        "digest": "J9nnHringoQtXFCKcK7AFtiBLtJzcrTd7W1vD43NtTJy",
+        "gas_mist": 1053960,
+        "allowance_used_mist": 3436392,
+        "abort": [
+          "deployment_manager",
+          "report_status",
+          "7"
+        ]
+      },
+      {
+        "label": "verified report before the legacy device is activated",
+        "gas_budget_mist": 10000000,
+        "funding_mist": 0,
+        "status": "failure",
+        "digest": "3w3RxDNQpf9d85unXjPbwpY5qRCcUHoX8JpPEaPJV94W",
+        "gas_mist": 1053960,
+        "allowance_used_mist": 4490352,
+        "abort": [
+          "device_cap",
+          "assert_active",
+          "2"
+        ]
+      },
+      {
+        "label": "operator reports with a cap it minted for the device",
+        "gas_budget_mist": 50000000,
+        "funding_mist": 0,
+        "status": "failure",
+        "digest": "84nYzo115MHLmwsjxRstLwAkHwgWWCZA6ex24qWuU5zw",
+        "gas_mist": 1044080,
+        "allowance_used_mist": 81520356,
+        "abort": [
+          "device_cap",
+          "assert_signer",
+          "0"
+        ]
+      },
+      {
+        "label": "activate the legacy device (head)",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "Fsk1kG97pSXHLnYBNDQ8dUtNvbvXF5vk2JhxeJFsfBCn",
+        "gas_mist": 8773204,
+        "allowance_used_mist": 90293560
+      },
+      {
+        "label": "deployment via head (after activation)",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "4zZeXMAMCzhgLbPZyN2aRGQEoVpXi9BWV7cLGSoANWux",
+        "gas_mist": 13593200,
+        "allowance_used_mist": 103886760
+      },
+      {
+        "label": "revoke the device (head)",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "7iMV22HbTV9ms97fj3c2skkiqENuc9oMnGGDt6Lx431N",
+        "gas_mist": 1064220,
+        "allowance_used_mist": 104950980
+      },
+      {
+        "label": "verified report after revocation",
+        "gas_budget_mist": 10000000,
+        "funding_mist": 0,
+        "status": "failure",
+        "digest": "8GLoyvb8gU8rH4HQAwC1Kqhc4c1TnXgCTVXJAYZZiZTq",
+        "gas_mist": 1053960,
+        "allowance_used_mist": 5544312,
+        "abort": [
+          "device_cap",
+          "assert_active",
+          "2"
+        ]
+      },
+      {
+        "label": "delete head deployments",
+        "gas_budget_mist": 20000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "ESSwF5VYkjG6eRq93TRanb9UDdpyWU9geAidn2bN9XwD",
+        "gas_mist": 0,
+        "allowance_used_mist": 104950980
+      },
+      {
+        "label": "delete base deployment",
+        "gas_budget_mist": 20000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "EvmRowweJEqsQaPG7JQ1JuXJ35SyjpZwi7DKa4QfLiv7",
+        "gas_mist": 0,
+        "allowance_used_mist": 104950980
+      },
+      {
+        "label": "delete the legacy group and deregister the device",
+        "gas_budget_mist": 20000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "DrTSQGcm8CbGj2YGcovfe1NELbCobfQsRSVbfQW4hSro",
+        "gas_mist": 0,
+        "allowance_used_mist": 104950980
+      },
+      {
+        "label": "sweep the device key",
+        "gas_budget_mist": 3000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "7J4TvuhAKaDwd4RQ4VMpoHhC2eug73s1knUUewNbMGWx",
+        "gas_mist": 1009880,
+        "allowance_used_mist": 6554192
+      }
+    ],
+    "checks": [
+      "reused fixture 45c90c60c2c5\u2026: base 0x04b78bbaa5\u2026, head 0x74640ff7af\u2026 (UpgradeCap version 2 still points at head; re-verified on chain; no package storage spent)",
+      "base 0x04b78bbaa5\u2026's entry points, after the upgrade: legacy device, bound cap, group and a receipted deployment created with them",
+      "upgraded in place to 0x74640ff7af\u2026; identity types originate in the upgrade, existing types in the base",
+      "old-package, superseded, pre-activation and impersonation reports all abort on chain; no receipt written",
+      "activated legacy device: the real daemon applied the new deployment (artifact from Walrus testnet); its existing bound cap reported Applied",
+      "after revocation the device's reports abort and its receipt is unchanged"
+    ],
+    "chain": "4c78adac",
+    "rpc": "https://fullnode.testnet.sui.io:443",
+    "operator": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+    "start_balance_mist": 1022057404,
+    "max_spend_mist": 600000000,
+    "sui": "sui 1.81.1-e04cf9aa915c",
+    "head": "ba71f90df7013e054e7a6b7d0c7f614f552cb877",
+    "base": "14b351b9389c058117297343ced34f262db6f3c3",
+    "walrus": "testnet",
+    "legacy_state": "created through the base package after the cached upgrade",
+    "base_package": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+    "head_package": "0x74640ff7afacec242479fcca2ceccba1a12bdbce290f855ca32e79eabe258dce",
+    "registry": "0x7b926f283ca0b492edafd82dba3be62e91d0c94e4518c165cc26affb40cb9f68",
+    "upgrade_cap": "0x9bb2a728fa5b0ebd036119233f6815db98db4592053ce8ffd8725d58987ade57",
+    "fixture": "45c90c60c2c5095491a764c4..bde66f056256536cc93d186f",
+    "type_origins": {
+      "device_registry::DeviceRegistry": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "device_registry::Device": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "device_group::DeviceGroup": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "device_group::GroupCreated": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "device_cap::DeviceCap": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "device_cap::DeviceAddressKey": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::DeploymentRecord": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::DeploymentCreated": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::DeviceStatusUpdated": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::TargetGroupsKey": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::TargetDevicesKey": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::StatusesKey": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::RecipeDigestKey": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::ReceiptsKey": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::Receipts": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::DeviceStatusReported": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "device_registry::IdentityKey": "0x74640ff7afacec242479fcca2ceccba1a12bdbce290f855ca32e79eabe258dce",
+      "device_registry::Identity": "0x74640ff7afacec242479fcca2ceccba1a12bdbce290f855ca32e79eabe258dce",
+      "device_registry::DeviceIdentityChanged": "0x74640ff7afacec242479fcca2ceccba1a12bdbce290f855ca32e79eabe258dce",
+      "device_registry::CustodyKey": "0x74640ff7afacec242479fcca2ceccba1a12bdbce290f855ca32e79eabe258dce",
+      "device_registry::DeviceOwnerCap": "0x74640ff7afacec242479fcca2ceccba1a12bdbce290f855ca32e79eabe258dce"
+    },
+    "receipts": {
+      "d0": {
+        "0x1d93d4e7813164bc896f96f662a1265c345b4391aaa38073c53d67d87e762031": 1
+      },
+      "d2": {
+        "0x1d93d4e7813164bc896f96f662a1265c345b4391aaa38073c53d67d87e762031": 1
+      }
+    },
+    "device_sweep_mist": 33127216,
+    "end_balance_mist": 992711820,
+    "spent_mist": 29345584,
+    "allowance_used_mist": 104950980,
+    "finished": "2026-10-15T07:27:49Z"
   }
 }

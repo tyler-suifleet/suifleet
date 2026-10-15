@@ -89,7 +89,7 @@ make live-gate-upgrade-security SUIFLEET_WALLET=$HOME/.config/suifleet/testnet/a
 
 `scripts/live_upgrade_security.py` proves on a public network what the Move tests prove locally: existing objects survive an upgrade, later-introduced types originate in the upgrade, and older package versions — which stay callable forever — cannot be used to bypass the new authority. Recipes and artifacts go to real Walrus testnet.
 
-The base package and its upgrade to head are cached in the fixture state (`live-state.json` beside the wallet, `security_fixtures`), keyed by the content hashes of the base and head contracts. Before reuse the suite re-reads the UpgradeCap — still the operator's, at version 2 and pointing at the cached head, so no other upgrade was chained on top — and the shared registry, and the manifest's type origins must still split between base and head. A reused pair creates the legacy state through the base package's entry points, which older packages keep after an upgrade; the objects and types are the same as those created before it. A cached run costs about 0.07 SUI, most of it the per-run legacy objects and the device's 0.04 SUI of charged report gas. `FRESH=1` (`--fresh`) publishes a new pair (about 0.22 SUI) so the legacy state is created before the upgrade; do that for release candidates and contract-security changes.
+The base package and its upgrade to head are cached in the fixture state (`live-state.json` beside the wallet, `security_fixtures`), keyed by the content hashes of the base and head contracts. Before reuse the suite re-reads the UpgradeCap — still the operator's, at version 2 and pointing at the cached head, so no other upgrade was chained on top — and the shared registry, and the manifest's type origins must still split between base and head. A reused pair creates the legacy state through the base package's entry points, which older packages keep after an upgrade; the objects and types are the same as those created before it. A cached run costs about 0.03 SUI net. The allowance is charged about 0.105 SUI, because the device's 0.04 SUI of funding counts in full even though most of it is swept back. `FRESH=1` (`--fresh`) publishes a new pair (about 0.22 SUI) so the legacy state is created before the upgrade; do that for release candidates and contract-security changes.
 
 1. Publishes the pre-identity contracts `14b351b` (before SF-008), or reuses the cached pair, and creates with them a **legacy** device, its bound cap, a group, and a deployment the device reports Applied through the old `report_status`.
 2. Upgrades in place to the checked-out tree and verifies the manifest: identity types (`IdentityKey`, `DeviceOwnerCap`, …) originate in the upgrade, existing types in the base.
@@ -104,7 +104,9 @@ The base package and its upgrade to head are cached in the fixture state (`live-
 
 4. Activates the legacy device through the head package; the real daemon applies a new deployment (artifact from Walrus testnet) and its pre-upgrade cap reports Applied.
 5. Revokes the device; its next verified report aborts (`device_cap::assert_active` 2) and the receipt is unchanged.
-6. Deletes the deployments for the storage rebate and writes evidence (abort locations, digests, receipts, type origins, SUI spent).
+6. Cleans up, after a failure too. It deletes the deployments and the group and deregisters the device for the storage rebate. An activated device leaves a revoked identity tombstone, and the two DeviceCaps have no delete function, so they remain. Each cleanup transaction has a 0.02 SUI budget, so an unknown outcome cannot starve the rest.
+7. Sweeps the device key's unspent funding back to the operator. The sweep is paid from the device's charged funding and never replenishes the allowance. The key's seed is kept (0600) beside the wallet as `live-security-device.key` from before the funding until that sweep succeeds. The next run sweeps a leftover key first, charged to its own allowance.
+8. Writes evidence: abort locations, digests, receipts, type origins, cleanup failures and SUI spent and swept.
 
 ## The `wallet` live gate (SF-010)
 
@@ -212,6 +214,7 @@ These were measured on Sui testnet on 2026-10-15 with Sui CLI 1.81.1 and this re
 | 2026-10-15 | `14b351b` → PR #70 feedback tree | upgrade-security, fresh pair, 5/5 PASS, 17 transactions (5 expected aborts, gas charged) | 0.221 SUI (allowance 0.257) | base `0x04b78bba…`, head `0x74640ff7…`; every mutation through `Budget` |
 | 2026-10-15 | same | upgrade-security, **cached pair**, 6/6 PASS, 15 transactions | 0.070 SUI (allowance 0.106) | no publish; UpgradeCap re-verified at version 2 |
 | 2026-10-15 | same | wallet gate 10 checks PASS | 0.019 SUI (allowance 0.102, funding charged) | on-chain abort `N4CwDxCK…` read back as failure |
+| 2026-10-15 | `14b351b` → SF-010 `ba71f90` (main `0a7a184` merged) | upgrade-security, cached pair, 6/6 PASS, 17 transactions (5 expected aborts) | 0.029 SUI (allowance 0.105) | cleanup: deployments deleted, group deleted and device deregistered (`DrTSQGcm…`); 0.033 SUI swept back from the device key (`7J4TvuhA…`); no pending key left |
 
 
 ## SF-043 implementation verification
