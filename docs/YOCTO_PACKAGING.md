@@ -116,14 +116,21 @@ unprivileged account in the existing sandbox and starts only when
 `/etc/suifleet/config.toml` exists. `suifleet-enrollment.path` notices that
 file's installation; the service also starts on subsequent enrolled boots.
 
-Register the address and obtain the device/capability IDs. Generate a verified
+Register the address through the current registry flow and obtain the
+device/capability IDs. Existing fleets must complete the registry-identity
+activation and receipt migration described in [the deployment runbook](DEPLOYMENT_MANIFEST.md)
+before switching to this client. Provisioning preserves key bytes; it does not
+activate on-chain identities or migrate objects. Generate a verified
 manifest/config bundle using the deployment-manifest workflow, choosing the
 updater explicitly. Install `deployment.json` first, root:suifleet mode 0640;
 install `config.toml` last and atomically with the same ownership/mode. Paths
 must name `/etc/suifleet/device.key` and `/var/lib/suifleet`. Keep enrollment
 files outside Git. The shipped example uses `/usr/bin/false`, so an operator
 must opt into an actual installed updater. For test images, choose
-`/usr/bin/suifleet-test-updater` in direct mode.
+`/usr/bin/suifleet-test-updater` in direct mode. The pinned client also includes
+`--verify-release`; provision its public trust policy through the
+[signed-release workflow](RELEASES.md) when using that integration. Device
+production trust acceptance remains SF-042; the image does not provision it.
 
 Watch `journalctl -u suifleet.service`. Startup verifies deployment metadata;
 network failures cause service retry, and established polling retries without
