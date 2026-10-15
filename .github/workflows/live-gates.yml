@@ -1,8 +1,15 @@
 # Separately authorized live gates: package upgrade, wallet and hardware.
 # Never triggered by pull requests or pushes. Each gate runs only after a human
 # reviewer approves its GitHub environment, which also holds that gate's
-# secrets. The preflight job fails closed if the environment lacks a required
-# reviewer (GitHub would otherwise auto-create it unprotected).
+# secrets and only releases them to runs dispatched from main. The preflight
+# job fails closed if the environment lacks a required reviewer (GitHub would
+# otherwise auto-create it unprotected).
+#
+# package-upgrade (docs/TESTNET.md): checks out `ref`, publishes `base_ref`
+# (default: its merge base with main) to testnet, upgrades in place to `ref`,
+# runs the real daemon and judges on-chain receipts. Spends testnet gas from
+# the dedicated CI wallet whose key is the environment secret
+# SUIFLEET_TESTNET_KEY; uploads the evidence JSON (no keys).
 name: Live gates
 
 on:
@@ -14,8 +21,18 @@ on:
         type: choice
         options: [package-upgrade, wallet, hardware]
       network:
-        description: Target network alias recorded in the run (e.g. testnet); the gate verifies chain identity itself
+        description: Target network (package-upgrade supports testnet); the gate verifies chain identity itself
         required: true
+        type: string
+        default: testnet
+      ref:
+        description: Commit, branch or PR head to test (e.g. refs/pull/58/head)
+        required: false
+        type: string
+        default: main
+      base_ref:
+        description: Contracts published before the upgrade (default merge base with main)
+        required: false
         type: string
       confirm:
         description: Type the gate name again to confirm a live run
@@ -54,15 +71,79 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
 
-      - name: Run gate
+      - name: Make origin/main available for the merge base
+        run: git fetch --no-tags origin main:refs/remotes/origin/main
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+        if: inputs.gate == 'package-upgrade'
+
+      - name: Runner identity
+        id: ids
+        run: echo "uid=$(id -u)" >> "$GITHUB_OUTPUT" && echo "gid=$(id -g)" >> "$GITHUB_OUTPUT"
+
+      - name: Build pinned dev image
+        if: inputs.gate == 'package-upgrade'
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          load: true
+          tags: suifleet-dev:live
+          build-args: |
+            USER_UID=${{ steps.ids.outputs.uid }}
+            USER_GID=${{ steps.ids.outputs.gid }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run package-upgrade gate on testnet
+        if: inputs.gate == 'package-upgrade'
+        env:
+          SUIFLEET_TESTNET_KEY: ${{ secrets.SUIFLEET_TESTNET_KEY }}
+          SUIFLEET_TESTNET_ADDRESS: ${{ vars.SUIFLEET_TESTNET_ADDRESS }}
+          NETWORK: ${{ inputs.network }}
+          BASE_REF: ${{ inputs.base_ref }}
+        run: |
+          [ "$NETWORK" = testnet ] || { echo "::error::package-upgrade supports network=testnet"; exit 1; }
+          [ -n "$SUIFLEET_TESTNET_KEY" ] || { echo "::error::environment secret SUIFLEET_TESTNET_KEY is not set (docs/TESTNET.md)"; exit 1; }
+          mkdir -p .ci-cache/cargo-registry .ci-cache/cargo-git evidence
+          # The key only ever exists inside this container's temporary wallet.
+          docker run --rm -e SUIFLEET_TESTNET_KEY -e SUIFLEET_TESTNET_ADDRESS -e BASE_REF \
+            -v "$PWD:/workspace" -w /workspace \
+            -v "$PWD/.ci-cache/cargo-registry:/home/dev/.cargo/registry" \
+            -v "$PWD/.ci-cache/cargo-git:/home/dev/.cargo/git" \
+            suifleet-dev:live bash -ec '
+              git config --global --add safe.directory /workspace
+              wallet=$(mktemp -d)
+              printf "[]\n" > "$wallet/sui.keystore"
+              printf "keystore:\n  File: %s/sui.keystore\nenvs:\n- alias: testnet\n  rpc: https://fullnode.testnet.sui.io:443\n  ws: null\n  basic_auth: null\nactive_env: testnet\nactive_address: null\n" "$wallet" > "$wallet/client.yaml"
+              sui keytool --keystore-path "$wallet/sui.keystore" import "$SUIFLEET_TESTNET_KEY" ed25519 >/dev/null
+              unset SUIFLEET_TESTNET_KEY
+              sui client --client.config "$wallet/client.yaml" switch --address "$SUIFLEET_TESTNET_ADDRESS" >/dev/null
+              make live-gate-package-upgrade SUIFLEET_WALLET="$wallet/client.yaml" BASE_REF="$BASE_REF" \
+                SUIFLEET_EVIDENCE=evidence/package-upgrade.json
+              rm -rf "$wallet"'
+
+      - name: Run other gates
+        if: inputs.gate != 'package-upgrade'
         env:
           GATE: ${{ inputs.gate }}
           SUIFLEET_NETWORK: ${{ inputs.network }}
         run: |
-          # Suites are provided by SF-010 (package-upgrade, wallet) and SF-031 (hardware).
+          # Suites are provided by SF-010 (wallet) and SF-031 (hardware).
           if ! make -n "live-gate-$GATE" >/dev/null 2>&1; then
             echo "::error::make live-gate-$GATE is not implemented yet (SF-010/SF-031)"
             exit 1
           fi
           make "live-gate-$GATE"
+
+      - name: Upload evidence
+        if: always() && inputs.gate == 'package-upgrade'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: live-package-upgrade-evidence
+          path: evidence/
+          retention-days: 90
+          if-no-files-found: warn
