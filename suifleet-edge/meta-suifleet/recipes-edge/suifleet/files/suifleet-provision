@@ -8,7 +8,8 @@ printf '%s\n' "$address" | grep -Eq '^0x[0-9a-f]{64}$'
 chown suifleet:suifleet "$directory/device.key"
 chmod 0600 "$directory/device.key"
 temporary=$(mktemp "$directory/.device-address.XXXXXX")
-trap 'rm -f "$temporary"' EXIT HUP INT TERM
+trap 'rm -f "$temporary"' EXIT
+trap 'exit 1' HUP INT TERM
 printf '%s\n' "$address" > "$temporary"
 chown root:suifleet "$temporary"
 chmod 0640 "$temporary"
