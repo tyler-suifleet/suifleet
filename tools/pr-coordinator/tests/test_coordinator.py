@@ -127,3 +127,10 @@ class RetryTests(unittest.TestCase):
             store.db.execute("UPDATE jobs SET retry_after=0 WHERE id=?",(job,))
             self.assertEqual(store.reserve('one',pr,'Claude','review',Path(d)),job)
             self.assertIsNone(store.reserve('one',pr,'Claude','review',Path(d)))
+
+class ResultTests(unittest.TestCase):
+    def test_evidence_arrays_preserve_actual_review_without_changing_verdict(self):
+        result=c.normalize_result(dict(verdict='blocked',acceptance_complete=False,model='GPT-6',evidence=['source reviewed','missing release acceptance']))
+        self.assertEqual(result['verdict'],'blocked');self.assertFalse(result['acceptance_complete']);self.assertIn('missing release acceptance',result['evidence'])
+        for invalid in ([],[''],[{'untrusted':'object'}],None):
+            with self.assertRaises(ValueError): c.normalize_result(dict(verdict='approve',acceptance_complete=True,model='GPT-6',evidence=invalid))
