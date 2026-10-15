@@ -24,6 +24,8 @@ CARGO_LOCK_SRC_DIR = "${S}/suifleet-edge"
 CARGO_BUILD_FLAGS:append = " --bin suifleet --features systemd"
 # Every compile uses the dependency graph fetched and verified by BitBake.
 export CARGO_NET_OFFLINE = "true"
+# Let Yocto split debug symbols and strip the packaged executable itself.
+export CARGO_PROFILE_RELEASE_STRIP = "false"
 
 DEPENDS += "openssl systemd"
 RDEPENDS:${PN} += "ca-certificates"
