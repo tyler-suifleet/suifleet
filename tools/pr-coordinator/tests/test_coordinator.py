@@ -19,6 +19,17 @@ def fixture():
 
 
 class Gates(unittest.TestCase):
+    def test_long_feedback_build_does_not_occupy_readonly_review_slot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store=c.Store(Path(directory)/'jobs.sqlite3')
+            pr=fixture()[0]
+            self.assertIsNotNone(store.reserve('project',pr,'Codex','fix',Path(directory)/'fix'))
+            other={**pr,'number':50}
+            self.assertIsNotNone(store.reserve('project',other,'Codex','review',Path(directory)/'review'))
+            self.assertIsNone(store.reserve('project',pr,'Claude','review',Path(directory)/'same-pr'))
+            self.assertIsNone(store.reserve('project',{**pr,'number':51},'Codex','review',Path(directory)/'second-review'))
+            self.assertIsNone(store.reserve('project',{**pr,'number':52},'Codex','fix',Path(directory)/'second-fix'))
+
     def test_acceptance_scope_change_requires_new_independent_review(self):
         pr,owner,review=fixture()
         pr['_acceptance_policy']={'tickets':{'SF-008':{'acceptance_issues':['https://example.test/11']}}}

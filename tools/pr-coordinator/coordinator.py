@@ -93,7 +93,7 @@ class Store:
     def reserve(self, project, pr, family, kind, directory):
         self.db.execute('BEGIN IMMEDIATE')
         try:
-            active = self.db.execute("SELECT 1 FROM jobs WHERE status IN ('reserved','running','orphaned') AND (family=? OR (project=? AND pr=?))", (family, project, pr['number'])).fetchone()
+            active = self.db.execute("SELECT 1 FROM jobs WHERE status IN ('reserved','running','orphaned') AND ((family=? AND kind=?) OR (project=? AND pr=?))", (family, kind, project, pr['number'])).fetchone()
             if active:
                 self.db.execute('COMMIT'); return None
             previous = self.db.execute("SELECT * FROM jobs WHERE project=? AND pr=? AND kind=? AND head=? AND feedback=?",(project,pr['number'],kind,pr['headRefOid'],feedback(pr))).fetchone()
