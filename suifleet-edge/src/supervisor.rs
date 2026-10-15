@@ -1,7 +1,8 @@
 //! Supervised component runtime (SF-014): persistent versioned workspaces,
 //! process lifecycle, readiness, restart policy and descendant containment.
 //!
-//! Layout under `<state_dir>/components`:
+//! Layout under `<state_dir>/supervised` (apart from the dependency cache in
+//! `<state_dir>/components`, so no component name can collide with it):
 //! - `active.json`: the committed version of each component, started again on
 //!   every daemon start (bootstrap, reboot). A version is committed only once it
 //!   became ready, so an interrupted replacement restarts the previous one.
@@ -160,7 +161,7 @@ pub struct Supervisor {
 
 impl Supervisor {
     pub fn open(state_dir: &Path, settings: Settings) -> anyhow::Result<Self> {
-        let root = state_dir.join("components");
+        let root = state_dir.join("supervised");
         std::fs::create_dir_all(&root)?;
         let active = match std::fs::read(root.join("active.json")) {
             Ok(bytes) => serde_json::from_slice(&bytes)?,
@@ -862,13 +863,13 @@ mod tests {
             supervisor.deploy(spec, &artifact, install, &self.runner, "test").await
         }
         fn work(&self, file: &str) -> PathBuf {
-            self.dir.join("components/app/work").join(file)
+            self.dir.join("supervised/app/work").join(file)
         }
         fn read(&self, file: &str) -> String {
             std::fs::read_to_string(self.work(file)).unwrap_or_default()
         }
         fn active(&self) -> BTreeMap<String, Spec> {
-            std::fs::read(self.dir.join("components/active.json"))
+            std::fs::read(self.dir.join("supervised/active.json"))
                 .map(|bytes| serde_json::from_slice(&bytes).unwrap())
                 .unwrap_or_default()
         }
@@ -915,7 +916,7 @@ mod tests {
         assert!(alive(grouped) && alive(escaped));
         // Genuine runtime state on disk.
         let on_disk: BTreeMap<String, Status> =
-            serde_json::from_slice(&std::fs::read(f.dir.join("components/status.json")).unwrap()).unwrap();
+            serde_json::from_slice(&std::fs::read(f.dir.join("supervised/status.json")).unwrap()).unwrap();
         assert_eq!(on_disk["app"].phase, Phase::Running);
         assert_eq!(on_disk["app"].pid, Some(main));
 
@@ -1029,7 +1030,7 @@ mod tests {
         assert_eq!(f.active()["app"], v3);
         let v4 = f.spec("4.0.0", "exec sleep 300");
         f.deploy(&mut s, v4, None).await.unwrap();
-        let mut versions: Vec<String> = std::fs::read_dir(f.dir.join("components/app/versions"))
+        let mut versions: Vec<String> = std::fs::read_dir(f.dir.join("supervised/app/versions"))
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().split('-').next().unwrap().to_string())
             .collect();

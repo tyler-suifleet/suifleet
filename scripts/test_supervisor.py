@@ -106,7 +106,7 @@ def run(binary):
                 f'[runtime]\nstate_dir = {json.dumps(str(state_dir))}\npoll_seconds = 1\n'
                 'component_startup_seconds = 1\ncomponent_ready_timeout_seconds = 3\n'
                 'component_stop_timeout_seconds = 3\ncomponent_max_restarts = 3\n')
-            components = state_dir / "components"
+            components = state_dir / "supervised"
             work = components / "svc" / "work"
 
             def journal():
