@@ -1,6 +1,6 @@
 # SuiFleet operations and verification
 
-This runbook describes current local operations and the intended release gates. It does not establish production readiness. Current release blockers include the publication resolver's retired JSON-RPC integration (SF-006; the daemon and frontend use gRPC), incorrect origins for newly introduced key types, and old-package entry points that can bypass new checks on shared authoritative state.
+This runbook describes current local operations and the intended release gates. It does not establish production readiness. Current release blockers include incorrect origins for newly introduced key types, and old-package entry points that can bypass new checks on shared authoritative state.
 
 ## Environment
 
@@ -224,7 +224,7 @@ The daemon talks to the manifest's `rpc_url` over the Sui gRPC v2 API only (Myst
 2. Validate the release compatibility matrix and all relevant checks above. Resolve unsupported transport and upgrade-security blockers before a public-network release.
 3. Prepare migrations for existing capabilities, recipes and state. Added dynamic fields do not appear automatically on old objects. New type keys can originate in the upgrade package rather than the initial package.
 4. Publish an initial package or perform a compatible upgrade. Existing public signatures/layouts/abilities must remain compatible; an initializer is not a migration. Record execution effects, transaction digest, latest call ID, per-type origins, shared object IDs and UpgradeCap ID.
-5. Generate frontend and device configuration from a network deployment manifest. This generator/manifest is planned; currently `.env.local` and device TOML are separate manual outputs.
+5. Generate frontend and device configuration from the network deployment manifest. `scripts/redeploy.sh` does this together with step 4 ([DEPLOYMENT_MANIFEST.md](DEPLOYMENT_MANIFEST.md)).
 6. Rebuild the frontend after environment changes. `NEXT_PUBLIC_*` variables are compiled into the static export; editing server environment after build does not rewrite those assets.
 7. Stage daemon rollout, verify enrolled identity/cap binding and preserve each device's journal. Do not force firmware replay by deleting state. Run a real end-to-end update/report and negative-path acceptance test before expanding the rollout.
 8. Record artifacts, versions, IDs, migrations, results and recovery instructions in the release issue. Keep private credentials out of all artifacts.
@@ -232,12 +232,25 @@ The daemon talks to the manifest's `rpc_url` over the Sui gRPC v2 API only (Myst
 The current development command is:
 
 ```bash
-make publish-contracts
+make publish-contracts PUBLISH_ARGS="--expect-address 0x... --dry-run"   # then without --dry-run
 ```
 
-It runs `scripts/redeploy.sh` and mutates the chain. It is not part of `make check`. The helper supports devnet/testnet aliases, parses metadata with unsafe unscoped greps and suppresses some publish/parse errors. It writes `dapp/.env.local`, not device config. It requires hardening and live validation before automated releases.
+It runs `scripts/redeploy.sh` (`scripts/publish.py`). Without `--dry-run`, it spends gas and mutates the chain. It is not part of `make check`.
 
-Current frontend variables are `NEXT_PUBLIC_PACKAGE_ID`, `NEXT_PUBLIC_ORIGINAL_PACKAGE_ID`, `NEXT_PUBLIC_REGISTRY_ID`, and `NEXT_PUBLIC_NETWORK`. The blanket original-ID model must become a per-type-origin mapping for upgraded packages. Current edge configuration is described in `suifleet-edge/config.example.toml`; its `rpc_url` is legacy and must migrate.
+**Before any transaction, it verifies:**
+- the live chain identity, against `Move.toml` and this environment's own `Published.toml` section;
+- the signing account;
+- for an upgrade, the UpgradeCap's owner, package and version.
+
+**When something fails:**
+- A failed command, failed effects or bad metadata stops it.
+- If a later step fails after the transaction has executed, the transaction is kept in a pending record. Prior configuration is preserved.
+
+**On success**, it records the release under `deployments/ENV/releases/`. The record holds all IDs and type origins, plus generated frontend and device configs. `deployments/ENV/current` and `dapp/.env.local` are then switched to it together, under a journal: if the process is killed mid-switch, the next run (or `scripts/redeploy.sh --reconcile`) finishes it, and `make dapp-build` refuses until then.
+
+Details and recovery are in [DEPLOYMENT_MANIFEST.md](DEPLOYMENT_MANIFEST.md). `make test-publish` and `make test-publish-localnet` cover it. It has not yet been run against testnet.
+
+The frontend reads only `NEXT_PUBLIC_DEPLOYMENT_MANIFEST`; the daemon reads the manifest through `[sui] manifest_path` (`suifleet-edge/config.example.toml`).
 
 ## Static frontend and Linux deployment
 
