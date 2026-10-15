@@ -7,9 +7,10 @@ address=$(/usr/bin/suifleet --provision "$directory/device.key")
 printf '%s\n' "$address" | grep -Eq '^0x[0-9a-f]{64}$'
 chown suifleet:suifleet "$directory/device.key"
 chmod 0600 "$directory/device.key"
-temporary=$(mktemp "$directory/.device-address.XXXXXX")
-trap 'rm -f "$temporary"' EXIT
+temporary=
+trap '[ -z "$temporary" ] || rm -f "$temporary"' EXIT
 trap 'exit 1' HUP INT TERM
+temporary=$(mktemp "$directory/.device-address.XXXXXX")
 printf '%s\n' "$address" > "$temporary"
 chown root:suifleet "$temporary"
 chmod 0640 "$temporary"
