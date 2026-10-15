@@ -302,7 +302,11 @@ def run(binary):
                 assert (root / "daemon.log").read_text().count("refusing to start components") >= 4
                 print("PASS: after a daemon SIGKILL during a first install (no status yet) the successor "
                       "refused to start over the install's undetectable descendant, repeatedly")
-                os.killpg(install_group, signal.SIGKILL)
+                # (The install shell may already have ended with its middle child.)
+                try:
+                    os.killpg(install_group, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
                 os.kill(detached, signal.SIGKILL)
                 (components / "instance.json").unlink()
                 process = start()
