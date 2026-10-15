@@ -29,65 +29,17 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
-import time
 from types import SimpleNamespace
 
 import deployment_manifest as dm
-from live_common import DAEMON, ROOT, Budget, Live, Spent, WALRUS_TESTNET
+from live_common import DAEMON, ROOT, Budget, Live, Spent, WALRUS_TESTNET, pending_key, recover_key, sweep
 from live_package_upgrade import contracts_digest, load_state
 
 FUNDING = 100_000_000  # 0.1 SUI for the test key; swept back afterwards.
-SWEEP_GAS = 3_000_000
-
-
-def sweep_wallet(live, seed, root):
-    """A throwaway client.yaml holding the test key; returns (config, address)."""
-    from live_upgrade_security import bech32_suiprivkey
-    wallet = root / "sweep-wallet"
-    wallet.mkdir(exist_ok=True)
-    (wallet / "sui.keystore").write_text("[]\n")
-    (wallet / "client.yaml").write_text(
-        f"keystore:\n  File: {wallet / 'sui.keystore'}\nenvs:\n- alias: live\n  rpc: {live.rpc_url}\n  ws: null\n  basic_auth: null\n"
-        "active_env: live\nactive_address: null\n")
-    env = {**os.environ, "SUI_CONFIG_DIR": str(wallet)}
-    subprocess.run(["sui", "keytool", "--keystore-path", str(wallet / "sui.keystore"), "import",
-                    bech32_suiprivkey(bytes.fromhex(seed)), "ed25519"], check=True, capture_output=True, env=env)
-    key = root / "sweep.key"
-    key.write_text(seed + "\n")
-    address = subprocess.check_output([str(DAEMON), "--derive-address", str(key)], text=True).strip()
-    subprocess.run(["sui", "client", "--client.config", str(wallet / "client.yaml"), "switch", "--address", address],
-                   check=True, capture_output=True)
-    return wallet / "client.yaml", address
-
-
-def sweep(live, seed, root, ledger):
-    """Send everything the throwaway key holds back to the operator, from
-    Python (independent of the browser run). The sweep is a charged mutation
-    like any other: its gas is reserved against `ledger` before submission
-    (this run's key: its charged funding; a previous run's key: this run's
-    own allowance, since that funding was charged to the earlier run), and
-    what it returns never replenishes either."""
-    config, address = sweep_wallet(live, seed, root)
-    time.sleep(3)  # Reads trail the browser's own sweep.
-    amount = live.balance(address)
-    if amount < 5_000_000:
-        return 0
-    try:
-        live.execute("sweep the test key", ["ptb", "--transfer-objects", "[gas]", f"@{live.operator}"],
-                     gas=SWEEP_GAS, sender=(config, ledger))
-    except Spent:
-        raise
-    except RuntimeError as error:
-        # Charged (or, with no outcome, fully reserved) all the same.
-        time.sleep(5)
-        assert live.balance(address) < 5_000_000, f"sweep failed and the test key still holds funds: {error}"
-        return 0  # Already swept (the read was stale).
-    return amount
 
 
 def pending_key_path(live):
     return live.wallet.parent / "live-browser-key.hex"
-
 
 
 def run(args):
@@ -107,16 +59,9 @@ def run(args):
         root = Path(temporary)
         (root / "deployment.json").write_text(json.dumps(manifest))
         pending = pending_key_path(live)
-        if pending.exists():
-            recovered = sweep(live, pending.read_text().strip(), root, live.ledger)
-            pending.unlink()
-            live.evidence["recovered_from_previous_run_mist"] = recovered
-            print(f"recovered {recovered / 1e9:.4f} SUI from a previous run's test key")
+        recover_key(live, pending, root)
         seed = os.urandom(32).hex()
-        # Kept (0600, beside the wallet) until the sweep succeeds, so a failed
-        # run never strands the funding.
-        pending.write_text(seed + "\n")
-        pending.chmod(0o600)
+        pending_key(pending, seed)
         key = root / "browser.key"
         key.write_text(seed + "\n")
         key.chmod(0o600)

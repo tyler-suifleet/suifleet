@@ -292,6 +292,106 @@ class Walrus:
             self.server.shutdown()
 
 
+SWEEP_GAS = 3_000_000
+
+
+def bech32_suiprivkey(seed):
+    """Bech32 encoding (HRP "suiprivkey") of the ed25519 flag and seed."""
+    charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
+    data = bytes([0]) + seed
+    bits, acc, values = 0, 0, []
+    for byte in data:
+        acc = (acc << 8) | byte
+        bits += 8
+        while bits >= 5:
+            bits -= 5
+            values.append((acc >> bits) & 31)
+    if bits:
+        values.append((acc << (5 - bits)) & 31)
+    hrp = "suiprivkey"
+
+    def polymod(items):
+        generator = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3]
+        check = 1
+        for item in items:
+            top = check >> 25
+            check = (check & 0x1ffffff) << 5 ^ item
+            for i in range(5):
+                check ^= generator[i] if (top >> i) & 1 else 0
+        return check
+    expanded = [ord(c) >> 5 for c in hrp] + [0] + [ord(c) & 31 for c in hrp]
+    mod = polymod(expanded + values + [0] * 6) ^ 1
+    checksum = [(mod >> 5 * (5 - i)) & 31 for i in range(6)]
+    return hrp + "1" + "".join(charset[v] for v in values + checksum)
+
+
+def key_wallet(live, seed, root, name):
+    """A throwaway `sui client` config under `root` holding one test key (hex
+    ed25519 seed); returns (client.yaml, address)."""
+    wallet = root / name
+    wallet.mkdir(exist_ok=True)
+    (wallet / "sui.keystore").write_text("[]\n")
+    (wallet / "client.yaml").write_text(
+        f"keystore:\n  File: {wallet / 'sui.keystore'}\nenvs:\n- alias: live\n  rpc: {live.rpc_url}\n  ws: null\n  basic_auth: null\n"
+        "active_env: live\nactive_address: null\n")
+    # keytool also loads a client config; point it at this throwaway wallet.
+    env = {**os.environ, "SUI_CONFIG_DIR": str(wallet)}
+    imported = subprocess.run(["sui", "keytool", "--keystore-path", str(wallet / "sui.keystore"), "import",
+                               bech32_suiprivkey(bytes.fromhex(seed)), "ed25519"], capture_output=True, env=env)
+    assert imported.returncode == 0, "could not import the throwaway test key"
+    key = wallet / "test.key"
+    key.touch(mode=0o600)
+    key.write_text(seed + "\n")
+    address = subprocess.check_output([str(DAEMON), "--derive-address", str(key)], text=True).strip()
+    subprocess.run(["sui", "client", "--client.config", str(wallet / "client.yaml"), "switch", "--address", address],
+                   check=True, capture_output=True)
+    return wallet / "client.yaml", address
+
+
+def sweep(live, seed, root, ledger, label="sweep the test key"):
+    """Send everything a throwaway key holds back to the operator. The sweep
+    is a charged mutation like any other: its gas is reserved against
+    `ledger` before submission (this run's key: its charged funding; a
+    previous run's key: this run's own allowance, since that funding was
+    charged to the earlier run), and what it returns never replenishes
+    either."""
+    config, address = key_wallet(live, seed, root, "sweep-wallet")
+    time.sleep(3)  # Reads trail the key's own last transactions.
+    amount = live.balance(address)
+    if amount < 5_000_000:
+        return 0
+    try:
+        live.execute(label, ["ptb", "--transfer-objects", "[gas]", f"@{live.operator}"], gas=SWEEP_GAS, sender=(config, ledger))
+    except Spent:
+        raise
+    except RuntimeError as error:
+        # Charged (or, with no outcome, fully reserved) all the same.
+        time.sleep(5)
+        assert live.balance(address) < 5_000_000, f"sweep failed and the test key still holds funds: {error}"
+        return 0  # Already swept (the read was stale).
+    return amount
+
+
+def pending_key(path, seed):
+    """Keep a funded test key's seed (0600, beside the wallet) until its sweep
+    succeeds, so a failed run never strands the funding."""
+    path.touch(mode=0o600)
+    path.chmod(0o600)
+    path.write_text(seed + "\n")
+
+
+def recover_key(live, path, root):
+    """Sweep a test key an earlier run left funded, charged to this run's
+    allowance; returns the MIST recovered. The file goes only after a sweep."""
+    if not path.exists():
+        return 0
+    recovered = sweep(live, path.read_text().strip(), root, live.ledger, label=f"recover {path.name}")
+    path.unlink()
+    live.evidence.setdefault("recovered_from_previous_run_mist", {})[path.name] = recovered
+    print(f"recovered {recovered / 1e9:.4f} SUI from a previous run's {path.name}")
+    return recovered
+
+
 def deployment_args(walrus, version, run_id, *, fail="none", name=component.DEFAULT_COMPONENT):
     """create_deployment_verified's first five arguments, with the recipe and
     artifact stored in `walrus`."""

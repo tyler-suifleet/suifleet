@@ -1,6 +1,7 @@
 """Offline spend-accounting and fixture-reuse checks for the SF-010 live suites."""
 import json
 import sys
+import tempfile
 from pathlib import Path
 from subprocess import CompletedProcess
 import unittest
@@ -8,7 +9,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import live_common
-import live_wallet_gate
+import live_upgrade_security
 from live_common import Live
 from live_upgrade_security import fixture_valid
 from testnet_budget import Budget, Spent
@@ -173,16 +174,16 @@ class SecurityFixtureTests(unittest.TestCase):
 
 
 class SweepTests(unittest.TestCase):
-    """The wallet gate's sweep of a throwaway browser key is charged like any mutation."""
+    """Sweeping a throwaway test key (browser or device) is charged like any mutation."""
 
     def sweep(self, chain, ledger, held=(100_000_000, 0), limit=100_000_000):
         run = live(chain, limit)
         run.operator = OPERATOR
         balances = list(held)
         run.balance = lambda address=None: balances.pop(0)
-        with patch.object(live_wallet_gate, "sweep_wallet", return_value=("/tmp/sweep.yaml", "0xkey")), \
-                patch.object(live_wallet_gate.time, "sleep"):
-            return run, live_wallet_gate.sweep(run, "00" * 32, Path("/tmp"), ledger(run))
+        with patch.object(live_common, "key_wallet", return_value=("/tmp/sweep.yaml", "0xkey")), \
+                patch.object(live_common.time, "sleep"):
+            return run, live_common.sweep(run, "00" * 32, Path("/tmp"), ledger(run))
 
     def test_recovering_a_previous_key_reserves_this_runs_allowance(self):
         chain = Chain(effects(cost=1_000_000))
@@ -190,7 +191,7 @@ class SweepTests(unittest.TestCase):
         self.assertEqual(swept, 100_000_000)
         command, config = chain.calls[0]
         self.assertEqual(config, "/tmp/sweep.yaml")
-        self.assertEqual(int(command[command.index("--gas-budget") + 1]), live_wallet_gate.SWEEP_GAS)
+        self.assertEqual(int(command[command.index("--gas-budget") + 1]), live_common.SWEEP_GAS)
         self.assertEqual(run.ledger.used, 1_000_000)  # Charged; the returned 0.1 SUI is never credited.
 
     def test_recovery_with_an_exhausted_allowance_never_submits(self):
@@ -208,7 +209,7 @@ class SweepTests(unittest.TestCase):
         self.assertEqual((swept, run.ledger.used), (0, 1_200_000))
         chain = Chain(CompletedProcess([], 1, "", "connection reset"))
         run, swept = self.sweep(chain, lambda run: run.ledger)
-        self.assertEqual((swept, run.ledger.used), (0, live_wallet_gate.SWEEP_GAS))
+        self.assertEqual((swept, run.ledger.used), (0, live_common.SWEEP_GAS))
         with self.assertRaises(AssertionError):  # Still funded after a failure: the run fails.
             self.sweep(Chain(CompletedProcess([], 1, "", "connection reset")), lambda run: run.ledger,
                        held=(100_000_000, 100_000_000))
@@ -226,6 +227,93 @@ class SweepTests(unittest.TestCase):
         run, swept = self.sweep(chain, lambda run: run.ledger, held=(4_000_000,))
         self.assertEqual((swept, chain.calls, run.ledger.used), (0, [], 0))
 
+
+    def test_recovery_charges_this_run_and_keeps_the_key_until_swept(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            pending = Path(temporary) / "live-security-device.key"
+            live_common.pending_key(pending, "00" * 32)
+            self.assertEqual(pending.stat().st_mode & 0o777, 0o600)
+            run = live(Chain(effects(cost=1_000_000)))
+            run.operator = OPERATOR
+            run.balance = lambda address=None: 30_000_000
+            with patch.object(live_common, "key_wallet", return_value=("/tmp/sweep.yaml", "0xkey")), \
+                    patch.object(live_common.time, "sleep"):
+                self.assertEqual(live_common.recover_key(run, pending, Path(temporary)), 30_000_000)
+                self.assertFalse(pending.exists())
+                self.assertEqual(run.ledger.used, 1_000_000)
+                live_common.pending_key(pending, "00" * 32)
+                run = live(Chain(), limit=1)
+                run.operator = OPERATOR
+                run.balance = lambda address=None: 30_000_000
+                with self.assertRaises(Spent):
+                    live_common.recover_key(run, pending, Path(temporary))
+                self.assertTrue(pending.exists())  # Kept for a later run.
+
+
+class TeardownTests(unittest.TestCase):
+    """The upgrade-security suite deletes its objects and sweeps its funded
+    device key, after a failure too; the key stays pending until swept."""
+
+    def teardown(self, chain, made, held=(30_000_000, 0)):
+        run = live(chain)
+        run.operator = OPERATOR
+        balances = list(held)
+        run.balance = lambda address=None: balances.pop(0)
+        with tempfile.TemporaryDirectory() as temporary:
+            pending = Path(temporary) / "live-security-device.key"
+            live_common.pending_key(pending, "00" * 32)
+            made = {"base_records": [], "head_records": [], "pending": pending, "seed": "00" * 32, "root": Path(temporary),
+                    "device_ledger": Budget(40_000_000, run.evidence["transactions"]), **made}
+            with patch.object(live_common, "key_wallet", return_value=("/tmp/device.yaml", "0xkey")), \
+                    patch.object(live_common.time, "sleep"):
+                failure = live_upgrade_security.teardown(run, made)
+            return run, made, failure, pending.exists()
+
+    @staticmethod
+    def calls(chain):
+        return [(" ".join(command), config) for command, config in chain.calls]
+
+    def test_success_deletes_everything_and_sweeps_the_device(self):
+        chain = Chain(*(effects(cost=1_000_000) for _ in range(4)))
+        run, made, failure, kept = self.teardown(chain, dict(
+            package="0xhead", base_package="0xbase", registry="0xreg", device="0xdev", group="0xgrp", owner_cap="0xown",
+            base_records=["0xd0"], head_records=["0xd1", "0xd2"]))
+        self.assertIsNone(failure)
+        self.assertFalse(kept)
+        calls = self.calls(chain)
+        self.assertIn("0xhead::deployment_manager::delete_deployment @0xd1 --move-call 0xhead::deployment_manager::delete_deployment @0xd2",
+                      calls[0][0])
+        self.assertIn("0xbase::deployment_manager::delete_deployment @0xd0", calls[1][0])
+        self.assertIn("0xhead::device_group::delete_group @0xgrp --move-call "
+                      "0xhead::device_registry::deregister_activated_device @0xreg @0xown", calls[2][0])
+        self.assertIn("--transfer-objects [gas] @" + OPERATOR, calls[3][0])
+        self.assertEqual(calls[3][1], "/tmp/device.yaml")
+        self.assertEqual(run.ledger.used, 3_000_000)
+        self.assertTrue(all(f"--gas-budget {live_upgrade_security.CLEANUP_GAS}" in c for c, _ in calls[:3]))
+        self.assertEqual(made["device_ledger"].used, 1_000_000)  # The device pays its own sweep from its charged funding.
+        self.assertEqual(run.evidence["device_sweep_mist"], 30_000_000)
+
+    def test_a_failed_step_never_skips_the_rest_and_keeps_an_unswept_key(self):
+        # Before activation, with an unknown deletion outcome and a sweep that
+        # leaves the key funded: every step is attempted and the key is kept.
+        chain = Chain(CompletedProcess([], 1, "", "connection reset"), effects(cost=1_000_000),
+                      CompletedProcess([], 1, "", "connection reset"))
+        run, made, failure, kept = self.teardown(chain, dict(
+            package="0xbase", base_package="0xbase", registry="0xreg", device="0xdev", group="0xgrp",
+            base_records=["0xd0"]), held=(30_000_000, 30_000_000))
+        self.assertIsInstance(failure, RuntimeError)  # The first failure; the sweep's own is recorded too.
+        self.assertTrue(kept)
+        calls = self.calls(chain)
+        self.assertEqual(len(calls), 3)
+        self.assertIn("0xbase::device_registry::deregister_device @0xreg @0xdev", calls[1][0])
+        self.assertEqual(len(run.evidence["cleanup_failures"]), 2)
+        self.assertEqual(run.ledger.used, live_upgrade_security.CLEANUP_GAS + 1_000_000)  # Unknown: reservation kept.
+        self.assertEqual(made["device_ledger"].used, live_common.SWEEP_GAS)
+
+    def test_nothing_created_submits_nothing_but_releases_an_empty_key(self):
+        chain = Chain()
+        run, _, failure, kept = self.teardown(chain, {}, held=(0,))
+        self.assertEqual((failure, chain.calls, kept, run.ledger.used), (None, [], False, 0))
 
 if __name__ == "__main__":
     unittest.main()

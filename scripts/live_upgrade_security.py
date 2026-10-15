@@ -31,9 +31,15 @@ was upgraded on top), the registry is shared, and the manifest's type origins
 split between base and head. A reused pair recreates the legacy state through
 the base package's entry points, which old packages keep after an upgrade;
 --fresh republishes (~0.18 SUI), for release candidates that must also show
-state created before the upgrade. A cached run costs about 0.05 SUI, mostly
-the legacy device's report gas. Every transaction, the device's funding and
+state created before the upgrade. Every transaction, the device's funding and
 the device's own transactions are charged to --max-spend-mist.
+
+Cleanup runs after a failure too: the run deletes its deployments and group
+and deregisters the device (an activated one leaves a revoked identity
+tombstone; DeviceCaps have no delete function and remain), then sweeps the
+device key's unspent funding back to the operator. Until that sweep succeeds
+the key's seed is kept (0600) beside the wallet as live-security-device.key,
+and the next run sweeps it first, charged to its own allowance.
 """
 import argparse
 import json
@@ -45,8 +51,8 @@ import uuid
 from types import SimpleNamespace
 
 import deployment_manifest as dm
-from live_common import (CLOCK, DAEMON, Live, Spent, Walrus, contracts_at, deployment_args, history, ids, stage,
-                         start_daemon, wait_for)
+from live_common import (CLOCK, DAEMON, Live, Spent, Walrus, contracts_at, deployment_args, history, ids, key_wallet,
+                         pending_key, recover_key, stage, start_daemon, sweep, wait_for)
 from live_package_upgrade import contracts_digest, load_state, save_state
 import subprocess
 
@@ -54,6 +60,7 @@ DEFAULT_BASE = "f43d531^1"  # main immediately before SF-008 (#50): receipts, no
 
 
 DEVICE_FUNDING = 40_000_000  # The legacy device's own report/attack gas, charged up front.
+CLEANUP_GAS = 20_000_000  # Deletions are cheap; an unknown outcome must not starve the remaining cleanup.
 
 
 def fixture_valid(live, fixture):
@@ -78,10 +85,11 @@ def run(args):
     live.evidence.update(base=base, walrus=args.walrus)
     state_path = Path(args.state) if args.state else live.wallet.parent / "live-state.json"
     walrus = Walrus(args.walrus)
-    daemon = None
-    try:
-        with tempfile.TemporaryDirectory(prefix="suifleet-live-security-") as temporary:
-            root = Path(temporary)
+    daemon, passed, failure = None, False, None
+    made = {"base_records": [], "head_records": []}
+    with tempfile.TemporaryDirectory(prefix="suifleet-live-security-") as temporary:
+        root = Path(temporary)
+        try:
             package_dir, pubfile = root / "package", root / "Pub.live.toml"
             base_contracts = contracts_at(base, root / "base")
             key_name = f"{contracts_digest(base_contracts)}..{contracts_digest(repository / 'contracts')}"
@@ -92,9 +100,15 @@ def run(args):
                 print("Cached security fixture is no longer intact on chain; publishing a new one")
                 fixture = None
             run_id = "sec-" + uuid.uuid4().hex[:8]
+            pending = pending_key_path(live)
+            recover_key(live, pending, root)
             key = root / "device.key"
-            device_address = subprocess.check_output([str(DAEMON), "--provision", str(key)], text=True).strip()
-            device_wallet = live.child(device_client(root, key, live), DEVICE_FUNDING)
+            subprocess.check_output([str(DAEMON), "--provision", str(key)], text=True)
+            seed = key.read_text().strip()
+            pending_key(pending, seed)
+            device_config, device_address = key_wallet(live, seed, root, "device-wallet")
+            device_wallet = live.child(device_config, DEVICE_FUNDING)
+            made.update(pending=pending, seed=seed, root=root, device_ledger=device_wallet[1])
 
             def legacy_state(old, registry):
                 """A legacy device, its signer-bound cap (plus one the operator
@@ -111,6 +125,8 @@ def run(args):
                 device = live.created(registered, "::device_registry::Device")[0]
                 caps = live.created(registered, "::device_cap::DeviceCap")
                 group = live.created(registered, "::device_group::DeviceGroup")[0]
+                made.update(base_package=old, registry=registry, device=device, group=group)
+                made.setdefault("package", old)  # Until the upgrade (a reused fixture already set head).
                 for cap_id in caps:
                     live.readable(cap_id)
                 cap = next(c for c in caps if dm.object_id(live.owner(c)) == dm.object_id(device_address))
@@ -119,6 +135,7 @@ def run(args):
                 d0 = live.created(live.transaction("deployment via base", "--move-call", f"{old}::deployment_manager::create_deployment_verified",
                                                    *deployment_args(walrus, "0.9.0", run_id), "vector[]", ids([device]), CLOCK),
                                   "::deployment_manager::DeploymentRecord")[0]
+                made["base_records"].append(d0)
                 live.transaction("legacy device reports Applied via base", "--move-call", f"{old}::deployment_manager::report_status",
                                  f"@{d0}", f"@{cap}", "1u8", budget=10_000_000, sender=device_wallet)
                 wait_for(lambda: live.receipts(d0) == {dm.object_id(device): 1}, "base receipt not readable")
@@ -126,6 +143,7 @@ def run(args):
 
             if fixture:
                 old, new, registry, upgrade_cap = (fixture[k] for k in ("base_package", "head_package", "registry", "upgrade_cap"))
+                made["package"] = new
                 live.check(f"reused fixture {key_name[:12]}…: base {old[:12]}…, head {new[:12]}… (UpgradeCap version 2 still "
                            "points at head; re-verified on chain; no package storage spent)")
                 device, cap, minted, group, d0 = legacy_state(old, registry)
@@ -146,6 +164,7 @@ def run(args):
                 # 2. Upgrade in place.
                 stage(repository / "contracts", package_dir)
                 new = live.published(live.publish("upgrade to head", package_dir, pubfile, upgrade_cap=upgrade_cap))
+                made["package"] = new
                 fixtures[key_name] = dict(base_package=old, head_package=new, registry=registry, upgrade_cap=upgrade_cap,
                                           base=base, created=live.evidence["started"])
                 save_state(state_path, state)
@@ -162,6 +181,7 @@ def run(args):
             d1 = live.created(live.transaction("deployment via head", "--move-call", f"{new}::deployment_manager::create_deployment_verified",
                                                *deployment_args(walrus, "1.0.0", run_id), "vector[]", ids([device]), CLOCK),
                               "::deployment_manager::DeploymentRecord")[0]
+            made["head_records"].append(d1)
             # The device holds DEVICE_FUNDING: its budgets stay well below that.
             attack = lambda label, *ptb, **expected: live.attack(label, *ptb, budget=10_000_000, sender=device_wallet, **expected)
             attack("old package report on a new record", "--move-call", f"{old}::deployment_manager::report_status", f"@{d1}", f"@{cap}", "1u8",
@@ -180,6 +200,7 @@ def run(args):
             activated = live.transaction("activate the legacy device (head)", "--move-call", f"{new}::device_registry::activate_device",
                                          f"@{registry}", f"@{device}", "--assign", "owner", "--transfer-objects", "[owner]", f"@{live.operator}")
             owner_cap = live.created(activated, "::device_registry::DeviceOwnerCap")[0]
+            made["owner_cap"] = owner_cap
             live.readable(owner_cap)
             daemon, components = start_daemon(root, "legacy", manifest, f'[device]\nkeypair_path = "{key}"\n'
                                               f'device_object_id = "{device}"\ndevice_cap_id = "{cap}"\n')
@@ -187,6 +208,7 @@ def run(args):
                                                "--move-call", f"{new}::deployment_manager::create_deployment_verified",
                                                *deployment_args(walrus, "2.0.0", run_id), "vector[]", ids([device]), CLOCK),
                               "::deployment_manager::DeploymentRecord")[0]
+            made["head_records"].append(d2)
             wait_for(lambda: live.receipts(d2) == {dm.object_id(device): 1}, "activated legacy device did not report Applied", daemon)
             assert history(components) == ["2.0.0"], history(components)
             live.check("activated legacy device: the real daemon applied the new deployment (artifact from "
@@ -199,72 +221,64 @@ def run(args):
             daemon.send_signal(signal.SIGINT)
             daemon.wait(timeout=60)
             daemon = None
-
-            # 5. Cleanup: storage rebate on the records.
-            deletes = []
-            for record in (d1, d2):
-                deletes += ["--move-call", f"{new}::deployment_manager::delete_deployment", f"@{record}"]
-            live.transaction("delete head deployments", *deletes)
-            live.transaction("delete base deployment", "--move-call", f"{old}::deployment_manager::delete_deployment", f"@{d0}")
             live.evidence["receipts"] = {"d0": {dm.object_id(device): 1}, "d2": {dm.object_id(device): 1}}
-    finally:
-        if daemon and daemon.poll() is None:
-            daemon.kill()
-        walrus.close()
-        live.finish(args.evidence)
+            passed = True
+        finally:
+            if daemon and daemon.poll() is None:
+                daemon.kill()
+            # 5. Cleanup, after a failure too: storage rebates on the run's
+            # objects, then the device's unspent funding back to the operator.
+            failure = teardown(live, made)
+            walrus.close()
+            live.finish(args.evidence)
+    if failure and passed:
+        raise failure
 
 
-def device_client(root, key, live):
-    """A `sui client` for the device's own key (a throwaway testnet key that
-    the daemon provisioned), in a separate config under the run's temp dir."""
-    wallet = root / "device-wallet"
-    wallet.mkdir()
-    (wallet / "sui.keystore").write_text("[]\n")
-    (wallet / "client.yaml").write_text(
-        f"keystore:\n  File: {wallet / 'sui.keystore'}\nenvs:\n- alias: live\n  rpc: {live.rpc_url}\n  ws: null\n  basic_auth: null\n"
-        "active_env: live\nactive_address: null\n")
-    seed = bytes.fromhex(key.read_text().strip())
-    # sui keytool takes a Bech32 "suiprivkey" (flag 0x00 = ed25519 + seed).
-    import os
-    # keytool also loads a client config; point it at this throwaway wallet.
-    imported = subprocess.run(["sui", "keytool", "--keystore-path", str(wallet / "sui.keystore"), "import",
-                               bech32_suiprivkey(seed), "ed25519"], capture_output=True, text=True,
-                              env={**os.environ, "SUI_CONFIG_DIR": str(wallet)})
-    assert imported.returncode == 0, "could not import the device's throwaway key"
-    address = subprocess.check_output([str(DAEMON), "--derive-address", str(key)], text=True).strip()
-    subprocess.run(["sui", "client", "--client.config", str(wallet / "client.yaml"), "switch", "--address", address],
-                   check=True, capture_output=True)
-    return wallet / "client.yaml"
+def pending_key_path(live):
+    return live.wallet.parent / "live-security-device.key"
 
 
-def bech32_suiprivkey(seed):
-    """Bech32 encoding (HRP "suiprivkey") of the ed25519 flag and seed."""
-    charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
-    data = bytes([0]) + seed
-    bits, acc, values = 0, 0, []
-    for byte in data:
-        acc = (acc << 8) | byte
-        bits += 8
-        while bits >= 5:
-            bits -= 5
-            values.append((acc >> bits) & 31)
-    if bits:
-        values.append((acc << (5 - bits)) & 31)
-    hrp = "suiprivkey"
-
-    def polymod(items):
-        generator = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3]
-        check = 1
-        for item in items:
-            top = check >> 25
-            check = (check & 0x1ffffff) << 5 ^ item
-            for i in range(5):
-                check ^= generator[i] if (top >> i) & 1 else 0
-        return check
-    expanded = [ord(c) >> 5 for c in hrp] + [0] + [ord(c) & 31 for c in hrp]
-    mod = polymod(expanded + values + [0] * 6) ^ 1
-    checksum = [(mod >> 5 * (5 - i)) & 31 for i in range(6)]
-    return hrp + "1" + "".join(charset[v] for v in values + checksum)
+def teardown(live, made):
+    """Delete what the run created and sweep the device key, attempting
+    every step even after a failure (each is charged like any mutation).
+    The device key stays pending beside the wallet unless its sweep
+    succeeds. Returns the first failure, or None."""
+    steps, package, registry = [], made.get("package"), made.get("registry")
+    if made["head_records"]:
+        steps.append(("delete head deployments", lambda: live.transaction("delete head deployments", *(
+            arg for record in made["head_records"]
+            for arg in ("--move-call", f"{package}::deployment_manager::delete_deployment", f"@{record}")), budget=CLEANUP_GAS)))
+    for record in made["base_records"]:
+        base = made["base_package"]
+        steps.append(("delete base deployment", lambda record=record: live.transaction(
+            "delete base deployment", "--move-call", f"{base}::deployment_manager::delete_deployment", f"@{record}",
+            budget=CLEANUP_GAS)))
+    if made.get("group"):
+        # An activated device leaves a revoked identity tombstone; its caps
+        # (no delete function) remain with the operator and the device key.
+        deregister = (["--move-call", f"{package}::device_registry::deregister_activated_device", f"@{registry}",
+                       f"@{made['owner_cap']}"] if made.get("owner_cap") else
+                      ["--move-call", f"{package}::device_registry::deregister_device", f"@{registry}", f"@{made['device']}"])
+        steps.append(("delete group, deregister device", lambda: live.transaction(
+            "delete the legacy group and deregister the device", "--move-call", f"{package}::device_group::delete_group",
+            f"@{made['group']}", *deregister, budget=CLEANUP_GAS)))
+    if made.get("seed"):
+        def sweep_device():
+            # Checked whether or not the funding transfer reported effects.
+            live.evidence["device_sweep_mist"] = sweep(live, made["seed"], made["root"], made["device_ledger"],
+                                                       label="sweep the device key")
+            made["pending"].unlink()
+        steps.append(("sweep the device key", sweep_device))
+    failure = None
+    for label, step in steps:
+        try:
+            step()
+        except Exception as error:  # Spent included: the remaining steps may still fit.
+            live.evidence.setdefault("cleanup_failures", []).append(f"{label}: {error}")
+            print(f"cleanup failed: {label}: {error}")
+            failure = failure or error
+    return failure
 
 
 if __name__ == "__main__":
