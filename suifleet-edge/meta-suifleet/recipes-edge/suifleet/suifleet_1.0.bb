@@ -14,12 +14,12 @@ SRC_URI = " \
     file://suifleet-provision \
     file://suifleet-enrollment.path \
 "
-SRCREV = "c10ac76e9aae5b3ea8f92a42d8a68068c9bba71f"
+SRCREV = "59149f054981b114d09e24224fb54bf720abbe92"
 S = "${WORKDIR}/git"
 
 inherit cargo cargo-update-recipe-crates systemd pkgconfig useradd
 require suifleet-crates.inc
-SUIFLEET_LOCK_SHA256 = "965363c17c3e0106dc82411c6cb7b8fb982f13bc1259ce00720a89383c635974"
+SUIFLEET_LOCK_SHA256 = "ad8c34be35ee73888a43ebee10c3b1c5d95f3b3aaa5e95bd60d9312c9ca9f294"
 CARGO_LOCK_SRC_DIR = "${S}/suifleet-edge"
 CARGO_BUILD_FLAGS:append = " --bin suifleet --features systemd"
 # Every compile uses the dependency graph fetched and verified by BitBake.
