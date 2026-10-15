@@ -394,9 +394,14 @@ a superseded revision is never selected from the deferred queue. The notice time
 starts when this device first observes a control revision and survives restarts;
 editing controls (including resume) starts a new notice. Notices are structured
 local log messages before disruptive work, not an interactive approval prompt.
-Devices need a synchronized UTC clock. The durable time high-water mark prevents
-clock rollback from reopening an observed deadline; correct a bad clock before
-creating a replacement deployment. No offline or cached admission is allowed.
+Devices need a synchronized UTC clock. Schedule/window checks use current UTC,
+so correcting a forward clock step restores later admission decisions. A notice
+timestamp ahead of corrected UTC restarts that device's notice interval. Per-record
+terminal cancellation/expiry observations survive clock correction and control edits;
+correct a bad clock before creating a replacement for an already expired record.
+Extending an expired record can split the fleet: devices that observed expiry keep
+it terminal, while devices that did not may admit it. Create a replacement instead.
+No offline or cached admission is allowed.
 
 Controls are checked before preparation, then read again after all artifacts are
 verified and immediately before journaling apply intent. Read/validation failures

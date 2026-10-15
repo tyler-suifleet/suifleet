@@ -170,6 +170,42 @@ def run(binary):
                 assert count() == 6 and not sim.errors
                 print("PASS: final control-read outage fails closed without apply/failure receipt; retry applies once")
 
+                # Model the journal saved during a forward RTC/NTP step, then
+                # restart at corrected UTC. No host clock mutation is required.
+                add("0x50e", state=1, notice_ms=3500)
+                wait(lambda: deferred("0x50e", "paused"), "clock fixture not observed")
+                stop()
+                saved = state()
+                future = now() + 86_400_000
+                saved["control_time_ms"] = future  # legacy global high-water mark
+                saved["deferred"]["0x50e"]["notified_ms"] = future
+                # Keep the revision unchanged so recovery must repair its notice.
+                sim.controls["0x50e"]["state"] = 0
+                saved["deferred"]["0x50e"]["control"]["state"] = 0
+                (root / "state/state.json").write_text(json.dumps(saved))
+                deadline = now() + 6000
+                add("0x50f", not_before_ms=deadline, expires_ms=deadline+60000)
+                add("0x510", window_start_ms=deadline, window_end_ms=deadline+60000)
+                process = start()
+                wait(lambda: deferred("0x50e", "advance notice"), "future notice did not restart")
+                assert state()["deferred"]["0x50e"]["notified_ms"] < future and not outcome("0x50e")
+                wait(lambda: deferred("0x50f", "not yet scheduled") and
+                    deferred("0x510", "outside maintenance window"), "forward clock poisoned later schedules")
+                assert now() < deadline and not outcome("0x50f") and not outcome("0x510")
+                wait(lambda: outcome("0x50e") == 1, "future notice did not recover after clock correction")
+                wait(lambda: outcome("0x50f") == 1 and outcome("0x510") == 1,
+                    "corrected schedules never admitted")
+                assert now() >= deadline and count() == 9
+                # An observed expiry remains terminal even when its controls
+                # are extended; the clock fix must not reopen that record.
+                control("0x503", expires_ms=now()+60000)
+                settle()
+                assert deferred("0x503", "expired") and not outcome("0x503")
+                assert "control_time_ms" not in state()
+                print("PASS: corrected forward clock cannot bypass later start/window/expiry; future notice recovers; observed expiry stays terminal")
+
+
+
 
             except Exception:
                 log.flush(); print((root / "daemon.log").read_text()[-16000:], file=sys.stderr); raise

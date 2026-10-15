@@ -14,9 +14,6 @@ pub struct State {
     /// Pre-apply notices/deferrals are not execution intents or status receipts.
     #[serde(default)]
     pub deferred: BTreeMap<String, crate::control::Deferred>,
-    /// Prevent a wall-clock rollback from reopening an observed deadline.
-    #[serde(default)]
-    pub control_time_ms: u64,
     pub cursor: Option<Value>,
     #[serde(default)]
     pub initialized: bool,

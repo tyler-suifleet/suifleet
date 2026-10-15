@@ -319,10 +319,13 @@ async fn admit(sui: &SuiClient, journal: &mut Journal, id: &str) -> anyhow::Resu
     anyhow::ensure!(sui.optional_object(id).await?.is_some(), "deployment deleted before admission");
     let control = sui.deployment_control(id).await?;
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis();
-    let now = u64::try_from(now)?.max(journal.state.control_time_ms);
-    journal.state.control_time_ms = now;
+    let now = u64::try_from(now)?;
+    // Use corrected UTC for schedule/window checks. Only a deployment's
+    // terminal observation survives clock rollback, never a global clock floor.
+    // Restart notice if its saved timestamp is ahead of the corrected clock.
     let notified = journal.state.deferred.get(id)
-        .filter(|d| d.control == control).map(|d| d.notified_ms).unwrap_or(now);
+        .filter(|d| d.control == control && d.notified_ms <= now)
+        .map(|d| d.notified_ms).unwrap_or(now);
     let reason = control.reason(now, notified)?;
     let entry = control::Deferred {
         control, notified_ms: notified,
