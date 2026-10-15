@@ -191,10 +191,11 @@ def run(args):
         # At most one request; never reset the spending ledger from a faucet credit.
         funded = ledger.faucet(lambda: subprocess.run([args.faucet_tool, 'client', '--client.config', str(wallet),
                                  'faucet', '--address', operator], capture_output=True, timeout=180))
-        evidence['faucet'] = {'attempts': 1, 'success': funded.returncode == 0}
-        if funded.returncode:
-            raise RuntimeError('dedicated testnet faucet unavailable (one bounded attempt)')
         start_balance = balance()
+        evidence['faucet'] = {'attempts': 1, 'cli_returncode': funded.returncode,
+                              'balance_after_mist': start_balance, 'success': start_balance >= args.max_spend_mist}
+        if start_balance < args.max_spend_mist:
+            raise RuntimeError('dedicated testnet faucet did not supply the required balance (one bounded attempt)')
     assert start_balance >= args.max_spend_mist, (
         f"{operator} holds {start_balance} MIST; this run may spend up to {args.max_spend_mist}. Fund it first "
         f"(docs/TESTNET.md)")

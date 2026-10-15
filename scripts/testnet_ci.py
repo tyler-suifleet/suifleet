@@ -76,6 +76,7 @@ def status(repo, head, base, state, url):
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
+    parser.add_argument('--recheck', action='store_true')
     parser.add_argument('--status', choices=['pending', 'success', 'failure'])
     args = parser.parse_args()
     repo = os.environ['GITHUB_REPOSITORY']
@@ -85,6 +86,9 @@ if __name__ == '__main__':
     else:
         with open(os.environ['GITHUB_EVENT_PATH']) as stream:
             selection = plan(os.environ['GITHUB_EVENT_NAME'], json.load(stream), repo)
+        if args.recheck and (not selection or selection['head'] != os.environ['TEST_HEAD']
+                             or selection['base'] != os.environ['BASE_REF']):
+            raise RuntimeError('superseded head/base: no testnet mutation submitted')
         if selection:
             environment = api(f'repos/{repo}/environments/live-package-upgrade')
             branches = api(f'repos/{repo}/environments/live-package-upgrade/deployment-branch-policies')
