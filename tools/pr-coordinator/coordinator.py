@@ -9,6 +9,7 @@ from pathlib import Path
 import sqlite3
 import subprocess
 import time
+from urllib.parse import quote
 
 MARKER = '<!-- pr-coordinator -->'
 FAMILIES = {'Codex', 'Claude'}
@@ -143,6 +144,10 @@ class Coordinator:
     def pr(self, project, number, fields=None):
         fields = fields or 'number,headRefOid,headRefName,baseRefName,baseRefOid,isCrossRepository,state,isDraft,mergeable,title,body,comments,reviews,statusCheckRollup,mergeCommit'
         pr = json.loads(self.gh(project, ['pr', 'view', str(number), '--repo', project['repository'], '--json', fields]))
+        # GitHub's PR baseRefOid can retain the original comparison base.
+        # Approval must bind to the actual current integration branch tip.
+        reference=json.loads(self.gh(project,['api',f"repos/{project['repository']}/git/ref/heads/{quote(pr['baseRefName'],safe='/')}"]))
+        pr['baseRefOid']=reference['object']['sha']
         owner, repo = project['repository'].split('/')
         query = '''query($owner:String!,$repo:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100,after:$cursor){nodes{id isResolved comments(first:100){nodes{id body updatedAt} pageInfo{hasNextPage}}} pageInfo{hasNextPage endCursor}}}}}'''
         threads, cursor = [], None
@@ -183,6 +188,9 @@ class Coordinator:
         directory.mkdir(parents=True, exist_ok=True)
         try:
             if kind == 'review':
+                run(['git','fetch','origin',pr['baseRefName']],cwd=project['root'])
+                base=run(['git','rev-parse',f"origin/{pr['baseRefName']}"],cwd=project['root']).strip()
+                if base != pr['baseRefOid']: raise RuntimeError('integration base changed during review checkout')
                 run(['git', 'fetch', 'origin', f"pull/{pr['number']}/head"], cwd=project['root'])
                 # Never run review on a moved branch or implementation checkout.
                 actual = run(['git', 'rev-parse', 'FETCH_HEAD'], cwd=project['root']).strip()
@@ -234,7 +242,7 @@ Never claim unrun tests. Approval requires all acceptance including required liv
 Do not edit the coordinator database or forge another model's review. Only this worker result is collected.
 '''
         if kind == 'review':
-            return common + '''Independently review this exact detached commit against origin/main. Check correctness, security, compatibility, all existing change requests and acceptance evidence. Run meaningful scoped tests using globally locked build/port resources only while in use. Do not modify the implementation branch or post GitHub reviews yourself. Return approve only when all feedback and acceptance are resolved; otherwise changes_requested or blocked with precise file/line findings. Independent source review is required even when CI passes.
+            return common + f'''Independently review this exact detached commit against origin/{pr['baseRefName']}. Check correctness, security, compatibility, all existing change requests and acceptance evidence. Run meaningful scoped tests using globally locked build/port resources only while in use. Do not modify the implementation branch or post GitHub reviews yourself. Return approve only when all feedback and acceptance are resolved; otherwise changes_requested or blocked with precise file/line findings. Independent source review is required even when CI passes.
 '''
         return common + f'''You inherit the existing {owner['agent']} claim for {owner['key']}; token is PR_COORDINATOR_CLAIM_TOKEN in the environment, never print/post it.
 The service renewed/resumed this reserved Review claim; assert before edits and commits and heartbeat every five minutes. Fix all review feedback on the owner branch, integrate current main carefully, run required tests, commit and push contained Tyler-authored changes. Do not claim another ticket or resolve threads merely to hide findings. Post a detailed feedback reply on the existing PR. Mark ticket Review with exact evidence after push. Return fixed only after verifying the pushed head and required checks; if blocked retain the claim and report the next step. The coordinator will request a fresh independent review automatically.
