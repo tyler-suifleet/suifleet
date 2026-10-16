@@ -684,7 +684,7 @@ SUITE_RUNNERS = {
     "cloudwatch-logs-cases.json": lambda c, _: _run_sequences(c, managed.LogsExport, "cloudwatch-logs"),
 }
 LEVELS = ("functional", "aws_api", "aws_recipe")
-STATUSES = {"implemented", "partial", "proposed", "excluded", "undecided", "not-applicable"}
+STATUSES = {"implemented", "partial", "proposed", "excluded", "undecided", "roadmap", "not-applicable"}
 EXECUTIONS = {"pending", "passed"}
 
 

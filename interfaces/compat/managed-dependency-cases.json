@@ -53,10 +53,10 @@
    "adapter": "credential-provider",
    "requires": [
     "SF-021",
-    "SF-022",
-    "SF-027"
+    "SF-027",
+    "SF-053"
    ],
-   "implementation_ticket": null
+   "implementation_ticket": "SF-057"
   }
  },
  {
@@ -70,10 +70,10 @@
    "adapter": "credential-provider",
    "requires": [
     "SF-021",
-    "SF-022",
-    "SF-027"
+    "SF-027",
+    "SF-053"
    ],
-   "implementation_ticket": null
+   "implementation_ticket": "SF-057"
   }
  },
  {
@@ -85,10 +85,10 @@
    "adapter": "credential-provider",
    "requires": [
     "SF-021",
-    "SF-022",
-    "SF-027"
+    "SF-027",
+    "SF-053"
    ],
-   "implementation_ticket": null
+   "implementation_ticket": "SF-057"
   }
  },
  {
@@ -102,10 +102,10 @@
    "adapter": "credential-provider",
    "requires": [
     "SF-021",
-    "SF-022",
-    "SF-027"
+    "SF-027",
+    "SF-053"
    ],
-   "implementation_ticket": null
+   "implementation_ticket": "SF-057"
   }
  },
  {
@@ -119,10 +119,10 @@
    "adapter": "credential-provider",
    "requires": [
     "SF-021",
-    "SF-022",
-    "SF-027"
+    "SF-027",
+    "SF-053"
    ],
-   "implementation_ticket": null
+   "implementation_ticket": "SF-057"
   }
  },
  {
@@ -182,9 +182,10 @@
    "adapter": "cloudwatch-metrics-export",
    "requires": [
     "SF-019",
-    "SF-032"
+    "SF-032",
+    "SF-057"
    ],
-   "implementation_ticket": null
+   "implementation_ticket": "SF-059"
   }
  },
  {
@@ -212,27 +213,29 @@
   }
  },
  {
-  "id": "device-defender-adapter-deferred",
+  "id": "device-defender-adapter-specification-incomplete",
   "dependency": "aws.greengrass.DeviceDefender",
   "spec": {
    "VersionRequirement": "^4.0.0"
   },
   "expected": {
    "outcome": "reject",
-   "reason": "adapter-not-selected",
-   "adapter": "device-defender-metrics"
+   "reason": "adapter-specification-incomplete",
+   "adapter": "device-defender-metrics",
+   "implementation_ticket": "SF-062"
   }
  },
  {
-  "id": "secure-tunneling-adapter-deferred",
+  "id": "secure-tunneling-adapter-specification-incomplete",
   "dependency": "aws.greengrass.SecureTunneling",
   "spec": {
    "VersionRequirement": ">=2.0.0"
   },
   "expected": {
    "outcome": "reject",
-   "reason": "adapter-not-selected",
-   "adapter": "secure-tunneling"
+   "reason": "adapter-specification-incomplete",
+   "adapter": "secure-tunneling",
+   "implementation_ticket": "SF-063"
   }
  },
  {
@@ -328,36 +331,45 @@
   }
  },
  {
-  "id": "lambda-manager-excluded",
+  "id": "lambda-manager-roadmap-gap",
   "dependency": "aws.greengrass.LambdaManager",
   "spec": {
    "VersionRequirement": "^2.0.0"
   },
   "expected": {
    "outcome": "reject",
-   "reason": "excluded-component"
+   "reason": "roadmap-gap",
+   "tickets": [
+    "SF-064"
+   ]
   }
  },
  {
-  "id": "lambda-launcher-excluded",
+  "id": "lambda-launcher-roadmap-gap",
   "dependency": "aws.greengrass.LambdaLauncher",
   "spec": {
    "VersionRequirement": "^2.0.0"
   },
   "expected": {
    "outcome": "reject",
-   "reason": "excluded-component"
+   "reason": "roadmap-gap",
+   "tickets": [
+    "SF-064"
+   ]
   }
  },
  {
-  "id": "legacy-router-excluded",
+  "id": "legacy-router-roadmap-gap",
   "dependency": "aws.greengrass.LegacySubscriptionRouter",
   "spec": {
    "VersionRequirement": "^2.1.0"
   },
   "expected": {
    "outcome": "reject",
-   "reason": "excluded-component"
+   "reason": "roadmap-gap",
+   "tickets": [
+    "SF-064"
+   ]
   }
  },
  {
@@ -399,14 +411,17 @@
   }
  },
  {
-  "id": "dlr-sample-excluded",
+  "id": "dlr-sample-roadmap-gap",
   "dependency": "aws.greengrass.DLRImageClassification",
   "spec": {
    "VersionRequirement": "^2.1.0"
   },
   "expected": {
    "outcome": "reject",
-   "reason": "excluded-component"
+   "reason": "roadmap-gap",
+   "tickets": [
+    "SF-064"
+   ]
   }
  },
  {
@@ -419,7 +434,8 @@
    "outcome": "package-natively",
    "tickets": [
     "SF-011",
-    "SF-032"
+    "SF-032",
+    "SF-064"
    ]
   }
  },
@@ -438,58 +454,73 @@
   }
  },
  {
-  "id": "sitewise-collector-excluded",
+  "id": "sitewise-collector-roadmap-gap",
   "dependency": "aws.iot.SiteWiseEdgeCollectorOpcua",
   "spec": {
    "VersionRequirement": "^2.0.0"
   },
   "expected": {
    "outcome": "reject",
-   "reason": "excluded-component"
+   "reason": "roadmap-gap",
+   "tickets": [
+    "SF-064"
+   ]
   }
  },
  {
-  "id": "kvs-connector-excluded",
+  "id": "kvs-connector-roadmap-gap",
   "dependency": "aws.iot.EdgeConnectorForKVS",
   "spec": {
    "VersionRequirement": ">=1.0.0"
   },
   "expected": {
    "outcome": "reject",
-   "reason": "excluded-component"
+   "reason": "roadmap-gap",
+   "tickets": [
+    "SF-064"
+   ]
   }
  },
  {
-  "id": "firehose-excluded",
+  "id": "firehose-roadmap-gap",
   "dependency": "aws.greengrass.KinesisFirehose",
   "spec": {
    "VersionRequirement": "^2.1.0"
   },
   "expected": {
    "outcome": "reject",
-   "reason": "excluded-component"
+   "reason": "roadmap-gap",
+   "tickets": [
+    "SF-064"
+   ]
   }
  },
  {
-  "id": "sns-excluded",
+  "id": "sns-roadmap-gap",
   "dependency": "aws.greengrass.SNS",
   "spec": {
    "VersionRequirement": "^2.1.0"
   },
   "expected": {
    "outcome": "reject",
-   "reason": "excluded-component"
+   "reason": "roadmap-gap",
+   "tickets": [
+    "SF-064"
+   ]
   }
  },
  {
-  "id": "debug-console-excluded",
+  "id": "debug-console-roadmap-gap",
   "dependency": "aws.greengrass.LocalDebugConsole",
   "spec": {
    "VersionRequirement": "^2.0.0"
   },
   "expected": {
    "outcome": "reject",
-   "reason": "excluded-component"
+   "reason": "roadmap-gap",
+   "tickets": [
+    "SF-064"
+   ]
   }
  },
  {

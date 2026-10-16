@@ -17,7 +17,8 @@ from pathlib import Path
 CATALOG = Path("interfaces/compat/managed-components.json")
 AWS_TYPES = {"generic", "plugin", "lambda", "nucleus"}
 AWS_OS = {"linux", "windows"}
-SELECTIONS = {"recommended", "deferred"}
+SPECIFICATIONS = {"complete", "incomplete"}
+PHASES = {"initial-prototype", "roadmap"}
 MANAGED_PREFIXES = ("aws.greengrass.", "aws.iot.", "variant.")
 ADAPTER_TEXT = ("summary", "auth", "licensing")
 
@@ -72,8 +73,9 @@ def satisfies(version: str, requirement: str) -> bool:
 
 # ---------------------------------------------------------------------------
 # AWS recipe ComponentDependencies -> catalog disposition (proposed guidance
-# for SF-037). Until SF-037 re-specifies translation, aws.greengrass.*
-# dependencies stay rejected; this model fixes what each one will mean.
+# for the open SF-037 translation ticket). Until SF-037 adopts it,
+# aws.greengrass.* dependencies stay rejected; this model fixes what each
+# one will mean.
 # ---------------------------------------------------------------------------
 def classify_dependency(catalog: dict, name, spec) -> dict:
     if not isinstance(name, str) or not isinstance(spec, dict) or set(spec) - {"VersionRequirement", "DependencyType"}:
@@ -91,8 +93,8 @@ def classify_dependency(catalog: dict, name, spec) -> dict:
     if "discontinued" in row:
         return {"outcome": "reject", "reason": "discontinued-aws-service"}
     disposition = row["disposition"]
-    if disposition == "exclude":
-        return {"outcome": "reject", "reason": "excluded-component"}
+    if disposition == "roadmap":
+        return {"outcome": "reject", "reason": "roadmap-gap", "tickets": row["tickets"]}
     if disposition == "not-applicable":
         return {"outcome": "reject", "reason": "not-applicable"}
     if disposition == "native":
@@ -100,8 +102,9 @@ def classify_dependency(catalog: dict, name, spec) -> dict:
     if disposition == "native-component":
         return {"outcome": "package-natively", "tickets": row["tickets"]}
     adapter = next(a for a in catalog["adapters"] if a["id"] == row["adapter"])
-    if adapter["selection"] != "recommended":
-        return {"outcome": "reject", "reason": "adapter-not-selected", "adapter": adapter["id"]}
+    if adapter["specification"] != "complete":
+        return {"outcome": "reject", "reason": "adapter-specification-incomplete", "adapter": adapter["id"],
+                "implementation_ticket": adapter["implementation_ticket"]}
     version = adapter["replaces"][name]
     if not satisfies(version, requirement):
         return {"outcome": "reject", "reason": "unsupported-aws-version", "adapter": adapter["id"]}
@@ -498,16 +501,6 @@ class LogsExport:
 # ---------------------------------------------------------------------------
 # Catalog structure and cross-reference checks.
 # ---------------------------------------------------------------------------
-def _approved(root: Path, entry: dict, label: str, errors: list):
-    approval = entry.get("approval", "pending")
-    if approval not in ("pending", "approved"):
-        errors.append(f"{label}: approval {approval!r}")
-    if approval == "approved":
-        ref = entry.get("decision_ref")
-        if not ref or not (root / ref).exists():
-            errors.append(f"{label}: approved decisions need an existing decision_ref")
-
-
 def check_catalog(root: Path, catalog: dict, compat: dict, backlog_keys: set) -> list:
     errors = []
     if catalog.get("format_version") != 1:
@@ -547,18 +540,45 @@ def check_catalog(root: Path, catalog: dict, compat: dict, backlog_keys: set) ->
             errors.append(f"{label}: unknown adapter {row['adapter']}")
         elif disposition == "adapter" and "adapter" in row and name not in (adapters[row["adapter"]].get("replaces") or {}):
             errors.append(f"{label}: adapter {row['adapter']} does not list it in replaces")
-        if "discontinued" in row and disposition not in ("exclude", "not-applicable"):
-            errors.append(f"{label}: discontinued AWS services can only be excluded")
-        _approved(root, row, label, errors)
+        if disposition == "roadmap" and "SF-064" not in row.get("tickets", []):
+            errors.append(f"{label}: roadmap gaps are tracked by SF-064")
+        if "discontinued" in row and disposition != "not-applicable":
+            errors.append(f"{label}: discontinued AWS services can only be not-applicable")
+        if "approval" in row:
+            errors.append(f"{label}: approvals are not recorded in this catalog")
     for family in catalog.get("required_families", []):
         if family not in families or not any(r.get("family") == family for r in rows.values()):
             errors.append(f"managed catalog: required family {family} has no component")
     platforms = {p["id"]: p for p in compat.get("platforms", [])}
+    phases = {}
+    for entry in catalog.get("platform_phases", []):
+        pid = entry.get("platform")
+        label = f"platform phase {pid}"
+        if pid in phases:
+            errors.append(f"{label}: duplicate")
+        phases[pid] = entry.get("phase")
+        if pid not in platforms:
+            errors.append(f"{label}: unknown platform")
+        if entry.get("phase") not in PHASES or not entry.get("reason"):
+            errors.append(f"{label}: needs phase and reason")
+        if entry.get("phase") == "initial-prototype" and pid in platforms and platforms[pid].get("native") is None:
+            errors.append(f"{label}: initial-prototype platforms need a native runtime")
+        if entry.get("phase") == "roadmap" and "SF-064" not in entry.get("tickets", []):
+            errors.append(f"{label}: roadmap platforms are tracked by SF-064")
+        for ticket in entry.get("tickets", []):
+            if ticket not in backlog_keys:
+                errors.append(f"{label}: unknown ticket {ticket}")
+        if "approval" in entry:
+            errors.append(f"{label}: approvals are not recorded in this catalog")
+    for pid in platforms:
+        if pid not in phases:
+            errors.append(f"platform {pid}: has no SF-038 phase")
     suites = compat.get("suites", {})
     for aid, adapter in adapters.items():
         label = f"adapter {aid}"
-        if adapter.get("selection") not in SELECTIONS:
-            errors.append(f"{label}: selection")
+        complete = adapter.get("specification") == "complete"
+        if adapter.get("specification") not in SPECIFICATIONS:
+            errors.append(f"{label}: specification")
         for text in ADAPTER_TEXT:
             if not adapter.get(text):
                 errors.append(f"{label}: needs {text}")
@@ -568,8 +588,8 @@ def check_catalog(root: Path, catalog: dict, compat: dict, backlog_keys: set) ->
         if not replaces:
             errors.append(f"{label}: replaces no AWS component")
         for name, version in replaces.items():
-            if adapter.get("selection") == "recommended" and not re.fullmatch(CORE, str(version)):
-                errors.append(f"{label}: recommended adapters must pin an exact AWS version for {name}")
+            if complete and not re.fullmatch(CORE, str(version)):
+                errors.append(f"{label}: complete specifications must pin an exact AWS version for {name}")
             row = rows.get(name)
             if row is None:
                 errors.append(f"{label}: replaces unknown component {name}")
@@ -582,36 +602,35 @@ def check_catalog(root: Path, catalog: dict, compat: dict, backlog_keys: set) ->
         for platform in adapter.get("platforms", []):
             if platform not in platforms or platforms[platform].get("native") is None:
                 errors.append(f"{label}: platform {platform} has no native runtime")
+            elif phases.get(platform) != "initial-prototype":
+                errors.append(f"{label}: platform {platform} is not in the initial prototype phase")
         for ticket in adapter.get("depends_on", []):
             if ticket not in backlog_keys:
                 errors.append(f"{label}: unknown ticket {ticket}")
         acceptance = adapter.get("acceptance", {})
         if not acceptance.get("runtime_tests") or not acceptance.get("environment"):
             errors.append(f"{label}: needs runtime_tests and environment")
-        if adapter.get("selection") == "recommended" and not acceptance.get("reference_suites"):
-            errors.append(f"{label}: recommended adapters need an executable reference suite")
+        if complete and not acceptance.get("reference_suites"):
+            errors.append(f"{label}: complete specifications need an executable reference suite")
         for suite in acceptance.get("reference_suites", []):
             if suite not in suites:
                 errors.append(f"{label}: unknown suite {suite}")
         ticket = adapter.get("implementation_ticket")
-        if ticket is not None and ticket not in backlog_keys:
+        if ticket not in backlog_keys:
             errors.append(f"{label}: unknown implementation ticket {ticket}")
-        if adapter.get("selection") == "recommended" and ticket is None:
-            request = adapter.get("ticket_request") or {}
-            if not request.get("title") or any(t not in backlog_keys for t in request.get("depends_on", [])):
-                errors.append(f"{label}: recommended adapters without a ticket need a valid ticket_request")
-        if adapter.get("selection") == "deferred" and not adapter.get("selection_precondition"):
-            errors.append(f"{label}: deferred adapters need a selection_precondition")
-    decided = set()
-    for decision in catalog.get("platform_decisions", []):
-        pid = decision.get("platform")
-        decided.add(pid)
-        if pid not in platforms:
-            errors.append(f"platform decision {pid}: unknown platform")
-        if decision.get("recommendation") not in ("exclude", "support") or not decision.get("reason"):
-            errors.append(f"platform decision {pid}: needs recommendation and reason")
-        _approved(root, decision, f"platform decision {pid}", errors)
-    for pid, platform in platforms.items():
-        if platform.get("status") == "undecided" and pid not in decided:
-            errors.append(f"platform {pid}: undecided without an SF-038 recommendation")
+        if ticket in adapter.get("depends_on", []):
+            errors.append(f"{label}: depends on its own implementation ticket")
+        if "ticket_request" in adapter:
+            errors.append(f"{label}: ticket_request is obsolete; link implementation_ticket")
+        # Reference-model agreement is not adapter execution; only the
+        # implementation ticket may record a runtime receipt.
+        execution = adapter.get("runtime_execution")
+        if execution not in ("pending", "passed"):
+            errors.append(f"{label}: runtime_execution {execution!r}")
+        elif execution == "passed":
+            receipt = adapter.get("runtime_evidence")
+            if not receipt or not (root / receipt).exists():
+                errors.append(f"{label}: passed runtime execution needs an existing runtime_evidence receipt")
+        if not complete and not adapter.get("specification_gap"):
+            errors.append(f"{label}: incomplete specifications need a specification_gap")
     return errors

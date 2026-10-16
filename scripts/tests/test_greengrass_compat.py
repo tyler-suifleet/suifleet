@@ -162,13 +162,16 @@ class FixtureGateTests(unittest.TestCase):
 
     def test_managed_catalog_change_is_checked_against_fixtures(self):
         # Fixture outcomes depend on the catalog, so a catalog edit must be deliberate.
-        def deferred(c):
+        def incomplete(c):
             next(a for a in c["adapters"] if a["id"] == "credential-provider").update(
-                selection="deferred", selection_precondition="test")
-        def exclude(c):
-            next(r for r in c["components"] if r["name"] == "variant.DLR")["disposition"] = "exclude"
-        self.run_mutated("managed-components.json", deferred)
-        self.run_mutated("managed-components.json", exclude)
+                specification="incomplete", specification_gap="test")
+        def roadmap(c):
+            next(r for r in c["components"] if r["name"] == "variant.DLR").update(disposition="roadmap", tickets=["SF-064"])
+        def ticket(c):
+            next(a for a in c["adapters"] if a["id"] == "cloudwatch-metrics-export")["implementation_ticket"] = "SF-060"
+        self.run_mutated("managed-components.json", incomplete)
+        self.run_mutated("managed-components.json", roadmap)
+        self.run_mutated("managed-components.json", ticket)
 
 
 class ManagedCatalogGateTests(unittest.TestCase):
@@ -196,12 +199,21 @@ class ManagedCatalogGateTests(unittest.TestCase):
     def test_baseline_has_no_errors(self):
         self.assertEqual(self.errors(lambda c: None), [])
 
-    def test_every_disposition_is_pending_and_no_adapter_has_a_ticket(self):
-        # This specification approves nothing and creates no tickets.
-        for entry in self.catalog["components"] + self.catalog["platform_decisions"]:
-            self.assertNotEqual(entry.get("approval"), "approved")
-        self.assertEqual({a["implementation_ticket"] for a in self.catalog["adapters"]}, {None})
+    def test_adapters_link_published_tickets_and_stay_unexecuted(self):
+        # Published scoped implementation tickets (Codex, PR #91 feedback).
+        # Linking a ticket is not runtime evidence: every adapter stays pending.
+        self.assertEqual({a["id"]: a["implementation_ticket"] for a in self.catalog["adapters"]}, {
+            "credential-provider": "SF-057", "stream-export-aws": "SF-058",
+            "cloudwatch-metrics-export": "SF-059", "cloudwatch-logs-export": "SF-060",
+            "aws-iot-core-connection": "SF-061", "device-defender-metrics": "SF-062",
+            "secure-tunneling": "SF-063"})
+        self.assertEqual({a["runtime_execution"] for a in self.catalog["adapters"]}, {"pending"})
         self.assertFalse(self.catalog["parity_claim"])
+        for entry in self.catalog["components"] + self.catalog["platform_phases"]:
+            self.assertNotIn("approval", entry)
+        roadmap = [r["name"] for r in self.catalog["components"] if r["disposition"] == "roadmap"]
+        self.assertTrue(roadmap)
+        self.assertTrue(all("SF-064" in self.component(self.catalog, n)["tickets"] for n in roadmap))
 
     def test_required_families_and_parity(self):
         self.has(lambda c: c.update(parity_claim=True), "parity_claim")
@@ -216,6 +228,10 @@ class ManagedCatalogGateTests(unittest.TestCase):
         self.has(lambda c: self.component(c, "variant.DLR")["tickets"].append("SF-999"), "unknown ticket SF-999")
         self.has(lambda c: self.component(c, "aws.greengrass.SageMakerEdgeManager").update(disposition="native-component", tickets=["SF-011"]),
                  "discontinued")
+        self.has(lambda c: self.component(c, "aws.greengrass.SageMakerEdgeManager").update(disposition="roadmap", tickets=["SF-064"]),
+                 "discontinued")
+        self.has(lambda c: self.component(c, "aws.greengrass.SNS").update(tickets=["SF-020"]), "tracked by SF-064")
+        self.has(lambda c: self.component(c, "aws.greengrass.SNS").update(disposition="exclude"), "disposition")
         self.has(lambda c: self.component(c, "aws.greengrass.Cloudwatch").pop("adapter"), "needs an adapter")
         self.has(lambda c: self.component(c, "aws.greengrass.Cloudwatch").update(adapter="nope"), "unknown adapter")
         self.has(lambda c: self.component(c, "aws.greengrass.Cloudwatch").update(adapter="credential-provider"), "does not list it")
@@ -223,16 +239,20 @@ class ManagedCatalogGateTests(unittest.TestCase):
         self.has(lambda c: self.component(c, "aws.greengrass.SNS").update(disposition="maybe"), "disposition")
         self.has(lambda c: self.component(c, "aws.greengrass.SNS").update(native_equivalent=""), "native_equivalent")
 
-    def test_approval_requires_a_recorded_decision(self):
-        self.has(lambda c: self.component(c, "aws.greengrass.LambdaManager").update(approval="approved"), "decision_ref")
-        self.has(lambda c: c["platform_decisions"][1].update(approval="approved", decision_ref="docs/NOPE.md"), "decision_ref")
-        self.assertEqual(self.errors(lambda c: self.component(c, "aws.greengrass.LambdaManager").update(
-            approval="approved", decision_ref="docs/GREENGRASS_MANAGED_COMPONENTS.md")), [])
+    def test_catalog_records_no_approvals(self):
+        # Roadmap gaps are not approved exclusions; the catalog cannot claim one.
+        self.has(lambda c: self.component(c, "aws.greengrass.LambdaManager").update(approval="approved"), "approvals")
+        self.has(lambda c: c["platform_phases"][4].update(approval="pending"), "approvals")
 
     def test_adapter_rules(self):
-        self.has(lambda c: self.adapter(c, "credential-provider").update(ticket_request=None), "ticket_request")
-        self.has(lambda c: self.adapter(c, "credential-provider")["ticket_request"]["depends_on"].append("SF-999"), "ticket_request")
+        self.has(lambda c: self.adapter(c, "credential-provider").update(ticket_request={"title": "x"}), "ticket_request is obsolete")
         self.has(lambda c: self.adapter(c, "credential-provider").update(implementation_ticket="SF-999"), "unknown implementation ticket")
+        self.has(lambda c: self.adapter(c, "credential-provider").update(implementation_ticket=None), "unknown implementation ticket")
+        self.has(lambda c: self.adapter(c, "credential-provider")["depends_on"].append("SF-057"), "its own implementation ticket")
+        self.has(lambda c: self.adapter(c, "credential-provider").update(runtime_execution="passed"), "runtime_evidence")
+        self.has(lambda c: self.adapter(c, "credential-provider").update(runtime_execution="passed", runtime_evidence="docs/NOPE.json"),
+                 "runtime_evidence")
+        self.has(lambda c: self.adapter(c, "credential-provider").pop("runtime_execution"), "runtime_execution")
         self.has(lambda c: self.adapter(c, "credential-provider")["replaces"].update({"aws.greengrass.TokenExchangeService": "2.0.4"}), "!= reference")
         self.has(lambda c: self.adapter(c, "credential-provider")["replaces"].update({"aws.greengrass.SNS": "2.1.10"}), "does not reference")
         self.has(lambda c: self.adapter(c, "credential-provider")["platforms"].append("windows"), "no native runtime")
@@ -241,7 +261,9 @@ class ManagedCatalogGateTests(unittest.TestCase):
         self.has(lambda c: self.adapter(c, "credential-provider").update(licensing=""), "needs licensing")
         self.has(lambda c: self.adapter(c, "cloudwatch-logs-export")["replaces"].update({"aws.greengrass.LogManager": "unpinned"}), "pin an exact")
         self.has(lambda c: self.adapter(c, "cloudwatch-metrics-export")["acceptance"].update(reference_suites=[]), "executable reference suite")
-        self.has(lambda c: self.adapter(c, "secure-tunneling").pop("selection_precondition"), "selection_precondition")
+        self.has(lambda c: self.adapter(c, "secure-tunneling").pop("specification_gap"), "specification_gap")
+        self.has(lambda c: self.adapter(c, "secure-tunneling").update(specification="deferred"), "specification")
+        self.has(lambda c: self.adapter(c, "aws-iot-core-connection").update(specification="complete"), "pin an exact")
         self.has(lambda c: c["adapters"].append(copy.deepcopy(c["adapters"][0])), "duplicate adapter")
 
     def test_document_lists_every_component_and_suite_size(self):
@@ -249,7 +271,7 @@ class ManagedCatalogGateTests(unittest.TestCase):
         for row in self.catalog["components"]:
             self.assertIn(f"| `{row['name']}` |", doc)
         for adapter in self.catalog["adapters"]:
-            self.assertIn(f"| `{adapter['id']}` | {adapter['selection']} |", doc)
+            self.assertIn(f"| `{adapter['id']}` | {adapter['implementation_ticket']} | {adapter['specification']} |", doc)
         counts = compat.run(ROOT)
         self.assertIn(f"| `managed-dependency-cases.json` | {counts['managed-dependency-cases.json']} classifications |", doc)
         for suite in ("credential-provider-cases.json", "cloudwatch-metrics-cases.json", "cloudwatch-logs-cases.json"):
@@ -258,9 +280,15 @@ class ManagedCatalogGateTests(unittest.TestCase):
         for suite, count in counts.items():
             self.assertIn(f"| `{suite}` | {count} ", compatibility)
 
-    def test_undecided_platforms_need_a_recommendation(self):
-        self.has(lambda c: c["platform_decisions"].pop(1), "platform windows")
-        self.has(lambda c: c["platform_decisions"][0].update(recommendation="maybe"), "recommendation")
+    def test_every_platform_has_a_phase(self):
+        phases = {p["platform"]: p["phase"] for p in self.catalog["platform_phases"]}
+        self.assertEqual({p for p, v in phases.items() if v == "initial-prototype"}, {"linux-x86_64", "linux-aarch64", "linux-arm"})
+        self.has(lambda c: c["platform_phases"].pop(4), "platform windows")
+        self.has(lambda c: c["platform_phases"][0].update(phase="excluded"), "needs phase")
+        self.has(lambda c: c["platform_phases"][4].update(tickets=[]), "tracked by SF-064")
+        self.has(lambda c: c["platform_phases"][4].update(phase="initial-prototype"), "need a native runtime")
+        self.has(lambda c: c["platform_phases"].append(copy.deepcopy(c["platform_phases"][0])), "duplicate")
+        self.has(lambda c: c["platform_phases"][2].update(phase="roadmap", tickets=["SF-064"]), "not in the initial prototype phase")
 
 
 class ModelTests(unittest.TestCase):
