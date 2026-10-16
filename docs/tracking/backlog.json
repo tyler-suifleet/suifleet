@@ -756,7 +756,8 @@
         "SF-005",
         "SF-006",
         "SF-029",
-        "SF-030"
+        "SF-030",
+        "SF-065"
       ],
       "paths": [
         "scripts/",
@@ -1325,6 +1326,354 @@
         "Publish per-release/per-device workload tables and break-even comparisons against matched AWS pricing, retention and availability. State exactly which data is measured, simulated, estimated, excluded or blocked. A partial subtotal cannot be a full bill."
       ],
       "validation": "Offline cost arithmetic/fixture tests, exact transaction effects and token-accounting evidence, independently checked read-only Mainnet rates, reproducible results and peer review. Testnet mutation only with standing wallet locks/allowances; no unauthorized Mainnet spend."
+    },
+    {
+      "key": "SF-055",
+      "title": "Reconcile implementation acceptance and publish missing compatibility work",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "baseline",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "docs",
+        "AGENTS.md"
+      ],
+      "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
+      "description": "Reconcile implementation acceptance and publish missing compatibility work. Apply the standing implementation/integration acceptance split to SF-015 and SF-019: physical Pi, actual extension-wallet and provisioned hosted-service acceptance stay in SF-010/SF-031; preserve source/security/regression/local compatibility and relevant automatic testnet CI gates.",
+      "acceptance": [
+        "Apply the standing implementation/integration acceptance split to SF-015 and SF-019: physical Pi, actual extension-wallet and provisioned hosted-service acceptance stay in SF-010/SF-031; preserve source/security/regression/local compatibility and relevant automatic testnet CI gates.",
+        "Publish and link actual AWS adapter implementation scopes for SF-038 without claiming proposed interfaces are implemented; Linux-first is a prototype phase, not a permanent exclusion of the full parity roadmap.",
+        "Reconcile stopped worker dispatch receipts with verified process/exit/owner evidence and preserve valid Review/Blocked claims; do not fabricate completion or steal claims.",
+        "Persist scoped policy and tracker changes, obtain fresh independent exact-head/base/policy reviews and leave merges to sole coordinator. Keep production signing held and physical programming unauthorized."
+      ],
+      "validation": "Offline tracking/policy/coordinator checks, source/link consistency and independently reviewed documentation. No hardware or Mainnet mutation.",
+      "resources": []
+    },
+    {
+      "key": "SF-056",
+      "title": "Repair live Sui tooling compatibility for current public testnet protocol",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "baseline",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "Dockerfile",
+        ".github/workflows",
+        "scripts",
+        "docs/TESTNET.md"
+      ],
+      "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
+      "description": "Repair live Sui tooling compatibility for current public testnet protocol. Reproduce the fresh-fixture protocol139 versus pinned CLI138 failure without assuming all cached testnet runs fail; identify and checksum-pin a compatible supported transaction CLI with explicit version/protocol evidence.",
+      "acceptance": [
+        "Reproduce the fresh-fixture protocol139 versus pinned CLI138 failure without assuming all cached testnet runs fail; identify and checksum-pin a compatible supported transaction CLI with explicit version/protocol evidence.",
+        "Add cheap read-only chain/protocol/account compatibility preflight before writes. Preserve dedicated wallets, serialized mutations, non-replenishing allowance, failure charging, encrypted state and protected CI authority.",
+        "Separate release compilation from live network submission explicitly, or deliberately upgrade the shared toolchain with bytecode/ABI/origin/lockfile regressions. test-publish/test-upgrade compile as well as submit: changing PATH must not silently change the framework or fixtures.",
+        "Include actual build/network CLI and framework provenance in evidence/fixture compatibility where required; never reuse a fixture for a different base-to-head upgrade. Verify cached and fresh-fixture acceptance with actual effects under bounded spending.",
+        "Update relevant pinned downloads/checksums, docs and regression tests; do not disable mandatory testnet statuses, inflate spend to hide faults or use the funding-only CLI as unsupported proof of compatibility."
+      ],
+      "validation": "Offline preflight/cache/toolchain regressions, real cheap protocol probes, fresh and cached public-testnet acceptance/effects and exact-head CI. No Mainnet spending.",
+      "resources": []
+    },
+    {
+      "key": "SF-057",
+      "title": "Implement scoped AWS component credential exchange",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-021",
+        "SF-027",
+        "SF-053"
+      ],
+      "paths": [
+        "suifleet-edge/src",
+        "scripts",
+        "docs"
+      ],
+      "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
+      "description": "Implement scoped AWS component credential exchange. Implement the declared SDK-compatible local credential endpoint backed by an explicitly configured separately provisioned AWS X.509 identity/provider; a Sui/Seal identity does not create AWS credentials.",
+      "acceptance": [
+        "Implement the declared SDK-compatible local credential endpoint backed by an explicitly configured separately provisioned AWS X.509 identity/provider; a Sui/Seal identity does not create AWS credentials.",
+        "Enforce deny-by-default component grants, bounded per-start tokens, caller identity, refresh/expiry/backoff and no secret logging/journaling or sibling-process access. Use SF-022 when protected distribution is selected; mock-backed adapter work need not await live AWS accounts.",
+        "Execute declared credential-provider fixtures against the actual process and unmodified supported AWS SDK clients plus a local mTLS upstream. Distinguish semantic compatibility and reference-model checks from actual adapter execution.",
+        "Retain live AWS account/service acceptance explicitly pending until authorized. No silently purchased services, production credentials or unsupported HSM/regulated-data claims."
+      ],
+      "validation": "Actual adapter/local TLS and SDK-client integration tests, wrong-caller/expiry/rotation/outage cases, scoped Rust/IPC regressions and documented live acceptance boundary.",
+      "resources": []
+    },
+    {
+      "key": "SF-058",
+      "title": "Implement Kinesis and S3 durable stream exporters",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-034",
+        "SF-057"
+      ],
+      "paths": [
+        "suifleet-edge/src",
+        "scripts",
+        "docs"
+      ],
+      "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
+      "description": "Implement Kinesis and S3 durable stream exporters. Implement explicitly configured Kinesis and S3 exporters over durable stream storage and scoped credentials using actual request/response semantics.",
+      "acceptance": [
+        "Implement explicitly configured Kinesis and S3 exporters over durable stream storage and scoped credentials using actual request/response semantics.",
+        "Handle partial success, retry/backoff, lost responses and crash-safe export checkpoints; support multipart resume/abort cleanup and configured bandwidth/batch limits without silently losing or advancing unexported data.",
+        "Run reference fixtures against the real exporter and local API emulators, including actual payload assertions and restart/failure cases. Keep SiteWise/other service exports visible as remaining roadmap work.",
+        "Record authorized live AWS service acceptance separately; emulators do not establish AWS-account behavior or complete StreamManager parity."
+      ],
+      "validation": "Actual exporter/emulator, partial-batch/multipart/crash/checkpoint/permissions tests and supported SDK/recipe integration.",
+      "resources": []
+    },
+    {
+      "key": "SF-059",
+      "title": "Implement CloudWatch component and device metrics export",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-019",
+        "SF-032",
+        "SF-057"
+      ],
+      "paths": [
+        "suifleet-edge/src",
+        "scripts",
+        "docs"
+      ],
+      "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
+      "description": "Implement CloudWatch component and device metrics export. Implement version-pinned AWS component metrics semantics with explicitly configured CloudWatch PutMetricData export using scoped credentials.",
+      "acceptance": [
+        "Implement version-pinned AWS component metrics semantics with explicitly configured CloudWatch PutMetricData export using scoped credentials.",
+        "Validate granted publishers, schema/dimensions/units, batching, timestamps, bounded durable queues and declared retry/drop behavior.",
+        "Execute metrics fixtures against the actual adapter and emulator-observed requests; demonstrate unauthorized publication, outage/restart, over-limit and rejected-record behavior.",
+        "Keep actual AWS metrics delivery pending explicit account authorization and evidence; existing Sui telemetry and fixture-only reference checks are prerequisites, not implementation proof."
+      ],
+      "validation": "Real adapter/emulator assertions, messaging/telemetry regressions and quota/restart/redaction/permission cases.",
+      "resources": []
+    },
+    {
+      "key": "SF-060",
+      "title": "Implement CloudWatch Logs export for managed components",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-020",
+        "SF-057"
+      ],
+      "paths": [
+        "suifleet-edge/src",
+        "scripts",
+        "docs"
+      ],
+      "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
+      "description": "Implement CloudWatch Logs export for managed components. Implement the declared LogManager-compatible file selection/naming and CloudWatch upload path with scoped credentials.",
+      "acceptance": [
+        "Implement the declared LogManager-compatible file selection/naming and CloudWatch upload path with scoped credentials.",
+        "Redact before durable spool, apply Unicode-safe splitting and request limits, and preserve explicit at-least-once checkpoint behavior through restart, rejection and lost responses.",
+        "Execute declared log fixtures against the actual adapter and request-checking emulator; test sibling access denial, rollover, oversize events, outage and disk limits.",
+        "Do not claim end-to-end AWS LogManager/live-service parity from local file collection or fixtures; track authorized real account acceptance explicitly."
+      ],
+      "validation": "Actual adapter, spool/checkpoint, request-shape and failure-path tests plus diagnostics/permissions regressions.",
+      "resources": []
+    },
+    {
+      "key": "SF-061",
+      "title": "Implement AWS IoT Core bridge and shadow connection",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-032",
+        "SF-033",
+        "SF-021"
+      ],
+      "paths": [
+        "suifleet-edge/src",
+        "scripts",
+        "docs"
+      ],
+      "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
+      "description": "Implement AWS IoT Core bridge and shadow connection. Implement the declared AWS IoT connection using explicitly configured separate AWS thing certificates/keys and endpoints; retain Sui device identity as a separate trust domain.",
+      "acceptance": [
+        "Implement the declared AWS IoT connection using explicitly configured separate AWS thing certificates/keys and endpoints; retain Sui device identity as a separate trust domain.",
+        "Support mTLS/ALPN where required, ACL enforcement, connection recovery, certificate rotation, IotCore topic routes and version/conflict-aware shadow reconciliation.",
+        "Run actual adapter against a local TLS broker and AWS-shaped shadow harness, including unauthorized identities/topics, reconnect/outage and credential rotation.",
+        "Record service/account-specific AWS acceptance separately; Linux-first implementation is phased support rather than a permanent platform exclusion."
+      ],
+      "validation": "Actual broker/bridge/shadow adapter tests, TLS identity/ACL/rotation/recovery regressions and explicit unrun live-account cases.",
+      "resources": []
+    },
+    {
+      "key": "SF-062",
+      "title": "Implement Device Defender device-side metrics export",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-019",
+        "SF-061"
+      ],
+      "paths": [
+        "suifleet-edge/src",
+        "scripts",
+        "docs"
+      ],
+      "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
+      "description": "Implement Device Defender device-side metrics export. Implement a version/schema-pinned Device Defender device-side metrics component and AWS topic export using the configured IoT connection.",
+      "acceptance": [
+        "Implement a version/schema-pinned Device Defender device-side metrics component and AWS topic export using the configured IoT connection.",
+        "Enforce bounded configured sampling, correct accepted/rejected handling, authorization and disconnected buffering/retry behavior.",
+        "Run executable schema/topic fixtures against the real adapter; do not present the AWS server-side Detect service as locally replicated or covered by this device component."
+      ],
+      "validation": "Actual metrics/topic adapter, sampling/rejection/disconnection tests and explicit authorized live AWS acceptance gaps.",
+      "resources": []
+    },
+    {
+      "key": "SF-063",
+      "title": "Package and supervise a configured secure-tunneling destination adapter",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-025",
+        "SF-014",
+        "SF-027",
+        "SF-061"
+      ],
+      "paths": [
+        "suifleet-edge/src",
+        "scripts",
+        "docs"
+      ],
+      "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
+      "description": "Package and supervise a configured secure-tunneling destination adapter. Provide explicitly enabled, allow-listed local-service destination proxy lifecycle using the selected platform tunnel configuration and AWS-shaped notifications.",
+      "acceptance": [
+        "Provide explicitly enabled, allow-listed local-service destination proxy lifecycle using the selected platform tunnel configuration and AWS-shaped notifications.",
+        "Protect ephemeral tokens, restrict destinations/callers, bound sessions/concurrency/timeouts, and stop/revoke/clean up correctly after failures or component replacement. Platform scripts/admins own SSH daemon, firewall and service configuration.",
+        "Exercise actual supervised proxy/process with stub notifications/tunnel endpoint, denied targets, token leakage negatives and connection failures. This does not authorize arbitrary remote commands or SuiFleet-driven platform reboot.",
+        "Record real AWS tunnel acceptance separately until account/network authorization exists. Do not permanently exclude remote-access components merely because platform configuration remains platform-owned."
+      ],
+      "validation": "Actual process supervision/proxy, token/ACL/timeout/restart/cleanup tests and separately evidenced live service integration.",
+      "resources": []
+    },
+    {
+      "key": "SF-064",
+      "title": "Complete remaining managed-component functional compatibility roadmap",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-038"
+      ],
+      "paths": [
+        "docs",
+        "interfaces/compat",
+        "scripts"
+      ],
+      "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
+      "description": "Complete remaining managed-component functional compatibility roadmap. Keep Lambda invocation/subscriptions, industrial/SiteWise/Kinesis-video functions, ML example-equivalent packaging and platform expansion visible as missing functional work, not user-approved permanent exclusions.",
+      "acceptance": [
+        "Keep Lambda invocation/subscriptions, industrial/SiteWise/Kinesis-video functions, ML example-equivalent packaging and platform expansion visible as missing functional work, not user-approved permanent exclusions.",
+        "Define versioned executable semantics and split each selected implementation scope into concrete Codex-published issues with dependencies and acceptance before claiming roadmap closure. Reuse existing tickets where actual implementation scope already exists.",
+        "Linux x86_64/aarch64/arm is the initial prototype phase; other platforms remain tracked gaps unless the user explicitly changes the full parity goal. Respect upstream licensing through clean-room functional alternatives without relabeling native wrappers as existing compatibility.",
+        "Preserve separate reference-model, actual-adapter and authorized live service/hardware evidence; no whole-catalog parity claim from seven adapter tickets or fixture checks."
+      ],
+      "validation": "Reviewed capability-to-ticket matrix and executable specifications, no false implemented/runtime/full-parity claims.",
+      "resources": []
+    },
+    {
+      "key": "SF-065",
+      "title": "Implement offline wallet-to-edge acceptance harness",
+      "priority": "P1",
+      "area": "clients",
+      "phase": "baseline",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-029",
+        "SF-030"
+      ],
+      "paths": [
+        "scripts",
+        "tests",
+        "docs"
+      ],
+      "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
+      "description": "Implement offline wallet-to-edge acceptance harness. Implement the missing SF-031 harness and deterministic local-network/Testnet profiles without requiring a physical Pi to write or test the runner.",
+      "acceptance": [
+        "Implement the missing SF-031 harness and deterministic local-network/Testnet profiles without requiring a physical Pi to write or test the runner.",
+        "Validate explicit device/SSH/manifest/accounts/endpoints, preserve keys/journals, generate isolated test-component artifacts and verify digests and reported results. Support offline harness tests and an explicit hardware execution mode with hardware lock only while actually used.",
+        "Support public-artifact baseline and a clearly pending SF-022 encrypted profile; separate real extension-wallet steps from scripted wallet/test-account automation. Missing physical or extension evidence cannot become a fake pass.",
+        "Keep SF-031/#32 open for actual physical/wallet/network acceptance after this implementation merges; no disk flashing, guessed target, unapproved Mainnet or production credential use."
+      ],
+      "validation": "Offline runner/protocol/command/failure-path tests and local simulator execution; exact public-testnet checks where relevant/available. Physical Pi and extension acceptance explicitly remain in SF031.",
+      "resources": []
+    },
+    {
+      "key": "SF-066",
+      "title": "Refresh the Pi image to a coherent reviewed signer-service release",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "baseline",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-029",
+        "SF-053",
+        "SF-026"
+      ],
+      "paths": [
+        "kas",
+        "suifleet-edge/meta-suifleet",
+        "scripts",
+        "docs"
+      ],
+      "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
+      "description": "Refresh the Pi image to a coherent reviewed signer-service release. Update the fixed daemon source revision, crate include and Cargo.lock digest together to a coherent reviewed release containing the signer-service and self-update integration. Preserve the existing image as a labeled older public smoke baseline, not evidence of current customer-ready security.",
+      "acceptance": [
+        "Update the fixed daemon source revision, crate include and Cargo.lock digest together to a coherent reviewed release containing the signer-service and self-update integration. Preserve the existing image as a labeled older public smoke baseline, not evidence of current customer-ready security.",
+        "Build the actual raspberrypi3-64 BitBake SD image using pinned layers/toolchains, include all required launcher/signer/service binaries and permissions, and inspect identity/session credential separation and public-key SSH/DHCP first-boot state.",
+        "Publish new checksum/package manifest/build provenance and version compatibility checks; no device keys/enrollment secrets in image. Actual build and filesystem checks are required, not an SSH binary copy.",
+        "No physical Pi is needed to build; preserve physical flashing/boot/network/recovery acceptance in SF031. Do not program a device or silently override platform reboot/updater ownership."
+      ],
+      "validation": "Real BitBake image build, artifact/rootfs/service/permissions and manifest/client compatibility inspection; exact source/image/binary hashes and explicit deferred physical tests.",
+      "resources": []
+    },
+    {
+      "key": "SF-067",
+      "title": "Recover stopped automation capacity without losing ticket ownership",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "baseline",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator",
+        "docs/PR_COORDINATION.md",
+        "AGENTS.md"
+      ],
+      "resources": [],
+      "description": "Make implementation and review automation robust to stopped workers and blocked work so eligible tickets keep progressing.",
+      "evidence": "User requests robust automation and no unused workers; expired/orphaned reservations currently consume family capacity despite stopped processes.",
+      "acceptance": [
+        "Separate verified stopped blocked jobs from active worker capacity while preserving their ticket reservations and evidence.",
+        "Reconcile durable completed handoffs after service restarts and revisit orphan records safely; process identity and live-worker checks must prevent duplicate mutation workers.",
+        "Keep ambiguous claims isolated and visible without permanently consuming unrelated implementation capacity; bound concurrency for genuinely running workers and never auto-reclaim uncertain ownership.",
+        "Provide regression tests for dead/live/PID-reused wrappers, blocked results, restart reconciliation and ownership changes; document diagnostics and deploy reviewed automation changes."
+      ],
+      "validation": "Dispatcher/coordinator regression tests, offline tracking validation, service status and operational capacity evidence; no relaxed review or acceptance gates."
     }
   ]
 }
