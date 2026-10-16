@@ -5,8 +5,10 @@ chain/Walrus simulator, without keys or gas.
 Supervised component `cfg` (its run copies $SUIFLEET_CONFIGURATION), with
 `/db/role` confidential and provisioned only in the device overlay:
   0x501 1.0.0 defaults                 -> runs with defaults + overlay value;
-                                          its install prints the configuration
-                                          into the private component log only;
+                                          its install, its failing then passing
+                                          readiness check and its shutdown print
+                                          the configuration into the private
+                                          component log only;
                                           no overlay value in public state or logs
   0x502 1.0.0 merge                    -> merged over the persisted config
   0x503 2.0.0 new defaults, reset      -> existing values kept, missing defaults
@@ -41,6 +43,10 @@ RUN = 'cp "$SUIFLEET_CONFIGURATION" seen.json; exec sleep 300'
 # An install that prints the configuration it receives, confidential values
 # included, on stdout and stderr: that output must stay out of the daemon log.
 PRINT = "cat {configuration}; cat {configuration} >&2"
+# Readiness fails its first attempt, then passes; shutdown then stops the run.
+# Both print the configuration on stdout and stderr first, labelled.
+READY = "echo ready-out; echo ready-err >&2; " + PRINT + "; test -e ready-once || { touch ready-once; exit 1; }"
+SHUTDOWN = "echo shutdown-out; echo shutdown-err >&2; " + PRINT + "; kill {pid}"
 
 VALUES = ("private-one", "private-two")
 
@@ -166,14 +172,18 @@ def run(binary):
                 wait_for(lambda: journal().get("initialized"), "daemon did not establish its cursor", process)
 
                 deploy("0x501", "1.0.0", {"defaults": {"port": 8080, "log": {"level": "info"}, "db": {"host": "db1"}},
-                                          "confidential": ["/db/role"]}, run=RUN, install=PRINT)
+                                          "confidential": ["/db/role"]}, run=RUN, install=PRINT,
+                       readiness=READY, shutdown=SHUTDOWN)
                 wait_for(lambda: outcome("0x501").get("status") == 1, "0x501 was not applied", process)
                 wait_for(lambda: running("1.0.0") and seen(), "0x501 did not run", process)
                 v1 = {"port": 8080, "log": {"level": "info"}, "db": {"host": "db1", "role": VALUES[0]}}
                 assert seen() == v1, seen()
                 assert effective() == {"port": 8080, "log": {"level": "info"}, "db": {"host": "db1"}}, effective()
-                assert (components / "cfg" / "component.log").read_text().count(VALUES[0]) == 2
-                print("PASS: defaults applied; the confidential value came from the device overlay only")
+                cfg_log = (components / "cfg" / "component.log").read_text()
+                # Install twice, then the failed and the passing readiness attempt.
+                assert cfg_log.count(VALUES[0]) == 6 and cfg_log.count("ready-err") == 2, cfg_log
+                print("PASS: defaults applied; the confidential value came from the device overlay only; "
+                      "install and readiness output went to the private component log")
 
                 (work / "seen.json").unlink()
                 deploy("0x502", "1.0.0", {"merge": {"port": 9000, "log": {"level": "debug"}}, "confidential": ["/db/role"]})
@@ -181,6 +191,8 @@ def run(binary):
                 wait_for(lambda: seen(), "0x502 did not run", process)
                 v2 = {"port": 9000, "log": {"level": "debug"}, "db": {"host": "db1", "role": VALUES[0]}}
                 assert seen() == v2, seen()
+                cfg_log = (components / "cfg" / "component.log").read_text()
+                assert cfg_log.count("shutdown-err") == 1 and cfg_log.count(VALUES[0]) == 8, cfg_log
                 print("PASS: merge applied over the persisted configuration; the component restarted with it")
 
                 (work / "seen.json").unlink()

@@ -768,9 +768,14 @@ impl Context {
 
     /// A bounded helper command (readiness check or shutdown).
     /// Hardened once, by [`Context::command`], so it keeps the component's
-    /// environment and recovery marker.
+    /// environment and recovery marker. It sees the materialized
+    /// configuration, so its output goes to the private component log like
+    /// every other lifecycle command, never to the daemon's diagnostics.
     async fn helper(&self, template: &str, pid: u32, timeout: Duration) -> anyhow::Result<()> {
-        apply::run_hardened(self.command(template, Some(pid)), timeout).await
+        let log = open_log(&self.component.join("component.log"))?;
+        let mut command = self.command(template, Some(pid));
+        command.stdout(log.try_clone()?).stderr(log);
+        apply::run_hardened(command, timeout).await
     }
 
     async fn ready(&self, pid: u32) -> Result<(), String> {
