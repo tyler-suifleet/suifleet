@@ -18,6 +18,19 @@ const values = (n) => Object.fromEntries(Array.from({length:n}, (_, i) => [Strin
 assert.equal(recipes.CONFIGURATION_LIMITS.values, 4096);
 assert.doesNotThrow(() => recipes.assertComponentRecipe(configured(values(4095))));
 assert.throws(() => recipes.assertComponentRecipe(configured(values(4096))), /exceeds/);
+// The deploy forms' configuration builder produces recipes both clients accept.
+const forms = load("dapp/src/lib/recipe-configuration.ts");
+assert.deepEqual(forms.recipeConfiguration(forms.EMPTY_CONFIGURATION), {schemaVersion:"1.0", configuration:{}});
+const form = forms.recipeConfiguration({defaults:'{"port":8080,"db":{}}', merge:'{"port":9000}', reset:'""\n /port \n', confidential:"/db/password", validate:" grep -q port {configuration} "});
+assert.deepEqual(form, {schemaVersion:"1.2", validate:"grep -q port {configuration}",
+  configuration:{defaults:{port:8080, db:{}}, merge:{port:9000}, reset:["", "/port"], confidential:["/db/password"]}});
+const formRecipe = (configured, lifecycle) => ({...cases[0].value, schemaVersion:configured.schemaVersion, lifecycle:{...lifecycle, ...(configured.validate ? {validate:configured.validate} : {})}, configuration:configured.configuration});
+assert.doesNotThrow(() => recipes.assertComponentRecipe(formRecipe(form, {run:"exec {artifact}"})));
+assert.throws(() => recipes.assertComponentRecipe(formRecipe(form, {})), /install or run/);
+const leaked = forms.recipeConfiguration({...forms.EMPTY_CONFIGURATION, defaults:'{"db":{"password":"x"}}', confidential:"/db/password"});
+assert.throws(() => recipes.assertComponentRecipe(formRecipe(leaked, {install:"true"})), /confidential \/db\/password/);
+assert.throws(() => forms.recipeConfiguration({...forms.EMPTY_CONFIGURATION, merge:"[1]"}), /must be a JSON object/);
+assert.throws(() => forms.recipeConfiguration({...forms.EMPTY_CONFIGURATION, defaults:"{port:"}), /not valid JSON/);
 const vector = JSON.parse(fs.readFileSync(path.resolve(__dirname, "../interfaces/wire-vectors.json"), "utf8")).deployment_created;
 assert.equal(Buffer.from(protocol.deployment_manager_DeploymentCreatedBcs.serialize(vector.json).toBytes()).toString("hex"), vector.bcs_hex);
 // Supply an exact Uint8Array, not a Node pooled Buffer with unrelated backing bytes.
