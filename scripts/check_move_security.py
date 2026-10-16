@@ -94,15 +94,17 @@ def main():
         print("PASS: unsuppressed gate rejects a new lint inside the actual package")
         negative = temporary / "negative"
         (negative / "sources").mkdir(parents=True)
-        (negative / "Move.toml").write_text(
-            '[package]\nname = "security_negative"\nedition = "2024.beta"\n[environments]\n')
+        # Use the exact release manifest/lock: a fresh manifest alone resolves
+        # today's implicit framework instead of the reviewed release revision.
+        for name in ("Move.toml", "Move.lock"):
+            shutil.copyfile(ROOT / "contracts" / name, negative / name)
         fixture = negative / "sources" / "negative.move"
-        fixture.write_text("module security_negative::negative {\n"
+        fixture.write_text("module sui_edge::negative {\n"
                            "public entry fun redundant_entry(_ctx: &mut TxContext) {}\n}\n")
         negative_build = [arg if arg != str(package) else str(negative) for arg in build]
         run(negative_build, env, failure="error[ESL01011]")
         print("PASS: extra linter rejects public-entry negative fixture")
-        fixture.write_text("module security_negative::negative {\n"
+        fixture.write_text("module sui_edge::negative {\n"
                            "public struct Linear {}\n"
                            "public fun discard(value: Linear) {}\n}\n")
         run(negative_build, env, failure="does not have the 'drop' ability")
