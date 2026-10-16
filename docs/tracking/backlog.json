@@ -1210,6 +1210,29 @@
       ],
       "validation": "Locked frontend checks/build, relevant regression tests and genuine final vulnerability scan.",
       "description": "The first genuine SF-048 filesystem audit reports 19 HIGH/CRITICAL frontend dependency findings (2 CRITICAL,17 HIGH) in the locked dependency tree, including Next14.2.35, browserslist4.28.2, nanoid3.3.12, PostCSS8.4.31/8.5.13, source-map-js1.2.1 and braces3.0.3. These package advisories do not by themselves prove exploitability of the static deployed dApp, but the new no-suppression CI gate correctly blocks them.\n\nAcceptance:\n- Reproduce with the checksum-verified Trivy0.76.0 scanner and document exact findings, runtime/build applicability and fixed versions from primary advisories.\n- Upgrade the supported Next/React combination and affected transitive dependencies deliberately, preserving wallet/Sui SDK pins unless a verified security fix requires changing them. Keep manifest/lockfile changes coupled.\n- Resolve every HIGH/CRITICAL finding without broad ignore files, turning off scanners, skipping tests or suppressing failed audits. For unpatched advisories, implement and test a targeted mitigation/patch or report a precise real blocker; do not silently accept risk.\n- Run locked frontend install, query/transaction/schema tests, typecheck and production build; test affected runtime behavior and real-wallet acceptance limits honestly.\n- Re-run the genuine dependency/secret/configuration scan against the final branch; preserve both Rust lockfile and Dockerfile coverage. Record exact scan results and current-head CI.\n\nThis is the prerequisite remediation for SF-048/#78 security-gate adoption; use a standalone branch from current main so it can merge before the audit workflow. Do not include the security workflow implementation in this PR. Scope is dependency fixes, not production deployment or hardware programming.\n"
+    },
+    {
+      "key": "SF-051",
+      "title": "Document network-first business economics and reassess Sui-stack opportunities",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "docs/BUSINESS_PLAN.md",
+        "docs/business/",
+        "README.md"
+      ],
+      "evidence": "User explicitly requires business plans to reflect the usage-based network-cost opportunity, replacing unsupported SaaS price assumptions, and asks for a fresh ranking of adjacent AWS-like services. No business-plan document exists in the current checkout.",
+      "acceptance": [
+        "Document the user-originated thesis: measured low marginal authority/storage costs may support materially lower customer pricing and a margin on measured usage; do not claim a proven full-service margin or assign arbitrary subscriptions.",
+        "Preserve dated public Mainnet fee observations and explicit cost formulas, workload and exclusions; distinguish testnet measurements, Mainnet estimates and measured production invoices.",
+        "Rank adjacent products by avoidable customer charges and Sui/Walrus fit; identify counterexamples where AWS operations are cheaper and workloads still need paid compute, delivery, querying or key services.",
+        "Use authoritative current sources, disclose absent AWS product-margin/revenue data, and link discoverable business documentation."
+      ],
+      "validation": "JSON, formula arithmetic, source/link and scope checks plus independent review; documentation-only, no mainnet transactions or full application build.",
+      "description": "Write a network-first business plan and reassess opportunities using actual protocol economics, excluding labor from the base comparison and keeping unmeasured service costs explicit."
     }
   ]
 }
