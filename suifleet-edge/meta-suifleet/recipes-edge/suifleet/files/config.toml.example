@@ -4,9 +4,14 @@
 manifest_path = "deployment.json"
 
 [device]
-keypair_path = "/etc/suifleet/device.key"
 device_object_id = "0x<DEVICE_OBJECT_ID>"
 device_cap_id = "0x<DEVICE_CAP_ID>"
+
+# The device key is held by the signing service (suifleet-signer.service,
+# signer.toml), never readable by this daemon or its component commands.
+[device.signer]
+kind = "service"
+socket = "/run/suifleet-signer/sign.sock"
 
 # Walrus endpoints come from the deployment manifest.
 # Uncomment this table together with any optional limits below.
