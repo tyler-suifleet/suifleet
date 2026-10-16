@@ -15,7 +15,7 @@ Use the pinned Scarthgap/Rust-mixin layers
 from `kas/packaging.yml` on Ubuntu 22.04. The target is `suifleet-pi-image`, not
 the package-only `suifleet` target. Rust crates are fetched/checksummed by
 BitBake and compiled frozen/offline. Source is commit
-`4dbc1d70efbadbccd13cfd0976ef1163ba8a3f40` (reviewed main plus the SF-053
+`6c9501603165c5ed24c0f49c38c31cd0213f1fc5` (reviewed main plus the SF-053
 signing service; recorded SF-029 image builds used `795de747`); its Cargo.lock SHA-256 is
 `44aa5b2637fc2b828a796a63e9a550d9c0fa652437cf59ffd31e0b264021290e`.
 The image includes the cargo-built daemon, first-boot helper, harmless updater,

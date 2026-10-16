@@ -18,10 +18,11 @@ Other hosts/architectures need a deliberate profile change and validation.
 The local SuiFleet layer comes from this checkout. Archive its commit ID and
 any diff alongside the kas configuration and build artifacts. The daemon source
 is fetched independently at the recipe's fixed `SRCREV`
-`4dbc1d70efbadbccd13cfd0976ef1163ba8a3f40`: reviewed main through SF-026
+`6c9501603165c5ed24c0f49c38c31cd0213f1fc5`: reviewed main through SF-026
 (integrated gRPC, identity, catalog/dependency, desired-state, deployment-control
 and daemon-update implementations) plus the SF-053 device signing service, so the
-packaged `suifleet-signer` units and `signer.toml` match the binary. See
+packaged `suifleet-signer` units, `signer.toml` and the provisioning script's
+`--key-holder` call match the binary. See
 [the SF-053 package rebuild](#sf053-package-rebuild). `nobranch=1` selects this exact immutable revision, never AUTOREV.
 The daemon crate version is `0.2.1`. It requires indexed gRPC `ListEvents`
 (Sui ≥ 1.81 in SF-004 tests). Packaging/offline checks do not establish
@@ -440,7 +441,26 @@ gates; automatic testnet status, if failing, must remain visible on the PR.
 
 ## SF-053 package rebuild (2026-10-16 UTC)
 
-The pin moved from `795de747` to `4dbc1d70efbadbccd13cfd0976ef1163ba8a3f40`,
+**Current pin, `6c9501603165c5ed24c0f49c38c31cd0213f1fc5`.** It adds
+`--key-holder` (used by the packaged `suifleet-provision`), the base-binary
+check of `--record-main-process` and the refusal of `[daemon_update]` with the
+service signer. Cargo.lock is unchanged, and `bitbake -c update_crates suifleet`
+regenerated `suifleet-crates.inc` byte-identical. Then `bitbake suifleet` (same
+build directory and layers as below) exited 0: 2023 tasks, 2004 reused, package
+QA passed. Inspection of `packages-split/suifleet`:
+- the unpacked source HEAD is `6c950160…` and its lock digest matches;
+- the installed `suifleet.service`, `suifleet-provision.service`,
+  `suifleet-signer.service`, `suifleet-signer.socket`, `suifleet-provision` and
+  `signer.toml.example` are identical to the layer files;
+- `/usr/bin/suifleet` is an AArch64 PIE. Under the build's `qemu-aarch64` it
+  prints `suifleet` for a legacy `keypair_path` config and `suifleet-signer` for
+  a `kind = "service"` config, and `--check-config` refuses `[daemon_update]`
+  with the service signer.
+
+This is package evidence only: no image build, QEMU boot or physical Pi
+(SF-031).
+
+**Earlier pin.** The pin moved from `795de747` to `4dbc1d70efbadbccd13cfd0976ef1163ba8a3f40`,
 whose daemon has `--signer-service`, `--record-main-process` and the
 `kind = "service"` signer the new units use. Its Cargo.lock is unchanged
 (SHA-256 `44aa5b26…290e`): `bitbake -c update_crates suifleet` regenerated
