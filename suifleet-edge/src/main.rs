@@ -20,6 +20,7 @@ mod signer_service;
 mod state;
 mod sui_client;
 mod supervisor;
+mod telemetry;
 mod walrus_client;
 
 use apply::ApplyRunner;
@@ -111,6 +112,7 @@ async fn main() -> anyhow::Result<()> {
             .unwrap_or_else(|_| PathBuf::from("/etc/suifleet/config.toml"))
     };
     let cfg = Config::load(&path)?;
+    let started_ms = telemetry::now_ms();
     if !check_config && cfg.device.signer.as_ref().is_some_and(|signer| signer.kind == "service") {
         // Component processes run as this user: with the key in the signing
         // service, keep them from ptracing the daemon (and so signing as it)
@@ -119,7 +121,10 @@ async fn main() -> anyhow::Result<()> {
         // SAFETY: plain prctl on this process.
         anyhow::ensure!(unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) } == 0, "cannot make the daemon non-dumpable");
     }
-    let sui = SuiClient::load(cfg.sui.clone(), identity::signer(&cfg.device)?)?;
+    // One signer for transactions and telemetry (a PKCS#11 module is
+    // initialized once per process).
+    let signer = identity::signer(&cfg.device)?;
+    let sui = SuiClient::load(cfg.sui.clone(), signer.clone())?;
     sui.validate_deployment().await?;
     if check_config {
         println!("Verified deployment configuration");
@@ -198,6 +203,34 @@ async fn main() -> anyhow::Result<()> {
     });
     #[cfg(feature = "systemd")]
     sd_notify::notify(false, &[sd_notify::NotifyState::Ready]).ok();
+    // Telemetry runs beside the poll loop, so a long apply or bootstrap does
+    // not silence the heartbeat; it reads only the state files on disk.
+    let sync = telemetry::SharedSync::default();
+    let reporter = match &cfg.telemetry {
+        Some(settings) => Some(tokio::spawn(
+            telemetry::Task {
+                binding: telemetry::Binding {
+                    chain_identifier: sui.manifest().chain_identifier.clone(),
+                    registry: sui.manifest().shared_objects.registry.id.clone(),
+                    device_id: cfg.device.device_object_id.clone(),
+                    interval_seconds: settings.interval_seconds,
+                    poll_seconds: cfg.runtime.poll_seconds,
+                    started_ms,
+                    boot_id: telemetry::boot_id(),
+                },
+                url: telemetry::ingress_url(&settings.url)?,
+                state_dir: cfg.runtime.state_dir.clone(),
+                buffer_max: settings.buffer_max,
+                signer: signer.clone(),
+                sync: sync.clone(),
+            }
+            .run(),
+        )),
+        None => {
+            info!("No [telemetry] configured; device health is not reported");
+            None
+        }
+    };
     // A new daemon is confirmed only after this complete local startup
     // (configuration, identity, chain validation, journal and supervisor).
     if let Some(update) = confirm_after_startup.take() {
@@ -227,8 +260,10 @@ async fn main() -> anyhow::Result<()> {
                         restart_for_handoff = true;
                         break;
                     }
-                    Err(error) => warn!(%error, "Sync failed; retrying without advancing cursor"),
-                    Ok(()) => {}
+                    result => {
+                        sync.lock().unwrap().record(&result);
+                        if let Err(error) = result { warn!(%error, "Sync failed; retrying without advancing cursor"); }
+                    }
                 },
                 _ = &mut shutdown => { info!("Stopping; interrupted apply requires inspection on restart"); break; }
             }
@@ -237,6 +272,10 @@ async fn main() -> anyhow::Result<()> {
                 _ = &mut shutdown => break,
             }
         }
+    }
+    // Spooled snapshots stay for the next start.
+    if let Some(reporter) = reporter {
+        reporter.abort();
     }
     // Components stop with the daemon (shutdown command, then the whole group).
     supervisor.stop_all().await;

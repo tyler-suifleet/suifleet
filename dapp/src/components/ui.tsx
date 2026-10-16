@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { DeviceHealth, FleetStatus } from "@/lib/telemetry";
 
 // ── Shared components ──────────────────────────────────────────────────────────
 
@@ -35,8 +36,27 @@ export function Section({
   );
 }
 
-export function StatusDot({ healthy }: { healthy?: boolean }) {
+const STATUS_STYLE: Record<FleetStatus, { dot: string; label: string }> = {
+  healthy: { dot: "bg-green-500", label: "Healthy" },
+  degraded: { dot: "bg-amber-500", label: "Degraded" },
+  offline: { dot: "bg-red-500", label: "Offline" },
+  unverified: { dot: "bg-red-500", label: "Unverified" },
+  unreported: { dot: "bg-gray-400", label: "Unreported" },
+  unavailable: { dot: "bg-gray-300", label: "Health unavailable" },
+};
+
+/** Device health (SF-019); without telemetry nothing is claimed. */
+export function StatusDot({ health }: { health?: DeviceHealth }) {
+  const style = health ? STATUS_STYLE[health.status] : undefined;
+  const title = health ? [style!.label, ...health.reasons].join("\n") : "Health not reported";
+  return <span title={title} className={`inline-block w-2 h-2 rounded-full shrink-0 ${style?.dot ?? "bg-gray-400"}`} />;
+}
+
+export function HealthBadge({ health }: { health?: DeviceHealth }) {
   return (
-    <span title={healthy === undefined ? "Health not reported" : healthy ? "Healthy" : "Unhealthy"} className={`inline-block w-2 h-2 rounded-full ${healthy ? "bg-green-500" : "bg-gray-400"}`} />
+    <span className="inline-flex items-center gap-1.5 text-xs text-gray-600" title={health?.reasons.join("\n")}>
+      <StatusDot health={health} />
+      {health ? STATUS_STYLE[health.status].label : "Health not reported"}
+    </span>
   );
 }

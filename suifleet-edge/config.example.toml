@@ -79,3 +79,11 @@ replay_history = false
 # component = "suifleet-daemon"
 # max_start_attempts = 3
 # preflight_timeout_seconds = 60
+
+# Heartbeat, installed inventory and health (SF-019; docs/TELEMETRY.md):
+# signed snapshots to the fleet indexer, spooled under state_dir/telemetry
+# while it is unreachable. Off-chain; on-chain receipts are unchanged.
+# [telemetry]
+# url = "https://fleet.example"   # indexer base URL (POST {url}/v1/telemetry)
+# interval_seconds = 60           # 10..=3600
+# buffer_max = 1024               # snapshots kept offline; oldest dropped beyond

@@ -1,0 +1,282 @@
+// Device heartbeat, inventory and health (SF-019, docs/TELEMETRY.md).
+//
+// Devices sign telemetry snapshots and send them to the fleet indexer, never
+// to the chain. The dApp reads each device's newest snapshot from the
+// indexer, then verifies its signature itself against the device's identity
+// read from the chain: the indexer can withhold or delay reports, but cannot
+// invent a device's health. Only `received_ms` (the indexer's clock) is taken
+// on trust; it decides online/offline.
+import { bcs } from "@mysten/sui/bcs";
+import type { SuiGrpcClient } from "@mysten/sui/grpc";
+import { ObjectError } from "@mysten/sui/client";
+import { fromBase64, normalizeStructTag, normalizeSuiAddress } from "@mysten/sui/utils";
+import { isValidPersonalMessageSignature } from "@mysten/sui/verify";
+import { device_registry_IdentityBcs as IdentityBcs } from "./fleet-protocol";
+import { moveType, requireManifest } from "./deployment-manifest";
+
+/** Fleet indexer base URL with telemetry enabled; empty when not configured. */
+export const TELEMETRY_URL = process.env.NEXT_PUBLIC_SUIFLEET_TELEMETRY_URL ?? "";
+export const TELEMETRY_SCHEMA = 1;
+export const MIN_INTERVAL_SECONDS = 10;
+export const MAX_INTERVAL_SECONDS = 3600;
+export const OFFLINE_INTERVALS = 3;
+export const DELAYED_INTERVALS = 2;
+
+export interface ComponentHealth {
+  name: string;
+  version: string;
+  deployment_id: string;
+  installed: boolean;
+  supervised: boolean;
+  phase: string | null;
+  restarts: number | null;
+  last_exit: string | null;
+  since_ms: number | null;
+}
+
+/** The daemon's signed snapshot, schema 1. */
+export interface Snapshot {
+  schema: number;
+  chain_identifier: string;
+  registry: string;
+  device_id: string;
+  signer: string;
+  seq: number;
+  observed_ms: number;
+  interval_seconds: number;
+  daemon_version: string;
+  boot_id: string | null;
+  started_ms: number;
+  dropped: number;
+  sync: { last_success_ms: number | null; consecutive_failures: number; last_error: string | null };
+  pending_receipts: number;
+  components: ComponentHealth[];
+  health: string;
+  reasons: string[];
+}
+
+/** One stored report as the indexer serves it. */
+export interface Report {
+  device_id: string;
+  seq: number;
+  signer: string;
+  observed_ms: number;
+  received_ms: number;
+  message: string;
+  signature: string;
+}
+
+/** Fleet status. `unverified` and `unavailable` are the dApp's own. */
+export type FleetStatus = "unreported" | "offline" | "degraded" | "healthy" | "unverified" | "unavailable";
+
+export interface Assessment {
+  status: FleetStatus;
+  codes: string[];
+  reasons: string[];
+}
+
+export interface DeviceHealth extends Assessment {
+  lastSeenMs?: number;
+  /** Age of the newest report by the indexer's clock (not the browser's). */
+  lastSeenAgeMs?: number;
+  observedMs?: number;
+  daemonVersion?: string;
+  components: ComponentHealth[];
+}
+
+/**
+ * Status from a device's identity and its newest report from that identity's
+ * signer; the same rules and codes as suifleet-indexer (shared cases in
+ * interfaces/telemetry-cases.json). Healthy needs a fresh, timely report
+ * whose own judgement is healthy and whose facts agree with it.
+ */
+export function assess(revoked: boolean, latest: { snapshot: Snapshot; receivedMs: number } | undefined, nowMs: number): Assessment {
+  if (revoked) {
+    return { status: "unreported", codes: ["revoked"], reasons: ["device identity is revoked or deregistered; its telemetry is not trusted"] };
+  }
+  if (!latest) return { status: "unreported", codes: ["no-telemetry"], reasons: ["no telemetry received"] };
+  const { snapshot, receivedMs } = latest;
+  const codes: string[] = [];
+  const reasons: string[] = [];
+  const interval = Math.min(Math.max(snapshot.interval_seconds, MIN_INTERVAL_SECONDS), MAX_INTERVAL_SECONDS) * 1000;
+  const offline = nowMs - receivedMs > OFFLINE_INTERVALS * interval;
+  if (offline) {
+    codes.push("offline");
+    reasons.push(`no report for ${Math.floor(Math.max(0, nowMs - receivedMs) / 1000)} s`);
+  }
+  if (receivedMs - snapshot.observed_ms > DELAYED_INTERVALS * interval) {
+    codes.push("delayed");
+    reasons.push("newest report was taken long before it arrived (buffered offline, or the device clock is behind)");
+  }
+  if (snapshot.health !== "healthy" || snapshot.reasons.length > 0) {
+    codes.push("device-degraded");
+    reasons.push(...(snapshot.reasons.length ? snapshot.reasons : ["device reports degraded"]));
+  } else if (snapshot.components.some((c) => !c.installed || (c.supervised && c.phase !== "running"))) {
+    codes.push("inconsistent");
+    reasons.push("device reports healthy, but a component is not installed or not running");
+  }
+  return { status: offline ? "offline" : codes.length ? "degraded" : "healthy", codes, reasons };
+}
+
+/** A device's registry identity (SF-008), read from the chain. */
+export interface Identity { signer: string; revoked: boolean }
+
+export async function readIdentity(client: Pick<SuiGrpcClient, "getDynamicField">, deviceId: string): Promise<Identity | undefined> {
+  let field;
+  try {
+    field = await client.getDynamicField({ parentId: requireManifest().shared_objects.registry.id,
+      name: { type: moveType("device_registry::IdentityKey"), bcs: bcs.Address.serialize(deviceId).toBytes() } });
+  } catch (error) {
+    // Only a missing field means "no identity" (an unactivated device).
+    if (error instanceof ObjectError && error.reason === "notFound") return undefined;
+    throw error;
+  }
+  if (normalizeStructTag(field.dynamicField.value.type) !== normalizeStructTag(moveType("device_registry::Identity"))) {
+    throw new Error("Unexpected Identity type");
+  }
+  const identity = IdentityBcs.parse(field.dynamicField.value.bcs);
+  return { signer: normalizeSuiAddress(identity.signer), revoked: identity.revoked };
+}
+
+/**
+ * The snapshot of a report, only if its signature verifies for `signer` and
+ * it is bound to this deployment and device; otherwise why not.
+ */
+export async function verifyReport(report: Pick<Report, "message" | "signature">, deviceId: string, signer: string): Promise<Snapshot | string> {
+  let bytes: Uint8Array, signature: Uint8Array;
+  try {
+    bytes = fromBase64(report.message);
+    signature = fromBase64(report.signature);
+  } catch {
+    return "undecodable report";
+  }
+  // Device keys are plain ed25519 (0x00) or P-256 (0x02) keys.
+  if (signature[0] !== 0x00 && signature[0] !== 0x02) return "unsupported signature scheme";
+  if (!await isValidPersonalMessageSignature(bytes, report.signature, { address: signer })) {
+    return "signature is not the device identity's";
+  }
+  let snapshot: Snapshot;
+  try {
+    snapshot = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  } catch {
+    return "undecodable snapshot";
+  }
+  const manifest = requireManifest();
+  if (snapshot.schema !== TELEMETRY_SCHEMA) return `unsupported telemetry schema ${snapshot.schema}`;
+  if (snapshot.chain_identifier !== manifest.chain_identifier
+      || normalizeSuiAddress(snapshot.registry) !== normalizeSuiAddress(manifest.shared_objects.registry.id)) {
+    return "report is bound to another deployment";
+  }
+  if (normalizeSuiAddress(snapshot.device_id) !== normalizeSuiAddress(deviceId)) return "report is for another device";
+  if (normalizeSuiAddress(snapshot.signer) !== normalizeSuiAddress(signer)) return "report names another signer";
+  return snapshot;
+}
+
+/** The indexer's view of one device (GET /v1/health). */
+export interface IndexedHealth {
+  device_id: string;
+  report: Report | null;
+}
+
+/** Combine the chain identity with the indexer's newest report. */
+export async function deviceHealth(identity: Identity | undefined, indexed: IndexedHealth | undefined, deviceId: string, serverNowMs: number): Promise<DeviceHealth> {
+  if (!identity) {
+    return { status: "unreported", codes: ["not-activated"], reasons: ["device is not activated; it has no identity to sign telemetry"], components: [] };
+  }
+  const report = indexed?.report;
+  if (!report || identity.revoked) return { ...assess(identity.revoked, undefined, serverNowMs), components: [] };
+  const snapshot = await verifyReport(report, deviceId, identity.signer);
+  if (typeof snapshot === "string") {
+    return { status: "unverified", codes: ["unverified"], reasons: [`newest report rejected: ${snapshot}`], components: [] };
+  }
+  return {
+    ...assess(false, { snapshot, receivedMs: report.received_ms }, serverNowMs),
+    lastSeenMs: report.received_ms, lastSeenAgeMs: Math.max(0, serverNowMs - report.received_ms), observedMs: snapshot.observed_ms, daemonVersion: snapshot.daemon_version,
+    components: snapshot.components,
+  };
+}
+
+/** Every device the indexer knows for this operator, with its newest report. */
+export async function fetchIndexedHealth(url: string, token: string, owner: string, fetcher: typeof fetch = fetch): Promise<{ items: IndexedHealth[]; serverNowMs: number }> {
+  const items: IndexedHealth[] = [];
+  let cursor: string | null = null;
+  let serverNowMs = 0;
+  for (let page = 0; page < 1000; page++) {
+    const query = new URLSearchParams({ owner, limit: "500", ...(cursor ? { cursor } : {}) });
+    const response = await fetcher(`${url.replace(/\/+$/, "")}/v1/health?${query}`, {
+      headers: token ? { authorization: `Bearer ${token}` } : {},
+    });
+    if (!response.ok) throw new Error(`Telemetry service answered ${response.status}`);
+    const body = await response.json() as { items: IndexedHealth[]; next: string | null; server_time_ms: number };
+    items.push(...body.items);
+    serverNowMs = body.server_time_ms;
+    if (!body.next) return { items, serverNowMs };
+    if (body.next === cursor) throw new Error("Telemetry pagination made no progress");
+    cursor = body.next;
+  }
+  throw new Error("Telemetry pagination did not end");
+}
+
+const message = (error: unknown) => error instanceof Error ? error.message : String(error);
+const unavailableHealth = (reason: string): DeviceHealth => ({ status: "unavailable", codes: ["unavailable"], reasons: [reason], components: [] });
+
+/**
+ * Health of each of `deviceIds`, or `unavailable` for all when the service
+ * cannot answer. A device whose chain identity cannot be read, or whose report
+ * cannot be checked, is `unavailable` on its own; this never rejects, so a
+ * failed refresh cannot leave an earlier result on screen.
+ */
+export async function fetchFleetHealth(client: Pick<SuiGrpcClient, "getDynamicField">, deviceIds: string[], owner: string,
+  url = TELEMETRY_URL, token = "", fetcher: typeof fetch = fetch): Promise<Record<string, DeviceHealth>> {
+  const unavailable = (reason: string): Record<string, DeviceHealth> => Object.fromEntries(deviceIds.map((id) => [id, unavailableHealth(reason)]));
+  if (!url) return unavailable("no telemetry service configured (NEXT_PUBLIC_SUIFLEET_TELEMETRY_URL)");
+  let indexed;
+  try {
+    indexed = await fetchIndexedHealth(url, token, owner, fetcher);
+  } catch (error) {
+    return unavailable(`telemetry service unavailable: ${message(error)}`);
+  }
+  const byId = new Map(indexed.items.map((item) => [normalizeSuiAddress(item.device_id), item]));
+  const entries = await Promise.all(deviceIds.map(async (id): Promise<[string, DeviceHealth]> => {
+    let identity;
+    try {
+      identity = await readIdentity(client, id);
+    } catch (error) {
+      return [id, unavailableHealth(`device identity cannot be read from the chain: ${message(error)}`)];
+    }
+    try {
+      return [id, await deviceHealth(identity, byId.get(normalizeSuiAddress(id)), id, indexed.serverNowMs)];
+    } catch (error) {
+      return [id, unavailableHealth(`newest report cannot be checked: ${message(error)}`)];
+    }
+  }));
+  return Object.fromEntries(entries);
+}
+
+/** How often the dApp refreshes fleet health. */
+export const HEALTH_REFRESH_MS = 15_000;
+/** How long a verified result may be shown without a successful refresh. */
+export const HEALTH_STALE_MS = 2 * HEALTH_REFRESH_MS;
+
+/**
+ * The health to display: the last result only while it is recent and its
+ * refresh has not failed. Otherwise every device is `unavailable`, so an
+ * outage of the indexer or the chain never freezes an earlier healthy claim.
+ */
+export function currentHealth(data: Record<string, DeviceHealth> | undefined, updatedAtMs: number, refreshFailed: boolean,
+  nowMs: number): Record<string, DeviceHealth> | undefined {
+  if (!data) return undefined;
+  const ageMs = nowMs - updatedAtMs;
+  if (!refreshFailed && ageMs <= HEALTH_STALE_MS) return data;
+  const reason = refreshFailed ? "health refresh failed" : `health not refreshed for ${Math.floor(ageMs / 1000)} s`;
+  return Object.fromEntries(Object.keys(data).map((id) => [id, unavailableHealth(reason)]));
+}
+
+export function lastSeenLabel(health: DeviceHealth | undefined): string {
+  if (health?.lastSeenAgeMs === undefined) return "never";
+  const seconds = Math.round(health.lastSeenAgeMs / 1000);
+  if (seconds < 90) return `${seconds} s ago`;
+  if (seconds < 5400) return `${Math.round(seconds / 60)} min ago`;
+  if (seconds < 172800) return `${Math.round(seconds / 3600)} h ago`;
+  return `${Math.round(seconds / 86400)} d ago`;
+}

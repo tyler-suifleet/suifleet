@@ -66,6 +66,7 @@ test-ota:
 	$(RUN) python3 scripts/test_daemon_update.py
 	$(RUN) python3 scripts/test_desired_state.py
 	$(RUN) python3 scripts/test_deployment_control.py
+	$(RUN) python3 scripts/test_telemetry.py
 
 # Supervised components under the shipped systemd units on real systemd and
 # cgroup v2 (SF-014): a disposable privileged container with systemd as PID 1.
@@ -204,6 +205,7 @@ test-manifest:
 	$(RUN) node scripts/test_frontend_queries.cjs
 	$(RUN) node scripts/test_target_groups.cjs
 	$(RUN) node scripts/test_desired_state.cjs
+	$(RUN) node scripts/test_telemetry.cjs
 
 test-manifest-live:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
@@ -227,7 +229,7 @@ indexer-test:
 # Against a disposable localnet (start it first): API vs chain, restart,
 # auth, signed CLI bulk operation, chain-binding refusal and load.
 test-indexer-localnet: indexer-build
-	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --example chain_facts
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_indexer_localnet.py
 
 # SF-006 publisher against a disposable localnet (start it first): refusals, dry

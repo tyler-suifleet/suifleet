@@ -13,7 +13,8 @@ path = "src/main.rs"
 sui-rpc = "0.4.0"
 sui-sdk-types = { version = "0.4.0", features = ["serde", "hash"] }
 sui-transaction-builder = "0.4.0"
-sui-crypto = { version = "0.4.0", features = ["ed25519"] }
+# ed25519 and P-256 (PKCS#11, SF-021) device telemetry signatures
+sui-crypto = { version = "0.4.0", features = ["ed25519", "secp256r1"] }
 tonic = { version = "0.14", default-features = false }
 prost-types = "0.14"
 bcs = "0.1"
@@ -34,3 +35,5 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
 tempfile = "3"
+# Requests against the API router in tests (already in the tree through axum)
+tower = { version = "0.5", features = ["util"] }
