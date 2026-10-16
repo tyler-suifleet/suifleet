@@ -795,5 +795,592 @@
     }
    }
   ]
+ },
+ {
+  "id": "booleans-are-not-numbers",
+  "steps": [
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "enabled": true,
+        "values": [
+         false
+        ],
+        "nested": {
+         "flag": false
+        },
+        "label": "1"
+       },
+       "reported": {
+        "enabled": 1,
+        "values": [
+         0
+        ],
+        "nested": {
+         "flag": 0
+        },
+        "label": 1
+       }
+      }
+     }
+    },
+    "expect": {
+     "state": {
+      "desired": {
+       "enabled": true,
+       "values": [
+        false
+       ],
+       "nested": {
+        "flag": false
+       },
+       "label": "1"
+      },
+      "reported": {
+       "enabled": 1,
+       "values": [
+        0
+       ],
+       "nested": {
+        "flag": 0
+       },
+       "label": 1
+      },
+      "delta": {
+       "enabled": true,
+       "values": [
+        false
+       ],
+       "nested": {
+        "flag": false
+       },
+       "label": "1"
+      }
+     },
+     "version": 1
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "reported": {
+        "enabled": true,
+        "values": [
+         false
+        ],
+        "nested": {
+         "flag": false
+        },
+        "label": "1"
+       }
+      }
+     }
+    },
+    "expect": {
+     "state": {
+      "desired": {
+       "enabled": true,
+       "values": [
+        false
+       ],
+       "nested": {
+        "flag": false
+       },
+       "label": "1"
+      },
+      "reported": {
+       "enabled": true,
+       "values": [
+        false
+       ],
+       "nested": {
+        "flag": false
+       },
+       "label": "1"
+      }
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "reported": {
+        "values": [
+         true
+        ]
+       }
+      }
+     }
+    },
+    "expect": {
+     "state": {
+      "desired": {
+       "enabled": true,
+       "values": [
+        false
+       ],
+       "nested": {
+        "flag": false
+       },
+       "label": "1"
+      },
+      "reported": {
+       "enabled": true,
+       "values": [
+        true
+       ],
+       "nested": {
+        "flag": false
+       },
+       "label": "1"
+      },
+      "delta": {
+       "values": [
+        false
+       ]
+      }
+     },
+     "version": 3
+    }
+   }
+  ]
+ },
+ {
+  "id": "array-nesting-counts-toward-depth",
+  "steps": [
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "a": [
+         [
+          [
+           [
+            [
+             [
+              [
+               1
+              ]
+             ]
+            ]
+           ]
+          ]
+         ]
+        ]
+       }
+      }
+     }
+    },
+    "expect": {
+     "state": {
+      "desired": {
+       "a": [
+        [
+         [
+          [
+           [
+            [
+             [
+              1
+             ]
+            ]
+           ]
+          ]
+         ]
+        ]
+       ]
+      },
+      "delta": {
+       "a": [
+        [
+         [
+          [
+           [
+            [
+             [
+              1
+             ]
+            ]
+           ]
+          ]
+         ]
+        ]
+       ]
+      }
+     },
+     "version": 1
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "a": [
+         [
+          [
+           [
+            [
+             [
+              [
+               [
+                1
+               ]
+              ]
+             ]
+            ]
+           ]
+          ]
+         ]
+        ]
+       }
+      }
+     }
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "o": [
+         {
+          "k1": {
+           "k2": {
+            "k3": {
+             "k4": {
+              "k5": {
+               "k6": {
+                "k7": 1
+               }
+              }
+             }
+            }
+           }
+          }
+         }
+        ]
+       }
+      }
+     }
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "o": [
+         {
+          "k1": {
+           "k2": {
+            "k3": {
+             "k4": {
+              "k5": {
+               "k6": {
+                "k7": {
+                 "k8": {
+                  "k9": {
+                   "k10": {
+                    "k11": {
+                     "k12": 1
+                    }
+                   }
+                  }
+                 }
+                }
+               }
+              }
+             }
+            }
+           }
+          }
+         }
+        ]
+       }
+      }
+     }
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "k": {
+         "k": [
+          [
+           [
+            [
+             [
+              [
+               [
+                1
+               ]
+              ]
+             ]
+            ]
+           ]
+          ]
+         ]
+        }
+       }
+      }
+     }
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "reported": {
+        "o": [
+         {
+          "k1": {
+           "k2": {
+            "k3": {
+             "k4": {
+              "k5": {
+               "k6": {
+                "k7": 1
+               }
+              }
+             }
+            }
+           }
+          }
+         }
+        ]
+       }
+      }
+     }
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "get",
+     "shadow": ""
+    },
+    "expect": {
+     "state": {
+      "desired": {
+       "a": [
+        [
+         [
+          [
+           [
+            [
+             [
+              1
+             ]
+            ]
+           ]
+          ]
+         ]
+        ]
+       ]
+      },
+      "delta": {
+       "a": [
+        [
+         [
+          [
+           [
+            [
+             [
+              1
+             ]
+            ]
+           ]
+          ]
+         ]
+        ]
+       ]
+      }
+     },
+     "version": 1
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "o": [
+         {
+          "k1": {
+           "k2": {
+            "k3": {
+             "k4": {
+              "k5": {
+               "k6": 1
+              }
+             }
+            }
+           }
+          }
+         }
+        ],
+        "k": {
+         "k": [
+          [
+           [
+            [
+             [
+              [
+               1
+              ]
+             ]
+            ]
+           ]
+          ]
+         ]
+        }
+       }
+      }
+     }
+    },
+    "expect": {
+     "state": {
+      "desired": {
+       "a": [
+        [
+         [
+          [
+           [
+            [
+             [
+              1
+             ]
+            ]
+           ]
+          ]
+         ]
+        ]
+       ],
+       "o": [
+        {
+         "k1": {
+          "k2": {
+           "k3": {
+            "k4": {
+             "k5": {
+              "k6": 1
+             }
+            }
+           }
+          }
+         }
+        }
+       ],
+       "k": {
+        "k": [
+         [
+          [
+           [
+            [
+             [
+              1
+             ]
+            ]
+           ]
+          ]
+         ]
+        ]
+       }
+      },
+      "delta": {
+       "a": [
+        [
+         [
+          [
+           [
+            [
+             [
+              1
+             ]
+            ]
+           ]
+          ]
+         ]
+        ]
+       ],
+       "o": [
+        {
+         "k1": {
+          "k2": {
+           "k3": {
+            "k4": {
+             "k5": {
+              "k6": 1
+             }
+            }
+           }
+          }
+         }
+        }
+       ],
+       "k": {
+        "k": [
+         [
+          [
+           [
+            [
+             [
+              1
+             ]
+            ]
+           ]
+          ]
+         ]
+        ]
+       }
+      }
+     },
+     "version": 2
+    }
+   }
+  ]
  }
 ]

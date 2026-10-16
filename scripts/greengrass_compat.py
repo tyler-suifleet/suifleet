@@ -349,9 +349,25 @@ SHADOW_NAME = re.compile(r"^[A-Za-z0-9:_-]{1,64}$")
 
 
 def _depth(value) -> int:
+    """Nesting levels; the section object is level 1 and every object or array adds one."""
     if isinstance(value, dict):
         return 1 + max((_depth(v) for v in value.values()), default=0)
+    if isinstance(value, list):
+        return 1 + max((_depth(v) for v in value), default=0)
     return 0
+
+
+def json_equal(a, b) -> bool:
+    """JSON value equality: unlike Python ``==``, booleans never equal numbers."""
+    if isinstance(a, bool) or isinstance(b, bool):
+        return isinstance(a, bool) and isinstance(b, bool) and a == b
+    if isinstance(a, dict) or isinstance(b, dict):
+        return (isinstance(a, dict) and isinstance(b, dict) and a.keys() == b.keys()
+                and all(json_equal(a[k], b[k]) for k in a))
+    if isinstance(a, list) or isinstance(b, list):
+        return (isinstance(a, list) and isinstance(b, list) and len(a) == len(b)
+                and all(json_equal(x, y) for x, y in zip(a, b)))
+    return a == b
 
 
 def _has_null_in_array(value) -> bool:
@@ -390,7 +406,7 @@ def shadow_delta(desired, reported):
             nested = shadow_delta(value, other)
             if nested:
                 delta[key] = nested
-        elif value != other:
+        elif not json_equal(value, other):
             delta[key] = copy.deepcopy(value)
     return delta
 
@@ -624,7 +640,7 @@ def _run_sequences(cases, factory, label) -> int:
         store = factory()
         for index, step in enumerate(case["steps"]):
             actual = store.apply(step["op"])
-            if actual != step["expect"]:
+            if not json_equal(actual, step["expect"]):
                 raise AssertionError(f"{label} case {case['id']} step {index}: {actual!r} != {step['expect']!r}")
             count += 1
     return count

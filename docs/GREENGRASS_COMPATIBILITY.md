@@ -87,8 +87,8 @@ Everything below is proposed. Each adapter runs as a supervised local service be
 ### Shadows (SF-033)
 
 - **Document semantics follow AWS IoT Device Shadow.** A request has the shape `{state:{desired?,reported?}, version?, clientToken?}`, and unknown request keys are invalid. Updates merge recursively. Arrays are values that are replaced whole and may not contain `null`. A `null` value deletes its key, and a `null` section deletes the section. Objects left empty are removed.
-- **Delta and versions.** The delta contains the desired keys that differ from reported, giving the path from the root; keys that exist only in reported are ignored. Each accepted change increments the version by 1. A supplied version must equal the current one, or the result is `conflict` (AWS 409). A version below 1 is `invalid`.
-- **Limits.** Depth may not exceed 8, `clientToken` may not exceed 64 bytes, and the serialized state may not exceed 8 KiB (`too-large`). Shadow names are 1–64 characters of `[A-Za-z0-9:_-]`, and `""` is the classic shadow.
+- **Delta and versions.** The delta contains the desired keys that differ from reported, giving the path from the root; keys that exist only in reported are ignored. Values are compared as JSON types, so `true` differs from `1` and `[false]` differs from `[0]`. Each accepted change increments the version by 1. A supplied version must equal the current one, or the result is `conflict` (AWS 409). A version below 1 is `invalid`.
+- **Limits.** Depth may not exceed 8 in either section. The section object is level 1, and every nested object or array adds a level, including objects inside arrays and arrays inside arrays; this array rule is the proposed SuiFleet convention. A rejected request leaves the document and version unchanged. `clientToken` may not exceed 64 bytes, and the serialized state may not exceed 8 KiB (`too-large`). Shadow names are 1–64 characters of `[A-Za-z0-9:_-]`, and `""` is the classic shadow.
 - **Proposed differences from AWS.**
   - Deleting a shadow increments the version, and a recreated shadow continues the sequence. There is no 48-hour reset.
   - Cloud synchronization is a selected adapter with an explicit conflict policy.
@@ -120,7 +120,7 @@ This runs `python3 scripts/greengrass_compat.py`, the checker's negative tests a
 |---|---|---|---|
 | `aws-recipe-cases.json` | 49 recipes | Daemon and frontend validators (passing) | Pending SF-037 |
 | `pubsub-cases.json` | 53 filter/topic/match/ACL checks | none | Pending SF-027, SF-032 |
-| `shadow-cases.json` | 32 steps across 7 sequences | none | Pending SF-027, SF-033 |
+| `shadow-cases.json` | 43 steps across 9 sequences | none | Pending SF-027, SF-033 |
 | `stream-cases.json` | 45 steps across 5 sequences | none | Pending SF-027, SF-034 |
 | `client-device-cases.json` | 16 authorization requests | none | Pending SF-032, SF-035 |
 

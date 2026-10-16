@@ -118,11 +118,31 @@ class FixtureGateTests(unittest.TestCase):
 
     def test_sequence_expectations_pinned(self):
         self.run_mutated("shadow-cases.json", lambda c: c[0]["steps"][0]["expect"].update(version=2))
+        bools = lambda c: next(x for x in c if x["id"] == "booleans-are-not-numbers")
+        self.run_mutated("shadow-cases.json", lambda c: bools(c)["steps"][0]["expect"]["state"]["delta"].update(enabled=1))
+        self.run_mutated("shadow-cases.json", lambda c: bools(c)["steps"][0]["expect"]["state"]["delta"].pop("values"))
         self.run_mutated("stream-cases.json", lambda c: c[1]["steps"][5]["expect"].update(oldest=0))
         self.run_mutated("client-device-cases.json", lambda c: c[0]["requests"][9].update(allowed=True))
 
 
 class ModelTests(unittest.TestCase):
+    def test_json_equality_distinguishes_booleans_from_numbers(self):
+        self.assertFalse(compat.json_equal(True, 1))
+        self.assertFalse(compat.json_equal([False], [0]))
+        self.assertFalse(compat.json_equal({"a": {"b": True}}, {"a": {"b": 1}}))
+        self.assertFalse(compat.json_equal([1], [1, 1]))
+        self.assertTrue(compat.json_equal({"a": [False, {"b": 2}]}, {"a": [False, {"b": 2}]}))
+
+    def test_shadow_depth_counts_arrays_and_rejection_changes_nothing(self):
+        deep = {"k12": 1}
+        for i in range(11, 0, -1):
+            deep = {f"k{i}": deep}
+        store = compat.ShadowStore()
+        self.assertEqual(store.apply({"op": "update", "request": {"state": {"desired": {"a": 1}}}})["version"], 1)
+        for value in ([deep], [[[[[[[[1]]]]]]]], {"x": [[{"y": [[[[1]]]]}]]}):
+            self.assertEqual(store.apply({"op": "update", "request": {"state": {"desired": {"values": value}}}}), {"error": "invalid"})
+        self.assertEqual(store.apply({"op": "get"}), {"state": {"desired": {"a": 1}, "delta": {"a": 1}}, "version": 1})
+
     def test_translation_rejects_non_objects_and_reports_all_reasons(self):
         self.assertEqual(compat.translate_recipe([], {})["outcome"], "reject")
         result = compat.translate_recipe({"RecipeFormatVersion": "x", "ComponentType": "aws.greengrass.nucleus"}, {})
