@@ -804,7 +804,10 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("suifleet-record-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("daemon.main");
-        let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        // Registered, or a concurrently running supervisor test's orphan sweep
+        // kills it (the test process is a subreaper there).
+        use crate::supervisor::{forget_std_tracked, spawn_std_tracked};
+        let mut child = spawn_std_tracked(std::process::Command::new("sleep").arg("30")).unwrap();
         let sleep = std::fs::read_link(format!("/proc/{}/exe", child.id())).unwrap();
         assert!(record(&path, child.id(), &sleep).unwrap());
         let main = MainProcess::parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
@@ -826,15 +829,17 @@ mod tests {
             child.kill().unwrap();
             child.wait().unwrap();
         }
+        forget_std_tracked(child.id());
         // A main process not running the base binary (here: sleep, against
         // this test binary) is not recorded, and an earlier record is removed.
-        let mut other = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let mut other = spawn_std_tracked(std::process::Command::new("sleep").arg("30")).unwrap();
         assert!(path.exists());
         assert!(!record(&path, other.id(), Path::new("/proc/self/exe")).unwrap());
         assert!(!path.exists(), "a stale record survived");
         assert!(!record(&path, other.id(), Path::new("/proc/self/exe")).unwrap());
         other.kill().unwrap();
         other.wait().unwrap();
+        forget_std_tracked(other.id());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
