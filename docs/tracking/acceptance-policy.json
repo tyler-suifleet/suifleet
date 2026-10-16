@@ -121,6 +121,21 @@
         "mandatory testnet status enforcement and sole-orchestrator integration",
         "overall SF043 request incomplete until actual automatic updated-helper restoration/reuse after integration is observed and recorded"
       ]
+    },
+    "SF-029": {
+      "deferred_checks": [
+        "physical SD flashing, Pi first boot and on-device network/identity/persistence acceptance"
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "authorization": "User explicitly requests building the flashable image now without physical Pi; user will flash it. Build and image inspection must complete; physical evidence remains separately tracked, not passed.",
+      "retained_gates": [
+        "real BitBake SD-image build, checksum, package manifest and pinned source/layer evidence",
+        "wired DHCP and SSH public-key access configured and inspected",
+        "fresh independent code/security review and relevant tests/CI",
+        "no physical programming or private identity/enrollment keys in image"
+      ]
     }
   }
 }
