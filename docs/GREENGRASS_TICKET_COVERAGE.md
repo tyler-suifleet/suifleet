@@ -24,7 +24,7 @@ P2 means broader compatibility, not optional for a full-parity claim. Each row n
 | Device update timeout | [SF-018](https://github.com/tyler-suifleet/suifleet/issues/18) |
 | Maintenance windows/update deferral | [SF-018](https://github.com/tyler-suifleet/suifleet/issues/18) |
 | Automatic application rollback | [SF-016](https://github.com/tyler-suifleet/suifleet/issues/21) |
-| OS/firmware recovery | [SF-016](https://github.com/tyler-suifleet/suifleet/issues/21) |
+| Platform-owned OS/firmware installer handoff and explicit results | [SF-016](https://github.com/tyler-suifleet/suifleet/issues/21) |
 | Safe daemon self-update | [SF-026](https://github.com/tyler-suifleet/suifleet/issues/26) |
 | Artifact lifecycle | [SF-023](https://github.com/tyler-suifleet/suifleet/issues/5) |
 | Component versions/catalog | [SF-011](https://github.com/tyler-suifleet/suifleet/issues/12) |
@@ -64,4 +64,4 @@ P2 means broader compatibility, not optional for a full-parity claim. Each row n
 
 ## Hardware acceptance
 
-[SF-029](https://github.com/tyler-suifleet/suifleet/issues/29) builds a bootable Yocto image for the Pi 3 B+ with the SF-025 BitBake client package; [SF-030](https://github.com/tyler-suifleet/suifleet/issues/30) supplies versioned harmless application fixtures; [SF-031](https://github.com/tyler-suifleet/suifleet/issues/32) exercises the real frontend wallet, Sui/Walrus and device. [SF-010](https://github.com/tyler-suifleet/suifleet/issues/11) retains upgrade/migration acceptance. [SF-016](https://github.com/tyler-suifleet/suifleet/issues/21) owns firmware A/B and power-loss safety. Extend the Pi acceptance matrix as each new capability lands; a one-shot OTA smoke test cannot establish complete runtime parity.
+[SF-029](https://github.com/tyler-suifleet/suifleet/issues/29) builds a bootable Yocto image for the Pi 3 B+ with the SF-025 BitBake client package; [SF-030](https://github.com/tyler-suifleet/suifleet/issues/30) supplies versioned harmless application fixtures; [SF-031](https://github.com/tyler-suifleet/suifleet/issues/32) exercises the real frontend wallet, Sui/Walrus and device. [SF-010](https://github.com/tyler-suifleet/suifleet/issues/11) retains upgrade/migration acceptance. [SF-016](https://github.com/tyler-suifleet/suifleet/issues/21) owns SuiFleet installer handoff and journal/result semantics; platform scripts/tools own installation, reboot and firmware recovery. Physical recovery evidence validates the selected platform integration, not a universal A/B requirement. Extend the Pi acceptance matrix as each new capability lands; a one-shot OTA smoke test cannot establish complete runtime parity.
