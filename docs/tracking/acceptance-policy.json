@@ -57,6 +57,24 @@
         "fresh independent review of exact head/base/feedback/policy"
       ]
     },
+    "SF-015": {
+      "deferred_checks": [
+        "physical Pi configuration persistence/restart acceptance",
+        "real extension-wallet connect/sign/network/error acceptance for component configuration UI"
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/11",
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "authorization": "Apply the standing user-authorized implementation/integration split under the 2026-10-16 request to restore progress after these precise acceptance blockers were reported. Deferred checks remain required and unrun.",
+      "retained_gates": [
+        "all actionable code/security findings fixed and local configuration merge/reset/validation/failure regressions pass",
+        "relevant Rust/Move/frontend builds and exact-head/current-base CI and automatic testnet checks pass",
+        "available dedicated-Testnet feature validation remains normal authorized work; do not substitute package-upgrade success for configuration behavior evidence",
+        "commit the matching SF-015 scope in implementation acceptance documentation and policy",
+        "fresh independent exact-head/base/feedback/policy review; no physical programming or production deployment authorization"
+      ]
+    },
     "SF-024": {
       "deferred_checks": [
         "hosted/public-node and archival-retention integration"
