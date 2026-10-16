@@ -336,10 +336,10 @@
       "evidence": "Only one-shot install/apply exists; run/shutdown are deliberately rejected.",
       "acceptance": [
         "Implement persistent versioned workspaces, process lifecycle, readiness and restart policy.",
-        "Handle shutdown/replacement/bootstrap/reboot without leaving unmanaged descendants.",
+        "Handle component shutdown/replacement/bootstrap and restore supervision after platform-controlled daemon/device restart without leaving unmanaged descendants. Component supervision does not authorize SuiFleet to request system reboot or govern OS installation/boot recovery.",
         "Expose genuine runtime state and enable UI recipe fields only after behavior is tested."
       ],
-      "validation": "Supervisor start/crash/restart/shutdown/reboot-stage integration tests.",
+      "validation": "Supervisor start/crash/restart/shutdown and component-bootstrap integration tests, including restoration after platform-controlled restart. Platform scripts/tools own system reboot and firmware recovery.",
       "description": "Supervise component install, run, shutdown, bootstrap and recovery. Implement persistent versioned workspaces, process lifecycle, readiness and restart policy."
     },
     {
@@ -368,7 +368,7 @@
     },
     {
       "key": "SF-016",
-      "title": "Add health-based application and reboot-aware firmware rollback",
+      "title": "Support platform-owned installers and explicit application recovery",
       "priority": "P1",
       "area": "edge",
       "phase": "ota",
@@ -382,14 +382,16 @@
         "suifleet-edge/meta-suifleet/",
         "scripts/"
       ],
-      "evidence": "Applied currently means updater exit zero; no post-boot health or A/B rollback is implemented.",
+      "evidence": "Configured lifecycle commands can invoke platform installers. SuiFleet must preserve execution state and accurately report supplied results across daemon/device restarts without owning OS installation, partitions, reboot or firmware recovery.",
       "acceptance": [
-        "Persist last-known-good state and application health rollback.",
-        "Implement a validated RAUC/SWUpdate A/B adapter with reboot intent and boot confirmation.",
-        "Distinguish ambiguous interrupted work, installation success, healthy boot and rollback."
+        "Deliver verified artifacts to explicitly configured lifecycle commands, including platform installer scripts; do not autodetect or select an updater, require A/B partitions, or prescribe an OS-update architecture.",
+        "Platform scripts/tools own OS installation, reboot decisions, boot confirmation and firmware rollback. SuiFleet must not initiate reboot or implement a firmware boot/recovery state machine.",
+        "Preserve SuiFleet execution/journal state across platform-controlled restarts; distinguish command completion from interrupted/unknown work and record only results explicitly supplied by configured commands or platform reporting. Never infer successful boot from exit zero or automatically repeat ambiguous destructive work.",
+        "Scope application health/recovery separately: execute explicitly configured component health/recovery behavior and retain the relevant component state; this does not authorize platform firmware rollback.",
+        "Demonstrate a configured installer handoff with a harmless fixture and, on a supported platform, an installer-script integration. Platform-specific physical recovery evidence documents that integration and is not a universal prerequisite for SuiFleet lifecycle infrastructure."
       ],
-      "validation": "Real-hardware power-loss/reboot/bad-image/health-failure recovery tests and simulator coverage.",
-      "description": "Add health-based application and reboot-aware firmware rollback. Persist last-known-good state and application health rollback."
+      "validation": "Artifact-integrity and configured-command handoff tests; daemon restart/interrupted-work journal tests; explicit-result and application-recovery tests. Record platform installer integration separately. No implicit updater detection, SuiFleet-triggered reboot or mandatory A/B acceptance.",
+      "description": "Support verified artifact delivery and configured lifecycle commands for platform-owned installers such as SWUpdate or RAUC. Platform scripts/tools own updater selection, installation, reboot, boot confirmation and firmware rollback. Application recovery is a separate explicitly configured component-lifecycle concern."
     },
     {
       "key": "SF-017",
@@ -630,12 +632,12 @@
       ],
       "evidence": "No independent recovery path exists when replacing the daemon itself.",
       "acceptance": [
-        "Perform staged self-update with persistent bootstrap intent and known-good fallback.",
+        "Support explicitly configured daemon replacement with durable handoff and a platform/service-manager-provided startup fallback; do not require a SuiFleet-owned OS updater or bootloader.",
         "Preserve device identity, journals and protocol compatibility across process replacement.",
-        "Recover failed startup/reboot without relying on the failed daemon."
+        "Verify failed daemon startup can recover through the configured external service manager/bootstrap mechanism without relying on the failed daemon. The platform owns any system reboot, boot confirmation and OS rollback."
       ],
-      "validation": "Process/power-loss and broken-binary self-update recovery acceptance.",
-      "description": "Update the daemon safely with bootstrap handoff and fallback. Perform staged self-update with persistent bootstrap intent and known-good fallback."
+      "validation": "Configured daemon replacement, interrupted handoff, identity/journal preservation and broken-binary startup recovery tests. Record platform-specific power-loss evidence separately; SuiFleet does not decide system reboot or firmware recovery.",
+      "description": "Update the daemon through a configured replacement/handoff mechanism while preserving identity, journals and protocol compatibility. An external platform/service-manager mechanism supplies startup fallback; system reboot and firmware recovery remain platform-owned."
     },
     {
       "key": "SF-027",
@@ -767,7 +769,7 @@
         "Publish a capability-based acceptance matrix so future runtime/config/rollback/self-update features add cases; do not claim this baseline tests every Greengrass feature or A/B firmware safety.",
         "Start the enrolled client before creating the first test deployment so enrollment baseline behavior does not intentionally skip it; verify a fetched/applied test component and matching chain receipt. A read-only authenticated inventory/health query is an optional earlier connectivity smoke test, not OTA acceptance."
       ],
-      "validation": "Offline harness tests and an actual frontend-wallet -> Sui/Walrus -> Pi -> on-chain receipt run, with reproducible evidence and explicit skipped/blocked cases. Hardware reboot/power-loss tests stay in SF-016.",
+      "validation": "Offline harness tests and an actual frontend-wallet -> Sui/Walrus -> Pi -> on-chain receipt run, with reproducible evidence and explicit skipped/blocked cases. Platform installer/reboot/power-loss evidence is recorded separately for the selected platform; SF-016 validates SuiFleet handoff, journal preservation and explicit results, not ownership of firmware recovery.",
       "description": "Run wallet-to-testnet-to-Raspberry-Pi OTA acceptance tests. Provide an opt-in test runner with local-network and Sui testnet profiles using a verified network manifest, compatible Sui/Walrus endpoints and explicitly supplied funded test accounts; fail preflight clearly when APIs or funding are unavailable.\n\nThis is a deferred integration acceptance ticket. It must not be used as a blanket dependency for unrelated implementation merges; its own live/hardware/production evidence is still required before completion."
     },
     {
