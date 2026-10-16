@@ -18,6 +18,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -224,7 +225,7 @@ class Simulator:
         raise AssertionError(f"unexpected RPC method {method}")
 
 
-def run(binary, firmware_helper=False, daemon_user=None):
+def run(binary, firmware_helper=False, daemon_user=None, platform_installer=False):
     """With firmware_helper, updates go through `suifleet --firmware-helper`, run
     here as the path unit would. With daemon_user (requires root), the daemon
     runs as that user while the helper keeps root, as in the systemd units."""
@@ -294,6 +295,9 @@ def run(binary, firmware_helper=False, daemon_user=None):
             updater.write_text("import json, pathlib, sys\nwith open(" + repr(str(applied)) + ", 'a') as output:\n    output.write(json.dumps(pathlib.Path(sys.argv[1]).read_bytes().decode()) + '\\n')\n")
             url = f"http://127.0.0.1:{server.server_port}"
             command = f"{sys.executable} {updater}"
+            if platform_installer:
+                installer = Path(__file__).resolve().parents[1] / "tests/components/platform-installer/install.sh"
+                command = shlex.join(["/bin/sh", str(installer), str(root / "installed-artifact"), str(updater)])
             manifest = dict(schema_version=1, protocol_version=1, network="localnet", chain_identifier=sim.chain,
                 rpc_url=rpc_url, call_package_id=PACKAGE, upgrade_cap_id=UPGRADE_CAP, package_version="3", type_origins=TYPE_ORIGINS,
                 shared_objects={"registry": {"id": REGISTRY, "initial_shared_version": "1"}},
@@ -434,6 +438,9 @@ def run(binary, firmware_helper=False, daemon_user=None):
             print("PASS: provisioning and independent signing/address vector")
             print("PASS: mixed per-type origins and runtime chain-reset/stale-call-package rejection")
             print("PASS: safe enrollment; paginated direct/group deployment and recipe-to-artifact flow")
+            if platform_installer:
+                assert (root / "installed-artifact").read_bytes() == ARTIFACT
+                print("PASS: explicitly configured Linux installer script received verified bytes; command completion only")
             print("PASS: artifact/recipe hash mismatch, unsupported lifecycle, untrusted creator and deleted targets rejected")
             print("PASS: future/missing/malformed deployment schemas failed without downloads; later v1 applied and cursor advanced")
             print("PASS: offline catch-up, restart deduplication, failed execution and durable report retry")
@@ -453,8 +460,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, default=Path(__file__).resolve().parents[1] / "suifleet-edge/target/debug/suifleet")
     parser.add_argument("--firmware-helper", action="store_true", help="apply through the privileged firmware helper")
+    parser.add_argument("--platform-installer", action="store_true", help="exercise the explicit Linux installer script fixture")
     parser.add_argument("--daemon-user", help="run the daemon as this user; requires root (helper stays root)")
     args = parser.parse_args()
     if args.daemon_user and os.geteuid() != 0:
         parser.error("--daemon-user requires root")
-    run(args.binary.resolve(), args.firmware_helper or bool(args.daemon_user), args.daemon_user)
+    run(args.binary.resolve(), args.firmware_helper or bool(args.daemon_user), args.daemon_user, args.platform_installer)

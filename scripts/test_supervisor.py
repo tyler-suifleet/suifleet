@@ -22,7 +22,7 @@ One component, `svc`, across daemon lifetimes:
             first install                 instance record still makes the
                                           successor refuse over the install's
                                           undetectable descendant; once cleared,
-                                          v5 is reported Failed (interrupted)
+                                          v5 remains unknown (interrupted)
 """
 import argparse
 import json
@@ -132,10 +132,14 @@ def run(binary):
             config.write_text('[sui]\nmanifest_path = "deployment.json"\n'
                 f'[device]\nkeypair_path = {json.dumps(str(key))}\ndevice_object_id = "{DEVICE}"\ndevice_cap_id = "{CAP}"\n'
                 f'[walrus]\naggregator_url = "{url}"\n'
-                '[apply]\ncommand = "/bin/false"\ntimeout_seconds = 5\nallow_recipe_commands = true\n'
+                '[apply]\ncommand = "/bin/false"\ntimeout_seconds = 5\nallow_recipe_commands = true\nmode = "privileged-helper"\n'
+                f'firmware_spool = {json.dumps(str(state_dir / "firmware"))}\n'
                 f'[runtime]\nstate_dir = {json.dumps(str(state_dir))}\npoll_seconds = 1\n'
                 'component_startup_seconds = 1\ncomponent_ready_timeout_seconds = 3\n'
                 'component_stop_timeout_seconds = 3\ncomponent_max_restarts = 3\n')
+            recovery = f"cp {{artifact}} {root}/recovered-artifact; cp {{artifacts}}/configuration {root}/application-config"
+            with config.open("a") as output:
+                output.write('\n[components.recovery_commands]\nsvc = ' + json.dumps(recovery) + '\n')
             components = state_dir / "supervised"
             work = components / "svc" / "work"
 
@@ -175,7 +179,7 @@ def run(binary):
                 wait_for(lambda: journal().get("initialized"), "daemon did not establish its cursor", process)
 
                 # Start and readiness.
-                deploy("0x401", "1.0.0", run=RUN, readiness=READY, shutdown="kill -TERM {pid}")
+                deploy("0x401", "1.0.0", install="echo stable > {artifacts}/configuration", run=RUN, readiness=READY, shutdown="kill -TERM {pid}")
                 wait_for(lambda: outcome("0x401").get("status") == 1, "v1 was not applied", process)
                 assert running("1.0.0"), status()
                 first = recorded()
@@ -191,11 +195,16 @@ def run(binary):
                 print("PASS: crashed run restarted (on-failure); all of its descendants were killed")
 
                 # Replacement that never becomes ready: Failed, rolled back to v1.
-                deploy("0x402", "2.0.0", run="exit 1")
+                deploy("0x402", "2.0.0", install=f"echo broken > {root}/application-config", run="exit 1")
                 wait_for(lambda: outcome("0x402").get("status") == 2, "unready v2 was not reported Failed", process)
                 assert "rolled back to 1.0.0 (ready)" in outcome("0x402")["error"], outcome("0x402")
                 assert running("1.0.0"), status()
-                print("PASS: v2 never became ready: Failed, rolled back to v1 (Running)")
+                assert (root / "recovered-artifact").read_bytes() == test_ota.ARTIFACT
+                assert (root / "application-config").read_text().strip() == "stable"
+                assert journal()["components"]["svc"]["version"] == "1.0.0", journal()
+                assert journal()["current"]["svc"] == "0x401", journal()
+                assert journal()["last_known_good"]["svc"]["version"] == "1.0.0", journal()
+                print("PASS: v2 failed health; explicit recovery restored v1 artifact/configuration and journal identity")
 
                 # Successful replacement.
                 before = recorded()
@@ -207,6 +216,25 @@ def run(binary):
                 active = json.loads((components / "active.json").read_text())
                 assert active["svc"]["version"] == "3.0.0", active
                 print("PASS: v3 replaced v1 (graceful shutdown) and was committed")
+
+                # Runtime failure exhausts the restart budget, then explicit
+                # recovery restores the retained v1 and journal identity.
+                for crash in range(4):
+                    pid = status()["pid"]
+                    os.kill(pid, signal.SIGKILL)
+                    if crash < 3:
+                        wait_for(lambda: running("3.0.0") and status().get("pid") != pid,
+                                 "v3 did not restart before its budget was exhausted", process)
+                wait_for(lambda: running("1.0.0") and journal().get("components", {}).get("svc", {}).get("version") == "1.0.0",
+                         "runtime recovery did not restore v1 and its journal", process)
+                assert journal()["current"]["svc"] == "0x401", journal()
+                assert outcome("0x403")["status"] == 1, "historical command completion was rewritten"
+                assert (root / "application-config").read_text().strip() == "stable"
+                assert (root / "recovered-artifact").read_bytes() == test_ota.ARTIFACT
+                print("PASS: runtime crash budget exhaustion restored v1 artifact/configuration and journal without rewriting command receipt")
+                # A fresh deployment installs v3 for the remaining containment tests.
+                deploy("0x406", "3.0.0", run=RUN, readiness=READY, shutdown="kill -TERM {pid}")
+                wait_for(lambda: outcome("0x406").get("status") == 1, "fresh v3 did not apply", process)
 
                 # Daemon stop: the component goes with it, descendants included.
                 (work / "stopped").unlink()
@@ -312,11 +340,14 @@ def run(binary):
                     pass
                 os.kill(detached, signal.SIGKILL)
                 (components / "instance.json").unlink()
+                checks = sim.chain_checks
                 process = start()
-                wait_for(lambda: outcome("0x405").get("reported"), "v5's interrupted outcome was not sent", process)
-                assert outcome("0x405").get("status") == 2 and "interrupted" in outcome("0x405")["error"], outcome("0x405")
+                wait_for(lambda: sim.chain_checks >= checks + 3, "successor did not reach polling", process)
+                wait_for(lambda: outcome("0x405").get("indeterminate"), "v5's interrupted outcome was not preserved", process)
+                assert outcome("0x405").get("firmware_request") is None
+                assert outcome("0x405").get("status") is None and not outcome("0x405").get("reported") and "interrupted" in outcome("0x405")["error"], outcome("0x405")
                 assert status() == {} and "svc" not in json.loads((components / "active.json").read_text())
-                print("PASS: once cleared, the interrupted v5 was reported Failed and not committed")
+                print("PASS: once cleared, the interrupted v5 remained unknown, unreported and not committed")
 
                 # Reports queued across the stops and the kills go out on the next poll.
                 process.send_signal(signal.SIGTERM)
@@ -324,8 +355,8 @@ def run(binary):
                 process = None
                 assert not sim.errors, sim.errors
                 reported = sorted(id for id, _ in sim.reports)
-                assert reported == ["0x401", "0x402", "0x403", "0x404", "0x405"], reported
-                print("PASS: all five outcomes reported on chain")
+                assert reported == ["0x401", "0x402", "0x403", "0x404", "0x406"], reported
+                print("PASS: five explicit outcomes reported; interrupted install remains unreported")
     finally:
         if process and process.poll() is None:
             process.kill()
