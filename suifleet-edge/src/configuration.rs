@@ -289,6 +289,24 @@ pub fn write_private(path: &Path, value: &impl Serialize) -> anyhow::Result<()> 
     file.write_all(&serde_json::to_vec_pretty(value)?)?;
     file.sync_all()?;
     std::fs::rename(&temporary, path)?;
+    sync_parent(path)
+}
+
+/// Make `path`'s directory entry durable.
+fn sync_parent(path: &Path) -> anyhow::Result<()> {
+    let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    std::fs::File::open(parent)?.sync_all()?;
+    Ok(())
+}
+
+/// `create_dir_all`, with every directory it created made durable in its
+/// parent, so a record written inside survives a power loss.
+pub fn create_dir_durable(path: &Path) -> anyhow::Result<()> {
+    let missing: Vec<&Path> = path.ancestors().take_while(|dir| !dir.as_os_str().is_empty() && !dir.exists()).collect();
+    std::fs::create_dir_all(path)?;
+    for dir in missing.into_iter().rev() {
+        sync_parent(dir)?;
+    }
     Ok(())
 }
 
@@ -339,7 +357,8 @@ impl Store {
 
     pub fn stage(&self, name: &str, record: &Record) -> anyhow::Result<()> {
         let dir = self.dir(name)?;
-        std::fs::create_dir_all(&dir)?;
+        // Durable before the install it precedes starts (see settle).
+        create_dir_durable(&dir)?;
         write_private(&dir.join("staged.json"), record)
     }
 
@@ -348,7 +367,7 @@ impl Store {
         let dir = self.dir(name)?;
         if self.staged(name)?.is_some_and(|r| r.deployment == deployment) {
             std::fs::rename(dir.join("staged.json"), dir.join("committed.json"))?;
-            std::fs::File::open(&dir)?.sync_all()?;
+            sync_parent(&dir.join("committed.json"))?;
         }
         Ok(())
     }
@@ -514,6 +533,17 @@ mod tests {
         let error = overlay(&dir, "app").unwrap_err().to_string();
         assert!(!error.contains("s3cret"), "{error}");
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn durable_directories_are_created_with_their_parents() {
+        let dir = temp("durable");
+        let nested = dir.join("a/b/c");
+        create_dir_durable(&nested).unwrap();
+        assert!(nested.is_dir());
+        // Existing directories are accepted unchanged.
+        create_dir_durable(&nested).unwrap();
+        create_dir_durable(&dir).unwrap();
     }
 
     #[test]

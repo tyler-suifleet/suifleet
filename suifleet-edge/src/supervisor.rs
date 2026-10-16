@@ -282,7 +282,9 @@ impl Supervisor {
         anyhow::ensure!(safe_segment(&spec.version), "component version is not a safe path segment");
         let workspace = self.workspace(&spec);
         let _ = std::fs::remove_dir_all(&workspace);
-        std::fs::create_dir_all(&workspace)?;
+        // Durable before the install starts: a restart must find the version
+        // and the configuration record it was installed with.
+        configuration::create_dir_durable(&workspace)?;
         let installed = workspace.join("artifact");
         std::fs::rename(artifact, &installed)?;
         configuration::write_private(&workspace.join(CONFIGURATION_STATE), configuration)?;
