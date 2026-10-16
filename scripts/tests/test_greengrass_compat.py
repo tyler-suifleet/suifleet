@@ -121,6 +121,10 @@ class FixtureGateTests(unittest.TestCase):
         bools = lambda c: next(x for x in c if x["id"] == "booleans-are-not-numbers")
         self.run_mutated("shadow-cases.json", lambda c: bools(c)["steps"][0]["expect"]["state"]["delta"].update(enabled=1))
         self.run_mutated("shadow-cases.json", lambda c: bools(c)["steps"][0]["expect"]["state"]["delta"].pop("values"))
+        versions = lambda c: next(x for x in c if x["id"] == "versions-are-integers-not-booleans")
+        self.run_mutated("shadow-cases.json", lambda c: versions(c)["steps"][1].update(
+            expect={"state": {"desired": {"enabled": True}, "delta": {"enabled": True}}, "version": 2}))
+        self.run_mutated("shadow-cases.json", lambda c: versions(c)["steps"][5].update(expect={"version": 2}))
         self.run_mutated("stream-cases.json", lambda c: c[1]["steps"][5]["expect"].update(oldest=0))
         self.run_mutated("client-device-cases.json", lambda c: c[0]["requests"][9].update(allowed=True))
 
@@ -142,6 +146,17 @@ class ModelTests(unittest.TestCase):
         for value in ([deep], [[[[[[[[1]]]]]]]], {"x": [[{"y": [[[[1]]]]}]]}):
             self.assertEqual(store.apply({"op": "update", "request": {"state": {"desired": {"values": value}}}}), {"error": "invalid"})
         self.assertEqual(store.apply({"op": "get"}), {"state": {"desired": {"a": 1}, "delta": {"a": 1}}, "version": 1})
+
+    def test_shadow_version_must_be_integer_and_rejection_changes_nothing(self):
+        store = compat.ShadowStore()
+        created = store.apply({"op": "update", "request": {"state": {"desired": {"enabled": False}}}})
+        self.assertEqual(created["version"], 1)
+        for version in (True, False, "1", 1.5, None, [1], 0, -1):
+            self.assertEqual(store.apply({"op": "update", "request": {"state": {"desired": {"enabled": True}}, "version": version}}),
+                             {"error": "invalid"}, version)
+            self.assertEqual(store.apply({"op": "delete", "version": version}), {"error": "invalid"}, version)
+        self.assertEqual(store.apply({"op": "get"}), created)
+        self.assertEqual(store.apply({"op": "delete", "version": 1}), {"version": 2})
 
     def test_translation_rejects_non_objects_and_reports_all_reasons(self):
         self.assertEqual(compat.translate_recipe([], {})["outcome"], "reject")

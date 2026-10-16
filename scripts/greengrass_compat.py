@@ -370,6 +370,11 @@ def json_equal(a, b) -> bool:
     return a == b
 
 
+def _valid_version(value) -> bool:
+    """A document version is a JSON integer >= 1; booleans are not versions."""
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+
+
 def _has_null_in_array(value) -> bool:
     if isinstance(value, list):
         return any(v is None or _has_null_in_array(v) for v in value)
@@ -434,6 +439,8 @@ class ShadowStore:
         if kind == "get":
             return self._view(name) if name in self.documents else {"error": "not-found"}
         if kind == "delete":
+            if "version" in op and not _valid_version(op["version"]):
+                return {"error": "invalid"}
             if name not in self.documents:
                 return {"error": "not-found"}
             if "version" in op and op["version"] != self.versions[name]:
@@ -455,7 +462,7 @@ class ShadowStore:
         if any(_depth(v) > SHADOW_MAX_DEPTH for v in state.values() if v) or _has_null_in_array(state):
             return {"error": "invalid"}
         if "version" in request:
-            if not isinstance(request["version"], int) or request["version"] < 1:
+            if not _valid_version(request["version"]):
                 return {"error": "invalid"}
             if request["version"] != self.versions.get(name, 0) or name not in self.documents:
                 return {"error": "conflict"}

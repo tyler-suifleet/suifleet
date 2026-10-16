@@ -1382,5 +1382,169 @@
     }
    }
   ]
+ },
+ {
+  "id": "versions-are-integers-not-booleans",
+  "steps": [
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "enabled": false
+       }
+      }
+     }
+    },
+    "expect": {
+     "state": {
+      "desired": {
+       "enabled": false
+      },
+      "delta": {
+       "enabled": false
+      }
+     },
+     "version": 1
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "enabled": true
+       }
+      },
+      "version": true
+     }
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "enabled": true
+       }
+      },
+      "version": "1"
+     }
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "enabled": true
+       }
+      },
+      "version": 1.5
+     }
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "enabled": true
+       }
+      },
+      "version": null
+     }
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "delete",
+     "shadow": "",
+     "version": true
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "delete",
+     "shadow": "",
+     "version": "1"
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "delete",
+     "shadow": "",
+     "version": null
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "get",
+     "shadow": ""
+    },
+    "expect": {
+     "state": {
+      "desired": {
+       "enabled": false
+      },
+      "delta": {
+       "enabled": false
+      }
+     },
+     "version": 1
+    }
+   },
+   {
+    "op": {
+     "op": "delete",
+     "shadow": "",
+     "version": 1
+    },
+    "expect": {
+     "version": 2
+    }
+   },
+   {
+    "op": {
+     "op": "delete",
+     "shadow": "",
+     "version": true
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   }
+  ]
  }
 ]
