@@ -264,6 +264,13 @@ test-daemon-localnet:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_daemon_localnet.py
 
+# SF-022 confidential delivery against a disposable localnet (start it first):
+# dapp encryption, test Seal key servers, signing-service sessions, daemon apply.
+.PHONY: test-seal-localnet
+test-seal-localnet:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example seal_key_server
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_seal_localnet.py
+
 .PHONY: test-testnet
 test-testnet:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_testnet*.py'
