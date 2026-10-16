@@ -14,7 +14,8 @@ ADDRESS = '0x99894c1ae83e8179dd05f3f419f3967c24508159fc5ddaf232af67fdf0c2dcac'
 SUITES = (('upgrade-security', 'scripts/live_upgrade_security.py', 400_000_000),
           ('wallet', 'scripts/live_wallet_gate.py', 150_000_000))
 SUITE_PATHS = ('contracts/', 'dapp/', 'interfaces/', 'suifleet-edge/', 'scripts/browser/', 'scripts/live_',
-               'scripts/ci_testnet', 'scripts/deployment_manifest.py', 'scripts/testnet_budget.py', 'Dockerfile')
+               'scripts/ci_testnet', 'scripts/deployment_manifest.py', 'scripts/testnet_budget.py',
+               'scripts/sui_toolchain.py', 'scripts/sui_tx_inspect.cjs', 'Dockerfile')
 # Funded test keys a suite keeps beside the wallet until their sweep succeeds.
 PENDING_KEYS = ('live-browser-key.hex', 'live-security-device.key')
 

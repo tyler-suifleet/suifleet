@@ -206,6 +206,7 @@ class TrustTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {'GITHUB_EVENT_NAME': 'workflow_run'}):
             self.assertTrue(suites_relevant('b', git('docs/x.md\ncontracts/sources/a.move\n')))
             self.assertTrue(suites_relevant('b', git('scripts/live_common.py\n')))
+            self.assertTrue(suites_relevant('b', git('scripts/sui_toolchain.py\n')))  # Their transaction CLI.
             self.assertFalse(suites_relevant('b', git('docs/x.md\nscripts/tracking.py\n')))
             self.assertFalse(suites_relevant('b', git('')))
         with mock.patch.dict(os.environ, {'GITHUB_EVENT_NAME': 'workflow_dispatch'}):

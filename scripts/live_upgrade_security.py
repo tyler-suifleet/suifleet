@@ -53,7 +53,7 @@ from types import SimpleNamespace
 import deployment_manifest as dm
 from live_common import (CLOCK, DAEMON, Live, Spent, Walrus, contracts_at, deployment_args, history, ids, key_wallet,
                          pending_key, recover_key, stage, start_daemon, stop_daemon, sweep, wait_for)
-from live_package_upgrade import contracts_digest, load_state, save_state
+from live_package_upgrade import contracts_digest, fixture_key, load_state, save_state
 import subprocess
 
 DEFAULT_BASE = "f43d531^1"  # main immediately before SF-008 (#50): receipts, no identities.
@@ -92,7 +92,8 @@ def run(args):
         try:
             package_dir, pubfile = root / "package", root / "Pub.live.toml"
             base_contracts = contracts_at(base, root / "base")
-            key_name = f"{contracts_digest(base_contracts)}..{contracts_digest(repository / 'contracts')}"
+            # The (base, head) pair and the release compiler that built its bytecode.
+            key_name = fixture_key(contracts_digest(base_contracts), contracts_digest(repository / "contracts"))
             state = load_state(state_path, live.chain, live.operator)
             fixtures = state.setdefault("security_fixtures", {})
             fixture = None if args.fresh else fixtures.get(key_name)
@@ -163,7 +164,8 @@ def run(args):
 
                 # 2. Upgrade in place.
                 stage(repository / "contracts", package_dir)
-                new = live.published(live.publish("upgrade to head", package_dir, pubfile, upgrade_cap=upgrade_cap))
+                new = live.published(live.publish("upgrade to head", package_dir, pubfile,
+                                                        upgrade={"cap": upgrade_cap, "package": old}))
                 made["package"] = new
                 fixtures[key_name] = dict(base_package=old, head_package=new, registry=registry, upgrade_cap=upgrade_cap,
                                           base=base, created=live.evidence["started"])

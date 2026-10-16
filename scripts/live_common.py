@@ -3,6 +3,12 @@
 Everything here reads and writes the chain through the Sui CLI and gRPC
 (`chain_facts`): public testnet fullnodes do not serve JSON-RPC. Nothing
 here faucets, reads a default wallet or prints a key.
+
+Toolchain (scripts/sui_toolchain.py, SF-056): every `sui client` command
+runs on the pinned transaction CLI, which must support the chain's protocol
+version (checked read-only before any write). Package bytecode comes from
+the pinned release compiler and is verified in the unsigned transaction
+before signing.
 """
 import hashlib
 import json
@@ -17,6 +23,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import deployment_manifest as dm
+import sui_toolchain as toolchain
 import test_component as component
 from testnet_budget import Budget, Spent  # noqa: F401 (re-exported to the suites)
 
@@ -83,8 +90,10 @@ class Live:
     the effects, so failures, aborts and unknown outcomes are charged and
     rebates never replenish the allowance."""
 
-    def __init__(self, wallet, network, max_spend_mist):
+    def __init__(self, wallet, network, max_spend_mist, build_sui="sui",
+                 network_sui=os.environ.get("SUIFLEET_NETWORK_SUI", toolchain.NETWORK_DEFAULT)):
         self.wallet = Path(wallet).resolve()
+        self.build_sui, self.network_sui = build_sui, network_sui
         self.network = network
         self.max_spend = max_spend_mist
         self.evidence = {"started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "network": network,
@@ -92,7 +101,7 @@ class Live:
         self.ledger = Budget(max_spend_mist, self.evidence["transactions"])
 
     def client(self, *command, json_output=True, check=True, config=None):
-        full = ["sui", "client", "--client.config", str(config or self.wallet), *map(str, command)]
+        full = [self.network_sui, "client", "--client.config", str(config or self.wallet), *map(str, command)]
         if json_output:
             full.append("--json")
         result = subprocess.run(full, text=True, capture_output=True, timeout=600)
@@ -144,22 +153,29 @@ class Live:
         return sum(int(c.get("mistBalance", 0)) for c in coins) + (int(gas.get("addressMistBalance") or 0) if isinstance(gas, dict) else 0)
 
     def preflight(self):
+        # Pinned release compiler and transaction CLI, never PATH substitutes.
+        self.tools = toolchain.check_tools(self.build_sui, self.network_sui)
+        self.build_sui, self.network_sui = self.tools["build"]["path"], self.tools["network"]["path"]
         envs, active_env = self.client("envs")
         self.rpc_url = next(e["rpc"] for e in envs if e["alias"] == active_env)
         self.operator = dm.object_id(self.client("active-address", json_output=False).stdout.strip().split()[-1])
-        self.chain = dm.chain_facts(self.rpc_url)["chain_identifier"]
+        facts = dm.chain_facts(self.rpc_url)
+        self.chain = facts["chain_identifier"]
         if self.network == "localnet":
             assert any(h in self.rpc_url for h in ("127.0.0.1", "localhost")), "localnet profile needs a loopback node"
         else:
             assert self.chain == CHAINS[self.network], f"active env {active_env} is chain {self.chain}, not {self.network}"
             assert self.operator in TESTNET_WALLETS, "wallet is outside the dedicated testnet grant"
+        # Read-only protocol gate before any transaction.
+        self.evidence["toolchain"] = dict(self.tools, compatibility=toolchain.preflight(
+            self.tools, facts, CHAINS.get(self.network)))
         self.start_balance = self.balance()
         assert self.start_balance >= self.max_spend, (
             f"{self.operator} holds {self.start_balance} MIST; this run may spend up to {self.max_spend}. "
             "Fund it first (docs/TESTNET.md)")
         self.evidence.update(chain=self.chain, rpc=self.rpc_url, operator=self.operator, start_balance_mist=self.start_balance,
                              max_spend_mist=self.max_spend,
-                             sui=subprocess.run(["sui", "--version"], capture_output=True, text=True).stdout.strip(),
+                             sui={k: self.tools[k]["version"] for k in self.tools},
                              head=subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "HEAD"], text=True).strip())
         print(f"{self.network} chain {self.chain}, operator {self.operator}, balance {self.start_balance / 1e9:.3f} SUI")
 
@@ -204,11 +220,28 @@ class Live:
     def published(result):
         return next(c["packageId"] for c in result["objectChanges"] if c["type"] == "published")
 
-    def publish(self, label, package_dir, pubfile, upgrade_cap=None):
-        """Ephemeral publication (or upgrade) of a contracts tree."""
-        common = ["--build-env", "testnet", "--pubfile-path", pubfile, "--silence-warnings"]
-        args = ["test-upgrade", package_dir, "--upgrade-capability", upgrade_cap] if upgrade_cap else ["test-publish", package_dir]
-        return self.execute(label, [*args, *common], gas=400_000_000)
+    def publish(self, label, package_dir, pubfile, upgrade=None):
+        """Ephemeral publication of a contracts tree, or its upgrade
+        (`upgrade` = {"cap": UpgradeCap, "package": current package}). The
+        pinned compiler's bytecode is verified in the unsigned transaction
+        before it is signed; a publication records the pubfile the upgrade
+        reads (serialized publication does not write it)."""
+        common = ["--build-env", "testnet", "--pubfile-path", str(pubfile), "--silence-warnings"]
+        execute = self.executor()
+
+        def client(*command, json_output=True, check=True):
+            # The verified bytes are executed like any other mutation.
+            if command[0] == "serialized-tx":
+                return execute(*command)
+            return self.client(*command, json_output=json_output, check=check)
+        built = self.evidence.setdefault("verified_package_transactions", {})
+        result = self.execute(label, toolchain.package_submitter(
+            client, self.build_sui, package_dir, common, sender=self.operator, upgrade=upgrade,
+            record=built.setdefault(label, {})), gas=400_000_000)
+        if upgrade is None:
+            toolchain.write_pubfile(pubfile, self.chain, package_dir, self.published(result),
+                                    self.created(result, "::package::UpgradeCap")[0])
+        return result
 
     def object(self, object_id):
         return self.client("object", object_id)
@@ -336,14 +369,14 @@ def key_wallet(live, seed, root, name):
         "active_env: live\nactive_address: null\n")
     # keytool also loads a client config; point it at this throwaway wallet.
     env = {**os.environ, "SUI_CONFIG_DIR": str(wallet)}
-    imported = subprocess.run(["sui", "keytool", "--keystore-path", str(wallet / "sui.keystore"), "import",
+    imported = subprocess.run([live.network_sui, "keytool", "--keystore-path", str(wallet / "sui.keystore"), "import",
                                bech32_suiprivkey(bytes.fromhex(seed)), "ed25519"], capture_output=True, env=env)
     assert imported.returncode == 0, "could not import the throwaway test key"
     key = wallet / "test.key"
     key.touch(mode=0o600)
     key.write_text(seed + "\n")
     address = subprocess.check_output([str(DAEMON), "--derive-address", str(key)], text=True).strip()
-    subprocess.run(["sui", "client", "--client.config", str(wallet / "client.yaml"), "switch", "--address", address],
+    subprocess.run([live.network_sui, "client", "--client.config", str(wallet / "client.yaml"), "switch", "--address", address],
                    check=True, capture_output=True)
     return wallet / "client.yaml", address
 

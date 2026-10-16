@@ -33,7 +33,7 @@ from types import SimpleNamespace
 
 import deployment_manifest as dm
 from live_common import DAEMON, ROOT, Budget, Live, Spent, WALRUS_TESTNET, pending_key, recover_key, sweep
-from live_package_upgrade import contracts_digest, load_state
+from live_package_upgrade import contracts_digest, fixture_key, load_state
 
 FUNDING = 100_000_000  # 0.1 SUI for the test key; swept back afterwards.
 
@@ -42,12 +42,18 @@ def pending_key_path(live):
     return live.wallet.parent / "live-browser-key.hex"
 
 
+def head_fixture(state, tree):
+    """The package-upgrade fixture whose head is `tree`, built by the pinned
+    release compiler (live_package_upgrade.fixture_key), or None."""
+    head = fixture_key(tree, tree)
+    return state["fixtures"].get(head) or next((f for k, f in state["fixtures"].items() if k.endswith(".." + head)), None)
+
+
 def run(args):
     live = Live(args.wallet, args.network, args.max_spend_mist)
     live.preflight()
     state = load_state(Path(args.state) if args.state else live.wallet.parent / "live-state.json", live.chain, live.operator)
-    tree = contracts_digest(ROOT / "contracts")
-    fixture = state["fixtures"].get(tree) or next((f for k, f in state["fixtures"].items() if k.endswith(".." + tree)), None)
+    fixture = head_fixture(state, contracts_digest(ROOT / "contracts"))
     if not fixture or not fixture.get("owner_cap"):
         sys.exit("no activated package-upgrade fixture for these contracts; run make live-gate-package-upgrade first")
     publisher, aggregator = WALRUS_TESTNET

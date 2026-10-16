@@ -11,6 +11,8 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import live_common
 import live_upgrade_security
+import live_wallet_gate
+import sui_toolchain
 from live_common import Live
 from live_upgrade_security import fixture_valid
 from testnet_budget import Budget, Spent
@@ -42,6 +44,7 @@ class Chain:
 def live(chain, limit=100_000_000):
     run = Live("/nonexistent/client.yaml", "testnet", limit)
     run.client = chain
+    run.operator, run.chain = OPERATOR, "4c78adac"  # Set by preflight.
     return run
 
 
@@ -143,6 +146,86 @@ class LiveSpendTests(unittest.TestCase):
                 patch.object(live_common.subprocess, "run") as lock:
             run.transaction("locked", "--move-call", "x")
         self.assertIn("lock-assert", lock.call_args.args[0])
+
+
+class PackageTransactionTests(unittest.TestCase):
+    """Publish/upgrade go through sui_toolchain's verify-before-sign submitter."""
+
+    def submitter(self, calls, refuse=False):
+        def make(client, build_tool, package_dir, common, *, sender, upgrade=None, record=None):
+            calls.append(dict(build_tool=build_tool, package_dir=package_dir, sender=sender, upgrade=upgrade))
+
+            def submit(budget):
+                if refuse:
+                    raise sui_toolchain.NotSubmitted("bytecode differs")
+                record.update(kind="upgrade" if upgrade else "publish")
+                return client("serialized-tx", "VERIFIEDBYTES")
+            return submit
+        return make
+
+    def published(self):
+        result = effects(cost=5_000_000, storage=80_000_000)
+        result["objectChanges"] = [{"type": "published", "packageId": "0x" + "a" * 64},
+                                   {"type": "created", "objectType": "0x2::package::UpgradeCap", "objectId": "0xcap"}]
+        return result
+
+    def test_publish_signs_verified_bytes_and_records_the_pubfile(self):
+        calls, chain = [], Chain(self.published())
+        run = live(chain, limit=500_000_000)
+        with patch.object(live_common.toolchain, "package_submitter", self.submitter(calls)), \
+                patch.object(live_common.toolchain, "write_pubfile") as pubfile:
+            run.publish("publish base", "/tmp/package", "/tmp/pub.toml")
+        self.assertEqual(chain.calls[0][0][:2], ("serialized-tx", "VERIFIEDBYTES"))
+        self.assertEqual(calls[0]["sender"], OPERATOR)
+        pubfile.assert_called_once_with("/tmp/pub.toml", "4c78adac", "/tmp/package", "0x" + "a" * 64, "0xcap")
+        self.assertEqual(run.ledger.used, 85_000_000)
+        self.assertEqual(run.evidence["verified_package_transactions"]["publish base"], {"kind": "publish"})
+
+    def test_upgrade_targets_the_cap_and_package_without_rewriting_the_pubfile(self):
+        calls, chain = [], Chain(self.published())
+        run = live(chain, limit=500_000_000)
+        upgrade = {"cap": "0xcap", "package": "0xold"}
+        with patch.object(live_common.toolchain, "package_submitter", self.submitter(calls)), \
+                patch.object(live_common.toolchain, "write_pubfile") as pubfile:
+            run.publish("upgrade to head", "/tmp/package", "/tmp/pub.toml", upgrade=upgrade)
+        self.assertEqual(calls[0]["upgrade"], upgrade)
+        pubfile.assert_not_called()
+
+    def test_refused_package_transaction_is_never_submitted_or_charged(self):
+        calls, chain = [], Chain()
+        run = live(chain, limit=500_000_000)
+        with patch.object(live_common.toolchain, "package_submitter", self.submitter(calls, refuse=True)), \
+                patch.object(live_common.toolchain, "write_pubfile") as pubfile:
+            with self.assertRaises(sui_toolchain.NotSubmitted):
+                run.publish("publish base", "/tmp/package", "/tmp/pub.toml")
+        self.assertEqual(chain.calls, [])
+        self.assertEqual(run.ledger.used, 0)
+        self.assertEqual(run.evidence["transactions"][-1]["status"], "not_submitted")
+        pubfile.assert_not_called()
+
+    def test_preflight_refuses_an_unpinned_transaction_cli_before_any_read(self):
+        chain = Chain()
+        run = live(chain)
+        with patch.object(live_common.toolchain, "check_tools", side_effect=sui_toolchain.Incompatible("PATH sui")):
+            with self.assertRaises(sui_toolchain.Incompatible):
+                run.preflight()
+        self.assertEqual(chain.calls, [])
+
+    def test_client_runs_the_network_cli(self):
+        run = Live("/nonexistent/client.yaml", "testnet", 1, network_sui="/opt/sui-network/sui")
+        with patch.object(live_common.subprocess, "run", return_value=CompletedProcess([], 0, "{}", "")) as ran:
+            run.client("gas")
+        self.assertEqual(ran.call_args.args[0][:2], ["/opt/sui-network/sui", "client"])
+
+
+class WalletFixtureTests(unittest.TestCase):
+    def test_head_fixture_is_keyed_by_release_compiler(self):
+        compiler = sui_toolchain.BUILD["version"].split()[1]
+        same, pair = {"owner_cap": "0x1"}, {"owner_cap": "0x2"}
+        self.assertIs(live_wallet_gate.head_fixture({"fixtures": {f"t@{compiler}": same}}, "t"), same)
+        self.assertIs(live_wallet_gate.head_fixture({"fixtures": {f"b..t@{compiler}": pair}}, "t"), pair)
+        # Pre-SF-056 keys (no compiler) and other compilers are never reused.
+        self.assertIsNone(live_wallet_gate.head_fixture({"fixtures": {"t": same, "b..t": pair, "t@0.0.0": same}}, "t"))
 
 
 class SecurityFixtureTests(unittest.TestCase):
