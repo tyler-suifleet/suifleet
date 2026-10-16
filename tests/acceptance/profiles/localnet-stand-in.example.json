@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "profile": "localnet",
+  "manifest": "deployment.json",
+  "wallet": {"mode": "scripted", "address": "0x<LOCALNET_TEST_ACCOUNT>", "client_config": "wallet/client.yaml"},
+  "walrus": {"mode": "stand-in", "bind": "127.0.0.1"},
+  "device": {"mode": "local", "root": "device"},
+  "artifact_profile": "public",
+  "faucet_url": "http://127.0.0.1:9123/v2/gas"
+}
