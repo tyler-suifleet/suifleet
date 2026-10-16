@@ -1,6 +1,6 @@
 {
   "ticket": "SF-026",
-  "head": "5fe5818b2d9d1b1d960ef61ff824eb833a1fee55",
+  "head": "237c432805a5c306ab699810327996eb03bf2960",
   "checks": [
     "ExecStart=/usr/bin/suifleet --launch runs the base binary when nothing is staged",
     "working update: staged, exit 75, systemd restarted the unit, the launcher exec'd 2.0.0-0af61cfa/suifleet as its main process; confirmed and Applied with the same identity and journal",
@@ -16,7 +16,7 @@
     "suifleet-provision.service": "0e7ced8971f1de43ad97d3b5f6d018d0ee85d2c9702c27ce56b02665f83811bc"
   },
   "test_dropin": "TimeoutStartSec=15",
-  "daemon_sha256": "55453aae01feccad7c037529c7633da70a440a7fcfc86c8e46d45179dedbf3d3",
+  "daemon_sha256": "a50f6e44e4f871458ae52bd5f3157dc9c6151eed20683d6db155df563d929fe9",
   "host": {
     "kernel": "6.6.87.2-microsoft-standard-WSL2",
     "docker": "29.8.0",
