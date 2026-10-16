@@ -1,0 +1,140 @@
+[
+  {
+    "name": "plain line kept",
+    "line": "Deployment finished deployment=0x2a status=1",
+    "redacted": "Deployment finished deployment=0x2a status=1",
+    "count": 0
+  },
+  {
+    "name": "0x object id kept",
+    "line": "registry 0xabababababababababababababababababababababababababababababababab ready",
+    "redacted": "registry 0xabababababababababababababababababababababababababababababababab ready",
+    "count": 0
+  },
+  {
+    "name": "raw hex key",
+    "line": "loaded key 0707070707070707070707070707070707070707070707070707070707070707",
+    "redacted": "loaded key [REDACTED]",
+    "count": 1
+  },
+  {
+    "name": "sui private key",
+    "line": "export suiprivkey1qqpabc123xyz done",
+    "redacted": "export [REDACTED] done",
+    "count": 1
+  },
+  {
+    "name": "password value",
+    "line": "connecting with password=hunter2 to db",
+    "redacted": "connecting with password=[REDACTED] to db",
+    "count": 1
+  },
+  {
+    "name": "json api key",
+    "line": "{\"api_key\": \"abc123xyz\", \"user\": \"bob\"}",
+    "redacted": "{\"api_key\": \"[REDACTED]\", \"user\": \"bob\"}",
+    "count": 1
+  },
+  {
+    "name": "authorization bearer",
+    "line": "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.payload.sig",
+    "redacted": "Authorization: Bearer [REDACTED]",
+    "count": 1
+  },
+  {
+    "name": "standalone bearer",
+    "line": "curl -H 'x: y' Bearer abcdefghijkl",
+    "redacted": "curl -H 'x: y' Bearer [REDACTED]",
+    "count": 1
+  },
+  {
+    "name": "padded base64 key",
+    "line": "material Zm9vYmFyYmF6cXV4cXV1eGNvcmdlZ3JhdWx0Z2FycGx5d2FsZG8rZm9v== end",
+    "redacted": "material [REDACTED] end",
+    "count": 1
+  },
+  {
+    "name": "base58 digest kept",
+    "line": "digest 7nPq2vT3Wu1xYzAbCdEfGhJkLmNoPqRsTuVwXyZ12345 ok",
+    "redacted": "digest 7nPq2vT3Wu1xYzAbCdEfGhJkLmNoPqRsTuVwXyZ12345 ok",
+    "count": 0
+  },
+  {
+    "name": "walrus blob id kept",
+    "line": "blob uSBt1alhF53Dlg7aFE7wI8oqffR_iL5ThM8Hk2FsrYk available",
+    "redacted": "blob uSBt1alhF53Dlg7aFE7wI8oqffR_iL5ThM8Hk2FsrYk available",
+    "count": 0
+  },
+  {
+    "name": "recovery phrase",
+    "line": "seed words: abandon ability able about above absent absorb abstract absurd abuse access accident",
+    "redacted": "seed words: [REDACTED]",
+    "count": 1
+  },
+  {
+    "name": "prose kept",
+    "line": "the daemon started with durable deployment polling and verified manifest",
+    "redacted": "the daemon started with durable deployment polling and verified manifest",
+    "count": 0
+  },
+  {
+    "name": "confidential overlay value",
+    "line": "connected to mqtt://user:s3cretValue@host",
+    "secrets": [
+      "s3cretValue"
+    ],
+    "redacted": "connected to mqtt://user:[REDACTED]@host",
+    "count": 1
+  },
+  {
+    "name": "short overlay values ignored",
+    "line": "mode on",
+    "secrets": [
+      "on"
+    ],
+    "redacted": "mode on",
+    "count": 0
+  },
+  {
+    "name": "pem private key line",
+    "line": "-----BEGIN OPENSSH PRIVATE KEY-----",
+    "redacted": "[REDACTED] (private key block line)",
+    "count": 1
+  },
+  {
+    "name": "token before separator",
+    "line": "token=abc,next=1",
+    "redacted": "token=[REDACTED],next=1",
+    "count": 1
+  },
+  {
+    "name": "prefixed secret name",
+    "line": "DB_PASSWORD=xyz",
+    "redacted": "DB_PASSWORD=[REDACTED]",
+    "count": 1
+  },
+  {
+    "name": "pin value",
+    "line": "pin: 1234",
+    "redacted": "pin: [REDACTED]",
+    "count": 1
+  },
+  {
+    "name": "pinned kept",
+    "line": "pinned version 1.2",
+    "redacted": "pinned version 1.2",
+    "count": 0
+  },
+  {
+    "name": "tokens word without value kept",
+    "line": "status: ok tokens remaining 5",
+    "redacted": "status: ok tokens remaining 5",
+    "count": 0
+  },
+  {
+    "name": "quoted single",
+    "line": "secret='a b c' rest",
+    "redacted": "secret='[REDACTED]' rest",
+    "count": 1
+  }
+]
