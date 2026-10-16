@@ -69,11 +69,16 @@ test-ota:
 # Supervised components under the shipped systemd units on real systemd and
 # cgroup v2 (SF-014): a disposable privileged container with systemd as PID 1.
 # Runs on the host (needs Docker), not inside the dev container.
-.PHONY: test-supervisor-systemd test-daemon-update-systemd
+.PHONY: test-supervisor-systemd test-daemon-update-systemd test-key-isolation-systemd
 # Daemon self-update under the shipped unit on real systemd (SF-026); host, needs Docker.
 test-daemon-update-systemd:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
 	PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_daemon_update_systemd.py --evidence "$${SUIFLEET_EVIDENCE:-daemon-update-systemd-evidence.json}"
+
+# Device-key isolation under the shipped units on real systemd (SF-053); host, needs Docker.
+test-key-isolation-systemd:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+	PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_key_isolation_systemd.py --evidence "$${SUIFLEET_EVIDENCE:-key-isolation-systemd-evidence.json}"
 
 .PHONY: test-supervisor-systemd
 test-supervisor-systemd:

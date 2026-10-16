@@ -168,6 +168,21 @@
         "fresh independent code/security review and relevant tests/CI",
         "no physical programming or private identity/enrollment keys in image"
       ]
+    },
+    "SF-053": {
+      "deferred_checks": [
+        "physical Pi image/service acceptance of the signing service, and hardware-token (TPM/secure element) protection"
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "all source/security findings repaired",
+        "daemon unit tests including signer policy/caller negatives, and make test-ota",
+        "real systemd/cgroup-v2 evidence under the shipped units (scripts/test_key_isolation_systemd.py): component key/PIN/config/proc/env/fd/socket negatives, signed daemon reports, restarts and key migration",
+        "exact-head ordinary CI and current-head/base testnet status",
+        "fresh independent review of exact head/base/feedback/policy"
+      ]
     }
   }
 }
