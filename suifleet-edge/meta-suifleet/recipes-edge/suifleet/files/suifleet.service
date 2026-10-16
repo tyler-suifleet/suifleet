@@ -3,6 +3,9 @@ Description=SuiFleet Edge Deployment Client
 After=network-online.target suifleet-provision.service
 Wants=network-online.target
 Requires=suifleet-provision.service
+# Signatures come from the device signing service (SF-053) when configured.
+Wants=suifleet-signer.socket
+After=suifleet-signer.socket
 ConditionPathExists=/etc/suifleet/config.toml
 
 [Service]

@@ -1,0 +1,58 @@
+[Unit]
+Description=SuiFleet device signing service
+Documentation=file:///usr/share/doc/suifleet/KEY_ISOLATION.md
+Requires=suifleet-signer.socket suifleet-provision.service
+After=suifleet-provision.service
+ConditionPathExists=/etc/suifleet/signer.toml
+
+[Service]
+# Holds the device key as its own user; the daemon and its component
+# processes (user suifleet) cannot read it (SF-053).
+Type=simple
+User=suifleet-signer
+Group=suifleet-signer
+# Traverse /etc/suifleet (root:suifleet 0750) and read the shared manifest;
+# membership grants the daemon nothing of the signer's.
+SupplementaryGroups=suifleet
+ExecStart=/usr/bin/suifleet --signer-service /etc/suifleet/signer.toml
+Restart=on-failure
+RestartSec=2
+UMask=0077
+
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+# Default /proc visibility: the caller check reads the peer's parent PID and
+# cgroup (world-readable fields); environ and memory stay ptrace-protected.
+ProtectProc=default
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+# AF_UNIX only: the signing socket.
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+LimitCORE=0
+MemoryMax=64M
+TasksMax=16
+# A PKCS#11 token on a device node (e.g. /dev/tpmrm0) needs, in a drop-in:
+#   PrivateDevices=no
+#   DeviceAllow=/dev/tpmrm0 rw
+
+[Install]
+WantedBy=multi-user.target

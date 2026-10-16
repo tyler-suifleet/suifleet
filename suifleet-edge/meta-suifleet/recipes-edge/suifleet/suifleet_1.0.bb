@@ -13,6 +13,9 @@ SRC_URI = " \
     file://suifleet-provision.service \
     file://suifleet-provision \
     file://suifleet-enrollment.path \
+    file://suifleet-signer.service \
+    file://suifleet-signer.socket \
+    file://signer.toml.example \
 "
 SRCREV = "795de747e066ee97af0e9e0e53deda3c6c71e90c"
 # Preserve core's unpack root; Scarthgap predates UNPACKDIR.
@@ -58,11 +61,13 @@ python do_verify_toolchain() {
 }
 addtask verify_toolchain after do_prepare_recipe_sysroot before do_configure
 
-# Unprivileged daemon user; only suifleet-firmware.service runs as root.
+# Unprivileged daemon user; only suifleet-firmware.service runs as root. The
+# device key belongs to the separate signing-service user (SF-053).
 USERADD_PACKAGES = "${PN}"
-USERADD_PARAM:${PN} = "--system --no-create-home --home-dir /var/lib/suifleet --shell /sbin/nologin --user-group suifleet"
+USERADD_PARAM:${PN} = "--system --no-create-home --home-dir /var/lib/suifleet --shell /sbin/nologin --user-group suifleet; \
+    --system --no-create-home --home-dir /nonexistent --shell /sbin/nologin --user-group suifleet-signer"
 
-SYSTEMD_SERVICE:${PN} = "suifleet.service suifleet-provision.service suifleet-enrollment.path suifleet-firmware.path"
+SYSTEMD_SERVICE:${PN} = "suifleet.service suifleet-provision.service suifleet-enrollment.path suifleet-firmware.path suifleet-signer.socket suifleet-signer.service"
 SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 
 do_install:append() {
@@ -71,6 +76,7 @@ do_install:append() {
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${SUIFLEET_UNPACKDIR}/suifleet.service ${SUIFLEET_UNPACKDIR}/suifleet-firmware.service ${SUIFLEET_UNPACKDIR}/suifleet-firmware.path \
         ${SUIFLEET_UNPACKDIR}/suifleet-provision.service ${SUIFLEET_UNPACKDIR}/suifleet-enrollment.path \
+        ${SUIFLEET_UNPACKDIR}/suifleet-signer.service ${SUIFLEET_UNPACKDIR}/suifleet-signer.socket \
         ${D}${systemd_system_unitdir}/
     install -D -m 0755 ${SUIFLEET_UNPACKDIR}/suifleet-provision ${D}${libexecdir}/suifleet-provision
     # /etc/suifleet is read-only to the daemon; config.toml must be root:suifleet 0640.
@@ -78,7 +84,9 @@ do_install:append() {
     install -m 0640 -g suifleet ${SUIFLEET_UNPACKDIR}/config.toml.example ${D}${sysconfdir}/suifleet/config.toml.example
     # Root-only: names the only command that ever runs as root.
     install -m 0600 ${SUIFLEET_UNPACKDIR}/firmware.toml.example ${D}${sysconfdir}/suifleet/firmware.toml.example
+    # Readable by the signing service only (it names the key or PKCS#11 PIN file).
+    install -m 0640 -g suifleet-signer ${SUIFLEET_UNPACKDIR}/signer.toml.example ${D}${sysconfdir}/suifleet/signer.toml.example
 }
 
-FILES:${PN} += "${sysconfdir}/suifleet ${systemd_system_unitdir}/suifleet*.service ${systemd_system_unitdir}/suifleet*.path"
+FILES:${PN} += "${sysconfdir}/suifleet ${systemd_system_unitdir}/suifleet*.service ${systemd_system_unitdir}/suifleet*.path ${systemd_system_unitdir}/suifleet*.socket"
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_base-utils}"

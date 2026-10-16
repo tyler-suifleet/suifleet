@@ -5,7 +5,14 @@ directory=/etc/suifleet
 umask 077
 address=$(/usr/bin/suifleet --provision "$directory/device.key")
 printf '%s\n' "$address" | grep -Eq '^0x[0-9a-f]{64}$'
-chown suifleet:suifleet "$directory/device.key"
+# The signing service's user holds the key when installed (SF-053); the
+# daemon user, which runs component commands, must not be able to read it.
+# Existing keys move to it on the next boot, unchanged, so the identity stays.
+owner=suifleet
+if id suifleet-signer >/dev/null 2>&1; then
+    owner=suifleet-signer
+fi
+chown "$owner:$owner" "$directory/device.key"
 chmod 0600 "$directory/device.key"
 temporary=
 trap '[ -z "$temporary" ] || rm -f "$temporary"' EXIT
