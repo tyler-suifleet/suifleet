@@ -218,6 +218,43 @@ class PackageTransactionTests(unittest.TestCase):
         self.assertEqual(ran.call_args.args[0][:2], ["/opt/sui-network/sui", "client"])
 
 
+class WalrusUploadTests(unittest.TestCase):
+    STORED = json.dumps({"newlyCreated": {"blobObject": {"blobId": "blob1"}}}).encode()
+
+    def upload(self, *outcomes):
+        import io
+        import urllib.error
+        attempts = []
+
+        def urlopen(request, timeout):
+            attempts.append(request.get_method())
+            outcome = outcomes[len(attempts) - 1]
+            if isinstance(outcome, BaseException):
+                raise outcome
+            return nullcontext(io.BytesIO(outcome))
+        walrus = live_common.Walrus("testnet")
+        with patch.object(live_common.urllib.request, "urlopen", urlopen), \
+                patch.object(live_common.time, "sleep"), patch.object(walrus, "readable", return_value=True):
+            try:
+                return walrus.put("recipe", b"body"), attempts
+            except (OSError, urllib.error.HTTPError) as error:
+                return error, attempts
+
+    def test_transient_publisher_failures_are_retried(self):
+        import urllib.error
+        server = urllib.error.HTTPError("u", 503, "busy", {}, None)
+        blob, attempts = self.upload(TimeoutError("read timed out"), server, self.STORED)
+        self.assertEqual((blob, attempts), ("blob1", ["PUT"] * 3))
+
+    def test_retries_are_bounded_and_client_errors_are_not_retried(self):
+        import urllib.error
+        error, attempts = self.upload(*[TimeoutError("read timed out")] * 3, self.STORED)
+        self.assertIsInstance(error, TimeoutError)
+        self.assertEqual(len(attempts), live_common.WALRUS_ATTEMPTS)
+        error, attempts = self.upload(urllib.error.HTTPError("u", 413, "too large", {}, None), self.STORED)
+        self.assertEqual((error.code, len(attempts)), (413, 1))
+
+
 class WalletFixtureTests(unittest.TestCase):
     def test_head_fixture_is_keyed_by_release_compiler(self):
         compiler = sui_toolchain.BUILD["version"].split()[1]

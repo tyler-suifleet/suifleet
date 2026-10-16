@@ -19,6 +19,7 @@ import shutil
 import subprocess
 import threading
 import time
+import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -33,6 +34,8 @@ CLOCK = "@0x6"
 CHAINS = {"testnet": "4c78adac"}
 # The public Walrus endpoints refuse Python's default User-Agent (HTTP 403).
 AGENT = {"User-Agent": "suifleet-acceptance/1"}
+# The public publisher occasionally stalls; uploads are retried (content-addressed).
+WALRUS_ATTEMPTS, WALRUS_RETRY_SECONDS = 3, 10
 WALRUS_TESTNET = ("https://publisher.walrus-testnet.walrus.space", "https://aggregator.walrus-testnet.walrus.space")
 # Move aborts as the CLI reports them: "... aborted within function
 # '0x…::module::function' at instruction N with code C", or the older
@@ -303,14 +306,30 @@ class Walrus:
         if self.mode != "testnet":
             self.blobs[name] = body
             return name
-        request = urllib.request.Request(f"{self.publisher}/v1/blobs?epochs=1", data=body, method="PUT", headers=AGENT)
-        with urllib.request.urlopen(request, timeout=120) as response:
-            stored = json.load(response)
+        stored = self.store(body)
         blob = stored.get("newlyCreated", {}).get("blobObject", {}).get("blobId") or stored.get("alreadyCertified", {}).get("blobId")
         assert blob, f"Walrus publisher returned no blob ID: {stored}"
         # Read it back through the aggregator before relying on it.
         wait_for(lambda: self.readable(blob, body), f"Walrus blob {blob} not readable from the aggregator", timeout=120)
         return blob
+
+    def store(self, body):
+        """PUT a blob to the public publisher, retrying transient failures
+        (timeouts, resets, 5xx) a bounded number of times. Blob IDs are
+        content-addressed and the publisher pays, so a retry spends nothing
+        from the run's wallet and returns the same ID."""
+        for attempt in range(1, WALRUS_ATTEMPTS + 1):
+            request = urllib.request.Request(f"{self.publisher}/v1/blobs?epochs=1", data=body, method="PUT", headers=AGENT)
+            try:
+                with urllib.request.urlopen(request, timeout=120) as response:
+                    return json.load(response)
+            except urllib.error.HTTPError as error:
+                if error.code < 500 or attempt == WALRUS_ATTEMPTS:
+                    raise
+            except OSError:
+                if attempt == WALRUS_ATTEMPTS:
+                    raise
+            time.sleep(WALRUS_RETRY_SECONDS * attempt)
 
     def readable(self, blob, body):
         try:
