@@ -18,6 +18,9 @@ StateDirectory=suifleet
 StateDirectoryMode=0700
 UMask=0077
 # Provisioning runs independently before enrollment; this service is unprivileged.
+# As root ("+"): the device key's owner follows this configuration, which may
+# have just been installed or switched to the signing service (SF-053).
+ExecStartPre=+/usr/libexec/suifleet-provision
 # The platform's read-only base binary starts first. With [daemon_update]
 # enabled it execs a staged or confirmed daemon update (same PID, so readiness
 # and the watchdog apply to it); a new daemon that exits or never becomes ready

@@ -316,6 +316,30 @@ fn record(path: &Path, pid: u32, base: &Path) -> anyhow::Result<bool> {
     Ok(true)
 }
 
+pub const SIGNER_USER: &str = "suifleet-signer";
+pub const DAEMON_USER: &str = "suifleet";
+
+/// `suifleet --key-holder CONFIG_PATH`, for root provisioning: the user that
+/// must own the device key file. The signing service's user only when the
+/// daemon's configuration uses `[device.signer] kind = "service"` (or, with no
+/// daemon configuration yet, when `signer.toml` is installed beside it);
+/// otherwise the daemon's user, whose unchanged configuration still loads the
+/// key itself. So a package update never strands a legacy configuration.
+pub fn key_holder(config: &Path) -> anyhow::Result<&'static str> {
+    use anyhow::Context;
+    let text = match std::fs::read_to_string(config) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let signer = config.with_file_name("signer.toml");
+            return Ok(if signer.exists() { SIGNER_USER } else { DAEMON_USER });
+        }
+        Err(error) => return Err(error).with_context(|| format!("reading {}", config.display())),
+    };
+    let value: toml::Value = toml::from_str(&text).with_context(|| format!("parsing {}", config.display()))?;
+    let kind = value.get("device").and_then(|device| device.get("signer")).and_then(|signer| signer.get("kind"));
+    Ok(if kind.and_then(toml::Value::as_str) == Some("service") { SIGNER_USER } else { DAEMON_USER })
+}
+
 /// The peer's process as a pidfd (Linux 6.5+), so a request is never
 /// attributed to a later process reusing the peer's PID.
 fn peer_pidfd(stream: &UnixStream) -> Option<std::os::fd::OwnedFd> {
@@ -638,6 +662,29 @@ mod tests {
         // The public address is not a secret.
         assert_eq!(handle(&json!({ "op": "address" }), component, &Key, &p, || false)["address"], "0xa0");
         assert!(handle(&json!({ "op": "export" }), daemon, &Key, &p, || true)["error"].is_string());
+    }
+
+    #[test]
+    fn the_key_follows_the_configured_daemon_signer() {
+        let dir = std::env::temp_dir().join(format!("suifleet-key-holder-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let config = dir.join("config.toml");
+        // No daemon configuration yet: the signer only once signer.toml exists.
+        assert_eq!(key_holder(&config).unwrap(), DAEMON_USER);
+        std::fs::write(dir.join("signer.toml"), "").unwrap();
+        assert_eq!(key_holder(&config).unwrap(), SIGNER_USER);
+        // A legacy configuration keeps loading the key itself, even with
+        // signer.toml installed; PKCS#11 does not use the key file.
+        std::fs::write(&config, "[device]\nkeypair_path = '/etc/suifleet/device.key'\n").unwrap();
+        assert_eq!(key_holder(&config).unwrap(), DAEMON_USER);
+        std::fs::write(&config, "[device.signer]\nkind = 'pkcs11'\n").unwrap();
+        assert_eq!(key_holder(&config).unwrap(), DAEMON_USER);
+        std::fs::write(&config, "[device]\ndevice_cap_id = '0x2'\n[device.signer]\nkind = 'service'\n").unwrap();
+        assert_eq!(key_holder(&config).unwrap(), SIGNER_USER);
+        std::fs::write(&config, "[device\n").unwrap();
+        assert!(key_holder(&config).is_err(), "an unparsable configuration must not move the key");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

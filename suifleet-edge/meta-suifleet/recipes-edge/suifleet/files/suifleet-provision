@@ -5,12 +5,15 @@ directory=/etc/suifleet
 umask 077
 address=$(/usr/bin/suifleet --provision "$directory/device.key")
 printf '%s\n' "$address" | grep -Eq '^0x[0-9a-f]{64}$'
-# The signing service's user holds the key when installed (SF-053); the
-# daemon user, which runs component commands, must not be able to read it.
-# Existing keys move to it on the next boot, unchanged, so the identity stays.
-owner=suifleet
-if id suifleet-signer >/dev/null 2>&1; then
-    owner=suifleet-signer
+# The key's owner follows the daemon's configuration (SF-053): the signing
+# service's user once config.toml uses [device.signer] kind = "service", so the
+# daemon user, which runs component commands, cannot read it; otherwise the
+# daemon user, whose unchanged legacy configuration still loads it. The key
+# itself never changes, so the identity stays. Also run before every daemon
+# start, so a configuration switch takes effect without a reboot.
+owner=$(/usr/bin/suifleet --key-holder "$directory/config.toml")
+if [ "$owner" = suifleet-signer ] && ! id suifleet-signer >/dev/null 2>&1; then
+    owner=suifleet
 fi
 chown "$owner:$owner" "$directory/device.key"
 chmod 0600 "$directory/device.key"
