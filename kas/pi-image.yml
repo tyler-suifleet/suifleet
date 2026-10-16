@@ -1,0 +1,13 @@
+header:
+  version: 14
+  includes:
+    - packaging.yml
+target: suifleet-pi-image
+local_conf_header:
+  suifleet-pi-image: |
+    IMAGE_FSTYPES = "wic.bz2 wic.bmap ext4"
+    INIT_MANAGER = "systemd"
+    ENABLE_UART = "1"
+    PACKAGECONFIG:append:pn-systemd = " networkd resolved timesyncd"
+    hostname:pn-base-files = "suifleet-pi"
+    RPI_EXTRA_CONFIG:append = "\narm_64bit=1\n"
