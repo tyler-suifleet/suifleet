@@ -63,6 +63,13 @@ replay_history = false
 # offline_candidates = "never"
 # cache_max_bytes = 536870912
 
+# Daemon self-update (docs/DAEMON_UPDATE.md); requires ExecStart=suifleet --launch.
+# [daemon_update]
+# enabled = false
+# component = "suifleet-daemon"
+# max_start_attempts = 3
+# preflight_timeout_seconds = 60
+
 # Heartbeat, installed inventory and health (SF-019; docs/TELEMETRY.md):
 # signed snapshots to the fleet indexer, spooled under state_dir/telemetry
 # while it is unreachable. Off-chain; on-chain receipts are unchanged.
