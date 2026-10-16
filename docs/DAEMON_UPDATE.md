@@ -15,6 +15,8 @@ preflight_timeout_seconds = 60
 
 The shipped `suifleet.service` starts `ExecStart=/usr/bin/suifleet --launch`. Without `[daemon_update]`, or with it disabled, the launcher simply continues as the base binary, so this changes nothing until enabled. Keep the unit's `Type=notify`, `Restart=on-failure`, start timeout and watchdog: they are the recovery path.
 
+Self-update cannot be combined with the device signing service (`[device.signer] kind = "service"`, [KEY_ISOLATION.md](KEY_ISOLATION.md)); the daemon refuses that configuration. The install directory belongs to the daemon user, which components share, so components could choose the binary the signing service trusts.
+
 ## Publishing an update
 
 Deploy the configured component (for example `suifleet-daemon 0.3.0`) to devices, like any component. The artifact is the daemon executable for the target platform. Its recipe must have no lifecycle commands or dependencies. The recipe and artifact digests are verified on chain and in Walrus as for every deployment.

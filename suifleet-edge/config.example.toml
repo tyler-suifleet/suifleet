@@ -4,6 +4,11 @@ manifest_path = "deployment.json"
 
 [device]
 keypair_path = "/etc/suifleet/device.key"   # 32-byte hex ed25519 private key
+# Production: keep the key in the signing service instead (docs/KEY_ISOLATION.md;
+# not combinable with [daemon_update]):
+# [device.signer]
+# kind = "service"
+# socket = "/run/suifleet-signer/sign.sock"
 device_object_id = "0x..."                      # Device object ID from registration
 device_cap_id    = "0x..."                      # DeviceCap object ID
 # Or keep the key in a PKCS#11 token (build with --features pkcs11; docs/ENROLLMENT.md):
