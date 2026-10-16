@@ -2,7 +2,7 @@ use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs::{File, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
@@ -11,10 +11,66 @@ use std::{
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct State {
     pub binding: String,
+    /// Pre-apply notices/deferrals are not execution intents or status receipts.
+    #[serde(default)]
+    pub deferred: BTreeMap<String, crate::control::Deferred>,
     pub cursor: Option<Value>,
     #[serde(default)]
     pub initialized: bool,
     pub deployments: BTreeMap<String, Outcome>,
+    /// Components on this device by name, maintained by every deployment.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub components: BTreeMap<String, Component>,
+    /// Previous confirmed identity retained before replacement, including after interruption.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub last_known_good: BTreeMap<String, Component>,
+    /// Resume point of the DeviceAddedToGroup scan, which starts at genesis
+    /// whatever the deployment baseline (membership predates enrollment).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub membership_cursor: Option<Value>,
+    /// Groups that ever added this device. Membership itself is re-read from
+    /// each group object on every poll.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub groups: BTreeSet<String>,
+    /// Component name → deployment desired-state reconciliation last acted on.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub managed: BTreeMap<String, String>,
+    /// Component name → deployment this daemon last started for it, one-shot
+    /// or desired, saved with that deployment's intent. Its outcome in
+    /// `deployments` says whether it is what the component now runs.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub current: BTreeMap<String, String>,
+    /// Fingerprint of the desired state last reconciled (reconcile.rs).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub desired: Option<String>,
+    /// Desired-state step last started, saved before its intent. Until it has
+    /// applied, later steps stay stopped, across restarts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step: Option<Step>,
+}
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Step {
+    pub deployment: String,
+    /// Fingerprint of the desired state it was started for: that state stays
+    /// stopped by it, newer ones only while it is in flight.
+    pub desired: String,
+}
+/// An installed component. It is recorded unconfirmed before its install
+/// starts and confirmed only once the install is known to have succeeded;
+/// an unconfirmed entry is never reused to satisfy a dependency.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct Component {
+    pub version: String,
+    pub deployment_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version_id: Option<String>,
+    pub recipe_sha256: String,
+    pub artifact_sha256: String,
+    #[serde(default)]
+    pub dependencies: crate::deps::Dependencies,
+    pub confirmed: bool,
 }
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Outcome {
@@ -25,11 +81,31 @@ pub struct Outcome {
     /// before the update starts so a restart can still learn its outcome.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub firmware_request: Option<String>,
-    /// The privileged update may or may not have been applied: never
+    /// A configured command may or may not have completed: never
     /// reported, never re-applied and never turned into Failed.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub indeterminate: bool,
+    /// A staged daemon update (SF-026): pending until the handoff resolves
+    /// on a later start, never settled as an interrupted apply.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub daemon_handoff: Option<String>,
 }
+/// Read-only check that this build understands the journal in `directory`
+/// and that it belongs to `binding` (no lock: the running daemon holds it).
+pub fn check(directory: &Path, binding: &str) -> anyhow::Result<()> {
+    let path = directory.join("state.json");
+    if !path.exists() {
+        return Ok(());
+    }
+    let state: State = serde_json::from_slice(&std::fs::read(&path)?)
+        .map_err(|error| anyhow::anyhow!("journal {} is not readable by this daemon: {error}", path.display()))?;
+    anyhow::ensure!(
+        state.binding.is_empty() || state.binding == binding,
+        "journal belongs to another network/package/device"
+    );
+    Ok(())
+}
+
 pub struct Journal {
     path: PathBuf,
     _lock: File,
@@ -66,7 +142,8 @@ impl Journal {
     }
     /// Settle deployments an interrupted run left without a status. Those
     /// `pending` says can still learn their real outcome (and indeterminate
-    /// ones) are kept; every other one becomes Failed and is never re-applied.
+    /// ones) are kept. Direct command interruptions stay unknown; only helper
+    /// requests proven never started become Failed. Nothing is re-applied.
     pub fn settle_interrupted(
         &mut self,
         mut pending: impl FnMut(&str, &Outcome) -> bool,
@@ -75,13 +152,24 @@ impl Journal {
             if outcome.status.is_some() || outcome.indeterminate || pending(id, outcome) {
                 continue;
             }
-            outcome.status = Some(crate::protocol::STATUS_FAILED);
+            // With no helper request there is no durable external completion
+            // receipt. The command may have made changes before interruption.
+            outcome.indeterminate = outcome.firmware_request.is_none();
+            outcome.status = (!outcome.indeterminate).then_some(crate::protocol::STATUS_FAILED);
             outcome.error = Some(
                 "daemon interrupted during apply; inspect device before explicitly redeploying"
                     .into(),
             );
         }
         self.save()
+    }
+    /// Confirm the root component a deployment installed once it is Applied.
+    pub fn confirm_components(&mut self, deployment_id: &str) {
+        for component in self.state.components.values_mut() {
+            if component.deployment_id == deployment_id {
+                component.confirmed = true;
+            }
+        }
     }
     pub fn save(&self) -> anyhow::Result<()> {
         let temporary = self.path.with_extension("json.tmp");
@@ -157,12 +245,12 @@ mod tests {
                 .iter()
                 .map(|id| journal.state.deployments[*id].status)
                 .collect();
-            assert_eq!(states, [Some(2), None, None, Some(2)]);
+            assert_eq!(states, [None, None, None, Some(2)]);
             assert!(!journal.state.deployments["0x1"].reported);
         }
         {
             let journal = reopen(&path);
-            assert_eq!(journal.state.deployments["0x1"].status, Some(2), "settled outcome is durable");
+            assert!(journal.state.deployments["0x1"].indeterminate, "unknown outcome is durable");
             assert!(journal.state.deployments["0x3"].indeterminate);
         }
         assert!(Journal::open(&path, "other-device".into()).is_err());

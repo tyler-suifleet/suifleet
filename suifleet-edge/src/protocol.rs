@@ -8,19 +8,24 @@ pub const DEPLOYMENT_SCHEMA_VERSION: u64 = 1;
 pub const SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS: &[u64] = &[1, 2];
 pub const CATALOG_TYPES: &[&str] = &["component_catalog::ComponentCatalog", "component_catalog::ComponentVersion", "component_catalog::CatalogCreated", "component_catalog::VersionPublished", "component_catalog::CatalogBindingKey", "component_catalog::CatalogBinding"];
 pub const RECIPE_VERSION: &str = "1.0";
+pub const RECIPE_VERSIONS: &[&str] = &["1.0", "1.1"];
 pub const STATUS_APPLIED: u8 = 1;
 pub const STATUS_FAILED: u8 = 2;
-pub const REQUIRED_TYPES: &[&str] = &["device_registry::DeviceRegistry", "device_registry::Device", "device_group::DeviceGroup", "device_group::GroupCreated", "device_cap::DeviceCap", "device_cap::DeviceAddressKey", "deployment_manager::DeploymentRecord", "deployment_manager::DeploymentCreated", "deployment_manager::DeviceStatusUpdated", "deployment_manager::TargetGroupsKey", "deployment_manager::TargetDevicesKey", "deployment_manager::StatusesKey", "deployment_manager::RecipeDigestKey", "deployment_manager::ReceiptsKey", "deployment_manager::Receipts", "deployment_manager::DeviceStatusReported", "device_registry::IdentityKey", "device_registry::Identity", "device_registry::DeviceIdentityChanged", "device_registry::CustodyKey", "device_registry::DeviceOwnerCap"];
+pub const REQUIRED_TYPES: &[&str] = &["device_registry::DeviceRegistry", "device_registry::Device", "device_group::DeviceGroup", "device_group::GroupCreated", "device_cap::DeviceCap", "device_cap::DeviceAddressKey", "deployment_manager::DeploymentRecord", "deployment_manager::DeploymentCreated", "deployment_manager::DeviceStatusUpdated", "deployment_manager::TargetGroupsKey", "deployment_manager::TargetDevicesKey", "deployment_manager::StatusesKey", "deployment_manager::RecipeDigestKey", "deployment_manager::ReceiptsKey", "deployment_manager::Receipts", "deployment_manager::DeviceStatusReported", "device_registry::IdentityKey", "device_registry::Identity", "device_registry::DeviceIdentityChanged", "device_registry::CustodyKey", "device_registry::DeviceOwnerCap", "deployment_manager::DelegateKey", "enrollment::EnrollmentPolicy", "enrollment::DeviceEnrolled", "roles::DeployerRole", "roles::RoleKey", "roles::RoleGranted", "device_group::DeviceAddedToGroup", "deployment_manager::ManagedKey", "desired_state::DesiredKey", "desired_state::DesiredState", "desired_state::DesiredStateChanged", "deployment_manager::ControlKey", "deployment_manager::Control"];
 pub const MOVE_ABI_JSON: &str = include_str!("../../interfaces/fleet-v1.json");
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Entry<K, V> { pub key: K, pub value: V }
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct VecMap<K, V> { pub contents: Vec<Entry<K, V>> }
+/// sui::table::Table: entries are dynamic fields; the struct is its UID and size.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Table { pub id: [u8; 32], pub size: u64 }
 pub mod component_catalog {
     use super::*;
     pub const MODULE: &str = "component_catalog";
     pub const CREATE_CATALOG: &str = "create_catalog";
     pub const CREATE_DEPLOYMENT: &str = "create_deployment";
+    pub const CREATE_DEPLOYMENT_PAUSED: &str = "create_deployment_paused";
     pub const DELETE_DEPLOYMENT: &str = "delete_deployment";
     pub const PUBLISH_VERSION: &str = "publish_version";
     pub const PUBLISHER: &str = "publisher";
@@ -81,12 +86,19 @@ pub mod deployment_manager {
     use super::*;
     pub const MODULE: &str = "deployment_manager";
     pub const ARTIFACT_SHA256: &str = "artifact_sha256";
+    pub const COMPONENT_NAME: &str = "component_name";
+    pub const CONTROL: &str = "control";
     pub const CREATE_DEPLOYMENT: &str = "create_deployment";
     pub const CREATE_DEPLOYMENT_VERIFIED: &str = "create_deployment_verified";
+    pub const CREATOR: &str = "creator";
+    pub const DELEGATE: &str = "delegate";
     pub const DELETE_DEPLOYMENT: &str = "delete_deployment";
     pub const HAS_CURRENT_RECEIPTS: &str = "has_current_receipts";
     pub const HAS_RECEIPTS: &str = "has_receipts";
+    pub const HAS_RECIPE_DIGEST: &str = "has_recipe_digest";
+    pub const IS_MANAGED: &str = "is_managed";
     pub const MIGRATE: &str = "migrate";
+    pub const NEW_DEPLOYMENT_VERIFIED: &str = "new_deployment_verified";
     pub const RECEIPT_STATUS: &str = "receipt_status";
     pub const RECEIPT_STATUSES: &str = "receipt_statuses";
     pub const RECEIPTS_VERSION: &str = "receipts_version";
@@ -96,11 +108,34 @@ pub mod deployment_manager {
     pub const REPORT_STATUS_FOR_GROUP: &str = "report_status_for_group";
     pub const REPORT_VERIFIED_STATUS: &str = "report_verified_status";
     pub const REPORT_VERIFIED_STATUS_FOR_GROUP: &str = "report_verified_status_for_group";
+    pub const SET_CONTROL: &str = "set_control";
+    pub const SHARE_DEPLOYMENT: &str = "share_deployment";
     pub const STATUS_APPLIED: &str = "status_applied";
     pub const STATUS_FAILED: &str = "status_failed";
     pub const STATUSES: &str = "statuses";
     pub const TARGET_DEVICES: &str = "target_devices";
     pub const TARGET_GROUPS: &str = "target_groups";
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Control {
+        pub revision: u64,
+        pub state: u8,
+        pub not_before_ms: u64,
+        pub expires_ms: u64,
+        pub window_start_ms: u64,
+        pub window_end_ms: u64,
+        pub notice_ms: u64,
+    }
+    impl Control { pub const MOVE_TYPE: &'static str = "deployment_manager::Control"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct ControlKey {
+        pub dummy_field: bool,
+    }
+    impl ControlKey { pub const MOVE_TYPE: &'static str = "deployment_manager::ControlKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DelegateKey {
+        pub dummy_field: bool,
+    }
+    impl DelegateKey { pub const MOVE_TYPE: &'static str = "deployment_manager::DelegateKey"; }
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct DeploymentCreated {
         pub deployment_id: [u8; 32],
@@ -147,6 +182,11 @@ pub mod deployment_manager {
     }
     impl DeviceStatusUpdated { pub const MOVE_TYPE: &'static str = "deployment_manager::DeviceStatusUpdated"; }
     #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct ManagedKey {
+        pub dummy_field: bool,
+    }
+    impl ManagedKey { pub const MOVE_TYPE: &'static str = "deployment_manager::ManagedKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct Receipts {
         pub version: u64,
         pub statuses: super::VecMap<[u8; 32], u8>,
@@ -177,6 +217,45 @@ pub mod deployment_manager {
         pub dummy_field: bool,
     }
     impl TargetGroupsKey { pub const MOVE_TYPE: &'static str = "deployment_manager::TargetGroupsKey"; }
+}
+pub mod desired_state {
+    use super::*;
+    pub const MODULE: &str = "desired_state";
+    pub const BEGIN: &str = "begin";
+    pub const COMMIT: &str = "commit";
+    pub const COMPONENTS: &str = "components";
+    pub const PLAN_COMPONENTS: &str = "plan_components";
+    pub const REMOVE_COMPONENT: &str = "remove_component";
+    pub const REVISION: &str = "revision";
+    pub const SET_COMPONENT: &str = "set_component";
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DesiredKey {
+        pub dummy_field: bool,
+    }
+    impl DesiredKey { pub const MOVE_TYPE: &'static str = "desired_state::DesiredKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DesiredState {
+        pub revision: u64,
+        pub components: super::VecMap<String, [u8; 32]>,
+        pub updated_at: u64,
+    }
+    impl DesiredState { pub const MOVE_TYPE: &'static str = "desired_state::DesiredState"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DesiredStateChanged {
+        pub group_id: [u8; 32],
+        pub revision: u64,
+        pub component_names: Vec<String>,
+        pub deployments: Vec<[u8; 32]>,
+    }
+    impl DesiredStateChanged { pub const MOVE_TYPE: &'static str = "desired_state::DesiredStateChanged"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct RevisionPlan {
+        pub group_id: [u8; 32],
+        pub admin: [u8; 32],
+        pub base_revision: u64,
+        pub components: super::VecMap<String, [u8; 32]>,
+    }
+    impl RevisionPlan { pub const MOVE_TYPE: &'static str = "desired_state::RevisionPlan"; }
 }
 pub mod device_cap {
     use super::*;
@@ -347,6 +426,103 @@ pub mod device_registry {
     }
     impl RegistryCreated { pub const MOVE_TYPE: &'static str = "device_registry::RegistryCreated"; }
 }
+pub mod enrollment {
+    use super::*;
+    pub const MODULE: &str = "enrollment";
+    pub const ADD_CLAIMS: &str = "add_claims";
+    pub const CLOSE: &str = "close";
+    pub const CREATE_POLICY: &str = "create_policy";
+    pub const ENROLL: &str = "enroll";
+    pub const ENROLLED: &str = "enrolled";
+    pub const IS_CLAIM: &str = "is_claim";
+    pub const IS_OPEN: &str = "is_open";
+    pub const OPERATOR: &str = "operator";
+    pub const REMAINING: &str = "remaining";
+    pub const REVOKE_CLAIM: &str = "revoke_claim";
+    pub const SET_LIMITS: &str = "set_limits";
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DeviceEnrolled {
+        pub policy_id: [u8; 32],
+        pub device_id: [u8; 32],
+        pub device_address: [u8; 32],
+        pub claim: [u8; 32],
+        pub operator: [u8; 32],
+        pub owner_cap: [u8; 32],
+        pub device_cap: [u8; 32],
+    }
+    impl DeviceEnrolled { pub const MOVE_TYPE: &'static str = "enrollment::DeviceEnrolled"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct EnrollmentPolicy {
+        pub id: [u8; 32],
+        pub operator: [u8; 32],
+        pub registry: [u8; 32],
+        pub claims: super::Table,
+        pub remaining: u64,
+        pub expires_at_ms: u64,
+        pub open: bool,
+        pub enrolled: u64,
+    }
+    impl EnrollmentPolicy { pub const MOVE_TYPE: &'static str = "enrollment::EnrollmentPolicy"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct PolicyCreated {
+        pub policy_id: [u8; 32],
+        pub operator: [u8; 32],
+        pub registry: [u8; 32],
+    }
+    impl PolicyCreated { pub const MOVE_TYPE: &'static str = "enrollment::PolicyCreated"; }
+}
+pub mod roles {
+    use super::*;
+    pub const MODULE: &str = "roles";
+    pub const ALLOW_GROUP: &str = "allow_group";
+    pub const CREATE_DEPLOYMENT_AS: &str = "create_deployment_as";
+    pub const GRANT: &str = "grant";
+    pub const IS_ACTIVE: &str = "is_active";
+    pub const NEW_DEPLOYER_ROLE: &str = "new_deployer_role";
+    pub const REVOKE: &str = "revoke";
+    pub const ROLE_GROUPS: &str = "role_groups";
+    pub const ROLE_OPERATOR: &str = "role_operator";
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DelegatedDeployment {
+        pub deployment_id: [u8; 32],
+        pub role_id: [u8; 32],
+        pub operator: [u8; 32],
+        pub delegate: [u8; 32],
+    }
+    impl DelegatedDeployment { pub const MOVE_TYPE: &'static str = "roles::DelegatedDeployment"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DeployerRole {
+        pub id: [u8; 32],
+        pub operator: [u8; 32],
+        pub groups: Vec<[u8; 32]>,
+    }
+    impl DeployerRole { pub const MOVE_TYPE: &'static str = "roles::DeployerRole"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct RoleBuilder {
+        pub operator: [u8; 32],
+        pub groups: Vec<[u8; 32]>,
+    }
+    impl RoleBuilder { pub const MOVE_TYPE: &'static str = "roles::RoleBuilder"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct RoleGranted {
+        pub role_id: [u8; 32],
+        pub operator: [u8; 32],
+        pub delegate: [u8; 32],
+        pub groups: Vec<[u8; 32]>,
+    }
+    impl RoleGranted { pub const MOVE_TYPE: &'static str = "roles::RoleGranted"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct RoleKey {
+        pub role_id: [u8; 32],
+    }
+    impl RoleKey { pub const MOVE_TYPE: &'static str = "roles::RoleKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct RoleRevoked {
+        pub role_id: [u8; 32],
+        pub operator: [u8; 32],
+    }
+    impl RoleRevoked { pub const MOVE_TYPE: &'static str = "roles::RoleRevoked"; }
+}
 #[derive(Debug, Clone, Deserialize)]
 pub struct DeploymentCreatedEvent {
     pub deployment_id: String,
@@ -378,6 +554,9 @@ pub struct Recipe {
     pub lifecycle: Lifecycle,
     #[serde(rename = "configuration")]
     pub configuration: serde_json::Map<String, serde_json::Value>,
+    #[serde(rename = "componentDependencies")]
+    #[serde(default)]
+    pub component_dependencies: Option<std::collections::BTreeMap<String, ComponentDependency>>,
 }
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -391,4 +570,19 @@ pub struct Lifecycle {
     #[serde(rename = "shutdown")]
     #[serde(default)]
     pub shutdown: Option<String>,
+    #[serde(rename = "readiness")]
+    #[serde(default)]
+    pub readiness: Option<String>,
+    #[serde(rename = "restart")]
+    #[serde(default)]
+    pub restart: Option<String>,
+}
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ComponentDependency {
+    #[serde(rename = "versionRequirement")]
+    pub version_requirement: String,
+    #[serde(rename = "dependencyType")]
+    #[serde(default)]
+    pub dependency_type: Option<String>,
 }

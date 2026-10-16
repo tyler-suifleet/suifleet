@@ -1,0 +1,146 @@
+{
+ "format_version": 1,
+ "parity_claim": false,
+ "description": "SF-028 Greengrass compatibility matrix. Status values describe this repository at the commit containing this file, not merged-later or proposed work. See docs/GREENGRASS_COMPATIBILITY.md.",
+ "reference": {
+  "checked": "2026-10-15",
+  "greengrass": "AWS IoT Greengrass V2 classic nucleus 2.x documentation; nucleus lite is out of scope",
+  "components": {
+   "aws.greengrass.clientdevices.Auth": "2.5.x policy semantics",
+   "aws.greengrass.clientdevices.mqtt.Bridge": "2.3.x",
+   "aws.greengrass.ShadowManager": "IPC operations as documented",
+   "aws.greengrass.StreamManager": "2.3.x SDK data model"
+  },
+  "sources": [
+   "https://docs.aws.amazon.com/greengrass/v2/developerguide/component-recipe-reference.html",
+   "https://docs.aws.amazon.com/greengrass/v2/developerguide/ipc-publish-subscribe.html",
+   "https://docs.aws.amazon.com/greengrass/v2/developerguide/mqtt-bridge-component.html",
+   "https://docs.aws.amazon.com/greengrass/v2/developerguide/client-device-auth-component.html",
+   "https://docs.aws.amazon.com/greengrass/v2/developerguide/ipc-local-shadows.html",
+   "https://docs.aws.amazon.com/iot/latest/developerguide/device-shadow-document.html",
+   "https://docs.aws.amazon.com/greengrass/v2/developerguide/work-with-streams.html",
+   "https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html"
+  ]
+ },
+ "levels": {
+  "functional": "Equivalent behaviour through SuiFleet's own chain, recipe and local APIs.",
+  "aws_api": "Unmodified AWS IPC/SDK/CLI/cloud-API clients work against SuiFleet.",
+  "aws_recipe": "AWS Greengrass recipe documents are accepted, translated or rejected with stated semantics."
+ },
+ "statuses": {
+  "implemented": "Merged and covered by cited local evidence.",
+  "partial": "A cited subset is merged; the remainder is listed.",
+  "proposed": "Specified here; implementation belongs to the listed tickets.",
+  "undecided": "Requires a user/Codex scope decision before an implementation ticket is approved.",
+  "excluded": "Out of scope by an explicit approved decision.",
+  "not-applicable": "The level has no meaning for this capability."
+ },
+ "platforms": [
+  {"id": "linux-x86_64", "aws": {"os": "linux", "architecture": "amd64"}, "native": {"os": "linux", "arch": "x86_64"}, "status": "partial",
+   "current_evidence": ["docs/COMPONENT_CATALOG.md", "docs/VALIDATION.md"], "notes": "Daemon and simulator/localnet runtime evidence on x86_64 development hosts."},
+  {"id": "linux-aarch64", "aws": {"os": "linux", "architecture": "aarch64"}, "native": {"os": "linux", "arch": "aarch64"}, "status": "partial",
+   "current_evidence": ["docs/YOCTO_PACKAGING.md"], "tickets": ["SF-029", "SF-031"], "notes": "Yocto QEMU aarch64 boot evidence; physical Raspberry Pi 3 B+ acceptance pending in SF-031."},
+  {"id": "linux-arm", "aws": {"os": "linux", "architecture": "arm"}, "native": {"os": "linux", "arch": "arm"}, "status": "proposed",
+   "tickets": ["SF-011"], "notes": "Catalog selection vectors only; architecture.detail (arm61/arm71/arm81) is not represented and is rejected by translation."},
+  {"id": "linux-x86", "aws": {"os": "linux", "architecture": "x86"}, "native": null, "status": "undecided", "tickets": ["SF-038"],
+   "notes": "Translated recipes omit x86 manifests and report them."},
+  {"id": "windows", "aws": {"os": "windows"}, "native": null, "status": "undecided", "tickets": ["SF-038"],
+   "notes": "No Windows runtime; SF-038 owns the OS support decision. Translated recipes omit Windows manifests."},
+  {"id": "darwin", "aws": {"os": "darwin"}, "native": null, "status": "undecided", "tickets": ["SF-038"], "notes": "No macOS runtime."}
+ ],
+ "suites": {
+  "aws-recipe-cases.json": {
+   "description": "AWS recipe subset classification and expected native catalog manifests.",
+   "runtime_execution": "pending", "pending_on": ["SF-037"],
+   "current_api_checks": ["suifleet-edge/src/compat_tests.rs", "scripts/test_greengrass_compat.cjs"],
+   "current_api_scope": "The current daemon and frontend validators, including SF-014 lifecycle fields, reject every AWS-format recipe and accept every expected translated native recipe."
+  },
+  "pubsub-cases.json": {
+   "description": "MQTT topic name/filter validity and matching, and AWS-compatible local pub/sub ACL resource matching.",
+   "runtime_execution": "pending", "pending_on": ["SF-027", "SF-032"]
+  },
+  "shadow-cases.json": {
+   "description": "Named shadow update/merge/delta/version/delete semantics.",
+   "runtime_execution": "pending", "pending_on": ["SF-027", "SF-033"]
+  },
+  "stream-cases.json": {
+   "description": "Durable stream append/read/eviction/restart/export-checkpoint semantics.",
+   "runtime_execution": "pending", "pending_on": ["SF-027", "SF-034"]
+  },
+  "client-device-cases.json": {
+   "description": "LAN client identity state and group/policy authorization.",
+   "runtime_execution": "pending", "pending_on": ["SF-032", "SF-035"]
+  }
+ },
+ "capabilities": [
+  {"id": "recipe.format", "area": "recipes", "aws_reference": "RecipeFormatVersion 2020-01-25 JSON/YAML",
+   "functional": "partial", "aws_api": "not-applicable", "aws_recipe": "proposed",
+   "tickets": ["SF-005", "SF-012", "SF-037"], "suites": ["aws-recipe-cases.json"],
+   "current_evidence": ["interfaces/recipe.schema.json", "interfaces/recipe-cases.json", "docs/COMPONENT_DEPENDENCIES.md"],
+   "notes": "Native recipe 1.0/1.1 with one authenticated artifact, optional install and dependencies. AWS recipes are rejected today; SF-037 implements the translation subset."},
+  {"id": "recipe.platform-manifests", "area": "recipes", "aws_reference": "Manifests[].Platform os/architecture, first match",
+   "functional": "partial", "aws_api": "not-applicable", "aws_recipe": "proposed",
+   "tickets": ["SF-011", "SF-037"], "suites": ["aws-recipe-cases.json"], "current_evidence": ["docs/COMPONENT_CATALOG.md", "interfaces/component-cases.json"],
+   "notes": "Exact values and * only; amd64 maps to x86_64; regex, architecture.detail, runtime and custom keys are rejected."},
+  {"id": "recipe.dependencies", "area": "recipes", "aws_reference": "ComponentDependencies VersionRequirement/DependencyType",
+   "functional": "partial", "aws_api": "not-applicable", "aws_recipe": "proposed",
+   "tickets": ["SF-012", "SF-037"], "suites": ["aws-recipe-cases.json"], "current_evidence": ["docs/COMPONENT_DEPENDENCIES.md"],
+   "notes": "Native comparator grammar only; npm x-ranges, hyphen ranges and || are rejected. AWS HARD/SOFT restart coupling is not implemented natively (a dependent is not stopped when a dependency fails); translation preserves the field."},
+  {"id": "recipe.lifecycle", "area": "runtime", "aws_reference": "bootstrap/install/startup/run/shutdown/recover/uninstall, Setenv, Timeout",
+   "functional": "partial", "aws_api": "not-applicable", "aws_recipe": "proposed",
+   "tickets": ["SF-014", "SF-037"], "suites": ["aws-recipe-cases.json"],
+   "current_evidence": ["interfaces/recipe.schema.json", "docs/OPERATIONS.md", "scripts/test_supervisor.py", "docs/validation/sf014-systemd.json"],
+   "notes": "Native install plus SF-014 supervised run/shutdown/readiness/restart. AWS run/shutdown translate with reported restart/timeout differences; bootstrap, startup, recover, uninstall, Timeout, Setenv, RequiresPrivilege and Skipif are rejected."},
+  {"id": "recipe.configuration", "area": "runtime", "aws_reference": "ComponentConfiguration.DefaultConfiguration, {configuration:/pointer}",
+   "functional": "proposed", "aws_api": "proposed", "aws_recipe": "proposed",
+   "tickets": ["SF-015", "SF-027", "SF-037"], "suites": ["aws-recipe-cases.json"],
+   "notes": "Nonempty configuration is rejected today. GetConfiguration/UpdateConfiguration-style access is part of the SF-027 local API."},
+  {"id": "ipc.local-api", "area": "ipc", "aws_reference": "Greengrass IPC (event-stream over a local socket) and component SDKs",
+   "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable", "tickets": ["SF-027"],
+   "notes": "SF-027 defines the native authenticated local API. Reproducing the AWS IPC wire protocol and SDK compatibility needs a separate scope decision."},
+  {"id": "ipc.access-control", "area": "ipc", "aws_reference": "accessControl policies (service/policyId/operations/resources)",
+   "functional": "proposed", "aws_api": "undecided", "aws_recipe": "proposed",
+   "tickets": ["SF-027", "SF-037"], "suites": ["aws-recipe-cases.json", "pubsub-cases.json"],
+   "notes": "Deny by default; * glob resources; recipe accessControl is deferred until SF-027."},
+  {"id": "messaging.local-pubsub", "area": "messaging", "aws_reference": "aws.greengrass.ipc.pubsub PublishToTopic/SubscribeToTopic",
+   "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable",
+   "tickets": ["SF-027", "SF-032"], "suites": ["pubsub-cases.json"]},
+  {"id": "messaging.mqtt-broker", "area": "messaging", "aws_reference": "Moquette/EMQX broker components for client devices",
+   "functional": "proposed", "aws_api": "not-applicable", "aws_recipe": "not-applicable",
+   "tickets": ["SF-032", "SF-035"], "suites": ["pubsub-cases.json", "client-device-cases.json"],
+   "notes": "Standard MQTT 3.1.1/5 protocol conformance, not an AWS API."},
+  {"id": "messaging.bridge", "area": "messaging", "aws_reference": "aws.greengrass.clientdevices.mqtt.Bridge mqttTopicMapping LocalMqtt/Pubsub/IotCore",
+   "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable",
+   "tickets": ["SF-032"], "suites": ["pubsub-cases.json"],
+   "notes": "LocalMqtt<->Pubsub routing is native; any cloud target (IotCore or another broker) is a selected adapter needing approval."},
+  {"id": "shadows.local", "area": "shadows", "aws_reference": "aws.greengrass.ShadowManager Get/Update/Delete/ListNamedShadowsForThing",
+   "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable",
+   "tickets": ["SF-027", "SF-033"], "suites": ["shadow-cases.json"]},
+  {"id": "shadows.cloud-sync", "area": "shadows", "aws_reference": "Shadow manager synchronization with AWS IoT Device Shadow",
+   "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable", "tickets": ["SF-033"],
+   "notes": "Synchronization target is a selected adapter; on-chain storage of shadow documents is not proposed."},
+  {"id": "streams.local", "area": "streams", "aws_reference": "aws.greengrass.StreamManager MessageStreamDefinition/read/append",
+   "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable",
+   "tickets": ["SF-027", "SF-034"], "suites": ["stream-cases.json"]},
+  {"id": "streams.export", "area": "streams", "aws_reference": "Kinesis/S3/IoT SiteWise/HTTP export definitions",
+   "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable",
+   "tickets": ["SF-034", "SF-038"], "suites": ["stream-cases.json"],
+   "notes": "Export checkpoint semantics are specified; concrete AWS destinations are SF-038 adapter decisions."},
+  {"id": "client-devices.auth", "area": "client-devices", "aws_reference": "aws.greengrass.clientdevices.Auth deviceGroups/policies",
+   "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable",
+   "tickets": ["SF-021", "SF-035"], "suites": ["client-device-cases.json"]},
+  {"id": "client-devices.discovery", "area": "client-devices", "aws_reference": "Greengrass cloud discovery API and IP detector",
+   "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable", "tickets": ["SF-035"],
+   "notes": "Native discovery returns broker endpoints and CA from an authenticated source; the AWS discovery REST API is not proposed by default."},
+  {"id": "cloud.credentials", "area": "cloud", "aws_reference": "aws.greengrass.TokenExchangeService",
+   "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable", "tickets": ["SF-022", "SF-038"]},
+  {"id": "components.aws-managed", "area": "components", "aws_reference": "AWS-provided components, Lambda, ML, industrial, Device Defender",
+   "functional": "undecided", "aws_api": "undecided", "aws_recipe": "undecided", "tickets": ["SF-038"]},
+  {"id": "cli.local", "area": "operations", "aws_reference": "greengrass-cli deployment/component commands",
+   "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable", "tickets": ["SF-027"]},
+  {"id": "control-plane.deployments", "area": "deployments", "aws_reference": "Greengrass CreateDeployment/ListEffectiveDeployments cloud APIs",
+   "functional": "partial", "aws_api": "undecided", "aws_recipe": "not-applicable",
+   "tickets": ["SF-013", "SF-017", "SF-018"], "current_evidence": ["docs/GREENGRASS_PARITY_AUDIT.md", "docs/VALIDATION.md"],
+   "notes": "The control plane is Sui; AWS control-plane API emulation is not proposed (recommend exclusion, pending decision)."}
+ ]
+}

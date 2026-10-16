@@ -1,0 +1,28 @@
+{
+  "ticket": "SF-053",
+  "head": "9530a01a48be5e1cd8c68fd89291bd71d4f7accb",
+  "checks": [
+    "legacy: with an unchanged config.toml (keypair_path) and no signer.toml, provisioning leaves the key with the daemon user (0600), which keeps reporting",
+    "migration: after switching config.toml to the service signer, the daemon restart handed the same key to suifleet-signer (0600) without a reboot; address (0xa0ccc8bcc8\u2026) and journal unchanged; the unit recorded its MainPID as root",
+    "component process (daemon user, shipped sandbox): device.key and signer.toml unreadable (EACCES); signer processes invisible; no key material in env or inherited fds; the daemon's environ and descriptors unavailable (FileNotFoundError: [Errno 2] No such file or directory: '/proc/444/environ'; PermissionError: [Errno 1] pidfd_getfd: Operation not permitted); signing refused (not the main process); only the public address served",
+    "the daemon's status report was signed by the service and accepted by the shim's signature verification",
+    "reports keep being signed after the signer and the daemon restart; the refused component request is logged",
+    "a component killed the daemon and, reparented to PID 1 in suifleet.service's cgroup, made 8 signing requests (ppid 1, unit cgroup verified as root): all refused as not the recorded main process; the restarted daemon reports again",
+    "hijack: component-written launcher state naming its own executable is ignored (the real binary refuses [daemon_update] with the service signer; the restarted main process is /usr/bin/suifleet and reports); a main process running that executable (a full daemon) is not recorded by the root recorder ('not running the base binary'), and its otherwise valid report request is refused; the queued report is signed only after the base daemon runs again"
+  ],
+  "systemd": "systemd 252 (252.39-1~deb12u2)",
+  "container_cgroup": "cgroup2fs",
+  "os": "Debian GNU/Linux 12 (bookworm)",
+  "units_sha256": {
+    "suifleet.service": "8c75fa3443890e8653580ba17cdead2f401894c58e0922090489cc635ddf8da2",
+    "suifleet-provision.service": "0e7ced8971f1de43ad97d3b5f6d018d0ee85d2c9702c27ce56b02665f83811bc",
+    "suifleet-signer.service": "c174e9309da0f6ae954f76ae5b5d0657bdc6aba5ba134cc319391dd9f11adbc6",
+    "suifleet-signer.socket": "6ce9e9c40b518002f9992aaff0ffa8b645ed5d9876ba1fc0c95b95134ac3b78f"
+  },
+  "daemon_sha256": "6c051dd6ea1807b180b755ac94e5bb557de1eeb40fe52f2e14b6aee311f1b92c",
+  "host": {
+    "kernel": "6.6.87.2-microsoft-standard-WSL2",
+    "docker": "29.8.0",
+    "cgroup": "cgroup2fs"
+  }
+}

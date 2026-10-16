@@ -4,6 +4,8 @@ The 51-capability audit is a functional OTA/fleet and broader-runtime roadmap, n
 
 Reference: [AWS Greengrass V2 overview](https://docs.aws.amazon.com/greengrass/v2/developerguide/what-is-iot-greengrass.html) and [AWS-provided components](https://docs.aws.amazon.com/greengrass/v2/developerguide/public-components.html), checked 2026-10-13.
 
+[GREENGRASS_COMPATIBILITY.md](GREENGRASS_COMPATIBILITY.md) (SF-028) defines the functional, AWS-recipe and AWS-API compatibility levels, the supported platforms and the proposed adapter fixtures for SF-032–SF-035 and SF-037. Its runtime suites remain pending until those tickets execute them.
+
 P2 means broader compatibility, not optional for a full-parity claim. Each row needs executable acceptance evidence, including failures and recovery, before completion. See [the audit](GREENGRASS_PARITY_AUDIT.md).
 
 | Capability | Tracking keys |
@@ -22,7 +24,7 @@ P2 means broader compatibility, not optional for a full-parity claim. Each row n
 | Device update timeout | [SF-018](https://github.com/tyler-suifleet/suifleet/issues/18) |
 | Maintenance windows/update deferral | [SF-018](https://github.com/tyler-suifleet/suifleet/issues/18) |
 | Automatic application rollback | [SF-016](https://github.com/tyler-suifleet/suifleet/issues/21) |
-| OS/firmware recovery | [SF-016](https://github.com/tyler-suifleet/suifleet/issues/21) |
+| Platform-owned OS/firmware installer handoff and explicit results | [SF-016](https://github.com/tyler-suifleet/suifleet/issues/21) |
 | Safe daemon self-update | [SF-026](https://github.com/tyler-suifleet/suifleet/issues/26) |
 | Artifact lifecycle | [SF-023](https://github.com/tyler-suifleet/suifleet/issues/5) |
 | Component versions/catalog | [SF-011](https://github.com/tyler-suifleet/suifleet/issues/12) |
@@ -62,4 +64,4 @@ P2 means broader compatibility, not optional for a full-parity claim. Each row n
 
 ## Hardware acceptance
 
-[SF-029](https://github.com/tyler-suifleet/suifleet/issues/29) builds a bootable Yocto image for the Pi 3 B+ with the SF-025 BitBake client package; [SF-030](https://github.com/tyler-suifleet/suifleet/issues/30) supplies versioned harmless application fixtures; [SF-031](https://github.com/tyler-suifleet/suifleet/issues/32) exercises the real frontend wallet, Sui/Walrus and device. [SF-010](https://github.com/tyler-suifleet/suifleet/issues/11) retains upgrade/migration acceptance. [SF-016](https://github.com/tyler-suifleet/suifleet/issues/21) owns firmware A/B and power-loss safety. Extend the Pi acceptance matrix as each new capability lands; a one-shot OTA smoke test cannot establish complete runtime parity.
+[SF-029](https://github.com/tyler-suifleet/suifleet/issues/29) builds a bootable Yocto image for the Pi 3 B+ with the SF-025 BitBake client package; [SF-030](https://github.com/tyler-suifleet/suifleet/issues/30) supplies versioned harmless application fixtures; [SF-031](https://github.com/tyler-suifleet/suifleet/issues/32) exercises the real frontend wallet, Sui/Walrus and device. [SF-010](https://github.com/tyler-suifleet/suifleet/issues/11) retains upgrade/migration acceptance. [SF-016](https://github.com/tyler-suifleet/suifleet/issues/21) owns SuiFleet installer handoff and journal/result semantics; platform scripts/tools own installation, reboot and firmware recovery. Physical recovery evidence validates the selected platform integration, not a universal A/B requirement. Extend the Pi acceptance matrix as each new capability lands; a one-shot OTA smoke test cannot establish complete runtime parity.

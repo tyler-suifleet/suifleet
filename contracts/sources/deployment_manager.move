@@ -34,6 +34,9 @@ module sui_edge::deployment_manager {
     const ENoReceipts: u64 = 6;
     const EUseVerifiedReport: u64 = 7;
     const EStaleReceipts: u64 = 8;
+    const EInvalidControlState: u64 = 9;
+    const EInvalidSchedule: u64 = 10;
+    const ECancelled: u64 = 11;
 
     // ── Dynamic field keys ────────────────────────────────────────────────────
     //
@@ -45,6 +48,12 @@ module sui_edge::deployment_manager {
     public struct StatusesKey has copy, drop, store {}
     public struct RecipeDigestKey has copy, drop, store {}
     public struct ReceiptsKey has copy, drop, store {}
+    /// Present (true) on records that a group's desired state has referenced:
+    /// desired-state reconciliation applies them, not the one-shot event path.
+    public struct ManagedKey has copy, drop, store {}
+    /// The delegate who created a record under a deployer role (`roles`);
+    /// the record's `creator` is the operator the role acts for.
+    public struct DelegateKey has copy, drop, store {}
 
     /// Authoritative per-device status receipts.
     ///
@@ -55,6 +64,54 @@ module sui_edge::deployment_manager {
     public struct Receipts has store {
         version: u64,
         statuses: VecMap<ID, u8>,
+    }
+
+    /// SF-018 controls have their own introduction-package origin. An absent
+    /// field preserves existing immediate-deployment behaviour.
+    public struct ControlKey has copy, drop, store {}
+    public struct Control has copy, drop, store {
+        revision: u64,
+        state: u8, // 0 active, 1 paused, 2 permanently cancelled
+        not_before_ms: u64,
+        expires_ms: u64, // 0 means no expiry
+        window_start_ms: u64,
+        window_end_ms: u64, // 0 means no maintenance window
+        notice_ms: u64,
+    }
+
+    /// Creator-only, additive control API for existing and new records.
+    /// Cancellation is irreversible. Expiry and windows gate admission, not
+    /// an updater already admitted; cancelling never kills an in-flight apply.
+    public fun set_control(
+        deployment: &mut DeploymentRecord, state: u8,
+        not_before_ms: u64, expires_ms: u64,
+        window_start_ms: u64, window_end_ms: u64, notice_ms: u64,
+        ctx: &TxContext,
+    ) {
+        assert!(ctx.sender() == deployment.creator, ENotCreator);
+        assert!(state <= 2, EInvalidControlState);
+        assert!(expires_ms == 0 || expires_ms > not_before_ms, EInvalidSchedule);
+        assert!((window_start_ms == 0 && window_end_ms == 0) ||
+            window_end_ms > window_start_ms, EInvalidSchedule);
+        assert!(notice_ms <= 604800000, EInvalidSchedule); // at most seven days
+        let revision = if (df::exists(&deployment.id, ControlKey {})) {
+            let previous: Control = df::remove(&mut deployment.id, ControlKey {});
+            assert!(previous.state != 2, ECancelled);
+            previous.revision + 1
+        } else { 1 };
+        df::add(&mut deployment.id, ControlKey {}, Control {
+            revision, state, not_before_ms, expires_ms,
+            window_start_ms, window_end_ms, notice_ms,
+        });
+    }
+
+    public fun control(deployment: &DeploymentRecord): Control {
+        if (df::exists(&deployment.id, ControlKey {})) {
+            *df::borrow(&deployment.id, ControlKey {})
+        } else {
+            Control { revision: 0, state: 0, not_before_ms: 0, expires_ms: 0,
+                window_start_ms: 0, window_end_ms: 0, notice_ms: 0 }
+        }
     }
 
     // ── Objects ───────────────────────────────────────────────────────────────
@@ -133,7 +190,8 @@ module sui_edge::deployment_manager {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
-        let record = make_deployment(component_name, version, recipe_blob_id, artifact_sha256,
+        let creator = ctx.sender();
+        let record = make_deployment(creator, component_name, version, recipe_blob_id, artifact_sha256,
             target_groups, target_devices, clock, ctx);
         transfer::share_object(record);
     }
@@ -151,6 +209,61 @@ module sui_edge::deployment_manager {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
+        share_deployment(new_deployment_verified(component_name, version, recipe_blob_id, artifact_sha256,
+            recipe_sha256, target_groups, target_devices, clock, ctx));
+    }
+
+    /// As `create_deployment_verified`, but returns the record so the same
+    /// transaction can reference it (e.g. in a desired-state revision) before
+    /// `share_deployment` publishes it.
+    public fun new_deployment_verified(
+        component_name: String,
+        version: String,
+        recipe_blob_id: String,
+        artifact_sha256: String,
+        recipe_sha256: String,
+        target_groups: vector<ID>,
+        target_devices: vector<ID>,
+        clock: &Clock,
+        ctx: &mut TxContext,
+    ): DeploymentRecord {
+        assert_recipe_hash(&recipe_sha256);
+        let creator = ctx.sender();
+        let mut record = make_deployment(creator, component_name, version, recipe_blob_id, artifact_sha256,
+            target_groups, target_devices, clock, ctx);
+        df::add(&mut record.id, RecipeDigestKey {}, recipe_sha256);
+        record
+    }
+
+    public fun share_deployment(record: DeploymentRecord) {
+        transfer::share_object(record);
+    }
+
+    /// A verified group deployment attributed to `operator` but created by the
+    /// sender as its delegate. Only `roles::create_deployment_as`, which checks
+    /// an active deployer role scoped to these groups, may call it.
+    public(package) fun create_delegated(
+        operator: address,
+        component_name: String,
+        version: String,
+        recipe_blob_id: String,
+        artifact_sha256: String,
+        recipe_sha256: String,
+        target_groups: vector<ID>,
+        clock: &Clock,
+        ctx: &mut TxContext,
+    ): ID {
+        assert_recipe_hash(&recipe_sha256);
+        let mut record = make_deployment(operator, component_name, version, recipe_blob_id, artifact_sha256,
+            target_groups, vector[], clock, ctx);
+        df::add(&mut record.id, RecipeDigestKey {}, recipe_sha256);
+        df::add(&mut record.id, DelegateKey {}, ctx.sender());
+        let id = object::id(&record);
+        transfer::share_object(record);
+        id
+    }
+
+    fun assert_recipe_hash(recipe_sha256: &String) {
         let bytes = recipe_sha256.as_bytes();
         assert!(bytes.length() == 64, EInvalidRecipeHash);
         let mut i = 0;
@@ -159,21 +272,25 @@ module sui_edge::deployment_manager {
             assert!((byte >= 48 && byte <= 57) || (byte >= 97 && byte <= 102), EInvalidRecipeHash);
             i = i + 1;
         };
-        let mut record = make_deployment(component_name, version, recipe_blob_id, artifact_sha256,
-            target_groups, target_devices, clock, ctx);
-        df::add(&mut record.id, RecipeDigestKey {}, recipe_sha256);
-        transfer::share_object(record);
     }
 
     public(package) fun create_catalog_deployment<K: copy + drop + store, V: store>(
         name: String, version: String, groups: vector<ID>, devices: vector<ID>,
         key: K, value: V, clock: &Clock, ctx: &mut TxContext,
     ) {
-        let mut record = make_deployment(name, version, std::string::utf8(b""),
+        transfer::share_object(new_catalog_deployment(name, version, groups, devices, key, value, clock, ctx));
+    }
+
+    public(package) fun new_catalog_deployment<K: copy + drop + store, V: store>(
+        name: String, version: String, groups: vector<ID>, devices: vector<ID>,
+        key: K, value: V, clock: &Clock, ctx: &mut TxContext,
+    ): DeploymentRecord {
+        let creator = ctx.sender();
+        let mut record = make_deployment(creator, name, version, std::string::utf8(b""),
             std::string::utf8(b""), groups, devices, clock, ctx);
         record.schema_version = 2;
         df::add(&mut record.id, key, value);
-        transfer::share_object(record);
+        record
     }
 
     public(package) fun remove_catalog_binding<K: copy + drop + store, V: store + drop>(
@@ -185,6 +302,7 @@ module sui_edge::deployment_manager {
     }
 
     fun make_deployment(
+        creator: address,
         component_name: String,
         version: String,
         recipe_blob_id: String,
@@ -198,7 +316,7 @@ module sui_edge::deployment_manager {
 
         let mut record = DeploymentRecord {
             id: object::new(ctx),
-            creator: ctx.sender(),
+            creator,
             component_name,
             version,
             recipe_blob_id,
@@ -337,6 +455,9 @@ module sui_edge::deployment_manager {
 
         // Catalog records require their defining module to remove the binding first.
         assert!(deployment.schema_version == SCHEMA_VERSION, EPackageOutdated);
+        if (df::exists(&deployment.id, ControlKey {})) {
+            let _: Control = df::remove(&mut deployment.id, ControlKey {});
+        };
         // Remove dynamic fields before destroying the object.
         let _: vector<ID>       = df::remove(&mut deployment.id, TargetGroupsKey {});
         let _: vector<ID>       = df::remove(&mut deployment.id, TargetDevicesKey {});
@@ -348,6 +469,12 @@ module sui_edge::deployment_manager {
         };
         if (df::exists(&deployment.id, RecipeDigestKey {})) {
             let _: String = df::remove(&mut deployment.id, RecipeDigestKey {});
+        };
+        if (df::exists(&deployment.id, ManagedKey {})) {
+            let _: bool = df::remove(&mut deployment.id, ManagedKey {});
+        };
+        if (df::exists(&deployment.id, DelegateKey {})) {
+            let _: address = df::remove(&mut deployment.id, DelegateKey {});
         };
 
         let DeploymentRecord { id, creator, component_name: _, version: _, recipe_blob_id: _, artifact_sha256: _, created_at: _, schema_version: _ } = deployment;
@@ -460,6 +587,22 @@ module sui_edge::deployment_manager {
     }
 
     public fun recipe_blob_id(d: &DeploymentRecord): &String { &d.recipe_blob_id }
+    public fun creator(d: &DeploymentRecord): address { d.creator }
+    public fun component_name(d: &DeploymentRecord): &String { &d.component_name }
+    public fun has_recipe_digest(d: &DeploymentRecord): bool { df::exists(&d.id, RecipeDigestKey {}) }
+    public fun is_managed(d: &DeploymentRecord): bool { df::exists(&d.id, ManagedKey {}) }
+
+    /// Marks a record as owned by desired-state reconciliation (idempotent).
+    public(package) fun mark_managed(d: &mut DeploymentRecord) {
+        if (!df::exists(&d.id, ManagedKey {})) {
+            df::add(&mut d.id, ManagedKey {}, true);
+        };
+    }
+
+    /// The delegate behind a role-created record, if any.
+    public fun delegate(d: &DeploymentRecord): Option<address> {
+        if (df::exists(&d.id, DelegateKey {})) option::some(*df::borrow(&d.id, DelegateKey {})) else option::none()
+    }
     public fun artifact_sha256(d: &DeploymentRecord): &String { &d.artifact_sha256 }
     public fun status_applied(): u8 { STATUS_APPLIED }
     public fun status_failed(): u8 { STATUS_FAILED }

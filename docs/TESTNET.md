@@ -31,9 +31,44 @@ sui client faucet --address 0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d8
 
 **Older CLIs don't work.** The pinned 1.81.1 CLI only redirects to the web faucet, and `POST /v2/gas` answers "CI compatibility is disabled".
 
-**Use 1.82.1 for funding only.** A checksum-verified 1.82.1 release binary (from the MystenLabs/sui release `testnet-v1.82.1`, sha256 `112bf204…2858c` for `ubuntu-x86_64`) is fine for requesting funds. Builds and tests stay on the pinned CLI. The faucet credits the *address balance*, which the 1.81.1 CLI can spend as gas.
+**Funding uses the pinned transaction CLI.** The dev image installs the checksum-verified 1.82.1 release binary at `/opt/sui-network/sui` (see [Toolchain](#toolchain-release-compiler-and-transaction-cli)), and live runs request funds only through that verified binary. The faucet credits the *address balance*, which both CLIs can spend as gas.
 
 **The web faucet** is the alternative: `https://faucet.sui.io/?address=ADDRESS`.
+
+## Toolchain: release compiler and transaction CLI
+
+Live runs use two pinned Sui CLIs with separate jobs ([`scripts/sui_toolchain.py`](../scripts/sui_toolchain.py)):
+
+| Role | Pin | Supports protocol | Used for |
+|---|---|---|---|
+| Release compiler | `sui` on PATH, Dockerfile `SUI_VERSION` = `testnet-v1.81.1` (`1.81.1-e04cf9aa915c`) | up to 138 | offline `sui move build`, Move tests, the SF-050 lint/security baseline and all package bytecode |
+| Transaction CLI | `/opt/sui-network/sui`, Dockerfile `SUI_NETWORK_VERSION` = `testnet-v1.82.1` (`1.82.1-987123842623`); archive sha256 `112bf204…2858c`, binary sha256 `de1d7eff…a0d6b` | up to 139 | every `sui client` call: reads, PTBs, the faucet, and building, signing and submitting publish/upgrade transactions |
+
+The protocol limits are `MAX_PROTOCOL_VERSION` in `crates/sui-protocol-config/src/lib.rs` at each release tag. Neither version string alone proves compatibility; the runs below do.
+
+**Why the split.** Since testnet moved to protocol 139, `sui client test-upgrade` from 1.81.1 fails with `protocol version 139 is newer than the maximum version 138 supported by this CLI`. Its client-side upgrade compatibility check needs the network's protocol config. Publish and plain PTBs don't, so cached runs kept passing while every fresh fixture with differing contracts published its base package and then failed at the upgrade. A free `--dry-run` reproduces this on testnet: 1.81.1 fails, and 1.82.1 passes the same upgrade.
+
+**What each run checks:**
+- **Pinned identities, before anything else.** The release compiler's exact version, and the transaction CLI's exact version and binary SHA-256. A different `sui` on PATH, or an unpinned transaction binary, stops the run.
+- **Read-only preflight before any faucet request or write.** The gRPC chain reader (`chain_facts`) reports the chain identifier, epoch and current protocol version. A protocol newer than the transaction CLI supports stops the run before it spends anything. Pin a newer transaction CLI, with its own evidence, instead of disabling the check.
+- **Verify before signing.** For publish and upgrade:
+  1. The release compiler builds the bytecode offline. `Move.lock` must not change.
+  2. The transaction CLI builds the unsigned transaction (`--serialize-unsigned-transaction`), including its upgrade compatibility check. It must not change `Move.lock` either.
+  3. The pinned frontend SDK decodes the transaction ([`sui_tx_inspect.cjs`](../scripts/sui_tx_inspect.cjs)). The run requires byte-identical modules and dependencies, the authorized upgrade digest, the sender, gas owner and budget, and the exact command shape: publish plus a transfer of its UpgradeCap to the wallet, or authorize/upgrade/commit with this run's UpgradeCap and package.
+  4. Only those bytes are signed and executed (`sui client serialized-tx`).
+
+  A refusal before signing releases its reservation and is recorded as `not_submitted`. Everything submitted is charged as before.
+- **Provenance.** Evidence records both CLIs (version, path, protocol limit, binary checksum), the chain protocol and epoch, and the `Move.lock` framework sources for base and head. Each new fixture records the commits, both CLIs, the protocol, the framework pins and the verified transaction digests. Fixture keys include the release compiler version as well as the base/head contract hashes. A fixture is never reused for another pair or compiler, and a compiler change republishes once.
+
+**SF-056 verification (2026-10-16).**
+- **Reproduced for free.** On testnet (chain `4c78adac`, epoch 1254, protocol 139), a `--dry-run` upgrade of a cached fixture fails with 1.81.1 and succeeds with 1.82.1. A disposable 1.82.1 localnet (protocol 139) reproduces the same split offline.
+- **Real acceptance with the agent wallet.**
+  - Fresh base `3ff488c` → head `b81ff39`: all checks passed, including the upgrade (`HLp3bSDEQ2VKZwXfcyZiE8MXJt2MvyRdDnxXQwoPx6H8`). Net cost 411,486,525 MIST, against a 460,915,082 MIST conservative allowance and one faucet request.
+  - Cached rerun: three transactions, 2,001,843 MIST.
+
+Digests and effects are in [the SF-056 receipt](validation/sf056-testnet.json). These runs used the dedicated agent wallet, not the CI wallet. The automatic CI run on the PR head records its own evidence.
+
+**Updating the transaction CLI.** When testnet moves past protocol 139, update `SUI_NETWORK_*` in the Dockerfile and `NETWORK` in `sui_toolchain.py` together, with the release's protocol limit and checksums. The tests in `scripts/tests/test_testnet_toolchain.py` check that the Dockerfile and the constants agree, and inside the dev image they check the installed binary's identity. Changing the release compiler is a separate, reviewed toolchain upgrade (the SF-050 baseline), not a fix for network protocol drift.
 
 ## The `package-upgrade` live gate
 
@@ -62,12 +97,12 @@ The controller sets `testnet/package-upgrade` on the tested SHA, with `base:<exa
 
 **Spending.** Default allowance is 600,000,000 MIST. Every publish, upgrade, PTB, funding transfer and cleanup uses one executor. It caps each transaction gas budget at remaining allowance, counts nonnegative gas on both successful and failed effects, reserves the full budget on unknown execution outcomes, and counts all available device gas plus new funding. Refunds/faucet credits never increase allowance. Abort cleanup uses only what remains; evidence survives failures. This is a conservative ceiling, so accounted allowance may exceed net wallet spend.
 
-**Automatic funding.** If the dedicated wallet holds less than the run allowance, the runner may make one testnet faucet request, bounded to 180 seconds. CI downloads a funding-only Sui 1.82.1 binary with SHA-256 verified against the pinned release digest; build/test tools remain Sui 1.81.1. Faucet outages and insufficient balance fail clearly. No user hand-funding step is part of routine CI.
+**Automatic funding.** If the dedicated wallet holds less than the run allowance, the runner may make one testnet faucet request, bounded to 180 seconds, through the verified transaction CLI already in the image. Compilation and tests remain on Sui 1.81.1. Faucet outages and insufficient balance fail clearly. No user hand-funding step is part of routine CI.
 
 **Cost.** Package storage is never refunded, so the published fixture is cached. The fixture is the base package, its upgrade, the device with its key, the cap and the group.
 - **Where the cache lives.** Locally it's `live-state.json` beside the wallet; on CI only AES-256-GCM ciphertext is stored in the main-workflow encrypted fixture artifact. The domain-separated encryption key is derived through HKDF-SHA256 from the protected CI secret; the CI key itself is never cached. Decrypted device state and public wallet configuration exist only in a mode-0700 temporary directory, files mode 0600, removed on exit. CI signing bytes travel through an in-process pipe to a Linux anonymous memfd; a private runtime symlink permits the pinned CLI to read it without a disk key file or secret command arguments. Tampering and wrong keys fail closed. It's keyed by content hashes of the base and head contracts.
 - **Re-verified before reuse.** Free reads check that every object still exists with the expected owner.
-- **Fresh fixture** (first run, or after any contract change): about 0.18 SUI.
+- **Fresh fixture** (first run, or after any contract change): about 0.41 SUI when base and head differ, since each package store now costs about 0.18 SUI. Earlier, smaller packages cost about 0.18 SUI in total.
 - **Cached run:** about 0.0025 SUI. It sends three transactions: head-package creates, a base-package create (one transaction cannot call two versions of a package), and one delete batch that recovers the storage.
 - **Identical contracts.** When base and head contracts are identical, the upgrade is skipped.
 - **Device gas.** The device's report gas, about 0.004 SUI per run, is topped up with 0.03 SUI only when below 0.01. So 1 SUI covers hundreds of cached runs.
@@ -76,6 +111,7 @@ The controller sets `testnet/package-upgrade` on the tested SHA, with `base:<exa
 
 **Limits:**
 - Walrus is a local stand-in, not real Walrus storage.
+- `scripts/redeploy.sh` / `scripts/publish.py` still submit through the PATH `sui` (1.81.1). On a protocol-139 network, `publish.py` upgrades would hit the same client-side check. They are not yet run against testnet (SF-006 acceptance #11) and need the same split before they are.
 - There is no browser-extension wallet: that is the `wallet` gate, still unimplemented (SF-010).
 - There is no hardware: that is the `hardware` gate (SF-031).
 - The device keeps its unused report gas, about 0.03 SUI per run.
@@ -119,6 +155,8 @@ These were measured on Sui testnet on 2026-10-15 with Sui CLI 1.81.1 and this re
 | 2026-10-15 | SF-006 `redeploy.sh` at `8ee6c84` | dry run, publish `0xffccacbb…` (`CKP2uM91…`), upgrade `0x34f6b171…` (`J9rwj14c…`) | ~0.17 SUI | SF-006 acceptance, posted on #56 |
 | 2026-10-15 | `14b351b` → `8ee6c84`+harness | fresh fixture, 7/7 PASS, 8 transactions | 0.176 SUI | base `0x30230efc…`, head `0x5a9686ae…` |
 | 2026-10-15 | same | **cached fixture**, 7/7 PASS, 3 transactions | **0.0025 SUI** | fixture reuse and batching |
+| 2026-10-16 | `3ff488c` → `b81ff39` (SF-056) | fresh fixture on protocol 139, 10/10 PASS, 9 transactions | 0.411 SUI | split toolchain; base `0x0644ce0d…` (`FqzLbH84…`), upgrade `0x2976ad86…` (`HLp3bSDE…`); one faucet request |
+| 2026-10-16 | same | cached fixture, 8/8 PASS, 3 transactions | 0.0020 SUI | reused the compiler-keyed fixture |
 
 
 ## SF-043 implementation verification

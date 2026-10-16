@@ -18,8 +18,11 @@ export function buildPublishVersionTx(catalog:string,name:string,version:string,
   calls.component_catalog_publish_version(tx,catalogPackage(),catalog,name,version,manifests.map(m=>m.os),manifests.map(m=>m.arch),manifests.map(m=>m.recipeBlobId),manifests.map(m=>m.recipeSha256),manifests.map(m=>m.artifactSha256),'0x6');
   return tx;
 }
-export function buildCatalogDeploymentTx(version:string,groups:string[],devices:string[]) {
-  const tx=new Transaction(); calls.component_catalog_create_deployment(tx,catalogPackage(),version,groups,devices,'0x6'); return tx;
+export function buildCatalogDeploymentTx(version:string,groups:string[],devices:string[], initiallyPaused = false) {
+  const tx=new Transaction();
+  if (initiallyPaused) calls.component_catalog_create_deployment_paused(tx,catalogPackage(),version,groups,devices,'0x6');
+  else calls.component_catalog_create_deployment(tx,catalogPackage(),version,groups,devices,'0x6');
+  return tx;
 }
 export async function fetchVersion(client:SuiGrpcClient,id:string):Promise<ComponentVersion> {
   catalogPackage(); await verifyDeployment(client);

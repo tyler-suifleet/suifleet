@@ -50,7 +50,8 @@ impl WalrusClient {
         format!("{}/v1/blobs/{}", self.aggregator_url, blob_id)
     }
 
-    pub async fn recipe(&self, blob_id: &str) -> anyhow::Result<(crate::recipe::Recipe, String)> {
+    /// Raw recipe bytes; callers authenticate them against a SHA-256 digest.
+    pub async fn recipe_bytes(&self, blob_id: &str) -> anyhow::Result<Vec<u8>> {
         let bytes = self
             .retry(blob_id, || async {
                 let response = self.get(blob_id, None).await?;
@@ -68,10 +69,7 @@ impl WalrusClient {
                 Ok(bytes)
             })
             .await?;
-        Ok((
-            serde_json::from_slice(&bytes)?,
-            hex::encode(Sha256::digest(&bytes)),
-        ))
+        Ok(bytes)
     }
 
     /// Download a blob to `dest` and return the SHA-256 of the complete file.
@@ -277,6 +275,13 @@ impl WalrusClient {
         Ok(())
     }
 
+    /// The same limits for a local copy of `size` bytes into `directory`,
+    /// such as a cached artifact, which never passes through `download`.
+    pub fn ensure_room(&self, directory: &Path, size: u64) -> anyhow::Result<()> {
+        self.check_space(directory, size, 0)
+            .map_err(|(Failure::Permanent(e) | Failure::Transient(e))| e)
+    }
+
     /// Bytes that can be written to `directory` while keeping `min_free_bytes`.
     fn writable(&self, directory: &Path) -> Result<u64, Failure> {
         let available = available_bytes(directory).map_err(|e| Failure::Permanent(e.into()))?;
@@ -290,7 +295,7 @@ fn partial_path(dest: &Path) -> PathBuf {
     dest.with_file_name(name)
 }
 
-fn sha256_file(path: &Path) -> anyhow::Result<String> {
+pub fn sha256_file(path: &Path) -> anyhow::Result<String> {
     let mut file = std::fs::File::open(path)?;
     let mut hasher = Sha256::new();
     let mut buffer = vec![0u8; 64 * 1024];

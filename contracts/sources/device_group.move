@@ -126,4 +126,8 @@ module sui_edge::device_group {
     public fun device_ids(group: &DeviceGroup): &vector<ID> { &group.device_ids }
     public fun name(group: &DeviceGroup): String { group.name }
     public fun admin(group: &DeviceGroup): address { group.admin }
+
+    /// For package modules that keep state on a group (desired_state).
+    public(package) fun uid(group: &DeviceGroup): &UID { &group.id }
+    public(package) fun uid_mut(group: &mut DeviceGroup): &mut UID { &mut group.id }
 }

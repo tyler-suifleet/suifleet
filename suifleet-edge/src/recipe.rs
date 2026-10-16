@@ -1,18 +1,39 @@
 use crate::sui_client::DeploymentCreatedEvent;
 pub use crate::protocol::Recipe;
 impl Recipe {
+    /// Validate a deployment's recipe; returns its declared dependencies.
     pub fn validate(
         &self,
         event: &DeploymentCreatedEvent,
         allow_commands: bool,
-    ) -> anyhow::Result<()> {
-        anyhow::ensure!(self.schema_version == crate::protocol::RECIPE_VERSION, "unsupported recipe schema");
+    ) -> anyhow::Result<crate::deps::Dependencies> {
+        self.validate_component(
+            &event.component_name,
+            &event.version,
+            &event.artifact_sha256,
+            allow_commands,
+        )
+    }
+
+    /// Validate a recipe for an authenticated component identity and artifact
+    /// digest; returns its declared dependencies.
+    pub fn validate_component(
+        &self,
+        name: &str,
+        version: &str,
+        artifact_sha256: &str,
+        allow_commands: bool,
+    ) -> anyhow::Result<crate::deps::Dependencies> {
         anyhow::ensure!(
-            self.component_name == event.component_name && self.component_version == event.version,
+            crate::protocol::RECIPE_VERSIONS.contains(&self.schema_version.as_str()),
+            "unsupported recipe schema"
+        );
+        anyhow::ensure!(
+            self.component_name == name && self.component_version == version,
             "recipe component identity differs from deployment"
         );
         anyhow::ensure!(
-            self.artifact_sha256 == event.artifact_sha256,
+            self.artifact_sha256 == artifact_sha256,
             "recipe hash differs from on-chain hash"
         );
         anyhow::ensure!(
@@ -27,13 +48,24 @@ impl Recipe {
                     .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'),
             "invalid artifact blob ID"
         );
-        anyhow::ensure!(self.lifecycle.run.is_none() && self.lifecycle.shutdown.is_none(), "managed run/shutdown lifecycle requires a component supervisor, which is not implemented");
+        let lifecycle = &self.lifecycle;
+        anyhow::ensure!(
+            lifecycle.run.is_some()
+                || (lifecycle.shutdown.is_none() && lifecycle.readiness.is_none() && lifecycle.restart.is_none()),
+            "shutdown, readiness and restart need a supervised run command"
+        );
+        crate::supervisor::Restart::parse(lifecycle.restart.as_deref())?;
+        anyhow::ensure!(lifecycle.run.is_none() || allow_commands, "recipe run commands are disabled; set apply.allow_recipe_commands only for a trusted operator");
         anyhow::ensure!(
             self.configuration.is_empty(),
             "component configuration management is not implemented"
         );
         anyhow::ensure!(self.lifecycle.install.is_none() || allow_commands, "recipe install commands are disabled; set apply.allow_recipe_commands only for a trusted operator");
-        Ok(())
+        anyhow::ensure!(
+            self.component_dependencies.is_none() || self.schema_version != "1.0",
+            "recipe componentDependencies requires schemaVersion 1.1"
+        );
+        crate::deps::declared(&self.component_name, self.component_dependencies.as_ref())
     }
 }
 
@@ -49,7 +81,7 @@ mod tests {
         let cases: serde_json::Value = serde_json::from_str(include_str!("../../interfaces/recipe-cases.json")).unwrap();
         for case in cases.as_array().unwrap() {
             let accepted = serde_json::from_value::<Recipe>(case["value"].clone())
-                .is_ok_and(|recipe| recipe.validate(&event, false).is_ok());
+                .is_ok_and(|recipe| recipe.validate(&event, true).is_ok());
             assert_eq!(accepted, case["valid"].as_bool().unwrap(), "{}", case["name"]);
         }
     }
@@ -61,15 +93,31 @@ mod tests {
         })).unwrap();
         let value = json!({"schemaVersion":"1.0","componentName":"app","componentVersion":"1",
             "artifactBlobId":"blob","artifactSha256":"a".repeat(64),"lifecycle":{},"configuration":{}});
-        let mut recipe: Recipe = serde_json::from_value(value).unwrap();
-        assert!(recipe.validate(&event, false).is_ok());
+        let mut recipe: Recipe = serde_json::from_value(value.clone()).unwrap();
+        assert!(recipe.validate(&event, false).unwrap().is_empty());
         recipe.artifact_sha256 = "b".repeat(64);
         assert!(recipe.validate(&event, true).is_err());
         recipe.artifact_sha256 = event.artifact_sha256.clone();
         recipe.lifecycle.install = Some("true".into());
         assert!(recipe.validate(&event, false).is_err());
         assert!(recipe.validate(&event, true).is_ok());
+        recipe.lifecycle.shutdown = Some("true".into());
+        assert!(recipe.validate(&event, true).is_err(), "shutdown without run");
         recipe.lifecycle.run = Some("sleep 60".into());
+        assert!(recipe.validate(&event, false).is_err(), "run needs trusted recipe commands");
+        assert!(recipe.validate(&event, true).is_ok());
+        recipe.lifecycle.restart = Some("sometimes".into());
         assert!(recipe.validate(&event, true).is_err());
+        // Dependencies are returned parsed; a self dependency is rejected.
+        let mut value = value;
+        value["schemaVersion"] = json!("1.1");
+        value["componentDependencies"] = json!({"lib": {"versionRequirement": "^1.0.0"}, "log": {"versionRequirement": "*", "dependencyType": "SOFT"}});
+        let recipe: Recipe = serde_json::from_value(value.clone()).unwrap();
+        let dependencies = recipe.validate(&event, false).unwrap();
+        assert_eq!(dependencies["lib"].kind, crate::deps::Kind::Hard);
+        assert_eq!(dependencies["log"].kind, crate::deps::Kind::Soft);
+        value["componentDependencies"] = json!({"app": {"versionRequirement": "*"}});
+        let recipe: Recipe = serde_json::from_value(value).unwrap();
+        assert!(recipe.validate(&event, false).unwrap_err().to_string().contains("depends on itself"));
     }
 }

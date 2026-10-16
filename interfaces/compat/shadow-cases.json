@@ -1,0 +1,1550 @@
+[
+ {
+  "id": "desired-reported-delta",
+  "steps": [
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "color": "red"
+       }
+      }
+     }
+    },
+    "expect": {
+     "state": {
+      "desired": {
+       "color": "red"
+      },
+      "delta": {
+       "color": "red"
+      }
+     },
+     "version": 1
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "reported": {
+        "color": "red"
+       }
+      }
+     }
+    },
+    "expect": {
+     "state": {
+      "desired": {
+       "color": "red"
+      },
+      "reported": {
+       "color": "red"
+      }
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": {
+     "op": "get",
+     "shadow": ""
+    },
+    "expect": {
+     "state": {
+      "desired": {
+       "color": "red"
+      },
+      "reported": {
+       "color": "red"
+      }
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "color": null
+       }
+      }
+     }
+    },
+    "expect": {
+     "state": {
+      "reported": {
+       "color": "red"
+      }
+     },
+     "version": 3
+    }
+   }
+  ]
+ },
+ {
+  "id": "nested-delta-path-to-root",
+  "steps": [
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "lights": {
+         "color": {
+          "r": 255,
+          "g": 255,
+          "b": 255
+         }
+        }
+       },
+       "reported": {
+        "lights": {
+         "color": {
+          "r": 255,
+          "g": 0,
+          "b": 255
+         }
+        }
+       }
+      }
+     }
+    },
+    "expect": {
+     "state": {
+      "desired": {
+       "lights": {
+        "color": {
+         "r": 255,
+         "g": 255,
+         "b": 255
+        }
+       }
+      },
+      "reported": {
+       "lights": {
+        "color": {
+         "r": 255,
+         "g": 0,
+         "b": 255
+        }
+       }
+      },
+      "delta": {
+       "lights": {
+        "color": {
+         "g": 255
+        }
+       }
+      }
+     },
+     "version": 1
+    }
+   }
+  ]
+ },
+ {
+  "id": "arrays-are-values-and-reported-only-keys-ignored",
+  "steps": [
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "list": [
+         1,
+         2
+        ]
+       },
+       "reported": {
+        "list": [
+         1,
+         3
+        ],
+        "extra": 1
+       }
+      }
+     }
+    },
+    "expect": {
+     "state": {
+      "desired": {
+       "list": [
+        1,
+        2
+       ]
+      },
+      "reported": {
+       "list": [
+        1,
+        3
+       ],
+       "extra": 1
+      },
+      "delta": {
+       "list": [
+        1,
+        2
+       ]
+      }
+     },
+     "version": 1
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "reported": {
+        "list": [
+         1,
+         2
+        ]
+       }
+      }
+     }
+    },
+    "expect": {
+     "state": {
+      "desired": {
+       "list": [
+        1,
+        2
+       ]
+      },
+      "reported": {
+       "list": [
+        1,
+        2
+       ],
+       "extra": 1
+      }
+     },
+     "version": 2
+    }
+   }
+  ]
+ },
+ {
+  "id": "optimistic-version-and-client-token",
+  "steps": [
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "a": 1
+       }
+      }
+     }
+    },
+    "expect": {
+     "state": {
+      "desired": {
+       "a": 1
+      },
+      "delta": {
+       "a": 1
+      }
+     },
+     "version": 1
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "a": 2
+       }
+      },
+      "version": 2
+     }
+    },
+    "expect": {
+     "error": "conflict"
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "a": 2
+       }
+      },
+      "version": 1,
+      "clientToken": "req-1"
+     }
+    },
+    "expect": {
+     "state": {
+      "desired": {
+       "a": 2
+      },
+      "delta": {
+       "a": 2
+      }
+     },
+     "version": 2,
+     "clientToken": "req-1"
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "a": 3
+       }
+      },
+      "version": 0
+     }
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   }
+  ]
+ },
+ {
+  "id": "invalid-requests-change-nothing",
+  "steps": [
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "a": [
+         null,
+         "RED"
+        ]
+       }
+      }
+     }
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "a": 1
+       }
+      },
+      "clientToken": "ttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+     }
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "a": 1
+       }
+      },
+      "clientToken": "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+     }
+    },
+    "expect": {
+     "state": {
+      "desired": {
+       "a": 1
+      },
+      "delta": {
+       "a": 1
+      }
+     },
+     "version": 1,
+     "clientToken": "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "l1": {
+         "l2": {
+          "l3": {
+           "l4": {
+            "l5": {
+             "l6": {
+              "l7": {
+               "l8": {
+                "l9": 1
+               }
+              }
+             }
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     }
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "l1": {
+         "l2": {
+          "l3": {
+           "l4": {
+            "l5": {
+             "l6": {
+              "l7": {
+               "l8": 1
+              }
+             }
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     }
+    },
+    "expect": {
+     "state": {
+      "desired": {
+       "a": 1,
+       "l1": {
+        "l2": {
+         "l3": {
+          "l4": {
+           "l5": {
+            "l6": {
+             "l7": {
+              "l8": 1
+             }
+            }
+           }
+          }
+         }
+        }
+       }
+      },
+      "delta": {
+       "a": 1,
+       "l1": {
+        "l2": {
+         "l3": {
+          "l4": {
+           "l5": {
+            "l6": {
+             "l7": {
+              "l8": 1
+             }
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": "on"
+      }
+     }
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "a": 1
+       }
+      },
+      "metadata": {}
+     }
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "blob": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+       }
+      }
+     }
+    },
+    "expect": {
+     "error": "too-large"
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "bad/name",
+     "request": {
+      "state": {
+       "desired": {
+        "a": 1
+       }
+      }
+     }
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "get",
+     "shadow": ""
+    },
+    "expect": {
+     "state": {
+      "desired": {
+       "a": 1,
+       "l1": {
+        "l2": {
+         "l3": {
+          "l4": {
+           "l5": {
+            "l6": {
+             "l7": {
+              "l8": 1
+             }
+            }
+           }
+          }
+         }
+        }
+       }
+      },
+      "delta": {
+       "a": 1,
+       "l1": {
+        "l2": {
+         "l3": {
+          "l4": {
+           "l5": {
+            "l6": {
+             "l7": {
+              "l8": 1
+             }
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     },
+     "version": 2
+    }
+   }
+  ]
+ },
+ {
+  "id": "delete-keeps-version-sequence",
+  "steps": [
+   {
+    "op": {
+     "op": "update",
+     "shadow": "config",
+     "request": {
+      "state": {
+       "reported": {
+        "a": 1
+       }
+      }
+     }
+    },
+    "expect": {
+     "state": {
+      "reported": {
+       "a": 1
+      }
+     },
+     "version": 1
+    }
+   },
+   {
+    "op": {
+     "op": "delete",
+     "shadow": "config",
+     "version": 2
+    },
+    "expect": {
+     "error": "conflict"
+    }
+   },
+   {
+    "op": {
+     "op": "delete",
+     "shadow": "config"
+    },
+    "expect": {
+     "version": 2
+    }
+   },
+   {
+    "op": {
+     "op": "get",
+     "shadow": "config"
+    },
+    "expect": {
+     "error": "not-found"
+    }
+   },
+   {
+    "op": {
+     "op": "delete",
+     "shadow": "config"
+    },
+    "expect": {
+     "error": "not-found"
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "config",
+     "request": {
+      "state": {
+       "reported": {
+        "a": 1
+       }
+      },
+      "version": 2
+     }
+    },
+    "expect": {
+     "error": "conflict"
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "config",
+     "request": {
+      "state": {
+       "reported": {
+        "b": 2
+       }
+      }
+     }
+    },
+    "expect": {
+     "state": {
+      "reported": {
+       "b": 2
+      }
+     },
+     "version": 3
+    }
+   },
+   {
+    "op": {
+     "op": "get",
+     "shadow": ""
+    },
+    "expect": {
+     "error": "not-found"
+    }
+   }
+  ]
+ },
+ {
+  "id": "null-section-and-empty-objects-removed",
+  "steps": [
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "a": {
+         "b": 1
+        }
+       },
+       "reported": {
+        "a": {
+         "b": 1
+        }
+       }
+      }
+     }
+    },
+    "expect": {
+     "state": {
+      "desired": {
+       "a": {
+        "b": 1
+       }
+      },
+      "reported": {
+       "a": {
+        "b": 1
+       }
+      }
+     },
+     "version": 1
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": null
+      }
+     }
+    },
+    "expect": {
+     "state": {
+      "reported": {
+       "a": {
+        "b": 1
+       }
+      }
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "reported": {
+        "a": {
+         "b": null
+        }
+       }
+      }
+     }
+    },
+    "expect": {
+     "state": {},
+     "version": 3
+    }
+   }
+  ]
+ },
+ {
+  "id": "booleans-are-not-numbers",
+  "steps": [
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "enabled": true,
+        "values": [
+         false
+        ],
+        "nested": {
+         "flag": false
+        },
+        "label": "1"
+       },
+       "reported": {
+        "enabled": 1,
+        "values": [
+         0
+        ],
+        "nested": {
+         "flag": 0
+        },
+        "label": 1
+       }
+      }
+     }
+    },
+    "expect": {
+     "state": {
+      "desired": {
+       "enabled": true,
+       "values": [
+        false
+       ],
+       "nested": {
+        "flag": false
+       },
+       "label": "1"
+      },
+      "reported": {
+       "enabled": 1,
+       "values": [
+        0
+       ],
+       "nested": {
+        "flag": 0
+       },
+       "label": 1
+      },
+      "delta": {
+       "enabled": true,
+       "values": [
+        false
+       ],
+       "nested": {
+        "flag": false
+       },
+       "label": "1"
+      }
+     },
+     "version": 1
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "reported": {
+        "enabled": true,
+        "values": [
+         false
+        ],
+        "nested": {
+         "flag": false
+        },
+        "label": "1"
+       }
+      }
+     }
+    },
+    "expect": {
+     "state": {
+      "desired": {
+       "enabled": true,
+       "values": [
+        false
+       ],
+       "nested": {
+        "flag": false
+       },
+       "label": "1"
+      },
+      "reported": {
+       "enabled": true,
+       "values": [
+        false
+       ],
+       "nested": {
+        "flag": false
+       },
+       "label": "1"
+      }
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "reported": {
+        "values": [
+         true
+        ]
+       }
+      }
+     }
+    },
+    "expect": {
+     "state": {
+      "desired": {
+       "enabled": true,
+       "values": [
+        false
+       ],
+       "nested": {
+        "flag": false
+       },
+       "label": "1"
+      },
+      "reported": {
+       "enabled": true,
+       "values": [
+        true
+       ],
+       "nested": {
+        "flag": false
+       },
+       "label": "1"
+      },
+      "delta": {
+       "values": [
+        false
+       ]
+      }
+     },
+     "version": 3
+    }
+   }
+  ]
+ },
+ {
+  "id": "array-nesting-counts-toward-depth",
+  "steps": [
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "a": [
+         [
+          [
+           [
+            [
+             [
+              [
+               1
+              ]
+             ]
+            ]
+           ]
+          ]
+         ]
+        ]
+       }
+      }
+     }
+    },
+    "expect": {
+     "state": {
+      "desired": {
+       "a": [
+        [
+         [
+          [
+           [
+            [
+             [
+              1
+             ]
+            ]
+           ]
+          ]
+         ]
+        ]
+       ]
+      },
+      "delta": {
+       "a": [
+        [
+         [
+          [
+           [
+            [
+             [
+              1
+             ]
+            ]
+           ]
+          ]
+         ]
+        ]
+       ]
+      }
+     },
+     "version": 1
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "a": [
+         [
+          [
+           [
+            [
+             [
+              [
+               [
+                1
+               ]
+              ]
+             ]
+            ]
+           ]
+          ]
+         ]
+        ]
+       }
+      }
+     }
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "o": [
+         {
+          "k1": {
+           "k2": {
+            "k3": {
+             "k4": {
+              "k5": {
+               "k6": {
+                "k7": 1
+               }
+              }
+             }
+            }
+           }
+          }
+         }
+        ]
+       }
+      }
+     }
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "o": [
+         {
+          "k1": {
+           "k2": {
+            "k3": {
+             "k4": {
+              "k5": {
+               "k6": {
+                "k7": {
+                 "k8": {
+                  "k9": {
+                   "k10": {
+                    "k11": {
+                     "k12": 1
+                    }
+                   }
+                  }
+                 }
+                }
+               }
+              }
+             }
+            }
+           }
+          }
+         }
+        ]
+       }
+      }
+     }
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "k": {
+         "k": [
+          [
+           [
+            [
+             [
+              [
+               [
+                1
+               ]
+              ]
+             ]
+            ]
+           ]
+          ]
+         ]
+        }
+       }
+      }
+     }
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "reported": {
+        "o": [
+         {
+          "k1": {
+           "k2": {
+            "k3": {
+             "k4": {
+              "k5": {
+               "k6": {
+                "k7": 1
+               }
+              }
+             }
+            }
+           }
+          }
+         }
+        ]
+       }
+      }
+     }
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "get",
+     "shadow": ""
+    },
+    "expect": {
+     "state": {
+      "desired": {
+       "a": [
+        [
+         [
+          [
+           [
+            [
+             [
+              1
+             ]
+            ]
+           ]
+          ]
+         ]
+        ]
+       ]
+      },
+      "delta": {
+       "a": [
+        [
+         [
+          [
+           [
+            [
+             [
+              1
+             ]
+            ]
+           ]
+          ]
+         ]
+        ]
+       ]
+      }
+     },
+     "version": 1
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "o": [
+         {
+          "k1": {
+           "k2": {
+            "k3": {
+             "k4": {
+              "k5": {
+               "k6": 1
+              }
+             }
+            }
+           }
+          }
+         }
+        ],
+        "k": {
+         "k": [
+          [
+           [
+            [
+             [
+              [
+               1
+              ]
+             ]
+            ]
+           ]
+          ]
+         ]
+        }
+       }
+      }
+     }
+    },
+    "expect": {
+     "state": {
+      "desired": {
+       "a": [
+        [
+         [
+          [
+           [
+            [
+             [
+              1
+             ]
+            ]
+           ]
+          ]
+         ]
+        ]
+       ],
+       "o": [
+        {
+         "k1": {
+          "k2": {
+           "k3": {
+            "k4": {
+             "k5": {
+              "k6": 1
+             }
+            }
+           }
+          }
+         }
+        }
+       ],
+       "k": {
+        "k": [
+         [
+          [
+           [
+            [
+             [
+              1
+             ]
+            ]
+           ]
+          ]
+         ]
+        ]
+       }
+      },
+      "delta": {
+       "a": [
+        [
+         [
+          [
+           [
+            [
+             [
+              1
+             ]
+            ]
+           ]
+          ]
+         ]
+        ]
+       ],
+       "o": [
+        {
+         "k1": {
+          "k2": {
+           "k3": {
+            "k4": {
+             "k5": {
+              "k6": 1
+             }
+            }
+           }
+          }
+         }
+        }
+       ],
+       "k": {
+        "k": [
+         [
+          [
+           [
+            [
+             [
+              1
+             ]
+            ]
+           ]
+          ]
+         ]
+        ]
+       }
+      }
+     },
+     "version": 2
+    }
+   }
+  ]
+ },
+ {
+  "id": "versions-are-integers-not-booleans",
+  "steps": [
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "enabled": false
+       }
+      }
+     }
+    },
+    "expect": {
+     "state": {
+      "desired": {
+       "enabled": false
+      },
+      "delta": {
+       "enabled": false
+      }
+     },
+     "version": 1
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "enabled": true
+       }
+      },
+      "version": true
+     }
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "enabled": true
+       }
+      },
+      "version": "1"
+     }
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "enabled": true
+       }
+      },
+      "version": 1.5
+     }
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
+       "desired": {
+        "enabled": true
+       }
+      },
+      "version": null
+     }
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "delete",
+     "shadow": "",
+     "version": true
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "delete",
+     "shadow": "",
+     "version": "1"
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "delete",
+     "shadow": "",
+     "version": null
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "get",
+     "shadow": ""
+    },
+    "expect": {
+     "state": {
+      "desired": {
+       "enabled": false
+      },
+      "delta": {
+       "enabled": false
+      }
+     },
+     "version": 1
+    }
+   },
+   {
+    "op": {
+     "op": "delete",
+     "shadow": "",
+     "version": 1
+    },
+    "expect": {
+     "version": 2
+    }
+   },
+   {
+    "op": {
+     "op": "delete",
+     "shadow": "",
+     "version": true
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   }
+  ]
+ }
+]

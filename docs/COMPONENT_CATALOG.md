@@ -44,8 +44,8 @@ authenticates the version's type origin and immutable owner, verifies component
 identity and all manifest data, then selects locally before creating an artifact
 directory, saving updater intent, or downloading anything. A mixed group receives
 one deployment ID and independently selects platform-specific bytes. Recipe
-schema remains 1.0; install command opt-in and unsupported lifecycle restrictions
-are unchanged. Failures are journaled as Failed and advance the discovery cursor;
+schema remains 1.0; install command opt-in is unchanged, and run recipes become
+supervised components (SF-014, docs/OPERATIONS.md). Failures are journaled as Failed and advance the discovery cursor;
 report retries survive restart without repeating an update.
 
 Manifest schema/protocol remain 1. The reviewed interface metadata advertises
@@ -69,6 +69,9 @@ delete their original-layout records without understanding the binding, leaving
 an unreachable dynamic field. This does not permit changing a frozen version or
 forging an authoritative receipt. Do not assume old package entry points are
 disabled or that deletion implements cancellation.
+
+Recipe schema 1.1 dependencies, resolution and install ordering for catalog
+deployments are documented in [COMPONENT_DEPENDENCIES.md](COMPONENT_DEPENDENCIES.md).
 
 ## Validation
 

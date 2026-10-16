@@ -11,10 +11,9 @@
 //!   execution effects, never inferred from a digest.
 use crate::{config::SuiConfig, identity, protocol};
 use base64::{engine::general_purpose::STANDARD, Engine};
-use ed25519_dalek::SigningKey;
 use futures_util::StreamExt;
 use serde_json::{json, Value};
-use std::{path::Path, str::FromStr, time::Duration};
+use std::{str::FromStr, time::Duration};
 use sui_rpc::field::{FieldMask, FieldMaskUtil};
 use sui_rpc::proto::sui::rpc::v2 as proto;
 use sui_sdk_types::{Address, Argument, Command, Digest, Input, StructTag, Transaction, TypeTag};
@@ -26,6 +25,8 @@ const CALL_MODULE: &str = protocol::deployment_manager::MODULE;
 const MAX_GAS_BUDGET: u64 = 50_000_000;
 /// Events requested per ListEvents call.
 const PAGE_SIZE: u32 = 50;
+const DEPLOYMENT_CREATED: &str = "deployment_manager::DeploymentCreated";
+const DEVICE_ADDED_TO_GROUP: &str = "device_group::DeviceAddedToGroup";
 
 pub use crate::protocol::DeploymentCreatedEvent;
 
@@ -50,6 +51,13 @@ pub enum Owner {
 /// resume *after* it; `end` is the cursor after the whole scanned range.
 pub struct EventPage {
     pub events: Vec<(DeploymentCreatedEvent, Value)>,
+    pub end: Value,
+    pub has_more: bool,
+}
+
+/// One page of DeviceAddedToGroup events as (group ID, device ID).
+pub struct MembershipPage {
+    pub events: Vec<(String, String)>,
     pub end: Value,
     pub has_more: bool,
 }
@@ -152,9 +160,23 @@ fn ensure_retained(position: Option<u64>, lowest: Option<u64>) -> anyhow::Result
 #[derive(Clone)]
 pub struct SuiClient {
     config: SuiConfig,
-    signing_key: SigningKey,
+    signer: std::sync::Arc<dyn identity::TxSigner>,
     rpc: sui_rpc::Client,
 }
+
+/// Objects created by a successful enrollment (SF-021).
+#[derive(Debug, Clone)]
+pub struct Enrolled {
+    pub digest: String,
+    pub device_object_id: String,
+    pub device_cap_id: String,
+    pub device_address: String,
+    /// Sent to the policy's operator.
+    pub owner_cap_id: String,
+}
+
+/// Largest gas budget a claim key sponsors for one enrollment (0.05 SUI).
+const MAX_ENROLL_BUDGET: u64 = 50_000_000;
 
 pub fn same_id(a: &str, b: &str) -> bool {
     fn normalized(s: &str) -> Option<Vec<u8>> {
@@ -221,7 +243,7 @@ fn id_list(value: &Value) -> Vec<String> {
 }
 
 impl SuiClient {
-    pub fn load(config: SuiConfig, path: &Path) -> anyhow::Result<Self> {
+    pub fn load(config: SuiConfig, signer: std::sync::Arc<dyn identity::TxSigner>) -> anyhow::Result<Self> {
         let manifest = config
             .manifest
             .as_ref()
@@ -232,12 +254,12 @@ impl SuiClient {
             .with_response_headers_timeout(Duration::from_secs(30));
         Ok(Self {
             config,
-            signing_key: identity::load(path)?,
+            signer,
             rpc,
         })
     }
     pub fn address(&self) -> String {
-        identity::address(&self.signing_key)
+        self.signer.address()
     }
     pub fn manifest(&self) -> &crate::config::DeploymentManifest {
         self.config.manifest.as_ref().expect("validated manifest")
@@ -333,6 +355,44 @@ impl SuiClient {
         }
     }
 
+    /// A Move object's type, owner and BCS contents, decoded from the node's
+    /// object BCS rather than its JSON rendering.
+    pub async fn move_object(&self, id: &str) -> anyhow::Result<(String, Owner, Vec<u8>)> {
+        let mut request = proto::GetObjectRequest::default();
+        request.object_id = Some(id.to_owned());
+        request.read_mask = Some(mask(&["bcs"]));
+        let bytes = self
+            .rpc
+            .clone()
+            .ledger_client()
+            .get_object(request)
+            .await
+            .map_err(|e| status(e).context(format!("object {id}")))?
+            .into_inner()
+            .object
+            .and_then(|o| o.bcs)
+            .and_then(|b| b.value)
+            .ok_or_else(|| anyhow::anyhow!("object {id} has no contents"))?;
+        let object: sui_sdk_types::Object = bcs::from_bytes(&bytes)
+            .map_err(|e| anyhow::anyhow!("undecodable object {id}: {e}"))?;
+        let owner = match object.owner() {
+            sui_sdk_types::Owner::Address(address) => Owner::Address(address.to_string()),
+            sui_sdk_types::Owner::Shared(version) => Owner::Shared {
+                initial_version: *version,
+            },
+            sui_sdk_types::Owner::Immutable => Owner::Immutable,
+            _ => Owner::Other,
+        };
+        match object.data() {
+            sui_sdk_types::ObjectData::Struct(value) => Ok((
+                value.object_type().to_string(),
+                owner,
+                value.contents().to_vec(),
+            )),
+            _ => anyhow::bail!("{id} is not a Move object"),
+        }
+    }
+
     pub async fn optional_object(&self, id: &str) -> anyhow::Result<Option<Object>> {
         let mut request = proto::GetObjectRequest::default();
         request.object_id = Some(id.to_owned());
@@ -418,7 +478,7 @@ impl SuiClient {
             Cursor::Genesis => (Start::Checkpoint(0), Some(0)),
         };
         self.ensure_retained(position).await?;
-        let page = self.event_page(start).await?;
+        let page = self.event_page(start, DEPLOYMENT_CREATED).await?;
         let mut events = Vec::new();
         for (event, watermark) in page.events {
             let fields = event.json.as_deref().map(to_json).unwrap_or(Value::Null);
@@ -454,7 +514,7 @@ impl SuiClient {
         self.ensure_retained(Some(checkpoint)).await?;
         let mut start = Start::Checkpoint(checkpoint);
         loop {
-            let page = self.event_page(start).await?;
+            let page = self.event_page(start, DEPLOYMENT_CREATED).await?;
             for (event, watermark) in page.events {
                 if let Some(found) = legacy_boundary(&event, digest, sequence, checkpoint, &watermark)? {
                     return Ok(found);
@@ -472,9 +532,10 @@ impl SuiClient {
         }
     }
 
-    /// One ListEvents page of DeploymentCreated events, each with the cursor
-    /// to resume after it.
-    async fn event_page(&self, start: Start) -> anyhow::Result<RawPage> {
+    /// One ListEvents page of `event_type` events (e.g.
+    /// "deployment_manager::DeploymentCreated"), each with the cursor to
+    /// resume after it.
+    async fn event_page(&self, start: Start, event_type: &str) -> anyhow::Result<RawPage> {
         let mut request = proto::ListEventsRequest::default();
         request.read_mask = Some(mask(&[
             "event_type",
@@ -485,7 +546,7 @@ impl SuiClient {
         ]));
         let mut literal = proto::EventLiteral::default();
         let mut by_type = proto::EventTypeFilter::default();
-        by_type.event_type = Some(self.move_type("deployment_manager::DeploymentCreated"));
+        by_type.event_type = Some(self.move_type(event_type));
         literal.predicate = Some(proto::event_literal::Predicate::EventType(by_type));
         let mut term = proto::EventTerm::default();
         term.literals = vec![literal];
@@ -507,7 +568,7 @@ impl SuiClient {
             .await
             .map_err(status)?
             .into_inner();
-        let expected = self.move_type("deployment_manager::DeploymentCreated");
+        let expected = self.move_type(event_type);
         let mut events = Vec::new();
         while let Some(frame) = stream.next().await {
             let frame = frame.map_err(status)?;
@@ -555,15 +616,32 @@ impl SuiClient {
             })
     }
 
-    /// A matching ID alone is not authority to update a device. Only its current
-    /// operator may deploy; shared groups must belong to that operator too.
-    /// An activated Device is held by the registry; its operator is whoever
-    /// owns the DeviceOwnerCap that its identity names.
-    pub async fn authorized_target(
-        &self,
-        event: &DeploymentCreatedEvent,
-        device: &str,
-    ) -> anyhow::Result<bool> {
+    /// The next page of DeviceAddedToGroup events after `cursor` (from
+    /// genesis when None). Pruned history fails loudly, as for deployments.
+    pub async fn memberships(&self, cursor: &Option<Value>) -> anyhow::Result<MembershipPage> {
+        let (start, position) = match Cursor::parse(cursor)? {
+            Cursor::After(bytes, checkpoint) => (Start::After(bytes), checkpoint),
+            Cursor::Checkpoint(checkpoint) => (Start::Checkpoint(checkpoint), Some(checkpoint)),
+            Cursor::Genesis => (Start::Checkpoint(0), Some(0)),
+            Cursor::Legacy(..) => anyhow::bail!("membership cursor cannot be a JSON-RPC cursor"),
+        };
+        self.ensure_retained(position).await?;
+        let page = self.event_page(start, DEVICE_ADDED_TO_GROUP).await?;
+        let mut events = Vec::new();
+        for (event, _) in page.events {
+            let fields = event.json.as_deref().map(to_json).unwrap_or(Value::Null);
+            match (fields["group_id"].as_str(), fields["device_id"].as_str()) {
+                (Some(group), Some(device)) => events.push((group.to_owned(), device.to_owned())),
+                _ => anyhow::bail!("undecodable DeviceAddedToGroup event: {fields}"),
+            }
+        }
+        Ok(MembershipPage { events, end: page.end, has_more: page.has_more })
+    }
+
+    /// The device's operator. An activated Device is held by the registry; its
+    /// operator is whoever owns the DeviceOwnerCap that its identity names.
+    /// Also checks that the Device is registered to this daemon's key.
+    pub async fn operator(&self, device: &str) -> anyhow::Result<String> {
         let object = self.object(device).await?;
         anyhow::ensure!(
             same_type(&object.object_type, &self.move_type("device_registry::Device")),
@@ -584,16 +662,109 @@ impl SuiClient {
         let Owner::Address(owner) = &owner_cap.owner else {
             anyhow::bail!("DeviceOwnerCap has no operator owner");
         };
+        anyhow::ensure!(
+            same_id(object.fields["device_address"].as_str().unwrap_or(""), &self.address()),
+            "device key does not match registered address"
+        );
+        Ok(owner.clone())
+    }
+
+    /// The group's current desired state, if this device must follow it:
+    /// None when the group is gone, belongs to another operator, or no longer
+    /// contains the device. A group without desired state is revision 0.
+    pub async fn group_desired(
+        &self,
+        group: &str,
+        operator: &str,
+        device: &str,
+    ) -> anyhow::Result<Option<crate::reconcile::GroupDesired>> {
+        if !self.group_contains(group, operator, device).await? {
+            return Ok(None);
+        }
+        let mut desired = crate::reconcile::GroupDesired {
+            group: group.to_owned(),
+            revision: 0,
+            components: Default::default(),
+        };
+        if let Some(state) = self.dynamic_field(group, "desired_state::DesiredKey").await? {
+            desired.revision = number(&state["revision"])
+                .ok_or_else(|| anyhow::anyhow!("desired state of {group} has no revision"))?;
+            let entries = state["components"]["contents"]
+                .as_array()
+                .ok_or_else(|| anyhow::anyhow!("undecodable desired state of {group}: {state}"))?;
+            for entry in entries {
+                match (entry["key"].as_str(), entry["value"].as_str()) {
+                    (Some(name), Some(deployment)) => {
+                        desired.components.insert(name.to_owned(), deployment.to_owned());
+                    }
+                    _ => anyhow::bail!("undecodable desired state of {group}: {state}"),
+                }
+            }
+        }
+        Ok(Some(desired))
+    }
+
+    /// A DeploymentRecord as its creation event would describe it, or None
+    /// when it was deleted. Fails on any other type.
+    pub async fn deployment(
+        &self,
+        id: &str,
+    ) -> anyhow::Result<Option<(DeploymentCreatedEvent, Object)>> {
+        let Some(record) = self.optional_object(id).await? else {
+            return Ok(None);
+        };
+        anyhow::ensure!(
+            same_type(
+                &record.object_type,
+                &self.move_type(protocol::deployment_manager::DeploymentRecord::MOVE_TYPE)
+            ),
+            "{id} is not a DeploymentRecord"
+        );
+        let field = |name: &str| record.fields[name].as_str().unwrap_or_default().to_owned();
+        let groups = self.dynamic_field(id, "deployment_manager::TargetGroupsKey").await?;
+        let devices = self.dynamic_field(id, "deployment_manager::TargetDevicesKey").await?;
+        let event = DeploymentCreatedEvent {
+            deployment_id: id.to_owned(),
+            component_name: field("component_name"),
+            version: field("version"),
+            recipe_blob_id: field("recipe_blob_id"),
+            artifact_sha256: field("artifact_sha256"),
+            target_groups: groups.as_ref().map(id_list).unwrap_or_default(),
+            target_devices: devices.as_ref().map(id_list).unwrap_or_default(),
+            creator: field("creator"),
+        };
+        Ok(Some((event, record)))
+    }
+
+    /// Whether desired state references this record; reconciliation then
+    /// applies it, never the one-shot creation-event path.
+    pub async fn deployment_control(&self, deployment: &str) -> anyhow::Result<crate::control::Control> {
+        match self.dynamic_field(deployment, "deployment_manager::ControlKey").await? {
+            None => Ok(crate::control::Control::default()),
+            Some(value) => Ok(serde_json::from_value(
+                value.get("fields").cloned().unwrap_or(value)
+            )?),
+        }
+    }
+
+    pub async fn is_managed(&self, deployment: &str) -> anyhow::Result<bool> {
+        Ok(self
+            .dynamic_field(deployment, "deployment_manager::ManagedKey")
+            .await?
+            .is_some())
+    }
+
+    /// A matching ID alone is not authority to update a device. Only its current
+    /// operator may deploy; shared groups must belong to that operator too.
+    pub async fn authorized_target(
+        &self,
+        event: &DeploymentCreatedEvent,
+        device: &str,
+    ) -> anyhow::Result<bool> {
+        let owner = &self.operator(device).await?;
         if !same_id(owner, &event.creator) {
             return Ok(false);
         }
-        anyhow::ensure!(
-            same_id(
-                object.fields["device_address"].as_str().unwrap_or(""),
-                &self.address()
-            ),
-            "device key does not match registered address"
-        );
         if event.target_devices.iter().any(|id| same_id(id, device)) {
             return Ok(true);
         }
@@ -733,6 +904,93 @@ impl SuiClient {
         Ok(transaction)
     }
 
+    /// Enroll this device's key under an enrollment policy (SF-021): one
+    /// transaction sent by the device and sponsored by the claim key, which
+    /// pays its gas. Checked against the exact intended call before either
+    /// key signs; success and the created objects come from the effects.
+    pub async fn enroll(
+        &self,
+        policy: &str,
+        name: &str,
+        arch: &str,
+        claim: &dyn identity::TxSigner,
+    ) -> anyhow::Result<Enrolled> {
+        let package = Address::from_str(&self.config.package_id)?;
+        let sender = Address::from_str(&self.address())?;
+        let sponsor = Address::from_str(&claim.address())?;
+        anyhow::ensure!(sender != sponsor, "the claim key must differ from the device key");
+        let registry = Address::from_str(&self.manifest().shared_objects.registry.id)?;
+        let mut builder = sui_transaction_builder::TransactionBuilder::new();
+        let arguments = vec![
+            builder.object(sui_transaction_builder::ObjectInput::new(Address::from_str(policy)?)),
+            builder.object(sui_transaction_builder::ObjectInput::new(registry)),
+            builder.pure(&name.to_owned()),
+            builder.pure(&arch.to_owned()),
+            builder.object(sui_transaction_builder::ObjectInput::new(Address::from_str("0x6")?)),
+        ];
+        builder.move_call(
+            sui_transaction_builder::Function::new(package, protocol::enrollment::MODULE.parse()?, protocol::enrollment::ENROLL.parse()?),
+            arguments,
+        );
+        builder.set_sender(sender);
+        builder.set_sponsor(sponsor);
+        let transaction = builder
+            .build(&mut self.rpc.clone())
+            .await
+            .map_err(|e| anyhow::anyhow!("enrollment simulation failed: {e}"))?;
+        anyhow::ensure!(transaction.sender == sender, "simulated transaction has another sender");
+        anyhow::ensure!(transaction.gas_payment.owner == sponsor, "gas is not paid by the claim key");
+        anyhow::ensure!(transaction.gas_payment.budget <= MAX_ENROLL_BUDGET, "gas budget {} exceeds the enrollment ceiling", transaction.gas_payment.budget);
+        let sui_sdk_types::TransactionKind::ProgrammableTransaction(program) = &transaction.kind else {
+            anyhow::bail!("not a programmable transaction");
+        };
+        anyhow::ensure!(
+            matches!(program.commands.as_slice(), [Command::MoveCall(call)]
+                if call.package == package && call.module.as_str() == protocol::enrollment::MODULE
+                    && call.function.as_str() == protocol::enrollment::ENROLL && call.type_arguments.is_empty()),
+            "simulated transaction is not exactly enrollment::enroll"
+        );
+        let bytes = bcs::to_bytes(&transaction)?;
+        let signature = |value: Vec<u8>| {
+            let mut out = proto::UserSignature::default();
+            let mut bcs = proto::Bcs::default();
+            bcs.value = Some(value.into());
+            out.bcs = Some(bcs);
+            out
+        };
+        let mut request = proto::ExecuteTransactionRequest::default();
+        let mut tx = proto::Transaction::default();
+        let mut tx_bcs = proto::Bcs::default();
+        tx_bcs.value = Some(bytes.clone().into());
+        tx.bcs = Some(tx_bcs);
+        request.transaction = Some(tx);
+        request.signatures = vec![signature(self.signer.sign(&bytes)?), signature(claim.sign(&bytes)?)];
+        request.read_mask = Some(mask(&["digest", "effects.status", "events"]));
+        let executed = self
+            .rpc
+            .clone()
+            .execution_client()
+            .execute_transaction(request)
+            .await
+            .map_err(status)?
+            .into_inner()
+            .transaction
+            .ok_or_else(|| anyhow::anyhow!("execution returned no transaction"))?;
+        let digest = execution_digest(&executed)?;
+        let expected = self.move_type(protocol::enrollment::DeviceEnrolled::MOVE_TYPE);
+        let event = executed
+            .events
+            .iter()
+            .flat_map(|events| events.events.iter())
+            .find(|event| same_type(event.event_type.as_deref().unwrap_or(""), &expected))
+            .and_then(|event| event.json.as_deref().map(to_json))
+            .ok_or_else(|| anyhow::anyhow!("enrollment {digest} emitted no DeviceEnrolled event"))?;
+        let field = |name: &str| event[name].as_str().map(str::to_owned).ok_or_else(|| anyhow::anyhow!("DeviceEnrolled without {name}"));
+        let enrolled = Enrolled { digest, device_object_id: field("device_id")?, device_cap_id: field("device_cap")?, device_address: field("device_address")?, owner_cap_id: field("owner_cap")? };
+        anyhow::ensure!(same_id(&enrolled.device_address, &self.address()), "enrolled another key");
+        Ok(enrolled)
+    }
+
     async fn execute(&self, transaction: &Transaction) -> anyhow::Result<String> {
         let bytes = bcs::to_bytes(transaction)?;
         let mut request = proto::ExecuteTransactionRequest::default();
@@ -743,7 +1001,7 @@ impl SuiClient {
         request.transaction = Some(tx);
         let mut signature = proto::UserSignature::default();
         let mut bcs = proto::Bcs::default();
-        bcs.value = Some(identity::signature(&self.signing_key, &bytes).into());
+        bcs.value = Some(self.signer.sign(&bytes)?.into());
         signature.bcs = Some(bcs);
         request.signatures = vec![signature];
         request.read_mask = Some(mask(&["digest", "effects.status"]));

@@ -3,6 +3,10 @@
 Audited 2026-10-13 against this repository and current AWS Greengrass V2 documentation.
 Scope: functional equivalence for software/firmware OTA and fleet operations. This is not a claim of AWS API, recipe-format, SDK, IAM, or managed-component compatibility. Those require separate adapters and acceptance suites.
 
+## Platform responsibility clarification
+
+The platform installer owns OS installation, partitions, reboot, boot confirmation and firmware rollback. Greengrass-style component deployment requires verified artifact delivery and configured lifecycle execution, not automatic updater detection or a SuiFleet-owned OS recovery mechanism. Historical missing-feature rows below do not override this boundary; current tickets and implementation evidence govern completion.
+
 ## Conclusion
 
 SuiFleet has a testable one-shot OTA foundation. It does not yet provide Greengrass-compatible fleet management or a complete component runtime. Local test coverage establishes simulator behavior, not public-network availability, production readiness, or successful hardware firmware updates.
@@ -26,7 +30,7 @@ The immediate platform blocker is transport. The daemon now uses the supported g
 - Artifact downloads buffered whole firmware in memory. They now stream, with a 1 GiB limit; recipes have a 1 MiB limit. HTTP and apply timeouts are bounded.
 - The deployments page did not load/display per-device status. It now reads the live dynamic status field, expands current group members, and omits deleted records. Queries paginate instead of truncating the fleet at 50 records.
 - Provisioning/address CLI commands were documented but absent. Software provisioning is now idempotent, creates a 0600 key, and runs before daemon startup under systemd.
-- The UI advertised run/shutdown that no daemon executed. Those controls are disabled and such recipes/configurations fail explicitly; install scripts require device-side opt-in.
+- The UI advertised run/shutdown that no daemon executed. SF-014 added the supervisor; the run/readiness/shutdown/restart controls are enabled again now that the behavior is tested. Configuration still fails explicitly, and install and run commands both require device-side opt-in.
 - Tests had a stale function signature and invalid shared-object test timing. Those are corrected. Frontend SDK version skew is pinned to the wallet library's compatible version.
 
 ## Tracking coverage
@@ -45,20 +49,20 @@ AWS provides device/group targets, component dependency resolution, deployment r
 |---|---|---|---|
 | Individual and static group targeting | Implemented, locally tested | Public-network/hardware acceptance | P0 |
 | Artifact distribution and integrity | Partial: Walrus download + on-chain recipe/artifact digests | Storage renewal, confidential artifacts and live network validation | P0 |
-| Durable offline delivery | Partial: cursor catch-up for an enrolled device | Supported transport; retention/indexer guarantees; desired-state reconciliation | P0 |
+| Durable offline delivery | Partial: cursor catch-up for an enrolled device; group desired state converges on the latest revision (SF-013) | Supported transport; retention/indexer guarantees | P0 |
 | Trusted update authorization | Partial: current operator/group checks | On-chain creation authorization, key rotation/revocation and delegated roles | P0 |
-| Deployment statuses | Partial: pending/applied/failed | Queued/downloading/installing/rebooting/healthy/rolled-back/cancelled; reasons and timestamps | P1 |
-| Desired fleet state and revisions | Missing | Latest revision per target, supersession and cross-group conflict handling | P1 |
-| Newly joined devices receive desired state | Missing | Membership reconciliation must trigger delivery even without a new creation event | P1 |
-| Multi-component atomic deployments | Missing | Deployment manifest, install plan, coordinated commit/recovery | P1 |
+| Deployment statuses | Partial: pending/applied/failed | Execution progress, explicit component/platform-reported outcomes, reasons and timestamps; do not infer OS boot health | P1 |
+| Desired fleet state and revisions | Implemented for groups, locally tested (SF-013): revisioned component → deployment map per group; supersession; cross-group conflicts left as installed | Device-level desired state (after SF-008 custody); public-network/hardware acceptance | P1 |
+| Newly joined devices receive desired state | Implemented, locally tested (SF-013): membership from DeviceAddedToGroup events, verified against the group object each poll | Event retention for long-lived fleets; public-network acceptance | P1 |
+| Multi-component atomic deployments | Partial (SF-013): one revision commits several components atomically on chain; devices run an ordered, journaled plan that stops at the first failed step; each step installs its dependencies first (SF-012) | Ordering across desired components by dependency (steps run in name order), device-side rollback and lifecycle supervision (SF-014) | P1 |
 | Staged/canary rollout | Missing | Cohorts, concurrency/rate limits, bake period and release gates | P1 |
 | Failure-threshold abort | Missing | Fleet aggregation, minimum sample size and threshold evaluation | P1 |
 | Pause/resume/cancel | Missing | Durable state transitions; deletion is not cancellation | P1 |
 | Device update timeout | Partial: bounded command/download | End-to-end deadline, offline expiry, retry policy and backoff | P1 |
 | Maintenance windows/update deferral | Missing | Scheduler and component safe-to-update handshake | P1 |
 | Automatic application rollback | Missing | Versioned cache, reversible install, health checks and last-known-good state | P1 |
-| OS/firmware recovery | External apply hook only | RAUC/SWUpdate A/B adapter, reboot persistence and post-boot confirmation | P1 |
-| Safe daemon self-update | Missing | Bootstrap handoff and fallback independent of the daemon being replaced | P1 |
+| OS/firmware recovery | External apply hook only | Verified handoff to configured platform installer scripts; preserve SuiFleet state and report explicit results. Platform owns installation, reboot and firmware recovery | P1 |
+| Safe daemon self-update | Partial (SF-026): configured handoff to a verified, preflighted daemon binary through the base `--launch` binary; startup failures and hangs fall back via systemd restart/start timeout without the new daemon; real-systemd and simulator tested ([DAEMON_UPDATE.md](DAEMON_UPDATE.md)) | Physical power-loss during handoff and signed-release (SF-039) verification of daemon artifacts | P1 |
 | Artifact lifecycle | Partial: short-lived Walrus uploads | Retention/renewal ownership, cache/GC, resumable downloads and disk quotas | P1 |
 
 ### Component runtime
@@ -69,12 +73,12 @@ AWS components define recipes, lifecycle, dependencies and platform selection. S
 |---|---|---|---|
 | Component versions/catalog | Partial: name/version strings in jobs | Immutable version registry, semantic versions, discover/resolve candidates | P1 |
 | Recipe format | Partial: proprietary v1 JSON | Defined compatibility policy; AWS JSON/YAML adapter if format compatibility is desired | P1 |
-| Install lifecycle | Partial: one-shot opt-in shell script or apply hook | Per-version work directories, validation and install receipts | P1 |
-| Run/startup/shutdown/bootstrap/recover | Missing; unsupported fields rejected | Process supervisor, readiness, restart policy, reboot stages | P1 |
-| Dependency resolution | Missing | Semver constraints, DAG ordering, hard/soft dependencies and cycle/conflict rejection | P1 |
+| Install lifecycle | Partial: one-shot opt-in shell script or apply hook; supervised components install into per-version workspaces (SF-014) | Validation and install receipts | P1 |
+| Run/startup/shutdown/bootstrap/recover | Partial (SF-014): supervised run with readiness, restart policy and budget, graceful shutdown, rollback of an unready replacement, dependency-ordered restart of committed versions on daemon start and after a daemon crash, no unmanaged descendants; simulator-tested | Configured component bootstrap, dependency failure coupling, health reporting on chain and physical validation of supervision restoration after platform-controlled restart; platform scripts own system reboot | P1 |
+| Dependency resolution | Partial: recipe 1.1 SemVer requirements, hard/soft dependencies, deterministic dependency-first installs, and cycle/conflict rejection before changes ([SF-012](COMPONENT_DEPENDENCIES.md)) | Dependency lifecycle state coupling, rollback, and public-network/hardware acceptance | P1 |
 | Platform manifests | Missing | OS/arch/platform selectors and multiple artifacts | P1 |
 | Configuration merge/reset/validation | Missing; nonempty config rejected | Persisted defaults, JSON-pointer reset, merge policy, validation and notification | P1 |
-| Runtime isolation | Missing: updater runs as service user | Per-component users, environment, resource limits and IPC ACLs | P0 |
+| Runtime isolation | Partial (SF-053): device key and PIN held by a separate signing-service user with an intent-checked, caller-checked socket; component processes cannot read or use it ([KEY_ISOLATION.md](KEY_ISOLATION.md)); components still share the daemon user | Per-component users, environment, resource limits and IPC ACLs | P0 |
 | Local deployment/component CLI | Partial: provisioning/address CLI | Install/list/start/stop/restart/status/logs and offline local recipes | P2 |
 | Container component adapters | External command possible | OCI pull/auth, digest pinning, supervision and recovery | P2 |
 | Lambda/AWS-managed component compatibility | Missing | Explicit adapters; cannot claim native compatibility | P2 |
@@ -86,14 +90,14 @@ AWS includes device/component health, operational telemetry, logs and provisioni
 | Capability | SuiFleet after fixes | Remaining requirement | Priority |
 |---|---|---|---|
 | Inventory and groups | Partial: registration and manual groups | Installed versions, tags, search, filters, dynamic groups and ownership transfer semantics | P1 |
-| Software key provisioning | Partial: idempotent key + manual chain enrollment | Claim-based enrollment, bootstrap ownership checks, bulk onboarding, gas sponsorship | P1 |
-| Hardware identity/TPM/HSM | Missing | Signer abstraction, PKCS#11/device backend, compatible signing algorithms and attestation | P1 |
+| Software key provisioning | Implemented, locally tested (SF-021): claim-sponsored self-enrollment (`suifleet --enroll`), operator ownership via DeviceOwnerCap, bulk claims funded in one PTB, quota/expiry/revocation | Image/first-boot integration (SF-025/029), public-network acceptance | P1 |
+| Hardware identity/TPM/HSM | Partial (SF-021): signer abstraction; PKCS#11 P-256 (Sui secp256r1) backend tested with SoftHSM2 | Real TPM/HSM validation, ed25519 tokens, attestation | P1 |
 | Key rotation/revocation | Missing | Revocable capability tied to active identity, migration and recovery | P0 |
 | Online/last-seen/heartbeat | Missing | Telemetry ingress with bounded offline buffering | P1 |
 | Installed component and device health | Missing | Structured health/status service and fleet aggregate API | P1 |
 | Diagnostics and remote logs | Partial: local tracing/systemd logs | Collection/rotation, upload, queries, redaction, alerts and remote support | P1 |
 | Fleet API/CLI and automation | Partial (SF-024): versioned `/v1` API with filters/keyset pagination, unsigned bulk-operation transactions, long-poll change feed and `ctl` CLI | Webhook push delivery, CI integration examples, more bulk operations | P1 |
-| Operator RBAC and delegation | Missing: wallet ownership only | Fleet roles, scoped deployment authority, multisig/change approvals and audit trails | P1 |
+| Operator RBAC and delegation | Partial (SF-021): revocable group-scoped deployer roles with on-chain delegate audit | Further roles (enrollment/lifecycle managers), multisig/change approvals | P1 |
 | Production indexer | Implemented, locally tested (SF-024): `suifleet-indexer` materializes events/objects into SQLite with durable cursors; versioned API, change feed, CLI | Hosted deployment, dApp migration onto the API, archival-node retention on public networks | P1 |
 | Secrets and confidential configuration | Missing | Encrypted distribution, policy-controlled local cache and rotation; never plaintext on public chain/Walrus | P1 |
 | Cost/network policy | Missing | Gas funding/sponsorship, storage budgets, renewal alerts and network quotas | P1 |
@@ -104,6 +108,8 @@ AWS includes device/component health, operational telemetry, logs and provisioni
 ### Broader Greengrass capabilities
 
 These belong to full Greengrass equivalence beyond OTA/fleet management. See [AWS-provided components](https://docs.aws.amazon.com/greengrass/v2/developerguide/public-components.html), [configuration IPC](https://docs.aws.amazon.com/greengrass/v2/developerguide/ipc-component-configuration.html), and [local component-management IPC](https://docs.aws.amazon.com/greengrass/v2/developerguide/ipc-local-deployments-components.html).
+
+The [compatibility specification](GREENGRASS_COMPATIBILITY.md) (SF-028) separates functional, AWS-recipe and AWS-API compatibility for these rows and provides proposed contract fixtures; it does not implement any of them.
 
 | Capability | Status | Required direction | Priority |
 |---|---|---|---|
@@ -119,7 +125,7 @@ These belong to full Greengrass equivalence beyond OTA/fleet management. See [AW
 ## Release gates and sequencing
 
 1. **Supported network and trust boundary (P0):** migrate app wallet/client and edge reader/builder/executor to supported Sui APIs; separate type origins from call package IDs; independently verify authenticated recipes across the supported transport; add revocation and runtime privilege boundaries. Verify chain identity, transaction effects and gas recovery. Run real testnet registration and successful/failed reports.
-2. **OTA engine (P1):** introduce immutable component versions and a deployment manifest/revision model; reconcile desired state; resolve dependencies/platforms; install into versioned directories; supervise components; add health-based rollback and reboot-aware firmware adapters. Crash-test each transition and power-loss behavior on real hardware.
+2. **OTA engine (P1):** introduce immutable component versions and a deployment manifest/revision model; reconcile desired state; resolve dependencies/platforms; install into versioned directories; supervise components; add explicitly configured application recovery and platform-installer handoff. Test SuiFleet execution/journal recovery across restarts; validate platform-controlled firmware recovery separately on the selected hardware.
 3. **Fleet scheduler (P1):** add explicit pause/cancel/expiry, staged cohorts, concurrency and abort gates. A coordinator/indexer should compute rollout eligibility; devices must verify their authorization and eligibility. Test offline cohort members and membership changes.
 4. **Fleet operations (P1):** add health telemetry, installed inventory, logs, secrets, onboarding/revocation, roles, fleet API/CLI, alerts, gas/storage funding and renewal. Use off-chain services for high-volume/private data; chain stores authority and compact deployment receipts.
 5. **Extended compatibility (P2):** publish a component SDK and adapters for messaging, shadows, streams, client devices and selected AWS recipes/components. Run a capability-by-capability acceptance suite before claiming Greengrass equivalence.
@@ -135,7 +141,7 @@ For each feature, completion requires contract/API semantics, daemon behavior, o
 - `contracts/Published.toml` is empty. Separate ephemeral devnet metadata exists in `Pub.devnet.toml`, but no current live deployment was verified. Nothing was published or hardware-programmed during this change.
 - Ownership and membership checks use a trusted RPC response and can race changes before apply. The on-chain group report checks current membership, which can reject a report after removal. Such reports remain queued and need lifecycle/terminal error policy.
 - Deregistering a device stops this daemon from accepting new work because the Device lookup fails, but existing transferable caps are not fully revoked on-chain.
-- Events are one-shot work, not desired state. Enrolled offline devices replay queued events in order; they do not coalesce superseded firmware versions. New group membership alone does not trigger an old deployment.
+- Deployments not referenced by a group's desired state are still one-shot work: enrolled offline devices replay them in order. Desired state (SF-013) coalesces superseded versions and reaches newly joined members, for groups only; component removal retires management but does not uninstall (SF-014).
 - Status retry is durable but has no terminal dead-letter/backoff policy; deleted records, revoked caps or exhausted gas need operator resolution.
 - A crash between successful hardware apply and journal completion is ambiguous. Recovery reports failure and requests inspection; automatic rollback is absent.
 - Apply success means command exit status, not firmware boot health. Interrupted or timed-out commands can leave partial changes; the updater must provide its own atomicity/recovery.
@@ -143,7 +149,7 @@ For each feature, completion requires contract/API semantics, daemon behavior, o
 - Browser event scans now paginate but are not an efficient fleet index; deployment group expansion reflects current membership rather than a historical target snapshot.
 - TPM support and the original README's `--features tpm` were aspirational, not implemented. Existing devices registered using the former SHA3 address need re-enrollment under the corrected address.
 - The development publish script still uses unscoped metadata greps and suppresses errors in its publish/pretty-print pipeline; it needs hardening before automated releases.
-- Yocto cross-compilation and actual A/B firmware updates remain unvalidated.
+- Historical baseline limitation: Yocto cross-compilation and platform-installer physical recovery were unvalidated at audit time; consult current build and integration evidence.
 
 ## Validation evidence
 
