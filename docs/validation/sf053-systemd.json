@@ -1,6 +1,6 @@
 {
   "ticket": "SF-053",
-  "head": "fa07d42440dac0ed9d48f4f7a2681ed113ce71d6",
+  "head": "80c986fafbf83bbcdcfc0291acd85288cd48f95c",
   "checks": [
     "migration: the existing key now belongs to suifleet-signer (0600); address unchanged (0xa0ccc8bcc8\u2026)",
     "component process (daemon user, shipped sandbox): device.key and signer.toml unreadable (EACCES); signer processes invisible; no key material in env or inherited fds; signing refused (not the main process); only the public address served",
@@ -11,12 +11,12 @@
   "container_cgroup": "cgroup2fs",
   "os": "Debian GNU/Linux 12 (bookworm)",
   "units_sha256": {
-    "suifleet.service": "0935a91424eb1be3216d42b8fbfb358ff631f3f54695163adcee7354aed9b4c6",
+    "suifleet.service": "95ab84d56b9bc4f0431edc956349871a9f83220a1880c0ed5d2b1dbf0adf8d1c",
     "suifleet-provision.service": "0e7ced8971f1de43ad97d3b5f6d018d0ee85d2c9702c27ce56b02665f83811bc",
     "suifleet-signer.service": "cfb47f5f8553c2743b1278fc79e501e69bd53272b3492e41d550e970606a4715",
     "suifleet-signer.socket": "0e393571203fe40b92c7c05263f1489d740e040954e08265b0e44cfc5c439d57"
   },
-  "daemon_sha256": "29caf0198c238899ae5b6a0c2e752f15fd3a30e68480899e13a65a313e9b29e5",
+  "daemon_sha256": "9d6f2a528a43a073591b0cdfe224e8d25991371412642b6553ef29326ee242fc",
   "host": {
     "kernel": "6.6.87.2-microsoft-standard-WSL2",
     "docker": "29.8.0",
