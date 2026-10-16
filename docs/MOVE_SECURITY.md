@@ -8,6 +8,49 @@ branch `work/suifleet/sf-050-533dfe05`. Scope is the seven modules under
 This is a source audit plus executable checks, not a complete security proof.
 Remaining work is retained in [SF-050/#82](https://github.com/tyler-suifleet/suifleet/issues/82).
 
+## Recovery validation on current main
+
+On 2026-10-15 the reserved SF-050 worker was safely resumed after verifying
+its prior service/PID had stopped. Main at
+`795de747e066ee97af0e9e0e53deda3c6c71e90c` was integrated (the exact baseline
+is also the merge commit's second parent). The audit now includes the eighth
+module, `desired_state`, and the deployment-control APIs. Historical evidence
+below remains historical; this section records the new checks.
+
+- Corrected the hosted CI container/cache identity mismatch by building with
+  the runner UID/GID, following ordinary CI. No root compiler execution.
+- Pinned standalone negative controls to the release `Move.toml`/`Move.lock`.
+  A fresh manifest had selected a newer implicit framework; a compiler-version
+  check alone did not pin those dependencies.
+- Reviewed three new baseline diagnostics: `deployment_manager::set_control`
+  and `desired_state::{begin,commit}` use already-published `&TxContext` public
+  signatures. Changing those signatures would break compatibility. Existing
+  module-level allowances are independently stripped by the baseline check.
+- The complete gate passed with `--network none`: strict compiler/lints,
+  exact unsuppressed baseline, both lint negative controls, linear-capability
+  negative, **82/82 Move tests**, and both authority-check removal mutations.
+- All **eight** release module byte arrays equal current main, serialized-array
+  SHA-256 `5d8bb6d05e67fb5b9706cc374ea5e2661731133099a6f08b634760568ca70b99`.
+  No source function body or public signature was changed by the audit repair.
+- `actionlint 1.7.7` and `git diff --check` passed. Current-head hosted workflow
+  results are recorded in PR #83; local success is not a hosted-CI claim.
+
+`desired_state::begin/commit` checks group admin, group identity and stale
+revision; `set_component` requires creator, target-group membership and an
+authenticated recipe. The non-droppable `RevisionPlan` cannot escape its PTB.
+`deployment_manager::set_control` checks creator, state/schedule constraints
+and irreversible cancellation; removal before its cancellation check is atomic
+on abort. These are source-review and regression-test observations, not proofs.
+None of the new controls disables old package entry points; existing mixed-
+version trust rules remain necessary.
+
+The pinned prover upstream HEAD is still `949d14419515038d341d440e9c01c0737adf2ff0`.
+A release-compatible model port remains required: preserve release executable
+framework bodies while supplying reviewed spec-only integer support and models
+matching the release native signatures. Substituting the fork's moving `next`
+framework or deleting unsupported checks would not prove this release. That
+port and successful positive/negative proofs are still unmet SF-050 acceptance.
+
 ## Authority map and findings
 
 Severity means potential impact within the current client trust model. No
