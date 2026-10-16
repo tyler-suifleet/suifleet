@@ -8,9 +8,8 @@
 //!   or `report_verified_status_for_group` call on the manifest's package, with
 //!   the manifest's registry, this device's cap, status Applied or Failed, paid
 //!   by the device within a gas ceiling; only from the configured caller (in
-//!   production, the main process of `suifleet.service`: a direct child of
-//!   PID 1 in that unit's cgroup, which no component process can be while the
-//!   daemon, their child subreaper, lives);
+//!   production, the main process of `suifleet.service`, by the PID and start
+//!   time the unit records as root when it starts, see [`is_daemon`]);
 //! - enrollment: exactly `enrollment::enroll` with the manifest's registry,
 //!   sponsored by another address; only from root (provisioning).
 //!
@@ -39,6 +38,9 @@ const IO_TIMEOUT: Duration = Duration::from_secs(10);
 fn default_socket() -> PathBuf {
     "/run/suifleet-signer/sign.sock".into()
 }
+fn default_record() -> PathBuf {
+    MAIN_RECORD.into()
+}
 fn default_budget() -> u64 {
     50_000_000
 }
@@ -62,6 +64,9 @@ pub struct ServiceConfig {
     /// Production: only this systemd unit's main process may request reports.
     #[serde(default)]
     pub caller_unit: Option<String>,
+    /// Where that unit records its main process (`ExecStartPost=`).
+    #[serde(default = "default_record")]
+    pub caller_record: PathBuf,
     /// Development only: any process of this UID (weaker: components share it).
     #[serde(default)]
     pub caller_uid: Option<u32>,
@@ -187,7 +192,8 @@ pub fn check(policy: &Policy, bytes: &[u8]) -> anyhow::Result<Intent> {
 /// Who may ask for what.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Callers {
-    Unit(String),
+    /// The main process of this systemd unit, as recorded by the unit itself.
+    Unit { unit: String, record: PathBuf },
     Uid(u32),
 }
 
@@ -197,33 +203,110 @@ pub struct Peer {
     pub uid: u32,
 }
 
-/// A process's parent PID and cgroup v2 path.
+/// A process's start time (clock ticks after boot) and cgroup v2 path.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Lineage {
-    pub ppid: u32,
+pub struct Process {
+    pub start: u64,
     pub cgroup: String,
 }
 
+/// The unit's main process: `PID START`, written by the unit's root
+/// `ExecStartPost=` from systemd's `$MAINPID` (see [`record_main_process`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MainProcess {
+    pub pid: u32,
+    pub start: u64,
+}
+
+impl MainProcess {
+    fn parse(text: &str) -> Option<Self> {
+        let (pid, start) = text.trim().split_once(' ')?;
+        Some(Self { pid: pid.parse().ok()?, start: start.parse().ok()? })
+    }
+}
+
+/// Default record of `suifleet.service`'s main process.
+pub const MAIN_RECORD: &str = "/run/suifleet-signer/daemon.main";
+
 /// Whether `peer` is the daemon allowed to request status reports. For a
-/// unit: its main process, i.e. a direct child of the service manager (PID 1)
-/// inside the unit's own cgroup. Component processes share the cgroup but are
-/// descendants of the daemon (their child subreaper) and cannot leave the
-/// cgroup (ProtectControlGroups), so they never pass.
-pub fn is_daemon(callers: &Callers, peer: Peer, lineage: impl Fn(u32) -> Option<Lineage>) -> bool {
+/// unit: exactly the main process systemd started for it, identified by PID
+/// and start time. Parent PID and cgroup are not enough: a component that
+/// kills the daemon is reparented to PID 1 inside the same cgroup until
+/// systemd removes it. Neither can a component claim the role: only the
+/// main process may notify systemd (NotifyAccess=main), the record is
+/// written by root, and a reused PID has a different start time.
+pub fn is_daemon(callers: &Callers, peer: Peer, main: Option<MainProcess>, process: impl Fn(u32) -> Option<Process>) -> bool {
     match callers {
-        Callers::Unit(unit) => lineage(peer.pid).is_some_and(|l| {
-            l.ppid == 1 && l.cgroup.rsplit('/').next() == Some(unit.as_str())
+        Callers::Unit { unit, .. } => main.is_some_and(|main| {
+            main.pid == peer.pid
+                && process(peer.pid).is_some_and(|p| p.start == main.start && p.cgroup.rsplit('/').next() == Some(unit.as_str()))
         }),
         Callers::Uid(uid) => peer.uid == *uid,
     }
 }
 
-fn proc_lineage(pid: u32) -> Option<Lineage> {
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    let ppid = stat.rsplit_once(')')?.1.split_whitespace().nth(1)?.parse().ok()?;
+fn proc_start(stat: &str) -> Option<u64> {
+    // Field 22; fields after the parenthesized command name start at 3.
+    stat.rsplit_once(')')?.1.split_whitespace().nth(19)?.parse().ok()
+}
+
+fn proc_process(pid: u32) -> Option<Process> {
+    let start = proc_start(&std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?)?;
     let cgroup = std::fs::read_to_string(format!("/proc/{pid}/cgroup")).ok()?;
     let cgroup = cgroup.lines().find_map(|line| line.strip_prefix("0::"))?.trim().to_owned();
-    Some(Lineage { ppid, cgroup })
+    Some(Process { start, cgroup })
+}
+
+/// `suifleet --record-main-process PATH`, run by the daemon unit as root
+/// (`ExecStartPost=+`): records systemd's `$MAINPID` and its start time for
+/// the signing service. The directory is root's, so the daemon user cannot
+/// write the record.
+pub fn record_main_process(path: &Path) -> anyhow::Result<()> {
+    use anyhow::Context;
+    let pid: u32 = std::env::var("MAINPID").context("MAINPID is not set (run as the unit's ExecStartPost=)")?.parse()?;
+    record(path, pid)
+}
+
+fn record(path: &Path, pid: u32) -> anyhow::Result<()> {
+    use anyhow::Context;
+    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).with_context(|| format!("main process {pid}"))?;
+    let start = proc_start(&stat).ok_or_else(|| anyhow::anyhow!("unreadable start time of {pid}"))?;
+    let directory = path.parent().unwrap_or(Path::new("/"));
+    if !directory.is_dir() {
+        std::fs::DirBuilder::new().recursive(true).mode(0o755).create(directory)?;
+        std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o755))?;
+    }
+    let staging = directory.join(".daemon.main.tmp");
+    let _ = std::fs::remove_file(&staging);
+    let mut file = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o644).open(&staging)?;
+    // The unit's UMask=0077 applies here too; the signer user must read it.
+    file.set_permissions(std::fs::Permissions::from_mode(0o644))?;
+    writeln!(file, "{pid} {start}")?;
+    file.sync_all()?;
+    std::fs::rename(&staging, path)?;
+    Ok(())
+}
+
+/// The peer's process as a pidfd (Linux 6.5+), so a request is never
+/// attributed to a later process reusing the peer's PID.
+fn peer_pidfd(stream: &UnixStream) -> Option<std::os::fd::OwnedFd> {
+    use std::os::fd::{AsRawFd, FromRawFd};
+    let mut fd: libc::c_int = -1;
+    let mut length = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
+    // SAFETY: SO_PEERPIDFD writes one descriptor into the int we own.
+    let result = unsafe {
+        libc::getsockopt(stream.as_raw_fd(), libc::SOL_SOCKET, libc::SO_PEERPIDFD, &mut fd as *mut _ as *mut libc::c_void, &mut length)
+    };
+    // SAFETY: on success the kernel returned a new descriptor we now own.
+    (result == 0 && fd >= 0).then(|| unsafe { std::os::fd::OwnedFd::from_raw_fd(fd) })
+}
+
+/// The PID a pidfd refers to, or None once that process has exited.
+fn pidfd_pid(pidfd: &std::os::fd::OwnedFd) -> Option<u32> {
+    use std::os::fd::AsRawFd;
+    let info = std::fs::read_to_string(format!("/proc/self/fdinfo/{}", pidfd.as_raw_fd())).ok()?;
+    info.lines().find_map(|line| line.strip_prefix("Pid:"))?.trim().parse().ok()
 }
 
 fn peer(stream: &UnixStream) -> std::io::Result<Peer> {
@@ -252,14 +335,13 @@ pub fn handle(
     peer: Peer,
     key: &dyn TxSigner,
     policy: &Policy,
-    callers: &Callers,
-    lineage: impl Fn(u32) -> Option<Lineage>,
+    daemon: impl FnOnce() -> bool,
 ) -> Value {
     let result = (|| -> anyhow::Result<Value> {
         match request["op"].as_str() {
             Some("address") => Ok(json!({ "address": key.address() })),
             Some("sign") => {
-                let daemon = is_daemon(callers, peer, lineage);
+                let daemon = daemon();
                 let root = peer.uid == 0;
                 anyhow::ensure!(
                     daemon || root,
@@ -286,7 +368,7 @@ pub fn serve(path: &Path) -> anyhow::Result<()> {
     let key = config.key()?;
     policy.device = Address::from_str(&key.address())?;
     let callers = match (&config.caller_unit, config.caller_uid) {
-        (Some(unit), _) => Callers::Unit(unit.clone()),
+        (Some(unit), _) => Callers::Unit { unit: unit.clone(), record: config.caller_record.clone() },
         (None, Some(uid)) => Callers::Uid(uid),
         _ => unreachable!(),
     };
@@ -298,7 +380,23 @@ pub fn serve(path: &Path) -> anyhow::Result<()> {
         let _ = stream.set_write_timeout(Some(IO_TIMEOUT));
         let response = match (peer(&stream), read_request(&stream)) {
             (Ok(peer), Ok(request)) => {
-                let response = handle(&request, peer, key.as_ref(), &policy, &callers, proc_lineage);
+                let pidfd = peer_pidfd(&stream);
+                let daemon = || {
+                    let main = match &callers {
+                        Callers::Unit { record, .. } => std::fs::read_to_string(record).ok().and_then(|text| MainProcess::parse(&text)),
+                        Callers::Uid(_) => None,
+                    };
+                    // Read /proc, then confirm the pidfd still names that live
+                    // process: the PID was not reused in between.
+                    is_daemon(&callers, peer, main, |pid| {
+                        let process = proc_process(pid)?;
+                        match &pidfd {
+                            Some(pidfd) => (pidfd_pid(pidfd) == Some(pid)).then_some(process),
+                            None => Some(process),
+                        }
+                    })
+                };
+                let response = handle(&request, peer, key.as_ref(), &policy, daemon);
                 if let Some(error) = response["error"].as_str() {
                     tracing::warn!(pid = peer.pid, uid = peer.uid, error, "Signing request refused");
                 }
@@ -468,30 +566,79 @@ mod tests {
     }
 
     #[test]
-    fn only_the_units_main_process_gets_report_signatures() {
-        let (p, callers) = (policy(), Callers::Unit("suifleet.service".into()));
-        let main = |pid: u32| match pid {
-            100 => Some(Lineage { ppid: 1, cgroup: "/system.slice/suifleet.service".into() }),
-            // A component: same cgroup, child of the daemon.
-            101 => Some(Lineage { ppid: 100, cgroup: "/system.slice/suifleet.service".into() }),
-            // A child of PID 1 in another unit.
-            102 => Some(Lineage { ppid: 1, cgroup: "/system.slice/other.service".into() }),
+    fn only_the_units_recorded_main_process_is_the_daemon() {
+        let callers = Callers::Unit { unit: "suifleet.service".into(), record: MAIN_RECORD.into() };
+        let unit = "/system.slice/suifleet.service";
+        let processes = |pid: u32| match pid {
+            100 => Some(Process { start: 5000, cgroup: unit.into() }),
+            // A component that killed the daemon: now a child of PID 1 in the
+            // unit's cgroup, which is what the old ancestry rule accepted.
+            101 => Some(Process { start: 5100, cgroup: unit.into() }),
+            102 => Some(Process { start: 5000, cgroup: "/system.slice/other.service".into() }),
             _ => None,
         };
+        let main = Some(MainProcess { pid: 100, start: 5000 });
+        let daemon = Peer { pid: 100, uid: 990 };
+        assert!(is_daemon(&callers, daemon, main, processes));
+        assert!(!is_daemon(&callers, Peer { pid: 101, uid: 990 }, main, processes), "orphaned component");
+        // A later process reusing the recorded PID has another start time.
+        assert!(!is_daemon(&callers, daemon, Some(MainProcess { pid: 100, start: 4000 }), processes), "reused PID");
+        assert!(!is_daemon(&callers, Peer { pid: 102, uid: 990 }, Some(MainProcess { pid: 102, start: 5000 }), processes), "other unit");
+        // No record (unit not started) or an exited peer: nobody.
+        assert!(!is_daemon(&callers, daemon, None, processes));
+        assert!(!is_daemon(&callers, daemon, main, |_| None));
+        assert_eq!(MainProcess::parse("100 5000\n"), main);
+        assert_eq!(MainProcess::parse("100"), None);
+        let stat = "100 (suifleet (x) y) S 1 100 100 0 -1 4194560 1 0 0 0 0 0 0 0 20 0 1 0 5000 1000 10";
+        assert_eq!(proc_start(stat), Some(5000));
+        // The development rule is the UID alone.
+        assert!(is_daemon(&Callers::Uid(990), daemon, None, |_| None));
+        assert!(!is_daemon(&Callers::Uid(991), daemon, None, |_| None));
+    }
+
+    #[test]
+    fn report_signatures_only_for_the_daemon() {
+        let p = policy();
         let sign = json!({ "op": "sign", "tx": STANDARD.encode(Tx::default().bytes()) });
         let daemon = Peer { pid: 100, uid: 990 };
         let component = Peer { pid: 101, uid: 990 };
-        assert_eq!(handle(&sign, daemon, &Key, &p, &callers, main)["signature"], STANDARD.encode([7]));
-        let refused = handle(&sign, component, &Key, &p, &callers, main);
+        assert_eq!(handle(&sign, daemon, &Key, &p, || true)["signature"], STANDARD.encode([7]));
+        let refused = handle(&sign, component, &Key, &p, || false);
         assert!(refused["error"].as_str().unwrap().contains("may not request signatures"), "{refused}");
-        let other_unit = handle(&sign, Peer { pid: 102, uid: 990 }, &Key, &p, &callers, main);
-        assert!(other_unit["error"].is_string(), "{other_unit}");
-        // Without a running unit nobody gets a report signature, root included.
-        let none = |_: u32| None;
-        assert!(handle(&sign, Peer { pid: 1, uid: 0 }, &Key, &p, &callers, none)["error"].as_str().unwrap().contains("only for the daemon"));
+        // Root is not the daemon: no report signatures, only enrollment.
+        assert!(handle(&sign, Peer { pid: 1, uid: 0 }, &Key, &p, || false)["error"].as_str().unwrap().contains("only for the daemon"));
         // The public address is not a secret.
-        assert_eq!(handle(&json!({ "op": "address" }), component, &Key, &p, &callers, main)["address"], "0xa0");
-        assert!(handle(&json!({ "op": "export" }), daemon, &Key, &p, &callers, main)["error"].is_string());
+        assert_eq!(handle(&json!({ "op": "address" }), component, &Key, &p, || false)["address"], "0xa0");
+        assert!(handle(&json!({ "op": "export" }), daemon, &Key, &p, || true)["error"].is_string());
+    }
+
+    #[test]
+    fn records_and_pins_a_live_process() {
+        let dir = std::env::temp_dir().join(format!("suifleet-record-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("daemon.main");
+        let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        record(&path, child.id()).unwrap();
+        let main = MainProcess::parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(main.pid, child.id());
+        assert_eq!(proc_process(child.id()).unwrap().start, main.start);
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o644);
+        // SAFETY: pidfd_open on our own child.
+        let raw = unsafe { libc::syscall(libc::SYS_pidfd_open, child.id() as libc::c_int, 0) } as libc::c_int;
+        if raw >= 0 {
+            use std::os::fd::FromRawFd;
+            // SAFETY: a new descriptor we own.
+            let pidfd = unsafe { std::os::fd::OwnedFd::from_raw_fd(raw) };
+            assert_eq!(pidfd_pid(&pidfd), Some(child.id()));
+            child.kill().unwrap();
+            child.wait().unwrap();
+            assert_eq!(pidfd_pid(&pidfd), None, "an exited process still resolved");
+        } else {
+            child.kill().unwrap();
+            child.wait().unwrap();
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -507,7 +654,8 @@ mod tests {
             for stream in listener.incoming().take(3) {
                 let mut stream = stream.unwrap();
                 let request = read_request(&stream).unwrap();
-                let response = handle(&request, peer(&stream).unwrap(), &Key, &p, &Callers::Uid(uid), |_| None);
+                let peer = peer(&stream).unwrap();
+                let response = handle(&request, peer, &Key, &p, || is_daemon(&Callers::Uid(uid), peer, None, |_| None));
                 writeln!(stream, "{response}").unwrap();
             }
         });

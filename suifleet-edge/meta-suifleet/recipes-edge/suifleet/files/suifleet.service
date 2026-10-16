@@ -23,6 +23,11 @@ UMask=0077
 # and the watchdog apply to it); a new daemon that exits or never becomes ready
 # is restarted by this unit until the launcher falls back (docs/DAEMON_UPDATE.md).
 ExecStart=/usr/bin/suifleet --launch
+# As root ("+"), from systemd's $MAINPID once ready: the signing service
+# signs status reports only for this exact process (PID and start time), never
+# for a component, including one orphaned after killing the daemon (SF-053).
+# The read-only base binary, not an update the daemon user could write.
+ExecStartPost=+/usr/bin/suifleet --record-main-process /run/suifleet-signer/daemon.main
 Restart=on-failure
 RestartSec=5
 # Stop SIGTERMs only the daemon, which stops supervised components itself

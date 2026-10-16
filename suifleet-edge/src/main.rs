@@ -57,6 +57,10 @@ async fn main() -> anyhow::Result<()> {
         );
         return Ok(());
     }
+    if args.len() == 3 && args[1] == "--record-main-process" {
+        // Root ExecStartPost= of the daemon unit, for the signing service (SF-053).
+        return signer_service::record_main_process(Path::new(&args[2]));
+    }
     if args.len() == 3 && args[1] == "--self-check" {
         return self_check(Path::new(&args[2]));
     }
@@ -75,7 +79,7 @@ async fn main() -> anyhow::Result<()> {
     let signer_service = args.len() == 3 && args[1] == "--signer-service";
     anyhow::ensure!(
         args.len() == 1 || launched || check_config || helper || signer_service,
-        "usage: suifleet [--launch | --provision KEY_PATH | --derive-address KEY_PATH | --enroll ENROLL_TOML | --check-config CONFIG_PATH | --self-check CONFIG_PATH | --firmware-helper CONFIG | --signer-service SIGNER_TOML | --verify-release BUNDLE_DIR TRUST_FILE]"
+        "usage: suifleet [--launch | --provision KEY_PATH | --derive-address KEY_PATH | --enroll ENROLL_TOML | --check-config CONFIG_PATH | --self-check CONFIG_PATH | --firmware-helper CONFIG | --signer-service SIGNER_TOML | --record-main-process PATH | --verify-release BUNDLE_DIR TRUST_FILE]"
     );
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -101,6 +105,14 @@ async fn main() -> anyhow::Result<()> {
             .unwrap_or_else(|_| PathBuf::from("/etc/suifleet/config.toml"))
     };
     let cfg = Config::load(&path)?;
+    if !check_config && cfg.device.signer.as_ref().is_some_and(|signer| signer.kind == "service") {
+        // Component processes run as this user: with the key in the signing
+        // service, keep them from ptracing the daemon (and so signing as it)
+        // or taking its descriptors. execve restores the default for each
+        // component.
+        // SAFETY: plain prctl on this process.
+        anyhow::ensure!(unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) } == 0, "cannot make the daemon non-dumpable");
+    }
     let sui = SuiClient::load(cfg.sui.clone(), identity::signer(&cfg.device)?)?;
     sui.validate_deployment().await?;
     if check_config {

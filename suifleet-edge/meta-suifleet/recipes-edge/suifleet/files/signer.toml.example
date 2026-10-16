@@ -5,8 +5,10 @@ manifest_path = "deployment.json"           # the same verified manifest as conf
 device_cap_id = "0x<DEVICE_CAP_ID>"
 keypair_path = "/etc/suifleet/device.key"   # owned by suifleet-signer, 0600
 
-# Only this unit's main process gets status-report signatures.
+# Only this unit's main process gets status-report signatures: the PID and
+# start time the unit records as root (ExecStartPost=) when it starts.
 caller_unit = "suifleet.service"
+# caller_record = "/run/suifleet-signer/daemon.main"
 # max_gas_budget = 50000000
 
 # A key in a PKCS#11 token instead of keypair_path (build with --features pkcs11):

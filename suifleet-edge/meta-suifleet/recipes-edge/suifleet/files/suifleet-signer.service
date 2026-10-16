@@ -29,7 +29,7 @@ ProtectKernelLogs=yes
 ProtectControlGroups=yes
 ProtectClock=yes
 ProtectHostname=yes
-# Default /proc visibility: the caller check reads the peer's parent PID and
+# Default /proc visibility: the caller check reads the peer's start time and
 # cgroup (world-readable fields); environ and memory stay ptrace-protected.
 ProtectProc=default
 NoNewPrivileges=yes

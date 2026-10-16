@@ -5,7 +5,8 @@ Documentation=file:///usr/share/doc/suifleet/KEY_ISOLATION.md
 [Socket]
 # The daemon (group suifleet) connects here. Component processes share that
 # user and can connect too; the service signs status reports only for the
-# main process of suifleet.service (SF-053).
+# main process of suifleet.service, which that unit records as root in this
+# directory (daemon.main) when it starts (SF-053).
 ListenStream=/run/suifleet-signer/sign.sock
 SocketUser=suifleet-signer
 SocketGroup=suifleet
