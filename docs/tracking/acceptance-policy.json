@@ -57,6 +57,23 @@
         "fresh independent review of exact head/base/feedback/policy"
       ]
     },
+    "SF-020": {
+      "deferred_checks": [
+        "hosted indexer (TLS, rate limiting, webhook delivery) and physical Pi log shipping and power loss",
+        "public-network operation"
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32",
+        "https://github.com/tyler-suifleet/suifleet/issues/11"
+      ],
+      "retained_gates": [
+        "all source/security findings repaired",
+        "edge and indexer unit tests including shared redaction cases, quota, auth and alert rules",
+        "real-daemon log shipping (scripts/test_logs.py) and the real localnet indexer end-to-end log/diagnostics/alert check (make test-indexer-localnet)",
+        "exact-head ordinary CI and current-head/base testnet status",
+        "fresh independent review of exact head/base/feedback/policy"
+      ]
+    },
     "SF-024": {
       "deferred_checks": [
         "hosted/public-node and archival-retention integration"
