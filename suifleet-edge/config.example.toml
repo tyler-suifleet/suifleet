@@ -49,6 +49,12 @@ poll_seconds = 10
 # Enable only if explicitly replaying old one-shot deployments is safe.
 replay_history = false
 
+# Supervised components (recipes with lifecycle.run; docs/OPERATIONS.md).
+# component_startup_seconds = 3        # ready after surviving this long, without a readiness command
+# component_ready_timeout_seconds = 60 # how long a readiness command may keep failing
+# component_stop_timeout_seconds = 10  # grace for shutdown/SIGTERM before SIGKILL
+# component_max_restarts = 5           # within ten minutes, then Broken
+
 # Dependency candidates: "never" (default) uses only the live catalog and
 # Walrus; "cached" keeps authenticated versions/recipes/artifacts under
 # state_dir/components for reuse and offline resolution.

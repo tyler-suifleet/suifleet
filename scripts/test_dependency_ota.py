@@ -53,13 +53,15 @@ class DependencySimulator(ComponentSimulator):
         self.catalog_offline = False
         self.next_id = 0x5000
 
-    def publish(self, name, version, dependencies=None, fail='none', available=True):
+    def publish(self, name, version, dependencies=None, fail='none', available=True, lifecycle=None):
         artifact = component.build(version, 'deps-sim', fail, component=name)
         blob = tag(name, version)
         document = json.loads(component.recipe(artifact, f'artifact-{blob}'))
         if dependencies is not None:
             document['schemaVersion'] = '1.1'
             document['componentDependencies'] = dependencies
+        if lifecycle:
+            document['lifecycle'] = lifecycle
         recipe = json.dumps(document).encode()
         self.blobs[f'artifact-{blob}'], self.blobs[f'recipe-{blob}'] = artifact, recipe
         self.next_id += 1
@@ -151,9 +153,9 @@ def run():
                                f'exec /bin/sh {component.UPDATER} --root {root / "components"} "$1"\n')
             config = root / 'config.toml'
 
-            def configure(policy, walrus=''):
+            def configure(policy, walrus='', apply=''):
                 config.write_text(f'[sui]\nmanifest_path="deployment.json"\n[device]\nkeypair_path={json.dumps(str(key))}\n'
-                    f'device_object_id="{ota.DEVICE}"\ndevice_cap_id="{ota.CAP}"\n[apply]\ncommand={json.dumps("/bin/sh " + str(wrapper))}\n'
+                    f'device_object_id="{ota.DEVICE}"\ndevice_cap_id="{ota.CAP}"\n[apply]\ncommand={json.dumps("/bin/sh " + str(wrapper))}\n{apply}'
                     f'[runtime]\nstate_dir={json.dumps(str(root / "state"))}\npoll_seconds=1\n'
                     f'[components]\noffline_candidates="{policy}"\n' + (f'[walrus]\n{walrus}\n' if walrus else ''))
 
@@ -280,11 +282,50 @@ def run():
             assert outcome['status'] == 2 and 'component catalog unavailable' in outcome['error'], outcome
             assert (installs(), registry()) == before
             stop(process); process = None
+
+            # Supervised dependencies (SF-014): a dependency with a run command is
+            # ready before its supervised dependent starts, at deploy and again at
+            # daemon start; the dependent fails if started without it.
+            sup = root / 'state' / 'supervised'
+            sim.catalog_offline = False
+            sim.publish('svc-db', '1.0.0', lifecycle={
+                'run': 'echo svc-db >> ../../starts; sleep 0.5; touch up; exec sleep 300',
+                'readiness': 'test -e up', 'shutdown': 'rm -f up; kill -TERM {pid}'})
+            sim.publish('svc-app', '1.0.0', {'svc-db': {'versionRequirement': '^1.0.0'}}, lifecycle={
+                'run': 'test -e ../../svc-db/work/up || exit 1; echo svc-app >> ../../starts; exec sleep 300'})
+
+            def supervised():
+                p = sup / 'status.json'
+                return json.loads(p.read_text()) if p.exists() else {}
+
+            def starts():
+                p = sup / 'starts'
+                return p.read_text().split() if p.exists() else []
+
+            def both_running():
+                current = supervised()
+                return all(current.get(n, {}).get('phase') == 'running' for n in ('svc-db', 'svc-app'))
+
+            configure('never', apply='allow_recipe_commands=true\n')
+            process = start()
+            sim.deploy('0x60c', 'svc-app', '1.0.0')
+            outcome = settle('0x60c')
+            assert outcome['status'] == 1, outcome
+            assert both_running() and starts() == ['svc-db', 'svc-app'], (supervised(), starts())
+            assert registry()['svc-db'] == ('1.0.0', True) and registry()['svc-app'] == ('1.0.0', True), registry()
+            stop(process)
+            assert not (sup / 'svc-db/work/up').exists(), 'svc-db was not stopped through its shutdown command'
+            process = start()
+            ota.wait_for(both_running, 'supervised components did not restart on daemon start', process)
+            assert starts()[2:] == ['svc-db', 'svc-app'], starts()
+            assert supervised()['svc-app']['restarts'] == 0, supervised()
+            stop(process); process = None
             assert not sim.errors, sim.errors
             log.close()
         print('PASS: actual-daemon dependency-first multi-component install; unavailable platform/soft omission; '
               'installed-dependent conflict and cycle rejected before downloads/installs; installed reuse; '
-              'failed dependency stops dependent; cached offline candidates only under the cached policy and download limits')
+              'failed dependency stops dependent; cached offline candidates only under the cached policy and download limits; '
+              'supervised dependency ready before its dependent at deploy and at daemon start')
     finally:
         if process and process.poll() is None:
             process.kill(); process.wait()

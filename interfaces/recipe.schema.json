@@ -54,15 +54,23 @@
           "type": [
             "string",
             "null"
-          ],
-          "const": null
+          ]
         },
         "shutdown": {
           "type": [
             "string",
             "null"
-          ],
-          "const": null
+          ]
+        },
+        "readiness": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "restart": {
+          "type": "string",
+          "pattern": "^(never|on-failure|always)$"
         }
       }
     },

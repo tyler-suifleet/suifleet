@@ -172,8 +172,8 @@
     }
   },
   {
-    "name": "unsupported-run",
-    "valid": false,
+    "name": "supervised-run",
+    "valid": true,
     "value": {
       "schemaVersion": "1.0",
       "componentName": "app",
@@ -181,13 +181,17 @@
       "artifactBlobId": "blob_1",
       "artifactSha256": "abababababababababababababababababababababababababababababababab",
       "lifecycle": {
-        "run": "sleep 60"
+        "install": "chmod +x {artifact}",
+        "run": "exec {artifact}",
+        "shutdown": "kill -TERM {pid}",
+        "readiness": "test -e ready",
+        "restart": "on-failure"
       },
       "configuration": {}
     }
   },
   {
-    "name": "unsupported-shutdown",
+    "name": "unknown-restart-policy",
     "valid": false,
     "value": {
       "schemaVersion": "1.0",
@@ -196,7 +200,8 @@
       "artifactBlobId": "blob_1",
       "artifactSha256": "abababababababababababababababababababababababababababababababab",
       "lifecycle": {
-        "shutdown": "true"
+        "run": "exec {artifact}",
+        "restart": "sometimes"
       },
       "configuration": {}
     }

@@ -78,6 +78,43 @@ pub async fn run_bounded(
     timeout: Duration,
     max_memory_bytes: Option<u64>,
 ) -> anyhow::Result<()> {
+    harden(&mut command, workdir, max_memory_bytes);
+    run_hardened(command, timeout).await
+}
+
+/// [`run_bounded`] for a command already passed through [`harden`] (and
+/// possibly given deliberate environment variables afterwards).
+pub async fn run_hardened(
+    mut command: tokio::process::Command,
+    timeout: Duration,
+) -> anyhow::Result<()> {
+    let mut child = crate::supervisor::spawn_tracked(&mut command).map_err(spawn_error)?;
+    #[cfg(unix)]
+    let _group = ProcessGroup(child.pid() as i32);
+    let status = match tokio::time::timeout(timeout, child.wait()).await {
+        Ok(status) => status?,
+        Err(_) => {
+            // Kill and reap the group now rather than leaving it to drop.
+            #[cfg(unix)]
+            kill_group(child.pid() as i32);
+            let _ = child.wait().await;
+            anyhow::bail!(
+                "apply command timed out after {}s; process group killed",
+                timeout.as_secs()
+            )
+        }
+    };
+    exit_result(status)
+}
+
+/// The confinement every updater, recipe and component child gets: a cleared
+/// environment, no stdin, its own working directory and process group, no
+/// core dumps, bounded descriptors/memory, and killed if its handle is dropped.
+pub fn harden(
+    command: &mut tokio::process::Command,
+    workdir: &Path,
+    max_memory_bytes: Option<u64>,
+) {
     command
         .env_clear()
         .env("PATH", CHILD_PATH)
@@ -94,22 +131,14 @@ pub async fn run_bounded(
             command.pre_exec(move || limit_child(max_memory_bytes));
         }
     }
-    let mut child = command.spawn().map_err(spawn_error)?;
-    #[cfg(unix)]
-    let _group = ProcessGroup(
-        child
-            .id()
-            .ok_or_else(|| anyhow::anyhow!("updater has no pid"))? as i32,
-    );
-    let status = tokio::time::timeout(timeout, child.wait())
-        .await
-        .map_err(|_| {
-            anyhow::anyhow!(
-                "apply command timed out after {}s; process group killed",
-                timeout.as_secs()
-            )
-        })??;
-    exit_result(status)
+}
+
+/// SIGKILL a child's whole process group (its PID is the group ID).
+#[cfg(unix)]
+pub fn kill_group(group: i32) {
+    unsafe {
+        libc::kill(-group, libc::SIGKILL);
+    }
 }
 
 fn spawn_error(error: std::io::Error) -> anyhow::Error {
@@ -122,7 +151,7 @@ fn spawn_error(error: std::io::Error) -> anyhow::Error {
     }
 }
 
-fn exit_result(status: std::process::ExitStatus) -> anyhow::Result<()> {
+pub fn exit_result(status: std::process::ExitStatus) -> anyhow::Result<()> {
     if status.success() {
         return Ok(());
     }
@@ -180,9 +209,7 @@ struct ProcessGroup(i32);
 impl Drop for ProcessGroup {
     fn drop(&mut self) {
         // The child was placed in a fresh process group whose ID is its PID.
-        unsafe {
-            libc::kill(-self.0, libc::SIGKILL);
-        }
+        kill_group(self.0);
     }
 }
 

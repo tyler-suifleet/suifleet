@@ -44,8 +44,8 @@ authenticates the version's type origin and immutable owner, verifies component
 identity and all manifest data, then selects locally before creating an artifact
 directory, saving updater intent, or downloading anything. A mixed group receives
 one deployment ID and independently selects platform-specific bytes. Recipe
-schema remains 1.0; install command opt-in and unsupported lifecycle restrictions
-are unchanged. Failures are journaled as Failed and advance the discovery cursor;
+schema remains 1.0; install command opt-in is unchanged, and run recipes become
+supervised components (SF-014, docs/OPERATIONS.md). Failures are journaled as Failed and advance the discovery cursor;
 report retries survive restart without repeating an update.
 
 Manifest schema/protocol remain 1. The reviewed interface metadata advertises
