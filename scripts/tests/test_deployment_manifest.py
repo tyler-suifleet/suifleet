@@ -123,6 +123,14 @@ class ManifestTests(unittest.TestCase):
             self.assertEqual(json.loads(encoded), json.loads((bundle / "deployment.json").read_text()))
             self.assertEqual((bundle / "config.toml").read_text(), '[sui]\nmanifest_path = "deployment.json"\n\n' + template.read_text())
             with self.assertRaises(ValueError): dm.generate(fixture(), bundle, template)
+            # Confidential delivery settings (SF-022) belong in the device template;
+            # arrays of tables would bypass the section check and are refused.
+            sealed = root / "sealed.toml"
+            sealed.write_text(template.read_text() + '[seal]\nkey_server_package="0x5"\nkey_servers=[{object_id="0x6"}]\n')
+            dm.generate(fixture(), root / "sealed", sealed)
+            tables = root / "tables.toml"
+            tables.write_text(template.read_text() + '[[seal.key_servers]]\nobject_id="0x6"\n')
+            with self.assertRaises(ValueError): dm.generate(fixture(), root / "tables", tables)
 
     def test_latest_package_checked_against_upgrade_cap(self):
         manifest = fixture(); ordinary = chain(manifest)

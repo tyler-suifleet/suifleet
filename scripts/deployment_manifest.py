@@ -192,8 +192,10 @@ def generate(manifest, output, device_template):
     # Device templates deliberately permit simple top-level sections only. Their
     # values are parsed by the daemon's TOML parser, never merged with network IDs.
     sections = re.findall(r"^\s*\[([^\]\n]+)\]\s*(?:#.*)?$", template, re.MULTILINE)
-    if any(section not in ("device", "device.signer", "apply", "runtime") for section in sections):
-        raise ValueError("device template permits only device, device.signer, apply and runtime sections")
+    if re.search(r"^\s*\[\[", template, re.MULTILINE):
+        raise ValueError("device template permits no arrays of tables; use inline arrays")
+    if any(section not in ("device", "device.signer", "apply", "runtime", "seal") for section in sections):
+        raise ValueError("device template permits only device, device.signer, apply, runtime and seal sections")
     if len(set(sections)) != len(sections) or not {"device", "apply"} <= set(sections):
         raise ValueError("missing or duplicate device template sections")
     encoded = json.dumps(manifest, separators=(",", ":"))
