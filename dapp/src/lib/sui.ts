@@ -217,7 +217,7 @@ export function buildDeleteDeploymentTx(deploymentObjectId: string, schemaVersio
 
 // ── Queries ───────────────────────────────────────────────────────────────────
 
-async function allOwned(client: SuiGrpcClient, owner: string, type: string) {
+export async function allOwned(client: SuiGrpcClient, owner: string, type: string) {
   let page = await client.listOwnedObjects({ owner, type, include: { content: true }, limit: 50 });
   const data = [...page.objects];
   while (page.hasNextPage) {

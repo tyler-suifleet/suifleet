@@ -166,8 +166,9 @@ function StorageBadge({ recipeBlobId }: { recipeBlobId: string }) {
   if (!data) return null;
   const missing = [data.recipe === "unavailable" && "recipe", data.artifact === "unavailable" && "artifact"].filter(Boolean);
   if (missing.length === 0) {
+    if (data.confidential) return <span className="inline-flex px-2 py-1 rounded bg-blue-50 text-blue-700" title="Seal-encrypted; only granted devices and accounts can decrypt">Confidential recipe stored</span>;
     return data.recipe === "available" && data.artifact === "available"
-      ? <span className="inline-flex px-2 py-1 rounded bg-green-50 text-green-700">Storage available</span>
+      ? <span className="inline-flex px-2 py-1 rounded bg-green-50 text-green-700">Storage available · public</span>
       : null;
   }
   return (
