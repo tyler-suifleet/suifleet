@@ -6,6 +6,9 @@ boot, real-device identity persistence, networking and OTA acceptance remain
 programmed by this build. This writable development image is not a production
 release or a firmware rollback design. SF-042 remains on hold.
 
+The completed artifact paths, checksums and exact verification are in
+[PI_IMAGE_BUILD.md](PI_IMAGE_BUILD.md).
+
 ## Rebuild
 
 Use the pinned Scarthgap/Rust-mixin layers
