@@ -89,7 +89,27 @@ pub struct Outcome {
     /// reported, never re-applied and never turned into Failed.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub indeterminate: bool,
+    /// A staged daemon update (SF-026): pending until the handoff resolves
+    /// on a later start, never settled as an interrupted apply.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub daemon_handoff: Option<String>,
 }
+/// Read-only check that this build understands the journal in `directory`
+/// and that it belongs to `binding` (no lock: the running daemon holds it).
+pub fn check(directory: &Path, binding: &str) -> anyhow::Result<()> {
+    let path = directory.join("state.json");
+    if !path.exists() {
+        return Ok(());
+    }
+    let state: State = serde_json::from_slice(&std::fs::read(&path)?)
+        .map_err(|error| anyhow::anyhow!("journal {} is not readable by this daemon: {error}", path.display()))?;
+    anyhow::ensure!(
+        state.binding.is_empty() || state.binding == binding,
+        "journal belongs to another network/package/device"
+    );
+    Ok(())
+}
+
 pub struct Journal {
     path: PathBuf,
     _lock: File,

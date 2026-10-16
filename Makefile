@@ -63,12 +63,19 @@ test-ota:
 	$(RUN) python3 scripts/test_firmware_restart.py
 	$(RUN) python3 scripts/test_supervisor.py
 	$(RUN) python3 scripts/test_configuration.py
+	$(RUN) python3 scripts/test_daemon_update.py
 	$(RUN) python3 scripts/test_desired_state.py
 	$(RUN) python3 scripts/test_deployment_control.py
 
 # Supervised components under the shipped systemd units on real systemd and
 # cgroup v2 (SF-014): a disposable privileged container with systemd as PID 1.
 # Runs on the host (needs Docker), not inside the dev container.
+.PHONY: test-supervisor-systemd test-daemon-update-systemd
+# Daemon self-update under the shipped unit on real systemd (SF-026); host, needs Docker.
+test-daemon-update-systemd:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+	PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_daemon_update_systemd.py --evidence "$${SUIFLEET_EVIDENCE:-daemon-update-systemd-evidence.json}"
+
 .PHONY: test-supervisor-systemd
 test-supervisor-systemd:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
