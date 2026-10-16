@@ -24,6 +24,8 @@ unknown outcome into Applied. Inspect the installer/platform's own evidence and
 use a new authorized deployment after resolving ambiguous work. SuiFleet has no
 API that fabricates platform boot confirmation.
 
+Replacing the SuiFleet daemon itself uses a separate, explicitly configured handoff with service-manager fallback; see [daemon self-update](DAEMON_UPDATE.md).
+
 ## Explicit application recovery
 
 For a trusted supervised application, configure a recovery command by component

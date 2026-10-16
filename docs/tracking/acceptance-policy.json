@@ -74,6 +74,21 @@
         "https://github.com/tyler-suifleet/suifleet/issues/32"
       ]
     },
+    "SF-026": {
+      "deferred_checks": [
+        "physical Pi power loss during daemon handoff and platform-specific boot behavior"
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "all source/security findings repaired",
+        "daemon unit tests and make test-ota, including scripts/test_daemon_update.py (working update, startup-failure rollback, preflight rejection, interrupted handoff)",
+        "real systemd/cgroup-v2 evidence under the shipped unit (scripts/test_daemon_update_systemd.py): handoff via service-manager restart, start-timeout and exit rollback without the new daemon",
+        "exact-head ordinary CI and current-head/base testnet status",
+        "fresh independent review of exact head/base/feedback/policy"
+      ]
+    },
     "SF-039": {
       "deferred_checks": [
         "production protected signing environment and provisioned trust roots",

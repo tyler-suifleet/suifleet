@@ -12,6 +12,38 @@ pub struct Config {
     pub runtime: RuntimeConfig,
     #[serde(default)]
     pub components: ComponentsConfig,
+    #[serde(default)]
+    pub daemon_update: DaemonUpdateConfig,
+    /// The file this configuration was loaded from (for the update preflight).
+    #[serde(skip)]
+    pub path: PathBuf,
+}
+
+/// Daemon self-update (SF-026; docs/DAEMON_UPDATE.md). Off unless enabled; the
+/// service must then start `suifleet --launch` so a failed new daemon falls
+/// back without its own help.
+#[derive(Deserialize, Debug, Clone)]
+#[serde(default, deny_unknown_fields)]
+pub struct DaemonUpdateConfig {
+    pub enabled: bool,
+    /// Deployments of this component name carry a new daemon binary.
+    pub component: String,
+    /// Default: `<state_dir>/daemon`.
+    pub install_dir: Option<PathBuf>,
+    /// Starts a new daemon gets to complete startup before rollback.
+    pub max_start_attempts: u32,
+    pub preflight_timeout_seconds: u64,
+}
+impl Default for DaemonUpdateConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            component: "suifleet-daemon".into(),
+            install_dir: None,
+            max_start_attempts: 3,
+            preflight_timeout_seconds: 60,
+        }
+    }
 }
 
 /// Where component dependency candidates may come from.
@@ -393,6 +425,14 @@ impl Config {
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         let raw = std::fs::read_to_string(path)?;
         let mut cfg: Self = toml::from_str(&raw)?;
+        cfg.path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
+        anyhow::ensure!(
+            !cfg.daemon_update.enabled
+                || (crate::deps::valid_name(&cfg.daemon_update.component) && cfg.daemon_update.max_start_attempts > 0
+                    && cfg.daemon_update.preflight_timeout_seconds > 0
+                    && cfg.daemon_update.install_dir.as_ref().is_none_or(|d| d.is_absolute())),
+            "daemon_update needs a valid component name, positive attempts/timeout and an absolute install_dir"
+        );
         anyhow::ensure!(
             cfg.components.recovery_commands.iter().all(|(name, command)| crate::deps::valid_name(name) && !command.trim().is_empty()),
             "application recovery needs valid component names and nonempty commands"
