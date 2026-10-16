@@ -517,10 +517,10 @@
     },
     {
       "key": "SF-022",
-      "title": "Distribute confidential artifacts, secrets and rotated credentials",
-      "priority": "P1",
+      "title": "Require Seal-encrypted artifact delivery and scoped decryption for customer readiness",
+      "priority": "P0",
       "area": "security",
-      "phase": "fleet",
+      "phase": "baseline",
       "kind": "type:feature",
       "depends_on": [
         "SF-008",
@@ -532,14 +532,19 @@
         "contracts/",
         "dapp/src/"
       ],
-      "evidence": "Walrus/chain data is public; there is no confidential secret/config service.",
+      "evidence": "Current artifact uploads send original bytes and recipe JSON to Walrus; hashes and deployment authority do not provide confidentiality. The user explicitly requires Seal encryption and scoped access as a commercial prototype/customer-readiness baseline.",
       "acceptance": [
-        "Implement encrypted policy-controlled delivery/cache with scoped access and revocation.",
-        "Rotate secrets without embedding plaintext in public data or logs.",
-        "Define offline cache expiry and deletion behavior."
+        "Encrypt proprietary artifacts and confidential recipe/configuration content client-side before any publisher/relay/Walrus upload. Default the customer-facing path to confidential delivery; allow clearly labeled explicit public artifacts for public/open-source tests. Never silently fall back to plaintext.",
+        "Define versioned Seal policy identities for releases/artifacts and explicit account/device/group decryption scopes. An authorized administrator grants/revokes access with signed onchain transactions; recipients use their own keys. Enforce publish/deploy/admin operations separately through actual Move authority, not frontend visibility or possession of a decryption key. Document any role/capability transfer and delegation semantics.",
+        "Implement unattended edge Seal authentication with its own enrolled device signer and bounded session credentials, including correct personal-message/session signing for supported software/hardware signers. Never copy the administrator wallet seed, recovery phrase or private key to an edge client or require an administrator signature per download. Keep private keys local to their signer.",
+        "Check active device identity and policy scope before key release; validate configured key-server identities and transport. Include device/group authorization, removal, revoked/rotated identities, policy/package upgrades and old-policy namespace bypass attempts. Do not promise atomic revocation across asynchronously observed chain state.",
+        "Decrypt locally with bounded resource use and verify authenticated encryption plus the defined artifact/recipe digests before execution. Specify which metadata/digests are public and ciphertext-versus-plaintext binding. Never log/cache plaintext confidential data or reusable decryption keys outside explicitly protected runtime/cache paths.",
+        "Define key/session lifetime, rotation, offline caching/expiry and disk cleanup. State that previously obtained plaintext or decryption keys cannot be remotely revoked; fresh protected versions need suitable new encryption identities/keys. Define whether offline execution is permitted and the resulting revocation limitation.",
+        "Choose and validate suitable production key providers/authentication, fees, availability and recovery; provider API credentials are distinct from device identity and must not be baked into public frontend assets/images. Respect Seal documented data-sensitivity exclusions; no unqualified KMS/HSM/regulated-data claims.",
+        "Provide reproducible encrypted upload -> authorized edge decryption/application -> onchain result acceptance and unauthorized-account/device, tamper, wrong-network/policy, expiry, keyserver outage, rotation/revocation and offline-cache failures. Public OTA smoke tests may proceed earlier but do not establish confidential customer readiness."
       ],
-      "validation": "Cross-device unauthorized access/revocation/rotation/offline-cache tests.",
-      "description": "Distribute confidential artifacts, secrets and rotated credentials. Implement encrypted policy-controlled delivery/cache with scoped access and revocation."
+      "validation": "Move policy/authority and upgrade tests; frontend typecheck/build with verified pre-upload encryption; Rust signer/session/decryption tests and encrypted OTA simulator; authorized public-testnet encrypted delivery/effects checks. Track real extension-wallet/Pi acceptance separately in SF-010/SF-031. Record actual key-provider/network costs and limitations; no plaintext fallback or administrator secret distribution.",
+      "description": "Implement Seal-based encryption before Walrus upload and authenticated, policy-scoped edge decryption. This is required before claiming readiness for proprietary customer deployments; intentionally public test artifacts remain an explicit mode. Existing deployment/admin authority remains enforced separately by Move capabilities and roles."
     },
     {
       "key": "SF-023",
@@ -766,10 +771,11 @@
         "Exercise offline catch-up, daemon restart, report retry, recipe/artifact tampering, unauthorized targets and failed updater; expected failures must not report Applied.",
         "Keep private keys on their intended host, separate manual wallet steps from unattended test-account automation, document testnet resets/retention, and preserve device identity/journal during cleanup.",
         "Publish a capability-based acceptance matrix so future runtime/config/rollback/self-update features add cases; do not claim this baseline tests every Greengrass feature or A/B firmware safety.",
-        "Start the enrolled client before creating the first test deployment so enrollment baseline behavior does not intentionally skip it; verify a fetched/applied test component and matching chain receipt. A read-only authenticated inventory/health query is an optional earlier connectivity smoke test, not OTA acceptance."
+        "Start the enrolled client before creating the first test deployment so enrollment baseline behavior does not intentionally skip it; verify a fetched/applied test component and matching chain receipt. A read-only authenticated inventory/health query is an optional earlier connectivity smoke test, not OTA acceptance.",
+        "Retain a clearly labeled public-artifact baseline smoke test, then add the SF-022 Seal-encrypted artifact/recipe profile: permitted account/device decrypts and runs; unauthorized/revoked identities, ciphertext tamper and key-service failures cannot execute or report success. Missing confidential-profile evidence must remain explicit; a public smoke pass does not establish proprietary-customer readiness."
       ],
       "validation": "Offline harness tests and an actual frontend-wallet -> Sui/Walrus -> Pi -> on-chain receipt run, with reproducible evidence and explicit skipped/blocked cases. Platform installer/reboot/power-loss evidence is recorded separately for the selected platform; SF-016 validates SuiFleet handoff, journal preservation and explicit results, not ownership of firmware recovery.",
-      "description": "Run wallet-to-testnet-to-Raspberry-Pi OTA acceptance tests. Provide an opt-in test runner with local-network and Sui testnet profiles using a verified network manifest, compatible Sui/Walrus endpoints and explicitly supplied funded test accounts; fail preflight clearly when APIs or funding are unavailable.\n\nThis is a deferred integration acceptance ticket. It must not be used as a blanket dependency for unrelated implementation merges; its own live/hardware/production evidence is still required before completion."
+      "description": "Run wallet-to-testnet-to-Raspberry-Pi OTA acceptance tests. Provide an opt-in test runner with local-network and Sui testnet profiles using a verified network manifest, compatible Sui/Walrus endpoints and explicitly supplied funded test accounts; fail preflight clearly when APIs or funding are unavailable.\n\nThis is a deferred integration acceptance ticket. It must not be used as a blanket dependency for unrelated implementation merges; its own live/hardware/production evidence is still required before completion. Customer-ready proprietary deployments additionally require SF-022 encrypted-delivery acceptance; this does not block earlier public-artifact Pi smoke testing."
     },
     {
       "key": "SF-032",
@@ -1233,6 +1239,31 @@
       ],
       "validation": "JSON, formula arithmetic, source/link and scope checks plus independent review; documentation-only, no mainnet transactions or full application build.",
       "description": "Write a network-first business plan and reassess opportunities using actual protocol economics, excluding labor from the base comparison and keeping unmeasured service costs explicit."
+    },
+    {
+      "key": "SF-052",
+      "title": "Record mandatory Seal confidentiality and explain wallet delegation and edge authentication",
+      "priority": "P1",
+      "area": "security",
+      "phase": "baseline",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "docs/tracking/backlog.json",
+        "docs/tracking/github-state.json",
+        "docs/BUSINESS_PLAN.md",
+        "docs/ACCESS_AND_ENCRYPTION.md",
+        "README.md"
+      ],
+      "evidence": "User requires tickets to reflect customer-ready Seal encryption and asks how administrators grant wallet access and how edge authentication credentials are provisioned. Existing scoped roles/device keys must be distinguished from planned Seal integration.",
+      "description": "Update existing SF-022/SF-031 acceptance and commercial/security guidance; explain implemented wallet delegation and device identity versus planned Seal sessions. Documentation/tracker changes only.",
+      "acceptance": [
+        "Make Seal-encrypted proprietary delivery an explicit customer-readiness gate without blocking clearly labeled public OTA smoke tests.",
+        "Describe actual scoped deployer roles/revocation and separate decryption privileges from operational authority.",
+        "Explain local device key generation, enrollment, optional claim credentials and future headless Seal sessions; no admin passphrase/private key distribution.",
+        "Preserve honest current-versus-planned boundaries, revocation/cache limitations and unmeasured production key-service costs."
+      ],
+      "validation": "Source/issue consistency, local-link/JSON checks, offline tracking tests and independent review; no application implementation or mainnet transactions."
     }
   ]
 }
