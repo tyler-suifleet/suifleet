@@ -101,15 +101,17 @@ class Simulator:
         self.managed = set()
         self.controls = {}
 
-    def add(self, id, *, creator=OPERATOR, groups=None, direct=True, bad_hash=False, run=False, expired=False):
+    def add(self, id, *, creator=OPERATOR, groups=None, direct=True, bad_hash=False, run=False, expired=False, event=None, recipe=None):
+        """Publish deployment `id`. `event`/`recipe` override fields before
+        publication: a polling daemon must never see a half-built deployment."""
         digest = "f" * 64 if bad_hash else HASH
-        event = dict(deployment_id=id, component_name=f"app-{id}", version="1.0.0",
+        fields = dict(deployment_id=id, component_name=f"app-{id}", version="1.0.0",
             recipe_blob_id=f"recipe-{id}", artifact_sha256=digest,
-            target_groups=groups or [], target_devices=[DEVICE] if direct else [], creator=creator)
-        recipe = dict(schemaVersion=_PROTOCOL_RECIPE_VERSION, componentName=event["component_name"], componentVersion="1.0.0",
-            artifactBlobId="expired" if expired else "artifact", artifactSha256=digest, lifecycle={"run": "sleep 10"} if run else {}, configuration={})
-        self.recipes[event["recipe_blob_id"]] = recipe
-        self.events.append(dict(id={"txDigest":f"event-{len(self.events)}", "eventSeq":"0"}, parsedJson=event))
+            target_groups=groups or [], target_devices=[DEVICE] if direct else [], creator=creator) | (event or {})
+        self.recipes[fields["recipe_blob_id"]] = dict(schemaVersion=_PROTOCOL_RECIPE_VERSION, componentName=fields["component_name"],
+            componentVersion=fields["version"], artifactBlobId="expired" if expired else "artifact", artifactSha256=fields["artifact_sha256"],
+            lifecycle={"run": "sleep 10"} if run else {}, configuration={}) | (recipe or {})
+        self.events.append(dict(id={"txDigest":f"event-{len(self.events)}", "eventSeq":"0"}, parsedJson=fields))
 
     def obj(self, id):
         if id in self.deleted:
