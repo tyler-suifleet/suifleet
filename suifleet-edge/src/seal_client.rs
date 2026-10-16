@@ -694,11 +694,8 @@ mod tests {
         fn address(&self) -> String {
             crate::identity::address(&self.0)
         }
-        fn sign(&self, tx: &[u8]) -> anyhow::Result<Vec<u8>> {
-            Ok(crate::identity::signature(&self.0, tx))
-        }
-        fn sign_personal_message(&self, message: &[u8]) -> anyhow::Result<Vec<u8>> {
-            Ok(crate::identity::personal_message_signature(&self.0, message))
+        fn sign_digest(&self, digest: &[u8]) -> anyhow::Result<Vec<u8>> {
+            crate::identity::Ed25519File(self.0.clone()).sign_digest(digest)
         }
     }
 

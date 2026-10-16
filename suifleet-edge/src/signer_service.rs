@@ -11,7 +11,11 @@
 //!   production, the main process of `suifleet.service`, by the PID and start
 //!   time the unit records as root when it starts, see [`is_daemon`]);
 //! - enrollment: exactly `enrollment::enroll` with the manifest's registry,
-//!   sponsored by another address; only from root (provisioning).
+//!   sponsored by another address; only from root (provisioning);
+//! - telemetry (SF-019): a personal message that is exactly one canonical,
+//!   bounded telemetry snapshot of the manifest's chain and registry, signed
+//!   by this key; only from the daemon's main process, like status reports.
+//!   A personal-message signature is never valid as a transaction.
 //!
 //! Any process may ask for the device's public address. Everything else is
 //! refused. Component processes run as the daemon user and may reach the
@@ -33,7 +37,8 @@ use std::{
 use sui_sdk_types::{Address, Argument, Command, Input, Transaction};
 
 pub const MAX_ENROLL_BUDGET: u64 = 50_000_000;
-const MAX_REQUEST_BYTES: u64 = 64 * 1024;
+/// Room for a base64 telemetry snapshot of [`crate::telemetry::MAX_MESSAGE_BYTES`].
+const MAX_REQUEST_BYTES: u64 = 128 * 1024;
 const IO_TIMEOUT: Duration = Duration::from_secs(10);
 
 fn default_socket() -> PathBuf {
@@ -119,6 +124,7 @@ impl ServiceConfig {
             registry: Address::from_str(&manifest.shared_objects.registry.id)?,
             cap: Address::from_str(&config.device_cap_id)?,
             max_budget: config.max_gas_budget,
+            chain_identifier: manifest.chain_identifier.clone(),
         };
         Ok((config, policy))
     }
@@ -165,6 +171,8 @@ pub struct Policy {
     pub registry: Address,
     pub cap: Address,
     pub max_budget: u64,
+    /// The manifest's chain; telemetry snapshots must name it.
+    pub chain_identifier: String,
 }
 
 fn input<'a>(inputs: &'a [Input], argument: &Argument) -> anyhow::Result<&'a Input> {
@@ -225,6 +233,21 @@ pub fn check(policy: &Policy, bytes: &[u8]) -> anyhow::Result<Intent> {
         }
         (module, function) => anyhow::bail!("{module}::{function} is not a permitted signing intent"),
     }
+}
+
+/// Check a telemetry personal message: exactly the canonical JSON of one
+/// bounded snapshot, of this chain and registry, naming this key as signer.
+/// Its content is otherwise the daemon's own report, like a status report's.
+pub fn check_telemetry(policy: &Policy, message: &[u8]) -> anyhow::Result<()> {
+    use crate::telemetry::{Snapshot, MAX_MESSAGE_BYTES, SCHEMA};
+    anyhow::ensure!(message.len() <= MAX_MESSAGE_BYTES, "telemetry snapshot exceeds {MAX_MESSAGE_BYTES} bytes");
+    let snapshot: Snapshot = serde_json::from_slice(message).map_err(|e| anyhow::anyhow!("not a telemetry snapshot: {e}"))?;
+    anyhow::ensure!(serde_json::to_vec(&snapshot)? == message, "telemetry snapshot is not in canonical form");
+    anyhow::ensure!(snapshot.schema == SCHEMA, "unsupported telemetry schema {}", snapshot.schema);
+    anyhow::ensure!(snapshot.chain_identifier == policy.chain_identifier, "telemetry snapshot is for another chain");
+    anyhow::ensure!(Address::from_str(&snapshot.registry).ok() == Some(policy.registry), "telemetry snapshot is not for this fleet's registry");
+    anyhow::ensure!(Address::from_str(&snapshot.signer).ok() == Some(policy.device), "telemetry snapshot names another signer");
+    Ok(())
 }
 
 /// Who may ask for what.
@@ -467,6 +490,17 @@ pub fn handle(
                 }
                 Ok(json!({ "signature": STANDARD.encode(key.sign(&bytes)?) }))
             }
+            Some("sign_telemetry") => {
+                anyhow::ensure!(
+                    daemon(),
+                    "caller pid {} uid {} may not request telemetry signatures (only the daemon's main process)",
+                    peer.pid,
+                    peer.uid
+                );
+                let message = STANDARD.decode(request["message"].as_str().unwrap_or(""))?;
+                check_telemetry(policy, &message)?;
+                Ok(json!({ "signature": STANDARD.encode(key.sign_personal_message(&message)?) }))
+            }
             _ => anyhow::bail!("unknown request"),
         }
     })();
@@ -561,6 +595,13 @@ impl TxSigner for ServiceSigner {
         let response = request(&self.socket, &json!({ "op": "sign", "tx": STANDARD.encode(tx) }))?;
         Ok(STANDARD.decode(response["signature"].as_str().ok_or_else(|| anyhow::anyhow!("signer returned no signature"))?)?)
     }
+    fn sign_personal_message(&self, message: &[u8]) -> anyhow::Result<Vec<u8>> {
+        let response = request(&self.socket, &json!({ "op": "sign_telemetry", "message": STANDARD.encode(message) }))?;
+        Ok(STANDARD.decode(response["signature"].as_str().ok_or_else(|| anyhow::anyhow!("signer returned no signature"))?)?)
+    }
+    fn sign_digest(&self, _: &[u8]) -> anyhow::Result<Vec<u8>> {
+        anyhow::bail!("the signing service signs only requests it can check, never a bare digest")
+    }
 }
 
 /// The daemon side of Seal sessions with `kind = "service"`: the service
@@ -616,6 +657,7 @@ mod tests {
             registry: Address::from_str("0x13").unwrap(),
             cap: Address::from_str("0x11").unwrap(),
             max_budget: 50_000_000,
+            chain_identifier: "4c78adac".into(),
         }
     }
 
@@ -700,6 +742,76 @@ mod tests {
         fn sign(&self, _: &[u8]) -> anyhow::Result<Vec<u8>> {
             Ok(vec![7])
         }
+        fn sign_digest(&self, _: &[u8]) -> anyhow::Result<Vec<u8>> {
+            Ok(vec![8])
+        }
+    }
+
+    fn telemetry(edit: impl FnOnce(&mut crate::telemetry::Snapshot)) -> Vec<u8> {
+        use crate::telemetry::*;
+        let binding = Binding {
+            chain_identifier: "4c78adac".into(),
+            registry: "0x13".into(),
+            device_id: "0x10".into(),
+            interval_seconds: 60,
+            poll_seconds: 30,
+            started_ms: 1,
+            boot_id: None,
+        };
+        let mut snapshot = snapshot(&binding, "0xa0", 1, 0, SyncHealth::default(), Inventory::default(), 2);
+        edit(&mut snapshot);
+        serde_json::to_vec(&snapshot).unwrap()
+    }
+
+    #[test]
+    fn signs_only_this_devices_canonical_telemetry() {
+        let p = policy();
+        check_telemetry(&p, &telemetry(|_| {})).unwrap();
+        // The registry may be written in any address form.
+        check_telemetry(&p, &telemetry(|s| s.registry = format!("0x{}", "0".repeat(62) + "13"))).unwrap();
+        for (label, bad) in [
+            ("another chain", telemetry(|s| s.chain_identifier = "35834a8a".into())),
+            ("another registry", telemetry(|s| s.registry = "0x14".into())),
+            ("another signer", telemetry(|s| s.signer = "0xa1".into())),
+            ("unparsable signer", telemetry(|s| s.signer = "me".into())),
+            ("another schema", telemetry(|s| s.schema = 2)),
+        ] {
+            assert!(check_telemetry(&p, &bad).is_err(), "{label} was accepted");
+        }
+        let canonical = telemetry(|_| {});
+        let mut padded = canonical.clone();
+        padded.push(b' ');
+        let mut extra: serde_json::Value = serde_json::from_slice(&canonical).unwrap();
+        extra["extra"] = json!(1);
+        let oversized = telemetry(|s| s.reasons = vec!["x".repeat(crate::telemetry::MAX_MESSAGE_BYTES)]);
+        for (label, bad) in [
+            ("trailing whitespace", padded),
+            ("unknown field", serde_json::to_vec(&extra).unwrap()),
+            ("oversized", oversized),
+            ("a transaction", Tx::default().bytes()),
+            ("garbage", b"not telemetry".to_vec()),
+        ] {
+            assert!(check_telemetry(&p, &bad).is_err(), "{label} was accepted");
+        }
+    }
+
+    #[test]
+    fn telemetry_signatures_only_for_the_daemon() {
+        let p = policy();
+        let sign = json!({ "op": "sign_telemetry", "message": STANDARD.encode(telemetry(|_| {})) });
+        let daemon = Peer { pid: 100, uid: 990 };
+        assert_eq!(handle(&sign, daemon, &Key, &p, None, || true)["signature"], STANDARD.encode([8]));
+        let refused = handle(&sign, Peer { pid: 101, uid: 990 }, &Key, &p, None, || false);
+        assert!(refused["error"].as_str().unwrap().contains("only the daemon's main process"), "{refused}");
+        // Root (provisioning) gets no telemetry signatures either.
+        assert!(handle(&sign, Peer { pid: 1, uid: 0 }, &Key, &p, None, || false)["error"].is_string());
+        let forged = json!({ "op": "sign_telemetry", "message": STANDARD.encode(telemetry(|s| s.registry = "0x14".into())) });
+        assert!(handle(&forged, daemon, &Key, &p, None, || true)["error"].as_str().unwrap().contains("registry"));
+        // A transaction is never signed as a personal message, nor telemetry as a transaction.
+        let tx = json!({ "op": "sign_telemetry", "message": STANDARD.encode(Tx::default().bytes()) });
+        assert!(handle(&tx, daemon, &Key, &p, None, || true)["error"].is_string());
+        let swapped = json!({ "op": "sign", "tx": STANDARD.encode(telemetry(|_| {})) });
+        assert!(handle(&swapped, daemon, &Key, &p, None, || true)["error"].is_string());
     }
 
     #[test]
@@ -831,7 +943,10 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("suifleet-record-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("daemon.main");
-        let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        // Registered, or a concurrently running supervisor test's orphan sweep
+        // kills it (the test process is a subreaper there).
+        use crate::supervisor::{forget_std_tracked, spawn_std_tracked};
+        let mut child = spawn_std_tracked(std::process::Command::new("sleep").arg("30")).unwrap();
         let sleep = std::fs::read_link(format!("/proc/{}/exe", child.id())).unwrap();
         assert!(record(&path, child.id(), &sleep).unwrap());
         let main = MainProcess::parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
@@ -853,15 +968,17 @@ mod tests {
             child.kill().unwrap();
             child.wait().unwrap();
         }
+        forget_std_tracked(child.id());
         // A main process not running the base binary (here: sleep, against
         // this test binary) is not recorded, and an earlier record is removed.
-        let mut other = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let mut other = spawn_std_tracked(std::process::Command::new("sleep").arg("30")).unwrap();
         assert!(path.exists());
         assert!(!record(&path, other.id(), Path::new("/proc/self/exe")).unwrap());
         assert!(!path.exists(), "a stale record survived");
         assert!(!record(&path, other.id(), Path::new("/proc/self/exe")).unwrap());
         other.kill().unwrap();
         other.wait().unwrap();
+        forget_std_tracked(other.id());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -875,7 +992,7 @@ mod tests {
         let uid = unsafe { libc::getuid() };
         std::thread::spawn(move || {
             let p = policy();
-            for stream in listener.incoming().take(3) {
+            for stream in listener.incoming().take(5) {
                 let mut stream = stream.unwrap();
                 let request = read_request(&stream).unwrap();
                 let peer = peer(&stream).unwrap();
@@ -888,5 +1005,14 @@ mod tests {
         assert_eq!(signer.sign(&Tx::default().bytes()).unwrap(), vec![7]);
         let refused = signer.sign(&Tx { function: dm::DELETE_DEPLOYMENT, ..Tx::default() }.bytes()).unwrap_err();
         assert!(format!("{refused:#}").contains("not a permitted signing intent"), "{refused:#}");
+        // A full-size telemetry snapshot fits in one request.
+        let large = telemetry(|s| {
+            s.reasons = vec![];
+            s.boot_id = Some("b".repeat(crate::telemetry::MAX_MESSAGE_BYTES - 400));
+        });
+        assert!(large.len() > crate::telemetry::MAX_MESSAGE_BYTES - 200, "{}", large.len());
+        assert_eq!(signer.sign_personal_message(&large).unwrap(), vec![8]);
+        let refused = signer.sign_personal_message(b"anything").unwrap_err();
+        assert!(format!("{refused:#}").contains("not a telemetry snapshot"), "{refused:#}");
     }
 }

@@ -12,6 +12,9 @@ pub struct Config {
     pub runtime: RuntimeConfig,
     #[serde(default)]
     pub components: ComponentsConfig,
+    /// Heartbeat and health telemetry (SF-019); none when omitted.
+    #[serde(default)]
+    pub telemetry: Option<TelemetryConfig>,
     #[serde(default)]
     pub daemon_update: DaemonUpdateConfig,
     /// Confidential delivery (SF-022); without it, Seal-encrypted recipes and
@@ -21,6 +24,27 @@ pub struct Config {
     /// The file this configuration was loaded from (for the update preflight).
     #[serde(skip)]
     pub path: PathBuf,
+}
+
+/// `[telemetry]`: signed snapshots to the fleet indexer (docs/TELEMETRY.md).
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct TelemetryConfig {
+    /// Fleet indexer base URL; snapshots go to `{url}/v1/telemetry`.
+    pub url: String,
+    #[serde(default = "default_telemetry_interval")]
+    pub interval_seconds: u64,
+    /// Snapshots kept while the indexer is unreachable; the oldest beyond
+    /// this are dropped (and counted in later snapshots).
+    #[serde(default = "default_telemetry_buffer")]
+    pub buffer_max: usize,
+}
+
+fn default_telemetry_interval() -> u64 {
+    60
+}
+fn default_telemetry_buffer() -> usize {
+    1024
 }
 
 /// Daemon self-update (SF-026; docs/DAEMON_UPDATE.md). Off unless enabled; the
@@ -628,12 +652,31 @@ impl Config {
             cfg.walrus.download_timeout_seconds > 0,
             "walrus.download_timeout_seconds must be positive"
         );
+        if let Some(telemetry) = &cfg.telemetry {
+            telemetry.validate()?;
+        }
         Ok(cfg)
     }
 }
 
 fn default_timeout() -> u64 {
     600
+}
+
+impl TelemetryConfig {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        use crate::telemetry::{MAX_BUFFER, MAX_INTERVAL_SECONDS, MIN_INTERVAL_SECONDS};
+        endpoint(&self.url).map_err(|e| e.context("invalid telemetry.url"))?;
+        anyhow::ensure!(
+            (MIN_INTERVAL_SECONDS..=MAX_INTERVAL_SECONDS).contains(&self.interval_seconds),
+            "telemetry.interval_seconds must be {MIN_INTERVAL_SECONDS}..={MAX_INTERVAL_SECONDS}"
+        );
+        anyhow::ensure!(
+            (1..=MAX_BUFFER).contains(&self.buffer_max),
+            "telemetry.buffer_max must be 1..={MAX_BUFFER}"
+        );
+        Ok(())
+    }
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -737,6 +780,23 @@ mod tests {
         m.validate().unwrap();
         m.type_origins.insert(crate::catalog::TYPES[0].into(), "bad".into());
         assert!(m.validate().is_err());
+    }
+    #[test]
+    fn telemetry_is_optional_and_bounded() {
+        let base = "[sui]\nmanifest_path='deployment.json'\n[device]\nkeypair_path='k'\n\
+            device_object_id='0x1'\ndevice_cap_id='0x2'\n[apply]\ncommand='true'\n";
+        assert!(toml::from_str::<Config>(base).unwrap().telemetry.is_none());
+        let parsed: Config = toml::from_str(&format!("{base}[telemetry]\nurl='https://fleet.example'\n")).unwrap();
+        let telemetry = parsed.telemetry.unwrap();
+        assert_eq!((telemetry.interval_seconds, telemetry.buffer_max), (60, 1024));
+        telemetry.validate().unwrap();
+        for bad in ["url='ftp://fleet.example'", "url='https://u:p@fleet.example'",
+                    "url='https://fleet.example'\ninterval_seconds=5", "url='https://fleet.example'\ninterval_seconds=3601",
+                    "url='https://fleet.example'\nbuffer_max=0", "url='https://fleet.example'\nbuffer_max=10001"] {
+            let parsed: Config = toml::from_str(&format!("{base}[telemetry]\n{bad}\n")).unwrap();
+            assert!(parsed.telemetry.unwrap().validate().is_err(), "{bad}");
+        }
+        assert!(toml::from_str::<Config>(&format!("{base}[telemetry]\nurl='https://x'\ntoken='t'\n")).is_err());
     }
     #[test]
     fn daemon_update_is_refused_with_the_service_signer() {

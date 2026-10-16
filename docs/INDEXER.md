@@ -49,7 +49,8 @@ suifleet-indexer serve --manifest deployment.json --db /var/lib/suifleet-indexer
 
 **Limits.**
 - No hosted instance exists. A systemd unit and packaging are not provided yet.
-- The dApp still reads the chain directly. Switching it to the API is follow-up work.
+- The dApp still reads the chain directly. Switching it to the API is follow-up work. Device health is the exception: the dApp reads it from `/v1/health` and verifies each report against the chain ([TELEMETRY.md](TELEMETRY.md)).
+- `--cors-origin ORIGIN` lets one browser origin, such as the dApp, call the API.
 
 ## Auth
 
@@ -74,6 +75,8 @@ suifleet-indexer serve --manifest deployment.json --db /var/lib/suifleet-indexer
 | `GET /v1/deployments?creator=&component=&group=&device=` | Deployments. `device=` matches direct targets and groups whose admin created the deployment, the same rule devices apply |
 | `GET /v1/{devices,groups,deployments}/{id}` | One item. A deployment adds `resolved_devices` and authoritative `receipts`. Deployments carry `catalog_version` (see above) |
 | `GET /v1/changes?after=SEQ&limit=&wait=SECONDS` | Integration feed: `{seq, kind, object_id, checkpoint, payload}` in order. Long-polls up to 30 s. Resume with `after=next` |
+| `POST /v1/telemetry` | Signed device telemetry ingress (SF-019). It takes no token, because each snapshot carries the device's own signature. See [TELEMETRY.md](TELEMETRY.md) |
+| `GET /v1/health`, `/v1/health/summary`, `/v1/devices/{id}/telemetry` | Device status, last seen and inventory; fleet counts; stored signed reports ([TELEMETRY.md](TELEMETRY.md)). Need `--telemetry-db` |
 | `POST /v1/transactions/{add-devices,remove-devices,create-deployment}` | `{transaction, digest, sender, summary}`: base64 BCS of the sign-ready transaction, with gas and versions resolved by node simulation |
 
 **Pagination.**
