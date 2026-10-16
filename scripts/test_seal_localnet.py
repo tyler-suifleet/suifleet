@@ -24,10 +24,15 @@ Judged from on-chain receipts and the daemon's journal:
     decrypts with its own key through the official SDK
   - no confidential plaintext in the offline component cache
 
+With --upgrade-from REF, the contracts at REF (without seal_policy) are
+published first and its registry is reused after a compatible upgrade to this
+tree: Seal's namespace is then the original package ID while approvals call
+the upgraded package, as on public networks.
+
 Run inside the dev image with a throwaway node and faucet, no other network:
 
     SUI_CONFIG_DIR=/tmp/sui-config sui start --with-faucet --force-regenesis &
-    python3 scripts/test_seal_localnet.py
+    python3 scripts/test_seal_localnet.py [--upgrade-from main]
 
 It refuses non-loopback endpoints and never reads the normal wallet.
 """
@@ -83,7 +88,7 @@ def seal_tool(request):
     return json.loads(result.stdout.strip().splitlines()[-1])
 
 
-def run(rpc_url, faucet_url):
+def run(rpc_url, faucet_url, upgrade_from=None):
     for url in (rpc_url, faucet_url):
         if urlparse(url).hostname not in ("localhost", "127.0.0.1", "::1"):
             raise ValueError("this test requires an isolated loopback node and faucet")
@@ -156,15 +161,41 @@ def run(rpc_url, faucet_url):
                 assert published["effects"]["status"]["status"] == "success", published["effects"]["status"]
                 return published, next(c["packageId"] for c in published["objectChanges"] if c["type"] == "published")
 
-            published, package = publish(ROOT / "contracts", "contracts")
-            registry = created(published, "::device_registry::DeviceRegistry")[0]
-            upgrade_cap = created(published, "::package::UpgradeCap")[0]
+            if upgrade_from:
+                base = root / "base-contracts"
+                shutil.copytree(ROOT / "contracts", base, ignore=shutil.ignore_patterns("build", "Published.toml", "sources", "tests"))
+                (base / "sources").mkdir()
+                names = subprocess.check_output(["git", "ls-tree", "--name-only", f"{upgrade_from}:contracts/sources"], cwd=ROOT, text=True).split()
+                assert "seal_policy.move" not in names, "the base must predate seal_policy"
+                for name in names:
+                    (base / "sources" / name).write_bytes(subprocess.check_output(["git", "show", f"{upgrade_from}:contracts/sources/{name}"], cwd=ROOT))
+                published, original = publish(base, "contracts")
+                registry = created(published, "::device_registry::DeviceRegistry")[0]
+                upgrade_cap = created(published, "::package::UpgradeCap")[0]
+                head = root / "contracts"
+                shutil.rmtree(head / "sources")
+                shutil.copytree(ROOT / "contracts/sources", head / "sources")
+                upgraded = client("test-upgrade", head, "--build-env", "testnet", "--pubfile-path", root / "Pub.contracts.toml",
+                                  "--upgrade-capability", upgrade_cap, "--gas-budget", "500000000", "--silence-warnings")
+                assert upgraded["effects"]["status"]["status"] == "success", upgraded["effects"]["status"]
+                package = next(c["packageId"] for c in upgraded["objectChanges"] if c["type"] == "published")
+                assert dm.object_id(package) != dm.object_id(original)
+            else:
+                published, package = publish(ROOT / "contracts", "contracts")
+                registry = created(published, "::device_registry::DeviceRegistry")[0]
+                upgrade_cap = created(published, "::package::UpgradeCap")[0]
             _, key_server_package = publish(ROOT / "tests/seal-key-server", "key-server")
             manifest = dm.resolve(SimpleNamespace(chain_identifier=chain_id, rpc=rpc_url, package=package,
                                                   upgrade_cap=upgrade_cap, registry=registry, network="localnet",
                                                   publisher=aggregator, aggregator=aggregator))
             assert all(name in manifest["type_origins"] for name in dm.SEAL_POLICY_TYPES), "seal_policy origins missing"
             namespace = manifest["type_origins"]["device_registry::DeviceRegistry"]
+            if upgrade_from:
+                # Existing types keep the base package's origin; seal_policy is new.
+                assert dm.object_id(namespace) == dm.object_id(original)
+                assert all(dm.object_id(manifest["type_origins"][n]) == dm.object_id(package) for n in dm.SEAL_POLICY_TYPES)
+                print(f"PASS: compatible upgrade from {upgrade_from}: registry reused, seal_policy introduced by the upgrade, "
+                      "Seal namespace is the original package")
 
             # The device's identity is generated locally and held by the signing service.
             key = root / "device.key"
@@ -429,5 +460,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--rpc", default="http://127.0.0.1:9000")
     parser.add_argument("--faucet", default="http://127.0.0.1:9123/v2/gas")
+    parser.add_argument("--upgrade-from", help="git ref whose contracts are published first, then upgraded to this tree")
     args = parser.parse_args()
-    run(args.rpc, args.faucet)
+    run(args.rpc, args.faucet, args.upgrade_from)
