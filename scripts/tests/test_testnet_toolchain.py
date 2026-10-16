@@ -15,6 +15,7 @@ from unittest.mock import Mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import sui_toolchain as tc
 from testnet_budget import Budget
+import live_package_upgrade as live
 
 ROOT = Path(__file__).resolve().parents[2]
 SENDER = '0x' + '0e' * 32
@@ -137,6 +138,11 @@ class Pins(unittest.TestCase):
         pins = tc.framework_pins(ROOT / 'contracts/Move.lock')
         self.assertEqual(set(pins), {'MoveStdlib', 'Sui', 'sui_edge'})
         self.assertIn('rev = "', pins['Sui'])
+
+    def test_fixture_key_binds_pair_and_compiler(self):
+        self.assertEqual(live.fixture_key('a', 'a'), 'a@1.81.1-e04cf9aa915c')
+        self.assertEqual(live.fixture_key('a', 'b'), 'a..b@1.81.1-e04cf9aa915c')
+        self.assertNotEqual(live.fixture_key('a', 'b'), live.fixture_key('a', 'c'))
 
     @unittest.skipUnless(IN_CONTAINER, 'installed toolchain exists only in the dev image')
     def test_installed_toolchain(self):
