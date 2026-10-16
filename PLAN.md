@@ -26,7 +26,7 @@ Updated 2026-10-13. The original scaffold checklist was stale. The feature inven
 - [ ] Component catalog, semver/dependencies/platform manifests.
 - [ ] Desired-state revisions, membership reconciliation and multi-component transactions.
 - [ ] Component lifecycle supervisor, configuration management and local CLI.
-- [ ] Application rollback, health validation, reboot-aware A/B firmware and daemon self-update.
+- [ ] Application rollback, health validation, configured platform-installer handoff with explicit results and daemon self-update.
 - [ ] Canary/rate-limited rollout, abort gates, pause/cancel/expiry and maintenance windows.
 - [ ] Heartbeats, installed inventory, fleet health, logs, diagnostics and alerts.
 - [ ] Fleet provisioning, rotation/revocation, delegated roles and confidential secrets.
