@@ -1,0 +1,728 @@
+{
+  "description": "SF-019 telemetry cases shared by suifleet-indexer (src/telemetry.rs) and the dApp (scripts/test_telemetry.cjs); the edge signs the same bytes to the same signature. 'signed' was produced by @mysten/sui Ed25519Keypair (secret key 32 x 0x07) signPersonalMessage over the exact message bytes. Status cases: status and stable codes for a device's newest report from its current signer (docs/TELEMETRY.md).",
+  "signed": {
+    "signer": "0xa0ccc8bcc83f6c628340134f8546a21e0618fd1aaa02432bba454c4a2c2233da",
+    "snapshot": {
+      "schema": 1,
+      "chain_identifier": "abcd1234",
+      "registry": "0x5",
+      "device_id": "0xd1",
+      "signer": "0xa0ccc8bcc83f6c628340134f8546a21e0618fd1aaa02432bba454c4a2c2233da",
+      "seq": 1792113000000,
+      "observed_ms": 1792113000000,
+      "interval_seconds": 60,
+      "daemon_version": "0.2.1",
+      "boot_id": "8f0c1b2e-58a4-4c39-9a51-2f6d0e7c9b11",
+      "started_ms": 1792112000000,
+      "dropped": 2,
+      "sync": {
+        "last_success_ms": 1792112995000,
+        "consecutive_failures": 0,
+        "last_error": null
+      },
+      "pending_receipts": 1,
+      "components": [
+        {
+          "name": "firmware",
+          "version": "3.1.0",
+          "deployment_id": "0xa",
+          "installed": true,
+          "supervised": false,
+          "phase": null,
+          "restarts": null,
+          "last_exit": null,
+          "since_ms": null
+        },
+        {
+          "name": "svc",
+          "version": "1.0.0",
+          "deployment_id": "0xe",
+          "installed": true,
+          "supervised": true,
+          "phase": "backoff",
+          "restarts": 2,
+          "last_exit": "exit status: 1",
+          "since_ms": 1792112990000
+        }
+      ],
+      "health": "degraded",
+      "reasons": [
+        "component svc: backoff (exit status: 1)"
+      ]
+    },
+    "envelope": {
+      "message": "eyJzY2hlbWEiOjEsImNoYWluX2lkZW50aWZpZXIiOiJhYmNkMTIzNCIsInJlZ2lzdHJ5IjoiMHg1IiwiZGV2aWNlX2lkIjoiMHhkMSIsInNpZ25lciI6IjB4YTBjY2M4YmNjODNmNmM2MjgzNDAxMzRmODU0NmEyMWUwNjE4ZmQxYWFhMDI0MzJiYmE0NTRjNGEyYzIyMzNkYSIsInNlcSI6MTc5MjExMzAwMDAwMCwib2JzZXJ2ZWRfbXMiOjE3OTIxMTMwMDAwMDAsImludGVydmFsX3NlY29uZHMiOjYwLCJkYWVtb25fdmVyc2lvbiI6IjAuMi4xIiwiYm9vdF9pZCI6IjhmMGMxYjJlLTU4YTQtNGMzOS05YTUxLTJmNmQwZTdjOWIxMSIsInN0YXJ0ZWRfbXMiOjE3OTIxMTIwMDAwMDAsImRyb3BwZWQiOjIsInN5bmMiOnsibGFzdF9zdWNjZXNzX21zIjoxNzkyMTEyOTk1MDAwLCJjb25zZWN1dGl2ZV9mYWlsdXJlcyI6MCwibGFzdF9lcnJvciI6bnVsbH0sInBlbmRpbmdfcmVjZWlwdHMiOjEsImNvbXBvbmVudHMiOlt7Im5hbWUiOiJmaXJtd2FyZSIsInZlcnNpb24iOiIzLjEuMCIsImRlcGxveW1lbnRfaWQiOiIweGEiLCJpbnN0YWxsZWQiOnRydWUsInN1cGVydmlzZWQiOmZhbHNlLCJwaGFzZSI6bnVsbCwicmVzdGFydHMiOm51bGwsImxhc3RfZXhpdCI6bnVsbCwic2luY2VfbXMiOm51bGx9LHsibmFtZSI6InN2YyIsInZlcnNpb24iOiIxLjAuMCIsImRlcGxveW1lbnRfaWQiOiIweGUiLCJpbnN0YWxsZWQiOnRydWUsInN1cGVydmlzZWQiOnRydWUsInBoYXNlIjoiYmFja29mZiIsInJlc3RhcnRzIjoyLCJsYXN0X2V4aXQiOiJleGl0IHN0YXR1czogMSIsInNpbmNlX21zIjoxNzkyMTEyOTkwMDAwfV0sImhlYWx0aCI6ImRlZ3JhZGVkIiwicmVhc29ucyI6WyJjb21wb25lbnQgc3ZjOiBiYWNrb2ZmIChleGl0IHN0YXR1czogMSkiXX0=",
+      "signature": "AHSiX4i/yjM+j4xQcVAOAcUW3Ain3aaKsXrs1eMCSGoqZXI3PdYmBspuDodi/Ari8n57fbIGC7YQR15tF4+B3gjqSmxj4pxSCr71UHsTLsX5lUd2rr6+e5JCHuppFEbSLA=="
+    }
+  },
+  "status": [
+    {
+      "name": "never reported",
+      "snapshot": null,
+      "received_ms": null,
+      "now_ms": 1000000,
+      "status": "unreported",
+      "codes": [
+        "no-telemetry"
+      ]
+    },
+    {
+      "name": "revoked identity ignores its telemetry",
+      "revoked": true,
+      "snapshot": {
+        "schema": 1,
+        "chain_identifier": "abcd1234",
+        "registry": "0x5",
+        "device_id": "0xd1",
+        "signer": "0xa0ccc8bcc83f6c628340134f8546a21e0618fd1aaa02432bba454c4a2c2233da",
+        "seq": 1,
+        "observed_ms": 1000000,
+        "interval_seconds": 60,
+        "daemon_version": "0.2.1",
+        "boot_id": "8f0c1b2e-58a4-4c39-9a51-2f6d0e7c9b11",
+        "started_ms": 1792112000000,
+        "dropped": 0,
+        "sync": {
+          "last_success_ms": 1792112995000,
+          "consecutive_failures": 0,
+          "last_error": null
+        },
+        "pending_receipts": 0,
+        "components": [
+          {
+            "name": "firmware",
+            "version": "3.1.0",
+            "deployment_id": "0xa",
+            "installed": true,
+            "supervised": false,
+            "phase": null,
+            "restarts": null,
+            "last_exit": null,
+            "since_ms": null
+          },
+          {
+            "name": "svc",
+            "version": "1.0.0",
+            "deployment_id": "0xe",
+            "installed": true,
+            "supervised": true,
+            "phase": "running",
+            "restarts": 0,
+            "last_exit": null,
+            "since_ms": 1792112990000
+          }
+        ],
+        "health": "healthy",
+        "reasons": []
+      },
+      "received_ms": 1000000,
+      "now_ms": 1000000,
+      "status": "unreported",
+      "codes": [
+        "revoked"
+      ]
+    },
+    {
+      "name": "fresh healthy report",
+      "snapshot": {
+        "schema": 1,
+        "chain_identifier": "abcd1234",
+        "registry": "0x5",
+        "device_id": "0xd1",
+        "signer": "0xa0ccc8bcc83f6c628340134f8546a21e0618fd1aaa02432bba454c4a2c2233da",
+        "seq": 1,
+        "observed_ms": 1000000,
+        "interval_seconds": 60,
+        "daemon_version": "0.2.1",
+        "boot_id": "8f0c1b2e-58a4-4c39-9a51-2f6d0e7c9b11",
+        "started_ms": 1792112000000,
+        "dropped": 0,
+        "sync": {
+          "last_success_ms": 1792112995000,
+          "consecutive_failures": 0,
+          "last_error": null
+        },
+        "pending_receipts": 0,
+        "components": [
+          {
+            "name": "firmware",
+            "version": "3.1.0",
+            "deployment_id": "0xa",
+            "installed": true,
+            "supervised": false,
+            "phase": null,
+            "restarts": null,
+            "last_exit": null,
+            "since_ms": null
+          },
+          {
+            "name": "svc",
+            "version": "1.0.0",
+            "deployment_id": "0xe",
+            "installed": true,
+            "supervised": true,
+            "phase": "running",
+            "restarts": 0,
+            "last_exit": null,
+            "since_ms": 1792112990000
+          }
+        ],
+        "health": "healthy",
+        "reasons": []
+      },
+      "received_ms": 1000000,
+      "now_ms": 1060000,
+      "status": "healthy",
+      "codes": []
+    },
+    {
+      "name": "three intervals is still online",
+      "snapshot": {
+        "schema": 1,
+        "chain_identifier": "abcd1234",
+        "registry": "0x5",
+        "device_id": "0xd1",
+        "signer": "0xa0ccc8bcc83f6c628340134f8546a21e0618fd1aaa02432bba454c4a2c2233da",
+        "seq": 1,
+        "observed_ms": 1000000,
+        "interval_seconds": 60,
+        "daemon_version": "0.2.1",
+        "boot_id": "8f0c1b2e-58a4-4c39-9a51-2f6d0e7c9b11",
+        "started_ms": 1792112000000,
+        "dropped": 0,
+        "sync": {
+          "last_success_ms": 1792112995000,
+          "consecutive_failures": 0,
+          "last_error": null
+        },
+        "pending_receipts": 0,
+        "components": [
+          {
+            "name": "firmware",
+            "version": "3.1.0",
+            "deployment_id": "0xa",
+            "installed": true,
+            "supervised": false,
+            "phase": null,
+            "restarts": null,
+            "last_exit": null,
+            "since_ms": null
+          },
+          {
+            "name": "svc",
+            "version": "1.0.0",
+            "deployment_id": "0xe",
+            "installed": true,
+            "supervised": true,
+            "phase": "running",
+            "restarts": 0,
+            "last_exit": null,
+            "since_ms": 1792112990000
+          }
+        ],
+        "health": "healthy",
+        "reasons": []
+      },
+      "received_ms": 1000000,
+      "now_ms": 1180000,
+      "status": "healthy",
+      "codes": []
+    },
+    {
+      "name": "beyond three intervals is offline",
+      "snapshot": {
+        "schema": 1,
+        "chain_identifier": "abcd1234",
+        "registry": "0x5",
+        "device_id": "0xd1",
+        "signer": "0xa0ccc8bcc83f6c628340134f8546a21e0618fd1aaa02432bba454c4a2c2233da",
+        "seq": 1,
+        "observed_ms": 1000000,
+        "interval_seconds": 60,
+        "daemon_version": "0.2.1",
+        "boot_id": "8f0c1b2e-58a4-4c39-9a51-2f6d0e7c9b11",
+        "started_ms": 1792112000000,
+        "dropped": 0,
+        "sync": {
+          "last_success_ms": 1792112995000,
+          "consecutive_failures": 0,
+          "last_error": null
+        },
+        "pending_receipts": 0,
+        "components": [
+          {
+            "name": "firmware",
+            "version": "3.1.0",
+            "deployment_id": "0xa",
+            "installed": true,
+            "supervised": false,
+            "phase": null,
+            "restarts": null,
+            "last_exit": null,
+            "since_ms": null
+          },
+          {
+            "name": "svc",
+            "version": "1.0.0",
+            "deployment_id": "0xe",
+            "installed": true,
+            "supervised": true,
+            "phase": "running",
+            "restarts": 0,
+            "last_exit": null,
+            "since_ms": 1792112990000
+          }
+        ],
+        "health": "healthy",
+        "reasons": []
+      },
+      "received_ms": 1000000,
+      "now_ms": 1180001,
+      "status": "offline",
+      "codes": [
+        "offline"
+      ]
+    },
+    {
+      "name": "long intervals stretch the window",
+      "snapshot": {
+        "schema": 1,
+        "chain_identifier": "abcd1234",
+        "registry": "0x5",
+        "device_id": "0xd1",
+        "signer": "0xa0ccc8bcc83f6c628340134f8546a21e0618fd1aaa02432bba454c4a2c2233da",
+        "seq": 1,
+        "observed_ms": 1000000,
+        "interval_seconds": 3600,
+        "daemon_version": "0.2.1",
+        "boot_id": "8f0c1b2e-58a4-4c39-9a51-2f6d0e7c9b11",
+        "started_ms": 1792112000000,
+        "dropped": 0,
+        "sync": {
+          "last_success_ms": 1792112995000,
+          "consecutive_failures": 0,
+          "last_error": null
+        },
+        "pending_receipts": 0,
+        "components": [
+          {
+            "name": "firmware",
+            "version": "3.1.0",
+            "deployment_id": "0xa",
+            "installed": true,
+            "supervised": false,
+            "phase": null,
+            "restarts": null,
+            "last_exit": null,
+            "since_ms": null
+          },
+          {
+            "name": "svc",
+            "version": "1.0.0",
+            "deployment_id": "0xe",
+            "installed": true,
+            "supervised": true,
+            "phase": "running",
+            "restarts": 0,
+            "last_exit": null,
+            "since_ms": 1792112990000
+          }
+        ],
+        "health": "healthy",
+        "reasons": []
+      },
+      "received_ms": 1000000,
+      "now_ms": 11800000,
+      "status": "healthy",
+      "codes": []
+    },
+    {
+      "name": "buffered report is delayed",
+      "snapshot": {
+        "schema": 1,
+        "chain_identifier": "abcd1234",
+        "registry": "0x5",
+        "device_id": "0xd1",
+        "signer": "0xa0ccc8bcc83f6c628340134f8546a21e0618fd1aaa02432bba454c4a2c2233da",
+        "seq": 1,
+        "observed_ms": 1000000,
+        "interval_seconds": 60,
+        "daemon_version": "0.2.1",
+        "boot_id": "8f0c1b2e-58a4-4c39-9a51-2f6d0e7c9b11",
+        "started_ms": 1792112000000,
+        "dropped": 0,
+        "sync": {
+          "last_success_ms": 1792112995000,
+          "consecutive_failures": 0,
+          "last_error": null
+        },
+        "pending_receipts": 0,
+        "components": [
+          {
+            "name": "firmware",
+            "version": "3.1.0",
+            "deployment_id": "0xa",
+            "installed": true,
+            "supervised": false,
+            "phase": null,
+            "restarts": null,
+            "last_exit": null,
+            "since_ms": null
+          },
+          {
+            "name": "svc",
+            "version": "1.0.0",
+            "deployment_id": "0xe",
+            "installed": true,
+            "supervised": true,
+            "phase": "running",
+            "restarts": 0,
+            "last_exit": null,
+            "since_ms": 1792112990000
+          }
+        ],
+        "health": "healthy",
+        "reasons": []
+      },
+      "received_ms": 1120001,
+      "now_ms": 1120001,
+      "status": "degraded",
+      "codes": [
+        "delayed"
+      ]
+    },
+    {
+      "name": "device clock slightly ahead is not delayed",
+      "snapshot": {
+        "schema": 1,
+        "chain_identifier": "abcd1234",
+        "registry": "0x5",
+        "device_id": "0xd1",
+        "signer": "0xa0ccc8bcc83f6c628340134f8546a21e0618fd1aaa02432bba454c4a2c2233da",
+        "seq": 1,
+        "observed_ms": 1200000,
+        "interval_seconds": 60,
+        "daemon_version": "0.2.1",
+        "boot_id": "8f0c1b2e-58a4-4c39-9a51-2f6d0e7c9b11",
+        "started_ms": 1792112000000,
+        "dropped": 0,
+        "sync": {
+          "last_success_ms": 1792112995000,
+          "consecutive_failures": 0,
+          "last_error": null
+        },
+        "pending_receipts": 0,
+        "components": [
+          {
+            "name": "firmware",
+            "version": "3.1.0",
+            "deployment_id": "0xa",
+            "installed": true,
+            "supervised": false,
+            "phase": null,
+            "restarts": null,
+            "last_exit": null,
+            "since_ms": null
+          },
+          {
+            "name": "svc",
+            "version": "1.0.0",
+            "deployment_id": "0xe",
+            "installed": true,
+            "supervised": true,
+            "phase": "running",
+            "restarts": 0,
+            "last_exit": null,
+            "since_ms": 1792112990000
+          }
+        ],
+        "health": "healthy",
+        "reasons": []
+      },
+      "received_ms": 1000000,
+      "now_ms": 1000000,
+      "status": "healthy",
+      "codes": []
+    },
+    {
+      "name": "device says degraded",
+      "snapshot": {
+        "schema": 1,
+        "chain_identifier": "abcd1234",
+        "registry": "0x5",
+        "device_id": "0xd1",
+        "signer": "0xa0ccc8bcc83f6c628340134f8546a21e0618fd1aaa02432bba454c4a2c2233da",
+        "seq": 1,
+        "observed_ms": 1000000,
+        "interval_seconds": 60,
+        "daemon_version": "0.2.1",
+        "boot_id": "8f0c1b2e-58a4-4c39-9a51-2f6d0e7c9b11",
+        "started_ms": 1792112000000,
+        "dropped": 0,
+        "sync": {
+          "last_success_ms": 1792112995000,
+          "consecutive_failures": 0,
+          "last_error": null
+        },
+        "pending_receipts": 0,
+        "components": [
+          {
+            "name": "firmware",
+            "version": "3.1.0",
+            "deployment_id": "0xa",
+            "installed": true,
+            "supervised": false,
+            "phase": null,
+            "restarts": null,
+            "last_exit": null,
+            "since_ms": null
+          },
+          {
+            "name": "svc",
+            "version": "1.0.0",
+            "deployment_id": "0xe",
+            "installed": true,
+            "supervised": true,
+            "phase": "running",
+            "restarts": 0,
+            "last_exit": null,
+            "since_ms": 1792112990000
+          }
+        ],
+        "health": "degraded",
+        "reasons": [
+          "chain sync failing (1 consecutive): timeout"
+        ]
+      },
+      "received_ms": 1000000,
+      "now_ms": 1000000,
+      "status": "degraded",
+      "codes": [
+        "device-degraded"
+      ]
+    },
+    {
+      "name": "healthy claim with a component in backoff",
+      "snapshot": {
+        "schema": 1,
+        "chain_identifier": "abcd1234",
+        "registry": "0x5",
+        "device_id": "0xd1",
+        "signer": "0xa0ccc8bcc83f6c628340134f8546a21e0618fd1aaa02432bba454c4a2c2233da",
+        "seq": 1,
+        "observed_ms": 1000000,
+        "interval_seconds": 60,
+        "daemon_version": "0.2.1",
+        "boot_id": "8f0c1b2e-58a4-4c39-9a51-2f6d0e7c9b11",
+        "started_ms": 1792112000000,
+        "dropped": 0,
+        "sync": {
+          "last_success_ms": 1792112995000,
+          "consecutive_failures": 0,
+          "last_error": null
+        },
+        "pending_receipts": 0,
+        "components": [
+          {
+            "name": "firmware",
+            "version": "3.1.0",
+            "deployment_id": "0xa",
+            "installed": true,
+            "supervised": false,
+            "phase": null,
+            "restarts": null,
+            "last_exit": null,
+            "since_ms": null
+          },
+          {
+            "name": "svc",
+            "version": "1.0.0",
+            "deployment_id": "0xe",
+            "installed": true,
+            "supervised": true,
+            "phase": "backoff",
+            "restarts": 0,
+            "last_exit": null,
+            "since_ms": 1792112990000
+          }
+        ],
+        "health": "healthy",
+        "reasons": []
+      },
+      "received_ms": 1000000,
+      "now_ms": 1000000,
+      "status": "degraded",
+      "codes": [
+        "inconsistent"
+      ]
+    },
+    {
+      "name": "healthy claim with an unconfirmed install",
+      "snapshot": {
+        "schema": 1,
+        "chain_identifier": "abcd1234",
+        "registry": "0x5",
+        "device_id": "0xd1",
+        "signer": "0xa0ccc8bcc83f6c628340134f8546a21e0618fd1aaa02432bba454c4a2c2233da",
+        "seq": 1,
+        "observed_ms": 1000000,
+        "interval_seconds": 60,
+        "daemon_version": "0.2.1",
+        "boot_id": "8f0c1b2e-58a4-4c39-9a51-2f6d0e7c9b11",
+        "started_ms": 1792112000000,
+        "dropped": 0,
+        "sync": {
+          "last_success_ms": 1792112995000,
+          "consecutive_failures": 0,
+          "last_error": null
+        },
+        "pending_receipts": 0,
+        "components": [
+          {
+            "name": "firmware",
+            "version": "3.1.0",
+            "deployment_id": "0xa",
+            "installed": false,
+            "supervised": false,
+            "phase": null,
+            "restarts": null,
+            "last_exit": null,
+            "since_ms": null
+          },
+          {
+            "name": "svc",
+            "version": "1.0.0",
+            "deployment_id": "0xe",
+            "installed": true,
+            "supervised": true,
+            "phase": "running",
+            "restarts": 0,
+            "last_exit": null,
+            "since_ms": 1792112990000
+          }
+        ],
+        "health": "healthy",
+        "reasons": []
+      },
+      "received_ms": 1000000,
+      "now_ms": 1000000,
+      "status": "degraded",
+      "codes": [
+        "inconsistent"
+      ]
+    },
+    {
+      "name": "healthy claim with a supervised component not started",
+      "snapshot": {
+        "schema": 1,
+        "chain_identifier": "abcd1234",
+        "registry": "0x5",
+        "device_id": "0xd1",
+        "signer": "0xa0ccc8bcc83f6c628340134f8546a21e0618fd1aaa02432bba454c4a2c2233da",
+        "seq": 1,
+        "observed_ms": 1000000,
+        "interval_seconds": 60,
+        "daemon_version": "0.2.1",
+        "boot_id": "8f0c1b2e-58a4-4c39-9a51-2f6d0e7c9b11",
+        "started_ms": 1792112000000,
+        "dropped": 0,
+        "sync": {
+          "last_success_ms": 1792112995000,
+          "consecutive_failures": 0,
+          "last_error": null
+        },
+        "pending_receipts": 0,
+        "components": [
+          {
+            "name": "firmware",
+            "version": "3.1.0",
+            "deployment_id": "0xa",
+            "installed": true,
+            "supervised": false,
+            "phase": null,
+            "restarts": null,
+            "last_exit": null,
+            "since_ms": null
+          },
+          {
+            "name": "svc",
+            "version": "1.0.0",
+            "deployment_id": "0xe",
+            "installed": true,
+            "supervised": true,
+            "phase": null,
+            "restarts": 0,
+            "last_exit": null,
+            "since_ms": 1792112990000
+          }
+        ],
+        "health": "healthy",
+        "reasons": []
+      },
+      "received_ms": 1000000,
+      "now_ms": 1000000,
+      "status": "degraded",
+      "codes": [
+        "inconsistent"
+      ]
+    },
+    {
+      "name": "offline keeps the last problems",
+      "snapshot": {
+        "schema": 1,
+        "chain_identifier": "abcd1234",
+        "registry": "0x5",
+        "device_id": "0xd1",
+        "signer": "0xa0ccc8bcc83f6c628340134f8546a21e0618fd1aaa02432bba454c4a2c2233da",
+        "seq": 1,
+        "observed_ms": 1000000,
+        "interval_seconds": 60,
+        "daemon_version": "0.2.1",
+        "boot_id": "8f0c1b2e-58a4-4c39-9a51-2f6d0e7c9b11",
+        "started_ms": 1792112000000,
+        "dropped": 0,
+        "sync": {
+          "last_success_ms": 1792112995000,
+          "consecutive_failures": 0,
+          "last_error": null
+        },
+        "pending_receipts": 0,
+        "components": [
+          {
+            "name": "firmware",
+            "version": "3.1.0",
+            "deployment_id": "0xa",
+            "installed": true,
+            "supervised": false,
+            "phase": null,
+            "restarts": null,
+            "last_exit": null,
+            "since_ms": null
+          },
+          {
+            "name": "svc",
+            "version": "1.0.0",
+            "deployment_id": "0xe",
+            "installed": true,
+            "supervised": true,
+            "phase": "running",
+            "restarts": 0,
+            "last_exit": null,
+            "since_ms": 1792112990000
+          }
+        ],
+        "health": "degraded",
+        "reasons": [
+          "component svc: broken"
+        ]
+      },
+      "received_ms": 1000000,
+      "now_ms": 1500000,
+      "status": "offline",
+      "codes": [
+        "offline",
+        "device-degraded"
+      ]
+    }
+  ]
+}

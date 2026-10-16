@@ -291,11 +291,8 @@ def inside(args):
         assert cgroup(main) == UNIT_CGROUP, cgroup(main)
         check(f"suifleet.service active as shipped (User={show('User')}, Type=notify, MainPID {main} in {UNIT_CGROUP})")
 
-        sim.add("0x501")
-        event = sim.events[-1]["parsedJson"]
-        event["component_name"], event["version"] = "svc", "1.0.0"
-        sim.recipes[event["recipe_blob_id"]].update(componentName="svc", componentVersion="1.0.0",
-            lifecycle={"run": RUN, "readiness": READY, "shutdown": "echo $$ > requested; kill -TERM {pid}"})
+        sim.add("0x501", event=dict(component_name="svc", version="1.0.0"),
+                recipe=dict(lifecycle={"run": RUN, "readiness": READY, "shutdown": "echo $$ > requested; kill -TERM {pid}"}))
         wait(lambda: outcome("0x501").get("status") == 1, "supervised component was not applied")
         wait(lambda: all(read(n) for n in RECORDED), "run did not record its descendants")
         first = recorded()
@@ -368,11 +365,8 @@ def inside(args):
         check(f"slow bootstrap: ready before two unready components finished ({took:.0f}s, start deadline {deadline}); "
               "no timeout or restart")
 
-        sim.add("0x502")
-        event = sim.events[-1]["parsedJson"]
-        event["component_name"], event["version"] = "svc", "1.0.1"
-        sim.recipes[event["recipe_blob_id"]].update(componentName="svc", componentVersion="1.0.1",
-            lifecycle={"run": RUN, "readiness": READY, "shutdown": "echo $$ > requested; kill -TERM {pid}"})
+        sim.add("0x502", event=dict(component_name="svc", version="1.0.1"),
+                recipe=dict(lifecycle={"run": RUN, "readiness": READY, "shutdown": "echo $$ > requested; kill -TERM {pid}"}))
         wait(lambda: outcome("0x502").get("status") == 1, "repair after bootstrap was not applied")
         wait(lambda: status().get("phase") == "running" and status().get("version") == "1.0.1", "repaired svc not running")
         assert show("MainPID") == str(main)

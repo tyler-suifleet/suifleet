@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://suifleet.local/interfaces/recipe-1.1.schema.json",
+  "$id": "https://suifleet.local/interfaces/recipe-1.2.schema.json",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -17,7 +17,8 @@
       "type": "string",
       "enum": [
         "1.0",
-        "1.1"
+        "1.1",
+        "1.2"
       ]
     },
     "componentName": {
@@ -71,12 +72,43 @@
         "restart": {
           "type": "string",
           "pattern": "^(never|on-failure|always)$"
+        },
+        "validate": {
+          "type": "string"
         }
       }
     },
     "configuration": {
       "type": "object",
-      "additionalProperties": false
+      "additionalProperties": false,
+      "properties": {
+        "defaults": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "merge": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "reset": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "maxLength": 1024,
+            "pattern": "^(/([^~/]|~[01])*)*$"
+          }
+        },
+        "confidential": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "maxLength": 1024,
+            "pattern": "^(/([^~/]|~[01])*)+$"
+          }
+        }
+      }
     },
     "componentDependencies": {
       "type": "object",

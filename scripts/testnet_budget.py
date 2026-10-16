@@ -2,7 +2,12 @@
 
 Refunds never enlarge the allowance. Unknown execution outcomes consume the full
 reservation. Device gas is charged as a grant, including already-cached gas.
+Only a transaction refused before it was signed (NotSubmitted) releases its
+reservation.
 """
+from sui_toolchain import NotSubmitted
+
+
 class Spent(RuntimeError):
     pass
 
@@ -41,7 +46,13 @@ class Budget:
         entry = dict(label=label, gas_budget_mist=reserved, funding_mist=funding, status='unknown')
         self.evidence.append(entry)
         try:
-            result = client(*command, '--gas-budget', str(reserved))
+            try:
+                # A callable builds and verifies its transaction before submitting it.
+                result = command(reserved) if callable(command) else client(*command, '--gas-budget', str(reserved))
+            except NotSubmitted:
+                self.used -= reserved + funding  # Refused before signing: nothing can be charged.
+                entry['status'] = 'not_submitted'
+                raise
             effects = result['effects']
             status = effects['status']['status']
             gas_used = effects['gasUsed']

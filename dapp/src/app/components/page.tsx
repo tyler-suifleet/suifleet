@@ -7,6 +7,9 @@ import { fetchCatalogs,discoverVersions,buildCreateCatalogTx,buildPublishVersion
 import { parseVersion } from '@/lib/component-selector';
 import { uploadArtifact,uploadRecipe,storageWarnings,renewalCommand } from '@/lib/walrus';
 import { PageHeader } from '@/components/ui';
+import { ConfigurationFields } from '@/components/ConfigurationFields';
+import { EMPTY_CONFIGURATION,recipeConfiguration } from '@/lib/recipe-configuration';
+import { assertComponentRecipe,type ComponentRecipe } from '@/lib/recipe-schema';
 import Link from 'next/link';
 type Row={os:string;arch:string;file?:File;install:string};
 export default function ComponentsPage() {
@@ -15,6 +18,7 @@ export default function ComponentsPage() {
   const [catalog,setCatalog]=useState(''),[name,setName]=useState(''),[version,setVersion]=useState('');
   const [rows,setRows]=useState<Row[]>([{os:'linux',arch:'x86_64',install:''}]);
   const [busy,setBusy]=useState(false),[message,setMessage]=useState('');
+  const [configuration,setConfiguration]=useState(EMPTY_CONFIGURATION);
   const catalogs=useQuery({queryKey:['catalogs',account?.address],enabled:!!account,queryFn:()=>fetchCatalogs(client,account!.address)});
   const selected=catalog || catalogs.data?.[0]?.objectId || '';
   const versions=useQuery({queryKey:['component-versions',selected],enabled:!!selected,queryFn:()=>discoverVersions(client,selected)});
@@ -26,11 +30,17 @@ export default function ComponentsPage() {
       if(!/^[A-Za-z0-9_.-]{1,128}$/.test(name)) throw new Error('Invalid component name'); parseVersion(version);
       if(!selected || rows.some(r=>!r.file)) throw new Error('Choose a catalog and an artifact for every platform');
       if(new Set(rows.map(r=>r.os+'/'+r.arch)).size!==rows.length) throw new Error('Duplicate platform');
+      // One configuration for the version, in every platform's recipe (SF-015).
+      const configured=recipeConfiguration(configuration);
+      const recipeFor=(row:Row,artifactBlobId:string,artifactSha256:string):ComponentRecipe=>({schemaVersion:configured.schemaVersion,componentName:name,componentVersion:version,artifactBlobId,artifactSha256,
+        lifecycle:{...(row.install?{install:row.install}:{}),...(configured.validate?{validate:configured.validate}:{})},configuration:configured.configuration});
+      // Every recipe is checked before the first upload.
+      for(const row of rows) assertComponentRecipe(recipeFor(row,'pending','0'.repeat(64)));
       const warnings:string[]=[];
       const manifests=[];
       for(const row of rows){
         const artifact=await uploadArtifact(row.file!,account!.address);
-        const recipe=await uploadRecipe({schemaVersion:'1.0',componentName:name,componentVersion:version,artifactBlobId:artifact.blobId,artifactSha256:artifact.sha256,lifecycle:row.install?{install:row.install}:{},configuration:{}},account!.address);
+        const recipe=await uploadRecipe(recipeFor(row,artifact.blobId,artifact.sha256),account!.address);
         for(const [label,s] of [['Artifact',artifact.storage],['Recipe',recipe.storage]] as const){
           warnings.push(`${label} storage expires at epoch ${s.endEpoch??'unknown'}`, ...storageWarnings(s));
           const renew=renewalCommand(s);if(renew) warnings.push(renew);
@@ -56,6 +66,7 @@ export default function ComponentsPage() {
         {rows.length>1&&<button onClick={()=>setRows(rows.filter((_,j)=>i!==j))}>Remove manifest</button>}
         {i>0&&<button onClick={()=>{const copy=[...rows];[copy[i-1],copy[i]]=[copy[i],copy[i-1]];setRows(copy);}}>Move earlier</button>}
       </div>)}
+      <ConfigurationFields value={configuration} onChange={setConfiguration} disabled={busy}/>
       <button disabled={rows.length>=16} onClick={()=>setRows([...rows,{os:'linux',arch:'aarch64',install:''}])}>Add platform</button>{' '}
       <button disabled={busy||isPending||!selected} onClick={publish}>{busy?'Uploading…':'Upload and register immutable version'}</button>
     </div><p className="whitespace-pre-wrap" role="status">{message}</p>

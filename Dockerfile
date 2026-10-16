@@ -4,6 +4,11 @@ FROM ubuntu:22.04@sha256:5ec03bb3441e8b0bf3b4f9cd4629a1ae763010dc3035bb8da3ae6cf
 
 ARG SUI_VERSION=testnet-v1.81.1
 ARG SUI_SHA256=d921910fdedf5ae2bc3f08a7236c57819a457ce53a8cc60c85f3653c7831b5d4
+# Transaction CLI for live networks only (scripts/sui_toolchain.py). It must
+# support the network's protocol version; SUI_VERSION stays the compiler.
+ARG SUI_NETWORK_VERSION=testnet-v1.82.1
+ARG SUI_NETWORK_SHA256=112bf204fab6927b135edfb316cddac07bdba754434b5f12d021ca7e8a72858c
+ARG SUI_NETWORK_BINARY_SHA256=de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b
 ARG NODE_MAJOR=22
 ARG NODE_VERSION=22.22.2-1nodesource1
 ARG PNPM_VERSION=11.0.8
@@ -33,6 +38,16 @@ RUN curl -fL -o /tmp/sui.tgz \
     && tar -xzf /tmp/sui.tgz -C /usr/local/bin \
     && rm /tmp/sui.tgz \
     && sui --version
+
+# Network transaction CLI → /opt/sui-network/sui, never on PATH
+RUN curl -fL -o /tmp/sui-network.tgz \
+    "https://github.com/MystenLabs/sui/releases/download/${SUI_NETWORK_VERSION}/sui-${SUI_NETWORK_VERSION}-ubuntu-x86_64.tgz" \
+    && echo "${SUI_NETWORK_SHA256}  /tmp/sui-network.tgz" | sha256sum -c - \
+    && mkdir -p /opt/sui-network \
+    && tar --no-same-owner -xzf /tmp/sui-network.tgz -C /opt/sui-network ./sui \
+    && rm /tmp/sui-network.tgz \
+    && echo "${SUI_NETWORK_BINARY_SHA256}  /opt/sui-network/sui" | sha256sum -c - \
+    && /opt/sui-network/sui --version
 
 # Node.js + pnpm (global install, any user can run them)
 RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - \
