@@ -34,12 +34,20 @@ pub struct ComponentsConfig {
     /// Cached artifacts beyond this are evicted oldest first, except those
     /// of installed versions.
     pub cache_max_bytes: u64,
+    /// Device-local configuration values (`<name>.json`, JSON pointer →
+    /// value), the only source of confidential ones. Not readable by others.
+    pub configuration_overlay_dir: PathBuf,
+    /// How long a component's validate command may keep deferring one
+    /// deployment's configuration update before the deployment fails.
+    pub configuration_defer_max_seconds: u64,
 }
 impl Default for ComponentsConfig {
     fn default() -> Self {
         Self {
             offline_candidates: OfflinePolicy::Never,
             cache_max_bytes: 512 * 1024 * 1024,
+            configuration_overlay_dir: "/etc/suifleet/component-config".into(),
+            configuration_defer_max_seconds: 86_400,
         }
     }
 }
@@ -510,6 +518,10 @@ mod tests {
         let cached: Config = toml::from_str(&format!("{base}[components]\noffline_candidates='cached'\ncache_max_bytes=10\n")).unwrap();
         assert_eq!(cached.components.offline_candidates, OfflinePolicy::Cached);
         assert_eq!(cached.components.cache_max_bytes, 10);
+        assert_eq!(omitted.components.configuration_overlay_dir, PathBuf::from("/etc/suifleet/component-config"));
+        let overlay: Config = toml::from_str(&format!("{base}[components]\nconfiguration_overlay_dir='/run/x'\nconfiguration_defer_max_seconds=5\n")).unwrap();
+        assert_eq!(overlay.components.configuration_overlay_dir, PathBuf::from("/run/x"));
+        assert_eq!(overlay.components.configuration_defer_max_seconds, 5);
         assert!(toml::from_str::<Config>(&format!("{base}[components]\noffline_candidates='always'\n")).is_err());
         assert!(toml::from_str::<Config>(&format!("{base}[components]\noffline='cached'\n")).is_err());
         assert_eq!(partial.walrus.download_attempts, 2);

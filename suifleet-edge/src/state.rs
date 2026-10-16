@@ -44,6 +44,10 @@ pub struct State {
     /// applied, later steps stay stopped, across restarts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub step: Option<Step>,
+    /// Deployment → when (UTC ms) a component's validate command first
+    /// deferred its configuration update; bounds how long it may defer.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub configuration_deferrals: BTreeMap<String, u64>,
 }
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Step {

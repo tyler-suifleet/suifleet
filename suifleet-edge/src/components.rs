@@ -263,6 +263,8 @@ pub struct Loaded {
     pub install: Option<String>,
     /// Present for a supervised (run) dependency.
     pub supervised: Option<crate::supervisor::Lifecycle>,
+    pub configuration: crate::protocol::Configuration,
+    pub validate: Option<String>,
 }
 
 pub struct Loader<'a> {
@@ -372,6 +374,8 @@ impl<'a> Loader<'a> {
                 supervised: crate::supervisor::Lifecycle::of(&parsed.lifecycle)?,
                 artifact_blob_id: parsed.artifact_blob_id,
                 install: parsed.lifecycle.install,
+                configuration: parsed.configuration,
+                validate: parsed.lifecycle.validate,
             },
         );
         Ok(deps::Detail::Ready(dependencies))
@@ -428,7 +432,7 @@ mod tests {
 
     fn store(name: &str, max_bytes: u64) -> (PathBuf, Store) {
         let dir = std::env::temp_dir().join(format!("suifleet-store-{name}-{}-{}", std::process::id(), rand::random::<u64>()));
-        let config = ComponentsConfig { offline_candidates: OfflinePolicy::Cached, cache_max_bytes: max_bytes };
+        let config = ComponentsConfig { offline_candidates: OfflinePolicy::Cached, cache_max_bytes: max_bytes, ..ComponentsConfig::default() };
         assert!(Store::open(&dir, &ComponentsConfig::default()).is_none(), "never policy keeps no store");
         (dir.clone(), Store::open(&dir, &config).unwrap())
     }

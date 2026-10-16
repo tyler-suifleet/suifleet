@@ -11,7 +11,14 @@
 //!   (and whatever its install step wrote). The active and previous versions
 //!   are kept for rollback; older ones are removed.
 //! - `<name>/work/`: the component's working directory and HOME, kept across
-//!   versions; `<name>/component.log`: its stdout/stderr.
+//!   versions; `<name>/component.log`: its stdout/stderr (and its validate
+//!   command's).
+//! - In a version's workspace, `configuration-state.json`: the public
+//!   configuration record it was deployed with (SF-015), and
+//!   `configuration.json` (0600): that configuration with the device overlay,
+//!   rewritten before every start so overlay changes apply on restart. Its
+//!   commands see it as `{configuration}` and `$SUIFLEET_CONFIGURATION`; a
+//!   rollback restores the previous version with its own configuration.
 //!
 //! Run commands must stay in the foreground. Each runs in its own process
 //! group, which is killed when it exits or stops; the daemon is also a child
@@ -23,7 +30,10 @@
 //! process (install or run). A daemon that finds the marked record of one that
 //! did not stop them, and cannot prove that none of its processes survived (a
 //! sealed cgroup with nothing left in it, or a reboot), refuses to start.
-use crate::apply::{self, ApplyRunner};
+use crate::{
+    apply::{self, ApplyRunner},
+    configuration,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
@@ -150,7 +160,12 @@ pub struct Settings {
     /// Restarts allowed within ten minutes before the component is Broken.
     pub max_restarts: u32,
     pub max_memory_bytes: Option<u64>,
+    /// Device-local configuration values (configuration.rs).
+    pub overlay_dir: PathBuf,
 }
+
+const CONFIGURATION_STATE: &str = "configuration-state.json";
+const CONFIGURATION: &str = "configuration.json";
 
 struct Handle {
     stop: watch::Sender<bool>,
@@ -251,6 +266,7 @@ impl Supervisor {
     /// Install `artifact` as a new version, replace the running one and wait
     /// until it is ready. On failure the previous version is restored and the
     /// error says so; the new version is never committed.
+    /// `configuration` is the version's public configuration record.
     pub async fn deploy(
         &mut self,
         spec: Spec,
@@ -258,6 +274,7 @@ impl Supervisor {
         install: Option<&str>,
         runner: &ApplyRunner,
         request_id: &str,
+        configuration: &configuration::Record,
     ) -> anyhow::Result<()> {
         anyhow::ensure!(safe_segment(&spec.name), "component name is not a safe path segment");
         anyhow::ensure!(safe_segment(&spec.version), "component version is not a safe path segment");
@@ -266,10 +283,12 @@ impl Supervisor {
         std::fs::create_dir_all(&workspace)?;
         let installed = workspace.join("artifact");
         std::fs::rename(artifact, &installed)?;
+        configuration::write_private(&workspace.join(CONFIGURATION_STATE), configuration)?;
+        let materialized = materialize(&self.settings.overlay_dir, &spec.name, &workspace)?;
         if let Some(script) = install {
             self.record.arm().map_err(|error| error.context("install not started"))?;
             // The old version keeps running until the new one is installed.
-            if let Err(error) = runner.apply(&installed, Some(script), request_id).await {
+            if let Err(error) = runner.apply(&installed, Some(script), request_id, materialized.as_deref()).await {
                 let _ = std::fs::remove_dir_all(&workspace);
                 return Err(error.context("install failed; the running version is unchanged"));
             }
@@ -302,6 +321,56 @@ impl Supervisor {
                 )
             }
         }
+    }
+
+    /// Run a version's validate command against a candidate configuration
+    /// file, before anything is installed: `Ok(true)` accepts it, `Ok(false)`
+    /// defers it (exit 75), and any other end rejects it. It runs like the
+    /// component's other commands, in its work directory, with its output in
+    /// the component log rather than the daemon's.
+    pub async fn validate(
+        &self,
+        name: &str,
+        version: &str,
+        command: &str,
+        artifact: &Path,
+        configuration: &Path,
+        timeout: Duration,
+    ) -> anyhow::Result<bool> {
+        anyhow::ensure!(safe_segment(name), "component name is not a safe path segment");
+        let component = self.root.join(name);
+        let work = component.join("work");
+        std::fs::create_dir_all(&work)?;
+        let script = command
+            .replace("{artifact}", &quote(artifact))
+            .replace("{artifacts}", &quote(artifact.parent().unwrap_or(Path::new("/"))))
+            .replace("{work}", &quote(&work))
+            .replace("{configuration}", &quote(configuration));
+        let mut command = tokio::process::Command::new("/bin/sh");
+        command.arg("-c").arg(script);
+        apply::harden(&mut command, &work, self.settings.max_memory_bytes);
+        let log = open_log(&component.join("component.log"))?;
+        command
+            .env(MARKER, marker(&self.root))
+            .env("SUIFLEET_COMPONENT", name)
+            .env("SUIFLEET_COMPONENT_VERSION", version)
+            .env("SUIFLEET_CONFIGURATION", configuration)
+            .stdout(log.try_clone()?)
+            .stderr(log);
+        self.record.arm().map_err(|error| error.context("validate not started"))?;
+        let status = apply::run_status(command, timeout)
+            .await
+            .map_err(|error| error.context("configuration validate command"))?;
+        if status.code() == Some(configuration::DEFER_EXIT) {
+            return Ok(false);
+        }
+        apply::exit_result(status).map_err(|error| error.context("configuration rejected by the component's validate command"))?;
+        Ok(true)
+    }
+
+    /// The deployment of `name`'s committed version, if it is supervised.
+    pub fn committed(&self, name: &str) -> Option<&str> {
+        self.active.get(name).map(|spec| spec.deployment.as_str())
     }
 
     /// Whether `name` is a committed or running supervised component.
@@ -502,10 +571,12 @@ impl Context {
 
     fn command(&self, template: &str, pid: Option<u32>) -> tokio::process::Command {
         let work = self.component.join("work");
+        let configuration = self.workspace.join(CONFIGURATION);
         let mut script = template
             .replace("{artifact}", &quote(&self.workspace.join("artifact")))
             .replace("{artifacts}", &quote(&self.workspace))
-            .replace("{work}", &quote(&work));
+            .replace("{work}", &quote(&work))
+            .replace("{configuration}", &quote(&configuration));
         if let Some(pid) = pid {
             script = script.replace("{pid}", &pid.to_string());
         }
@@ -516,6 +587,10 @@ impl Context {
             .env(MARKER, marker(&self.root))
             .env("SUIFLEET_COMPONENT", &self.spec.name)
             .env("SUIFLEET_COMPONENT_VERSION", &self.spec.version);
+        // Versions deployed before configuration management have none.
+        if self.workspace.join(CONFIGURATION_STATE).exists() {
+            command.env("SUIFLEET_CONFIGURATION", &configuration);
+        }
         command
     }
 
@@ -551,6 +626,9 @@ impl Context {
     fn spawn(&self) -> anyhow::Result<Tracked> {
         let work = self.component.join("work");
         std::fs::create_dir_all(&work)?;
+        // Every start reads the overlay again: a provisioned or rotated
+        // device-local value applies on the next restart.
+        materialize(&self.settings.overlay_dir, &self.spec.name, &self.workspace)?;
         self.record.arm()?;
         let log = open_log(&self.component.join("component.log"))?;
         let mut command = self.command(&self.spec.run, None);
@@ -687,6 +765,23 @@ fn signal_group(pid: u32, signal: i32) {
     unsafe {
         libc::kill(-(pid as i32), signal);
     }
+}
+
+/// Write a workspace's `configuration.json` from its public record and the
+/// device overlay; returns its path, or nothing for a version deployed
+/// without configuration management.
+fn materialize(overlay_dir: &Path, name: &str, workspace: &Path) -> anyhow::Result<Option<PathBuf>> {
+    let Some(record) = std::fs::read(workspace.join(CONFIGURATION_STATE))
+        .ok()
+        .map(|bytes| serde_json::from_slice::<configuration::Record>(&bytes))
+        .transpose()?
+    else {
+        return Ok(None);
+    };
+    let value = configuration::materialize(&record, &configuration::overlay(overlay_dir, name)?)?;
+    let path = workspace.join(CONFIGURATION);
+    configuration::write_private(&path, &value)?;
+    Ok(Some(path))
 }
 
 fn quote(path: &Path) -> String {
@@ -1168,6 +1263,7 @@ mod tests {
                     stop_timeout: Duration::from_secs(2),
                     max_restarts,
                     max_memory_bytes: None,
+                    overlay_dir: self.dir.join("overlay"),
                 },
             )
             .unwrap()
@@ -1186,9 +1282,19 @@ mod tests {
             }
         }
         async fn deploy(&self, supervisor: &mut Supervisor, spec: Spec, install: Option<&str>) -> anyhow::Result<()> {
+            let record = configuration::Record { deployment: spec.deployment.clone(), version: spec.version.clone(), ..Default::default() };
+            self.deploy_configured(supervisor, spec, install, &record).await
+        }
+        async fn deploy_configured(
+            &self,
+            supervisor: &mut Supervisor,
+            spec: Spec,
+            install: Option<&str>,
+            record: &configuration::Record,
+        ) -> anyhow::Result<()> {
             let artifact = self.dir.join(format!("download-{}", spec.deployment));
             std::fs::write(&artifact, format!("artifact {}", spec.version)).unwrap();
-            supervisor.deploy(spec, &artifact, install, &self.runner, "test").await
+            supervisor.deploy(spec, &artifact, install, &self.runner, "test", record).await
         }
         fn work(&self, file: &str) -> PathBuf {
             self.dir.join("supervised/app/work").join(file)
@@ -1615,5 +1721,92 @@ mod tests {
         spec.version = "1.0.0".into();
         spec.name = "a/b".into();
         assert!(f.deploy(&mut s, spec, None).await.is_err());
+    }
+
+    fn configured(spec: &Spec, effective: serde_json::Value, confidential: &[&str]) -> configuration::Record {
+        configuration::Record {
+            deployment: spec.deployment.clone(),
+            version: spec.version.clone(),
+            effective: effective.as_object().unwrap().clone(),
+            confidential: confidential.iter().map(|p| p.to_string()).collect(),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn runs_with_its_configuration_across_restarts_and_rollback() {
+        use std::os::unix::fs::PermissionsExt;
+        let mut f = Fixture::new("configuration");
+        let overlay = f.dir.join("overlay");
+        std::fs::create_dir_all(&overlay).unwrap();
+        let secret = overlay.join("app.json");
+        std::fs::write(&secret, r#"{"/db/password": "one"}"#).unwrap();
+        std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let mut s = f.open();
+        let run = "cp {configuration} {work}/seen.json; echo \"$SUIFLEET_CONFIGURATION\" > {work}/env; exec sleep 300";
+        let v1 = f.spec("1.0.0", run);
+        let record = configured(&v1, serde_json::json!({"port": 1, "db": {}}), &["/db/password"]);
+        // Each install script also receives it.
+        f.deploy_configured(&mut s, v1.clone(), Some("cp {configuration} {artifacts}/installed.json"), &record).await.unwrap();
+        let seen = |f: &Fixture, file| serde_json::from_str::<serde_json::Value>(&f.read(file)).unwrap();
+        until("configuration seen", || f.work("seen.json").exists() && f.work("env").exists()).await;
+        assert_eq!(seen(&f, "seen.json"), serde_json::json!({"port": 1, "db": {"password": "one"}}));
+        let file = PathBuf::from(f.read("env").trim());
+        assert!(file.starts_with(f.dir.join("supervised/app/versions")), "{}", file.display());
+        let installed: serde_json::Value = serde_json::from_slice(&std::fs::read(file.with_file_name("installed.json")).unwrap()).unwrap();
+        assert_eq!(installed, serde_json::json!({"port": 1, "db": {"password": "one"}}));
+        assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
+        // The public record holds no confidential value.
+        let state = std::fs::read_to_string(file.with_file_name(CONFIGURATION_STATE)).unwrap();
+        assert!(!state.contains("one"), "{state}");
+
+        // A version without the confidential value provisioned never starts;
+        // the running version, with its own configuration, is restored.
+        let v2 = f.spec("2.0.0", run);
+        let missing = configured(&v2, serde_json::json!({"port": 2}), &["/api/token"]);
+        let error = f.deploy_configured(&mut s, v2, None, &missing).await.unwrap_err().to_string();
+        assert!(error.contains("/api/token") && error.contains("not provisioned"), "{error}");
+        assert_eq!(f.active()["app"], v1);
+        assert_eq!(seen(&f, "seen.json")["port"], 1);
+
+        // A replacement that fails to start rolls back to v1 and its configuration.
+        let v3 = f.spec("3.0.0", "cp {configuration} {work}/seen.json; exit 3");
+        let error = f.deploy_configured(&mut s, v3.clone(), None, &configured(&v3, serde_json::json!({"port": 3}), &[])).await.unwrap_err();
+        assert!(error.to_string().contains("rolled back to 1.0.0"), "{error}");
+        until("v1 restarted", || f.work("seen.json").exists() && seen(&f, "seen.json")["port"] == 1).await;
+
+        // A daemon restart starts it again with the rotated overlay value.
+        s.stop_all().await;
+        std::fs::write(&secret, r#"{"/db/password": "two"}"#).unwrap();
+        std::fs::remove_file(f.work("seen.json")).unwrap();
+        let mut s = f.open();
+        s.bootstrap().await;
+        until("restarted", || f.work("seen.json").exists()).await;
+        assert_eq!(seen(&f, "seen.json"), serde_json::json!({"port": 1, "db": {"password": "two"}}));
+        s.stop_all().await;
+    }
+
+    #[tokio::test]
+    async fn validate_accepts_defers_or_rejects_without_side_effects() {
+        let f = Fixture::new("validate");
+        let s = f.open();
+        let artifact = f.dir.join("candidate-artifact");
+        std::fs::write(&artifact, "artifact").unwrap();
+        let candidate = f.dir.join("candidate.json");
+        std::fs::write(&candidate, r#"{"port": 80}"#).unwrap();
+        let check = |command: &'static str| s.validate("app", "1.0.0", command, &artifact, &candidate, Duration::from_secs(5));
+        let script = "test \"$SUIFLEET_CONFIGURATION\" = {configuration} && test -f {artifact} && grep -q 80 {configuration}";
+        assert!(check(script).await.unwrap());
+        assert!(!check("exit 75").await.unwrap(), "exit 75 defers");
+        let error = check("echo 'port 80 is reserved' >&2; exit 1").await.unwrap_err();
+        assert!(format!("{error:#}").contains("rejected"), "{error:#}");
+        // Its output goes to the component log, not into diagnostics.
+        assert!(!format!("{error:#}").contains("reserved"));
+        let log = std::fs::read_to_string(f.dir.join("supervised/app/component.log")).unwrap();
+        assert!(log.contains("port 80 is reserved"), "{log}");
+        let hung = s.validate("app", "1.0.0", "exec sleep 30", &artifact, &candidate, Duration::from_secs(1)).await;
+        assert!(format!("{:#}", hung.unwrap_err()).contains("timed out"));
+        assert!(s.validate("../x", "1", "true", &artifact, &candidate, Duration::from_secs(1)).await.is_err());
+        assert!(s.active.is_empty(), "nothing was installed or committed");
     }
 }

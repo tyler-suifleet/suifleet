@@ -62,3 +62,8 @@ replay_history = false
 # [components]
 # offline_candidates = "never"
 # cache_max_bytes = 536870912
+# Component configuration (recipe 1.2; see docs/OPERATIONS.md). Confidential
+# values come only from <configuration_overlay_dir>/<name>.json, an object of
+# JSON pointer -> value that must not be accessible to other users.
+# configuration_overlay_dir = "/etc/suifleet/component-config"
+# configuration_defer_max_seconds = 86400  # then a deferring validate fails
