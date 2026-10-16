@@ -5,6 +5,7 @@ mod components;
 mod config;
 mod deps;
 mod firmware;
+mod handoff;
 mod identity;
 mod reconcile;
 mod recipe;
@@ -55,11 +56,24 @@ async fn main() -> anyhow::Result<()> {
         );
         return Ok(());
     }
+    if args.len() == 3 && args[1] == "--self-check" {
+        return self_check(Path::new(&args[2]));
+    }
+    // The service manager starts the platform's base binary with --launch; it
+    // execs a staged or confirmed daemon update, or continues as this binary.
+    if args.len() == 2 && args[1] == "--launch" {
+        let path = std::env::var("EDGE_CONFIG").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/etc/suifleet/config.toml"));
+        match Config::load(&path) {
+            Ok(cfg) => handoff::launch(&cfg.daemon_update, &cfg.runtime.state_dir)?,
+            Err(error) => eprintln!("suifleet launcher: configuration unreadable ({error:#}); starting this daemon"),
+        }
+    }
+    let launched = args.len() == 2 && args[1] == "--launch";
     let check_config = args.len() == 3 && args[1] == "--check-config";
     let helper = args.len() == 3 && args[1] == "--firmware-helper";
     anyhow::ensure!(
-        args.len() == 1 || check_config || helper,
-        "usage: suifleet [--provision KEY_PATH | --derive-address KEY_PATH | --enroll ENROLL_TOML | --check-config CONFIG_PATH | --firmware-helper CONFIG | --verify-release BUNDLE_DIR TRUST_FILE]"
+        args.len() == 1 || launched || check_config || helper,
+        "usage: suifleet [--launch | --provision KEY_PATH | --derive-address KEY_PATH | --enroll ENROLL_TOML | --check-config CONFIG_PATH | --self-check CONFIG_PATH | --firmware-helper CONFIG | --verify-release BUNDLE_DIR TRUST_FILE]"
     );
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -99,12 +113,29 @@ async fn main() -> anyhow::Result<()> {
     // finish, or already did, must not be settled as Failed.
     let spool = cfg.apply.firmware_spool.clone();
     journal.settle_interrupted(|id, outcome| match &outcome.firmware_request {
+        _ if outcome.daemon_handoff.is_some() => true, // Resolved by the handoff below.
         Some(request) => firmware::recover(&spool, request).unwrap_or_else(|error| {
             warn!(deployment = id, %error, "Cannot inspect firmware spool; keeping outcome pending");
             true
         }),
         None => false,
     })?;
+    // A daemon update staged by an earlier run: applied, rolled back, or (when
+    // this process is its candidate) confirmed once startup completes.
+    let handoff_dir = handoff::install_dir(&cfg.daemon_update, &cfg.runtime.state_dir);
+    let mut confirm_after_startup = None;
+    if cfg.daemon_update.enabled {
+        let candidate = std::env::var(handoff::CANDIDATE_ENV).ok();
+        match handoff::resolve(&handoff_dir, candidate.as_deref())? {
+            handoff::Resolution::None => {}
+            handoff::Resolution::ConfirmAfterStartup(update) => confirm_after_startup = Some(update),
+            handoff::Resolution::Applied(update) => settle_handoff(&mut journal, &handoff_dir, &update, Ok(()))?,
+            handoff::Resolution::Failed(update, reason) => {
+                warn!(deployment = update.deployment, version = update.version, %reason, "Daemon update rolled back");
+                settle_handoff(&mut journal, &handoff_dir, &update, Err(anyhow::anyhow!(reason)))?
+            }
+        }
+    }
     let walrus = WalrusClient::new(&cfg.walrus);
     // The artifact cache holds at most the in-flight artifact; anything left
     // by an earlier run (e.g. a crash mid-download) is unused.
@@ -141,6 +172,14 @@ async fn main() -> anyhow::Result<()> {
     });
     #[cfg(feature = "systemd")]
     sd_notify::notify(false, &[sd_notify::NotifyState::Ready]).ok();
+    // A new daemon is confirmed only after this complete local startup
+    // (configuration, identity, chain validation, journal and supervisor).
+    if let Some(update) = confirm_after_startup.take() {
+        handoff::confirm(&handoff_dir, &update)?;
+        info!(deployment = update.deployment, version = update.version, "Daemon update confirmed");
+        settle_handoff(&mut journal, &handoff_dir, &update, Ok(()))?;
+    }
+    let mut restart_for_handoff = false;
     let shutdown = shutdown_signal();
     tokio::pin!(shutdown);
     // A stop during bootstrap still stops whatever it already started.
@@ -156,7 +195,15 @@ async fn main() -> anyhow::Result<()> {
         loop {
             let cycle = poll(&cfg, &sui, &walrus, &runner, store.as_ref(), &mut supervisor, &mut journal);
             tokio::select! {
-                result = cycle => { if let Err(error) = result { warn!(%error, "Sync failed; retrying without advancing cursor"); } }
+                result = cycle => match result {
+                    Err(error) if error.downcast_ref::<handoff::Requested>().is_some() => {
+                        info!("Daemon update staged; stopping components and restarting into it");
+                        restart_for_handoff = true;
+                        break;
+                    }
+                    Err(error) => warn!(%error, "Sync failed; retrying without advancing cursor"),
+                    Ok(()) => {}
+                },
                 _ = &mut shutdown => { info!("Stopping; interrupted apply requires inspection on restart"); break; }
             }
             tokio::select! {
@@ -167,6 +214,38 @@ async fn main() -> anyhow::Result<()> {
     }
     // Components stop with the daemon (shutdown command, then the whole group).
     supervisor.stop_all().await;
+    if restart_for_handoff {
+        std::process::exit(handoff::RESTART_EXIT);
+    }
+    Ok(())
+}
+
+/// Record a resolved daemon update's outcome, then drop its handoff record.
+fn settle_handoff(journal: &mut Journal, dir: &Path, update: &handoff::Handoff, result: anyhow::Result<()>) -> anyhow::Result<()> {
+    let outcome = journal.state.deployments.entry(update.deployment.clone()).or_default();
+    if outcome.status.is_none() {
+        record_result(outcome, result);
+        outcome.daemon_handoff = None;
+        journal.save()?;
+    }
+    handoff::finish(dir, update)
+}
+
+/// `suifleet --self-check CONFIG`: offline proof that this binary accepts the
+/// device's configuration, manifest, identity and journal. A daemon update is
+/// preflighted with it before the running daemon hands over.
+fn self_check(path: &Path) -> anyhow::Result<()> {
+    let cfg = Config::load(path)?;
+    let sui = SuiClient::load(cfg.sui.clone(), identity::signer(&cfg.device)?)?;
+    let binding = format!(
+        "{}/{}/{}/{}",
+        sui.manifest().chain_identifier,
+        sui.origin(),
+        cfg.device.device_object_id,
+        sui.address()
+    );
+    state::check(&cfg.runtime.state_dir, &binding)?;
+    println!("suifleet {} accepts this configuration, identity and journal", env!("CARGO_PKG_VERSION"));
     Ok(())
 }
 
@@ -337,6 +416,9 @@ async fn execute(
         return Ok(status);
     }
     let resolved = resolved?;
+    if cfg.daemon_update.enabled && event.component_name == cfg.daemon_update.component {
+        return stage_daemon_update(cfg, walrus, store, journal, &resolved).await;
+    }
     let directory = cfg
         .runtime
         .state_dir
@@ -359,6 +441,52 @@ async fn execute(
     }
     let _ = std::fs::remove_dir_all(&directory);
     Ok(status)
+}
+
+/// A deployment of the configured daemon component: verify and stage the new
+/// binary, journal the deployment as pending, and ask for a restart. Failures
+/// before the handoff is recorded are ordinary Failed outcomes.
+async fn stage_daemon_update(
+    cfg: &Config,
+    walrus: &WalrusClient,
+    store: Option<&components::Store>,
+    journal: &mut Journal,
+    resolved: &catalog::Resolved,
+) -> anyhow::Result<Option<u8>> {
+    let event = &resolved.event;
+    let directory = cfg.runtime.state_dir.join("artifacts").join(hex::encode(identity::hash(event.deployment_id.as_bytes())));
+    std::fs::create_dir_all(&directory)?;
+    let staged = async {
+        let bytes = components::recipe(walrus, store, &event.recipe_blob_id, &resolved.recipe_sha256).await?;
+        let recipe: recipe::Recipe = serde_json::from_slice(&bytes)?;
+        let dependencies = recipe.validate(event, false)?;
+        let lifecycle = &recipe.lifecycle;
+        anyhow::ensure!(
+            dependencies.is_empty() && lifecycle.install.is_none() && lifecycle.run.is_none() && lifecycle.shutdown.is_none(),
+            "a daemon update recipe carries only the daemon binary (no lifecycle commands or dependencies)"
+        );
+        let artifact = directory.join("artifact");
+        components::artifact(walrus, store, &recipe.artifact_blob_id, &event.artifact_sha256, &artifact).await?;
+        handoff::stage(&cfg.daemon_update, &cfg.runtime.state_dir, &cfg.path, &event.deployment_id, &event.version, &artifact).await
+    }
+    .await;
+    let _ = std::fs::remove_dir_all(&directory);
+    let outcome = journal.state.deployments.entry(event.deployment_id.clone()).or_default();
+    match staged {
+        Ok(()) => {
+            outcome.daemon_handoff = Some(event.version.clone());
+            journal.save()?;
+            info!(deployment = event.deployment_id, version = event.version, "Daemon update staged");
+            Err(handoff::Requested.into())
+        }
+        Err(error) => {
+            record_result(outcome, Err(error));
+            warn!(deployment = event.deployment_id, error = ?outcome.error, "Daemon update rejected");
+            let status = outcome.status;
+            journal.save()?;
+            Ok(status)
+        }
+    }
 }
 
 /// Persist notice and deferral independently of execution outcomes. A terminal
