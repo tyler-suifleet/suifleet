@@ -147,7 +147,7 @@ For each feature, completion requires contract/API semantics, daemon behavior, o
 - Browser event scans now paginate but are not an efficient fleet index; deployment group expansion reflects current membership rather than a historical target snapshot.
 - TPM support and the original README's `--features tpm` were aspirational, not implemented. Existing devices registered using the former SHA3 address need re-enrollment under the corrected address.
 - The development publish script still uses unscoped metadata greps and suppresses errors in its publish/pretty-print pipeline; it needs hardening before automated releases.
-- Yocto cross-compilation and actual A/B firmware updates remain unvalidated.
+- Historical baseline limitation: Yocto cross-compilation and platform-installer physical recovery were unvalidated at audit time; consult current build and integration evidence.
 
 ## Validation evidence
 

@@ -282,7 +282,7 @@ The frontend reads only `NEXT_PUBLIC_DEPLOYMENT_MANIFEST`; the daemon reads the 
 
 Install the daemon, systemd service and real config through the validated image/package workflow. The separate root first-boot provisioning service invokes `--provision`; the unprivileged daemon starts after enrollment config appears and creates its state directory. Register the printed address, record Device/DeviceCap IDs, and fund report gas. Apply success currently means updater exit code zero, not post-boot health.
 
-The Yocto layer is `suifleet-edge/meta-suifleet`. [YOCTO_PACKAGING.md](YOCTO_PACKAGING.md) describes its pinned source/crate graph, Scarthgap Rust-mixin and Wrynose build profiles and separate first-boot provisioning/enrollment services. The source pin includes the merged SF-004 gRPC migration; offline packaging/boot acceptance remains distinct from supported-network OTA acceptance. Record actual build and boot results rather than inferring them from recipe presence. SWUpdate/RAUC and A/B recovery remain external adapter work.
+The Yocto layer is `suifleet-edge/meta-suifleet`. [YOCTO_PACKAGING.md](YOCTO_PACKAGING.md) describes its pinned source/crate graph, Scarthgap Rust-mixin and Wrynose build profiles and separate first-boot provisioning/enrollment services. The source pin includes the merged SF-004 gRPC migration; offline packaging/boot acceptance remains distinct from supported-network OTA acceptance. Record actual build and boot results rather than inferring them from recipe presence. SWUpdate/RAUC installation and A/B recovery are platform-owned; SuiFleet invokes configured installer commands.
 
 ## Execution privileges
 
