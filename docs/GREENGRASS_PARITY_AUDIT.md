@@ -78,7 +78,7 @@ AWS components define recipes, lifecycle, dependencies and platform selection. S
 | Dependency resolution | Partial: recipe 1.1 SemVer requirements, hard/soft dependencies, deterministic dependency-first installs, and cycle/conflict rejection before changes ([SF-012](COMPONENT_DEPENDENCIES.md)) | Dependency lifecycle state coupling, rollback, and public-network/hardware acceptance | P1 |
 | Platform manifests | Missing | OS/arch/platform selectors and multiple artifacts | P1 |
 | Configuration merge/reset/validation | Missing; nonempty config rejected | Persisted defaults, JSON-pointer reset, merge policy, validation and notification | P1 |
-| Runtime isolation | Missing: updater runs as service user | Per-component users, environment, resource limits and IPC ACLs | P0 |
+| Runtime isolation | Partial (SF-053): device key and PIN held by a separate signing-service user with an intent-checked, caller-checked socket; component processes cannot read or use it ([KEY_ISOLATION.md](KEY_ISOLATION.md)); components still share the daemon user | Per-component users, environment, resource limits and IPC ACLs | P0 |
 | Local deployment/component CLI | Partial: provisioning/address CLI | Install/list/start/stop/restart/status/logs and offline local recipes | P2 |
 | Container component adapters | External command possible | OCI pull/auth, digest pinning, supervision and recovery | P2 |
 | Lambda/AWS-managed component compatibility | Missing | Explicit adapters; cannot claim native compatibility | P2 |
