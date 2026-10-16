@@ -60,6 +60,14 @@ The protocol limits are `MAX_PROTOCOL_VERSION` in `crates/sui-protocol-config/sr
   A refusal before signing releases its reservation and is recorded as `not_submitted`. Everything submitted is charged as before.
 - **Provenance.** Evidence records both CLIs (version, path, protocol limit, binary checksum), the chain protocol and epoch, and the `Move.lock` framework sources for base and head. Each new fixture records the commits, both CLIs, the protocol, the framework pins and the verified transaction digests. Fixture keys include the release compiler version as well as the base/head contract hashes. A fixture is never reused for another pair or compiler, and a compiler change republishes once.
 
+**SF-056 verification (2026-10-16).**
+- **Reproduced for free.** On testnet (chain `4c78adac`, epoch 1254, protocol 139), a `--dry-run` upgrade of a cached fixture fails with 1.81.1 and succeeds with 1.82.1. A disposable 1.82.1 localnet (protocol 139) reproduces the same split offline.
+- **Real acceptance with the agent wallet.**
+  - Fresh base `3ff488c` → head `b81ff39`: all checks passed, including the upgrade (`HLp3bSDEQ2VKZwXfcyZiE8MXJt2MvyRdDnxXQwoPx6H8`). Net cost 411,486,525 MIST, against a 460,915,082 MIST conservative allowance and one faucet request.
+  - Cached rerun: three transactions, 2,001,843 MIST.
+
+Digests and effects are in [the SF-056 receipt](validation/sf056-testnet.json). These runs used the dedicated agent wallet, not the CI wallet. The automatic CI run on the PR head records its own evidence.
+
 **Updating the transaction CLI.** When testnet moves past protocol 139, update `SUI_NETWORK_*` in the Dockerfile and `NETWORK` in `sui_toolchain.py` together, with the release's protocol limit and checksums. The tests in `scripts/tests/test_testnet_toolchain.py` check that the Dockerfile and the constants agree, and inside the dev image they check the installed binary's identity. Changing the release compiler is a separate, reviewed toolchain upgrade (the SF-050 baseline), not a fix for network protocol drift.
 
 ## The `package-upgrade` live gate
@@ -147,6 +155,8 @@ These were measured on Sui testnet on 2026-10-15 with Sui CLI 1.81.1 and this re
 | 2026-10-15 | SF-006 `redeploy.sh` at `8ee6c84` | dry run, publish `0xffccacbb…` (`CKP2uM91…`), upgrade `0x34f6b171…` (`J9rwj14c…`) | ~0.17 SUI | SF-006 acceptance, posted on #56 |
 | 2026-10-15 | `14b351b` → `8ee6c84`+harness | fresh fixture, 7/7 PASS, 8 transactions | 0.176 SUI | base `0x30230efc…`, head `0x5a9686ae…` |
 | 2026-10-15 | same | **cached fixture**, 7/7 PASS, 3 transactions | **0.0025 SUI** | fixture reuse and batching |
+| 2026-10-16 | `3ff488c` → `b81ff39` (SF-056) | fresh fixture on protocol 139, 10/10 PASS, 9 transactions | 0.411 SUI | split toolchain; base `0x0644ce0d…` (`FqzLbH84…`), upgrade `0x2976ad86…` (`HLp3bSDE…`); one faucet request |
+| 2026-10-16 | same | cached fixture, 8/8 PASS, 3 transactions | 0.0020 SUI | reused the compiler-keyed fixture |
 
 
 ## SF-043 implementation verification
