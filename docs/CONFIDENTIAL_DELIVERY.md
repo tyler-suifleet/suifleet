@@ -76,7 +76,7 @@ The deployment records the **plaintext** digests, exactly as for public delivery
 
 - **Session keys and certificates**: memory only, at most `session_ttl_minutes`.
 - **Fetched decryption keys** (per identity and key server): memory only, at most `key_cache_seconds` (default 120). Set it to 0 to fetch for every blob. They are lost on restart.
-- **Confidential plaintext**: present only in the deployment's working path and what the component itself installs. It is never put in the offline component cache, never logged, and never written to the journal. In `required` mode the plaintext-only offline cache is not consulted.
+- **Confidential plaintext**: present only in the deployment's working path and what the component itself installs. It is never put in the offline component cache, never logged, and never written to the journal. Errors from parsing or checking a confidential recipe (its validation, dependency resolution and configuration merge) name only the failing stage, since their messages would quote recipe values. In `required` mode the plaintext-only offline cache is not consulted.
 - **Offline execution.**
   - Installed components keep running offline.
   - A new or reinstalled confidential version needs reachable key servers.
@@ -95,7 +95,7 @@ The deployment records the **plaintext** digests, exactly as for public delivery
 
 They carry no SLA and no promise of long-term key persistence, so do not encrypt data you must decrypt reliably later with only testnet servers ([Seal providers](https://docs.sui.io/sui-stack/seal/pricing)).
 
-**Mainnet** is not configured or authorized here. Choosing providers is a release decision:
+**Mainnet** is not configured or authorized here. Choosing providers is a release decision, and SF-022's production-provider acceptance (choice, authentication, fees, availability and recovery) remains open: nothing below has been validated against production key servers.
 - Independent providers (Ruby Nodes, NodeInfra, Overclock, Studio Mirai, H2O Nodes, Triton One, Natsai, Enoki) set their own prices and rate limits. Prices were not obtained or measured.
 - Mysten's mainnet committee server needs an Enoki API key and an aggregator, which this edge client does not support yet.
 - Choose a threshold and a set of independent providers you can rely on for as long as the data must stay decryptable. The server set is fixed per ciphertext, so a provider's loss of keys loses the data unless enough others remain.
