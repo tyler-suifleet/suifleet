@@ -158,6 +158,15 @@ struct Handle {
     task: tokio::task::JoinHandle<()>,
 }
 
+/// A failed replacement whose previous application was explicitly restored
+/// and passed readiness. Only this evidence may restore journal confirmation.
+#[derive(Debug)]
+pub struct Recovered(pub String);
+impl std::fmt::Display for Recovered {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str(&self.0) }
+}
+impl std::error::Error for Recovered {}
+
 pub struct Supervisor {
     root: PathBuf,
     settings: Settings,
@@ -165,16 +174,33 @@ pub struct Supervisor {
     running: BTreeMap<String, Handle>,
     status: Arc<Mutex<BTreeMap<String, Status>>>,
     record: Record,
+    recovery_commands: BTreeMap<String, String>,
+    previous: BTreeMap<String, Spec>,
+    recovered: BTreeMap<String, String>,
 }
 
 impl Supervisor {
     pub fn open(state_dir: &Path, settings: Settings) -> anyhow::Result<Self> {
         let root = state_dir.join("supervised");
         std::fs::create_dir_all(&root)?;
+        anyhow::ensure!(
+            !root.join("recovery-intent.json").exists(),
+            "application recovery was interrupted or failed; inspect recovery-intent.json and application state before operator clearance"
+        );
         let active = match std::fs::read(root.join("active.json")) {
             Ok(bytes) => serde_json::from_slice(&bytes)?,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
             Err(error) => return Err(error.into()),
+        };
+        let previous_versions = match std::fs::read(root.join("previous.json")) {
+            Ok(bytes) => serde_json::from_slice(&bytes)?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
+            Err(e) => return Err(e.into()),
+        };
+        let recovered = match std::fs::read(root.join("recovered.json")) {
+            Ok(bytes) => serde_json::from_slice(&bytes)?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
+            Err(e) => return Err(e.into()),
         };
         let current = Instance::current();
         let previous = Instance::recorded(&root)?;
@@ -230,9 +256,88 @@ impl Supervisor {
             running: BTreeMap::new(),
             status: Arc::new(Mutex::new(BTreeMap::new())),
             record,
+            recovery_commands: BTreeMap::new(),
+            previous: previous_versions,
+            recovered,
         };
         write_status(&supervisor.root, &supervisor.status)?;
         Ok(supervisor)
+    }
+
+    pub fn configure_recovery(&mut self, commands: BTreeMap<String, String>) {
+        self.recovery_commands = commands;
+    }
+
+    /// Only confirmed, running previous versions can restore the component journal.
+    pub fn restored(&self, name: &str, deployment: &str) -> bool {
+        self.active.get(name).is_some_and(|s| s.deployment == deployment)
+            && self.status.lock().unwrap().get(name).is_some_and(|s| s.deployment == deployment && s.phase == Phase::Running)
+    }
+
+    /// Runtime crash/readiness failure after the restart budget is exhausted.
+    /// Only explicitly opted-in applications with a retained previous version
+    /// can recover; no platform installation or reboot is initiated.
+    pub async fn recover_broken(&mut self, runner: &ApplyRunner, confirmed: impl Fn(&str) -> bool) -> anyhow::Result<()> {
+        anyhow::ensure!(!self.root.join("recovery-intent.json").exists(),
+            "application recovery requires operator inspection");
+        let broken: Vec<_> = self.status.lock().unwrap().iter()
+            .filter(|(_, status)| status.phase == Phase::Broken)
+            .map(|(name, _)| name.clone()).collect();
+        for name in broken {
+            if !confirmed(&name) || !self.recovery_commands.contains_key(&name) { continue; }
+            let Some(previous) = self.previous.get(&name).cloned() else { continue; };
+            if self.active.get(&name).is_some_and(|s| s.deployment == previous.deployment) { continue; }
+            self.recover_application(&previous, runner, "application-recovery").await?;
+            self.start(previous.clone());
+            self.wait_ready(&name).await?;
+            self.recovered.insert(name.clone(), previous.deployment.clone());
+            atomic_write(&self.root.join("recovered.json"), &serde_json::to_vec(&self.recovered)?)?;
+            self.active.insert(name.clone(), previous);
+            self.save_active()?;
+            self.previous.remove(&name);
+            atomic_write(&self.root.join("previous.json"), &serde_json::to_vec(&self.previous)?)?;
+            self.complete_recovery()?;
+            info!(component = name, "Application recovered after runtime failure");
+        }
+        Ok(())
+    }
+
+    pub fn recovered(&self) -> &BTreeMap<String, String> { &self.recovered }
+
+    /// Invalidate a past recovery before admitting any new installer for this
+    /// component, including a transition away from supervision.
+    pub fn begin_install(&mut self, name: &str) -> anyhow::Result<()> {
+        self.recovered.remove(name);
+        atomic_write(&self.root.join("recovered.json"), &serde_json::to_vec(&self.recovered)?)
+    }
+
+
+    async fn recover_application(&mut self, previous: &Spec, runner: &ApplyRunner, request: &str) -> anyhow::Result<()> {
+        let Some(command) = self.recovery_commands.get(&previous.name).cloned() else {
+            return Ok(());
+        };
+        // Save before inspection or command execution: any failure leaves the
+        // application state requiring inspection instead of a silent bootstrap.
+        let intent = self.root.join("recovery-intent.json");
+        atomic_write(&intent, &serde_json::to_vec(&serde_json::json!({"previous": previous, "command": command}))?)?;
+        self.stop(&previous.name).await;
+        let workspace = self.workspace(previous);
+        let expected = std::fs::read_to_string(workspace.join("artifact.sha256"))?;
+        anyhow::ensure!(crate::walrus_client::sha256_file(&workspace.join("artifact"))? == expected,
+            "previous application artifact digest mismatch; recovery refused");
+        self.record.arm()?;
+        runner.apply(&self.workspace(previous).join("artifact"), Some(&command), request).await
+            .map_err(|e| e.context("application recovery failed; operator inspection required"))?;
+        Ok(())
+    }
+
+    fn complete_recovery(&self) -> anyhow::Result<()> {
+        let intent = self.root.join("recovery-intent.json");
+        if intent.exists() {
+            std::fs::remove_file(intent)?;
+            std::fs::File::open(&self.root)?.sync_all()?;
+        }
+        Ok(())
     }
 
     /// Start every committed component (daemon start, including after a
@@ -259,26 +364,55 @@ impl Supervisor {
         runner: &ApplyRunner,
         request_id: &str,
     ) -> anyhow::Result<()> {
+        anyhow::ensure!(!self.root.join("recovery-intent.json").exists(),
+            "application recovery requires operator inspection");
         anyhow::ensure!(safe_segment(&spec.name), "component name is not a safe path segment");
         anyhow::ensure!(safe_segment(&spec.version), "component version is not a safe path segment");
+        // A prior runtime recovery cannot confirm the outcome of this new
+        // deployment. Persist invalidation before any workspace/install work,
+        // including paths that return early or are interrupted.
+        self.begin_install(&spec.name)?;
         let workspace = self.workspace(&spec);
         let _ = std::fs::remove_dir_all(&workspace);
         std::fs::create_dir_all(&workspace)?;
         let installed = workspace.join("artifact");
         std::fs::rename(artifact, &installed)?;
+        std::fs::File::open(&installed)?.sync_all()?;
+        atomic_write(&workspace.join("artifact.sha256"), crate::walrus_client::sha256_file(&installed)?.as_bytes())?;
+        let previous = self.active.get(&spec.name).cloned();
         if let Some(script) = install {
             self.record.arm().map_err(|error| error.context("install not started"))?;
             // The old version keeps running until the new one is installed.
             if let Err(error) = runner.apply(&installed, Some(script), request_id).await {
+                if error.downcast_ref::<crate::firmware::Indeterminate>().is_some() {
+                    // No destructive recovery after an ambiguous installer result.
+                    return Err(error);
+                }
                 let _ = std::fs::remove_dir_all(&workspace);
-                return Err(error.context("install failed; the running version is unchanged"));
+                if let Some(previous) = &previous {
+                    if self.recovery_commands.contains_key(&previous.name) {
+                        self.recover_application(previous, runner, request_id).await?;
+                        self.start(previous.clone());
+                        self.wait_ready(&previous.name).await?;
+                        self.complete_recovery()?;
+                        return Err(Recovered(format!("{error:#}; previous application {} recovered", previous.version)).into());
+                    }
+                }
+                return Err(error.context("install failed; previous application retained"));
             }
         }
-        let previous = self.active.get(&spec.name).cloned();
         self.stop(&spec.name).await;
         self.start(spec.clone());
         match self.wait_ready(&spec.name).await {
             Ok(()) => {
+                if let Some(previous) = &previous {
+                    self.previous.insert(spec.name.clone(), previous.clone());
+                } else {
+                    self.previous.remove(&spec.name);
+                }
+                atomic_write(&self.root.join("previous.json"), &serde_json::to_vec(&self.previous)?)?;
+                self.recovered.remove(&spec.name);
+                atomic_write(&self.root.join("recovered.json"), &serde_json::to_vec(&self.recovered)?)?;
                 self.active.insert(spec.name.clone(), spec.clone());
                 self.save_active()?;
                 self.collect_versions(&spec, previous.as_ref());
@@ -291,15 +425,17 @@ impl Supervisor {
                 let Some(previous) = previous else {
                     return Err(error);
                 };
+                self.recover_application(&previous, runner, request_id).await?;
                 self.start(previous.clone());
                 let restored = match self.wait_ready(&previous.name).await {
-                    Ok(()) => "ready".to_string(),
+                    Ok(()) => { self.complete_recovery()?; "ready".to_string() },
                     Err(error) => format!("not ready: {error:#}"),
                 };
-                anyhow::bail!(
-                    "{error:#}; rolled back to {} ({restored})",
-                    previous.version
-                )
+                let message = format!("{error:#}; rolled back to {} ({restored})", previous.version);
+                if restored == "ready" && (install.is_none() || self.recovery_commands.contains_key(&previous.name)) {
+                    return Err(Recovered(message).into());
+                }
+                anyhow::bail!(message)
             }
         }
     }
@@ -317,6 +453,10 @@ impl Supervisor {
         if self.active.remove(name).is_some() {
             self.save_active()?;
         }
+        self.previous.remove(name);
+        self.recovered.remove(name);
+        atomic_write(&self.root.join("previous.json"), &serde_json::to_vec(&self.previous)?)?;
+        atomic_write(&self.root.join("recovered.json"), &serde_json::to_vec(&self.recovered)?)?;
         self.status.lock().unwrap().remove(name);
         write_status(&self.root, &self.status)?;
         if safe_segment(name) {
@@ -715,6 +855,7 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     std::fs::write(&temporary, bytes)?;
     std::fs::File::open(&temporary)?.sync_all()?;
     std::fs::rename(&temporary, path)?;
+    std::fs::File::open(path.parent().unwrap())?.sync_all()?;
     Ok(())
 }
 
@@ -1365,6 +1506,196 @@ mod tests {
         versions.sort();
         assert_eq!(versions, ["3.0.0", "4.0.0"]);
         s.stop_all().await;
+    }
+
+    #[tokio::test]
+    async fn explicit_recovery_restores_previous_artifact_configuration_and_restart() {
+        let mut f = Fixture::new("explicit-recovery");
+        let mut s = f.open();
+        let state = f.dir.join("application");
+        std::fs::create_dir_all(&state).unwrap();
+        let current = quote(&state.join("current"));
+        let config = quote(&state.join("config"));
+        s.configure_recovery(BTreeMap::from([("app".into(), format!(
+            "cp {{artifact}} {current}; cp {{artifacts}}/config {config}"
+        ))]));
+        let mut v1 = f.spec("1.0.0", "exec sleep 300");
+        v1.readiness = Some(format!("test \"$(cat {current})\" = 'artifact 1.0.0'; test \"$(cat {config})\" = stable"));
+        f.deploy(&mut s, v1.clone(), Some(&format!(
+            "echo stable > {{artifacts}}/config; cp {{artifact}} {current}; cp {{artifacts}}/config {config}"
+        ))).await.unwrap();
+        // A partially destructive install supplies failure explicitly.
+        let v2 = f.spec("2.0.0", "exec sleep 300");
+        assert!(f.deploy(&mut s, v2, Some(&format!("echo broken > {current}; echo broken > {config}; exit 9"))).await.is_err());
+        assert_eq!(std::fs::read_to_string(state.join("current")).unwrap(), "artifact 1.0.0");
+        assert_eq!(std::fs::read_to_string(state.join("config")).unwrap().trim(), "stable");
+        assert!(s.restored("app", &v1.deployment));
+        // A readiness/health failure invokes the same explicit recovery.
+        let mut v3 = f.spec("3.0.0", "exec sleep 300");
+        v3.readiness = Some("exit 1".into());
+        let error = f.deploy(&mut s, v3, Some(&format!("echo broken > {current}; echo broken > {config}"))).await.unwrap_err();
+        assert!(format!("{error:#}").contains("rolled back to 1.0.0 (ready)"));
+        assert_eq!(std::fs::read_to_string(state.join("current")).unwrap(), "artifact 1.0.0");
+        assert_eq!(std::fs::read_to_string(state.join("config")).unwrap().trim(), "stable");
+        assert_eq!(f.active()["app"], v1);
+        s.stop_all().await;
+        drop(s);
+        let mut s = f.open();
+        s.bootstrap().await;
+        assert!(s.restored("app", &v1.deployment));
+        s.stop_all().await;
+    }
+
+    #[tokio::test]
+    async fn runtime_failure_recovers_retained_previous_version_once() {
+        let mut f = Fixture::new("runtime-recovery");
+        let mut s = f.open_with(0);
+        let v1 = f.spec("1.0.0", "echo 1 > {work}/version; exec sleep 300");
+        f.deploy(&mut s, v1.clone(), None).await.unwrap();
+        let trigger = f.dir.join("crash");
+        let v2 = f.spec("2.0.0", &format!("echo 2 > {{work}}/version; while test ! -e {}; do sleep 0.05; done; exit 9", quote(&trigger)));
+        f.deploy(&mut s, v2, None).await.unwrap();
+        s.stop_all().await;
+        drop(s);
+        // Retained prior lifecycle and artifact survive a daemon restart.
+        let mut s = f.open_with(0);
+        let marker = f.dir.join("recovery-runs");
+        s.configure_recovery(BTreeMap::from([("app".into(), format!("cat {{artifact}} > {}; echo ran >> {}", quote(&f.dir.join("restored")), quote(&marker)))]));
+        s.bootstrap().await;
+        std::fs::write(trigger, "crash").unwrap();
+        until("runtime failure", || phase(&s) == Phase::Broken).await;
+        s.recover_broken(&f.runner, |_| true).await.unwrap();
+        assert_eq!(f.read("version").trim(), "1");
+        assert_eq!(std::fs::read_to_string(f.dir.join("restored")).unwrap(), "artifact 1.0.0");
+        assert!(s.restored("app", &v1.deployment));
+        assert_eq!(s.recovered()["app"], v1.deployment);
+        s.recover_broken(&f.runner, |_| true).await.unwrap();
+        assert_eq!(std::fs::read_to_string(marker).unwrap(), "ran\n");
+        s.stop_all().await;
+    }
+
+    #[tokio::test]
+    async fn previous_artifact_corruption_refuses_recovery_and_bootstrap() {
+        let mut f = Fixture::new("corrupt-recovery");
+        let mut s = f.open();
+        let v1 = f.spec("1.0.0", "exec sleep 300");
+        f.deploy(&mut s, v1.clone(), None).await.unwrap();
+        std::fs::write(s.workspace(&v1).join("artifact"), "corrupt").unwrap();
+        let marker = f.dir.join("must-not-run");
+        s.configure_recovery(BTreeMap::from([("app".into(), format!("touch {}", quote(&marker)))]));
+        let v2 = f.spec("2.0.0", "exit 1");
+        assert!(f.deploy(&mut s, v2, None).await.unwrap_err().to_string().contains("digest mismatch"));
+        assert!(!marker.exists());
+        assert!(f.dir.join("supervised/recovery-intent.json").exists());
+        s.stop_all().await;
+    }
+
+    #[tokio::test]
+    async fn interrupted_recovery_keeps_intent_without_repeating_work() {
+        let mut f = Fixture::new("interrupted-recovery");
+        let mut s = f.open();
+        let v1 = f.spec("1.0.0", "exec sleep 300");
+        f.deploy(&mut s, v1, None).await.unwrap();
+        let marker = f.dir.join("recovery-runs");
+        s.configure_recovery(BTreeMap::from([("app".into(), format!("echo ran >> {}; exec sleep 300", quote(&marker)))]));
+        let v2 = f.spec("2.0.0", "exit 1");
+        tokio::select! {
+            _ = f.deploy(&mut s, v2, None) => panic!("recovery should still be running"),
+            _ = until("recovery command", || marker.exists()) => {}
+        }
+        assert!(f.dir.join("supervised/recovery-intent.json").exists());
+        s.stop_all().await;
+        let settings = s.settings.clone();
+        drop(s);
+        assert!(Supervisor::open(&f.dir, settings).err().unwrap().to_string().contains("recovery was interrupted or failed"));
+        assert_eq!(std::fs::read_to_string(marker).unwrap(), "ran\n");
+    }
+
+    #[tokio::test]
+    async fn new_failed_install_invalidates_prior_runtime_recovery() {
+        for (label, install, indeterminate, supervised) in [
+            ("killed", "kill -KILL $$", true, true),
+            ("failed", "exit 9", false, true),
+            ("direct-killed", "kill -KILL $$", true, false),
+            ("direct-failed", "exit 9", false, false),
+        ] {
+            let mut f = Fixture::new(&format!("stale-recovery-{label}"));
+            let mut s = f.open_with(0);
+            let v1 = f.spec("1.0.0", "exec sleep 300");
+            f.deploy(&mut s, v1.clone(), None).await.unwrap();
+            let v2 = f.spec("2.0.0", "exec sleep 300");
+            f.deploy(&mut s, v2, None).await.unwrap();
+            s.configure_recovery(BTreeMap::from([("app".into(), "true".into())]));
+            let pid = s.status()["app"].pid.unwrap();
+            unsafe { libc::kill(pid as i32, libc::SIGKILL); }
+            until("runtime failure", || phase(&s) == Phase::Broken).await;
+            s.recover_broken(&f.runner, |_| true).await.unwrap();
+            assert_eq!(s.recovered()["app"], v1.deployment);
+            assert!(s.restored("app", &v1.deployment));
+            s.configure_recovery(BTreeMap::new());
+
+            let v3 = f.spec("3.0.0", "exec sleep 300");
+            let error = if supervised {
+                f.deploy(&mut s, v3, Some(install)).await.unwrap_err()
+            } else {
+                // The admission path also invalidates recovery when replacing
+                // supervision with an install-only recipe.
+                s.begin_install("app").unwrap();
+                let artifact = f.dir.join("direct-artifact");
+                std::fs::write(&artifact, "v3").unwrap();
+                f.runner.apply(&artifact, Some(install), "test").await.unwrap_err()
+            };
+            assert_eq!(error.downcast_ref::<crate::firmware::Indeterminate>().is_some(), indeterminate);
+            assert!(error.downcast_ref::<Recovered>().is_none());
+            // The retained process is still running, but polling must have no
+            // stale recovery identity with which to confirm the failed install.
+            assert!(s.restored("app", &v1.deployment));
+            assert!(!s.recovered().contains_key("app"));
+            s.stop_all().await;
+            drop(s);
+            let s = f.open_with(0);
+            assert!(!s.recovered().contains_key("app"), "stale recovery survived restart");
+        }
+    }
+
+    #[tokio::test]
+    async fn ambiguous_install_never_triggers_destructive_recovery() {
+        let mut f = Fixture::new("unknown-install");
+        let mut s = f.open_with(0);
+        let v1 = f.spec("1.0.0", "exec sleep 300");
+        f.deploy(&mut s, v1, None).await.unwrap();
+        let marker = f.dir.join("must-not-recover");
+        s.configure_recovery(BTreeMap::from([("app".into(), format!("touch {}", quote(&marker)))]));
+        let v2 = f.spec("2.0.0", "exec sleep 300");
+        let error = f.deploy(&mut s, v2, Some("kill -KILL $$")).await.unwrap_err();
+        assert!(error.downcast_ref::<crate::firmware::Indeterminate>().is_some());
+        assert!(!marker.exists());
+        let pid = s.status()["app"].pid.unwrap();
+        unsafe { libc::kill(pid as i32, libc::SIGKILL); }
+        until("previous run failure after unknown install", || phase(&s) == Phase::Broken).await;
+        s.recover_broken(&f.runner, |_| false).await.unwrap();
+        assert!(!marker.exists(), "unconfirmed application state must block runtime recovery too");
+        s.stop_all().await;
+    }
+
+    #[tokio::test]
+    async fn failed_recovery_blocks_restart_and_is_never_repeated() {
+        let mut f = Fixture::new("failed-recovery");
+        let mut s = f.open();
+        let v1 = f.spec("1.0.0", "exec sleep 300");
+        f.deploy(&mut s, v1, None).await.unwrap();
+        let marker = f.dir.join("recovery-runs");
+        s.configure_recovery(BTreeMap::from([("app".into(), format!("echo ran >> {}; exit 8", quote(&marker)))]));
+        let v2 = f.spec("2.0.0", "exit 1");
+        assert!(f.deploy(&mut s, v2, None).await.unwrap_err().to_string().contains("recovery failed"));
+        s.stop_all().await;
+        drop(s);
+        for _ in 0..2 {
+            let settings = Settings { startup: Duration::ZERO, ready_timeout: Duration::from_secs(1), stop_timeout: Duration::from_secs(1), max_restarts: 0, max_memory_bytes: None };
+            let error = Supervisor::open(&f.dir, settings).err().expect("restarted over ambiguous recovery");
+            assert!(error.to_string().contains("recovery was interrupted or failed"));
+        }
+        assert_eq!(std::fs::read_to_string(marker).unwrap(), "ran\n");
     }
 
     #[tokio::test]

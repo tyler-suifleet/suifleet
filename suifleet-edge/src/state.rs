@@ -21,6 +21,9 @@ pub struct State {
     /// Components on this device by name, maintained by every deployment.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub components: BTreeMap<String, Component>,
+    /// Previous confirmed identity retained before replacement, including after interruption.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub last_known_good: BTreeMap<String, Component>,
     /// Resume point of the DeviceAddedToGroup scan, which starts at genesis
     /// whatever the deployment baseline (membership predates enrollment).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -78,7 +81,7 @@ pub struct Outcome {
     /// before the update starts so a restart can still learn its outcome.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub firmware_request: Option<String>,
-    /// The privileged update may or may not have been applied: never
+    /// A configured command may or may not have completed: never
     /// reported, never re-applied and never turned into Failed.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub indeterminate: bool,
@@ -119,7 +122,8 @@ impl Journal {
     }
     /// Settle deployments an interrupted run left without a status. Those
     /// `pending` says can still learn their real outcome (and indeterminate
-    /// ones) are kept; every other one becomes Failed and is never re-applied.
+    /// ones) are kept. Direct command interruptions stay unknown; only helper
+    /// requests proven never started become Failed. Nothing is re-applied.
     pub fn settle_interrupted(
         &mut self,
         mut pending: impl FnMut(&str, &Outcome) -> bool,
@@ -128,7 +132,10 @@ impl Journal {
             if outcome.status.is_some() || outcome.indeterminate || pending(id, outcome) {
                 continue;
             }
-            outcome.status = Some(crate::protocol::STATUS_FAILED);
+            // With no helper request there is no durable external completion
+            // receipt. The command may have made changes before interruption.
+            outcome.indeterminate = outcome.firmware_request.is_none();
+            outcome.status = (!outcome.indeterminate).then_some(crate::protocol::STATUS_FAILED);
             outcome.error = Some(
                 "daemon interrupted during apply; inspect device before explicitly redeploying"
                     .into(),
@@ -218,12 +225,12 @@ mod tests {
                 .iter()
                 .map(|id| journal.state.deployments[*id].status)
                 .collect();
-            assert_eq!(states, [Some(2), None, None, Some(2)]);
+            assert_eq!(states, [None, None, None, Some(2)]);
             assert!(!journal.state.deployments["0x1"].reported);
         }
         {
             let journal = reopen(&path);
-            assert_eq!(journal.state.deployments["0x1"].status, Some(2), "settled outcome is durable");
+            assert!(journal.state.deployments["0x1"].indeterminate, "unknown outcome is durable");
             assert!(journal.state.deployments["0x3"].indeterminate);
         }
         assert!(Journal::open(&path, "other-device".into()).is_err());
