@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """SF-028 Greengrass compatibility specification checker.
 
-Validates interfaces/compat/greengrass-compat.json and evaluates every
+Validates interfaces/compat/greengrass-compat.json and the SF-038 managed
+component catalog (scripts/greengrass_managed.py), and evaluates every
 fixture case against the *specification reference models* below. These models
 define the proposed adapter semantics precisely enough to make the fixtures
 executable and self-consistent. They are not the daemon, the SF-037 recipe
@@ -20,6 +21,9 @@ import json
 import re
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import greengrass_managed as managed  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 COMPAT = Path("interfaces/compat")
@@ -663,12 +667,19 @@ def check_client_devices(cases) -> int:
     return count
 
 
+def _managed_catalog(root: Path) -> dict:
+    return json.loads((root / managed.CATALOG).read_text())
+
+
+# Runners take (cases, root); root locates the SF-038 managed catalog.
 SUITE_RUNNERS = {
-    "aws-recipe-cases.json": check_recipes,
-    "pubsub-cases.json": check_pubsub,
-    "shadow-cases.json": lambda c: _run_sequences(c, ShadowStore, "shadow"),
-    "stream-cases.json": lambda c: _run_sequences(c, StreamStore, "stream"),
-    "client-device-cases.json": check_client_devices,
+    "aws-recipe-cases.json": lambda c, _: check_recipes(c),
+    "pubsub-cases.json": lambda c, _: check_pubsub(c),
+    "shadow-cases.json": lambda c, _: _run_sequences(c, ShadowStore, "shadow"),
+    "stream-cases.json": lambda c, _: _run_sequences(c, StreamStore, "stream"),
+    "client-device-cases.json": lambda c, _: check_client_devices(c),
+    "managed-dependency-cases.json": lambda c, root: managed.check_dependency_cases(c, _managed_catalog(root)),
+    "credential-provider-cases.json": lambda c, _: _run_sequences(c, managed.CredentialProvider, "credential-provider"),
 }
 LEVELS = ("functional", "aws_api", "aws_recipe")
 STATUSES = {"implemented", "partial", "proposed", "excluded", "undecided", "not-applicable"}
@@ -745,9 +756,10 @@ def run(root: Path) -> dict:
     keys = {issue["key"] for issue in backlog["issues"]}
     matrix = _load(root, "greengrass-compat.json")
     errors = check_matrix(root, matrix, keys)
+    errors += managed.check_catalog(root, _managed_catalog(root), matrix, keys)
     if errors:
         raise AssertionError("compatibility matrix invalid:\n  " + "\n  ".join(errors))
-    counts = {name: SUITE_RUNNERS[name](_load(root, name)) for name in matrix["suites"]}
+    counts = {name: SUITE_RUNNERS[name](_load(root, name), root) for name in matrix["suites"]}
     return counts
 
 

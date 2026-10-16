@@ -9,7 +9,8 @@
    "aws.greengrass.clientdevices.Auth": "2.5.x policy semantics",
    "aws.greengrass.clientdevices.mqtt.Bridge": "2.3.x",
    "aws.greengrass.ShadowManager": "IPC operations as documented",
-   "aws.greengrass.StreamManager": "2.3.x SDK data model"
+   "aws.greengrass.StreamManager": "2.3.x SDK data model",
+   "AWS-managed components": "SF-038 catalog and adapter reference versions in managed-components.json"
   },
   "sources": [
    "https://docs.aws.amazon.com/greengrass/v2/developerguide/component-recipe-reference.html",
@@ -43,10 +44,10 @@
   {"id": "linux-arm", "aws": {"os": "linux", "architecture": "arm"}, "native": {"os": "linux", "arch": "arm"}, "status": "proposed",
    "tickets": ["SF-011"], "notes": "Catalog selection vectors only; architecture.detail (arm61/arm71/arm81) is not represented and is rejected by translation."},
   {"id": "linux-x86", "aws": {"os": "linux", "architecture": "x86"}, "native": null, "status": "undecided", "tickets": ["SF-038"],
-   "notes": "Translated recipes omit x86 manifests and report them."},
+   "notes": "Translated recipes omit x86 manifests and report them. SF-038 recommends exclusion, pending approval."},
   {"id": "windows", "aws": {"os": "windows"}, "native": null, "status": "undecided", "tickets": ["SF-038"],
-   "notes": "No Windows runtime; SF-038 owns the OS support decision. Translated recipes omit Windows manifests."},
-  {"id": "darwin", "aws": {"os": "darwin"}, "native": null, "status": "undecided", "tickets": ["SF-038"], "notes": "No macOS runtime."}
+   "notes": "No Windows runtime. SF-038 recommends exclusion, pending approval; translated recipes omit Windows manifests."},
+  {"id": "darwin", "aws": {"os": "darwin"}, "native": null, "status": "undecided", "tickets": ["SF-038"], "notes": "No macOS runtime. SF-038 recommends exclusion, pending approval."}
  ],
  "suites": {
   "aws-recipe-cases.json": {
@@ -70,6 +71,15 @@
   "client-device-cases.json": {
    "description": "LAN client identity state and group/policy authorization.",
    "runtime_execution": "pending", "pending_on": ["SF-032", "SF-035"]
+  },
+  "managed-dependency-cases.json": {
+   "description": "SF-038 classification of AWS recipe dependencies on AWS-managed components against the managed catalog.",
+   "runtime_execution": "pending", "pending_on": ["SF-037"]
+  },
+  "credential-provider-cases.json": {
+   "description": "SF-038 proposed credential-provider (token exchange equivalent) grants, tokens, caching and upstream retry.",
+   "runtime_execution": "pending", "pending_on": ["SF-022", "SF-027"],
+   "notes": "The adapter has no implementation ticket yet; see the ticket_request in managed-components.json."
   }
  },
  "capabilities": [
@@ -125,17 +135,43 @@
   {"id": "streams.export", "area": "streams", "aws_reference": "Kinesis/S3/IoT SiteWise/HTTP export definitions",
    "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable",
    "tickets": ["SF-034", "SF-038"], "suites": ["stream-cases.json"],
-   "notes": "Export checkpoint semantics are specified; concrete AWS destinations are SF-038 adapter decisions."},
+   "notes": "Export checkpoint semantics are specified. SF-038 recommends the stream-export-aws adapter for Kinesis Data Streams and S3; IoT Analytics (discontinued) and SiteWise destinations are recommended exclusions."},
   {"id": "client-devices.auth", "area": "client-devices", "aws_reference": "aws.greengrass.clientdevices.Auth deviceGroups/policies",
    "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable",
    "tickets": ["SF-021", "SF-035"], "suites": ["client-device-cases.json"]},
   {"id": "client-devices.discovery", "area": "client-devices", "aws_reference": "Greengrass cloud discovery API and IP detector",
    "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable", "tickets": ["SF-035"],
    "notes": "Native discovery returns broker endpoints and CA from an authenticated source; the AWS discovery REST API is not proposed by default."},
-  {"id": "cloud.credentials", "area": "cloud", "aws_reference": "aws.greengrass.TokenExchangeService",
-   "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable", "tickets": ["SF-022", "SF-038"]},
-  {"id": "components.aws-managed", "area": "components", "aws_reference": "AWS-provided components, Lambda, ML, industrial, Device Defender",
-   "functional": "undecided", "aws_api": "undecided", "aws_recipe": "undecided", "tickets": ["SF-038"]},
+  {"id": "cloud.credentials", "area": "cloud", "aws_reference": "aws.greengrass.TokenExchangeService 2.0.3 container-credentials protocol",
+   "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable",
+   "tickets": ["SF-022", "SF-027", "SF-038"], "suites": ["credential-provider-cases.json"],
+   "notes": "SF-038 credential-provider adapter: unmodified AWS SDKs read AWS_CONTAINER_CREDENTIALS_FULL_URI/AWS_CONTAINER_AUTHORIZATION_TOKEN. SF-038 recommends this aws_api scope; it stays undecided until approved and an implementation ticket exists."},
+  {"id": "components.aws-managed", "area": "components", "aws_reference": "46 AWS-provided and machine learning components (managed-components.json)",
+   "functional": "proposed", "aws_api": "undecided", "aws_recipe": "proposed",
+   "tickets": ["SF-037", "SF-038"], "suites": ["managed-dependency-cases.json"],
+   "notes": "Each component maps to a native equivalent, a candidate adapter or a recommended exclusion; dispositions await approval. Recipe dependencies on them stay rejected until SF-037 adopts the classification."},
+  {"id": "components.lambda", "area": "components", "aws_reference": "aws.greengrass.lambda component type, LambdaManager 2.3.9, launcher, runtimes, legacy subscription router",
+   "functional": "proposed", "aws_api": "undecided", "aws_recipe": "proposed",
+   "tickets": ["SF-014", "SF-037", "SF-038"], "suites": ["aws-recipe-cases.json", "managed-dependency-cases.json"],
+   "notes": "Lambda execution emulation is a recommended exclusion. Functions are repackaged as generic native components; Lambda recipes and dependencies are rejected with guidance."},
+  {"id": "components.ml-inference", "area": "components", "aws_reference": "variant.DLR 1.6.16, variant.TensorFlowLite 2.5.15, model stores, SageMaker AI Edge Manager (discontinued 2024-04-26)",
+   "functional": "proposed", "aws_api": "not-applicable", "aws_recipe": "proposed",
+   "tickets": ["SF-011", "SF-023", "SF-038"], "suites": ["managed-dependency-cases.json"],
+   "notes": "Runtimes and models are native components with authenticated artifacts. AWS sample inference components and the discontinued Edge Manager are recommended exclusions."},
+  {"id": "cloud.metrics", "area": "cloud", "aws_reference": "aws.greengrass.Cloudwatch 4.0.0, aws.greengrass.DeviceDefender 4.0.0, telemetry NucleusEmitter 1.0.14",
+   "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable",
+   "tickets": ["SF-019", "SF-020", "SF-038"],
+   "notes": "Native metrics in SF-019/SF-020. CloudWatch export is a recommended adapter; Device Defender is deferred behind aws-iot-core-connection."},
+  {"id": "cloud.logs", "area": "cloud", "aws_reference": "aws.greengrass.LogManager, aws.greengrass.SystemLogForwarder",
+   "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable", "tickets": ["SF-020", "SF-038"],
+   "notes": "Native log collection in SF-020; CloudWatch Logs upload is a recommended adapter."},
+  {"id": "remote.secure-tunneling", "area": "remote-support", "aws_reference": "aws.greengrass.SecureTunneling 2.0.1, aws.greengrass.SystemsManagerAgent",
+   "functional": "not-applicable", "aws_api": "undecided", "aws_recipe": "not-applicable", "tickets": ["SF-038"],
+   "notes": "Remote access is platform-owned. An AWS secure tunneling adapter is deferred; the open-source SSM agent can be packaged as a native component."},
+  {"id": "industrial.protocols", "area": "industrial", "aws_reference": "aws.greengrass.Modbus 2.1.11, IoT SiteWise OPC UA collector/publisher/processor, EdgeConnectorForKVS 1.0.5",
+   "functional": "proposed", "aws_api": "undecided", "aws_recipe": "proposed",
+   "tickets": ["SF-011", "SF-032", "SF-034", "SF-038"], "suites": ["managed-dependency-cases.json"],
+   "notes": "Protocol collectors are native components over SF-032/SF-034. AWS closed-source SiteWise and KVS components are recommended exclusions."},
   {"id": "cli.local", "area": "operations", "aws_reference": "greengrass-cli deployment/component commands",
    "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable", "tickets": ["SF-027"]},
   {"id": "control-plane.deployments", "area": "deployments", "aws_reference": "Greengrass CreateDeployment/ListEffectiveDeployments cloud APIs",
