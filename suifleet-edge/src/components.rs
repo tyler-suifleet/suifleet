@@ -261,6 +261,8 @@ pub struct Loaded {
     pub artifact_sha256: String,
     pub artifact_blob_id: String,
     pub install: Option<String>,
+    /// Present for a supervised (run) dependency.
+    pub supervised: Option<crate::supervisor::Lifecycle>,
 }
 
 pub struct Loader<'a> {
@@ -367,6 +369,7 @@ impl<'a> Loader<'a> {
                 version_id: id,
                 recipe_sha256: value.recipe_sha256s[i].clone(),
                 artifact_sha256: value.artifact_sha256s[i].clone(),
+                supervised: crate::supervisor::Lifecycle::of(&parsed.lifecycle)?,
                 artifact_blob_id: parsed.artifact_blob_id,
                 install: parsed.lifecycle.install,
             },
