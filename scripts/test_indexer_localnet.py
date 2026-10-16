@@ -26,6 +26,11 @@ receipt), indexes it, and checks:
     the API, verify every call and argument against the request and the
     CLI's own chain reads, sign and execute; `ctl ... --out` writes an unsigned transaction; the
     indexer then shows the new membership and deployment;
+  - device telemetry (SF-019): real daemons sign snapshots to `POST
+    /v1/telemetry`; the activated device's are accepted against its indexed
+    identity and served as healthy by `/v1/health` (and verified again by the
+    dApp's verifier), the revoked device's are rejected and it stays
+    unreported; stored telemetry survives an indexer restart;
   - a database bound to another chain, or to another publication on the
     same chain, is refused; --reset discards it and indexes only the new one;
   - load: concurrent paginated reads over ~45k synthetic rows.
@@ -39,6 +44,7 @@ import argparse
 import base64
 import concurrent.futures
 import json
+import os
 from pathlib import Path
 import shutil
 import sqlite3
@@ -55,6 +61,7 @@ import deployment_manifest as dm
 
 ROOT = Path(__file__).resolve().parents[1]
 INDEXER = ROOT / "suifleet-indexer/target/debug/suifleet-indexer"
+DAEMON = ROOT / "suifleet-edge/target/debug/suifleet"
 CLOCK = "@0x6"
 API = "http://127.0.0.1:8650"
 
@@ -163,7 +170,7 @@ def run(rpc_url, faucet_url):
         spare, _, _ = register("spare", operator, operator, activate=False)
         third, _, third_owner = register("third", operator, operator)
         use(other)
-        foreign, _, foreign_owner = register("foreign", other, other)
+        foreign, foreign_cap, foreign_owner = register("foreign", other, other)
         use(operator)
 
         def borrowed(owner_cap, *call):
@@ -200,7 +207,8 @@ def run(rpc_url, faucet_url):
 
         def serve(*extra):
             process = subprocess.Popen([str(INDEXER), "serve", *common, "--tokens", str(root / "tokens"),
-                                        "--interval-seconds", "1", *extra], stdout=log, stderr=log)
+                                        "--interval-seconds", "1", "--telemetry-db", str(root / "telemetry.db"), *extra],
+                                       stdout=log, stderr=log)
             wait_for(lambda: process.poll() is None and http("GET", "/v1/status", read_token)[0] == 200, "API did not start")
             return process
         server = serve()
@@ -248,6 +256,64 @@ def run(rpc_url, faucet_url):
             assert get(f"/v1/devices/{foreign}")["owner"] == n(other)
             print("PASS: a revocation (DeviceIdentityChanged) is indexed")
 
+            # Telemetry (SF-019): real daemons sign with the wallet's device keys.
+            seeds = {}
+            for entry in json.loads((root / "wallet/sui.keystore").read_text()):
+                raw = base64.b64decode(entry)
+                if raw[0] == 0:
+                    key = root / f"key-{len(seeds)}"
+                    key.write_text(raw[1:].hex())
+                    address = subprocess.run([str(DAEMON), "--derive-address", str(key)], capture_output=True, text=True,
+                                             check=True).stdout.strip()
+                    seeds[n(address)] = key
+            daemons = []
+
+            def daemon(name, device, cap, key):
+                directory = root / name
+                directory.mkdir()
+                (directory / "config.toml").write_text(
+                    f'[sui]\nmanifest_path = {json.dumps(str(root / "deployment.json"))}\n'
+                    f'[device]\nkeypair_path = {json.dumps(str(key))}\ndevice_object_id = "{device}"\ndevice_cap_id = "{cap}"\n'
+                    '[apply]\ncommand = "/bin/false"\n'
+                    f'[runtime]\nstate_dir = {json.dumps(str(directory / "state"))}\npoll_seconds = 2\n'
+                    f'[telemetry]\nurl = "{API}"\ninterval_seconds = 10\n')
+                process = subprocess.Popen([str(DAEMON)], env={**os.environ, "EDGE_CONFIG": str(directory / "config.toml")},
+                                           stdout=(directory / "daemon.log").open("w"), stderr=subprocess.STDOUT)
+                daemons.append(process)
+                return directory
+            try:
+                daemon("pi", pi, pi_cap, seeds[n(device_signer)])
+                revoked = daemon("foreign", foreign, foreign_cap, seeds[n(other)])
+
+                def health(owner):
+                    return {d["device_id"]: d for d in every(f"/v1/health?owner={owner}")}
+                wait_for(lambda: health(operator)[n(pi)]["status"] == "healthy", "the activated device never reported healthy",
+                         timeout=90)
+                pi_health = health(operator)[n(pi)]
+                assert pi_health["codes"] == [] and pi_health["signer"] == n(device_signer), pi_health
+                assert pi_health["report"]["signer"] == n(device_signer) and pi_health["daemon_version"], pi_health
+                assert health(operator)[n(spare)]["codes"] == ["no-telemetry"], "an unactivated device got health"
+                summary = get(f"/v1/health/summary?owner={operator}")
+                assert summary["counts"]["healthy"] == 1 and summary["total"] == 3, summary
+                wait_for(lambda: "Telemetry snapshot rejected" in (revoked / "daemon.log").read_text(),
+                         "the revoked device's telemetry was not rejected", timeout=60)
+                gone = health(other)[n(foreign)]
+                assert (gone["status"], gone["codes"], gone["report"]) == ("unreported", ["revoked"], None), gone
+                history = get(f"/v1/devices/{foreign}/telemetry")["items"]
+                assert history == [], "a revoked identity's telemetry was stored"
+                stored = get(f"/v1/devices/{pi}/telemetry")["items"]
+                assert stored and stored[0]["seq"] == max(r["seq"] for r in stored)
+                captured = root / "envelopes.json"
+                captured.write_text(json.dumps([{"message": r["message"], "signature": r["signature"]} for r in stored]))
+                subprocess.run(["node", str(ROOT / "scripts/test_telemetry.cjs"), "--verify", str(captured),
+                                n(device_signer), n(pi), chain_id, n(registry)], check=True)
+            finally:
+                for process in daemons:
+                    process.terminate()
+                    process.wait(timeout=30)
+            print("PASS: telemetry: the activated device's signed snapshots accepted and served healthy (verified again "
+                  "by the dApp), the unactivated device unreported, the revoked device's rejected and unreported")
+
             # A catalog deployment (SF-011) names its ComponentVersion, not a recipe.
             catalog = created(transaction("--move-call", f"{package}::component_catalog::create_catalog"),
                               "::component_catalog::ComponentCatalog")[0]
@@ -287,6 +353,7 @@ def run(rpc_url, faucet_url):
             server = serve()
             wait_for(lambda: get(f"/v1/deployments/{direct}")["deleted"], "deletion not indexed after restart")
             wait_for(lambda: n(spare) not in get(f"/v1/groups/{group}")["devices"], "removal not indexed after restart")
+            assert get(f"/v1/devices/{pi}/telemetry")["items"] == stored, "telemetry did not survive a restart"
             new = get(f"/v1/changes?after={before[1]}")["items"]
             kinds = sorted(c["kind"] for c in new)
             assert kinds == ["deployment.deleted", "group.updated"], kinds
