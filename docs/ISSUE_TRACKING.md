@@ -1,6 +1,6 @@
 # Issue tracking and model ownership
 
-Repository: `tyler-suifleet/suifleet`. Live private GitHub Project: [SuiFleet — OTA and Fleet Management](https://github.com/users/tyler-suifleet/projects/1). The expanded roadmap has 39 scoped items; see publication records for live issue IDs. See [the issue index](tracking/INDEX.md) and [publication records](tracking/github-state.json); live GitHub state is authoritative for assignments and status.
+Repository: `tyler-suifleet/suifleet`. Live private GitHub Project: [SuiFleet — OTA and Fleet Management](https://github.com/users/tyler-suifleet/projects/1). The roadmap contains scoped items in the seed backlog; see publication records for live issue IDs. See [the issue index](tracking/INDEX.md) and [publication records](tracking/github-state.json); live GitHub state is authoritative for assignments and status.
 
 ## Authority
 
@@ -8,9 +8,15 @@ Repository: `tyler-suifleet/suifleet`. Live private GitHub Project: [SuiFleet �
 
 GitHub authenticates an account, not an AI model. These files establish the requested workflow rule; they do not make shared credentials technically model-restricted. Do not claim that an issue template or a self-reported actor flag enforces access control.
 
+## Findings discovered in conversation
+
+The user requires actionable conversation findings to be tracked before handoff. Codex checks existing issues, updates their scope where appropriate, and publishes new issues/Project items for missing work. Verify publication before appending seed entries; keep remote IDs synchronized without changing another worker's ownership. Report which existing issues changed and which new issues were created. Questions and speculative business opportunities are not automatically implementation requirements.
+
+The key-storage discussion produced [SF-053/#96](https://github.com/tyler-suifleet/suifleet/issues/96): same-UID component execution can read the software identity key despite mode 0600 and a read-only mount. SF-022 requires that credential boundary before customer-ready Seal delivery. The incomplete cost discussion produced [SF-054/#97](https://github.com/tyler-suifleet/suifleet/issues/97): measure the full encrypted network/service bill without labor or invented subscription allocations. Both are published follow-ups, not completed fixes.
+
 ## Backlog and publication
 
-[backlog.json](tracking/backlog.json) contains 39 scoped, dependency-linked roadmap items from the parity audit and upgrade discussion. Each has evidence, affected paths, acceptance criteria and specific verification expectations. Stable keys `SF-001` etc. are local tracking keys, not GitHub issue numbers.
+[backlog.json](tracking/backlog.json) contains scoped, dependency-linked roadmap items from the parity audit and upgrade discussion. Each has evidence, affected paths, acceptance criteria and specific verification expectations. Stable keys `SF-001` etc. are local tracking keys, not GitHub issue numbers.
 
 ```bash
 # Offline preview; no GitHub access or writes required
