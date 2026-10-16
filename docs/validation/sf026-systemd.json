@@ -1,0 +1,25 @@
+{
+  "ticket": "SF-026",
+  "head": "5fe5818b2d9d1b1d960ef61ff824eb833a1fee55",
+  "checks": [
+    "ExecStart=/usr/bin/suifleet --launch runs the base binary when nothing is staged",
+    "working update: staged, exit 75, systemd restarted the unit, the launcher exec'd 2.0.0-0af61cfa/suifleet as its main process; confirmed and Applied with the same identity and journal",
+    "update that never becomes ready: systemd's start timeout killed it 2 times; the launcher then restarted v2 without the new daemon's help; Failed reported; v2 stays current",
+    "update that exits at startup: two failed starts under systemd, then rollback to v2; Failed reported",
+    "outcomes reported (Applied, Failed, Failed); systemctl stop leaves the unit inactive with an empty cgroup"
+  ],
+  "systemd": "systemd 252 (252.39-1~deb12u2)",
+  "container_cgroup": "cgroup2fs",
+  "os": "Debian GNU/Linux 12 (bookworm)",
+  "units_sha256": {
+    "suifleet.service": "c749ee3559439d0eb277445440b6c0057c7ef7cc5dc4b5624c22206dfc3ac43a",
+    "suifleet-provision.service": "0e7ced8971f1de43ad97d3b5f6d018d0ee85d2c9702c27ce56b02665f83811bc"
+  },
+  "test_dropin": "TimeoutStartSec=15",
+  "daemon_sha256": "55453aae01feccad7c037529c7633da70a440a7fcfc86c8e46d45179dedbf3d3",
+  "host": {
+    "kernel": "6.6.87.2-microsoft-standard-WSL2",
+    "docker": "29.8.0",
+    "cgroup": "cgroup2fs"
+  }
+}
