@@ -58,12 +58,17 @@ pub struct ComponentsConfig {
     /// Cached artifacts beyond this are evicted oldest first, except those
     /// of installed versions.
     pub cache_max_bytes: u64,
+    /// Operator-owned application recovery scripts, keyed by component name.
+    /// Run in the previous committed version workspace, never for platform installers.
+    #[serde(default)]
+    pub recovery_commands: std::collections::BTreeMap<String, String>,
 }
 impl Default for ComponentsConfig {
     fn default() -> Self {
         Self {
             offline_candidates: OfflinePolicy::Never,
             cache_max_bytes: 512 * 1024 * 1024,
+            recovery_commands: Default::default(),
         }
     }
 }
@@ -403,6 +408,12 @@ impl Config {
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         let raw = std::fs::read_to_string(path)?;
         let mut cfg: Self = toml::from_str(&raw)?;
+        anyhow::ensure!(
+            cfg.components.recovery_commands.iter().all(|(name, command)| crate::deps::valid_name(name) && !command.trim().is_empty()),
+            "application recovery needs valid component names and nonempty commands"
+        );
+        anyhow::ensure!(cfg.components.recovery_commands.is_empty() || cfg.apply.allow_recipe_commands,
+            "application recovery commands require apply.allow_recipe_commands");
         let manifest_path = if cfg.sui.manifest_path.is_absolute() {
             cfg.sui.manifest_path.clone()
         } else {

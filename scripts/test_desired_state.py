@@ -202,13 +202,14 @@ def run(binary):
             os.killpg(int(pid.read_text()), signal.SIGKILL)
             hang.unlink()
             process = start()
-            wait_for(lambda: outcomes().get("0x208") == 2, "interrupted step was not settled as Failed", process)
+            wait_for(lambda: state().get("deployments", {}).get("0x208", {}).get("indeterminate"), "interrupted step was not preserved as unknown", process)
+            assert outcomes().get("0x208") is None and not state()["deployments"]["0x208"]["reported"]
             settle()
             assert runs() == 4, "interrupted updater was executed again"
             assert "interrupted" in state()["deployments"]["0x208"]["error"]
             assert "0x20b" not in outcomes(), "plan continued past an interrupted step after restart"
             assert state()["step"]["deployment"] == "0x208" and state()["current"]["firmware"] == "0x208"
-            print("PASS: crash mid-step settles it Failed on restart; the updater is never re-executed and later steps stay stopped")
+            print("PASS: crash mid-step stays unknown and unreported on restart; the updater is never re-executed and later steps stay stopped")
 
             # 7. A -> B -> A: firmware 0x202 ran, then 0x208 was started; a
             #    revision selecting 0x202 again is not taken as converged (a

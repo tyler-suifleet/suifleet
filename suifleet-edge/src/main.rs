@@ -133,6 +133,7 @@ async fn main() -> anyhow::Result<()> {
             max_memory_bytes: cfg.apply.max_memory_bytes,
         },
     )?;
+    supervisor.configure_recovery(cfg.components.recovery_commands.clone());
     // The daemon is ready before its components are: bootstrap waits up to a
     // readiness timeout per component, which would otherwise exceed the
     // unit's start deadline and restart the daemon into the same bootstrap.
@@ -239,6 +240,17 @@ async fn poll(
     supervisor: &mut supervisor::Supervisor,
     journal: &mut Journal,
 ) -> anyhow::Result<()> {
+    supervisor.recover_broken(runner, |name| journal.state.components.get(name).is_some_and(|c| c.confirmed)).await?;
+    // A recovery receipt and the retained identity reconcile even when the
+    // daemon stopped between supervisor commit and journal save.
+    for (name, deployment) in supervisor.recovered() {
+        if !supervisor.restored(name, deployment) { continue; }
+        if let Some(previous) = journal.state.last_known_good.get(name).filter(|c| &c.deployment_id == deployment).cloned() {
+            journal.state.current.insert(name.clone(), deployment.clone());
+            journal.state.components.insert(name.clone(), previous);
+        }
+    }
+    journal.save()?;
     sui.validate_deployment().await?;
     sui.validate_cap(&cfg.device.device_cap_id, &cfg.device.device_object_id)
         .await?;
@@ -382,7 +394,9 @@ async fn execute(
     info!(deployment = event.deployment_id, status = outcome.status, error = ?outcome.error, "Deployment finished");
     let status = outcome.status;
     journal.save()?;
-    firmware::acknowledge(&cfg.apply.firmware_spool, &firmware::request_id(&event.deployment_id));
+    if status.is_some() {
+        firmware::acknowledge(&cfg.apply.firmware_spool, &firmware::request_id(&event.deployment_id));
+    }
     let _ = std::fs::remove_dir_all(&directory);
     Ok(status)
 }
@@ -679,17 +693,18 @@ async fn handle_deployment(
         }
     }
     journal.state.current.insert(event.component_name.clone(), event.deployment_id.clone());
-    journal.state.deployments.insert(event.deployment_id.clone(), Outcome {
-        firmware_request: (config.mode == config::ApplyMode::PrivilegedHelper)
-            .then(|| firmware::request_id(&event.deployment_id)),
-        ..Outcome::default()
-    });
+    journal.state.deployments.insert(event.deployment_id.clone(), Outcome::default());
     journal.state.deferred.remove(&event.deployment_id);
     journal.save()?;
     info!(deployment = event.deployment_id, "Apply admitted; subsequent control changes do not interrupt this plan");
     for install in installs {
+        supervisor.begin_install(&install.name)?;
         // Recorded unconfirmed first: an interrupted install is never reused.
         // A dependency install changes what that component runs as well.
+        let previous = journal.state.components.get(&install.name).cloned().filter(|c| c.confirmed);
+        if let Some(previous) = &previous {
+            journal.state.last_known_good.insert(install.name.clone(), previous.clone());
+        }
         journal
             .state
             .components
@@ -698,6 +713,12 @@ async fn handle_deployment(
             .state
             .current
             .insert(install.name.clone(), event.deployment_id.clone());
+        // Only the actual helper handoff has a helper receipt. Recipe and
+        // dependency commands remain direct, even under helper-mode config.
+        journal.state.deployments.get_mut(&event.deployment_id).unwrap().firmware_request =
+            (install.root && install.supervised.is_none() && install.install.is_none()
+                && config.mode == config::ApplyMode::PrivilegedHelper)
+                .then(|| firmware::request_id(&event.deployment_id));
         journal.save()?;
         let request = if install.root {
             firmware::request_id(&event.deployment_id)
@@ -727,6 +748,11 @@ async fn handle_deployment(
             },
         };
         if let Err(error) = result {
+            if let Some(previous) = previous.filter(|c| error.downcast_ref::<supervisor::Recovered>().is_some() && supervisor.restored(&install.name, &c.deployment_id)) {
+                journal.state.current.insert(install.name.clone(), previous.deployment_id.clone());
+                journal.state.components.insert(install.name.clone(), previous);
+                journal.save()?;
+            }
             return Err(if install.root {
                 error
             } else {
@@ -754,7 +780,7 @@ async fn handle_deployment(
     Ok(())
 }
 
-/// Applied/Failed, or no status when a privileged update's outcome is
+/// Applied/Failed, or no status when a configured command's outcome is
 /// unknown: like a crash mid-update, that is neither reported nor re-applied.
 fn record_result(outcome: &mut Outcome, result: anyhow::Result<()>) {
     outcome.indeterminate = matches!(&result, Err(error) if error.downcast_ref::<firmware::Indeterminate>().is_some());
