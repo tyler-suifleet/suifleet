@@ -260,18 +260,46 @@ fn proc_process(pid: u32) -> Option<Process> {
 /// `suifleet --record-main-process PATH`, run by the daemon unit as root
 /// (`ExecStartPost=+`): records systemd's `$MAINPID` and its start time for
 /// the signing service. The directory is root's, so the daemon user cannot
-/// write the record.
+/// write the record. Only a main process running this same read-only base
+/// binary is recorded: the daemon user (and so any component) can write the
+/// launcher's daemon-update state, so the unit's main process could otherwise
+/// be an executable a component chose. Any other main process (a daemon
+/// update, which the service signer does not allow) leaves no record, so the
+/// signing service trusts nobody; the unit itself keeps running.
 pub fn record_main_process(path: &Path) -> anyhow::Result<()> {
     use anyhow::Context;
     let pid: u32 = std::env::var("MAINPID").context("MAINPID is not set (run as the unit's ExecStartPost=)")?.parse()?;
-    record(path, pid)
+    if !record(path, pid, Path::new("/proc/self/exe"))? {
+        eprintln!("suifleet: main process {pid} is not running the base binary; no main process recorded for the signing service");
+    }
+    Ok(())
 }
 
-fn record(path: &Path, pid: u32) -> anyhow::Result<()> {
+/// Whether two paths name the same file (device and inode), following links.
+fn same_file(a: &Path, b: &Path) -> std::io::Result<bool> {
+    use std::os::unix::fs::MetadataExt;
+    let (a, b) = (std::fs::metadata(a)?, std::fs::metadata(b)?);
+    Ok(a.dev() == b.dev() && a.ino() == b.ino())
+}
+
+/// Records `pid` if it runs `base`; otherwise removes any earlier record and
+/// returns false.
+fn record(path: &Path, pid: u32, base: &Path) -> anyhow::Result<bool> {
     use anyhow::Context;
     use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).with_context(|| format!("main process {pid}"))?;
-    let start = proc_start(&stat).ok_or_else(|| anyhow::anyhow!("unreadable start time of {pid}"))?;
+    let start_of = |pid: u32| -> anyhow::Result<u64> {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).with_context(|| format!("main process {pid}"))?;
+        proc_start(&stat).ok_or_else(|| anyhow::anyhow!("unreadable start time of {pid}"))
+    };
+    let start = start_of(pid)?;
+    if !same_file(Path::new(&format!("/proc/{pid}/exe")), base).with_context(|| format!("executable of main process {pid}"))? {
+        match std::fs::remove_file(path) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error.into()),
+            _ => return Ok(false),
+        }
+    }
+    // The executable checked belongs to this process, not a later one reusing its PID.
+    anyhow::ensure!(start_of(pid)? == start, "main process {pid} exited while being recorded");
     let directory = path.parent().unwrap_or(Path::new("/"));
     if !directory.is_dir() {
         std::fs::DirBuilder::new().recursive(true).mode(0o755).create(directory)?;
@@ -285,7 +313,7 @@ fn record(path: &Path, pid: u32) -> anyhow::Result<()> {
     writeln!(file, "{pid} {start}")?;
     file.sync_all()?;
     std::fs::rename(&staging, path)?;
-    Ok(())
+    Ok(true)
 }
 
 /// The peer's process as a pidfd (Linux 6.5+), so a request is never
@@ -618,7 +646,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("daemon.main");
         let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
-        record(&path, child.id()).unwrap();
+        let sleep = std::fs::read_link(format!("/proc/{}/exe", child.id())).unwrap();
+        assert!(record(&path, child.id(), &sleep).unwrap());
         let main = MainProcess::parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(main.pid, child.id());
         assert_eq!(proc_process(child.id()).unwrap().start, main.start);
@@ -638,6 +667,15 @@ mod tests {
             child.kill().unwrap();
             child.wait().unwrap();
         }
+        // A main process not running the base binary (here: sleep, against
+        // this test binary) is not recorded, and an earlier record is removed.
+        let mut other = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        assert!(path.exists());
+        assert!(!record(&path, other.id(), Path::new("/proc/self/exe")).unwrap());
+        assert!(!path.exists(), "a stale record survived");
+        assert!(!record(&path, other.id(), Path::new("/proc/self/exe")).unwrap());
+        other.kill().unwrap();
+        other.wait().unwrap();
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

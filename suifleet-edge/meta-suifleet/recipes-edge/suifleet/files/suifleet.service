@@ -26,7 +26,8 @@ ExecStart=/usr/bin/suifleet --launch
 # As root ("+"), from systemd's $MAINPID once ready: the signing service
 # signs status reports only for this exact process (PID and start time), never
 # for a component, including one orphaned after killing the daemon (SF-053).
-# The read-only base binary, not an update the daemon user could write.
+# The read-only base binary, not an update the daemon user could write; it
+# refuses to record a main process running any other executable.
 ExecStartPost=+/usr/bin/suifleet --record-main-process /run/suifleet-signer/daemon.main
 Restart=on-failure
 RestartSec=5
