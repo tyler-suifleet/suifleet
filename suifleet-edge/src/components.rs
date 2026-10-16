@@ -204,8 +204,32 @@ impl Store {
     }
 }
 
-/// Authenticated recipe bytes: a verified cached copy when permitted,
-/// otherwise Walrus. A Seal-encrypted recipe is decrypted in memory and never
+/// An authenticated, parsed recipe, and whether it was Seal-encrypted.
+pub struct Authentic {
+    pub recipe: Recipe,
+    pub confidential: bool,
+}
+
+impl Authentic {
+    /// Check the recipe; a confidential recipe's error names only `stage`.
+    pub fn check<T>(&self, stage: &str, check: impl FnOnce(&Recipe) -> anyhow::Result<T>) -> anyhow::Result<T> {
+        withhold(self.confidential, stage, check(&self.recipe))
+    }
+}
+
+/// Parse and validation errors quote recipe values (commands, configuration,
+/// dependency requirements). For confidential content keep only the stage,
+/// so its plaintext never reaches logs, the journal or telemetry.
+pub fn withhold<T>(confidential: bool, stage: &str, result: anyhow::Result<T>) -> anyhow::Result<T> {
+    result.map_err(|error| if confidential { withheld(stage) } else { error })
+}
+
+fn withheld(stage: &str) -> anyhow::Error {
+    anyhow::anyhow!("confidential recipe rejected at {stage} (details withheld)")
+}
+
+/// Authenticated recipe: a verified cached copy when permitted, otherwise
+/// Walrus. A Seal-encrypted recipe is decrypted and parsed in memory and never
 /// cached; with `[seal] mode = "required"` an unencrypted one is refused and
 /// the (plaintext-only) cache is not consulted.
 pub async fn recipe(
@@ -213,14 +237,20 @@ pub async fn recipe(
     store: Option<&Store>,
     blob_id: &str,
     sha256: &str,
-) -> anyhow::Result<Vec<u8>> {
+) -> anyhow::Result<Authentic> {
+    let plain = |bytes: &[u8]| Ok(Authentic { recipe: serde_json::from_slice(bytes)?, confidential: false });
     let store = store.filter(|_| !walrus.confidential_only());
     if let Some(bytes) = store.and_then(|s| s.recipe(sha256)) {
-        return Ok(bytes);
+        return plain(&bytes);
     }
     let bytes = walrus.recipe_bytes(blob_id).await?;
     if crate::seal::is_envelope(&bytes) {
-        return Ok(walrus.open(bytes, crate::seal::Kind::Recipe, sha256).await?.to_vec());
+        let plaintext = walrus.open(bytes, crate::seal::Kind::Recipe, sha256).await?;
+        let recipe = serde_json::from_slice(&plaintext).map_err(|error| {
+            // Its category and position are content-free; its message is not.
+            withheld(&format!("parsing ({:?} error at line {} column {})", error.classify(), error.line(), error.column()))
+        })?;
+        return Ok(Authentic { recipe, confidential: true });
     }
     anyhow::ensure!(!walrus.confidential_only(), "unencrypted recipe refused: [seal] mode = \"required\" accepts only confidential delivery");
     anyhow::ensure!(hex::encode(Sha256::digest(&bytes)) == sha256, "recipe SHA-256 mismatch");
@@ -229,7 +259,7 @@ pub async fn recipe(
             warn!(%error, "Cannot cache recipe");
         }
     }
-    Ok(bytes)
+    plain(&bytes)
 }
 
 /// Write decrypted plaintext beside `dest` (owner-only) and move it into place.
@@ -312,6 +342,8 @@ pub struct Loaded {
     pub supervised: Option<crate::supervisor::Lifecycle>,
     pub configuration: crate::protocol::Configuration,
     pub validate: Option<String>,
+    /// Its recipe was Seal-encrypted (see `withhold`).
+    pub confidential: bool,
 }
 
 pub struct Loader<'a> {
@@ -324,6 +356,8 @@ pub struct Loader<'a> {
     offline: bool,
     ids: BTreeMap<(String, String), String>,
     pub loaded: BTreeMap<(String, String), Loaded>,
+    /// A confidential recipe was loaded: resolution errors may quote it.
+    pub confidential: bool,
 }
 
 impl<'a> Loader<'a> {
@@ -344,6 +378,7 @@ impl<'a> Loader<'a> {
             offline: false,
             ids: BTreeMap::new(),
             loaded: BTreeMap::new(),
+            confidential: false,
         }
     }
 
@@ -408,21 +443,25 @@ impl<'a> Loader<'a> {
         let Some(i) = value.platform(os, arch) else {
             return Ok(deps::Detail::Unavailable(format!("no {os}/{arch} manifest")));
         };
-        let bytes = recipe(self.walrus, self.store, &value.recipe_blob_ids[i], &value.recipe_sha256s[i]).await?;
-        let parsed: Recipe = serde_json::from_slice(&bytes)?;
-        let dependencies =
-            parsed.validate_component(name, version, &value.artifact_sha256s[i], self.allow_commands)?;
+        let authentic = recipe(self.walrus, self.store, &value.recipe_blob_ids[i], &value.recipe_sha256s[i]).await?;
+        self.confidential |= authentic.confidential;
+        let (dependencies, supervised) = authentic.check("validation", |recipe| {
+            let dependencies = recipe.validate_component(name, version, &value.artifact_sha256s[i], self.allow_commands)?;
+            Ok((dependencies, crate::supervisor::Lifecycle::of(&recipe.lifecycle)?))
+        })?;
+        let Authentic { recipe: parsed, confidential } = authentic;
         self.loaded.insert(
             (name.to_owned(), version.to_owned()),
             Loaded {
                 version_id: id,
                 recipe_sha256: value.recipe_sha256s[i].clone(),
                 artifact_sha256: value.artifact_sha256s[i].clone(),
-                supervised: crate::supervisor::Lifecycle::of(&parsed.lifecycle)?,
+                supervised,
                 artifact_blob_id: parsed.artifact_blob_id,
                 install: parsed.lifecycle.install,
                 configuration: parsed.configuration,
                 validate: parsed.lifecycle.validate,
+                confidential,
             },
         );
         Ok(deps::Detail::Ready(dependencies))
@@ -493,6 +532,22 @@ mod tests {
             "recipe_blob_ids": ["r"], "recipe_sha256s": ["a".repeat(64)], "artifact_sha256s": ["b".repeat(64)]
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn confidential_recipe_errors_withhold_their_content() {
+        let value = serde_json::json!({"schemaVersion":"1.1","componentName":"app","componentVersion":"1",
+            "artifactBlobId":"blob","artifactSha256":"a".repeat(64),"lifecycle":{},"configuration":{},
+            "componentDependencies":{"helper":{"versionRequirement":"SECRET-requirement"}}});
+        let validate = |recipe: &Recipe| recipe.validate_component("app", "1", &"a".repeat(64), false);
+        let plain = Authentic { recipe: serde_json::from_value(value.clone()).unwrap(), confidential: false };
+        assert!(format!("{:#}", plain.check("validation", validate).unwrap_err()).contains("SECRET-requirement"));
+        let sealed = Authentic { recipe: serde_json::from_value(value).unwrap(), confidential: true };
+        let error = format!("{:#}", sealed.check("validation", validate).unwrap_err());
+        assert_eq!(error, "confidential recipe rejected at validation (details withheld)");
+        assert_eq!(withhold(true, "configuration merge", Ok(7)).unwrap(), 7);
+        let failed: anyhow::Result<()> = Err(anyhow::anyhow!("pointer \"/SECRET\""));
+        assert!(!format!("{:#}", withhold(true, "configuration merge", failed).unwrap_err()).contains("SECRET"));
     }
 
     #[test]

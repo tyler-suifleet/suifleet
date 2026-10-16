@@ -22,6 +22,8 @@ Judged from on-chain receipts and the daemon's journal:
   - a key server refusing the session lifetime -> its keys withheld
   - accounts: an ungranted account is refused by key servers, a granted one
     decrypts with its own key through the official SDK
+  - malformed encrypted recipes (parse and validation errors) -> Failed with
+    the details withheld: their content never reaches the log or journal
   - no confidential plaintext in the offline component cache
 
 With --upgrade-from REF, the contracts at REF (without seal_policy) are
@@ -257,14 +259,19 @@ def run(rpc_url, faucet_url, upgrade_from=None):
             counter = [0]
 
             def release(version, *, confidential=True, tamper=False, namespace_override=None, key_epoch=None, targets=None,
-                        before_deploy=None):
+                        before_deploy=None, edit_recipe=None):
                 """Upload one release (artifact + recipe) and create its deployment;
-                `before_deploy` runs between the upload and the deployment."""
+                `before_deploy` runs between the upload and the deployment, and
+                `edit_recipe` changes the recipe document before encryption."""
                 counter[0] += 1
                 artifact = component.build(version, run_id)
                 tag = f"{version.replace('.', '-')}-{counter[0]}"
                 artifact_blob, recipe_blob = f"artifact-{tag}", f"recipe-{tag}"
                 recipe = component.recipe(artifact, artifact_blob)
+                if edit_recipe:
+                    document = json.loads(recipe)
+                    edit_recipe(document)
+                    recipe = json.dumps(document, separators=(",", ":")).encode()
                 if confidential:
                     request = {"op": "encrypt", "manifest": manifest, "servers": seal_servers, "threshold": 2,
                                "policyId": policy, "keyEpoch": str(epoch if key_epoch is None else key_epoch),
@@ -364,6 +371,24 @@ def run(rpc_url, faucet_url, upgrade_from=None):
                 assert installed(artifact)
                 print("PASS: granted device: dapp-encrypted recipe and artifact fetched, decrypted with its own "
                       "signing-service session, verified and applied; Applied on chain")
+
+                # Authentic but malformed confidential recipes: serde and
+                # validation messages would quote their values.
+                marker = "CUSTOMER_CONFIDENTIAL_MARKER"
+                def unparsable(document):
+                    document["configuration"] = {"confidential": marker}
+                def invalid(document):
+                    document["schemaVersion"] = "1.1"
+                    document["componentDependencies"] = {"helper": {"versionRequirement": f"{marker}-requirement"}}
+                malformed, _, _ = release("1.1.1", edit_recipe=unparsable)
+                settles(malformed, 2, "confidential recipe rejected at parsing (Data error at line 1 column")
+                rejected, _, _ = release("1.1.2", edit_recipe=invalid)
+                settles(rejected, 2, "confidential recipe rejected at validation (details withheld)")
+                log.flush()
+                assert marker not in journal_path.read_text(), "confidential recipe content in the journal"
+                assert marker not in (root / "daemon.log").read_text(), "confidential recipe content in the log"
+                print("PASS: malformed confidential recipes (parse and validation errors) Failed with details "
+                      "withheld; their content is in neither the daemon log nor the journal")
 
                 plain, _, _ = release("1.2.0", confidential=False)
                 settles(plain, 2, "unencrypted recipe refused")

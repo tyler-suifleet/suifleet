@@ -591,14 +591,17 @@ async fn stage_daemon_update(
     let directory = cfg.runtime.state_dir.join("artifacts").join(hex::encode(identity::hash(event.deployment_id.as_bytes())));
     std::fs::create_dir_all(&directory)?;
     let staged = async {
-        let bytes = components::recipe(walrus, store, &event.recipe_blob_id, &resolved.recipe_sha256).await?;
-        let recipe: recipe::Recipe = serde_json::from_slice(&bytes)?;
-        let dependencies = recipe.validate(event, false)?;
-        let lifecycle = &recipe.lifecycle;
-        anyhow::ensure!(
-            dependencies.is_empty() && lifecycle.install.is_none() && lifecycle.run.is_none() && lifecycle.shutdown.is_none(),
-            "a daemon update recipe carries only the daemon binary (no lifecycle commands or dependencies)"
-        );
+        let authentic = components::recipe(walrus, store, &event.recipe_blob_id, &resolved.recipe_sha256).await?;
+        authentic.check("validation", |recipe| {
+            let dependencies = recipe.validate(event, false)?;
+            let lifecycle = &recipe.lifecycle;
+            anyhow::ensure!(
+                dependencies.is_empty() && lifecycle.install.is_none() && lifecycle.run.is_none() && lifecycle.shutdown.is_none(),
+                "a daemon update recipe carries only the daemon binary (no lifecycle commands or dependencies)"
+            );
+            Ok(())
+        })?;
+        let recipe = &authentic.recipe;
         let artifact = directory.join("artifact");
         components::artifact(walrus, store, &recipe.artifact_blob_id, &event.artifact_sha256, &artifact).await?;
         // As in handle_deployment: re-read after downloads, before the
@@ -811,6 +814,8 @@ struct Install {
     root: bool,
     configuration: protocol::Configuration,
     validate: Option<String>,
+    /// Its recipe was Seal-encrypted: configuration errors are withheld.
+    confidential: bool,
     /// Its next configuration, computed and validated before any install.
     record: configuration::Record,
 }
@@ -848,10 +853,11 @@ async fn handle_deployment(
             warn!(%error, "Cannot cache component version");
         }
     }
-    let bytes =
-        components::recipe(walrus, store, &event.recipe_blob_id, &resolved.recipe_sha256).await?;
-    let recipe: recipe::Recipe = serde_json::from_slice(&bytes)?;
-    let dependencies = recipe.validate(event, config.allow_recipe_commands)?;
+    let authentic = components::recipe(walrus, store, &event.recipe_blob_id, &resolved.recipe_sha256).await?;
+    let (dependencies, root_supervised) = authentic.check("validation", |recipe| {
+        Ok((recipe.validate(event, config.allow_recipe_commands)?, supervisor::Lifecycle::of(&recipe.lifecycle)?))
+    })?;
+    let recipe = &authentic.recipe;
     let root = deps::Root {
         name: event.component_name.clone(),
         version: event.version.clone(),
@@ -865,7 +871,8 @@ async fn handle_deployment(
         config.allow_recipe_commands,
     );
     let installed = components::installed(&journal.state.components);
-    let plan = components::plan(&mut loader, &root, &installed).await?;
+    let plan = components::plan(&mut loader, &root, &installed).await;
+    let plan = components::withhold(authentic.confidential || loader.confidential, "dependency resolution", plan)?;
     if !plan.omitted.is_empty() {
         info!(deployment = event.deployment_id, omitted = ?plan.omitted, "Unavailable soft dependencies omitted");
     }
@@ -882,7 +889,7 @@ async fn handle_deployment(
             dependencies: planned.dependencies.clone(),
             confirmed: false,
         };
-        let (component, blob, install, supervised, configuration, validate) = if root {
+        let (component, blob, install, supervised, configuration, validate, confidential) = if root {
             (
                 component(
                     resolved.catalog.as_ref().map(|c| c.version_id.clone()),
@@ -891,9 +898,10 @@ async fn handle_deployment(
                 ),
                 recipe.artifact_blob_id.clone(),
                 recipe.lifecycle.install.clone(),
-                supervisor::Lifecycle::of(&recipe.lifecycle)?,
+                root_supervised.clone(),
                 recipe.configuration.clone(),
                 recipe.lifecycle.validate.clone(),
+                authentic.confidential,
             )
         } else {
             let loaded = &loader.loaded[&(planned.name.clone(), planned.version.clone())];
@@ -912,6 +920,7 @@ async fn handle_deployment(
                 loaded.supervised.clone(),
                 loaded.configuration.clone(),
                 loaded.validate.clone(),
+                loaded.confidential,
             )
         };
         installs.push(Install {
@@ -928,6 +937,7 @@ async fn handle_deployment(
             root,
             configuration,
             validate,
+            confidential,
             record: configuration::Record::default(),
         });
     }
@@ -1075,16 +1085,20 @@ async fn prepare_configurations(
     for (index, install) in installs.iter_mut().enumerate() {
         let checked = async {
             let previous = configs.committed(&install.name)?;
-            let configuration = &install.configuration;
-            let record = configuration::Record {
-                deployment: deployment.to_owned(),
-                version: install.component.version.clone(),
-                defaults: configuration.defaults.clone().unwrap_or_default(),
-                effective: configuration::next(previous.as_ref().map(|r| &r.effective), configuration)?,
-                confidential: configuration.confidential.clone().unwrap_or_default(),
-            };
             let overlay = configuration::overlay(&configs.overlay_dir, &install.name)?;
-            let materialized = configuration::materialize(&record, &overlay)?;
+            let configuration = &install.configuration;
+            let computed = (|| {
+                let record = configuration::Record {
+                    deployment: deployment.to_owned(),
+                    version: install.component.version.clone(),
+                    defaults: configuration.defaults.clone().unwrap_or_default(),
+                    effective: configuration::next(previous.as_ref().map(|r| &r.effective), configuration)?,
+                    confidential: configuration.confidential.clone().unwrap_or_default(),
+                };
+                let materialized = configuration::materialize(&record, &overlay)?;
+                Ok((record, materialized))
+            })();
+            let (record, materialized) = components::withhold(install.confidential, "configuration merge", computed)?;
             install.record = record;
             let Some(command) = &install.validate else {
                 return Ok(true);
@@ -1133,7 +1147,8 @@ fn install_configuration(
 ) -> anyhow::Result<PathBuf> {
     let overlay = configuration::overlay(&configs.overlay_dir, &install.name)?;
     let file = directory.join(format!("configuration-{index}.json"));
-    configuration::write_private(&file, &configuration::materialize(&install.record, &overlay)?)?;
+    let materialized = components::withhold(install.confidential, "configuration merge", configuration::materialize(&install.record, &overlay))?;
+    configuration::write_private(&file, &materialized)?;
     Ok(file)
 }
 
