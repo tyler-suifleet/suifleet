@@ -412,8 +412,20 @@ def run(rpc_url, faucet_url, upgrade_from=None):
                 start_server(servers[2])
                 recovered, _, _ = release("4.3.0")
                 settles(recovered, 1)
+
+                def restart_with_a_server_down():
+                    daemon = processes.pop("daemon")
+                    daemon.send_signal(signal.SIGINT)
+                    daemon.wait(timeout=30)
+                    stop_server(servers[0])
+                    processes["daemon"] = subprocess.Popen([str(DAEMON)], env={**os.environ, "EDGE_CONFIG": str(config)},
+                                                           stdout=log, stderr=log)
+                restarted, _, _ = release("4.4.0", before_deploy=restart_with_a_server_down)
+                settles(restarted, 1)
+                start_server(servers[0])
                 print("PASS: threshold 2 of 3: one key server down Applied, two down Failed; a server refusing the "
-                      "session lifetime withholds its keys; recovery Applied")
+                      "session lifetime withholds its keys; recovery Applied; a daemon restarted while a key server "
+                      "is down still meets the threshold")
 
                 cached = list((root / "state" / "components").rglob("*")) if (root / "state" / "components").exists() else []
                 cached_files = [p for p in cached if p.is_file()]

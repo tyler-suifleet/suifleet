@@ -438,7 +438,10 @@ pub struct Seal {
     authority: Arc<dyn Authority>,
     device_id: Address,
     http: reqwest::Client,
+    /// Every configured key server's on-chain identity (URL, public key).
     servers: OnceCell<Vec<KeyServer>>,
+    /// Key servers that passed their proof of possession in this process.
+    verified: Mutex<std::collections::HashSet<[u8; 32]>>,
     keys: Mutex<HashMap<(Vec<u8>, [u8; 32]), (G1Affine, Instant)>>,
 }
 
@@ -460,6 +463,7 @@ impl Seal {
             device_id: Address::from_str(device_id)?,
             http,
             servers: OnceCell::new(),
+            verified: Mutex::new(std::collections::HashSet::new()),
             keys: Mutex::new(HashMap::new()),
         })
     }
@@ -472,24 +476,31 @@ impl Seal {
         self.config.max_plaintext_bytes
     }
 
-    /// The configured key servers, loaded and verified once per process.
+    /// The configured key servers' on-chain identities, read once per
+    /// process. Reachability is not needed here: public keys come from chain.
     async fn servers(&self) -> anyhow::Result<&[KeyServer]> {
         let servers = self
             .servers
             .get_or_try_init(|| async {
                 let mut servers = Vec::new();
                 for config in &self.config.key_servers {
-                    let server = load_key_server(&self.sui, &self.config.key_server_package, config).await?;
-                    if self.config.verify_key_servers {
-                        server.verify(&self.http).await.map_err(|e| anyhow::anyhow!("key server {} ({}): {e:#}", server.name, server.url))?;
-                    }
-                    info!(name = server.name, url = server.url, "Verified Seal key server");
-                    servers.push(server);
+                    servers.push(load_key_server(&self.sui, &self.config.key_server_package, config).await?);
                 }
                 anyhow::Ok(servers)
             })
             .await?;
         Ok(servers)
+    }
+
+    /// Fetch from one key server, first checking its proof of possession
+    /// once per process. An unreachable server fails only its own share.
+    async fn fetch_from(&self, server: &KeyServer, request: &Value, enc_secret: &ark_bls12_381::Fr) -> anyhow::Result<Vec<(Vec<u8>, G1Affine)>> {
+        if self.config.verify_key_servers && !self.verified.lock().unwrap().contains(&server.object_id) {
+            server.verify(&self.http).await.map_err(|e| anyhow::anyhow!("proof of possession: {e:#}"))?;
+            self.verified.lock().unwrap().insert(server.object_id);
+            info!(name = server.name, url = server.url, "Verified Seal key server");
+        }
+        server.fetch(&self.http, request, enc_secret).await
     }
 
     async fn policy(&self, id: &[u8; 32]) -> anyhow::Result<Policy> {
@@ -586,7 +597,7 @@ impl Seal {
             "certificate": certificate.to_json(),
         });
         let pending: Vec<_> = servers.iter().filter(|s| !keys.contains_key(&s.object_id)).collect();
-        let results = futures_util::future::join_all(pending.iter().map(|s| s.fetch(&self.http, &request, &enc_secret))).await;
+        let results = futures_util::future::join_all(pending.iter().map(|s| self.fetch_from(s, &request, &enc_secret))).await;
         let mut errors = Vec::new();
         for (server, result) in pending.iter().zip(results) {
             match result.and_then(|found| {

@@ -4,7 +4,8 @@
   "command": "python3 scripts/test_seal_localnet.py [--upgrade-from 410dcfd63298cd9b1d1ed851673453bad8d11a65]",
   "tested_commits": {
     "fresh_publish": "f568e23 (scripts/test_seal_localnet.py)",
-    "upgrade": "fbfcc9d"
+    "upgrade": "fbfcc9d",
+    "fresh_publish_after_lazy_key_server_verification": "this commit (per-server proof of possession)"
   },
   "key_servers": "3 test-only key servers (suifleet-edge/examples/seal_key_server.rs), threshold 2; not Mysten's production servers",
   "runs": {
@@ -31,6 +32,19 @@
         "PASS: group grant follows membership: Applied through the group, Failed after removal",
         "PASS: key epoch rotation retires earlier identities; a fresh release under the new epoch Applied",
         "PASS: threshold 2 of 3: one key server down Applied, two down Failed; a server refusing the session lifetime withholds its keys; recovery Applied",
+        "PASS: no confidential recipe or artifact in the offline cache, no key material in the log",
+        "PASS: an ungranted account is refused by the key servers; once granted it decrypts with its own key through the official @mysten/seal SDK"
+      ]
+    },
+    "fresh_publish_after_lazy_key_server_verification": {
+      "exit": 0,
+      "checks": [
+        "PASS: device outside the policy: deployment Failed with an on-chain receipt, nothing decrypted",
+        "PASS: granted device: dapp-encrypted recipe and artifact fetched, decrypted with its own signing-service session, verified and applied; Applied on chain",
+        "PASS: required mode refuses plaintext; tampered ciphertext and another namespace Failed",
+        "PASS: group grant follows membership: Applied through the group, Failed after removal",
+        "PASS: key epoch rotation retires earlier identities; a fresh release under the new epoch Applied",
+        "PASS: threshold 2 of 3: one key server down Applied, two down Failed; a server refusing the session lifetime withholds its keys; recovery Applied; a daemon restarted while a key server is down still meets the threshold",
         "PASS: no confidential recipe or artifact in the offline cache, no key material in the log",
         "PASS: an ungranted account is refused by the key servers; once granted it decrypts with its own key through the official @mysten/seal SDK"
       ]
