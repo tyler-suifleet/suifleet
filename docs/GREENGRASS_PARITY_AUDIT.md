@@ -89,8 +89,8 @@ AWS includes device/component health, operational telemetry, logs and provisioni
 | Software key provisioning | Implemented, locally tested (SF-021): claim-sponsored self-enrollment (`suifleet --enroll`), operator ownership via DeviceOwnerCap, bulk claims funded in one PTB, quota/expiry/revocation | Image/first-boot integration (SF-025/029), public-network acceptance | P1 |
 | Hardware identity/TPM/HSM | Partial (SF-021): signer abstraction; PKCS#11 P-256 (Sui secp256r1) backend tested with SoftHSM2 | Real TPM/HSM validation, ed25519 tokens, attestation | P1 |
 | Key rotation/revocation | Missing | Revocable capability tied to active identity, migration and recovery | P0 |
-| Online/last-seen/heartbeat | Missing | Telemetry ingress with bounded offline buffering | P1 |
-| Installed component and device health | Missing | Structured health/status service and fleet aggregate API | P1 |
+| Online/last-seen/heartbeat | Partial (SF-019): signed heartbeat snapshots, bounded offline spool, indexer ingress checked against the registry identity, online/offline/last-seen in the API and dApp; locally and localnet-tested ([TELEMETRY.md](TELEMETRY.md)) | Hosted ingress, alerts, public-network and hardware acceptance | P1 |
+| Installed component and device health | Partial (SF-019): installed versions, supervised phases and sync health per device; healthy/degraded/offline/unreported status, fleet summary API, dashboard independently verifying each report | Component-defined health checks and metrics, alerts, hosted service | P1 |
 | Diagnostics and remote logs | Partial: local tracing/systemd logs | Collection/rotation, upload, queries, redaction, alerts and remote support | P1 |
 | Fleet API/CLI and automation | Partial (SF-024): versioned `/v1` API with filters/keyset pagination, unsigned bulk-operation transactions, long-poll change feed and `ctl` CLI | Webhook push delivery, CI integration examples, more bulk operations | P1 |
 | Operator RBAC and delegation | Partial (SF-021): revocable group-scoped deployer roles with on-chain delegate audit | Further roles (enrollment/lifecycle managers), multisig/change approvals | P1 |
