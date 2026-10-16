@@ -89,6 +89,7 @@
     },
     "expect": {
      "status": "spooled",
+     "events": 1,
      "spooled": 1,
      "dropped": 0
     }
@@ -103,6 +104,7 @@
     },
     "expect": {
      "status": "spooled",
+     "events": 1,
      "spooled": 2,
      "dropped": 0
     }
@@ -117,6 +119,7 @@
     },
     "expect": {
      "status": "spooled",
+     "events": 1,
      "spooled": 3,
      "dropped": 0
     }
@@ -217,6 +220,7 @@
     },
     "expect": {
      "status": "spooled",
+     "events": 1,
      "spooled": 1,
      "dropped": 0
     }
@@ -231,6 +235,7 @@
     },
     "expect": {
      "status": "spooled",
+     "events": 1,
      "spooled": 2,
      "dropped": 0
     }
@@ -245,6 +250,7 @@
     },
     "expect": {
      "status": "spooled",
+     "events": 1,
      "spooled": 3,
      "dropped": 0
     }
@@ -307,6 +313,7 @@
     },
     "expect": {
      "status": "spooled",
+     "events": 1,
      "spooled": 3,
      "dropped": 0
     }
@@ -438,6 +445,7 @@
     },
     "expect": {
      "status": "spooled",
+     "events": 1,
      "spooled": 1,
      "dropped": 0
     }
@@ -452,6 +460,7 @@
     },
     "expect": {
      "status": "spooled",
+     "events": 1,
      "spooled": 2,
      "dropped": 0
     }
@@ -466,6 +475,7 @@
     },
     "expect": {
      "status": "spooled",
+     "events": 1,
      "spooled": 3,
      "dropped": 0
     }
@@ -603,6 +613,7 @@
     },
     "expect": {
      "status": "spooled",
+     "events": 1,
      "spooled": 1,
      "dropped": 0
     }
@@ -617,6 +628,7 @@
     },
     "expect": {
      "status": "spooled",
+     "events": 1,
      "spooled": 1,
      "dropped": 1
     }
@@ -630,10 +642,20 @@
      "time": 3
     },
     "expect": {
-     "status": "spooled",
-     "spooled": 0,
-     "dropped": 3
+     "status": "dropped",
+     "events": 1,
+     "spooled": 1,
+     "dropped": 2
     }
+   },
+   {
+    "op": {
+     "op": "upstream",
+     "results": [
+      "ok"
+     ]
+    },
+    "expect": {}
    },
    {
     "op": {
@@ -641,7 +663,179 @@
      "now": 300
     },
     "expect": {
-     "uploads": [],
+     "uploads": [
+      {
+       "group": "/aws/greengrass/UserComponent/us-east-1/app",
+       "stream": "/1970/01/01/thing/thing",
+       "events": [
+        [
+         2,
+         "second-msg"
+        ]
+       ],
+       "result": "ok"
+      }
+     ],
+     "spooled": 0,
+     "dropped": 2
+    }
+   }
+  ]
+ },
+ {
+  "id": "oversized-lines-split-at-utf8-boundaries",
+  "steps": [
+   {
+    "op": {
+     "op": "configure",
+     "sources": {
+      "app": "UserComponent"
+     }
+    },
+    "expect": {
+     "status": "ok"
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "app",
+     "level": "INFO",
+     "message": "x",
+     "time": 1759968000,
+     "repeat": 262118
+    },
+    "expect": {
+     "status": "spooled",
+     "events": 1,
+     "spooled": 1,
+     "dropped": 0
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "app",
+     "level": "INFO",
+     "message": "x",
+     "time": 1759968001,
+     "repeat": 262119
+    },
+    "expect": {
+     "status": "spooled",
+     "events": 2,
+     "spooled": 3,
+     "dropped": 0
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "app",
+     "level": "INFO",
+     "message": "\u20ac",
+     "time": 1759968002,
+     "repeat": 87373
+    },
+    "expect": {
+     "status": "spooled",
+     "events": 2,
+     "spooled": 5,
+     "dropped": 0
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "app",
+     "level": "INFO",
+     "message": "x",
+     "time": 1759968003,
+     "repeat": 1048576
+    },
+    "expect": {
+     "status": "spooled",
+     "events": 5,
+     "spooled": 10,
+     "dropped": 0
+    }
+   }
+  ]
+ },
+ {
+  "id": "oversized-line-drops-only-itself",
+  "steps": [
+   {
+    "op": {
+     "op": "configure",
+     "sources": {
+      "app": "UserComponent"
+     },
+     "spool_limit": 524288
+    },
+    "expect": {
+     "status": "ok"
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "app",
+     "level": "INFO",
+     "message": "keep",
+     "time": 1759968004
+    },
+    "expect": {
+     "status": "spooled",
+     "events": 1,
+     "spooled": 1,
+     "dropped": 0
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "app",
+     "level": "INFO",
+     "message": "x",
+     "time": 1759968005,
+     "repeat": 524288
+    },
+    "expect": {
+     "status": "dropped",
+     "events": 3,
+     "spooled": 1,
+     "dropped": 3
+    }
+   },
+   {
+    "op": {
+     "op": "upstream",
+     "results": [
+      "ok"
+     ]
+    },
+    "expect": {}
+   },
+   {
+    "op": {
+     "op": "tick",
+     "now": 300
+    },
+    "expect": {
+     "uploads": [
+      {
+       "group": "/aws/greengrass/UserComponent/us-east-1/app",
+       "stream": "/2025/10/09/thing/thing",
+       "events": [
+        [
+         1759968004,
+         "keep"
+        ]
+       ],
+       "result": "ok"
+      }
+     ],
      "spooled": 0,
      "dropped": 3
     }
@@ -685,6 +879,7 @@
     },
     "expect": {
      "status": "spooled",
+     "events": 1,
      "spooled": 1,
      "dropped": 0
     }
@@ -699,6 +894,7 @@
     },
     "expect": {
      "status": "spooled",
+     "events": 1,
      "spooled": 2,
      "dropped": 0
     }

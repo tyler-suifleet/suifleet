@@ -151,6 +151,12 @@ class FixtureGateTests(unittest.TestCase):
         lost = lambda c: case(c, "day-split-checkpoint-and-lost-response")["steps"]
         self.run_mutated("cloudwatch-logs-cases.json", lambda c: lost(c)[9]["expect"].update(spooled=0))
         self.run_mutated("cloudwatch-logs-cases.json", lambda c: lost(c)[5]["expect"]["uploads"][0].update(stream="/2025/10/09/thing/thing"))
+        split = lambda c: case(c, "oversized-lines-split-at-utf8-boundaries")["steps"]
+        self.run_mutated("cloudwatch-logs-cases.json", lambda c: split(c)[3]["expect"].update(events=1))
+        self.run_mutated("cloudwatch-logs-cases.json", lambda c: split(c)[1]["expect"].update(events=2))
+        alone = lambda c: case(c, "oversized-line-drops-only-itself")["steps"]
+        self.run_mutated("cloudwatch-logs-cases.json", lambda c: alone(c)[2]["expect"].update(spooled=0))
+        self.run_mutated("cloudwatch-logs-cases.json", lambda c: alone(c)[4]["expect"].update(uploads=[]))
         names = lambda c: case(c, "levels-redaction-names-and-order")["steps"]
         self.run_mutated("cloudwatch-logs-cases.json", lambda c: names(c)[11]["expect"]["uploads"][1]["events"][1].__setitem__(1, "token=s3cr3t ok s3cr3t"))
 
@@ -366,14 +372,43 @@ class ModelTests(unittest.TestCase):
         self.assertEqual([len(u["events"]) for u in uploads], [managed.LOG_BATCH_EVENTS, 1])
         times = [event[0] for upload in uploads for event in upload["events"]]
         self.assertEqual(times, sorted(times))
-        big = "x" * (managed.LOG_BATCH_BYTES // 3)
-        for index in range(4):
+        # Four maximum-size events fill a batch exactly; the fifth starts the next one.
+        big = "x" * (managed.LOG_EVENT_BYTES - managed.LOG_EVENT_OVERHEAD)
+        for index in range(5):
             exporter.apply({"op": "log", "source": "app", "level": "INFO", "message": big, "time": 1759968000 + index})
         exporter.apply({"op": "upstream", "results": ["ok", "ok"]})
         uploads = exporter.apply({"op": "tick", "now": 600})["uploads"]
-        self.assertEqual([len(u["events"]) for u in uploads], [2, 2])
+        self.assertEqual([len(u["events"]) for u in uploads], [4, 1])
         with self.assertRaises(AssertionError):
             exporter.apply({"op": "tick", "now": 599})
+
+    def test_oversized_log_lines_split_within_limits(self):
+        def batch_bytes(upload):
+            return sum(len(e[1].encode()) + managed.LOG_EVENT_OVERHEAD for e in upload["events"])
+
+        for line in ("x" * managed.LOG_BATCH_BYTES, "\u20ac" * 350000, "a" + "\U0001f600" * 200000):
+            exporter = managed.LogsExport()
+            exporter.apply({"op": "configure", "sources": {"app": "UserComponent"}})
+            logged = exporter.apply({"op": "log", "source": "app", "level": "INFO", "message": line, "time": 1759968000})
+            self.assertEqual(logged["status"], "spooled")
+            exporter.apply({"op": "upstream", "results": ["ok"] * logged["events"]})
+            uploads = exporter.apply({"op": "tick", "now": 300})["uploads"]
+            events = [e for u in uploads for e in u["events"]]
+            self.assertEqual(len(events), logged["events"])
+            self.assertEqual("".join(e[1] for e in events), line)
+            self.assertTrue(all(len(e[1].encode()) + managed.LOG_EVENT_OVERHEAD <= managed.LOG_EVENT_BYTES for e in events))
+            self.assertTrue(all(batch_bytes(u) <= managed.LOG_BATCH_BYTES for u in uploads))
+        self.assertEqual(managed.LogsExport._split("\u20ac" * 87373), ["\u20ac" * 87372, "\u20ac"])
+        self.assertEqual(managed.LogsExport._split(""), [""])
+
+    def test_oversized_log_line_evicts_nothing(self):
+        exporter = managed.LogsExport()
+        exporter.apply({"op": "configure", "sources": {"app": "UserComponent"}, "spool_limit": 100})
+        self.assertEqual(exporter.apply({"op": "log", "source": "app", "level": "INFO", "message": "keep", "time": 0}),
+                         {"status": "spooled", "events": 1, "spooled": 1, "dropped": 0})
+        self.assertEqual(exporter.apply({"op": "log", "source": "app", "level": "INFO", "message": "x" * 101, "time": 1}),
+                         {"status": "dropped", "events": 1, "spooled": 1, "dropped": 1})
+        self.assertEqual([e[3] for e in exporter.spool], ["keep"])
 
     def test_selection_rule_grammar(self):
         with self.assertRaises(ValueError):

@@ -154,13 +154,13 @@ The `cloudwatch-metrics-export` adapter is pinned to `aws.greengrass.Cloudwatch`
 
 ### CloudWatch Logs export contract
 
-The `cloudwatch-logs-export` adapter is pinned to `aws.greengrass.LogManager` 2.3.14 and fixed by `cloudwatch-logs-cases.json` (48 steps across 5 sequences):
+The `cloudwatch-logs-export` adapter is pinned to `aws.greengrass.LogManager` 2.3.14 and fixed by `cloudwatch-logs-cases.json` (59 steps across 7 sequences):
 
 - **Sources and levels.** Only configured sources are uploaded. Each source is a `UserComponent` or a `GreengrassSystemComponent`. `minimumLogLevel` defaults to `INFO` from `DEBUG`, `INFO`, `WARN`, `ERROR`. Lower levels are filtered out, and unknown levels are rejected.
 - **Names.** Events go to log group `/aws/greengrass/{componentType}/{region}/{componentName}` and log stream `/{yyyy/MM/dd}/thing/{thingName}`. The date is the event's UTC day, and `:` in the thing name becomes `+`.
-- **Uploads.** An upload runs every `periodicUploadIntervalSec`, which defaults to 300 s. Each source's events are sent in chronological order; equal timestamps keep arrival order. A `PutLogEvents` batch holds at most 10,000 events and 1,048,576 bytes, counting 26 bytes per event, all from one UTC day.
+- **Uploads.** An upload runs every `periodicUploadIntervalSec`, which defaults to 300 s. Each source's events are sent in chronological order; equal timestamps keep arrival order. A `PutLogEvents` batch holds at most 10,000 events and 1,048,576 bytes, counting 26 bytes per event, all from one UTC day. As in LogManager 2.2.2 and later, a line over 256 KiB (262,144 bytes counting the 26) is split into consecutive events with the same timestamp, cut only at UTF-8 character boundaries, so no event or batch exceeds a limit. Each `log` result reports how many `events` the line became; the fixture field `repeat` abbreviates a long line as `message` repeated that many times.
 - **Checkpoint.** Each source's checkpoint advances only on a successful response. After a throttled, server, connection or lost-response result, that source sends nothing further in the cycle, and the next cycle resends the same events unchanged. Delivery is therefore at least once, never lossy. Other sources are not affected.
-- **Redaction and spool.** These are SuiFleet proposals. Configured secrets are replaced with `[REDACTED]` before an event is spooled. The spool is durable across restarts and bounded in bytes. When it is full, the oldest events are dropped and counted, and an event larger than the whole spool drops itself.
+- **Redaction and spool.** These are SuiFleet proposals. Configured secrets are replaced with `[REDACTED]` before an event is spooled. The spool is durable across restarts and bounded in bytes. When it is full, the oldest events are dropped and counted. A line whose events together exceed the whole spool is dropped by itself with status `dropped`; it evicts nothing, and each of its events is counted.
 
 ## Recipe dependency classification (for SF-037)
 
@@ -191,7 +191,7 @@ The checker validates the catalog's structure and its cross-references to the ba
 | `managed-dependency-cases.json` | 47 classifications | Pending SF-037 |
 | `credential-provider-cases.json` | 65 steps across 7 sequences | Pending SF-022, SF-027 and an approved adapter ticket |
 | `cloudwatch-metrics-cases.json` | 66 steps across 6 sequences | Pending SF-019, SF-032 and an approved adapter ticket |
-| `cloudwatch-logs-cases.json` | 48 steps across 5 sequences | Pending SF-020 and an approved adapter ticket |
+| `cloudwatch-logs-cases.json` | 59 steps across 7 sequences | Pending SF-020 and an approved adapter ticket |
 
 Each recommended adapter must pin an exact AWS version and name at least one executable reference suite; the checker enforces both. `stream-export-aws` uses the SF-028 `stream-cases.json` checkpoint suite. The deferred adapters still have unpinned versions and prose-only tests, and they must be specified fully before selection.
 

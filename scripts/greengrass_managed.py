@@ -345,17 +345,21 @@ class MetricsExport:
 # INFO), log group /aws/greengrass/{componentType}/{region}/{componentName},
 # log stream /{yyyy/MM/dd}/thing/{thingName} with ':' replaced by '+', and the
 # PutLogEvents limits (chronological events, at most 10,000 events and
-# 1,048,576 bytes counting 26 bytes per event, within one day). SuiFleet
+# 1,048,576 bytes counting 26 bytes per event, within one day). As in
+# LogManager 2.2.2 and later, a line over 256 KiB (counting the 26 bytes) is
+# split into consecutive events at UTF-8 character boundaries. SuiFleet
 # proposals: configured literal redaction before spooling, a bounded durable
-# spool with counted oldest-first drops, and a per-source checkpoint that only
-# advances on a successful response. A lost response is resent unchanged
-# (at least once), never skipped.
+# spool with counted oldest-first drops (a line larger than the whole spool
+# drops only itself), and a per-source checkpoint that only advances on a
+# successful response. A lost response is resent unchanged (at least once),
+# never skipped.
 # ---------------------------------------------------------------------------
 LOG_LEVELS = ("DEBUG", "INFO", "WARN", "ERROR")
 LOG_COMPONENT_TYPES = {"UserComponent", "GreengrassSystemComponent"}
 LOG_BATCH_EVENTS = 10000
 LOG_BATCH_BYTES = 1048576
 LOG_EVENT_OVERHEAD = 26
+LOG_EVENT_BYTES = 262144
 LOG_RETRYABLE = RETRYABLE | {"response-lost"}
 
 
@@ -374,6 +378,17 @@ class LogsExport:
     @staticmethod
     def _size(message: str) -> int:
         return len(message.encode()) + LOG_EVENT_OVERHEAD
+
+    @staticmethod
+    def _split(message: str) -> list:
+        data, limit, parts = message.encode(), LOG_EVENT_BYTES - LOG_EVENT_OVERHEAD, []
+        while len(data) > limit:
+            cut = limit
+            while data[cut] & 0xC0 == 0x80:  # never cut inside a UTF-8 character
+                cut -= 1
+            parts.append(data[:cut].decode())
+            data = data[cut:]
+        return parts + [data.decode()]
 
     def _state(self, **extra):
         return {**extra, "spooled": len(self.spool), "dropped": self.dropped}
@@ -404,6 +419,8 @@ class LogsExport:
         for event in events:
             event_day = datetime.datetime.fromtimestamp(event[2], datetime.timezone.utc).strftime("%Y/%m/%d")
             event_size = self._size(event[3])
+            if event_size > LOG_EVENT_BYTES:
+                raise AssertionError("spooled events must already be split to the event limit")
             if batch and (event_day != day or len(batch) == LOG_BATCH_EVENTS or size + event_size > LOG_BATCH_BYTES):
                 yield day, batch
                 batch, size = [], 0
@@ -429,20 +446,28 @@ class LogsExport:
         if kind == "log":
             if op["source"] not in self.sources:
                 return {"status": "unknown-source"}
+            repeat = op.get("repeat", 1)  # fixture shorthand: the line is message * repeat
+            if not isinstance(repeat, int) or isinstance(repeat, bool) or repeat <= 0:
+                raise AssertionError("fixture repeat must be a positive integer")
             if op.get("level") not in LOG_LEVELS or not isinstance(op.get("message"), str) or not _number(op.get("time")):
                 return {"status": "invalid"}
             if LOG_LEVELS.index(op["level"]) < LOG_LEVELS.index(self.minimum):
                 return {"status": "filtered"}
-            message = op["message"]
+            message = op["message"] * repeat
             for secret in self.redact:
                 message = message.replace(secret, "[REDACTED]")
-            self.seq += 1
-            self.spool.append((self.seq, op["source"], op["time"], message))
-            # An event larger than the whole spool drops itself.
+            parts = self._split(message)
+            # A line larger than the whole spool drops itself without evicting older events.
+            if sum(self._size(part) for part in parts) > self.limit:
+                self.dropped += len(parts)
+                return self._state(status="dropped", events=len(parts))
+            for part in parts:
+                self.seq += 1
+                self.spool.append((self.seq, op["source"], op["time"], part))
             while sum(self._size(e[3]) for e in self.spool) > self.limit:
                 self.spool.pop(0)
                 self.dropped += 1
-            return self._state(status="spooled")
+            return self._state(status="spooled", events=len(parts))
         if kind != "tick":
             raise AssertionError(f"unknown op {kind}")
         if not self.spool or self.now - self.last_upload < self.interval:

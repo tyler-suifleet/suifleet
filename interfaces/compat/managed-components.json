@@ -240,8 +240,8 @@
      "Run cloudwatch-logs-cases.json against the real adapter, with upstream results injected by a local CloudWatch Logs emulator",
      "Log lines from a supervised component and the journal arrive in chronological order in the emulator under the LogManager 2.3.14 group and stream names",
      "Redaction removes configured secrets before spooling; key and token material never appears in the spool or upload",
-     "Spool limit with counted drops, offline catch-up, and restart without lost batches; a batch whose response was lost is resent unchanged (at least once)",
-     "Batches respect the PutLogEvents 10,000-event, 1,048,576-byte and single-day limits; events over 256 KiB are split as LogManager 2.2.2 and later do"
+     "Spool limit with counted oldest-first drops (a line larger than the whole spool drops only itself), offline catch-up, and restart without lost batches; a batch whose response was lost is resent unchanged (at least once)",
+     "Batches respect the PutLogEvents 10,000-event, 1,048,576-byte and single-day limits; lines over 256 KiB are split at UTF-8 character boundaries as LogManager 2.2.2 and later do, so no event or batch exceeds a limit"
     ],
     "environment": "Network-none container with a local AWS API emulator",
     "deferred": ["Real AWS account log upload; needs separate user authorization"]
