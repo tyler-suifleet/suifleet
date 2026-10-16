@@ -12,6 +12,7 @@ merging implementation does not establish them or authorize deployment.
 | SF-014 component supervisor | SF-031 physical Pi boot/reboot/power-loss component recovery, plus SF-010 extension-wallet lifecycle UI; real systemd/cgroup-v2 crash/containment/restart evidence under the shipped unit remains a premerge gate |
 | SF-026 daemon self-update | SF-031 physical power loss during handoff and platform boot behavior; real systemd/cgroup-v2 handoff and fallback evidence remains a premerge gate |
 | SF-053 device-key isolation | SF-031 physical Pi acceptance and hardware-token protection; real systemd/cgroup-v2 isolation evidence remains a premerge gate |
+| SF-019 telemetry and health | SF-031 physical Pi heartbeat/reboot/power-loss, plus SF-010 real extension-wallet telemetry/dashboard and provisioned hosted indexer integration; local telemetry authenticity/privacy/quota/offline-buffer/API regressions, exact-head CI and automatic testnet checks remain premerge gates |
 | SF-024 indexer | SF-010 public-node/archival integration |
 | SF-025 packaging | SF-029 bootable Pi image and SF-031 physical acceptance; final BitBake/QEMU evidence remains required for the packaging implementation |
 | SF-029 bootable Pi image | Physical flashing/boot, real-device identity persistence, networking and OTA remain SF-031/#32; a completed BitBake SD image and local partition/rootfs inspection remain required before Review. User will flash the image. |
