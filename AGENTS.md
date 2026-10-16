@@ -6,6 +6,12 @@
 
 An explicit user exception applies only to its stated model and scope. Humans retain control of the tracker. This is an agent workflow rule; shared GitHub credentials do not enforce model identity technically.
 
+## Capture conversation findings — user requirement
+
+Codex must capture actionable bugs, missing features, changed requirements and acceptance gaps discovered in conversations as tracker work before handing off the turn. First check for an existing issue: update its specification/acceptance rather than create a duplicate. Publish genuinely new work to GitHub Issues and the Project, keep the seed backlog/publication records synchronized, and report the issue links. Publish and verify remote IDs before introducing a new seed entry so other models never fail refresh on an unpublished ticket. Preserve existing ownership and meaningful dependencies; reporting a finding does not authorize stealing its implementation.
+
+Distinguish confirmed defects, implementation requirements, outstanding acceptance and speculative business/design ideas. Keep unapproved opportunities in the business/design documents rather than silently turning them into implementation commitments. Other models still report findings through the existing issue/handoff for Codex to triage; the Codex-only creation rule remains unchanged. Do not leave a concrete discovery only in chat or mark it fixed merely because a ticket was created.
+
 ## Commit policy — user requirement
 
 Keep commits small, contained and itemized. Each commit must have one clear purpose, stage only its intended paths/hunks, and use a descriptive subject with an itemized body explaining the change and verification. Separate unrelated functional changes, dependency updates, formatting, infrastructure and documentation. Keep coupled API/lockfile changes together when separating them would break the build. Do not sweep a mixed working tree into one commit.
