@@ -23,6 +23,11 @@ shipped suifleet-provision.service.
   systemctl stop            -> the daemon runs the component's own shutdown
                                command (systemd signals only the daemon); status
                                stopped; the unit's cgroup is empty
+  two unready components    -> the daemon is ready (no start timeout) while
+                               bootstrap outlasts the start deadline, then
+                               polls and applies a repair
+  systemctl stop mid-bootstrap -> started and starting components stop; the
+                               cgroup is empty
 Evidence (versions, head, unit digests, results) goes to --evidence.
 """
 import argparse
@@ -237,11 +242,14 @@ def inside(args):
     def outcome(id):
         return journal().get("deployments", {}).get(id, {})
 
-    def status():
+    def status_of():
         try:
-            return json.loads((supervised / "status.json").read_text()).get("svc", {})
+            return json.loads((supervised / "status.json").read_text())
         except (OSError, ValueError):
             return {}
+
+    def status():
+        return status_of().get("svc", {})
 
     def read(name):
         try:
@@ -332,6 +340,56 @@ def inside(args):
         assert status().get("phase") == "stopped", status()
         assert not sim.errors, sim.errors
         check("systemctl stop: graceful shutdown command ran; unit cgroup empty; status stopped; report sent")
+
+        # Two committed components that no longer become ready: bootstrap
+        # outlasts the unit's start deadline, which must not stop the daemon.
+        active_path = supervised / "active.json"
+        active = json.loads(active_path.read_text())
+        active["svc"].update(run="exec sleep 300", readiness="false", restart="never", shutdown=None)
+        active["svc2"] = dict(active["svc"], name="svc2")
+        active_path.write_text(json.dumps(active))
+        config = etc / "config.toml"
+        config.write_text(config.read_text().replace("component_ready_timeout_seconds = 5", "component_ready_timeout_seconds = 60"))
+        deadline = show("TimeoutStartUSec")
+        started = time.monotonic()
+        sh("systemctl", "start", "--no-block", "suifleet")
+        wait(lambda: show("ActiveState") == "active", "daemon did not become ready during bootstrap", timeout=30)
+        main, restarts = int(show("MainPID")), int(show("NRestarts"))
+        assert "svc2" not in status_of() and status().get("phase") == "starting", status_of()
+        wait(lambda: status_of().get("svc2", {}).get("phase") == "exited", "bootstrap did not finish", timeout=180)
+        took = time.monotonic() - started
+        assert took > 90, f"bootstrap took {took:.0f}s, not beyond the {deadline} start deadline"
+        assert show("ActiveState") == "active" and show("MainPID") == str(main), (show("ActiveState"), show("MainPID"))
+        assert int(show("NRestarts")) == restarts
+        assert "timed out" not in sh("journalctl", "-u", "suifleet", "--no-pager", "-o", "cat"), "systemd start timeout"
+        check(f"slow bootstrap: ready before two unready components finished ({took:.0f}s, start deadline {deadline}); "
+              "no timeout or restart")
+
+        sim.add("0x502")
+        event = sim.events[-1]["parsedJson"]
+        event["component_name"], event["version"] = "svc", "1.0.1"
+        sim.recipes[event["recipe_blob_id"]].update(componentName="svc", componentVersion="1.0.1",
+            lifecycle={"run": RUN, "readiness": READY, "shutdown": "echo $$ > requested; kill -TERM {pid}"})
+        wait(lambda: outcome("0x502").get("status") == 1, "repair after bootstrap was not applied")
+        wait(lambda: status().get("phase") == "running" and status().get("version") == "1.0.1", "repaired svc not running")
+        assert show("MainPID") == str(main)
+        check("after bootstrap the same daemon polled and applied a repair deployment (svc 1.0.1 running)")
+
+        sh("systemctl", "stop", "suifleet")
+        sh("systemctl", "start", "--no-block", "suifleet")
+        wait(lambda: show("ActiveState") == "active" and status().get("phase") == "running"
+             and status_of().get("svc2", {}).get("phase") == "starting", "bootstrap did not reach the unready svc2")
+        (work / "stopped").unlink(missing_ok=True)
+        stopping = time.monotonic()
+        sh("systemctl", "stop", "suifleet")
+        took = time.monotonic() - stopping
+        assert show("ActiveState") == "inactive" and took < 20, (show("ActiveState"), took)
+        assert read("stopped") == "graceful", "svc did not stop gracefully during bootstrap"
+        assert not unit_procs(), f"processes left in the unit cgroup: {unit_procs()}"
+        assert {name: s.get("phase") for name, s in status_of().items()} == {"svc": "stopped", "svc2": "stopped"}, status_of()
+        assert "Stopping during component bootstrap" in sh("journalctl", "-u", "suifleet", "--no-pager", "-o", "cat")
+        assert not sim.errors, sim.errors
+        check(f"systemctl stop during bootstrap: stopped in {took:.1f}s; started and still-starting components stopped; cgroup empty")
     finally:
         sh("systemctl", "stop", "suifleet", check=False)
         shim.kill()
