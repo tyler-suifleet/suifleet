@@ -11,6 +11,8 @@ mod recipe;
 mod protocol;
 #[cfg(test)]
 mod protocol_tests;
+#[cfg(test)]
+mod compat_tests;
 mod release;
 mod state;
 mod sui_client;
