@@ -102,13 +102,10 @@ def run(binary):
                 self.respond(b"not found", 404)
 
     def deploy(id, version, configuration=None, **lifecycle):
-        sim.add(id)
-        event = sim.events[-1]["parsedJson"]
-        event["component_name"], event["version"] = "svc", version
-        recipe = sim.recipes[event["recipe_blob_id"]]
-        recipe.update(componentName="svc", componentVersion=version, lifecycle=lifecycle)
+        recipe = dict(lifecycle=lifecycle)
         if configuration is not None:
             recipe.update(schemaVersion="1.2", configuration=configuration)
+        sim.add(id, event=dict(component_name="svc", version=version), recipe=recipe)
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
