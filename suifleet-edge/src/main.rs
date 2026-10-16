@@ -9,6 +9,7 @@ mod firmware;
 mod handoff;
 mod identity;
 mod reconcile;
+mod seal;
 mod recipe;
 mod protocol;
 #[cfg(test)]
