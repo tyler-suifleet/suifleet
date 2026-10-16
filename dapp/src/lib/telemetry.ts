@@ -217,24 +217,59 @@ export async function fetchIndexedHealth(url: string, token: string, owner: stri
   throw new Error("Telemetry pagination did not end");
 }
 
-/** Health of each of `deviceIds`, or `unavailable` for all when the service cannot answer. */
+const message = (error: unknown) => error instanceof Error ? error.message : String(error);
+const unavailableHealth = (reason: string): DeviceHealth => ({ status: "unavailable", codes: ["unavailable"], reasons: [reason], components: [] });
+
+/**
+ * Health of each of `deviceIds`, or `unavailable` for all when the service
+ * cannot answer. A device whose chain identity cannot be read, or whose report
+ * cannot be checked, is `unavailable` on its own; this never rejects, so a
+ * failed refresh cannot leave an earlier result on screen.
+ */
 export async function fetchFleetHealth(client: Pick<SuiGrpcClient, "getDynamicField">, deviceIds: string[], owner: string,
   url = TELEMETRY_URL, token = "", fetcher: typeof fetch = fetch): Promise<Record<string, DeviceHealth>> {
-  const unavailable = (reason: string): Record<string, DeviceHealth> => Object.fromEntries(deviceIds.map((id) =>
-    [id, { status: "unavailable", codes: ["unavailable"], reasons: [reason], components: [] }]));
+  const unavailable = (reason: string): Record<string, DeviceHealth> => Object.fromEntries(deviceIds.map((id) => [id, unavailableHealth(reason)]));
   if (!url) return unavailable("no telemetry service configured (NEXT_PUBLIC_SUIFLEET_TELEMETRY_URL)");
   let indexed;
   try {
     indexed = await fetchIndexedHealth(url, token, owner, fetcher);
   } catch (error) {
-    return unavailable(`telemetry service unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    return unavailable(`telemetry service unavailable: ${message(error)}`);
   }
   const byId = new Map(indexed.items.map((item) => [normalizeSuiAddress(item.device_id), item]));
-  const entries = await Promise.all(deviceIds.map(async (id) => {
-    const identity = await readIdentity(client, id);
-    return [id, await deviceHealth(identity, byId.get(normalizeSuiAddress(id)), id, indexed.serverNowMs)] as const;
+  const entries = await Promise.all(deviceIds.map(async (id): Promise<[string, DeviceHealth]> => {
+    let identity;
+    try {
+      identity = await readIdentity(client, id);
+    } catch (error) {
+      return [id, unavailableHealth(`device identity cannot be read from the chain: ${message(error)}`)];
+    }
+    try {
+      return [id, await deviceHealth(identity, byId.get(normalizeSuiAddress(id)), id, indexed.serverNowMs)];
+    } catch (error) {
+      return [id, unavailableHealth(`newest report cannot be checked: ${message(error)}`)];
+    }
   }));
   return Object.fromEntries(entries);
+}
+
+/** How often the dApp refreshes fleet health. */
+export const HEALTH_REFRESH_MS = 15_000;
+/** How long a verified result may be shown without a successful refresh. */
+export const HEALTH_STALE_MS = 2 * HEALTH_REFRESH_MS;
+
+/**
+ * The health to display: the last result only while it is recent and its
+ * refresh has not failed. Otherwise every device is `unavailable`, so an
+ * outage of the indexer or the chain never freezes an earlier healthy claim.
+ */
+export function currentHealth(data: Record<string, DeviceHealth> | undefined, updatedAtMs: number, refreshFailed: boolean,
+  nowMs: number): Record<string, DeviceHealth> | undefined {
+  if (!data) return undefined;
+  const ageMs = nowMs - updatedAtMs;
+  if (!refreshFailed && ageMs <= HEALTH_STALE_MS) return data;
+  const reason = refreshFailed ? "health refresh failed" : `health not refreshed for ${Math.floor(ageMs / 1000)} s`;
+  return Object.fromEntries(Object.keys(data).map((id) => [id, unavailableHealth(reason)]));
 }
 
 export function lastSeenLabel(health: DeviceHealth | undefined): string {

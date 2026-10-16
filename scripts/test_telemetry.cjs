@@ -152,4 +152,46 @@ async function sign(keypair, snapshot) {
   const stuck = async () => ({ ok: true, status: 200, json: async () => ({ items: [], next: "same", server_time_ms: now }) });
   await assert.rejects(telemetry.fetchIndexedHealth("https://fleet.example", "", owner, stuck), /made no progress/);
   console.log("PASS: missing configuration, refused token and unreachable service show health unavailable; stuck pagination fails");
+
+  // A failed refresh never leaves earlier health on screen: the query holds the
+  // last successful data on error, so the display (useFleetHealth) expires it.
+  const { QueryClient } = appRequire("@tanstack/react-query");
+  const queries = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const key = ["health", device];
+  const onePage = async () => ({ ok: true, status: 200, json: async () => ({ items: [pages[""].items[0]], next: null, server_time_ms: now }) });
+  const shown = (atMs) => {
+    const state = queries.getQueryState(key);
+    return telemetry.currentHealth(state.data, state.dataUpdatedAt, state.status === "error", atMs)[device];
+  };
+  await queries.fetchQuery({ queryKey: key, queryFn: () => telemetry.fetchFleetHealth(client, [device], owner, "https://fleet.example", "", onePage) });
+  const verifiedAt = queries.getQueryState(key).dataUpdatedAt;
+  assert.equal(shown(verifiedAt).status, "healthy");
+  assert.equal(shown(verifiedAt + telemetry.HEALTH_STALE_MS).status, "healthy");
+  // Chain identity outage on the next refresh: that device is unavailable, the refresh still succeeds.
+  const down = { getDynamicField: async () => { throw new ObjectError("bad", "chain identity RPC unavailable", { reason: "unknown" }); } };
+  await queries.fetchQuery({ queryKey: key, staleTime: 0, queryFn: () => telemetry.fetchFleetHealth(down, [device], owner, "https://fleet.example", "", onePage) });
+  assert.equal(queries.getQueryState(key).status, "success");
+  assert.deepEqual([shown(Date.now()).status, shown(Date.now()).reasons], ["unavailable", ["device identity cannot be read from the chain: chain identity RPC unavailable"]]);
+  // A report whose check throws is unavailable too, not a rejected refresh.
+  const throwing = async () => ({ ok: true, status: 200, json: async () => ({ items: [{ device_id: id(device), report: { ...pages[""].items[0].report, get received_ms() { throw new Error("malformed report"); } } }], next: null, server_time_ms: now }) });
+  const unchecked = await telemetry.fetchFleetHealth(client, [device], owner, "https://fleet.example", "", throwing);
+  assert.deepEqual([unchecked[device].status, unchecked[device].reasons], ["unavailable", ["newest report cannot be checked: malformed report"]]);
+  // Back to healthy, then a refresh that rejects outright: the retained data is not shown.
+  await queries.fetchQuery({ queryKey: key, staleTime: 0, queryFn: () => telemetry.fetchFleetHealth(client, [device], owner, "https://fleet.example", "", onePage) });
+  assert.equal(shown(Date.now()).status, "healthy");
+  await assert.rejects(queries.fetchQuery({ queryKey: key, staleTime: 0, queryFn: async () => { throw new Error("unexpected failure"); } }));
+  const failed = queries.getQueryState(key);
+  assert.equal(failed.status, "error");
+  assert.equal(failed.data[device].status, "healthy", "TanStack Query keeps the earlier data on error");
+  assert.deepEqual([shown(Date.now()).status, shown(Date.now()).reasons], ["unavailable", ["health refresh failed"]]);
+  // A refresh that never finishes: health expires, and stays unavailable well past the offline threshold.
+  await queries.fetchQuery({ queryKey: key, staleTime: 0, queryFn: () => telemetry.fetchFleetHealth(client, [device], owner, "https://fleet.example", "", onePage) });
+  const lastOk = queries.getQueryState(key).dataUpdatedAt;
+  const offlineMs = telemetry.OFFLINE_INTERVALS * healthyNow.interval_seconds * 1000;
+  for (const later of [telemetry.HEALTH_STALE_MS + 1, offlineMs + 1, 10 * offlineMs]) {
+    assert.equal(shown(lastOk + later).status, "unavailable", `${later} ms after the last refresh`);
+  }
+  assert.equal(telemetry.currentHealth(undefined, 0, true, now), undefined);
+  queries.clear();
+  console.log("PASS: identity outage or failed/stalled refresh shows health unavailable, never the earlier healthy result");
 })().catch((error) => { console.error(error); process.exit(1); });
