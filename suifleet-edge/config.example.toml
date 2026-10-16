@@ -4,7 +4,8 @@ manifest_path = "deployment.json"
 
 [device]
 keypair_path = "/etc/suifleet/device.key"   # 32-byte hex ed25519 private key
-# Production: keep the key in the signing service instead (docs/KEY_ISOLATION.md):
+# Production: keep the key in the signing service instead (docs/KEY_ISOLATION.md;
+# not combinable with [daemon_update]):
 # [device.signer]
 # kind = "service"
 # socket = "/run/suifleet-signer/sign.sock"
