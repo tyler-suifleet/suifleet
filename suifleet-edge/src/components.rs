@@ -428,7 +428,7 @@ mod tests {
 
     fn store(name: &str, max_bytes: u64) -> (PathBuf, Store) {
         let dir = std::env::temp_dir().join(format!("suifleet-store-{name}-{}-{}", std::process::id(), rand::random::<u64>()));
-        let config = ComponentsConfig { offline_candidates: OfflinePolicy::Cached, cache_max_bytes: max_bytes };
+        let config = ComponentsConfig { offline_candidates: OfflinePolicy::Cached, cache_max_bytes: max_bytes, ..ComponentsConfig::default() };
         assert!(Store::open(&dir, &ComponentsConfig::default()).is_none(), "never policy keeps no store");
         (dir.clone(), Store::open(&dir, &config).unwrap())
     }

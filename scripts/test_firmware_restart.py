@@ -9,7 +9,7 @@ Journal entries without a status, with their firmware spool state:
                                                never reported, survives restarts
   0x304 unclaimed request                   -> withdrawn at startup, never runs: Failed
   0x305 helper mode, nothing submitted      -> Failed (updater never ran)
-  0x306 older journal entry, no request     -> Failed (direct-mode crash policy)
+  0x306 older journal entry, no request     -> unknown (no explicit command result)
 """
 import argparse
 import fcntl
@@ -142,14 +142,14 @@ def run(binary):
                 stage("0x304", "json")  # Published but never claimed.
 
                 process = start()
-                wait_for(lambda: reported() == ["0x301", "0x304", "0x305", "0x306"],
+                wait_for(lambda: reported() == ["0x301", "0x304", "0x305"],
                          "startup did not settle and report the definite outcomes", process)
                 assert outcome("0x301")["status"] == 1
                 assert not (results / f"{request_id('0x301')}.json").exists(), "collected result not acknowledged"
-                for id in ("0x304", "0x305", "0x306"):
+                for id in ("0x304", "0x305"):
                     assert outcome(id)["status"] == 2, (id, outcome(id))
                 assert not (requests / f"{request_id('0x304')}.json").exists(), "unclaimed request not withdrawn"
-                for id in ("0x302", "0x303"):
+                for id in ("0x302", "0x303", "0x306"):
                     assert outcome(id)["status"] is None and not outcome(id)["reported"], (id, outcome(id))
 
                 # The path unit's next run sweeps the abandoned claim and skips the live one.
@@ -178,13 +178,13 @@ def run(binary):
                 stop(process)
                 process = None
                 assert outcome("0x303")["status"] is None and outcome("0x303")["indeterminate"]
-                assert reported() == ["0x301", "0x302", "0x304", "0x305", "0x306"], sim.reports
-                assert dict(sim.reports) == {"0x301": 1, "0x302": 1, "0x304": 2, "0x305": 2, "0x306": 2}
+                assert reported() == ["0x301", "0x302", "0x304", "0x305"], sim.reports
+                assert dict(sim.reports) == {"0x301": 1, "0x302": 1, "0x304": 2, "0x305": 2}
                 assert not list(requests.iterdir()), list(requests.iterdir())
                 assert not sim.errors, sim.errors
             print("PASS: restart reconciles a written result and a live claim instead of reporting Failed")
             print("PASS: abandoned claim becomes indeterminate (never reported, survives restart); "
-                  "unclaimed/unsubmitted/legacy entries settle as Failed without running the updater")
+                  "unclaimed/unsubmitted entries settle as Failed; legacy direct interruption stays unknown without running the updater")
     finally:
         if process and process.poll() is None:
             process.kill()
