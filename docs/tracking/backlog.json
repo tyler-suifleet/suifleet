@@ -1650,6 +1650,30 @@
       ],
       "validation": "Real BitBake image build, artifact/rootfs/service/permissions and manifest/client compatibility inspection; exact source/image/binary hashes and explicit deferred physical tests.",
       "resources": []
+    },
+    {
+      "key": "SF-067",
+      "title": "Recover stopped automation capacity without losing ticket ownership",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "baseline",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator",
+        "docs/PR_COORDINATION.md",
+        "AGENTS.md"
+      ],
+      "resources": [],
+      "description": "Make implementation and review automation robust to stopped workers and blocked work so eligible tickets keep progressing.",
+      "evidence": "User requests robust automation and no unused workers; expired/orphaned reservations currently consume family capacity despite stopped processes.",
+      "acceptance": [
+        "Separate verified stopped blocked jobs from active worker capacity while preserving their ticket reservations and evidence.",
+        "Reconcile durable completed handoffs after service restarts and revisit orphan records safely; process identity and live-worker checks must prevent duplicate mutation workers.",
+        "Keep ambiguous claims isolated and visible without permanently consuming unrelated implementation capacity; bound concurrency for genuinely running workers and never auto-reclaim uncertain ownership.",
+        "Provide regression tests for dead/live/PID-reused wrappers, blocked results, restart reconciliation and ownership changes; document diagnostics and deploy reviewed automation changes."
+      ],
+      "validation": "Dispatcher/coordinator regression tests, offline tracking validation, service status and operational capacity evidence; no relaxed review or acceptance gates."
     }
   ]
 }
