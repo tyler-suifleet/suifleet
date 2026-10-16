@@ -31,8 +31,8 @@ Statuses: `implemented`/`partial` (merged, with cited local evidence), `proposed
 | Linux x86_64 | `linux`/`amd64` | `linux`/`x86_64` | Partial: daemon, simulator and localnet evidence |
 | Linux aarch64 | `linux`/`aarch64` | `linux`/`aarch64` | Partial: Yocto QEMU; physical Pi pending in SF-031 |
 | Linux 32-bit ARM | `linux`/`arm` | `linux`/`arm` | Proposed: selection vectors only. `architecture.detail` is rejected |
-| Linux x86 | `linux`/`x86` | none | Undecided (SF-038). Translation omits these manifests |
-| Windows, macOS | `windows`, `darwin` | none | Undecided (SF-038). Translation omits these manifests |
+| Linux x86 | `linux`/`x86` | none | Undecided; SF-038 recommends exclusion. Translation omits these manifests |
+| Windows, macOS | `windows`, `darwin` | none | Undecided; SF-038 recommends exclusion. Translation omits these manifests |
 
 ## Current APIs versus proposed contracts
 
@@ -114,7 +114,7 @@ Everything below is proposed. Each adapter runs as a supervised local service be
 make test-compat
 ```
 
-This runs `python3 scripts/greengrass_compat.py`, the checker's negative tests and the frontend validator check. `make edge-test` runs the Rust current-API check.
+This runs `python3 scripts/greengrass_compat.py`, the checker's negative tests and the frontend validator check. The checker also validates the SF-038 [managed-component catalog](GREENGRASS_MANAGED_COMPONENTS.md). `make edge-test` runs the Rust current-API check.
 
 | Suite | Cases evaluated by the reference model | Current-API execution | Runtime execution |
 |---|---|---|---|
@@ -123,6 +123,8 @@ This runs `python3 scripts/greengrass_compat.py`, the checker's negative tests a
 | `shadow-cases.json` | 54 steps across 10 sequences | none | Pending SF-027, SF-033 |
 | `stream-cases.json` | 45 steps across 5 sequences | none | Pending SF-027, SF-034 |
 | `client-device-cases.json` | 16 authorization requests | none | Pending SF-032, SF-035 |
+| `managed-dependency-cases.json` | 47 managed-dependency classifications | none | Pending SF-037 |
+| `credential-provider-cases.json` | 65 steps across 7 sequences | none | Pending SF-022, SF-027 |
 
 `scripts/greengrass_compat.py` contains small **specification reference models**. They make each expected value checkable and keep the fixtures internally consistent. They are not the daemon, a translator or an adapter, and agreement with them proves nothing about runtime conformance. Each owning ticket must execute the same fixture files against its real implementation. That ticket then sets the suite to `passed` with a committed runtime receipt, and only after that may it raise any `aws_*` status. Fixtures may be corrected in review if they contradict AWS behaviour or an approved design. Correct them deliberately; never loosen them to make an implementation pass.
 
@@ -136,4 +138,4 @@ These are recommendations only. Codex decides on approval and on any ticket chan
    - Exclude AWS control-plane API emulation.
    - Defer AWS IPC wire/SDK compatibility until a native SF-027 API exists.
    - Treat each AWS cloud target (IoT Core bridge, shadow sync, Kinesis/S3 export, token exchange) as an SF-038 adapter decision.
-4. **SF-038.** Owns Windows/macOS/x86, AWS-managed components and Lambda.
+4. **SF-038.** Owns Windows/macOS/x86, AWS-managed components and Lambda. Its catalog, candidate adapters and recommended exclusions are in [GREENGRASS_MANAGED_COMPONENTS.md](GREENGRASS_MANAGED_COMPONENTS.md).

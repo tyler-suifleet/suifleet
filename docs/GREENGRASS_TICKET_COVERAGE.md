@@ -4,6 +4,8 @@ The 51-capability audit is a functional OTA/fleet and broader-runtime roadmap, n
 
 Reference: [AWS Greengrass V2 overview](https://docs.aws.amazon.com/greengrass/v2/developerguide/what-is-iot-greengrass.html) and [AWS-provided components](https://docs.aws.amazon.com/greengrass/v2/developerguide/public-components.html), checked 2026-10-13.
 
+[GREENGRASS_MANAGED_COMPONENTS.md](GREENGRASS_MANAGED_COMPONENTS.md) (SF-038) maps all 46 AWS-provided components to native equivalents, candidate adapters or recommended exclusions; its adapter tickets await Codex approval.
+
 [GREENGRASS_COMPATIBILITY.md](GREENGRASS_COMPATIBILITY.md) (SF-028) defines the functional, AWS-recipe and AWS-API compatibility levels, the supported platforms and the proposed adapter fixtures for SF-032–SF-035 and SF-037. Its runtime suites remain pending until those tickets execute them.
 
 P2 means broader compatibility, not optional for a full-parity claim. Each row needs executable acceptance evidence, including failures and recovery, before completion. See [the audit](GREENGRASS_PARITY_AUDIT.md).
