@@ -1214,5 +1214,316 @@
     }
    }
   ]
+ },
+ {
+  "id": "malformed-unit-types-change-nothing",
+  "steps": [
+   {
+    "op": {
+     "op": "grant",
+     "publisher": "p1"
+    },
+    "expect": {}
+   },
+   {
+    "op": {
+     "op": "put",
+     "publisher": "p1",
+     "message": {
+      "request": {
+       "namespace": "Greengrass",
+       "metricData": {
+        "metricName": "temp",
+        "value": 1
+       }
+      }
+     },
+     "now": 1
+    },
+    "expect": {
+     "status": "success",
+     "buffered": 1,
+     "dropped": 0,
+     "rejected": 0
+    }
+   },
+   {
+    "op": {
+     "op": "put",
+     "publisher": "p1",
+     "message": {
+      "request": {
+       "namespace": "Greengrass",
+       "metricData": {
+        "metricName": "count",
+        "value": 1,
+        "unit": "Count"
+       }
+      }
+     }
+    },
+    "expect": {
+     "status": "success",
+     "buffered": 2,
+     "dropped": 0,
+     "rejected": 0
+    }
+   },
+   {
+    "op": {
+     "op": "put",
+     "publisher": "p1",
+     "message": {
+      "request": {
+       "namespace": "Greengrass",
+       "metricData": {
+        "metricName": "none",
+        "value": 1,
+        "unit": "None"
+       }
+      }
+     }
+    },
+    "expect": {
+     "status": "success",
+     "buffered": 3,
+     "dropped": 0,
+     "rejected": 0
+    }
+   },
+   {
+    "op": {
+     "op": "put",
+     "publisher": "p1",
+     "message": {
+      "request": {
+       "namespace": "Greengrass",
+       "metricData": {
+        "metricName": "temp",
+        "value": 1,
+        "unit": []
+       }
+      }
+     }
+    },
+    "expect": {
+     "status": "fail",
+     "error": "InvalidInputException"
+    }
+   },
+   {
+    "op": {
+     "op": "put",
+     "publisher": "p1",
+     "message": {
+      "request": {
+       "namespace": "Greengrass",
+       "metricData": {
+        "metricName": "temp",
+        "value": 1,
+        "unit": {}
+       }
+      }
+     }
+    },
+    "expect": {
+     "status": "fail",
+     "error": "InvalidInputException"
+    }
+   },
+   {
+    "op": {
+     "op": "put",
+     "publisher": "p1",
+     "message": {
+      "request": {
+       "namespace": "Greengrass",
+       "metricData": {
+        "metricName": "temp",
+        "value": 1,
+        "unit": null
+       }
+      }
+     }
+    },
+    "expect": {
+     "status": "fail",
+     "error": "InvalidInputException"
+    }
+   },
+   {
+    "op": {
+     "op": "put",
+     "publisher": "p1",
+     "message": {
+      "request": {
+       "namespace": "Greengrass",
+       "metricData": {
+        "metricName": "temp",
+        "value": 1,
+        "unit": true
+       }
+      }
+     }
+    },
+    "expect": {
+     "status": "fail",
+     "error": "InvalidInputException"
+    }
+   },
+   {
+    "op": {
+     "op": "put",
+     "publisher": "p1",
+     "message": {
+      "request": {
+       "namespace": "Greengrass",
+       "metricData": {
+        "metricName": "temp",
+        "value": 1,
+        "unit": 5
+       }
+      }
+     }
+    },
+    "expect": {
+     "status": "fail",
+     "error": "InvalidInputException"
+    }
+   },
+   {
+    "op": {
+     "op": "put",
+     "publisher": "p1",
+     "message": {
+      "request": {
+       "namespace": "Greengrass",
+       "metricData": {
+        "metricName": "temp",
+        "value": 1,
+        "unit": 1.5
+       }
+      }
+     }
+    },
+    "expect": {
+     "status": "fail",
+     "error": "InvalidInputException"
+    }
+   },
+   {
+    "op": {
+     "op": "put",
+     "publisher": "p1",
+     "message": {
+      "request": {
+       "namespace": "Greengrass",
+       "metricData": {
+        "metricName": "temp",
+        "value": 1,
+        "unit": [
+         "Count"
+        ]
+       }
+      }
+     }
+    },
+    "expect": {
+     "status": "fail",
+     "error": "InvalidInputException"
+    }
+   },
+   {
+    "op": {
+     "op": "put",
+     "publisher": "p1",
+     "message": {
+      "request": {
+       "namespace": "Greengrass",
+       "metricData": {
+        "metricName": "temp",
+        "value": 1,
+        "unit": {
+         "Count": 1
+        }
+       }
+      }
+     }
+    },
+    "expect": {
+     "status": "fail",
+     "error": "InvalidInputException"
+    }
+   },
+   {
+    "op": {
+     "op": "put",
+     "publisher": "p1",
+     "message": {
+      "request": {
+       "namespace": "Greengrass",
+       "metricData": {
+        "metricName": "temp",
+        "value": 1,
+        "unit": "count"
+       }
+      }
+     }
+    },
+    "expect": {
+     "status": "fail",
+     "error": "InvalidInputException"
+    }
+   },
+   {
+    "op": {
+     "op": "put",
+     "publisher": "p1",
+     "message": {
+      "request": {
+       "namespace": "Greengrass",
+       "metricData": {
+        "metricName": "temp",
+        "value": 1,
+        "unit": ""
+       }
+      }
+     }
+    },
+    "expect": {
+     "status": "fail",
+     "error": "InvalidInputException"
+    }
+   },
+   {
+    "op": {
+     "op": "upstream",
+     "results": [
+      "ok"
+     ]
+    },
+    "expect": {}
+   },
+   {
+    "op": {
+     "op": "tick",
+     "now": 10
+    },
+    "expect": {
+     "calls": [
+      {
+       "namespace": "Greengrass",
+       "count": 3,
+       "first": "temp",
+       "last": "none",
+       "result": "ok"
+      }
+     ],
+     "buffered": 0,
+     "dropped": 0,
+     "rejected": 0
+    }
+   }
+  ]
  }
 ]

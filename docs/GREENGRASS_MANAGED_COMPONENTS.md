@@ -163,9 +163,9 @@ Grants, per-component tokens and the refresh margin are SuiFleet proposals. The 
 
 ### CloudWatch metrics export contract
 
-The `cloudwatch-metrics-export` adapter is pinned to `aws.greengrass.Cloudwatch` 4.0.0 and fixed by `cloudwatch-metrics-cases.json` (66 steps across 6 sequences):
+The `cloudwatch-metrics-export` adapter is pinned to `aws.greengrass.Cloudwatch` 4.0.0 and fixed by `cloudwatch-metrics-cases.json` (82 steps across 7 sequences):
 
-- **Requests.** It accepts the 4.0.0 `cloudwatch/metric/put` message: a `request` holding exactly `namespace` and `metricData`. The namespace has 1–255 characters, does not start with `:` and does not start with `AWS/`. `metricData` holds `metricName`, a numeric `value` that is 0 or has magnitude 8.515920e-109 to 1.174271e+108, up to 10 `dimensions`, a non-negative `timestamp` and a 4.0.0 `unit` (default `None`). Booleans, NaN and infinities are rejected. Every dimension needs a non-empty name and value, and `coreName` is reserved for the adapter. Anything else gets `{"status": "fail", "error": "InvalidInputException"}`.
+- **Requests.** It accepts the 4.0.0 `cloudwatch/metric/put` message: a `request` holding exactly `namespace` and `metricData`. The namespace has 1–255 characters, does not start with `:` and does not start with `AWS/`. `metricData` holds `metricName`, a numeric `value` that is 0 or has magnitude 8.515920e-109 to 1.174271e+108, up to 10 `dimensions`, a non-negative `timestamp` and a 4.0.0 `unit` string (default `None` when omitted; any other JSON type, including `null`, is invalid). Booleans, NaN and infinities are rejected. Every dimension needs a non-empty name and value, and `coreName` is reserved for the adapter. Anything else gets `{"status": "fail", "error": "InvalidInputException"}`.
 - **Grants.** Only publishers granted through SF-027 may put metrics. Others get `Unauthorized`. This is a SuiFleet proposal.
 - **Publishing.** Metrics go out when `PublishInterval` has elapsed (default 10 s, at most 900 s; 0 publishes on every tick), or as soon as one namespace holds 20 metrics. Each `PutMetricData` call carries at most 20 metrics of one namespace, and namespaces go out in first-arrival order.
 - **Retention.** `MaxMetricsToRetain` defaults to 5000 and must be at least 2000. When the buffer is full, a new metric replaces the oldest metric in its own namespace. If its namespace has no older metric, the new metric is dropped. Every drop is counted.
@@ -211,7 +211,7 @@ The checker validates the catalog's structure and its cross-references to the ba
 |---|---|---|
 | `managed-dependency-cases.json` | 47 classifications | Pending SF-037 |
 | `credential-provider-cases.json` | 65 steps across 7 sequences | Pending SF-057 |
-| `cloudwatch-metrics-cases.json` | 66 steps across 6 sequences | Pending SF-059 |
+| `cloudwatch-metrics-cases.json` | 82 steps across 7 sequences | Pending SF-059 |
 | `cloudwatch-logs-cases.json` | 59 steps across 7 sequences | Pending SF-060 |
 
 A `complete` adapter specification must pin an exact AWS version and name at least one executable reference suite; the checker enforces both. `stream-export-aws` uses the SF-028 `stream-cases.json` checkpoint suite.

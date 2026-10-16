@@ -157,6 +157,9 @@ class FixtureGateTests(unittest.TestCase):
         alone = lambda c: case(c, "oversized-line-drops-only-itself")["steps"]
         self.run_mutated("cloudwatch-logs-cases.json", lambda c: alone(c)[2]["expect"].update(spooled=0))
         self.run_mutated("cloudwatch-logs-cases.json", lambda c: alone(c)[4]["expect"].update(uploads=[]))
+        units = lambda c: case(c, "malformed-unit-types-change-nothing")["steps"]
+        self.run_mutated("cloudwatch-metrics-cases.json", lambda c: units(c)[4]["expect"].update(status="success"))
+        self.run_mutated("cloudwatch-metrics-cases.json", lambda c: units(c)[15]["expect"]["calls"][0].update(count=4))
         names = lambda c: case(c, "levels-redaction-names-and-order")["steps"]
         self.run_mutated("cloudwatch-logs-cases.json", lambda c: names(c)[11]["expect"]["uploads"][1]["events"][1].__setitem__(1, "token=s3cr3t ok s3cr3t"))
 
@@ -388,6 +391,9 @@ class ModelTests(unittest.TestCase):
         for timestamp in (0, 0.0, 1700000000.5):
             self.assertTrue(managed._metric_valid(request(timestamp=timestamp)))
         self.assertFalse(managed._metric_valid(request(dimensions=[{"name": "a"}])))
+        for unit in ([], {}, ["Count"], None, True, 5, "count"):
+            self.assertFalse(managed._metric_valid(request(unit=unit)))
+        self.assertTrue(managed._metric_valid(request(unit="Count")))
         self.assertFalse(managed._metric_valid({"request": {"namespace": "N" * 256, "metricData": {"metricName": "m", "value": 1}}}))
         exporter = managed.MetricsExport()
         exporter.apply({"op": "tick", "now": 5})
@@ -441,6 +447,15 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(exporter.apply({"op": "log", "source": "app", "level": "INFO", "message": "x" * 101, "time": 1}),
                          {"status": "dropped", "events": 1, "spooled": 1, "dropped": 1})
         self.assertEqual([e[3] for e in exporter.spool], ["keep"])
+
+    def test_log_unhashable_sources_are_rejected(self):
+        exporter = managed.LogsExport()
+        for sources in ({"app": []}, {"app": {}}, {"app": None}):
+            self.assertEqual(exporter.apply({"op": "configure", "sources": sources}), {"status": "invalid-config"})
+        self.assertEqual(exporter.apply({"op": "configure", "sources": {"app": "UserComponent"}}), {"status": "ok"})
+        for source in ([], {}):
+            self.assertEqual(exporter.apply({"op": "log", "source": source, "level": "INFO", "message": "x", "time": 1}),
+                             {"status": "unknown-source"})
 
     def test_log_numbers_must_be_finite(self):
         exporter = managed.LogsExport()

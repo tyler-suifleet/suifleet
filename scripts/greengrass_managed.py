@@ -257,7 +257,8 @@ def _metric_valid(message) -> bool:
             return False
     if "timestamp" in data and (not _number(data["timestamp"]) or data["timestamp"] < 0):
         return False
-    return data.get("unit", "None") in METRIC_UNITS
+    unit = data.get("unit", "None")
+    return isinstance(unit, str) and unit in METRIC_UNITS
 
 
 class MetricsExport:
@@ -409,7 +410,7 @@ class LogsExport:
         if not isinstance(redact, list) or not all(isinstance(r, str) and r for r in redact):
             return False
         sources = op.get("sources", self.sources)
-        if not isinstance(sources, dict) or set(sources.values()) - LOG_COMPONENT_TYPES:
+        if not isinstance(sources, dict) or not all(isinstance(t, str) and t in LOG_COMPONENT_TYPES for t in sources.values()):
             return False
         thing = op.get("thing", self.thing)
         if not isinstance(thing, str) or not thing:
@@ -449,7 +450,7 @@ class LogsExport:
         if kind == "restart":
             return self._state()
         if kind == "log":
-            if op["source"] not in self.sources:
+            if not isinstance(op["source"], str) or op["source"] not in self.sources:
                 return {"status": "unknown-source"}
             repeat = op.get("repeat", 1)  # fixture shorthand: the line is message * repeat
             if not isinstance(repeat, int) or isinstance(repeat, bool) or repeat <= 0:
