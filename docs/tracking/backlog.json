@@ -669,9 +669,7 @@
       "area": "compatibility",
       "phase": "extended",
       "kind": "type:epic",
-      "depends_on": [
-        "SF-027"
-      ],
+      "depends_on": [],
       "paths": [
         "docs/",
         "suifleet-edge/src/"
@@ -680,10 +678,11 @@
       "acceptance": [
         "Define exact functional vs AWS API/recipe compatibility and supported platforms/components.",
         "Design messaging/shadows/stream/client-device adapters and an acceptance suite.",
-        "Codex splits approved implementation scope into existing or new authorized issues; other models only report recommendations."
+        "Codex splits approved implementation scope into existing or new authorized issues; other models only report recommendations.",
+        "Specify proposed interfaces and contract/fixture acceptance independently of unfinished IPC/runtime implementations. Track implementation-dependent execution as pending; do not claim those tests passed or change implementation APIs by assumption."
       ],
       "validation": "Reviewed compatibility matrix and executable acceptance specifications, not a parity claim.",
-      "description": "Specify and validate broader Greengrass compatibility adapters. Define exact functional vs AWS API/recipe compatibility and supported platforms/components."
+      "description": "Specify and validate broader Greengrass compatibility adapters. Define exact functional vs AWS API/recipe compatibility and supported platforms/components. This is specification work and does not wait for IPC implementation. Distinguish current APIs from proposed contracts; use executable contract/fixture specifications without inventing unpublished runtime APIs or claiming runtime conformance."
     },
     {
       "key": "SF-029",
