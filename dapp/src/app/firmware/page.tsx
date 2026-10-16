@@ -10,8 +10,10 @@ import { buildCreateDeploymentTx } from "@/lib/sui";
 import { buildDesiredRevisionTx } from "@/lib/desired-state";
 import { fetchVersion, buildCatalogDeploymentTx, type ComponentVersion } from "@/lib/catalog";
 import { useCurrentClient } from "@mysten/dapp-kit-react";
-import { RECIPE_VERSION } from "@/lib/protocol-version";
+import { assertComponentRecipe } from "@/lib/recipe-schema";
+import { EMPTY_CONFIGURATION, recipeConfiguration } from "@/lib/recipe-configuration";
 import { PageHeader } from "@/components/ui";
+import { ConfigurationFields } from "@/components/ConfigurationFields";
 import Link from "next/link";
 
 type Step = "artifact" | "recipe" | "deploy" | "done";
@@ -47,6 +49,7 @@ export default function FirmwarePage() {
   const [shutdownCmd, setShutdownCmd] = useState("");
   const [readinessCmd, setReadinessCmd] = useState("");
   const [restartPolicy, setRestartPolicy] = useState<"on-failure" | "never" | "always">("on-failure");
+  const [configuration, setConfiguration] = useState(EMPTY_CONFIGURATION);
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
   const [selectedDevices, setSelectedDevices] = useState<Set<string>>(new Set());
   // Desired state: the groups' current version of this component, superseding
@@ -92,25 +95,13 @@ export default function FirmwarePage() {
       return;
     }
 
-    const recipe: ComponentRecipe = {
-      schemaVersion: RECIPE_VERSION,
-      componentName,
-      componentVersion: version,
-      ...(description ? { description } : {}),
-      artifactBlobId: artifact.blobId,
-      artifactSha256: artifact.sha256,
-      lifecycle: {
-        ...(installCmd ? { install: installCmd } : {}),
-        // Supervised component (SF-014): shutdown, readiness and restart need a run command.
-        ...(runCmd ? {
-          run: runCmd,
-          ...(shutdownCmd ? { shutdown: shutdownCmd } : {}),
-          ...(readinessCmd ? { readiness: readinessCmd } : {}),
-          restart: restartPolicy,
-        } : {}),
-      },
-      configuration: {},
-    };
+    let recipe: ComponentRecipe;
+    try {
+      recipe = buildRecipe(artifact);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+      return;
+    }
 
     let recipeUpload: Awaited<ReturnType<typeof uploadRecipe>>;
     try {
@@ -140,6 +131,34 @@ export default function FirmwarePage() {
         onError: (err) => alert(`Deployment failed: ${err.message}`),
       }
     );
+  }
+
+  /** The recipe as entered; throws with the field at fault. */
+  function buildRecipe(uploaded: ArtifactResult): ComponentRecipe {
+    // Configuration (SF-015) makes it a 1.2 recipe; without it any daemon accepts it.
+    const configured = recipeConfiguration(configuration);
+    const recipe: ComponentRecipe = {
+      schemaVersion: configured.schemaVersion,
+      componentName,
+      componentVersion: version,
+      ...(description ? { description } : {}),
+      artifactBlobId: uploaded.blobId,
+      artifactSha256: uploaded.sha256,
+      lifecycle: {
+        ...(installCmd ? { install: installCmd } : {}),
+        // Supervised component (SF-014): shutdown, readiness and restart need a run command.
+        ...(runCmd ? {
+          run: runCmd,
+          ...(shutdownCmd ? { shutdown: shutdownCmd } : {}),
+          ...(readinessCmd ? { readiness: readinessCmd } : {}),
+          restart: restartPolicy,
+        } : {}),
+        ...(configured.validate ? { validate: configured.validate } : {}),
+      },
+      configuration: configured.configuration,
+    };
+    assertComponentRecipe(recipe);
+    return recipe;
   }
 
   function toggle(set: Set<string>, setter: (s: Set<string>) => void, id: string) {
@@ -173,6 +192,7 @@ export default function FirmwarePage() {
                 setStep("artifact"); setArtifact(null); setRecipeStorage(null);
                 setComponentName(""); setVersion(""); setDescription("");
                 setInstallCmd(""); setRunCmd(""); setShutdownCmd(""); setReadinessCmd(""); setRestartPolicy("on-failure");
+                setConfiguration(EMPTY_CONFIGURATION);
                 setSelectedGroups(new Set()); setSelectedDevices(new Set()); setTxDigest(null);
               }}
               className="text-sm text-gray-500 hover:text-gray-700"
@@ -307,9 +327,17 @@ export default function FirmwarePage() {
             </>
           )}
         </div>
+        <ConfigurationFields value={configuration} onChange={setConfiguration} disabled={step !== "recipe"} />
         {step === "recipe" && (
           <button
-            onClick={() => setStep("deploy")}
+            onClick={() => {
+              try {
+                if (artifact) buildRecipe(artifact);
+                setStep("deploy");
+              } catch (err) {
+                alert(err instanceof Error ? err.message : String(err));
+              }
+            }}
             className="mt-2 bg-[#4DA2FF] hover:bg-[#2e8ed4] text-white px-5 py-2 rounded text-sm"
           >
             Continue to target groups

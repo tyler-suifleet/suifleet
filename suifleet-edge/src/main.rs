@@ -3,6 +3,7 @@ mod control;
 mod apply;
 mod components;
 mod config;
+mod configuration;
 mod deps;
 mod firmware;
 mod handoff;
@@ -185,9 +186,11 @@ async fn main() -> anyhow::Result<()> {
             stop_timeout: Duration::from_secs(cfg.runtime.component_stop_timeout_seconds),
             max_restarts: cfg.runtime.component_max_restarts,
             max_memory_bytes: cfg.apply.max_memory_bytes,
+            overlay_dir: cfg.components.configuration_overlay_dir.clone(),
         },
     )?;
     supervisor.configure_recovery(cfg.components.recovery_commands.clone());
+    let configs = configuration::Store::open(&cfg.runtime.state_dir, &cfg.components.configuration_overlay_dir)?;
     // The daemon is ready before its components are: bootstrap waits up to a
     // readiness timeout per component, which would otherwise exceed the
     // unit's start deadline and restart the daemon into the same bootstrap.
@@ -249,7 +252,7 @@ async fn main() -> anyhow::Result<()> {
             "Daemon started with durable deployment polling"
         );
         loop {
-            let cycle = poll(&cfg, &sui, &walrus, &runner, store.as_ref(), &mut supervisor, &mut journal);
+            let cycle = poll(&cfg, &sui, &walrus, &runner, store.as_ref(), &configs, &mut supervisor, &mut journal);
             tokio::select! {
                 result = cycle => match result {
                     Err(error) if error.downcast_ref::<handoff::Requested>().is_some() => {
@@ -332,12 +335,14 @@ async fn enroll(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn poll(
     cfg: &Config,
     sui: &SuiClient,
     walrus: &WalrusClient,
     runner: &ApplyRunner,
     store: Option<&components::Store>,
+    configs: &configuration::Store,
     supervisor: &mut supervisor::Supervisor,
     journal: &mut Journal,
 ) -> anyhow::Result<()> {
@@ -346,6 +351,9 @@ async fn poll(
     // daemon stopped between supervisor commit and journal save.
     for (name, deployment) in supervisor.recovered() {
         if !supervisor.restored(name, deployment) { continue; }
+        // Later updates build on the restored version's configuration, not
+        // on the failed one's.
+        configs.restore(name, supervisor.configuration(name)?.as_ref())?;
         if let Some(previous) = journal.state.last_known_good.get(name).filter(|c| &c.deployment_id == deployment).cloned() {
             journal.state.current.insert(name.clone(), deployment.clone());
             journal.state.components.insert(name.clone(), previous);
@@ -365,6 +373,7 @@ async fn poll(
     if cfg.apply.mode == config::ApplyMode::PrivilegedHelper {
         collect_firmware_results(cfg, journal)?;
     }
+    settle_configuration(configs, journal, supervisor)?;
     // Reports remain queued across network failures and daemon restarts.
     let pending: Vec<_> = journal
         .state
@@ -404,7 +413,7 @@ async fn poll(
                 if sui.is_managed(&event.deployment_id).await? {
                     info!(deployment = event.deployment_id, "Managed by desired state; left to reconciliation");
                 } else {
-                    execute(cfg, sui, walrus, runner, store, supervisor, journal, &event, &record).await?;
+                    execute(cfg, sui, walrus, runner, store, configs, supervisor, journal, &event, &record).await?;
                 }
             }
             journal.state.cursor = Some(cursor);
@@ -437,10 +446,44 @@ async fn poll(
             journal.state.deferred.remove(&id);
             journal.save()?;
         } else if sui.authorized_target(&event, &cfg.device.device_object_id).await? {
-            execute(cfg, sui, walrus, runner, store, supervisor, journal, &event, &record).await?;
+            execute(cfg, sui, walrus, runner, store, configs, supervisor, journal, &event, &record).await?;
         }
     }
-    reconcile(cfg, sui, walrus, runner, store, supervisor, journal).await
+    reconcile(cfg, sui, walrus, runner, store, configs, supervisor, journal).await
+}
+
+/// Commit, keep or discard the configuration each interrupted or finished
+/// install staged, by what became of it: the version the supervisor
+/// committed or a confirmed install keeps its configuration; a privileged
+/// update with an unknown outcome keeps it staged.
+fn settle_configuration(
+    configs: &configuration::Store,
+    journal: &mut Journal,
+    supervisor: &supervisor::Supervisor,
+) -> anyhow::Result<()> {
+    // A deferral matters only while its deployment still awaits admission.
+    let state = &mut journal.state;
+    let before = state.configuration_deferrals.len();
+    state.configuration_deferrals.retain(|id, _| {
+        state.deferred.get(id).is_some_and(|d| !d.terminal) && !state.deployments.contains_key(id)
+    });
+    if state.configuration_deferrals.len() != before {
+        journal.save()?;
+    }
+    configs.settle(|name, deployment| {
+        let confirmed = journal
+            .state
+            .components
+            .get(name)
+            .is_some_and(|c| c.confirmed && c.deployment_id == deployment);
+        if confirmed || supervisor.committed(name) == Some(deployment) {
+            configuration::Settled::Committed
+        } else if journal.state.deployments.get(deployment).is_some_and(|o| o.status.is_none()) {
+            configuration::Settled::Pending
+        } else {
+            configuration::Settled::Abandoned
+        }
+    })
 }
 
 /// Apply one authorized deployment, journaling intent first, and record its
@@ -452,6 +495,7 @@ async fn execute(
     walrus: &WalrusClient,
     runner: &ApplyRunner,
     store: Option<&components::Store>,
+    configs: &configuration::Store,
     supervisor: &mut supervisor::Supervisor,
     journal: &mut Journal,
     event: &DeploymentCreatedEvent,
@@ -488,7 +532,7 @@ async fn execute(
         .join(hex::encode(identity::hash(event.deployment_id.as_bytes())));
     std::fs::create_dir_all(&directory)?;
     let result =
-        handle_deployment(sui, walrus, runner, &cfg.apply, store, supervisor, journal, &resolved, &directory).await;
+        handle_deployment(cfg, sui, walrus, runner, store, configs, supervisor, journal, &resolved, &directory).await;
     if matches!(&result, Err(error) if error.downcast_ref::<control::NotAdmitted>().is_some()) {
         let _ = std::fs::remove_dir_all(&directory);
         return Ok(None);
@@ -608,6 +652,7 @@ async fn reconcile(
     walrus: &WalrusClient,
     runner: &ApplyRunner,
     store: Option<&components::Store>,
+    configs: &configuration::Store,
     supervisor: &mut supervisor::Supervisor,
     journal: &mut Journal,
 ) -> anyhow::Result<()> {
@@ -714,7 +759,7 @@ async fn reconcile(
         });
         journal.state.managed.insert(component.clone(), deployment.clone());
         journal.save()?;
-        let status = execute(cfg, sui, walrus, runner, store, supervisor, journal, &event, &record).await?;
+        let status = execute(cfg, sui, walrus, runner, store, configs, supervisor, journal, &event, &record).await?;
         if status != Some(protocol::STATUS_APPLIED) {
             if status.is_none() {
                 info!(component, deployment, "Plan deferred; admission reconsidered on the next poll");
@@ -738,6 +783,19 @@ struct Install {
     install: Option<String>,
     supervised: Option<supervisor::Lifecycle>,
     root: bool,
+    configuration: protocol::Configuration,
+    validate: Option<String>,
+    /// Its next configuration, computed and validated before any install.
+    record: configuration::Record,
+}
+impl Install {
+    fn context(&self, error: anyhow::Error) -> anyhow::Error {
+        if self.root {
+            error
+        } else {
+            error.context(format!("dependency {} {}", self.name, self.component.version))
+        }
+    }
 }
 
 /// Resolve the deployed component's dependencies, fetch and verify every
@@ -745,16 +803,18 @@ struct Install {
 /// cycles and unavailable candidates are rejected before anything changes.
 #[allow(clippy::too_many_arguments)]
 async fn handle_deployment(
+    cfg: &Config,
     sui: &SuiClient,
     walrus: &WalrusClient,
     runner: &ApplyRunner,
-    config: &config::ApplyConfig,
     store: Option<&components::Store>,
+    configs: &configuration::Store,
     supervisor: &mut supervisor::Supervisor,
     journal: &mut Journal,
     resolved: &catalog::Resolved,
     directory: &Path,
 ) -> anyhow::Result<()> {
+    let config = &cfg.apply;
     let event = &resolved.event;
     // The deployed version can later satisfy dependencies from the cache.
     if let (Some(store), Some(catalog), Some(version)) = (store, &resolved.catalog, &resolved.version) {
@@ -796,7 +856,7 @@ async fn handle_deployment(
             dependencies: planned.dependencies.clone(),
             confirmed: false,
         };
-        let (component, blob, install, supervised) = if root {
+        let (component, blob, install, supervised, configuration, validate) = if root {
             (
                 component(
                     resolved.catalog.as_ref().map(|c| c.version_id.clone()),
@@ -806,6 +866,8 @@ async fn handle_deployment(
                 recipe.artifact_blob_id.clone(),
                 recipe.lifecycle.install.clone(),
                 supervisor::Lifecycle::of(&recipe.lifecycle)?,
+                recipe.configuration.clone(),
+                recipe.lifecycle.validate.clone(),
             )
         } else {
             let loaded = &loader.loaded[&(planned.name.clone(), planned.version.clone())];
@@ -822,6 +884,8 @@ async fn handle_deployment(
                 loaded.artifact_blob_id.clone(),
                 loaded.install.clone(),
                 loaded.supervised.clone(),
+                loaded.configuration.clone(),
+                loaded.validate.clone(),
             )
         };
         installs.push(Install {
@@ -836,19 +900,21 @@ async fn handle_deployment(
             install,
             supervised,
             root,
+            configuration,
+            validate,
+            record: configuration::Record::default(),
         });
     }
     // Every artifact is verified before the first install starts.
     for install in &installs {
         components::artifact(walrus, store, &install.blob, &install.component.artifact_sha256, &install.artifact)
             .await
-            .map_err(|e| {
-                if install.root {
-                    e
-                } else {
-                    e.context(format!("dependency {} {}", install.name, install.component.version))
-                }
-            })?;
+            .map_err(|e| install.context(e))?;
+    }
+    // So is every configuration: computed from the committed one, provisioned
+    // and accepted by the component's validate command, or nothing changes.
+    if !prepare_configurations(cfg, configs, supervisor, journal, &event.deployment_id, &mut installs, directory).await? {
+        return Err(control::NotAdmitted.into());
     }
     // Re-read after downloads: a pause/cancel/window closing during fetch
     // cannot pass a stale initial check. Read failure fails closed before intent.
@@ -865,8 +931,11 @@ async fn handle_deployment(
     journal.state.deferred.remove(&event.deployment_id);
     journal.save()?;
     info!(deployment = event.deployment_id, "Apply admitted; subsequent control changes do not interrupt this plan");
-    for install in installs {
+    for (index, install) in installs.into_iter().enumerate() {
         supervisor.begin_install(&install.name)?;
+        // Staged before the install starts, committed once it is confirmed
+        // (settle_configuration covers an interruption in between).
+        configs.stage(&install.name, &install.record)?;
         // Recorded unconfirmed first: an interrupted install is never reused.
         // A dependency install changes what that component runs as well.
         let previous = journal.state.components.get(&install.name).cloned().filter(|c| c.confirmed);
@@ -901,19 +970,32 @@ async fn handle_deployment(
                 let after = install.component.dependencies.keys().cloned().collect();
                 let spec = supervisor::Spec::new(&install.name, &install.component.version, &event.deployment_id, lifecycle, after);
                 supervisor
-                    .deploy(spec, &install.artifact, install.install.as_deref(), runner, &request)
+                    .deploy(spec, &install.artifact, install.install.as_deref(), runner, &request, &install.record)
                     .await
             }
             // Installed while a supervised version of the same name keeps
             // running; once it succeeds, that version is stopped and
             // uncommitted, or the deployment fails.
-            None => match runner.apply(&install.artifact, install.install.as_deref(), &request).await {
-                Ok(()) if supervisor.supervises(&install.name) => supervisor
-                    .retire(&install.name)
-                    .await
-                    .map_err(|error| error.context("installed, but cannot stop the supervised version it replaces")),
-                result => result,
-            },
+            None => {
+                let applied = match install_configuration(configs, &install, directory, index) {
+                    Ok(file) => match supervisor.component_log(&install.name) {
+                        Ok(output) => {
+                            runner
+                                .apply(&install.artifact, install.install.as_deref(), &request, Some(&file), Some(output))
+                                .await
+                        }
+                        Err(error) => Err(error),
+                    },
+                    Err(error) => Err(error),
+                };
+                match applied {
+                    Ok(()) if supervisor.supervises(&install.name) => supervisor
+                        .retire(&install.name)
+                        .await
+                        .map_err(|error| error.context("installed, but cannot stop the supervised version it replaces")),
+                    result => result,
+                }
+            }
         };
         if let Err(error) = result {
             if let Some(previous) = previous.filter(|c| error.downcast_ref::<supervisor::Recovered>().is_some() && supervisor.restored(&install.name, &c.deployment_id)) {
@@ -932,6 +1014,7 @@ async fn handle_deployment(
         }
         journal.state.components.get_mut(&install.name).unwrap().confirmed = true;
         journal.save()?;
+        configs.commit(&install.name, &event.deployment_id)?;
         info!(deployment = event.deployment_id, component = install.name, version = install.component.version, "Component installed");
     }
     if let Some(store) = store {
@@ -946,6 +1029,86 @@ async fn handle_deployment(
         }
     }
     Ok(())
+}
+
+/// Compute each install's next configuration, check that its confidential
+/// values are provisioned, and run its validate command against it. Returns
+/// false when a component defers the update (retried on a later poll, up to
+/// `configuration_defer_max_seconds`); an error rejects the deployment
+/// before anything changed.
+async fn prepare_configurations(
+    cfg: &Config,
+    configs: &configuration::Store,
+    supervisor: &supervisor::Supervisor,
+    journal: &mut Journal,
+    deployment: &str,
+    installs: &mut [Install],
+    directory: &Path,
+) -> anyhow::Result<bool> {
+    let timeout = Duration::from_secs(cfg.apply.timeout_seconds);
+    for (index, install) in installs.iter_mut().enumerate() {
+        let checked = async {
+            let previous = configs.committed(&install.name)?;
+            let configuration = &install.configuration;
+            let record = configuration::Record {
+                deployment: deployment.to_owned(),
+                version: install.component.version.clone(),
+                defaults: configuration.defaults.clone().unwrap_or_default(),
+                effective: configuration::next(previous.as_ref().map(|r| &r.effective), configuration)?,
+                confidential: configuration.confidential.clone().unwrap_or_default(),
+            };
+            let overlay = configuration::overlay(&configs.overlay_dir, &install.name)?;
+            let materialized = configuration::materialize(&record, &overlay)?;
+            install.record = record;
+            let Some(command) = &install.validate else {
+                return Ok(true);
+            };
+            let file = directory.join(format!("validate-{index}.json"));
+            configuration::write_private(&file, &materialized)?;
+            let verdict = supervisor
+                .validate(&install.name, &install.component.version, command, &install.artifact, &file, timeout)
+                .await;
+            let _ = std::fs::remove_file(&file);
+            verdict
+        }
+        .await
+        .map_err(|e| install.context(e.context("configuration")))?;
+        if checked {
+            continue;
+        }
+        let now = u64::try_from(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis())?;
+        let since = *journal.state.configuration_deferrals.entry(deployment.to_owned()).or_insert(now);
+        let limit = cfg.components.configuration_defer_max_seconds;
+        if now.saturating_sub(since) < limit.saturating_mul(1000) {
+            journal.save()?;
+            info!(deployment, component = install.name, "Component deferred its configuration update; retrying on a later poll");
+            return Ok(false);
+        }
+        journal.state.configuration_deferrals.remove(deployment);
+        journal.save()?;
+        return Err(install.context(anyhow::anyhow!(
+            "configuration update still deferred by the component after {limit}s"
+        )));
+    }
+    if journal.state.configuration_deferrals.remove(deployment).is_some() {
+        journal.save()?;
+    }
+    Ok(true)
+}
+
+/// The materialized configuration file an install-only component's install
+/// script receives as `{configuration}`; removed with the deployment's
+/// directory.
+fn install_configuration(
+    configs: &configuration::Store,
+    install: &Install,
+    directory: &Path,
+    index: usize,
+) -> anyhow::Result<PathBuf> {
+    let overlay = configuration::overlay(&configs.overlay_dir, &install.name)?;
+    let file = directory.join(format!("configuration-{index}.json"));
+    configuration::write_private(&file, &configuration::materialize(&install.record, &overlay)?)?;
+    Ok(file)
 }
 
 /// Applied/Failed, or no status when a configured command's outcome is

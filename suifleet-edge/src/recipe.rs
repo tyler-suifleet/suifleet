@@ -56,10 +56,21 @@ impl Recipe {
         );
         crate::supervisor::Restart::parse(lifecycle.restart.as_deref())?;
         anyhow::ensure!(lifecycle.run.is_none() || allow_commands, "recipe run commands are disabled; set apply.allow_recipe_commands only for a trusted operator");
+        let configuration = &self.configuration;
+        let configured = configuration.defaults.is_some()
+            || configuration.merge.is_some()
+            || configuration.reset.is_some()
+            || configuration.confidential.is_some()
+            || lifecycle.validate.is_some();
+        // Older daemons reject these fields: they need a 1.2 consumer.
+        anyhow::ensure!(!configured || self.schema_version == "1.2", "recipe configuration requires schemaVersion 1.2");
+        let command = |c: &Option<String>| c.as_deref().is_some_and(|c| !c.is_empty());
         anyhow::ensure!(
-            self.configuration.is_empty(),
-            "component configuration management is not implemented"
+            !configured || command(&lifecycle.install) || command(&lifecycle.run),
+            "recipe configuration needs an install or run command to receive it"
         );
+        anyhow::ensure!(lifecycle.validate.is_none() || allow_commands, "recipe validate commands are disabled; set apply.allow_recipe_commands only for a trusted operator");
+        crate::configuration::validate_recipe(configuration)?;
         anyhow::ensure!(self.lifecycle.install.is_none() || allow_commands, "recipe install commands are disabled; set apply.allow_recipe_commands only for a trusted operator");
         anyhow::ensure!(
             self.component_dependencies.is_none() || self.schema_version != "1.0",

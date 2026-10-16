@@ -213,10 +213,7 @@ def inside(args):
                 self.respond(b"not found", 404)
 
     def deploy(id, name, lifecycle):
-        sim.add(id)
-        event = sim.events[-1]["parsedJson"]
-        event["component_name"] = name
-        sim.recipes[event["recipe_blob_id"]].update(componentName=name, lifecycle=lifecycle)
+        sim.add(id, event=dict(component_name=name), recipe=dict(lifecycle=lifecycle))
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()

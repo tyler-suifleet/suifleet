@@ -8,7 +8,7 @@ pub const DEPLOYMENT_SCHEMA_VERSION: u64 = 1;
 pub const SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS: &[u64] = &[1, 2];
 pub const CATALOG_TYPES: &[&str] = &["component_catalog::ComponentCatalog", "component_catalog::ComponentVersion", "component_catalog::CatalogCreated", "component_catalog::VersionPublished", "component_catalog::CatalogBindingKey", "component_catalog::CatalogBinding"];
 pub const RECIPE_VERSION: &str = "1.0";
-pub const RECIPE_VERSIONS: &[&str] = &["1.0", "1.1"];
+pub const RECIPE_VERSIONS: &[&str] = &["1.0", "1.1", "1.2"];
 pub const STATUS_APPLIED: u8 = 1;
 pub const STATUS_FAILED: u8 = 2;
 pub const REQUIRED_TYPES: &[&str] = &["device_registry::DeviceRegistry", "device_registry::Device", "device_group::DeviceGroup", "device_group::GroupCreated", "device_cap::DeviceCap", "device_cap::DeviceAddressKey", "deployment_manager::DeploymentRecord", "deployment_manager::DeploymentCreated", "deployment_manager::DeviceStatusUpdated", "deployment_manager::TargetGroupsKey", "deployment_manager::TargetDevicesKey", "deployment_manager::StatusesKey", "deployment_manager::RecipeDigestKey", "deployment_manager::ReceiptsKey", "deployment_manager::Receipts", "deployment_manager::DeviceStatusReported", "device_registry::IdentityKey", "device_registry::Identity", "device_registry::DeviceIdentityChanged", "device_registry::CustodyKey", "device_registry::DeviceOwnerCap", "deployment_manager::DelegateKey", "enrollment::EnrollmentPolicy", "enrollment::DeviceEnrolled", "roles::DeployerRole", "roles::RoleKey", "roles::RoleGranted", "device_group::DeviceAddedToGroup", "deployment_manager::ManagedKey", "desired_state::DesiredKey", "desired_state::DesiredState", "desired_state::DesiredStateChanged", "deployment_manager::ControlKey", "deployment_manager::Control"];
@@ -534,6 +534,14 @@ pub struct DeploymentCreatedEvent {
     pub target_devices: Vec<String>,
     pub creator: String,
 }
+/// A present optional field; null is rejected like any other wrong type.
+fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Option<T>, D::Error> { T::deserialize(d).map(Some) }
+/// A JSON object only, as the schema says; never an array of fields.
+fn object<'de, D: serde::Deserializer<'de>, T: serde::de::DeserializeOwned>(d: D) -> Result<T, D::Error> {
+    let value = serde_json::Value::deserialize(d)?;
+    if !value.is_object() { return Err(serde::de::Error::custom("expected a JSON object")); }
+    serde_json::from_value(value).map_err(serde::de::Error::custom)
+}
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Recipe {
@@ -550,12 +558,14 @@ pub struct Recipe {
     pub artifact_blob_id: String,
     #[serde(rename = "artifactSha256")]
     pub artifact_sha256: String,
+    #[serde(deserialize_with = "object")]
     #[serde(rename = "lifecycle")]
     pub lifecycle: Lifecycle,
+    #[serde(deserialize_with = "object")]
     #[serde(rename = "configuration")]
-    pub configuration: serde_json::Map<String, serde_json::Value>,
+    pub configuration: Configuration,
     #[serde(rename = "componentDependencies")]
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
     pub component_dependencies: Option<std::collections::BTreeMap<String, ComponentDependency>>,
 }
 #[derive(Debug, Default, Deserialize)]
@@ -574,8 +584,27 @@ pub struct Lifecycle {
     #[serde(default)]
     pub readiness: Option<String>,
     #[serde(rename = "restart")]
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
     pub restart: Option<String>,
+    #[serde(rename = "validate")]
+    #[serde(default, deserialize_with = "present")]
+    pub validate: Option<String>,
+}
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Configuration {
+    #[serde(rename = "defaults")]
+    #[serde(default, deserialize_with = "present")]
+    pub defaults: Option<serde_json::Map<String, serde_json::Value>>,
+    #[serde(rename = "merge")]
+    #[serde(default, deserialize_with = "present")]
+    pub merge: Option<serde_json::Map<String, serde_json::Value>>,
+    #[serde(rename = "reset")]
+    #[serde(default, deserialize_with = "present")]
+    pub reset: Option<Vec<String>>,
+    #[serde(rename = "confidential")]
+    #[serde(default, deserialize_with = "present")]
+    pub confidential: Option<Vec<String>>,
 }
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -583,6 +612,6 @@ pub struct ComponentDependency {
     #[serde(rename = "versionRequirement")]
     pub version_requirement: String,
     #[serde(rename = "dependencyType")]
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
     pub dependency_type: Option<String>,
 }
