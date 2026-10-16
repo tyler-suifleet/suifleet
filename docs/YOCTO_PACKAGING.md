@@ -18,21 +18,23 @@ Other hosts/architectures need a deliberate profile change and validation.
 The local SuiFleet layer comes from this checkout. Archive its commit ID and
 any diff alongside the kas configuration and build artifacts. The daemon source
 is fetched independently at the recipe's fixed `SRCREV`
-`56bbac4d3286f32cad954ad8679bf0d4acf1b838`, a fixed owner-branch revision
-containing the merged SF-003/SF-004 gRPC transport, reviewed generated interfaces,
-atomic first-key publication, registry identity enforcement and signed-release
-verification from main through `38beecd`. `nobranch=1` permits this exact revision before
-PR integration; it does not select a floating source.
-It requires a node serving indexed gRPC `ListEvents` (Sui ≥ 1.81 in SF-004
-tests). Packaging and offline boot checks do not establish real-chain OTA
-acceptance. The lockfile SHA-256 is
-`31360ca31fc20fcfd66b0a370fc5bfd31693a1c3e036d69720cdef368f0be822`.
+`795de747e066ee97af0e9e0e53deda3c6c71e90c`, reviewed main including the
+integrated gRPC, identity, catalog/dependency, desired-state and deployment-control
+implementations. `nobranch=1` selects this exact immutable revision, never AUTOREV.
+The daemon crate version is `0.2.1`. It requires indexed gRPC `ListEvents`
+(Sui ≥ 1.81 in SF-004 tests). Packaging/offline checks do not establish
+real-chain OTA acceptance. The Cargo.lock SHA-256 is
+`44aa5b2637fc2b828a796a63e9a550d9c0fa652437cf59ffd31e0b264021290e`.
 
-`suifleet-crates.inc` declares all 285 registry packages/versions and SHA-256 from
+`suifleet-crates.inc` declares all 302 registry packages/versions and SHA-256 from
 that revision's Cargo.lock. BitBake fetches/unpacks them before compilation;
 Yocto's cargo class vendors them locally and passes `--frozen`. The recipe also
 sets `CARGO_NET_OFFLINE=true` and checks the lockfile digest before configure.
 There is no compile-time crate download or `AUTOREV`.
+
+The bootable SD image profile, access provisioning and flashing instructions are
+in [PI_IMAGE.md](PI_IMAGE.md). Historical validation below remains tied to its
+recorded older sources; use the SF-029 image evidence for the new pin.
 
 To update: select a reviewed source revision, update `SRCREV`, run
 `bitbake -c update_crates suifleet`, and update `SUIFLEET_LOCK_SHA256` from that

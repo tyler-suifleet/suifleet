@@ -14,14 +14,14 @@ SRC_URI = " \
     file://suifleet-provision \
     file://suifleet-enrollment.path \
 "
-SRCREV = "56bbac4d3286f32cad954ad8679bf0d4acf1b838"
+SRCREV = "795de747e066ee97af0e9e0e53deda3c6c71e90c"
 # Preserve core's unpack root; Scarthgap predates UNPACKDIR.
 SUIFLEET_UNPACKDIR = "${@d.getVar('UNPACKDIR') or d.getVar('WORKDIR')}"
 S = "${SUIFLEET_UNPACKDIR}/git"
 
 inherit cargo cargo-update-recipe-crates systemd pkgconfig useradd
 require suifleet-crates.inc
-SUIFLEET_LOCK_SHA256 = "31360ca31fc20fcfd66b0a370fc5bfd31693a1c3e036d69720cdef368f0be822"
+SUIFLEET_LOCK_SHA256 = "44aa5b2637fc2b828a796a63e9a550d9c0fa652437cf59ffd31e0b264021290e"
 CARGO_LOCK_SRC_DIR = "${S}/suifleet-edge"
 CARGO_BUILD_FLAGS:append = " --bin suifleet --features systemd"
 # Every compile uses the dependency graph fetched and verified by BitBake.
@@ -66,6 +66,8 @@ SYSTEMD_SERVICE:${PN} = "suifleet.service suifleet-provision.service suifleet-en
 SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 
 do_install:append() {
+    install -d ${D}${datadir}/suifleet
+    printf 'source_revision=%s\nlock_sha256=%s\ncrate_version=%s\n' '${SRCREV}' '${SUIFLEET_LOCK_SHA256}' '0.2.1' > ${D}${datadir}/suifleet/build-info
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${SUIFLEET_UNPACKDIR}/suifleet.service ${SUIFLEET_UNPACKDIR}/suifleet-firmware.service ${SUIFLEET_UNPACKDIR}/suifleet-firmware.path \
         ${SUIFLEET_UNPACKDIR}/suifleet-provision.service ${SUIFLEET_UNPACKDIR}/suifleet-enrollment.path \

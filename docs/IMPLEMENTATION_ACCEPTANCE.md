@@ -12,6 +12,7 @@ merging implementation does not establish them or authorize deployment.
 | SF-014 component supervisor | SF-031 physical Pi boot/reboot/power-loss component recovery, plus SF-010 extension-wallet lifecycle UI; real systemd/cgroup-v2 crash/containment/restart evidence under the shipped unit remains a premerge gate |
 | SF-024 indexer | SF-010 public-node/archival integration |
 | SF-025 packaging | SF-029 bootable Pi image and SF-031 physical acceptance; final BitBake/QEMU evidence remains required for the packaging implementation |
+| SF-029 bootable Pi image | Physical flashing/boot, real-device identity persistence, networking and OTA remain SF-031/#32; a completed BitBake SD image and local partition/rootfs inspection remain required before Review. User will flash the image. |
 | SF-039 signed releases | [SF-042: provisioned signing workflow and device trust](https://github.com/tyler-suifleet/suifleet/issues/62), plus SF-031 |
 | SF-043 automatic testnet controller | First full automatic Actions execution requires reviewed main-only bootstrap; tracked in SF-043/#64 and observed before declaring the overall request complete |
 | SF-045 testnet preflight repair | First full automatic Actions success after reviewed repair integration; exact-head CI, keyless Actions metadata probe and genuine current-head/base testnet effects/status remain premerge gates; tracked in #69/#64 |
