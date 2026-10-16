@@ -603,6 +603,17 @@ impl Supervisor {
                 s.after.iter().any(|d| d == name) && self.running.contains_key(&s.name)),
                 "stop dependents first");
             self.stop(name).await;
+            // An already-finished Broken/Exited task cannot observe the stop
+            // signal. Record explicit intent so the next poll does not recover
+            // and restart a component the operator just stopped.
+            if let Some(status) = self.status.lock().unwrap().get_mut(name) {
+                status.phase = Phase::Stopped;
+                status.pid = None;
+                status.pid_start = None;
+                status.since = SystemTime::now().duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_secs()).unwrap_or(0);
+            }
+            write_status(&self.root, &self.status)?;
         }
         if operation == "start" || operation == "restart" {
             let status = self.status();
@@ -1768,6 +1779,27 @@ mod tests {
         let mut s = f.open();
         s.bootstrap().await;
         assert!(s.restored("app", &v1.deployment));
+        s.stop_all().await;
+    }
+
+    #[tokio::test]
+    async fn explicit_local_stop_of_broken_component_prevents_recovery() {
+        let mut f = Fixture::new("local-stop-broken");
+        let mut s = f.open_with(0);
+        let v1 = f.spec("1.0.0", "exec sleep 300");
+        f.deploy(&mut s, v1, None).await.unwrap();
+        let trigger = f.dir.join("crash");
+        let v2 = f.spec("2.0.0", &format!("while test ! -e {}; do sleep 0.05; done; exit 9", quote(&trigger)));
+        f.deploy(&mut s, v2.clone(), None).await.unwrap();
+        let marker = f.dir.join("must-not-recover");
+        s.configure_recovery(BTreeMap::from([("app".into(), format!("touch {}", quote(&marker)))]));
+        std::fs::write(trigger, "crash").unwrap();
+        until("runtime failure", || phase(&s) == Phase::Broken).await;
+        s.local_control("app", "stop").await.unwrap();
+        assert_eq!(phase(&s), Phase::Stopped);
+        s.recover_broken(&f.runner, |_| true).await.unwrap();
+        assert!(!marker.exists());
+        assert_eq!(s.committed("app"), Some(v2.deployment.as_str()));
         s.stop_all().await;
     }
 
