@@ -264,6 +264,7 @@ fn phrases(text: &str) -> (String, usize) {
 }
 
 /// Every string leaf of a JSON value (confidential overlay values).
+#[allow(dead_code)] // The daemon uses it; the indexer shares this file.
 pub fn string_leaves(value: &serde_json::Value, out: &mut Vec<String>) {
     match value {
         serde_json::Value::String(s) => out.push(s.clone()),
