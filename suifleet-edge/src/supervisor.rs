@@ -277,14 +277,14 @@ impl Supervisor {
     /// Runtime crash/readiness failure after the restart budget is exhausted.
     /// Only explicitly opted-in applications with a retained previous version
     /// can recover; no platform installation or reboot is initiated.
-    pub async fn recover_broken(&mut self, runner: &ApplyRunner) -> anyhow::Result<()> {
+    pub async fn recover_broken(&mut self, runner: &ApplyRunner, confirmed: impl Fn(&str) -> bool) -> anyhow::Result<()> {
         anyhow::ensure!(!self.root.join("recovery-intent.json").exists(),
             "application recovery requires operator inspection");
         let broken: Vec<_> = self.status.lock().unwrap().iter()
             .filter(|(_, status)| status.phase == Phase::Broken)
             .map(|(name, _)| name.clone()).collect();
         for name in broken {
-            if !self.recovery_commands.contains_key(&name) { continue; }
+            if !confirmed(&name) || !self.recovery_commands.contains_key(&name) { continue; }
             let Some(previous) = self.previous.get(&name).cloned() else { continue; };
             if self.active.get(&name).is_some_and(|s| s.deployment == previous.deployment) { continue; }
             self.recover_application(&previous, runner, "application-recovery").await?;
@@ -1552,12 +1552,12 @@ mod tests {
         s.bootstrap().await;
         std::fs::write(trigger, "crash").unwrap();
         until("runtime failure", || phase(&s) == Phase::Broken).await;
-        s.recover_broken(&f.runner).await.unwrap();
+        s.recover_broken(&f.runner, |_| true).await.unwrap();
         assert_eq!(f.read("version").trim(), "1");
         assert_eq!(std::fs::read_to_string(f.dir.join("restored")).unwrap(), "artifact 1.0.0");
         assert!(s.restored("app", &v1.deployment));
         assert_eq!(s.recovered()["app"], v1.deployment);
-        s.recover_broken(&f.runner).await.unwrap();
+        s.recover_broken(&f.runner, |_| true).await.unwrap();
         assert_eq!(std::fs::read_to_string(marker).unwrap(), "ran\n");
         s.stop_all().await;
     }
@@ -1602,7 +1602,7 @@ mod tests {
     #[tokio::test]
     async fn ambiguous_install_never_triggers_destructive_recovery() {
         let mut f = Fixture::new("unknown-install");
-        let mut s = f.open();
+        let mut s = f.open_with(0);
         let v1 = f.spec("1.0.0", "exec sleep 300");
         f.deploy(&mut s, v1, None).await.unwrap();
         let marker = f.dir.join("must-not-recover");
@@ -1611,6 +1611,11 @@ mod tests {
         let error = f.deploy(&mut s, v2, Some("kill -KILL $$")).await.unwrap_err();
         assert!(error.downcast_ref::<crate::firmware::Indeterminate>().is_some());
         assert!(!marker.exists());
+        let pid = s.status()["app"].pid.unwrap();
+        unsafe { libc::kill(pid as i32, libc::SIGKILL); }
+        until("previous run failure after unknown install", || phase(&s) == Phase::Broken).await;
+        s.recover_broken(&f.runner, |_| false).await.unwrap();
+        assert!(!marker.exists(), "unconfirmed application state must block runtime recovery too");
         s.stop_all().await;
     }
 

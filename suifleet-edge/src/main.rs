@@ -198,7 +198,7 @@ async fn poll(
     supervisor: &mut supervisor::Supervisor,
     journal: &mut Journal,
 ) -> anyhow::Result<()> {
-    supervisor.recover_broken(runner).await?;
+    supervisor.recover_broken(runner, |name| journal.state.components.get(name).is_some_and(|c| c.confirmed)).await?;
     // A recovery receipt and the retained identity reconcile even when the
     // daemon stopped between supervisor commit and journal save.
     for (name, deployment) in supervisor.recovered() {
