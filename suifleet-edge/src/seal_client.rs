@@ -234,7 +234,6 @@ pub struct KeyServer {
     pub name: String,
     pub url: String,
     pub public_key: G2Affine,
-    pub weight: u8,
     api_key: Option<(String, String)>,
 }
 
@@ -334,7 +333,6 @@ pub async fn load_key_server(
         name,
         url: url.trim_end_matches('/').to_owned(),
         public_key: seal::g2(&pk)?,
-        weight: config.weight,
         api_key,
     })
 }
@@ -577,7 +575,8 @@ impl Seal {
     async fn fetch_keys(&self, object: &Object, servers: &[KeyServer], ptb: &ProgrammableTransaction) -> anyhow::Result<HashMap<[u8; 32], G1Affine>> {
         let full_id = object.full_id();
         let mut keys = self.cached(&full_id, servers);
-        let weight = |keys: &HashMap<[u8; 32], G1Affine>| servers.iter().filter(|s| keys.contains_key(&s.object_id)).map(|s| usize::from(s.weight)).sum::<usize>();
+        // A server's weight is how many shares the ciphertext gives it.
+        let weight = |keys: &HashMap<[u8; 32], G1Affine>| object.services.iter().filter(|(id, _)| keys.contains_key(id)).count();
         if weight(&keys) >= usize::from(object.threshold) {
             return Ok(keys);
         }
