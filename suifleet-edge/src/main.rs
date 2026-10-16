@@ -16,6 +16,7 @@ mod protocol_tests;
 #[cfg(test)]
 mod compat_tests;
 mod release;
+mod signer_service;
 mod state;
 mod sui_client;
 mod supervisor;
@@ -57,6 +58,15 @@ async fn main() -> anyhow::Result<()> {
         );
         return Ok(());
     }
+    if args.len() == 3 && args[1] == "--key-holder" {
+        // Root provisioning: who owns device.key under this configuration (SF-053).
+        println!("{}", signer_service::key_holder(Path::new(&args[2]))?);
+        return Ok(());
+    }
+    if args.len() == 3 && args[1] == "--record-main-process" {
+        // Root ExecStartPost= of the daemon unit, for the signing service (SF-053).
+        return signer_service::record_main_process(Path::new(&args[2]));
+    }
     if args.len() == 3 && args[1] == "--self-check" {
         return self_check(Path::new(&args[2]));
     }
@@ -72,9 +82,10 @@ async fn main() -> anyhow::Result<()> {
     let launched = args.len() == 2 && args[1] == "--launch";
     let check_config = args.len() == 3 && args[1] == "--check-config";
     let helper = args.len() == 3 && args[1] == "--firmware-helper";
+    let signer_service = args.len() == 3 && args[1] == "--signer-service";
     anyhow::ensure!(
-        args.len() == 1 || launched || check_config || helper,
-        "usage: suifleet [--launch | --provision KEY_PATH | --derive-address KEY_PATH | --enroll ENROLL_TOML | --check-config CONFIG_PATH | --self-check CONFIG_PATH | --firmware-helper CONFIG | --verify-release BUNDLE_DIR TRUST_FILE]"
+        args.len() == 1 || launched || check_config || helper || signer_service,
+        "usage: suifleet [--launch | --provision KEY_PATH | --derive-address KEY_PATH | --enroll ENROLL_TOML | --check-config CONFIG_PATH | --self-check CONFIG_PATH | --firmware-helper CONFIG | --signer-service SIGNER_TOML | --record-main-process PATH | --key-holder CONFIG_PATH | --verify-release BUNDLE_DIR TRUST_FILE]"
     );
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -82,6 +93,10 @@ async fn main() -> anyhow::Result<()> {
                 .unwrap_or_else(|_| "suifleet=info".into()),
         )
         .init();
+    if signer_service {
+        // Runs as its own user, holding the device key (SF-053).
+        return signer_service::serve(Path::new(&args[2]));
+    }
     if helper {
         // Root-owned, path-activated: the only privileged operation.
         let helper = config::FirmwareHelperConfig::load(Path::new(&args[2]))?;
@@ -96,6 +111,14 @@ async fn main() -> anyhow::Result<()> {
             .unwrap_or_else(|_| PathBuf::from("/etc/suifleet/config.toml"))
     };
     let cfg = Config::load(&path)?;
+    if !check_config && cfg.device.signer.as_ref().is_some_and(|signer| signer.kind == "service") {
+        // Component processes run as this user: with the key in the signing
+        // service, keep them from ptracing the daemon (and so signing as it)
+        // or taking its descriptors. execve restores the default for each
+        // component.
+        // SAFETY: plain prctl on this process.
+        anyhow::ensure!(unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) } == 0, "cannot make the daemon non-dumpable");
+    }
     let sui = SuiClient::load(cfg.sui.clone(), identity::signer(&cfg.device)?)?;
     sui.validate_deployment().await?;
     if check_config {
