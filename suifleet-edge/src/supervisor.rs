@@ -304,6 +304,14 @@ impl Supervisor {
 
     pub fn recovered(&self) -> &BTreeMap<String, String> { &self.recovered }
 
+    /// Invalidate a past recovery before admitting any new installer for this
+    /// component, including a transition away from supervision.
+    pub fn begin_install(&mut self, name: &str) -> anyhow::Result<()> {
+        self.recovered.remove(name);
+        atomic_write(&self.root.join("recovered.json"), &serde_json::to_vec(&self.recovered)?)
+    }
+
+
     async fn recover_application(&mut self, previous: &Spec, runner: &ApplyRunner, request: &str) -> anyhow::Result<()> {
         let Some(command) = self.recovery_commands.get(&previous.name).cloned() else {
             return Ok(());
@@ -360,6 +368,10 @@ impl Supervisor {
             "application recovery requires operator inspection");
         anyhow::ensure!(safe_segment(&spec.name), "component name is not a safe path segment");
         anyhow::ensure!(safe_segment(&spec.version), "component version is not a safe path segment");
+        // A prior runtime recovery cannot confirm the outcome of this new
+        // deployment. Persist invalidation before any workspace/install work,
+        // including paths that return early or are interrupted.
+        self.begin_install(&spec.name)?;
         let workspace = self.workspace(&spec);
         let _ = std::fs::remove_dir_all(&workspace);
         std::fs::create_dir_all(&workspace)?;
@@ -1597,6 +1609,53 @@ mod tests {
         drop(s);
         assert!(Supervisor::open(&f.dir, settings).err().unwrap().to_string().contains("recovery was interrupted or failed"));
         assert_eq!(std::fs::read_to_string(marker).unwrap(), "ran\n");
+    }
+
+    #[tokio::test]
+    async fn new_failed_install_invalidates_prior_runtime_recovery() {
+        for (label, install, indeterminate, supervised) in [
+            ("killed", "kill -KILL $$", true, true),
+            ("failed", "exit 9", false, true),
+            ("direct-killed", "kill -KILL $$", true, false),
+            ("direct-failed", "exit 9", false, false),
+        ] {
+            let mut f = Fixture::new(&format!("stale-recovery-{label}"));
+            let mut s = f.open_with(0);
+            let v1 = f.spec("1.0.0", "exec sleep 300");
+            f.deploy(&mut s, v1.clone(), None).await.unwrap();
+            let v2 = f.spec("2.0.0", "exec sleep 300");
+            f.deploy(&mut s, v2, None).await.unwrap();
+            s.configure_recovery(BTreeMap::from([("app".into(), "true".into())]));
+            let pid = s.status()["app"].pid.unwrap();
+            unsafe { libc::kill(pid as i32, libc::SIGKILL); }
+            until("runtime failure", || phase(&s) == Phase::Broken).await;
+            s.recover_broken(&f.runner, |_| true).await.unwrap();
+            assert_eq!(s.recovered()["app"], v1.deployment);
+            assert!(s.restored("app", &v1.deployment));
+            s.configure_recovery(BTreeMap::new());
+
+            let v3 = f.spec("3.0.0", "exec sleep 300");
+            let error = if supervised {
+                f.deploy(&mut s, v3, Some(install)).await.unwrap_err()
+            } else {
+                // The admission path also invalidates recovery when replacing
+                // supervision with an install-only recipe.
+                s.begin_install("app").unwrap();
+                let artifact = f.dir.join("direct-artifact");
+                std::fs::write(&artifact, "v3").unwrap();
+                f.runner.apply(&artifact, Some(install), "test").await.unwrap_err()
+            };
+            assert_eq!(error.downcast_ref::<crate::firmware::Indeterminate>().is_some(), indeterminate);
+            assert!(error.downcast_ref::<Recovered>().is_none());
+            // The retained process is still running, but polling must have no
+            // stale recovery identity with which to confirm the failed install.
+            assert!(s.restored("app", &v1.deployment));
+            assert!(!s.recovered().contains_key("app"));
+            s.stop_all().await;
+            drop(s);
+            let s = f.open_with(0);
+            assert!(!s.recovered().contains_key("app"), "stale recovery survived restart");
+        }
     }
 
     #[tokio::test]

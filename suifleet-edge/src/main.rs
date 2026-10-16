@@ -656,6 +656,7 @@ async fn handle_deployment(
     journal.save()?;
     info!(deployment = event.deployment_id, "Apply admitted; subsequent control changes do not interrupt this plan");
     for install in installs {
+        supervisor.begin_install(&install.name)?;
         // Recorded unconfirmed first: an interrupted install is never reused.
         // A dependency install changes what that component runs as well.
         let previous = journal.state.components.get(&install.name).cloned().filter(|c| c.confirmed);
