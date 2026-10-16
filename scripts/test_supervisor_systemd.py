@@ -85,9 +85,12 @@ def sh(*command, check=True, capture=True):
     return result.stdout.strip() if capture else ""
 
 
-def host(args):
+def host(args, script="test_supervisor_systemd.py", container=CONTAINER):
+    """Boot the harness and run `script --inside` in it (shared with other
+    real-systemd tests, e.g. test_daemon_update_systemd.py)."""
+    CONTAINER = container
     for binary in ("suifleet", "examples/grpc_sim_shim"):
-        assert (ROOT / "suifleet-edge/target/debug" / binary).exists(), f"build {binary} first (make test-supervisor-systemd)"
+        assert (ROOT / "suifleet-edge/target/debug" / binary).exists(), f"build {binary} first"
     built = subprocess.run(["docker", "build", "-q", "-t", IMAGE, "-"], input=HARNESS, text=True, capture_output=True)
     assert built.returncode == 0, built.stderr
     sh("docker", "rm", "-f", CONTAINER, check=False)
@@ -104,7 +107,7 @@ def host(args):
         head = sh("git", "-C", str(ROOT), "rev-parse", "HEAD")
         dirty = bool(sh("git", "-C", str(ROOT), "status", "--porcelain", "--untracked-files=no"))
         result = subprocess.run(["docker", "exec", "-e", "PYTHONDONTWRITEBYTECODE=1", CONTAINER, "python3",
-                                 "/workspace/scripts/test_supervisor_systemd.py", "--inside",
+                                 f"/workspace/scripts/{script}", "--inside",
                                  "--head", head + ("+dirty" if dirty else "")], text=True, capture_output=True)
         sys.stdout.write(result.stdout)
         if result.returncode:
