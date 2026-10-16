@@ -10,6 +10,7 @@ they are not an adapter and prove no runtime conformance.
 from __future__ import annotations
 
 import datetime
+import math
 import re
 from pathlib import Path
 
@@ -225,7 +226,8 @@ RETRYABLE = {"throttled", "server-error", "connection-error"}
 
 
 def _number(value) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
+    """A finite JSON number; booleans, NaN and infinities are not numbers here."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
 def _metric_valid(message) -> bool:
@@ -240,7 +242,7 @@ def _metric_valid(message) -> bool:
     name, value = data.get("metricName"), data.get("value")
     if not isinstance(name, str) or not 0 < len(name) <= 255 or not _number(value):
         return False
-    if value != 0 and not 8.515920e-109 <= abs(value) <= 1.174271e+108:  # also rejects NaN and infinities
+    if value != 0 and not 8.515920e-109 <= abs(value) <= 1.174271e+108:
         return False
     dimensions = data.get("dimensions", [])
     if not isinstance(dimensions, list) or len(dimensions) > 10:

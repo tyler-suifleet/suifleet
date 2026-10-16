@@ -355,6 +355,10 @@ class ModelTests(unittest.TestCase):
         for value in (float("nan"), float("inf"), -float("inf")):
             self.assertFalse(managed._metric_valid(request(value=value)))
         self.assertTrue(managed._metric_valid(request(value=-1.174271e+108)))
+        for timestamp in (float("nan"), float("inf"), -float("inf"), -1, True):
+            self.assertFalse(managed._metric_valid(request(timestamp=timestamp)))
+        for timestamp in (0, 0.0, 1700000000.5):
+            self.assertTrue(managed._metric_valid(request(timestamp=timestamp)))
         self.assertFalse(managed._metric_valid(request(dimensions=[{"name": "a"}])))
         self.assertFalse(managed._metric_valid({"request": {"namespace": "N" * 256, "metricData": {"metricName": "m", "value": 1}}}))
         exporter = managed.MetricsExport()
@@ -409,6 +413,16 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(exporter.apply({"op": "log", "source": "app", "level": "INFO", "message": "x" * 101, "time": 1}),
                          {"status": "dropped", "events": 1, "spooled": 1, "dropped": 1})
         self.assertEqual([e[3] for e in exporter.spool], ["keep"])
+
+    def test_log_numbers_must_be_finite(self):
+        exporter = managed.LogsExport()
+        for interval in (float("nan"), float("inf")):
+            self.assertEqual(exporter.apply({"op": "configure", "sources": {"app": "UserComponent"}, "interval": interval}),
+                             {"status": "invalid-config"})
+        exporter.apply({"op": "configure", "sources": {"app": "UserComponent"}})
+        for time in (float("nan"), float("inf"), -float("inf")):
+            self.assertEqual(exporter.apply({"op": "log", "source": "app", "level": "INFO", "message": "m", "time": time}),
+                             {"status": "invalid"})
 
     def test_selection_rule_grammar(self):
         with self.assertRaises(ValueError):
