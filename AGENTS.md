@@ -178,3 +178,10 @@ Automatic implementation dispatch is described in [PR coordination](docs/PR_COOR
 User-authorized implementation/integration acceptance split: follow [IMPLEMENTATION_ACCEPTANCE.md](docs/IMPLEMENTATION_ACCEPTANCE.md) and its per-ticket tracked scope. Reviewed implementations may merge before the explicitly deferred Pi, real-wallet, public-network or production-release integration checks. Keep code findings, local compatibility/regression evidence and CI as merge gates; retain the linked acceptance tickets and never claim deferred tests ran.
 
 The user explicitly authorizes automatic public Sui testnet acceptance using the dedicated testnet agent/CI wallets described in PR #63 and SF-010/#11. Verify chain/account/authority, preserve keys, honor run spend limits and acquire `network:suifleet-testnet` only during machine-session mutations; coordinate with Claude before using shared state. Mainnet, other wallets, physical programming and production credential operations remain outside this grant. Testnet availability does not reinstate blanket external-acceptance merge blockers.
+
+
+## Physical target acceptance — current user direction
+
+Physical Pi work must not block software implementation, review or merge. The user explicitly permits resolving target issues later. Apply this rule to future tickets too: physical boot/networking, target reboot/power-loss, hardware-only isolation/performance and device-specific integration stay in SF-031/#32. The unfinished refreshed SD image SF-066/#111 is on hold; do not require that image for an offline software harness or unrelated feature. Do not claim a new image or physical result exists.
+
+Preserve real software/API dependencies, source/security review, meaningful unit/simulator/host integration checks and normal authorized automatic testnet CI. This deferral grants no hardware programming authority and does not waive failing software tests. Packaging/image work must still produce actual artifacts before its own completion; an on-hold target ticket is not Done. Platform scripts remain responsible for reboot and firmware recovery.
