@@ -18,6 +18,10 @@ SuiFleet verifies and delivers artifacts, executes configured lifecycle commands
 
 The pitch is: **manage deployments at a price derived from actual usage, preserve the customer's platform integration, and make release authority and reported outcomes independently verifiable.** Full Greengrass API/recipe/component compatibility is a roadmap, not an existing sales claim.
 
+## Mandatory customer confidentiality
+
+Seal-encrypted delivery and scoped account/device/group decryption are required for proprietary customer readiness in SF-022/#25. Encrypt before any publisher/relay upload; explicit public artifacts remain available for public smoke tests. Decryption privileges do not grant publish/deploy/admin authority. Devices authenticate with their own enrolled signer; administrator wallet secrets are never distributed to devices. The current plaintext OTA path does not satisfy this gate. See [wallet delegation and edge authentication](ACCESS_AND_ENCRYPTION.md) for implemented versus planned behavior, bootstrap credentials and revocation/cache limits. Production Seal provider fees and encrypted-delivery costs remain to be measured.
+
 ## Evidence and network-only example
 
 The [public Mainnet snapshot](business/network-costs-2026-10-16.json) records read-only queries, raw fee values, workload, arithmetic and exclusions at 04:34 UTC. It contains no keys and submitted no transactions. Its derived costs are estimates from live parameters, not a paid production invoice. [Walrus network reference](https://docs.wal.app/docs/network-reference) identifies the system object, token units and relay endpoint.
