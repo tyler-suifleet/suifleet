@@ -1,22 +1,23 @@
 {
   "ticket": "SF-053",
-  "head": "80c986fafbf83bbcdcfc0291acd85288cd48f95c",
+  "head": "c600830f75804f84baf51526bbbe67d0b5fe09b5",
   "checks": [
-    "migration: the existing key now belongs to suifleet-signer (0600); address unchanged (0xa0ccc8bcc8\u2026)",
-    "component process (daemon user, shipped sandbox): device.key and signer.toml unreadable (EACCES); signer processes invisible; no key material in env or inherited fds; signing refused (not the main process); only the public address served",
+    "migration: the existing key now belongs to suifleet-signer (0600); address unchanged (0xa0ccc8bcc8\u2026); the unit recorded its MainPID as root",
+    "component process (daemon user, shipped sandbox): device.key and signer.toml unreadable (EACCES); signer processes invisible; no key material in env or inherited fds; the daemon's environ and descriptors unavailable (FileNotFoundError: [Errno 2] No such file or directory: '/proc/167/environ'; PermissionError: [Errno 1] pidfd_getfd: Operation not permitted); signing refused (not the main process); only the public address served",
     "the daemon's status report was signed by the service and accepted by the shim's signature verification",
-    "reports keep being signed after the signer and the daemon restart; the refused component request is logged"
+    "reports keep being signed after the signer and the daemon restart; the refused component request is logged",
+    "a component killed the daemon and, reparented to PID 1 in suifleet.service's cgroup, made 8 signing requests (ppid 1, unit cgroup verified as root): all refused as not the recorded main process; the restarted daemon reports again"
   ],
   "systemd": "systemd 252 (252.39-1~deb12u2)",
   "container_cgroup": "cgroup2fs",
   "os": "Debian GNU/Linux 12 (bookworm)",
   "units_sha256": {
-    "suifleet.service": "95ab84d56b9bc4f0431edc956349871a9f83220a1880c0ed5d2b1dbf0adf8d1c",
+    "suifleet.service": "fbe8eda8c8b2ebe9898530fab3b7a73618813e0040b314f111ba1084ce9d9c58",
     "suifleet-provision.service": "0e7ced8971f1de43ad97d3b5f6d018d0ee85d2c9702c27ce56b02665f83811bc",
-    "suifleet-signer.service": "cfb47f5f8553c2743b1278fc79e501e69bd53272b3492e41d550e970606a4715",
-    "suifleet-signer.socket": "0e393571203fe40b92c7c05263f1489d740e040954e08265b0e44cfc5c439d57"
+    "suifleet-signer.service": "c174e9309da0f6ae954f76ae5b5d0657bdc6aba5ba134cc319391dd9f11adbc6",
+    "suifleet-signer.socket": "6ce9e9c40b518002f9992aaff0ffa8b645ed5d9876ba1fc0c95b95134ac3b78f"
   },
-  "daemon_sha256": "9d6f2a528a43a073591b0cdfe224e8d25991371412642b6553ef29326ee242fc",
+  "daemon_sha256": "5c14b27e4baf261ab58c51b21c22238e3dca857dec8b1d6410cf364b2c261199",
   "host": {
     "kernel": "6.6.87.2-microsoft-standard-WSL2",
     "docker": "29.8.0",
