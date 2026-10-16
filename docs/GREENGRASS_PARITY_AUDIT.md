@@ -3,6 +3,10 @@
 Audited 2026-10-13 against this repository and current AWS Greengrass V2 documentation.
 Scope: functional equivalence for software/firmware OTA and fleet operations. This is not a claim of AWS API, recipe-format, SDK, IAM, or managed-component compatibility. Those require separate adapters and acceptance suites.
 
+## Platform responsibility clarification
+
+The platform installer owns OS installation, partitions, reboot, boot confirmation and firmware rollback. Greengrass-style component deployment requires verified artifact delivery and configured lifecycle execution, not automatic updater detection or a SuiFleet-owned OS recovery mechanism. Historical missing-feature rows below do not override this boundary; current tickets and implementation evidence govern completion.
+
 ## Conclusion
 
 SuiFleet has a testable one-shot OTA foundation. It does not yet provide Greengrass-compatible fleet management or a complete component runtime. Local test coverage establishes simulator behavior, not public-network availability, production readiness, or successful hardware firmware updates.
@@ -47,7 +51,7 @@ AWS provides device/group targets, component dependency resolution, deployment r
 | Artifact distribution and integrity | Partial: Walrus download + on-chain recipe/artifact digests | Storage renewal, confidential artifacts and live network validation | P0 |
 | Durable offline delivery | Partial: cursor catch-up for an enrolled device; group desired state converges on the latest revision (SF-013) | Supported transport; retention/indexer guarantees | P0 |
 | Trusted update authorization | Partial: current operator/group checks | On-chain creation authorization, key rotation/revocation and delegated roles | P0 |
-| Deployment statuses | Partial: pending/applied/failed | Queued/downloading/installing/rebooting/healthy/rolled-back/cancelled; reasons and timestamps | P1 |
+| Deployment statuses | Partial: pending/applied/failed | Execution progress, explicit component/platform-reported outcomes, reasons and timestamps; do not infer OS boot health | P1 |
 | Desired fleet state and revisions | Implemented for groups, locally tested (SF-013): revisioned component → deployment map per group; supersession; cross-group conflicts left as installed | Device-level desired state (after SF-008 custody); public-network/hardware acceptance | P1 |
 | Newly joined devices receive desired state | Implemented, locally tested (SF-013): membership from DeviceAddedToGroup events, verified against the group object each poll | Event retention for long-lived fleets; public-network acceptance | P1 |
 | Multi-component atomic deployments | Partial (SF-013): one revision commits several components atomically on chain; devices run an ordered, journaled plan that stops at the first failed step; each step installs its dependencies first (SF-012) | Ordering across desired components by dependency (steps run in name order), device-side rollback and lifecycle supervision (SF-014) | P1 |
@@ -57,7 +61,7 @@ AWS provides device/group targets, component dependency resolution, deployment r
 | Device update timeout | Partial: bounded command/download | End-to-end deadline, offline expiry, retry policy and backoff | P1 |
 | Maintenance windows/update deferral | Missing | Scheduler and component safe-to-update handshake | P1 |
 | Automatic application rollback | Missing | Versioned cache, reversible install, health checks and last-known-good state | P1 |
-| OS/firmware recovery | External apply hook only | RAUC/SWUpdate A/B adapter, reboot persistence and post-boot confirmation | P1 |
+| OS/firmware recovery | External apply hook only | Verified handoff to configured platform installer scripts; preserve SuiFleet state and report explicit results. Platform owns installation, reboot and firmware recovery | P1 |
 | Safe daemon self-update | Missing | Bootstrap handoff and fallback independent of the daemon being replaced | P1 |
 | Artifact lifecycle | Partial: short-lived Walrus uploads | Retention/renewal ownership, cache/GC, resumable downloads and disk quotas | P1 |
 
@@ -70,7 +74,7 @@ AWS components define recipes, lifecycle, dependencies and platform selection. S
 | Component versions/catalog | Partial: name/version strings in jobs | Immutable version registry, semantic versions, discover/resolve candidates | P1 |
 | Recipe format | Partial: proprietary v1 JSON | Defined compatibility policy; AWS JSON/YAML adapter if format compatibility is desired | P1 |
 | Install lifecycle | Partial: one-shot opt-in shell script or apply hook | Per-version work directories, validation and install receipts | P1 |
-| Run/startup/shutdown/bootstrap/recover | Missing; unsupported fields rejected | Process supervisor, readiness, restart policy, reboot stages | P1 |
+| Run/startup/shutdown/bootstrap/recover | Missing; unsupported fields rejected | Process supervisor, readiness, restart policy and restoration after platform-controlled restart | P1 |
 | Dependency resolution | Partial: recipe 1.1 SemVer requirements, hard/soft dependencies, deterministic dependency-first installs, and cycle/conflict rejection before changes ([SF-012](COMPONENT_DEPENDENCIES.md)) | Dependency lifecycle state coupling, rollback, and public-network/hardware acceptance | P1 |
 | Platform manifests | Missing | OS/arch/platform selectors and multiple artifacts | P1 |
 | Configuration merge/reset/validation | Missing; nonempty config rejected | Persisted defaults, JSON-pointer reset, merge policy, validation and notification | P1 |
@@ -119,7 +123,7 @@ These belong to full Greengrass equivalence beyond OTA/fleet management. See [AW
 ## Release gates and sequencing
 
 1. **Supported network and trust boundary (P0):** migrate app wallet/client and edge reader/builder/executor to supported Sui APIs; separate type origins from call package IDs; independently verify authenticated recipes across the supported transport; add revocation and runtime privilege boundaries. Verify chain identity, transaction effects and gas recovery. Run real testnet registration and successful/failed reports.
-2. **OTA engine (P1):** introduce immutable component versions and a deployment manifest/revision model; reconcile desired state; resolve dependencies/platforms; install into versioned directories; supervise components; add health-based rollback and reboot-aware firmware adapters. Crash-test each transition and power-loss behavior on real hardware.
+2. **OTA engine (P1):** introduce immutable component versions and a deployment manifest/revision model; reconcile desired state; resolve dependencies/platforms; install into versioned directories; supervise components; add explicitly configured application recovery and platform-installer handoff. Test SuiFleet execution/journal recovery across restarts; validate platform-controlled firmware recovery separately on the selected hardware.
 3. **Fleet scheduler (P1):** add explicit pause/cancel/expiry, staged cohorts, concurrency and abort gates. A coordinator/indexer should compute rollout eligibility; devices must verify their authorization and eligibility. Test offline cohort members and membership changes.
 4. **Fleet operations (P1):** add health telemetry, installed inventory, logs, secrets, onboarding/revocation, roles, fleet API/CLI, alerts, gas/storage funding and renewal. Use off-chain services for high-volume/private data; chain stores authority and compact deployment receipts.
 5. **Extended compatibility (P2):** publish a component SDK and adapters for messaging, shadows, streams, client devices and selected AWS recipes/components. Run a capability-by-capability acceptance suite before claiming Greengrass equivalence.
