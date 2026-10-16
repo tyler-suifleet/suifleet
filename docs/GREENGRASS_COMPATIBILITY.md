@@ -2,7 +2,7 @@
 
 SF-028 defines what "Greengrass compatible" may mean for SuiFleet. It also proposes adapter contracts for messaging, shadows, streams and client devices, with executable fixtures. This is a specification. It is not a parity claim and implements no runtime adapter. The [parity audit](GREENGRASS_PARITY_AUDIT.md) and [ticket map](GREENGRASS_TICKET_COVERAGE.md) remain the roadmap.
 
-The machine-readable source of truth is [`interfaces/compat/greengrass-compat.json`](../interfaces/compat/greengrass-compat.json). Statuses there describe the commit that contains the file. Work in open PRs (for example SF-014's supervisor) counts as "proposed" until it is merged.
+The machine-readable source of truth is [`interfaces/compat/greengrass-compat.json`](../interfaces/compat/greengrass-compat.json). Statuses there describe the commit that contains the file. Work in open PRs counts as "proposed" until it is merged.
 
 AWS reference: Greengrass V2 classic nucleus 2.x documentation, checked 2026-10-15. Nucleus lite is out of scope. Component references are client device auth 2.5.x, MQTT bridge 2.3.x, shadow manager IPC and the stream manager 2.3.x SDK data model. Sources are listed in the matrix.
 
@@ -38,7 +38,7 @@ Statuses: `implemented`/`partial` (merged, with cited local evidence), `proposed
 
 The following is merged today and is the only thing the daemon and frontend execute:
 
-- **Native recipes** (`interfaces/recipe.schema.json`) are versions 1.0/1.1, with one authenticated artifact, optional install-only lifecycle, empty configuration and native dependency ranges.
+- **Native recipes** (`interfaces/recipe.schema.json`) are versions 1.0/1.1, with one authenticated artifact, empty configuration and native dependency ranges. The lifecycle is `install`, plus the SF-014 supervised `run`/`shutdown`/`readiness`/`restart` ([OPERATIONS.md](OPERATIONS.md#supervised-components-sf-014)). Commands use the shell-quoted substitutions `{artifact}`, `{artifacts}` and `{work}` (`{work}` only in supervised commands), and `{pid}` in readiness/shutdown.
 - **The catalog** has platform manifests `linux|*` × `x86_64|aarch64|arm|*`, selected by first match.
 - **There is no** IPC, pub/sub, MQTT broker, shadow, stream, client-device or AWS recipe support.
 
@@ -62,12 +62,15 @@ The input is an AWS recipe, already parsed from JSON or YAML into the same value
 | `ComponentDependencies` | Native comparator grammar, HARD/SOFT. x-ranges, hyphen ranges, `\|\|` and `aws.greengrass.*` dependencies are rejected |
 | `Manifests[].Platform` | `os`/`architecture` exact or `*` only; `amd64`→`x86_64`. Regex, `architecture.detail`, `runtime` and custom keys are rejected. Windows/macOS/x86 manifests are omitted and reported. No supported manifest, or a duplicate pair, is rejected |
 | `Manifests[].Artifacts` | Exactly one bound artifact. `Unarchive` other than `NONE`, or non-default `Permission`, is rejected. An AWS `Digest` must be SHA-256 and equal the binding |
-| `Manifests[].Lifecycle.install` | String or `{Script}`. `Timeout`/`Setenv` are deferred to SF-014. `RequiresPrivilege: true` and `Skipif` are rejected |
-| `bootstrap`, `startup`, `run`, `shutdown`, `recover`, `uninstall` | Deferred to SF-014. `BootstrapOnRollback` is rejected |
+| `install`, `run`, `shutdown` | String or `{Script}`, mapped to the native command of the same name. `run`/`shutdown` are reported as informational, because the native restart policy (`on-failure`, backoff, Broken after 5 restarts in 10 minutes) and stop timeout replace AWS `recover` retries and step timeouts. `shutdown` without `run` is rejected |
+| `bootstrap`, `startup`, `recover`, `uninstall` | Rejected: no native equivalent |
+| Step `Timeout`, `Setenv`, `Lifecycle.Setenv`, `RequiresPrivilege: true`, `Skipif`, `BootstrapOnRollback` | Rejected |
 | Global `Lifecycle` / `Selections` | Rejected |
+| `{artifacts:path}/<Uri basename>` | Becomes `{artifact}`. Any other `{artifacts:…}` use, including `decompressedPath`, is rejected |
+| `{work:path}` | Becomes `{work}` in `run`/`shutdown`; rejected in `install` |
 | `{configuration:…}` | Deferred to SF-015 |
-| `{artifacts:…}`, `{work:…}`, including the dependency-prefixed forms | Deferred to SF-014 |
-| `{iot:thingName}`, `{kernel:rootPath}`, unknown namespaces | Rejected. No other identity is substituted |
+| `{dep:…:…}`, `{iot:thingName}`, `{kernel:rootPath}`, unknown namespaces | Rejected. No other identity is substituted |
+| Variables in a script containing quotes or backslashes; literal `{artifact}`/`{artifacts}`/`{work}`/`{pid}` | Rejected, because native shell-quoted substitution would change their meaning |
 
 Translation produces native recipe 1.1 when dependencies exist and 1.0 otherwise. The current daemon validator (`compat_tests.rs`) and frontend validator (`test_greengrass_compat.cjs`) check two things: every AWS fixture is rejected as a native recipe, and every expected translated manifest is accepted.
 
@@ -115,7 +118,7 @@ This runs `python3 scripts/greengrass_compat.py`, the checker's negative tests a
 
 | Suite | Cases evaluated by the reference model | Current-API execution | Runtime execution |
 |---|---|---|---|
-| `aws-recipe-cases.json` | 41 recipes | Daemon and frontend validators (passing) | Pending SF-037 |
+| `aws-recipe-cases.json` | 49 recipes | Daemon and frontend validators (passing) | Pending SF-037 |
 | `pubsub-cases.json` | 53 filter/topic/match/ACL checks | none | Pending SF-027, SF-032 |
 | `shadow-cases.json` | 32 steps across 7 sequences | none | Pending SF-027, SF-033 |
 | `stream-cases.json` | 45 steps across 5 sequences | none | Pending SF-027, SF-034 |
@@ -127,7 +130,7 @@ This runs `python3 scripts/greengrass_compat.py`, the checker's negative tests a
 
 These are recommendations only. Codex decides on approval and on any ticket changes.
 
-1. **SF-037.** Adopt the recipe subset and fixtures above as acceptance. Add YAML parsing, translator CLI/UI output and per-case migration guidance. Re-specify the deferred cases only after SF-014/SF-015/SF-027 merge.
+1. **SF-037.** Adopt the recipe subset and fixtures above as acceptance. Add YAML parsing, translator CLI/UI output and per-case migration guidance. Re-specify the deferred cases only after SF-015/SF-027 merge. Bootstrap/startup/recover/uninstall need a separate native-lifecycle decision before they can be translated.
 2. **SF-032/033/034/035.** Use the matching fixture files as required runtime acceptance, plus restart, disk-full, concurrency and authorization-failure tests on real processes.
 3. **`aws_api` levels** are `undecided`. Recommendations:
    - Exclude AWS control-plane API emulation.

@@ -26,8 +26,10 @@ COMPAT = Path("interfaces/compat")
 
 # ---------------------------------------------------------------------------
 # AWS Greengrass V2 recipe -> native SuiFleet catalog manifests (proposed
-# SF-037 subset). Outcomes: translate, defer (supported by this proposal only
-# after the named runtime ticket lands; must be rejected until then) or reject.
+# SF-037 subset) against the merged native recipe contract, including the SF-014
+# supervisor (run/shutdown and {artifact}/{artifacts}/{work} substitutions).
+# Outcomes: translate; defer (expressible only after the named unmerged ticket
+# lands, so it must be rejected until a reviewed change re-specifies it); reject.
 # ---------------------------------------------------------------------------
 NAME = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 NUM = r"(0|[1-9][0-9]*)"
@@ -43,43 +45,66 @@ TOP_KEYS = {
     "ComponentType", "ComponentSource", "Manifests", "Lifecycle",
 }
 STEP_KEYS = {"Script", "RequiresPrivilege", "Skipif", "Timeout", "Setenv", "BootstrapOnRollback"}
-DEFERRED_STEPS = {"bootstrap", "startup", "run", "shutdown", "recover", "uninstall"}
+# Native SF-014 lifecycle commands that keep their meaning.
+MAPPED_STEPS = {"install", "run", "shutdown"}
+# No native equivalent on the merged base.
+UNSUPPORTED_STEPS = {"bootstrap", "startup", "recover", "uninstall"}
 OS_MAP = {"linux": "linux", "*": "*"}
 OMITTED_OS = {"windows", "darwin"}
 ARCH_MAP = {"amd64": "x86_64", "aarch64": "aarch64", "arm": "arm", "*": "*"}
 OMITTED_ARCH = {"x86"}
 VARIABLE = re.compile(r"\{([^{}]*)\}")
+# Literal text the native daemon would substitute (shell-quoted).
+NATIVE_PLACEHOLDERS = ("{artifact}", "{artifacts}", "{work}", "{pid}")
 MAX_MANIFESTS = 16
+DEFER_ONLY = {"configuration-variable", "component-configuration", "ipc-access-control"}
 
 
-def _variables(script: str, reasons: set, requires: set) -> None:
+def _script(step_name: str, script: str, basename: str, reasons: set, requires: set) -> str:
+    """Rewrite AWS recipe variables to native substitutions where meaning is identical."""
+    if any(p in script for p in NATIVE_PLACEHOLDERS):
+        reasons.add("native-placeholder-collision")
+    variables = [body for body in VARIABLE.findall(script) if ":" in body]
+    if variables and set(script) & {"'", '"', "\\"}:
+        # Native substitutions are shell-quoted; inside quotes they change meaning.
+        reasons.add("quoted-variable")
+    exact = re.compile(r"\{artifacts:path\}/" + re.escape(basename) + r"(?![A-Za-z0-9._-])") if basename else None
+    if exact:
+        script = exact.sub("{artifact}", script)
+    if step_name != "install":
+        script = script.replace("{work:path}", "{work}")
     for body in VARIABLE.findall(script):
+        if body in ("artifact", "artifacts", "work", "pid"):
+            continue
         parts = body.split(":")
-        if len(parts) == 3:  # {dependency:namespace:key}
-            parts = parts[1:]
-        namespace = parts[0] if len(parts) == 2 else None
-        if namespace == "configuration":
+        if len(parts) == 3:
+            reasons.add("dependency-variable")
+        elif len(parts) != 2:
+            continue  # not a recipe variable (for example shell ${VAR} or JSON)
+        elif parts[0] == "configuration":
             reasons.add("configuration-variable"); requires.add("SF-015")
-        elif namespace in ("artifacts", "work"):
-            reasons.add("workspace-variable"); requires.add("SF-014")
-        elif namespace in ("iot", "kernel"):
+        elif parts[0] == "artifacts":
+            reasons.add("unmappable-artifact-path")
+        elif parts[0] == "work":
+            reasons.add("work-path-in-install")
+        elif parts[0] in ("iot", "kernel"):
             reasons.add("aws-runtime-variable")
-        elif namespace is not None:
+        else:
             reasons.add("unknown-variable")
+    return script
 
 
-def _step(name: str, step, reasons: set, requires: set):
-    """Return the install script for a translatable step."""
+def _step(step_name: str, step, basename: str, reasons: set, requires: set):
+    """Return the translated command for one lifecycle step, or None."""
     if isinstance(step, str):
         script = step
     elif isinstance(step, dict):
-        unknown = set(step) - STEP_KEYS
-        if unknown or "Skipif" in step or "BootstrapOnRollback" in step:
+        if set(step) - STEP_KEYS or "Skipif" in step or "BootstrapOnRollback" in step:
             reasons.add("unsupported-step-key")
         if step.get("RequiresPrivilege") is True:
             reasons.add("privileged-step")
         if "Timeout" in step or "Setenv" in step:
-            reasons.add("step-timeout-or-env"); requires.add("SF-014")
+            reasons.add("step-timeout-or-env")
         script = step.get("Script")
         if not isinstance(script, str):
             reasons.add("invalid-step")
@@ -87,8 +112,7 @@ def _step(name: str, step, reasons: set, requires: set):
     else:
         reasons.add("invalid-step")
         return None
-    _variables(script, reasons, requires)
-    return script
+    return _script(step_name, script, basename, reasons, requires)
 
 
 def _platform(platform, reasons: set):
@@ -117,20 +141,22 @@ def _artifact(manifest: dict, bindings: dict, reasons: set):
     artifacts = manifest.get("Artifacts", [])
     if not isinstance(artifacts, list) or len(artifacts) != 1:
         reasons.add("artifact-count")
-        return None
+        return None, None
     artifact = artifacts[0]
     if not isinstance(artifact, dict) or set(artifact) - {"Uri", "Unarchive", "Permission", "Digest", "Algorithm"}:
         reasons.add("unsupported-artifact-key")
-        return None
+        return None, None
+    uri = artifact.get("Uri")
+    basename = uri.rstrip("/").rsplit("/", 1)[-1] if isinstance(uri, str) else None
     if artifact.get("Unarchive", "NONE") != "NONE":
         reasons.add("unsupported-unarchive")
     permission = artifact.get("Permission", {})
     if not isinstance(permission, dict) or set(permission) - {"Read", "Execute"} or permission.get("Read", "OWNER") != "OWNER" or permission.get("Execute", "NONE") != "NONE":
         reasons.add("unsupported-artifact-permission")
-    binding = bindings.get(artifact.get("Uri"))
+    binding = bindings.get(uri) if isinstance(uri, str) else None
     if binding is None:
         reasons.add("unbound-artifact")
-        return None
+        return None, basename
     if "Digest" in artifact or "Algorithm" in artifact:
         try:
             digest = base64.b64decode(artifact.get("Digest", ""), validate=True).hex()
@@ -138,7 +164,7 @@ def _artifact(manifest: dict, bindings: dict, reasons: set):
             digest = None
         if artifact.get("Algorithm") != "SHA-256" or digest != binding["artifactSha256"]:
             reasons.add("artifact-digest-mismatch")
-    return binding
+    return binding, basename
 
 
 def translate_recipe(recipe, bindings: dict) -> dict:
@@ -211,21 +237,28 @@ def translate_recipe(recipe, bindings: dict) -> dict:
         if platform in seen:
             reasons.add("duplicate-platform"); continue
         seen.add(platform)
+        binding, basename = _artifact(manifest, bindings, reasons)
         lifecycle = manifest.get("Lifecycle", {})
-        install = None
+        commands = {}
         if not isinstance(lifecycle, dict):
             reasons.add("invalid-step"); lifecycle = {}
         for step_name, step in lifecycle.items():
             if step_name == "Setenv":
-                reasons.add("step-timeout-or-env"); requires.add("SF-014")
-            elif step_name == "install":
-                install = _step(step_name, step, reasons, requires)
-            elif step_name in DEFERRED_STEPS:
-                _step(step_name, step, reasons, requires)
-                reasons.add("managed-lifecycle-step"); requires.add("SF-014")
+                reasons.add("step-timeout-or-env")
+            elif step_name in MAPPED_STEPS:
+                command = _step(step_name, step, basename, reasons, requires)
+                if command is not None:
+                    commands[step_name] = command
+            elif step_name in UNSUPPORTED_STEPS:
+                _step(step_name, step, basename, reasons, requires)
+                reasons.add("unsupported-lifecycle-step")
             else:
                 reasons.add("unknown-lifecycle-step")
-        binding = _artifact(manifest, bindings, reasons)
+        if "shutdown" in commands and "run" not in commands:
+            reasons.add("shutdown-without-run")
+        for step_name in ("run", "shutdown"):
+            if step_name in commands and f"Lifecycle.{step_name}" not in informational:
+                informational.append(f"Lifecycle.{step_name}")
         if binding is None:
             continue
         native = {
@@ -234,7 +267,7 @@ def translate_recipe(recipe, bindings: dict) -> dict:
             "componentVersion": version,
             "artifactBlobId": binding["artifactBlobId"],
             "artifactSha256": binding["artifactSha256"],
-            "lifecycle": {} if install is None else {"install": install},
+            "lifecycle": commands,
             "configuration": {},
         }
         if "ComponentDescription" in recipe:
@@ -246,9 +279,7 @@ def translate_recipe(recipe, bindings: dict) -> dict:
         reasons.add("no-supported-platform")
     if len(manifests) > MAX_MANIFESTS:
         reasons.add("artifact-count")
-    defer_only = {"configuration-variable", "workspace-variable", "step-timeout-or-env",
-                  "managed-lifecycle-step", "component-configuration", "ipc-access-control"}
-    if reasons - defer_only:
+    if reasons - DEFER_ONLY:
         return {"outcome": "reject", "reasons": sorted(reasons), "requires": []}
     if reasons:
         return {"outcome": "defer", "reasons": sorted(reasons), "requires": sorted(requires)}

@@ -388,8 +388,8 @@
   }
  },
  {
-  "id": "run-step-deferred",
-  "note": "Managed run lifecycle needs the SF-014 supervisor; the translator must reject until that is merged and re-specified.",
+  "id": "supervised-run-translates",
+  "note": "run/shutdown map to the merged SF-014 supervisor; {artifacts:path}/<Uri basename> becomes {artifact} and {work:path} becomes {work}. Restart/timeout behaviour differs from AWS and is reported, not hidden.",
   "recipe": {
    "RecipeFormatVersion": "2020-01-25",
    "ComponentName": "com.example.Hello",
@@ -398,8 +398,9 @@
    "Manifests": [
     {
      "Lifecycle": {
-      "install": "echo i",
-      "run": "python3 -u app.py"
+      "install": "chmod +x {artifacts:path}/hello.tar",
+      "run": "exec {artifacts:path}/hello.tar --data {work:path}",
+      "shutdown": "echo stop > {work:path}/stop"
      },
      "Platform": {
       "os": "linux",
@@ -424,13 +425,355 @@
    }
   },
   "expected": {
-   "outcome": "defer",
-   "reasons": [
-    "managed-lifecycle-step"
+   "outcome": "translate",
+   "reasons": [],
+   "requires": [],
+   "manifests": [
+    {
+     "os": "linux",
+     "arch": "aarch64",
+     "recipe": {
+      "schemaVersion": "1.0",
+      "componentName": "com.example.Hello",
+      "componentVersion": "1.0.0",
+      "artifactBlobId": "blob_hello",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {
+       "install": "chmod +x {artifact}",
+       "run": "exec {artifact} --data {work}",
+       "shutdown": "echo stop > {work}/stop"
+      },
+      "configuration": {}
+     }
+    }
    ],
-   "requires": [
-    "SF-014"
+   "omitted_manifests": [],
+   "informational": [
+    "ComponentPublisher",
+    "Lifecycle.run",
+    "Lifecycle.shutdown"
    ]
+  }
+ },
+ {
+  "id": "shell-braces-untouched",
+  "note": "Shell parameter braces are not recipe variables and pass through unchanged.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "run": "while true; do echo \"${HOME}\"; sleep 5; done"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "translate",
+   "reasons": [],
+   "requires": [],
+   "manifests": [
+    {
+     "os": "linux",
+     "arch": "aarch64",
+     "recipe": {
+      "schemaVersion": "1.0",
+      "componentName": "com.example.Hello",
+      "componentVersion": "1.0.0",
+      "artifactBlobId": "blob_hello",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {
+       "run": "while true; do echo \"${HOME}\"; sleep 5; done"
+      },
+      "configuration": {}
+     }
+    }
+   ],
+   "omitted_manifests": [],
+   "informational": [
+    "ComponentPublisher",
+    "Lifecycle.run"
+   ]
+  }
+ },
+ {
+  "id": "artifact-path-other-file-rejected",
+  "note": "The native workspace holds only the bound artifact, so other artifact-directory paths cannot keep their meaning.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "cat {artifacts:path}/other.txt"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "unmappable-artifact-path"
+   ],
+   "requires": []
+  }
+ },
+ {
+  "id": "artifact-basename-prefix-rejected",
+  "note": "Only the exact Uri basename maps to {artifact}.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "cat {artifacts:path}/hello.tar.gz"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "unmappable-artifact-path"
+   ],
+   "requires": []
+  }
+ },
+ {
+  "id": "decompressed-path-rejected",
+  "note": "There is no unarchive support.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "ls {artifacts:decompressedPath}"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "unmappable-artifact-path"
+   ],
+   "requires": []
+  }
+ },
+ {
+  "id": "quoted-variable-rejected",
+  "note": "Native substitutions are shell-quoted; a variable inside quotes would change meaning.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "run": "exec \"{artifacts:path}/hello.tar\""
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "quoted-variable"
+   ],
+   "requires": []
+  }
+ },
+ {
+  "id": "native-placeholder-collision-rejected",
+  "note": "AWS leaves {work} literal but the native daemon would substitute it.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "echo {work}"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "native-placeholder-collision"
+   ],
+   "requires": []
+  }
+ },
+ {
+  "id": "work-path-in-install-rejected",
+  "note": "Native install commands do not substitute {work}.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "touch {work:path}/x"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "work-path-in-install"
+   ],
+   "requires": []
   }
  },
  {
@@ -474,15 +817,15 @@
   "expected": {
    "outcome": "reject",
    "reasons": [
-    "managed-lifecycle-step",
+    "unsupported-lifecycle-step",
     "unsupported-step-key"
    ],
    "requires": []
   }
  },
  {
-  "id": "startup-shutdown-deferred",
-  "note": "Startup/shutdown require supervision.",
+  "id": "startup-rejected",
+  "note": "Background startup services have no native equivalent; shutdown needs a supervised run.",
   "recipe": {
    "RecipeFormatVersion": "2020-01-25",
    "ComponentName": "com.example.Hello",
@@ -517,18 +860,17 @@
    }
   },
   "expected": {
-   "outcome": "defer",
+   "outcome": "reject",
    "reasons": [
-    "managed-lifecycle-step"
+    "shutdown-without-run",
+    "unsupported-lifecycle-step"
    ],
-   "requires": [
-    "SF-014"
-   ]
+   "requires": []
   }
  },
  {
   "id": "install-timeout-deferred",
-  "note": "Per-step timeouts are not expressible in native recipe 1.x.",
+  "note": "Per-step timeouts are not expressible in the native recipe; device-wide limits apply.",
   "recipe": {
    "RecipeFormatVersion": "2020-01-25",
    "ComponentName": "com.example.Hello",
@@ -565,18 +907,16 @@
    }
   },
   "expected": {
-   "outcome": "defer",
+   "outcome": "reject",
    "reasons": [
     "step-timeout-or-env"
    ],
-   "requires": [
-    "SF-014"
-   ]
+   "requires": []
   }
  },
  {
   "id": "setenv-deferred",
-  "note": "Lifecycle Setenv needs per-component environment management.",
+  "note": "Native commands get a cleared environment; Setenv has no equivalent.",
   "recipe": {
    "RecipeFormatVersion": "2020-01-25",
    "ComponentName": "com.example.Hello",
@@ -613,13 +953,11 @@
    }
   },
   "expected": {
-   "outcome": "defer",
+   "outcome": "reject",
    "reasons": [
     "step-timeout-or-env"
    ],
-   "requires": [
-    "SF-014"
-   ]
+   "requires": []
   }
  },
  {
@@ -736,7 +1074,7 @@
  },
  {
   "id": "dependency-workspace-variable",
-  "note": "Artifact/work path variables need SF-014 versioned workspaces, including dependency-prefixed forms.",
+  "note": "Cross-component variables have no native equivalent.",
   "recipe": {
    "RecipeFormatVersion": "2020-01-25",
    "ComponentName": "com.example.Hello",
@@ -775,13 +1113,12 @@
    }
   },
   "expected": {
-   "outcome": "defer",
+   "outcome": "reject",
    "reasons": [
-    "workspace-variable"
+    "dependency-variable",
+    "work-path-in-install"
    ],
-   "requires": [
-    "SF-014"
-   ]
+   "requires": []
   }
  },
  {
@@ -963,8 +1300,8 @@
   }
  },
  {
-  "id": "bootstrap-deferred",
-  "note": "Bootstrap needs SF-014 supervision; its restart exit codes (100/101) also need an approved platform restart policy.",
+  "id": "bootstrap-rejected",
+  "note": "Greengrass bootstrap with restart exit codes (100/101) has no native equivalent; SF-014 lists it as not yet supported.",
   "recipe": {
    "RecipeFormatVersion": "2020-01-25",
    "ComponentName": "com.example.Hello",
@@ -998,13 +1335,11 @@
    }
   },
   "expected": {
-   "outcome": "defer",
+   "outcome": "reject",
    "reasons": [
-    "managed-lifecycle-step"
+    "unsupported-lifecycle-step"
    ],
-   "requires": [
-    "SF-014"
-   ]
+   "requires": []
   }
  },
  {
@@ -2000,8 +2335,8 @@
   }
  },
  {
-  "id": "uninstall-deferred",
-  "note": "Uninstall belongs to supervised lifecycle.",
+  "id": "uninstall-rejected",
+  "note": "Component removal retires management but does not uninstall.",
   "recipe": {
    "RecipeFormatVersion": "2020-01-25",
    "ComponentName": "com.example.Hello",
@@ -2036,13 +2371,55 @@
    }
   },
   "expected": {
-   "outcome": "defer",
+   "outcome": "reject",
    "reasons": [
-    "managed-lifecycle-step"
+    "unsupported-lifecycle-step"
    ],
-   "requires": [
-    "SF-014"
+   "requires": []
+  }
+ },
+ {
+  "id": "recover-rejected",
+  "note": "Native restart policy replaces recover; it is not translated silently.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "run": "exec app",
+      "recover": "echo r"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
    ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "unsupported-lifecycle-step"
+   ],
+   "requires": []
   }
  }
 ]

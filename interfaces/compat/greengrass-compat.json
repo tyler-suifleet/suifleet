@@ -53,7 +53,7 @@
    "description": "AWS recipe subset classification and expected native catalog manifests.",
    "runtime_execution": "pending", "pending_on": ["SF-037"],
    "current_api_checks": ["suifleet-edge/src/compat_tests.rs", "scripts/test_greengrass_compat.cjs"],
-   "current_api_scope": "The current daemon and frontend validators reject every AWS-format recipe and accept every expected translated native recipe."
+   "current_api_scope": "The current daemon and frontend validators, including SF-014 lifecycle fields, reject every AWS-format recipe and accept every expected translated native recipe."
   },
   "pubsub-cases.json": {
    "description": "MQTT topic name/filter validity and matching, and AWS-compatible local pub/sub ACL resource matching.",
@@ -85,11 +85,12 @@
   {"id": "recipe.dependencies", "area": "recipes", "aws_reference": "ComponentDependencies VersionRequirement/DependencyType",
    "functional": "partial", "aws_api": "not-applicable", "aws_recipe": "proposed",
    "tickets": ["SF-012", "SF-037"], "suites": ["aws-recipe-cases.json"], "current_evidence": ["docs/COMPONENT_DEPENDENCIES.md"],
-   "notes": "Native comparator grammar only; npm x-ranges, hyphen ranges and || are rejected. HARD/SOFT restart coupling depends on SF-014."},
+   "notes": "Native comparator grammar only; npm x-ranges, hyphen ranges and || are rejected. AWS HARD/SOFT restart coupling is not implemented natively (a dependent is not stopped when a dependency fails); translation preserves the field."},
   {"id": "recipe.lifecycle", "area": "runtime", "aws_reference": "bootstrap/install/startup/run/shutdown/recover/uninstall, Setenv, Timeout",
    "functional": "partial", "aws_api": "not-applicable", "aws_recipe": "proposed",
-   "tickets": ["SF-014", "SF-037"], "suites": ["aws-recipe-cases.json"], "current_evidence": ["interfaces/recipe.schema.json"],
-   "notes": "Install-only one-shot today. Managed steps are deferred to SF-014; RequiresPrivilege, Skipif and BootstrapOnRollback are rejected."},
+   "tickets": ["SF-014", "SF-037"], "suites": ["aws-recipe-cases.json"],
+   "current_evidence": ["interfaces/recipe.schema.json", "docs/OPERATIONS.md", "scripts/test_supervisor.py", "docs/validation/sf014-systemd.json"],
+   "notes": "Native install plus SF-014 supervised run/shutdown/readiness/restart. AWS run/shutdown translate with reported restart/timeout differences; bootstrap, startup, recover, uninstall, Timeout, Setenv, RequiresPrivilege and Skipif are rejected."},
   {"id": "recipe.configuration", "area": "runtime", "aws_reference": "ComponentConfiguration.DefaultConfiguration, {configuration:/pointer}",
    "functional": "proposed", "aws_api": "proposed", "aws_recipe": "proposed",
    "tickets": ["SF-015", "SF-027", "SF-037"], "suites": ["aws-recipe-cases.json"],
