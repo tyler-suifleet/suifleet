@@ -14,8 +14,8 @@ Windows directory: `\\wsl.localhost\Ubuntu-22.04\home\tyler\dev\codex\yocto-sf02
 
 | Artifact | Bytes | SHA-256 |
 |---|---:|---|
-| `suifleet-pi-image-raspberrypi3-64.wic.bz2` | 74511583 | `3261fe2b39ef4354e667d9eee3ddfe864ee8323941d68e5465761f61a6f64b90` |
-| Decompressed partitioned WIC | 1085904896 | `2244680d63d5e8b7520299dd502255a0a1489332bf4be4e6b4fcf4c6cccc37c6` |
+| `suifleet-pi-image-raspberrypi3-64.wic.bz2` | 74512846 | `d545524550b20b346280afd135377320690ac08a5f6f89a4909c31d2f70020c9` |
+| Decompressed partitioned WIC | 1085904896 | `c0d121184a3044bc6c5ddb0a5bc216bbebad2bb10092c9cba062b3540e880ddf` |
 | Packaged/image daemon | 4737720 | `ee35637ccafa51a0e766a12770e0cf382c444f91208b39d9f83481545f0d666d` |
 | Packaged/image harmless updater | 3713 | `ed6f56c9c63ede1e2c71b1db1b40fa1504e13866ff62485cb268187c37dd4400` |
 
@@ -29,8 +29,9 @@ The image requires at least a 2 GB card and does not automatically grow its root
 
 ## Exact inputs
 
-Metadata verification revision: `4640544df7302f38015c9e5b54a69072ed1c798a`. The later evidence-only
-commit changes no recipes. Daemon source: `795de747e066ee97af0e9e0e53deda3c6c71e90c` (reviewed main),
+Metadata verification revision: `b1d735a35e2239b1421bb53ed8e28b52b0af7485`,
+including integration base `c025870cbc585b954a4f9448d599c7a800a54b83`. The later
+evidence-only commit changes no recipes. Daemon source: `795de747e066ee97af0e9e0e53deda3c6c71e90c` (reviewed main),
 crate version `0.2.1`, recipe package version `1.0`. Cargo.lock SHA-256:
 `44aa5b2637fc2b828a796a63e9a550d9c0fa652437cf59ffd31e0b264021290e`; all 302 registry URI/checksums were regenerated with
 BitBake and independently compared to that lockfile. Compilation is frozen/offline.
@@ -75,6 +76,18 @@ The full image run passed all 4836 tasks, 4040 reused. Both normal make rechecks
 passed; their final logs contain zero future-timestamp/clock-skew warnings. The
 post-recheck image run passed all 4836 tasks, 4821 reused. Verification after the
 commits passed all 4836 tasks with all reused, confirming unchanged inputs.
+After integrating that base, `umask 022` followed by the same environment setup
+and `bitbake suifleet-pi-image` passed all 4836 tasks, 4805 reused. The first
+worker attempt stopped at the umask sanity check before tasks; no check was
+disabled. This rebuilt the service with upstream `KillMode=mixed` while retaining
+the fixed daemon source and lock graph. The rootfs unit exactly matches merged
+metadata (SHA-256 `80b61269e3b149c8c513f4876f3c546738bee8a7f8219afaa02c7782c7a128e6`).
+Image inspection, read-only fsck, packaged QEMU identity checks and every delivered
+checksum passed again. The daemon hash is unchanged. Previous artifacts are
+retained locally in `../artifacts-before-base-c025870`; the table above and
+current `provenance.json` describe the rebuilt delivery. The refresh log is
+`bitbake-base-integration.log`. Both acceptance-policy entries are preserved.
+
 Three expected warnings remain: local hash-equivalence/sstate mirror setup and
 two explicit forced-task markers. No package QA or clock check was disabled.
 
