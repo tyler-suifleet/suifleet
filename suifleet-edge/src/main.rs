@@ -417,7 +417,7 @@ async fn execute(
     }
     let resolved = resolved?;
     if cfg.daemon_update.enabled && event.component_name == cfg.daemon_update.component {
-        return stage_daemon_update(cfg, walrus, store, journal, &resolved).await;
+        return stage_daemon_update(cfg, sui, walrus, store, journal, &resolved).await;
     }
     let directory = cfg
         .runtime
@@ -445,9 +445,11 @@ async fn execute(
 
 /// A deployment of the configured daemon component: verify and stage the new
 /// binary, journal the deployment as pending, and ask for a restart. Failures
-/// before the handoff is recorded are ordinary Failed outcomes.
+/// before the handoff is recorded are ordinary Failed outcomes; a deployment no
+/// longer admitted after the downloads stays deferred.
 async fn stage_daemon_update(
     cfg: &Config,
+    sui: &SuiClient,
     walrus: &WalrusClient,
     store: Option<&components::Store>,
     journal: &mut Journal,
@@ -467,10 +469,26 @@ async fn stage_daemon_update(
         );
         let artifact = directory.join("artifact");
         components::artifact(walrus, store, &recipe.artifact_blob_id, &event.artifact_sha256, &artifact).await?;
+        // As in handle_deployment: re-read after downloads, before the
+        // candidate runs or the daemon restarts. Read failure fails closed.
+        match admit(sui, journal, &event.deployment_id).await {
+            Ok(true) => {}
+            Ok(false) => return Err(control::NotAdmitted.into()),
+            Err(error) => {
+                warn!(%error, "Admission unavailable; retrying before the daemon update");
+                return Err(control::NotAdmitted.into());
+            }
+        }
         handoff::stage(&cfg.daemon_update, &cfg.runtime.state_dir, &cfg.path, &event.deployment_id, &event.version, &artifact).await
     }
     .await;
     let _ = std::fs::remove_dir_all(&directory);
+    if matches!(&staged, Err(error) if error.downcast_ref::<control::NotAdmitted>().is_some()) {
+        return Ok(None);
+    }
+    if staged.is_ok() {
+        journal.state.deferred.remove(&event.deployment_id);
+    }
     let outcome = journal.state.deployments.entry(event.deployment_id.clone()).or_default();
     match staged {
         Ok(()) => {

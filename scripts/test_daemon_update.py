@@ -17,6 +17,11 @@ including a new daemon that hangs before readiness.
                                          Failed; v2 stays current
   0x703 v4  cannot run at all         -> rejected by the preflight self-check;
                                          no restart, the running daemon is kept
+  0x705/6   cancelled / window closed -> admission is re-read after the slow
+            during the artifact download  download: no preflight, handoff or
+                                         restart; cancellation stays terminal,
+                                         the window deferral is retryable and
+                                         applies once the window reopens
   0x704 v5  daemon killed right after -> the next start still hands over and
             staging (interrupted)        v5 confirms
 """
@@ -87,6 +92,7 @@ def run(binary):
     sim.allow_reports = True
     sim.fail_execution = False
     blobs = {}
+    gates = {}  # blob -> (download started, release download)
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -110,11 +116,23 @@ def run(binary):
         def do_GET(self):
             blob = self.path.removeprefix("/v1/blobs/")
             if blob in blobs:
+                gate = gates.get(blob)
+                if gate:
+                    gate[0].set()
+                    assert gate[1].wait(60), "test did not release the download"
                 self.respond(blobs[blob])
             elif blob in sim.recipes:
                 self.respond(json.dumps(sim.recipes[blob]).encode())
             else:
                 self.respond(b"not found", 404)
+
+    def control(id, **kw):
+        previous = sim.controls.get(id, {})
+        sim.controls[id] = {"revision": previous.get("revision", 0) + 1, "state": 0, "not_before_ms": 0, "expires_ms": 0,
+                            "window_start_ms": 0, "window_end_ms": 0, "notice_ms": 0, **kw}
+
+    def now():
+        return int(time.time() * 1000)
 
     def deploy(id, version, payload):
         sim.add(id)
@@ -217,6 +235,38 @@ def run(binary):
             assert manager.pid() == pid and manager.starts == starts, "an unrunnable update caused a restart"
             print("PASS: an unrunnable binary failed its preflight self-check; the running daemon was kept (no restart)")
 
+            # Cancelled, or the maintenance window closed, during a slow daemon
+            # download: admission is re-read before the candidate runs.
+            for id, version, action in [("0x705", "6.0.0", "cancel"), ("0x706", "7.0.0", "window")]:
+                started, release = threading.Event(), threading.Event()
+                gates[f"artifact-{id}"] = (started, release)
+                end = now() + 6000
+                if action == "window":
+                    control(id, window_start_ms=now() - 1000, window_end_ms=end)
+                pid, starts = manager.pid(), manager.starts
+                deploy(id, version, Path(binary).read_bytes())
+                wait_for(started.is_set, f"{action}: the daemon artifact download did not start")
+                if action == "cancel":
+                    control(id, state=2)
+                else:
+                    # Wait for the actual UTC deadline, with clock-step margin.
+                    wait_for(lambda: now() >= end + 5000, "window end did not elapse")
+                reason = {"cancel": "cancelled", "window": "outside maintenance window"}[action]
+                release.set()
+                wait_for(lambda: journal().get("deferred", {}).get(id, {}).get("reason") == reason, f"{action}: not deferred after download")
+                time.sleep(2)
+                assert not outcome(id), (action, outcome(id))
+                assert not (daemon_dir / "handoff.json").exists(), f"{action}: handoff staged after admission ended"
+                assert not any(f"{version}-" in p.name for p in (daemon_dir / "versions").iterdir()), f"{action}: candidate installed"
+                assert manager.pid() == pid and manager.starts == starts, f"{action}: the daemon restarted"
+                print(f"PASS: {action} during a slow daemon download: rechecked before preflight/handoff; no restart, no outcome")
+            assert journal()["deferred"]["0x705"]["terminal"]
+            gates.clear()
+            control("0x706", window_start_ms=now() - 1000, window_end_ms=now() + 120000)
+            wait_for(lambda: outcome("0x706").get("status") == 1, "the reopened window did not apply the daemon update")
+            assert "/versions/7.0.0-" in current(), current()
+            print("PASS: a window deferral is retryable: once reopened, the daemon update staged, handed over and applied")
+
             # Killed right after staging: the next start still hands over.
             deploy("0x704", "5.0.0", Path(binary).read_bytes())
             wait_for(lambda: (daemon_dir / "handoff.json").exists() or outcome("0x704").get("status"), "the update was not staged")
@@ -228,10 +278,11 @@ def run(binary):
             assert journal()["binding"] == binding
             print("PASS: a daemon killed right after staging: the next start handed over and v5 confirmed")
 
-            wait_for(lambda: {"0x701", "0x702", "0x703", "0x704"} <= set(reported()), f"reports missing: {reported()}")
+            wait_for(lambda: {"0x701", "0x702", "0x703", "0x704", "0x706"} <= set(reported()), f"reports missing: {reported()}")
             assert reported()["0x701"] == 1 and reported()["0x702"] == 2 and reported()["0x703"] == 2 and reported()["0x704"] == 1, reported()
+            assert reported()["0x706"] == 1 and "0x705" not in reported(), reported()
             assert not sim.errors, sim.errors
-            print("PASS: all outcomes reported on chain (Applied, Failed, Failed, Applied)")
+            print("PASS: all outcomes reported on chain (Applied, Failed, Failed, Applied, Applied); the cancelled update has none")
             manager.stop()
             manager = None
             log.close()
