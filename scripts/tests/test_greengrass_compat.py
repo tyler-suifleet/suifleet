@@ -292,7 +292,21 @@ class ModelTests(unittest.TestCase):
         self.assertFalse(managed.satisfies("2.0.0-rc.1", ">=2.0.0"))
         self.assertTrue(managed.satisfies("2.0.0", "=2.0.0"))
         self.assertTrue(managed.satisfies("2.0.0", "2.0.0"))
-        for bad in ("2.x", "^1 || ^2", ">= 2.0.0", ""):
+        # SemVer 2.0.0 item 11: numeric prerelease identifiers compare as
+        # integers, below alphanumeric ones; a shorter prefix sorts first.
+        chain = ["1.0.0-alpha", "1.0.0-alpha.1", "1.0.0-alpha.beta", "1.0.0-beta", "1.0.0-beta.2",
+                 "1.0.0-beta.11", "1.0.0-rc.1", "1.0.0-rc.2", "1.0.0-rc.10", "1.0.0"]
+        for lower, higher in zip(chain, chain[1:]):
+            self.assertTrue(managed.satisfies(higher, f">{lower}"), (higher, lower))
+            self.assertFalse(managed.satisfies(lower, f">{higher}"), (lower, higher))
+            self.assertTrue(managed.satisfies(lower, f"<{higher}"), (lower, higher))
+        self.assertTrue(managed.satisfies("2.0.0-rc.10", ">2.0.0-rc.2"))
+        self.assertFalse(managed.satisfies("2.0.0-rc.2", ">2.0.0-rc.10"))
+        self.assertTrue(managed.satisfies("2.0.0-rc.10", "^2.0.0-rc.9"))
+        self.assertTrue(managed.satisfies("2.0.0-1a", ">2.0.0-10"))
+        self.assertFalse(managed.satisfies("3.0.0-0", "^2.0.0"))
+        self.assertTrue(managed.satisfies("2.0.0-rc.01a", "=2.0.0-rc.01a"))
+        for bad in ("2.x", "^1 || ^2", ">= 2.0.0", "", ">2.0.0-rc.01"):
             with self.assertRaises(ValueError):
                 managed.satisfies("2.0.0", bad)
 

@@ -31,9 +31,18 @@ RANGE = re.compile(rf"^(\*|(>=|<=|>|<|=|\^|~)?{CORE}( (>=|<=|>|<|=|\^|~)?{CORE})
 # Version ranges (native comparator grammar) used for adapter compatibility.
 # ---------------------------------------------------------------------------
 def _key(version: str):
+    """SemVer 2.0.0 precedence key (spec item 11).
+
+    A prerelease sorts before its release. Prerelease identifiers compare left
+    to right: numeric ones as integers and below alphanumeric ones, which
+    compare as ASCII; a shorter identifier list that is a prefix sorts first.
+    """
     core, _, pre = version.partition("-")
     major, minor, patch = (int(part) for part in core.split("."))
-    return (major, minor, patch, 0 if pre else 1, pre)
+    if not pre:
+        return (major, minor, patch, 1, ())
+    ids = tuple((0, int(part), "") if part.isdigit() else (1, 0, part) for part in pre.split("."))
+    return (major, minor, patch, 0, ids)
 
 
 def satisfies(version: str, requirement: str) -> bool:
@@ -48,10 +57,10 @@ def satisfies(version: str, requirement: str) -> bool:
         low = _key(bound)
         major, minor, patch = low[:3]
         if op == "^":
-            high = (major + 1, 0, 0, 0, "") if major else (0, minor + 1, 0, 0, "") if minor else (0, 0, patch + 1, 0, "")
+            high = (major + 1, 0, 0, 0, ()) if major else (0, minor + 1, 0, 0, ()) if minor else (0, 0, patch + 1, 0, ())
             ok = low <= value < high
         elif op == "~":
-            ok = low <= value < (major, minor + 1, 0, 0, "")
+            ok = low <= value < (major, minor + 1, 0, 0, ())
         else:
             ok = {">=": value >= low, "<=": value <= low, ">": value > low, "<": value < low}.get(op, value == low)
         if not ok:
