@@ -263,6 +263,8 @@ pub struct Loaded {
     pub install: Option<String>,
     /// Present for a supervised (run) dependency.
     pub supervised: Option<crate::supervisor::Lifecycle>,
+    pub configuration: crate::protocol::Configuration,
+    pub validate: Option<String>,
 }
 
 pub struct Loader<'a> {
@@ -372,6 +374,8 @@ impl<'a> Loader<'a> {
                 supervised: crate::supervisor::Lifecycle::of(&parsed.lifecycle)?,
                 artifact_blob_id: parsed.artifact_blob_id,
                 install: parsed.lifecycle.install,
+                configuration: parsed.configuration,
+                validate: parsed.lifecycle.validate,
             },
         );
         Ok(deps::Detail::Ready(dependencies))

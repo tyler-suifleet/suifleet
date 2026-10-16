@@ -81,10 +81,7 @@ def run(binary):
     sim.memberships += [(GROUP, DEVICE), (G2, DEVICE)]
 
     def deploy(id, component, groups, *, managed=True, bad_hash=False):
-        sim.add(id, groups=groups, direct=False, bad_hash=bad_hash)
-        event = sim.events[-1]["parsedJson"]
-        event["component_name"] = component
-        sim.recipes[event["recipe_blob_id"]]["componentName"] = component
+        sim.add(id, groups=groups, direct=False, bad_hash=bad_hash, event=dict(component_name=component))
         if managed:
             sim.managed.add(id)
 
@@ -318,9 +315,7 @@ def run_helper(binary):
                 time.sleep(0.3)
 
             def deploy(id, component):
-                sim.add(id, groups=[GROUP], direct=False)
-                sim.events[-1]["parsedJson"]["component_name"] = component
-                sim.recipes[sim.events[-1]["parsedJson"]["recipe_blob_id"]]["componentName"] = component
+                sim.add(id, groups=[GROUP], direct=False, event=dict(component_name=component))
                 sim.managed.add(id)
 
             helper = threading.Thread(target=helper_loop, daemon=True)
