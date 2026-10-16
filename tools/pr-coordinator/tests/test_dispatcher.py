@@ -52,15 +52,54 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(self.state_of_run(),'finished')
         self.assertTrue(self.worker.available(self.slot,[]))
 
-    def test_failed_or_incomplete_handoff_retains_slot(self):
+    def test_stopped_incomplete_handoff_quarantines_without_releasing_claim(self):
         for owner,code,verdict in [('in_progress',0,'review_ready'),('review',1,'review_ready'),('review',0,'blocked')]:
             with self.subTest(owner=owner,code=code,verdict=verdict):
                 self.worker.db.execute('DELETE FROM runs')
                 self.receipt(owner_status=owner,exitcode=code,verdict=verdict)
                 with patch.object(d,'process_identity',return_value=None):
                     self.worker.reconcile(self.project)
-                self.assertEqual(self.state_of_run(),'orphaned')
-                self.assertFalse(self.worker.available(self.slot,[]))
+                self.assertEqual(self.state_of_run(),'quarantined')
+                self.assertTrue(self.worker.available(self.slot,[self.claim]))
+                self.assertEqual(json.loads(self.worker.db.execute('SELECT claim FROM runs').fetchone()[0])['token'],'private-token')
+
+    def test_corrupt_receipt_is_isolated_without_losing_ownership(self):
+        folder=self.receipt()
+        (folder/'process.json').write_text('{broken')
+        self.worker.reconcile(self.project)
+        self.assertEqual(self.state_of_run(),'running')
+        self.assertFalse(self.worker.available(self.slot,[]))
+
+    def test_blocked_worker_parks_and_does_not_count_as_manual_owner(self):
+        self.receipt(owner_status='blocked', verdict='blocked')
+        with patch.object(d,'process_identity',return_value=None), patch.object(d,'worker_stopped',return_value=True):
+            self.worker.reconcile(self.project)
+        self.assertEqual(self.state_of_run(),'parked')
+        self.assertTrue(self.worker.available(self.slot,[{**self.claim,'status':'blocked'}]))
+        self.worker.ticket.assert_called_once()
+
+    def test_orphaned_successful_handoff_is_reconciled_after_restart(self):
+        self.receipt(status='orphaned')
+        with patch.object(d,'process_identity',return_value=None), patch.object(d,'worker_stopped',return_value=True):
+            self.worker.reconcile(self.project)
+        self.assertEqual(self.state_of_run(),'finished')
+
+    def test_live_descendant_keeps_capacity_when_wrapper_disappears(self):
+        self.receipt()
+        with patch.object(d,'process_identity',return_value=None), patch.object(d,'worker_stopped',return_value=False):
+            self.worker.reconcile(self.project)
+        self.assertEqual(self.state_of_run(),'running')
+        self.assertFalse(self.worker.available(self.slot,[]))
+
+    def test_changed_owner_is_never_renewed_and_stopped_run_is_quarantined(self):
+        self.receipt(status='orphaned',owner_status='in_progress')
+        self.worker.ticket.return_value={**self.claim,'token':'replacement'}
+        with patch.object(d,'process_identity',return_value='start'):
+            self.worker.reconcile(self.project)
+        self.worker.ticket.assert_called_once()
+        with patch.object(d,'process_identity',return_value=None),patch.object(d,'worker_stopped',return_value=True):
+            self.worker.reconcile(self.project)
+        self.assertEqual(self.state_of_run(),'quarantined')
 
     def test_interrupted_claim_never_reclaims_or_launches(self):
         self.receipt(status='claiming')

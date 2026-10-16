@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 import threading
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 spec = importlib.util.spec_from_file_location('coordinator',Path(__file__).resolve().parents[1]/'coordinator.py')
 c = importlib.util.module_from_spec(spec);spec.loader.exec_module(c)
@@ -29,6 +29,45 @@ class Gates(unittest.TestCase):
         for field,value in [('network','mainnet'),('chain_identifier','35834a8a'),('lock_resource','')]:
             with self.subTest(field=field),self.assertRaises(ValueError):
                 c.network_authorization({'testnet_authorization':{**grant,field:value}})
+
+    def test_stopped_quarantine_frees_family_but_preserves_pr_exclusion(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store=c.Store(Path(directory)/'jobs.sqlite3')
+            pr=fixture()[0]
+            first=store.reserve('project',pr,'Codex','fix',Path(directory))
+            store.db.execute("UPDATE jobs SET status='quarantined' WHERE id=?",(first,))
+            self.assertIsNone(store.reserve('project',pr,'Claude','review',Path(directory)))
+            self.assertIsNotNone(store.reserve('project',{**pr,'number':50},'Codex','fix',Path(directory)))
+
+    def test_collect_quarantines_only_proven_stopped_orphan(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store=c.Store(Path(directory)/'jobs.sqlite3')
+            job=store.reserve('project',fixture()[0],'Codex','fix',Path(directory))
+            store.db.execute("UPDATE jobs SET status='orphaned',pid=123,started='old' WHERE id=?",(job,))
+            coordinator=c.Coordinator.__new__(c.Coordinator)
+            coordinator.store=store; coordinator.children={}; coordinator.publish_results=Mock()
+            with patch.object(c,'worker_stopped',return_value=False):
+                coordinator.collect({'id':'project'},[])
+            self.assertEqual(store.db.execute('SELECT status FROM jobs').fetchone()[0],'orphaned')
+            with patch.object(c,'worker_stopped',return_value=True):
+                coordinator.collect({'id':'project'},[])
+            self.assertEqual(store.db.execute('SELECT status FROM jobs').fetchone()[0],'quarantined')
+
+    def test_worker_stopped_requires_identity_and_complete_session_scan(self):
+        self.assertFalse(c.worker_stopped(None,None))
+        with patch.object(c,'process_identity',return_value='same'):
+            self.assertFalse(c.worker_stopped(999,'same'))
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            child=root/'123'; child.mkdir()
+            (child/'stat').write_text('123 (child) S 1 999 999 '+'0 '*16)
+            with patch.object(c,'process_identity',return_value=None),patch.object(c.Path,'iterdir',return_value=iter([child])):
+                self.assertFalse(c.worker_stopped(999,'old'))
+            (child/'stat').write_text('123 (child) Z 1 999 999 '+'0 '*16)
+            with patch.object(c,'process_identity',return_value=None),patch.object(c.Path,'iterdir',return_value=iter([child])):
+                self.assertTrue(c.worker_stopped(999,'old'))
+        with patch.object(c,'process_identity',return_value=None),patch.object(c.Path,'iterdir',side_effect=PermissionError):
+            self.assertFalse(c.worker_stopped(999,'old'))
 
     def test_long_feedback_build_does_not_occupy_readonly_review_slot(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -119,7 +119,7 @@ class Store:
     def reserve(self, project, pr, family, kind, directory):
         self.db.execute('BEGIN IMMEDIATE')
         try:
-            active = self.db.execute("SELECT 1 FROM jobs WHERE status IN ('reserved','running','orphaned') AND project=? AND pr=?", (project, pr['number'])).fetchone()
+            active = self.db.execute("SELECT 1 FROM jobs WHERE status IN ('reserved','running','orphaned','quarantined') AND project=? AND pr=?", (project, pr['number'])).fetchone()
             count = self.db.execute("SELECT COUNT(*) FROM jobs WHERE status IN ('reserved','running','orphaned') AND family=? AND kind=?", (family, kind)).fetchone()[0]
             limit = self.worker_limits.get(family, {}).get(kind, 1)
             if active or count >= limit:
@@ -154,6 +154,31 @@ def process_identity(pid):
         return Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()[19]
     except (FileNotFoundError, ProcessLookupError):
         return None
+
+
+def worker_stopped(pid, started):
+    """Prove the wrapper and its Linux session have no runnable members.
+
+    Workers start a new session. A dead wrapper alone does not prove its model
+    subprocess stopped. Missing identity or unreadable /proc fails closed.
+    """
+    if not pid or not started:
+        return False
+    try:
+        if process_identity(pid) == started:
+            return False
+        for entry in Path('/proc').iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                fields = (entry/'stat').read_text().rsplit(')', 1)[1].split()
+            except (FileNotFoundError, ProcessLookupError):
+                continue
+            if fields[0] != 'Z' and int(fields[3]) == int(pid):
+                return False
+        return True
+    except (OSError, ValueError, IndexError):
+        return False
 
 
 class Coordinator:
@@ -300,8 +325,14 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
 '''
 
     def collect(self, project, owners):
-        rows = self.store.db.execute("SELECT * FROM jobs WHERE project=? AND status IN ('running','reserved','retry')", (project['id'],)).fetchall()
+        rows = self.store.db.execute("SELECT * FROM jobs WHERE project=? AND status IN ('running','reserved','retry','orphaned')", (project['id'],)).fetchall()
         for row in rows:
+            if row['status'] == 'orphaned':
+                if worker_stopped(row['pid'], row['started']):
+                    self.store.db.execute("UPDATE jobs SET status='quarantined',error=? WHERE id=?",
+                                          ('Verified stopped; ticket/PR remains reserved for explicit recovery',row['id']))
+                    print(f"{project['id']} PR#{row['pr']}: stopped orphan quarantined; family capacity freed", flush=True)
+                continue
             if row['status'] == 'retry':
                 if row['retry_after'] > time.time(): continue
                 receipt=Path(row['directory'])/'exit.json'
@@ -321,12 +352,14 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                     self.store.db.execute("UPDATE jobs SET status='failed',error='launch interrupted before worker started' WHERE id=?",(row['id'],))
                 continue
             child = self.children.get(row['id'])
-            alive = (child.poll() is None if child else process_identity(row['pid']) == row['started']) and not (Path(row['directory'])/'exit.json').exists()
+            alive = child.poll() is None if child else process_identity(row['pid']) == row['started']
             if alive:
                 if row['kind'] == 'fix':
                     # Locate by branch from fresh PR; never renew somebody else's claim.
                     pr = self.pr(project, row['pr']); owner = self.owner(project, pr, owners)
                     if owner and owner['status'] == 'in_progress': self.ticket(project, 'heartbeat', owner['key'], '--token', owner['token'])
+                continue
+            if not worker_stopped(row['pid'], row['started']):
                 continue
             path = Path(row['directory']) / 'result.json'
             try:
