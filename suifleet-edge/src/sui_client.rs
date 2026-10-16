@@ -291,7 +291,7 @@ impl SuiClient {
             package.version.to_string() == manifest.package_version,
             "package metadata mismatch"
         );
-        for name in crate::config::REQUIRED_TYPES.iter().chain(crate::catalog::TYPES.iter().filter(|name| manifest.type_origins.contains_key(**name))) {
+        for name in crate::config::REQUIRED_TYPES.iter().chain(manifest.optional_types()) {
             let (module, datatype) = name.split_once("::").unwrap();
             let entries: Vec<_> = package
                 .type_origin_table

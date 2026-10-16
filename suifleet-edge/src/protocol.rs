@@ -7,6 +7,7 @@ pub const MANIFEST_SCHEMA_VERSION: u64 = 1;
 pub const DEPLOYMENT_SCHEMA_VERSION: u64 = 1;
 pub const SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS: &[u64] = &[1, 2];
 pub const CATALOG_TYPES: &[&str] = &["component_catalog::ComponentCatalog", "component_catalog::ComponentVersion", "component_catalog::CatalogCreated", "component_catalog::VersionPublished", "component_catalog::CatalogBindingKey", "component_catalog::CatalogBinding"];
+pub const SEAL_POLICY_TYPES: &[&str] = &["seal_policy::AccessPolicy", "seal_policy::AccessAdminCap", "seal_policy::PolicyCreated", "seal_policy::AccessChanged", "seal_policy::KeyEpochRotated", "seal_policy::PolicyMigrated"];
 pub const RECIPE_VERSION: &str = "1.0";
 pub const RECIPE_VERSIONS: &[&str] = &["1.0", "1.1", "1.2"];
 pub const STATUS_APPLIED: u8 = 1;
@@ -522,6 +523,80 @@ pub mod roles {
         pub operator: [u8; 32],
     }
     impl RoleRevoked { pub const MOVE_TYPE: &'static str = "roles::RoleRevoked"; }
+}
+pub mod seal_policy {
+    use super::*;
+    pub const MODULE: &str = "seal_policy";
+    pub const ACCOUNT_ALLOWED: &str = "account_allowed";
+    pub const ACCOUNTS: &str = "accounts";
+    pub const CAP_POLICY_ID: &str = "cap_policy_id";
+    pub const CODE_VERSION: &str = "code_version";
+    pub const CREATE_POLICY: &str = "create_policy";
+    pub const DEVICE_ALLOWED: &str = "device_allowed";
+    pub const DEVICES: &str = "devices";
+    pub const GRANT_ACCOUNT: &str = "grant_account";
+    pub const GRANT_DEVICE: &str = "grant_device";
+    pub const GRANT_GROUP: &str = "grant_group";
+    pub const GROUP_DEVICE_ALLOWED: &str = "group_device_allowed";
+    pub const GROUPS: &str = "groups";
+    pub const IDENTITY_MATCHES: &str = "identity_matches";
+    pub const IDENTITY_PREFIX: &str = "identity_prefix";
+    pub const KEY_EPOCH: &str = "key_epoch";
+    pub const MIGRATE: &str = "migrate";
+    pub const NAME: &str = "name";
+    pub const REVOKE_ACCOUNT: &str = "revoke_account";
+    pub const REVOKE_DEVICE: &str = "revoke_device";
+    pub const REVOKE_GROUP: &str = "revoke_group";
+    pub const ROTATE_KEY_EPOCH: &str = "rotate_key_epoch";
+    pub const SEAL_APPROVE_ACCOUNT: &str = "seal_approve_account";
+    pub const SEAL_APPROVE_DEVICE: &str = "seal_approve_device";
+    pub const SEAL_APPROVE_GROUP_DEVICE: &str = "seal_approve_group_device";
+    pub const VERSION: &str = "version";
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct AccessAdminCap {
+        pub id: [u8; 32],
+        pub policy_id: [u8; 32],
+    }
+    impl AccessAdminCap { pub const MOVE_TYPE: &'static str = "seal_policy::AccessAdminCap"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct AccessChanged {
+        pub policy_id: [u8; 32],
+        pub scope: u8,
+        pub subject: [u8; 32],
+        pub granted: bool,
+    }
+    impl AccessChanged { pub const MOVE_TYPE: &'static str = "seal_policy::AccessChanged"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct AccessPolicy {
+        pub id: [u8; 32],
+        pub version: u64,
+        pub name: String,
+        pub key_epoch: u64,
+        pub accounts: Vec<[u8; 32]>,
+        pub devices: Vec<[u8; 32]>,
+        pub groups: Vec<[u8; 32]>,
+    }
+    impl AccessPolicy { pub const MOVE_TYPE: &'static str = "seal_policy::AccessPolicy"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct KeyEpochRotated {
+        pub policy_id: [u8; 32],
+        pub key_epoch: u64,
+    }
+    impl KeyEpochRotated { pub const MOVE_TYPE: &'static str = "seal_policy::KeyEpochRotated"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct PolicyCreated {
+        pub policy_id: [u8; 32],
+        pub cap_id: [u8; 32],
+        pub name: String,
+        pub creator: [u8; 32],
+    }
+    impl PolicyCreated { pub const MOVE_TYPE: &'static str = "seal_policy::PolicyCreated"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct PolicyMigrated {
+        pub policy_id: [u8; 32],
+        pub version: u64,
+    }
+    impl PolicyMigrated { pub const MOVE_TYPE: &'static str = "seal_policy::PolicyMigrated"; }
 }
 #[derive(Debug, Clone, Deserialize)]
 pub struct DeploymentCreatedEvent {

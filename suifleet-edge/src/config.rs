@@ -198,9 +198,11 @@ impl DeploymentManifest {
             crate::sui_client::same_id(&self.call_package_id, &self.call_package_id),
             "invalid call package ID"
         );
-        let catalog_count = crate::catalog::TYPES.iter().filter(|name| self.type_origins.contains_key(**name)).count();
-        anyhow::ensure!(catalog_count == 0 || catalog_count == crate::catalog::TYPES.len(), "partial catalog type origins");
-        for name in REQUIRED_TYPES.iter().chain(crate::catalog::TYPES.iter().filter(|name| self.type_origins.contains_key(**name))) {
+        for (label, group) in [("catalog", crate::catalog::TYPES), ("seal policy", crate::protocol::SEAL_POLICY_TYPES)] {
+            let count = group.iter().filter(|name| self.type_origins.contains_key(**name)).count();
+            anyhow::ensure!(count == 0 || count == group.len(), "partial {label} type origins");
+        }
+        for name in REQUIRED_TYPES.iter().chain(self.optional_types()) {
             let origin = self
                 .type_origins
                 .get(*name)
@@ -230,6 +232,13 @@ impl DeploymentManifest {
             "unsupported edge client version"
         );
         Ok(())
+    }
+    /// Optional type-origin groups present in this manifest (all or none of each).
+    pub fn optional_types(&self) -> impl Iterator<Item = &&'static str> {
+        crate::catalog::TYPES
+            .iter()
+            .chain(crate::protocol::SEAL_POLICY_TYPES)
+            .filter(|name| self.type_origins.contains_key(**name))
     }
     pub fn move_type(&self, name: &str) -> String {
         // Called only after validating every required type; no first-package fallback.

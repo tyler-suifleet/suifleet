@@ -2333,6 +2333,440 @@
           ]
         }
       }
+    },
+    "seal_policy": {
+      "functions": {
+        "account_allowed": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::seal_policy::AccessPolicy",
+            "&vector<u8>",
+            "address"
+          ],
+          "returns": [
+            "bool"
+          ]
+        },
+        "accounts": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::seal_policy::AccessPolicy"
+          ],
+          "returns": [
+            "&vector<address>"
+          ]
+        },
+        "cap_policy_id": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::seal_policy::AccessAdminCap"
+          ],
+          "returns": [
+            "sui::object::ID"
+          ]
+        },
+        "code_version": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [],
+          "returns": [
+            "u64"
+          ]
+        },
+        "create_policy": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "std::string::String",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": [
+            "sui_edge::seal_policy::AccessAdminCap"
+          ]
+        },
+        "device_allowed": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::seal_policy::AccessPolicy",
+            "&vector<u8>",
+            "&sui_edge::device_registry::DeviceRegistry",
+            "sui::object::ID",
+            "address"
+          ],
+          "returns": [
+            "bool"
+          ]
+        },
+        "devices": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::seal_policy::AccessPolicy"
+          ],
+          "returns": [
+            "&vector<sui::object::ID>"
+          ]
+        },
+        "grant_account": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::seal_policy::AccessPolicy",
+            "&sui_edge::seal_policy::AccessAdminCap",
+            "address"
+          ],
+          "returns": []
+        },
+        "grant_device": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::seal_policy::AccessPolicy",
+            "&sui_edge::seal_policy::AccessAdminCap",
+            "&sui_edge::device_registry::DeviceRegistry",
+            "sui::object::ID"
+          ],
+          "returns": []
+        },
+        "grant_group": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::seal_policy::AccessPolicy",
+            "&sui_edge::seal_policy::AccessAdminCap",
+            "&sui_edge::device_group::DeviceGroup",
+            "&sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "group_device_allowed": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::seal_policy::AccessPolicy",
+            "&vector<u8>",
+            "&sui_edge::device_registry::DeviceRegistry",
+            "&sui_edge::device_group::DeviceGroup",
+            "sui::object::ID",
+            "address"
+          ],
+          "returns": [
+            "bool"
+          ]
+        },
+        "groups": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::seal_policy::AccessPolicy"
+          ],
+          "returns": [
+            "&vector<sui::object::ID>"
+          ]
+        },
+        "identity_matches": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::seal_policy::AccessPolicy",
+            "&vector<u8>"
+          ],
+          "returns": [
+            "bool"
+          ]
+        },
+        "identity_prefix": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::seal_policy::AccessPolicy"
+          ],
+          "returns": [
+            "vector<u8>"
+          ]
+        },
+        "key_epoch": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::seal_policy::AccessPolicy"
+          ],
+          "returns": [
+            "u64"
+          ]
+        },
+        "migrate": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::seal_policy::AccessPolicy",
+            "&sui_edge::seal_policy::AccessAdminCap"
+          ],
+          "returns": []
+        },
+        "name": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::seal_policy::AccessPolicy"
+          ],
+          "returns": [
+            "std::string::String"
+          ]
+        },
+        "revoke_account": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::seal_policy::AccessPolicy",
+            "&sui_edge::seal_policy::AccessAdminCap",
+            "address"
+          ],
+          "returns": []
+        },
+        "revoke_device": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::seal_policy::AccessPolicy",
+            "&sui_edge::seal_policy::AccessAdminCap",
+            "sui::object::ID"
+          ],
+          "returns": []
+        },
+        "revoke_group": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::seal_policy::AccessPolicy",
+            "&sui_edge::seal_policy::AccessAdminCap",
+            "sui::object::ID"
+          ],
+          "returns": []
+        },
+        "rotate_key_epoch": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::seal_policy::AccessPolicy",
+            "&sui_edge::seal_policy::AccessAdminCap"
+          ],
+          "returns": []
+        },
+        "seal_approve_account": {
+          "visibility": "Private",
+          "entry": true,
+          "type_parameters": [],
+          "parameters": [
+            "vector<u8>",
+            "&sui_edge::seal_policy::AccessPolicy",
+            "&sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "seal_approve_device": {
+          "visibility": "Private",
+          "entry": true,
+          "type_parameters": [],
+          "parameters": [
+            "vector<u8>",
+            "&sui_edge::seal_policy::AccessPolicy",
+            "&sui_edge::device_registry::DeviceRegistry",
+            "sui::object::ID",
+            "&sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "seal_approve_group_device": {
+          "visibility": "Private",
+          "entry": true,
+          "type_parameters": [],
+          "parameters": [
+            "vector<u8>",
+            "&sui_edge::seal_policy::AccessPolicy",
+            "&sui_edge::device_registry::DeviceRegistry",
+            "&sui_edge::device_group::DeviceGroup",
+            "sui::object::ID",
+            "&sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "version": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::seal_policy::AccessPolicy"
+          ],
+          "returns": [
+            "u64"
+          ]
+        }
+      },
+      "structs": {
+        "AccessAdminCap": {
+          "abilities": [
+            "Key",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "id",
+              "sui::object::UID"
+            ],
+            [
+              "policy_id",
+              "sui::object::ID"
+            ]
+          ]
+        },
+        "AccessChanged": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "policy_id",
+              "sui::object::ID"
+            ],
+            [
+              "scope",
+              "u8"
+            ],
+            [
+              "subject",
+              "address"
+            ],
+            [
+              "granted",
+              "bool"
+            ]
+          ]
+        },
+        "AccessPolicy": {
+          "abilities": [
+            "Key"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "id",
+              "sui::object::UID"
+            ],
+            [
+              "version",
+              "u64"
+            ],
+            [
+              "name",
+              "std::string::String"
+            ],
+            [
+              "key_epoch",
+              "u64"
+            ],
+            [
+              "accounts",
+              "vector<address>"
+            ],
+            [
+              "devices",
+              "vector<sui::object::ID>"
+            ],
+            [
+              "groups",
+              "vector<sui::object::ID>"
+            ]
+          ]
+        },
+        "KeyEpochRotated": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "policy_id",
+              "sui::object::ID"
+            ],
+            [
+              "key_epoch",
+              "u64"
+            ]
+          ]
+        },
+        "PolicyCreated": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "policy_id",
+              "sui::object::ID"
+            ],
+            [
+              "cap_id",
+              "sui::object::ID"
+            ],
+            [
+              "name",
+              "std::string::String"
+            ],
+            [
+              "creator",
+              "address"
+            ]
+          ]
+        },
+        "PolicyMigrated": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "policy_id",
+              "sui::object::ID"
+            ],
+            [
+              "version",
+              "u64"
+            ]
+          ]
+        }
+      }
     }
   },
   "required_type_origins": [
@@ -2380,6 +2814,14 @@
       "component_catalog::VersionPublished",
       "component_catalog::CatalogBindingKey",
       "component_catalog::CatalogBinding"
+    ],
+    "seal_policy": [
+      "seal_policy::AccessPolicy",
+      "seal_policy::AccessAdminCap",
+      "seal_policy::PolicyCreated",
+      "seal_policy::AccessChanged",
+      "seal_policy::KeyEpochRotated",
+      "seal_policy::PolicyMigrated"
     ]
   },
   "supported_deployment_schema_versions": [
