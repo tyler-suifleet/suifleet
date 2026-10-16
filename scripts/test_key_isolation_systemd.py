@@ -10,13 +10,22 @@ hardware. Uses the disposable harness of scripts/test_supervisor_systemd.py
                         unit; the device address is unchanged
   0x901 probe        -> a supervised component running in suifleet.service's
                         sandbox, as the daemon user, cannot: read device.key or
-                        signer.toml; see the signer's processes in /proc; find
+                        signer.toml; see the signer's processes in /proc; read
+                        the daemon's environ or take its descriptors; find
                         key material in its environment or inherited fds; get a
                         signature from the signing socket (refused: not the
                         unit's main process). It can read the public address.
   reports            -> the daemon's status reports are signed by the service
                         and accepted by the shim's signature verification,
                         including after the signer and the daemon restart
+  0x904 orphan       -> a component SIGKILLs the daemon, is reparented to PID 1
+                        inside suifleet.service's cgroup (what a parent-PID
+                        rule would accept) and asks for signatures: every
+                        request is refused as not the recorded main process;
+                        the restarted daemon reports again. The shipped
+                        KillMode=mixed removes such orphans within milliseconds;
+                        a test-only drop-in (KillMode=process, Restart=no) holds
+                        the orphan alive so the refusal is observed every run
 """
 import argparse
 import base64
@@ -31,7 +40,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from test_supervisor_systemd import host, sh, show  # noqa: E402
+from test_supervisor_systemd import UNIT_CGROUP, alive, cgroup, host, sh, show  # noqa: E402
 
 CONTAINER = "suifleet-key-isolation-systemd"
 KEY_HEX = "07" * 32  # The simulator's test identity, not a secret.
@@ -57,6 +66,22 @@ def signer_processes():
         seen.append(uid)
     return sorted(set(seen))
 attempt("visible_uids", signer_processes)
+# The daemon (our parent) is non-dumpable: no /proc access, no descriptor theft.
+attempt("daemon_environ", lambda: open(f"/proc/{os.getppid()}/environ", "rb").read().decode(errors="replace"))
+def steal_fds():
+    import ctypes
+    libc = ctypes.CDLL(None, use_errno=True)
+    pidfd = libc.syscall(434, os.getppid(), 0)  # pidfd_open
+    if pidfd < 0:
+        raise OSError(ctypes.get_errno(), "pidfd_open")
+    try:
+        stolen = [fd for fd in range(64) if libc.syscall(438, pidfd, fd, 0) >= 0]  # pidfd_getfd
+    finally:
+        os.close(pidfd)
+    if not stolen:
+        raise OSError(ctypes.get_errno(), "pidfd_getfd: " + os.strerror(ctypes.get_errno()))
+    return stolen
+attempt("daemon_fds", steal_fds)
 env = dict(os.environ)
 out["env_has_key"] = any(KEY in v for v in env.values())
 out["env_names"] = sorted(env)
@@ -88,6 +113,43 @@ import time
 while True:
     time.sleep(1)
 '''.replace("KEY", repr(KEY_HEX))
+
+
+# Runs once as a component: kills the daemon, then asks for signatures as an
+# orphan in the unit's cgroup until systemd kills it.
+ORPHAN = r'''
+import json, os, signal, socket, base64
+if os.path.exists("attacked"):
+    signal.pause()
+open("attacked", "w").close()
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+log = open("orphan.jsonl", "a", buffering=1)
+log.write(json.dumps({"daemon": os.getppid(), "pid": os.getpid()}) + "\n")
+sockets = []
+for _ in range(8):
+    s = socket.socket(socket.AF_UNIX)
+    s.connect("/run/suifleet-signer/sign.sock")
+    sockets.append(s)
+os.kill(os.getppid(), signal.SIGKILL)
+while os.getppid() != 1:
+    pass
+tx = base64.b64encode(b"\0" * 64).decode()
+for s in sockets:
+    entry = {"ppid": os.getppid(), "cgroup": open("/proc/self/cgroup").read().strip()}
+    try:
+        s.sendall((json.dumps({"op": "sign", "tx": tx}) + "\n").encode())
+        data = b""
+        while not data.endswith(b"\n"):
+            chunk = s.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+        entry["response"] = json.loads(data)
+    except Exception as e:
+        entry["exception"] = type(e).__name__ + ": " + str(e)
+    log.write(json.dumps(entry) + "\n")
+signal.pause()
+'''
 
 
 def inside(args):
@@ -216,7 +278,12 @@ def inside(args):
         assert pwd.getpwuid(stat.st_uid).pw_name == "suifleet-signer" and stat.st_mode & 0o777 == 0o600, (stat.st_uid, oct(stat.st_mode))
         assert (etc / "device.address").read_text().strip() == ADDRESS
         assert show("ActiveState") == "active"
-        check(f"migration: the existing key now belongs to suifleet-signer (0600); address unchanged ({ADDRESS[:12]}…)")
+        record = Path("/run/suifleet-signer/daemon.main")
+        wait(lambda: record.exists() and record.read_text().split()[0] == show("MainPID"), "the main process was not recorded")
+        record_stat = os.stat(record)
+        assert record_stat.st_uid == 0 and record_stat.st_mode & 0o777 == 0o644, (record_stat.st_uid, oct(record_stat.st_mode))
+        check(f"migration: the existing key now belongs to suifleet-signer (0600); address unchanged ({ADDRESS[:12]}…); "
+              "the unit recorded its MainPID as root")
 
         deploy("0x901", "probe", {"run": "exec python3 -c " + "'" + PROBE.replace("'", "'\\''") + "'"})
         work = state / "supervised" / "probe" / "work"
@@ -224,6 +291,8 @@ def inside(args):
         probe = json.loads((work / "probe.json").read_text())
         for name in ("read_key", "read_signer_config"):
             assert not probe[name]["ok"] and "PermissionError" in probe[name]["error"], (name, probe[name])
+        for name in ("daemon_environ", "daemon_fds"):
+            assert not probe[name]["ok"], (name, probe[name])
         signer_uid = pwd.getpwnam("suifleet-signer").pw_uid
         assert probe["visible_uids"]["ok"] and signer_uid not in probe["visible_uids"]["value"], probe["visible_uids"]
         assert not probe["env_has_key"], "key material in the component environment"
@@ -235,8 +304,9 @@ def inside(args):
         assert "may not request signatures" in sign.get("error", ""), probe["sign"]
         assert "error" in (probe["export"]["value"] if probe["export"]["ok"] else {"error": 1}), probe["export"]
         check("component process (daemon user, shipped sandbox): device.key and signer.toml unreadable (EACCES); signer "
-              "processes invisible; no key material in env or inherited fds; signing refused (not the main process); "
-              "only the public address served")
+              "processes invisible; no key material in env or inherited fds; the daemon's environ and descriptors "
+              f"unavailable ({probe['daemon_environ']['error']}; {probe['daemon_fds']['error']}); signing refused "
+              "(not the main process); only the public address served")
 
         wait(lambda: reported("0x901"), "the daemon's status report was not signed and accepted")
         assert outcome("0x901").get("status") == 1
@@ -252,6 +322,41 @@ def inside(args):
         assert "Signing request refused" in log
         assert not sim.errors, sim.errors
         check("reports keep being signed after the signer and the daemon restart; the refused component request is logged")
+
+        before = show("MainPID")
+        dropin = Path("/etc/systemd/system/suifleet.service.d/hold-orphans.conf")
+        dropin.parent.mkdir(exist_ok=True)
+        dropin.write_text("[Service]\nKillMode=process\nRestart=no\n")
+        sh("systemctl", "daemon-reload")
+        deploy("0x904", "orphan", {"run": "exec python3 -c " + "'" + ORPHAN.replace("'", "'\\''") + "'"})
+        attempts_log = state / "supervised" / "orphan" / "work" / "orphan.jsonl"
+
+        def attempts():
+            try:
+                return [json.loads(line) for line in attempts_log.read_text().splitlines() if line.endswith("}")]
+            except OSError:
+                return []
+        wait(lambda: len(attempts()) == 9, "the orphan did not finish its signing requests")
+        header, tries = attempts()[0], attempts()[1:]
+        assert str(header["daemon"]) == before, (header, before)
+        assert show("MainPID") == "0", "the daemon was not killed"
+        orphan = header["pid"]
+        stat = Path(f"/proc/{orphan}/stat").read_text().rsplit(")", 1)[1].split()
+        assert stat[1] == "1" and cgroup(orphan) == UNIT_CGROUP, (stat[:2], cgroup(orphan))
+        for attempt in tries:
+            assert attempt["ppid"] == 1 and attempt["cgroup"] == "0::" + UNIT_CGROUP, attempt
+            assert "may not request signatures" in attempt.get("response", {}).get("error", ""), attempt
+        sh("kill", "-9", str(orphan))
+        wait(lambda: not alive(orphan), "the orphan survived SIGKILL")
+        dropin.unlink()
+        sh("systemctl", "daemon-reload")
+        sh("systemctl", "start", "suifleet")
+        wait(lambda: show("MainPID") not in ("0", before) and record.read_text().split()[0] == show("MainPID"),
+             "the daemon did not restart and record its main process")
+        deploy("0x905", "plain3", {})
+        wait(lambda: reported("0x905"), "no report after the daemon was killed by a component")
+        check(f"a component killed the daemon and, reparented to PID 1 in suifleet.service's cgroup, made {len(tries)} "
+              "signing requests (ppid 1, unit cgroup verified as root): all refused as not the recorded main process; the restarted daemon reports again")
     finally:
         sh("systemctl", "stop", "suifleet", "suifleet-signer.service", "suifleet-signer.socket", check=False)
         shim.kill()
