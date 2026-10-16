@@ -1,0 +1,2 @@
+# Development image: authenticated operator may administer this disposable device.
+operator ALL=(ALL:ALL) NOPASSWD: ALL
