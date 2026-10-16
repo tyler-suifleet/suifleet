@@ -106,6 +106,14 @@ test-protocol-live:
 test-catalog-live:
 	$(RUN) python3 scripts/test_catalog_localnet.py
 
+# SF-028 Greengrass compatibility matrix, reference-model fixtures and current
+# frontend validator check (docs/GREENGRASS_COMPATIBILITY.md). Offline.
+.PHONY: test-compat
+test-compat:
+	$(RUN) python3 scripts/greengrass_compat.py
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_greengrass_compat.py'
+	$(RUN) node scripts/test_greengrass_compat.cjs
+
 # Offline regression tests for the drift gate itself (synthetic summaries).
 test-interfaces:
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_check_contract_interfaces.py'
@@ -118,7 +126,7 @@ toolchain-versions:
 # CI entry point (run inside the dev image): each step's output is kept under
 # ci-logs/ for failure diagnostics. No step publishes, spends gas or uses secrets.
 ci: SHELL := /bin/bash
-CI_STEPS := indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces edge-test test-ota test-component dapp-typecheck dapp-build
+CI_STEPS := indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat edge-test test-ota test-component dapp-typecheck dapp-build
 ci:
 	@mkdir -p ci-logs
 	@$(MAKE) --no-print-directory toolchain-versions | tee ci-logs/toolchain-versions.txt
@@ -137,6 +145,7 @@ check:
 	$(MAKE) test-contracts
 	$(MAKE) test-interfaces
 	$(MAKE) check-interfaces
+	$(MAKE) test-compat
 	$(MAKE) edge-test
 	$(MAKE) test-ota
 	$(MAKE) test-component

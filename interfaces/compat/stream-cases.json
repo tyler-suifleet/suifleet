@@ -1,0 +1,499 @@
+[
+ {
+  "id": "reject-new-data-when-full",
+  "steps": [
+   {
+    "op": {
+     "op": "create",
+     "stream": "telemetry",
+     "max_size": 2048,
+     "strategy_on_full": "RejectNewData"
+    },
+    "expect": {}
+   },
+   {
+    "op": {
+     "op": "append",
+     "stream": "telemetry",
+     "size": 1000
+    },
+    "expect": {
+     "sequence": 0
+    }
+   },
+   {
+    "op": {
+     "op": "append",
+     "stream": "telemetry",
+     "size": 1000
+    },
+    "expect": {
+     "sequence": 1
+    }
+   },
+   {
+    "op": {
+     "op": "append",
+     "stream": "telemetry",
+     "size": 100
+    },
+    "expect": {
+     "error": "full"
+    }
+   },
+   {
+    "op": {
+     "op": "read",
+     "stream": "telemetry",
+     "start": 0,
+     "min": 1,
+     "max": 5
+    },
+    "expect": {
+     "sequences": [
+      0,
+      1
+     ]
+    }
+   },
+   {
+    "op": {
+     "op": "describe",
+     "stream": "telemetry"
+    },
+    "expect": {
+     "oldest": 0,
+     "newest": 1,
+     "exported": -1,
+     "bytes": 2000
+    }
+   }
+  ]
+ },
+ {
+  "id": "overwrite-oldest-reports-eviction",
+  "steps": [
+   {
+    "op": {
+     "op": "create",
+     "stream": "logs",
+     "max_size": 2048,
+     "strategy_on_full": "OverwriteOldestData"
+    },
+    "expect": {}
+   },
+   {
+    "op": {
+     "op": "append",
+     "stream": "logs",
+     "size": 1000
+    },
+    "expect": {
+     "sequence": 0
+    }
+   },
+   {
+    "op": {
+     "op": "append",
+     "stream": "logs",
+     "size": 1000
+    },
+    "expect": {
+     "sequence": 1
+    }
+   },
+   {
+    "op": {
+     "op": "append",
+     "stream": "logs",
+     "size": 1000
+    },
+    "expect": {
+     "sequence": 2
+    }
+   },
+   {
+    "op": {
+     "op": "describe",
+     "stream": "logs"
+    },
+    "expect": {
+     "oldest": 1,
+     "newest": 2,
+     "exported": -1,
+     "bytes": 2000
+    }
+   },
+   {
+    "op": {
+     "op": "read",
+     "stream": "logs",
+     "start": 0
+    },
+    "expect": {
+     "error": "evicted",
+     "oldest": 1
+    }
+   },
+   {
+    "op": {
+     "op": "read",
+     "stream": "logs",
+     "start": 1,
+     "max": 10
+    },
+    "expect": {
+     "sequences": [
+      1,
+      2
+     ]
+    }
+   },
+   {
+    "op": {
+     "op": "read",
+     "stream": "logs",
+     "start": 3
+    },
+    "expect": {
+     "error": "not-enough-messages"
+    }
+   },
+   {
+    "op": {
+     "op": "read",
+     "stream": "logs",
+     "start": 1,
+     "min": 3,
+     "max": 3
+    },
+    "expect": {
+     "error": "not-enough-messages"
+    }
+   }
+  ]
+ },
+ {
+  "id": "restart-drops-memory-never-reuses-sequences",
+  "steps": [
+   {
+    "op": {
+     "op": "create",
+     "stream": "mem",
+     "max_size": 4096,
+     "strategy_on_full": "RejectNewData",
+     "persistence": "Memory"
+    },
+    "expect": {}
+   },
+   {
+    "op": {
+     "op": "create",
+     "stream": "disk",
+     "max_size": 4096,
+     "strategy_on_full": "RejectNewData"
+    },
+    "expect": {}
+   },
+   {
+    "op": {
+     "op": "append",
+     "stream": "mem",
+     "size": 10
+    },
+    "expect": {
+     "sequence": 0
+    }
+   },
+   {
+    "op": {
+     "op": "append",
+     "stream": "disk",
+     "size": 10
+    },
+    "expect": {
+     "sequence": 0
+    }
+   },
+   {
+    "op": {
+     "op": "restart"
+    },
+    "expect": {}
+   },
+   {
+    "op": {
+     "op": "describe",
+     "stream": "mem"
+    },
+    "expect": {
+     "oldest": 1,
+     "newest": 0,
+     "exported": -1,
+     "bytes": 0
+    }
+   },
+   {
+    "op": {
+     "op": "read",
+     "stream": "mem",
+     "start": 0
+    },
+    "expect": {
+     "error": "evicted",
+     "oldest": 1
+    }
+   },
+   {
+    "op": {
+     "op": "describe",
+     "stream": "disk"
+    },
+    "expect": {
+     "oldest": 0,
+     "newest": 0,
+     "exported": -1,
+     "bytes": 10
+    }
+   },
+   {
+    "op": {
+     "op": "append",
+     "stream": "mem",
+     "size": 10
+    },
+    "expect": {
+     "sequence": 1
+    }
+   },
+   {
+    "op": {
+     "op": "read",
+     "stream": "mem",
+     "start": 1
+    },
+    "expect": {
+     "sequences": [
+      1
+     ]
+    }
+   }
+  ]
+ },
+ {
+  "id": "export-checkpoint-idempotent",
+  "steps": [
+   {
+    "op": {
+     "op": "create",
+     "stream": "export",
+     "max_size": 4096,
+     "strategy_on_full": "RejectNewData"
+    },
+    "expect": {}
+   },
+   {
+    "op": {
+     "op": "append",
+     "stream": "export",
+     "size": 1
+    },
+    "expect": {
+     "sequence": 0
+    }
+   },
+   {
+    "op": {
+     "op": "append",
+     "stream": "export",
+     "size": 1
+    },
+    "expect": {
+     "sequence": 1
+    }
+   },
+   {
+    "op": {
+     "op": "export-ack",
+     "stream": "export",
+     "sequence": 0
+    },
+    "expect": {
+     "exported": 0
+    }
+   },
+   {
+    "op": {
+     "op": "export-ack",
+     "stream": "export",
+     "sequence": 0
+    },
+    "expect": {
+     "exported": 0
+    }
+   },
+   {
+    "op": {
+     "op": "export-ack",
+     "stream": "export",
+     "sequence": 5
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "export-ack",
+     "stream": "export",
+     "sequence": 1
+    },
+    "expect": {
+     "exported": 1
+    }
+   },
+   {
+    "op": {
+     "op": "describe",
+     "stream": "export"
+    },
+    "expect": {
+     "oldest": 0,
+     "newest": 1,
+     "exported": 1,
+     "bytes": 2
+    }
+   }
+  ]
+ },
+ {
+  "id": "invalid-operations",
+  "steps": [
+   {
+    "op": {
+     "op": "create",
+     "stream": "dup",
+     "max_size": 4096,
+     "strategy_on_full": "RejectNewData"
+    },
+    "expect": {}
+   },
+   {
+    "op": {
+     "op": "create",
+     "stream": "dup",
+     "max_size": 4096,
+     "strategy_on_full": "RejectNewData"
+    },
+    "expect": {
+     "error": "exists"
+    }
+   },
+   {
+    "op": {
+     "op": "create",
+     "stream": "small",
+     "max_size": 100,
+     "strategy_on_full": "RejectNewData"
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "create",
+     "stream": "bad/name",
+     "max_size": 4096,
+     "strategy_on_full": "RejectNewData"
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "create",
+     "stream": "strategy",
+     "max_size": 4096,
+     "strategy_on_full": "DropNewest"
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "create",
+     "stream": "persist",
+     "max_size": 4096,
+     "strategy_on_full": "RejectNewData",
+     "persistence": "Tape"
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "append",
+     "stream": "missing",
+     "size": 1
+    },
+    "expect": {
+     "error": "not-found"
+    }
+   },
+   {
+    "op": {
+     "op": "append",
+     "stream": "dup",
+     "size": 5000
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "append",
+     "stream": "dup",
+     "size": 0
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "read",
+     "stream": "dup",
+     "min": 0
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "read",
+     "stream": "dup",
+     "min": 2,
+     "max": 1
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "read",
+     "stream": "dup"
+    },
+    "expect": {
+     "error": "not-enough-messages"
+    }
+   }
+  ]
+ }
+]
