@@ -40,6 +40,23 @@
         "https://github.com/tyler-suifleet/suifleet/issues/32"
       ]
     },
+    "SF-014": {
+      "deferred_checks": [
+        "physical Pi boot, reboot, power-loss and supervised component recovery",
+        "real extension-wallet lifecycle (run/readiness/shutdown/restart) deploy UI acceptance"
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32",
+        "https://github.com/tyler-suifleet/suifleet/issues/11"
+      ],
+      "retained_gates": [
+        "all source/security findings repaired",
+        "daemon unit tests and the full local simulator suite (make test-ota), including supervised crash, replacement, rollback, daemon SIGKILL and dependency cases",
+        "real systemd/cgroup-v2 evidence under the shipped suifleet.service (scripts/test_supervisor_systemd.py): component crash, setsid/env-cleared/reparented descendant containment, daemon SIGKILL with successful successor bootstrap, no overlapping or unmanaged descendants",
+        "exact-head ordinary CI and current-head/base testnet status",
+        "fresh independent review of exact head/base/feedback/policy"
+      ]
+    },
     "SF-024": {
       "deferred_checks": [
         "hosted/public-node and archival-retention integration"

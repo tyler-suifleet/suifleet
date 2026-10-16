@@ -18,6 +18,10 @@ UMask=0077
 ExecStart=/usr/bin/suifleet
 Restart=on-failure
 RestartSec=5
+# Stop SIGTERMs only the daemon, which stops supervised components itself
+# (their shutdown commands, dependents first); systemd then SIGKILLs anything
+# left in the cgroup, also after a crash, so nothing outlives the unit.
+KillMode=mixed
 WatchdogSec=60
 NotifyAccess=main
 EnvironmentFile=-/etc/suifleet/env

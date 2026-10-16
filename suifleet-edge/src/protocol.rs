@@ -570,6 +570,12 @@ pub struct Lifecycle {
     #[serde(rename = "shutdown")]
     #[serde(default)]
     pub shutdown: Option<String>,
+    #[serde(rename = "readiness")]
+    #[serde(default)]
+    pub readiness: Option<String>,
+    #[serde(rename = "restart")]
+    #[serde(default)]
+    pub restart: Option<String>,
 }
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
