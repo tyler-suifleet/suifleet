@@ -60,8 +60,48 @@ class DispatchTests(unittest.TestCase):
                 with patch.object(d,'process_identity',return_value=None):
                     self.worker.reconcile(self.project)
                 self.assertEqual(self.state_of_run(),'quarantined')
-                self.assertTrue(self.worker.available(self.slot,[self.claim]))
+                self.assertFalse(self.worker.available(self.slot,[self.claim]))
                 self.assertEqual(json.loads(self.worker.db.execute('SELECT claim FROM runs').fetchone()[0])['token'],'private-token')
+
+    def test_fast_fail_ticks_back_off_and_stop_at_durable_cap(self):
+        owners = {}
+        def ticket(project, *args):
+            if args[0] == 'list': return list(owners.values())
+            if args[0] == 'show': return owners[args[1]]
+            if args[0] == 'refresh': return {}
+            if args[0] == 'assert': return {}
+            if args[0] == 'claim':
+                key = 'SF-' + str(len(owners)+1)
+                claim = {**self.claim, 'key':key, 'session':args[args.index('--session')+1]}
+                owners[key] = claim
+                return claim
+            raise AssertionError(args)
+        def stopped_wrapper(argv, **kwargs):
+            folder = Path(argv[-1])
+            (folder/'exit.json').write_text('{"returncode":1}')
+            return Mock(pid=123, poll=Mock(return_value=1))
+        self.worker.ticket = Mock(side_effect=ticket)
+        with patch.object(d,'run',return_value='test-token'), patch.object(d.subprocess,'Popen',side_effect=stopped_wrapper), patch.object(d,'process_identity',return_value='start'), patch.object(d,'worker_stopped',return_value=True), patch.object(d.time,'time') as now:
+            # Advance past every backoff: even unlimited ticks cannot reserve the backlog.
+            for tick in range(20):
+                now.return_value = tick*10000
+                with patch.object(d,'process_identity',return_value=None) if tick % 2 else patch.object(d,'process_identity',return_value='start'):
+                    self.worker.tick(True)
+                if tick == 1:
+                    self.assertFalse(self.worker.available(self.slot, list(owners.values())))
+                    pause = self.worker.db.execute('SELECT attempts FROM backoff').fetchone()
+                    self.assertEqual(pause[0], 1)
+            self.assertEqual(len(owners), 3)
+            self.assertEqual(self.worker.db.execute("SELECT COUNT(*) FROM runs WHERE status='quarantined'").fetchone()[0], 3)
+            restarted = d.Dispatcher(self.config, self.state)
+            self.assertFalse(restarted.available(self.slot, list(owners.values())))
+            self.assertEqual(self.worker.db.execute('SELECT attempts FROM backoff').fetchone()[0], 3)
+
+    def test_parked_jobs_also_have_a_retention_cap(self):
+        self.receipt(owner_status='blocked', verdict='blocked')
+        with patch.object(d,'process_identity',return_value=None), patch.object(d,'worker_stopped',return_value=True):
+            self.worker.reconcile(self.project)
+        self.assertFalse(self.worker.available({**self.slot,'max_quarantined':1}, []))
 
     def test_corrupt_receipt_is_isolated_without_losing_ownership(self):
         folder=self.receipt()

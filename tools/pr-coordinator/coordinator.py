@@ -119,6 +119,9 @@ class Store:
             head TEXT, feedback TEXT, status TEXT, directory TEXT, pid INTEGER, started TEXT,
             result TEXT, error TEXT, created REAL, retry_after REAL, attempts INTEGER DEFAULT 0,
             UNIQUE(project,pr,kind,head,feedback));
+          CREATE TABLE IF NOT EXISTS quarantine_backoff (
+            family TEXT, kind TEXT, attempts INTEGER, retry_after REAL,
+            PRIMARY KEY(family,kind));
           CREATE TABLE IF NOT EXISTS publications (project TEXT, pr INTEGER, node_id TEXT PRIMARY KEY, hash TEXT);
           CREATE TABLE IF NOT EXISTS integrations (
             project TEXT, pr INTEGER, head TEXT, commit_id TEXT, reconciled INTEGER DEFAULT 0,
@@ -133,13 +136,27 @@ class Store:
                     # Legacy done rows were already published; never replay them.
                     self.db.execute("UPDATE jobs SET publication_done=1 WHERE status='done'")
 
+    def quarantine(self, row):
+        self.db.execute('BEGIN IMMEDIATE')
+        try:
+            old = self.db.execute('SELECT attempts FROM quarantine_backoff WHERE family=? AND kind=?', (row['family'],row['kind'])).fetchone()
+            attempts = old[0]+1 if old else 1
+            delay = min(3600, 300 * 2**min(attempts-1,4))
+            self.db.execute('INSERT OR REPLACE INTO quarantine_backoff VALUES(?,?,?,?)', (row['family'],row['kind'],attempts,time.time()+delay))
+            self.db.execute("UPDATE jobs SET status='quarantined',error=? WHERE id=?", ('Verified stopped; ticket/PR remains reserved for explicit recovery',row['id']))
+            self.db.execute('COMMIT')
+        except BaseException:
+            self.db.execute('ROLLBACK'); raise
+
     def reserve(self, project, pr, family, kind, directory):
         self.db.execute('BEGIN IMMEDIATE')
         try:
             active = self.db.execute("SELECT 1 FROM jobs WHERE status IN ('reserved','running','orphaned','quarantined') AND project=? AND pr=?", (project, pr['number'])).fetchone()
             count = self.db.execute("SELECT COUNT(*) FROM jobs WHERE status IN ('reserved','running','orphaned') AND family=? AND kind=?", (family, kind)).fetchone()[0]
             limit = self.worker_limits.get(family, {}).get(kind, 1)
-            if active or count >= limit:
+            quarantine_count = self.db.execute("SELECT COUNT(*) FROM jobs WHERE status='quarantined' AND family=? AND kind=?", (family,kind)).fetchone()[0]
+            pause = self.db.execute('SELECT retry_after FROM quarantine_backoff WHERE family=? AND kind=?', (family,kind)).fetchone()
+            if active or count >= limit or quarantine_count >= 3 or (pause and pause[0] > time.time()):
                 self.db.execute('COMMIT'); return None
             previous = self.db.execute("SELECT * FROM jobs WHERE project=? AND pr=? AND kind=? AND head=? AND feedback=?",(project,pr['number'],kind,pr['headRefOid'],feedback(pr))).fetchone()
             if previous and previous['status'] == 'retry' and previous['retry_after'] <= time.time():
@@ -346,8 +363,7 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
         for row in rows:
             if row['status'] == 'orphaned':
                 if worker_stopped(row['pid'], row['started']):
-                    self.store.db.execute("UPDATE jobs SET status='quarantined',error=? WHERE id=?",
-                                          ('Verified stopped; ticket/PR remains reserved for explicit recovery',row['id']))
+                    self.store.quarantine(row)
                     print(f"{project['id']} PR#{row['pr']}: stopped orphan quarantined; family capacity freed", flush=True)
                 continue
             if row['status'] == 'retry':

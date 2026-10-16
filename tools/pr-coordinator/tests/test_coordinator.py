@@ -53,6 +53,31 @@ class Gates(unittest.TestCase):
                 coordinator.collect({'id':'project'},[])
             self.assertEqual(store.db.execute('SELECT status FROM jobs').fetchone()[0],'quarantined')
 
+    def test_stopped_orphans_back_off_and_cap_cross_pr_cascade(self):
+        for kind in ('fix', 'review'):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory)/'jobs.sqlite3'
+                store = c.Store(path)
+                coordinator = c.Coordinator.__new__(c.Coordinator)
+                coordinator.store=store; coordinator.children={}; coordinator.publish_results=Mock()
+                claims = []
+                with patch.object(c.time,'time') as now, patch.object(c,'worker_stopped',return_value=True):
+                    for tick in range(20):
+                        now.return_value = tick*10000
+                        job = store.reserve('project',{**fixture()[0],'number':tick},'Codex',kind,Path(directory))
+                        if job is None: continue
+                        claims.append(job)
+                        store.db.execute("UPDATE jobs SET status='orphaned',pid=123,started='old' WHERE id=?", (job,))
+                        coordinator.collect({'id':'project'}, [])
+                        self.assertIsNone(store.reserve('other',{**fixture()[0],'number':100+tick},'Codex',kind,Path(directory)))
+                        attempts, deadline = store.db.execute('SELECT attempts,retry_after FROM quarantine_backoff').fetchone()
+                        self.assertEqual(attempts, len(claims))
+                        self.assertEqual(deadline, tick*10000 + 300*2**(len(claims)-1))
+                    self.assertEqual(len(claims), 3)
+                    self.assertIsNone(c.Store(path).reserve('other',{**fixture()[0],'number':999},'Codex',kind,Path(directory)))
+                    # The other family/category can still make progress.
+                    self.assertIsNotNone(store.reserve('other',fixture()[0],'Claude',kind,Path(directory)))
+
     def test_worker_stopped_requires_identity_and_complete_session_scan(self):
         self.assertFalse(c.worker_stopped(None,None))
         with patch.object(c,'process_identity',return_value='same'):

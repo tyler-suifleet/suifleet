@@ -34,6 +34,9 @@ class Dispatcher:
                 raise ValueError('Each slot needs a known family and actual model')
             if slot['project'] not in {p['id'] for p in config['projects']}:
                 raise ValueError('Unknown slot project')
+            limit = slot.get('max_quarantined', 3)
+            if type(limit) is not int or not 1 <= limit <= 16:
+                raise ValueError('max_quarantined must be an integer from 1 to 16')
             limit = slot.get('max_workers', 1)
             if type(limit) is not int or not 1 <= limit <= 16:
                 raise ValueError('max_workers must be an integer from 1 to 16')
@@ -101,7 +104,9 @@ class Dispatcher:
                     continue  # A child may still be running after its wrapper disappeared.
                 if ownership_changed:
                     self.update(row['session'], 'quarantined', 'Stopped worker; ownership changed; original claim never resumed')
+                    self.defer(project, row['family'], 'stopped worker quarantined')
                     continue
+                result = {}
                 # Exit receipt alone is insufficient: the wrapper can write it just before exiting.
                 if receipt.exists() and json.loads(receipt.read_text()).get('returncode') == 0:
                     result_path = directory/'result.json'
@@ -109,6 +114,7 @@ class Dispatcher:
                     if (owner['status'] in ('review', 'done') and not owner.get('publish_pending')
                             and result.get('verdict') == 'review_ready' and result.get('evidence')):
                         self.update(row['session'], 'finished', 'Implementation handed off; review coordinator owns integration')
+                        self.db.execute('DELETE FROM backoff WHERE project=? AND family=?', (project['id'],row['family']))
                         continue
                 if (receipt.exists() and json.loads(receipt.read_text()).get('returncode') == 0
                         and owner['status'] == 'blocked' and not owner.get('publish_pending')
@@ -116,6 +122,7 @@ class Dispatcher:
                     self.update(row['session'], 'parked', 'Verified stopped blocked worker; ticket retained, execution capacity freed')
                     continue
                 self.update(row['session'], 'quarantined', 'Verified stopped without handoff; claim retained for explicit recovery')
+                self.defer(project, row['family'], 'stopped worker quarantined')
             except (OSError, ValueError, KeyError, TypeError, subprocess.CalledProcessError) as error:
                 # A corrupt receipt or one unavailable ticket must not starve
                 # unrelated slots. Keep its existing capacity/ownership intact.
@@ -131,6 +138,8 @@ class Dispatcher:
             return False
         rows = self.db.execute("SELECT session,claim,status FROM runs WHERE project=? AND family=? AND status!='finished'",
                                (slot['project'], slot['family'])).fetchall()
+        if sum(r['status'] in ('quarantined', 'parked') for r in rows) >= slot.get('max_quarantined', 3):
+            return False
         managed_sessions = {r['session'] for r in rows}
         # Real ticket responses preserve the dispatch session. Tests/legacy state
         # may preserve it only in the persisted claim; use both identities.
@@ -179,7 +188,6 @@ class Dispatcher:
                                      cwd=claim['worktree'], env=env, stdin=subprocess.DEVNULL,
                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
             self.children[session] = child
-            self.db.execute('DELETE FROM backoff WHERE project=? AND family=?', (project['id'],slot['family']))
             self.db.execute("UPDATE runs SET status='running',pid=?,started=? WHERE session=?",
                             (child.pid, process_identity(child.pid), session))
             print(f"{project['id']}: {slot['family']} implementing {claim['key']}", flush=True)
