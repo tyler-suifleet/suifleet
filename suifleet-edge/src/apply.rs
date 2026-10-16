@@ -98,10 +98,10 @@ pub async fn run_hardened(
             #[cfg(unix)]
             kill_group(child.pid() as i32);
             let _ = child.wait().await;
-            anyhow::bail!(
-                "apply command timed out after {}s; process group killed",
+            return Err(crate::firmware::Indeterminate(format!(
+                "apply command timed out after {}s; process group killed; completion unknown",
                 timeout.as_secs()
-            )
+            )).into());
         }
     };
     exit_result(status)
@@ -165,7 +165,7 @@ pub fn exit_result(status: std::process::ExitStatus) -> anyhow::Result<()> {
             #[cfg(unix)]
             {
                 use std::os::unix::process::ExitStatusExt;
-                anyhow::bail!("apply command killed by signal {:?}", status.signal())
+                return Err(crate::firmware::Indeterminate(format!("apply command killed by signal {:?}; completion unknown", status.signal())).into());
             }
             #[cfg(not(unix))]
             anyhow::bail!("apply command terminated abnormally")
@@ -256,6 +256,7 @@ mod tests {
             .await
             .unwrap_err();
         assert!(error.to_string().contains("timed out"), "{error}");
+        assert!(error.downcast_ref::<crate::firmware::Indeterminate>().is_some());
     }
 
     #[tokio::test]

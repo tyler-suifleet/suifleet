@@ -338,10 +338,10 @@ pub async fn run_helper(config: &FirmwareHelperConfig) -> anyhow::Result<usize> 
             id: stem.clone(),
             ok: result.is_ok(),
             message: match &result {
-                Ok(()) => "applied".into(),
+                Ok(()) => "configured command completed (exit 0); platform boot confirmation not inferred".into(),
                 Err(error) => error.to_string(),
             },
-            interrupted: false,
+            interrupted: result.as_ref().err().is_some_and(|e| e.downcast_ref::<Indeterminate>().is_some()),
         };
         // Answer while `_claim_lock` still holds the claim, then always consume
         // the request, even if invalid, so the path unit settles.
@@ -824,6 +824,22 @@ mod tests {
         assert!(late.downcast_ref::<Indeterminate>().is_some(), "{late:#}");
         acknowledge(&spool, ID);
         assert!(collect(&spool, ID).unwrap().is_none());
+        let _ = std::fs::remove_dir_all(f.root);
+    }
+
+    #[tokio::test]
+    async fn helper_timeout_persists_unknown_instead_of_supplied_failure() {
+        let mut f = fixture("timeout-unknown", "/bin/sh -c 'exec sleep 300'");
+        f.config.timeout_seconds = 1;
+        let (result, ()) = tokio::join!(
+            submit(&f.config.spool_dir, ID, &f.artifact, Duration::from_secs(3)),
+            helper_once(&f.config)
+        );
+        let error = result.unwrap_err();
+        assert!(error.downcast_ref::<Indeterminate>().is_some(), "{error:#}");
+        let raw = std::fs::read(results(&f.config.spool_dir).join(format!("{ID}.json"))).unwrap();
+        let outcome: Outcome = serde_json::from_slice(&raw).unwrap();
+        assert!(outcome.interrupted && !outcome.ok);
         let _ = std::fs::remove_dir_all(f.root);
     }
 
