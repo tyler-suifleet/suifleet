@@ -1,0 +1,2048 @@
+[
+ {
+  "id": "install-only-translates",
+  "note": "Generic component with one install script and one bound artifact maps to one native manifest; ComponentPublisher is reported, not silently dropped.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "echo installed"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ],
+   "ComponentDescription": "Hello component"
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "translate",
+   "reasons": [],
+   "requires": [],
+   "manifests": [
+    {
+     "os": "linux",
+     "arch": "aarch64",
+     "recipe": {
+      "schemaVersion": "1.0",
+      "componentName": "com.example.Hello",
+      "componentVersion": "1.0.0",
+      "artifactBlobId": "blob_hello",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {
+       "install": "echo installed"
+      },
+      "configuration": {},
+      "description": "Hello component"
+     }
+    }
+   ],
+   "omitted_manifests": [],
+   "informational": [
+    "ComponentPublisher"
+   ]
+  }
+ },
+ {
+  "id": "multi-platform-dependencies",
+  "note": "First-match manifest order is preserved; Windows is omitted and reported; AWS amd64 maps to native x86_64; a manifest without Platform matches all platforms; npm-style comparator ranges inside the native grammar translate to recipe 1.1.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Platform": {
+      "os": "windows"
+     },
+     "Lifecycle": {
+      "install": "echo windows"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    },
+    {
+     "Lifecycle": {
+      "install": {
+       "Script": "echo amd64"
+      }
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "amd64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    },
+    {
+     "Name": "arm32",
+     "Platform": {
+      "os": "linux",
+      "architecture": "arm"
+     },
+     "Lifecycle": {
+      "install": "echo arm"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello-arm.tar"
+      }
+     ]
+    },
+    {
+     "Lifecycle": {},
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ],
+   "ComponentDependencies": {
+    "com.example.Lib": {
+     "VersionRequirement": ">=1.0.0 <2.0.0",
+     "DependencyType": "SOFT"
+    },
+    "com.example.Log": {
+     "VersionRequirement": "^1.2.0"
+    }
+   }
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "translate",
+   "reasons": [],
+   "requires": [],
+   "manifests": [
+    {
+     "os": "linux",
+     "arch": "x86_64",
+     "recipe": {
+      "schemaVersion": "1.1",
+      "componentName": "com.example.Hello",
+      "componentVersion": "1.0.0",
+      "artifactBlobId": "blob_hello",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {
+       "install": "echo amd64"
+      },
+      "configuration": {},
+      "componentDependencies": {
+       "com.example.Lib": {
+        "versionRequirement": ">=1.0.0 <2.0.0",
+        "dependencyType": "SOFT"
+       },
+       "com.example.Log": {
+        "versionRequirement": "^1.2.0"
+       }
+      }
+     }
+    },
+    {
+     "os": "linux",
+     "arch": "arm",
+     "recipe": {
+      "schemaVersion": "1.1",
+      "componentName": "com.example.Hello",
+      "componentVersion": "1.0.0",
+      "artifactBlobId": "blob_hello_arm",
+      "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "lifecycle": {
+       "install": "echo arm"
+      },
+      "configuration": {},
+      "componentDependencies": {
+       "com.example.Lib": {
+        "versionRequirement": ">=1.0.0 <2.0.0",
+        "dependencyType": "SOFT"
+       },
+       "com.example.Log": {
+        "versionRequirement": "^1.2.0"
+       }
+      }
+     }
+    },
+    {
+     "os": "*",
+     "arch": "*",
+     "recipe": {
+      "schemaVersion": "1.1",
+      "componentName": "com.example.Hello",
+      "componentVersion": "1.0.0",
+      "artifactBlobId": "blob_hello",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {},
+      "configuration": {},
+      "componentDependencies": {
+       "com.example.Lib": {
+        "versionRequirement": ">=1.0.0 <2.0.0",
+        "dependencyType": "SOFT"
+       },
+       "com.example.Log": {
+        "versionRequirement": "^1.2.0"
+       }
+      }
+     }
+    }
+   ],
+   "omitted_manifests": [
+    0
+   ],
+   "informational": [
+    "ComponentPublisher"
+   ]
+  }
+ },
+ {
+  "id": "aws-digest-cross-checked",
+  "note": "An AWS-populated SHA-256 digest must equal the operator's authenticated binding; default permissions are accepted.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "echo installed"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar",
+       "Algorithm": "SHA-256",
+       "Digest": "q6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6s=",
+       "Permission": {
+        "Read": "OWNER",
+        "Execute": "NONE"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "translate",
+   "reasons": [],
+   "requires": [],
+   "manifests": [
+    {
+     "os": "linux",
+     "arch": "aarch64",
+     "recipe": {
+      "schemaVersion": "1.0",
+      "componentName": "com.example.Hello",
+      "componentVersion": "1.0.0",
+      "artifactBlobId": "blob_hello",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {
+       "install": "echo installed"
+      },
+      "configuration": {}
+     }
+    }
+   ],
+   "omitted_manifests": [],
+   "informational": [
+    "ComponentPublisher"
+   ]
+  }
+ },
+ {
+  "id": "aws-digest-mismatch",
+  "note": "A digest that differs from the binding is rejected.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "echo installed"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar",
+       "Algorithm": "SHA-256",
+       "Digest": "zc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc0="
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "artifact-digest-mismatch"
+   ],
+   "requires": []
+  }
+ },
+ {
+  "id": "aws-digest-other-algorithm",
+  "note": "Only SHA-256 digests can be cross-checked.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "echo installed"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar",
+       "Algorithm": "SHA-1",
+       "Digest": "q6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6s="
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "artifact-digest-mismatch"
+   ],
+   "requires": []
+  }
+ },
+ {
+  "id": "run-step-deferred",
+  "note": "Managed run lifecycle needs the SF-014 supervisor; the translator must reject until that is merged and re-specified.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "echo i",
+      "run": "python3 -u app.py"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "defer",
+   "reasons": [
+    "managed-lifecycle-step"
+   ],
+   "requires": [
+    "SF-014"
+   ]
+  }
+ },
+ {
+  "id": "bootstrap-on-rollback-rejected",
+  "note": "Rejections list every reason; BootstrapOnRollback has no native equivalent and is rejected even after SF-014.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "bootstrap": {
+       "Script": "echo b",
+       "BootstrapOnRollback": true
+      }
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "managed-lifecycle-step",
+    "unsupported-step-key"
+   ],
+   "requires": []
+  }
+ },
+ {
+  "id": "startup-shutdown-deferred",
+  "note": "Startup/shutdown require supervision.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "startup": "svc start",
+      "shutdown": "svc stop"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "defer",
+   "reasons": [
+    "managed-lifecycle-step"
+   ],
+   "requires": [
+    "SF-014"
+   ]
+  }
+ },
+ {
+  "id": "install-timeout-deferred",
+  "note": "Per-step timeouts are not expressible in native recipe 1.x.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": {
+       "Script": "echo i",
+       "Timeout": 300
+      }
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "defer",
+   "reasons": [
+    "step-timeout-or-env"
+   ],
+   "requires": [
+    "SF-014"
+   ]
+  }
+ },
+ {
+  "id": "setenv-deferred",
+  "note": "Lifecycle Setenv needs per-component environment management.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "Setenv": {
+       "A": "1"
+      },
+      "install": "echo i"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "defer",
+   "reasons": [
+    "step-timeout-or-env"
+   ],
+   "requires": [
+    "SF-014"
+   ]
+  }
+ },
+ {
+  "id": "configuration-deferred",
+  "note": "Default configuration and configuration interpolation need SF-015.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "echo {configuration:/port}"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ],
+   "ComponentConfiguration": {
+    "DefaultConfiguration": {
+     "port": 8080
+    }
+   }
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "defer",
+   "reasons": [
+    "component-configuration",
+    "configuration-variable"
+   ],
+   "requires": [
+    "SF-015"
+   ]
+  }
+ },
+ {
+  "id": "access-control-deferred",
+  "note": "IPC authorization policies need the SF-027 IPC ACL model.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "echo installed"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ],
+   "ComponentConfiguration": {
+    "DefaultConfiguration": {
+     "accessControl": {
+      "aws.greengrass.ipc.pubsub": {
+       "p": {
+        "operations": [
+         "aws.greengrass#PublishToTopic"
+        ],
+        "resources": [
+         "t"
+        ]
+       }
+      }
+     }
+    }
+   }
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "defer",
+   "reasons": [
+    "ipc-access-control"
+   ],
+   "requires": [
+    "SF-027"
+   ]
+  }
+ },
+ {
+  "id": "dependency-workspace-variable",
+  "note": "Artifact/work path variables need SF-014 versioned workspaces, including dependency-prefixed forms.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "cp {com.example.Lib:artifacts:path}/lib.so {work:path}"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ],
+   "ComponentDependencies": {
+    "com.example.Lib": {
+     "VersionRequirement": "^1.0.0"
+    }
+   }
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "defer",
+   "reasons": [
+    "workspace-variable"
+   ],
+   "requires": [
+    "SF-014"
+   ]
+  }
+ },
+ {
+  "id": "iot-thing-name-rejected",
+  "note": "There is no AWS IoT thing; the translator must not substitute a different identity silently.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "echo {iot:thingName}"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "aws-runtime-variable"
+   ],
+   "requires": []
+  }
+ },
+ {
+  "id": "kernel-root-rejected",
+  "note": "No Greengrass kernel root exists.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "ls {kernel:rootPath}"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "aws-runtime-variable"
+   ],
+   "requires": []
+  }
+ },
+ {
+  "id": "privileged-step-rejected",
+  "note": "Root escalation is outside the SF-009 runtime boundary.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": {
+       "Script": "apt-get install x",
+       "RequiresPrivilege": true
+      }
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "privileged-step"
+   ],
+   "requires": []
+  }
+ },
+ {
+  "id": "skipif-rejected",
+  "note": "Skipif is not translated.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": {
+       "Script": "echo i",
+       "Skipif": "onpath git"
+      }
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "unsupported-step-key"
+   ],
+   "requires": []
+  }
+ },
+ {
+  "id": "bootstrap-deferred",
+  "note": "Bootstrap needs SF-014 supervision; its restart exit codes (100/101) also need an approved platform restart policy.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "bootstrap": "echo b"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "defer",
+   "reasons": [
+    "managed-lifecycle-step"
+   ],
+   "requires": [
+    "SF-014"
+   ]
+  }
+ },
+ {
+  "id": "lambda-rejected",
+  "note": "Lambda components belong to the SF-038 adapter decision.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "echo installed"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ],
+   "ComponentType": "aws.greengrass.lambda",
+   "ComponentSource": "arn:aws:lambda:REGION:ACCOUNT:function:example:1"
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "lambda-source",
+    "unsupported-component-type"
+   ],
+   "requires": []
+  }
+ },
+ {
+  "id": "plugin-rejected",
+  "note": "Nucleus plugins cannot run.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "echo installed"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ],
+   "ComponentType": "aws.greengrass.plugin"
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "unsupported-component-type"
+   ],
+   "requires": []
+  }
+ },
+ {
+  "id": "aws-managed-dependency-rejected",
+  "note": "AWS-managed component dependencies need SF-038 native equivalents.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "echo installed"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ],
+   "ComponentDependencies": {
+    "aws.greengrass.TokenExchangeService": {
+     "VersionRequirement": "^2.0.0"
+    }
+   }
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "aws-managed-dependency"
+   ],
+   "requires": []
+  }
+ },
+ {
+  "id": "npm-x-range-rejected",
+  "note": "npm x-ranges, hyphen ranges and || are outside the native comparator grammar.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "echo installed"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ],
+   "ComponentDependencies": {
+    "com.example.Lib": {
+     "VersionRequirement": "1.x"
+    }
+   }
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "unsupported-version-range"
+   ],
+   "requires": []
+  }
+ },
+ {
+  "id": "npm-or-range-rejected",
+  "note": "Disjunctions are rejected rather than narrowed.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "echo installed"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ],
+   "ComponentDependencies": {
+    "com.example.Lib": {
+     "VersionRequirement": "^1.0.0 || ^2.0.0"
+    }
+   }
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "unsupported-version-range"
+   ],
+   "requires": []
+  }
+ },
+ {
+  "id": "platform-regex-rejected",
+  "note": "Java regular-expression platform matching is not reproduced.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "echo installed"
+     },
+     "Platform": {
+      "os": "/linux|darwin/"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "platform-regex"
+   ],
+   "requires": []
+  }
+ },
+ {
+  "id": "platform-detail-rejected",
+  "note": "architecture.detail, runtime and custom platform attributes are rejected.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "echo installed"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "arm",
+      "architecture.detail": "arm71"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "unsupported-platform-key"
+   ],
+   "requires": []
+  }
+ },
+ {
+  "id": "nucleus-lite-runtime-rejected",
+  "note": "Runtime selection is AWS-specific.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "echo installed"
+     },
+     "Platform": {
+      "os": "linux",
+      "runtime": "aws_nucleus_lite"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "unsupported-platform-key"
+   ],
+   "requires": []
+  }
+ },
+ {
+  "id": "unknown-platform-value-rejected",
+  "note": "Unknown OS values are rejected, not treated as wildcards.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "echo installed"
+     },
+     "Platform": {
+      "os": "freebsd"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "unsupported-platform-value"
+   ],
+   "requires": []
+  }
+ },
+ {
+  "id": "no-supported-platform",
+  "note": "Recipes for omitted platforms only are rejected.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "echo installed"
+     },
+     "Platform": {
+      "os": "windows"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    },
+    {
+     "Platform": {
+      "os": "linux",
+      "architecture": "x86"
+     },
+     "Lifecycle": {},
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "no-supported-platform"
+   ],
+   "requires": []
+  }
+ },
+ {
+  "id": "duplicate-platform-rejected",
+  "note": "The native catalog rejects duplicate OS/architecture pairs.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "echo installed"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    },
+    {
+     "Lifecycle": {
+      "install": "echo installed"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "duplicate-platform"
+   ],
+   "requires": []
+  }
+ },
+ {
+  "id": "unarchive-rejected",
+  "note": "Native artifacts are single opaque files.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "echo installed"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar",
+       "Unarchive": "ZIP"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "unsupported-unarchive"
+   ],
+   "requires": []
+  }
+ },
+ {
+  "id": "execute-permission-rejected",
+  "note": "Artifact permissions are not translated.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "echo installed"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar",
+       "Permission": {
+        "Execute": "OWNER"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "unsupported-artifact-permission"
+   ],
+   "requires": []
+  }
+ },
+ {
+  "id": "unbound-artifact-rejected",
+  "note": "Every artifact needs an operator-supplied Walrus blob and authenticated SHA-256 binding.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "echo installed"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {},
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "unbound-artifact"
+   ],
+   "requires": []
+  }
+ },
+ {
+  "id": "two-artifacts-rejected",
+  "note": "Native recipes bind exactly one artifact.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "echo installed"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      },
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello-arm.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "artifact-count"
+   ],
+   "requires": []
+  }
+ },
+ {
+  "id": "no-artifact-rejected",
+  "note": "Native recipes require an artifact.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "echo installed"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": []
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "artifact-count"
+   ],
+   "requires": []
+  }
+ },
+ {
+  "id": "global-lifecycle-rejected",
+  "note": "Global lifecycle selections are not translated.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "echo installed"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ],
+     "Selections": [
+      "all"
+     ]
+    }
+   ],
+   "Lifecycle": {
+    "all": {
+     "install": "echo i"
+    }
+   }
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "global-lifecycle-selections"
+   ],
+   "requires": []
+  }
+ },
+ {
+  "id": "format-version-rejected",
+  "note": "Only RecipeFormatVersion 2020-01-25 exists.",
+  "recipe": {
+   "RecipeFormatVersion": "2021-01-01",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "echo installed"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "unsupported-format-version"
+   ],
+   "requires": []
+  }
+ },
+ {
+  "id": "unknown-field-rejected",
+  "note": "Unknown top-level keys are rejected.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "echo installed"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ],
+   "ComponentLicense": "MIT"
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "unknown-field"
+   ],
+   "requires": []
+  }
+ },
+ {
+  "id": "invalid-version-rejected",
+  "note": "ComponentVersion must be SemVer.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "echo installed"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "invalid-component-version"
+   ],
+   "requires": []
+  }
+ },
+ {
+  "id": "invalid-name-rejected",
+  "note": "Native component-name grammar applies.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com/example",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "echo installed"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "invalid-component-name"
+   ],
+   "requires": []
+  }
+ },
+ {
+  "id": "unknown-variable-rejected",
+  "note": "Unknown interpolation namespaces are rejected.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "echo {secret:token}"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "unknown-variable"
+   ],
+   "requires": []
+  }
+ },
+ {
+  "id": "uninstall-deferred",
+  "note": "Uninstall belongs to supervised lifecycle.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "echo i",
+      "uninstall": "echo u"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "defer",
+   "reasons": [
+    "managed-lifecycle-step"
+   ],
+   "requires": [
+    "SF-014"
+   ]
+  }
+ }
+]
