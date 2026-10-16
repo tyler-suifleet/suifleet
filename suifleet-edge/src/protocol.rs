@@ -11,7 +11,7 @@ pub const RECIPE_VERSION: &str = "1.0";
 pub const RECIPE_VERSIONS: &[&str] = &["1.0", "1.1"];
 pub const STATUS_APPLIED: u8 = 1;
 pub const STATUS_FAILED: u8 = 2;
-pub const REQUIRED_TYPES: &[&str] = &["device_registry::DeviceRegistry", "device_registry::Device", "device_group::DeviceGroup", "device_group::GroupCreated", "device_cap::DeviceCap", "device_cap::DeviceAddressKey", "deployment_manager::DeploymentRecord", "deployment_manager::DeploymentCreated", "deployment_manager::DeviceStatusUpdated", "deployment_manager::TargetGroupsKey", "deployment_manager::TargetDevicesKey", "deployment_manager::StatusesKey", "deployment_manager::RecipeDigestKey", "deployment_manager::ReceiptsKey", "deployment_manager::Receipts", "deployment_manager::DeviceStatusReported", "device_registry::IdentityKey", "device_registry::Identity", "device_registry::DeviceIdentityChanged", "device_registry::CustodyKey", "device_registry::DeviceOwnerCap", "deployment_manager::DelegateKey", "enrollment::EnrollmentPolicy", "enrollment::DeviceEnrolled", "roles::DeployerRole", "roles::RoleKey", "roles::RoleGranted"];
+pub const REQUIRED_TYPES: &[&str] = &["device_registry::DeviceRegistry", "device_registry::Device", "device_group::DeviceGroup", "device_group::GroupCreated", "device_cap::DeviceCap", "device_cap::DeviceAddressKey", "deployment_manager::DeploymentRecord", "deployment_manager::DeploymentCreated", "deployment_manager::DeviceStatusUpdated", "deployment_manager::TargetGroupsKey", "deployment_manager::TargetDevicesKey", "deployment_manager::StatusesKey", "deployment_manager::RecipeDigestKey", "deployment_manager::ReceiptsKey", "deployment_manager::Receipts", "deployment_manager::DeviceStatusReported", "device_registry::IdentityKey", "device_registry::Identity", "device_registry::DeviceIdentityChanged", "device_registry::CustodyKey", "device_registry::DeviceOwnerCap", "deployment_manager::DelegateKey", "enrollment::EnrollmentPolicy", "enrollment::DeviceEnrolled", "roles::DeployerRole", "roles::RoleKey", "roles::RoleGranted", "device_group::DeviceAddedToGroup", "deployment_manager::ManagedKey", "desired_state::DesiredKey", "desired_state::DesiredState", "desired_state::DesiredStateChanged", "deployment_manager::ControlKey", "deployment_manager::Control"];
 pub const MOVE_ABI_JSON: &str = include_str!("../../interfaces/fleet-v1.json");
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Entry<K, V> { pub key: K, pub value: V }
@@ -25,6 +25,7 @@ pub mod component_catalog {
     pub const MODULE: &str = "component_catalog";
     pub const CREATE_CATALOG: &str = "create_catalog";
     pub const CREATE_DEPLOYMENT: &str = "create_deployment";
+    pub const CREATE_DEPLOYMENT_PAUSED: &str = "create_deployment_paused";
     pub const DELETE_DEPLOYMENT: &str = "delete_deployment";
     pub const PUBLISH_VERSION: &str = "publish_version";
     pub const PUBLISHER: &str = "publisher";
@@ -85,6 +86,8 @@ pub mod deployment_manager {
     use super::*;
     pub const MODULE: &str = "deployment_manager";
     pub const ARTIFACT_SHA256: &str = "artifact_sha256";
+    pub const COMPONENT_NAME: &str = "component_name";
+    pub const CONTROL: &str = "control";
     pub const CREATE_DEPLOYMENT: &str = "create_deployment";
     pub const CREATE_DEPLOYMENT_VERIFIED: &str = "create_deployment_verified";
     pub const CREATOR: &str = "creator";
@@ -92,7 +95,10 @@ pub mod deployment_manager {
     pub const DELETE_DEPLOYMENT: &str = "delete_deployment";
     pub const HAS_CURRENT_RECEIPTS: &str = "has_current_receipts";
     pub const HAS_RECEIPTS: &str = "has_receipts";
+    pub const HAS_RECIPE_DIGEST: &str = "has_recipe_digest";
+    pub const IS_MANAGED: &str = "is_managed";
     pub const MIGRATE: &str = "migrate";
+    pub const NEW_DEPLOYMENT_VERIFIED: &str = "new_deployment_verified";
     pub const RECEIPT_STATUS: &str = "receipt_status";
     pub const RECEIPT_STATUSES: &str = "receipt_statuses";
     pub const RECEIPTS_VERSION: &str = "receipts_version";
@@ -102,11 +108,29 @@ pub mod deployment_manager {
     pub const REPORT_STATUS_FOR_GROUP: &str = "report_status_for_group";
     pub const REPORT_VERIFIED_STATUS: &str = "report_verified_status";
     pub const REPORT_VERIFIED_STATUS_FOR_GROUP: &str = "report_verified_status_for_group";
+    pub const SET_CONTROL: &str = "set_control";
+    pub const SHARE_DEPLOYMENT: &str = "share_deployment";
     pub const STATUS_APPLIED: &str = "status_applied";
     pub const STATUS_FAILED: &str = "status_failed";
     pub const STATUSES: &str = "statuses";
     pub const TARGET_DEVICES: &str = "target_devices";
     pub const TARGET_GROUPS: &str = "target_groups";
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Control {
+        pub revision: u64,
+        pub state: u8,
+        pub not_before_ms: u64,
+        pub expires_ms: u64,
+        pub window_start_ms: u64,
+        pub window_end_ms: u64,
+        pub notice_ms: u64,
+    }
+    impl Control { pub const MOVE_TYPE: &'static str = "deployment_manager::Control"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct ControlKey {
+        pub dummy_field: bool,
+    }
+    impl ControlKey { pub const MOVE_TYPE: &'static str = "deployment_manager::ControlKey"; }
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct DelegateKey {
         pub dummy_field: bool,
@@ -158,6 +182,11 @@ pub mod deployment_manager {
     }
     impl DeviceStatusUpdated { pub const MOVE_TYPE: &'static str = "deployment_manager::DeviceStatusUpdated"; }
     #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct ManagedKey {
+        pub dummy_field: bool,
+    }
+    impl ManagedKey { pub const MOVE_TYPE: &'static str = "deployment_manager::ManagedKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct Receipts {
         pub version: u64,
         pub statuses: super::VecMap<[u8; 32], u8>,
@@ -188,6 +217,45 @@ pub mod deployment_manager {
         pub dummy_field: bool,
     }
     impl TargetGroupsKey { pub const MOVE_TYPE: &'static str = "deployment_manager::TargetGroupsKey"; }
+}
+pub mod desired_state {
+    use super::*;
+    pub const MODULE: &str = "desired_state";
+    pub const BEGIN: &str = "begin";
+    pub const COMMIT: &str = "commit";
+    pub const COMPONENTS: &str = "components";
+    pub const PLAN_COMPONENTS: &str = "plan_components";
+    pub const REMOVE_COMPONENT: &str = "remove_component";
+    pub const REVISION: &str = "revision";
+    pub const SET_COMPONENT: &str = "set_component";
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DesiredKey {
+        pub dummy_field: bool,
+    }
+    impl DesiredKey { pub const MOVE_TYPE: &'static str = "desired_state::DesiredKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DesiredState {
+        pub revision: u64,
+        pub components: super::VecMap<String, [u8; 32]>,
+        pub updated_at: u64,
+    }
+    impl DesiredState { pub const MOVE_TYPE: &'static str = "desired_state::DesiredState"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DesiredStateChanged {
+        pub group_id: [u8; 32],
+        pub revision: u64,
+        pub component_names: Vec<String>,
+        pub deployments: Vec<[u8; 32]>,
+    }
+    impl DesiredStateChanged { pub const MOVE_TYPE: &'static str = "desired_state::DesiredStateChanged"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct RevisionPlan {
+        pub group_id: [u8; 32],
+        pub admin: [u8; 32],
+        pub base_revision: u64,
+        pub components: super::VecMap<String, [u8; 32]>,
+    }
+    impl RevisionPlan { pub const MOVE_TYPE: &'static str = "desired_state::RevisionPlan"; }
 }
 pub mod device_cap {
     use super::*;

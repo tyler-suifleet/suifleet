@@ -60,6 +60,8 @@ test-ota:
 	$(RUN) python3 scripts/test_dependency_ota.py
 	$(RUN) python3 scripts/test_ota.py --firmware-helper
 	$(RUN) python3 scripts/test_firmware_restart.py
+	$(RUN) python3 scripts/test_desired_state.py
+	$(RUN) python3 scripts/test_deployment_control.py
 
 # SF-030 harmless test component: fixture tests (system shell, plus busybox when
 # installed), then the real daemon applying it through suifleet-test-updater.
@@ -82,6 +84,7 @@ check-interfaces:
 	$(RUN) python3 scripts/test_generated_interfaces.py
 	$(RUN) node scripts/test_protocol.cjs
 	$(RUN) node scripts/test_component_catalog.cjs
+	$(RUN) node scripts/test_deployment_control.cjs
 
 generate-interfaces:
 	$(RUN) python3 scripts/generate_interfaces.py
@@ -168,10 +171,18 @@ test-manifest:
 	$(RUN) node scripts/test_deployment_receipts.cjs
 	$(RUN) node scripts/test_frontend_queries.cjs
 	$(RUN) node scripts/test_target_groups.cjs
+	$(RUN) node scripts/test_desired_state.cjs
 
 test-manifest-live:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
 	$(RUN) python3 scripts/test_manifest_upgrades.py
+
+# SF-013 desired state on a disposable localnet (start it first): main's
+# contracts upgraded in place, then reconciliation judged by on-chain receipts.
+.PHONY: test-desired-state-localnet
+test-desired-state-localnet:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_desired_state_localnet.py
 
 # SF-024 fleet indexer, API and CLI (suifleet-indexer/, docs/INDEXER.md).
 .PHONY: indexer-build indexer-test test-indexer-localnet
@@ -224,3 +235,8 @@ test-daemon-localnet:
 test-testnet:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_testnet*.py'
 	$(RUN) node scripts/test_testnet_cache.cjs
+
+.PHONY: test-deployment-control-localnet
+test-deployment-control-localnet:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+	$(RUN) python3 scripts/test_deployment_control_localnet.py

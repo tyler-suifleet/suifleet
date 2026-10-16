@@ -46,3 +46,6 @@ encrypted-live-state/
 evidence/
 live-evidence.json
 /dist/
+
+# Sanitized local security reports (raw reports belong outside the checkout)
+security-reports/

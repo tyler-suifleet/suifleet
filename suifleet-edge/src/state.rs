@@ -2,7 +2,7 @@ use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs::{File, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
@@ -11,6 +11,9 @@ use std::{
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct State {
     pub binding: String,
+    /// Pre-apply notices/deferrals are not execution intents or status receipts.
+    #[serde(default)]
+    pub deferred: BTreeMap<String, crate::control::Deferred>,
     pub cursor: Option<Value>,
     #[serde(default)]
     pub initialized: bool,
@@ -18,6 +21,36 @@ pub struct State {
     /// Components on this device by name, maintained by every deployment.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub components: BTreeMap<String, Component>,
+    /// Resume point of the DeviceAddedToGroup scan, which starts at genesis
+    /// whatever the deployment baseline (membership predates enrollment).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub membership_cursor: Option<Value>,
+    /// Groups that ever added this device. Membership itself is re-read from
+    /// each group object on every poll.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub groups: BTreeSet<String>,
+    /// Component name → deployment desired-state reconciliation last acted on.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub managed: BTreeMap<String, String>,
+    /// Component name → deployment this daemon last started for it, one-shot
+    /// or desired, saved with that deployment's intent. Its outcome in
+    /// `deployments` says whether it is what the component now runs.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub current: BTreeMap<String, String>,
+    /// Fingerprint of the desired state last reconciled (reconcile.rs).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub desired: Option<String>,
+    /// Desired-state step last started, saved before its intent. Until it has
+    /// applied, later steps stay stopped, across restarts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step: Option<Step>,
+}
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Step {
+    pub deployment: String,
+    /// Fingerprint of the desired state it was started for: that state stays
+    /// stopped by it, newer ones only while it is in flight.
+    pub desired: String,
 }
 /// An installed component. It is recorded unconfirmed before its install
 /// starts and confirmed only once the install is known to have succeeded;
