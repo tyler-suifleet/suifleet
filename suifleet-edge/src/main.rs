@@ -14,6 +14,7 @@ mod protocol_tests;
 mod release;
 mod state;
 mod sui_client;
+mod supervisor;
 mod walrus_client;
 
 use apply::ApplyRunner;
@@ -114,6 +115,20 @@ async fn main() -> anyhow::Result<()> {
     }
     let runner = ApplyRunner::new(cfg.apply.clone());
     let store = components::Store::open(&cfg.runtime.state_dir, &cfg.components);
+    // Committed components start again on every daemon start (bootstrap/reboot).
+    let mut supervisor = supervisor::Supervisor::open(
+        &cfg.runtime.state_dir,
+        supervisor::Settings {
+            startup: Duration::from_secs(cfg.runtime.component_startup_seconds),
+            ready_timeout: Duration::from_secs(cfg.runtime.component_ready_timeout_seconds),
+            stop_timeout: Duration::from_secs(cfg.runtime.component_stop_timeout_seconds),
+            max_restarts: cfg.runtime.component_max_restarts,
+            max_memory_bytes: cfg.apply.max_memory_bytes,
+        },
+    )?;
+    // The daemon is ready before its components are: bootstrap waits up to a
+    // readiness timeout per component, which would otherwise exceed the
+    // unit's start deadline and restart the daemon into the same bootstrap.
     #[cfg(feature = "systemd")]
     tokio::spawn(async {
         loop {
@@ -123,23 +138,32 @@ async fn main() -> anyhow::Result<()> {
     });
     #[cfg(feature = "systemd")]
     sd_notify::notify(false, &[sd_notify::NotifyState::Ready]).ok();
-    info!(
-        address = sui.address(),
-        "Daemon started with durable deployment polling"
-    );
     let shutdown = shutdown_signal();
     tokio::pin!(shutdown);
-    loop {
-        let cycle = poll(&cfg, &sui, &walrus, &runner, store.as_ref(), &mut journal);
-        tokio::select! {
-            result = cycle => { if let Err(error) = result { warn!(%error, "Sync failed; retrying without advancing cursor"); } }
-            _ = &mut shutdown => { info!("Stopping; interrupted apply requires inspection on restart"); break; }
-        }
-        tokio::select! {
-            _ = tokio::time::sleep(Duration::from_secs(cfg.runtime.poll_seconds)) => {}
-            _ = &mut shutdown => break,
+    // A stop during bootstrap still stops whatever it already started.
+    let stopping = tokio::select! {
+        _ = supervisor.bootstrap() => false,
+        _ = &mut shutdown => { info!("Stopping during component bootstrap"); true }
+    };
+    if !stopping {
+        info!(
+            address = sui.address(),
+            "Daemon started with durable deployment polling"
+        );
+        loop {
+            let cycle = poll(&cfg, &sui, &walrus, &runner, store.as_ref(), &mut supervisor, &mut journal);
+            tokio::select! {
+                result = cycle => { if let Err(error) = result { warn!(%error, "Sync failed; retrying without advancing cursor"); } }
+                _ = &mut shutdown => { info!("Stopping; interrupted apply requires inspection on restart"); break; }
+            }
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(cfg.runtime.poll_seconds)) => {}
+                _ = &mut shutdown => break,
+            }
         }
     }
+    // Components stop with the daemon (shutdown command, then the whole group).
+    supervisor.stop_all().await;
     Ok(())
 }
 
@@ -170,6 +194,7 @@ async fn poll(
     walrus: &WalrusClient,
     runner: &ApplyRunner,
     store: Option<&components::Store>,
+    supervisor: &mut supervisor::Supervisor,
     journal: &mut Journal,
 ) -> anyhow::Result<()> {
     sui.validate_deployment().await?;
@@ -224,7 +249,7 @@ async fn poll(
                 if sui.is_managed(&event.deployment_id).await? {
                     info!(deployment = event.deployment_id, "Managed by desired state; left to reconciliation");
                 } else {
-                    execute(cfg, sui, walrus, runner, store, journal, &event, &record).await?;
+                    execute(cfg, sui, walrus, runner, store, supervisor, journal, &event, &record).await?;
                 }
             }
             journal.state.cursor = Some(cursor);
@@ -257,10 +282,10 @@ async fn poll(
             journal.state.deferred.remove(&id);
             journal.save()?;
         } else if sui.authorized_target(&event, &cfg.device.device_object_id).await? {
-            execute(cfg, sui, walrus, runner, store, journal, &event, &record).await?;
+            execute(cfg, sui, walrus, runner, store, supervisor, journal, &event, &record).await?;
         }
     }
-    reconcile(cfg, sui, walrus, runner, store, journal).await
+    reconcile(cfg, sui, walrus, runner, store, supervisor, journal).await
 }
 
 /// Apply one authorized deployment, journaling intent first, and record its
@@ -272,6 +297,7 @@ async fn execute(
     walrus: &WalrusClient,
     runner: &ApplyRunner,
     store: Option<&components::Store>,
+    supervisor: &mut supervisor::Supervisor,
     journal: &mut Journal,
     event: &DeploymentCreatedEvent,
     record: &sui_client::Object,
@@ -304,7 +330,7 @@ async fn execute(
         .join(hex::encode(identity::hash(event.deployment_id.as_bytes())));
     std::fs::create_dir_all(&directory)?;
     let result =
-        handle_deployment(sui, walrus, runner, &cfg.apply, store, journal, &resolved, &directory).await;
+        handle_deployment(sui, walrus, runner, &cfg.apply, store, supervisor, journal, &resolved, &directory).await;
     if matches!(&result, Err(error) if error.downcast_ref::<control::NotAdmitted>().is_some()) {
         let _ = std::fs::remove_dir_all(&directory);
         return Ok(None);
@@ -351,12 +377,14 @@ async fn admit(sui: &SuiClient, journal: &mut Journal, id: &str) -> anyhow::Resu
 
 /// Move toward the current desired state of every group this device is in
 /// (reconcile.rs describes the rules).
+#[allow(clippy::too_many_arguments)]
 async fn reconcile(
     cfg: &Config,
     sui: &SuiClient,
     walrus: &WalrusClient,
     runner: &ApplyRunner,
     store: Option<&components::Store>,
+    supervisor: &mut supervisor::Supervisor,
     journal: &mut Journal,
 ) -> anyhow::Result<()> {
     let device = &cfg.device.device_object_id;
@@ -462,7 +490,7 @@ async fn reconcile(
         });
         journal.state.managed.insert(component.clone(), deployment.clone());
         journal.save()?;
-        let status = execute(cfg, sui, walrus, runner, store, journal, &event, &record).await?;
+        let status = execute(cfg, sui, walrus, runner, store, supervisor, journal, &event, &record).await?;
         if status != Some(protocol::STATUS_APPLIED) {
             if status.is_none() {
                 info!(component, deployment, "Plan deferred; admission reconsidered on the next poll");
@@ -484,6 +512,7 @@ struct Install {
     blob: String,
     artifact: PathBuf,
     install: Option<String>,
+    supervised: Option<supervisor::Lifecycle>,
     root: bool,
 }
 
@@ -497,6 +526,7 @@ async fn handle_deployment(
     runner: &ApplyRunner,
     config: &config::ApplyConfig,
     store: Option<&components::Store>,
+    supervisor: &mut supervisor::Supervisor,
     journal: &mut Journal,
     resolved: &catalog::Resolved,
     directory: &Path,
@@ -542,7 +572,7 @@ async fn handle_deployment(
             dependencies: planned.dependencies.clone(),
             confirmed: false,
         };
-        let (component, blob, install) = if root {
+        let (component, blob, install, supervised) = if root {
             (
                 component(
                     resolved.catalog.as_ref().map(|c| c.version_id.clone()),
@@ -551,12 +581,14 @@ async fn handle_deployment(
                 ),
                 recipe.artifact_blob_id.clone(),
                 recipe.lifecycle.install.clone(),
+                supervisor::Lifecycle::of(&recipe.lifecycle)?,
             )
         } else {
             let loaded = &loader.loaded[&(planned.name.clone(), planned.version.clone())];
-            // The privileged helper only ever receives the deployed artifact.
+            // The privileged helper only ever receives the deployed artifact;
+            // a supervised dependency never goes to it.
             anyhow::ensure!(
-                config.mode == config::ApplyMode::Direct || loaded.install.is_some(),
+                config.mode == config::ApplyMode::Direct || loaded.install.is_some() || loaded.supervised.is_some(),
                 "dependency {} {} has no install command; the firmware helper applies only the deployed component",
                 planned.name,
                 planned.version
@@ -565,6 +597,7 @@ async fn handle_deployment(
                 component(Some(loaded.version_id.clone()), &loaded.recipe_sha256, &loaded.artifact_sha256),
                 loaded.artifact_blob_id.clone(),
                 loaded.install.clone(),
+                loaded.supervised.clone(),
             )
         };
         installs.push(Install {
@@ -577,6 +610,7 @@ async fn handle_deployment(
             blob,
             component,
             install,
+            supervised,
             root,
         });
     }
@@ -628,9 +662,28 @@ async fn handle_deployment(
         } else {
             firmware::request_id(&format!("{}/{}", event.deployment_id, install.name))
         };
-        let result = runner
-            .apply(&install.artifact, install.install.as_deref(), &request)
-            .await;
+        // A run command makes it a supervised component: installed into its
+        // version workspace and confirmed only once ready (dependencies,
+        // planned first, are therefore ready before their dependents start).
+        let result = match install.supervised.clone() {
+            Some(lifecycle) => {
+                let after = install.component.dependencies.keys().cloned().collect();
+                let spec = supervisor::Spec::new(&install.name, &install.component.version, &event.deployment_id, lifecycle, after);
+                supervisor
+                    .deploy(spec, &install.artifact, install.install.as_deref(), runner, &request)
+                    .await
+            }
+            // Installed while a supervised version of the same name keeps
+            // running; once it succeeds, that version is stopped and
+            // uncommitted, or the deployment fails.
+            None => match runner.apply(&install.artifact, install.install.as_deref(), &request).await {
+                Ok(()) if supervisor.supervises(&install.name) => supervisor
+                    .retire(&install.name)
+                    .await
+                    .map_err(|error| error.context("installed, but cannot stop the supervised version it replaces")),
+                result => result,
+            },
+        };
         if let Err(error) = result {
             return Err(if install.root {
                 error

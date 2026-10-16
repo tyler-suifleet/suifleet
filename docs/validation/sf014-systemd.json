@@ -1,0 +1,27 @@
+{
+  "ticket": "SF-014",
+  "head": "ac2efd292a8df0ae3cdd1632adede232dedc9e65",
+  "checks": [
+    "suifleet.service active as shipped (User=suifleet, Type=notify, MainPID 150 in /system.slice/suifleet.service)",
+    "component Applied once ready; run plus grouped, setsid, env-cleared and reparented env-cleared setsid descendants all in the unit cgroup",
+    "component crash: restarted by the supervisor; all of its descendants killed; daemon unaffected",
+    "daemon SIGKILL: systemd emptied the cgroup and restarted the unit (NRestarts 0->1); successor accepted the sealed cgroup, bootstrapped the component; no earlier process survived; one instance",
+    "systemctl stop: graceful shutdown command ran; unit cgroup empty; status stopped; report sent",
+    "slow bootstrap: ready before two unready components finished (121s, start deadline 1min 30s); no timeout or restart",
+    "after bootstrap the same daemon polled and applied a repair deployment (svc 1.0.1 running)",
+    "systemctl stop during bootstrap: stopped in 0.5s; started and still-starting components stopped; cgroup empty"
+  ],
+  "systemd": "systemd 252 (252.39-1~deb12u2)",
+  "container_cgroup": "cgroup2fs",
+  "os": "Debian GNU/Linux 12 (bookworm)",
+  "units_sha256": {
+    "suifleet.service": "80b61269e3b149c8c513f4876f3c546738bee8a7f8219afaa02c7782c7a128e6",
+    "suifleet-provision.service": "0e7ced8971f1de43ad97d3b5f6d018d0ee85d2c9702c27ce56b02665f83811bc"
+  },
+  "daemon_sha256": "e55587ba72590c0e845b9584a922988acfc028785f6878ea8d41b467ac1b9308",
+  "host": {
+    "kernel": "6.6.87.2-microsoft-standard-WSL2",
+    "docker": "29.8.0",
+    "cgroup": "cgroup2fs"
+  }
+}
