@@ -1603,7 +1603,6 @@
       "phase": "baseline",
       "kind": "type:feature",
       "depends_on": [
-        "SF-029",
         "SF-030"
       ],
       "paths": [
@@ -1612,7 +1611,7 @@
         "docs"
       ],
       "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
-      "description": "Implement offline wallet-to-edge acceptance harness. Implement the missing SF-031 harness and deterministic local-network/Testnet profiles without requiring a physical Pi to write or test the runner.",
+      "description": "Implement offline wallet-to-edge acceptance harness. Implement the missing SF-031 harness and deterministic local-network/Testnet profiles without requiring a physical Pi to write or test the runner. Physical Pi hardware, bootable target image and target acceptance are deferred separately and do not block this offline software harness.",
       "acceptance": [
         "Implement the missing SF-031 harness and deterministic local-network/Testnet profiles without requiring a physical Pi to write or test the runner.",
         "Validate explicit device/SSH/manifest/accounts/endpoints, preserve keys/journals, generate isolated test-component artifacts and verify digests and reported results. Support offline harness tests and an explicit hardware execution mode with hardware lock only while actually used.",
@@ -1674,6 +1673,29 @@
         "Provide regression tests for dead/live/PID-reused wrappers, blocked results, restart reconciliation and ownership changes; document diagnostics and deploy reviewed automation changes."
       ],
       "validation": "Dispatcher/coordinator regression tests, offline tracking validation, service status and operational capacity evidence; no relaxed review or acceptance gates."
+    },
+    {
+      "key": "SF-068",
+      "title": "Defer physical Pi and target-image acceptance without blocking software delivery",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "baseline",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "AGENTS.md",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Apply the user instruction that Pi work must not block software progress; target issues can be resolved later.",
+      "evidence": "User explicitly requests no Pi blocking and allows working through target issues later.",
+      "acceptance": [
+        "Keep physical Pi boot, networking, power-loss and target-only integration acceptance open in SF031 without blocking unrelated software implementation or merge.",
+        "Place refreshed target-image build SF066 on hold and retain its incomplete build evidence; do not claim a new image exists or remove real software API dependencies.",
+        "Apply physical-target-only deferrals to existing and future software implementation tickets in checked-in and running acceptance policy, retaining source/security/local tests and normal automatic testnet gates.",
+        "Remove target-image prerequisites from the offline harness specification; preserve real fixture/component requirements and publish policy notes on affected PRs."
+      ],
+      "validation": "Offline tracking and policy consistency checks, dependency audit, independent documentation review; no physical hardware or new image required."
     }
   ]
 }
