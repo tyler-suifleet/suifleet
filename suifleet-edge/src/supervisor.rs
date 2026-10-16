@@ -342,8 +342,12 @@ impl Supervisor {
         let expected = std::fs::read_to_string(workspace.join("artifact.sha256"))?;
         anyhow::ensure!(crate::walrus_client::sha256_file(&workspace.join("artifact"))? == expected,
             "previous application artifact digest mismatch; recovery refused");
+        // Like the version's other commands, it may see its configuration,
+        // so its output goes to the private component log.
+        let materialized = materialize(&self.settings.overlay_dir, &previous.name, &workspace)?;
+        let output = self.component_log(&previous.name)?;
         self.record.arm()?;
-        runner.apply(&self.workspace(previous).join("artifact"), Some(&command), request, None, None).await
+        runner.apply(&workspace.join("artifact"), Some(&command), request, materialized.as_deref(), Some(output)).await
             .map_err(|e| e.context("application recovery failed; operator inspection required"))?;
         Ok(())
     }
@@ -1641,7 +1645,7 @@ mod tests {
         let current = quote(&state.join("current"));
         let config = quote(&state.join("config"));
         s.configure_recovery(BTreeMap::from([("app".into(), format!(
-            "cp {{artifact}} {current}; cp {{artifacts}}/config {config}"
+            "cp {{artifact}} {current}; cp {{artifacts}}/config {config}; cat {{configuration}}; echo recovery-output >&2"
         ))]));
         let mut v1 = f.spec("1.0.0", "exec sleep 300");
         v1.readiness = Some(format!("test \"$(cat {current})\" = 'artifact 1.0.0'; test \"$(cat {config})\" = stable"));
@@ -1654,6 +1658,10 @@ mod tests {
         assert_eq!(std::fs::read_to_string(state.join("current")).unwrap(), "artifact 1.0.0");
         assert_eq!(std::fs::read_to_string(state.join("config")).unwrap().trim(), "stable");
         assert!(s.restored("app", &v1.deployment));
+        // The recovery command receives the previous version's configuration,
+        // and its output goes to the private component log.
+        let log = std::fs::read_to_string(f.dir.join("supervised/app/component.log")).unwrap();
+        assert!(log.contains("{}") && log.contains("recovery-output"), "{log}");
         // A readiness/health failure invokes the same explicit recovery.
         let mut v3 = f.spec("3.0.0", "exec sleep 300");
         v3.readiness = Some("exit 1".into());
