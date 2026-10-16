@@ -135,13 +135,18 @@ def run(binary):
         return int(time.time() * 1000)
 
     def deploy(id, version, payload):
-        sim.add(id)
-        event = sim.events[-1]["parsedJson"]
+        # Complete the event before publishing it: the daemon polls concurrently
+        # and rejects a record that disagrees with the event it already read.
+        staging = Simulator()
+        staging.add(id)
+        event = staging.events[-1]["parsedJson"]
         digest = hashlib.sha256(payload).hexdigest()
         blobs[f"artifact-{id}"] = payload
         event.update(component_name=COMPONENT, version=version, artifact_sha256=digest)
-        sim.recipes[event["recipe_blob_id"]].update(componentName=COMPONENT, componentVersion=version,
-                                                     artifactBlobId=f"artifact-{id}", artifactSha256=digest, lifecycle={})
+        staging.recipes[event["recipe_blob_id"]].update(componentName=COMPONENT, componentVersion=version,
+                                                         artifactBlobId=f"artifact-{id}", artifactSha256=digest, lifecycle={})
+        sim.recipes.update(staging.recipes)
+        sim.events.append(dict(id={"txDigest": f"event-{len(sim.events)}", "eventSeq": "0"}, parsedJson=event))
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
