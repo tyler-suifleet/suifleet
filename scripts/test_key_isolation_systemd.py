@@ -5,9 +5,13 @@ signature with Mysten's sui-crypto): no keys of value, gas, public network or
 hardware. Uses the disposable harness of scripts/test_supervisor_systemd.py
 (host side: needs Docker).
 
-  migration          -> an existing key owned by the daemon user (old layout)
-                        is handed to suifleet-signer by the shipped provisioning
-                        unit; the device address is unchanged
+  legacy             -> the updated package with an unchanged legacy
+                        config.toml (keypair_path, no signer.toml): provisioning
+                        leaves the key with the daemon user, which reports
+  migration          -> after signer.toml is installed and config.toml switched
+                        to the service signer, a daemon restart (root
+                        ExecStartPre=) hands the same key to suifleet-signer; the
+                        address and journal are unchanged
   0x901 probe        -> a supervised component running in suifleet.service's
                         sandbox, as the daemon user, cannot: read device.key or
                         signer.toml; see the signer's processes in /proc; read
@@ -26,6 +30,15 @@ hardware. Uses the disposable harness of scripts/test_supervisor_systemd.py
                         KillMode=mixed removes such orphans within milliseconds;
                         a test-only drop-in (KillMode=process, Restart=no) holds
                         the orphan alive so the refusal is observed every run
+  hijack             -> a component-written daemon-update launcher state (its own
+                        executable as current/pending) is ignored: the shipped
+                        config cannot enable [daemon_update] with the service
+                        signer (the real binary refuses it), and the restarted
+                        main process is the base binary. A main process running
+                        any other executable (what an obeyed launcher state
+                        would start) is never recorded: the root recorder
+                        removes the record, so the signing service refuses
+                        that process's otherwise valid report requests
 """
 import argparse
 import base64
@@ -34,6 +47,7 @@ import json
 import os
 from pathlib import Path
 import re
+import subprocess
 import sys
 import threading
 import time
@@ -232,19 +246,20 @@ def inside(args):
         supported_clients={"dapp": {"min": "0.0.1", "max_exclusive": "0.1.0"}, "edge": {"min": "0.1.0", "max_exclusive": "0.3.0"}},
         walrus={"publisher_url": url, "aggregator_url": url})
     (etc / "deployment.json").write_text(json.dumps(manifest))
-    (etc / "signer.toml").write_text(f'manifest_path = "deployment.json"\ndevice_cap_id = "{CAP}"\n'
-        f'keypair_path = "{key}"\ncaller_unit = "suifleet.service"\n')
-    sh("chown", "root:suifleet-signer", str(etc / "signer.toml"))
-    (etc / "signer.toml").chmod(0o640)
-    (etc / "config.toml").write_text('[sui]\nmanifest_path = "deployment.json"\n'
-        f'[device]\ndevice_object_id = "{DEVICE}"\ndevice_cap_id = "{CAP}"\n'
-        '[device.signer]\nkind = "service"\nsocket = "/run/suifleet-signer/sign.sock"\n'
-        f'[walrus]\naggregator_url = "{url}"\n'
-        '[apply]\ncommand = "/bin/false"\ntimeout_seconds = 5\nallow_recipe_commands = true\n'
-        '[runtime]\nstate_dir = "/var/lib/suifleet"\npoll_seconds = 1\ncomponent_startup_seconds = 1\n')
-    for name in ("deployment.json", "config.toml"):
-        sh("chown", "root:suifleet", str(etc / name))
-        (etc / name).chmod(0o640)
+    def write_config(signer, extra=""):
+        path = etc / "config.toml"
+        path.write_text('[sui]\nmanifest_path = "deployment.json"\n'
+            f'[device]\ndevice_object_id = "{DEVICE}"\ndevice_cap_id = "{CAP}"\n' + signer +
+            f'[walrus]\naggregator_url = "{url}"\n'
+            '[apply]\ncommand = "/bin/false"\ntimeout_seconds = 5\nallow_recipe_commands = true\n'
+            '[runtime]\nstate_dir = "/var/lib/suifleet"\npoll_seconds = 1\ncomponent_startup_seconds = 1\n' + extra)
+        sh("chown", "root:suifleet", str(path))
+        path.chmod(0o640)
+        return path
+
+    # Old layout: the daemon loads the key itself and there is no signer.toml.
+    write_config(f'keypair_path = "{key}"\n')
+    sh("chown", "root:suifleet", str(etc / "deployment.json"))
     # signer.toml names the manifest relative to itself; the signer reads it too.
     (etc / "deployment.json").chmod(0o644)
     sh("systemctl", "daemon-reload")
@@ -270,20 +285,42 @@ def inside(args):
     def reported(id):
         return any(i == id for i, _ in sim.reports)
 
-    try:
-        sh("systemctl", "start", "suifleet-signer.socket", "suifleet")
-        wait(lambda: journal().get("initialized"), "daemon did not start through the signing service")
+    import pwd
+
+    def key_owner():
         stat = os.stat(key)
-        import pwd
-        assert pwd.getpwuid(stat.st_uid).pw_name == "suifleet-signer" and stat.st_mode & 0o777 == 0o600, (stat.st_uid, oct(stat.st_mode))
+        assert stat.st_mode & 0o777 == 0o600, oct(stat.st_mode)
+        return pwd.getpwuid(stat.st_uid).pw_name
+
+    try:
+        # A package update reaching a device whose configuration is unchanged.
+        sh("systemctl", "start", "suifleet-signer.socket", "suifleet")
+        wait(lambda: journal().get("initialized"), "the legacy daemon did not start")
+        assert key_owner() == "suifleet", key_owner()
+        deploy("0x900", "legacy", {})
+        wait(lambda: reported("0x900"), "the legacy daemon could not report after the package update")
+        legacy = outcome("0x900")
+        assert legacy.get("status") in (1, 2), legacy
+        check("legacy: with an unchanged config.toml (keypair_path) and no signer.toml, provisioning leaves the key with "
+              "the daemon user (0600), which keeps reporting")
+
+        (etc / "signer.toml").write_text(f'manifest_path = "deployment.json"\ndevice_cap_id = "{CAP}"\n'
+            f'keypair_path = "{key}"\ncaller_unit = "suifleet.service"\n')
+        sh("chown", "root:suifleet-signer", str(etc / "signer.toml"))
+        (etc / "signer.toml").chmod(0o640)
+        write_config('[device.signer]\nkind = "service"\nsocket = "/run/suifleet-signer/sign.sock"\n')
+        sh("systemctl", "restart", "suifleet")
+        wait(lambda: show("ActiveState") == "active", "the daemon did not restart on the service signer")
+        assert key_owner() == "suifleet-signer", key_owner()
         assert (etc / "device.address").read_text().strip() == ADDRESS
-        assert show("ActiveState") == "active"
+        assert outcome("0x900") == legacy, "the journal was not preserved"
         record = Path("/run/suifleet-signer/daemon.main")
         wait(lambda: record.exists() and record.read_text().split()[0] == show("MainPID"), "the main process was not recorded")
         record_stat = os.stat(record)
         assert record_stat.st_uid == 0 and record_stat.st_mode & 0o777 == 0o644, (record_stat.st_uid, oct(record_stat.st_mode))
-        check(f"migration: the existing key now belongs to suifleet-signer (0600); address unchanged ({ADDRESS[:12]}…); "
-              "the unit recorded its MainPID as root")
+        check(f"migration: after switching config.toml to the service signer, the daemon restart handed the same key to "
+              f"suifleet-signer (0600) without a reboot; address ({ADDRESS[:12]}…) and journal unchanged; the unit "
+              "recorded its MainPID as root")
 
         deploy("0x901", "probe", {"run": "exec python3 -c " + "'" + PROBE.replace("'", "'\\''") + "'"})
         work = state / "supervised" / "probe" / "work"
@@ -357,6 +394,65 @@ def inside(args):
         wait(lambda: reported("0x905"), "no report after the daemon was killed by a component")
         check(f"a component killed the daemon and, reparented to PID 1 in suifleet.service's cgroup, made {len(tries)} "
               "signing requests (ppid 1, unit cgroup verified as root): all refused as not the recorded main process; the restarted daemon reports again")
+
+        # A component (daemon user) writes launcher state naming its own executable.
+        install = state / "daemon"
+        evil = install / "versions" / "9.9.9-ee" / "suifleet"
+        evil.parent.mkdir(parents=True, exist_ok=True)
+        sh("install", "-m", "0755", "/usr/bin/suifleet", str(evil))
+        (install / "current").write_text(str(evil))
+        (install / "handoff.json").write_text(json.dumps({"deployment": "0x9ee", "version": "9.9.9", "candidate": str(evil),
+            "previous": str(evil), "attempts": 0, "phase": "pending", "error": None}))
+        sh("chown", "-R", "suifleet:suifleet", str(install))
+        updating = write_config('[device.signer]\nkind = "service"\nsocket = "/run/suifleet-signer/sign.sock"\n',
+                                '[daemon_update]\nenabled = true\ncomponent = "suifleet"\n')
+        refused = subprocess.run(["/usr/bin/suifleet", "--check-config", str(updating)], capture_output=True, text=True)
+        assert refused.returncode != 0 and "daemon_update cannot be enabled with the service signer" in refused.stderr, refused
+        write_config('[device.signer]\nkind = "service"\nsocket = "/run/suifleet-signer/sign.sock"\n')
+        before = show("MainPID")
+        sh("systemctl", "restart", "suifleet")
+        wait(lambda: show("MainPID") not in ("0", before) and record.read_text().split()[0] == show("MainPID"),
+             "the daemon did not restart and record its main process")
+        assert os.readlink(f"/proc/{show('MainPID')}/exe") == "/usr/bin/suifleet", os.readlink(f"/proc/{show('MainPID')}/exe")
+        deploy("0x906", "plain4", {})
+        wait(lambda: reported("0x906"), "no report after the launcher state was tampered with")
+
+        # What an obeyed launcher state would start: the unit's main process runs
+        # the component's executable (a full daemon, with this valid config and
+        # pending deployments). The root recorder must not record it.
+        hijack = Path("/etc/systemd/system/suifleet.service.d/hijack.conf")
+        hijack.write_text(f"[Service]\nExecStart=\nExecStart={evil}\n")
+        sh("systemctl", "daemon-reload")
+        def refusals():
+            text = re.sub(r"\x1b\[[0-9;]*m", "", sh("journalctl", "-u", "suifleet-signer", "--no-pager", "-o", "cat"))
+            return text.count("Signing request refused")
+        refused_before = refusals()
+        sh("systemctl", "restart", "suifleet")
+        hijacked = show("MainPID")
+        assert os.readlink(f"/proc/{hijacked}/exe") == str(evil), os.readlink(f"/proc/{hijacked}/exe")
+        log = re.sub(r"\x1b\[[0-9;]*m", "", sh("journalctl", "-u", "suifleet", "--no-pager", "-o", "cat"))
+        assert f"main process {hijacked} is not running the base binary" in log, log[-3000:]
+        assert not record.exists(), "a main process running another executable was recorded"
+        deploy("0x9ef", "hijacked", {})
+        wait(lambda: outcome("0x9ef").get("status") in (1, 2), "the hijacked daemon did not try to report")
+        wait(lambda: refusals() > refused_before, "the hijacked daemon's report request was not refused")
+        time.sleep(3)
+        assert not reported("0x9ef"), "a report from a main process running another executable was signed"
+        assert show("ActiveState") == "active" and show("MainPID") == hijacked
+        hijack.unlink()
+        sh("systemctl", "daemon-reload")
+        sh("systemctl", "restart", "suifleet")
+        wait(lambda: show("MainPID") != "0" and record.read_text().split()[0] == show("MainPID"),
+             "the daemon did not restart after the hijack attempt")
+        wait(lambda: reported("0x9ef"), "the queued report was not signed once the base daemon ran again")
+        deploy("0x907", "plain5", {})
+        wait(lambda: reported("0x907"), "no report after the hijack attempt")
+        assert not sim.errors, sim.errors
+        check("hijack: component-written launcher state naming its own executable is ignored (the real binary refuses "
+              "[daemon_update] with the service signer; the restarted main process is /usr/bin/suifleet and reports); a "
+              "main process running that executable (a full daemon) is not recorded by the root recorder ('not running the "
+              "base binary'), and its otherwise valid report request is refused; the queued report is signed only "
+              "after the base daemon runs again")
     finally:
         sh("systemctl", "stop", "suifleet", "suifleet-signer.service", "suifleet-signer.socket", check=False)
         shim.kill()
