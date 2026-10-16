@@ -1,0 +1,194 @@
+[
+ {
+  "id": "groups-policies-and-identity-state",
+  "config": {
+   "identities": {
+    "sensor-1": {
+     "state": "active",
+     "expires": 2000
+    },
+    "sensor-2": {
+     "state": "revoked",
+     "expires": 2000
+    },
+    "sensor-old": {
+     "state": "active",
+     "expires": 100
+    },
+    "cam-9": {
+     "state": "active",
+     "expires": 2000
+    },
+    "ops-admin": {
+     "state": "active",
+     "expires": 2000
+    }
+   },
+   "deviceGroups": {
+    "formatVersion": "2021-03-05",
+    "definitions": {
+     "sensors": {
+      "selectionRule": "thingName: sensor-*",
+      "policyName": "sensorPolicy"
+     },
+     "operators": {
+      "selectionRule": "thingName: cam-9 OR thingName: *-admin",
+      "policyName": "allPolicy"
+     }
+    },
+    "policies": {
+     "sensorPolicy": {
+      "connect": {
+       "operations": [
+        "mqtt:connect"
+       ],
+       "resources": [
+        "mqtt:clientId:sensor-*"
+       ]
+      },
+      "publish": {
+       "operations": [
+        "mqtt:publish"
+       ],
+       "resources": [
+        "mqtt:topic:sensors/*"
+       ]
+      },
+      "subscribe": {
+       "operations": [
+        "mqtt:subscribe"
+       ],
+       "resources": [
+        "mqtt:topicfilter:commands/+"
+       ]
+      }
+     },
+     "allPolicy": {
+      "all": {
+       "operations": [
+        "*"
+       ],
+       "resources": [
+        "*"
+       ]
+      }
+     }
+    }
+   }
+  },
+  "requests": [
+   {
+    "thing": "sensor-1",
+    "operation": "mqtt:connect",
+    "resource": "mqtt:clientId:sensor-1",
+    "now": 1000,
+    "allowed": true
+   },
+   {
+    "thing": "sensor-1",
+    "operation": "mqtt:connect",
+    "resource": "mqtt:clientId:sensor-9",
+    "now": 1000,
+    "allowed": false
+   },
+   {
+    "thing": "sensor-1",
+    "operation": "mqtt:publish",
+    "resource": "mqtt:topic:sensors/temp",
+    "now": 1000,
+    "allowed": true
+   },
+   {
+    "thing": "sensor-1",
+    "operation": "mqtt:publish",
+    "resource": "mqtt:topic:other/temp",
+    "now": 1000,
+    "allowed": false
+   },
+   {
+    "thing": "sensor-1",
+    "operation": "mqtt:subscribe",
+    "resource": "mqtt:topicfilter:commands/+",
+    "now": 1000,
+    "allowed": true
+   },
+   {
+    "thing": "sensor-1",
+    "operation": "mqtt:subscribe",
+    "resource": "mqtt:topicfilter:commands/reboot",
+    "now": 1000,
+    "allowed": false
+   },
+   {
+    "thing": "sensor-1",
+    "operation": "mqtt:publish",
+    "resource": "mqtt:topicfilter:sensors/temp",
+    "now": 1000,
+    "allowed": false
+   },
+   {
+    "thing": "sensor-1",
+    "operation": "mqtt:retain",
+    "resource": "mqtt:topic:sensors/temp",
+    "now": 1000,
+    "allowed": false
+   },
+   {
+    "thing": "sensor-1",
+    "operation": "mqtt:connect",
+    "resource": "mqtt:clientId:sensor-1",
+    "now": 2000,
+    "allowed": false
+   },
+   {
+    "thing": "sensor-2",
+    "operation": "mqtt:connect",
+    "resource": "mqtt:clientId:sensor-2",
+    "now": 1000,
+    "allowed": false
+   },
+   {
+    "thing": "sensor-old",
+    "operation": "mqtt:connect",
+    "resource": "mqtt:clientId:sensor-old",
+    "now": 1000,
+    "allowed": false
+   },
+   {
+    "thing": "unknown-thing",
+    "operation": "mqtt:connect",
+    "resource": "mqtt:clientId:unknown-thing",
+    "now": 1000,
+    "allowed": false
+   },
+   {
+    "thing": "cam-9",
+    "operation": "mqtt:subscribe",
+    "resource": "mqtt:topicfilter:#",
+    "now": 1000,
+    "allowed": true
+   },
+   {
+    "thing": "cam-9",
+    "operation": "mqtt:connect",
+    "resource": "mqtt:clientId:cam-9",
+    "now": 1000,
+    "allowed": true
+   },
+   {
+    "thing": "ops-admin",
+    "operation": "mqtt:publish",
+    "resource": "mqtt:topic:anything",
+    "now": 1000,
+    "allowed": true
+   },
+   {
+    "thing": "cam-9",
+    "operation": "mqtt:connect",
+    "resource": "mqtt:clientId:other",
+    "now": 1000,
+    "allowed": false
+   }
+  ]
+ }
+]
