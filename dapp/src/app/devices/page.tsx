@@ -1,18 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useCurrentAccount } from "@mysten/dapp-kit-react";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import { useDevices } from "@/hooks/useDevices";
 import { useGroups } from "@/hooks/useGroups";
 import { useDeployments } from "@/hooks/useDeployments";
 import { useDesiredStates } from "@/hooks/useDesiredStates";
+import { useFleetHealth, useTelemetryToken, setTelemetryToken } from "@/hooks/useFleetHealth";
+import { lastSeenLabel, TELEMETRY_URL, type DeviceHealth } from "@/lib/telemetry";
 import { buildDesiredRevisionTx, desiredConflicts } from "@/lib/desired-state";
 import {
   buildRegisterDeviceTx, buildActivateDeviceTx, buildIssueCapTx, buildDeregisterDeviceTx,
   buildCreateGroupTx, buildAddDeviceToGroupTx, buildRemoveDeviceFromGroupTx, buildDeleteGroupTx,
 } from "@/lib/sui";
-import { PageHeader, StatusDot } from "@/components/ui";
+import { PageHeader, HealthBadge } from "@/components/ui";
 import type { DeviceRef } from "@/lib/sui";
 
 type Tab = "devices" | "groups";
@@ -47,6 +49,8 @@ function DevicesTab() {
   const { data: devices = [], isLoading, refetch } = useDevices();
   const { mutate: signAndExecute, isPending } = useFleetTransaction();
   const [showModal, setShowModal] = useState(false);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const { data: health = {} } = useFleetHealth(devices.filter((d) => d.ownerCapId).map((d) => d.objectId));
 
   function handleRegister(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -70,8 +74,9 @@ function DevicesTab() {
 
   return (
     <>
-      <div className="flex justify-end">
-        <button onClick={() => setShowModal(true)} className="bg-[#4DA2FF] hover:bg-[#2e8ed4] text-white text-sm px-4 py-2 rounded">
+      <div className="flex items-start justify-between gap-4">
+        <TelemetrySettings />
+        <button onClick={() => setShowModal(true)} className="bg-[#4DA2FF] hover:bg-[#2e8ed4] text-white text-sm px-4 py-2 rounded shrink-0">
           Register device
         </button>
       </div>
@@ -88,16 +93,21 @@ function DevicesTab() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-200 text-left text-xs text-gray-500 bg-gray-50">
-                {["Status", "Name", "Architecture", "Device address", "Object ID", "Actions"].map((h) => (
+                {["Status", "Name", "Architecture", "Last seen", "Device address", "Object ID", "Actions"].map((h) => (
                   <th key={h} className="py-2 px-4 font-medium">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {devices.map((d) => (
-                <tr key={d.objectId} className="hover:bg-gray-50">
+                <Fragment key={d.objectId}>
+                <tr className="hover:bg-gray-50">
                   <td className="py-3 px-4">
-                    {d.ownerCapId ? <StatusDot /> : (
+                    {d.ownerCapId ? (
+                      <button onClick={() => setExpanded(expanded === d.objectId ? null : d.objectId)} className="text-left" title="Show installed components and health">
+                        <HealthBadge health={health[d.objectId]} />
+                      </button>
+                    ) : (
                       <span className="text-xs text-amber-600" title="Registered before device identities: its reports are rejected until you activate it.">
                         Not activated
                       </span>
@@ -105,6 +115,7 @@ function DevicesTab() {
                   </td>
                   <td className="py-3 pr-4 font-medium">{d.name}</td>
                   <td className="py-3 pr-4 text-gray-500">{d.arch}</td>
+                  <td className="py-3 pr-4 text-xs text-gray-500">{d.ownerCapId ? lastSeenLabel(health[d.objectId]) : "—"}</td>
                   <td className="py-3 pr-4 font-mono text-xs text-gray-400 max-w-[160px] truncate">{d.deviceAddress}</td>
                   <td className="py-3 pr-4 font-mono text-xs text-gray-400">{d.objectId.slice(0, 14)}…</td>
                   <td className="py-3 flex items-center gap-3">
@@ -158,6 +169,12 @@ function DevicesTab() {
                     </button>
                   </td>
                 </tr>
+                {expanded === d.objectId && (
+                  <tr className="bg-gray-50" data-testid="health-details">
+                    <td colSpan={7} className="px-4 py-3"><HealthDetails health={health[d.objectId]} /></td>
+                  </tr>
+                )}
+                </Fragment>
               ))}
             </tbody>
           </table>
@@ -417,6 +434,76 @@ function GroupsTab() {
         </Modal>
       )}
     </>
+  );
+}
+
+// ── Device health (SF-019) ────────────────────────────────────────────────────
+
+/** The indexer read token, kept for this browser tab only. */
+function TelemetrySettings() {
+  const token = useTelemetryToken();
+  const [draft, setDraft] = useState("");
+  if (!TELEMETRY_URL) {
+    return <p className="text-xs text-gray-500">Device health is not reported: no telemetry service is configured for this build.</p>;
+  }
+  return (
+    <form
+      className="flex items-center gap-2 text-xs text-gray-600"
+      onSubmit={(e) => { e.preventDefault(); setTelemetryToken(draft.trim()); setDraft(""); }}
+    >
+      <span>Telemetry: {TELEMETRY_URL}</span>
+      {token ? (
+        <button type="button" onClick={() => setTelemetryToken("")} className="text-[#4DA2FF] hover:underline">Forget read token</button>
+      ) : (
+        <>
+          <input type="password" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Read token"
+            className="border border-gray-300 rounded px-2 py-1 text-xs w-48" />
+          <button type="submit" className="text-[#4DA2FF] hover:underline">Use</button>
+        </>
+      )}
+    </form>
+  );
+}
+
+function HealthDetails({ health }: { health?: DeviceHealth }) {
+  if (!health) return <p className="text-xs text-gray-400">Loading health…</p>;
+  return (
+    <div className="space-y-2 text-xs">
+      {health.reasons.length > 0 && (
+        <ul className="list-disc pl-4 text-amber-800">
+          {health.reasons.map((reason, i) => <li key={i}>{reason}</li>)}
+        </ul>
+      )}
+      {health.lastSeenMs !== undefined && (
+        <p className="text-gray-500">
+          Last report {new Date(health.lastSeenMs).toLocaleString()} (taken {new Date(health.observedMs!).toLocaleString()} by the device clock),
+          daemon {health.daemonVersion}. Reports are signed by the device and verified against its on-chain identity.
+        </p>
+      )}
+      {health.components.length === 0 ? (
+        <p className="text-gray-400">No installed components reported.</p>
+      ) : (
+        <table className="w-full">
+          <thead>
+            <tr className="text-left text-gray-500">
+              {["Component", "Version", "Installed", "Runtime", "Restarts", "Last exit"].map((h) => <th key={h} className="py-1 pr-4 font-medium">{h}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {health.components.map((c) => (
+              <tr key={c.name}>
+                <td className="py-1 pr-4 font-medium">{c.name}</td>
+                <td className="py-1 pr-4">{c.version}</td>
+                <td className="py-1 pr-4">{c.installed ? "yes" : "not confirmed"}</td>
+                <td className="py-1 pr-4">{c.supervised ? c.phase ?? "not started" : "one-shot"}</td>
+                <td className="py-1 pr-4">{c.restarts ?? "—"}</td>
+                <td className="py-1 pr-4 text-gray-500">{c.last_exit ?? "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
   );
 }
 
