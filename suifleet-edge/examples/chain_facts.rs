@@ -6,7 +6,7 @@
 //!
 //!   chain_facts RPC_URL [OBJECT_ID...]
 //!
-//!   {"chain_identifier": "4c78adac",
+//!   {"chain_identifier": "4c78adac", "epoch": 1012, "protocol_version": 139,
 //!    "objects": {"0x..": {"kind": "package", "version": 3,
 //!                         "type_origins": [{"module", "datatype", "package"}]},
 //!                "0x..": {"kind": "object", "type": "0x2::package::UpgradeCap",
@@ -90,6 +90,23 @@ async fn main() -> anyhow::Result<()> {
     let genesis = info.chain_id.unwrap_or_default();
     let digest = Digest::from_str(&genesis)
         .map_err(|e| anyhow::anyhow!("invalid chain_id {genesis:?}: {e}"))?;
+    // The current protocol version gates which transaction CLI may build and
+    // sign for this network (scripts/sui_toolchain.py).
+    let mut request = proto::GetEpochRequest::default();
+    request.read_mask = Some(FieldMask::from_paths(["epoch", "protocol_config.protocol_version"]));
+    let epoch = rpc
+        .clone()
+        .ledger_client()
+        .get_epoch(request)
+        .await
+        .map_err(|e| anyhow::anyhow!("GetEpoch: {}: {}", e.code(), e.message()))?
+        .into_inner()
+        .epoch
+        .ok_or_else(|| anyhow::anyhow!("GetEpoch returned no epoch"))?;
+    let protocol_version = epoch
+        .protocol_config
+        .and_then(|config| config.protocol_version)
+        .ok_or_else(|| anyhow::anyhow!("GetEpoch returned no protocol version"))?;
     let mut objects = Map::new();
     for id in ids {
         let address =
@@ -117,7 +134,9 @@ async fn main() -> anyhow::Result<()> {
     }
     println!(
         "{}",
-        json!({"chain_identifier": hex::encode(&digest.inner()[..4]), "objects": objects})
+        json!({"chain_identifier": hex::encode(&digest.inner()[..4]),
+               "epoch": epoch.epoch, "protocol_version": protocol_version,
+               "objects": objects})
     );
     Ok(())
 }
