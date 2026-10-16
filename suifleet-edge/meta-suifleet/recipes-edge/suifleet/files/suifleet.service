@@ -15,7 +15,11 @@ StateDirectory=suifleet
 StateDirectoryMode=0700
 UMask=0077
 # Provisioning runs independently before enrollment; this service is unprivileged.
-ExecStart=/usr/bin/suifleet
+# The platform's read-only base binary starts first. With [daemon_update]
+# enabled it execs a staged or confirmed daemon update (same PID, so readiness
+# and the watchdog apply to it); a new daemon that exits or never becomes ready
+# is restarted by this unit until the launcher falls back (docs/DAEMON_UPDATE.md).
+ExecStart=/usr/bin/suifleet --launch
 Restart=on-failure
 RestartSec=5
 # Stop SIGTERMs only the daemon, which stops supervised components itself
