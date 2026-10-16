@@ -140,6 +140,20 @@ class FixtureGateTests(unittest.TestCase):
         self.run_mutated("credential-provider-cases.json", lambda c: revoke(c)["steps"][5].update(
             expect={"status": "ok", "credential_set": "set-1", "expiration": 3600, "upstream_calls": 1}))
 
+    def test_cloudwatch_expectations_pinned(self):
+        case = lambda c, cid: next(x for x in c if x["id"] == cid)
+        retain = lambda c: case(c, "retention-replaces-oldest-in-same-namespace")["steps"]
+        self.run_mutated("cloudwatch-metrics-cases.json", lambda c: retain(c)[11]["expect"].update(dropped=2))
+        retry = lambda c: case(c, "retryable-and-invalid-results")["steps"]
+        self.run_mutated("cloudwatch-metrics-cases.json", lambda c: retry(c)[4]["expect"].update(buffered=0))
+        split = lambda c: case(c, "namespace-trigger-and-twenty-metric-calls")["steps"]
+        self.run_mutated("cloudwatch-metrics-cases.json", lambda c: split(c)[6]["expect"]["calls"][0].update(count=21))
+        lost = lambda c: case(c, "day-split-checkpoint-and-lost-response")["steps"]
+        self.run_mutated("cloudwatch-logs-cases.json", lambda c: lost(c)[9]["expect"].update(spooled=0))
+        self.run_mutated("cloudwatch-logs-cases.json", lambda c: lost(c)[5]["expect"]["uploads"][0].update(stream="/2025/10/09/thing/thing"))
+        names = lambda c: case(c, "levels-redaction-names-and-order")["steps"]
+        self.run_mutated("cloudwatch-logs-cases.json", lambda c: names(c)[11]["expect"]["uploads"][1]["events"][1].__setitem__(1, "token=s3cr3t ok s3cr3t"))
+
     def test_managed_catalog_change_is_checked_against_fixtures(self):
         # Fixture outcomes depend on the catalog, so a catalog edit must be deliberate.
         def deferred(c):
@@ -219,6 +233,8 @@ class ManagedCatalogGateTests(unittest.TestCase):
         self.has(lambda c: self.adapter(c, "credential-provider")["acceptance"].update(runtime_tests=[]), "runtime_tests")
         self.has(lambda c: self.adapter(c, "credential-provider")["acceptance"]["reference_suites"].append("x.json"), "unknown suite")
         self.has(lambda c: self.adapter(c, "credential-provider").update(licensing=""), "needs licensing")
+        self.has(lambda c: self.adapter(c, "cloudwatch-logs-export")["replaces"].update({"aws.greengrass.LogManager": "unpinned"}), "pin an exact")
+        self.has(lambda c: self.adapter(c, "cloudwatch-metrics-export")["acceptance"].update(reference_suites=[]), "executable reference suite")
         self.has(lambda c: self.adapter(c, "secure-tunneling").pop("selection_precondition"), "selection_precondition")
         self.has(lambda c: c["adapters"].append(copy.deepcopy(c["adapters"][0])), "duplicate adapter")
 
@@ -230,7 +246,11 @@ class ManagedCatalogGateTests(unittest.TestCase):
             self.assertIn(f"| `{adapter['id']}` | {adapter['selection']} |", doc)
         counts = compat.run(ROOT)
         self.assertIn(f"| `managed-dependency-cases.json` | {counts['managed-dependency-cases.json']} classifications |", doc)
-        self.assertIn(f"| `credential-provider-cases.json` | {counts['credential-provider-cases.json']} steps", doc)
+        for suite in ("credential-provider-cases.json", "cloudwatch-metrics-cases.json", "cloudwatch-logs-cases.json"):
+            self.assertIn(f"| `{suite}` | {counts[suite]} steps", doc)
+        compatibility = (ROOT / "docs/GREENGRASS_COMPATIBILITY.md").read_text()
+        for suite, count in counts.items():
+            self.assertIn(f"| `{suite}` | {count} ", compatibility)
 
     def test_undecided_platforms_need_a_recommendation(self):
         self.has(lambda c: c["platform_decisions"].pop(1), "platform windows")
@@ -321,6 +341,39 @@ class ModelTests(unittest.TestCase):
         provider.apply({"op": "request", "method": "GET", "path": "/", "now": 10})
         with self.assertRaises(AssertionError):
             provider.apply({"op": "request", "method": "GET", "path": "/", "now": 9})
+
+    def test_metric_request_validation_edges(self):
+        def request(**data):
+            return {"request": {"namespace": "N", "metricData": {"metricName": "m", "value": 1, **data}}}
+        self.assertTrue(managed._metric_valid(request()))
+        for value in (float("nan"), float("inf"), -float("inf")):
+            self.assertFalse(managed._metric_valid(request(value=value)))
+        self.assertTrue(managed._metric_valid(request(value=-1.174271e+108)))
+        self.assertFalse(managed._metric_valid(request(dimensions=[{"name": "a"}])))
+        self.assertFalse(managed._metric_valid({"request": {"namespace": "N" * 256, "metricData": {"metricName": "m", "value": 1}}}))
+        exporter = managed.MetricsExport()
+        exporter.apply({"op": "tick", "now": 5})
+        with self.assertRaises(AssertionError):
+            exporter.apply({"op": "tick", "now": 4})
+
+    def test_log_batches_respect_put_log_events_limits(self):
+        exporter = managed.LogsExport()
+        self.assertEqual(exporter.apply({"op": "configure", "sources": {"app": "UserComponent"}}), {"status": "ok"})
+        for index in range(managed.LOG_BATCH_EVENTS + 1):
+            exporter.apply({"op": "log", "source": "app", "level": "INFO", "message": "m", "time": 1759968000 + index % 7})
+        exporter.apply({"op": "upstream", "results": ["ok", "ok"]})
+        uploads = exporter.apply({"op": "tick", "now": 300})["uploads"]
+        self.assertEqual([len(u["events"]) for u in uploads], [managed.LOG_BATCH_EVENTS, 1])
+        times = [event[0] for upload in uploads for event in upload["events"]]
+        self.assertEqual(times, sorted(times))
+        big = "x" * (managed.LOG_BATCH_BYTES // 3)
+        for index in range(4):
+            exporter.apply({"op": "log", "source": "app", "level": "INFO", "message": big, "time": 1759968000 + index})
+        exporter.apply({"op": "upstream", "results": ["ok", "ok"]})
+        uploads = exporter.apply({"op": "tick", "now": 600})["uploads"]
+        self.assertEqual([len(u["events"]) for u in uploads], [2, 2])
+        with self.assertRaises(AssertionError):
+            exporter.apply({"op": "tick", "now": 599})
 
     def test_selection_rule_grammar(self):
         with self.assertRaises(ValueError):

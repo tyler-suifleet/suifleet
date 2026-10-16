@@ -33,7 +33,7 @@ Every disposition below is a **recommendation**. The checker refuses `approval: 
 | Device Defender | `DeviceDefender` 4.0.0 | Native security metrics and alerts in SF-019/SF-020. AWS Detect upload is a **deferred adapter** behind `aws-iot-core-connection` | SF-019, SF-020 |
 | Remote support | `SecureTunneling` 2.0.1, `SystemsManagerAgent` | Remote access is platform-owned, in line with the [platform boundary](../AGENTS.md#platform-update-boundary--user-requirement). AWS tunnels are a **deferred adapter**. The open-source SSM agent can be packaged as a native component | SF-011, SF-022 |
 | Industrial | `Modbus` 2.1.11, SiteWise OPC UA collector, simulator, publisher and processor, `EdgeConnectorForKVS` 1.0.5 | Protocol collectors are native components over SF-032 pub/sub and SF-034 streams. Exclude the closed-source SiteWise and KVS components | SF-011, SF-032, SF-034 |
-| Cloud export | `StreamManager` 2.3.1, `LogManager`, `SystemLogForwarder`, `KinesisFirehose`, `SNS` | Native streams (SF-034) and logs (SF-020). **Recommended adapters** `stream-export-aws` and `cloudwatch-logs-export`. Exclude the Lambda Firehose and SNS components | SF-020, SF-034 |
+| Cloud export | `StreamManager` 2.3.1, `LogManager` 2.3.14, `SystemLogForwarder`, `KinesisFirehose`, `SNS` | Native streams (SF-034) and logs (SF-020). **Recommended adapters** `stream-export-aws` and `cloudwatch-logs-export`. Exclude the Lambda Firehose and SNS components | SF-020, SF-034 |
 
 ## Component catalog
 
@@ -114,7 +114,7 @@ All adapters run as supervised local services. Components reach them only throug
 | `credential-provider` | recommended | TokenExchangeService 2.0.3 | AWS IoT credentials provider (role alias) or IAM Roles Anywhere; STS | Device X.509 key from SF-021 or SF-022; per-component bearer token | SF-021, SF-022, SF-027 |
 | `stream-export-aws` | recommended | StreamManager 2.3.1 export | Kinesis Data Streams, S3 | credential-provider; `kinesis:PutRecords`, `kinesis:ListShards`, `s3:PutObject` | SF-034 |
 | `cloudwatch-metrics-export` | recommended | Cloudwatch 4.0.0 | CloudWatch | credential-provider; `cloudwatch:PutMetricData` | SF-019, SF-032 |
-| `cloudwatch-logs-export` | recommended | LogManager upload | CloudWatch Logs | credential-provider; `logs:CreateLogGroup`, `logs:CreateLogStream`, `logs:PutLogEvents` | SF-020 |
+| `cloudwatch-logs-export` | recommended | LogManager 2.3.14 upload | CloudWatch Logs | credential-provider; `logs:CreateLogGroup`, `logs:CreateLogStream`, `logs:PutLogEvents` | SF-020 |
 | `aws-iot-core-connection` | deferred | Bridge IotCore target, shadow sync | AWS IoT Core | Thing certificate and policy | SF-021, SF-022, SF-032 |
 | `device-defender-metrics` | deferred | DeviceDefender 4.0.0 | Device Defender Detect, IoT Core | `aws-iot-core-connection` | SF-019, SF-020 |
 | `secure-tunneling` | deferred | SecureTunneling 2.0.1 | IoT secure tunneling, IoT Core | `aws-iot-core-connection`; per-tunnel access token | SF-025 |
@@ -141,6 +141,27 @@ The `credential-provider` adapter is fixed by `credential-provider-cases.json` (
 
 Grants, per-component tokens and the refresh margin are SuiFleet proposals. The AWS service lets every component on a device use the device role.
 
+### CloudWatch metrics export contract
+
+The `cloudwatch-metrics-export` adapter is pinned to `aws.greengrass.Cloudwatch` 4.0.0 and fixed by `cloudwatch-metrics-cases.json` (66 steps across 6 sequences):
+
+- **Requests.** It accepts the 4.0.0 `cloudwatch/metric/put` message: a `request` holding exactly `namespace` and `metricData`. The namespace has 1–255 characters, does not start with `:` and does not start with `AWS/`. `metricData` holds `metricName`, a numeric `value` that is 0 or has magnitude 8.515920e-109 to 1.174271e+108, up to 10 `dimensions`, a non-negative `timestamp` and a 4.0.0 `unit` (default `None`). Booleans, NaN and infinities are rejected. Every dimension needs a non-empty name and value, and `coreName` is reserved for the adapter. Anything else gets `{"status": "fail", "error": "InvalidInputException"}`.
+- **Grants.** Only publishers granted through SF-027 may put metrics. Others get `Unauthorized`. This is a SuiFleet proposal.
+- **Publishing.** Metrics go out when `PublishInterval` has elapsed (default 10 s, at most 900 s; 0 publishes on every tick), or as soon as one namespace holds 20 metrics. Each `PutMetricData` call carries at most 20 metrics of one namespace, and namespaces go out in first-arrival order.
+- **Retention.** `MaxMetricsToRetain` defaults to 5000 and must be at least 2000. When the buffer is full, a new metric replaces the oldest metric in its own namespace. If its namespace has no older metric, the new metric is dropped. Every drop is counted.
+- **Upstream results.** Throttling, server errors and connection errors keep the batch for the next publish. An invalid-request response discards the batch and counts it as `rejected`.
+- **Restart.** The buffer survives an adapter restart, and the interval restarts from the restart time. This is a SuiFleet proposal; the AWS component loses its buffer.
+
+### CloudWatch Logs export contract
+
+The `cloudwatch-logs-export` adapter is pinned to `aws.greengrass.LogManager` 2.3.14 and fixed by `cloudwatch-logs-cases.json` (48 steps across 5 sequences):
+
+- **Sources and levels.** Only configured sources are uploaded. Each source is a `UserComponent` or a `GreengrassSystemComponent`. `minimumLogLevel` defaults to `INFO` from `DEBUG`, `INFO`, `WARN`, `ERROR`. Lower levels are filtered out, and unknown levels are rejected.
+- **Names.** Events go to log group `/aws/greengrass/{componentType}/{region}/{componentName}` and log stream `/{yyyy/MM/dd}/thing/{thingName}`. The date is the event's UTC day, and `:` in the thing name becomes `+`.
+- **Uploads.** An upload runs every `periodicUploadIntervalSec`, which defaults to 300 s. Each source's events are sent in chronological order; equal timestamps keep arrival order. A `PutLogEvents` batch holds at most 10,000 events and 1,048,576 bytes, counting 26 bytes per event, all from one UTC day.
+- **Checkpoint.** Each source's checkpoint advances only on a successful response. After a throttled, server, connection or lost-response result, that source sends nothing further in the cycle, and the next cycle resends the same events unchanged. Delivery is therefore at least once, never lossy. Other sources are not affected.
+- **Redaction and spool.** These are SuiFleet proposals. Configured secrets are replaced with `[REDACTED]` before an event is spooled. The spool is durable across restarts and bounded in bytes. When it is full, the oldest events are dropped and counted, and an event larger than the whole spool drops itself.
+
 ## Recipe dependency classification (for SF-037)
 
 `managed-dependency-cases.json` (47 cases) fixes what an AWS recipe's `ComponentDependencies` entry on a managed component will mean. It does not change the merged SF-037 subset, which still rejects every `aws.greengrass.*` dependency until SF-037 re-specifies it.
@@ -163,12 +184,16 @@ Ranges use the native comparator grammar. x-ranges, hyphen ranges, `||` and non-
 make test-compat
 ```
 
-The checker validates the catalog's structure and its cross-references to the backlog, the SF-028 platforms and the suites. It also evaluates the two SF-038 suites against reference models in `scripts/greengrass_managed.py`. As with SF-028, these models only make the fixtures checkable. Agreement with them proves nothing about an adapter. Both suites stay `runtime_execution: pending` until the owning implementation runs the same fixtures and commits a receipt.
+The checker validates the catalog's structure and its cross-references to the backlog, the SF-028 platforms and the suites. It also evaluates the four SF-038 suites against reference models in `scripts/greengrass_managed.py`. As with SF-028, these models only make the fixtures checkable. Agreement with them proves nothing about an adapter. All four suites stay `runtime_execution: pending` until the owning implementation runs the same fixtures and commits a receipt.
 
 | Suite | Cases | Runtime execution |
 |---|---|---|
 | `managed-dependency-cases.json` | 47 classifications | Pending SF-037 |
 | `credential-provider-cases.json` | 65 steps across 7 sequences | Pending SF-022, SF-027 and an approved adapter ticket |
+| `cloudwatch-metrics-cases.json` | 66 steps across 6 sequences | Pending SF-019, SF-032 and an approved adapter ticket |
+| `cloudwatch-logs-cases.json` | 48 steps across 5 sequences | Pending SF-020 and an approved adapter ticket |
+
+Each recommended adapter must pin an exact AWS version and name at least one executable reference suite; the checker enforces both. `stream-export-aws` uses the SF-028 `stream-cases.json` checkpoint suite. The deferred adapters still have unpinned versions and prose-only tests, and they must be specified fully before selection.
 
 ## Requests for Codex
 

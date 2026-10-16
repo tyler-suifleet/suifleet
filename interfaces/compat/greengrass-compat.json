@@ -80,6 +80,16 @@
    "description": "SF-038 proposed credential-provider (token exchange equivalent) grants, tokens, caching and upstream retry.",
    "runtime_execution": "pending", "pending_on": ["SF-022", "SF-027"],
    "notes": "The adapter has no implementation ticket yet; see the ticket_request in managed-components.json."
+  },
+  "cloudwatch-metrics-cases.json": {
+   "description": "SF-038 proposed cloudwatch-metrics-export adapter pinned to aws.greengrass.Cloudwatch 4.0.0: request validation, grants, batching, retention and retry.",
+   "runtime_execution": "pending", "pending_on": ["SF-019", "SF-032"],
+   "notes": "The adapter has no implementation ticket yet; see the ticket_request in managed-components.json."
+  },
+  "cloudwatch-logs-cases.json": {
+   "description": "SF-038 proposed cloudwatch-logs-export adapter pinned to aws.greengrass.LogManager 2.3.14: levels, redaction, group/stream names, batching, spool and checkpoint.",
+   "runtime_execution": "pending", "pending_on": ["SF-020"],
+   "notes": "The adapter has no implementation ticket yet; see the ticket_request in managed-components.json."
   }
  },
  "capabilities": [
@@ -160,10 +170,11 @@
    "notes": "Runtimes and models are native components with authenticated artifacts. AWS sample inference components and the discontinued Edge Manager are recommended exclusions."},
   {"id": "cloud.metrics", "area": "cloud", "aws_reference": "aws.greengrass.Cloudwatch 4.0.0, aws.greengrass.DeviceDefender 4.0.0, telemetry NucleusEmitter 1.0.14",
    "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable",
-   "tickets": ["SF-019", "SF-020", "SF-038"],
+   "tickets": ["SF-019", "SF-020", "SF-038"], "suites": ["cloudwatch-metrics-cases.json"],
    "notes": "Native metrics in SF-019/SF-020. CloudWatch export is a recommended adapter; Device Defender is deferred behind aws-iot-core-connection."},
-  {"id": "cloud.logs", "area": "cloud", "aws_reference": "aws.greengrass.LogManager, aws.greengrass.SystemLogForwarder",
+  {"id": "cloud.logs", "area": "cloud", "aws_reference": "aws.greengrass.LogManager 2.3.14, aws.greengrass.SystemLogForwarder",
    "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable", "tickets": ["SF-020", "SF-038"],
+   "suites": ["cloudwatch-logs-cases.json"],
    "notes": "Native log collection in SF-020; CloudWatch Logs upload is a recommended adapter."},
   {"id": "remote.secure-tunneling", "area": "remote-support", "aws_reference": "aws.greengrass.SecureTunneling 2.0.1, aws.greengrass.SystemsManagerAgent",
    "functional": "not-applicable", "aws_api": "undecided", "aws_recipe": "not-applicable", "tickets": ["SF-038"],

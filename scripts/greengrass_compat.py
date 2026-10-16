@@ -680,6 +680,8 @@ SUITE_RUNNERS = {
     "client-device-cases.json": lambda c, _: check_client_devices(c),
     "managed-dependency-cases.json": lambda c, root: managed.check_dependency_cases(c, _managed_catalog(root)),
     "credential-provider-cases.json": lambda c, _: _run_sequences(c, managed.CredentialProvider, "credential-provider"),
+    "cloudwatch-metrics-cases.json": lambda c, _: _run_sequences(c, managed.MetricsExport, "cloudwatch-metrics"),
+    "cloudwatch-logs-cases.json": lambda c, _: _run_sequences(c, managed.LogsExport, "cloudwatch-logs"),
 }
 LEVELS = ("functional", "aws_api", "aws_recipe")
 STATUSES = {"implemented", "partial", "proposed", "excluded", "undecided", "not-applicable"}

@@ -11,6 +11,7 @@
    "https://docs.aws.amazon.com/greengrass/v2/developerguide/machine-learning-components.html",
    "https://docs.aws.amazon.com/greengrass/v2/developerguide/token-exchange-service-component.html",
    "https://docs.aws.amazon.com/greengrass/v2/developerguide/cloudwatch-metrics-component.html",
+   "https://docs.aws.amazon.com/greengrass/v2/developerguide/log-manager-component.html",
    "https://docs.aws.amazon.com/greengrass/v2/developerguide/device-defender-component.html",
    "https://docs.aws.amazon.com/greengrass/v2/developerguide/secure-tunneling-component.html",
    "https://docs.aws.amazon.com/greengrass/v2/developerguide/stream-manager-component.html",
@@ -131,7 +132,7 @@
    "reference_version": "2.3.1", "disposition": "native", "tickets": ["SF-034"], "adapter": "stream-export-aws",
    "native_equivalent": "SF-034 durable streams; AWS destinations through the stream-export-aws adapter"},
   {"name": "aws.greengrass.LogManager", "display": "Log manager", "family": "cloud-export", "aws": {"type": "plugin", "os": ["linux", "windows"], "open_source": true},
-   "disposition": "native", "tickets": ["SF-020"], "adapter": "cloudwatch-logs-export",
+   "reference_version": "2.3.14", "disposition": "native", "tickets": ["SF-020"], "adapter": "cloudwatch-logs-export",
    "native_equivalent": "SF-020 log collection; CloudWatch Logs upload through the cloudwatch-logs-export adapter"},
   {"name": "aws.greengrass.SystemLogForwarder", "display": "System log forwarder", "family": "cloud-export", "aws": {"type": "generic", "os": ["linux"], "open_source": true},
    "disposition": "native", "tickets": ["SF-020"], "adapter": "cloudwatch-logs-export", "native_equivalent": "SF-020 journal collection"},
@@ -214,18 +215,19 @@
    "licensing": "Clean-room implementation. The AWS component is released under the Greengrass Core Software License Agreement and is not reused.",
    "depends_on": ["SF-019", "SF-032"],
    "acceptance": {
-    "reference_suites": [],
+    "reference_suites": ["cloudwatch-metrics-cases.json"],
     "runtime_tests": [
-     "Metrics from SF-019 and from a granted component reach a local CloudWatch emulator with the configured namespace, dimensions, unit and timestamp",
-     "Publish-interval batching, retention limit overflow (counted drops, never silent) and offline buffering across daemon restart",
-     "Ungranted publishers and malformed metric requests are rejected with a status message"
+     "Run cloudwatch-metrics-cases.json against the real adapter, with upstream results injected by a local CloudWatch emulator",
+     "Metrics from SF-019 and from a granted component reach the emulator with the configured namespace, dimensions (plus coreName), unit and timestamp, at most 20 per PutMetricData call",
+     "Publish-interval batching, the 20-metric namespace trigger, same-namespace retention replacement (counted drops, never silent) and buffering across daemon restart",
+     "Ungranted publishers and malformed metric requests are rejected with a status message on cloudwatch/metric/put/status"
     ],
     "environment": "Network-none container with a local AWS API emulator",
     "deferred": ["Real AWS account metrics; needs separate user authorization"]
    },
    "implementation_ticket": null,
    "ticket_request": {"title": "Implement the CloudWatch metrics export adapter", "depends_on": ["SF-019", "SF-032"]}},
-  {"id": "cloudwatch-logs-export", "selection": "recommended", "replaces": {"aws.greengrass.LogManager": "unpinned"},
+  {"id": "cloudwatch-logs-export", "selection": "recommended", "replaces": {"aws.greengrass.LogManager": "2.3.14"},
    "summary": "Uploads SF-020 collected component and system logs to CloudWatch Logs with per-source retention, redaction and bounded local spool.",
    "platforms": ["linux-x86_64", "linux-aarch64", "linux-arm"],
    "aws_services": ["Amazon CloudWatch Logs (logs.<region>.amazonaws.com:443)"],
@@ -233,11 +235,13 @@
    "licensing": "Clean-room implementation using the Apache-2.0 AWS SDK for Rust.",
    "depends_on": ["SF-020"],
    "acceptance": {
-    "reference_suites": [],
+    "reference_suites": ["cloudwatch-logs-cases.json"],
     "runtime_tests": [
-     "Log lines from a supervised component and the journal arrive in order in a local CloudWatch Logs emulator",
-     "Redaction removes configured secrets before upload; key and token material never appears",
-     "Spool limit, offline catch-up and restart without duplicate or lost batches"
+     "Run cloudwatch-logs-cases.json against the real adapter, with upstream results injected by a local CloudWatch Logs emulator",
+     "Log lines from a supervised component and the journal arrive in chronological order in the emulator under the LogManager 2.3.14 group and stream names",
+     "Redaction removes configured secrets before spooling; key and token material never appears in the spool or upload",
+     "Spool limit with counted drops, offline catch-up, and restart without lost batches; a batch whose response was lost is resent unchanged (at least once)",
+     "Batches respect the PutLogEvents 10,000-event, 1,048,576-byte and single-day limits; events over 256 KiB are split as LogManager 2.2.2 and later do"
     ],
     "environment": "Network-none container with a local AWS API emulator",
     "deferred": ["Real AWS account log upload; needs separate user authorization"]
