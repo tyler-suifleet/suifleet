@@ -92,7 +92,9 @@ pub async fn run_hardened(
     #[cfg(unix)]
     let _group = ProcessGroup(child.pid() as i32);
     let status = match tokio::time::timeout(timeout, child.wait()).await {
-        Ok(status) => status?,
+        Ok(status) => status.map_err(|error| crate::firmware::Indeterminate(format!(
+            "cannot collect apply command exit result: {error}; completion unknown"
+        )))?,
         Err(_) => {
             // Kill and reap the group now rather than leaving it to drop.
             #[cfg(unix)]
