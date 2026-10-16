@@ -10,7 +10,7 @@ import subprocess
 import time
 import uuid
 
-from coordinator import network_authorization, process_identity, run
+from coordinator import network_authorization, process_identity, worker_stopped, run
 
 
 class Dispatcher:
@@ -34,6 +34,9 @@ class Dispatcher:
                 raise ValueError('Each slot needs a known family and actual model')
             if slot['project'] not in {p['id'] for p in config['projects']}:
                 raise ValueError('Unknown slot project')
+            limit = slot.get('max_quarantined', 3)
+            if type(limit) is not int or not 1 <= limit <= 16:
+                raise ValueError('max_quarantined must be an integer from 1 to 16')
             limit = slot.get('max_workers', 1)
             if type(limit) is not int or not 1 <= limit <= 16:
                 raise ValueError('max_workers must be an integer from 1 to 16')
@@ -64,44 +67,66 @@ class Dispatcher:
         self.db.execute('UPDATE runs SET status=?,message=? WHERE session=?', (status, message, session))
 
     def reconcile(self, project):
-        rows = self.db.execute("SELECT * FROM runs WHERE project=? AND status IN ('claiming','launching','running')", (project['id'],)).fetchall()
+        rows = self.db.execute("SELECT * FROM runs WHERE project=? AND status IN ('claiming','launching','running','orphaned')", (project['id'],)).fetchall()
         for row in rows:
-            directory = Path(row['directory'])
-            child = self.children.get(row['session'])
-            if child is not None:
-                child.poll()  # Reap our exited wrappers before checking /proc identity.
-            if row['status'] == 'claiming':
-                # Claim may have succeeded before its response was persisted. Never repeat it.
-                self.update(row['session'], 'orphaned', 'Interrupted claim; inspect ticket session and worktree before recovery')
-                continue
-            claim = json.loads(row['claim'])
-            owner = self.ticket(project, 'show', claim['key'])
-            completed = (owner['status'] == 'done' and owner.get('token') is None
-                         and owner.get('session') == claim['session'] and owner.get('branch') == claim['branch'])
-            if owner.get('token') != claim['token'] and not completed:
-                self.update(row['session'], 'orphaned', 'Ownership changed; inspect and stop old worker')
-                continue
-            process = directory/'process.json'
-            if process.exists():
-                identity = json.loads(process.read_text())
-                pid, started = identity['pid'], identity['started']
-            else:
-                pid, started = row['pid'], row['started']
-            alive = pid and started and process_identity(pid) == started
-            receipt = directory/'exit.json'
-            if alive:
-                if owner['status'] == 'in_progress':
-                    self.ticket(project, 'heartbeat', claim['key'], '--token', claim['token'])
-                continue
-            # Exit receipt alone is insufficient: the wrapper can write it just before exiting.
-            if receipt.exists() and json.loads(receipt.read_text()).get('returncode') == 0:
-                result_path = directory/'result.json'
-                result = json.loads(result_path.read_text()) if result_path.exists() else {}
-                if (owner['status'] in ('review', 'done') and not owner.get('publish_pending')
-                        and result.get('verdict') == 'review_ready' and result.get('evidence')):
-                    self.update(row['session'], 'finished', 'Implementation handed off; review coordinator owns integration')
+            try:
+                directory = Path(row['directory'])
+                child = self.children.get(row['session'])
+                if child is not None:
+                    child.poll()  # Reap our exited wrappers before checking /proc identity.
+                if row['status'] == 'claiming':
+                    # Claim may have succeeded before its response was persisted. Never repeat it.
+                    self.update(row['session'], 'orphaned', 'Interrupted claim; inspect ticket session and worktree before recovery')
                     continue
-            self.update(row['session'], 'orphaned', 'Worker stopped without verified handoff; claim retained, slot stopped')
+                if not row['claim']:
+                    continue  # Interrupted claim has no trustworthy process/ownership identity.
+                claim = json.loads(row['claim'])
+                owner = self.ticket(project, 'show', claim['key'])
+                completed = (owner['status'] == 'done' and owner.get('token') is None
+                             and owner.get('session') == claim['session'] and owner.get('branch') == claim['branch'])
+                ownership_changed = owner.get('token') != claim['token'] and not completed
+                if ownership_changed and row['status'] != 'orphaned':
+                    self.update(row['session'], 'orphaned', 'Ownership changed; inspect and stop old worker')
+                    continue
+                process = directory/'process.json'
+                if process.exists():
+                    identity = json.loads(process.read_text())
+                    pid, started = identity['pid'], identity['started']
+                else:
+                    pid, started = row['pid'], row['started']
+                alive = pid and started and process_identity(pid) == started
+                receipt = directory/'exit.json'
+                if alive:
+                    if not ownership_changed and owner['status'] == 'in_progress':
+                        self.ticket(project, 'heartbeat', claim['key'], '--token', claim['token'])
+                    continue
+                if not worker_stopped(pid, started):
+                    continue  # A child may still be running after its wrapper disappeared.
+                if ownership_changed:
+                    self.update(row['session'], 'quarantined', 'Stopped worker; ownership changed; original claim never resumed')
+                    self.defer(project, row['family'], 'stopped worker quarantined')
+                    continue
+                result = {}
+                # Exit receipt alone is insufficient: the wrapper can write it just before exiting.
+                if receipt.exists() and json.loads(receipt.read_text()).get('returncode') == 0:
+                    result_path = directory/'result.json'
+                    result = json.loads(result_path.read_text()) if result_path.exists() else {}
+                    if (owner['status'] in ('review', 'done') and not owner.get('publish_pending')
+                            and result.get('verdict') == 'review_ready' and result.get('evidence')):
+                        self.update(row['session'], 'finished', 'Implementation handed off; review coordinator owns integration')
+                        self.db.execute('DELETE FROM backoff WHERE project=? AND family=?', (project['id'],row['family']))
+                        continue
+                if (receipt.exists() and json.loads(receipt.read_text()).get('returncode') == 0
+                        and owner['status'] == 'blocked' and not owner.get('publish_pending')
+                        and result.get('verdict') == 'blocked' and result.get('evidence')):
+                    self.update(row['session'], 'parked', 'Verified stopped blocked worker; ticket retained, execution capacity freed')
+                    continue
+                self.update(row['session'], 'quarantined', 'Verified stopped without handoff; claim retained for explicit recovery')
+                self.defer(project, row['family'], 'stopped worker quarantined')
+            except (OSError, ValueError, KeyError, TypeError, subprocess.CalledProcessError) as error:
+                # A corrupt receipt or one unavailable ticket must not starve
+                # unrelated slots. Keep its existing capacity/ownership intact.
+                print(f"{project['id']}: reconciliation deferred for {row['session']} ({type(error).__name__})", flush=True)
 
     def available(self, slot, owners):
         pause = self.db.execute('SELECT retry_after FROM backoff WHERE project=? AND family=?', (slot['project'],slot['family'])).fetchone()
@@ -111,8 +136,10 @@ class Dispatcher:
         # service database, but a lengthy review/repair must not pause a family.
         if not (self.state/'reviews.sqlite3').exists():
             return False
-        rows = self.db.execute("SELECT session,claim FROM runs WHERE project=? AND family=? AND status!='finished'",
+        rows = self.db.execute("SELECT session,claim,status FROM runs WHERE project=? AND family=? AND status!='finished'",
                                (slot['project'], slot['family'])).fetchall()
+        if sum(r['status'] in ('quarantined', 'parked') for r in rows) >= slot.get('max_quarantined', 3):
+            return False
         managed_sessions = {r['session'] for r in rows}
         # Real ticket responses preserve the dispatch session. Tests/legacy state
         # may preserve it only in the persisted claim; use both identities.
@@ -121,9 +148,9 @@ class Dispatcher:
                      if owner.get('agent') == slot['family']
                      and owner['status'] in ('in_progress', 'blocked')
                      and (not owner.get('session') or owner['session'] not in managed_sessions))
-        # Uncertain, orphaned and expired reservations each consume capacity;
-        # none grants permission to restart or reclaim their existing ticket.
-        return len(rows) + manual < slot.get('max_workers', 1)
+        # Quarantined/parked jobs retain ownership, but have no runnable worker.
+        active = sum(r['status'] not in ('quarantined', 'parked') for r in rows)
+        return active + manual < slot.get('max_workers', 1)
 
     def launch(self, project, slot):
         # A fetch cannot acquire ownership. A transient pre-claim failure is retryable.
@@ -161,7 +188,6 @@ class Dispatcher:
                                      cwd=claim['worktree'], env=env, stdin=subprocess.DEVNULL,
                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
             self.children[session] = child
-            self.db.execute('DELETE FROM backoff WHERE project=? AND family=?', (project['id'],slot['family']))
             self.db.execute("UPDATE runs SET status='running',pid=?,started=? WHERE session=?",
                             (child.pid, process_identity(child.pid), session))
             print(f"{project['id']}: {slot['family']} implementing {claim['key']}", flush=True)
