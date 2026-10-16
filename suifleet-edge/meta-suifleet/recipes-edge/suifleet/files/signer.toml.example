@@ -1,0 +1,20 @@
+# /etc/suifleet/signer.toml: root:suifleet-signer 0640 (SF-053, KEY_ISOLATION.md).
+# The device signing service holds the key; the daemon uses
+#   [device.signer] kind = "service", socket = "/run/suifleet-signer/sign.sock"
+manifest_path = "deployment.json"           # the same verified manifest as config.toml
+device_cap_id = "0x<DEVICE_CAP_ID>"
+keypair_path = "/etc/suifleet/device.key"   # owned by suifleet-signer, 0600
+
+# Only this unit's main process gets status-report signatures: the PID and
+# start time the unit records as root (ExecStartPost=) when it starts.
+caller_unit = "suifleet.service"
+# caller_record = "/run/suifleet-signer/daemon.main"
+# max_gas_budget = 50000000
+
+# A key in a PKCS#11 token instead of keypair_path (build with --features pkcs11):
+# [pkcs11]
+# kind = "pkcs11"
+# module = "/usr/lib/libtpm2_pkcs11.so"
+# token_label = "suifleet"
+# key_label = "device"
+# pin_file = "/etc/suifleet/pkcs11.pin"   # suifleet-signer 0600

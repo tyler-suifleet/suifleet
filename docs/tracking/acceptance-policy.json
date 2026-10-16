@@ -40,6 +40,23 @@
         "https://github.com/tyler-suifleet/suifleet/issues/32"
       ]
     },
+    "SF-014": {
+      "deferred_checks": [
+        "physical Pi boot, reboot, power-loss and supervised component recovery",
+        "real extension-wallet lifecycle (run/readiness/shutdown/restart) deploy UI acceptance"
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32",
+        "https://github.com/tyler-suifleet/suifleet/issues/11"
+      ],
+      "retained_gates": [
+        "all source/security findings repaired",
+        "daemon unit tests and the full local simulator suite (make test-ota), including supervised crash, replacement, rollback, daemon SIGKILL and dependency cases",
+        "real systemd/cgroup-v2 evidence under the shipped suifleet.service (scripts/test_supervisor_systemd.py): component crash, setsid/env-cleared/reparented descendant containment, daemon SIGKILL with successful successor bootstrap, no overlapping or unmanaged descendants",
+        "exact-head ordinary CI and current-head/base testnet status",
+        "fresh independent review of exact head/base/feedback/policy"
+      ]
+    },
     "SF-024": {
       "deferred_checks": [
         "hosted/public-node and archival-retention integration"
@@ -55,6 +72,21 @@
       "acceptance_issues": [
         "https://github.com/tyler-suifleet/suifleet/issues/29",
         "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ]
+    },
+    "SF-026": {
+      "deferred_checks": [
+        "physical Pi power loss during daemon handoff and platform-specific boot behavior"
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "all source/security findings repaired",
+        "daemon unit tests and make test-ota, including scripts/test_daemon_update.py (working update, startup-failure rollback, preflight rejection, interrupted handoff)",
+        "real systemd/cgroup-v2 evidence under the shipped unit (scripts/test_daemon_update_systemd.py): handoff via service-manager restart, start-timeout and exit rollback without the new daemon",
+        "exact-head ordinary CI and current-head/base testnet status",
+        "fresh independent review of exact head/base/feedback/policy"
       ]
     },
     "SF-039": {
@@ -120,6 +152,36 @@
         "fresh independent review of exact head/base/feedback/policy",
         "mandatory testnet status enforcement and sole-orchestrator integration",
         "overall SF043 request incomplete until actual automatic updated-helper restoration/reuse after integration is observed and recorded"
+      ]
+    },
+    "SF-029": {
+      "deferred_checks": [
+        "physical SD flashing, Pi first boot and on-device network/identity/persistence acceptance"
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "authorization": "User explicitly requests building the flashable image now without physical Pi; user will flash it. Build and image inspection must complete; physical evidence remains separately tracked, not passed.",
+      "retained_gates": [
+        "real BitBake SD-image build, checksum, package manifest and pinned source/layer evidence",
+        "wired DHCP and SSH public-key access configured and inspected",
+        "fresh independent code/security review and relevant tests/CI",
+        "no physical programming or private identity/enrollment keys in image"
+      ]
+    },
+    "SF-053": {
+      "deferred_checks": [
+        "physical Pi image/service acceptance of the signing service, and hardware-token (TPM/secure element) protection"
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "all source/security findings repaired",
+        "daemon unit tests including signer policy/caller negatives, and make test-ota",
+        "real systemd/cgroup-v2 evidence under the shipped units (scripts/test_key_isolation_systemd.py): component key/PIN/config/proc/env/fd/socket negatives, signed daemon reports, restarts and key migration",
+        "exact-head ordinary CI and current-head/base testnet status",
+        "fresh independent review of exact head/base/feedback/policy"
       ]
     }
   }

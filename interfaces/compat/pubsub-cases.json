@@ -1,0 +1,405 @@
+{
+ "filters": [
+  {
+   "id": "filter-0",
+   "filter": "a/b",
+   "valid": true
+  },
+  {
+   "id": "filter-1",
+   "filter": "a/+/c",
+   "valid": true
+  },
+  {
+   "id": "filter-2",
+   "filter": "#",
+   "valid": true
+  },
+  {
+   "id": "filter-3",
+   "filter": "+",
+   "valid": true
+  },
+  {
+   "id": "filter-4",
+   "filter": "a/#",
+   "valid": true
+  },
+  {
+   "id": "filter-5",
+   "filter": "/",
+   "valid": true
+  },
+  {
+   "id": "filter-6",
+   "filter": "+/+",
+   "valid": true
+  },
+  {
+   "id": "filter-7",
+   "filter": "sport/+/player1",
+   "valid": true
+  },
+  {
+   "id": "filter-8",
+   "filter": "a/#/b",
+   "valid": false
+  },
+  {
+   "id": "filter-9",
+   "filter": "a#",
+   "valid": false
+  },
+  {
+   "id": "filter-10",
+   "filter": "a/b+",
+   "valid": false
+  },
+  {
+   "id": "filter-11",
+   "filter": "",
+   "valid": false
+  },
+  {
+   "id": "filter-12",
+   "filter": "##",
+   "valid": false
+  },
+  {
+   "id": "filter-13",
+   "filter": "sport+",
+   "valid": false
+  },
+  {
+   "id": "filter-14",
+   "filter": "a/\u0000",
+   "valid": false
+  }
+ ],
+ "topics": [
+  {
+   "id": "topic-0",
+   "topic": "a/b",
+   "valid": true
+  },
+  {
+   "id": "topic-1",
+   "topic": "/",
+   "valid": true
+  },
+  {
+   "id": "topic-2",
+   "topic": "$SYS/broker",
+   "valid": true
+  },
+  {
+   "id": "topic-3",
+   "topic": "a//b",
+   "valid": true
+  },
+  {
+   "id": "topic-4",
+   "topic": "a/+",
+   "valid": false
+  },
+  {
+   "id": "topic-5",
+   "topic": "a/#",
+   "valid": false
+  },
+  {
+   "id": "topic-6",
+   "topic": "",
+   "valid": false
+  }
+ ],
+ "matches": [
+  {
+   "id": "match-0",
+   "filter": "sport/tennis/player1/#",
+   "topic": "sport/tennis/player1",
+   "matches": true
+  },
+  {
+   "id": "match-1",
+   "filter": "sport/tennis/player1/#",
+   "topic": "sport/tennis/player1/ranking",
+   "matches": true
+  },
+  {
+   "id": "match-2",
+   "filter": "sport/tennis/player1/#",
+   "topic": "sport/tennis/player1/score/wimbledon",
+   "matches": true
+  },
+  {
+   "id": "match-3",
+   "filter": "sport/#",
+   "topic": "sport",
+   "matches": true
+  },
+  {
+   "id": "match-4",
+   "filter": "sport/tennis/+",
+   "topic": "sport/tennis/player1",
+   "matches": true
+  },
+  {
+   "id": "match-5",
+   "filter": "sport/tennis/+",
+   "topic": "sport/tennis/player1/ranking",
+   "matches": false
+  },
+  {
+   "id": "match-6",
+   "filter": "sport/+",
+   "topic": "sport",
+   "matches": false
+  },
+  {
+   "id": "match-7",
+   "filter": "sport/+",
+   "topic": "sport/",
+   "matches": true
+  },
+  {
+   "id": "match-8",
+   "filter": "+",
+   "topic": "a",
+   "matches": true
+  },
+  {
+   "id": "match-9",
+   "filter": "+",
+   "topic": "a/b",
+   "matches": false
+  },
+  {
+   "id": "match-10",
+   "filter": "/+",
+   "topic": "/finance",
+   "matches": true
+  },
+  {
+   "id": "match-11",
+   "filter": "+/+",
+   "topic": "/finance",
+   "matches": true
+  },
+  {
+   "id": "match-12",
+   "filter": "+",
+   "topic": "/finance",
+   "matches": false
+  },
+  {
+   "id": "match-13",
+   "filter": "#",
+   "topic": "$SYS/broker",
+   "matches": false
+  },
+  {
+   "id": "match-14",
+   "filter": "+/monitor/Clients",
+   "topic": "$SYS/monitor/Clients",
+   "matches": false
+  },
+  {
+   "id": "match-15",
+   "filter": "$SYS/#",
+   "topic": "$SYS/monitor/Clients",
+   "matches": true
+  },
+  {
+   "id": "match-16",
+   "filter": "$SYS/monitor/+",
+   "topic": "$SYS/monitor/Clients",
+   "matches": true
+  },
+  {
+   "id": "match-17",
+   "filter": "ACCOUNTS",
+   "topic": "Accounts",
+   "matches": false
+  },
+  {
+   "id": "match-18",
+   "filter": "a/b",
+   "topic": "a/b/",
+   "matches": false
+  },
+  {
+   "id": "match-19",
+   "filter": "a//b",
+   "topic": "a//b",
+   "matches": true
+  },
+  {
+   "id": "match-20",
+   "filter": "a/+/b",
+   "topic": "a//b",
+   "matches": true
+  }
+ ],
+ "authorization": [
+  {
+   "id": "subscribe-wildcard-literal",
+   "policies": [
+    {
+     "operations": [
+      "aws.greengrass#SubscribeToTopic"
+     ],
+     "resources": [
+      "test/topic/#"
+     ]
+    }
+   ],
+   "operation": "SubscribeToTopic",
+   "topic": "test/topic/#",
+   "allowed": true
+  },
+  {
+   "id": "subscribe-wildcard-not-expanded",
+   "policies": [
+    {
+     "operations": [
+      "aws.greengrass#SubscribeToTopic"
+     ],
+     "resources": [
+      "test/topic/#"
+     ]
+    }
+   ],
+   "operation": "SubscribeToTopic",
+   "topic": "test/topic/filter",
+   "allowed": false
+  },
+  {
+   "id": "star-glob-publish",
+   "policies": [
+    {
+     "operations": [
+      "aws.greengrass#PublishToTopic"
+     ],
+     "resources": [
+      "test/*"
+     ]
+    }
+   ],
+   "operation": "PublishToTopic",
+   "topic": "test/a/b",
+   "allowed": true
+  },
+  {
+   "id": "star-glob-subscribe-filter",
+   "policies": [
+    {
+     "operations": [
+      "aws.greengrass#SubscribeToTopic"
+     ],
+     "resources": [
+      "test/*"
+     ]
+    }
+   ],
+   "operation": "SubscribeToTopic",
+   "topic": "test/+/status",
+   "allowed": true
+  },
+  {
+   "id": "other-topic-denied",
+   "policies": [
+    {
+     "operations": [
+      "aws.greengrass#PublishToTopic"
+     ],
+     "resources": [
+      "test/*"
+     ]
+    }
+   ],
+   "operation": "PublishToTopic",
+   "topic": "other/a",
+   "allowed": false
+  },
+  {
+   "id": "operation-not-granted",
+   "policies": [
+    {
+     "operations": [
+      "aws.greengrass#PublishToTopic"
+     ],
+     "resources": [
+      "*"
+     ]
+    }
+   ],
+   "operation": "SubscribeToTopic",
+   "topic": "a",
+   "allowed": false
+  },
+  {
+   "id": "all-operations",
+   "policies": [
+    {
+     "operations": [
+      "*"
+     ],
+     "resources": [
+      "*"
+     ]
+    }
+   ],
+   "operation": "SubscribeToTopic",
+   "topic": "#",
+   "allowed": true
+  },
+  {
+   "id": "no-policy-denies",
+   "policies": [],
+   "operation": "PublishToTopic",
+   "topic": "a",
+   "allowed": false
+  },
+  {
+   "id": "any-policy-grants",
+   "policies": [
+    {
+     "operations": [
+      "aws.greengrass#PublishToTopic"
+     ],
+     "resources": [
+      "x"
+     ]
+    },
+    {
+     "operations": [
+      "aws.greengrass#PublishToTopic"
+     ],
+     "resources": [
+      "a/b"
+     ]
+    }
+   ],
+   "operation": "PublishToTopic",
+   "topic": "a/b",
+   "allowed": true
+  },
+  {
+   "id": "plus-is-literal-in-resource",
+   "policies": [
+    {
+     "operations": [
+      "aws.greengrass#PublishToTopic"
+     ],
+     "resources": [
+      "a/+/c"
+     ]
+    }
+   ],
+   "operation": "PublishToTopic",
+   "topic": "a/b/c",
+   "allowed": false
+  }
+ ]
+}

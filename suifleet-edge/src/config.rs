@@ -12,6 +12,38 @@ pub struct Config {
     pub runtime: RuntimeConfig,
     #[serde(default)]
     pub components: ComponentsConfig,
+    #[serde(default)]
+    pub daemon_update: DaemonUpdateConfig,
+    /// The file this configuration was loaded from (for the update preflight).
+    #[serde(skip)]
+    pub path: PathBuf,
+}
+
+/// Daemon self-update (SF-026; docs/DAEMON_UPDATE.md). Off unless enabled; the
+/// service must then start `suifleet --launch` so a failed new daemon falls
+/// back without its own help.
+#[derive(Deserialize, Debug, Clone)]
+#[serde(default, deny_unknown_fields)]
+pub struct DaemonUpdateConfig {
+    pub enabled: bool,
+    /// Deployments of this component name carry a new daemon binary.
+    pub component: String,
+    /// Default: `<state_dir>/daemon`.
+    pub install_dir: Option<PathBuf>,
+    /// Starts a new daemon gets to complete startup before rollback.
+    pub max_start_attempts: u32,
+    pub preflight_timeout_seconds: u64,
+}
+impl Default for DaemonUpdateConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            component: "suifleet-daemon".into(),
+            install_dir: None,
+            max_start_attempts: 3,
+            preflight_timeout_seconds: 60,
+        }
+    }
 }
 
 /// Where component dependency candidates may come from.
@@ -34,12 +66,17 @@ pub struct ComponentsConfig {
     /// Cached artifacts beyond this are evicted oldest first, except those
     /// of installed versions.
     pub cache_max_bytes: u64,
+    /// Operator-owned application recovery scripts, keyed by component name.
+    /// Run in the previous committed version workspace, never for platform installers.
+    #[serde(default)]
+    pub recovery_commands: std::collections::BTreeMap<String, String>,
 }
 impl Default for ComponentsConfig {
     fn default() -> Self {
         Self {
             offline_candidates: OfflinePolicy::Never,
             cache_max_bytes: 512 * 1024 * 1024,
+            recovery_commands: Default::default(),
         }
     }
 }
@@ -249,20 +286,29 @@ impl EnrollConfig {
     }
 }
 
-/// `[device.signer]`: a P-256 key in a PKCS#11 token (HSM, SoftHSM2, or a
-/// TPM's PKCS#11 provider). Requires a build with `--features pkcs11`.
+/// `[device.signer]`. `kind = "service"`: the device signing service
+/// (SF-053; the daemon user cannot read the key). `kind = "pkcs11"`: a P-256
+/// key in a PKCS#11 token (HSM, SoftHSM2, or a TPM's PKCS#11 provider), which
+/// requires a build with `--features pkcs11`.
 #[derive(Deserialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(not(feature = "pkcs11"), allow(dead_code))]
 pub struct SignerConfig {
-    /// Only "pkcs11".
+    /// "service" or "pkcs11".
     pub kind: String,
-    /// The token's PKCS#11 module, e.g. /usr/lib/softhsm/libsofthsm2.so.
+    /// service: the signing service's socket.
+    #[serde(default)]
+    pub socket: PathBuf,
+    /// pkcs11: the token's module, e.g. /usr/lib/softhsm/libsofthsm2.so.
+    #[serde(default)]
     pub module: PathBuf,
+    #[serde(default)]
     pub token_label: String,
-    /// CKA_LABEL of both the private and the public key object.
+    /// pkcs11: CKA_LABEL of both the private and the public key object.
+    #[serde(default)]
     pub key_label: String,
-    /// File holding the user PIN (root-only readable).
+    /// pkcs11: file holding the user PIN (readable only by the key's user).
+    #[serde(default)]
     pub pin_file: PathBuf,
 }
 
@@ -379,6 +425,29 @@ impl Config {
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         let raw = std::fs::read_to_string(path)?;
         let mut cfg: Self = toml::from_str(&raw)?;
+        cfg.path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
+        anyhow::ensure!(
+            !cfg.daemon_update.enabled
+                || (crate::deps::valid_name(&cfg.daemon_update.component) && cfg.daemon_update.max_start_attempts > 0
+                    && cfg.daemon_update.preflight_timeout_seconds > 0
+                    && cfg.daemon_update.install_dir.as_ref().is_none_or(|d| d.is_absolute())),
+            "daemon_update needs a valid component name, positive attempts/timeout and an absolute install_dir"
+        );
+        // The launcher execs whatever its install directory names, and that
+        // directory is writable by the daemon user and so by every component:
+        // a component could make itself the unit's main process, which the
+        // signing service trusts for status reports (SF-053, KEY_ISOLATION.md).
+        anyhow::ensure!(
+            !(cfg.daemon_update.enabled && cfg.device.signer.as_ref().is_some_and(|signer| signer.kind == "service")),
+            "daemon_update cannot be enabled with the service signer ([device.signer] kind = \"service\"): \
+             components could replace the daemon the signing service trusts"
+        );
+        anyhow::ensure!(
+            cfg.components.recovery_commands.iter().all(|(name, command)| crate::deps::valid_name(name) && !command.trim().is_empty()),
+            "application recovery needs valid component names and nonempty commands"
+        );
+        anyhow::ensure!(cfg.components.recovery_commands.is_empty() || cfg.apply.allow_recipe_commands,
+            "application recovery commands require apply.allow_recipe_commands");
         let manifest_path = if cfg.sui.manifest_path.is_absolute() {
             cfg.sui.manifest_path.clone()
         } else {
@@ -432,6 +501,15 @@ pub struct RuntimeConfig {
     pub state_dir: PathBuf,
     pub poll_seconds: u64,
     pub replay_history: bool,
+    /// Supervised components without a readiness command are ready once their
+    /// run survives this long.
+    pub component_startup_seconds: u64,
+    /// How long a readiness command may keep failing before the start fails.
+    pub component_ready_timeout_seconds: u64,
+    /// Grace for the shutdown command (or SIGTERM) before SIGKILL.
+    pub component_stop_timeout_seconds: u64,
+    /// Restarts allowed within ten minutes before a component is Broken.
+    pub component_max_restarts: u32,
 }
 impl Default for RuntimeConfig {
     fn default() -> Self {
@@ -439,6 +517,10 @@ impl Default for RuntimeConfig {
             state_dir: "/var/lib/suifleet".into(),
             poll_seconds: 10,
             replay_history: false,
+            component_startup_seconds: 3,
+            component_ready_timeout_seconds: 60,
+            component_stop_timeout_seconds: 10,
+            component_max_restarts: 5,
         }
     }
 }
@@ -510,6 +592,22 @@ mod tests {
         m.validate().unwrap();
         m.type_origins.insert(crate::catalog::TYPES[0].into(), "bad".into());
         assert!(m.validate().is_err());
+    }
+    #[test]
+    fn daemon_update_is_refused_with_the_service_signer() {
+        let dir = std::env::temp_dir().join(format!("suifleet-config-update-signer-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        let base = "[sui]\nmanifest_path='missing.json'\n[device]\ndevice_object_id='0x1'\ndevice_cap_id='0x2'\n\
+            [device.signer]\nkind='service'\nsocket='/run/s.sock'\n[apply]\ncommand='true'\n";
+        std::fs::write(&path, format!("{base}[daemon_update]\nenabled=true\ncomponent='suifleet'\n")).unwrap();
+        let error = Config::load(&path).unwrap_err().to_string();
+        assert!(error.contains("daemon_update cannot be enabled with the service signer"), "{error}");
+        // Without daemon_update the check passes (and loading reaches the manifest).
+        std::fs::write(&path, base).unwrap();
+        let error = format!("{:#}", Config::load(&path).unwrap_err());
+        assert!(!error.contains("daemon_update"), "{error}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
     #[test]
     fn legacy_network_config_rejected() {

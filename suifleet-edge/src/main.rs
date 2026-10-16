@@ -5,15 +5,20 @@ mod components;
 mod config;
 mod deps;
 mod firmware;
+mod handoff;
 mod identity;
 mod reconcile;
 mod recipe;
 mod protocol;
 #[cfg(test)]
 mod protocol_tests;
+#[cfg(test)]
+mod compat_tests;
 mod release;
+mod signer_service;
 mod state;
 mod sui_client;
+mod supervisor;
 mod walrus_client;
 
 use apply::ApplyRunner;
@@ -52,11 +57,34 @@ async fn main() -> anyhow::Result<()> {
         );
         return Ok(());
     }
+    if args.len() == 3 && args[1] == "--key-holder" {
+        // Root provisioning: who owns device.key under this configuration (SF-053).
+        println!("{}", signer_service::key_holder(Path::new(&args[2]))?);
+        return Ok(());
+    }
+    if args.len() == 3 && args[1] == "--record-main-process" {
+        // Root ExecStartPost= of the daemon unit, for the signing service (SF-053).
+        return signer_service::record_main_process(Path::new(&args[2]));
+    }
+    if args.len() == 3 && args[1] == "--self-check" {
+        return self_check(Path::new(&args[2]));
+    }
+    // The service manager starts the platform's base binary with --launch; it
+    // execs a staged or confirmed daemon update, or continues as this binary.
+    if args.len() == 2 && args[1] == "--launch" {
+        let path = std::env::var("EDGE_CONFIG").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/etc/suifleet/config.toml"));
+        match Config::load(&path) {
+            Ok(cfg) => handoff::launch(&cfg.daemon_update, &cfg.runtime.state_dir)?,
+            Err(error) => eprintln!("suifleet launcher: configuration unreadable ({error:#}); starting this daemon"),
+        }
+    }
+    let launched = args.len() == 2 && args[1] == "--launch";
     let check_config = args.len() == 3 && args[1] == "--check-config";
     let helper = args.len() == 3 && args[1] == "--firmware-helper";
+    let signer_service = args.len() == 3 && args[1] == "--signer-service";
     anyhow::ensure!(
-        args.len() == 1 || check_config || helper,
-        "usage: suifleet [--provision KEY_PATH | --derive-address KEY_PATH | --enroll ENROLL_TOML | --check-config CONFIG_PATH | --firmware-helper CONFIG | --verify-release BUNDLE_DIR TRUST_FILE]"
+        args.len() == 1 || launched || check_config || helper || signer_service,
+        "usage: suifleet [--launch | --provision KEY_PATH | --derive-address KEY_PATH | --enroll ENROLL_TOML | --check-config CONFIG_PATH | --self-check CONFIG_PATH | --firmware-helper CONFIG | --signer-service SIGNER_TOML | --record-main-process PATH | --key-holder CONFIG_PATH | --verify-release BUNDLE_DIR TRUST_FILE]"
     );
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -64,6 +92,10 @@ async fn main() -> anyhow::Result<()> {
                 .unwrap_or_else(|_| "suifleet=info".into()),
         )
         .init();
+    if signer_service {
+        // Runs as its own user, holding the device key (SF-053).
+        return signer_service::serve(Path::new(&args[2]));
+    }
     if helper {
         // Root-owned, path-activated: the only privileged operation.
         let helper = config::FirmwareHelperConfig::load(Path::new(&args[2]))?;
@@ -78,6 +110,14 @@ async fn main() -> anyhow::Result<()> {
             .unwrap_or_else(|_| PathBuf::from("/etc/suifleet/config.toml"))
     };
     let cfg = Config::load(&path)?;
+    if !check_config && cfg.device.signer.as_ref().is_some_and(|signer| signer.kind == "service") {
+        // Component processes run as this user: with the key in the signing
+        // service, keep them from ptracing the daemon (and so signing as it)
+        // or taking its descriptors. execve restores the default for each
+        // component.
+        // SAFETY: plain prctl on this process.
+        anyhow::ensure!(unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) } == 0, "cannot make the daemon non-dumpable");
+    }
     let sui = SuiClient::load(cfg.sui.clone(), identity::signer(&cfg.device)?)?;
     sui.validate_deployment().await?;
     if check_config {
@@ -96,12 +136,29 @@ async fn main() -> anyhow::Result<()> {
     // finish, or already did, must not be settled as Failed.
     let spool = cfg.apply.firmware_spool.clone();
     journal.settle_interrupted(|id, outcome| match &outcome.firmware_request {
+        _ if outcome.daemon_handoff.is_some() => true, // Resolved by the handoff below.
         Some(request) => firmware::recover(&spool, request).unwrap_or_else(|error| {
             warn!(deployment = id, %error, "Cannot inspect firmware spool; keeping outcome pending");
             true
         }),
         None => false,
     })?;
+    // A daemon update staged by an earlier run: applied, rolled back, or (when
+    // this process is its candidate) confirmed once startup completes.
+    let handoff_dir = handoff::install_dir(&cfg.daemon_update, &cfg.runtime.state_dir);
+    let mut confirm_after_startup = None;
+    if cfg.daemon_update.enabled {
+        let candidate = std::env::var(handoff::CANDIDATE_ENV).ok();
+        match handoff::resolve(&handoff_dir, candidate.as_deref())? {
+            handoff::Resolution::None => {}
+            handoff::Resolution::ConfirmAfterStartup(update) => confirm_after_startup = Some(update),
+            handoff::Resolution::Applied(update) => settle_handoff(&mut journal, &handoff_dir, &update, Ok(()))?,
+            handoff::Resolution::Failed(update, reason) => {
+                warn!(deployment = update.deployment, version = update.version, %reason, "Daemon update rolled back");
+                settle_handoff(&mut journal, &handoff_dir, &update, Err(anyhow::anyhow!(reason)))?
+            }
+        }
+    }
     let walrus = WalrusClient::new(&cfg.walrus);
     // The artifact cache holds at most the in-flight artifact; anything left
     // by an earlier run (e.g. a crash mid-download) is unused.
@@ -114,6 +171,21 @@ async fn main() -> anyhow::Result<()> {
     }
     let runner = ApplyRunner::new(cfg.apply.clone());
     let store = components::Store::open(&cfg.runtime.state_dir, &cfg.components);
+    // Committed components start again on every daemon start (bootstrap/reboot).
+    let mut supervisor = supervisor::Supervisor::open(
+        &cfg.runtime.state_dir,
+        supervisor::Settings {
+            startup: Duration::from_secs(cfg.runtime.component_startup_seconds),
+            ready_timeout: Duration::from_secs(cfg.runtime.component_ready_timeout_seconds),
+            stop_timeout: Duration::from_secs(cfg.runtime.component_stop_timeout_seconds),
+            max_restarts: cfg.runtime.component_max_restarts,
+            max_memory_bytes: cfg.apply.max_memory_bytes,
+        },
+    )?;
+    supervisor.configure_recovery(cfg.components.recovery_commands.clone());
+    // The daemon is ready before its components are: bootstrap waits up to a
+    // readiness timeout per component, which would otherwise exceed the
+    // unit's start deadline and restart the daemon into the same bootstrap.
     #[cfg(feature = "systemd")]
     tokio::spawn(async {
         loop {
@@ -123,23 +195,80 @@ async fn main() -> anyhow::Result<()> {
     });
     #[cfg(feature = "systemd")]
     sd_notify::notify(false, &[sd_notify::NotifyState::Ready]).ok();
-    info!(
-        address = sui.address(),
-        "Daemon started with durable deployment polling"
-    );
+    // A new daemon is confirmed only after this complete local startup
+    // (configuration, identity, chain validation, journal and supervisor).
+    if let Some(update) = confirm_after_startup.take() {
+        handoff::confirm(&handoff_dir, &update)?;
+        info!(deployment = update.deployment, version = update.version, "Daemon update confirmed");
+        settle_handoff(&mut journal, &handoff_dir, &update, Ok(()))?;
+    }
+    let mut restart_for_handoff = false;
     let shutdown = shutdown_signal();
     tokio::pin!(shutdown);
-    loop {
-        let cycle = poll(&cfg, &sui, &walrus, &runner, store.as_ref(), &mut journal);
-        tokio::select! {
-            result = cycle => { if let Err(error) = result { warn!(%error, "Sync failed; retrying without advancing cursor"); } }
-            _ = &mut shutdown => { info!("Stopping; interrupted apply requires inspection on restart"); break; }
-        }
-        tokio::select! {
-            _ = tokio::time::sleep(Duration::from_secs(cfg.runtime.poll_seconds)) => {}
-            _ = &mut shutdown => break,
+    // A stop during bootstrap still stops whatever it already started.
+    let stopping = tokio::select! {
+        _ = supervisor.bootstrap() => false,
+        _ = &mut shutdown => { info!("Stopping during component bootstrap"); true }
+    };
+    if !stopping {
+        info!(
+            address = sui.address(),
+            "Daemon started with durable deployment polling"
+        );
+        loop {
+            let cycle = poll(&cfg, &sui, &walrus, &runner, store.as_ref(), &mut supervisor, &mut journal);
+            tokio::select! {
+                result = cycle => match result {
+                    Err(error) if error.downcast_ref::<handoff::Requested>().is_some() => {
+                        info!("Daemon update staged; stopping components and restarting into it");
+                        restart_for_handoff = true;
+                        break;
+                    }
+                    Err(error) => warn!(%error, "Sync failed; retrying without advancing cursor"),
+                    Ok(()) => {}
+                },
+                _ = &mut shutdown => { info!("Stopping; interrupted apply requires inspection on restart"); break; }
+            }
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(cfg.runtime.poll_seconds)) => {}
+                _ = &mut shutdown => break,
+            }
         }
     }
+    // Components stop with the daemon (shutdown command, then the whole group).
+    supervisor.stop_all().await;
+    if restart_for_handoff {
+        std::process::exit(handoff::RESTART_EXIT);
+    }
+    Ok(())
+}
+
+/// Record a resolved daemon update's outcome, then drop its handoff record.
+fn settle_handoff(journal: &mut Journal, dir: &Path, update: &handoff::Handoff, result: anyhow::Result<()>) -> anyhow::Result<()> {
+    let outcome = journal.state.deployments.entry(update.deployment.clone()).or_default();
+    if outcome.status.is_none() {
+        record_result(outcome, result);
+        outcome.daemon_handoff = None;
+        journal.save()?;
+    }
+    handoff::finish(dir, update)
+}
+
+/// `suifleet --self-check CONFIG`: offline proof that this binary accepts the
+/// device's configuration, manifest, identity and journal. A daemon update is
+/// preflighted with it before the running daemon hands over.
+fn self_check(path: &Path) -> anyhow::Result<()> {
+    let cfg = Config::load(path)?;
+    let sui = SuiClient::load(cfg.sui.clone(), identity::signer(&cfg.device)?)?;
+    let binding = format!(
+        "{}/{}/{}/{}",
+        sui.manifest().chain_identifier,
+        sui.origin(),
+        cfg.device.device_object_id,
+        sui.address()
+    );
+    state::check(&cfg.runtime.state_dir, &binding)?;
+    println!("suifleet {} accepts this configuration, identity and journal", env!("CARGO_PKG_VERSION"));
     Ok(())
 }
 
@@ -170,8 +299,20 @@ async fn poll(
     walrus: &WalrusClient,
     runner: &ApplyRunner,
     store: Option<&components::Store>,
+    supervisor: &mut supervisor::Supervisor,
     journal: &mut Journal,
 ) -> anyhow::Result<()> {
+    supervisor.recover_broken(runner, |name| journal.state.components.get(name).is_some_and(|c| c.confirmed)).await?;
+    // A recovery receipt and the retained identity reconcile even when the
+    // daemon stopped between supervisor commit and journal save.
+    for (name, deployment) in supervisor.recovered() {
+        if !supervisor.restored(name, deployment) { continue; }
+        if let Some(previous) = journal.state.last_known_good.get(name).filter(|c| &c.deployment_id == deployment).cloned() {
+            journal.state.current.insert(name.clone(), deployment.clone());
+            journal.state.components.insert(name.clone(), previous);
+        }
+    }
+    journal.save()?;
     sui.validate_deployment().await?;
     sui.validate_cap(&cfg.device.device_cap_id, &cfg.device.device_object_id)
         .await?;
@@ -224,7 +365,7 @@ async fn poll(
                 if sui.is_managed(&event.deployment_id).await? {
                     info!(deployment = event.deployment_id, "Managed by desired state; left to reconciliation");
                 } else {
-                    execute(cfg, sui, walrus, runner, store, journal, &event, &record).await?;
+                    execute(cfg, sui, walrus, runner, store, supervisor, journal, &event, &record).await?;
                 }
             }
             journal.state.cursor = Some(cursor);
@@ -257,10 +398,10 @@ async fn poll(
             journal.state.deferred.remove(&id);
             journal.save()?;
         } else if sui.authorized_target(&event, &cfg.device.device_object_id).await? {
-            execute(cfg, sui, walrus, runner, store, journal, &event, &record).await?;
+            execute(cfg, sui, walrus, runner, store, supervisor, journal, &event, &record).await?;
         }
     }
-    reconcile(cfg, sui, walrus, runner, store, journal).await
+    reconcile(cfg, sui, walrus, runner, store, supervisor, journal).await
 }
 
 /// Apply one authorized deployment, journaling intent first, and record its
@@ -272,6 +413,7 @@ async fn execute(
     walrus: &WalrusClient,
     runner: &ApplyRunner,
     store: Option<&components::Store>,
+    supervisor: &mut supervisor::Supervisor,
     journal: &mut Journal,
     event: &DeploymentCreatedEvent,
     record: &sui_client::Object,
@@ -297,6 +439,9 @@ async fn execute(
         return Ok(status);
     }
     let resolved = resolved?;
+    if cfg.daemon_update.enabled && event.component_name == cfg.daemon_update.component {
+        return stage_daemon_update(cfg, sui, walrus, store, journal, &resolved).await;
+    }
     let directory = cfg
         .runtime
         .state_dir
@@ -304,7 +449,7 @@ async fn execute(
         .join(hex::encode(identity::hash(event.deployment_id.as_bytes())));
     std::fs::create_dir_all(&directory)?;
     let result =
-        handle_deployment(sui, walrus, runner, &cfg.apply, store, journal, &resolved, &directory).await;
+        handle_deployment(sui, walrus, runner, &cfg.apply, store, supervisor, journal, &resolved, &directory).await;
     if matches!(&result, Err(error) if error.downcast_ref::<control::NotAdmitted>().is_some()) {
         let _ = std::fs::remove_dir_all(&directory);
         return Ok(None);
@@ -314,9 +459,75 @@ async fn execute(
     info!(deployment = event.deployment_id, status = outcome.status, error = ?outcome.error, "Deployment finished");
     let status = outcome.status;
     journal.save()?;
-    firmware::acknowledge(&cfg.apply.firmware_spool, &firmware::request_id(&event.deployment_id));
+    if status.is_some() {
+        firmware::acknowledge(&cfg.apply.firmware_spool, &firmware::request_id(&event.deployment_id));
+    }
     let _ = std::fs::remove_dir_all(&directory);
     Ok(status)
+}
+
+/// A deployment of the configured daemon component: verify and stage the new
+/// binary, journal the deployment as pending, and ask for a restart. Failures
+/// before the handoff is recorded are ordinary Failed outcomes; a deployment no
+/// longer admitted after the downloads stays deferred.
+async fn stage_daemon_update(
+    cfg: &Config,
+    sui: &SuiClient,
+    walrus: &WalrusClient,
+    store: Option<&components::Store>,
+    journal: &mut Journal,
+    resolved: &catalog::Resolved,
+) -> anyhow::Result<Option<u8>> {
+    let event = &resolved.event;
+    let directory = cfg.runtime.state_dir.join("artifacts").join(hex::encode(identity::hash(event.deployment_id.as_bytes())));
+    std::fs::create_dir_all(&directory)?;
+    let staged = async {
+        let bytes = components::recipe(walrus, store, &event.recipe_blob_id, &resolved.recipe_sha256).await?;
+        let recipe: recipe::Recipe = serde_json::from_slice(&bytes)?;
+        let dependencies = recipe.validate(event, false)?;
+        let lifecycle = &recipe.lifecycle;
+        anyhow::ensure!(
+            dependencies.is_empty() && lifecycle.install.is_none() && lifecycle.run.is_none() && lifecycle.shutdown.is_none(),
+            "a daemon update recipe carries only the daemon binary (no lifecycle commands or dependencies)"
+        );
+        let artifact = directory.join("artifact");
+        components::artifact(walrus, store, &recipe.artifact_blob_id, &event.artifact_sha256, &artifact).await?;
+        // As in handle_deployment: re-read after downloads, before the
+        // candidate runs or the daemon restarts. Read failure fails closed.
+        match admit(sui, journal, &event.deployment_id).await {
+            Ok(true) => {}
+            Ok(false) => return Err(control::NotAdmitted.into()),
+            Err(error) => {
+                warn!(%error, "Admission unavailable; retrying before the daemon update");
+                return Err(control::NotAdmitted.into());
+            }
+        }
+        handoff::stage(&cfg.daemon_update, &cfg.runtime.state_dir, &cfg.path, &event.deployment_id, &event.version, &artifact).await
+    }
+    .await;
+    let _ = std::fs::remove_dir_all(&directory);
+    if matches!(&staged, Err(error) if error.downcast_ref::<control::NotAdmitted>().is_some()) {
+        return Ok(None);
+    }
+    if staged.is_ok() {
+        journal.state.deferred.remove(&event.deployment_id);
+    }
+    let outcome = journal.state.deployments.entry(event.deployment_id.clone()).or_default();
+    match staged {
+        Ok(()) => {
+            outcome.daemon_handoff = Some(event.version.clone());
+            journal.save()?;
+            info!(deployment = event.deployment_id, version = event.version, "Daemon update staged");
+            Err(handoff::Requested.into())
+        }
+        Err(error) => {
+            record_result(outcome, Err(error));
+            warn!(deployment = event.deployment_id, error = ?outcome.error, "Daemon update rejected");
+            let status = outcome.status;
+            journal.save()?;
+            Ok(status)
+        }
+    }
 }
 
 /// Persist notice and deferral independently of execution outcomes. A terminal
@@ -351,12 +562,14 @@ async fn admit(sui: &SuiClient, journal: &mut Journal, id: &str) -> anyhow::Resu
 
 /// Move toward the current desired state of every group this device is in
 /// (reconcile.rs describes the rules).
+#[allow(clippy::too_many_arguments)]
 async fn reconcile(
     cfg: &Config,
     sui: &SuiClient,
     walrus: &WalrusClient,
     runner: &ApplyRunner,
     store: Option<&components::Store>,
+    supervisor: &mut supervisor::Supervisor,
     journal: &mut Journal,
 ) -> anyhow::Result<()> {
     let device = &cfg.device.device_object_id;
@@ -462,7 +675,7 @@ async fn reconcile(
         });
         journal.state.managed.insert(component.clone(), deployment.clone());
         journal.save()?;
-        let status = execute(cfg, sui, walrus, runner, store, journal, &event, &record).await?;
+        let status = execute(cfg, sui, walrus, runner, store, supervisor, journal, &event, &record).await?;
         if status != Some(protocol::STATUS_APPLIED) {
             if status.is_none() {
                 info!(component, deployment, "Plan deferred; admission reconsidered on the next poll");
@@ -484,6 +697,7 @@ struct Install {
     blob: String,
     artifact: PathBuf,
     install: Option<String>,
+    supervised: Option<supervisor::Lifecycle>,
     root: bool,
 }
 
@@ -497,6 +711,7 @@ async fn handle_deployment(
     runner: &ApplyRunner,
     config: &config::ApplyConfig,
     store: Option<&components::Store>,
+    supervisor: &mut supervisor::Supervisor,
     journal: &mut Journal,
     resolved: &catalog::Resolved,
     directory: &Path,
@@ -542,7 +757,7 @@ async fn handle_deployment(
             dependencies: planned.dependencies.clone(),
             confirmed: false,
         };
-        let (component, blob, install) = if root {
+        let (component, blob, install, supervised) = if root {
             (
                 component(
                     resolved.catalog.as_ref().map(|c| c.version_id.clone()),
@@ -551,12 +766,14 @@ async fn handle_deployment(
                 ),
                 recipe.artifact_blob_id.clone(),
                 recipe.lifecycle.install.clone(),
+                supervisor::Lifecycle::of(&recipe.lifecycle)?,
             )
         } else {
             let loaded = &loader.loaded[&(planned.name.clone(), planned.version.clone())];
-            // The privileged helper only ever receives the deployed artifact.
+            // The privileged helper only ever receives the deployed artifact;
+            // a supervised dependency never goes to it.
             anyhow::ensure!(
-                config.mode == config::ApplyMode::Direct || loaded.install.is_some(),
+                config.mode == config::ApplyMode::Direct || loaded.install.is_some() || loaded.supervised.is_some(),
                 "dependency {} {} has no install command; the firmware helper applies only the deployed component",
                 planned.name,
                 planned.version
@@ -565,6 +782,7 @@ async fn handle_deployment(
                 component(Some(loaded.version_id.clone()), &loaded.recipe_sha256, &loaded.artifact_sha256),
                 loaded.artifact_blob_id.clone(),
                 loaded.install.clone(),
+                loaded.supervised.clone(),
             )
         };
         installs.push(Install {
@@ -577,6 +795,7 @@ async fn handle_deployment(
             blob,
             component,
             install,
+            supervised,
             root,
         });
     }
@@ -603,17 +822,18 @@ async fn handle_deployment(
         }
     }
     journal.state.current.insert(event.component_name.clone(), event.deployment_id.clone());
-    journal.state.deployments.insert(event.deployment_id.clone(), Outcome {
-        firmware_request: (config.mode == config::ApplyMode::PrivilegedHelper)
-            .then(|| firmware::request_id(&event.deployment_id)),
-        ..Outcome::default()
-    });
+    journal.state.deployments.insert(event.deployment_id.clone(), Outcome::default());
     journal.state.deferred.remove(&event.deployment_id);
     journal.save()?;
     info!(deployment = event.deployment_id, "Apply admitted; subsequent control changes do not interrupt this plan");
     for install in installs {
+        supervisor.begin_install(&install.name)?;
         // Recorded unconfirmed first: an interrupted install is never reused.
         // A dependency install changes what that component runs as well.
+        let previous = journal.state.components.get(&install.name).cloned().filter(|c| c.confirmed);
+        if let Some(previous) = &previous {
+            journal.state.last_known_good.insert(install.name.clone(), previous.clone());
+        }
         journal
             .state
             .components
@@ -622,16 +842,46 @@ async fn handle_deployment(
             .state
             .current
             .insert(install.name.clone(), event.deployment_id.clone());
+        // Only the actual helper handoff has a helper receipt. Recipe and
+        // dependency commands remain direct, even under helper-mode config.
+        journal.state.deployments.get_mut(&event.deployment_id).unwrap().firmware_request =
+            (install.root && install.supervised.is_none() && install.install.is_none()
+                && config.mode == config::ApplyMode::PrivilegedHelper)
+                .then(|| firmware::request_id(&event.deployment_id));
         journal.save()?;
         let request = if install.root {
             firmware::request_id(&event.deployment_id)
         } else {
             firmware::request_id(&format!("{}/{}", event.deployment_id, install.name))
         };
-        let result = runner
-            .apply(&install.artifact, install.install.as_deref(), &request)
-            .await;
+        // A run command makes it a supervised component: installed into its
+        // version workspace and confirmed only once ready (dependencies,
+        // planned first, are therefore ready before their dependents start).
+        let result = match install.supervised.clone() {
+            Some(lifecycle) => {
+                let after = install.component.dependencies.keys().cloned().collect();
+                let spec = supervisor::Spec::new(&install.name, &install.component.version, &event.deployment_id, lifecycle, after);
+                supervisor
+                    .deploy(spec, &install.artifact, install.install.as_deref(), runner, &request)
+                    .await
+            }
+            // Installed while a supervised version of the same name keeps
+            // running; once it succeeds, that version is stopped and
+            // uncommitted, or the deployment fails.
+            None => match runner.apply(&install.artifact, install.install.as_deref(), &request).await {
+                Ok(()) if supervisor.supervises(&install.name) => supervisor
+                    .retire(&install.name)
+                    .await
+                    .map_err(|error| error.context("installed, but cannot stop the supervised version it replaces")),
+                result => result,
+            },
+        };
         if let Err(error) = result {
+            if let Some(previous) = previous.filter(|c| error.downcast_ref::<supervisor::Recovered>().is_some() && supervisor.restored(&install.name, &c.deployment_id)) {
+                journal.state.current.insert(install.name.clone(), previous.deployment_id.clone());
+                journal.state.components.insert(install.name.clone(), previous);
+                journal.save()?;
+            }
             return Err(if install.root {
                 error
             } else {
@@ -659,7 +909,7 @@ async fn handle_deployment(
     Ok(())
 }
 
-/// Applied/Failed, or no status when a privileged update's outcome is
+/// Applied/Failed, or no status when a configured command's outcome is
 /// unknown: like a crash mid-update, that is neither reported nor re-applied.
 fn record_result(outcome: &mut Outcome, result: anyhow::Result<()>) {
     outcome.indeterminate = matches!(&result, Err(error) if error.downcast_ref::<firmware::Indeterminate>().is_some());

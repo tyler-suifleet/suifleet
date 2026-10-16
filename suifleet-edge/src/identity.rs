@@ -66,7 +66,11 @@ pub fn signer(device: &crate::config::DeviceConfig) -> anyhow::Result<std::sync:
 }
 
 pub fn signer_from(config: &crate::config::SignerConfig) -> anyhow::Result<std::sync::Arc<dyn TxSigner>> {
-    anyhow::ensure!(config.kind == "pkcs11", "unsupported signer kind {:?} (supported: pkcs11)", config.kind);
+    if config.kind == "service" {
+        anyhow::ensure!(!config.socket.as_os_str().is_empty(), "a service signer needs socket");
+        return Ok(std::sync::Arc::new(crate::signer_service::ServiceSigner::connect(&config.socket)?));
+    }
+    anyhow::ensure!(config.kind == "pkcs11", "unsupported signer kind {:?} (supported: service, pkcs11)", config.kind);
     #[cfg(feature = "pkcs11")]
     {
         Ok(std::sync::Arc::new(pkcs11::Pkcs11P256::open(config)?))
