@@ -6,8 +6,10 @@ boot, real-device identity persistence, networking and OTA acceptance remain
 programmed by this build. This writable development image is not a production
 release or a firmware rollback design. SF-042 remains on hold.
 
-The completed artifact paths, checksums and exact verification are in
-[PI_IMAGE_BUILD.md](PI_IMAGE_BUILD.md).
+Historical artifact checksums are in [PI_IMAGE_BUILD.md](PI_IMAGE_BUILD.md).
+The current-source refresh has not produced a verified image: its actual
+BitBake build stopped for insufficient disk space. See [SF-066 status](PI_IMAGE_REFRESH.md).
+Do not flash the older artifact expecting the signer-service release below.
 
 ## Rebuild
 
@@ -15,7 +17,7 @@ Use the pinned Scarthgap/Rust-mixin layers
 from `kas/packaging.yml` on Ubuntu 22.04. The target is `suifleet-pi-image`, not
 the package-only `suifleet` target. Rust crates are fetched/checksummed by
 BitBake and compiled frozen/offline. Source is commit
-`6c9501603165c5ed24c0f49c38c31cd0213f1fc5` (reviewed main plus the SF-053
+`a80784b97f41492558ad33bcb753a0a20505a3a0` (reviewed main containing merged SF-026 launcher and SF-053
 signing service; recorded SF-029 image builds used `795de747`); its Cargo.lock SHA-256 is
 `44aa5b2637fc2b828a796a63e9a550d9c0fa652437cf59ffd31e0b264021290e`.
 The image includes the cargo-built daemon, first-boot helper, harmless updater,
@@ -130,8 +132,15 @@ verification. Check `journalctl -u systemd-timesyncd` and `date -u`.
 Use [the verified manifest enrollment procedure](YOCTO_PACKAGING.md) after
 registering the public signer address. Preserve per-type origins and the
 supported client/protocol range from that manifest; do not paste stale IDs.
-Install `deployment.json` first and `config.toml` last atomically, root:suifleet
-0640. For this harmless one-shot application test use:
+Install `deployment.json` first (root:suifleet 0640), then `signer.toml`
+(root:suifleet-signer 0640), and `config.toml` last (root:suifleet 0640),
+atomically. Use the service-signer example and [key-isolation migration
+instructions](KEY_ISOLATION.md). The key moves to `suifleet-signer` before the
+daemon starts; component commands cannot read it. Launcher and signer are modes
+of `/usr/bin/suifleet`, not separate binaries. Enabled daemon self-update is
+explicitly incompatible with the service signer; keep it disabled. See
+[the self-update boundary](DAEMON_UPDATE.md). No reusable session credential is
+installed or passed to the daemon by this image. For this harmless one-shot application test use:
 
 ```toml
 [apply]
