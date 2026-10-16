@@ -10,6 +10,7 @@ mod handoff;
 mod identity;
 mod reconcile;
 mod seal;
+mod seal_client;
 mod recipe;
 mod protocol;
 #[cfg(test)]
@@ -120,7 +121,8 @@ async fn main() -> anyhow::Result<()> {
         // SAFETY: plain prctl on this process.
         anyhow::ensure!(unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) } == 0, "cannot make the daemon non-dumpable");
     }
-    let sui = SuiClient::load(cfg.sui.clone(), identity::signer(&cfg.device)?)?;
+    let signer = identity::signer(&cfg.device)?;
+    let sui = SuiClient::load(cfg.sui.clone(), signer.clone())?;
     sui.validate_deployment().await?;
     if check_config {
         println!("Verified deployment configuration");
@@ -161,7 +163,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     }
-    let walrus = WalrusClient::new(&cfg.walrus);
+    let walrus = WalrusClient::new(&cfg.walrus).with_seal(confidential_delivery(&cfg, &sui, signer)?);
     // The artifact cache holds at most the in-flight artifact; anything left
     // by an earlier run (e.g. a crash mid-download) is unused.
     let freed = walrus_client::collect_garbage(&cfg.runtime.state_dir.join("artifacts"))?;
@@ -245,6 +247,30 @@ async fn main() -> anyhow::Result<()> {
         std::process::exit(handoff::RESTART_EXIT);
     }
     Ok(())
+}
+
+/// Confidential delivery (SF-022): Seal sessions certified by this device's
+/// own identity, held by the signing service when the daemon has no key.
+fn confidential_delivery(
+    cfg: &Config,
+    sui: &SuiClient,
+    signer: std::sync::Arc<dyn identity::TxSigner>,
+) -> anyhow::Result<Option<std::sync::Arc<seal_client::Seal>>> {
+    let Some(config) = &cfg.seal else { return Ok(None) };
+    let authority: std::sync::Arc<dyn seal_client::Authority> = match &cfg.device.signer {
+        Some(service) if service.kind == "service" => std::sync::Arc::new(signer_service::ServiceSessions::new(&service.socket)),
+        _ => std::sync::Arc::new(seal_client::Sessions::new(
+            signer,
+            seal_client::SessionPolicy {
+                package: std::str::FromStr::from_str(sui.origin())?,
+                ttl_min: config.session_ttl_minutes,
+                clock_skew_ms: config.clock_skew_seconds * 1000,
+            },
+        )?),
+    };
+    let seal = seal_client::Seal::new(config.clone(), sui.clone(), authority, &cfg.device.device_object_id)?;
+    info!(mode = ?config.mode, key_servers = config.key_servers.len(), "Confidential delivery enabled");
+    Ok(Some(std::sync::Arc::new(seal)))
 }
 
 /// Record a resolved daemon update's outcome, then drop its handoff record.

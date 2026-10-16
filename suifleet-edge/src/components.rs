@@ -205,17 +205,24 @@ impl Store {
 }
 
 /// Authenticated recipe bytes: a verified cached copy when permitted,
-/// otherwise Walrus.
+/// otherwise Walrus. A Seal-encrypted recipe is decrypted in memory and never
+/// cached; with `[seal] mode = "required"` an unencrypted one is refused and
+/// the (plaintext-only) cache is not consulted.
 pub async fn recipe(
     walrus: &WalrusClient,
     store: Option<&Store>,
     blob_id: &str,
     sha256: &str,
 ) -> anyhow::Result<Vec<u8>> {
+    let store = store.filter(|_| !walrus.confidential_only());
     if let Some(bytes) = store.and_then(|s| s.recipe(sha256)) {
         return Ok(bytes);
     }
     let bytes = walrus.recipe_bytes(blob_id).await?;
+    if crate::seal::is_envelope(&bytes) {
+        return Ok(walrus.open(bytes, crate::seal::Kind::Recipe, sha256).await?.to_vec());
+    }
+    anyhow::ensure!(!walrus.confidential_only(), "unencrypted recipe refused: [seal] mode = \"required\" accepts only confidential delivery");
     anyhow::ensure!(hex::encode(Sha256::digest(&bytes)) == sha256, "recipe SHA-256 mismatch");
     if let Some(store) = store {
         if let Err(error) = store.save_recipe(sha256, &bytes) {
@@ -225,7 +232,29 @@ pub async fn recipe(
     Ok(bytes)
 }
 
+/// Write decrypted plaintext beside `dest` (owner-only) and move it into place.
+fn replace_private(dest: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut name = dest.file_name().unwrap_or_default().to_os_string();
+    name.push(".plain");
+    let staging = dest.with_file_name(name);
+    let _ = std::fs::remove_file(&staging);
+    let written = (|| -> anyhow::Result<()> {
+        let mut file = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&staging)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        std::fs::rename(&staging, dest)?;
+        Ok(())
+    })();
+    if written.is_err() {
+        let _ = std::fs::remove_file(&staging);
+    }
+    written
+}
+
 /// A verified artifact at `dest`: a cached copy when permitted, otherwise Walrus.
+/// A Seal-encrypted artifact is decrypted in memory, checked against the
+/// on-chain digest and only then written (owner-only); it is never cached.
 pub async fn artifact(
     walrus: &WalrusClient,
     store: Option<&Store>,
@@ -233,24 +262,42 @@ pub async fn artifact(
     sha256: &str,
     dest: &Path,
 ) -> anyhow::Result<()> {
+    let store = store.filter(|_| !walrus.confidential_only());
     if let Some(store) = store {
         if store.artifact(walrus, sha256, dest)? {
             return Ok(());
         }
     }
     let actual = walrus.download(blob_id, dest).await?;
+    if actual != sha256 && is_envelope_file(dest)? {
+        let ciphertext = std::fs::read(dest)?;
+        let _ = std::fs::remove_file(dest);
+        let plaintext = walrus.open(ciphertext, crate::seal::Kind::Artifact, sha256).await?;
+        return replace_private(dest, &plaintext);
+    }
     anyhow::ensure!(
         actual == sha256,
         "SHA-256 mismatch: expected {} got {}",
         sha256,
         actual
     );
+    if walrus.confidential_only() {
+        let _ = std::fs::remove_file(dest);
+        anyhow::bail!("unencrypted artifact refused: [seal] mode = \"required\" accepts only confidential delivery");
+    }
     if let Some(store) = store {
         if let Err(error) = store.save_artifact(walrus, sha256, dest) {
             warn!(%error, "Cannot cache artifact");
         }
     }
     Ok(())
+}
+
+fn is_envelope_file(path: &Path) -> anyhow::Result<bool> {
+    use std::io::Read;
+    let mut head = vec![0u8; crate::seal::MAGIC.len()];
+    let mut file = std::fs::File::open(path)?;
+    Ok(file.read_exact(&mut head).is_ok() && crate::seal::is_envelope(&head))
 }
 
 /// An authenticated dependency candidate selected for this platform.

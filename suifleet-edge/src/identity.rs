@@ -36,6 +36,31 @@ pub fn intent_digest(tx: &[u8]) -> Vec<u8> {
     hash(&intent)
 }
 
+/// The digest a Sui personal-message signature commits to: Blake2b-256 of
+/// the personal-message intent (3, v0, Sui) and the BCS-encoded bytes. Its
+/// scope differs from a transaction's, so neither can stand in for the other.
+pub fn personal_message_digest(message: &[u8]) -> Vec<u8> {
+    let mut intent = vec![3, 0, 0];
+    let mut length = message.len();
+    loop {
+        let byte = (length & 0x7f) as u8;
+        length >>= 7;
+        intent.push(if length == 0 { byte } else { byte | 0x80 });
+        if length == 0 {
+            break;
+        }
+    }
+    intent.extend_from_slice(message);
+    hash(&intent)
+}
+
+pub fn personal_message_signature(key: &SigningKey, message: &[u8]) -> Vec<u8> {
+    let mut out = vec![0];
+    out.extend_from_slice(&key.sign(&personal_message_digest(message)).to_bytes());
+    out.extend_from_slice(&key.verifying_key().to_bytes());
+    out
+}
+
 /// Whatever signs this device's transactions (SF-021): a key file, or a
 /// key held in a PKCS#11 token (HSM, TPM via a PKCS#11 provider).
 pub trait TxSigner: Send + Sync {
@@ -43,6 +68,11 @@ pub trait TxSigner: Send + Sync {
     fn address(&self) -> String;
     /// A serialized Sui `UserSignature` over BCS transaction data.
     fn sign(&self, tx: &[u8]) -> anyhow::Result<Vec<u8>>;
+    /// A serialized Sui `UserSignature` over a personal message (Seal session
+    /// certificates, SF-022). Only signers holding the key implement it.
+    fn sign_personal_message(&self, _message: &[u8]) -> anyhow::Result<Vec<u8>> {
+        anyhow::bail!("this signer does not sign personal messages")
+    }
 }
 
 /// An ed25519 key in a hex file (the default, `[device] keypair_path`).
@@ -54,6 +84,9 @@ impl TxSigner for Ed25519File {
     }
     fn sign(&self, tx: &[u8]) -> anyhow::Result<Vec<u8>> {
         Ok(signature(&self.0, tx))
+    }
+    fn sign_personal_message(&self, message: &[u8]) -> anyhow::Result<Vec<u8>> {
+        Ok(personal_message_signature(&self.0, message))
     }
 }
 
@@ -100,6 +133,11 @@ pub mod secp256r1 {
     /// intent digest with ECDSA-SHA256, i.e. ECDSA over SHA-256(digest).
     pub fn prehash(tx: &[u8]) -> [u8; 32] {
         Sha256::digest(super::intent_digest(tx)).into()
+    }
+
+    /// The same for a personal message (Seal session certificates).
+    pub fn prehash_personal_message(message: &[u8]) -> [u8; 32] {
+        Sha256::digest(super::personal_message_digest(message)).into()
     }
 
     /// Serialize a raw r||s signature as a Sui `UserSignature`, normalizing S
@@ -186,6 +224,16 @@ pub mod pkcs11 {
             super::secp256r1::address(&self.compressed)
         }
         fn sign(&self, tx: &[u8]) -> anyhow::Result<Vec<u8>> {
+            self.sign_prehash(&super::secp256r1::prehash(tx))
+        }
+        fn sign_personal_message(&self, message: &[u8]) -> anyhow::Result<Vec<u8>> {
+            self.sign_prehash(&super::secp256r1::prehash_personal_message(message))
+        }
+    }
+
+    impl Pkcs11P256 {
+        /// Raw ECDSA (CKM_ECDSA) inside the token over a 32-byte prehash.
+        fn sign_prehash(&self, prehash: &[u8; 32]) -> anyhow::Result<Vec<u8>> {
             let session = self.context.open_ro_session(self.slot)?;
             session.login(UserType::User, Some(&AuthPin::new(self.pin.clone())))?;
             let private = session
@@ -193,7 +241,7 @@ pub mod pkcs11 {
                 .into_iter()
                 .next()
                 .ok_or_else(|| anyhow::anyhow!("no private key labelled {:?} in the token", self.key_label))?;
-            let rs = session.sign(&Mechanism::Ecdsa, private, &super::secp256r1::prehash(tx))?;
+            let rs = session.sign(&Mechanism::Ecdsa, private, prehash)?;
             super::secp256r1::serialize(&rs, &self.compressed)
         }
     }
