@@ -528,6 +528,19 @@ impl Supervisor {
         self.active.get(name).map(|spec| spec.deployment.as_str())
     }
 
+    /// The public configuration record `name`'s committed version was
+    /// deployed with; none for a version predating configuration management.
+    pub fn configuration(&self, name: &str) -> anyhow::Result<Option<configuration::Record>> {
+        let Some(spec) = self.active.get(name) else { return Ok(None) };
+        let record = match std::fs::read(self.workspace(spec).join(CONFIGURATION_STATE)) {
+            Ok(bytes) => serde_json::from_slice::<configuration::Record>(&bytes)?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        anyhow::ensure!(record.deployment == spec.deployment, "configuration record of {name} belongs to another deployment");
+        Ok(Some(record))
+    }
+
     /// Whether `name` is a committed or running supervised component.
     pub fn supervises(&self, name: &str) -> bool {
         self.active.contains_key(name) || self.running.contains_key(name)

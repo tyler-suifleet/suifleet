@@ -101,12 +101,14 @@ def run(binary):
             else:
                 self.respond(b"not found", 404)
 
-    def deploy(id, version, **lifecycle):
+    def deploy(id, version, configuration=None, **lifecycle):
         sim.add(id)
         event = sim.events[-1]["parsedJson"]
         event["component_name"], event["version"] = "svc", version
         recipe = sim.recipes[event["recipe_blob_id"]]
         recipe.update(componentName="svc", componentVersion=version, lifecycle=lifecycle)
+        if configuration is not None:
+            recipe.update(schemaVersion="1.2", configuration=configuration)
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -142,6 +144,7 @@ def run(binary):
                 output.write('\n[components.recovery_commands]\nsvc = ' + json.dumps(recovery) + '\n')
             components = state_dir / "supervised"
             work = components / "svc" / "work"
+            committed = state_dir / "configuration" / "svc" / "committed.json"
 
             def journal():
                 path = state_dir / "state.json"
@@ -179,7 +182,8 @@ def run(binary):
                 wait_for(lambda: journal().get("initialized"), "daemon did not establish its cursor", process)
 
                 # Start and readiness.
-                deploy("0x401", "1.0.0", install="echo stable > {artifacts}/configuration", run=RUN, readiness=READY, shutdown="kill -TERM {pid}")
+                deploy("0x401", "1.0.0", {"defaults": {"selected": "1.0.0"}},
+                       install="echo stable > {artifacts}/configuration", run=RUN, readiness=READY, shutdown="kill -TERM {pid}")
                 wait_for(lambda: outcome("0x401").get("status") == 1, "v1 was not applied", process)
                 assert running("1.0.0"), status()
                 first = recorded()
@@ -208,8 +212,11 @@ def run(binary):
 
                 # Successful replacement.
                 before = recorded()
-                deploy("0x403", "3.0.0", run=RUN, readiness=READY, shutdown="kill -TERM {pid}")
+                deploy("0x403", "3.0.0", {"defaults": {"selected": "3.0.0"}, "reset": [""]},
+                       run=RUN, readiness=READY, shutdown="kill -TERM {pid}")
                 wait_for(lambda: outcome("0x403").get("status") == 1, "v3 was not applied", process)
+                wait_for(lambda: json.loads(committed.read_text())["deployment"] == "0x403",
+                         "v3's configuration was not committed", process)
                 assert running("3.0.0"), status()
                 assert not any(map(alive, before)), "v1's processes survived its replacement"
                 assert read("stopped") == "graceful", "v1 was not stopped through its shutdown command"
@@ -231,10 +238,19 @@ def run(binary):
                 assert outcome("0x403")["status"] == 1, "historical command completion was rewritten"
                 assert (root / "application-config").read_text().strip() == "stable"
                 assert (root / "recovered-artifact").read_bytes() == test_ota.ARTIFACT
-                print("PASS: runtime crash budget exhaustion restored v1 artifact/configuration and journal without rewriting command receipt")
-                # A fresh deployment installs v3 for the remaining containment tests.
-                deploy("0x406", "3.0.0", run=RUN, readiness=READY, shutdown="kill -TERM {pid}")
+                wait_for(lambda: json.loads(committed.read_text())["deployment"] == "0x401",
+                         "runtime recovery did not restore v1's committed configuration", process)
+                assert json.loads(committed.read_text())["effective"] == {"selected": "1.0.0"}, committed.read_text()
+                print("PASS: runtime crash budget exhaustion restored v1 artifact/configuration, committed configuration "
+                      "and journal without rewriting command receipt")
+                # A fresh deployment installs v3 for the remaining containment
+                # tests; its merge-only update builds on v1's configuration.
+                deploy("0x406", "3.0.0", {"merge": {"extra": 1}}, run=RUN, readiness=READY, shutdown="kill -TERM {pid}")
                 wait_for(lambda: outcome("0x406").get("status") == 1, "fresh v3 did not apply", process)
+                wait_for(lambda: json.loads(committed.read_text())["deployment"] == "0x406",
+                         "fresh v3's configuration was not committed", process)
+                assert json.loads(committed.read_text())["effective"] == {"selected": "1.0.0", "extra": 1}, committed.read_text()
+                print("PASS: a merge-only update after the recovery built on the recovered v1 configuration")
 
                 # Daemon stop: the component goes with it, descendants included.
                 (work / "stopped").unlink()

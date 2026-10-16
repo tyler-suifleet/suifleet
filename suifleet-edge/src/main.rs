@@ -210,6 +210,9 @@ async fn poll(
     // daemon stopped between supervisor commit and journal save.
     for (name, deployment) in supervisor.recovered() {
         if !supervisor.restored(name, deployment) { continue; }
+        // Later updates build on the restored version's configuration, not
+        // on the failed one's.
+        configs.restore(name, supervisor.configuration(name)?.as_ref())?;
         if let Some(previous) = journal.state.last_known_good.get(name).filter(|c| &c.deployment_id == deployment).cloned() {
             journal.state.current.insert(name.clone(), deployment.clone());
             journal.state.components.insert(name.clone(), previous);

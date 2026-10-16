@@ -384,6 +384,27 @@ impl Store {
         Ok(())
     }
 
+    /// Make `record` the committed one of `name` again, or none: the version
+    /// a runtime recovery restored was deployed with it (none when it predates
+    /// configuration management). Idempotent.
+    pub fn restore(&self, name: &str, record: Option<&Record>) -> anyhow::Result<()> {
+        if self.committed(name)?.as_ref() == record {
+            return Ok(());
+        }
+        let dir = self.dir(name)?;
+        let path = dir.join("committed.json");
+        match record {
+            Some(record) => {
+                create_dir_durable(self.root.parent().unwrap_or(&self.root), &dir)?;
+                write_private(&path, record)
+            }
+            None => {
+                std::fs::remove_file(&path)?;
+                sync_parent(&path)
+            }
+        }
+    }
+
     pub fn discard(&self, name: &str) -> anyhow::Result<()> {
         match std::fs::remove_file(self.dir(name)?.join("staged.json")) {
             Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error.into()),
@@ -599,6 +620,15 @@ mod tests {
         assert!(store.committed("tool").unwrap().is_none() && store.staged("tool").unwrap().is_none());
         assert!(store.staged("fw").unwrap().is_some(), "a pending outcome keeps its record");
         assert!(store.stage("../x", &record("0x5", 1)).is_err());
+        // A runtime recovery restores the recovered version's record, or none.
+        store.restore("lib", Some(&record("0x1", 1))).unwrap();
+        assert_eq!(store.committed("lib").unwrap().unwrap(), record("0x1", 1));
+        store.restore("lib", Some(&record("0x1", 1))).unwrap();
+        store.restore("lib", None).unwrap();
+        assert!(store.committed("lib").unwrap().is_none());
+        store.restore("lib", None).unwrap();
+        store.restore("new", Some(&record("0x6", 3))).unwrap();
+        assert_eq!(store.committed("new").unwrap().unwrap(), record("0x6", 3));
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
