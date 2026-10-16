@@ -352,7 +352,9 @@ async fn execute(
     info!(deployment = event.deployment_id, status = outcome.status, error = ?outcome.error, "Deployment finished");
     let status = outcome.status;
     journal.save()?;
-    firmware::acknowledge(&cfg.apply.firmware_spool, &firmware::request_id(&event.deployment_id));
+    if status.is_some() {
+        firmware::acknowledge(&cfg.apply.firmware_spool, &firmware::request_id(&event.deployment_id));
+    }
     let _ = std::fs::remove_dir_all(&directory);
     Ok(status)
 }
@@ -735,7 +737,7 @@ async fn handle_deployment(
     Ok(())
 }
 
-/// Applied/Failed, or no status when a privileged update's outcome is
+/// Applied/Failed, or no status when a configured command's outcome is
 /// unknown: like a crash mid-update, that is neither reported nor re-applied.
 fn record_result(outcome: &mut Outcome, result: anyhow::Result<()>) {
     outcome.indeterminate = matches!(&result, Err(error) if error.downcast_ref::<firmware::Indeterminate>().is_some());

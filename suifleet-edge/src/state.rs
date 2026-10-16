@@ -81,7 +81,7 @@ pub struct Outcome {
     /// before the update starts so a restart can still learn its outcome.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub firmware_request: Option<String>,
-    /// The privileged update may or may not have been applied: never
+    /// A configured command may or may not have completed: never
     /// reported, never re-applied and never turned into Failed.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub indeterminate: bool,
