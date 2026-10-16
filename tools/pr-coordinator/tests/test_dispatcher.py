@@ -52,15 +52,94 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(self.state_of_run(),'finished')
         self.assertTrue(self.worker.available(self.slot,[]))
 
-    def test_failed_or_incomplete_handoff_retains_slot(self):
+    def test_stopped_incomplete_handoff_quarantines_without_releasing_claim(self):
         for owner,code,verdict in [('in_progress',0,'review_ready'),('review',1,'review_ready'),('review',0,'blocked')]:
             with self.subTest(owner=owner,code=code,verdict=verdict):
                 self.worker.db.execute('DELETE FROM runs')
                 self.receipt(owner_status=owner,exitcode=code,verdict=verdict)
                 with patch.object(d,'process_identity',return_value=None):
                     self.worker.reconcile(self.project)
-                self.assertEqual(self.state_of_run(),'orphaned')
-                self.assertFalse(self.worker.available(self.slot,[]))
+                self.assertEqual(self.state_of_run(),'quarantined')
+                self.assertFalse(self.worker.available(self.slot,[self.claim]))
+                self.assertEqual(json.loads(self.worker.db.execute('SELECT claim FROM runs').fetchone()[0])['token'],'private-token')
+
+    def test_fast_fail_ticks_back_off_and_stop_at_durable_cap(self):
+        owners = {}
+        def ticket(project, *args):
+            if args[0] == 'list': return list(owners.values())
+            if args[0] == 'show': return owners[args[1]]
+            if args[0] == 'refresh': return {}
+            if args[0] == 'assert': return {}
+            if args[0] == 'claim':
+                key = 'SF-' + str(len(owners)+1)
+                claim = {**self.claim, 'key':key, 'session':args[args.index('--session')+1]}
+                owners[key] = claim
+                return claim
+            raise AssertionError(args)
+        def stopped_wrapper(argv, **kwargs):
+            folder = Path(argv[-1])
+            (folder/'exit.json').write_text('{"returncode":1}')
+            return Mock(pid=123, poll=Mock(return_value=1))
+        self.worker.ticket = Mock(side_effect=ticket)
+        with patch.object(d,'run',return_value='test-token'), patch.object(d.subprocess,'Popen',side_effect=stopped_wrapper), patch.object(d,'process_identity',return_value='start'), patch.object(d,'worker_stopped',return_value=True), patch.object(d.time,'time') as now:
+            # Advance past every backoff: even unlimited ticks cannot reserve the backlog.
+            for tick in range(20):
+                now.return_value = tick*10000
+                with patch.object(d,'process_identity',return_value=None) if tick % 2 else patch.object(d,'process_identity',return_value='start'):
+                    self.worker.tick(True)
+                if tick == 1:
+                    self.assertFalse(self.worker.available(self.slot, list(owners.values())))
+                    pause = self.worker.db.execute('SELECT attempts FROM backoff').fetchone()
+                    self.assertEqual(pause[0], 1)
+            self.assertEqual(len(owners), 3)
+            self.assertEqual(self.worker.db.execute("SELECT COUNT(*) FROM runs WHERE status='quarantined'").fetchone()[0], 3)
+            restarted = d.Dispatcher(self.config, self.state)
+            self.assertFalse(restarted.available(self.slot, list(owners.values())))
+            self.assertEqual(self.worker.db.execute('SELECT attempts FROM backoff').fetchone()[0], 3)
+
+    def test_parked_jobs_also_have_a_retention_cap(self):
+        self.receipt(owner_status='blocked', verdict='blocked')
+        with patch.object(d,'process_identity',return_value=None), patch.object(d,'worker_stopped',return_value=True):
+            self.worker.reconcile(self.project)
+        self.assertFalse(self.worker.available({**self.slot,'max_quarantined':1}, []))
+
+    def test_corrupt_receipt_is_isolated_without_losing_ownership(self):
+        folder=self.receipt()
+        (folder/'process.json').write_text('{broken')
+        self.worker.reconcile(self.project)
+        self.assertEqual(self.state_of_run(),'running')
+        self.assertFalse(self.worker.available(self.slot,[]))
+
+    def test_blocked_worker_parks_and_does_not_count_as_manual_owner(self):
+        self.receipt(owner_status='blocked', verdict='blocked')
+        with patch.object(d,'process_identity',return_value=None), patch.object(d,'worker_stopped',return_value=True):
+            self.worker.reconcile(self.project)
+        self.assertEqual(self.state_of_run(),'parked')
+        self.assertTrue(self.worker.available(self.slot,[{**self.claim,'status':'blocked'}]))
+        self.worker.ticket.assert_called_once()
+
+    def test_orphaned_successful_handoff_is_reconciled_after_restart(self):
+        self.receipt(status='orphaned')
+        with patch.object(d,'process_identity',return_value=None), patch.object(d,'worker_stopped',return_value=True):
+            self.worker.reconcile(self.project)
+        self.assertEqual(self.state_of_run(),'finished')
+
+    def test_live_descendant_keeps_capacity_when_wrapper_disappears(self):
+        self.receipt()
+        with patch.object(d,'process_identity',return_value=None), patch.object(d,'worker_stopped',return_value=False):
+            self.worker.reconcile(self.project)
+        self.assertEqual(self.state_of_run(),'running')
+        self.assertFalse(self.worker.available(self.slot,[]))
+
+    def test_changed_owner_is_never_renewed_and_stopped_run_is_quarantined(self):
+        self.receipt(status='orphaned',owner_status='in_progress')
+        self.worker.ticket.return_value={**self.claim,'token':'replacement'}
+        with patch.object(d,'process_identity',return_value='start'):
+            self.worker.reconcile(self.project)
+        self.worker.ticket.assert_called_once()
+        with patch.object(d,'process_identity',return_value=None),patch.object(d,'worker_stopped',return_value=True):
+            self.worker.reconcile(self.project)
+        self.assertEqual(self.state_of_run(),'quarantined')
 
     def test_interrupted_claim_never_reclaims_or_launches(self):
         self.receipt(status='claiming')

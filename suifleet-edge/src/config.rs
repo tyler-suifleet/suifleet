@@ -12,11 +12,35 @@ pub struct Config {
     pub runtime: RuntimeConfig,
     #[serde(default)]
     pub components: ComponentsConfig,
+    /// Heartbeat and health telemetry (SF-019); none when omitted.
+    #[serde(default)]
+    pub telemetry: Option<TelemetryConfig>,
     #[serde(default)]
     pub daemon_update: DaemonUpdateConfig,
     /// The file this configuration was loaded from (for the update preflight).
     #[serde(skip)]
     pub path: PathBuf,
+}
+
+/// `[telemetry]`: signed snapshots to the fleet indexer (docs/TELEMETRY.md).
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct TelemetryConfig {
+    /// Fleet indexer base URL; snapshots go to `{url}/v1/telemetry`.
+    pub url: String,
+    #[serde(default = "default_telemetry_interval")]
+    pub interval_seconds: u64,
+    /// Snapshots kept while the indexer is unreachable; the oldest beyond
+    /// this are dropped (and counted in later snapshots).
+    #[serde(default = "default_telemetry_buffer")]
+    pub buffer_max: usize,
+}
+
+fn default_telemetry_interval() -> u64 {
+    60
+}
+fn default_telemetry_buffer() -> usize {
+    1024
 }
 
 /// Daemon self-update (SF-026; docs/DAEMON_UPDATE.md). Off unless enabled; the
@@ -66,6 +90,12 @@ pub struct ComponentsConfig {
     /// Cached artifacts beyond this are evicted oldest first, except those
     /// of installed versions.
     pub cache_max_bytes: u64,
+    /// Device-local configuration values (`<name>.json`, JSON pointer →
+    /// value), the only source of confidential ones. Not readable by others.
+    pub configuration_overlay_dir: PathBuf,
+    /// How long a component's validate command may keep deferring one
+    /// deployment's configuration update before the deployment fails.
+    pub configuration_defer_max_seconds: u64,
     /// Operator-owned application recovery scripts, keyed by component name.
     /// Run in the previous committed version workspace, never for platform installers.
     #[serde(default)]
@@ -76,6 +106,8 @@ impl Default for ComponentsConfig {
         Self {
             offline_candidates: OfflinePolicy::Never,
             cache_max_bytes: 512 * 1024 * 1024,
+            configuration_overlay_dir: "/etc/suifleet/component-config".into(),
+            configuration_defer_max_seconds: 86_400,
             recovery_commands: Default::default(),
         }
     }
@@ -487,12 +519,31 @@ impl Config {
             cfg.walrus.download_timeout_seconds > 0,
             "walrus.download_timeout_seconds must be positive"
         );
+        if let Some(telemetry) = &cfg.telemetry {
+            telemetry.validate()?;
+        }
         Ok(cfg)
     }
 }
 
 fn default_timeout() -> u64 {
     600
+}
+
+impl TelemetryConfig {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        use crate::telemetry::{MAX_BUFFER, MAX_INTERVAL_SECONDS, MIN_INTERVAL_SECONDS};
+        endpoint(&self.url).map_err(|e| e.context("invalid telemetry.url"))?;
+        anyhow::ensure!(
+            (MIN_INTERVAL_SECONDS..=MAX_INTERVAL_SECONDS).contains(&self.interval_seconds),
+            "telemetry.interval_seconds must be {MIN_INTERVAL_SECONDS}..={MAX_INTERVAL_SECONDS}"
+        );
+        anyhow::ensure!(
+            (1..=MAX_BUFFER).contains(&self.buffer_max),
+            "telemetry.buffer_max must be 1..={MAX_BUFFER}"
+        );
+        Ok(())
+    }
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -579,6 +630,10 @@ mod tests {
         let cached: Config = toml::from_str(&format!("{base}[components]\noffline_candidates='cached'\ncache_max_bytes=10\n")).unwrap();
         assert_eq!(cached.components.offline_candidates, OfflinePolicy::Cached);
         assert_eq!(cached.components.cache_max_bytes, 10);
+        assert_eq!(omitted.components.configuration_overlay_dir, PathBuf::from("/etc/suifleet/component-config"));
+        let overlay: Config = toml::from_str(&format!("{base}[components]\nconfiguration_overlay_dir='/run/x'\nconfiguration_defer_max_seconds=5\n")).unwrap();
+        assert_eq!(overlay.components.configuration_overlay_dir, PathBuf::from("/run/x"));
+        assert_eq!(overlay.components.configuration_defer_max_seconds, 5);
         assert!(toml::from_str::<Config>(&format!("{base}[components]\noffline_candidates='always'\n")).is_err());
         assert!(toml::from_str::<Config>(&format!("{base}[components]\noffline='cached'\n")).is_err());
         assert_eq!(partial.walrus.download_attempts, 2);
@@ -592,6 +647,23 @@ mod tests {
         m.validate().unwrap();
         m.type_origins.insert(crate::catalog::TYPES[0].into(), "bad".into());
         assert!(m.validate().is_err());
+    }
+    #[test]
+    fn telemetry_is_optional_and_bounded() {
+        let base = "[sui]\nmanifest_path='deployment.json'\n[device]\nkeypair_path='k'\n\
+            device_object_id='0x1'\ndevice_cap_id='0x2'\n[apply]\ncommand='true'\n";
+        assert!(toml::from_str::<Config>(base).unwrap().telemetry.is_none());
+        let parsed: Config = toml::from_str(&format!("{base}[telemetry]\nurl='https://fleet.example'\n")).unwrap();
+        let telemetry = parsed.telemetry.unwrap();
+        assert_eq!((telemetry.interval_seconds, telemetry.buffer_max), (60, 1024));
+        telemetry.validate().unwrap();
+        for bad in ["url='ftp://fleet.example'", "url='https://u:p@fleet.example'",
+                    "url='https://fleet.example'\ninterval_seconds=5", "url='https://fleet.example'\ninterval_seconds=3601",
+                    "url='https://fleet.example'\nbuffer_max=0", "url='https://fleet.example'\nbuffer_max=10001"] {
+            let parsed: Config = toml::from_str(&format!("{base}[telemetry]\n{bad}\n")).unwrap();
+            assert!(parsed.telemetry.unwrap().validate().is_err(), "{bad}");
+        }
+        assert!(toml::from_str::<Config>(&format!("{base}[telemetry]\nurl='https://x'\ntoken='t'\n")).is_err());
     }
     #[test]
     fn daemon_update_is_refused_with_the_service_signer() {

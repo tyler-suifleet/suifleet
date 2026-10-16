@@ -78,7 +78,7 @@ active_address: '{ADDRESS}'
         wallet.chmod(0o600)
         code = run(['python3', 'scripts/live_package_upgrade.py', '--wallet', str(wallet),
                     '--base-ref', base, '--state', state, '--evidence', 'evidence/package-upgrade.json',
-                    '--faucet-tool', os.environ.get('SUIFLEET_FAUCET_TOOL', '/opt/sui-faucet/sui')],
+                    '--faucet-tool', os.environ.get('SUIFLEET_FAUCET_TOOL', '/opt/sui-network/sui')],
                    check=False).returncode
         if code or not relevant(base):
             if not code:

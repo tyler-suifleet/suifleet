@@ -21,9 +21,14 @@ pub fn address(key: &SigningKey) -> String {
     format!("0x{}", hex::encode(hash(&bytes)))
 }
 
+#[cfg(test)]
 pub fn signature(key: &SigningKey, tx: &[u8]) -> Vec<u8> {
+    digest_signature(key, &intent_digest(tx))
+}
+
+fn digest_signature(key: &SigningKey, digest: &[u8]) -> Vec<u8> {
     let mut out = vec![0];
-    out.extend_from_slice(&key.sign(&intent_digest(tx)).to_bytes());
+    out.extend_from_slice(&key.sign(digest).to_bytes());
     out.extend_from_slice(&key.verifying_key().to_bytes());
     out
 }
@@ -36,13 +41,30 @@ pub fn intent_digest(tx: &[u8]) -> Vec<u8> {
     hash(&intent)
 }
 
+/// The digest a Sui personal-message signature commits to: Blake2b-256 of the
+/// intent prefix (personal message, v0, Sui) and the BCS `vector<u8>`. It can
+/// never be valid as a transaction signature (SF-019 telemetry).
+pub fn personal_message_digest(message: &[u8]) -> Vec<u8> {
+    let mut intent = vec![3, 0, 0];
+    intent.extend(bcs::to_bytes(message).expect("bytes serialize"));
+    hash(&intent)
+}
+
 /// Whatever signs this device's transactions (SF-021): a key file, or a
 /// key held in a PKCS#11 token (HSM, TPM via a PKCS#11 provider).
 pub trait TxSigner: Send + Sync {
     /// The Sui address of the signing key.
     fn address(&self) -> String;
     /// A serialized Sui `UserSignature` over BCS transaction data.
-    fn sign(&self, tx: &[u8]) -> anyhow::Result<Vec<u8>>;
+    fn sign(&self, tx: &[u8]) -> anyhow::Result<Vec<u8>> {
+        self.sign_digest(&intent_digest(tx))
+    }
+    /// A serialized Sui `UserSignature` over a personal message.
+    fn sign_personal_message(&self, message: &[u8]) -> anyhow::Result<Vec<u8>> {
+        self.sign_digest(&personal_message_digest(message))
+    }
+    /// A serialized Sui `UserSignature` over an intent digest.
+    fn sign_digest(&self, digest: &[u8]) -> anyhow::Result<Vec<u8>>;
 }
 
 /// An ed25519 key in a hex file (the default, `[device] keypair_path`).
@@ -52,8 +74,8 @@ impl TxSigner for Ed25519File {
     fn address(&self) -> String {
         address(&self.0)
     }
-    fn sign(&self, tx: &[u8]) -> anyhow::Result<Vec<u8>> {
-        Ok(signature(&self.0, tx))
+    fn sign_digest(&self, digest: &[u8]) -> anyhow::Result<Vec<u8>> {
+        Ok(digest_signature(&self.0, digest))
     }
 }
 
@@ -99,7 +121,12 @@ pub mod secp256r1 {
     /// The 32 bytes a raw-ECDSA (prehashed) signer must sign: Sui signs the
     /// intent digest with ECDSA-SHA256, i.e. ECDSA over SHA-256(digest).
     pub fn prehash(tx: &[u8]) -> [u8; 32] {
-        Sha256::digest(super::intent_digest(tx)).into()
+        prehash_digest(&super::intent_digest(tx))
+    }
+
+    /// The same for any intent digest (a personal message's, for example).
+    pub fn prehash_digest(digest: &[u8]) -> [u8; 32] {
+        Sha256::digest(digest).into()
     }
 
     /// Serialize a raw r||s signature as a Sui `UserSignature`, normalizing S
@@ -185,7 +212,7 @@ pub mod pkcs11 {
         fn address(&self) -> String {
             super::secp256r1::address(&self.compressed)
         }
-        fn sign(&self, tx: &[u8]) -> anyhow::Result<Vec<u8>> {
+        fn sign_digest(&self, digest: &[u8]) -> anyhow::Result<Vec<u8>> {
             let session = self.context.open_ro_session(self.slot)?;
             session.login(UserType::User, Some(&AuthPin::new(self.pin.clone())))?;
             let private = session
@@ -193,7 +220,7 @@ pub mod pkcs11 {
                 .into_iter()
                 .next()
                 .ok_or_else(|| anyhow::anyhow!("no private key labelled {:?} in the token", self.key_label))?;
-            let rs = session.sign(&Mechanism::Ecdsa, private, &super::secp256r1::prehash(tx))?;
+            let rs = session.sign(&Mechanism::Ecdsa, private, &super::secp256r1::prehash_digest(digest))?;
             super::secp256r1::serialize(&rs, &self.compressed)
         }
     }
@@ -368,6 +395,39 @@ mod tests {
         let mut other = transaction.clone();
         other.gas_payment.budget += 1;
         assert!(sui_crypto::UserSignatureVerifier::new().verify_transaction(&other, &signature).is_err());
+    }
+
+    #[test]
+    fn personal_messages_verify_with_mystens_verifier_and_never_as_transactions() {
+        use sui_crypto::SuiVerifier;
+        let signer = Ed25519File(SigningKey::from_bytes(&[7; 32]));
+        let message = br#"{"schema":1}"#;
+        let signed = signer.sign_personal_message(message).unwrap();
+        let signature = sui_sdk_types::UserSignature::from_bytes(&signed).unwrap();
+        let verifier = sui_crypto::UserSignatureVerifier::new();
+        let personal = sui_sdk_types::PersonalMessage(message.as_slice().into());
+        verifier.verify_personal_message(&personal, &signature).unwrap();
+        let other = sui_sdk_types::PersonalMessage(br#"{"schema":2}"#.as_slice().into());
+        assert!(verifier.verify_personal_message(&other, &signature).is_err());
+        // The same bytes signed as a transaction give another signature.
+        assert_ne!(signer.sign(message).unwrap(), signed);
+        assert_ne!(personal_message_digest(message), intent_digest(message));
+    }
+
+    #[cfg(feature = "pkcs11")]
+    #[test]
+    fn secp256r1_personal_messages_verify_with_mystens_verifier() {
+        use p256::ecdsa::{signature::hazmat::PrehashSigner, SigningKey as P256Key};
+        use sui_crypto::SuiVerifier;
+        let key = P256Key::from_slice(&[9; 32]).unwrap();
+        let compressed = secp256r1::compress(key.verifying_key().to_encoded_point(false).as_bytes()).unwrap();
+        let message = b"telemetry";
+        let digest = personal_message_digest(message);
+        let rs: p256::ecdsa::Signature = key.sign_prehash(&secp256r1::prehash_digest(&digest)).unwrap();
+        let serialized = secp256r1::serialize(&rs.to_bytes(), &compressed).unwrap();
+        let signature = sui_sdk_types::UserSignature::from_bytes(&serialized).unwrap();
+        let personal = sui_sdk_types::PersonalMessage(message.as_slice().into());
+        sui_crypto::UserSignatureVerifier::new().verify_personal_message(&personal, &signature).unwrap();
     }
 
     #[test]
