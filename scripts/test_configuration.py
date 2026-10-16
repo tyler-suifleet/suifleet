@@ -3,9 +3,9 @@
 chain/Walrus simulator, without keys or gas.
 
 Supervised component `cfg` (its run copies $SUIFLEET_CONFIGURATION), with
-`/db/password` confidential and provisioned only in the device overlay:
+`/db/role` confidential and provisioned only in the device overlay:
   0x501 1.0.0 defaults                 -> runs with defaults + overlay value;
-                                          no secret in public state or logs
+                                          no overlay value in public state or logs
   0x502 1.0.0 merge                    -> merged over the persisted config
   0x503 2.0.0 new defaults, reset      -> existing values kept, missing defaults
                                           added, reset pointer takes the default
@@ -35,7 +35,7 @@ import test_ota
 from test_ota import CAP, DEVICE, PACKAGE, REGISTRY, TYPE_ORIGINS, UPGRADE_CAP, Simulator, start_grpc, wait_for
 
 RUN = 'cp "$SUIFLEET_CONFIGURATION" seen.json; exec sleep 300'
-SECRETS = ("s3cret-one", "s3cret-two")
+VALUES = ("private-one", "private-two")
 
 
 def run(binary):
@@ -100,13 +100,13 @@ def run(binary):
             state_dir = root / "state"
             overlay = root / "overlay"
             overlay.mkdir()
-            secret = overlay / "cfg.json"
+            overlay_file = overlay / "cfg.json"
 
             def provision(value):
-                secret.write_text(json.dumps({"/db/password": value}))
-                secret.chmod(0o600)
+                overlay_file.write_text(json.dumps({"/db/role": value}))
+                overlay_file.chmod(0o600)
 
-            provision(SECRETS[0])
+            provision(VALUES[0])
             config = root / "config.toml"
             config.write_text('[sui]\nmanifest_path = "deployment.json"\n'
                 f'[device]\nkeypair_path = {json.dumps(str(key))}\ndevice_object_id = "{DEVICE}"\ndevice_cap_id = "{CAP}"\n'
@@ -150,7 +150,7 @@ def run(binary):
             def unchanged(id, expected, reason):
                 wait_for(lambda: outcome(id).get("status") == 2, f"{id} was not reported Failed", process)
                 assert reason in outcome(id)["error"], outcome(id)
-                public = dict(expected, db={k: v for k, v in expected["db"].items() if k != "password"})
+                public = dict(expected, db={k: v for k, v in expected["db"].items() if k != "role"})
                 assert seen() == expected and effective() == public, (seen(), effective())
                 assert not (committed.parent / "staged.json").exists() or json.loads(
                     (committed.parent / "staged.json").read_text())["deployment"] != id
@@ -163,45 +163,45 @@ def run(binary):
                 wait_for(lambda: journal().get("initialized"), "daemon did not establish its cursor", process)
 
                 deploy("0x501", "1.0.0", {"defaults": {"port": 8080, "log": {"level": "info"}, "db": {"host": "db1"}},
-                                          "confidential": ["/db/password"]})
+                                          "confidential": ["/db/role"]})
                 wait_for(lambda: outcome("0x501").get("status") == 1, "0x501 was not applied", process)
                 wait_for(lambda: running("1.0.0") and seen(), "0x501 did not run", process)
-                v1 = {"port": 8080, "log": {"level": "info"}, "db": {"host": "db1", "password": SECRETS[0]}}
+                v1 = {"port": 8080, "log": {"level": "info"}, "db": {"host": "db1", "role": VALUES[0]}}
                 assert seen() == v1, seen()
                 assert effective() == {"port": 8080, "log": {"level": "info"}, "db": {"host": "db1"}}, effective()
                 print("PASS: defaults applied; the confidential value came from the device overlay only")
 
                 (work / "seen.json").unlink()
-                deploy("0x502", "1.0.0", {"merge": {"port": 9000, "log": {"level": "debug"}}, "confidential": ["/db/password"]})
+                deploy("0x502", "1.0.0", {"merge": {"port": 9000, "log": {"level": "debug"}}, "confidential": ["/db/role"]})
                 wait_for(lambda: outcome("0x502").get("status") == 1, "0x502 was not applied", process)
                 wait_for(lambda: seen(), "0x502 did not run", process)
-                v2 = {"port": 9000, "log": {"level": "debug"}, "db": {"host": "db1", "password": SECRETS[0]}}
+                v2 = {"port": 9000, "log": {"level": "debug"}, "db": {"host": "db1", "role": VALUES[0]}}
                 assert seen() == v2, seen()
                 print("PASS: merge applied over the persisted configuration; the component restarted with it")
 
                 (work / "seen.json").unlink()
                 deploy("0x503", "2.0.0", {"defaults": {"port": 8080, "log": {"level": "info", "format": "json"}, "db": {"host": "db2"}},
-                                          "reset": ["/db/host"], "confidential": ["/db/password"]})
+                                          "reset": ["/db/host"], "confidential": ["/db/role"]})
                 wait_for(lambda: outcome("0x503").get("status") == 1, "0x503 was not applied", process)
                 wait_for(lambda: running("2.0.0") and seen(), "0x503 did not run", process)
-                v3 = {"port": 9000, "log": {"level": "debug", "format": "json"}, "db": {"host": "db2", "password": SECRETS[0]}}
+                v3 = {"port": 9000, "log": {"level": "debug", "format": "json"}, "db": {"host": "db2", "role": VALUES[0]}}
                 assert seen() == v3, seen()
                 print("PASS: new version: customized values kept, new defaults added, reset pointer took its default")
 
-                deploy("0x504", "3.0.0", {"reset": ["/log/level/x"], "confidential": ["/db/password"]})
+                deploy("0x504", "3.0.0", {"reset": ["/log/level/x"], "confidential": ["/db/role"]})
                 unchanged("0x504", v3, "/log/level/x")
-                deploy("0x505", "3.0.0", {"merge": {"port": 70000}, "confidential": ["/db/password"]},
+                deploy("0x505", "3.0.0", {"merge": {"port": 70000}, "confidential": ["/db/role"]},
                        run=RUN, validate="echo port out of range >&2; ! grep -q 70000 {configuration}")
                 unchanged("0x505", v3, "rejected by the component's validate command")
                 assert "port out of range" not in outcome("0x505")["error"]
                 assert "port out of range" in (components / "cfg" / "component.log").read_text()
-                deploy("0x508", "3.0.0", {"confidential": ["/db/password", "/api/token"]})
+                deploy("0x508", "3.0.0", {"confidential": ["/db/role", "/api/token"]})
                 unchanged("0x508", v3, "/api/token is not provisioned")
                 assert running("2.0.0"), status()
                 print("PASS: invalid reset, a rejecting validate command and an unprovisioned confidential "
                       "value each failed the deployment before anything changed")
 
-                deploy("0x506", "3.0.0", {"merge": {"port": 9100}, "confidential": ["/db/password"]},
+                deploy("0x506", "3.0.0", {"merge": {"port": 9100}, "confidential": ["/db/role"]},
                        run=RUN, validate="test -e {work}/allow || exit 75; grep -q 9100 {configuration}")
                 wait_for(lambda: "0x506" in journal().get("configuration_deferrals", {}), "0x506 was not deferred", process)
                 assert not outcome("0x506") and running("2.0.0") and seen() == v3, (outcome("0x506"), status())
@@ -213,7 +213,7 @@ def run(binary):
                 assert seen() == v6 and "0x506" not in journal().get("configuration_deferrals", {}), seen()
                 print("PASS: a deferring validate command held the update until it accepted it")
 
-                deploy("0x507", "4.0.0", {"merge": {"port": 1}, "confidential": ["/db/password"]}, run=RUN, validate="exit 75")
+                deploy("0x507", "4.0.0", {"merge": {"port": 1}, "confidential": ["/db/role"]}, run=RUN, validate="exit 75")
                 wait_for(lambda: "0x507" in journal().get("configuration_deferrals", {}), "0x507 was not deferred", process)
                 unchanged("0x507", v6, "still deferred")
                 print("PASS: an update deferred past configuration_defer_max_seconds failed")
@@ -222,15 +222,15 @@ def run(binary):
                 process.send_signal(signal.SIGTERM)
                 assert process.wait(timeout=20) == 0
                 (work / "seen.json").unlink()
-                provision(SECRETS[1])
+                provision(VALUES[1])
                 process = start()
                 wait_for(lambda: running("3.0.0") and seen(), "the committed version did not restart", process)
-                assert seen() == dict(v6, db={"host": "db2", "password": SECRETS[1]}), seen()
+                assert seen() == dict(v6, db={"host": "db2", "role": VALUES[1]}), seen()
                 (work / "seen.json").unlink()
-                deploy("0x509", "3.0.1", {"merge": {"extra": True}, "confidential": ["/db/password"]})
+                deploy("0x509", "3.0.1", {"merge": {"extra": True}, "confidential": ["/db/role"]})
                 wait_for(lambda: outcome("0x509").get("status") == 1, "0x509 was not applied", process)
                 wait_for(lambda: running("3.0.1") and seen(), "0x509 did not run", process)
-                assert seen() == dict(v6, extra=True, db={"host": "db2", "password": SECRETS[1]}), seen()
+                assert seen() == dict(v6, extra=True, db={"host": "db2", "role": VALUES[1]}), seen()
                 print("PASS: after a daemon restart the component ran with its persisted configuration and the "
                       "rotated overlay value; the next update built on the persisted configuration")
 
@@ -244,7 +244,7 @@ def run(binary):
                 print("PASS: an install-only component's install received its configuration")
 
                 # A deferred deployment that is deleted leaves no deferral behind.
-                deploy("0x50b", "4.0.0", {"merge": {"port": 2}, "confidential": ["/db/password"]}, run=RUN, validate="exit 75")
+                deploy("0x50b", "4.0.0", {"merge": {"port": 2}, "confidential": ["/db/role"]}, run=RUN, validate="exit 75")
                 wait_for(lambda: "0x50b" in journal().get("configuration_deferrals", {}), "0x50b was not deferred", process)
                 sim.deleted.add("0x50b")
                 wait_for(lambda: "0x50b" not in journal().get("configuration_deferrals", {}), "0x50b's deferral was kept", process)
@@ -261,7 +261,7 @@ def run(binary):
             for path in [root / "daemon.log", *state_dir.rglob("*")]:
                 if path.is_file() and path.name not in ("configuration.json", "component.log", "seen.json"):
                     text = path.read_bytes()
-                    leaks += [str(path) for value in SECRETS if value.encode() in text]
+                    leaks += [str(path) for value in VALUES if value.encode() in text]
             assert not leaks, leaks
             for path in state_dir.rglob("configuration.json"):
                 assert path.stat().st_mode & 0o777 == 0o600, path
