@@ -936,5 +936,155 @@
     }
    }
   ]
+ },
+ {
+  "id": "out-of-range-times-change-nothing",
+  "steps": [
+   {
+    "op": {
+     "op": "configure",
+     "sources": {
+      "app": "UserComponent"
+     }
+    },
+    "expect": {
+     "status": "ok"
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "app",
+     "level": "INFO",
+     "message": "keep",
+     "time": 1760000000
+    },
+    "expect": {
+     "status": "spooled",
+     "events": 1,
+     "spooled": 1,
+     "dropped": 0
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "app",
+     "level": "INFO",
+     "message": "t",
+     "time": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+    },
+    "expect": {
+     "status": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "app",
+     "level": "INFO",
+     "message": "t",
+     "time": -10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+    },
+    "expect": {
+     "status": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "app",
+     "level": "INFO",
+     "message": "t",
+     "time": 1e+300
+    },
+    "expect": {
+     "status": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "app",
+     "level": "INFO",
+     "message": "t",
+     "time": -1
+    },
+    "expect": {
+     "status": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "app",
+     "level": "INFO",
+     "message": "t",
+     "time": 253402300800
+    },
+    "expect": {
+     "status": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "app",
+     "level": "INFO",
+     "message": "t",
+     "time": 253402300799
+    },
+    "expect": {
+     "status": "spooled",
+     "events": 1,
+     "spooled": 2,
+     "dropped": 0
+    }
+   },
+   {
+    "op": {
+     "op": "upstream",
+     "results": [
+      "ok",
+      "ok"
+     ]
+    },
+    "expect": {}
+   },
+   {
+    "op": {
+     "op": "tick",
+     "now": 300
+    },
+    "expect": {
+     "uploads": [
+      {
+       "group": "/aws/greengrass/UserComponent/us-east-1/app",
+       "stream": "/2025/10/09/thing/thing",
+       "events": [
+        [
+         1760000000,
+         "keep"
+        ]
+       ],
+       "result": "ok"
+      },
+      {
+       "group": "/aws/greengrass/UserComponent/us-east-1/app",
+       "stream": "/9999/12/31/thing/thing",
+       "events": [
+        [
+         253402300799,
+         "t"
+        ]
+       ],
+       "result": "ok"
+      }
+     ],
+     "spooled": 0,
+     "dropped": 0
+    }
+   }
+  ]
  }
 ]

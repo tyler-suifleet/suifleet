@@ -229,8 +229,16 @@ RETRYABLE = {"throttled", "server-error", "connection-error"}
 
 
 def _number(value) -> bool:
-    """A finite JSON number; booleans, NaN and infinities are not numbers here."""
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    """A finite JSON number; booleans, NaN and infinities are not numbers here.
+
+    JSON integers are unbounded in Python and are never converted to float, so
+    an integer too large for a float is still classified without raising;
+    callers compare it against their exact bounds."""
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return True
+    return isinstance(value, float) and math.isfinite(value)
 
 
 def _metric_valid(message) -> bool:
@@ -367,6 +375,7 @@ LOG_BATCH_BYTES = 1048576
 LOG_EVENT_OVERHEAD = 26
 LOG_EVENT_BYTES = 262144
 LOG_RETRYABLE = RETRYABLE | {"response-lost"}
+LOG_TIME_LIMIT = 253402300800  # 10000-01-01T00:00:00Z; event times must name a UTC day
 
 
 class LogsExport:
@@ -395,6 +404,11 @@ class LogsExport:
             parts.append(data[:cut].decode())
             data = data[cut:]
         return parts + [data.decode()]
+
+    @staticmethod
+    def _time(value) -> bool:
+        # Checked before spooling, so the day of every spooled event can be formatted.
+        return _number(value) and 0 <= value < LOG_TIME_LIMIT
 
     def _state(self, **extra):
         return {**extra, "spooled": len(self.spool), "dropped": self.dropped}
@@ -455,7 +469,7 @@ class LogsExport:
             repeat = op.get("repeat", 1)  # fixture shorthand: the line is message * repeat
             if not isinstance(repeat, int) or isinstance(repeat, bool) or repeat <= 0:
                 raise AssertionError("fixture repeat must be a positive integer")
-            if op.get("level") not in LOG_LEVELS or not isinstance(op.get("message"), str) or not _number(op.get("time")):
+            if op.get("level") not in LOG_LEVELS or not isinstance(op.get("message"), str) or not self._time(op.get("time")):
                 return {"status": "invalid"}
             if LOG_LEVELS.index(op["level"]) < LOG_LEVELS.index(self.minimum):
                 return {"status": "filtered"}

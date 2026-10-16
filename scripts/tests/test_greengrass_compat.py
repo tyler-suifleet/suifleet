@@ -160,6 +160,12 @@ class FixtureGateTests(unittest.TestCase):
         units = lambda c: case(c, "malformed-unit-types-change-nothing")["steps"]
         self.run_mutated("cloudwatch-metrics-cases.json", lambda c: units(c)[4]["expect"].update(status="success"))
         self.run_mutated("cloudwatch-metrics-cases.json", lambda c: units(c)[15]["expect"]["calls"][0].update(count=4))
+        huge = lambda c: case(c, "huge-integer-values-change-nothing")["steps"]
+        self.run_mutated("cloudwatch-metrics-cases.json", lambda c: huge(c)[2]["expect"].update(status="success"))
+        self.run_mutated("cloudwatch-metrics-cases.json", lambda c: huge(c)[7]["expect"]["calls"][0].update(count=3))
+        times = lambda c: case(c, "out-of-range-times-change-nothing")["steps"]
+        self.run_mutated("cloudwatch-logs-cases.json", lambda c: times(c)[2]["expect"].update(status="spooled"))
+        self.run_mutated("cloudwatch-logs-cases.json", lambda c: times(c)[7]["expect"].update(status="invalid"))
         names = lambda c: case(c, "levels-redaction-names-and-order")["steps"]
         self.run_mutated("cloudwatch-logs-cases.json", lambda c: names(c)[11]["expect"]["uploads"][1]["events"][1].__setitem__(1, "token=s3cr3t ok s3cr3t"))
 
@@ -386,6 +392,12 @@ class ModelTests(unittest.TestCase):
         for value in (float("nan"), float("inf"), -float("inf")):
             self.assertFalse(managed._metric_valid(request(value=value)))
         self.assertTrue(managed._metric_valid(request(value=-1.174271e+108)))
+        # JSON integers too large for a float are rejected by the range check without raising.
+        huge = json.loads("1" + "0" * 400)
+        for value in (huge, -huge, 2 * 10 ** 108):
+            self.assertFalse(managed._metric_valid(request(value=value)))
+        self.assertFalse(managed._metric_valid(request(timestamp=-huge)))
+        self.assertTrue(managed._metric_valid(request(value=10 ** 100)))
         for timestamp in (float("nan"), float("inf"), -float("inf"), -1, True):
             self.assertFalse(managed._metric_valid(request(timestamp=timestamp)))
         for timestamp in (0, 0.0, 1700000000.5):
@@ -466,6 +478,16 @@ class ModelTests(unittest.TestCase):
         for time in (float("nan"), float("inf"), -float("inf")):
             self.assertEqual(exporter.apply({"op": "log", "source": "app", "level": "INFO", "message": "m", "time": time}),
                              {"status": "invalid"})
+        self.assertEqual(exporter.apply({"op": "configure", "interval": 10 ** 400}), {"status": "ok"})
+        exporter.apply({"op": "configure", "interval": 300})
+        # Times that cannot name a UTC day are refused before spooling, so a tick never fails formatting them.
+        for time in (10 ** 400, -10 ** 400, 1e300, -1, managed.LOG_TIME_LIMIT):
+            self.assertEqual(exporter.apply({"op": "log", "source": "app", "level": "INFO", "message": "m", "time": time}),
+                             {"status": "invalid"})
+        self.assertEqual(exporter.apply({"op": "log", "source": "app", "level": "INFO", "message": "m",
+                                         "time": managed.LOG_TIME_LIMIT - 1})["status"], "spooled")
+        exporter.apply({"op": "upstream", "results": ["ok"]})
+        self.assertEqual(exporter.apply({"op": "tick", "now": 300})["uploads"][0]["stream"], "/9999/12/31/thing/thing")
 
     def test_selection_rule_grammar(self):
         with self.assertRaises(ValueError):
