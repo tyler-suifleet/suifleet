@@ -393,7 +393,7 @@ impl Task {
             if let Err(error) = self.collect(&mut spool) {
                 warn!(%error, "Log collection failed");
             }
-            if let Err(error) = telemetry::flush_as(&http, &self.url, &spool, "Log").await {
+            if let Err(error) = telemetry::flush_as(&http, &self.url, &spool, "Log", "batch").await {
                 info!(%error, "Log ingress unreachable; batches stay spooled");
             }
             tokio::time::sleep(Duration::from_secs(self.interval_seconds)).await;

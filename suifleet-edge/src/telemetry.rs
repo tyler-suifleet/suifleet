@@ -480,11 +480,11 @@ struct Response {
 /// Upload the spool oldest first, in batches, until it is empty or the
 /// indexer cannot take more now. Returns how many envelopes left the spool.
 pub async fn flush(http: &reqwest::Client, url: &reqwest::Url, spool: &Spool) -> anyhow::Result<usize> {
-    flush_as(http, url, spool, "Telemetry").await
+    flush_as(http, url, spool, "Telemetry", "snapshot").await
 }
 
-/// [`flush`] for any signed envelope stream (`what` names it in logs).
-pub async fn flush_as(http: &reqwest::Client, url: &reqwest::Url, spool: &Spool, what: &str) -> anyhow::Result<usize> {
+/// [`flush`] for any signed envelope stream (`what` and `item` name it in logs).
+pub async fn flush_as(http: &reqwest::Client, url: &reqwest::Url, spool: &Spool, what: &str, item: &str) -> anyhow::Result<usize> {
     let mut removed = 0;
     loop {
         let pending = spool.pending()?;
@@ -508,9 +508,9 @@ pub async fn flush_as(http: &reqwest::Client, url: &reqwest::Url, spool: &Spool,
         for ((seq, path), verdict) in batch.iter().zip(&verdicts.results) {
             match verdict.status.as_str() {
                 "accepted" | "duplicate" => {}
-                "rejected" => warn!(seq, error = verdict.error.as_deref().unwrap_or(""), "{what} envelope rejected; dropped"),
+                "rejected" => warn!(seq, error = verdict.error.as_deref().unwrap_or(""), "{what} {item} rejected; dropped"),
                 _ => {
-                    info!(seq, error = verdict.error.as_deref().unwrap_or(""), "{what} ingress deferred an envelope; kept for retry");
+                    info!(seq, error = verdict.error.as_deref().unwrap_or(""), "{what} ingress deferred a {item}; kept for retry");
                     return Ok(removed);
                 }
             }
