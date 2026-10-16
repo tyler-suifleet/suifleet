@@ -36,7 +36,7 @@ use std::{
 use sui_sdk_types::{Address, Argument, Command, Input, Transaction};
 
 pub const MAX_ENROLL_BUDGET: u64 = 50_000_000;
-/// Room for a base64 telemetry snapshot of `telemetry::MAX_MESSAGE_BYTES`.
+/// Room for a base64 telemetry snapshot of [`crate::telemetry::MAX_MESSAGE_BYTES`].
 const MAX_REQUEST_BYTES: u64 = 128 * 1024;
 const IO_TIMEOUT: Duration = Duration::from_secs(10);
 
