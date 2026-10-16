@@ -91,6 +91,10 @@ Normal CI also runs CodeQL and dependency/secret/configuration security gates; s
 
 Do not replace tests with type casts, ignored failures or mocked success. A returned digest does not prove transaction success; inspect execution effects. Record exact commands, results, limitations and changed behavior in the PR/handoff. Do not claim tests ran when they did not. [VALIDATION.md](docs/VALIDATION.md) is historical evidence and must not be treated as a current test run.
 
+## Platform update boundary — user requirement
+
+SuiFleet delivers authenticated artifacts, executes explicitly configured component lifecycle commands and records their reported results. Platform scripts/tools (for example SWUpdate or RAUC integrations) own updater selection, OS installation, partition/bootloader layout, reboot decisions, boot confirmation and firmware rollback. Do not add automatic updater detection, SuiFleet-triggered system reboot, a firmware boot/recovery state machine or mandatory A/B partitioning as Greengrass-parity requirements. Preserve SuiFleet journals and component state across platform-controlled restarts; do not infer healthy boot from command exit zero or replay ambiguous destructive work. Component process supervision and explicitly configured application recovery remain separate runtime responsibilities. Platform-specific recovery tests establish only the tested integration.
+
 ## Keeping clients and contracts synchronized
 
 - Maintain one versioned deployment manifest per network with chain identity, call package ID, per-type origins, shared object IDs, protocol/schema versions and supported client ranges. This manifest is implemented; see [DEPLOYMENT_MANIFEST.md](docs/DEPLOYMENT_MANIFEST.md).
