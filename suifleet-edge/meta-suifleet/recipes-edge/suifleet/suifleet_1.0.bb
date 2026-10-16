@@ -17,7 +17,7 @@ SRC_URI = " \
     file://suifleet-signer.socket \
     file://signer.toml.example \
 "
-SRCREV = "795de747e066ee97af0e9e0e53deda3c6c71e90c"
+SRCREV = "4dbc1d70efbadbccd13cfd0976ef1163ba8a3f40"
 # Preserve core's unpack root; Scarthgap predates UNPACKDIR.
 SUIFLEET_UNPACKDIR = "${@d.getVar('UNPACKDIR') or d.getVar('WORKDIR')}"
 S = "${SUIFLEET_UNPACKDIR}/git"
