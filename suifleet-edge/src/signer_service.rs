@@ -18,6 +18,7 @@
 //! refused. Component processes run as the daemon user and may reach the
 //! socket, but they are not the unit's main process.
 use crate::identity::TxSigner;
+use crate::protocol::{deployment_manager as dm, enrollment};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -151,10 +152,10 @@ pub fn check(policy: &Policy, bytes: &[u8]) -> anyhow::Result<Intent> {
     anyhow::ensure!(ptb.inputs.len() == call.arguments.len(), "transaction has extra inputs");
     let args: Vec<&Input> = call.arguments.iter().map(|a| input(&ptb.inputs, a)).collect::<anyhow::Result<_>>()?;
     match (call.module.as_str(), call.function.as_str()) {
-        ("deployment_manager", function @ ("report_verified_status" | "report_verified_status_for_group")) => {
+        (dm::MODULE, function @ (dm::REPORT_VERIFIED_STATUS | dm::REPORT_VERIFIED_STATUS_FOR_GROUP)) => {
             anyhow::ensure!(tx.gas_payment.owner == policy.device, "a status report must be paid by the device");
             anyhow::ensure!(tx.gas_payment.budget <= policy.max_budget, "gas budget {} exceeds {}", tx.gas_payment.budget, policy.max_budget);
-            let group = function == "report_verified_status_for_group";
+            let group = function == dm::REPORT_VERIFIED_STATUS_FOR_GROUP;
             anyhow::ensure!(args.len() == if group { 5 } else { 4 }, "unexpected argument count");
             shared(args[0])?;
             anyhow::ensure!(shared(args[1])? == policy.registry, "not this fleet's registry");
@@ -171,7 +172,7 @@ pub fn check(policy: &Policy, bytes: &[u8]) -> anyhow::Result<Intent> {
             );
             Ok(Intent::Report)
         }
-        ("enrollment", "enroll") => {
+        (enrollment::MODULE, enrollment::ENROLL) => {
             anyhow::ensure!(tx.gas_payment.owner != policy.device, "enrollment must be sponsored by the claim key");
             anyhow::ensure!(tx.gas_payment.budget <= MAX_ENROLL_BUDGET, "gas budget exceeds the enrollment ceiling");
             anyhow::ensure!(args.len() == 5, "unexpected argument count");
@@ -398,7 +399,7 @@ mod tests {
     }
     impl Default for Tx {
         fn default() -> Self {
-            Tx { module: "deployment_manager", function: "report_verified_status", package: "0x3", registry: "0x13", cap: "0x11",
+            Tx { module: dm::MODULE, function: dm::REPORT_VERIFIED_STATUS, package: "0x3", registry: "0x13", cap: "0x11",
                  status: 1, group: false, sender: "0xa0", gas_owner: "0xa0", budget: 10_000_000, extra_command: false }
         }
     }
@@ -433,15 +434,15 @@ mod tests {
         let p = policy();
         assert_eq!(check(&p, &Tx::default().bytes()).unwrap(), Intent::Report);
         assert_eq!(check(&p, &Tx { status: 2, ..Tx::default() }.bytes()).unwrap(), Intent::Report);
-        assert_eq!(check(&p, &Tx { group: true, function: "report_verified_status_for_group", ..Tx::default() }.bytes()).unwrap(), Intent::Report);
+        assert_eq!(check(&p, &Tx { group: true, function: dm::REPORT_VERIFIED_STATUS_FOR_GROUP, ..Tx::default() }.bytes()).unwrap(), Intent::Report);
         for (label, bad) in [
             ("other sender", Tx { sender: "0xbad", gas_owner: "0xbad", ..Tx::default() }),
             ("other gas owner", Tx { gas_owner: "0xbad", ..Tx::default() }),
             ("budget", Tx { budget: 50_000_001, ..Tx::default() }),
             ("package", Tx { package: "0x4", ..Tx::default() }),
-            ("unverified report", Tx { function: "report_status", ..Tx::default() }),
-            ("other function", Tx { function: "delete_deployment", ..Tx::default() }),
-            ("other module", Tx { module: "device_registry", function: "register_device", ..Tx::default() }),
+            ("unverified report", Tx { function: dm::REPORT_STATUS, ..Tx::default() }),
+            ("other function", Tx { function: dm::DELETE_DEPLOYMENT, ..Tx::default() }),
+            ("other module", Tx { module: crate::protocol::device_registry::MODULE, function: crate::protocol::device_registry::REGISTER_DEVICE, ..Tx::default() }),
             ("registry", Tx { registry: "0x99", ..Tx::default() }),
             ("cap", Tx { cap: "0x98", ..Tx::default() }),
             ("status", Tx { status: 3, ..Tx::default() }),
@@ -513,7 +514,7 @@ mod tests {
         let signer = ServiceSigner::connect(&socket).unwrap();
         assert_eq!(signer.address(), "0xa0");
         assert_eq!(signer.sign(&Tx::default().bytes()).unwrap(), vec![7]);
-        let refused = signer.sign(&Tx { function: "delete_deployment", ..Tx::default() }.bytes()).unwrap_err();
+        let refused = signer.sign(&Tx { function: dm::DELETE_DEPLOYMENT, ..Tx::default() }.bytes()).unwrap_err();
         assert!(format!("{refused:#}").contains("not a permitted signing intent"), "{refused:#}");
     }
 }
