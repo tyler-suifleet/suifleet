@@ -126,7 +126,9 @@ async fn main() -> anyhow::Result<()> {
             max_memory_bytes: cfg.apply.max_memory_bytes,
         },
     )?;
-    supervisor.bootstrap().await;
+    // The daemon is ready before its components are: bootstrap waits up to a
+    // readiness timeout per component, which would otherwise exceed the
+    // unit's start deadline and restart the daemon into the same bootstrap.
     #[cfg(feature = "systemd")]
     tokio::spawn(async {
         loop {
@@ -136,21 +138,28 @@ async fn main() -> anyhow::Result<()> {
     });
     #[cfg(feature = "systemd")]
     sd_notify::notify(false, &[sd_notify::NotifyState::Ready]).ok();
-    info!(
-        address = sui.address(),
-        "Daemon started with durable deployment polling"
-    );
     let shutdown = shutdown_signal();
     tokio::pin!(shutdown);
-    loop {
-        let cycle = poll(&cfg, &sui, &walrus, &runner, store.as_ref(), &mut supervisor, &mut journal);
-        tokio::select! {
-            result = cycle => { if let Err(error) = result { warn!(%error, "Sync failed; retrying without advancing cursor"); } }
-            _ = &mut shutdown => { info!("Stopping; interrupted apply requires inspection on restart"); break; }
-        }
-        tokio::select! {
-            _ = tokio::time::sleep(Duration::from_secs(cfg.runtime.poll_seconds)) => {}
-            _ = &mut shutdown => break,
+    // A stop during bootstrap still stops whatever it already started.
+    let stopping = tokio::select! {
+        _ = supervisor.bootstrap() => false,
+        _ = &mut shutdown => { info!("Stopping during component bootstrap"); true }
+    };
+    if !stopping {
+        info!(
+            address = sui.address(),
+            "Daemon started with durable deployment polling"
+        );
+        loop {
+            let cycle = poll(&cfg, &sui, &walrus, &runner, store.as_ref(), &mut supervisor, &mut journal);
+            tokio::select! {
+                result = cycle => { if let Err(error) = result { warn!(%error, "Sync failed; retrying without advancing cursor"); } }
+                _ = &mut shutdown => { info!("Stopping; interrupted apply requires inspection on restart"); break; }
+            }
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(cfg.runtime.poll_seconds)) => {}
+                _ = &mut shutdown => break,
+            }
         }
     }
     // Components stop with the daemon (shutdown command, then the whole group).
