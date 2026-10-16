@@ -399,7 +399,7 @@ impl Supervisor {
         let _ = std::fs::remove_dir_all(&workspace);
         // Durable before the install starts: a restart must find the version
         // and the configuration record it was installed with.
-        configuration::create_dir_durable(&workspace)?;
+        configuration::create_dir_durable(self.root.parent().unwrap_or(&self.root), &workspace)?;
         let installed = workspace.join("artifact");
         std::fs::rename(artifact, &installed)?;
         std::fs::File::open(&installed)?.sync_all()?;
@@ -2147,6 +2147,31 @@ mod tests {
         until("restarted", || f.work("seen.json").exists()).await;
         assert_eq!(seen(&f, "seen.json"), serde_json::json!({"port": 1, "db": {"password": "two"}}));
         s.stop_all().await;
+    }
+
+    #[tokio::test]
+    async fn first_deployment_after_validation_syncs_its_workspace_path_before_install() {
+        let mut f = Fixture::new("durable-workspace");
+        let mut s = f.open();
+        let artifact = f.dir.join("candidate-artifact");
+        std::fs::write(&artifact, "artifact").unwrap();
+        let candidate = f.dir.join("candidate.json");
+        std::fs::write(&candidate, "{}").unwrap();
+        // Validation creates supervised/app (its work directory and log)
+        // before deploy, without making it durable.
+        assert!(s.validate("app", "1.0.0", "true", &artifact, &candidate, Duration::from_secs(5)).await.unwrap());
+        assert!(f.dir.join("supervised/app").is_dir());
+        configuration::SYNCED.with(|synced| synced.borrow_mut().clear());
+        // A failing install returns right after it ran: every sync recorded
+        // happened before it.
+        let v1 = f.spec("1.0.0", "exec sleep 300");
+        let record = configured(&v1, serde_json::json!({}), &[]);
+        assert!(f.deploy_configured(&mut s, v1, Some("exit 1"), &record).await.is_err());
+        let synced = configuration::SYNCED.with(|synced| synced.take());
+        let root = f.dir.join("supervised");
+        for dir in [f.dir.clone(), root.clone(), root.join("app"), root.join("app/versions")] {
+            assert!(synced.contains(&dir), "{} not synced before install: {synced:?}", dir.display());
+        }
     }
 
     #[tokio::test]

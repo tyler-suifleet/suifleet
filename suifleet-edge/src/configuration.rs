@@ -295,16 +295,28 @@ pub fn write_private(path: &Path, value: &impl Serialize) -> anyhow::Result<()> 
 /// Make `path`'s directory entry durable.
 fn sync_parent(path: &Path) -> anyhow::Result<()> {
     let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    #[cfg(test)]
+    SYNCED.with(|synced| synced.borrow_mut().push(parent.to_owned()));
     std::fs::File::open(parent)?.sync_all()?;
     Ok(())
 }
 
-/// `create_dir_all`, with every directory it created made durable in its
-/// parent, so a record written inside survives a power loss.
-pub fn create_dir_durable(path: &Path) -> anyhow::Result<()> {
-    let missing: Vec<&Path> = path.ancestors().take_while(|dir| !dir.as_os_str().is_empty() && !dir.exists()).collect();
+#[cfg(test)]
+thread_local! {
+    /// Directories `sync_parent` synced on this thread, oldest first.
+    pub static SYNCED: std::cell::RefCell<Vec<PathBuf>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// `create_dir_all` for `path` inside `base`, with every directory between
+/// them made durable in its parent (`base` itself included), so a record
+/// written inside survives a power loss. Directories that already existed are
+/// synced too: an earlier, non-durable creation (a component's log or validate
+/// work directory) may not be on disk yet.
+pub fn create_dir_durable(base: &Path, path: &Path) -> anyhow::Result<()> {
+    anyhow::ensure!(path.starts_with(base) && path != base, "{} is not inside {}", path.display(), base.display());
     std::fs::create_dir_all(path)?;
-    for dir in missing.into_iter().rev() {
+    let dirs: Vec<&Path> = path.ancestors().take_while(|dir| *dir != base).collect();
+    for dir in dirs.into_iter().rev() {
         sync_parent(dir)?;
     }
     Ok(())
@@ -358,7 +370,7 @@ impl Store {
     pub fn stage(&self, name: &str, record: &Record) -> anyhow::Result<()> {
         let dir = self.dir(name)?;
         // Durable before the install it precedes starts (see settle).
-        create_dir_durable(&dir)?;
+        create_dir_durable(self.root.parent().unwrap_or(&self.root), &dir)?;
         write_private(&dir.join("staged.json"), record)
     }
 
@@ -536,14 +548,21 @@ mod tests {
     }
 
     #[test]
-    fn durable_directories_are_created_with_their_parents() {
+    fn durable_directories_are_synced_up_to_their_base() {
         let dir = temp("durable");
+        // `a` already exists, as a component directory created earlier by a
+        // non-durable path would: its entry in `dir` is synced regardless.
+        std::fs::create_dir_all(dir.join("a")).unwrap();
         let nested = dir.join("a/b/c");
-        create_dir_durable(&nested).unwrap();
+        SYNCED.with(|synced| synced.borrow_mut().clear());
+        create_dir_durable(&dir, &nested).unwrap();
         assert!(nested.is_dir());
+        let synced = SYNCED.with(|synced| synced.take());
+        assert_eq!(synced, [dir.clone(), dir.join("a"), dir.join("a/b")]);
         // Existing directories are accepted unchanged.
-        create_dir_durable(&nested).unwrap();
-        create_dir_durable(&dir).unwrap();
+        create_dir_durable(&dir, &nested).unwrap();
+        assert!(create_dir_durable(&dir, &dir).is_err());
+        assert!(create_dir_durable(&nested, &dir).is_err());
     }
 
     #[test]
