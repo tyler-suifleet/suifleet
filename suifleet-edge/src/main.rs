@@ -14,6 +14,7 @@ mod protocol_tests;
 #[cfg(test)]
 mod compat_tests;
 mod release;
+mod signer_service;
 mod state;
 mod sui_client;
 mod supervisor;
@@ -57,9 +58,10 @@ async fn main() -> anyhow::Result<()> {
     }
     let check_config = args.len() == 3 && args[1] == "--check-config";
     let helper = args.len() == 3 && args[1] == "--firmware-helper";
+    let signer_service = args.len() == 3 && args[1] == "--signer-service";
     anyhow::ensure!(
-        args.len() == 1 || check_config || helper,
-        "usage: suifleet [--provision KEY_PATH | --derive-address KEY_PATH | --enroll ENROLL_TOML | --check-config CONFIG_PATH | --firmware-helper CONFIG | --verify-release BUNDLE_DIR TRUST_FILE]"
+        args.len() == 1 || check_config || helper || signer_service,
+        "usage: suifleet [--provision KEY_PATH | --derive-address KEY_PATH | --enroll ENROLL_TOML | --check-config CONFIG_PATH | --firmware-helper CONFIG | --signer-service SIGNER_TOML | --verify-release BUNDLE_DIR TRUST_FILE]"
     );
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -67,6 +69,10 @@ async fn main() -> anyhow::Result<()> {
                 .unwrap_or_else(|_| "suifleet=info".into()),
         )
         .init();
+    if signer_service {
+        // Runs as its own user, holding the device key (SF-053).
+        return signer_service::serve(Path::new(&args[2]));
+    }
     if helper {
         // Root-owned, path-activated: the only privileged operation.
         let helper = config::FirmwareHelperConfig::load(Path::new(&args[2]))?;

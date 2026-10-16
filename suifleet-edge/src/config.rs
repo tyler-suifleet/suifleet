@@ -254,20 +254,29 @@ impl EnrollConfig {
     }
 }
 
-/// `[device.signer]`: a P-256 key in a PKCS#11 token (HSM, SoftHSM2, or a
-/// TPM's PKCS#11 provider). Requires a build with `--features pkcs11`.
+/// `[device.signer]`. `kind = "service"`: the device signing service
+/// (SF-053; the daemon user cannot read the key). `kind = "pkcs11"`: a P-256
+/// key in a PKCS#11 token (HSM, SoftHSM2, or a TPM's PKCS#11 provider), which
+/// requires a build with `--features pkcs11`.
 #[derive(Deserialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(not(feature = "pkcs11"), allow(dead_code))]
 pub struct SignerConfig {
-    /// Only "pkcs11".
+    /// "service" or "pkcs11".
     pub kind: String,
-    /// The token's PKCS#11 module, e.g. /usr/lib/softhsm/libsofthsm2.so.
+    /// service: the signing service's socket.
+    #[serde(default)]
+    pub socket: PathBuf,
+    /// pkcs11: the token's module, e.g. /usr/lib/softhsm/libsofthsm2.so.
+    #[serde(default)]
     pub module: PathBuf,
+    #[serde(default)]
     pub token_label: String,
-    /// CKA_LABEL of both the private and the public key object.
+    /// pkcs11: CKA_LABEL of both the private and the public key object.
+    #[serde(default)]
     pub key_label: String,
-    /// File holding the user PIN (root-only readable).
+    /// pkcs11: file holding the user PIN (readable only by the key's user).
+    #[serde(default)]
     pub pin_file: PathBuf,
 }
 
