@@ -156,13 +156,20 @@ pub fn inventory(state_dir: &Path) -> Inventory {
     let journal: Option<crate::state::State> = std::fs::read(state_dir.join("state.json"))
         .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok());
-    let supervised = state_dir.join("supervised");
-    let active: BTreeMap<String, crate::supervisor::Spec> = read_json(&supervised.join("active.json"));
-    let status: BTreeMap<String, crate::supervisor::Status> = read_json(&supervised.join("status.json"));
     let Some(journal) = journal else {
         inventory.reasons.push("daemon journal unreadable".into());
         return inventory;
     };
+    // Absent files are a device that never supervised anything; any other
+    // failure leaves the supervisor's view unknown, which is never healthy.
+    let supervised = state_dir.join("supervised");
+    let active: Option<BTreeMap<String, crate::supervisor::Spec>> =
+        read_state(&supervised.join("active.json"), "supervisor state", &mut inventory.reasons);
+    let status: Option<BTreeMap<String, crate::supervisor::Status>> =
+        read_state(&supervised.join("status.json"), "supervisor status", &mut inventory.reasons);
+    let no_status = BTreeMap::new();
+    let status_known = status.is_some();
+    let status = status.as_ref().unwrap_or(&no_status);
     for (id, outcome) in &journal.deployments {
         if outcome.status.is_some() && !outcome.reported {
             inventory.pending_receipts = inventory.pending_receipts.saturating_add(1);
@@ -171,15 +178,21 @@ pub fn inventory(state_dir: &Path) -> Inventory {
             inventory.reasons.push(format!("deployment {id}: outcome indeterminate; inspect the device"));
         }
     }
-    let mut names: Vec<&String> = journal.components.keys().chain(active.keys()).collect();
+    // Without the committed specs, the supervisor's own status still names
+    // what it runs; nothing else is asserted to be unsupervised by guess.
+    let committed: BTreeMap<&String, (&String, &String)> = match &active {
+        Some(active) => active.iter().map(|(name, spec)| (name, (&spec.version, &spec.deployment))).collect(),
+        None => status.iter().map(|(name, s)| (name, (&s.version, &s.deployment))).collect(),
+    };
+    let mut names: Vec<&String> = journal.components.keys().chain(committed.keys().copied()).collect();
     names.sort();
     names.dedup();
     for name in names {
-        let health = match active.get(name) {
+        let health = match committed.get(name) {
             // Supervised: what runs is the committed version, whatever a
             // failed replacement left in the journal.
-            Some(spec) => {
-                let current = status.get(name).filter(|s| s.version == spec.version && s.deployment == spec.deployment);
+            Some(&(version, deployment)) => {
+                let current = status.get(name).filter(|s| &s.version == version && &s.deployment == deployment);
                 let phase = current.map(|s| phase_name(s.phase));
                 match phase.as_deref() {
                     Some("running") => {}
@@ -187,12 +200,13 @@ pub fn inventory(state_dir: &Path) -> Inventory {
                         Some(exit) => format!("component {name}: {phase} ({exit})"),
                         None => format!("component {name}: {phase}"),
                     }),
-                    None => inventory.reasons.push(format!("component {name}: not started")),
+                    None if status_known => inventory.reasons.push(format!("component {name}: not started")),
+                    None => {}
                 }
                 ComponentHealth {
                     name: name.clone(),
-                    version: spec.version.clone(),
-                    deployment_id: spec.deployment.clone(),
+                    version: version.clone(),
+                    deployment_id: deployment.clone(),
                     installed: true,
                     supervised: true,
                     phase,
@@ -227,11 +241,17 @@ pub fn inventory(state_dir: &Path) -> Inventory {
     inventory
 }
 
-fn read_json<T: serde::de::DeserializeOwned + Default>(path: &Path) -> T {
-    std::fs::read(path)
+/// A supervisor file: empty when it does not exist yet, `None` (and a
+/// degraded reason) when it exists but cannot be read or parsed.
+fn read_state<T: serde::de::DeserializeOwned + Default>(path: &Path, what: &str, reasons: &mut Vec<String>) -> Option<T> {
+    let parsed = match std::fs::read(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Some(T::default()),
+        Err(error) => Err(error.to_string()),
+        Ok(bytes) => serde_json::from_slice(&bytes).map_err(|error| error.to_string()),
+    };
+    parsed
+        .map_err(|error| reasons.push(format!("{what} unreadable ({error}); component supervision unknown")))
         .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default()
 }
 
 fn phase_name(phase: crate::supervisor::Phase) -> String {
@@ -620,6 +640,73 @@ mod tests {
         let empty = temp();
         assert_eq!(super::inventory(&empty).reasons, ["daemon journal unreadable"]);
         std::fs::remove_dir_all(empty).unwrap();
+    }
+
+    #[test]
+    fn unreadable_supervisor_state_is_never_healthy() {
+        let now = 10_000_000;
+        let journal = serde_json::to_vec(&serde_json::json!({
+            "binding": "b", "cursor": null, "deployments": {},
+            "components": {"svc": {"version": "1.0.0", "deployment_id": "0xe", "recipe_sha256": "r", "artifact_sha256": "a",
+                                   "dependencies": {}, "confirmed": true}},
+        })).unwrap();
+        let broken = serde_json::to_vec(&serde_json::json!({
+            "svc": {"version": "1.0.0", "deployment": "0xe", "phase": "broken", "pid": null, "restarts": 3,
+                    "last_exit": "exit status: 1", "since": 6} })).unwrap();
+        let observe = |dir: &Path| {
+            let inventory = inventory(dir);
+            let components: Vec<_> = inventory.components.iter()
+                .map(|c| (c.name.clone(), c.installed, c.supervised, c.phase.clone())).collect();
+            let snapshot = snapshot(&binding(), "0xs", 1, 0, synced(now), inventory, now);
+            (components, snapshot.health, snapshot.reasons)
+        };
+
+        // A confirmed component is broken under supervision; its committed
+        // spec file is corrupt. The supervisor's status still names it.
+        let dir = temp();
+        std::fs::create_dir_all(dir.join("supervised")).unwrap();
+        std::fs::write(dir.join("state.json"), &journal).unwrap();
+        std::fs::write(dir.join("supervised/active.json"), b"{not json").unwrap();
+        std::fs::write(dir.join("supervised/status.json"), &broken).unwrap();
+        let (components, health, reasons) = observe(&dir);
+        assert_eq!(components, [("svc".to_owned(), true, true, Some("broken".to_owned()))]);
+        assert_eq!(health, Health::Degraded);
+        assert!(reasons[0].starts_with("supervisor state unreadable ("), "{reasons:?}");
+        assert_eq!(reasons[1], "component svc: broken (exit status: 1)");
+
+        // Neither file readable (a directory in place of each): nothing is
+        // known about supervision, so the device is not reported healthy.
+        std::fs::remove_file(dir.join("supervised/active.json")).unwrap();
+        std::fs::remove_file(dir.join("supervised/status.json")).unwrap();
+        std::fs::create_dir(dir.join("supervised/active.json")).unwrap();
+        std::fs::create_dir(dir.join("supervised/status.json")).unwrap();
+        let (_, health, reasons) = observe(&dir);
+        assert_eq!(health, Health::Degraded);
+        assert_eq!(reasons.len(), 2, "{reasons:?}");
+        assert!(reasons[0].starts_with("supervisor state unreadable ("), "{reasons:?}");
+        assert!(reasons[1].starts_with("supervisor status unreadable ("), "{reasons:?}");
+
+        // Committed specs readable, status corrupt: unknown, not "not started".
+        std::fs::remove_dir(dir.join("supervised/active.json")).unwrap();
+        std::fs::remove_dir(dir.join("supervised/status.json")).unwrap();
+        std::fs::write(dir.join("supervised/active.json"), serde_json::to_vec(&serde_json::json!({
+            "svc": {"name": "svc", "version": "1.0.0", "deployment": "0xe", "run": "r", "shutdown": null,
+                    "readiness": null, "restart": "on-failure"} })).unwrap()).unwrap();
+        std::fs::write(dir.join("supervised/status.json"), b"[").unwrap();
+        let (components, health, reasons) = observe(&dir);
+        assert_eq!(components, [("svc".to_owned(), true, true, None)]);
+        assert_eq!(health, Health::Degraded);
+        assert_eq!(reasons.len(), 1, "{reasons:?}");
+        assert!(reasons[0].starts_with("supervisor status unreadable ("), "{reasons:?}");
+        std::fs::remove_dir_all(dir).unwrap();
+
+        // A one-shot-only device never created supervisor state: healthy.
+        let oneshot = temp();
+        std::fs::write(oneshot.join("state.json"), &journal).unwrap();
+        let (components, health, reasons) = observe(&oneshot);
+        assert_eq!(components, [("svc".to_owned(), true, false, None)]);
+        assert_eq!((health, reasons.len()), (Health::Healthy, 0));
+        std::fs::remove_dir_all(oneshot).unwrap();
     }
 
     #[test]
