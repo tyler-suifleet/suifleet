@@ -3,6 +3,7 @@
 import { useDevices } from "@/hooks/useDevices";
 import { useDeployments } from "@/hooks/useDeployments";
 import { useGroups } from "@/hooks/useGroups";
+import { useFleetHealth } from "@/hooks/useFleetHealth";
 import Link from "next/link";
 import { PageHeader, Section, StatusDot } from "@/components/ui";
 
@@ -10,6 +11,9 @@ export default function DashboardPage() {
   const { data: devices = [], isLoading: dl } = useDevices();
   const { data: deployments = [], isLoading: depl } = useDeployments();
   const { data: groups = [], isLoading: gl } = useGroups();
+  const { data: health = {} } = useFleetHealth(devices.filter((d) => d.ownerCapId).map((d) => d.objectId));
+  const healthy = Object.values(health).filter((h) => h.status === "healthy").length;
+  const reported = Object.values(health).some((h) => h.status !== "unavailable");
 
   const pending = deployments.filter((d) => d.resolvedDeviceIds.some((id) => (d.statuses[id] ?? 0) === 0));
 
@@ -19,7 +23,7 @@ export default function DashboardPage() {
 
       {/* Stat cards */}
       <div className="grid grid-cols-4 gap-4">
-        <StatCard label="Devices" value={dl ? "—" : devices.length} href="/devices" />
+        <StatCard label="Devices (healthy)" value={dl ? "—" : reported ? `${devices.length} (${healthy})` : devices.length} href="/devices" />
         <StatCard label="Device groups" value={gl ? "—" : groups.length} href="/devices" />
         <StatCard label="Deployments" value={depl ? "—" : deployments.length} href="/deployments" />
         <StatCard label="Active deployments" value={depl ? "—" : pending.length} href="/deployments" />
@@ -102,7 +106,7 @@ export default function DashboardPage() {
               {devices.map((d) => (
                 <tr key={d.objectId} className="hover:bg-gray-50">
                   <td className="py-3 pr-4 font-medium flex items-center gap-2">
-                    <StatusDot />
+                    <StatusDot health={health[d.objectId]} />
                     {d.name}
                   </td>
                   <td className="py-3 pr-4 text-gray-500">{d.arch}</td>

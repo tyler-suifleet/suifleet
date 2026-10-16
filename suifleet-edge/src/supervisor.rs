@@ -1339,6 +1339,21 @@ pub fn spawn_tracked(command: &mut tokio::process::Command) -> std::io::Result<T
     Ok(Tracked { child, pid })
 }
 
+/// Tests elsewhere: spawn a plain child registered as known, so the orphan
+/// sweep of a concurrently running supervisor test leaves it alone. Pass the
+/// PID to [`forget_std_tracked`] once reaped.
+#[cfg(test)]
+pub fn spawn_std_tracked(command: &mut std::process::Command) -> std::io::Result<std::process::Child> {
+    let mut children = CHILDREN.lock().unwrap();
+    let child = command.spawn()?;
+    children.insert(child.id());
+    Ok(child)
+}
+#[cfg(test)]
+pub fn forget_std_tracked(pid: u32) {
+    CHILDREN.lock().unwrap().remove(&pid);
+}
+
 /// Become a child subreaper and kill orphans as they arrive.
 fn contain_descendants() -> anyhow::Result<()> {
     #[cfg(target_os = "linux")]
