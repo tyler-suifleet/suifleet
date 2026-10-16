@@ -105,6 +105,8 @@ AWS includes device/component health, operational telemetry, logs and provisioni
 
 These belong to full Greengrass equivalence beyond OTA/fleet management. See [AWS-provided components](https://docs.aws.amazon.com/greengrass/v2/developerguide/public-components.html), [configuration IPC](https://docs.aws.amazon.com/greengrass/v2/developerguide/ipc-component-configuration.html), and [local component-management IPC](https://docs.aws.amazon.com/greengrass/v2/developerguide/ipc-local-deployments-components.html).
 
+The [compatibility specification](GREENGRASS_COMPATIBILITY.md) (SF-028) separates functional, AWS-recipe and AWS-API compatibility for these rows and provides proposed contract fixtures; it does not implement any of them.
+
 | Capability | Status | Required direction | Priority |
 |---|---|---|---|
 | Component IPC and SDK | Missing | Authenticated local API for config, lifecycle, health and messaging | P2 |
