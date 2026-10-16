@@ -30,7 +30,7 @@ The immediate platform blocker is transport. The daemon now uses the supported g
 - Artifact downloads buffered whole firmware in memory. They now stream, with a 1 GiB limit; recipes have a 1 MiB limit. HTTP and apply timeouts are bounded.
 - The deployments page did not load/display per-device status. It now reads the live dynamic status field, expands current group members, and omits deleted records. Queries paginate instead of truncating the fleet at 50 records.
 - Provisioning/address CLI commands were documented but absent. Software provisioning is now idempotent, creates a 0600 key, and runs before daemon startup under systemd.
-- The UI advertised run/shutdown that no daemon executed. SF-014 added the supervisor; the run/readiness/shutdown/restart controls are enabled again now that the behavior is tested. Configuration still fails explicitly, and install and run commands both require device-side opt-in.
+- The UI advertised run/shutdown that no daemon executed. SF-014 added the supervisor; the run/readiness/shutdown/restart controls are enabled again now that the behavior is tested. Install and run commands both require device-side opt-in. SF-015 replaced the explicit configuration rejection with recipe 1.2 configuration management.
 - Tests had a stale function signature and invalid shared-object test timing. Those are corrected. Frontend SDK version skew is pinned to the wallet library's compatible version.
 
 ## Tracking coverage
@@ -77,7 +77,7 @@ AWS components define recipes, lifecycle, dependencies and platform selection. S
 | Run/startup/shutdown/bootstrap/recover | Partial (SF-014): supervised run with readiness, restart policy and budget, graceful shutdown, rollback of an unready replacement, dependency-ordered restart of committed versions on daemon start and after a daemon crash, no unmanaged descendants; simulator-tested | Configured component bootstrap, dependency failure coupling, health reporting on chain and physical validation of supervision restoration after platform-controlled restart; platform scripts own system reboot | P1 |
 | Dependency resolution | Partial: recipe 1.1 SemVer requirements, hard/soft dependencies, deterministic dependency-first installs, and cycle/conflict rejection before changes ([SF-012](COMPONENT_DEPENDENCIES.md)) | Dependency lifecycle state coupling, rollback, and public-network/hardware acceptance | P1 |
 | Platform manifests | Missing | OS/arch/platform selectors and multiple artifacts | P1 |
-| Configuration merge/reset/validation | Missing; nonempty config rejected | Persisted defaults, JSON-pointer reset, merge policy, validation and notification | P1 |
+| Configuration merge/reset/validation | Partial (SF-015): recipe 1.2 defaults, JSON-pointer reset then recursive merge, persisted per component with rollback, validate-command accept/defer/reject before apply, device-local confidential overlay; locally tested | Per-deployment updates for catalog versions (on-chain field), in-place reload notification over IPC (SF-027), public-network/hardware acceptance | P1 |
 | Runtime isolation | Missing: updater runs as service user | Per-component users, environment, resource limits and IPC ACLs | P0 |
 | Local deployment/component CLI | Partial: provisioning/address CLI | Install/list/start/stop/restart/status/logs and offline local recipes | P2 |
 | Container component adapters | External command possible | OCI pull/auth, digest pinning, supervision and recovery | P2 |
