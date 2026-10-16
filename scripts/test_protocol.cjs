@@ -12,6 +12,12 @@ for (const item of cases) {
   else assert.throws(() => recipes.assertComponentRecipe(item.value), undefined, item.name);
 }
 assert.doesNotThrow(() => recipes.assertComponentRecipe({...cases[0].value, description:undefined}));
+// Configuration value limits (shared with suifleet-edge/src/configuration.rs), too large for the case file.
+const configured = (merge) => ({...cases[0].value, schemaVersion:"1.2", lifecycle:{install:"true"}, configuration:{merge}});
+const values = (n) => Object.fromEntries(Array.from({length:n}, (_, i) => [String(i), i]));
+assert.equal(recipes.CONFIGURATION_LIMITS.values, 4096);
+assert.doesNotThrow(() => recipes.assertComponentRecipe(configured(values(4095))));
+assert.throws(() => recipes.assertComponentRecipe(configured(values(4096))), /exceeds/);
 const vector = JSON.parse(fs.readFileSync(path.resolve(__dirname, "../interfaces/wire-vectors.json"), "utf8")).deployment_created;
 assert.equal(Buffer.from(protocol.deployment_manager_DeploymentCreatedBcs.serialize(vector.json).toBytes()).toString("hex"), vector.bcs_hex);
 // Supply an exact Uint8Array, not a Node pooled Buffer with unrelated backing bytes.

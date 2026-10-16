@@ -3,6 +3,7 @@ mod control;
 mod apply;
 mod components;
 mod config;
+mod configuration;
 mod deps;
 mod firmware;
 mod identity;
