@@ -186,7 +186,8 @@ def run(binary):
             assert 75 in manager.exits, f"no handoff restart: {manager.exits}"
             wait_for(lambda: manager.exe() == v2, "the running daemon is not the confirmed update")
             assert journal()["binding"] == binding, "identity/journal binding changed across the handoff"
-            assert not (daemon_dir / "handoff.json").exists()
+            # The record is dropped right after the outcome is journaled.
+            wait_for(lambda: not (daemon_dir / "handoff.json").exists(), "the confirmed handoff record was not finished")
             wait_for(lambda: outcome("0x701").get("reported"), "the update's outcome was not reported")
             print("PASS: new daemon staged, preflighted and started by the launcher; confirmed; Applied reported with the same identity and journal")
 
@@ -204,7 +205,7 @@ def run(binary):
             assert current() == v2, current()
             assert manager.exits.count(3) >= 2, manager.exits
             wait_for(lambda: manager.exe() == v2, "the previous daemon is not running after rollback")
-            assert not any("3.0.0-" in p.name for p in (daemon_dir / "versions").iterdir()), "the failed candidate was kept"
+            wait_for(lambda: not any("3.0.0-" in p.name for p in (daemon_dir / "versions").iterdir()), "the failed candidate was kept")
             assert manager.starts - starts >= 3
             print("PASS: a new daemon that fails at startup: two counted attempts, then the launcher restarted v2, which reported Failed")
 

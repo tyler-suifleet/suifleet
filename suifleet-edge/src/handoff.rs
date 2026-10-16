@@ -85,6 +85,16 @@ fn clear(dir: &Path) -> anyhow::Result<()> {
     }
 }
 
+/// The binary a handoff record settles on. While a record exists its phase,
+/// not `current`, is authoritative: `current` can lag behind it after an
+/// interruption, and [`finish`] reconciles it before dropping the record.
+fn settled(handoff: &Handoff) -> Option<&Path> {
+    match handoff.phase {
+        Phase::Confirmed => Some(&handoff.candidate),
+        Phase::Pending | Phase::RolledBack => handoff.previous.as_deref(),
+    }
+}
+
 pub fn current(dir: &Path) -> Option<PathBuf> {
     let text = std::fs::read_to_string(dir.join(CURRENT)).ok()?;
     let path = PathBuf::from(text.trim());
@@ -123,7 +133,7 @@ pub fn decide(handoff: Option<&Handoff>, current: Option<&Path>, max_attempts: u
         return (fallback(current), None);
     };
     if handoff.phase != Phase::Pending {
-        return (fallback(current), None);
+        return (fallback(settled(handoff)), None);
     }
     if handoff.attempts >= max_attempts {
         let mut failed = handoff.clone();
@@ -291,19 +301,30 @@ pub fn resolve(dir: &Path, candidate_env: Option<&str>) -> anyhow::Result<Resolu
     })
 }
 
-/// The candidate completed startup: make it current.
+/// The candidate completed startup: make it current. The Confirmed record is
+/// written first and is authoritative until [`finish`], so an interruption
+/// before `current` is updated cannot strand either binary.
 pub fn confirm(dir: &Path, handoff: &Handoff) -> anyhow::Result<()> {
-    set_current(dir, Some(&handoff.candidate))?;
     let mut confirmed = handoff.clone();
     confirmed.phase = Phase::Confirmed;
-    write(dir, &confirmed)
+    write(dir, &confirmed)?;
+    set_current(dir, Some(&handoff.candidate))
 }
 
-/// After the deployment outcome is journaled: drop the handoff record and
-/// every version but the current and previous ones (or, after a rollback,
-/// the failed candidate).
+/// After the deployment outcome is journaled: durably point `current` at the
+/// binary the record settled on (the candidate if confirmed, otherwise the
+/// previous or base binary), then drop the record and every version but the
+/// current and previous ones (or, after a rollback, the failed candidate).
 pub fn finish(dir: &Path, handoff: &Handoff) -> anyhow::Result<()> {
-    let keep: Vec<PathBuf> = [current(dir), handoff.previous.clone()]
+    let settled = match read(dir)? {
+        Some(recorded) => {
+            let settled = settled(&recorded).map(Path::to_owned);
+            set_current(dir, settled.as_deref())?;
+            settled
+        }
+        None => current(dir),
+    };
+    let keep: Vec<PathBuf> = [settled, handoff.previous.clone()]
         .into_iter()
         .flatten()
         .filter_map(|binary| binary.parent().map(Path::to_owned))
@@ -375,13 +396,16 @@ mod tests {
     }
 
     #[test]
-    fn resolved_handoffs_do_not_change_what_starts() {
-        let current = Path::new("/c/suifleet");
-        for phase in [Phase::Confirmed, Phase::RolledBack] {
-            let mut h = pending(1);
-            h.phase = phase;
-            assert_eq!(decide(Some(&h), Some(current), 3), (Start::Confirmed(current.into()), None));
-        }
+    fn a_resolved_record_decides_what_starts_until_it_is_finished() {
+        // `current` may lag the record after an interruption; the phase wins.
+        let stale = Path::new("/c/suifleet");
+        let mut h = pending(1);
+        h.phase = Phase::Confirmed;
+        assert_eq!(decide(Some(&h), Some(stale), 3), (Start::Confirmed(h.candidate.clone()), None));
+        h.phase = Phase::RolledBack;
+        assert_eq!(decide(Some(&h), Some(stale), 3), (Start::Confirmed(h.previous.clone().unwrap()), None));
+        h.previous = None;
+        assert_eq!(decide(Some(&h), Some(stale), 3), (Start::Base, None));
     }
 
     fn dir(name: &str) -> PathBuf {
@@ -426,6 +450,62 @@ mod tests {
         finish(&d, &h).unwrap();
         assert!(read(&d).unwrap().is_none());
         assert!(cand.exists() && prev.exists() && !old.exists());
+    }
+
+    /// Simulates one launcher start against the on-disk state, as `launch` does.
+    fn start_once(d: &Path, max: u32) -> Start {
+        let (start, update) = decide(read(d).unwrap().as_ref(), current(d).as_deref(), max);
+        if let Some(update) = &update {
+            write(d, update).unwrap();
+        }
+        start
+    }
+
+    #[test]
+    fn rollback_after_an_interrupted_confirmation_restores_the_previous_binary() {
+        // Every interruption point inside `confirm`, then exhausted attempts,
+        // rollback settlement and a further ordinary restart.
+        for interrupted in ["current-before-phase", "phase-before-current"] {
+            let d = dir(&format!("interrupt-{interrupted}"));
+            let (prev, cand) = (d.join("versions/1.0.0-cd/suifleet"), d.join("versions/2.0.0-ab/suifleet"));
+            for binary in [&prev, &cand] {
+                std::fs::create_dir_all(binary.parent().unwrap()).unwrap();
+                std::fs::write(binary, b"x").unwrap();
+            }
+            set_current(&d, Some(&prev)).unwrap();
+            let mut h = pending(1);
+            h.candidate = cand.clone();
+            h.previous = Some(prev.clone());
+            write(&d, &h).unwrap();
+            match interrupted {
+                // An earlier release's order, or a failed second write.
+                "current-before-phase" => set_current(&d, Some(&cand)).unwrap(),
+                _ => {
+                    let mut confirmed = h.clone();
+                    confirmed.phase = Phase::Confirmed;
+                    write(&d, &confirmed).unwrap();
+                }
+            }
+            if interrupted == "phase-before-current" {
+                // Confirmed is authoritative: the candidate starts and applies.
+                assert_eq!(start_once(&d, 1), Start::Confirmed(cand.clone()));
+                let Resolution::Applied(update) = resolve(&d, None).unwrap() else { panic!("not applied") };
+                finish(&d, &update).unwrap();
+                assert_eq!(current(&d), Some(cand.clone()));
+                assert_eq!(start_once(&d, 1), Start::Confirmed(cand.clone()));
+                continue;
+            }
+            // Attempts are exhausted: the previous binary starts and settles Failed.
+            assert_eq!(start_once(&d, 1), Start::Confirmed(prev.clone()));
+            let Resolution::Failed(update, _) = resolve(&d, None).unwrap() else { panic!("not failed") };
+            // Even before settlement, a restart keeps the previous binary.
+            assert_eq!(start_once(&d, 1), Start::Confirmed(prev.clone()));
+            finish(&d, &update).unwrap();
+            assert!(read(&d).unwrap().is_none());
+            assert_eq!(current(&d), Some(prev.clone()), "the rejected candidate stayed current");
+            assert!(!cand.exists());
+            assert_eq!(start_once(&d, 1), Start::Confirmed(prev.clone()));
+        }
     }
 
     #[test]
