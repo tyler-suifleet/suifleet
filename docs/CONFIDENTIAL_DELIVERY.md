@@ -163,7 +163,7 @@ Device clocks must be roughly correct: a clock behind by more than the session l
   It also passes with `--upgrade-from` this branch's base on main, where the namespace differs from the call package. See [sf022-localnet.json](validation/sf022-localnet.json).
 - **Public testnet** (agent wallet, `network:suifleet-testnet` locked):
   - `make live-gate-package-upgrade` passed for base `dd728f8` → this head ([sf022-package-upgrade-testnet.json](validation/sf022-package-upgrade-testnet.json));
-  - `make live-seal-delivery`: Mysten's testnet key servers approved `seal_approve_device`, the daemon decrypted, verified and applied, and the receipt and report effects were read back. An ungranted account got `NoAccess` ([sf022-seal-testnet.json](validation/sf022-seal-testnet.json)).
+  - `make live-seal-delivery`: Mysten's testnet key servers approved `seal_approve_device`, the daemon decrypted, verified and applied, and the receipt and report effects were read back. An ungranted account got `NoAccess` ([sf022-seal-testnet.json](validation/sf022-seal-testnet.json)). It passed again at the final edge code, `26f6529`, reusing the cached fixture and policy: device report `5sSF3GovFFNf76vF1WpKRdtag5p95Ft6ahPHXWNTGVyV`, wallet net 1,750,475 MIST ([sf022-seal-testnet-26f6529.json](validation/sf022-seal-testnet-26f6529.json)).
 
 ## Limits
 
