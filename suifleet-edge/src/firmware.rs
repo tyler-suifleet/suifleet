@@ -146,10 +146,10 @@ async fn submit_within(
             id: id.to_owned(),
             sha256,
         })?,
-    )?;
+    ).map_err(|error| Indeterminate(format!("cannot confirm firmware request publication: {error}; completion unknown")))?;
     let deadline = tokio::time::Instant::now() + claim_within;
     loop {
-        if let Some(outcome) = collect(spool, id)? {
+        if let Some(outcome) = collect(spool, id).map_err(unavailable_result)? {
             return outcome;
         }
         if tokio::time::Instant::now() >= deadline {
@@ -163,11 +163,11 @@ async fn submit_within(
                     );
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => return Err(e.into()),
+                Err(e) => return Err(Indeterminate(format!("cannot confirm request withdrawal: {e}; completion unknown")).into()),
             }
             if !helper_active(&claimed) {
                 // The helper writes its result before releasing the claim.
-                return match collect(spool, id)? {
+                return match collect(spool, id).map_err(unavailable_result)? {
                     Some(outcome) => outcome,
                     None => Err(Indeterminate(format!(
                         "firmware request {id} was claimed but the helper stopped without a result; \
@@ -179,6 +179,10 @@ async fn submit_within(
         }
         tokio::time::sleep(POLL).await;
     }
+}
+
+fn unavailable_result(error: anyhow::Error) -> Indeterminate {
+    Indeterminate(format!("cannot read firmware command result: {error}; completion unknown"))
 }
 
 /// Read the helper's result for `id`, if it has written one. The result stays
@@ -338,10 +342,10 @@ pub async fn run_helper(config: &FirmwareHelperConfig) -> anyhow::Result<usize> 
             id: stem.clone(),
             ok: result.is_ok(),
             message: match &result {
-                Ok(()) => "applied".into(),
+                Ok(()) => "configured command completed (exit 0); platform boot confirmation not inferred".into(),
                 Err(error) => error.to_string(),
             },
-            interrupted: false,
+            interrupted: result.as_ref().err().is_some_and(|e| e.downcast_ref::<Indeterminate>().is_some()),
         };
         // Answer while `_claim_lock` still holds the claim, then always consume
         // the request, even if invalid, so the path unit settles.
@@ -824,6 +828,51 @@ mod tests {
         assert!(late.downcast_ref::<Indeterminate>().is_some(), "{late:#}");
         acknowledge(&spool, ID);
         assert!(collect(&spool, ID).unwrap().is_none());
+        let _ = std::fs::remove_dir_all(f.root);
+    }
+
+    #[tokio::test]
+    async fn unavailable_helper_result_stays_unknown_and_can_be_reconciled() {
+        let f = fixture("unavailable-result", "/bin/true");
+        let spool = &f.config.spool_dir;
+        let damage_result = async {
+            let request = requests(spool).join(format!("{ID}.json"));
+            while !request.exists() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+            std::fs::rename(request, requests(spool).join(format!("{ID}.claimed"))).unwrap();
+            std::fs::write(results(spool).join(format!("{ID}.json")), "unreadable result").unwrap();
+        };
+        let (result, ()) = tokio::join!(
+            submit_within(spool, ID, &f.artifact, Duration::from_secs(1)),
+            damage_result
+        );
+        let error = result.unwrap_err();
+        assert!(error.downcast_ref::<Indeterminate>().is_some(), "{error:#}");
+        assert!(results(spool).join(format!("{ID}.json")).exists());
+        // Platform/operator repair supplies a real result, without repeating
+        // the installer. It remains collectable until durably acknowledged.
+        std::fs::write(results(spool).join(format!("{ID}.json")), serde_json::to_vec(&Outcome {
+            id: ID.into(), ok: true, message: "command completed".into(), interrupted: false,
+        }).unwrap()).unwrap();
+        assert!(collect(spool, ID).unwrap().unwrap().is_ok());
+        assert!(!f.marker.exists(), "an unknown command must not be repeated");
+        let _ = std::fs::remove_dir_all(f.root);
+    }
+
+    #[tokio::test]
+    async fn helper_timeout_persists_unknown_instead_of_supplied_failure() {
+        let mut f = fixture("timeout-unknown", "/bin/sh -c 'exec sleep 300'");
+        f.config.timeout_seconds = 1;
+        let (result, ()) = tokio::join!(
+            submit(&f.config.spool_dir, ID, &f.artifact, Duration::from_secs(3)),
+            helper_once(&f.config)
+        );
+        let error = result.unwrap_err();
+        assert!(error.downcast_ref::<Indeterminate>().is_some(), "{error:#}");
+        let raw = std::fs::read(results(&f.config.spool_dir).join(format!("{ID}.json"))).unwrap();
+        let outcome: Outcome = serde_json::from_slice(&raw).unwrap();
+        assert!(outcome.interrupted && !outcome.ok);
         let _ = std::fs::remove_dir_all(f.root);
     }
 
