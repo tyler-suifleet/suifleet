@@ -18,7 +18,8 @@ hardware. Uses the disposable harness of scripts/test_supervisor_systemd.py
                         the daemon's environ or take its descriptors; find
                         key material in its environment or inherited fds; get a
                         signature from the signing socket (refused: not the
-                        unit's main process). It can read the public address.
+                        unit's main process), neither a report nor telemetry
+                        (SF-019). It can read the public address.
   reports            -> the daemon's status reports are signed by the service
                         and accepted by the shim's signature verification,
                         including after the signer and the daemon restart
@@ -120,6 +121,7 @@ def ask(body):
     return json.loads(data)
 attempt("address", lambda: ask({"op": "address"}))
 attempt("sign", lambda: ask({"op": "sign", "tx": base64.b64encode(b"\0" * 64).decode()}))
+attempt("sign_telemetry", lambda: ask({"op": "sign_telemetry", "message": base64.b64encode(b"{}").decode()}))
 attempt("export", lambda: ask({"op": "export"}))
 json.dump(out, open("probe.json.tmp", "w"))
 os.rename("probe.json.tmp", "probe.json")
@@ -339,11 +341,13 @@ def inside(args):
         assert probe["address"]["ok"] and probe["address"]["value"].get("address") == ADDRESS, probe["address"]
         sign = probe["sign"]["value"] if probe["sign"]["ok"] else {}
         assert "may not request signatures" in sign.get("error", ""), probe["sign"]
+        telemetry = probe["sign_telemetry"]["value"] if probe["sign_telemetry"]["ok"] else {}
+        assert "may not request telemetry signatures" in telemetry.get("error", ""), probe["sign_telemetry"]
         assert "error" in (probe["export"]["value"] if probe["export"]["ok"] else {"error": 1}), probe["export"]
         check("component process (daemon user, shipped sandbox): device.key and signer.toml unreadable (EACCES); signer "
               "processes invisible; no key material in env or inherited fds; the daemon's environ and descriptors "
-              f"unavailable ({probe['daemon_environ']['error']}; {probe['daemon_fds']['error']}); signing refused "
-              "(not the main process); only the public address served")
+              f"unavailable ({probe['daemon_environ']['error']}; {probe['daemon_fds']['error']}); report and "
+              "telemetry signing refused (not the main process); only the public address served")
 
         wait(lambda: reported("0x901"), "the daemon's status report was not signed and accepted")
         assert outcome("0x901").get("status") == 1

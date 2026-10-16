@@ -10,6 +10,9 @@ chain/Walrus simulator and a stand-in telemetry ingress, without keys or gas.
   supervised svc v1     -> inventory lists it running; device healthy once synced
   svc crashes past its  -> degraded, with the reason; the deployment receipt on
   restart budget           chain stays the compact Applied status
+  key moved to the      -> the daemon's snapshots are signed by the device signing
+  signing service          service (SF-053), which refuses anything but a canonical
+                           snapshot of this chain/registry/key
 Every captured envelope is then verified by the dApp's verifier (Mysten SDK)
 against the device key's address. The real indexer ingress, its checks and
 fleet status rules are covered by `make indexer-test`.
@@ -20,6 +23,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -117,6 +121,7 @@ def run(binary):
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     process = None
+    signer = None
     shim, rpc_url = start_grpc(f"http://127.0.0.1:{server.server_port}")
     try:
         with tempfile.TemporaryDirectory(prefix="suifleet-telemetry-") as temporary:
@@ -258,9 +263,42 @@ def run(binary):
                 assert [c["phase"] for c in latest()["components"] if c["name"] == "svc"] == ["broken"], latest()
                 print("PASS: svc broken after crashes: degraded with the reason, never healthy")
 
+                # The same key in the device signing service (SF-053; its
+                # development caller rule, this UID: the systemd main-process
+                # rule is covered by the unit tests and test-key-isolation-systemd).
+                process.send_signal(signal.SIGTERM)
+                assert process.wait(timeout=20) == 0
+                sock = root / "sign.sock"
+                (root / "signer.toml").write_text(
+                    f'manifest_path = "deployment.json"\ndevice_cap_id = "{CAP}"\nkeypair_path = {json.dumps(str(key))}\n'
+                    f'socket = {json.dumps(str(sock))}\ncaller_uid = {os.getuid()}\n')
+                signer = subprocess.Popen([str(binary), "--signer-service", str(root / "signer.toml")], stdout=log, stderr=log)
+                wait_for(sock.exists, "the signing service did not listen", signer)
+                config.write_text(config.read_text().replace(f'keypair_path = {json.dumps(str(key))}\n', "").replace(
+                    "[walrus]\n", f'[device.signer]\nkind = "service"\nsocket = {json.dumps(str(sock))}\n[walrus]\n'))
+                assert "keypair_path" not in config.read_text()
+
+                def ask(body):
+                    with socket.socket(socket.AF_UNIX) as connection:
+                        connection.connect(str(sock))
+                        connection.sendall((json.dumps(body) + "\n").encode())
+                        return json.loads(connection.makefile().readline())
+
+                assert ask({"op": "address"})["address"] == ADDRESS
+                for message in [b"any personal message", json.dumps(latest()).encode()]:
+                    refused = ask({"op": "sign_telemetry", "message": base64.b64encode(message).decode()})
+                    assert "error" in refused and "signature" not in refused, refused
+                last = latest()["seq"]
+                process = start()
+                wait_for(lambda: latest().get("seq", 0) > last, "no snapshot signed by the signing service", process,
+                         timeout=3 * INTERVAL)
+                assert latest()["signer"] == ADDRESS and latest()["device_id"] == DEVICE, latest()
                 process.send_signal(signal.SIGTERM)
                 assert process.wait(timeout=20) == 0
                 process = None
+                signer.terminate()
+                signer.wait(timeout=10)
+                print("PASS: key in the signing service: snapshots signed through it; arbitrary or non-canonical messages refused")
 
             # Receipts stay compact on chain; telemetry never went there.
             assert not sim.errors, sim.errors
@@ -276,6 +314,8 @@ def run(binary):
     finally:
         if process and process.poll() is None:
             process.kill()
+        if signer and signer.poll() is None:
+            signer.kill()
         shim.kill()
         server.shutdown()
 
