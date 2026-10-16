@@ -11,8 +11,9 @@
 //!   (and whatever its install step wrote). The active and previous versions
 //!   are kept for rollback; older ones are removed.
 //! - `<name>/work/`: the component's working directory and HOME, kept across
-//!   versions; `<name>/component.log`: its stdout/stderr (and its validate
-//!   command's).
+//!   versions; `<name>/component.log` (0600): the stdout/stderr of all its
+//!   commands (install and validate too, also for an install-only component),
+//!   which see its configuration and so stay out of the daemon's output.
 //! - In a version's workspace, `configuration-state.json`: the public
 //!   configuration record it was deployed with (SF-015), and
 //!   `configuration.json` (0600): that configuration with the device overlay,
@@ -37,6 +38,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
+    os::unix::fs::{OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
     process::ExitStatus,
     sync::{Arc, Mutex},
@@ -288,7 +290,8 @@ impl Supervisor {
         if let Some(script) = install {
             self.record.arm().map_err(|error| error.context("install not started"))?;
             // The old version keeps running until the new one is installed.
-            if let Err(error) = runner.apply(&installed, Some(script), request_id, materialized.as_deref()).await {
+            let output = self.component_log(&spec.name)?;
+            if let Err(error) = runner.apply(&installed, Some(script), request_id, materialized.as_deref(), Some(output)).await {
                 let _ = std::fs::remove_dir_all(&workspace);
                 return Err(error.context("install failed; the running version is unchanged"));
             }
@@ -349,7 +352,7 @@ impl Supervisor {
         let mut command = tokio::process::Command::new("/bin/sh");
         command.arg("-c").arg(script);
         apply::harden(&mut command, &work, self.settings.max_memory_bytes);
-        let log = open_log(&component.join("component.log"))?;
+        let log = self.component_log(name)?;
         command
             .env(MARKER, marker(&self.root))
             .env("SUIFLEET_COMPONENT", name)
@@ -366,6 +369,16 @@ impl Supervisor {
         }
         apply::exit_result(status).map_err(|error| error.context("configuration rejected by the component's validate command"))?;
         Ok(true)
+    }
+
+    /// `name`'s component log (0600), which receives the output of all its
+    /// commands, install included: they see its materialized configuration,
+    /// so their output must stay out of the daemon's diagnostics.
+    pub fn component_log(&self, name: &str) -> anyhow::Result<std::fs::File> {
+        anyhow::ensure!(safe_segment(name), "component name is not a safe path segment");
+        let component = self.root.join(name);
+        std::fs::create_dir_all(&component)?;
+        Ok(open_log(&component.join("component.log"))?)
     }
 
     /// The deployment of `name`'s committed version, if it is supervised.
@@ -802,7 +815,10 @@ fn open_log(path: &Path) -> std::io::Result<std::fs::File> {
     if std::fs::metadata(path).is_ok_and(|meta| meta.len() > LOG_ROTATE_BYTES) {
         let _ = std::fs::rename(path, path.with_extension("log.1"));
     }
-    std::fs::OpenOptions::new().create(true).append(true).open(path)
+    let file = std::fs::OpenOptions::new().create(true).append(true).mode(0o600).open(path)?;
+    // Also tightens a log created before it held configured output.
+    file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    Ok(file)
 }
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
@@ -1747,7 +1763,13 @@ mod tests {
         let v1 = f.spec("1.0.0", run);
         let record = configured(&v1, serde_json::json!({"port": 1, "db": {}}), &["/db/password"]);
         // Each install script also receives it.
-        f.deploy_configured(&mut s, v1.clone(), Some("cp {configuration} {artifacts}/installed.json"), &record).await.unwrap();
+        // Its output, which here prints the configuration, goes to the private
+        // component log, never to the daemon's own stdout/stderr.
+        let install = "cp {configuration} {artifacts}/installed.json; cat {configuration}; cat {configuration} >&2";
+        f.deploy_configured(&mut s, v1.clone(), Some(install), &record).await.unwrap();
+        let log = f.dir.join("supervised/app/component.log");
+        assert_eq!(std::fs::read_to_string(&log).unwrap().matches("\"one\"").count(), 2);
+        assert_eq!(std::fs::metadata(&log).unwrap().permissions().mode() & 0o777, 0o600);
         let seen = |f: &Fixture, file| serde_json::from_str::<serde_json::Value>(&f.read(file)).unwrap();
         until("configuration seen", || f.work("seen.json").exists() && f.work("env").exists()).await;
         assert_eq!(seen(&f, "seen.json"), serde_json::json!({"port": 1, "db": {"password": "one"}}));

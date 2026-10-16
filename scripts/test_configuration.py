@@ -5,6 +5,8 @@ chain/Walrus simulator, without keys or gas.
 Supervised component `cfg` (its run copies $SUIFLEET_CONFIGURATION), with
 `/db/role` confidential and provisioned only in the device overlay:
   0x501 1.0.0 defaults                 -> runs with defaults + overlay value;
+                                          its install prints the configuration
+                                          into the private component log only;
                                           no overlay value in public state or logs
   0x502 1.0.0 merge                    -> merged over the persisted config
   0x503 2.0.0 new defaults, reset      -> existing values kept, missing defaults
@@ -18,7 +20,8 @@ Supervised component `cfg` (its run copies $SUIFLEET_CONFIGURATION), with
                                           and the new overlay value
   0x509 merge after the restart        -> builds on the persisted config
 Install-only component `tool`:
-  0x50a defaults + merge               -> its install receives {configuration}
+  0x50a defaults + merge + confidential -> its install receives {configuration};
+                                          its output reaches only its component log
   0x50b deferred, then deleted         -> dropped; its deferral pruned
 """
 import argparse
@@ -35,6 +38,10 @@ import test_ota
 from test_ota import CAP, DEVICE, PACKAGE, REGISTRY, TYPE_ORIGINS, UPGRADE_CAP, Simulator, start_grpc, wait_for
 
 RUN = 'cp "$SUIFLEET_CONFIGURATION" seen.json; exec sleep 300'
+# An install that prints the configuration it receives, confidential values
+# included, on stdout and stderr: that output must stay out of the daemon log.
+PRINT = "cat {configuration}; cat {configuration} >&2"
+
 VALUES = ("private-one", "private-two")
 
 
@@ -163,12 +170,13 @@ def run(binary):
                 wait_for(lambda: journal().get("initialized"), "daemon did not establish its cursor", process)
 
                 deploy("0x501", "1.0.0", {"defaults": {"port": 8080, "log": {"level": "info"}, "db": {"host": "db1"}},
-                                          "confidential": ["/db/role"]})
+                                          "confidential": ["/db/role"]}, run=RUN, install=PRINT)
                 wait_for(lambda: outcome("0x501").get("status") == 1, "0x501 was not applied", process)
                 wait_for(lambda: running("1.0.0") and seen(), "0x501 did not run", process)
                 v1 = {"port": 8080, "log": {"level": "info"}, "db": {"host": "db1", "role": VALUES[0]}}
                 assert seen() == v1, seen()
                 assert effective() == {"port": 8080, "log": {"level": "info"}, "db": {"host": "db1"}}, effective()
+                assert (components / "cfg" / "component.log").read_text().count(VALUES[0]) == 2
                 print("PASS: defaults applied; the confidential value came from the device overlay only")
 
                 (work / "seen.json").unlink()
@@ -235,13 +243,20 @@ def run(binary):
                       "rotated overlay value; the next update built on the persisted configuration")
 
                 received = root / "tool-config.json"
-                deploy("0x50a", "1.0.0", {"defaults": {"mode": "a", "n": 1}, "merge": {"n": 2}}, name="tool",
-                       install=f"cp {{configuration}} {received}")
+                tool_overlay = overlay / "tool.json"
+                tool_overlay.write_text(json.dumps({"/key": VALUES[1]}))
+                tool_overlay.chmod(0o600)
+                deploy("0x50a", "1.0.0", {"defaults": {"mode": "a", "n": 1}, "merge": {"n": 2}, "confidential": ["/key"]},
+                       name="tool", install=f"cp {{configuration}} {received}; {PRINT}")
                 wait_for(lambda: outcome("0x50a").get("status") == 1, "0x50a was not applied", process)
-                assert json.loads(received.read_text()) == {"mode": "a", "n": 2}, received.read_text()
+                assert json.loads(received.read_text()) == {"mode": "a", "n": 2, "key": VALUES[1]}, received.read_text()
+                received.unlink()
                 tool = json.loads((state_dir / "configuration" / "tool" / "committed.json").read_text())
                 assert tool["effective"] == {"mode": "a", "n": 2} and tool["deployment"] == "0x50a", tool
-                print("PASS: an install-only component's install received its configuration")
+                tool_log = components / "tool" / "component.log"
+                assert tool_log.read_text().count(VALUES[1]) == 2 and tool_log.stat().st_mode & 0o777 == 0o600
+                print("PASS: an install-only component's install received its configuration; its output went to "
+                      "its private component log")
 
                 # A deferred deployment that is deleted leaves no deferral behind.
                 deploy("0x50b", "4.0.0", {"merge": {"port": 2}, "confidential": ["/db/role"]}, run=RUN, validate="exit 75")
@@ -263,8 +278,9 @@ def run(binary):
                     text = path.read_bytes()
                     leaks += [str(path) for value in VALUES if value.encode() in text]
             assert not leaks, leaks
-            for path in state_dir.rglob("configuration.json"):
-                assert path.stat().st_mode & 0o777 == 0o600, path
+            for name in ("configuration.json", "component.log"):
+                for path in state_dir.rglob(name):
+                    assert path.stat().st_mode & 0o777 == 0o600, path
             assert not sim.errors, sim.errors
             print("PASS: confidential values only in 0600 materialized files; none in state, journal or logs")
     finally:

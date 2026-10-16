@@ -744,7 +744,14 @@ async fn handle_deployment(
             // uncommitted, or the deployment fails.
             None => {
                 let applied = match install_configuration(configs, &install, directory, index) {
-                    Ok(file) => runner.apply(&install.artifact, install.install.as_deref(), &request, Some(&file)).await,
+                    Ok(file) => match supervisor.component_log(&install.name) {
+                        Ok(output) => {
+                            runner
+                                .apply(&install.artifact, install.install.as_deref(), &request, Some(&file), Some(output))
+                                .await
+                        }
+                        Err(error) => Err(error),
+                    },
                     Err(error) => Err(error),
                 };
                 match applied {
