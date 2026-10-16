@@ -131,7 +131,9 @@ The user authorized agents to spend **testnet** SUI from two dedicated accounts 
 - Public testnet is normal automated relevant validation, with standing authorization and no approval per run. Preserve preflight and the strict non-replenishing spending allowance (including failed transactions and device gas).
 - Record digests and evidence in the PR or issue.
 
-**Funding.** Use `sui client faucet --address …` with Sui ≥ 1.82.1, which solves a proof of work. The pinned CLI cannot.
+**Funding.** Use `sui client faucet --address …` with Sui ≥ 1.82.1, which solves a proof of work. The pinned 1.81.1 compiler CLI cannot.
+
+**Two CLIs.** Live runs compile with the pinned release compiler (`sui`, 1.81.1). They read, sign and submit with the checksum-pinned transaction CLI at `/opt/sui-network/sui` (1.82.1), which must support the network's protocol version (138 and 139 respectively). Package bytecode is verified in the unsigned transaction before signing. See [TESTNET.md](docs/TESTNET.md#toolchain-release-compiler-and-transaction-cli).
 
 **No JSON-RPC.** Public fullnodes no longer serve JSON-RPC, so live checks must use gRPC or the Sui CLI.
 
@@ -145,11 +147,11 @@ The user authorized agents to spend **testnet** SUI from two dedicated accounts 
 - **The gas budget is not the cost, but it must not exceed the balance.** Gas selection fails before execution otherwise, and a failed execution still charges. Keep budgets near real cost (0.4 SUI is ample for a publish).
 - **Upgrades only chain from the latest version.** To test a base→head upgrade, key the fixture by the (base, head) pair. Never test X→Y in place of base→Y.
 - **Reuse funded test identities.** For example, keep the test device's key and gas, and top it up only when low.
-- **Record each transaction's net gas** in the run's evidence. A cached package-upgrade run costs about 0.0025 SUI; a fresh fixture about 0.18 SUI.
+- **Record each transaction's net gas** in the run's evidence. A cached package-upgrade run costs about 0.0025 SUI; a fresh fixture whose base and head differ costs about 0.41 SUI.
 
 CI uses a main-sourced controller, successful originating CI and server-side write-authority/exact-head checks before executing trusted same-repository revisions; forks remain offline. Dedicated testnet environment protection is main-only without reviewers. Never weaken live-wallet, live-hardware or release protections. All CI testnet paths share one serialized wallet concurrency group. Cache device signing state only as authenticated ciphertext derived from the protected CI secret; plaintext belongs only in a private temporary runtime directory and never in public caches/artifacts. Evidence contains no keys.
 
-Machine sessions must acquire/assert/renew `network:suifleet-testnet` only during shared-wallet mutations, coordinate in #11/#63, and unlock promptly. Funding is automatic when needed, at most one faucet request per run with a separately checksum-verified Sui 1.82.1 tool; faucet credits and storage refunds never replenish the run allowance. Testnet availability does not add external-acceptance blockers to unrelated implementation tickets.
+Machine sessions must acquire/assert/renew `network:suifleet-testnet` only during shared-wallet mutations, coordinate in #11/#63, and unlock promptly. Funding is automatic when needed, at most one faucet request per run through the checksum-pinned transaction CLI; faucet credits and storage refunds never replenish the run allowance. Testnet availability does not add external-acceptance blockers to unrelated implementation tickets.
 
 **Mainnet** and any other account still need explicit user authorization.
 
