@@ -45,7 +45,7 @@ const deploymentBytes = schema.DeploymentBcs.serialize({ id: deployment, creator
   assert.deepEqual(deployments[0].statuses, { [device]: 1 });
   // Empty recipe bytes are valid in legacy records; only the authenticated schema
   // selects catalog cleanup. Exercise both queries and actual generated Move calls.
-  for (const schemaVersion of ["1", "2"]) {
+  for (const schemaVersion of ["1", "2", "3"]) {
     const emptyBlob = schema.DeploymentBcs.serialize({ id: deployment, creator: owner, component_name: "app", version: "1",
       recipe_blob_id: "", artifact_sha256: "", created_at: 456, schema_version: schemaVersion }).toBytes();
     c.getObjects = async ({ objectIds }) => ({ objects: objectIds.map(objectId => ({ objectId,
@@ -55,9 +55,9 @@ const deploymentBytes = schema.DeploymentBcs.serialize({ id: deployment, creator
     assert.equal(record.recipeBlobId, "");
     const call = sui.buildDeleteDeploymentTx(record.deploymentId, record.schemaVersion).getData().commands[0].MoveCall;
     assert.equal(call.module, schemaVersion === "2" ? "component_catalog" : "deployment_manager");
-    assert.equal(call.function, "delete_deployment");
+    assert.equal(call.function, schemaVersion === "3" ? "delete_rollout" : "delete_deployment");
   }
-  assert.throws(() => sui.buildDeleteDeploymentTx(deployment, "3"), /Unsupported DeploymentRecord schema/);
+  assert.throws(() => sui.buildDeleteDeploymentTx(deployment, "4"), /Unsupported DeploymentRecord schema/);
   c.getObjects = async () => ({ objects: [new ObjectError("notExists", "deleted", { reason: "deleted" })] });
   assert.deepEqual(await sui.fetchDeploymentEvents(c, owner), []);
   c.getObjects = async () => ({ objects: [new ObjectError("unknown", "transport failure", { reason: "unknown" })] });

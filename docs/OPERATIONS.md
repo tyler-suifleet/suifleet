@@ -507,3 +507,9 @@ IoT role-alias adapter, dedicated component UIDs, per-start exec wrapper, refres
 and revocation behavior, and `make test-aws-credentials`. This opt-in companion
 does not use the Sui/Seal identity or grant shared-UID supervised processes access.
 Live AWS account/service acceptance remains unauthorized and unrun.
+
+## Staged rollouts (SF-017)
+
+See [staged rollout operation and recovery](STAGED_ROLLOUTS.md) for immutable cohorts,
+creator-signed admission/health ticks, rate/concurrency/bake limits, offline slots,
+audited pause/abort and schema-3 manifest/upgrade requirements.
