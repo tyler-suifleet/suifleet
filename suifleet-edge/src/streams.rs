@@ -462,7 +462,9 @@ impl Stream {
         json!({
             "name": self.def.name, "max_size": self.def.max_size, "strategy_on_full": self.def.strategy_on_full,
             "persistence": self.def.persistence, "time_to_live_seconds": self.def.time_to_live_seconds,
-            "oldest": self.oldest, "newest": self.next as i64 - 1, "exported": self.exported, "bytes": self.bytes,
+            // The last assigned number (numbering may skip ahead after a crash).
+            "oldest": self.oldest, "newest": self.entries.back().map_or(self.next as i64 - 1, |e| e.sequence as i64),
+            "exported": self.exported, "bytes": self.bytes,
             "messages": self.entries.len(), "corrupt_segments": self.corrupt,
             "export": self.def.export.as_ref().map(|e| json!({"url": redact_url(&e.url), "status": self.export_status})),
         })
