@@ -8,6 +8,9 @@
 //! redacted (by the [`redact`] module, including the device's confidential
 //! configuration values) and only then truncated, so a secret is never split
 //! across records. A line longer than [`MAX_SCAN`] is replaced by a marker.
+//! A confidential value spanning lines is also matched line by line, and
+//! every line of a PEM private-key block is dropped, its state kept in the
+//! cursor across intervals and restarts.
 //!
 //! Lines go out as canonical schema-1 batches, signed with the device key as
 //! a Sui personal message (like telemetry, never valid as a transaction), to
@@ -170,6 +173,9 @@ pub struct Cursor {
     /// Inside a line longer than [`MAX_SCAN`]: skip to its end.
     #[serde(default)]
     pub skipping: bool,
+    /// Lines read so far inside a PEM private-key block (0 outside one).
+    #[serde(default)]
+    pub key_block: u32,
 }
 
 const HEAD_BYTES: u64 = 32;
@@ -270,7 +276,7 @@ pub fn tail(path: &Path, cursor: Cursor, budget: usize) -> std::io::Result<(Vec<
                 let end = read_lines(&old_path, cursor.offset, budget, &mut old_skipping, true, &mut lines)?;
                 if end < old.len() {
                     // Budget spent inside the rotated file: continue there next time.
-                    let next = Cursor { inode: cursor.inode, offset: end, head: head(&old_path), skipping: old_skipping };
+                    let next = Cursor { inode: cursor.inode, offset: end, head: head(&old_path), skipping: old_skipping, key_block: 0 };
                     return Ok((lines, next, false));
                 }
             }
@@ -279,7 +285,7 @@ pub fn tail(path: &Path, cursor: Cursor, budget: usize) -> std::io::Result<(Vec<
     }
     let remaining = budget.saturating_sub(lines.len());
     let end = read_lines(path, offset, remaining, &mut skipping, false, &mut lines)?;
-    Ok((lines, Cursor { inode: current.ino(), offset: end, head: head(path), skipping }, lost))
+    Ok((lines, Cursor { inode: current.ino(), offset: end, head: head(path), skipping, key_block: 0 }, lost))
 }
 
 /// The sources present now: the daemon log and each supervised component's.
@@ -305,18 +311,55 @@ pub fn confidential_values(overlay_dir: &Path) -> Vec<String> {
             if path.extension().is_some_and(|e| e == "json") {
                 if let Ok(value) = std::fs::read(&path).map(|b| serde_json::from_slice::<serde_json::Value>(&b)) {
                     if let Ok(value) = value {
-                        redact::string_leaves(&value, &mut values);
+                        let mut leaves = Vec::new();
+                        redact::string_leaves(&value, &mut leaves);
+                        for leaf in leaves {
+                            // The shipper reads physical lines, so a value
+                            // spanning lines is matched line by line too.
+                            if leaf.contains(['\n', '\r']) {
+                                for part in leaf.split(['\n', '\r']) {
+                                    values.push(part.to_owned());
+                                    values.push(part.trim().to_owned());
+                                }
+                            }
+                            values.push(leaf);
+                        }
                     }
                 }
             }
         }
     }
     // However short: a short value is over-redacted rather than exported.
-    values.retain(|v| !v.is_empty());
+    // Blank fragments of a multiline value carry nothing to protect.
+    values.retain(|v| !v.trim().is_empty());
     // Longest first, so a value containing another is replaced whole.
     values.sort_by_key(|v| std::cmp::Reverse(v.len()));
     values.dedup();
     values
+}
+
+/// The most lines one PEM private-key block may hold (an 8192-bit RSA key
+/// is about 100); past it, a block whose end marker was lost is closed.
+pub const MAX_KEY_BLOCK_LINES: u32 = 256;
+
+/// Redact one line of a source. `block` follows PEM private-key blocks,
+/// whose body lines carry no marker of their own: from a `BEGIN … PRIVATE
+/// KEY` line to its `END` line, every line is dropped.
+fn redact_line(line: &str, secrets: &[String], block: &mut u32) -> (String, usize) {
+    if line.contains("PRIVATE KEY") && line.contains("-----") {
+        if line.contains("BEGIN") {
+            *block = 1;
+        } else if line.contains("END") {
+            *block = 0;
+        }
+        return redact::redact(line, secrets);
+    }
+    if *block > 0 && *block < MAX_KEY_BLOCK_LINES {
+        *block += 1;
+        return (redact::key_block_line(), 1);
+    }
+    *block = 0;
+    redact::redact(line, secrets)
 }
 
 fn bound(line: &str) -> String {
@@ -369,16 +412,18 @@ impl Task {
                 break;
             }
             let cursor = cursors.get(&source).cloned().unwrap_or_default();
-            let (lines, next, lost) = tail(&file, cursor, budget)?;
+            let mut block = cursor.key_block;
+            let (lines, mut next, lost) = tail(&file, cursor, budget)?;
             if lost {
                 lost_sources.push(source.clone());
             }
             budget -= lines.len();
             for line in lines {
-                let (clean, n) = redact::redact(&line, &secrets);
+                let (clean, n) = redact_line(&line, &secrets, &mut block);
                 redactions += n as u64;
                 records.push(Record { source: bound(&source), line: bound(&clean) });
             }
+            next.key_block = block;
             cursors.insert(source, next);
         }
         for source in lost_sources {
@@ -443,7 +488,8 @@ fn batches(records: Vec<Record>) -> Vec<Vec<Record>> {
     let mut current = Vec::new();
     let mut size = 1024; // headroom for the envelope fields
     for record in records {
-        let cost = record.line.len() * 2 + record.source.len() + 32; // worst-case JSON escaping
+        // The record's exact JSON (a control byte escapes to six bytes), and a comma.
+        let cost = serde_json::to_vec(&record).map_or(MAX_MESSAGE_BYTES, |b| b.len()) + 1;
         if !current.is_empty() && (current.len() == MAX_RECORDS || size + cost > MAX_MESSAGE_BYTES) {
             out.push(std::mem::take(&mut current));
             size = 1024;
@@ -601,7 +647,9 @@ mod tests {
         let many: Vec<Record> = (0..600).map(|i| Record { source: "daemon".into(), line: format!("line {i}") }).collect();
         let chunks = batches(many);
         assert_eq!(chunks.iter().map(Vec::len).collect::<Vec<_>>(), [256, 256, 88]);
-        let big: Vec<Record> = (0..100).map(|_| Record { source: "daemon".into(), line: "\"".repeat(MAX_LINE) }).collect();
+        // Quotes escape to two bytes, control bytes to six.
+        let mut big: Vec<Record> = (0..100).map(|_| Record { source: "daemon".into(), line: "\"".repeat(MAX_LINE) }).collect();
+        big.extend((0..50).map(|_| Record { source: "daemon".into(), line: "\u{1}".repeat(MAX_LINE) }));
         for chunk in batches(big) {
             let batch = Batch { schema: 1, kind: "logs".into(), chain_identifier: "c".into(), registry: "r".into(), device_id: "d".into(),
                 signer: "s".into(), seq: 1, observed_ms: 1, dropped_lines: 0, redactions: 0, records: chunk };
@@ -693,5 +741,81 @@ mod tests {
         for fragment in ["Conf", "Q9", "123"] {
             assert!(!all.contains(fragment), "{fragment} exported");
         }
+    }
+
+    fn task(state: &Path, max_lines: usize) -> Task {
+        Task {
+            binding: Binding { chain_identifier: "4c78adac".into(), registry: "0x13".into(), device_id: "0xde".into() },
+            url: ingress_url("http://127.0.0.1:1").unwrap(),
+            state_dir: state.to_path_buf(),
+            overlay_dir: state.join("overlays"),
+            interval_seconds: 10,
+            max_lines,
+            buffer_max: 100,
+            signer: Arc::new(Key),
+        }
+    }
+
+    /// Collect one line per interval, with a fresh task (a daemon restart)
+    /// each time, until nothing is left; returns every shipped line.
+    fn collect_one_line_per_restart(state: &Path) -> Vec<String> {
+        let mut spool = telemetry::Spool::open(&state.join("logs/spool"), 100).unwrap();
+        while task(state, 1).collect(&mut spool).unwrap() > 0 {
+            spool = telemetry::Spool::open(&state.join("logs/spool"), 100).unwrap();
+        }
+        records(&spool).into_iter().map(|r| r.line).collect()
+    }
+
+    #[test]
+    fn collect_redacts_each_line_of_a_multiline_confidential_value() {
+        let state = dir("collect-multiline");
+        std::fs::create_dir_all(state.join("overlays")).unwrap();
+        std::fs::write(state.join("overlays/app.json"), r#"{"/cert": "AlphaLineQ9\r\n  BetaLineZ8\n\n"}"#).unwrap();
+        std::fs::create_dir_all(state.join("supervised/app")).unwrap();
+        append(&state.join("supervised/app/component.log"), "config AlphaLineQ9\n  BetaLineZ8\nBetaLineZ8 again\nok\n");
+        let lines = collect_one_line_per_restart(&state);
+        assert_eq!(lines, ["config [REDACTED]", "[REDACTED]", "[REDACTED] again", "ok"]);
+    }
+
+    /// A synthetic Ed25519 PKCS#8 key (all-zero seed): its body holds no `+`, `/` or `=`.
+    const ZERO_SEED_PKCS8: &str = "MC4CAQAwBQYDK2VwBCIEIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+    #[test]
+    fn collect_drops_every_line_of_a_private_key_block_across_restarts() {
+        let state = dir("collect-pem");
+        std::fs::create_dir_all(state.join("supervised/app")).unwrap();
+        // Body lines shorter than the PEM width carry nothing the line rules see.
+        append(
+            &state.join("supervised/app/component.log"),
+            &format!("before\n-----BEGIN PRIVATE KEY-----\n{ZERO_SEED_PKCS8}\nAbCd1234EfGh\n-----END PRIVATE KEY-----\nafter AbCd\n"),
+        );
+        let lines = collect_one_line_per_restart(&state);
+        let mark = redact::key_block_line();
+        assert_eq!(lines, ["before", &mark, &mark, &mark, &mark, "after AbCd"]);
+        let all = lines.concat();
+        assert!(!all.contains("MC4C") && !all.contains("1234"), "{all}");
+    }
+
+    #[test]
+    fn a_key_block_without_an_end_marker_closes() {
+        let mut block = 0;
+        assert_eq!(redact_line("-----BEGIN RSA PRIVATE KEY-----", &[], &mut block).0, redact::key_block_line());
+        for _ in 1..MAX_KEY_BLOCK_LINES {
+            assert_eq!(redact_line("short", &[], &mut block).0, redact::key_block_line());
+        }
+        assert_eq!(redact_line("short", &[], &mut block), ("short".to_string(), 0));
+        assert_eq!(block, 0);
+    }
+
+    #[test]
+    fn control_character_backlog_is_sealed_and_shipped() {
+        let state = dir("collect-control");
+        std::fs::create_dir_all(state.join("logs")).unwrap();
+        append(&state.join("logs/daemon.log"), &format!("{}after\n", format!("{}\n", "\u{1}".repeat(MAX_LINE)).repeat(50)));
+        let mut spool = telemetry::Spool::open(&state.join("logs/spool"), 100).unwrap();
+        assert_eq!(task(&state, 100).collect(&mut spool).unwrap(), 51);
+        assert_eq!(task(&state, 100).collect(&mut spool).unwrap(), 0);
+        let lines: Vec<String> = records(&spool).into_iter().map(|r| r.line).collect();
+        assert_eq!((lines.len(), lines[50].as_str()), (51, "after"));
     }
 }
