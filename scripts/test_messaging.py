@@ -210,8 +210,8 @@ def host(args):
     work = Path(tempfile.mkdtemp(prefix="suifleet-msg-host-"))
     (work / "mosquitto.conf").write_text(f"listener {BROKER_PORT} 127.0.0.1\nallow_anonymous true\npersistence true\n"
                                          "persistence_location /mosquitto/data/\nmax_queued_messages 1000\n")
-    (work / "data").mkdir()
-    os.chmod(work / "data", 0o777)
+    # Run the broker as the invoking user so its persistence directory stays private.
+    (work / "data").mkdir(mode=0o700)
     for name in (BROKER, RUNNER):
         sh("docker", "rm", "-f", name, check=False)
     checks = []
@@ -221,7 +221,7 @@ def host(args):
         print("PASS:", label, flush=True)
 
     try:
-        sh("docker", "run", "-d", "--name", BROKER, "--network", "host", "-v", f"{work}/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro",
+        sh("docker", "run", "-d", "--name", BROKER, "--network", "host", "--user", f"{os.getuid()}:{os.getgid()}", "-v", f"{work}/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro",
            "-v", f"{work}/data:/mosquitto/data", BROKER_IMAGE)
         sh("docker", "run", "-d", "--name", RUNNER, "--network", "host", "--user", "0", "-v", f"{ROOT}:/workspace:ro",
            "-e", "PYTHONDONTWRITEBYTECODE=1", args.image, "python3", "/workspace/scripts/test_messaging.py", "--serve")
