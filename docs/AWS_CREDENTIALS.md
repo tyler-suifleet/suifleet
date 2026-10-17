@@ -129,14 +129,23 @@ usable until their AWS expiry; local revocation cannot recall them from an SDK.
 
 An upstream exchange starts within 300 seconds of expiry. Failures back off for
 120 seconds (4xx), 60 (5xx), or 300 (transport/malformed/other responses), using a
-monotonic clock. Unexpired cached credentials remain available during backoff;
+monotonic clock. The 300-second transport backoff can postpone the next attempt
+until expiry after a brief outage near the refresh boundary; operators must allow
+for that availability limitation. Unexpired cached credentials remain available
+both during backoff and while another caller holds the refresh lock;
 expired/malformed credentials are never returned. HTTP 503 carries `Retry-After`
 when no valid credentials exist. Tokens are rechecked after upstream I/O so an
 intervening revocation wins. TLS validates CA/hostname and presents the configured
 client identity; redirects and environment proxies are not used. Connect/socket
 and total response deadlines, response/frame limits and bounded client slots
-limit resource use. Control has separate administrator capacity and two slots per
-component. No availability SLA is implied.
+limit resource use. Connect and TLS handshake each use a five-second socket
+timeout; the five-second total response timer begins after connection setup.
+HTTP rejects unknown UIDs before reading request bytes and allows two concurrent
+requests per configured component UID, within a global 16-request cap. Control
+has its own two slots per component and separate administrator capacity. These
+limits prevent one component from consuming all workers; simultaneous traffic
+from multiple configured UIDs can still exhaust the global allowance. No
+availability SLA is implied.
 
 ## Repeatable evidence and acceptance boundary
 
