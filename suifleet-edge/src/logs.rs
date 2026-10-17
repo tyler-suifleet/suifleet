@@ -348,6 +348,115 @@ pub fn confidential_values(overlay_dir: &Path) -> anyhow::Result<Vec<String>> {
     Ok(values)
 }
 
+/// How long a confidential value stays redacted after it left every overlay
+/// and materialized configuration, at least: covers a component still
+/// stopping with it. It is also kept until every log was read to its end.
+pub const RETAIN_MS: u64 = 60 * 60 * 1000;
+const RETAINED: &str = "logs/confidential.json";
+
+/// One confidential value known to the shipper.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Known {
+    /// When the value was first seen in no overlay and no materialized
+    /// configuration; `None` while one still holds it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    unused_since_ms: Option<u64>,
+}
+
+/// Every confidential value the shipper has redacted and may still meet:
+/// a replaced or removed overlay value stays in unread log lines and in a
+/// running component's materialized configuration. Kept (0600) in the state
+/// directory, never shipped.
+#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Retained {
+    values: BTreeMap<String, Known>,
+}
+
+impl Retained {
+    /// Fails closed like the overlays: a retained set that exists but cannot
+    /// be read would forget previous values.
+    fn load(path: &Path) -> anyhow::Result<Self> {
+        match std::fs::read(path) {
+            Ok(bytes) => serde_json::from_slice(&bytes).map_err(|_| anyhow::anyhow!("retained confidential values are not valid JSON")),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
+            Err(error) => anyhow::bail!("cannot read retained confidential values: {}", error.kind()),
+        }
+    }
+
+    fn save(&self, path: &Path) -> anyhow::Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        crate::configuration::write_private(path, self)
+            .map_err(|error| anyhow::anyhow!("cannot store retained confidential values: {}", error.root_cause()))
+    }
+
+    /// Add `current` and restart the clock of a value still in use; start it
+    /// for one no longer used. `in_use` is `None` when the materialized
+    /// configurations could not all be read: then every value counts as used.
+    fn update(&mut self, current: &[String], in_use: Option<&[String]>, now_ms: u64) {
+        for value in current {
+            self.values.insert(value.clone(), Known::default());
+        }
+        for (value, known) in &mut self.values {
+            let used = current.contains(value) || in_use.is_none_or(|leaves| leaves.iter().any(|leaf| leaf.contains(value.as_str())));
+            known.unused_since_ms = if used { None } else { Some(known.unused_since_ms.unwrap_or(now_ms)) };
+        }
+    }
+
+    /// After every log was read to its end: forget values unused for
+    /// [`RETAIN_MS`].
+    fn prune(&mut self, now_ms: u64) {
+        self.values.retain(|_, known| known.unused_since_ms.is_none_or(|since| now_ms.saturating_sub(since) < RETAIN_MS));
+    }
+
+    /// Longest first, so a value containing another is replaced whole.
+    fn secrets(&self) -> Vec<String> {
+        let mut values: Vec<String> = self.values.keys().cloned().collect();
+        values.sort_by_key(|v| std::cmp::Reverse(v.len()));
+        values
+    }
+}
+
+/// String leaves of every component version's materialized configuration
+/// (`supervised/<name>/versions/<version>/configuration.json`), which a
+/// running component may hold after its overlay changed. `None` if one
+/// cannot be read.
+fn materialized_leaves(state_dir: &Path) -> Option<Vec<String>> {
+    let mut leaves = Vec::new();
+    let components = match std::fs::read_dir(state_dir.join("supervised")) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Some(leaves),
+        Err(_) => return None,
+    };
+    for component in components {
+        let versions = match std::fs::read_dir(component.ok()?.path().join("versions")) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound || error.raw_os_error() == Some(libc::ENOTDIR) => continue,
+            Err(_) => return None,
+        };
+        for version in versions {
+            let path = version.ok()?.path().join("configuration.json");
+            match std::fs::read(&path) {
+                Ok(bytes) => redact::string_leaves(&serde_json::from_slice(&bytes).ok()?, &mut leaves),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(_) => return None,
+            }
+        }
+    }
+    Some(leaves)
+}
+
+/// Whether `file` was read to its end, as far as `cursor` shows.
+fn drained(file: &Path, cursor: &Cursor) -> bool {
+    match std::fs::metadata(file) {
+        Ok(meta) => meta.ino() == cursor.inode && cursor.offset >= meta.len() && !cursor.skipping,
+        Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+    }
+}
+
 /// The most lines one PEM private-key block may hold (an 8192-bit RSA key
 /// is about 100); past it, a block whose end marker was lost is closed.
 pub const MAX_KEY_BLOCK_LINES: u32 = 256;
@@ -408,9 +517,20 @@ pub struct Task {
 impl Task {
     /// One interval: tail, redact and batch new lines into the spool, then
     /// upload. Cursors advance only after the batches are spooled; nothing
-    /// is read when the confidential values cannot be loaded.
+    /// is read when the confidential values cannot be loaded. Values that
+    /// left the overlays are still redacted (see [`Retained`]).
     pub fn collect(&self, spool: &mut telemetry::Spool) -> anyhow::Result<usize> {
-        let secrets = confidential_values(&self.overlay_dir)?;
+        let current = confidential_values(&self.overlay_dir)?;
+        let retained_path = self.state_dir.join(RETAINED);
+        let mut retained = Retained::load(&retained_path)?;
+        let before = retained.values.clone();
+        let now = telemetry::now_ms();
+        retained.update(&current, materialized_leaves(&self.state_dir).as_deref(), now);
+        // Stored before any line is read, so no restart can forget a value.
+        if retained.values != before {
+            retained.save(&retained_path)?;
+        }
+        let secrets = retained.secrets();
         let path = self.state_dir.join("logs/shipper.json");
         let mut state: ShipperState = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
         let mut records = Vec::new();
@@ -418,8 +538,10 @@ impl Task {
         let mut budget = self.max_lines;
         let mut cursors = state.cursors.clone();
         let mut lost_sources = Vec::new();
+        let mut all_read = true;
         for (source, file) in sources(&self.state_dir) {
             if budget == 0 {
+                all_read = false;
                 break;
             }
             let cursor = cursors.get(&source).cloned().unwrap_or_default();
@@ -435,6 +557,7 @@ impl Task {
                 records.push(Record { source: bound(&source), line: bound(&clean) });
             }
             next.key_block = block;
+            all_read &= drained(&file, &next);
             cursors.insert(source, next);
         }
         for source in lost_sources {
@@ -468,6 +591,13 @@ impl Task {
         let temporary = path.with_extension("tmp");
         std::fs::write(&temporary, bytes)?;
         std::fs::rename(&temporary, &path)?;
+        if all_read {
+            let before = retained.values.len();
+            retained.prune(now);
+            if retained.values.len() != before {
+                retained.save(&retained_path)?;
+            }
+        }
         Ok(sent)
     }
 
@@ -533,6 +663,7 @@ pub fn ingress_url(base: &str) -> anyhow::Result<reqwest::Url> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
 
     /// What fits of the mark after 1020 bytes.
     const MARK_PREFIX: &str = "[RED";
@@ -799,6 +930,116 @@ mod tests {
         assert_eq!(task(&state, 100).collect(&mut spool).unwrap(), 1);
         let lines: Vec<String> = records(&spool).into_iter().map(|r| r.line).collect();
         assert_eq!(lines, ["first [REDACTED]", "login with [REDACTED]"]);
+    }
+
+    fn shipped(state: &Path) -> Vec<String> {
+        let mut spool = telemetry::Spool::open(&state.join("logs/spool"), 100).unwrap();
+        while task(state, 100).collect(&mut spool).unwrap() > 0 {}
+        records(&spool).into_iter().map(|r| r.line).collect()
+    }
+
+    fn retained(state: &Path) -> Retained {
+        Retained::load(&state.join(RETAINED)).unwrap()
+    }
+
+    #[test]
+    fn replaced_or_removed_overlay_values_stay_redacted_across_restarts() {
+        let state = dir("collect-rotation");
+        let overlays = state.join("overlays");
+        std::fs::create_dir_all(&overlays).unwrap();
+        std::fs::write(overlays.join("app.json"), r#"{"/key": "ConfidentialValueQ9"}"#).unwrap();
+        std::fs::create_dir_all(state.join("supervised/app")).unwrap();
+        let log = state.join("supervised/app/component.log");
+        append(&log, "first ConfidentialValueQ9\n");
+        assert_eq!(shipped(&state), ["first [REDACTED]"]);
+        let mode = std::fs::metadata(state.join(RETAINED)).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+        // Each step: a queued old line and the old component still writing,
+        // collected by a fresh task (a daemon restart).
+        let steps: [(&str, fn(&Path)); 3] = [
+            ("replaced", |o| std::fs::write(o.join("app.json"), r#"{"/key": "ReplacementValueR8"}"#).unwrap()),
+            ("file removed", |o| std::fs::remove_file(o.join("app.json")).unwrap()),
+            ("directory removed", |o| std::fs::remove_dir_all(o).unwrap()),
+        ];
+        let mut expected = vec!["first [REDACTED]".to_string()];
+        for (case, step) in steps {
+            append(&log, &format!("{case}: queued ConfidentialValueQ9\n"));
+            step(&overlays);
+            append(&log, &format!("{case}: still running with ConfidentialValueQ9 and ReplacementValueR8\n"));
+            expected.push(format!("{case}: queued [REDACTED]"));
+            // R8 is a current value only while the replacement overlay exists,
+            // and retained after it is removed.
+            expected.push(format!("{case}: still running with [REDACTED] and [REDACTED]"));
+            assert_eq!(shipped(&state), expected, "{case}");
+        }
+        let all = expected.concat();
+        assert!(!all.contains("Q9") && !all.contains("R8"));
+        // Both are unused now, but still within the retention.
+        let known = retained(&state);
+        assert!(known.values.values().all(|k| k.unused_since_ms.is_some()), "{known:?}");
+        assert_eq!(known.secrets(), ["ConfidentialValueQ9", "ReplacementValueR8"]);
+    }
+
+    #[test]
+    fn a_value_is_retained_while_materialized_and_until_every_log_was_read() {
+        let state = dir("collect-retention");
+        let overlays = state.join("overlays");
+        std::fs::create_dir_all(&overlays).unwrap();
+        std::fs::write(overlays.join("app.json"), r#"{"/key": "ConfidentialValueQ9"}"#).unwrap();
+        let version = state.join("supervised/app/versions/1-ab");
+        std::fs::create_dir_all(&version).unwrap();
+        std::fs::write(version.join("configuration.json"), r#"{"port": 80, "key": "ConfidentialValueQ9"}"#).unwrap();
+        let log = state.join("supervised/app/component.log");
+        append(&log, "one\n");
+        assert_eq!(shipped(&state), ["one"]);
+        std::fs::remove_file(overlays.join("app.json")).unwrap();
+        let expire = |state: &Path| {
+            let mut known = retained(state);
+            known.values.values_mut().for_each(|k| k.unused_since_ms = k.unused_since_ms.map(|_| 1));
+            known.save(&state.join(RETAINED)).unwrap();
+        };
+        // The running version still holds it: in use, however long.
+        expire(&state);
+        assert_eq!(shipped(&state), ["one"]);
+        assert_eq!(retained(&state).values["ConfidentialValueQ9"].unused_since_ms, None);
+        // An unreadable materialized configuration counts as using every value.
+        std::fs::write(version.join("configuration.json"), "{").unwrap();
+        append(&log, "two ConfidentialValueQ9\n");
+        assert_eq!(shipped(&state)[1], "two [REDACTED]");
+        assert_eq!(retained(&state).values["ConfidentialValueQ9"].unused_since_ms, None);
+        // Restarted with a new configuration: unused from now, kept for the retention.
+        std::fs::write(version.join("configuration.json"), r#"{"port": 80}"#).unwrap();
+        append(&log, "three ConfidentialValueQ9\n");
+        assert_eq!(shipped(&state)[2], "three [REDACTED]");
+        assert!(retained(&state).values["ConfidentialValueQ9"].unused_since_ms.is_some());
+        // Past the retention, but an unread line is left (the budget is
+        // spent): kept, and the line ships redacted.
+        expire(&state);
+        append(&log, "four ConfidentialValueQ9\nfive\n");
+        let mut spool = telemetry::Spool::open(&state.join("logs/spool"), 100).unwrap();
+        assert_eq!(task(&state, 1).collect(&mut spool).unwrap(), 1);
+        assert!(retained(&state).values.contains_key("ConfidentialValueQ9"));
+        // Every log read to its end: forgotten.
+        assert_eq!(task(&state, 100).collect(&mut spool).unwrap(), 1);
+        assert!(retained(&state).values.is_empty());
+        let lines: Vec<String> = records(&spool).into_iter().map(|r| r.line).collect();
+        assert_eq!(&lines[3..], ["four [REDACTED]", "five"]);
+    }
+
+    #[test]
+    fn collect_stops_while_the_retained_values_cannot_be_read() {
+        let state = dir("collect-retained-failure");
+        std::fs::create_dir_all(state.join("supervised/app")).unwrap();
+        std::fs::create_dir_all(state.join("logs")).unwrap();
+        std::fs::write(state.join(RETAINED), r#"{"values": {"ConfidentialValueQ9": {}"#).unwrap();
+        append(&state.join("supervised/app/component.log"), "login with ConfidentialValueQ9\n");
+        let mut spool = telemetry::Spool::open(&state.join("logs/spool"), 100).unwrap();
+        let error = format!("{:#}", task(&state, 100).collect(&mut spool).unwrap_err());
+        assert!(!error.contains("Q9") && !error.contains('{'), "{error}");
+        assert!(spool.pending().unwrap().is_empty());
+        assert!(!state.join("logs/shipper.json").exists());
+        std::fs::write(state.join(RETAINED), r#"{"values": {"ConfidentialValueQ9": {}}}"#).unwrap();
+        assert_eq!(shipped(&state), ["login with [REDACTED]"]);
     }
 
     #[test]
