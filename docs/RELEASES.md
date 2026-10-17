@@ -26,7 +26,9 @@ make release-artifacts            # builds HEAD twice; fails unless byte-identic
 - It builds inside the pinned release image (`docker/release.Dockerfile`).
 - Embedded source paths are remapped, so the build location doesn't leak into the binary.
 
-**Builder pins:** Ubuntu 22.04 digest; Rust 1.94.0 via a checksum-verified rustup-init 1.29.1; `gcc-aarch64-linux-gnu` 4:11.2.0-1ubuntu1 (gcc 11.4.0-1ubuntu1~22.04.3cross1); `binutils-aarch64-linux-gnu` 2.38-4ubuntu2.12; `libc6-dev-arm64-cross` 2.35-0ubuntu1cross3.
+**Builder pins:** Ubuntu 22.04 digest; Rust 1.94.0 via a checksum-verified rustup-init 1.29.1; `gcc-aarch64-linux-gnu` 4:11.2.0-1ubuntu1 (gcc 11.4.0-1ubuntu1~22.04.3cross1); `binutils-aarch64-linux-gnu` 2.38-4ubuntu2.12; `libc6-dev-arm64-cross` 2.35-0ubuntu1cross3. For 32-bit x86: `gcc-i686-linux-gnu` 4:11.2.0-1ubuntu1 (gcc 11.4.0-1ubuntu1~22.04.3cross1); `binutils-i686-linux-gnu` 2.38-4ubuntu2.12; `libc6-dev-i386-cross` 2.35-0ubuntu1cross3.
+
+**Targets:** `aarch64-unknown-linux-gnu` (the default, and the only one the tag workflow publishes) and `i686-unknown-linux-gnu` (32-bit x86, [LINUX_X86.md](LINUX_X86.md)): `make release-artifacts RELEASE_TARGET=i686-unknown-linux-gnu`. The target names the tarball, SBOM graph and provenance linker, and is signed in `release.json`.
 
 The daemon uses rustls for both gRPC and Walrus HTTP, so the release links no OpenSSL. Bump these pins deliberately, and record the new versions here.
 
@@ -50,9 +52,10 @@ cargo run --example sign_release -- sign     /secure/path/release-2026-10.key re
 suifleet --verify-release /path/to/bundle /etc/suifleet/release-trust.toml
 ```
 
-It exits non-zero unless both of these hold:
+Add the device's target triple as a third argument (`suifleet --verify-release BUNDLE TRUST i686-unknown-linux-gnu`) to also refuse a correctly signed bundle built for another target. It exits non-zero unless all of these hold:
 1. At least one signature verifies (strict ed25519) under a trusted, non-revoked key.
 2. Every file listed in `release.json` is a regular file inside the bundle (no paths, symlinks or hidden names) with the signed size and SHA-256.
+3. With a target argument, the signed target equals it.
 
 Installers (for example a daemon self-update recipe, or the image build) must run this before installing a release. A deployment's on-chain artifact SHA-256 proves *which* bytes the operator chose; the release signature proves *who built them*.
 

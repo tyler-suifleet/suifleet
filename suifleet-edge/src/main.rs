@@ -54,8 +54,12 @@ async fn main() -> anyhow::Result<()> {
     if args.len() == 3 && args[1] == "--enroll" {
         return enroll(Path::new(&args[2])).await;
     }
-    if args.len() == 4 && args[1] == "--verify-release" {
-        let verified = release::verify(Path::new(&args[2]), Path::new(&args[3]))?;
+    if (args.len() == 4 || args.len() == 5) && args[1] == "--verify-release" {
+        let (bundle, trust) = (Path::new(&args[2]), Path::new(&args[3]));
+        let verified = match args.get(4) {
+            Some(target) => release::verify_target(bundle, trust, target)?,
+            None => release::verify(bundle, trust)?,
+        };
         println!(
             "Verified {} {} ({}, commit {}) signed by {}",
             verified.name, verified.version, verified.target, verified.commit, verified.signer
@@ -89,7 +93,7 @@ async fn main() -> anyhow::Result<()> {
     let signer_service = args.len() == 3 && args[1] == "--signer-service";
     anyhow::ensure!(
         args.len() == 1 || launched || check_config || helper || signer_service,
-        "usage: suifleet [--launch | --provision KEY_PATH | --derive-address KEY_PATH | --enroll ENROLL_TOML | --check-config CONFIG_PATH | --self-check CONFIG_PATH | --firmware-helper CONFIG | --signer-service SIGNER_TOML | --record-main-process PATH | --key-holder CONFIG_PATH | --verify-release BUNDLE_DIR TRUST_FILE]"
+        "usage: suifleet [--launch | --provision KEY_PATH | --derive-address KEY_PATH | --enroll ENROLL_TOML | --check-config CONFIG_PATH | --self-check CONFIG_PATH | --firmware-helper CONFIG | --signer-service SIGNER_TOML | --record-main-process PATH | --key-holder CONFIG_PATH | --verify-release BUNDLE_DIR TRUST_FILE [TARGET]]"
     );
     tracing_subscriber::fmt()
         .with_env_filter(

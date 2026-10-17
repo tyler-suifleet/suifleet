@@ -91,6 +91,30 @@ jobs:
           retention-days: 14
           if-no-files-found: warn
 
+  linux-x86:
+    name: 32-bit Linux x86 runtime
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # i686 cross build in the pinned release builder, then the real-daemon
+      # simulator suites in the 32-bit i386 runner (docs/LINUX_X86.md).
+      - name: 32-bit build and software-runner suites
+        run: |
+          mkdir -p ci-logs
+          make test-linux-x86 RELEASE_IMAGE=suifleet-release:ci LINUX_X86_IMAGE=suifleet-linux-x86:ci \
+            LINUX_X86_EVIDENCE=ci-logs/linux-x86.json
+
+      - name: Upload 32-bit evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: linux-x86-evidence
+          path: ci-logs/
+          retention-days: 14
+          if-no-files-found: warn
+
   testnet-preflight:
     # Public forks retain the offline suite; this keyless probe uses no environment.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
