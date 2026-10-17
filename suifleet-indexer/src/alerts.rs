@@ -380,4 +380,3 @@ mod tests {
         assert_eq!(bodies[0]["alerts"][0]["kind"], "deployment-failed");
     }
 }
-
