@@ -36,7 +36,7 @@
     },
     {
       "command": "docker run --rm --network none ... suifleet-dev:sf056 python3 scripts/test_console.py",
-      "result": "passed: 12 checks; 129 audit records (after the CI secret/CodeQL fixture fix)"
+      "result": "passed: 12 checks; 132 audit records (after the CI CodeQL fixture fixes)"
     },
     {
       "command": "docker run --rm ... suifleet-dev:sf010-chrome python3 scripts/test_console.py --browser",
@@ -49,13 +49,13 @@
   ],
   "reference_vectors": "cargo test console::tests::decisions_follow_the_v1_reference_contract applies the SF-064 console vectors to the implementation's decision function and field allowlist",
   "source_sha256": {
-    "suifleet-edge/src/console.rs": "25187b59f08c3891fd654bf4fb4927b93d645e9db02a60c9b8537310305301a6",
+    "suifleet-edge/src/console.rs": "4fa907886b3da24c5dd7b24a54e8dc852234817e7fddd806cb501b97a8a3e9d5",
     "suifleet-edge/src/console/index.html": "127d9ef2f34416830509f2f91e0990a93869d59b29d8046e649b2f944ca6c7f6",
     "suifleet-edge/src/console/console.js": "8add9140e4fcc658abd5302d8ae71fd3bb7b69ea5a2e1bc8baca06e2cd61387a",
     "suifleet-edge/src/console/console.css": "e4c19b3253b6e14f1673f140e0fc6bb018215c58d36e68cca4de5e12bdbe74dd",
     "suifleet-edge/src/main.rs": "0dc76f8055a5456320f417d1283d30ef5e5c5c29b77d9baaf79c8c5abeeca925",
     "suifleet-edge/src/config.rs": "82e3b90280391f15dbff093f776cf31e8d26de224144e2835513a43c5c682d35",
-    "scripts/test_console.py": "f63be95ee7e86864b55784f1b83e77a68368c1c5652b37fe2f86d2f4bd623d83",
+    "scripts/test_console.py": "006285687eb15370d87362033b73372b764f375ae734422705b4188cc812da95",
     "scripts/test_console_browser.cjs": "655be209b5496347abac83c573acdde84bb1592ac469e01584a80b52a056469a",
     "interfaces/compat/remaining-roadmap-cases.json": "2b3d02d28570af01d5bf58005f7b08d5f67d1991daf3acc792492d2a7e6272b7"
   },
