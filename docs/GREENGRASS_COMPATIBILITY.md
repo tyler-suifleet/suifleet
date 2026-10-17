@@ -1,5 +1,7 @@
 # Greengrass compatibility specification
 
+The [SF-064 remaining functional roadmap](GREENGRASS_REMAINING_ROADMAP.md) defines versioned executable subcontracts and maps every selected remaining scope to published implementation tickets SF-069–SF-079. These remain pending implementations, not runtime or live acceptance.
+
 SF-028 defines what "Greengrass compatible" may mean for SuiFleet. It also proposes adapter contracts for messaging, shadows, streams and client devices, with executable fixtures. It is a specification, not a parity claim. Of the runtime work it describes, only the SF-037 recipe translator is implemented; no adapter is. The [parity audit](GREENGRASS_PARITY_AUDIT.md) and [ticket map](GREENGRASS_TICKET_COVERAGE.md) remain the roadmap.
 
 The machine-readable source of truth is [`interfaces/compat/greengrass-compat.json`](../interfaces/compat/greengrass-compat.json). Statuses there describe the commit that contains the file. Work in open PRs counts as "proposed" until it is merged.
@@ -215,7 +217,7 @@ The runtime receipt is [`docs/validation/sf037-recipe-translation.json`](validat
 | `stream-cases.json` | 45 steps across 5 sequences | none | Pending SF-027, SF-034 |
 | `client-device-cases.json` | 16 authorization requests | none | Pending SF-032, SF-035 |
 | `managed-dependency-cases.json` | 47 managed-dependency classifications | none | Passed: SF-037 translator classification |
-| `credential-provider-cases.json` | 65 steps across 7 sequences | none | Pending SF-057 |
+| `credential-provider-cases.json` | 65 steps across 7 sequences | none | Passed: SF-057 local adapter ([receipt](validation/sf057-credentials.json)) |
 | `cloudwatch-metrics-cases.json` | 90 steps across 8 sequences | none | Pending SF-059 |
 | `cloudwatch-logs-cases.json` | 69 steps across 8 sequences | none | Pending SF-060 |
 

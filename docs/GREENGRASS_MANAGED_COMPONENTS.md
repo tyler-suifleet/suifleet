@@ -1,6 +1,8 @@
 # AWS-managed component and cloud-service adapter coverage
 
-SF-038 maps every AWS-provided Greengrass component to one of three things: a SuiFleet native equivalent, a scoped adapter with its own implementation ticket, or a roadmap gap tracked by [SF-064](https://github.com/tyler-suifleet/suifleet/issues/109). For each adapter it records the platforms, AWS service and authentication dependencies, licensing constraints and executable acceptance. This is a specification. It implements no adapter, records no permanent exclusion and makes no parity claim. It extends the [SF-028 compatibility specification](GREENGRASS_COMPATIBILITY.md), whose levels and statuses apply here.
+The [SF-064 remaining functional roadmap](GREENGRASS_REMAINING_ROADMAP.md) defines versioned executable subcontracts and maps every selected remaining scope to published implementation tickets SF-069–SF-079. These remain pending implementations, not runtime or live acceptance.
+
+SF-038 maps every AWS-provided Greengrass component to one of three things: a SuiFleet native equivalent, a scoped adapter with its own implementation ticket, or a roadmap gap tracked by [SF-064](https://github.com/tyler-suifleet/suifleet/issues/109). For each adapter it records the platforms, AWS service and authentication dependencies, licensing constraints and executable acceptance. The catalog is a specification with per-adapter runtime receipts. SF-057 implements the scoped Linux credential adapter; other adapters remain pending. It records no permanent exclusion and makes no general parity claim. It extends the [SF-028 compatibility specification](GREENGRASS_COMPATIBILITY.md), whose levels and statuses apply here.
 
 The machine-readable source of truth is [`interfaces/compat/managed-components.json`](../interfaces/compat/managed-components.json). The [compatibility matrix](../interfaces/compat/greengrass-compat.json) cross-references it, and `make test-compat` checks both.
 
@@ -24,7 +26,7 @@ Codex published the scoped implementation tickets below. SF-038 links them; it d
 Three kinds of evidence stay separate:
 
 - **Reference models.** `make test-compat` checks the fixtures against small models. Agreement proves only that the fixtures are consistent.
-- **Adapter execution.** Every adapter has `runtime_execution: pending`. Only its implementation ticket may run the same fixtures and runtime tests against the real adapter and record a `runtime_evidence` receipt. A linked ticket is not runtime evidence.
+- **Adapter execution.** The credential adapter has a [local runtime receipt](validation/sf057-credentials.json) and [provisioning guide](AWS_CREDENTIALS.md); other adapters retain `runtime_execution: pending`. Only an implementation ticket may run the same fixtures and runtime tests against the real adapter and record a `runtime_evidence` receipt. A linked ticket is not runtime evidence.
 - **Live AWS acceptance.** No AWS account, credential, purchase or live service mutation is authorized. Every live check stays pending until the user authorizes one. The Sui testnet grant does not cover AWS.
 
 The SF-037 recipe translator applies the dependency classification below. A `replace` dependency is dropped and reported; every other managed dependency is rejected with its classification.
@@ -34,7 +36,7 @@ The SF-037 recipe translator applies the dependency classification below. A `rep
 | `native` | A SuiFleet subsystem owned by the listed tickets provides the function. No AWS interface is reproduced |
 | `native-component` | No SuiFleet runtime change. The operator packages equivalent open software as an ordinary native component |
 | `adapter` | Scoped adapter to the AWS service or its local interface, owned by its implementation ticket. Its specification is `complete` (pinned AWS version and executable reference suite) or `incomplete` (the ticket must finish it first) |
-| `roadmap` | Not provided in the initial Linux prototype phase. SF-064 tracks it as missing functional work and must split it into concrete tickets before implementation. This is not an approved permanent exclusion. The listed native equivalent is an interim workaround, not AWS API or recipe compatibility |
+| `roadmap` | Not provided in the initial Linux prototype phase. SF-064 tracks it as missing functional work and links concrete SF-069–SF-079 implementation tickets through the remaining roadmap. This is not an approved permanent exclusion. The listed native equivalent is an interim workaround, not AWS API or recipe compatibility |
 | `not-applicable` | No meaning for SuiFleet, including services AWS discontinued |
 
 ## Required families
@@ -108,9 +110,9 @@ The initial prototype phase is the SF-028 Linux rows: `x86_64`, `aarch64` and `a
 | Platform | Phase | Reason |
 |---|---|---|
 | Linux x86_64, aarch64, arm | Initial prototype | Development hosts, Yocto/Raspberry Pi and 32-bit ARM catalog selection |
-| Windows | Roadmap gap (SF-064) | The daemon depends on systemd and cgroups (SF-014) and on Yocto packaging. Translation omits and reports Windows manifests meanwhile |
-| macOS | Roadmap gap (SF-064) | No runtime. AWS lists only Linux and Windows for the catalog components |
-| Linux x86 (32-bit) | Roadmap gap (SF-064) | No Yocto or test target |
+| Windows | Roadmap gap (SF-074) | The daemon depends on systemd and cgroups (SF-014) and on Yocto packaging. Translation omits and reports Windows manifests meanwhile |
+| macOS | Roadmap gap (SF-075) | No runtime. AWS lists only Linux and Windows for the catalog components |
+| Linux x86 (32-bit) | Roadmap gap (SF-076) | No Yocto or test target |
 
 These gaps are not approved exclusions; they stay tracked unless the user changes the full parity goal. Windows support would need its own supervisor, service packaging, filesystem permissions and the full test suite. It is not an adapter.
 
@@ -205,7 +207,7 @@ Ranges use the native comparator grammar. x-ranges, hyphen ranges, `||` and non-
 make test-compat
 ```
 
-The checker validates the catalog's structure and its cross-references to the backlog, the SF-028 platforms and the suites. It also evaluates the four SF-038 suites against reference models in `scripts/greengrass_managed.py`. As with SF-028, these models only make the fixtures checkable. Agreement with them proves nothing about an adapter. The three adapter suites and all seven adapters stay `runtime_execution: pending` until their implementation tickets run the same fixtures and commit a receipt. The dependency suite has passed against the SF-037 translator.
+The checker validates the catalog's structure and its cross-references to the backlog, the SF-028 platforms and the suites. It also evaluates the four SF-038 suites against reference models in `scripts/greengrass_managed.py`. As with SF-028, these models only make the fixtures checkable. Agreement with them proves nothing about an adapter. The credential-provider suite has passed against the SF-057 adapter and the dependency suite against the SF-037 translator. The other suites and adapters stay `runtime_execution: pending` until their implementation tickets run the same fixtures and commit a receipt.
 
 | Suite | Cases | Runtime execution |
 |---|---|---|

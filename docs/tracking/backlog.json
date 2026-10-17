@@ -1696,6 +1696,321 @@
         "Remove target-image prerequisites from the offline harness specification; preserve real fixture/component requirements and publish policy notes on affected PRs."
       ],
       "validation": "Offline tracking and policy consistency checks, dependency audit, independent documentation review; no physical hardware or new image required."
+    },
+    {
+      "key": "SF-069",
+      "title": "Implement clean-room Lambda invocation and legacy subscriptions",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-014",
+        "SF-027",
+        "SF-032",
+        "SF-037"
+      ],
+      "paths": [
+        "suifleet-edge",
+        "scripts",
+        "interfaces/compat",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Version invocation envelopes, long-lived versus on-demand lifecycle, event subscriptions, timeout/concurrency/isolation and error responses. Execute real function processes and subscription routing; generic run wrappers alone do not establish Lambda compatibility.",
+      "evidence": "SF-064 audit identifies this remaining Greengrass functional scope; existing native foundations and reference fixtures are not runtime implementation evidence.",
+      "acceptance": [
+        "Version invocation envelopes, long-lived versus on-demand lifecycle, event subscriptions, timeout/concurrency/isolation and error responses. Execute real function processes and subscription routing; generic run wrappers alone do not establish Lambda compatibility.",
+        "Pin and review exact upstream semantic/version references before implementation; preserve clean-room licensing and distinguish specification/reference models from actual component execution.",
+        "Provide meaningful local/emulator/software-runner failure and recovery evidence. Physical Pi/target acceptance is deferred under user direction; normal authorized testnet CI remains required where relevant.",
+        "Track authorized live AWS acceptance separately. No AWS account mutations, paid services, production credentials, physical programming or unsupported full-parity claims are authorized."
+      ],
+      "validation": "Function invocation, payload/error/timeout, duplicate/subscription, permissions and process-restart fixtures; clean-room licensing boundary."
+    },
+    {
+      "key": "SF-070",
+      "title": "Implement industrial Modbus and OPC UA collection with a simulator",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-027",
+        "SF-032",
+        "SF-034"
+      ],
+      "paths": [
+        "suifleet-edge",
+        "scripts",
+        "interfaces/compat",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Implement versioned configured polling/subscription, data typing/timestamps/quality and authenticated collector output. Provide deterministic local Modbus and OPC UA server simulators; bound polling/reconnect/backpressure and preserve configured protocol security.",
+      "evidence": "SF-064 audit identifies this remaining Greengrass functional scope; existing native foundations and reference fixtures are not runtime implementation evidence.",
+      "acceptance": [
+        "Implement versioned configured polling/subscription, data typing/timestamps/quality and authenticated collector output. Provide deterministic local Modbus and OPC UA server simulators; bound polling/reconnect/backpressure and preserve configured protocol security.",
+        "Pin and review exact upstream semantic/version references before implementation; preserve clean-room licensing and distinguish specification/reference models from actual component execution.",
+        "Provide meaningful local/emulator/software-runner failure and recovery evidence. Physical Pi/target acceptance is deferred under user direction; normal authorized testnet CI remains required where relevant.",
+        "Track authorized live AWS acceptance separately. No AWS account mutations, paid services, production credentials, physical programming or unsupported full-parity claims are authorized."
+      ],
+      "validation": "Actual collector-to-simulator interoperability, wrong credentials, malformed data, disconnect, resubscription and durable stream tests."
+    },
+    {
+      "key": "SF-071",
+      "title": "Implement SiteWise-compatible edge processing and publishing",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-070",
+        "SF-034",
+        "SF-057"
+      ],
+      "paths": [
+        "suifleet-edge",
+        "scripts",
+        "interfaces/compat",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Define independently reviewed SiteWise measurement/property/alias mapping, processing and buffering semantics, and implement configured publishing with bounded credentials. Validate actual request bodies and checkpoints against a local service emulator; collectors alone are not SiteWise delivery.",
+      "evidence": "SF-064 audit identifies this remaining Greengrass functional scope; existing native foundations and reference fixtures are not runtime implementation evidence.",
+      "acceptance": [
+        "Define independently reviewed SiteWise measurement/property/alias mapping, processing and buffering semantics, and implement configured publishing with bounded credentials. Validate actual request bodies and checkpoints against a local service emulator; collectors alone are not SiteWise delivery.",
+        "Pin and review exact upstream semantic/version references before implementation; preserve clean-room licensing and distinguish specification/reference models from actual component execution.",
+        "Provide meaningful local/emulator/software-runner failure and recovery evidence. Physical Pi/target acceptance is deferred under user direction; normal authorized testnet CI remains required where relevant.",
+        "Track authorized live AWS acceptance separately. No AWS account mutations, paid services, production credentials, physical programming or unsupported full-parity claims are authorized."
+      ],
+      "validation": "Transformation/quality/time tests, partial failures, rejected records, restart/checkpoints and request-checking emulator evidence; live AWS acceptance separate."
+    },
+    {
+      "key": "SF-072",
+      "title": "Implement Kinesis Video edge ingestion and durable upload",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-034",
+        "SF-057"
+      ],
+      "paths": [
+        "suifleet-edge",
+        "scripts",
+        "interfaces/compat",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Version the configured media ingestion, stream credentials and fragment/session semantics. Implement actual media path with bounded buffering, reconnect/backpressure and restart recovery; generic file streaming is not Kinesis Video compatibility.",
+      "evidence": "SF-064 audit identifies this remaining Greengrass functional scope; existing native foundations and reference fixtures are not runtime implementation evidence.",
+      "acceptance": [
+        "Version the configured media ingestion, stream credentials and fragment/session semantics. Implement actual media path with bounded buffering, reconnect/backpressure and restart recovery; generic file streaming is not Kinesis Video compatibility.",
+        "Pin and review exact upstream semantic/version references before implementation; preserve clean-room licensing and distinguish specification/reference models from actual component execution.",
+        "Provide meaningful local/emulator/software-runner failure and recovery evidence. Physical Pi/target acceptance is deferred under user direction; normal authorized testnet CI remains required where relevant.",
+        "Track authorized live AWS acceptance separately. No AWS account mutations, paid services, production credentials, physical programming or unsupported full-parity claims are authorized."
+      ],
+      "validation": "Deterministic media source and local protocol emulator verifying fragments/timestamps, interruption, expiry, rejection and replay semantics."
+    },
+    {
+      "key": "SF-073",
+      "title": "Package reproducible ML inference runtimes and classifier/detector examples",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-011",
+        "SF-023"
+      ],
+      "paths": [
+        "suifleet-edge",
+        "scripts",
+        "interfaces/compat",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Provide authenticated model/runtime components and executable classification/detection examples with pinned model/runtime versions, declared preprocessing/output tolerances and per-platform selection. Verify digests and licenses; no unsupported SageMaker service or generic-wrapper compatibility claim.",
+      "evidence": "SF-064 audit identifies this remaining Greengrass functional scope; existing native foundations and reference fixtures are not runtime implementation evidence.",
+      "acceptance": [
+        "Provide authenticated model/runtime components and executable classification/detection examples with pinned model/runtime versions, declared preprocessing/output tolerances and per-platform selection. Verify digests and licenses; no unsupported SageMaker service or generic-wrapper compatibility claim.",
+        "Pin and review exact upstream semantic/version references before implementation; preserve clean-room licensing and distinguish specification/reference models from actual component execution.",
+        "Provide meaningful local/emulator/software-runner failure and recovery evidence. Physical Pi/target acceptance is deferred under user direction; normal authorized testnet CI remains required where relevant.",
+        "Track authorized live AWS acceptance separately. No AWS account mutations, paid services, production credentials, physical programming or unsupported full-parity claims are authorized."
+      ],
+      "validation": "Actual inference on committed redistributable fixtures with expected outputs/tolerances, wrong-digest/model/version/input and unsupported-platform tests; no physical Pi required."
+    },
+    {
+      "key": "SF-074",
+      "title": "Implement Windows runtime and service integration",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-014",
+        "SF-025",
+        "SF-027"
+      ],
+      "paths": [
+        "suifleet-edge",
+        "scripts",
+        "interfaces/compat",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Specify and implement Windows process/service lifecycle, IPC authentication, filesystem/secret ACLs and component selection with supported software-runner acceptance. Preserve platform-owned reboot/OS installation and explicitly enumerate unsupported APIs.",
+      "evidence": "SF-064 audit identifies this remaining Greengrass functional scope; existing native foundations and reference fixtures are not runtime implementation evidence.",
+      "acceptance": [
+        "Specify and implement Windows process/service lifecycle, IPC authentication, filesystem/secret ACLs and component selection with supported software-runner acceptance. Preserve platform-owned reboot/OS installation and explicitly enumerate unsupported APIs.",
+        "Pin and review exact upstream semantic/version references before implementation; preserve clean-room licensing and distinguish specification/reference models from actual component execution.",
+        "Provide meaningful local/emulator/software-runner failure and recovery evidence. Physical Pi/target acceptance is deferred under user direction; normal authorized testnet CI remains required where relevant.",
+        "Track authorized live AWS acceptance separately. No AWS account mutations, paid services, production credentials, physical programming or unsupported full-parity claims are authorized."
+      ],
+      "validation": "Windows software VM/CI tests for real service start/stop/restart, descendant containment, ACL/caller denial, component install and interrupted lifecycle; physical target tests deferred."
+    },
+    {
+      "key": "SF-075",
+      "title": "Implement macOS runtime and service integration",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-014",
+        "SF-025",
+        "SF-027"
+      ],
+      "paths": [
+        "suifleet-edge",
+        "scripts",
+        "interfaces/compat",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Specify and implement macOS process/service lifecycle, IPC authentication, secret permissions and component selection on a supported software runner. Preserve platform-owned reboot/OS installation and enumerate unsupported platform APIs.",
+      "evidence": "SF-064 audit identifies this remaining Greengrass functional scope; existing native foundations and reference fixtures are not runtime implementation evidence.",
+      "acceptance": [
+        "Specify and implement macOS process/service lifecycle, IPC authentication, secret permissions and component selection on a supported software runner. Preserve platform-owned reboot/OS installation and enumerate unsupported platform APIs.",
+        "Pin and review exact upstream semantic/version references before implementation; preserve clean-room licensing and distinguish specification/reference models from actual component execution.",
+        "Provide meaningful local/emulator/software-runner failure and recovery evidence. Physical Pi/target acceptance is deferred under user direction; normal authorized testnet CI remains required where relevant.",
+        "Track authorized live AWS acceptance separately. No AWS account mutations, paid services, production credentials, physical programming or unsupported full-parity claims are authorized."
+      ],
+      "validation": "macOS software-runner tests for actual service lifecycle, descendant containment, permissions/caller negatives, install and restart recovery; physical target tests deferred."
+    },
+    {
+      "key": "SF-076",
+      "title": "Implement and validate Linux x86 32-bit runtime packaging",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-023",
+        "SF-025"
+      ],
+      "paths": [
+        "suifleet-edge",
+        "scripts",
+        "interfaces/compat",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Declare supported 32-bit Linux ABI/toolchain and implement build/packaging and component platform selection. Exercise actual 32-bit runtime under a software runner/emulator without claiming x86_64 tests establish 32-bit compatibility.",
+      "evidence": "SF-064 audit identifies this remaining Greengrass functional scope; existing native foundations and reference fixtures are not runtime implementation evidence.",
+      "acceptance": [
+        "Declare supported 32-bit Linux ABI/toolchain and implement build/packaging and component platform selection. Exercise actual 32-bit runtime under a software runner/emulator without claiming x86_64 tests establish 32-bit compatibility.",
+        "Pin and review exact upstream semantic/version references before implementation; preserve clean-room licensing and distinguish specification/reference models from actual component execution.",
+        "Provide meaningful local/emulator/software-runner failure and recovery evidence. Physical Pi/target acceptance is deferred under user direction; normal authorized testnet CI remains required where relevant.",
+        "Track authorized live AWS acceptance separately. No AWS account mutations, paid services, production credentials, physical programming or unsupported full-parity claims are authorized."
+      ],
+      "validation": "Actual 32-bit binary/package build, software runtime lifecycle/IPC/identity/OTA fixtures, incompatible artifact rejection and documented limitations."
+    },
+    {
+      "key": "SF-077",
+      "title": "Implement Firehose durable stream export",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-034",
+        "SF-057"
+      ],
+      "paths": [
+        "suifleet-edge",
+        "scripts",
+        "interfaces/compat",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Implement versioned Firehose export over configured durable streams and scoped credentials, including batch request limits, per-record partial results and checkpoint/retry semantics. Reuse stream foundations without presenting Kinesis Data Streams as Firehose.",
+      "evidence": "SF-064 audit identifies this remaining Greengrass functional scope; existing native foundations and reference fixtures are not runtime implementation evidence.",
+      "acceptance": [
+        "Implement versioned Firehose export over configured durable streams and scoped credentials, including batch request limits, per-record partial results and checkpoint/retry semantics. Reuse stream foundations without presenting Kinesis Data Streams as Firehose.",
+        "Pin and review exact upstream semantic/version references before implementation; preserve clean-room licensing and distinguish specification/reference models from actual component execution.",
+        "Provide meaningful local/emulator/software-runner failure and recovery evidence. Physical Pi/target acceptance is deferred under user direction; normal authorized testnet CI remains required where relevant.",
+        "Track authorized live AWS acceptance separately. No AWS account mutations, paid services, production credentials, physical programming or unsupported full-parity claims are authorized."
+      ],
+      "validation": "Actual exporter/local emulator request assertions, partial failures, outage, credential expiry and restart/checkpoint tests; live AWS acceptance separate."
+    },
+    {
+      "key": "SF-078",
+      "title": "Implement SNS publication and event routing",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-032",
+        "SF-057"
+      ],
+      "paths": [
+        "suifleet-edge",
+        "scripts",
+        "interfaces/compat",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Implement explicitly configured versioned SNS topic publication and event routing using scoped credentials, declared payload/attribute semantics, backpressure and bounded delivery/retry behavior. Enforce per-component/topic grants; do not imply SNS server-side service replication.",
+      "evidence": "SF-064 audit identifies this remaining Greengrass functional scope; existing native foundations and reference fixtures are not runtime implementation evidence.",
+      "acceptance": [
+        "Implement explicitly configured versioned SNS topic publication and event routing using scoped credentials, declared payload/attribute semantics, backpressure and bounded delivery/retry behavior. Enforce per-component/topic grants; do not imply SNS server-side service replication.",
+        "Pin and review exact upstream semantic/version references before implementation; preserve clean-room licensing and distinguish specification/reference models from actual component execution.",
+        "Provide meaningful local/emulator/software-runner failure and recovery evidence. Physical Pi/target acceptance is deferred under user direction; normal authorized testnet CI remains required where relevant.",
+        "Track authorized live AWS acceptance separately. No AWS account mutations, paid services, production credentials, physical programming or unsupported full-parity claims are authorized."
+      ],
+      "validation": "Actual publisher/local emulator tests for messages/attributes, caller/topic denial, throttling, lost responses, retry/duplicate behavior and restart; live AWS acceptance separate."
+    },
+    {
+      "key": "SF-079",
+      "title": "Implement authenticated local support debug console",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-019",
+        "SF-027",
+        "SF-053"
+      ],
+      "paths": [
+        "suifleet-edge",
+        "scripts",
+        "interfaces/compat",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Implement a versioned local diagnostic console with authenticated authorization-scoped inventory, health and configured support operations. Default to loopback/local access, redact secrets before output and audit operations; a public unauthenticated admin console is forbidden.",
+      "evidence": "SF-064 audit identifies this remaining Greengrass functional scope; existing native foundations and reference fixtures are not runtime implementation evidence.",
+      "acceptance": [
+        "Implement a versioned local diagnostic console with authenticated authorization-scoped inventory, health and configured support operations. Default to loopback/local access, redact secrets before output and audit operations; a public unauthenticated admin console is forbidden.",
+        "Pin and review exact upstream semantic/version references before implementation; preserve clean-room licensing and distinguish specification/reference models from actual component execution.",
+        "Provide meaningful local/emulator/software-runner failure and recovery evidence. Physical Pi/target acceptance is deferred under user direction; normal authorized testnet CI remains required where relevant.",
+        "Track authorized live AWS acceptance separately. No AWS account mutations, paid services, production credentials, physical programming or unsupported full-parity claims are authorized."
+      ],
+      "validation": "Actual console/API auth, CSRF/origin where applicable, role/caller denial, redaction, bounded queries and audit tests; no production exposure or credentials provisioned."
     }
   ]
 }

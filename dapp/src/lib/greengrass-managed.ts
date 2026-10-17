@@ -27,7 +27,8 @@ export const MANAGED_CATALOG = {
       "name": "aws.greengrass.LocalDebugConsole",
       "disposition": "roadmap",
       "tickets": [
-        "SF-064"
+        "SF-064",
+        "SF-079"
       ]
     },
     {
@@ -70,28 +71,32 @@ export const MANAGED_CATALOG = {
       "name": "aws.greengrass.LambdaManager",
       "disposition": "roadmap",
       "tickets": [
-        "SF-064"
+        "SF-064",
+        "SF-069"
       ]
     },
     {
       "name": "aws.greengrass.LambdaLauncher",
       "disposition": "roadmap",
       "tickets": [
-        "SF-064"
+        "SF-064",
+        "SF-069"
       ]
     },
     {
       "name": "aws.greengrass.LambdaRuntimes",
       "disposition": "roadmap",
       "tickets": [
-        "SF-064"
+        "SF-064",
+        "SF-069"
       ]
     },
     {
       "name": "aws.greengrass.LegacySubscriptionRouter",
       "disposition": "roadmap",
       "tickets": [
-        "SF-064"
+        "SF-064",
+        "SF-069"
       ]
     },
     {
@@ -104,21 +109,24 @@ export const MANAGED_CATALOG = {
       "name": "variant.DLR",
       "disposition": "native-component",
       "tickets": [
-        "SF-011"
+        "SF-011",
+        "SF-073"
       ]
     },
     {
       "name": "aws.greengrass.DLRImageClassification",
       "disposition": "roadmap",
       "tickets": [
-        "SF-064"
+        "SF-064",
+        "SF-073"
       ]
     },
     {
       "name": "aws.greengrass.DLRObjectDetection",
       "disposition": "roadmap",
       "tickets": [
-        "SF-064"
+        "SF-064",
+        "SF-073"
       ]
     },
     {
@@ -126,7 +134,8 @@ export const MANAGED_CATALOG = {
       "disposition": "native-component",
       "tickets": [
         "SF-011",
-        "SF-023"
+        "SF-023",
+        "SF-073"
       ]
     },
     {
@@ -134,28 +143,32 @@ export const MANAGED_CATALOG = {
       "disposition": "native-component",
       "tickets": [
         "SF-011",
-        "SF-023"
+        "SF-023",
+        "SF-073"
       ]
     },
     {
       "name": "variant.TensorFlowLite",
       "disposition": "native-component",
       "tickets": [
-        "SF-011"
+        "SF-011",
+        "SF-073"
       ]
     },
     {
       "name": "aws.greengrass.TensorFlowLiteImageClassification",
       "disposition": "roadmap",
       "tickets": [
-        "SF-064"
+        "SF-064",
+        "SF-073"
       ]
     },
     {
       "name": "aws.greengrass.TensorFlowLiteObjectDetection",
       "disposition": "roadmap",
       "tickets": [
-        "SF-064"
+        "SF-064",
+        "SF-073"
       ]
     },
     {
@@ -163,7 +176,8 @@ export const MANAGED_CATALOG = {
       "disposition": "native-component",
       "tickets": [
         "SF-011",
-        "SF-023"
+        "SF-023",
+        "SF-073"
       ]
     },
     {
@@ -171,7 +185,8 @@ export const MANAGED_CATALOG = {
       "disposition": "native-component",
       "tickets": [
         "SF-011",
-        "SF-023"
+        "SF-023",
+        "SF-073"
       ]
     },
     {
@@ -196,42 +211,48 @@ export const MANAGED_CATALOG = {
       "tickets": [
         "SF-011",
         "SF-032",
-        "SF-064"
+        "SF-064",
+        "SF-070"
       ]
     },
     {
       "name": "aws.iot.SiteWiseEdgeCollectorOpcua",
       "disposition": "roadmap",
       "tickets": [
-        "SF-064"
+        "SF-064",
+        "SF-070"
       ]
     },
     {
       "name": "aws.iot.SiteWiseEdgeOpcuaDataSourceSimulator",
       "disposition": "roadmap",
       "tickets": [
-        "SF-064"
+        "SF-064",
+        "SF-070"
       ]
     },
     {
       "name": "aws.iot.SiteWiseEdgePublisher",
       "disposition": "roadmap",
       "tickets": [
-        "SF-064"
+        "SF-064",
+        "SF-071"
       ]
     },
     {
       "name": "aws.iot.SiteWiseEdgeProcessor",
       "disposition": "roadmap",
       "tickets": [
-        "SF-064"
+        "SF-064",
+        "SF-071"
       ]
     },
     {
       "name": "aws.iot.EdgeConnectorForKVS",
       "disposition": "roadmap",
       "tickets": [
-        "SF-064"
+        "SF-064",
+        "SF-072"
       ]
     },
     {
@@ -262,14 +283,16 @@ export const MANAGED_CATALOG = {
       "name": "aws.greengrass.KinesisFirehose",
       "disposition": "roadmap",
       "tickets": [
-        "SF-064"
+        "SF-064",
+        "SF-077"
       ]
     },
     {
       "name": "aws.greengrass.SNS",
       "disposition": "roadmap",
       "tickets": [
-        "SF-064"
+        "SF-064",
+        "SF-078"
       ]
     },
     {

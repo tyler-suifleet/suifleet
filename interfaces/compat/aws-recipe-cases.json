@@ -2098,13 +2098,15 @@
      "outcome": "reject",
      "reason": "roadmap-gap",
      "tickets": [
-      "SF-064"
+      "SF-064",
+      "SF-069"
      ]
     },
     "variant.DLR": {
      "outcome": "package-natively",
      "tickets": [
-      "SF-011"
+      "SF-011",
+      "SF-073"
      ]
     }
    }

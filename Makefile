@@ -68,6 +68,7 @@ test-ota:
 	$(RUN) python3 scripts/test_desired_state.py
 	$(RUN) python3 scripts/test_deployment_control.py
 	$(RUN) python3 scripts/test_telemetry.py
+	$(RUN) python3 scripts/test_rollout.py
 
 # Supervised components under the shipped systemd units on real systemd and
 # cgroup v2 (SF-014): a disposable privileged container with systemd as PID 1.
@@ -110,6 +111,7 @@ check-interfaces:
 	$(RUN) node scripts/test_protocol.cjs
 	$(RUN) node scripts/test_component_catalog.cjs
 	$(RUN) node scripts/test_deployment_control.cjs
+	$(RUN) node scripts/test_rollout.cjs
 
 generate-interfaces:
 	$(RUN) python3 scripts/generate_interfaces.py
@@ -128,8 +130,19 @@ test-catalog-live:
 .PHONY: test-compat
 test-compat:
 	$(RUN) python3 scripts/greengrass_compat.py
+	$(RUN) python3 scripts/greengrass_roadmap.py
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_greengrass_roadmap.py'
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_greengrass_compat.py'
 	$(RUN) node scripts/test_greengrass_compat.cjs
+
+# Exact wheel hashes are reviewed in interfaces/compat/ml/runtime-lock.json.
+# Only download needs network; inference tests use the verified local cache.
+.PHONY: test-ml
+test-ml:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+	$(RUN) python3 scripts/ml_component.py download --platform linux-x86_64-cp310 --wheels .ci-cache/ml-wheels
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_ml_components.py --wheels .ci-cache/ml-wheels -v
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_ml_ota.py --wheels .ci-cache/ml-wheels
 
 # Offline regression tests for the drift gate itself (synthetic summaries).
 test-interfaces:
@@ -143,7 +156,7 @@ toolchain-versions:
 # CI entry point (run inside the dev image): each step's output is kept under
 # ci-logs/ for failure diagnostics. No step publishes, spends gas or uses secrets.
 ci: SHELL := /bin/bash
-CI_STEPS := indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat edge-test test-ota test-component test-edge-acceptance dapp-typecheck dapp-build
+CI_STEPS := indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat test-ml edge-test test-ota test-component test-edge-acceptance dapp-typecheck dapp-build
 ci:
 	@mkdir -p ci-logs
 	@$(MAKE) --no-print-directory toolchain-versions | tee ci-logs/toolchain-versions.txt
@@ -163,6 +176,7 @@ check:
 	$(MAKE) test-interfaces
 	$(MAKE) check-interfaces
 	$(MAKE) test-compat
+	$(MAKE) test-ml
 	$(MAKE) edge-test
 	$(MAKE) test-ota
 	$(MAKE) test-component
@@ -278,6 +292,11 @@ test-deployment-control-localnet:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
 	$(RUN) python3 scripts/test_deployment_control_localnet.py
 
+# Start a disposable indexed loopback node/faucet first; network-none Docker only.
+.PHONY: test-rollout-localnet
+test-rollout-localnet:
+	$(RUN) python3 scripts/test_rollout_localnet.py
+
 # SF-065 wallet-to-edge acceptance harness for SF-031 (docs/EDGE_ACCEPTANCE.md).
 # Offline: profiles, matrix, locks, SSH pinning, fake-fleet runs with the real updater.
 .PHONY: test-edge-acceptance test-edge-acceptance-localnet edge-acceptance
@@ -305,3 +324,8 @@ ifdef INSIDE_DEV_CONTAINER
 else
 	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" python3 scripts/test_ipc.py
 endif
+
+# SF-057: online public SDK preparation, then network-none actual adapter/mTLS tests.
+.PHONY: test-aws-credentials
+test-aws-credentials:
+	bash scripts/test_aws_credentials.sh
