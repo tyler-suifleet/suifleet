@@ -1,0 +1,20 @@
+{
+  "ticket": "SF-034",
+  "head": "510fb9901103119da97f3013a92e6a9560347fae",
+  "checks": [
+    "ACLs per component, exports and declared streams operator-only, quota enforced",
+    "offline buffering: 25 messages exported in order in 3 signed batches after the destination returned",
+    "interrupted export: same range and Idempotency-Key retried; checkpoint only after a 2xx; no loss",
+    "crash recovery: kill -9 and a torn tail; 35 messages intact, numbering resumed at 1024 (no reuse), export resumed",
+    "clean restart: numbering continues exactly",
+    "quota exhaustion: RejectNewData stream refused message 17 with 'full'",
+    "retention: OverwriteOldestData kept 38 of 100 while offline; reads report evicted; the export reported 62 retired messages"
+  ],
+  "fixture": {
+    "file": "interfaces/compat/stream-cases.json",
+    "sequences": 5,
+    "steps": 45,
+    "executed_by": "make edge-test: streams::tests::shared_stream_cases"
+  },
+  "signature_verification": "independent: SHA-256 body binding, BLAKE2b personal-message intent digest, RFC 8032 Ed25519 (Python), signer address"
+}
