@@ -89,6 +89,30 @@ pub fn validate(batch: &Batch) -> anyhow::Result<()> {
 
 // --- The daemon's own log file ----------------------------------------------
 
+/// `[runtime] log_group_read` (SF-060): logs and the retained confidential
+/// values are group-readable (0640) and their directories group-traversable
+/// (0750), so a separate log reader such as the CloudWatch Logs adapter can
+/// read them through the daemon's group. Off by default (0600).
+static GROUP_READ: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_group_read(on: bool) {
+    GROUP_READ.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The mode of a log file or the retained values.
+pub fn private_mode() -> u32 {
+    if GROUP_READ.load(std::sync::atomic::Ordering::Relaxed) { 0o640 } else { 0o600 }
+}
+
+/// With group read, let the group traverse `dir` (0750). Without, leave it.
+pub fn share_dir(dir: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    if GROUP_READ.load(std::sync::atomic::Ordering::Relaxed) {
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o750))?;
+    }
+    Ok(())
+}
+
 /// A size-rotated log file for `tracing` (`daemon.log`, then `daemon.log.1`).
 #[derive(Clone)]
 pub struct RotatingFile {
@@ -115,8 +139,16 @@ impl Write for RotatingFile {
             let _ = std::fs::rename(&*path, PathBuf::from(rotated));
         }
         if file.is_none() {
-            use std::os::unix::fs::OpenOptionsExt;
-            *file = Some(std::fs::OpenOptions::new().create(true).append(true).mode(0o640).open(&*path)?);
+            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+            let opened = std::fs::OpenOptions::new().create(true).append(true).mode(0o640).open(&*path)?;
+            if GROUP_READ.load(std::sync::atomic::Ordering::Relaxed) {
+                // The service's umask would keep the group out.
+                opened.set_permissions(std::fs::Permissions::from_mode(0o640))?;
+                if let Some(parent) = path.parent() {
+                    share_dir(parent)?;
+                }
+            }
+            *file = Some(opened);
         }
         file.as_mut().unwrap().write(buf)
     }
@@ -471,7 +503,7 @@ impl Retained {
     }
 
     fn save(&self, path: &Path) -> anyhow::Result<()> {
-        crate::configuration::write_private(path, self)
+        crate::configuration::write_with_mode(path, self, private_mode())
             .map_err(|error| anyhow::anyhow!("cannot store retained confidential values: {}", error.root_cause()))
     }
 
@@ -521,6 +553,7 @@ impl Retained {
 fn retained<T>(state_dir: &Path, change: impl FnOnce(&mut Retained) -> T) -> anyhow::Result<T> {
     let path = state_dir.join(RETAINED);
     std::fs::create_dir_all(state_dir.join("logs"))?;
+    share_dir(&state_dir.join("logs"))?;
     let lock = std::fs::OpenOptions::new()
         .create(true)
         .truncate(false)
@@ -552,6 +585,21 @@ pub fn read_retained(state_dir: &Path) -> anyhow::Result<(Vec<String>, BTreeMap<
     let set = Retained::load(&state_dir.join(RETAINED))?
         .ok_or_else(|| anyhow::anyhow!("the daemon has not recorded confidential values yet ({RETAINED})"))?;
     Ok((set.secrets(), set.start))
+}
+
+/// Record the confidential values of every materialized configuration, as
+/// the shipper does each interval, for a separate log reader when `[logs]`
+/// is off (an installation configured before values were recorded).
+pub fn remember_materialized(state_dir: &Path) -> anyhow::Result<()> {
+    let values = materialized_values(state_dir)?;
+    if values.is_empty() {
+        return Ok(());
+    }
+    retained(state_dir, |set| {
+        for value in values {
+            set.values.entry(value).or_default();
+        }
+    })
 }
 
 /// Record every value of a component's overlay before it is materialized:

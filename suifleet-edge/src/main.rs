@@ -122,8 +122,10 @@ async fn main() -> anyhow::Result<()> {
             .unwrap_or_else(|_| PathBuf::from("/etc/suifleet/config.toml"))
     };
     let cfg = Config::load(&path)?;
-    if cfg.logs.is_some() && !check_config {
-        // From here on the daemon's own log is also written for shipping.
+    logs::set_group_read(cfg.runtime.log_group_read);
+    if (cfg.logs.is_some() || cfg.runtime.log_group_read) && !check_config {
+        // From here on the daemon's own log is also written for shipping
+        // or for a separate log reader.
         logs::enable_daemon_log(&cfg.runtime.state_dir)?;
     }
     let started_ms = telemetry::now_ms();
@@ -195,6 +197,11 @@ async fn main() -> anyhow::Result<()> {
     let store = components::Store::open(&cfg.runtime.state_dir, &cfg.components);
     // Before any component runs: their log lines are covered from here on.
     logs::initialize(&cfg.runtime.state_dir)?;
+    if cfg.runtime.log_group_read && cfg.logs.is_none() {
+        // The shipper would record these each interval; a separate reader
+        // only has what the daemon records.
+        logs::remember_materialized(&cfg.runtime.state_dir)?;
+    }
     // Committed components start again on every daemon start (bootstrap/reboot).
     let mut supervisor = supervisor::Supervisor::open(
         &cfg.runtime.state_dir,
