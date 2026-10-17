@@ -1,6 +1,6 @@
 {
   "ticket": "SF-034",
-  "head": "6bb06fab53b56e8fcc2f759f5208c55eec603852",
+  "head": "78c855a11902c0f1ce42457c4a9fa16eb562ff5b",
   "checks": [
     "ACLs per component, exports and declared streams operator-only, quota enforced",
     "offline buffering: 25 messages exported in order in 3 signed batches after the destination returned; forged manifests fail verification",
@@ -8,7 +8,8 @@
     "crash recovery: kill -9 and a torn tail; 35 messages intact, numbering resumed at 1024 (no reuse), export resumed",
     "clean restart: numbering continues exactly",
     "quota exhaustion: RejectNewData stream refused message 17 with 'full'",
-    "retention: OverwriteOldestData kept 23 of 100 while offline; reads report evicted; the export reported 77 retired messages"
+    "retention: OverwriteOldestData kept 23 of 100 while offline; reads report evicted; the export reported 77 retired messages",
+    "lowered quota: startup refused for 3 stored streams over max_total_bytes; with the old limits all 16 local-a messages remain"
   ],
   "fixture": {
     "file": "interfaces/compat/stream-cases.json",
