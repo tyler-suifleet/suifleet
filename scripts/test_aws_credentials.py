@@ -374,7 +374,8 @@ print('PASS: boto3 default credential chain')
         before = {p.name for p in self.directory.iterdir()}
         self.upstream.results.put(dict(result='ok', credential_set='set-1', expiration=3600))
         process = subprocess.Popen([sys.executable, str(ROOT / 'scripts/aws_credentials.py'),
-            '--config', str(config)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            '--config', str(config)], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            env={**os.environ, 'SSLKEYLOGFILE': str(self.directory / 'forbidden-tls-keylog')})
         try:
             deadline = time.monotonic() + 10
             while not Path(self.socket).exists() and time.monotonic() < deadline and process.poll() is None:

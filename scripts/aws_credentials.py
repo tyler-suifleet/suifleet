@@ -102,7 +102,10 @@ class Provider:
         if not endpoint.path.startswith('/role-aliases/') or not endpoint.path.endswith('/credentials'):
             raise ValueError('AWS IoT role-alias credentials path required')
         self.endpoint = endpoint
-        self.context = ssl.create_default_context(cafile=str(private_file(settings['ca'])))
+        # Explicit context avoids create_default_context's SSLKEYLOGFILE hook.
+        # Even an inherited debug environment must not write TLS session keys.
+        self.context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        self.context.load_verify_locations(cafile=str(private_file(settings['ca'])))
         self.context.minimum_version = ssl.TLSVersion.TLSv1_2
         self.context.load_cert_chain(private_file(settings['certificate']), private_file(settings['key']))
         self.cache = None
