@@ -2,6 +2,7 @@ mod ipc;
 mod catalog;
 mod control;
 mod apply;
+mod bridge;
 mod components;
 mod config;
 mod configuration;
@@ -10,10 +11,12 @@ mod firmware;
 mod handoff;
 mod identity;
 mod logs;
+mod mqtt;
 mod reconcile;
 mod recipe;
 mod redact;
 mod protocol;
+mod pubsub;
 #[cfg(test)]
 mod protocol_tests;
 #[cfg(test)]
@@ -207,6 +210,20 @@ async fn main() -> anyhow::Result<()> {
         }
         None => None,
     };
+    // Durable pub/sub and its MQTT bridge (SF-032).
+    let durable = match &cfg.pubsub {
+        Some(settings) => Some(std::sync::Arc::new(std::sync::Mutex::new(
+            pubsub::Broker::open(&cfg.runtime.state_dir.join("pubsub"), settings.limits())?))),
+        None => None,
+    };
+    let bridge_task = match (&cfg.pubsub, &durable) {
+        (Some(settings), Some(broker)) => match &settings.bridge {
+            Some(bridge) => Some(tokio::spawn(bridge::Bridge::new(bridge.clone(), broker.clone(),
+                cfg.runtime.state_dir.join("pubsub/bridge.json"))?.run())),
+            None => None,
+        },
+        _ => None,
+    };
     let runner = ApplyRunner::new(cfg.apply.clone());
     let store = components::Store::open(&cfg.runtime.state_dir, &cfg.components);
     // Before any component runs: their log lines are covered from here on.
@@ -354,7 +371,7 @@ async fn main() -> anyhow::Result<()> {
                         if pending.reply.is_closed() { continue; }
                         let result = tokio::select! {
                             result = local_request(&cfg, &sui, &walrus, &runner, store.as_ref(), &configs,
-                                &mut supervisor, &mut journal, &mut ipc_messages, streams.as_deref(), pending.uid, &pending.request) => result,
+                                &mut supervisor, &mut journal, &mut ipc_messages, durable.as_deref(), streams.as_deref(), pending.uid, &pending.request) => result,
                             _ = &mut shutdown => { stopped = true; break; }
                         };
                         if let Err(error) = &result { warn!(operation = pending.request.operation, %error, "Local IPC request failed"); }
@@ -379,6 +396,9 @@ async fn main() -> anyhow::Result<()> {
     if let Some(store) = &streams {
         store.lock().unwrap().close();
     }
+    if let Some(task) = bridge_task {
+        task.abort();
+    }
     // Components stop with the daemon (shutdown command, then the whole group).
     supervisor.stop_all().await;
     // process::exit below does not run destructors: close IPC before handoff.
@@ -394,7 +414,8 @@ async fn local_request(
     cfg: &Config, sui: &SuiClient, walrus: &WalrusClient, runner: &ApplyRunner,
     store: Option<&components::Store>, configs: &configuration::Store,
     supervisor: &mut supervisor::Supervisor, journal: &mut Journal,
-    messages: &mut ipc::Messages, streams: Option<&std::sync::Mutex<streams::Store>>, uid: u32, request: &ipc::Request,
+    messages: &mut ipc::Messages, durable: Option<&std::sync::Mutex<pubsub::Broker>>,
+    streams: Option<&std::sync::Mutex<streams::Store>>, uid: u32, request: &ipc::Request,
 ) -> anyhow::Result<serde_json::Value> {
     use serde_json::json;
     let policy = cfg.ipc.as_ref().ok_or_else(|| anyhow::anyhow!("IPC disabled"))?;
@@ -410,7 +431,14 @@ async fn local_request(
         }
         "logs" => Ok(json!({"tail":supervisor.local_logs(name)?})),
         "config" => Ok(json!({"configuration":configs.committed(name)?})),
-        "health" | "publish" | "receive" => messages.handle(policy, request, &principal),
+        "messaging" => {
+            let subscriptions = messages.handle(policy, request, &principal, durable)?;
+            let bridge = std::fs::read(cfg.runtime.state_dir.join("pubsub/bridge.json")).ok()
+                .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok());
+            Ok(json!({"subscriptions":subscriptions["subscriptions"],"bridge":bridge}))
+        }
+        "health" | "publish" | "receive" | "subscribe" | "unsubscribe" | "ack" =>
+            messages.handle(policy, request, &principal, durable),
         op if op.starts_with("stream_") => {
             let store = streams.ok_or_else(|| anyhow::anyhow!("streams are not enabled ([streams])"))?;
             let declared: Vec<String> = cfg.streams.iter().flat_map(|s| s.definitions.iter().map(|d| d.name.clone())).collect();

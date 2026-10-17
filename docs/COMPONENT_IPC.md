@@ -74,9 +74,11 @@ no keys, user accounts or enrollment settings are embedded by package builds.
 | `config` | `component` | Public committed configuration record, including version/deployment/effective/defaults. Confidential device-overlay values are never returned. Poll the record to observe configuration changes. |
 | `health` | `component`, `payload` = `healthy`, `degraded` or `broken` | Volatile self-reported health plus server timestamp. Does not assert firmware boot health, change supervisor phase or override signed fleet telemetry. Principal must exist in the configured ACL. |
 | `publish` | `component`, exact `topic`, JSON `payload` | Fanout to configured subscribers, message envelope includes authenticated component name (or `@operator/UID` for administrators). Payload <=4096 serialized bytes. Atomic backpressure if any inbox is full. |
-| `receive` | `component`, exact `topic` | Destructive nonblocking dequeue, or null. Each principal/topic has 32 messages maximum. |
+| `receive` | `component`, exact `topic` | Destructive nonblocking dequeue, or null. Each principal/topic has 32 messages maximum. With a durable subscription to that filter, its oldest message instead ([MESSAGING.md](MESSAGING.md)). |
 | `stream_create`, `stream_delete`, `stream_append`, `stream_read`, `stream_describe` | `component`, stream name as `topic` | Durable streams (SF-034, [STREAMS.md](STREAMS.md)); need `[streams]` and a matching `streams` glob in the component's ACL. |
 | `stream_list` | `component` | Stream names the caller's `streams` globs match. |
+| `subscribe`, `unsubscribe`, `ack` | `component`, filter `topic` | Durable pub/sub (SF-032); need `[pubsub]` and a `SubscribeToTopic` policy. |
+| `messaging` | no component needed | Administrator only. Durable subscription and bridge counters. |
 
 Stops are runtime controls: explicit start, replacement deployment or daemon restart
 may start the committed version again. Stop does not uninstall or alter chain desired
@@ -86,9 +88,10 @@ of authoritative configuration or independent second installation journal exists
 Install `ok: true` means the request was processed: inspect `status`/`outcome` for
 Applied (1), Failed (2), pending or deferred admission; a digest is not success.
 
-Messaging is bounded, volatile and non-durable. It has no retention, wildcard,
-MQTT, persistence or offline-delivery guarantee. SF-032/#33 owns those extensions.
-Health and inboxes clear on daemon restart; runtime and installed evidence comes
+The `publish`/`receive` inboxes above are bounded, volatile and non-durable.
+Durable subscriptions with MQTT filters, QoS 1 acknowledgement, AWS-shaped
+`pubsub_policies` and the local MQTT bridge are opt-in with `[pubsub]`: see
+[MESSAGING.md](MESSAGING.md) (SF-032). Health and volatile inboxes clear on daemon restart; runtime and installed evidence comes
 from the existing supervisor/journal. IPC does not reboot the platform.
 
 ## SDK and CLI

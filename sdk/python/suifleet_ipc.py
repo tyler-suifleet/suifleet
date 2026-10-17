@@ -75,6 +75,20 @@ class Client:
     def receive(self, topic):
         return self.request('receive', topic=topic)
 
+    def subscribe(self, topic_filter, qos=1):
+        """Durable subscription (MQTT filter); QoS 1 messages wait for ack."""
+        return self.request('subscribe', topic=topic_filter, payload={'qos': qos})
+
+    def unsubscribe(self, topic_filter):
+        return self.request('unsubscribe', topic=topic_filter)
+
+    def ack(self, topic_filter, message_id):
+        return self.request('ack', topic=topic_filter, payload=message_id)
+
+    def messaging(self):
+        """Administrator only: subscription and bridge counters."""
+        return self.request('messaging')
+
     # Durable streams (SF-034). Errors carry protocol codes such as 'full',
     # 'evicted', 'not-enough-messages', 'not-found', 'exists', 'quota', 'unavailable'.
     def stream_create(self, name, max_size, strategy_on_full='RejectNewData', persistence='File',
@@ -107,7 +121,9 @@ def main():
     parser.add_argument('--component', default='')
     parser.add_argument('operation', choices=['install', 'list', 'start', 'stop',
                                             'restart', 'status', 'logs', 'config',
-                                            'health', 'publish', 'receive', 'stream_create',
+                                            'health', 'publish', 'receive',
+                                            'subscribe', 'unsubscribe', 'ack',
+                                            'messaging', 'stream_create',
                                             'stream_delete', 'stream_append', 'stream_read',
                                             'stream_describe', 'stream_list'])
     parser.add_argument('--topic', default='')

@@ -60,7 +60,8 @@
   },
   "pubsub-cases.json": {
    "description": "MQTT topic name/filter validity and matching, and AWS-compatible local pub/sub ACL resource matching.",
-   "runtime_execution": "pending", "pending_on": ["SF-027", "SF-032"]
+   "runtime_execution": "passed", "runtime_evidence": "docs/validation/sf032-messaging.json",
+   "runtime_scope": "The daemon's pub/sub module executes all 53 cases (make edge-test); scripts/test_messaging.py exercises the same rules through real IPC UIDs and a real Mosquitto broker."
   },
   "shadow-cases.json": {
    "description": "Named shadow update/merge/delta/version/delete semantics.",
@@ -126,16 +127,19 @@
    "tickets": ["SF-027", "SF-037"], "suites": ["aws-recipe-cases.json", "pubsub-cases.json"],
    "notes": "Deny by default; * glob resources; recipe accessControl is deferred until SF-027."},
   {"id": "messaging.local-pubsub", "area": "messaging", "aws_reference": "aws.greengrass.ipc.pubsub PublishToTopic/SubscribeToTopic",
-   "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable",
-   "tickets": ["SF-027", "SF-032"], "suites": ["pubsub-cases.json"]},
+   "functional": "implemented", "aws_api": "undecided", "aws_recipe": "not-applicable",
+   "tickets": ["SF-027", "SF-032"], "suites": ["pubsub-cases.json"],
+   "current_evidence": ["docs/MESSAGING.md", "docs/validation/sf032-messaging.json"],
+   "notes": "Native IPC operations with AWS-shaped policies; durable QoS 1 and bounded QoS 0. Not the AWS IPC wire protocol."},
   {"id": "messaging.mqtt-broker", "area": "messaging", "aws_reference": "Moquette/EMQX broker components for client devices",
    "functional": "proposed", "aws_api": "not-applicable", "aws_recipe": "not-applicable",
    "tickets": ["SF-032", "SF-035"], "suites": ["pubsub-cases.json", "client-device-cases.json"],
    "notes": "Standard MQTT 3.1.1/5 protocol conformance, not an AWS API."},
   {"id": "messaging.bridge", "area": "messaging", "aws_reference": "aws.greengrass.clientdevices.mqtt.Bridge mqttTopicMapping LocalMqtt/Pubsub/IotCore",
-   "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable",
+   "functional": "partial", "aws_api": "undecided", "aws_recipe": "not-applicable",
    "tickets": ["SF-032"], "suites": ["pubsub-cases.json"],
-   "notes": "LocalMqtt<->Pubsub routing is native; any cloud target (IotCore or another broker) is a selected adapter needing approval."},
+   "current_evidence": ["docs/MESSAGING.md", "docs/validation/sf032-messaging.json"],
+   "notes": "LocalMqtt<->Pubsub routing is implemented over plain MQTT 3.1.1 to a local broker; TLS and client-device auth are SF-035; any cloud target (IotCore or another broker) is a selected adapter needing approval."},
   {"id": "shadows.local", "area": "shadows", "aws_reference": "aws.greengrass.ShadowManager Get/Update/Delete/ListNamedShadowsForThing",
    "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable",
    "tickets": ["SF-027", "SF-033"], "suites": ["shadow-cases.json"]},

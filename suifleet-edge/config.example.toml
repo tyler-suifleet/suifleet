@@ -88,6 +88,20 @@ replay_history = false
 # interval_seconds = 60           # 10..=3600
 # buffer_max = 1024               # snapshots kept offline; oldest dropped beyond
 
+# Durable local pub/sub and the local MQTT bridge (SF-032; docs/MESSAGING.md).
+# Components need pubsub_policies under [ipc.components.NAME].
+# [pubsub]
+# max_messages_per_subscription = 1000
+# max_bytes_per_subscription = 4194304
+# qos0_messages_per_subscription = 100
+# [pubsub.bridge]
+# broker = "127.0.0.1:1883"
+# [[pubsub.bridge.mappings]]
+# topic = "sensors/#"
+# source = "Pubsub"
+# target = "LocalMqtt"
+# target_topic_prefix = "device1/"
+
 # Redacted remote logs to the fleet indexer (needs [telemetry]; docs/LOGS.md).
 # [logs]
 # interval_seconds = 60
