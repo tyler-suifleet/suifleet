@@ -51,6 +51,7 @@ target = "Pubsub"
 - **Policies mirror `aws.greengrass.ipc.pubsub`.** Operations are `aws.greengrass#PublishToTopic`, `aws.greengrass#SubscribeToTopic` or `*`. A resource is a glob in which only `*` is special. `+` and `#` are literal, so `lan/commands/#` permits subscribing to exactly that filter, not to `lan/commands/x` or `lan/+/x`. Any matching policy grants; anything else is denied.
 - **The principal is authenticated.** SO_PEERCRED identifies the calling UID, which must own the named component. A component cannot subscribe, receive or acknowledge as another.
 - **Legacy SF-027 lists still apply.** `publish` passes on the legacy `publish` list or a `PublishToTopic` policy; `receive` on the legacy `subscribe` list or a `SubscribeToTopic` policy. `subscribe`, `unsubscribe` and `ack` need a `SubscribeToTopic` policy. `messaging` (counters) is administrator only.
+- **A durable subscription replaces the legacy inbox for its exact topic.** While a component has a durable subscription whose filter equals a legacy `subscribe` topic, publications to that topic go only to the durable queue. `receive` first returns any legacy messages queued before subscribing (without an `id`; they need no `ack`), then the durable queue. After `unsubscribe`, new publications go to the legacy inbox again. Wildcard filters do not affect the legacy inbox for a topic they match.
 
 ## Operations
 

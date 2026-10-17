@@ -201,15 +201,19 @@ impl Messages {
             "publish" => {
                 let legacy = topic(&r.topic);
                 anyhow::ensure!((legacy || crate::pubsub::valid_topic(&r.topic)) && serde_json::to_vec(&r.payload)?.len() <= 4096, "invalid message");
+                // A durable subscription to exactly this topic replaces the legacy
+                // inbox: receive reads it, so a legacy copy would be unreachable.
+                let mut broker = durable.map(|b| b.lock().unwrap());
                 let targets: Vec<_> = if legacy {
-                    policy.components.iter().filter(|(_, a)| a.subscribe.contains(&r.topic)
-                        && a.operations.iter().any(|op| op == "receive")).map(|(n, _)| n.clone()).collect()
+                    policy.components.iter().filter(|(n, a)| a.subscribe.contains(&r.topic)
+                        && a.operations.iter().any(|op| op == "receive")
+                        && !broker.as_ref().is_some_and(|b| b.has(n, &r.topic))).map(|(n, _)| n.clone()).collect()
                 } else { Vec::new() };
                 // Backpressure is atomic: never partially deliver a publication.
                 anyhow::ensure!(targets.iter().all(|n| self.queues.get(&(n.clone(), r.topic.clone())).map_or(0, VecDeque::len) < 32), "inbox full");
                 // Durable subscribers next (all or nothing), then the volatile inboxes.
-                let stored = match durable {
-                    Some(broker) => broker.lock().unwrap().publish(principal, &r.topic, &r.payload, None)?,
+                let stored = match broker.as_mut() {
+                    Some(broker) => broker.publish(principal, &r.topic, &r.payload, None)?,
                     None => json!({"durable":0,"volatile":0}),
                 };
                 for name in &targets {
@@ -222,6 +226,10 @@ impl Messages {
                 if let Some(broker) = durable {
                     let mut broker = broker.lock().unwrap();
                     if broker.has(principal, &r.topic) {
+                        // Legacy messages queued before subscribing come first (no id, no ack).
+                        if let Some(old) = self.queues.get_mut(&(r.component.clone(), r.topic.clone())).and_then(VecDeque::pop_front) {
+                            return Ok(old);
+                        }
                         return Ok(broker.receive(principal, &r.topic)?.map(|m| serde_json::to_value(m)).transpose()?.unwrap_or(Value::Null));
                     }
                 }
@@ -396,5 +404,51 @@ mod tests {
         let mut revoked = durable_policy();
         revoked.components.get_mut("sub").unwrap().pubsub_policies.clear();
         assert!(revoked.authorize(62002, &receive).is_err());
+    }
+
+    #[test]
+    fn a_durable_subscription_replaces_the_legacy_inbox_for_its_topic() {
+        use crate::pubsub::Policy;
+        let mut p = policy();
+        p.components.insert("mig".into(), Acl { uid: 61003,
+            operations: ["receive", "subscribe", "unsubscribe", "ack"].map(String::from).to_vec(),
+            publish: vec![], subscribe: vec!["a/events".into()],
+            pubsub_policies: vec![Policy { operations: vec!["aws.greengrass#SubscribeToTopic".into()], resources: vec!["a/events".into()] }] });
+        // Only mig subscribes, so other inboxes cannot fill.
+        p.components.get_mut("a").unwrap().subscribe.clear();
+        p.components.get_mut("b").unwrap().subscribe.clear();
+        p.validate().unwrap();
+        let dir = std::env::temp_dir().join(format!("suifleet-ipc-migrate-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let broker = std::sync::Mutex::new(crate::pubsub::Broker::open(&dir, crate::pubsub::Limits::default()).unwrap());
+        let mut messages = Messages::default();
+        let req = |op: &str, payload: Value| Request { version: 1, operation: op.into(), component: "mig".into(), topic: "a/events".into(), payload };
+        let publish = |messages: &mut Messages, n: u64| messages.handle(&p, &Request { payload: json!(n), ..request("publish") }, "a", Some(&broker));
+        for (op, payload) in [("subscribe", json!({"qos": 1})), ("receive", Value::Null), ("ack", json!(1)), ("unsubscribe", Value::Null)] {
+            p.authorize(61003, &req(op, payload)).unwrap();
+        }
+        // Legacy messages from before the subscription are still received first.
+        for n in 0..3 { assert_eq!(publish(&mut messages, n).unwrap()["delivered"], 1); }
+        messages.handle(&p, &req("subscribe", json!({"qos": 1})), "mig", Some(&broker)).unwrap();
+        for n in 0..3 {
+            let old = messages.handle(&p, &req("receive", Value::Null), "mig", Some(&broker)).unwrap();
+            assert_eq!((old["payload"].as_u64(), old.get("id")), (Some(n), None));
+        }
+        // Then only the durable queue: far beyond the 32-message legacy bound.
+        for n in 3..100 {
+            let out = publish(&mut messages, n).unwrap();
+            assert_eq!((out["delivered"].as_u64(), out["durable"].as_u64()), (Some(0), Some(1)));
+            let m = messages.handle(&p, &req("receive", Value::Null), "mig", Some(&broker)).unwrap();
+            assert_eq!(m["payload"].as_u64(), Some(n));
+            assert_eq!(messages.handle(&p, &req("ack", m["id"].clone()), "mig", Some(&broker)).unwrap()["acknowledged"], true);
+        }
+        assert!(messages.queues[&("mig".into(), "a/events".into())].is_empty());
+        assert!(messages.handle(&p, &req("receive", Value::Null), "mig", Some(&broker)).unwrap().is_null());
+        // After unsubscribing, the legacy inbox receives again.
+        messages.handle(&p, &req("unsubscribe", Value::Null), "mig", Some(&broker)).unwrap();
+        assert_eq!(publish(&mut messages, 100).unwrap()["delivered"], 1);
+        let m = messages.handle(&p, &req("receive", Value::Null), "mig", Some(&broker)).unwrap();
+        assert_eq!((m["payload"].as_u64(), m.get("id")), (Some(100), None));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
