@@ -88,6 +88,12 @@ replay_history = false
 # interval_seconds = 60           # 10..=3600
 # buffer_max = 1024               # snapshots kept offline; oldest dropped beyond
 
+# Redacted remote logs to the fleet indexer (needs [telemetry]; docs/LOGS.md).
+# [logs]
+# interval_seconds = 60
+# max_lines_per_interval = 512
+# buffer_max = 256
+
 # Durable local streams and export (SF-034; docs/STREAMS.md). Components need
 # stream operations and a `streams` glob under [ipc.components.NAME].
 # [streams]
