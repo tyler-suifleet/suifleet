@@ -1,6 +1,7 @@
 # Native component IPC and SDK (v1)
 
-SF-027 provides an opt-in Linux Unix-stream API and a dependency-free Python 3.10+
+SF-027 provides an opt-in Unix-stream API (Linux, and macOS since SF-075; see
+[MACOS_RUNTIME.md](MACOS_RUNTIME.md#ipc-authentication)) and a dependency-free Python 3.10+
 SDK/CLI in [`sdk/python/suifleet_ipc.py`](../sdk/python/suifleet_ipc.py). This is a
 native SuiFleet interface, not AWS Greengrass IPC, SDK or CLI compatibility.
 

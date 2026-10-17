@@ -223,7 +223,8 @@ def run(rpc_url, faucet_url, catalog_upgrade=False):
                 return created(result, "::deployment_manager::DeploymentRecord")[0]
 
             def deploy_catalog(version, *, devices=(), groups=(), unsupported=False,
-                               name=component.DEFAULT_COMPONENT, dependencies=None, register_only=False):
+                               name=component.DEFAULT_COMPONENT, dependencies=None, register_only=False,
+                               first=("linux", "aarch64")):
                 artifact = component.build(version, run_id, component=name)
                 tag = (version if name == component.DEFAULT_COMPONENT else f"{name}-{version}").replace(".", "-")
                 selected = "catalog-artifact-" + tag
@@ -237,8 +238,8 @@ def run(rpc_url, faucet_url, catalog_upgrade=False):
                 # First manifest is intentionally incompatible on this x86_64 test host.
                 strings = lambda values: "vector[" + ",".join(json.dumps(v) for v in values) + "]"
                 registration = transaction("--move-call", f"{package}::component_catalog::publish_version", f"@{catalog}",
-                    json.dumps(name), json.dumps(version), strings(["linux", "linux"]),
-                    strings(["aarch64", "arm" if unsupported else "x86_64"]), strings(["never-download", recipe_blob]),
+                    json.dumps(name), json.dumps(version), strings([first[0], "linux"]),
+                    strings([first[1], "arm" if unsupported else "x86_64"]), strings(["never-download", recipe_blob]),
                     strings(["a"*64, hashlib.sha256(recipe).hexdigest()]), strings(["b"*64, hashlib.sha256(artifact).hexdigest()]), CLOCK)
                 version_id = created(registration, "::component_catalog::ComponentVersion")[0]
                 obj = dm.rpc(rpc_url,"sui_getObject",[version_id,{"showOwner":True,"showContent":True}])["data"]
@@ -355,6 +356,15 @@ def run(rpc_url, faucet_url, catalog_upgrade=False):
                     print("PASS: live catalog BCS index resolved a schema-1.1 dependency (highest matching 1.5.0) "
                           "before its dependent, with on-chain receipt; unresolvable dependencies rejected before artifact downloads")
 
+                    # SF-075: the upgraded package accepts a macOS manifest for
+                    # the same architecture; this Linux daemon selects by OS.
+                    mixed = deploy_catalog("2.1.0", devices=[device], first=("macos", "x86_64"))
+                    wait_for(settled(mixed, 1), "a version listing a macOS manifest was not applied on Linux", process)
+                    receipt_is(mixed, 1)
+                    assert not any(p.endswith("never-download") for p in downloads), downloads
+                    print("PASS: upgraded catalog publishes a macos/x86_64 manifest; the linux/x86_64 daemon selected "
+                          "its own manifest and never fetched the macOS recipe")
+
                 bad = deploy("3.0.0", devices=[device], fail="health")
                 elsewhere = deploy("3.1.0", devices=[other])
                 wait_for(settled(bad, 2), "health failure was not reported as Failed", process)
@@ -389,7 +399,7 @@ def run(rpc_url, faucet_url, catalog_upgrade=False):
                 stop(process)
                 process = None
                 versions = [r["version"] for r in history()]
-                assert versions == ["1.0.0", "2.0.0", "3.0.0", "4.0.0", "5.0.0"], versions
+                assert versions == ["1.0.0", "2.0.0", *(["2.1.0"] if catalog_upgrade else []), "3.0.0", "4.0.0", "5.0.0"], versions
                 assert len(history()) == applied_before + 1, "migration replayed applied work"
                 assert "after" in journal()["cursor"], journal()["cursor"]
                 assert not outcome(before) and not outcome(elsewhere), "untargeted or pre-enrollment deployment ran"

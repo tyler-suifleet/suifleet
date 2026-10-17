@@ -112,7 +112,9 @@ module sui_edge::component_catalog {
         let b = s.as_bytes(); assert!(b.length() == 64, EManifest);
         b.do_ref!(|c| assert!(digit(*c) || (*c >= 97 && *c <= 102), EManifest));
     }
-    fun valid_os(s: &String): bool { *s == string::utf8(b"linux") || *s == string::utf8(b"*") }
+    fun valid_os(s: &String): bool {
+        *s == string::utf8(b"linux") || *s == string::utf8(b"macos") || *s == string::utf8(b"*")
+    }
     /// Rust's `std::env::consts::ARCH` names; `x86` is 32-bit i686 (SF-076).
     fun valid_arch(s: &String): bool {
         *s == string::utf8(b"x86_64") || *s == string::utf8(b"aarch64") || *s == string::utf8(b"arm")

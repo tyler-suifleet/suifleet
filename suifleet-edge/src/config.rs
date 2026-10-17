@@ -608,6 +608,9 @@ impl Config {
             "daemon_update cannot be enabled with the service signer ([device.signer] kind = \"service\"): \
              components could replace the daemon the signing service trusts"
         );
+        if let Some(reason) = unsupported_on(std::env::consts::OS, &cfg) {
+            anyhow::bail!("{reason} (docs/MACOS_RUNTIME.md)");
+        }
         anyhow::ensure!(
             cfg.components.recovery_commands.iter().all(|(name, command)| crate::deps::valid_name(name) && !command.trim().is_empty()),
             "application recovery needs valid component names and nonempty commands"
@@ -669,6 +672,28 @@ impl Config {
 
 fn default_timeout() -> u64 {
     600
+}
+
+/// A configured feature this platform cannot provide as specified. On macOS
+/// (SF-075) these rest on Linux/systemd mechanisms with no validated
+/// equivalent, so they are refused rather than silently weakened.
+pub fn unsupported_on(os: &str, cfg: &Config) -> Option<&'static str> {
+    if os != "macos" {
+        return None;
+    }
+    if cfg.device.signer.as_ref().is_some_and(|signer| signer.kind == "service") {
+        return Some("the device signing service needs systemd unit/cgroup caller identity; it is not supported on macOS");
+    }
+    if matches!(cfg.apply.mode, ApplyMode::PrivilegedHelper) {
+        return Some("the privileged firmware helper is a systemd path-activated unit; it is not supported on macOS");
+    }
+    if cfg.apply.max_memory_bytes.is_some() {
+        return Some("apply.max_memory_bytes is not enforced by macOS (RLIMIT_AS); it is not supported on macOS");
+    }
+    if cfg.daemon_update.enabled {
+        return Some("daemon self-update has not been validated under launchd; it is not supported on macOS");
+    }
+    None
 }
 
 impl TelemetryConfig {
@@ -853,6 +878,24 @@ mod tests {
         let error = format!("{:#}", Config::load(&path).unwrap_err());
         assert!(!error.contains("daemon_update"), "{error}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+    #[test]
+    fn linux_only_features_are_refused_on_macos() {
+        let base = "[sui]\nmanifest_path='deployment.json'\n[device]\nkeypair_path='/k'\ndevice_object_id='0x1'\ndevice_cap_id='0x2'\n";
+        let parse = |extra: &str| -> Config { toml::from_str(&format!("{base}{extra}")).unwrap() };
+        let plain = parse("[apply]\ncommand='/usr/bin/true'\n");
+        assert_eq!(unsupported_on("macos", &plain), None);
+        for (extra, needle) in [
+            ("[device.signer]\nkind='service'\nsocket='/s'\n[apply]\ncommand='/usr/bin/true'\n", "signing service"),
+            ("[apply]\ncommand='/usr/bin/true'\nmode='privileged-helper'\n", "firmware helper"),
+            ("[apply]\ncommand='/usr/bin/true'\nmax_memory_bytes=1000000\n", "max_memory_bytes"),
+            ("[apply]\ncommand='/usr/bin/true'\n[daemon_update]\nenabled=true\ncomponent='suifleet'\n", "self-update"),
+        ] {
+            let cfg = parse(extra);
+            assert!(unsupported_on("macos", &cfg).is_some_and(|reason| reason.contains(needle)), "{extra}");
+            // Linux keeps every one of them.
+            assert_eq!(unsupported_on("linux", &cfg), None, "{extra}");
+        }
     }
     #[test]
     fn legacy_network_config_rejected() {
