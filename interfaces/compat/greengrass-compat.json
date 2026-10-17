@@ -48,7 +48,7 @@
    "notes": "Outside the SF-038 initial Linux prototype phase; a tracked gap. Translated recipes omit x86 manifests and report them."},
   {"id": "windows", "aws": {"os": "windows"}, "native": null, "status": "roadmap", "tickets": ["SF-064", "SF-074"],
    "notes": "No Windows runtime; outside the SF-038 initial Linux prototype phase and a tracked gap. Translated recipes omit Windows manifests."},
-  {"id": "darwin", "aws": {"os": "darwin"}, "native": null, "status": "roadmap", "tickets": ["SF-064", "SF-075"], "notes": "No macOS runtime; outside the SF-038 initial Linux prototype phase and a tracked gap."}
+  {"id": "darwin", "aws": {"os": "darwin"}, "native": {"os": "macos", "arch": "aarch64"}, "status": "partial", "current_evidence": ["docs/MACOS_RUNTIME.md"], "tickets": ["SF-064", "SF-075"], "notes": "Native macOS LaunchDaemon runtime and catalog OS `macos` (SF-075), tested on a hosted macOS 15 arm64 runner; not a Greengrass platform. Translated recipes still omit darwin manifests."}
  ],
  "suites": {
   "aws-recipe-cases.json": {

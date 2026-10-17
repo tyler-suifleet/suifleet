@@ -295,6 +295,6 @@
    "reason": "No Yocto or test target yet. Translation omits and reports x86 manifests. A tracked gap, not an approved exclusion."},
   {"platform": "windows", "phase": "roadmap", "tickets": ["SF-064", "SF-074"],
    "reason": "The daemon depends on Linux systemd, cgroups (SF-014) and Yocto packaging. Windows needs its own supervisor, service packaging, permissions and test suite. A tracked gap, not an approved exclusion; translated recipes omit Windows manifests meanwhile."},
-  {"platform": "darwin", "phase": "roadmap", "tickets": ["SF-064", "SF-075"], "reason": "No macOS runtime. AWS lists only Linux and Windows for the components in this catalog. A tracked gap, not an approved exclusion."}
+  {"platform": "darwin", "phase": "roadmap", "tickets": ["SF-064", "SF-075"], "reason": "The native macOS runtime (SF-075, docs/MACOS_RUNTIME.md) runs SuiFleet components; AWS lists only Linux and Windows for the components in this catalog, so their macOS equivalents remain a tracked gap, not an approved exclusion."}
  ]
 }
