@@ -328,11 +328,15 @@ def run(args):
         wait(lambda: read("install-escaped") and installs.exists(), "install did not start")
         installer, escaped = int(installs.read_text().split()[0]), int(read("install-escaped"))
         assert proc.alive(installer) and proc.alive(escaped)
-        before = daemon_pid()
+        before, running = daemon_pid(), status().get("pid")
         os.kill(before, signal.SIGKILL)
         wait(lambda: daemon_pid() not in (0, before), f"launchd did not restart the daemon: {job()}")
-        wait(lambda: outcome("0x502").get("indeterminate") and status().get("phase") == "running"
-             and status().get("version") == "1.0.0", f"interrupted install not settled: {outcome('0x502')} {status()}")
+        # The journal settles before the supervisor reaps: wait for the
+        # successor's own record and a new run of the committed version.
+        wait(lambda: instance().get("pid") == daemon_pid() and outcome("0x502").get("indeterminate")
+             and status().get("phase") == "running" and status().get("version") == "1.0.0"
+             and status().get("pid") not in (None, running),
+             f"interrupted install not settled: {outcome('0x502')} {status()} {instance()}")
         assert not proc.alive(installer) and not proc.alive(escaped), "the interrupted install's processes survived"
         time.sleep(3)
         assert installs.read_text().split() == [str(installer)], "the interrupted install ran again"
