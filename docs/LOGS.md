@@ -22,17 +22,19 @@ buffer_max = 256                     # batches kept while the indexer is unreach
 
 **Redaction, before a line leaves the daemon.** The rules are in [redact.rs](../suifleet-edge/src/redact.rs), with shared cases in [log-redaction-cases.json](../interfaces/log-redaction-cases.json). Each match is replaced by `[REDACTED]`:
 - Sui private keys (`suiprivkey1…`) and PEM private-key lines;
-- values after secret-like names: `password`, `token`, `api_key`, `secret`, `pin`, `mnemonic`, `seed`, `private_key`, `credential`, `authorization`, and names ending in those, such as `DB_PASSWORD`. Quoted or not; an `Authorization` scheme such as `Bearer` is kept;
+- values after secret-like names: `password`, `token`, `api_key`, `secret`, `pin`, `mnemonic`, `seed`, `private_key`, `credential`, `authorization`, and names ending in those, such as `DB_PASSWORD`. Quoted or not, and a backslash-escaped quote (as in JSON) does not end a quoted value; an `Authorization` scheme such as `Bearer` is kept;
 - `Bearer` tokens;
 - 64 or more hex digits not written as a `0x` object ID or address;
 - base64 runs of 40 or more characters that contain `+`, `/` or `=`. Base58 digests and base64url blob IDs are kept;
 - runs of 12 or more words of 3 to 8 lowercase letters, which is how recovery phrases look;
-- every value in the device's confidential configuration overlays (SF-015), exactly.
+- every value in the device's confidential configuration overlays (SF-015), exactly and however short. A short value such as a PIN is redacted wherever it appears, even inside other words.
+
+A whole line is redacted before it is truncated, so a secret is never split across records. A line longer than 16 KiB is replaced by a marker line rather than shipped in pieces. When a rotated file ends without a newline, its last line is shipped as it is, and the shipper moves on to the current file.
 
 The rules lean towards over-redaction. They are a safety net; components still must not log secrets.
 
 **Bounds:**
-- lines at most 1024 bytes;
+- lines at most 1024 bytes after redaction;
 - batches at most 256 records and 64 KiB;
 - the per-interval line budget;
 - the spool bound. Batches dropped from a full spool are counted in later batches' `dropped_lines`.
@@ -102,7 +104,7 @@ Unlike device health, the dApp cannot re-derive alerts from the chain alone, so 
 
 | Command | Covers |
 |---|---|
-| `make edge-test` | The shared redaction cases. Tailing: complete lines once, rotation into `.1`, two unseen rotations reported lost, inode reuse, the budget, overlong lines. The rotating daemon log. Batch record and byte limits. Collection redacting a confidential overlay value with cursors persisted. The signing service's log-batch checks (other chain, registry, signer or schema, empty, overlong, bad source, non-canonical, transactions). `[logs]` config bounds and the need for `[telemetry]` |
+| `make edge-test` | The shared redaction cases. Tailing: complete lines once, rotation into `.1`, two unseen rotations reported lost, inode reuse, the budget, overlong lines read whole or omitted (also across intervals), an unterminated rotated tail followed by the current file. The rotating daemon log. Batch record and byte limits. Collection redacting a confidential overlay value with cursors persisted, and never splitting a value across records with a one-line budget. The signing service's log-batch checks (other chain, registry, signer or schema, empty, overlong, bad source, non-canonical, transactions). `[logs]` config bounds and the need for `[telemetry]` |
 | `make indexer-test` | The shared redaction cases. Ingest (accepted, duplicate, reused seq, other chain or key, bounds, clock, unindexed retry, revoked, tampered). Retention, search, paging and output redaction. Audit. Alert rules over real stored telemetry and receipts. Webhook deduplication and retry against a real local HTTP receiver. HTTP scopes: no token 401, `read` 403 on logs, `support` served, audit `operate`-only with fingerprints |
 | `python3 scripts/test_logs.py` (in `make test-ota`) | The real daemon and simulator. Batches spooled while the ingress is down. A component's overlay value, an api key and a raw key redacted on the device. 120 lines shipped in order over several intervals within the budget. The daemon's own log shipped. No line sent twice across a daemon restart. Every batch verified with Mysten's SDK |
 | `node scripts/test_alerts.cjs` (in `make test-manifest`) | Strict parsing, an owner-scoped authenticated fetch, unavailable instead of stale or partial lists |
