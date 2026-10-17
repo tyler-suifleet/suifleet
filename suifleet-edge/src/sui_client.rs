@@ -233,6 +233,10 @@ fn number(value: &Value) -> Option<u64> {
         .as_str()
         .and_then(|s| s.parse().ok())
         .or_else(|| value.as_u64())
+        // Protobuf JSON numbers arrive as doubles (not integer JSON tokens).
+        // Accept only exact nonnegative safe integers; full u64s use strings.
+        .or_else(|| value.as_f64().filter(|n| n.is_finite() && *n >= 0.0 &&
+            *n <= 9_007_199_254_740_991.0 && n.fract() == 0.0).map(|n| n as u64))
 }
 
 fn id_list(value: &Value) -> Vec<String> {
@@ -747,6 +751,35 @@ impl SuiClient {
         }
     }
 
+    /// Schema 3 requires a grant in the introduction-origin rollout field.
+    /// Every call re-reads chain state, including after artifact downloads.
+    pub async fn rollout_admission(&self, deployment: &str, device: &str) -> anyhow::Result<Option<&'static str>> {
+        let record = self.object(deployment).await?;
+        if number(&record.fields["schema_version"]) != Some(3) { return Ok(None); }
+        let r = self.dynamic_field(deployment, "deployment_manager::RolloutKey").await?
+            .ok_or_else(|| anyhow::anyhow!("schema-3 deployment has no rollout policy"))?;
+        let r = r.get("fields").unwrap_or(&r);
+        let state = number(&r["state"]).ok_or_else(|| anyhow::anyhow!("invalid rollout state"))?;
+        anyhow::ensure!(state <= 3, "unsupported rollout state");
+        if state == 1 { return Ok(Some("rollout paused")); }
+        if state == 2 { return Ok(Some("rollout aborted")); }
+        if state == 3 { return Ok(Some("rollout complete")); }
+        let members = id_list(&r["members"]);
+        let admitted = r["admitted_at"].as_array().ok_or_else(|| anyhow::anyhow!("invalid rollout grants"))?;
+        let outcomes = r["outcomes"].as_array().ok_or_else(|| anyhow::anyhow!("invalid rollout outcomes"))?;
+        let skipped = r["skipped"].as_array().ok_or_else(|| anyhow::anyhow!("invalid rollout exclusions"))?;
+        anyhow::ensure!(!members.is_empty() && members.len() <= 512 &&
+            [admitted.len(), outcomes.len(), skipped.len()].iter().all(|n| *n == members.len()),
+            "invalid rollout vector lengths");
+        let Some(index) = members.iter().position(|id| same_id(id, device)) else {
+            return Ok(Some("outside rollout cohort snapshot"));
+        };
+        let grant = number(&admitted[index]).ok_or_else(|| anyhow::anyhow!("invalid rollout grant"))?;
+        let outcome = number(&outcomes[index]).ok_or_else(|| anyhow::anyhow!("invalid rollout outcome"))?;
+        let skip = skipped[index].as_bool().ok_or_else(|| anyhow::anyhow!("invalid rollout exclusion"))?;
+        Ok(if grant != 0 && outcome == 0 && !skip { None } else { Some("waiting for rollout eligibility") })
+    }
+
     pub async fn is_managed(&self, deployment: &str) -> anyhow::Result<bool> {
         Ok(self
             .dynamic_field(deployment, "deployment_manager::ManagedKey")
@@ -1125,6 +1158,16 @@ fn execution_digest(executed: &proto::ExecutedTransaction) -> anyhow::Result<Str
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn protobuf_numbers_require_exact_safe_integers() {
+        use serde_json::json;
+        assert_eq!(super::number(&json!(0.0)), Some(0));
+        assert_eq!(super::number(&json!(255.0)), Some(255));
+        assert_eq!(super::number(&json!("18446744073709551615")), Some(u64::MAX));
+        for value in [json!(-1.0), json!(0.5), json!(9_007_199_254_740_992.0), json!("invalid")] {
+            assert_eq!(super::number(&value), None);
+        }
+    }
     use super::*;
 
     #[test]

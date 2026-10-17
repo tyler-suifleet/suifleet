@@ -508,7 +508,7 @@ async fn execute(
         ),
         "wrong deployment type"
     );
-    if !admit(sui, journal, &event.deployment_id).await? {
+    if !admit(sui, journal, &event.deployment_id, &cfg.device.device_object_id).await? {
         return Ok(None);
     }
     let resolved = catalog::resolve(sui, event, &record.fields).await;
@@ -577,7 +577,7 @@ async fn stage_daemon_update(
         components::artifact(walrus, store, &recipe.artifact_blob_id, &event.artifact_sha256, &artifact).await?;
         // As in handle_deployment: re-read after downloads, before the
         // candidate runs or the daemon restarts. Read failure fails closed.
-        match admit(sui, journal, &event.deployment_id).await {
+        match admit(sui, journal, &event.deployment_id, &cfg.device.device_object_id).await {
             Ok(true) => {}
             Ok(false) => return Err(control::NotAdmitted.into()),
             Err(error) => {
@@ -615,7 +615,7 @@ async fn stage_daemon_update(
 
 /// Persist notice and deferral independently of execution outcomes. A terminal
 /// observation is never forgotten if the device clock subsequently moves back.
-async fn admit(sui: &SuiClient, journal: &mut Journal, id: &str) -> anyhow::Result<bool> {
+async fn admit(sui: &SuiClient, journal: &mut Journal, id: &str, device: &str) -> anyhow::Result<bool> {
     if journal.state.deferred.get(id).is_some_and(|d| d.terminal) { return Ok(false); }
     // A missing record (including old-package deletion) is never permission.
     anyhow::ensure!(sui.optional_object(id).await?.is_some(), "deployment deleted before admission");
@@ -628,11 +628,14 @@ async fn admit(sui: &SuiClient, journal: &mut Journal, id: &str) -> anyhow::Resu
     let notified = journal.state.deferred.get(id)
         .filter(|d| d.control == control && d.notified_ms <= now)
         .map(|d| d.notified_ms).unwrap_or(now);
-    let reason = control.reason(now, notified)?;
+    let reason = match control.reason(now, notified)? {
+        Some(reason) => Some(reason),
+        None => sui.rollout_admission(id, device).await?,
+    };
     let entry = control::Deferred {
         control, notified_ms: notified,
         reason: reason.unwrap_or("ready for admission").to_owned(),
-        terminal: matches!(reason, Some("cancelled" | "expired")),
+        terminal: matches!(reason, Some("cancelled" | "expired" | "rollout aborted" | "rollout complete")),
     };
     if journal.state.deferred.get(id).is_none_or(|old| old.reason != entry.reason || old.control != entry.control) {
         info!(deployment = id, reason = entry.reason, notice_ms = entry.control.notice_ms,
@@ -918,7 +921,7 @@ async fn handle_deployment(
     }
     // Re-read after downloads: a pause/cancel/window closing during fetch
     // cannot pass a stale initial check. Read failure fails closed before intent.
-    match admit(sui, journal, &event.deployment_id).await {
+    match admit(sui, journal, &event.deployment_id, &cfg.device.device_object_id).await {
         Ok(true) => {},
         Ok(false) => return Err(control::NotAdmitted.into()),
         Err(error) => {
