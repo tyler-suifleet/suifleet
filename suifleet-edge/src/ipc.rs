@@ -28,6 +28,9 @@ pub struct Acl {
     /// Durable pub/sub (SF-032): AWS-style policies with MQTT topic filters.
     #[serde(default)]
     pub pubsub_policies: Vec<crate::pubsub::Policy>,
+    /// Stream names this component may use (SF-034); `*` is a glob.
+    #[serde(default)]
+    pub streams: Vec<String>,
 }
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -61,7 +64,8 @@ impl Drop for Server {
     }
 }
 const OPS: &[&str] = &["list", "status", "start", "stop", "restart", "logs", "config", "health", "publish", "receive", "install",
-    "subscribe", "unsubscribe", "ack", "messaging"];
+    "subscribe", "unsubscribe", "ack", "messaging",
+    "stream_create", "stream_delete", "stream_append", "stream_read", "stream_describe", "stream_list"];
 impl Settings {
     pub fn validate(&self) -> anyhow::Result<()> {
         anyhow::ensure!(self.socket.is_absolute(), "IPC socket must be absolute");
@@ -81,6 +85,8 @@ impl Settings {
                 && acl.subscribe.len() <= 128, "IPC ACL too large");
             anyhow::ensure!(acl.operations.iter().all(|op| OPS.contains(&op.as_str()) && op != "install" && op != "list" && op != "messaging"), "invalid component IPC operation");
             anyhow::ensure!(acl.publish.iter().chain(&acl.subscribe).all(|t| topic(t)), "invalid IPC topic");
+            anyhow::ensure!(acl.streams.len() <= 64 && acl.streams.iter().all(|p| crate::streams::valid_name(&p.replace('*', "x"))),
+                "invalid IPC stream pattern");
             crate::pubsub::validate_policies(&acl.pubsub_policies)?;
         }
         anyhow::ensure!(!self.administrators.contains(&daemon_uid) || daemon_uid == 0,
@@ -101,6 +107,8 @@ impl Settings {
             "receive" => anyhow::ensure!(acl.subscribe.contains(&r.topic) || authorized(policies, "SubscribeToTopic", &r.topic), "forbidden_topic"),
             // Revoking the policy also ends access to an existing subscription.
             "subscribe" | "unsubscribe" | "ack" => anyhow::ensure!(authorized(policies, "SubscribeToTopic", &r.topic), "forbidden_topic"),
+            op if op.starts_with("stream_") && op != "stream_list" =>
+                anyhow::ensure!(acl.streams.iter().any(|p| crate::streams::glob(p, &r.topic)), "forbidden_stream"),
             _ => {}
         }
         Ok(name.clone())
@@ -112,6 +120,14 @@ fn topic(t: &str) -> bool {
 pub fn response(result: anyhow::Result<Value>) -> Value {
     match result {
         Ok(data) => json!({"version":1,"ok":true,"data":data}),
+        // Stream outcomes (full, evicted, ...) are part of the protocol.
+        Err(error) if error.downcast_ref::<crate::streams::StreamError>().is_some() => {
+            let e = error.downcast_ref::<crate::streams::StreamError>().unwrap();
+            match e.oldest {
+                Some(oldest) => json!({"version":1,"ok":false,"error":e.code,"oldest":oldest}),
+                None => json!({"version":1,"ok":false,"error":e.code}),
+            }
+        }
         // Runtime diagnostics may contain private paths/commands/configuration.
         // Detailed local failure evidence remains in the daemon's private logs.
         Err(_) => json!({"version":1,"ok":false,"error":"request_failed"}),
@@ -266,8 +282,8 @@ mod tests {
     fn policy() -> Settings {
         Settings { socket: "/run/suifleet/ipc.sock".into(), administrators: vec![0],
             components: BTreeMap::from([
-                ("a".into(), Acl { uid: 61001, operations: vec!["config".into(), "health".into(), "publish".into(), "receive".into()], publish: vec!["a/events".into()], subscribe: vec!["a/events".into()], pubsub_policies: vec![] }),
-                ("b".into(), Acl { uid: 61002, operations: vec!["receive".into()], publish: vec![], subscribe: vec!["a/events".into()], pubsub_policies: vec![] }),
+                ("a".into(), Acl { uid: 61001, operations: vec!["config".into(), "health".into(), "publish".into(), "receive".into()], publish: vec!["a/events".into()], subscribe: vec!["a/events".into()], pubsub_policies: vec![], streams: vec![] }),
+                ("b".into(), Acl { uid: 61002, operations: vec!["receive".into()], publish: vec![], subscribe: vec!["a/events".into()], pubsub_policies: vec![], streams: vec![] }),
             ]) }
     }
     fn request(op: &str) -> Request {
@@ -358,9 +374,9 @@ mod tests {
             socket: "/tmp/x.sock".into(), administrators: vec![0],
             components: [
                 ("pub".into(), Acl { uid: 62001, operations: ops(&["publish"]), publish: vec![], subscribe: vec![],
-                    pubsub_policies: vec![Policy { operations: vec!["aws.greengrass#PublishToTopic".into()], resources: vec!["sensors/*".into()] }] }),
+                    pubsub_policies: vec![Policy { operations: vec!["aws.greengrass#PublishToTopic".into()], resources: vec!["sensors/*".into()] }], streams: vec![] }),
                 ("sub".into(), Acl { uid: 62002, operations: ops(&["subscribe", "receive", "ack", "unsubscribe"]), publish: vec![], subscribe: vec![],
-                    pubsub_policies: vec![Policy { operations: vec!["aws.greengrass#SubscribeToTopic".into()], resources: vec!["sensors/#".into()] }] }),
+                    pubsub_policies: vec![Policy { operations: vec!["aws.greengrass#SubscribeToTopic".into()], resources: vec!["sensors/#".into()] }], streams: vec![] }),
             ].into_iter().collect(),
         }
     }
@@ -413,7 +429,7 @@ mod tests {
         p.components.insert("mig".into(), Acl { uid: 61003,
             operations: ["receive", "subscribe", "unsubscribe", "ack"].map(String::from).to_vec(),
             publish: vec![], subscribe: vec!["a/events".into()],
-            pubsub_policies: vec![Policy { operations: vec!["aws.greengrass#SubscribeToTopic".into()], resources: vec!["a/events".into()] }] });
+            pubsub_policies: vec![Policy { operations: vec!["aws.greengrass#SubscribeToTopic".into()], resources: vec!["a/events".into()] }], streams: vec![] });
         // Only mig subscribes, so other inboxes cannot fill.
         p.components.get_mut("a").unwrap().subscribe.clear();
         p.components.get_mut("b").unwrap().subscribe.clear();
