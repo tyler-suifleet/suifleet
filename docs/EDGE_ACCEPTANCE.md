@@ -33,7 +33,7 @@ A profile is a JSON file. Relative paths resolve against the profile's directory
   - A localnet profile needs a loopback node and, if `faucet_url` is set, a loopback faucet.
 - **Wallet.** `wallet.client_config` is always explicit, never the default wallet. `wallet.address` must be that config's active address; preflight checks it and the active environment's chain.
   - On testnet, the address must be one of the two dedicated accounts in [TESTNET.md](TESTNET.md), and `budget.max_spend_mist` is required (at most 0.5 SUI).
-  - Spending uses the [non-replenishing allowance](../scripts/testnet_budget.py). Device gas counts as a grant.
+  - Spending uses the [non-replenishing allowance](../scripts/testnet_budget.py). Device gas counts as a grant. Extension-wallet transactions are charged to the same allowance (see [extension-wallet runs](#extension-wallet-runs)).
 - **No secrets.** A field named like a key, token, password or recovery phrase is refused, as is any value that looks like a Sui private key.
 - **Walrus.**
   - `stand-in` serves this run's blobs over HTTP. A local device needs a loopback bind. A Pi needs this host's explicit LAN address; loopback and `0.0.0.0` are refused.
@@ -53,7 +53,7 @@ A profile is a JSON file. Relative paths resolve against the profile's directory
    - Registers the device's address, issues its cap and activates it: through the scripted account, or the operator's extension wallet. It verifies the cap is owned by the device and the owner cap by the wallet.
    - Creates a group, and a decoy device on scripted runs.
    - Creates a deployment **before** enrollment, then installs the configuration and starts the enrolled daemon before any test deployment. On a Pi this installs `deployment.json`, `signer.toml`, then `config.toml` last, each root-owned and mode 0640. A device already enrolled with other IDs is not reconfigured unless `device.allow_replace_enrollment` is set.
-4. **Cases.** See the matrix below. Each outcome is judged from both the device journal and the deployment's authoritative on-chain receipt, read with the Sui CLI independently of the daemon. A device receipt must name this run ID and the artifact SHA-256.
+4. **Cases.** See the matrix below. Every deployment, scripted or extension-signed, is read back before it counts: its type must be the manifest's `DeploymentRecord` origin, and it must carry the requested component, version, recipe blob and artifact SHA-256. Its `RecipeDigestKey`, `TargetDevicesKey` and `TargetGroupsKey` fields must have the manifest's type origins, the recipe digest and exactly the requested device and group targets. Each outcome is judged from both the device journal and the deployment's authoritative on-chain receipt, read with the Sui CLI independently of the daemon. A device receipt must name this run ID and the artifact SHA-256.
 5. **Cleanup.** Deletes this run's deployments, group and decoy (storage rebate). The device identity, key and journal stay. If cleanup cannot finish, the evidence lists `leftover_objects`.
 
 **Evidence.** The file is rewritten after every transaction, so an interrupted run still names what it created. It records tool versions, chain, operator, device facts, enrollment IDs, artifacts and blob IDs, and every transaction's digest, status and gas. It also holds a redacted device-log tail. Evidence containing a private key, or the stand-in's key, is refused.
@@ -104,9 +104,11 @@ The operator enters each transaction digest, on stdin or through `--wallet-input
 - the transaction succeeded;
 - it was signed by `wallet.address`;
 - it created the expected objects;
-- each deployment carries this run's version, recipe and artifact.
+- each deployment carries this run's component, version, recipe blob, artifact and recipe digest, and targets exactly the requested device or group. For example, a direct deployment entered for the group step fails `group-v2`.
 
-A missing digest blocks the case.
+**Spending.** Before each prompt the harness reserves up to 0.05 SUI from the run's allowance, and the prompt asks for a wallet gas budget at or below that reservation. After verification it charges the transaction's net gas, even when that exceeds the reservation; exceeding it fails the case. When the remaining allowance is below 0.002 SUI, the run fails before showing another prompt. Each extension transaction's reservation, gas and the allowance used so far are checkpointed in the evidence.
+
+A blank answer means nothing was signed: it releases the reservation and blocks the case. An answer that cannot be verified keeps the reservation, because the wallet may have spent it. Examples are text that is not a digest, a digest the node does not know, a digest already used by another step, or a transaction signed by another account.
 
 Device report gas comes from the scripted `client_config` account; that transaction is labelled `scripted` in the evidence. On testnet the extension must hold a dedicated account; another account needs explicit user authorization. The harness verifies digests with `sui client tx-block`; that path is exercised only by offline tests so far.
 
@@ -119,7 +121,7 @@ Device report gas comes from the scripted `client_config` account; that transact
   - evidence redaction, and checkpointed evidence after an interrupted run;
   - full runs against a fake chain and a fake daemon that executes the real SF-030 updater.
 
-  Injected faults include tampered input that runs, failures reported as Applied, untargeted or pre-enrollment work that runs, reports without gas, replay after restart, a changed key, failed effects, wrong chain or account, an exhausted allowance, a foreign enrollment, missing or wrongly signed extension digests and the encrypted profile. Each must fail or block; none may pass.
+  Injected faults include tampered input that runs, failures reported as Applied, untargeted or pre-enrollment work that runs, reports without gas, replay after restart, a changed key, failed effects, wrong chain or account, an exhausted allowance, a foreign enrollment, missing, reused, unverifiable or wrongly signed extension digests, extension transactions over their reservation or the allowance, a deployment with the wrong targets, component, recipe digest or type origin, and the encrypted profile. Each must fail or block; none may pass.
 - **`make test-edge-acceptance-localnet`** (disposable localnet, started first as for the other `*-localnet` targets): `scripts/test_edge_acceptance_localnet.py` publishes the actual contracts and runs the harness three times:
   - a fresh enrollment, where every case a stand-in can establish must pass and the verdict must stay `incomplete`;
   - a run reusing that enrollment, key and journal, with no replay;
