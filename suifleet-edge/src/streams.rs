@@ -430,8 +430,14 @@ impl Stream {
         }
         self.save_meta()?;
         for first in dead {
-            std::fs::remove_file(segment_path(&self.dir, first))?;
+            let path = segment_path(&self.dir, first);
+            std::fs::remove_file(&path)?;
             self.segments.remove(&first);
+            // A pending undo of this segment went with it: every record in
+            // the file was retired, the torn tail included.
+            if self.torn.as_ref().is_some_and(|(torn, _)| *torn == path) {
+                self.torn = None;
+            }
         }
         Ok(())
     }
@@ -1229,6 +1235,46 @@ mod tests {
         assert_eq!(seg_len(4), Some(1024));
         assert_eq!(all(&mut store).len(), 5);
         assert!(store.append("w", &big(5), 0).unwrap() > 4);
+        FAULTS.set(Faults::default());
+        drop(store);
+        let _ = std::fs::remove_dir_all(&path);
+    }
+
+    #[test]
+    fn retiring_a_segment_with_a_pending_undo_lets_appends_resume() {
+        use faults::{Faults, FAULTS};
+        let path = dir("torn-retired");
+        let seg_dir = path.join(dir_name("t"));
+        let mut store = Store::open(&path, QUOTA, 0).unwrap();
+        let mut ttl = def("t", 1 << 15, Strategy::RejectNewData);
+        ttl.time_to_live_seconds = Some(1);
+        store.create(ttl).unwrap();
+        let mut discard = def("d", 1 << 15, Strategy::RejectNewData);
+        discard.discard_exported = true;
+        discard.export = Some(ExportConfig { url: "http://127.0.0.1:9/x".into(), bearer_token_file: None, batch_max_messages: 2,
+            batch_max_bytes: 1024, batch_interval_seconds: 1, max_backoff_seconds: 5 });
+        store.create(discard).unwrap();
+        store.append("t", b"expires", 0).unwrap();
+        store.append("d", b"exported", 0).unwrap();
+        // A failed write whose undo also fails leaves a torn tail pending.
+        for name in ["t", "d"] {
+            FAULTS.set(Faults { partial: Some(10), undo: 1, ..Faults::default() });
+            assert!(store.append(name, b"torn", 0).is_err());
+        }
+        // Retention retires the whole segment, torn tail included.
+        assert_eq!(store.describe("t", 2_000).unwrap()["messages"].as_u64(), Some(0));
+        store.export_ack("d", 0, 0).unwrap();
+        assert!(std::fs::metadata(segment_path(&seg_dir, 0)).is_err());
+        let t = store.append("t", b"after", 2_000).unwrap();
+        let d = store.append("d", b"after", 0).unwrap();
+        assert!(t >= 1 && d >= 1);
+        assert_eq!(store.read("t", t, 1, 1, 2_000).unwrap()[0].data, b"after");
+        assert_eq!(store.read("d", d, 1, 1, 0).unwrap()[0].data, b"after");
+        drop(store);
+        let mut store = Store::open(&path, QUOTA, 2_000).unwrap();
+        assert_eq!(store.read("t", t, 1, 1, 2_000).unwrap()[0].data, b"after", "survives reopening");
+        assert_eq!(store.read("d", d, 1, 1, 2_000).unwrap()[0].data, b"after");
+        assert!(store.append("t", b"more", 2_000).unwrap() > t);
         FAULTS.set(Faults::default());
         drop(store);
         let _ = std::fs::remove_dir_all(&path);
