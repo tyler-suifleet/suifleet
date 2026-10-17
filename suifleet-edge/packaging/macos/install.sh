@@ -49,12 +49,17 @@ install -d -o root -g wheel -m 0755 "$etc"
 install -o root -g wheel -m 0755 "$binary" /usr/local/bin/suifleet
 install -d -o "$user" -g "$user" -m 0700 "$state"
 install -d -o "$user" -g "$user" -m 0750 "$logs"
+# macOS checks ACL entries before the mode, and directories pass inheritable
+# entries to new files: strip any from the secret paths (-N removes them all).
+chmod -N "$etc" "$state"
 
-# The device key: generated here, readable by the daemon user only. The daemon
-# refuses to start with a key any other user can reach.
+# The device key: generated here, readable by the daemon user only, with no
+# ACL (an existing key is kept and made private). The daemon refuses to start
+# with a key any other user can reach.
 (umask 077 && /usr/local/bin/suifleet --provision "$etc/device.key" >/dev/null)
 chown "$user:$user" "$etc/device.key"
 chmod 0600 "$etc/device.key"
+chmod -N "$etc/device.key"
 address=$(/usr/local/bin/suifleet --derive-address "$etc/device.key")
 printf '%s\n' "$address" | grep -Eq '^0x[0-9a-f]{64}$'
 printf '%s\n' "$address" > "$etc/device.address"

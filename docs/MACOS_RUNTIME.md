@@ -34,7 +34,9 @@ hidden `_suifleet` account (first free ID in 200–400) when missing, installs
 [plist](../suifleet-edge/packaging/macos/org.suifleet.daemon.plist), creates
 `/var/lib/suifleet` (0700) and `/var/log/suifleet`, and provisions the device
 key on the machine: `/etc/suifleet/device.key` is generated once, kept on
-reinstall and made `0600 _suifleet`. Only the public address is printed and
+reinstall and made `0600 _suifleet` with no ACL (`chmod -N` on the key,
+`/etc/suifleet` and `/var/lib/suifleet`; macOS evaluates ACL entries before
+the mode, and directories pass inheritable entries on). Only the public address is printed and
 written to `device.address`. Packages must not contain keys, enrollment or state.
 The installer writes no configuration and starts nothing.
 
@@ -110,7 +112,7 @@ of the IPC clients). Component principals need distinct non-root UIDs other than
 
 | Path | Owner, mode | Enforced by |
 |---|---|---|
-| `/etc/suifleet/device.key` | `_suifleet`, 0600 | installer; the daemon refuses to start on macOS with a key that is not a regular file owned by its user, or any group/other access |
+| `/etc/suifleet/device.key` | `_suifleet`, 0600 | installer; the daemon refuses to start on macOS with a key that is not a regular file owned by its user, any group/other access, or any extended ACL entry (an allow entry can grant another user a 0600 file) |
 | `/etc/suifleet/config.toml`, `deployment.json` | root, 0644 | operator; the daemon cannot change its own policy |
 | `/var/lib/suifleet` | `_suifleet`, 0700 | installer |
 | component `component.log`, `configuration.json` | `_suifleet`, 0600 | daemon (umask 077 and explicit modes) |

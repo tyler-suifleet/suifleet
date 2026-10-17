@@ -23,7 +23,9 @@ debug daemon and examples/grpc_sim_shim first.
                                outcome stays indeterminate and is never rerun;
                                the committed version runs again
   secrets                   -> key, state and component log unreadable by other
-                               users; a group/world-readable key stops the daemon
+                               users; install.sh strips a preexisting key ACL; a
+                               group/world-readable key, or a 0600 key with an
+                               ACL granting read, stops the daemon
   launchctl bootout         -> the component's own shutdown command runs; status
                                stopped; the coalition is empty
 Evidence (versions, head, file digests, results) goes to --evidence.
@@ -100,6 +102,12 @@ def job():
         if match:
             fields[match.group(1)] = match.group(2)
     return fields
+
+
+def acl(path):
+    """The extended ACL entries of a file, as ls -led lists them."""
+    lines = sh("ls", "-led", str(path)).stdout.splitlines()[1:]
+    return [line.strip() for line in lines if line.strip()]
 
 
 def daemon_pid():
@@ -226,10 +234,17 @@ def run(args):
         key = ETC / "device.key"
         key.write_text("07" * 32)
         key.chmod(0o644)
+        # ...and with an ACL entry granting another user read access (and an
+        # inheritable one on its directory), which the installer must remove.
+        sh("chmod", "+a", "user:nobody allow read", str(key))
+        sh("chmod", "+a", "user:nobody allow read,file_inherit", str(ETC))
         installed = sh("sh", str(PACKAGING / "install.sh"), str(binary)).stdout
         account = pwd.getpwnam(USER)
         assert 200 <= account.pw_uid <= 400, account
         assert (key.stat().st_mode & 0o777, key.stat().st_uid) == (0o600, account.pw_uid)
+        for path in (key, ETC, STATE):
+            assert not acl(path), f"the installer left an ACL on {path}: {acl(path)}"
+        assert sh("cat", str(key), user="nobody", check=False).returncode != 0, "nobody read the installed key"
         assert (STATE.stat().st_mode & 0o777, STATE.stat().st_uid) == (0o700, account.pw_uid)
         assert "SuiFleet device address: 0x" in installed, installed
         PROBE.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
@@ -362,12 +377,24 @@ def run(args):
         wait(lambda: daemon_pid() == 0 and job().get("last exit code", "0") not in ("0", "(never exited)"),
              f"the daemon did not exit on a group-readable key: {job()}")
         assert status().get("phase") == "stopped", status()
+        # Mode 0600, but an ACL entry lets another user read it: also refused
+        # before any component runs. The entry goes on first, so a throttled
+        # launchd retry never sees a private key in between.
+        refused = log().count("has an access control list")
+        sh("chmod", "+a", "user:nobody allow read", str(key))
         key.chmod(0o600)
+        assert sh("cat", str(key), user="nobody", check=False).returncode == 0, "the ACL entry did not grant read"
+        sh("launchctl", "kickstart", f"system/{LABEL}")
+        wait(lambda: log().count("has an access control list") > refused, f"a key with an ACL was accepted: {job()}")
+        wait(lambda: daemon_pid() == 0, f"the daemon did not exit on a key with an ACL: {job()}")
+        assert status().get("phase") == "stopped", status()
+        sh("chmod", "-N", str(key))
         sh("launchctl", "kickstart", f"system/{LABEL}")
         wait(lambda: daemon_pid() > 0 and status().get("phase") == "running" and proc.alive(status().get("pid") or 0),
              f"daemon did not recover with a private key: {job()} {status()}")
         check("secrets: key 0600, state 0700 and component log 0600 owned by the daemon user; another user cannot "
-              "read them; a group-readable key stops the daemon until fixed")
+              "read them; a group-readable key, or a 0600 key with an ACL granting another user read, stops the daemon "
+              "until fixed")
 
         wait(lambda: all(read(n) for n in RECORDED) and int(read("pid")) == status().get("pid"), "run did not record itself")
         third = recorded()
