@@ -71,9 +71,51 @@ pub struct Config {
     pub logs: Option<LogsConfig>,
     #[serde(default)]
     pub daemon_update: DaemonUpdateConfig,
+    /// Durable local streams and exports (SF-034); none when omitted.
+    #[serde(default)]
+    pub streams: Option<StreamsConfig>,
     /// The file this configuration was loaded from (for the update preflight).
     #[serde(skip)]
     pub path: PathBuf,
+}
+
+/// `[streams]`: durable local streams (docs/STREAMS.md). Streams with an
+/// export are declared here only: components cannot direct device-signed
+/// data to a destination.
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct StreamsConfig {
+    #[serde(default = "default_max_streams")]
+    pub max_streams: usize,
+    /// Sum of all streams' max_size (their disk/memory reservation).
+    #[serde(default = "default_streams_bytes")]
+    pub max_total_bytes: u64,
+    #[serde(default)]
+    pub definitions: Vec<crate::streams::Definition>,
+}
+fn default_max_streams() -> usize {
+    32
+}
+fn default_streams_bytes() -> u64 {
+    64 << 20
+}
+impl StreamsConfig {
+    pub fn quota(&self) -> crate::streams::Quota {
+        crate::streams::Quota { max_streams: self.max_streams, max_total_bytes: self.max_total_bytes }
+    }
+    pub fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!((1..=1024).contains(&self.max_streams), "streams.max_streams must be 1..=1024");
+        anyhow::ensure!((1024..=64 << 30).contains(&self.max_total_bytes), "streams.max_total_bytes must be 1 KiB..=64 GiB");
+        anyhow::ensure!(self.definitions.len() <= self.max_streams, "more stream definitions than streams.max_streams");
+        let mut names = std::collections::BTreeSet::new();
+        for def in &self.definitions {
+            def.validate().map_err(|e| anyhow::anyhow!("stream {:?}: {e}", def.name))?;
+            anyhow::ensure!(names.insert(&def.name), "stream {:?} is defined twice", def.name);
+        }
+        anyhow::ensure!(self.definitions.iter().map(|d| d.max_size).sum::<u64>() <= self.max_total_bytes,
+            "stream definitions exceed streams.max_total_bytes");
+        Ok(())
+    }
 }
 
 /// `[telemetry]`: signed snapshots to the fleet indexer (docs/TELEMETRY.md).
@@ -620,6 +662,9 @@ impl Config {
         if let Some(logs) = &cfg.logs {
             anyhow::ensure!(cfg.telemetry.is_some(), "[logs] needs [telemetry] (the fleet indexer URL)");
             logs.validate()?;
+        }
+        if let Some(streams) = &cfg.streams {
+            streams.validate()?;
         }
         Ok(cfg)
     }

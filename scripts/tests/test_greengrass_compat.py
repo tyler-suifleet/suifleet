@@ -19,10 +19,10 @@ class RepositoryTests(unittest.TestCase):
         self.assertTrue(all(count > 0 for count in counts.values()))
 
     def test_runtime_receipts_are_scoped_to_executed_suites(self):
-        # SF-057 and SF-032 executed their declared suites; all others remain pending.
+        # SF-057, SF-032 and SF-034 executed their declared suites; all others remain pending.
         matrix = json.loads((ROOT / compat.COMPAT / "greengrass-compat.json").read_text())
         self.assertEqual({name for name, s in matrix["suites"].items() if s["runtime_execution"] == "passed"},
-                         {"credential-provider-cases.json", "pubsub-cases.json"})
+                         {"credential-provider-cases.json", "pubsub-cases.json", "stream-cases.json"})
 
 
 class MatrixGateTests(unittest.TestCase):
@@ -61,7 +61,7 @@ class MatrixGateTests(unittest.TestCase):
         self.assertTrue(any("runtime_evidence" in e for e in self.errors(missing)))
 
     def test_pending_suite_needs_owner(self):
-        self.assertTrue(any("pending_on" in e for e in self.errors(lambda m: m["suites"]["stream-cases.json"].pop("pending_on"))))
+        self.assertTrue(any("pending_on" in e for e in self.errors(lambda m: m["suites"]["cloudwatch-logs-cases.json"].pop("pending_on"))))
 
     def test_partial_needs_existing_evidence(self):
         def missing(m):
