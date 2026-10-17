@@ -303,30 +303,40 @@ pub fn sources(state_dir: &Path) -> Vec<(String, PathBuf)> {
 }
 
 /// Confidential values to redact: every string leaf of every overlay.
-pub fn confidential_values(overlay_dir: &Path) -> Vec<String> {
+///
+/// Fails closed: a component keeps its materialized secrets while its
+/// overlay is being edited, so an overlay that cannot be listed, read or
+/// parsed must stop collection rather than ship lines unredacted. Errors
+/// name the file only, never its content.
+pub fn confidential_values(overlay_dir: &Path) -> anyhow::Result<Vec<String>> {
     let mut values = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(overlay_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().is_some_and(|e| e == "json") {
-                if let Ok(value) = std::fs::read(&path).map(|b| serde_json::from_slice::<serde_json::Value>(&b)) {
-                    if let Ok(value) = value {
-                        let mut leaves = Vec::new();
-                        redact::string_leaves(&value, &mut leaves);
-                        for leaf in leaves {
-                            // The shipper reads physical lines, so a value
-                            // spanning lines is matched line by line too.
-                            if leaf.contains(['\n', '\r']) {
-                                for part in leaf.split(['\n', '\r']) {
-                                    values.push(part.to_owned());
-                                    values.push(part.trim().to_owned());
-                                }
-                            }
-                            values.push(leaf);
-                        }
-                    }
+    let entries = match std::fs::read_dir(overlay_dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(values),
+        Err(error) => anyhow::bail!("cannot list configuration overlays: {}", error.kind()),
+    };
+    for entry in entries {
+        let path = entry.map_err(|error| anyhow::anyhow!("cannot list configuration overlays: {}", error.kind()))?.path();
+        if !path.extension().is_some_and(|e| e == "json") {
+            continue;
+        }
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let bytes = std::fs::read(&path).map_err(|error| anyhow::anyhow!("cannot read configuration overlay {name}: {}", error.kind()))?;
+        // The overlay holds secrets: a parse error must not quote its content.
+        let value: serde_json::Value =
+            serde_json::from_slice(&bytes).map_err(|_| anyhow::anyhow!("configuration overlay {name} is not valid JSON"))?;
+        let mut leaves = Vec::new();
+        redact::string_leaves(&value, &mut leaves);
+        for leaf in leaves {
+            // The shipper reads physical lines, so a value spanning lines
+            // is matched line by line too.
+            if leaf.contains(['\n', '\r']) {
+                for part in leaf.split(['\n', '\r']) {
+                    values.push(part.to_owned());
+                    values.push(part.trim().to_owned());
                 }
             }
+            values.push(leaf);
         }
     }
     // However short: a short value is over-redacted rather than exported.
@@ -335,7 +345,7 @@ pub fn confidential_values(overlay_dir: &Path) -> Vec<String> {
     // Longest first, so a value containing another is replaced whole.
     values.sort_by_key(|v| std::cmp::Reverse(v.len()));
     values.dedup();
-    values
+    Ok(values)
 }
 
 /// The most lines one PEM private-key block may hold (an 8192-bit RSA key
@@ -397,11 +407,12 @@ pub struct Task {
 
 impl Task {
     /// One interval: tail, redact and batch new lines into the spool, then
-    /// upload. Cursors advance only after the batches are spooled.
+    /// upload. Cursors advance only after the batches are spooled; nothing
+    /// is read when the confidential values cannot be loaded.
     pub fn collect(&self, spool: &mut telemetry::Spool) -> anyhow::Result<usize> {
+        let secrets = confidential_values(&self.overlay_dir)?;
         let path = self.state_dir.join("logs/shipper.json");
         let mut state: ShipperState = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-        let secrets = confidential_values(&self.overlay_dir);
         let mut records = Vec::new();
         let mut redactions = 0u64;
         let mut budget = self.max_lines;
@@ -741,6 +752,58 @@ mod tests {
         for fragment in ["Conf", "Q9", "123"] {
             assert!(!all.contains(fragment), "{fragment} exported");
         }
+    }
+
+    #[test]
+    fn collect_stops_while_an_overlay_cannot_be_loaded() {
+        let state = dir("collect-overlay-failure");
+        let overlays = state.join("overlays");
+        std::fs::create_dir_all(&overlays).unwrap();
+        std::fs::write(overlays.join("app.json"), r#"{"/key": "ConfidentialValueQ9"}"#).unwrap();
+        std::fs::create_dir_all(state.join("supervised/app")).unwrap();
+        let log = state.join("supervised/app/component.log");
+        append(&log, "first ConfidentialValueQ9\n");
+        let mut spool = telemetry::Spool::open(&state.join("logs/spool"), 100).unwrap();
+        assert_eq!(task(&state, 100).collect(&mut spool).unwrap(), 1);
+        let cursors = std::fs::read(state.join("logs/shipper.json")).unwrap();
+        append(&log, "login with ConfidentialValueQ9\n");
+        // Mid-edit (truncated), unreadable (a directory) and unlistable
+        // overlays: nothing is collected, spooled or advanced, across restarts.
+        let broken: [(&str, fn(&Path)); 3] = [
+            ("truncated", |o| std::fs::write(o.join("app.json"), "{").unwrap()),
+            ("unreadable", |o| {
+                std::fs::remove_file(o.join("app.json")).unwrap();
+                std::fs::create_dir(o.join("app.json")).unwrap();
+            }),
+            ("unlistable", |o| {
+                std::fs::remove_dir(o.join("app.json")).unwrap();
+                std::fs::remove_dir(o).unwrap();
+                std::fs::write(o, r#"{"/key": "ConfidentialValueQ9"}"#).unwrap();
+            }),
+        ];
+        for (case, breaks) in broken {
+            breaks(&overlays);
+            for _ in 0..2 {
+                let mut spool = telemetry::Spool::open(&state.join("logs/spool"), 100).unwrap();
+                let error = format!("{:#}", task(&state, 100).collect(&mut spool).unwrap_err());
+                assert!(!error.contains("Confidential") && !error.contains("Q9") && !error.contains('{'), "{case}: {error}");
+                assert_eq!(spool.pending().unwrap().len(), 1, "{case}");
+                assert_eq!(std::fs::read(state.join("logs/shipper.json")).unwrap(), cursors, "{case}");
+            }
+        }
+        // Restored: the held line ships redacted.
+        std::fs::remove_file(&overlays).unwrap();
+        std::fs::create_dir(&overlays).unwrap();
+        std::fs::write(overlays.join("app.json"), r#"{"/key": "ConfidentialValueQ9"}"#).unwrap();
+        let mut spool = telemetry::Spool::open(&state.join("logs/spool"), 100).unwrap();
+        assert_eq!(task(&state, 100).collect(&mut spool).unwrap(), 1);
+        let lines: Vec<String> = records(&spool).into_iter().map(|r| r.line).collect();
+        assert_eq!(lines, ["first [REDACTED]", "login with [REDACTED]"]);
+    }
+
+    #[test]
+    fn a_missing_overlay_directory_holds_no_confidential_values() {
+        assert!(confidential_values(&dir("no-overlays").join("absent")).unwrap().is_empty());
     }
 
     fn task(state: &Path, max_lines: usize) -> Task {
