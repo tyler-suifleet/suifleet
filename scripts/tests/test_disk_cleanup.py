@@ -38,6 +38,23 @@ class FakeSystem:
         self.process_paths, self.mount_list = list(processes), list(mounts)
         self.docker_ok, self.ticket_ok = docker_ok, ticket_ok
         self.on_evaluate = None
+        self.session = "cleanup-session"
+
+    def lock(self, project, resource, ticket, purpose, session=None):
+        """The coordinator's exclusive lease: a live lock of another session is refused."""
+        session = session or self.session
+        if not self.ticket_ok:
+            raise dc.Unverifiable("coordinator unavailable")
+        for held in self.locks_list:
+            if held["resource"] == resource and held.get("session") != session and held.get("expires", 0) > time.time():
+                raise dc.Unverifiable(f"{resource} is locked by session {held.get('session')}")
+        self.locks_list = [l for l in self.locks_list if l["resource"] != resource]
+        self.locks_list.append({"resource": resource, "ticket": ticket, "purpose": purpose, "session": session,
+                                "expires": time.time() + 900, "token": f"tok-{resource}"})
+        return f"tok-{resource}"
+
+    def unlock(self, project, resource, token):
+        self.locks_list = [l for l in self.locks_list if l.get("token") != token]
 
     def claims(self, project):
         if not self.ticket_ok:
@@ -260,17 +277,27 @@ class ApplyTests(Fixture):
         with self.assertRaises(SystemExit):
             dc.apply(self.config(), system, {"kind": "other"})
 
-    def during_final_scan(self, action):
-        """Run `action` inside apply's scan of the renamed-aside tree."""
+    def during_apply_scan(self, action):
+        """Run `action` inside apply's in-place scan of each candidate."""
         real = dc.measure
 
         def measure(path, *args, **kwargs):
-            if ".retiring-" in str(path):
+            if args or kwargs:
                 action(Path(path))
             return real(path, *args, **kwargs)
         return mock.patch.object(dc, "measure", measure)
 
-    def test_lock_or_process_appearing_during_final_scan_aborts_and_restores(self):
+    def before_rename(self, action):
+        """Run `action` immediately before apply renames a candidate aside."""
+        real = os.rename
+
+        def rename(src, dst, *args, **kwargs):
+            if ".retiring-" in str(dst):
+                action(Path(src))
+            return real(src, dst, *args, **kwargs)
+        return mock.patch.object(dc.os, "rename", rename)
+
+    def test_lock_or_process_appearing_during_scan_aborts_without_moving(self):
         a = self.worktree("SF-110")
         b = self.worktree("SF-111")
         c = self.worktree("SF-112")
@@ -278,35 +305,122 @@ class ApplyTests(Fixture):
         plan = self.plan(system)
         self.assertEqual(len(plan["candidates"]), 3)
 
-        def race(aside):
-            name = aside.parent.name
+        def race(path):
+            # Each output must still be in place and usable during the scan.
+            self.assertEqual(len((path / "debug/app").read_bytes()), 100_000)
+            name = path.parent.name
             if name == "sf-110":
                 system.locks_list.append({"resource": "build:sf-110", "purpose": "SF-110 rebuild", "expires": time.time() + 600})
             elif name == "sf-111":
-                system.process_paths.append(str(aside / "debug"))
+                system.process_paths.append(str(path / "debug"))
             else:
                 system.claims_list[2]["status"] = "in_progress"
-        with self.during_final_scan(race):
+        renamed = []
+        with self.during_apply_scan(race), self.before_rename(renamed.append):
             result = dc.apply(self.config(), system, plan)
+        self.assertEqual(renamed, [], "a refused output is never moved")
         by_ticket = {r["ticket"]: r for r in result["results"]}
         self.assertIn("build:sf-110", by_ticket["SF-110"]["reason"])
         self.assertIn("in use by a process", by_ticket["SF-111"]["reason"])
         self.assertIn("ticket status in_progress", by_ticket["SF-112"]["reason"])
         for path in (a, b, c):
-            self.assertTrue((path / "target/debug/app").exists(), "aborted candidates are renamed back intact")
+            self.assertTrue((path / "target/debug/app").exists(), "aborted candidates stay intact")
             self.assertEqual(list(path.glob(".target.retiring-*")), [])
         self.assertTrue(all(r["result"] == "skipped" for r in result["results"]))
         self.assertEqual(result["measured_freed_bytes"], 0)
 
-    def test_recreated_output_during_final_scan_keeps_old_tree_aside(self):
-        a = self.worktree("SF-115")
+    def test_worker_is_excluded_by_the_cleanup_lock_until_deletion_is_decided(self):
+        a = self.worktree("SF-200")
+        system = FakeSystem(self.claims)
+        plan = self.plan(system)
+        refused = []
+
+        def worker(path):
+            # A cooperative worker locks its build resource just before the rename.
+            with self.assertRaises(dc.Unverifiable) as error:
+                system.lock(None, "build:SF-200", "SF-200", "SF-200 rebuild", session="worker")
+            refused.append(str(error.exception))
+            self.assertTrue((path / "debug/app").exists(), "output is in place until the rename")
+        with self.before_rename(worker):
+            result = dc.apply(self.config(), system, plan)
+        self.assertEqual(len(refused), 1)
+        self.assertIn("cleanup-session", refused[0])
+        self.assertEqual(result["results"][0]["result"], "removed")
+        self.assertEqual(system.locks_list, [], "the exclusion lock is released")
+        # Once released, the worker gets the lock and a fresh output.
+        system.lock(None, "build:SF-200", "SF-200", "SF-200 rebuild", session="worker")
+
+    def test_worker_lock_taken_during_scan_blocks_the_cleanup_lock(self):
+        a = self.worktree("SF-201")
+        system = FakeSystem(self.claims)
+        plan = self.plan(system)
+        renamed = []
+        with self.during_apply_scan(lambda path: system.lock(None, "build:SF-201", "SF-201", "rebuild", session="worker")), \
+                self.before_rename(renamed.append):
+            result = dc.apply(self.config(), system, plan)
+        self.assertEqual(result["results"][0]["result"], "skipped")
+        self.assertIn("build:SF-201", result["results"][0]["reason"])
+        self.assertEqual(renamed, [])
+        self.assertTrue((a / "target/debug/app").exists())
+        # The coordinator being unavailable for the lock also fails closed.
+        system = FakeSystem(self.claims)
+        system.lock = mock.Mock(side_effect=dc.Unverifiable("coordinator unavailable"))
+        result = dc.apply(self.config(), system, self.plan(FakeSystem(self.claims)))
+        self.assertIn("exclusion lock build:SF-201 not available", result["results"][0]["reason"])
+        self.assertTrue((a / "target/debug/app").exists())
+
+    def test_uncooperative_lock_or_process_before_rename_is_caught_and_restored(self):
+        a = self.worktree("SF-202")
+        b = self.worktree("SF-203")
         system = FakeSystem(self.claims)
         plan = self.plan(system)
 
-        def race(aside):
-            system.process_paths.append(str(aside))
-            (aside.parent / "target").mkdir()
-        with self.during_final_scan(race):
+        def race(path):
+            if path.parent.name == "sf-202":
+                system.locks_list.append({"resource": "build:pr-other", "purpose": "SF-202 rebuild", "session": "w",
+                                          "expires": time.time() + 600})
+            else:
+                system.process_paths.append(str(path.with_name(".target.retiring-%d" % os.getpid()) / "debug/app"))
+        with self.before_rename(race):
+            result = dc.apply(self.config(), system, plan)
+        by_ticket = {r["ticket"]: r for r in result["results"]}
+        self.assertIn("build:pr-other", by_ticket["SF-202"]["reason"])
+        self.assertIn("in use by a process", by_ticket["SF-203"]["reason"])
+        for path in (a, b):
+            self.assertTrue((path / "target/debug/app").exists(), "renamed back intact")
+            self.assertEqual(list(path.glob(".target.retiring-*")), [])
+        self.assertEqual([l["resource"] for l in system.locks_list], ["build:pr-other"])
+
+    def test_external_hard_links_are_not_counted_as_freed(self):
+        a = self.worktree("SF-204")
+        outside = self.tmp / "kept-link"
+        os.link(a / "target/debug/app", outside)
+        age(a, 10)
+        age(self.root / ".git/worktrees/sf-204", 10)
+        whole = dc.measure(self.tmp)
+        self.assertEqual(whole["exclusive_bytes"], whole["bytes"], "links that are all inside a tree are freed with it")
+        system = FakeSystem(self.claims)
+        plan = self.plan(system)
+        self.assertLess(plan["candidate_exclusive_bytes"], 100_000)
+        result = dc.apply(self.config(), system, plan)
+        record = result["results"][0]
+        self.assertEqual(record["result"], "removed")
+        self.assertGreaterEqual(record["removed_allocated_bytes"], 100_000)
+        self.assertLess(record["freed_bytes"], 100_000, "blocks still linked outside are not reclaimed")
+        self.assertEqual(len(outside.read_bytes()), 100_000)
+
+    def test_recreated_output_after_rename_keeps_old_tree_aside(self):
+        a = self.worktree("SF-115")
+        system = FakeSystem(self.claims)
+        plan = self.plan(system)
+        real = os.rename
+
+        def rename(src, dst):
+            real(src, dst)
+            if ".retiring-" in str(dst):
+                system.process_paths.append(str(dst))
+                Path(src).mkdir()
+        with mock.patch.object(dc.os, "rename", rename):
             result = dc.apply(self.config(), system, plan)
         record = result["results"][0]
         self.assertEqual(record["result"], "skipped")
@@ -356,7 +470,7 @@ class ApplyTests(Fixture):
         # Becoming uninspectable during apply also aborts.
         system = FakeSystem(self.claims)
         plan = self.plan(system)
-        with self.during_final_scan(lambda aside: system.uninspectable.append(4242)):
+        with self.during_apply_scan(lambda path: system.uninspectable.append(4242)):
             result = dc.apply(self.config(), system, plan)
         self.assertEqual(result["results"][0]["result"], "skipped")
         self.assertTrue((a / "target/debug/app").exists())
