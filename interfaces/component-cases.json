@@ -132,6 +132,171 @@
     "selected": 0
   },
   {
+    "name": "macOS device selects its manifest",
+    "value": {
+      "catalog_id": "0x1",
+      "publisher": "0x2",
+      "component_name": "app",
+      "version": "1.2.3-rc.1+build.1",
+      "schema_version": "1",
+      "platform_os": [
+        "linux",
+        "macos"
+      ],
+      "platform_arch": [
+        "aarch64",
+        "aarch64"
+      ],
+      "recipe_blob_ids": [
+        "recipe_x86",
+        "recipe_arm"
+      ],
+      "recipe_sha256s": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "artifact_sha256s": [
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      ]
+    },
+    "os": "macos",
+    "arch": "aarch64",
+    "selected": 1
+  },
+  {
+    "name": "linux device skips a macOS manifest",
+    "value": {
+      "catalog_id": "0x1",
+      "publisher": "0x2",
+      "component_name": "app",
+      "version": "1.2.3-rc.1+build.1",
+      "schema_version": "1",
+      "platform_os": [
+        "macos",
+        "linux"
+      ],
+      "platform_arch": [
+        "aarch64",
+        "aarch64"
+      ],
+      "recipe_blob_ids": [
+        "recipe_x86",
+        "recipe_arm"
+      ],
+      "recipe_sha256s": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "artifact_sha256s": [
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      ]
+    },
+    "os": "linux",
+    "arch": "aarch64",
+    "selected": 1
+  },
+  {
+    "name": "macOS-only version is unavailable on linux",
+    "value": {
+      "catalog_id": "0x1",
+      "publisher": "0x2",
+      "component_name": "app",
+      "version": "1.2.3-rc.1+build.1",
+      "schema_version": "1",
+      "platform_os": [
+        "macos",
+        "macos"
+      ],
+      "platform_arch": [
+        "x86_64",
+        "aarch64"
+      ],
+      "recipe_blob_ids": [
+        "recipe_x86",
+        "recipe_arm"
+      ],
+      "recipe_sha256s": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "artifact_sha256s": [
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      ]
+    },
+    "os": "linux",
+    "arch": "x86_64",
+    "selected": null
+  },
+  {
+    "name": "wildcard os serves macOS",
+    "value": {
+      "catalog_id": "0x1",
+      "publisher": "0x2",
+      "component_name": "app",
+      "version": "1.2.3-rc.1+build.1",
+      "schema_version": "1",
+      "platform_os": [
+        "*",
+        "linux"
+      ],
+      "platform_arch": [
+        "x86_64",
+        "aarch64"
+      ],
+      "recipe_blob_ids": [
+        "recipe_x86",
+        "recipe_arm"
+      ],
+      "recipe_sha256s": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "artifact_sha256s": [
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      ]
+    },
+    "os": "macos",
+    "arch": "x86_64",
+    "selected": 0
+  },
+  {
+    "name": "reject platform_os darwin",
+    "value": {
+      "catalog_id": "0x1",
+      "publisher": "0x2",
+      "component_name": "app",
+      "version": "1.2.3-rc.1+build.1",
+      "schema_version": "1",
+      "platform_os": [
+        "linux",
+        "darwin"
+      ],
+      "platform_arch": [
+        "x86_64",
+        "aarch64"
+      ],
+      "recipe_blob_ids": [
+        "recipe_x86",
+        "recipe_arm"
+      ],
+      "recipe_sha256s": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "artifact_sha256s": [
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      ]
+    },
+    "os": "linux",
+    "arch": "x86_64",
+    "selected": null
+  },
+  {
     "name": "reject version 1.02.3",
     "value": {
       "catalog_id": "0x1",
