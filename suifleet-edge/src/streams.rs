@@ -673,12 +673,8 @@ impl Store {
         self.streams.keys().cloned().collect()
     }
 
-    pub fn definition(&self, name: &str) -> Option<&Definition> {
-        self.streams.get(name).map(|s| &s.def)
-    }
-
-    fn reserved_bytes(&self, except: Option<&str>) -> u64 {
-        self.streams.values().filter(|s| Some(s.def.name.as_str()) != except).map(|s| s.def.max_size).sum()
+    fn reserved_bytes(&self) -> u64 {
+        self.streams.values().map(|s| s.def.max_size).sum()
     }
 
     pub fn create(&mut self, def: Definition) -> anyhow::Result<()> {
@@ -686,7 +682,7 @@ impl Store {
             return fail("exists", format!("stream {:?} exists", def.name));
         }
         def.validate()?;
-        if self.streams.len() >= self.quota.max_streams || self.reserved_bytes(None) + def.max_size > self.quota.max_total_bytes {
+        if self.streams.len() >= self.quota.max_streams || self.reserved_bytes() + def.max_size > self.quota.max_total_bytes {
             return fail("quota", "stream quota exceeded (max_streams / max_total_bytes)");
         }
         let dir = self.dir.join(dir_name(&def.name));
@@ -705,20 +701,8 @@ impl Store {
         Ok(())
     }
 
-    /// Apply an operator definition to an existing stream (persistence fixed).
-    pub fn reconfigure(&mut self, def: Definition, now_ms: u64) -> anyhow::Result<()> {
-        def.validate()?;
-        let others = self.reserved_bytes(Some(&def.name));
-        let quota = self.quota;
-        let stream = self.get(&def.name)?;
-        if stream.def == def {
-            return Ok(());
-        }
-        anyhow::ensure!(stream.def.persistence == def.persistence, "stream {:?}: persistence cannot change; delete and recreate it", def.name);
-        anyhow::ensure!(others + def.max_size <= quota.max_total_bytes, "stream {:?}: max_size exceeds the stream quota", def.name);
-        self.apply(def, now_ms)
-    }
-
+    /// Apply an operator definition to an existing stream; `start` has
+    /// checked its persistence and the quota.
     fn apply(&mut self, def: Definition, now_ms: u64) -> anyhow::Result<()> {
         let stream = self.get(&def.name)?;
         if stream.def == def {
@@ -1198,7 +1182,8 @@ mod tests {
         assert_eq!(code(&discard.validate().unwrap_err()), "invalid");
         discard.export = Some(ExportConfig { url: "http://127.0.0.1:9/x".into(), bearer_token_file: None, batch_max_messages: 2,
             batch_max_bytes: 1024, batch_interval_seconds: 1, max_backoff_seconds: 5 });
-        store.reconfigure(discard, 0).unwrap();
+        drop(store);
+        let mut store = Store::start(&path, Quota { max_streams: 2, max_total_bytes: 4096 }, &[discard], 0).unwrap();
         for i in 0..3u8 {
             store.append("second", &[i; 250], 0).unwrap();
         }
@@ -1207,7 +1192,7 @@ mod tests {
         assert_eq!(first.iter().map(|m| m.sequence).collect::<Vec<_>>(), vec![0, 1], "batch_max_messages");
         store.export_ack("second", 1, 0).unwrap();
         assert_eq!(store.append("second", &[9; 250], 0).unwrap(), 3, "exported messages discarded to make room");
-        let bad = ExportConfig { url: "http://user:pw@host/x".into(), ..store.definition("second").unwrap().export.clone().unwrap() };
+        let bad = ExportConfig { url: "http://user:pw@host/x".into(), ..store.streams["second"].def.export.clone().unwrap() };
         assert!(bad.validate().is_err(), "no credentials in URLs");
         assert_eq!(code(&store.append("missing", b"x", 0).unwrap_err()), "not-found");
         let _ = std::fs::remove_dir_all(&path);
@@ -1246,7 +1231,7 @@ mod tests {
         drop(store);
         let both = [def("a", 4096, Strategy::RejectNewData), def("b", 4096, Strategy::RejectNewData)];
         let mut store = Store::start(&path, Quota { max_streams: 2, max_total_bytes: 8192 }, &both, 0).unwrap();
-        assert_eq!(store.reserved_bytes(None), 8192);
+        assert_eq!(store.reserved_bytes(), 8192);
         store.append("b", &[0; 1500], 0).unwrap();
         store.append("b", &[0; 1500], 0).unwrap();
         assert_eq!(code(&store.append("b", &[0; 1500], 0).unwrap_err()), "full", "the new size is enforced");
