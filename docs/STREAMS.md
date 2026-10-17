@@ -46,7 +46,8 @@ max_backoff_seconds = 300                 # retry backoff cap, 1..=3600
   - Fewer than `min` messages at or after `start` returns `not-enough-messages`.
   - Reads do not consume: each consumer keeps its own cursor.
 - **Persistence.**
-  - `File` streams append CRC-framed records to segment files under `<state_dir>/streams/<hex name>/`, and sync each append before returning its sequence number. On open, a torn record at the end is truncated. A corrupt record ends its segment, and the result is counted in `corrupt_segments`. Segments are deleted once all their messages are retired. Disk use is at most `max_size` plus one segment, which is `max_size/8` clamped to 4 KiB–4 MiB.
+  - Each stream has a directory named by the SHA-256 of its name, so every valid name fits the file name limit. A stream whose state cannot be opened is left untouched, and creating a stream with its name fails with `exists`.
+  - `File` streams append CRC-framed records to segment files under `<state_dir>/streams/<SHA-256 of the name, hex>/`, and sync each append before returning its sequence number. On open, a torn record at the end is truncated. A corrupt record ends its segment, and the result is counted in `corrupt_segments`. Segments are deleted once all their messages are retired. Disk use is at most `max_size` plus one segment, which is `max_size/8` clamped to 4 KiB–4 MiB.
   - `Memory` streams keep their messages in memory and lose them on restart. Their numbering continues as above.
 - **Quota.** A stream reserves its `max_size` against `max_total_bytes`, so creating it fails with `quota` if the sum would exceed the limit, or if `max_streams` is reached.
 - **Messages.** A message is 1 byte up to min(`max_size`, 1 MiB) in the store. Over IPC, the payload is any JSON value, and its compact JSON bytes are what is stored and counted. The 64 KiB IPC frame limits a single append.

@@ -302,7 +302,7 @@ def run(evidence=None):
             for i in range(30, 35):
                 ipc(PRODUCER, "stream_append", "telemetry", {"i": i})
             stop(kill=True)
-            segment = max((state / "streams" / "telemetry".encode().hex()).glob("*.seg"))
+            segment = max((state / "streams" / hashlib.sha256(b"telemetry").hexdigest()).glob("*.seg"))
             with segment.open("ab") as f:
                 f.write(b"\x09\x00\x00\x00torn")
             start()

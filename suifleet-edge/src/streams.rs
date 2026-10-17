@@ -4,7 +4,7 @@
 //! A stream is a bounded sequence of messages numbered from 0, gap-free at
 //! append and never reused, even after eviction or restart. `File` streams
 //! live in CRC-framed append-only segment files under
-//! `<state_dir>/streams/<hex name>/` and survive crashes: a torn record at
+//! `<state_dir>/streams/<sha256(name) hex>/` and survive crashes: a torn record at
 //! the tail is truncated on open. `Memory` streams keep messages in memory and
 //! persist only their definition and sequence counter. When full, a stream
 //! rejects new data or overwrites its oldest messages; a time-to-live and
@@ -278,6 +278,13 @@ fn crc32(parts: &[&[u8]]) -> u32 {
     !crc
 }
 
+/// A stream's directory name: fixed length, so every valid name (up to 255
+/// bytes) fits the 255-byte file name limit. `Store::open` reads the name from
+/// `meta.json`, never from the directory.
+fn dir_name(name: &str) -> String {
+    hex::encode(Sha256::digest(name.as_bytes()))
+}
+
 fn segment_path(dir: &Path, first: u64) -> PathBuf {
     dir.join(format!("{first:020}.seg"))
 }
@@ -530,7 +537,11 @@ impl Store {
         if self.streams.len() >= self.quota.max_streams || self.reserved_bytes(None) + def.max_size > self.quota.max_total_bytes {
             return fail("quota", "stream quota exceeded (max_streams / max_total_bytes)");
         }
-        let dir = self.dir.join(hex::encode(def.name.as_bytes()));
+        let dir = self.dir.join(dir_name(&def.name));
+        if dir.join("meta.json").exists() {
+            // A stream that failed to open is left untouched, not overwritten.
+            return fail("exists", format!("stream {:?} has unreadable state on disk", def.name));
+        }
         std::fs::create_dir_all(&dir)?;
         let stream = Stream {
             def: def.clone(), dir, entries: VecDeque::new(), bytes: 0, next: 0, oldest: 0, exported: -1, reserved: 0,
@@ -922,7 +933,7 @@ mod tests {
             store.append("s", format!("message {i}").as_bytes(), 10).unwrap();
         }
         std::mem::forget(store); // a crash: nothing closed
-        let seg = std::fs::read_dir(path.join(hex::encode("s"))).unwrap().map(|e| e.unwrap().path())
+        let seg = std::fs::read_dir(path.join(dir_name("s"))).unwrap().map(|e| e.unwrap().path())
             .filter(|p| p.extension().is_some_and(|e| e == "seg")).max().unwrap();
         // A torn append: half a header and garbage.
         std::fs::OpenOptions::new().append(true).open(&seg).unwrap().write_all(&[9, 0, 0, 0, 1, 2, 3]).unwrap();
@@ -960,7 +971,7 @@ mod tests {
         }
         let d = store.describe("o", 1000).unwrap();
         assert_eq!((d["newest"].as_i64(), d["bytes"].as_u64()), (Some(999), Some(8100)));
-        let disk: u64 = std::fs::read_dir(path.join(hex::encode("o"))).unwrap().map(|e| e.unwrap().metadata().unwrap().len()).sum();
+        let disk: u64 = std::fs::read_dir(path.join(dir_name("o"))).unwrap().map(|e| e.unwrap().metadata().unwrap().len()).sum();
         assert!(disk < 8192 * 3, "evicted segments are deleted ({disk} bytes on disk)");
         let oldest = d["oldest"].as_u64().unwrap();
         std::mem::forget(store);
@@ -1024,7 +1035,30 @@ mod tests {
         let mut store = Store::open(&path, QUOTA, 0).unwrap();
         let next = store.append("m", b"y", 0).unwrap();
         assert!((5..=RESERVE).contains(&next), "after a crash numbering skips ahead, never back ({next})");
-        assert!(!std::fs::read_dir(path.join(hex::encode("m"))).unwrap().any(|e| e.unwrap().path().extension().is_some_and(|x| x == "seg")));
+        assert!(!std::fs::read_dir(path.join(dir_name("m"))).unwrap().any(|e| e.unwrap().path().extension().is_some_and(|x| x == "seg")));
+        let _ = std::fs::remove_dir_all(&path);
+    }
+
+    #[test]
+    fn longest_names_create_reopen_and_delete() {
+        let path = dir("names");
+        let long = "n".repeat(255);
+        let mut store = Store::open(&path, QUOTA, 0).unwrap();
+        store.create(def(&long, 4096, Strategy::RejectNewData)).unwrap();
+        store.append(&long, b"kept", 0).unwrap();
+        drop(store);
+        let mut store = Store::open(&path, QUOTA, 0).unwrap();
+        assert_eq!(store.read(&long, 0, 1, 1, 0).unwrap()[0].data, b"kept");
+        store.delete(&long).unwrap();
+        assert!(store.names().is_empty() && std::fs::read_dir(&path).unwrap().next().is_none());
+        // State that cannot be opened is left untouched, not recreated over.
+        let broken = path.join(dir_name("b"));
+        std::fs::create_dir(&broken).unwrap();
+        std::fs::write(broken.join("meta.json"), b"not json").unwrap();
+        let mut store = Store::open(&path, QUOTA, 0).unwrap();
+        assert_eq!(code(&store.create(def("b", 4096, Strategy::RejectNewData)).unwrap_err()), "exists");
+        assert_eq!(std::fs::read(broken.join("meta.json")).unwrap(), b"not json");
+        drop(store);
         let _ = std::fs::remove_dir_all(&path);
     }
 
