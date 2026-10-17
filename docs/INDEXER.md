@@ -54,7 +54,7 @@ suifleet-indexer serve --manifest deployment.json --db /var/lib/suifleet-indexer
 
 ## Auth
 
-**Token file.** `--tokens FILE` holds one `read|operate TOKEN` per line. Tokens must be at least 32 characters, are compared in constant time, and `#` starts a comment. Generate them with, for example, `openssl rand -hex 32`. Keep the file `0600`, owned by the service user.
+**Token file.** `--tokens FILE` holds one `read|support|operate TOKEN` per line. `support` adds device log search and diagnostic bundles, each access audited ([LOGS.md](LOGS.md)); `operate` covers both. Tokens must be at least 32 characters, are compared in constant time, and `#` starts a comment. Generate them with, for example, `openssl rand -hex 32`. Keep the file `0600`, owned by the service user.
 
 **Scopes.** Clients send `Authorization: Bearer TOKEN`.
 - `read` covers `GET`.
@@ -77,6 +77,7 @@ suifleet-indexer serve --manifest deployment.json --db /var/lib/suifleet-indexer
 | `GET /v1/changes?after=SEQ&limit=&wait=SECONDS` | Integration feed: `{seq, kind, object_id, checkpoint, payload}` in order. Long-polls up to 30 s. Resume with `after=next` |
 | `POST /v1/telemetry` | Signed device telemetry ingress (SF-019). It takes no token, because each snapshot carries the device's own signature. See [TELEMETRY.md](TELEMETRY.md) |
 | `GET /v1/health`, `/v1/health/summary`, `/v1/devices/{id}/telemetry` | Device status, last seen and inventory; fleet counts; stored signed reports ([TELEMETRY.md](TELEMETRY.md)). Need `--telemetry-db` |
+| `POST /v1/logs`; `GET /v1/devices/{id}/logs`, `/v1/devices/{id}/diagnostics` (support); `/v1/support/audit` (operate); `/v1/alerts` | Signed device log ingress, log search, diagnostic bundles, the support audit log and actionable alerts ([LOGS.md](LOGS.md)). Need `--telemetry-db` |
 | `POST /v1/transactions/{add-devices,remove-devices,create-deployment}` | `{transaction, digest, sender, summary}`: base64 BCS of the sign-ready transaction, with gas and versions resolved by node simulation |
 
 **Pagination.**

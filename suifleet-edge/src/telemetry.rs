@@ -480,6 +480,11 @@ struct Response {
 /// Upload the spool oldest first, in batches, until it is empty or the
 /// indexer cannot take more now. Returns how many envelopes left the spool.
 pub async fn flush(http: &reqwest::Client, url: &reqwest::Url, spool: &Spool) -> anyhow::Result<usize> {
+    flush_as(http, url, spool, "Telemetry", "snapshot").await
+}
+
+/// [`flush`] for any signed envelope stream (`what` and `item` name it in logs).
+pub async fn flush_as(http: &reqwest::Client, url: &reqwest::Url, spool: &Spool, what: &str, item: &str) -> anyhow::Result<usize> {
     let mut removed = 0;
     loop {
         let pending = spool.pending()?;
@@ -497,15 +502,15 @@ pub async fn flush(http: &reqwest::Client, url: &reqwest::Url, spool: &Spool) ->
             .send()
             .await?;
         let status = response.status();
-        anyhow::ensure!(status.is_success(), "telemetry ingress answered {status}");
+        anyhow::ensure!(status.is_success(), "{what} ingress answered {status}");
         let verdicts: Response = response.json().await?;
-        anyhow::ensure!(verdicts.results.len() == batch.len(), "telemetry ingress answered for another batch");
+        anyhow::ensure!(verdicts.results.len() == batch.len(), "{what} ingress answered for another batch");
         for ((seq, path), verdict) in batch.iter().zip(&verdicts.results) {
             match verdict.status.as_str() {
                 "accepted" | "duplicate" => {}
-                "rejected" => warn!(seq, error = verdict.error.as_deref().unwrap_or(""), "Telemetry snapshot rejected; dropped"),
+                "rejected" => warn!(seq, error = verdict.error.as_deref().unwrap_or(""), "{what} {item} rejected; dropped"),
                 _ => {
-                    info!(seq, error = verdict.error.as_deref().unwrap_or(""), "Telemetry ingress deferred a snapshot; kept for retry");
+                    info!(seq, error = verdict.error.as_deref().unwrap_or(""), "{what} ingress deferred a {item}; kept for retry");
                     return Ok(removed);
                 }
             }

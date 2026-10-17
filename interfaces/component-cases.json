@@ -723,5 +723,236 @@
     "os": "linux",
     "arch": "x86_64",
     "selected": null
+  },
+  {
+    "name": "exact 32-bit x86",
+    "value": {
+      "catalog_id": "0x1",
+      "publisher": "0x2",
+      "component_name": "app",
+      "version": "1.2.3-rc.1+build.1",
+      "schema_version": "1",
+      "platform_os": [
+        "linux",
+        "linux"
+      ],
+      "platform_arch": [
+        "x86_64",
+        "x86"
+      ],
+      "recipe_blob_ids": [
+        "recipe_x86",
+        "recipe_arm"
+      ],
+      "recipe_sha256s": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "artifact_sha256s": [
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      ]
+    },
+    "os": "linux",
+    "arch": "x86",
+    "selected": 1
+  },
+  {
+    "name": "x86_64 device never selects 32-bit x86",
+    "value": {
+      "catalog_id": "0x1",
+      "publisher": "0x2",
+      "component_name": "app",
+      "version": "1.2.3-rc.1+build.1",
+      "schema_version": "1",
+      "platform_os": [
+        "linux",
+        "linux"
+      ],
+      "platform_arch": [
+        "x86",
+        "x86_64"
+      ],
+      "recipe_blob_ids": [
+        "recipe_x86",
+        "recipe_arm"
+      ],
+      "recipe_sha256s": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "artifact_sha256s": [
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      ]
+    },
+    "os": "linux",
+    "arch": "x86_64",
+    "selected": 1
+  },
+  {
+    "name": "32-bit x86 device never selects x86_64",
+    "value": {
+      "catalog_id": "0x1",
+      "publisher": "0x2",
+      "component_name": "app",
+      "version": "1.2.3-rc.1+build.1",
+      "schema_version": "1",
+      "platform_os": [
+        "linux",
+        "linux"
+      ],
+      "platform_arch": [
+        "x86_64",
+        "aarch64"
+      ],
+      "recipe_blob_ids": [
+        "recipe_x86",
+        "recipe_arm"
+      ],
+      "recipe_sha256s": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "artifact_sha256s": [
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      ]
+    },
+    "os": "linux",
+    "arch": "x86",
+    "selected": null
+  },
+  {
+    "name": "32-bit x86 wildcard fallback",
+    "value": {
+      "catalog_id": "0x1",
+      "publisher": "0x2",
+      "component_name": "app",
+      "version": "1.2.3-rc.1+build.1",
+      "schema_version": "1",
+      "platform_os": [
+        "linux",
+        "linux"
+      ],
+      "platform_arch": [
+        "x86_64",
+        "*"
+      ],
+      "recipe_blob_ids": [
+        "recipe_x86",
+        "recipe_arm"
+      ],
+      "recipe_sha256s": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "artifact_sha256s": [
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      ]
+    },
+    "os": "linux",
+    "arch": "x86",
+    "selected": 1
+  },
+  {
+    "name": "reject platform_arch['x86', 'i686']",
+    "value": {
+      "catalog_id": "0x1",
+      "publisher": "0x2",
+      "component_name": "app",
+      "version": "1.2.3-rc.1+build.1",
+      "schema_version": "1",
+      "platform_os": [
+        "linux",
+        "linux"
+      ],
+      "platform_arch": [
+        "x86",
+        "i686"
+      ],
+      "recipe_blob_ids": [
+        "recipe_x86",
+        "recipe_arm"
+      ],
+      "recipe_sha256s": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "artifact_sha256s": [
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      ]
+    },
+    "os": "linux",
+    "arch": "x86",
+    "selected": null
+  },
+  {
+    "name": "reject platform_arch['x86', 'i386']",
+    "value": {
+      "catalog_id": "0x1",
+      "publisher": "0x2",
+      "component_name": "app",
+      "version": "1.2.3-rc.1+build.1",
+      "schema_version": "1",
+      "platform_os": [
+        "linux",
+        "linux"
+      ],
+      "platform_arch": [
+        "x86",
+        "i386"
+      ],
+      "recipe_blob_ids": [
+        "recipe_x86",
+        "recipe_arm"
+      ],
+      "recipe_sha256s": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "artifact_sha256s": [
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      ]
+    },
+    "os": "linux",
+    "arch": "x86",
+    "selected": null
+  },
+  {
+    "name": "reject duplicate 32-bit x86",
+    "value": {
+      "catalog_id": "0x1",
+      "publisher": "0x2",
+      "component_name": "app",
+      "version": "1.2.3-rc.1+build.1",
+      "schema_version": "1",
+      "platform_os": [
+        "linux",
+        "linux"
+      ],
+      "platform_arch": [
+        "x86",
+        "x86"
+      ],
+      "recipe_blob_ids": [
+        "recipe_x86",
+        "recipe_arm"
+      ],
+      "recipe_sha256s": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "artifact_sha256s": [
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      ]
+    },
+    "os": "linux",
+    "arch": "x86",
+    "selected": null
   }
 ]

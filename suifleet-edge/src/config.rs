@@ -17,6 +17,9 @@ pub struct Config {
     /// Heartbeat and health telemetry (SF-019); none when omitted.
     #[serde(default)]
     pub telemetry: Option<TelemetryConfig>,
+    /// Redacted remote logs (SF-020); needs `[telemetry]` for the indexer URL.
+    #[serde(default)]
+    pub logs: Option<LogsConfig>,
     #[serde(default)]
     pub daemon_update: DaemonUpdateConfig,
     /// The file this configuration was loaded from (for the update preflight).
@@ -36,6 +39,42 @@ pub struct TelemetryConfig {
     /// this are dropped (and counted in later snapshots).
     #[serde(default = "default_telemetry_buffer")]
     pub buffer_max: usize,
+}
+
+/// `[logs]`: redacted, signed log batches to the fleet indexer (docs/LOGS.md).
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct LogsConfig {
+    #[serde(default = "default_telemetry_interval")]
+    pub interval_seconds: u64,
+    /// Lines read per interval; the rest waits for later intervals.
+    #[serde(default = "default_logs_lines")]
+    pub max_lines_per_interval: usize,
+    /// Batches kept while the indexer is unreachable.
+    #[serde(default = "default_logs_buffer")]
+    pub buffer_max: usize,
+}
+fn default_logs_lines() -> usize {
+    512
+}
+fn default_logs_buffer() -> usize {
+    256
+}
+
+impl LogsConfig {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        use crate::telemetry::{MAX_BUFFER, MAX_INTERVAL_SECONDS, MIN_INTERVAL_SECONDS};
+        anyhow::ensure!(
+            (MIN_INTERVAL_SECONDS..=MAX_INTERVAL_SECONDS).contains(&self.interval_seconds),
+            "logs.interval_seconds must be {MIN_INTERVAL_SECONDS}..={MAX_INTERVAL_SECONDS}"
+        );
+        anyhow::ensure!(
+            (1..=crate::logs::MAX_LINES_PER_INTERVAL).contains(&self.max_lines_per_interval),
+            "logs.max_lines_per_interval must be 1..={}", crate::logs::MAX_LINES_PER_INTERVAL
+        );
+        anyhow::ensure!((1..=MAX_BUFFER).contains(&self.buffer_max), "logs.buffer_max must be 1..={MAX_BUFFER}");
+        Ok(())
+    }
 }
 
 fn default_telemetry_interval() -> u64 {
@@ -528,6 +567,10 @@ impl Config {
         if let Some(telemetry) = &cfg.telemetry {
             telemetry.validate()?;
         }
+        if let Some(logs) = &cfg.logs {
+            anyhow::ensure!(cfg.telemetry.is_some(), "[logs] needs [telemetry] (the fleet indexer URL)");
+            logs.validate()?;
+        }
         Ok(cfg)
     }
 }
@@ -692,6 +735,28 @@ mod tests {
             assert!(parsed.telemetry.unwrap().validate().is_err(), "{bad}");
         }
         assert!(toml::from_str::<Config>(&format!("{base}[telemetry]\nurl='https://x'\ntoken='t'\n")).is_err());
+    }
+    #[test]
+    fn logs_are_optional_bounded_and_need_telemetry() {
+        let base = "[sui]\nmanifest_path='deployment.json'\n[device]\nkeypair_path='k'\n\
+            device_object_id='0x1'\ndevice_cap_id='0x2'\n[apply]\ncommand='true'\n";
+        assert!(toml::from_str::<Config>(base).unwrap().logs.is_none());
+        let parsed: Config = toml::from_str(&format!("{base}[logs]\n")).unwrap();
+        let logs = parsed.logs.unwrap();
+        assert_eq!((logs.interval_seconds, logs.max_lines_per_interval, logs.buffer_max), (60, 512, 256));
+        logs.validate().unwrap();
+        for bad in ["interval_seconds=5", "max_lines_per_interval=0", "max_lines_per_interval=10001", "buffer_max=0"] {
+            let parsed: Config = toml::from_str(&format!("{base}[logs]\n{bad}\n")).unwrap();
+            assert!(parsed.logs.unwrap().validate().is_err(), "{bad}");
+        }
+        assert!(toml::from_str::<Config>(&format!("{base}[logs]\nurl='https://x'\n")).is_err(), "logs take their URL from [telemetry]");
+        // Config::load refuses [logs] without [telemetry].
+        let dir = std::env::temp_dir().join(format!("suifleet-config-logs-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("deployment.json"), include_str!("../../manifests/fixture.localnet.json")).unwrap();
+        std::fs::write(dir.join("config.toml"), format!("{base}[logs]\n")).unwrap();
+        let error = Config::load(&dir.join("config.toml")).unwrap_err();
+        assert!(format!("{error:#}").contains("[logs] needs [telemetry]"), "{error:#}");
     }
     #[test]
     fn daemon_update_is_refused_with_the_service_signer() {

@@ -2,7 +2,7 @@
 
 The [SF-064 remaining functional roadmap](GREENGRASS_REMAINING_ROADMAP.md) defines versioned executable subcontracts and maps every selected remaining scope to published implementation tickets SF-069–SF-079. These remain pending implementations, not runtime or live acceptance.
 
-SF-038 maps every AWS-provided Greengrass component to one of three things: a SuiFleet native equivalent, a scoped adapter with its own implementation ticket, or a roadmap gap tracked by [SF-064](https://github.com/tyler-suifleet/suifleet/issues/109). For each adapter it records the platforms, AWS service and authentication dependencies, licensing constraints and executable acceptance. This is a specification. It implements no adapter, records no permanent exclusion and makes no parity claim. It extends the [SF-028 compatibility specification](GREENGRASS_COMPATIBILITY.md), whose levels and statuses apply here.
+SF-038 maps every AWS-provided Greengrass component to one of three things: a SuiFleet native equivalent, a scoped adapter with its own implementation ticket, or a roadmap gap tracked by [SF-064](https://github.com/tyler-suifleet/suifleet/issues/109). For each adapter it records the platforms, AWS service and authentication dependencies, licensing constraints and executable acceptance. The catalog is a specification with per-adapter runtime receipts. SF-057 implements the scoped Linux credential adapter; other adapters remain pending. It records no permanent exclusion and makes no general parity claim. It extends the [SF-028 compatibility specification](GREENGRASS_COMPATIBILITY.md), whose levels and statuses apply here.
 
 The machine-readable source of truth is [`interfaces/compat/managed-components.json`](../interfaces/compat/managed-components.json). The [compatibility matrix](../interfaces/compat/greengrass-compat.json) cross-references it, and `make test-compat` checks both.
 
@@ -26,7 +26,7 @@ Codex published the scoped implementation tickets below. SF-038 links them; it d
 Three kinds of evidence stay separate:
 
 - **Reference models.** `make test-compat` checks the fixtures against small models. Agreement proves only that the fixtures are consistent.
-- **Adapter execution.** Every adapter has `runtime_execution: pending`. Only its implementation ticket may run the same fixtures and runtime tests against the real adapter and record a `runtime_evidence` receipt. A linked ticket is not runtime evidence.
+- **Adapter execution.** The credential adapter has a [local runtime receipt](validation/sf057-credentials.json) and [provisioning guide](AWS_CREDENTIALS.md); other adapters retain `runtime_execution: pending`. Only an implementation ticket may run the same fixtures and runtime tests against the real adapter and record a `runtime_evidence` receipt. A linked ticket is not runtime evidence.
 - **Live AWS acceptance.** No AWS account, credential, purchase or live service mutation is authorized. Every live check stays pending until the user authorizes one. The Sui testnet grant does not cover AWS.
 
 Until SF-037 (open) adopts the dependency classification, recipe dependencies on AWS-managed components stay rejected by the current translation subset.
@@ -112,7 +112,7 @@ The initial prototype phase is the SF-028 Linux rows: `x86_64`, `aarch64` and `a
 | Linux x86_64, aarch64, arm | Initial prototype | Development hosts, Yocto/Raspberry Pi and 32-bit ARM catalog selection |
 | Windows | Roadmap gap (SF-074) | The daemon depends on systemd and cgroups (SF-014) and on Yocto packaging. Translation omits and reports Windows manifests meanwhile |
 | macOS | Roadmap gap (SF-075) | No runtime. AWS lists only Linux and Windows for the catalog components |
-| Linux x86 (32-bit) | Roadmap gap (SF-076) | No Yocto or test target |
+| Linux x86 (32-bit) | Roadmap gap (SF-076) | Native daemon, release bundle and `x86` catalog selection with 32-bit software-runner evidence ([LINUX_X86.md](LINUX_X86.md)). Managed adapters and AWS recipe translation do not target it; no Yocto image |
 
 These gaps are not approved exclusions; they stay tracked unless the user changes the full parity goal. Windows support would need its own supervisor, service packaging, filesystem permissions and the full test suite. It is not an adapter.
 

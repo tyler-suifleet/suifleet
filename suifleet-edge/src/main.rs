@@ -9,9 +9,11 @@ mod deps;
 mod firmware;
 mod handoff;
 mod identity;
+mod logs;
 mod platform;
 mod reconcile;
 mod recipe;
+mod redact;
 mod protocol;
 #[cfg(test)]
 mod protocol_tests;
@@ -53,8 +55,12 @@ async fn main() -> anyhow::Result<()> {
     if args.len() == 3 && args[1] == "--enroll" {
         return enroll(Path::new(&args[2])).await;
     }
-    if args.len() == 4 && args[1] == "--verify-release" {
-        let verified = release::verify(Path::new(&args[2]), Path::new(&args[3]))?;
+    if (args.len() == 4 || args.len() == 5) && args[1] == "--verify-release" {
+        let (bundle, trust) = (Path::new(&args[2]), Path::new(&args[3]));
+        let verified = match args.get(4) {
+            Some(target) => release::verify_target(bundle, trust, target)?,
+            None => release::verify(bundle, trust)?,
+        };
         println!(
             "Verified {} {} ({}, commit {}) signed by {}",
             verified.name, verified.version, verified.target, verified.commit, verified.signer
@@ -88,14 +94,17 @@ async fn main() -> anyhow::Result<()> {
     let signer_service = args.len() == 3 && args[1] == "--signer-service";
     anyhow::ensure!(
         args.len() == 1 || launched || check_config || helper || signer_service,
-        "usage: suifleet [--launch | --provision KEY_PATH | --derive-address KEY_PATH | --enroll ENROLL_TOML | --check-config CONFIG_PATH | --self-check CONFIG_PATH | --firmware-helper CONFIG | --signer-service SIGNER_TOML | --record-main-process PATH | --key-holder CONFIG_PATH | --verify-release BUNDLE_DIR TRUST_FILE]"
+        "usage: suifleet [--launch | --provision KEY_PATH | --derive-address KEY_PATH | --enroll ENROLL_TOML | --check-config CONFIG_PATH | --self-check CONFIG_PATH | --firmware-helper CONFIG | --signer-service SIGNER_TOML | --record-main-process PATH | --key-holder CONFIG_PATH | --verify-release BUNDLE_DIR TRUST_FILE [TARGET]]"
     );
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "suifleet=info".into()),
-        )
-        .init();
+    {
+        use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+        // The second layer writes the daemon's own log file once [logs] is on.
+        tracing_subscriber::registry()
+            .with(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "suifleet=info".into()))
+            .with(tracing_subscriber::fmt::layer())
+            .with(tracing_subscriber::fmt::layer().with_ansi(false).with_writer(logs::DaemonLog))
+            .init();
+    }
     if signer_service {
         // Runs as its own user, holding the device key (SF-053).
         return signer_service::serve(Path::new(&args[2]));
@@ -114,6 +123,10 @@ async fn main() -> anyhow::Result<()> {
             .unwrap_or_else(|_| PathBuf::from("/etc/suifleet/config.toml"))
     };
     let cfg = Config::load(&path)?;
+    if cfg.logs.is_some() && !check_config {
+        // From here on the daemon's own log is also written for shipping.
+        logs::enable_daemon_log(&cfg.runtime.state_dir)?;
+    }
     let started_ms = telemetry::now_ms();
     if !check_config && cfg.device.signer.as_ref().is_some_and(|signer| signer.kind == "service") {
         // Component processes run as this user: with the key in the signing
@@ -187,6 +200,8 @@ async fn main() -> anyhow::Result<()> {
     let mut ipc_messages = ipc::Messages::default();
     let runner = ApplyRunner::new(cfg.apply.clone());
     let store = components::Store::open(&cfg.runtime.state_dir, &cfg.components);
+    // Before any component runs: their log lines are covered from here on.
+    logs::initialize(&cfg.runtime.state_dir)?;
     // Committed components start again on every daemon start (bootstrap/reboot).
     let mut supervisor = supervisor::Supervisor::open(
         &cfg.runtime.state_dir,
@@ -240,6 +255,27 @@ async fn main() -> anyhow::Result<()> {
             info!("No [telemetry] configured; device health is not reported");
             None
         }
+    };
+    // Redacted remote logs beside it (validated to have [telemetry]).
+    let shipper = match (&cfg.logs, &cfg.telemetry) {
+        (Some(settings), Some(telemetry)) => Some(tokio::spawn(
+            logs::Task {
+                binding: logs::Binding {
+                    chain_identifier: sui.manifest().chain_identifier.clone(),
+                    registry: sui.manifest().shared_objects.registry.id.clone(),
+                    device_id: cfg.device.device_object_id.clone(),
+                },
+                url: logs::ingress_url(&telemetry.url)?,
+                state_dir: cfg.runtime.state_dir.clone(),
+                overlay_dir: cfg.components.configuration_overlay_dir.clone(),
+                interval_seconds: settings.interval_seconds,
+                max_lines: settings.max_lines_per_interval,
+                buffer_max: settings.buffer_max,
+                signer: signer.clone(),
+            }
+            .run(),
+        )),
+        _ => None,
     };
     // A new daemon is confirmed only after this complete local startup
     // (configuration, identity, chain validation, journal and supervisor).
@@ -305,6 +341,9 @@ async fn main() -> anyhow::Result<()> {
         }
     }
     // Spooled snapshots stay for the next start.
+    if let Some(shipper) = shipper {
+        shipper.abort();
+    }
     if let Some(reporter) = reporter {
         reporter.abort();
     }
@@ -1140,7 +1179,7 @@ async fn prepare_configurations(
                 effective: configuration::next(previous.as_ref().map(|r| &r.effective), configuration)?,
                 confidential: configuration.confidential.clone().unwrap_or_default(),
             };
-            let overlay = configuration::overlay(&configs.overlay_dir, &install.name)?;
+            let overlay = configs.overlay(&install.name)?;
             let materialized = configuration::materialize(&record, &overlay)?;
             install.record = record;
             let Some(command) = &install.validate else {
@@ -1188,7 +1227,7 @@ fn install_configuration(
     directory: &Path,
     index: usize,
 ) -> anyhow::Result<PathBuf> {
-    let overlay = configuration::overlay(&configs.overlay_dir, &install.name)?;
+    let overlay = configs.overlay(&install.name)?;
     let file = directory.join(format!("configuration-{index}.json"));
     configuration::write_private(&file, &configuration::materialize(&install.record, &overlay)?)?;
     Ok(file)

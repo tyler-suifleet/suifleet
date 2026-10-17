@@ -95,7 +95,7 @@ AWS includes device/component health, operational telemetry, logs and provisioni
 | Key rotation/revocation | Missing | Revocable capability tied to active identity, migration and recovery | P0 |
 | Online/last-seen/heartbeat | Partial (SF-019): signed heartbeat snapshots, bounded offline spool, indexer ingress checked against the registry identity, online/offline/last-seen in the API and dApp; locally and localnet-tested ([TELEMETRY.md](TELEMETRY.md)) | Hosted ingress, alerts, public-network and hardware acceptance | P1 |
 | Installed component and device health | Partial (SF-019): installed versions, supervised phases and sync health per device; healthy/degraded/offline/unreported status, fleet summary API, dashboard independently verifying each report | Component-defined health checks and metrics, alerts, hosted service | P1 |
-| Diagnostics and remote logs | Partial: local tracing/systemd logs | Collection/rotation, upload, queries, redaction, alerts and remote support | P1 |
+| Diagnostics and remote logs | Partial (SF-020): bounded rotation and rotation-safe shipping of daemon and component logs, on-device redaction (secrets, keys, phrases, confidential configuration), signed batches with offline spool, support-scoped audited search and diagnostic bundles, actionable alerts with webhook; locally and localnet-tested ([LOGS.md](LOGS.md)) | Hosted service, dApp log search, per-component log levels, hardware acceptance | P1 |
 | Fleet API/CLI and automation | Partial (SF-024): versioned `/v1` API with filters/keyset pagination, unsigned bulk-operation transactions, long-poll change feed and `ctl` CLI | Webhook push delivery, CI integration examples, more bulk operations | P1 |
 | Operator RBAC and delegation | Partial (SF-021): revocable group-scoped deployer roles with on-chain delegate audit | Further roles (enrollment/lifecycle managers), multisig/change approvals | P1 |
 | Production indexer | Implemented, locally tested (SF-024): `suifleet-indexer` materializes events/objects into SQLite with durable cursors; versioned API, change feed, CLI | Hosted deployment, dApp migration onto the API, archival-node retention on public networks | P1 |
@@ -118,7 +118,7 @@ The [compatibility specification](GREENGRASS_COMPATIBILITY.md) (SF-028) separate
 | Device shadows | Missing | Desired/reported state with version/conflict semantics and local sync | P2 |
 | Stream manager/store-and-forward | Missing | Bounded durable streams, export adapters and recovery | P2 |
 | Client-device discovery/authentication | Missing | Local device discovery, credentials, certificates and gateway authorization | P2 |
-| Token exchange/cloud credentials | Missing | Scoped credential provider or equivalent decentralized service credentials | P2 |
+| Token exchange/cloud credentials | Opt-in Linux SDK endpoint and IoT X.509 adapter; local mTLS/SDK evidence in [AWS_CREDENTIALS.md](AWS_CREDENTIALS.md) | Separately provisioned AWS identity and IAM policy; platform-managed distinct UIDs; live AWS account/service acceptance remains unrun | P2 |
 | ML inference/industrial/cloud integrations | Missing | Optional component ecosystem/adapters and compatibility tests | P2 |
 | Windows/macOS runtime | macOS: native LaunchDaemon with coalition containment, peer-UID IPC, private key checks and `macos` catalog selection, tested on a hosted macOS 15 arm64 runner ([MACOS_RUNTIME.md](MACOS_RUNTIME.md)). Windows: missing | Windows runtime (SF-074); macOS sandboxing, service signer, daemon self-update, Intel/physical Mac acceptance | P2 |
 

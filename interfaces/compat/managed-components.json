@@ -1,7 +1,7 @@
 {
  "format_version": 1,
  "parity_claim": false,
- "description": "SF-038 AWS-managed component catalog mapped to SuiFleet native equivalents, scoped adapters (implementation tickets SF-057 to SF-063) and roadmap gaps (SF-064). Linux x86_64/aarch64/arm is the initial prototype phase. Nothing here is implemented: reference-model agreement is not adapter execution, and live AWS acceptance is unauthorized and unrun. See docs/GREENGRASS_MANAGED_COMPONENTS.md.",
+ "description": "SF-038 AWS-managed component catalog mapped to SuiFleet native equivalents, scoped adapters (implementation tickets SF-057 to SF-063) and roadmap gaps (SF-064). Linux x86_64/aarch64/arm is the initial prototype phase. Per-adapter runtime receipts distinguish local execution from reference models. Live AWS acceptance is unauthorized and unrun. See docs/GREENGRASS_MANAGED_COMPONENTS.md.",
  "reference": {
   "checked": "2026-10-15",
   "catalog": "AWS-provided components (36 rows) and machine learning components (11 rows) tables, Greengrass V2 developer guide",
@@ -165,7 +165,8 @@
    "disposition": "native", "tickets": ["SF-036"], "native_equivalent": "SF-036 pinned OCI components; registry credentials through SF-022 or credential-provider for ECR"}
  ],
  "adapters": [
-  {"id": "credential-provider", "specification": "complete", "implementation_ticket": "SF-057", "runtime_execution": "pending", "replaces": {"aws.greengrass.TokenExchangeService": "2.0.3"},
+  {"id": "credential-provider", "specification": "complete", "implementation_ticket": "SF-057", "runtime_execution": "passed",
+   "runtime_evidence": "docs/validation/sf057-credentials.json", "replaces": {"aws.greengrass.TokenExchangeService": "2.0.3"},
    "summary": "Local endpoint implementing the AWS container-credentials protocol for components granted access through SF-027; upstream exchange with the AWS IoT credentials provider (X.509 thing certificate plus role alias) or IAM Roles Anywhere.",
    "platforms": ["linux-x86_64", "linux-aarch64", "linux-arm"],
    "aws_services": ["AWS IoT credentials provider (credentials.iot.<region>.amazonaws.com:443) or IAM Roles Anywhere", "AWS STS (through the provider)"],
@@ -292,7 +293,7 @@
   {"platform": "linux-aarch64", "phase": "initial-prototype", "tickets": ["SF-029", "SF-031"], "reason": "Initial prototype phase; Yocto and Raspberry Pi target."},
   {"platform": "linux-arm", "phase": "initial-prototype", "tickets": ["SF-011"], "reason": "Initial prototype phase; 32-bit ARM catalog selection."},
   {"platform": "linux-x86", "phase": "roadmap", "tickets": ["SF-064", "SF-076"],
-   "reason": "No Yocto or test target yet. Translation omits and reports x86 manifests. A tracked gap, not an approved exclusion."},
+   "reason": "Native i686 daemon, release bundle and x86 catalog selection exist (SF-076, docs/LINUX_X86.md), but managed adapters do not target it and translation omits and reports x86 manifests. A tracked gap, not an approved exclusion."},
   {"platform": "windows", "phase": "roadmap", "tickets": ["SF-064", "SF-074"],
    "reason": "The daemon depends on Linux systemd, cgroups (SF-014) and Yocto packaging. Windows needs its own supervisor, service packaging, permissions and test suite. A tracked gap, not an approved exclusion; translated recipes omit Windows manifests meanwhile."},
   {"platform": "darwin", "phase": "roadmap", "tickets": ["SF-064", "SF-075"], "reason": "The native macOS runtime (SF-075, docs/MACOS_RUNTIME.md) runs SuiFleet components; AWS lists only Linux and Windows for the components in this catalog, so their macOS equivalents remain a tracked gap, not an approved exclusion."}

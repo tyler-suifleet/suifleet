@@ -82,7 +82,8 @@ impl Version {
                 matches!(self.platform_os[i].as_str(), "linux" | "macos" | "*")
                     && matches!(
                         self.platform_arch[i].as_str(),
-                        "x86_64" | "aarch64" | "arm" | "*"
+                        // Rust `std::env::consts::ARCH` names; `x86` is 32-bit i686.
+                        "x86_64" | "aarch64" | "arm" | "x86" | "*"
                     ),
                 "unsupported manifest platform"
             );

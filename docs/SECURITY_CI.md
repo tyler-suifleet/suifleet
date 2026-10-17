@@ -5,7 +5,7 @@ Normal `CI` runs security checks on every pull request and main update, with a w
 ## Coverage and enforcement
 
 - **CodeQL:** the official action is pinned to commit `6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee`. Its `security-extended` suite analyzes JavaScript/TypeScript, Python, Rust and GitHub Actions. Rust uses the existing Rust 1.94.0 baseline and build mode `none`.
-- **Dependencies, secrets and configuration:** Trivy 0.76.0 is downloaded from its official release and its archive must match the committed SHA-256 before extraction. No mutable scanner action, installer script or action tag executes. The filesystem scan includes development dependencies supported by the scanner, both Rust lockfiles, the frontend lockfile, source secrets, both Dockerfiles and supported deployment configuration. Generated dependency/build caches are excluded.
+- **Dependencies, secrets and configuration:** Trivy 0.76.0 is downloaded from its official release and its archive must match the committed SHA-256 before extraction. No mutable scanner action, installer script or action tag executes. The filesystem scan includes development dependencies supported by the scanner, both Rust lockfiles, the frontend lockfile, source secrets, all three Dockerfiles and supported deployment configuration. Generated dependency/build caches are excluded.
 - **Gates:** HIGH/CRITICAL and unknown-severity Trivy findings block CI. CodeQL security scores of 7 or more and SARIF error-level findings block CI. Other findings remain in the sanitized report. Scanner/download errors, missing reports, failed analysis invocations, malformed rule references, and missing required lockfile/Dockerfile coverage also fail CI.
 
 The scanner runs with an explicitly empty configuration and no ignore file. Existing findings are not silently baselined away. Exceptions and suppressed SARIF results do not bypass the local gate. CodeQL successful execution alone is insufficient: `scripts/security_audit.py` reads the actual results.
@@ -44,7 +44,7 @@ The remaining findings stay visible in sanitized artifacts and [SF-048/#78](http
 | CVE-2026-69153 (PostCSS) | MEDIUM | frontend lockfile |
 | GHSA-2mjx-qc3c-rqvc (rustls) | MEDIUM | both Rust lockfiles (two records) |
 | CVE-2026-45784 (OpenSSL) | MEDIUM | indexer lockfile |
-| DS-0026 (missing healthcheck) | LOW | both Dockerfiles (two records) |
+| DS-0026 (missing healthcheck) | LOW | all three Dockerfiles (three records) |
 
 Real Actions CodeQL analysis initially exposed four critical checkout TOCTOU results in the automatic testnet workflow. The controller now checks out its immutable workflow commit, selects test code by immutable event commit, and verifies actual Git HEAD against the independent server-authenticated planner selection before building or using credentials. Existing same-repository writer/actor, successful originating CI, environment and pre-spend checks remain. All four CodeQL languages subsequently reported zero findings on that repair; fresh current-head CI remains a merge gate. SARIF rule metadata is resolved through the referenced driver or extension component, with identity and bounds checks; taxonomy extensions may legitimately omit rules.
 

@@ -44,8 +44,9 @@
    "current_evidence": ["docs/YOCTO_PACKAGING.md"], "tickets": ["SF-029", "SF-031"], "notes": "Yocto QEMU aarch64 boot evidence; physical Raspberry Pi 3 B+ acceptance pending in SF-031."},
   {"id": "linux-arm", "aws": {"os": "linux", "architecture": "arm"}, "native": {"os": "linux", "arch": "arm"}, "status": "proposed",
    "tickets": ["SF-011"], "notes": "Catalog selection vectors only; architecture.detail (arm61/arm71/arm81) is not represented and is rejected by translation."},
-  {"id": "linux-x86", "aws": {"os": "linux", "architecture": "x86"}, "native": null, "status": "roadmap", "tickets": ["SF-064", "SF-076"],
-   "notes": "Outside the SF-038 initial Linux prototype phase; a tracked gap. Translated recipes omit x86 manifests and report them."},
+  {"id": "linux-x86", "aws": {"os": "linux", "architecture": "x86"}, "native": {"os": "linux", "arch": "x86"}, "status": "partial",
+   "current_evidence": ["docs/LINUX_X86.md", "docs/validation/sf076-linux-x86.json"], "tickets": ["SF-064", "SF-076"],
+   "notes": "i686 daemon, release bundle and native x86 catalog selection with 32-bit userland software-runner evidence; no 32-bit kernel or hardware. Outside the SF-038 initial Linux prototype phase; translated recipes still omit x86 manifests and report them."},
   {"id": "windows", "aws": {"os": "windows"}, "native": null, "status": "roadmap", "tickets": ["SF-064", "SF-074"],
    "notes": "No Windows runtime; outside the SF-038 initial Linux prototype phase and a tracked gap. Translated recipes omit Windows manifests."},
   {"id": "darwin", "aws": {"os": "darwin"}, "native": {"os": "macos", "arch": "aarch64"}, "status": "partial", "current_evidence": ["docs/MACOS_RUNTIME.md"], "tickets": ["SF-064", "SF-075"], "notes": "Native macOS LaunchDaemon runtime and catalog OS `macos` (SF-075), tested on a hosted macOS 15 arm64 runner; not a Greengrass platform. Translated recipes still omit darwin manifests."}
@@ -79,8 +80,8 @@
   },
   "credential-provider-cases.json": {
    "description": "SF-038 credential-provider (token exchange equivalent) grants, tokens, caching and upstream retry.",
-   "runtime_execution": "pending", "pending_on": ["SF-057"],
-   "notes": "Runtime execution belongs to the credential-provider implementation ticket SF-057. Reference-model agreement is not adapter execution."
+   "runtime_execution": "passed", "runtime_evidence": "docs/validation/sf057-credentials.json",
+   "notes": "SF-057 ran all declared fixtures against the actual local Linux adapter and mTLS upstream. Live AWS acceptance remains unrun; see the scoped runtime receipt."
   },
   "cloudwatch-metrics-cases.json": {
    "description": "SF-038 cloudwatch-metrics-export adapter pinned to aws.greengrass.Cloudwatch 4.0.0: request validation, grants, batching, retention and retry.",
@@ -154,9 +155,10 @@
    "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable", "tickets": ["SF-035"],
    "notes": "Native discovery returns broker endpoints and CA from an authenticated source; the AWS discovery REST API is not proposed by default."},
   {"id": "cloud.credentials", "area": "cloud", "aws_reference": "aws.greengrass.TokenExchangeService 2.0.3 container-credentials protocol",
-   "functional": "proposed", "aws_api": "proposed", "aws_recipe": "not-applicable",
+   "functional": "partial", "aws_api": "partial", "aws_recipe": "not-applicable",
+   "current_evidence": ["docs/AWS_CREDENTIALS.md", "docs/validation/sf057-credentials.json"],
    "tickets": ["SF-027", "SF-038", "SF-057"], "suites": ["credential-provider-cases.json"],
-   "notes": "SF-038 credential-provider adapter, implemented by SF-057: unmodified AWS SDKs read AWS_CONTAINER_CREDENTIALS_FULL_URI/AWS_CONTAINER_AUTHORIZATION_TOKEN. Upstream uses a separately provisioned AWS X.509 identity, not the Sui signer or Seal identity."},
+   "notes": "SF-057 local Linux IoT credential adapter with separate platform-managed UIDs; live AWS and physical integration remain pending: unmodified AWS SDKs read AWS_CONTAINER_CREDENTIALS_FULL_URI/AWS_CONTAINER_AUTHORIZATION_TOKEN. Upstream uses a separately provisioned AWS X.509 identity, not the Sui signer or Seal identity."},
   {"id": "components.aws-managed", "area": "components", "aws_reference": "46 AWS-provided and machine learning components (managed-components.json)",
    "functional": "proposed", "aws_api": "roadmap", "aws_recipe": "proposed",
    "tickets": ["SF-037", "SF-038", "SF-064", "SF-069", "SF-070", "SF-071", "SF-072", "SF-073", "SF-074", "SF-075", "SF-076", "SF-077", "SF-078", "SF-079"], "suites": ["managed-dependency-cases.json"],
