@@ -69,7 +69,8 @@
   },
   "stream-cases.json": {
    "description": "Durable stream append/read/eviction/restart/export-checkpoint semantics.",
-   "runtime_execution": "pending", "pending_on": ["SF-027", "SF-034"]
+   "runtime_execution": "passed", "runtime_evidence": "docs/validation/sf034-streams.json",
+   "runtime_scope": "The daemon's stream store executes all 5 sequences (make edge-test); scripts/test_streams.py exercises the same semantics through real IPC UIDs, crashes and a verifying export receiver."
   },
   "client-device-cases.json": {
    "description": "LAN client identity state and group/policy authorization.",
@@ -146,12 +147,15 @@
    "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable", "tickets": ["SF-033"],
    "notes": "Synchronization target is a selected adapter; on-chain storage of shadow documents is not proposed."},
   {"id": "streams.local", "area": "streams", "aws_reference": "aws.greengrass.StreamManager MessageStreamDefinition/read/append",
-   "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable",
-   "tickets": ["SF-027", "SF-034"], "suites": ["stream-cases.json"]},
+   "functional": "implemented", "aws_api": "undecided", "aws_recipe": "not-applicable",
+   "tickets": ["SF-027", "SF-034"], "suites": ["stream-cases.json"],
+   "current_evidence": ["docs/STREAMS.md", "docs/validation/sf034-streams.json"],
+   "notes": "Native IPC operations; per-message eviction and crash-skipped (never reused) numbering differ from AWS. Not the Stream Manager SDK wire protocol."},
   {"id": "streams.export", "area": "streams", "aws_reference": "Kinesis/S3/IoT SiteWise/HTTP export definitions",
-   "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable",
+   "functional": "partial", "aws_api": "undecided", "aws_recipe": "not-applicable",
    "tickets": ["SF-034", "SF-038", "SF-058", "SF-064"], "suites": ["stream-cases.json"],
-   "notes": "Export checkpoint semantics are specified. Kinesis Data Streams and S3 export is the stream-export-aws adapter (SF-058). SiteWise export is SF-064 roadmap work; IoT Analytics is discontinued."},
+   "current_evidence": ["docs/STREAMS.md", "docs/validation/sf034-streams.json"],
+   "notes": "SF-034 implements signed, resumable HTTP(S) export with checkpoints. Kinesis Data Streams and S3 export is the stream-export-aws adapter (SF-058). SiteWise export is SF-064 roadmap work; IoT Analytics is discontinued."},
   {"id": "client-devices.auth", "area": "client-devices", "aws_reference": "aws.greengrass.clientdevices.Auth deviceGroups/policies",
    "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable",
    "tickets": ["SF-021", "SF-035"], "suites": ["client-device-cases.json"]},

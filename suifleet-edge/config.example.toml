@@ -125,3 +125,16 @@ replay_history = false
 # interval_seconds = 60
 # max_lines_per_interval = 512
 # buffer_max = 256
+
+# Durable local streams and export (SF-034; docs/STREAMS.md). Components need
+# stream operations and a `streams` glob under [ipc.components.NAME].
+# [streams]
+# max_streams = 32
+# max_total_bytes = 67108864        # sum of all streams' max_size
+# [[streams.definitions]]
+# name = "telemetry"
+# max_size = 16777216               # each message costs its bytes + 64
+# strategy_on_full = "RejectNewData"  # or "OverwriteOldestData"
+# [streams.definitions.export]
+# url = "https://ingest.example/v1/streams"
+# bearer_token_file = "/etc/suifleet/stream-export.token"
