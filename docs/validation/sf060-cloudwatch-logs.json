@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "ticket": "SF-060",
+  "agent": "Claude",
+  "model": "claude-opus-5-5",
+  "date": "2026-10-17",
+  "adapter": "cloudwatch-logs-export",
+  "replaces": {
+    "aws.greengrass.LogManager": "2.3.14"
+  },
+  "environment": {
+    "image": "suifleet-dev:sf037 (Dockerfile unchanged since c41c391)",
+    "kernel": "6.6.87.2-microsoft-standard-WSL2",
+    "network": "none",
+    "uid": 1001,
+    "rust": "1.94.0",
+    "python": "3.10.12",
+    "node": "22.22.2"
+  },
+  "commands": [
+    {
+      "command": "docker run --network none ... suifleet-dev:sf037: cd suifleet-edge && cargo test --locked && cargo test --locked --features pkcs11",
+      "result": "205 passed; 0 failed (default) and 207 passed; 0 failed (pkcs11), including 16 cloudwatch_logs tests"
+    },
+    {
+      "command": "cargo test cloudwatch_logs::tests::declared_fixtures_run_against_the_adapter_and_emulator",
+      "result": "passed: all 8 sequences / 69 steps of cloudwatch-logs-cases.json against the adapter's spool, batching and SigV4 HTTP uploader; the emulator received exactly the expected PutLogEvents calls with 0 request-check violations; 1 step (non-text message) decided while decoding the fixture into the adapter's text interface"
+    },
+    {
+      "command": "python3 scripts/test_cloudwatch_logs.py (network none)",
+      "result": "passed: real daemon + supervised component with log_group_read (0640/0750), redaction before the spool, DEBUG filtered, LogManager group/stream names, 300000-byte line split 262118+37882; outage, lost response resent, SIGKILL restart, rotation, symlink/hard-link sibling refusal, 2000-byte spool keeping newest 26 of 400 and counting 376 dropped with a 44076-byte journal, refusal without credentials and with logFileRegex"
+    },
+    {
+      "command": "make test-ota sequence (each script run directly, network none)",
+      "result": "all 16 scripts passed (test_telemetry.py and test_logs.py after installing locked dApp dependencies with pnpm install --frozen-lockfile)"
+    },
+    {
+      "command": "make test-compat (scripts run directly)",
+      "result": "passed: 488 reference-model fixture checks, 76 roadmap checks, roadmap and compat unittest suites OK, frontend validator check; catalog and matrix receipts validated"
+    }
+  ],
+  "source_sha256": {
+    "suifleet-edge/src/cloudwatch_logs.rs": "6d58dd9898994dfdd60cf07b24e9f8bfe4f6eaf6e9902b2d69bea8147ae88fb1",
+    "suifleet-edge/src/cloudwatch_logs_tests.rs": "0a32bdd3e3e3fbaa5072f806c64b6ef0637e4ca9c7512b4e4c9d17cf5e30da51",
+    "suifleet-edge/src/logs.rs": "1489186155a313e618833779317c01dd13c3f3915a5861a5145297c3054b39e0",
+    "scripts/cloudwatch_logs_emulator.py": "f13d1978edc03683d3f93fe8cf6ebd421e3f86ebd4bbe228dff8d362a537a286",
+    "scripts/test_cloudwatch_logs.py": "15246ff1275dfe3b0455e4f196809c5480b94b6f8f3240985e2dd1636a7f0da6",
+    "interfaces/compat/cloudwatch-logs-cases.json": "5bd65c83a89c05ccd457430fb4a56a0b6ae17d26a2aa3d7ddc64d0cc97545693"
+  },
+  "limits": [
+    "Local Linux x86_64 execution with a request-checking local CloudWatch Logs emulator; no live AWS account, IAM policy or service call (unauthorized; tracked in SF-060/#105).",
+    "Credentials came from a stand-in for the SF-057 container endpoint speaking the same protocol, not the actual SF-057 adapter process.",
+    "UID separation and the shipped systemd units were not exercised; the tests run as one user and check file modes.",
+    "System is the daemon's log file; systemd-journal forwarding (SystemLogForwarder), platform-managed component log files, regex selection, deletion after upload and multi-line grouping are not implemented.",
+    "Physical Pi/target integration is deferred to SF-031/#32.",
+    "Reference-model agreement (make test-compat) is separate from adapter execution; no general Greengrass or LogManager parity claim."
+  ],
+  "post_ci_repairs": [
+    "CodeQL rust/cleartext-logging (HIGH) in a test assertion message that would print a fixture secret on failure: the message now names only the value's index. cargo test cloudwatch: 16 passed."
+  ]
+}

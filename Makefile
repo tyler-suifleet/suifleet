@@ -68,6 +68,7 @@ test-ota:
 	$(RUN) python3 scripts/test_deployment_control.py
 	$(RUN) python3 scripts/test_telemetry.py
 	$(RUN) python3 scripts/test_logs.py
+	$(RUN) python3 scripts/test_cloudwatch_logs.py
 	$(RUN) python3 scripts/test_rollout.py
 
 # Supervised components under the shipped systemd units on real systemd and

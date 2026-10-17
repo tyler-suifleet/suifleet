@@ -19,10 +19,10 @@ class RepositoryTests(unittest.TestCase):
         self.assertTrue(all(count > 0 for count in counts.values()))
 
     def test_runtime_receipts_are_scoped_to_executed_suites(self):
-        # SF-057 executed its declared suite; all other adapters remain pending.
+        # SF-057 and SF-060 executed their declared suites; all others remain pending.
         matrix = json.loads((ROOT / compat.COMPAT / "greengrass-compat.json").read_text())
         self.assertEqual({name for name, s in matrix["suites"].items() if s["runtime_execution"] == "passed"},
-                         {"credential-provider-cases.json"})
+                         {"credential-provider-cases.json", "cloudwatch-logs-cases.json"})
 
 
 class MatrixGateTests(unittest.TestCase):
@@ -217,7 +217,7 @@ class ManagedCatalogGateTests(unittest.TestCase):
             "aws-iot-core-connection": "SF-061", "device-defender-metrics": "SF-062",
             "secure-tunneling": "SF-063"})
         self.assertEqual({a["id"] for a in self.catalog["adapters"] if a["runtime_execution"] == "passed"},
-                         {"credential-provider"})
+                         {"credential-provider", "cloudwatch-logs-export"})
         self.assertFalse(self.catalog["parity_claim"])
         for entry in self.catalog["components"] + self.catalog["platform_phases"]:
             self.assertNotIn("approval", entry)

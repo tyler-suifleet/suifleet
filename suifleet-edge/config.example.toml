@@ -60,6 +60,11 @@ replay_history = false
 # component_stop_timeout_seconds = 10  # grace for shutdown/SIGTERM before SIGKILL
 # component_max_restarts = 5           # within ten minutes, then Broken
 
+# Let the daemon's group read its own and its components' logs and the
+# retained confidential values (0640, directories 0750), for a separate log
+# reader such as the CloudWatch Logs adapter (docs/CLOUDWATCH_LOGS.md).
+# log_group_read = false
+
 # Dependency candidates: "never" (default) uses only the live catalog and
 # Walrus; "cached" keeps authenticated versions/recipes/artifacts under
 # state_dir/components for reuse and offline resolution.

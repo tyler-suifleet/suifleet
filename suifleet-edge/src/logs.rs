@@ -89,6 +89,30 @@ pub fn validate(batch: &Batch) -> anyhow::Result<()> {
 
 // --- The daemon's own log file ----------------------------------------------
 
+/// `[runtime] log_group_read` (SF-060): logs and the retained confidential
+/// values are group-readable (0640) and their directories group-traversable
+/// (0750), so a separate log reader such as the CloudWatch Logs adapter can
+/// read them through the daemon's group. Off by default (0600).
+static GROUP_READ: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_group_read(on: bool) {
+    GROUP_READ.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The mode of a log file or the retained values.
+pub fn private_mode() -> u32 {
+    if GROUP_READ.load(std::sync::atomic::Ordering::Relaxed) { 0o640 } else { 0o600 }
+}
+
+/// With group read, let the group traverse `dir` (0750). Without, leave it.
+pub fn share_dir(dir: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    if GROUP_READ.load(std::sync::atomic::Ordering::Relaxed) {
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o750))?;
+    }
+    Ok(())
+}
+
 /// A size-rotated log file for `tracing` (`daemon.log`, then `daemon.log.1`).
 #[derive(Clone)]
 pub struct RotatingFile {
@@ -115,8 +139,16 @@ impl Write for RotatingFile {
             let _ = std::fs::rename(&*path, PathBuf::from(rotated));
         }
         if file.is_none() {
-            use std::os::unix::fs::OpenOptionsExt;
-            *file = Some(std::fs::OpenOptions::new().create(true).append(true).mode(0o640).open(&*path)?);
+            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+            let opened = std::fs::OpenOptions::new().create(true).append(true).mode(0o640).open(&*path)?;
+            if GROUP_READ.load(std::sync::atomic::Ordering::Relaxed) {
+                // The service's umask would keep the group out.
+                opened.set_permissions(std::fs::Permissions::from_mode(0o640))?;
+                if let Some(parent) = path.parent() {
+                    share_dir(parent)?;
+                }
+            }
+            *file = Some(opened);
         }
         file.as_mut().unwrap().write(buf)
     }
@@ -180,15 +212,80 @@ pub struct Cursor {
 
 const HEAD_BYTES: u64 = 32;
 
-fn head(path: &Path) -> String {
+/// How a source is read. The remote-log shipper uses [`Reader::SHIPPER`];
+/// the CloudWatch Logs adapter (SF-060) reads longer lines and opens files
+/// strictly.
+#[derive(Debug, Clone, Copy)]
+pub struct Reader {
+    /// The longest physical line read; a longer one becomes a marker.
+    pub max_scan: usize,
+    /// Refuse a path with a symbolic link in any component, and anything but
+    /// a regular file with one link, so a component cannot point its log at
+    /// another file.
+    pub strict: bool,
+}
+
+impl Reader {
+    pub const SHIPPER: Reader = Reader { max_scan: MAX_SCAN, strict: false };
+
+    fn open(&self, path: &Path) -> std::io::Result<std::fs::File> {
+        if !self.strict {
+            return std::fs::File::open(path);
+        }
+        let file = open_no_symlinks(path)?;
+        let meta = file.metadata()?;
+        if !meta.file_type().is_file() || meta.nlink() != 1 {
+            return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "not a regular file with a single link"));
+        }
+        Ok(file)
+    }
+
+    fn metadata(&self, path: &Path) -> std::io::Result<std::fs::Metadata> {
+        if self.strict {
+            self.open(path)?.metadata()
+        } else {
+            std::fs::metadata(path)
+        }
+    }
+
+    fn omitted(&self) -> String {
+        if self.max_scan == MAX_SCAN {
+            OMITTED.into()
+        } else {
+            format!("[suifleet: line longer than {} bytes omitted]", self.max_scan)
+        }
+    }
+}
+
+/// Open read-only, resolving no symbolic link anywhere in `path` (openat2,
+/// Linux 5.6+). Fails closed where the kernel lacks it.
+fn open_no_symlinks(path: &Path) -> std::io::Result<std::fs::File> {
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::fd::FromRawFd;
+    let name = std::ffi::CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "path holds a NUL byte"))?;
+    // SAFETY: open_how is plain data; zeroed is its documented initial state.
+    let mut how: libc::open_how = unsafe { std::mem::zeroed() };
+    how.flags = (libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOCTTY | libc::O_NONBLOCK) as u64;
+    how.resolve = libc::RESOLVE_NO_SYMLINKS | libc::RESOLVE_NO_MAGICLINKS;
+    // SAFETY: valid NUL-terminated path and open_how of the size passed.
+    let fd = unsafe { libc::syscall(libc::SYS_openat2, libc::AT_FDCWD, name.as_ptr(), &how as *const libc::open_how, std::mem::size_of::<libc::open_how>()) };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: a new descriptor owned by nobody else.
+    Ok(unsafe { std::fs::File::from_raw_fd(fd as i32) })
+}
+
+fn head(path: &Path, reader: &Reader) -> String {
     let mut bytes = Vec::new();
-    let _ = std::fs::File::open(path).map(|f| f.take(HEAD_BYTES).read_to_end(&mut bytes));
+    let _ = reader.open(path).map(|f| f.take(HEAD_BYTES).read_to_end(&mut bytes));
     hex::encode(bytes)
 }
 
 /// Whether `path` (with metadata `meta`) is the file `cursor` was reading.
-fn same_file(path: &Path, meta: &std::fs::Metadata, cursor: &Cursor) -> bool {
-    meta.ino() == cursor.inode && head(path).starts_with(&cursor.head)
+fn same_file(path: &Path, meta: &std::fs::Metadata, cursor: &Cursor, reader: &Reader) -> bool {
+    meta.ino() == cursor.inode && head(path, reader).starts_with(&cursor.head)
 }
 
 fn rotated(path: &Path) -> PathBuf {
@@ -198,11 +295,14 @@ fn rotated(path: &Path) -> PathBuf {
 }
 
 /// Complete lines from `file` starting at `offset`, at most `budget`; returns
-/// the offset after the last line consumed. A line longer than [`MAX_SCAN`]
-/// becomes [`OMITTED`] and `skipping` holds until its end. With `last` (a
-/// rotated file nobody writes to), an unterminated final line is a line too.
-fn read_lines(path: &Path, offset: u64, budget: usize, skipping: &mut bool, last: bool, lines: &mut Vec<String>) -> std::io::Result<u64> {
-    let mut file = std::fs::File::open(path)?;
+/// the offset after the last line consumed. A line longer than the reader's
+/// `max_scan` becomes a marker and `skipping` holds until its end. With
+/// `last` (a rotated file nobody writes to), an unterminated final line is a
+/// line too.
+#[allow(clippy::too_many_arguments)]
+fn read_lines(path: &Path, reader: &Reader, offset: u64, budget: usize, skipping: &mut bool, last: bool, lines: &mut Vec<String>) -> std::io::Result<u64> {
+    let max_scan = reader.max_scan;
+    let mut file = reader.open(path)?;
     let length = file.metadata()?.len();
     if offset >= length {
         return Ok(offset.min(length));
@@ -211,7 +311,7 @@ fn read_lines(path: &Path, offset: u64, budget: usize, skipping: &mut bool, last
     let mut bytes = Vec::new();
     // Bounded read: enough for the budget at the line limit, and for one
     // line up to the scan limit.
-    let window = (budget as u64).saturating_mul(MAX_LINE as u64 + 1).saturating_add(MAX_SCAN as u64 + 1);
+    let window = (budget as u64).saturating_mul(MAX_LINE as u64 + 1).saturating_add(max_scan as u64 + 1);
     file.take(window.min(length - offset)).read_to_end(&mut bytes)?;
     let at_end = offset + bytes.len() as u64 >= length;
     let mut start = 0usize;
@@ -228,16 +328,16 @@ fn read_lines(path: &Path, offset: u64, budget: usize, skipping: &mut bool, last
             continue;
         }
         match newline {
-            Some(n) if n <= MAX_SCAN => {
+            Some(n) if n <= max_scan => {
                 lines.push(String::from_utf8_lossy(&bytes[start..start + n]).into_owned());
                 start += n + 1;
             }
             Some(n) => {
-                lines.push(OMITTED.into());
+                lines.push(reader.omitted());
                 start += n + 1;
             }
-            None if bytes.len() - start > MAX_SCAN => {
-                lines.push(OMITTED.into());
+            None if bytes.len() - start > max_scan => {
+                lines.push(reader.omitted());
                 start = bytes.len();
                 *skipping = true;
             }
@@ -254,8 +354,13 @@ fn read_lines(path: &Path, offset: u64, budget: usize, skipping: &mut bool, last
 /// New lines of one source since `cursor`, following one rotation. Returns
 /// the lines, the new cursor and whether unseen lines were lost.
 pub fn tail(path: &Path, cursor: Cursor, budget: usize) -> std::io::Result<(Vec<String>, Cursor, bool)> {
+    tail_with(path, cursor, budget, &Reader::SHIPPER)
+}
+
+/// [`tail`] with an explicit [`Reader`].
+pub fn tail_with(path: &Path, cursor: Cursor, budget: usize, reader: &Reader) -> std::io::Result<(Vec<String>, Cursor, bool)> {
     let mut lines = Vec::new();
-    let current = match std::fs::metadata(path) {
+    let current = match reader.metadata(path) {
         Ok(m) => m,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok((lines, cursor, false)),
         Err(e) => return Err(e),
@@ -263,20 +368,20 @@ pub fn tail(path: &Path, cursor: Cursor, budget: usize) -> std::io::Result<(Vec<
     let mut lost = false;
     let mut offset = 0;
     let mut skipping = false;
-    if same_file(path, &current, &cursor) && cursor.offset <= current.len() {
+    if same_file(path, &current, &cursor, reader) && cursor.offset <= current.len() {
         offset = cursor.offset;
         skipping = cursor.skipping;
     } else if cursor.inode != 0 {
         // Rotated since the last read: finish the old file if it is `.1`,
         // including an unterminated last line (nothing will complete it).
         let old_path = rotated(path);
-        match std::fs::metadata(&old_path) {
-            Ok(old) if same_file(&old_path, &old, &cursor) => {
+        match reader.metadata(&old_path) {
+            Ok(old) if same_file(&old_path, &old, &cursor, reader) => {
                 let mut old_skipping = cursor.skipping;
-                let end = read_lines(&old_path, cursor.offset, budget, &mut old_skipping, true, &mut lines)?;
+                let end = read_lines(&old_path, reader, cursor.offset, budget, &mut old_skipping, true, &mut lines)?;
                 if end < old.len() {
                     // Budget spent inside the rotated file: continue there next time.
-                    let next = Cursor { inode: cursor.inode, offset: end, head: head(&old_path), skipping: old_skipping, key_block: 0 };
+                    let next = Cursor { inode: cursor.inode, offset: end, head: head(&old_path, reader), skipping: old_skipping, key_block: 0 };
                     return Ok((lines, next, false));
                 }
             }
@@ -284,8 +389,8 @@ pub fn tail(path: &Path, cursor: Cursor, budget: usize) -> std::io::Result<(Vec<
         }
     }
     let remaining = budget.saturating_sub(lines.len());
-    let end = read_lines(path, offset, remaining, &mut skipping, false, &mut lines)?;
-    Ok((lines, Cursor { inode: current.ino(), offset: end, head: head(path), skipping, key_block: 0 }, lost))
+    let end = read_lines(path, reader, offset, remaining, &mut skipping, false, &mut lines)?;
+    Ok((lines, Cursor { inode: current.ino(), offset: end, head: head(path, reader), skipping, key_block: 0 }, lost))
 }
 
 /// The sources present now: the daemon log and each supervised component's.
@@ -398,7 +503,7 @@ impl Retained {
     }
 
     fn save(&self, path: &Path) -> anyhow::Result<()> {
-        crate::configuration::write_private(path, self)
+        crate::configuration::write_with_mode(path, self, private_mode())
             .map_err(|error| anyhow::anyhow!("cannot store retained confidential values: {}", error.root_cause()))
     }
 
@@ -413,7 +518,7 @@ impl Retained {
                 && std::fs::File::open(&file)
                     .and_then(|mut f| f.seek(SeekFrom::End(-1)).and_then(|_| f.read_exact(&mut last)))
                     .map_or(true, |_| last[0] != b'\n');
-            start.insert(source, Cursor { inode: meta.ino(), offset: meta.len(), head: head(&file), skipping: partial, key_block: 0 });
+            start.insert(source, Cursor { inode: meta.ino(), offset: meta.len(), head: head(&file, &Reader::SHIPPER), skipping: partial, key_block: 0 });
         }
         Self { values: BTreeMap::new(), start }
     }
@@ -448,6 +553,7 @@ impl Retained {
 fn retained<T>(state_dir: &Path, change: impl FnOnce(&mut Retained) -> T) -> anyhow::Result<T> {
     let path = state_dir.join(RETAINED);
     std::fs::create_dir_all(state_dir.join("logs"))?;
+    share_dir(&state_dir.join("logs"))?;
     let lock = std::fs::OpenOptions::new()
         .create(true)
         .truncate(false)
@@ -470,6 +576,30 @@ fn retained<T>(state_dir: &Path, change: impl FnOnce(&mut Retained) -> T) -> any
 /// any component runs, so lines written from then on are all covered.
 pub fn initialize(state_dir: &Path) -> anyhow::Result<()> {
     retained(state_dir, |_| ())
+}
+
+/// The daemon's confidential values and start cursors, read without
+/// changing them, for a separate log reader (the CloudWatch Logs adapter).
+/// Fails closed: a missing, unreadable or invalid set stops that reader.
+pub fn read_retained(state_dir: &Path) -> anyhow::Result<(Vec<String>, BTreeMap<String, Cursor>)> {
+    let set = Retained::load(&state_dir.join(RETAINED))?
+        .ok_or_else(|| anyhow::anyhow!("the daemon has not recorded confidential values yet ({RETAINED})"))?;
+    Ok((set.secrets(), set.start))
+}
+
+/// Record the confidential values of every materialized configuration, as
+/// the shipper does each interval, for a separate log reader when `[logs]`
+/// is off (an installation configured before values were recorded).
+pub fn remember_materialized(state_dir: &Path) -> anyhow::Result<()> {
+    let values = materialized_values(state_dir)?;
+    if values.is_empty() {
+        return Ok(());
+    }
+    retained(state_dir, |set| {
+        for value in values {
+            set.values.entry(value).or_default();
+        }
+    })
 }
 
 /// Record every value of a component's overlay before it is materialized:
@@ -563,7 +693,7 @@ pub const MAX_KEY_BLOCK_LINES: u32 = 256;
 /// Redact one line of a source. `block` follows PEM private-key blocks,
 /// whose body lines carry no marker of their own: from a `BEGIN … PRIVATE
 /// KEY` line to its `END` line, every line is dropped.
-fn redact_line(line: &str, secrets: &[String], block: &mut u32) -> (String, usize) {
+pub fn redact_line(line: &str, secrets: &[String], block: &mut u32) -> (String, usize) {
     if line.contains("PRIVATE KEY") && line.contains("-----") {
         if line.contains("BEGIN") {
             *block = 1;
