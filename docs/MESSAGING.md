@@ -67,6 +67,8 @@ target = "Pubsub"
 
 **Bounds, never silent loss.**
 - A QoS 1 publication is all or nothing: if any matching QoS 1 queue is full (messages or bytes), nothing is stored, the publisher gets `backpressure` and each full subscription's `refused` counter increases.
+- Byte limits count each message as it is stored on disk (the JSON envelope with id, topic, sender, payload and timestamp, including escaping).
+- A storage failure on any target (for example a full disk) is also `backpressure`: the copies already written are removed and no subscriber receives the publication. Each copy is staged, synced and renamed into place, and the synced `<state_dir>/pubsub/seq` file then commits it. On start the daemon removes queue files above `seq`, so a crash part way through a fanout delivers to nobody either. If a failed publication's copies cannot be removed, publishing is refused until the daemon restarts.
 - QoS 0 queues drop their oldest message and count it in `dropped`.
 
 ## The bridge

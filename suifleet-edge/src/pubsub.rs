@@ -13,6 +13,11 @@
 //! queue is full, the whole publication is refused (backpressure) and the
 //! refusal counted; nothing is silently lost. QoS 0 queues are in memory: at
 //! most once, the oldest dropped (and counted) when full, cleared on restart.
+//!
+//! A publication's copies are staged, synced and renamed into place, then the
+//! persisted `seq` file commits them. Queue files above `seq` were never
+//! committed and are removed on open, so a failure or crash part way through a
+//! fanout delivers to nobody.
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -186,6 +191,9 @@ pub struct Broker {
     limits: Limits,
     seq: u64,
     subs: BTreeMap<(String, String), Subscription>,
+    /// Set when a failed publication could not be undone on disk. Publishing
+    /// stays refused until a restart's `open` discards its uncommitted copies.
+    poisoned: Option<String>,
 }
 
 fn queue_dir(root: &Path, principal: &str, filter: &str) -> PathBuf {
@@ -195,11 +203,29 @@ fn queue_dir(root: &Path, principal: &str, filter: &str) -> PathBuf {
 
 fn write_synced(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let temporary = path.with_extension("tmp");
-    let mut file = std::fs::File::create(&temporary)?;
-    file.write_all(bytes)?;
-    file.sync_all()?;
+    write_file_synced(&temporary, bytes)?;
     std::fs::rename(&temporary, path)?;
-    std::fs::File::open(path.parent().unwrap_or(Path::new(".")))?.sync_all()
+    sync_dir(path.parent().unwrap_or(Path::new(".")))
+}
+
+fn write_file_synced(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut file = std::fs::File::create(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
+}
+
+fn sync_dir(dir: &Path) -> std::io::Result<()> {
+    std::fs::File::open(dir)?.sync_all()
+}
+
+/// Remove a file; one that does not exist (or whose parent is not a directory)
+/// is already absent.
+fn remove_if_present(path: &Path) -> std::io::Result<()> {
+    use std::io::ErrorKind::{NotADirectory, NotFound};
+    match std::fs::remove_file(path) {
+        Err(e) if !matches!(e.kind(), NotFound | NotADirectory) => Err(e),
+        _ => Ok(()),
+    }
 }
 
 impl Broker {
@@ -210,7 +236,8 @@ impl Broker {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
             Err(e) => return Err(e.into()),
         };
-        let mut seq = 0;
+        // `seq` is the commit point: queue files above it are uncommitted.
+        let seq: u64 = std::fs::read_to_string(dir.join("seq")).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
         let mut subs = BTreeMap::new();
         for record in records {
             let dir_q = queue_dir(dir, &record.principal, &record.filter);
@@ -223,17 +250,20 @@ impl Broker {
                     continue;
                 }
                 let id = path.file_stem().and_then(|s| s.to_str()).and_then(|s| s.parse::<u64>().ok());
-                if let Some(id) = id {
-                    queued.push((id, std::fs::metadata(&path)?.len()));
-                    seq = seq.max(id);
+                match id {
+                    Some(id) if id > seq => {
+                        std::fs::remove_file(&path)?;
+                        sync_dir(&dir_q)?;
+                    }
+                    Some(id) => queued.push((id, std::fs::metadata(&path)?.len())),
+                    None => {}
                 }
             }
             queued.sort();
             subs.insert((record.principal.clone(), record.filter.clone()),
                 Subscription { record, dir: dir_q, qos0: VecDeque::new(), queued: queued.into() });
         }
-        let saved: u64 = std::fs::read_to_string(dir.join("seq")).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
-        Ok(Self { dir: dir.to_owned(), limits, seq: seq.max(saved), subs })
+        Ok(Self { dir: dir.to_owned(), limits, seq, subs, poisoned: None })
     }
 
     fn save(&self) -> anyhow::Result<()> {
@@ -278,16 +308,22 @@ impl Broker {
     /// Fan a publication out to every matching subscription, except those of
     /// `skip_principal` (the bridge's loop breaker). All or nothing for QoS 1.
     pub fn publish(&mut self, sender: &str, topic: &str, payload: &Value, skip_principal: Option<&str>) -> anyhow::Result<Value> {
+        if let Some(reason) = &self.poisoned {
+            anyhow::bail!("messaging store needs a daemon restart: {reason}");
+        }
         anyhow::ensure!(valid_topic(topic), "invalid topic");
-        let bytes = serde_json::to_vec(payload)?;
-        anyhow::ensure!(bytes.len() <= MAX_PAYLOAD, "payload exceeds {MAX_PAYLOAD} bytes");
+        anyhow::ensure!(serde_json::to_vec(payload)?.len() <= MAX_PAYLOAD, "payload exceeds {MAX_PAYLOAD} bytes");
         let targets: Vec<(String, String)> = self
             .subs
             .iter()
             .filter(|((principal, filter), _)| matches(filter, topic) && Some(principal.as_str()) != skip_principal)
             .map(|(k, _)| k.clone())
             .collect();
-        let size = bytes.len() as u64 + topic.len() as u64 + sender.len() as u64 + 128;
+        // The id is taken only if the publication is committed.
+        let message = Message { id: self.seq + 1, topic: topic.to_owned(), sender: sender.to_owned(), payload: payload.clone(), published_ms: crate::telemetry::now_ms() };
+        let encoded = serde_json::to_vec(&message)?;
+        // Bounds count the bytes actually stored, including escaping.
+        let size = encoded.len() as u64;
         let full: Vec<String> = targets
             .iter()
             .filter(|k| {
@@ -307,17 +343,14 @@ impl Broker {
             self.save()?;
             return Err(Backpressure(full.join(", ")).into());
         }
-        self.seq += 1;
-        let message = Message { id: self.seq, topic: topic.to_owned(), sender: sender.to_owned(), payload: payload.clone(), published_ms: crate::telemetry::now_ms() };
-        std::fs::write(self.dir.join("seq"), self.seq.to_string())?;
-        let encoded = serde_json::to_vec(&message)?;
+        let dirs: Vec<PathBuf> = targets.iter().map(|k| &self.subs[k]).filter(|s| s.record.qos == 1).map(|s| s.dir.clone()).collect();
+        self.spool(&dirs, message.id, &encoded)?;
+        self.seq = message.id;
         let (mut durable, mut volatile) = (0, 0);
         for key in &targets {
             let sub = self.subs.get_mut(key).unwrap();
             if sub.record.qos == 1 {
-                write_synced(&sub.dir.join(format!("{:020}.json", message.id)), &encoded)
-                    .map_err(|e| Backpressure(format!("cannot spool for {} {}: {e}", key.0, key.1)))?;
-                sub.queued.push_back((message.id, encoded.len() as u64));
+                sub.queued.push_back((message.id, size));
                 durable += 1;
             } else {
                 if sub.qos0.len() >= self.limits.qos0_messages {
@@ -328,10 +361,57 @@ impl Broker {
                 volatile += 1;
             }
         }
+        // Committed: a counter that cannot be saved must not turn this into a refusal.
         if volatile > 0 {
-            self.save()?;
+            if let Err(error) = self.save() {
+                tracing::warn!("cannot save pubsub counters: {error:#}");
+            }
         }
         Ok(json!({ "id": message.id, "durable": durable, "volatile": volatile }))
+    }
+
+    /// Store message `id` in every durable queue in `dirs`, or in none. Copies
+    /// are staged and synced, renamed into place, then committed by the synced
+    /// `seq` file. Any failure removes this id's copies again and returns
+    /// `Backpressure`, so the publisher (or the bridge's broker) retries later.
+    fn spool(&mut self, dirs: &[PathBuf], id: u64, encoded: &[u8]) -> anyhow::Result<()> {
+        // Every path this publication may have created, for the undo.
+        let mut made: Vec<PathBuf> = Vec::new();
+        let mut commit = || -> std::io::Result<()> {
+            for d in dirs {
+                made.push(d.join(format!("{id:020}.tmp")));
+                write_file_synced(made.last().unwrap(), encoded)?;
+            }
+            for d in dirs {
+                let placed = d.join(format!("{id:020}.json"));
+                std::fs::rename(d.join(format!("{id:020}.tmp")), &placed)?;
+                made.push(placed);
+            }
+            for d in dirs {
+                sync_dir(d)?;
+            }
+            write_synced(&self.dir.join("seq"), id.to_string().as_bytes())
+        };
+        let Err(error) = commit() else {
+            return Ok(());
+        };
+        let undo = || -> std::io::Result<()> {
+            for path in &made {
+                remove_if_present(path)?;
+            }
+            for d in dirs {
+                sync_dir(d)?;
+            }
+            Ok(())
+        };
+        if let Err(undo_error) = undo() {
+            // Uncommitted copies may remain; `open` removes them. Until then, no
+            // later publication may commit an id at or above this one.
+            let reason = format!("message {id} was refused ({error}) but not removed ({undo_error})");
+            self.poisoned = Some(reason.clone());
+            anyhow::bail!(reason);
+        }
+        Err(Backpressure(format!("cannot spool message {id}: {error}")).into())
     }
 
     /// The next message of a subscription. QoS 1 stays queued until acked
@@ -468,6 +548,106 @@ mod tests {
         tiny.subscribe("b", "t", 1).unwrap();
         tiny.publish("a", "t", &json!("x".repeat(100)), None).unwrap();
         assert!(tiny.publish("a", "t", &json!("x".repeat(100)), None).is_err());
+    }
+
+    #[test]
+    fn byte_bounds_count_the_stored_envelope_including_escapes() {
+        // Each U+0001 in a topic is stored as the six bytes `\u0001`.
+        let topic = "\u{1}".repeat(MAX_TOPIC);
+        let payload = json!("x".repeat(3600));
+        let mut tiny = Broker::open(&dir("escaped"), Limits { max_messages: 100, max_bytes: 4096, qos0_messages: 1 }).unwrap();
+        tiny.subscribe("b", "#", 1).unwrap();
+        assert!(tiny.publish("a", &topic, &payload, None).unwrap_err().downcast_ref::<Backpressure>().is_some());
+        assert_eq!(tiny.stats(None)[0]["bytes"], 0);
+        // Exactly at the bound is accepted; one byte less is refused.
+        let mut sized = Broker::open(&dir("escaped-size"), Limits::default()).unwrap();
+        sized.subscribe("b", "#", 1).unwrap();
+        sized.publish("a", &topic, &json!("x".repeat(100)), None).unwrap();
+        let size = sized.stats(None)[0]["bytes"].as_u64().unwrap();
+        assert!(size > 6 * MAX_TOPIC as u64 + 100);
+        for (max_bytes, accepted) in [(size, true), (size - 1, false)] {
+            let mut b = Broker::open(&dir(&format!("escaped-{max_bytes}")), Limits { max_messages: 100, max_bytes, qos0_messages: 1 }).unwrap();
+            b.subscribe("b", "#", 1).unwrap();
+            assert_eq!(b.publish("a", &topic, &json!("x".repeat(100)), None).is_ok(), accepted, "{max_bytes}");
+            assert!(b.stats(None)[0]["bytes"].as_u64().unwrap() <= max_bytes);
+        }
+    }
+
+    fn assert_nothing_delivered(broker: &mut Broker) {
+        for principal in ["a", "z"] {
+            assert!(broker.receive(principal, "t").unwrap().is_none(), "{principal} received a refused publication");
+            assert_eq!(broker.stats(Some(principal))[0]["bytes"], 0);
+        }
+    }
+
+    #[test]
+    fn a_later_target_storage_failure_delivers_to_nobody() {
+        let d = dir("fanout-write");
+        let mut broker = Broker::open(&d, Limits::default()).unwrap();
+        broker.subscribe("a", "t", 1).unwrap();
+        broker.subscribe("z", "t", 1).unwrap();
+        broker.subscribe("v", "t", 0).unwrap();
+        // Obstruct only z's queue (it sorts after a), as a full or failing disk would.
+        let z = queue_dir(&d, "z", "t");
+        std::fs::remove_dir_all(&z).unwrap();
+        std::fs::write(&z, b"").unwrap();
+        let error = broker.publish("p", "t", &json!(1), None).unwrap_err();
+        assert!(error.downcast_ref::<Backpressure>().is_some(), "{error}");
+        std::fs::remove_file(&z).unwrap();
+        std::fs::create_dir(&z).unwrap();
+        assert_nothing_delivered(&mut broker);
+        assert!(broker.receive("v", "t").unwrap().is_none(), "volatile copy of a refused publication");
+        assert_eq!(std::fs::read_dir(queue_dir(&d, "a", "t")).unwrap().count(), 0, "staged copy left behind");
+        drop(broker);
+        let mut broker = Broker::open(&d, Limits::default()).unwrap();
+        assert_nothing_delivered(&mut broker);
+        // The refused publication did not take an id; the next one is delivered to both.
+        assert_eq!(broker.publish("p", "t", &json!(2), None).unwrap()["id"], 1);
+        assert_eq!(broker.receive("a", "t").unwrap().unwrap().payload, json!(2));
+        assert_eq!(broker.receive("z", "t").unwrap().unwrap().payload, json!(2));
+    }
+
+    #[test]
+    fn a_failed_rename_into_place_is_undone() {
+        let d = dir("fanout-rename");
+        let mut broker = Broker::open(&d, Limits::default()).unwrap();
+        broker.subscribe("a", "t", 1).unwrap();
+        broker.subscribe("z", "t", 1).unwrap();
+        // a's copy is renamed into place first; z's rename then fails.
+        let blocker = queue_dir(&d, "z", "t").join(format!("{:020}.json", 1));
+        std::fs::create_dir(&blocker).unwrap();
+        std::fs::write(blocker.join("keep"), b"").unwrap();
+        assert!(broker.publish("p", "t", &json!(1), None).unwrap_err().downcast_ref::<Backpressure>().is_some());
+        std::fs::remove_dir_all(&blocker).unwrap();
+        assert_nothing_delivered(&mut broker);
+        for principal in ["a", "z"] {
+            assert_eq!(std::fs::read_dir(queue_dir(&d, principal, "t")).unwrap().count(), 0, "{principal} kept a copy");
+        }
+        assert_eq!(broker.publish("p", "t", &json!(2), None).unwrap()["durable"], 2);
+    }
+
+    #[test]
+    fn open_discards_copies_a_crash_left_uncommitted() {
+        let d = dir("fanout-crash");
+        let mut broker = Broker::open(&d, Limits::default()).unwrap();
+        broker.subscribe("a", "t", 1).unwrap();
+        broker.subscribe("z", "t", 1).unwrap();
+        broker.publish("p", "t", &json!("kept"), None).unwrap();
+        drop(broker);
+        // A crash after a's copy was renamed into place and z's only staged,
+        // before `seq` committed message 2.
+        let encoded = |id: u64| serde_json::to_vec(&Message { id, topic: "t".into(), sender: "p".into(), payload: json!("lost"), published_ms: 0 }).unwrap();
+        std::fs::write(queue_dir(&d, "a", "t").join(format!("{:020}.json", 2)), encoded(2)).unwrap();
+        std::fs::write(queue_dir(&d, "z", "t").join(format!("{:020}.tmp", 2)), encoded(2)).unwrap();
+        let mut broker = Broker::open(&d, Limits::default()).unwrap();
+        for principal in ["a", "z"] {
+            let m = broker.receive(principal, "t").unwrap().unwrap();
+            assert_eq!((m.id, m.payload), (1, json!("kept")));
+            broker.ack(principal, "t", 1).unwrap();
+            assert!(broker.receive(principal, "t").unwrap().is_none(), "{principal} got an uncommitted copy");
+            assert_eq!(std::fs::read_dir(queue_dir(&d, principal, "t")).unwrap().count(), 0);
+        }
+        assert_eq!(broker.publish("p", "t", &json!("next"), None).unwrap()["id"], 2);
     }
 
     #[test]
