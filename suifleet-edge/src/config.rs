@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 #[derive(Deserialize, Debug, Clone)]
 pub struct Config {
     pub sui: SuiConfig,
+    #[serde(default)]
+    pub ipc: Option<crate::ipc::Settings>,
     pub device: DeviceConfig,
     #[serde(default)]
     pub walrus: WalrusConfig,
@@ -496,6 +498,7 @@ impl Config {
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         let raw = std::fs::read_to_string(path)?;
         let mut cfg: Self = toml::from_str(&raw)?;
+        if let Some(ipc) = &cfg.ipc { ipc.validate()?; }
         cfg.path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
         anyhow::ensure!(
             !cfg.daemon_update.enabled
