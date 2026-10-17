@@ -44,8 +44,9 @@
    "current_evidence": ["docs/YOCTO_PACKAGING.md"], "tickets": ["SF-029", "SF-031"], "notes": "Yocto QEMU aarch64 boot evidence; physical Raspberry Pi 3 B+ acceptance pending in SF-031."},
   {"id": "linux-arm", "aws": {"os": "linux", "architecture": "arm"}, "native": {"os": "linux", "arch": "arm"}, "status": "proposed",
    "tickets": ["SF-011"], "notes": "Catalog selection vectors only; architecture.detail (arm61/arm71/arm81) is not represented and is rejected by translation."},
-  {"id": "linux-x86", "aws": {"os": "linux", "architecture": "x86"}, "native": null, "status": "roadmap", "tickets": ["SF-064", "SF-076"],
-   "notes": "Outside the SF-038 initial Linux prototype phase; a tracked gap. Translated recipes omit x86 manifests and report them."},
+  {"id": "linux-x86", "aws": {"os": "linux", "architecture": "x86"}, "native": {"os": "linux", "arch": "x86"}, "status": "partial",
+   "current_evidence": ["docs/LINUX_X86.md", "docs/validation/sf076-linux-x86.json"], "tickets": ["SF-064", "SF-076"],
+   "notes": "i686 daemon, release bundle and native x86 catalog selection with 32-bit userland software-runner evidence; no 32-bit kernel or hardware. Outside the SF-038 initial Linux prototype phase; translated recipes still omit x86 manifests and report them."},
   {"id": "windows", "aws": {"os": "windows"}, "native": null, "status": "roadmap", "tickets": ["SF-064", "SF-074"],
    "notes": "No Windows runtime; outside the SF-038 initial Linux prototype phase and a tracked gap. Translated recipes omit Windows manifests."},
   {"id": "darwin", "aws": {"os": "darwin"}, "native": null, "status": "roadmap", "tickets": ["SF-064", "SF-075"], "notes": "No macOS runtime; outside the SF-038 initial Linux prototype phase and a tracked gap."}

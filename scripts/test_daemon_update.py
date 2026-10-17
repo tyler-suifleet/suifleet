@@ -17,6 +17,9 @@ including a new daemon that hangs before readiness.
                                          Failed; v2 stays current
   0x703 v4  cannot run at all         -> rejected by the preflight self-check;
                                          no restart, the running daemon is kept
+  0x707 v8  this daemon rebuilt for   -> rejected before install or preflight
+            another ELF architecture     (SF-076: an x86_64 kernel also runs
+                                         i686, so a preflight could pass)
   0x705/6   cancelled / window closed -> admission is re-read after the slow
             during the artifact download  download: no preflight, handoff or
                                          restart; cancellation stays terminal,
@@ -44,6 +47,15 @@ COMPONENT = "suifleet-daemon"
 # Passes the preflight self-check, then fails every real start.
 FAILS_AT_STARTUP = b'#!/bin/sh\n[ "$1" = --self-check ] && exit 0\necho "broken daemon" >&2\nexit 3\n'
 NOT_RUNNABLE = b"\x7fELF this is not an executable\n"
+
+
+def other_architecture(binary):
+    """The same bytes with ELF e_machine swapped between x86 (3) and x86_64 (62)."""
+    data = bytearray(Path(binary).read_bytes())
+    order = "big" if data[5] == 2 else "little"
+    machine = int.from_bytes(data[18:20], order)
+    data[18:20] = (62 if machine == 3 else 3).to_bytes(2, order)
+    return bytes(data)
 
 
 class ServiceManager:
@@ -232,6 +244,16 @@ def run(binary):
             assert manager.pid() == pid and manager.starts == starts, "an unrunnable update caused a restart"
             print("PASS: an unrunnable binary failed its preflight self-check; the running daemon was kept (no restart)")
 
+            # Built for another ELF architecture: refused before it is installed or run.
+            pid, starts = manager.pid(), manager.starts
+            deploy("0x707", "8.0.0", other_architecture(binary))
+            wait_for(lambda: outcome("0x707").get("status") == 2, "the other-architecture update was not rejected")
+            assert "built for another architecture" in outcome("0x707")["error"], outcome("0x707")
+            assert "preflight" not in outcome("0x707")["error"], outcome("0x707")
+            assert not any("8.0.0-" in p.name for p in (daemon_dir / "versions").iterdir()), "candidate installed"
+            assert manager.pid() == pid and manager.starts == starts, "an other-architecture update caused a restart"
+            print("PASS: a daemon built for another ELF architecture was refused before install/preflight (no restart)")
+
             # Cancelled, or the maintenance window closed, during a slow daemon
             # download: admission is re-read before the candidate runs.
             for id, version, action in [("0x705", "6.0.0", "cancel"), ("0x706", "7.0.0", "window")]:
@@ -275,11 +297,12 @@ def run(binary):
             assert journal()["binding"] == binding
             print("PASS: a daemon killed right after staging: the next start handed over and v5 confirmed")
 
-            wait_for(lambda: {"0x701", "0x702", "0x703", "0x704", "0x706"} <= set(reported()), f"reports missing: {reported()}")
+            wait_for(lambda: {"0x701", "0x702", "0x703", "0x704", "0x706", "0x707"} <= set(reported()), f"reports missing: {reported()}")
             assert reported()["0x701"] == 1 and reported()["0x702"] == 2 and reported()["0x703"] == 2 and reported()["0x704"] == 1, reported()
+            assert reported()["0x707"] == 2, reported()
             assert reported()["0x706"] == 1 and "0x705" not in reported(), reported()
             assert not sim.errors, sim.errors
-            print("PASS: all outcomes reported on chain (Applied, Failed, Failed, Applied, Applied); the cancelled update has none")
+            print("PASS: all outcomes reported on chain (Applied, Failed, Failed, Failed, Applied, Applied); the cancelled update has none")
             manager.stop()
             manager = None
             log.close()

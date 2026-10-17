@@ -1,4 +1,6 @@
-//! Release bundle verification (SF-039): `suifleet --verify-release BUNDLE TRUST`.
+//! Release bundle verification (SF-039): `suifleet --verify-release BUNDLE TRUST [TARGET]`.
+//! With TARGET, the signed target triple must also equal it (SF-076), so an
+//! installer cannot install a trusted bundle built for another platform.
 //!
 //! A bundle (scripts/release.py) holds `release.json`, the files it lists, and
 //! `release.sig.json` with one or more ed25519 signatures over
@@ -159,6 +161,17 @@ pub fn verify(bundle: &Path, trust: &Path) -> anyhow::Result<Verified> {
     })
 }
 
+/// `verify`, then require the signed target triple, e.g. `i686-unknown-linux-gnu`.
+pub fn verify_target(bundle: &Path, trust: &Path, target: &str) -> anyhow::Result<Verified> {
+    let verified = verify(bundle, trust)?;
+    anyhow::ensure!(
+        verified.target == target,
+        "release is built for {}, not the required target {target}",
+        verified.target
+    );
+    Ok(verified)
+}
+
 fn check_signature(public_key: &str, signature: &str, message: &[u8]) -> anyhow::Result<()> {
     let key: [u8; 32] = hex::decode(public_key)?
         .try_into()
@@ -235,6 +248,22 @@ mod tests {
         let trust = bundle.trust(&[("release-a", &old, false)]);
         let verified = verify(&bundle.dir, &trust).unwrap();
         assert_eq!((verified.version.as_str(), verified.signer.as_str()), ("0.1.0", "release-a"));
+    }
+
+    #[test]
+    fn a_required_target_must_equal_the_signed_target() {
+        let (old, _, _) = keys();
+        let bundle = Bundle::new("target");
+        bundle.sign(&[("release-a", &old)]);
+        let trust = bundle.trust(&[("release-a", &old, false)]);
+        assert!(verify_target(&bundle.dir, &trust, "aarch64-unknown-linux-gnu").is_ok());
+        for other in ["i686-unknown-linux-gnu", "x86_64-unknown-linux-gnu", "aarch64", ""] {
+            let error = verify_target(&bundle.dir, &trust, other).unwrap_err().to_string();
+            assert!(error.contains("is built for aarch64-unknown-linux-gnu"), "{other}: {error}");
+        }
+        // The signature is still checked first.
+        let stranger = bundle.trust(&[("release-a", &keys().2, false)]);
+        assert!(verify_target(&bundle.dir, &stranger, "aarch64-unknown-linux-gnu").is_err());
     }
 
     #[test]

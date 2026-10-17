@@ -33,7 +33,7 @@ Statuses: `implemented`/`partial` (merged, with cited local evidence), `proposed
 | Linux x86_64 | `linux`/`amd64` | `linux`/`x86_64` | Partial: daemon, simulator and localnet evidence |
 | Linux aarch64 | `linux`/`aarch64` | `linux`/`aarch64` | Partial: Yocto QEMU; physical Pi pending in SF-031 |
 | Linux 32-bit ARM | `linux`/`arm` | `linux`/`arm` | Proposed: selection vectors only. `architecture.detail` is rejected |
-| Linux x86 | `linux`/`x86` | none | Roadmap gap (SF-064), outside the SF-038 initial Linux phase. Translation omits these manifests |
+| Linux x86 (32-bit) | `linux`/`x86` | `linux`/`x86` | Partial: i686 daemon, release bundle and catalog selection with 32-bit software-runner evidence ([LINUX_X86.md](LINUX_X86.md)). Outside the SF-038 initial Linux phase; translation still omits these manifests |
 | Windows, macOS | `windows`, `darwin` | none | Roadmap gap (SF-064), outside the SF-038 initial Linux phase. Translation omits these manifests |
 
 ## Current APIs versus proposed contracts
@@ -41,7 +41,7 @@ Statuses: `implemented`/`partial` (merged, with cited local evidence), `proposed
 The following is merged today and is the only thing the daemon and frontend execute:
 
 - **Native recipes** (`interfaces/recipe.schema.json`) are versions 1.0/1.1, with one authenticated artifact, empty configuration and native dependency ranges. The lifecycle is `install`, plus the SF-014 supervised `run`/`shutdown`/`readiness`/`restart` ([OPERATIONS.md](OPERATIONS.md#supervised-components-sf-014)). Commands use the shell-quoted substitutions `{artifact}`, `{artifacts}` and `{work}` (`{work}` only in supervised commands), and `{pid}` in readiness/shutdown.
-- **The catalog** has platform manifests `linux|*` × `x86_64|aarch64|arm|*`, selected by first match.
+- **The catalog** has platform manifests `linux|*` × `x86_64|aarch64|arm|x86|*`, selected by first match (`x86` is 32-bit i686, SF-076).
 - **Native IPC v1** provides UID-authenticated component APIs, operator management and bounded volatile messaging ([COMPONENT_IPC.md](COMPONENT_IPC.md)). Shared-daemon-user components cannot receive individual ACLs; separate platform Unix identities are required. There is no AWS IPC wire compatibility, durable pub/sub, MQTT broker, shadow, stream, client-device or AWS recipe support.
 
 Everything else here is proposed. The fixtures pin its semantics. The owning tickets implement them and may revise them through review. Implementers must not treat this document as a published runtime API, and must not change merged APIs to fit it by assumption.
