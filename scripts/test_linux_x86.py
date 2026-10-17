@@ -141,6 +141,7 @@ def inside_bundle(bundle, daemon, signer):
             assert member.isfile() and member.mode == 0o755, member
             packaged.write_bytes(archive.extractfile(member).read())
         packaged.chmod(0o755)
+        packaged_sha256 = sha256(packaged)
         bits, machine, interpreter = elf(packaged)
         assert (bits, machine, interpreter) == (32, EM_386, "/lib/ld-linux.so.2"), (bits, machine, interpreter)
         key = root / "throwaway.key"
@@ -162,7 +163,7 @@ def inside_bundle(bundle, daemon, signer):
         # Tampering with the signed manifest's target is a signature failure.
         (copy / "release.json").write_text((copy / "release.json").read_text().replace(TARGET, "x86_64-unknown-linux-gnu"))
         assert subprocess.run([daemon, "--verify-release", copy, trust], capture_output=True).returncode != 0
-    print(json.dumps({"bundle_target": TARGET, "packaged_binary_sha256": sha256(packaged),
+    print(json.dumps({"bundle_target": TARGET, "packaged_binary_sha256": packaged_sha256,
                       "packaged_elf": [bits, machine, interpreter], "verification": results,
                       "packaged_identity": "provisioned", "retargeted_manifest_refused": True}))
 
@@ -192,6 +193,16 @@ def runner(runner_image, target_dir, command, root=False, extra=()):
             "-e", "HOME=/tmp", "-v", f"{ROOT}:/workspace:ro",
             "-v", f"{target_dir}/{TARGET}:/workspace/suifleet-edge/target:ro", *extra,
             runner_image, "setarch", "i686", *command]
+
+
+def inside(command):
+    """Run an in-runner step; show its output if it fails, then return its JSON result."""
+    result = subprocess.run(command, capture_output=True, text=True, timeout=600)
+    if result.returncode:
+        sys.stdout.write(result.stdout[-4000:])
+        sys.stderr.write(result.stderr[-4000:])
+        raise SystemExit(f"FAIL: {command[-1]} step on the 32-bit runner (exit {result.returncode})")
+    return json.loads(result.stdout.strip().splitlines()[-1])
 
 
 def image_id(image):
@@ -243,9 +254,7 @@ def main():
 
         script = ["python3", "scripts/test_linux_x86.py", "--inside"]
         for step in ("environment", "identity"):
-            output = subprocess.run(runner(args.runner_image, target_dir, [*script, step]),
-                                    check=True, capture_output=True, text=True).stdout
-            evidence[step] = json.loads(output.strip().splitlines()[-1])
+            evidence[step] = inside(runner(args.runner_image, target_dir, [*script, step]))
             print(f"PASS: runner {step}: {evidence[step]}")
 
         evidence["suites"] = []
@@ -264,10 +273,8 @@ def main():
 
         if args.bundle:
             bundle = args.bundle.resolve()
-            output = subprocess.run(runner(args.runner_image, target_dir, [*script, "bundle"],
-                                           extra=("-v", f"{bundle}:/bundle:ro")),
-                                    check=True, capture_output=True, text=True).stdout
-            evidence["bundle"] = json.loads(output.strip().splitlines()[-1])
+            evidence["bundle"] = inside(runner(args.runner_image, target_dir, [*script, "bundle"],
+                                               extra=("-v", f"{bundle}:/bundle:ro")))
             evidence["bundle"]["release_json_sha256"] = sha256(bundle / "release.json")
             print(f"PASS: 32-bit release bundle: {evidence['bundle']}")
         evidence["limitations"] = [
