@@ -11,7 +11,7 @@ import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from test_ota import Simulator, ARTIFACT, TYPE_ORIGINS, DEVICE, CAP, object_id, start_grpc, wait_for
+from test_ota import Simulator, ARTIFACT, TYPE_ORIGINS, DEVICE, CAP, OWNER_CAP, OPERATOR, object_id, start_grpc, wait_for
 from test_desired_state import manifest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,6 +22,12 @@ def run():
     rollout = dict(state=0, members=MEMBERS, admitted_at=[0,0,0], outcomes=[0,0,0], skipped=[False]*3)
     fault = [False]
     class View(Simulator):
+        current_operator = OPERATOR
+        gate = None
+        def obj(self, id):
+            result = super().obj(id)
+            if id == OWNER_CAP: result['data']['owner'] = {'AddressOwner':self.current_operator}
+            return result
         def rpc(self, method, params):
             if method == 'shim_fields':
                 return super().rpc(method, params) + [[RECORD, f"{TYPE_ORIGINS['deployment_manager::RolloutKey']}::deployment_manager::RolloutKey", '00']]
@@ -51,6 +57,10 @@ def run():
                             self.respond(json.dumps({'jsonrpc':'2.0','id':req['id'],**reply}).encode())
                         def do_GET(self):
                             blob=self.path.removeprefix('/v1/blobs/')
+                            if blob=='artifact' and sim.gate:
+                                gate=sim.gate; gate[0].set()
+                                assert gate[1].wait(20), 'download gate not released'
+                                sim.gate=None
                             self.respond(ARTIFACT if blob=='artifact' else json.dumps(sim.recipes[blob]).encode())
                     return Handler
                 server=ThreadingHTTPServer(('127.0.0.1',0),handler(sim)); threading.Thread(target=server.serve_forever,daemon=True).start()
@@ -97,7 +107,13 @@ def run():
             wait(lambda:deferred(1,'rollout paused'),'durable pause lost after crash')
             rollout['admitted_at'][1]=2; fault[0]=True; rollout['state']=0
             time.sleep(2); assert count(1)==0
+            gate=(threading.Event(),threading.Event());handles[1]['sim'].gate=gate
             fault[0]=False
+            wait(gate[0].is_set,'second member did not prepare download')
+            handles[1]['sim'].current_operator='0xbad';gate[1].set()
+            wait(lambda:deferred(1,'rollout operator changed'),'ownership transfer during download not rechecked')
+            assert count(1)==0
+            handles[1]['sim'].current_operator=OPERATOR
             wait(lambda:handles[1]['sim'].reports,'resumed grant did not execute')
             assert [count(i) for i in range(3)]==[1,1,0]
             rollout['state']=2; start(2)
@@ -106,7 +122,7 @@ def run():
             wait(lambda:deferred(2,'rollout aborted'),'abort not durable')
             assert [count(i) for i in range(3)]==[1,1,0]
             assert all(not h['sim'].errors for h in handles),[h['sim'].errors for h in handles]
-            print('PASS: three daemon cohorts, canary-only grants, offline member, crash/restart, pause/resume, fail-closed reads and durable abort; apply counts 1/1/0')
+            print('PASS: three daemon cohorts, canary-only grants, offline member, crash/restart, pause/resume, fail-closed reads, final operator recheck and durable abort; apply counts 1/1/0')
     finally:
         for h in handles:
             if h['process']:

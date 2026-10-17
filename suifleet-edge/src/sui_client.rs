@@ -765,6 +765,14 @@ impl SuiClient {
     pub async fn rollout_admission(&self, deployment: &str, device: &str) -> anyhow::Result<Option<&'static str>> {
         let record = self.object(deployment).await?;
         if number(&record.fields["schema_version"]) != Some(3) { return Ok(None); }
+        // Ownership or signer trust can change while artifacts are fetched.
+        // Refresh both at the same final admission boundary as the grant.
+        let identity = self.identity(device).await?;
+        check_identity(identity.as_ref(), &self.address())?;
+        let operator = self.operator(device).await?;
+        if !same_id(&operator, record.fields["creator"].as_str().unwrap_or("")) {
+            return Ok(Some("rollout operator changed"));
+        }
         let r = self.dynamic_field(deployment, "deployment_manager::RolloutKey").await?
             .ok_or_else(|| anyhow::anyhow!("schema-3 deployment has no rollout policy"))?;
         let r = r.get("fields").unwrap_or(&r);
