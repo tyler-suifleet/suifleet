@@ -95,6 +95,8 @@ Everything below is proposed. Each adapter runs as a supervised local service be
 
 ### Streams (SF-034)
 
+Implemented for local streams and HTTP(S) export: see [STREAMS.md](STREAMS.md). The rest of this section is the specification it follows.
+
 - **Stream definitions.** Each stream has a name of 1–255 characters (`[A-Za-z0-9 ,._-]`), a byte bound of at least 1 KiB, a `strategy_on_full` of `RejectNewData` or `OverwriteOldestData`, and a persistence of `File` (the default) or `Memory`.
 - **Sequence numbers.** Numbers start at 0 for each stream. They are gap-free at append, monotonic, and never reused, even after eviction or restart.
 - **Reads.** A read below the oldest retained number returns `evicted` with the oldest number, so consumers detect loss. Fewer than `min` messages returns `not-enough-messages`.
@@ -121,7 +123,7 @@ This runs `python3 scripts/greengrass_compat.py`, the checker's negative tests a
 | `aws-recipe-cases.json` | 49 recipes | Daemon and frontend validators (passing) | Pending SF-037 |
 | `pubsub-cases.json` | 53 filter/topic/match/ACL checks | none | Pending SF-027, SF-032 |
 | `shadow-cases.json` | 54 steps across 10 sequences | none | Pending SF-027, SF-033 |
-| `stream-cases.json` | 45 steps across 5 sequences | none | Pending SF-027, SF-034 |
+| `stream-cases.json` | 45 steps across 5 sequences | Daemon stream store (passing) | Passed: SF-034 daemon, IPC UIDs, crashes and export ([receipt](validation/sf034-streams.json)) |
 | `client-device-cases.json` | 16 authorization requests | none | Pending SF-032, SF-035 |
 | `managed-dependency-cases.json` | 47 managed-dependency classifications | none | Pending SF-037 |
 | `credential-provider-cases.json` | 65 steps across 7 sequences | none | Pending SF-057 |

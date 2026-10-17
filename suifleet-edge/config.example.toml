@@ -87,3 +87,16 @@ replay_history = false
 # url = "https://fleet.example"   # indexer base URL (POST {url}/v1/telemetry)
 # interval_seconds = 60           # 10..=3600
 # buffer_max = 1024               # snapshots kept offline; oldest dropped beyond
+
+# Durable local streams and export (SF-034; docs/STREAMS.md). Components need
+# stream operations and a `streams` glob under [ipc.components.NAME].
+# [streams]
+# max_streams = 32
+# max_total_bytes = 67108864        # sum of all streams' max_size
+# [[streams.definitions]]
+# name = "telemetry"
+# max_size = 16777216
+# strategy_on_full = "RejectNewData"  # or "OverwriteOldestData"
+# [streams.definitions.export]
+# url = "https://ingest.example/v1/streams"
+# bearer_token_file = "/etc/suifleet/stream-export.token"

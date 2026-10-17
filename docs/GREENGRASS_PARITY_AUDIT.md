@@ -116,7 +116,7 @@ The [compatibility specification](GREENGRASS_COMPATIBILITY.md) (SF-028) separate
 | Component IPC and SDK | Native v1: Unix UID ACLs, Python SDK/CLI, authenticated deployment install and supervised management, public config reads, health and volatile messaging ([COMPONENT_IPC.md](COMPONENT_IPC.md)) | Per-component execution users for shared-user supervised components; AWS wire compatibility and durable messaging remain separate | P2 |
 | Local pub/sub and MQTT bridge | Missing | Broker/bridge adapters, permissions and offline delivery | P2 |
 | Device shadows | Missing | Desired/reported state with version/conflict semantics and local sync | P2 |
-| Stream manager/store-and-forward | Missing | Bounded durable streams, export adapters and recovery | P2 |
+| Stream manager/store-and-forward | Bounded durable streams over native IPC: crash-safe segment files, reject/overwrite, time-to-live, quotas, and signed resumable HTTP(S) export with checkpoints ([STREAMS.md](STREAMS.md)) | AWS export targets (Kinesis/S3, SF-058; SiteWise, SF-064), Stream Manager SDK wire protocol | P2 |
 | Client-device discovery/authentication | Missing | Local device discovery, credentials, certificates and gateway authorization | P2 |
 | Token exchange/cloud credentials | Missing | Scoped credential provider or equivalent decentralized service credentials | P2 |
 | ML inference/industrial/cloud integrations | Missing | Optional component ecosystem/adapters and compatibility tests | P2 |
