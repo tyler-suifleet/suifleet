@@ -63,6 +63,7 @@ test-ota:
 	$(RUN) python3 scripts/test_firmware_restart.py
 	$(RUN) python3 scripts/test_supervisor.py
 	$(RUN) python3 scripts/test_configuration.py
+	$(RUN) python3 scripts/test_greengrass_runtime.py
 	$(RUN) python3 scripts/test_daemon_update.py
 	$(RUN) python3 scripts/test_desired_state.py
 	$(RUN) python3 scripts/test_deployment_control.py
@@ -121,8 +122,9 @@ test-protocol-live:
 test-catalog-live:
 	$(RUN) python3 scripts/test_catalog_localnet.py
 
-# SF-028 Greengrass compatibility matrix, reference-model fixtures and current
-# frontend validator check (docs/GREENGRASS_COMPATIBILITY.md). Offline.
+# SF-028 Greengrass compatibility matrix and reference-model fixtures, and the
+# SF-037 translator executing the recipe/managed-dependency fixtures
+# (docs/GREENGRASS_COMPATIBILITY.md). Offline; needs the dApp dependencies.
 .PHONY: test-compat
 test-compat:
 	$(RUN) python3 scripts/greengrass_compat.py
