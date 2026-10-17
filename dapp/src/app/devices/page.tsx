@@ -192,6 +192,7 @@ function DevicesTab() {
                 <option value="aarch64">aarch64 (ARM 64-bit)</option>
                 <option value="armv7">armv7 (ARM 32-bit)</option>
                 <option value="x86_64">x86_64</option>
+                <option value="x86">x86 (32-bit i686)</option>
                 <option value="riscv64">riscv64</option>
               </select>
             </div>
