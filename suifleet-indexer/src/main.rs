@@ -10,12 +10,17 @@
 //!   suifleet-indexer ctl ...   (see `suifleet-indexer ctl help`)
 //!
 //! docs/INDEXER.md covers deployment, auth, storage, retention and recovery.
+mod alerts;
 mod api;
 mod chain;
 mod ctl;
 mod devices;
 mod indexer;
+mod logs;
 mod manifest;
+// The daemon's own redaction rules (one implementation for both sides).
+#[path = "../../suifleet-edge/src/redact.rs"]
+mod redact;
 mod store;
 mod telemetry;
 mod txbuild;
@@ -128,9 +133,25 @@ async fn main() -> anyhow::Result<()> {
                 call_package: chain::normalize(&manifest.call_package_id).unwrap_or_default(),
                 registry,
                 types: Arc::new(types),
-                telemetry,
+                telemetry: telemetry.clone(),
                 cors_origin: values.get("--cors-origin").cloned(),
+                logs_retain: values.get("--logs-retain").map(|s| s.parse()).transpose()?.unwrap_or(logs::DEFAULT_RETAIN),
+                stuck_after_ms: values
+                    .get("--stuck-after-minutes")
+                    .map(|s| s.parse::<u64>())
+                    .transpose()?
+                    .map(|m| m * 60_000)
+                    .unwrap_or(alerts::DEFAULT_STUCK_AFTER_MS),
             };
+            anyhow::ensure!(state.logs_retain > 0, "--logs-retain must be positive");
+            if let Some(url) = values.get("--alert-webhook") {
+                let service = telemetry.clone().ok_or_else(|| anyhow::anyhow!("--alert-webhook needs --telemetry-db"))?;
+                let url = reqwest::Url::parse(url)?;
+                anyhow::ensure!(matches!(url.scheme(), "https" | "http") && url.username().is_empty() && url.password().is_none(),
+                    "--alert-webhook must be an http(s) URL without credentials");
+                let every = std::time::Duration::from_secs(values.get("--alert-interval-seconds").map(|s| s.parse()).transpose()?.unwrap_or(60));
+                tokio::spawn(alerts::notify_loop(state.readers.clone(), service, url, every, state.stuck_after_ms));
+            }
             let interval = std::time::Duration::from_secs(
                 values
                     .get("--interval-seconds")

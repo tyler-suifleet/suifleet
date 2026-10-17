@@ -4,6 +4,7 @@ import { useDevices } from "@/hooks/useDevices";
 import { useDeployments } from "@/hooks/useDeployments";
 import { useGroups } from "@/hooks/useGroups";
 import { useFleetHealth } from "@/hooks/useFleetHealth";
+import { useFleetAlerts } from "@/hooks/useFleetAlerts";
 import Link from "next/link";
 import { PageHeader, Section, StatusDot } from "@/components/ui";
 
@@ -16,6 +17,7 @@ export default function DashboardPage() {
   const reported = Object.values(health).some((h) => h.status !== "unavailable");
 
   const pending = deployments.filter((d) => d.resolvedDeviceIds.some((id) => (d.statuses[id] ?? 0) === 0));
+  const alerts = useFleetAlerts();
 
   return (
     <div className="space-y-6 max-w-5xl">
@@ -28,6 +30,30 @@ export default function DashboardPage() {
         <StatCard label="Deployments" value={depl ? "—" : deployments.length} href="/deployments" />
         <StatCard label="Active deployments" value={depl ? "—" : pending.length} href="/deployments" />
       </div>
+
+      {/* Alerts (SF-020): derived by the fleet indexer from verified telemetry and receipts */}
+      <Section title="Alerts">
+        {alerts.status === "unavailable" ? (
+          <p className="text-sm text-gray-400">Alerts unavailable: {alerts.reason}. Enter the indexer read token on the Devices page.</p>
+        ) : alerts.items.length === 0 ? (
+          <p className="text-sm text-gray-500">No alerts for your devices.</p>
+        ) : (
+          <ul className="divide-y divide-gray-100 text-sm">
+            {alerts.items.slice(0, 20).map((a) => (
+              <li key={a.key} className="py-2">
+                <span className={`mr-2 rounded px-1.5 py-0.5 text-xs font-medium ${a.severity === "critical" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"}`}>
+                  {a.severity}
+                </span>
+                <Link href="/devices" className="font-medium hover:underline">{a.deviceName}</Link>
+                <span className="text-gray-600"> — {a.message}</span>
+                <p className="text-xs text-gray-400 mt-0.5">{a.action}</p>
+              </li>
+            ))}
+            {alerts.items.length > 20 && <li className="py-2 text-xs text-gray-400">{alerts.items.length - 20} more (suifleet-indexer ctl alerts)</li>}
+          </ul>
+        )}
+        <p className="mt-2 text-xs text-gray-400">Reported by the fleet indexer.</p>
+      </Section>
 
       {/* Recent deployments */}
       <Section title="Recent deployments" action={{ label: "View all", href: "/deployments" }}>

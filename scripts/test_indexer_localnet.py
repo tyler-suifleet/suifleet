@@ -201,8 +201,8 @@ def run(rpc_url, faucet_url):
         common = ["--manifest", str(root / "deployment.json"), "--db", str(db)]
         indexed = subprocess.run([str(INDEXER), "index", *common], capture_output=True, text=True, timeout=300)
         assert indexed.returncode == 0, indexed.stderr[-3000:]
-        read_token, operate_token = "r" * 40, "o" * 48
-        (root / "tokens").write_text(f"read {read_token}\noperate {operate_token}\n")
+        read_token, operate_token, support_token = "r" * 40, "o" * 48, "s" * 44
+        (root / "tokens").write_text(f"read {read_token}\noperate {operate_token}\nsupport {support_token}\n")
         log = (root / "indexer.log").open("w")
 
         def serve(*extra):
@@ -276,7 +276,8 @@ def run(rpc_url, faucet_url):
                     f'[device]\nkeypair_path = {json.dumps(str(key))}\ndevice_object_id = "{device}"\ndevice_cap_id = "{cap}"\n'
                     '[apply]\ncommand = "/bin/false"\n'
                     f'[runtime]\nstate_dir = {json.dumps(str(directory / "state"))}\npoll_seconds = 2\n'
-                    f'[telemetry]\nurl = "{API}"\ninterval_seconds = 10\n')
+                    f'[telemetry]\nurl = "{API}"\ninterval_seconds = 10\n'
+                    '[logs]\ninterval_seconds = 10\n')
                 process = subprocess.Popen([str(DAEMON)], env={**os.environ, "EDGE_CONFIG": str(directory / "config.toml")},
                                            stdout=(directory / "daemon.log").open("w"), stderr=subprocess.STDOUT)
                 daemons.append(process)
@@ -307,6 +308,32 @@ def run(rpc_url, faucet_url):
                 captured.write_text(json.dumps([{"message": r["message"], "signature": r["signature"]} for r in stored]))
                 subprocess.run(["node", str(ROOT / "scripts/test_telemetry.cjs"), "--verify", str(captured),
                                 n(device_signer), n(pi), chain_id, n(registry)], check=True)
+
+                # Remote logs, diagnostics and alerts (SF-020) through the real indexer.
+                def support(path, token=support_token):
+                    return http("GET", path, token)
+                wait_for(lambda: any("Daemon started" in line["line"]
+                                     for line in support(f"/v1/devices/{pi}/logs?source=daemon&limit=500")[1].get("items", [])),
+                         "the activated device's daemon log never reached the indexer", timeout=90)
+                assert support(f"/v1/devices/{pi}/logs", read_token)[0] == 403, "a read token searched device logs"
+                found = support(f"/v1/devices/{pi}/logs?q=daemon%20started")[1]["items"]
+                assert found and all("daemon started" in line["line"].lower() for line in found), found
+                wait_for(lambda: "Log batch rejected" in (revoked / "daemon.log").read_text(),
+                         "the revoked device's log batches were not rejected", timeout=60)
+                assert support(f"/v1/devices/{foreign}/logs")[1]["items"] == [], "a revoked identity's logs were stored"
+                status, bundle = support(f"/v1/devices/{pi}/diagnostics")
+                assert status == 200 and bundle["health"]["status"] == "healthy", bundle.get("health")
+                receipts = {d["deployment_id"]: d["receipt"] for d in bundle["deployments"]}
+                assert receipts.get(n(by_group)) == "applied", receipts
+                assert bundle["log_stats"]["lines"] > 0 and bundle["logs"], bundle["log_stats"]
+                status, alerts = http("GET", f"/v1/alerts?owner={operator}", read_token)
+                assert status == 200 and not [a for a in alerts["items"] if a["device_id"] == n(pi)], alerts
+                status, audit = http("GET", "/v1/support/audit", operate_token)
+                assert status == 200 and {"logs", "diagnostics"} <= {e["route"] for e in audit["items"]}, audit
+                assert support_token not in json.dumps(audit)
+                print("PASS: remote logs: the activated device's redacted daemon log searchable with a support token (read "
+                      "token 403), the revoked device's batches rejected; diagnostics bundle with the on-chain receipt; "
+                      "alerts served; support access audited by token fingerprint")
             finally:
                 for process in daemons:
                     process.terminate()
