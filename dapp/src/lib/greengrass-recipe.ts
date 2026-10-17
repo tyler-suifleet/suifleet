@@ -86,7 +86,7 @@ export const GUIDANCE: Record<string, string> = {
   "unsupported-platform-value": "Use os linux or * and architecture amd64, aarch64, arm or *.",
   "duplicate-platform": "Each translated manifest needs a distinct os/architecture pair; native selection is first match.",
   "no-manifests": "Add at least one manifest.",
-  "no-supported-platform": "Add a Linux manifest; Windows, macOS and x86 have no native runtime (SF-064).",
+  "no-supported-platform": "Add a Linux x86_64, aarch64 or arm manifest; Windows and macOS have no native runtime, and 32-bit x86 (SF-076) is outside the initial translation phase (SF-064).",
   "artifact-count": "Each manifest needs exactly one artifact (and a recipe at most 16 manifests); combine files into one archive unpacked by install.",
   "unsupported-artifact-key": "Artifacts may contain only Uri, Unarchive, Permission, Digest and Algorithm.",
   "unsupported-unarchive": "Use Unarchive NONE and unpack the archive in install, for example tar -xf {artifacts:path}/<file>.",

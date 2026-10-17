@@ -67,7 +67,7 @@ export function GreengrassImport({catalog,owner,execute,onPublished,disabled}:{c
     {uris.map(uri=><label key={uri} className="block">Artifact for <code>{uri}</code> <input type="file" onChange={e=>{const f=e.target.files?.[0];setFiles(({[uri]:_,...rest})=>f?{...rest,[uri]:f}:rest);setResult(null);}}/></label>)}
     <button disabled={busy||!text.trim()} onClick={check}>Check translation</button>
     {result&&<div role="status" className="space-y-2">
-      <p>{result.outcome==='translate'?`Translates to ${result.manifests!.length} native manifest(s)`:'Rejected'}{result.omitted_manifests?.length?`; manifests ${result.omitted_manifests.join(', ')} omitted (no native runtime for that platform)`:''}</p>
+      <p>{result.outcome==='translate'?`Translates to ${result.manifests!.length} native manifest(s)`:'Rejected'}{result.omitted_manifests?.length?`; manifests ${result.omitted_manifests.join(', ')} omitted (platform not translated: Windows, macOS or 32-bit x86)`:''}</p>
       <ul>{result.reasons.map(r=><li key={r}><code>{r}</code>: {guidance(r)}</li>)}</ul>
       {result.manifests?.map((m,i)=><p key={i}>{i+1}. {m.os}/{m.arch} · recipe {m.recipe.schemaVersion}</p>)}
       {result.managed_dependencies&&<ul>{Object.entries(result.managed_dependencies).map(([d,c])=><li key={d}><code>{d}</code>: {c.outcome}{c.reason?` (${c.reason})`:''}{c.tickets?.length?` · ${c.tickets.join(', ')}`:''}{c.implementation_ticket?` · ${c.implementation_ticket}`:''}</li>)}</ul>}
