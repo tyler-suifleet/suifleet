@@ -116,8 +116,14 @@ class Provider:
     def credentials(self):
         # One refresh at a time, without allowing queued callers to hold all
         # HTTP workers indefinitely while an upstream is unavailable.
-        if not self.lock.acquire(timeout=1):
-            return None, 1
+        if not self.lock.acquire(blocking=False):
+            # The cache is replaced, never mutated after publication. Inspect
+            # its own expiration so a concurrent refresh cannot mix generations.
+            cached = self.cache
+            if cached and datetime.datetime.fromisoformat(cached['Expiration'].replace('Z', '+00:00')).timestamp() > self.clock():
+                return cached, 0
+            if not self.lock.acquire(timeout=1):
+                return None, 1
         try:
             return self._credentials()
         finally:
@@ -165,10 +171,11 @@ class Provider:
                 expiration = datetime.datetime.fromisoformat(value['expiration'].replace('Z', '+00:00'))
                 if expiration.tzinfo is None or not now < expiration.timestamp() <= now + 43200:
                     raise ValueError('invalid credential expiry')
-                self.cache = dict(zip(('AccessKeyId', 'SecretAccessKey', 'Token', 'Expiration'),
+                cached = dict(zip(('AccessKeyId', 'SecretAccessKey', 'Token', 'Expiration'),
                                       (value[k] for k in fields)))
                 # The Rust SDK requires UTC Z, rather than a +00:00 offset.
-                self.cache['Expiration'] = expiration.astimezone(datetime.timezone.utc).isoformat().replace('+00:00', 'Z')
+                cached['Expiration'] = expiration.astimezone(datetime.timezone.utc).isoformat().replace('+00:00', 'Z')
+                self.cache = cached
                 self.expires = expiration.timestamp()
                 self.retry_at = 0
             except (OSError, ValueError, KeyError, TypeError, http.client.HTTPException):
@@ -380,7 +387,14 @@ class ControlHandler(socketserver.StreamRequestHandler):
 
 
 class HttpServer(BoundedServer, socketserver.TCPServer):
-    pass
+    def gates(self, request):
+        try:
+            uid = tcp_uid(request)
+        except (OSError, ValueError):
+            return []
+        if uid not in self.principal_slots:
+            return []
+        return [self.slots, self.principal_slots[uid]]
 
 
 class ControlServer(BoundedServer, socketserver.UnixStreamServer):
@@ -432,8 +446,8 @@ class Adapter:
             server.policy, server.provider = self.policy, self.provider
             server.slots = threading.BoundedSemaphore(16)
             server.held = {}
+            server.principal_slots = {uid: threading.BoundedSemaphore(2) for uid in self.policy.principals.values()}
         self.control.admin_slots = threading.BoundedSemaphore(4)
-        self.control.principal_slots = {uid: threading.BoundedSemaphore(2) for uid in self.policy.principals.values()}
         self.threads = []
 
     def start(self):

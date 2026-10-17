@@ -42,6 +42,7 @@ def actor(pipe, uid):
     os.setgroups([])
     os.setgid(uid)
     os.setuid(uid)
+    slow = []
     try:
         while True:
             command = pipe.recv()
@@ -56,6 +57,16 @@ def actor(pipe, uid):
                 body = json.loads(response.read())
                 pipe.send((response.status, dict(response.getheaders()), body))
                 client.close()
+            elif command['op'] == 'slow-http':
+                parsed = __import__('urllib.parse', fromlist=['urlsplit']).urlsplit(command['uri'])
+                for _ in range(24):
+                    sock = socket.create_connection((parsed.hostname, parsed.port), timeout=2)
+                    try:
+                        sock.sendall(b'G')
+                    except OSError:
+                        pass
+                    slow.append(sock)
+                pipe.send(True)
             elif command['op'] == 'connect-denied':
                 try:
                     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
@@ -101,6 +112,8 @@ class Upstream(__import__('http.server', fromlist=['HTTPServer']).HTTPServer):
                     result = owner.results.get_nowait()
                 except queue.Empty:
                     result = {'result': 'server-error'}
+                if result.get('delay'):
+                    time.sleep(result['delay'])
                 status = {'ok': 200, 'client-error': 403, 'server-error': 500, 'unknown-error': 200}[result['result']]
                 if result['result'] == 'ok':
                     name = result['credential_set']
@@ -310,6 +323,36 @@ class Runtime(unittest.TestCase):
         self.upstream.results.put(dict(result='ok', credential_set='set-2', expiration=3600))
         self.assertEqual(self.request('c1', newest)[0], 200)
 
+
+    def test_http_admission_isolates_hostile_uids(self):
+        self.start(['c1', 'c2'])
+        self.upstream.results.put(dict(result='ok', credential_set='initial', expiration=3600))
+        token = self.bootstrap('c1')['AWS_CONTAINER_AUTHORIZATION_TOKEN']
+        self.assertEqual(self.request('c1', token)[0], 200)
+        # Unknown, configured-but-ungranted, and granted UIDs each try more
+        # slow connections than the entire global worker allowance.
+        for hostile in ('unknown', 'c3', 'c2'):
+            self.assertTrue(self.ask(hostile, op='slow-http', uri=self.uri))
+            self.assertEqual(self.request('c1', token)[0], 200)
+
+    def test_cached_credentials_during_concurrent_refresh(self):
+        self.start(['c1', 'c2'])
+        tokens = {name: self.bootstrap(name)['AWS_CONTAINER_AUTHORIZATION_TOKEN'] for name in ('c1', 'c2')}
+        self.upstream.results.put(dict(result='ok', credential_set='initial', expiration=600))
+        self.assertEqual(self.request('c1', tokens['c1'])[0], 200)
+        self.timestamp.value = 301
+        self.upstream.results.put(dict(result='ok', credential_set='refreshed', expiration=3600, delay=2))
+        pipe, _ = self.actors['c1']
+        pipe.send(dict(op='http', uri=self.uri, token=tokens['c1']))
+        deadline = time.monotonic() + 5
+        while self.upstream.calls < 2 and time.monotonic() < deadline:
+            time.sleep(.01)
+        self.assertEqual(self.upstream.calls, 2)
+        response = self.request('c2', tokens['c2'])
+        self.assertEqual(response[0], 200)
+        self.assertEqual(response[2]['AccessKeyId'], 'initial')
+        self.assertTrue(pipe.poll(10))
+        self.assertEqual(pipe.recv()[2]['AccessKeyId'], 'refreshed')
 
     def test_unmodified_sdks_via_exec_wrapper(self):
         self.start(['c1'])
