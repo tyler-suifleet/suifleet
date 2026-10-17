@@ -1,0 +1,1090 @@
+[
+ {
+  "id": "levels-redaction-names-and-order",
+  "steps": [
+   {
+    "op": {
+     "op": "configure",
+     "sources": {
+      "com.example.App": "UserComponent",
+      "System": "GreengrassSystemComponent"
+     },
+     "redact": [
+      "s3cr3t"
+     ],
+     "region": "eu-west-1",
+     "thing": "fleet:pi-1"
+    },
+    "expect": {
+     "status": "ok"
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "com.other",
+     "level": "INFO",
+     "message": "x",
+     "time": 1760000000
+    },
+    "expect": {
+     "status": "unknown-source"
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "com.example.App",
+     "level": "TRACE",
+     "message": "x",
+     "time": 1760000000
+    },
+    "expect": {
+     "status": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "com.example.App",
+     "level": "INFO",
+     "message": 7,
+     "time": 1760000000
+    },
+    "expect": {
+     "status": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "com.example.App",
+     "level": "INFO",
+     "message": "x",
+     "time": "noon"
+    },
+    "expect": {
+     "status": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "com.example.App",
+     "level": "DEBUG",
+     "message": "dbg",
+     "time": 1760000000
+    },
+    "expect": {
+     "status": "filtered"
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "com.example.App",
+     "level": "INFO",
+     "message": "token=s3cr3t ok s3cr3t",
+     "time": 1760000000
+    },
+    "expect": {
+     "status": "spooled",
+     "events": 1,
+     "spooled": 1,
+     "dropped": 0
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "System",
+     "level": "WARN",
+     "message": "disk low",
+     "time": 1760000001
+    },
+    "expect": {
+     "status": "spooled",
+     "events": 1,
+     "spooled": 2,
+     "dropped": 0
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "com.example.App",
+     "level": "ERROR",
+     "message": "boom",
+     "time": 1759999999
+    },
+    "expect": {
+     "status": "spooled",
+     "events": 1,
+     "spooled": 3,
+     "dropped": 0
+    }
+   },
+   {
+    "op": {
+     "op": "tick",
+     "now": 299
+    },
+    "expect": {
+     "uploads": [],
+     "spooled": 3,
+     "dropped": 0
+    }
+   },
+   {
+    "op": {
+     "op": "upstream",
+     "results": [
+      "ok",
+      "ok"
+     ]
+    },
+    "expect": {}
+   },
+   {
+    "op": {
+     "op": "tick",
+     "now": 300
+    },
+    "expect": {
+     "uploads": [
+      {
+       "group": "/aws/greengrass/GreengrassSystemComponent/eu-west-1/System",
+       "stream": "/2025/10/09/thing/fleet+pi-1",
+       "events": [
+        [
+         1760000001,
+         "disk low"
+        ]
+       ],
+       "result": "ok"
+      },
+      {
+       "group": "/aws/greengrass/UserComponent/eu-west-1/com.example.App",
+       "stream": "/2025/10/09/thing/fleet+pi-1",
+       "events": [
+        [
+         1759999999,
+         "boom"
+        ],
+        [
+         1760000000,
+         "token=[REDACTED] ok [REDACTED]"
+        ]
+       ],
+       "result": "ok"
+      }
+     ],
+     "spooled": 0,
+     "dropped": 0
+    }
+   },
+   {
+    "op": {
+     "op": "tick",
+     "now": 600
+    },
+    "expect": {
+     "uploads": [],
+     "spooled": 0,
+     "dropped": 0
+    }
+   }
+  ]
+ },
+ {
+  "id": "day-split-checkpoint-and-lost-response",
+  "steps": [
+   {
+    "op": {
+     "op": "configure",
+     "sources": {
+      "app": "UserComponent"
+     }
+    },
+    "expect": {
+     "status": "ok"
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "app",
+     "level": "INFO",
+     "message": "a",
+     "time": 1759967999
+    },
+    "expect": {
+     "status": "spooled",
+     "events": 1,
+     "spooled": 1,
+     "dropped": 0
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "app",
+     "level": "INFO",
+     "message": "b",
+     "time": 1759968000
+    },
+    "expect": {
+     "status": "spooled",
+     "events": 1,
+     "spooled": 2,
+     "dropped": 0
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "app",
+     "level": "INFO",
+     "message": "c",
+     "time": 1759968001
+    },
+    "expect": {
+     "status": "spooled",
+     "events": 1,
+     "spooled": 3,
+     "dropped": 0
+    }
+   },
+   {
+    "op": {
+     "op": "upstream",
+     "results": [
+      "ok",
+      "server-error"
+     ]
+    },
+    "expect": {}
+   },
+   {
+    "op": {
+     "op": "tick",
+     "now": 300
+    },
+    "expect": {
+     "uploads": [
+      {
+       "group": "/aws/greengrass/UserComponent/us-east-1/app",
+       "stream": "/2025/10/08/thing/thing",
+       "events": [
+        [
+         1759967999,
+         "a"
+        ]
+       ],
+       "result": "ok"
+      },
+      {
+       "group": "/aws/greengrass/UserComponent/us-east-1/app",
+       "stream": "/2025/10/09/thing/thing",
+       "events": [
+        [
+         1759968000,
+         "b"
+        ],
+        [
+         1759968001,
+         "c"
+        ]
+       ],
+       "result": "server-error"
+      }
+     ],
+     "spooled": 2,
+     "dropped": 0
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "app",
+     "level": "INFO",
+     "message": "d",
+     "time": 1759968002
+    },
+    "expect": {
+     "status": "spooled",
+     "events": 1,
+     "spooled": 3,
+     "dropped": 0
+    }
+   },
+   {
+    "op": {
+     "op": "restart"
+    },
+    "expect": {
+     "spooled": 3,
+     "dropped": 0
+    }
+   },
+   {
+    "op": {
+     "op": "upstream",
+     "results": [
+      "response-lost"
+     ]
+    },
+    "expect": {}
+   },
+   {
+    "op": {
+     "op": "tick",
+     "now": 600
+    },
+    "expect": {
+     "uploads": [
+      {
+       "group": "/aws/greengrass/UserComponent/us-east-1/app",
+       "stream": "/2025/10/09/thing/thing",
+       "events": [
+        [
+         1759968000,
+         "b"
+        ],
+        [
+         1759968001,
+         "c"
+        ],
+        [
+         1759968002,
+         "d"
+        ]
+       ],
+       "result": "response-lost"
+      }
+     ],
+     "spooled": 3,
+     "dropped": 0
+    }
+   },
+   {
+    "op": {
+     "op": "upstream",
+     "results": [
+      "ok"
+     ]
+    },
+    "expect": {}
+   },
+   {
+    "op": {
+     "op": "tick",
+     "now": 899
+    },
+    "expect": {
+     "uploads": [],
+     "spooled": 3,
+     "dropped": 0
+    }
+   },
+   {
+    "op": {
+     "op": "tick",
+     "now": 900
+    },
+    "expect": {
+     "uploads": [
+      {
+       "group": "/aws/greengrass/UserComponent/us-east-1/app",
+       "stream": "/2025/10/09/thing/thing",
+       "events": [
+        [
+         1759968000,
+         "b"
+        ],
+        [
+         1759968001,
+         "c"
+        ],
+        [
+         1759968002,
+         "d"
+        ]
+       ],
+       "result": "ok"
+      }
+     ],
+     "spooled": 0,
+     "dropped": 0
+    }
+   }
+  ]
+ },
+ {
+  "id": "per-source-failure-isolation",
+  "steps": [
+   {
+    "op": {
+     "op": "configure",
+     "sources": {
+      "a": "UserComponent",
+      "b": "UserComponent"
+     }
+    },
+    "expect": {
+     "status": "ok"
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "a",
+     "level": "INFO",
+     "message": "x",
+     "time": 1759968000
+    },
+    "expect": {
+     "status": "spooled",
+     "events": 1,
+     "spooled": 1,
+     "dropped": 0
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "a",
+     "level": "INFO",
+     "message": "x2",
+     "time": 1759968000
+    },
+    "expect": {
+     "status": "spooled",
+     "events": 1,
+     "spooled": 2,
+     "dropped": 0
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "b",
+     "level": "INFO",
+     "message": "y",
+     "time": 1759968000
+    },
+    "expect": {
+     "status": "spooled",
+     "events": 1,
+     "spooled": 3,
+     "dropped": 0
+    }
+   },
+   {
+    "op": {
+     "op": "upstream",
+     "results": [
+      "throttled",
+      "ok"
+     ]
+    },
+    "expect": {}
+   },
+   {
+    "op": {
+     "op": "tick",
+     "now": 300
+    },
+    "expect": {
+     "uploads": [
+      {
+       "group": "/aws/greengrass/UserComponent/us-east-1/a",
+       "stream": "/2025/10/09/thing/thing",
+       "events": [
+        [
+         1759968000,
+         "x"
+        ],
+        [
+         1759968000,
+         "x2"
+        ]
+       ],
+       "result": "throttled"
+      },
+      {
+       "group": "/aws/greengrass/UserComponent/us-east-1/b",
+       "stream": "/2025/10/09/thing/thing",
+       "events": [
+        [
+         1759968000,
+         "y"
+        ]
+       ],
+       "result": "ok"
+      }
+     ],
+     "spooled": 2,
+     "dropped": 0
+    }
+   }
+  ]
+ },
+ {
+  "id": "bounded-spool-counts-drops",
+  "steps": [
+   {
+    "op": {
+     "op": "configure",
+     "sources": {
+      "app": "UserComponent"
+     },
+     "spool_limit": 0
+    },
+    "expect": {
+     "status": "invalid-config"
+    }
+   },
+   {
+    "op": {
+     "op": "configure",
+     "minimum_level": "TRACE"
+    },
+    "expect": {
+     "status": "invalid-config"
+    }
+   },
+   {
+    "op": {
+     "op": "configure",
+     "sources": {
+      "app": "Lambda"
+     }
+    },
+    "expect": {
+     "status": "invalid-config"
+    }
+   },
+   {
+    "op": {
+     "op": "configure",
+     "sources": {
+      "app": "UserComponent"
+     },
+     "redact": [
+      ""
+     ]
+    },
+    "expect": {
+     "status": "invalid-config"
+    }
+   },
+   {
+    "op": {
+     "op": "configure",
+     "sources": {
+      "app": "UserComponent"
+     },
+     "interval": 0
+    },
+    "expect": {
+     "status": "invalid-config"
+    }
+   },
+   {
+    "op": {
+     "op": "configure",
+     "sources": {
+      "app": "UserComponent"
+     },
+     "spool_limit": 60
+    },
+    "expect": {
+     "status": "ok"
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "app",
+     "level": "INFO",
+     "message": "first-msg!",
+     "time": 1
+    },
+    "expect": {
+     "status": "spooled",
+     "events": 1,
+     "spooled": 1,
+     "dropped": 0
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "app",
+     "level": "INFO",
+     "message": "second-msg",
+     "time": 2
+    },
+    "expect": {
+     "status": "spooled",
+     "events": 1,
+     "spooled": 1,
+     "dropped": 1
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "app",
+     "level": "INFO",
+     "message": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+     "time": 3
+    },
+    "expect": {
+     "status": "dropped",
+     "events": 1,
+     "spooled": 1,
+     "dropped": 2
+    }
+   },
+   {
+    "op": {
+     "op": "upstream",
+     "results": [
+      "ok"
+     ]
+    },
+    "expect": {}
+   },
+   {
+    "op": {
+     "op": "tick",
+     "now": 300
+    },
+    "expect": {
+     "uploads": [
+      {
+       "group": "/aws/greengrass/UserComponent/us-east-1/app",
+       "stream": "/1970/01/01/thing/thing",
+       "events": [
+        [
+         2,
+         "second-msg"
+        ]
+       ],
+       "result": "ok"
+      }
+     ],
+     "spooled": 0,
+     "dropped": 2
+    }
+   }
+  ]
+ },
+ {
+  "id": "oversized-lines-split-at-utf8-boundaries",
+  "steps": [
+   {
+    "op": {
+     "op": "configure",
+     "sources": {
+      "app": "UserComponent"
+     }
+    },
+    "expect": {
+     "status": "ok"
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "app",
+     "level": "INFO",
+     "message": "x",
+     "time": 1759968000,
+     "repeat": 262118
+    },
+    "expect": {
+     "status": "spooled",
+     "events": 1,
+     "spooled": 1,
+     "dropped": 0
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "app",
+     "level": "INFO",
+     "message": "x",
+     "time": 1759968001,
+     "repeat": 262119
+    },
+    "expect": {
+     "status": "spooled",
+     "events": 2,
+     "spooled": 3,
+     "dropped": 0
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "app",
+     "level": "INFO",
+     "message": "\u20ac",
+     "time": 1759968002,
+     "repeat": 87373
+    },
+    "expect": {
+     "status": "spooled",
+     "events": 2,
+     "spooled": 5,
+     "dropped": 0
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "app",
+     "level": "INFO",
+     "message": "x",
+     "time": 1759968003,
+     "repeat": 1048576
+    },
+    "expect": {
+     "status": "spooled",
+     "events": 5,
+     "spooled": 10,
+     "dropped": 0
+    }
+   }
+  ]
+ },
+ {
+  "id": "oversized-line-drops-only-itself",
+  "steps": [
+   {
+    "op": {
+     "op": "configure",
+     "sources": {
+      "app": "UserComponent"
+     },
+     "spool_limit": 524288
+    },
+    "expect": {
+     "status": "ok"
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "app",
+     "level": "INFO",
+     "message": "keep",
+     "time": 1759968004
+    },
+    "expect": {
+     "status": "spooled",
+     "events": 1,
+     "spooled": 1,
+     "dropped": 0
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "app",
+     "level": "INFO",
+     "message": "x",
+     "time": 1759968005,
+     "repeat": 524288
+    },
+    "expect": {
+     "status": "dropped",
+     "events": 3,
+     "spooled": 1,
+     "dropped": 3
+    }
+   },
+   {
+    "op": {
+     "op": "upstream",
+     "results": [
+      "ok"
+     ]
+    },
+    "expect": {}
+   },
+   {
+    "op": {
+     "op": "tick",
+     "now": 300
+    },
+    "expect": {
+     "uploads": [
+      {
+       "group": "/aws/greengrass/UserComponent/us-east-1/app",
+       "stream": "/2025/10/09/thing/thing",
+       "events": [
+        [
+         1759968004,
+         "keep"
+        ]
+       ],
+       "result": "ok"
+      }
+     ],
+     "spooled": 0,
+     "dropped": 3
+    }
+   }
+  ]
+ },
+ {
+  "id": "minimum-level-warn",
+  "steps": [
+   {
+    "op": {
+     "op": "configure",
+     "sources": {
+      "app": "UserComponent"
+     },
+     "minimum_level": "WARN"
+    },
+    "expect": {
+     "status": "ok"
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "app",
+     "level": "INFO",
+     "message": "i",
+     "time": 1759968000
+    },
+    "expect": {
+     "status": "filtered"
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "app",
+     "level": "WARN",
+     "message": "w",
+     "time": 1759968000
+    },
+    "expect": {
+     "status": "spooled",
+     "events": 1,
+     "spooled": 1,
+     "dropped": 0
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "app",
+     "level": "ERROR",
+     "message": "e",
+     "time": 1759968000
+    },
+    "expect": {
+     "status": "spooled",
+     "events": 1,
+     "spooled": 2,
+     "dropped": 0
+    }
+   },
+   {
+    "op": {
+     "op": "upstream",
+     "results": [
+      "ok"
+     ]
+    },
+    "expect": {}
+   },
+   {
+    "op": {
+     "op": "tick",
+     "now": 300
+    },
+    "expect": {
+     "uploads": [
+      {
+       "group": "/aws/greengrass/UserComponent/us-east-1/app",
+       "stream": "/2025/10/09/thing/thing",
+       "events": [
+        [
+         1759968000,
+         "w"
+        ],
+        [
+         1759968000,
+         "e"
+        ]
+       ],
+       "result": "ok"
+      }
+     ],
+     "spooled": 0,
+     "dropped": 0
+    }
+   }
+  ]
+ },
+ {
+  "id": "out-of-range-times-change-nothing",
+  "steps": [
+   {
+    "op": {
+     "op": "configure",
+     "sources": {
+      "app": "UserComponent"
+     }
+    },
+    "expect": {
+     "status": "ok"
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "app",
+     "level": "INFO",
+     "message": "keep",
+     "time": 1760000000
+    },
+    "expect": {
+     "status": "spooled",
+     "events": 1,
+     "spooled": 1,
+     "dropped": 0
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "app",
+     "level": "INFO",
+     "message": "t",
+     "time": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+    },
+    "expect": {
+     "status": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "app",
+     "level": "INFO",
+     "message": "t",
+     "time": -10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+    },
+    "expect": {
+     "status": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "app",
+     "level": "INFO",
+     "message": "t",
+     "time": 1e+300
+    },
+    "expect": {
+     "status": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "app",
+     "level": "INFO",
+     "message": "t",
+     "time": -1
+    },
+    "expect": {
+     "status": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "app",
+     "level": "INFO",
+     "message": "t",
+     "time": 253402300800
+    },
+    "expect": {
+     "status": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "log",
+     "source": "app",
+     "level": "INFO",
+     "message": "t",
+     "time": 253402300799
+    },
+    "expect": {
+     "status": "spooled",
+     "events": 1,
+     "spooled": 2,
+     "dropped": 0
+    }
+   },
+   {
+    "op": {
+     "op": "upstream",
+     "results": [
+      "ok",
+      "ok"
+     ]
+    },
+    "expect": {}
+   },
+   {
+    "op": {
+     "op": "tick",
+     "now": 300
+    },
+    "expect": {
+     "uploads": [
+      {
+       "group": "/aws/greengrass/UserComponent/us-east-1/app",
+       "stream": "/2025/10/09/thing/thing",
+       "events": [
+        [
+         1760000000,
+         "keep"
+        ]
+       ],
+       "result": "ok"
+      },
+      {
+       "group": "/aws/greengrass/UserComponent/us-east-1/app",
+       "stream": "/9999/12/31/thing/thing",
+       "events": [
+        [
+         253402300799,
+         "t"
+        ]
+       ],
+       "result": "ok"
+      }
+     ],
+     "spooled": 0,
+     "dropped": 0
+    }
+   }
+  ]
+ }
+]
