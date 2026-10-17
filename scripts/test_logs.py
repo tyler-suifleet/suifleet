@@ -30,11 +30,12 @@ import test_ota
 from test_ota import ADDRESS, CAP, DEVICE, PACKAGE, REGISTRY, TYPE_ORIGINS, UPGRADE_CAP, Simulator, start_grpc
 
 ROOT = Path(__file__).resolve().parents[1]
-SECRET = "Sup3rSecretOverlayValue"
+# Every string leaf of an overlay is confidential, whatever its name.
+OVERLAY_VALUE = "Ov3rlayValueQ9-brokerlogin"
 RAW_KEY = "ab" * 32
 # Prints its lines once (a marker in the persistent work directory), so a
 # restarted run adds nothing and any duplicate would be a re-send.
-RUN = ("if [ ! -e printed ]; then echo 'connecting to broker with " + SECRET + "'; echo 'api_key=k3y-abcdef0123'; "
+RUN = ("if [ ! -e printed ]; then echo 'connecting to broker with " + OVERLAY_VALUE + "'; echo 'api_key=k3y-abcdef0123'; "
        "echo 'loaded " + RAW_KEY + "'; echo 'ordinary line kept'; "
        "i=0; while [ $i -lt 120 ]; do echo tick $i; i=$((i+1)); done; touch printed; else echo restarted; fi; "
        "touch ready; exec sleep 600")
@@ -123,7 +124,7 @@ def run(binary):
             key.chmod(0o600)
             overlays = root / "overlays"
             overlays.mkdir(mode=0o700)
-            (overlays / "svc.json").write_text(json.dumps({"/broker_password": SECRET}))
+            (overlays / "svc.json").write_text(json.dumps({"/broker_login": OVERLAY_VALUE}))
             (overlays / "svc.json").chmod(0o600)
             url = f"http://127.0.0.1:{server.server_port}"
             manifest = dict(schema_version=1, protocol_version=1, network="localnet", chain_identifier=sim.chain,
@@ -180,8 +181,8 @@ def run(binary):
                 assert "connecting to broker with [REDACTED]" in svc, svc[:4]
                 assert "api_key=[REDACTED]" in svc and "loaded [REDACTED]" in svc, svc[:4]
                 raw = json.dumps(state["envelopes"]) + "".join(json.dumps(b) for b in batches())
-                for secret in (SECRET, "k3y-abcdef0123", RAW_KEY):
-                    assert secret not in raw, f"{secret[:6]}… left the device"
+                for value in (OVERLAY_VALUE, "k3y-abcdef0123", RAW_KEY):
+                    assert value not in raw, f"{value[:6]}… left the device"
                 assert sum(b["redactions"] for b in batches()) >= 3
                 assert all(len(b["records"]) <= 50 for b in batches()), "a batch exceeded the per-interval line budget"
                 daemon = lines("daemon")
