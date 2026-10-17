@@ -364,7 +364,7 @@ class ControlHandler(socketserver.StreamRequestHandler):
         self.request.settimeout(3)
         peerfd = None
         try:
-            _, uid, _ = struct.unpack('3i', self.request.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+            _, uid, _ = struct.unpack('iII', self.request.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
             peerfd = self.request.getsockopt(socket.SOL_SOCKET, SO_PEERPIDFD)
             raw = self.rfile.readline(MAX_FRAME + 1)
             if len(raw) > MAX_FRAME or not raw.endswith(b'\n'):
@@ -385,7 +385,7 @@ class HttpServer(BoundedServer, socketserver.TCPServer):
 
 class ControlServer(BoundedServer, socketserver.UnixStreamServer):
     def gates(self, request):
-        _, uid, _ = struct.unpack('3i', request.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+        _, uid, _ = struct.unpack('iII', request.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
         if uid == os.geteuid():
             return [self.admin_slots]
         if uid not in self.principal_slots:

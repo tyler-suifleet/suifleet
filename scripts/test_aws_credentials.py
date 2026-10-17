@@ -26,6 +26,7 @@ import aws_credentials as adapter
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = int(time.time())
+HIGH_UID = 2147544649
 
 
 def control(path, operation, component):
@@ -133,7 +134,7 @@ class Runtime(unittest.TestCase):
         if os.geteuid() != 0:
             raise RuntimeError('run only as root in a disposable network-none container')
         cls.directory = Path(tempfile.mkdtemp(prefix='sf057-', dir='/run'))
-        adapter.allow_principals(cls.directory, (61001, 61002, 61003), '--x')
+        adapter.allow_principals(cls.directory, (61001, 61002, 61003, HIGH_UID), '--x')
         def openssl(*args):
             subprocess.run(['openssl', *map(str, args)], cwd=cls.directory,
                            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -156,7 +157,7 @@ class Runtime(unittest.TestCase):
         self.socket = str(self.directory / 'credentials.sock')
         self.settings = dict(socket=self.socket, endpoint=f'https://127.0.0.1:{self.upstream.server_port}/role-aliases/fixture/credentials',
             ca=str(self.directory / 'ca.crt'), certificate=str(self.directory / 'client.crt'), key=str(self.directory / 'client.key'),
-            daemon_uid=1001, components={'c1': 61001, 'c2': 61002, 'c3': 61003}, grants=list(grants), token_ttl_seconds=ttl)
+            daemon_uid=1001, components={'c1': 61001, 'c2': 61002, 'c3': 61003, 'high': HIGH_UID}, grants=list(grants), token_ttl_seconds=ttl)
         self.pipe, child = mp.Pipe()
         self.process = mp.Process(target=broker, args=(child, self.settings, self.timestamp, BASE))
         self.process.start()
@@ -258,6 +259,10 @@ class Runtime(unittest.TestCase):
         self.start(['c1', 'c2'], ttl=10)
         self.upstream.results.put(dict(result='ok', credential_set='set-1', expiration=3600))
         token = self.bootstrap('c1')['AWS_CONTAINER_AUTHORIZATION_TOKEN']
+        self.assertEqual(self.bootstrap('high'), {})
+        self.assertTrue(control(self.socket, 'grant', 'high')['ok'])
+        high_token = self.bootstrap('high')['AWS_CONTAINER_AUTHORIZATION_TOKEN']
+        self.assertEqual(self.request('high', high_token)[0], 200)
         self.assertTrue(self.ask('unknown', op='connect-denied', path=self.socket))
         self.assertEqual(self.request('c2', token)[0], 401)
         self.assertEqual(self.request('c1', 'foreign')[0], 401)
