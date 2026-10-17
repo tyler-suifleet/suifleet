@@ -26,6 +26,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -177,6 +178,37 @@ def measure(path, protected=()):
             "unreadable": unreadable, "newest_mtime": newest}
 
 
+def lstat(path):
+    """The path's lstat, or None when it does not exist; other errors (such as
+    permission denied) raise, so callers cannot mistake them for absence."""
+    try:
+        return os.lstat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+
+
+def is_plain_dir(path):
+    info = lstat(path)
+    return info is not None and stat.S_ISDIR(info.st_mode)
+
+
+def subdirs(path, unscannable):
+    """Sorted non-symlink child directories. A read error on the path or an
+    entry is recorded in `unscannable` (path -> error) rather than raised."""
+    found = []
+    try:
+        with os.scandir(path) as entries:
+            for entry in entries:
+                try:
+                    if entry.is_dir(follow_symlinks=False):
+                        found.append(Path(entry.path))
+                except OSError as error:
+                    unscannable[entry.path] = str(error)
+    except OSError as error:
+        unscannable[str(path)] = str(error)
+    return sorted(found)
+
+
 def inside(path, parent):
     path, parent = os.path.normpath(path), os.path.normpath(parent)
     return path == parent or path.startswith(parent.rstrip("/") + "/")
@@ -192,16 +224,20 @@ def safe_child(base, relative):
     if not plain_relative(relative):
         return None, "allowlist entry must be a plain relative path"
     current = Path(base)
-    if current.is_symlink() or not current.is_dir():
-        return None, "root is a symlink or missing"
-    for part in relative.split("/"):
-        current = current / part
-        if current.is_symlink():
-            return None, f"symlink on path: {current}"
-        if not current.exists():
-            return None, "absent"
-    if not current.is_dir():
-        return None, "not a directory"
+    try:
+        if not is_plain_dir(current):
+            return None, "root is a symlink or missing"
+        for part in relative.split("/"):
+            current = current / part
+            info = lstat(current)
+            if info is None:
+                return None, "absent"
+            if stat.S_ISLNK(info.st_mode):
+                return None, f"symlink on path: {current}"
+        if not stat.S_ISDIR(info.st_mode):
+            return None, "not a directory"
+    except OSError as error:
+        return None, f"cannot inspect path: {error}"
     if os.path.realpath(current) != os.path.normpath(current) or not inside(os.path.realpath(current), os.path.realpath(base)):
         return None, "path escapes its root"
     return current, None
@@ -388,15 +424,34 @@ def scan_refusal(measured, now, retain, allow_protected=False):
 
 
 def yocto_activity(build):
+    """Newest mtime of the tree's BitBake markers. Raises OSError when the tree
+    or a marker cannot be read, so activity is never silently assumed absent."""
     times = []
     for name in ("bitbake-cookerdaemon.log", "bitbake.lock"):
-        if (build / name).exists():
-            times.append((build / name).stat().st_mtime)
-    for tmp in build.glob("tmp*"):
+        info = lstat(build / name)
+        if info:
+            times.append(info.st_mtime)
+    with os.scandir(build) as entries:
+        tmps = [Path(e.path) for e in entries if e.name.startswith("tmp")]
+    for tmp in tmps:
         for sub in ("log", "stamps", "deploy"):
-            if (tmp / sub).exists():
-                times.append((tmp / sub).stat().st_mtime)
+            info = lstat(tmp / sub)
+            if info:
+                times.append(info.st_mtime)
     return max(times, default=0.0)
+
+
+def yocto_busy(build, now, retain):
+    """Why the tree may be in use (lock present, recent activity, unreadable), or None."""
+    try:
+        if lstat(build / "bitbake.lock"):
+            return "bitbake.lock present (a build may be running)"
+        idle = now - yocto_activity(build)
+    except OSError as error:
+        return f"tree activity unverifiable: {error}"
+    if idle < retain:
+        return f"tree active {idle / 86400:.1f} days ago (retain {retain / 86400:g})"
+    return None
 
 
 def evaluate_yocto(ctx, tree, entry, now, scan=True):
@@ -407,12 +462,10 @@ def evaluate_yocto(ctx, tree, entry, now, scan=True):
         return record, reason
     if ctx.errors:
         return record, "unverifiable: " + "; ".join(ctx.errors)
-    if (build / "bitbake.lock").exists():
-        return record, "bitbake.lock present (a build may be running)"
     retain = tree.get("retain_days", ctx.config.get("retain_days", 3)) * 86400
-    idle = now - yocto_activity(build)
-    if idle < retain:
-        return record, f"tree active {idle / 86400:.1f} days ago (retain {retain / 86400:g})"
+    busy = yocto_busy(build, now, retain)
+    if busy:
+        return record, busy
     for keep in tree.get("preserve", []):
         if inside(os.path.join(build, keep), str(path)):
             return record, f"contains preserved path {keep}"
@@ -431,18 +484,28 @@ def evaluate_yocto(ctx, tree, entry, now, scan=True):
     return record, None
 
 
+def present(path, excluded, record):
+    """Whether the path exists; one that cannot be checked is excluded, not skipped."""
+    try:
+        return lstat(path) is not None
+    except OSError as error:
+        excluded.append({**record, "path": path, "reason": f"cannot inspect path: {error}"})
+        return False
+
+
 def plan(config, system):
     ctx, now = Context(config, system), system.now()
     candidates, excluded = [], []
     for project, claim in ctx.worktrees():
         for relative in config.get("worktree_outputs", DEFAULT_OUTPUTS):
-            if not os.path.lexists(os.path.join(claim["worktree"], relative)):
+            if not present(os.path.join(claim["worktree"], relative), excluded, {
+                    "kind": "worktree-output", "project": project["id"], "ticket": claim["key"], "relative": relative}):
                 continue
             record, reason = evaluate_output(ctx, project, claim, relative, now)
             (excluded.append({**record, "reason": reason}) if reason else candidates.append(record))
     for tree in config.get("yocto", []):
         for entry in tree.get("retire", []):
-            if not os.path.lexists(os.path.join(tree["path"], entry)):
+            if not present(os.path.join(tree["path"], entry), excluded, {"kind": "yocto-work", "tree": tree["path"], "relative": entry}):
                 continue
             record, reason = evaluate_yocto(ctx, tree, entry, now)
             (excluded.append({**record, "reason": reason}) if reason else candidates.append(record))
@@ -506,10 +569,9 @@ def recheck(ctx, planned, target, now, retain):
         scope = worktree
     else:
         build = Path(planned["tree"])
-        if (build / "bitbake.lock").exists():
-            return "bitbake.lock present (a build may be running)"
-        if now - yocto_activity(build) < retain:
-            return "tree became active"
+        busy = yocto_busy(build, now, retain)
+        if busy:
+            return busy
         locks = ctx.lock_naming(str(build), build.parent.name, "yocto", "bitbake")
         scope = str(build)
     if locks:
@@ -640,45 +702,73 @@ def audit(config, system):
     ctx = Context(config, system)
     outputs = config.get("worktree_outputs", DEFAULT_OUTPUTS)
     projects = {}
+    unscannable = {}
     for project, claim in ctx.worktrees():
         path = Path(claim["worktree"])
-        if not path.is_dir():
+        try:
+            if not is_plain_dir(path):
+                continue
+        except OSError as error:
+            unscannable[str(path)] = str(error)
             continue
         entry = projects.setdefault(project["id"], {})
         status = entry.setdefault(claim["status"], {"worktrees": 0, "bytes": 0, "regenerable_bytes": 0, "unreadable": 0})
         whole = measure(path)
-        regenerable = sum(measure(p)["bytes"] for p in (path / o for o in outputs) if p.is_dir() and not p.is_symlink())
+        regenerable = 0
+        for output in (path / o for o in outputs):
+            try:
+                if is_plain_dir(output):
+                    regenerable += measure(output)["bytes"]
+            except OSError as error:
+                unscannable[str(output)] = str(error)
         status["worktrees"] += 1
         status["bytes"] += whole["bytes"]
         status["regenerable_bytes"] += regenerable
         status["unreadable"] += whole["unreadable"]
     yocto = []
     for tree in config.get("yocto", []) + [{"path": p, "report_only": True} for p in config.get("yocto_report_only", [])]:
-        build = Path(tree["path"])
-        if not build.is_dir():
+        build, skipped = Path(tree["path"]), {}
+        try:
+            if not is_plain_dir(build):
+                continue
+        except OSError as error:
+            unscannable[str(build)] = str(error)
             continue
         parts, unreadable = {}, {}
-        for child in sorted(build.iterdir()):
-            if child.is_dir() and not child.is_symlink():
-                for sub in (sorted(s for s in child.iterdir() if s.is_dir() and not s.is_symlink()) if child.name.startswith("tmp") else [child]):
-                    name = str(sub.relative_to(build))
-                    measured = measure(sub)
-                    parts[name] = measured["bytes"]
-                    if measured["unreadable"]:
-                        unreadable[name] = measured["unreadable"]
+        for child in subdirs(build, skipped):
+            for sub in (subdirs(child, skipped) if child.name.startswith("tmp") else [child]):
+                name = str(sub.relative_to(build))
+                measured = measure(sub)
+                parts[name] = measured["bytes"]
+                if measured["unreadable"]:
+                    unreadable[name] = measured["unreadable"]
+        try:
+            idle_days = round((system.now() - yocto_activity(build)) / 86400, 1)
+        except OSError as error:
+            idle_days, skipped[str(build) + " (activity)"] = None, str(error)
+        unscannable.update(skipped)
         yocto.append({"path": str(build), "configured_retire": tree.get("retire", []), "bytes": sum(parts.values()), "parts": parts,
-                      "unreadable": unreadable,
-                      "idle_days": round((system.now() - yocto_activity(build)) / 86400, 1)})
-    extra = [{"path": p, **{k: v for k, v in measure(Path(p)).items() if k != "protected"}} for p in config.get("report_paths", []) if Path(p).exists()]
+                      "unreadable": unreadable, "unscannable": skipped, "complete": not skipped and not unreadable,
+                      "idle_days": idle_days})
+    extra = []
+    for p in config.get("report_paths", []):
+        try:
+            if lstat(p) is None:
+                continue
+        except OSError as error:
+            unscannable[p] = str(error)
+            continue
+        extra.append({"path": p, **{k: v for k, v in measure(Path(p)).items() if k != "protected"}})
     roots = [p["root"] for p in config.get("projects", [])] + [t["path"] for t in config.get("yocto", [])] + config.get("report_paths", [])
     return {"schema_version": SCHEMA, "kind": "disk-audit", "created": system.now(),
             "filesystems": filesystems(roots or ["/"], config.get("budget", {})),
             "worktrees": projects, "yocto": yocto, "report_paths": extra,
             "docker": {**system.docker_usage(), "note": "Docker's logical sizes overlap (shared layers, build cache) and are not physical "
                        "usage; its root directory is not scanned (permission-limited). Docker storage is never removed by this tool."},
-            "unverifiable": ctx.errors, "unreadable_processes": ctx.unreadable_processes,
+            "unverifiable": ctx.errors, "unscannable": unscannable, "unreadable_processes": ctx.unreadable_processes,
             "uninspectable_process_uids": sorted(set(ctx.uninspectable_uids)),
-            "note": "Bytes are allocated blocks with hard links counted once; entries that could not be read are counted, not sized."}
+            "note": "Bytes are allocated blocks with hard links counted once; entries that could not be read are counted, not sized; "
+                    "paths that could not be listed or checked are under unscannable and their sizes are absent (lower bounds)."}
 
 
 def main(argv=None):

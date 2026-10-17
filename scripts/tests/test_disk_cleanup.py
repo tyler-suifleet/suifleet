@@ -637,6 +637,66 @@ class YoctoTests(Fixture):
         report = dc.audit(config, system)
         self.assertEqual(report["yocto"][0]["unreadable"], {"tmp/work": 1})
 
+    def test_unreadable_tmp_or_build_root_is_reported_and_blocks(self):
+        if os.geteuid() == 0:
+            self.skipTest("root reads everything")
+        build = self.tree()
+        config = self.config(yocto=[{"path": str(build), "retire": ["tmp/work"]}])
+        system = FakeSystem(self.claims)
+        stale = dc.plan(config, system)
+        self.assertEqual(len(stale["candidates"]), 1)
+        for closed in (build / "tmp", build):
+            closed.chmod(0)
+            try:
+                before = self.snapshot() if closed != build else None
+                report = dc.audit(config, system)
+                tree = report["yocto"][0]
+                self.assertIn(str(closed), tree["unscannable"], "an unlistable directory is reported, not an exception")
+                self.assertFalse(tree["complete"])
+                self.assertIsNone(tree["idle_days"], "activity cannot be verified, so it is not reported as idle")
+                self.assertIn(str(closed), report["unscannable"])
+                self.assertIn("filesystems", report, "other categories are still produced")
+                self.assertTrue(all(not k.startswith("tmp/") for k in tree["parts"]))
+                if closed != build:
+                    self.assertIn("conf", tree["parts"], "readable parts are still sized")
+                    self.assertEqual(self.snapshot(), before)
+                reason = self.reasons(dc.plan(config, system))[("tmp", "tmp/work")]
+                self.assertIn("cannot inspect path", reason)
+                result = dc.apply(config, system, stale)
+                self.assertEqual(result["results"][0]["result"], "skipped")
+                self.assertRegex(result["results"][0]["reason"], "cannot inspect path|unverifiable")
+            finally:
+                closed.chmod(0o755)
+            self.assertTrue((build / "tmp/work/x/obj").exists(), "nothing was moved or deleted")
+        # Readable candidate, unreadable activity marker: the tree is not assumed idle.
+        real_lstat = dc.os.lstat
+
+        def lstat(path, *args, **kwargs):
+            if str(path).endswith("tmp/log"):
+                raise PermissionError(13, "denied", str(path))
+            return real_lstat(path, *args, **kwargs)
+        with mock.patch.object(dc.os, "lstat", lstat):
+            self.assertIn("tree activity unverifiable", self.reasons(dc.plan(config, system))[("tmp", "tmp/work")])
+            result = dc.apply(config, system, stale)
+        self.assertIn("tree activity unverifiable", result["results"][0]["reason"])
+        self.assertTrue((build / "tmp/work/x/obj").exists())
+
+    def test_unreadable_worktree_and_report_path_do_not_abort_audit(self):
+        if os.geteuid() == 0:
+            self.skipTest("root reads everything")
+        self.worktree("SF-100")
+        closed = self.tmp / "worktrees"
+        closed.chmod(0)
+        try:
+            report = dc.audit(self.config(report_paths=[str(closed / "sf-100")]), FakeSystem(self.claims))
+            self.assertIn(str(closed / "sf-100"), report["unscannable"])
+            self.assertEqual(report["report_paths"], [])
+            plan = dc.plan(self.config(), FakeSystem(self.claims))
+            self.assertEqual(plan["candidates"], [])
+            self.assertTrue(any("cannot inspect path" in e["reason"] for e in plan["excluded"]))
+        finally:
+            closed.chmod(0o755)
+
 
 class AuditTests(Fixture):
     def test_audit_reports_categories_without_mutation(self):
