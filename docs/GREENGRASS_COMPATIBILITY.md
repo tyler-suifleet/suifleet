@@ -1,6 +1,6 @@
 # Greengrass compatibility specification
 
-SF-028 defines what "Greengrass compatible" may mean for SuiFleet. It also proposes adapter contracts for messaging, shadows, streams and client devices, with executable fixtures. This is a specification. It is not a parity claim and implements no runtime adapter. The [parity audit](GREENGRASS_PARITY_AUDIT.md) and [ticket map](GREENGRASS_TICKET_COVERAGE.md) remain the roadmap.
+SF-028 defines what "Greengrass compatible" may mean for SuiFleet. It also proposes adapter contracts for messaging, shadows, streams and client devices, with executable fixtures. It is a specification, not a parity claim. Of the runtime work it describes, only the SF-037 recipe translator is implemented; no adapter is. The [parity audit](GREENGRASS_PARITY_AUDIT.md) and [ticket map](GREENGRASS_TICKET_COVERAGE.md) remain the roadmap.
 
 The machine-readable source of truth is [`interfaces/compat/greengrass-compat.json`](../interfaces/compat/greengrass-compat.json). Statuses there describe the commit that contains the file. Work in open PRs counts as "proposed" until it is merged.
 
@@ -13,7 +13,7 @@ Each capability has a separate status for each level. A higher level never follo
 | Level | Meaning | Default position |
 |---|---|---|
 | `functional` | Equivalent behaviour through SuiFleet's own chain, recipe and local APIs | The product goal |
-| `aws_recipe` | AWS recipe documents are translated, or rejected with a stated reason | Proposed subset (SF-037); never silently reinterpreted |
+| `aws_recipe` | AWS recipe documents are translated, or rejected with a stated reason | Partial: the SF-037 subset is implemented; nothing is silently reinterpreted |
 | `aws_api` | Unmodified AWS IPC/SDK/CLI/cloud-API clients work | `undecided` unless scoped: SF-038 adapters with implementation tickets are `proposed`, SF-064 gaps are `roadmap` |
 
 Statuses: `implemented`/`partial` (merged, with cited local evidence), `proposed`, `undecided`, `roadmap` (tracked missing work, not an exclusion), `excluded` (approved decision only) and `not-applicable`. The checker enforces several rules:
@@ -38,41 +38,127 @@ Statuses: `implemented`/`partial` (merged, with cited local evidence), `proposed
 
 The following is merged today and is the only thing the daemon and frontend execute:
 
-- **Native recipes** (`interfaces/recipe.schema.json`) are versions 1.0/1.1, with one authenticated artifact, empty configuration and native dependency ranges. The lifecycle is `install`, plus the SF-014 supervised `run`/`shutdown`/`readiness`/`restart` ([OPERATIONS.md](OPERATIONS.md#supervised-components-sf-014)). Commands use the shell-quoted substitutions `{artifact}`, `{artifacts}` and `{work}` (`{work}` only in supervised commands), and `{pid}` in readiness/shutdown.
+- **Native recipes** (`interfaces/recipe.schema.json`) are versions 1.0–1.2, with one authenticated artifact, native dependency ranges (1.1) and SF-015 configuration (1.2: `defaults`, `merge`, `reset`, `confidential`, `validate`). The lifecycle is `install`, plus the SF-014 supervised `run`/`shutdown`/`readiness`/`restart` ([OPERATIONS.md](OPERATIONS.md#supervised-components-sf-014)). Commands use the shell-quoted substitutions `{artifact}`, `{artifacts}`, `{configuration}` and `{work}` (`{work}` only in supervised commands), and `{pid}` in readiness/shutdown. A recipe with neither `install` nor `run` hands its artifact to the platform updater.
 - **The catalog** has platform manifests `linux|*` × `x86_64|aarch64|arm|*`, selected by first match.
-- **Native IPC v1** provides UID-authenticated component APIs, operator management and bounded volatile messaging ([COMPONENT_IPC.md](COMPONENT_IPC.md)). Shared-daemon-user components cannot receive individual ACLs; separate platform Unix identities are required. There is no AWS IPC wire compatibility, durable pub/sub, MQTT broker, shadow, stream, client-device or AWS recipe support.
+- **Native IPC v1** provides UID-authenticated component APIs, operator management and bounded volatile messaging ([COMPONENT_IPC.md](COMPONENT_IPC.md)). Shared-daemon-user components cannot receive individual ACLs; separate platform Unix identities are required.
+- **AWS recipe translation** (SF-037, below) turns the supported Greengrass V2 recipe subset into native catalog manifests, offline, in the dApp and a CLI. The daemon itself never reads AWS recipes.
 
-Everything else here is proposed. The fixtures pin its semantics. The owning tickets implement them and may revise them through review. Implementers must not treat this document as a published runtime API, and must not change merged APIs to fit it by assumption.
+There is no AWS IPC wire compatibility, durable pub/sub, MQTT broker, shadow, stream or client-device support. Everything else here is proposed. The fixtures pin its semantics. The owning tickets implement them and may revise them through review. Implementers must not treat this document as a published runtime API, and must not change merged APIs to fit it by assumption.
 
-## AWS recipe translation subset (SF-037)
+## AWS recipe translation (SF-037)
 
-The input is an AWS recipe, already parsed from JSON or YAML into the same value, plus an operator-supplied artifact binding: `Uri` → `{artifactBlobId, artifactSha256}`. A Walrus upload must be authenticated by SHA-256. AWS `s3://` URIs are never fetched. The output is either:
+The translator is [`dapp/src/lib/greengrass-recipe.ts`](../dapp/src/lib/greengrass-recipe.ts). Operators use it in two places:
 
-- `translate`, with ordered native catalog manifests `{os, arch, recipe}`, the indexes of omitted manifests and the metadata reported as informational; or
-- `defer`, which lists the runtime tickets that must merge first. Until a later reviewed change re-specifies these cases, the translator must reject them; or
-- `reject`, which lists every reason.
+- the **Import AWS Greengrass recipe** panel on the dApp's Components page, which uploads the bound artifacts and translated recipes and registers an immutable catalog version;
+- the offline CLI:
+
+  ```bash
+  node scripts/greengrass_translate.cjs recipe.yaml --bind s3://bucket/app/1.0.0/app.tar=BLOB_ID:SHA256
+  ```
+
+  It prints the result as JSON, with guidance for every reason and reported difference. It exits with 0 when the recipe translates, 1 when it is rejected and 2 on a usage error.
+
+The input is one JSON or YAML recipe document, plus an operator-supplied artifact binding: `Uri` → `{artifactBlobId, artifactSha256}`. A Walrus upload must be authenticated by SHA-256. AWS `s3://` URIs are never fetched. The output is one of two outcomes:
+
+- `translate`, with:
+  - the ordered native catalog manifests `{os, arch, recipe}`;
+  - the indexes of omitted manifests;
+  - `informational`, the reported differences from AWS behaviour. The dApp requires the operator to acknowledge these before it uploads anything.
+- `reject`, which lists every reason, each with migration guidance.
+
+Either outcome may also carry:
+
+- `managed_dependencies`, the SF-038 classification of each AWS-managed dependency;
+- `ipc_acl`, the operator IPC ACL equivalent to the recipe's `accessControl`.
+
+The earlier `defer` outcome is gone: SF-015 and SF-027 have merged, and the cases that waited on them are re-specified below.
+
+**Parsing.** Text that is valid JSON is read as JSON. Greengrass reads YAML with a YAML 1.1 parser, so YAML is accepted only if YAML 1.1 and YAML 1.2 produce the same JSON value. A YAML 1.1 timestamp is the one exception: it reads as the string it spells, so an unquoted `RecipeFormatVersion: 2020-01-25` is accepted. The parser rejects the following, each with its own reason:
+
+- plain scalars whose meaning differs between YAML 1.1 and 1.2: `yes`/`no`/`on`/`off`, `0755`, `1:20` and `<<` merge keys;
+- duplicate keys, in both JSON and YAML;
+- tags, anchors and aliases, directives, non-string keys, and non-finite or unsafe numbers;
+- multiple documents, and syntax errors.
+
+Field names are exact: Greengrass's case variants, such as `Install`, are rejected as unknown, never guessed.
 
 | AWS field | Rule |
 |---|---|
 | `RecipeFormatVersion` | Must be `2020-01-25` |
-| `ComponentType`, `ComponentSource` | Generic only; Lambda, plugin and nucleus are rejected (SF-038) |
+| `ComponentType`, `ComponentSource` | Generic only. Lambda, plugin and nucleus types are rejected (SF-038) |
 | `ComponentName`, `ComponentVersion` | Native name grammar; SemVer |
-| `ComponentDescription`, `ComponentPublisher` | Description copied; publisher reported as informational |
-| `ComponentConfiguration.DefaultConfiguration` | Empty only. Nonempty is deferred to SF-015; `accessControl` is deferred to SF-027 |
-| `ComponentDependencies` | Native comparator grammar, HARD/SOFT. x-ranges, hyphen ranges, `\|\|` and `aws.greengrass.*` dependencies are rejected |
+| `ComponentDescription`, `ComponentPublisher` | The description must be a string and is copied. The publisher is reported |
+| `ComponentConfiguration.DefaultConfiguration` | Becomes native recipe 1.2 `configuration.defaults`, which is reported. The rules are under [Configuration and permissions](#configuration-and-permissions) |
+| `accessControl` | Rejected (`ipc-access-control`); the equivalent operator ACL is reported. See [Configuration and permissions](#configuration-and-permissions) |
+| `ComponentDependencies` | Native comparator grammar and HARD/SOFT. x-ranges, hyphen ranges and `\|\|` are rejected. AWS-managed names (`aws.greengrass.*`, `aws.iot.*`, `variant.*`) are classified with the SF-038 catalog. A `replace` (the daemon provides the function, for example `aws.greengrass.Nucleus`) is dropped and reported. Every other classification is rejected (`aws-managed-dependency`) and reported in `managed_dependencies` |
 | `Manifests[].Platform` | `os`/`architecture` exact or `*` only; `amd64`→`x86_64`. Regex, `architecture.detail`, `runtime` and custom keys are rejected. Windows/macOS/x86 manifests are omitted and reported. No supported manifest, or a duplicate pair, is rejected |
-| `Manifests[].Artifacts` | Exactly one bound artifact. `Unarchive` other than `NONE`, or non-default `Permission`, is rejected. An AWS `Digest` must be SHA-256 and equal the binding |
-| `install`, `run`, `shutdown` | String or `{Script}`, mapped to the native command of the same name. `run`/`shutdown` are reported as informational, because the native restart policy (`on-failure`, backoff, Broken after 5 restarts in 10 minutes) and stop timeout replace AWS `recover` retries and step timeouts. `shutdown` without `run` is rejected |
+| `Manifests[].Artifacts` | Exactly one bound artifact. `Unarchive` other than `NONE`, or non-default `Permission` (Read `OWNER`, Execute `NONE`), is rejected. An AWS `Digest` must be SHA-256 and equal the binding |
+| `install`, `run`, `shutdown` | String or `{Script}` (with `RequiresPrivilege: false` at most), mapped to the native command of the same name. Each is reported; see [Reported differences](#reported-differences). `shutdown` without `run` is rejected |
+| A manifest with neither `install` nor `run` | Rejected (`no-lifecycle-command`). Natively it would hand the artifact to the platform updater |
 | `bootstrap`, `startup`, `recover`, `uninstall` | Rejected: no native equivalent |
-| Step `Timeout`, `Setenv`, `Lifecycle.Setenv`, `RequiresPrivilege: true`, `Skipif`, `BootstrapOnRollback` | Rejected |
+| Step `Timeout`, `Setenv`, `Lifecycle.Setenv`, `RequiresPrivilege` other than `false` (including the string `"true"`), `Skipif`, `BootstrapOnRollback` | Rejected |
 | Global `Lifecycle` / `Selections` | Rejected |
 | `{artifacts:path}/<Uri basename>` | Becomes `{artifact}`. Any other `{artifacts:…}` use, including `decompressedPath`, is rejected |
 | `{work:path}` | Becomes `{work}` in `run`/`shutdown`; rejected in `install` |
-| `{configuration:…}` | Deferred to SF-015 |
+| `{configuration:/pointer}` | Rejected. Native commands receive the whole configuration as the `{configuration}` file, never inline values |
 | `{dep:…:…}`, `{iot:thingName}`, `{kernel:rootPath}`, unknown namespaces | Rejected. No other identity is substituted |
-| Variables in a script containing quotes or backslashes; literal `{artifact}`/`{artifacts}`/`{work}`/`{pid}` | Rejected, because native shell-quoted substitution would change their meaning |
+| Nucleus environment in scripts (`SVCUID`, `AWS_GG_*`, `AWS_IOT_THING_NAME`, `AWS_REGION`, `AWS_DEFAULT_REGION`, `GG_ROOT_CA_PATH`, `AWS_CONTAINER_*`) | Rejected (`aws-environment-variable`); the daemon clears the environment |
+| Variables in a script containing quotes or backslashes; literal `{artifact}`/`{artifacts}`/`{work}`/`{pid}`/`{configuration}` | Rejected, because native shell-quoted substitution would change their meaning |
 
-Translation produces native recipe 1.1 when dependencies exist and 1.0 otherwise. The current daemon validator (`compat_tests.rs`) and frontend validator (`test_greengrass_compat.cjs`) check two things: every AWS fixture is rejected as a native recipe, and every expected translated manifest is accepted.
+Translation produces native recipe 1.2 when there is a configuration, 1.1 when there are native dependencies and 1.0 otherwise.
+
+### Configuration and permissions
+
+**Default configuration.** A non-empty `DefaultConfiguration` becomes `configuration.defaults`. Native commands receive it as the 0600 `{configuration}` file, and `run`/`shutdown` also as `$SUIFLEET_CONFIGURATION`; there is no IPC `GetConfiguration`. Three cases are rejected:
+
+- a manifest with no `install` or `run` command to receive the configuration;
+- more than 4096 values, or a depth greater than 32;
+- keys that differ only in case. The Greengrass nucleus configuration store looks keys up case-insensitively, but native keys are case-sensitive.
+
+Per-deployment AWS `reset`/`merge` updates correspond to native configuration deployments. Reset runs before merge in both. On an upgrade, native configuration keeps the device's values and fills only missing keys from the new version's defaults. The AWS guide does not specify how a changed default combines with an existing value, so check upgrades that change defaults.
+
+**Access control.** `accessControl` authorizes the AWS IPC protocol, which SuiFleet does not implement. Native IPC ACLs are operator-owned daemon configuration for separately provisioned Unix users; a recipe never grants them. Recipes with `accessControl` are therefore rejected (`ipc-access-control`). The translator still reports the equivalent operator ACL (`ipc_acl`, shown as TOML in the dApp and CLI) for the component once it is ported to the native SDK:
+
+- `config` and `health` are always included. Greengrass lets every component read its own configuration and report its state.
+- Exact `aws.greengrass.ipc.pubsub` topics map to `publish` and to `subscribe`/`receive`.
+- Glob resources and every other IPC service are listed as `unmapped`.
+
+**Execution identity.** `RequiresPrivilege` other than `false` is rejected; components run as the daemon user. Non-default artifact `Permission` is rejected.
+
+### Reported differences
+
+Each translated field below runs with a difference from AWS. The translator reports it in `informational`, with guidance, rather than hiding it:
+
+| Field | Native behaviour |
+|---|---|
+| `Lifecycle.install` | Runs in the version's artifact directory, which is temporary for install-only components, not the AWS work folder (`$PWD`). Runs as the daemon user with a cleared environment. Bounded by the operator's `apply.timeout_seconds`, not the AWS 120 s default |
+| `Lifecycle.run` | Supervised in the component work directory, which is `{work:path}` as in AWS, with no timeout. Restarted on failure with backoff and marked Broken after 5 restarts in 10 minutes, replacing AWS `recover`. Runs as the daemon user with a cleared environment |
+| `Lifecycle.shutdown` | Bounded by the operator's component stop timeout, not the AWS 15 s default |
+| `ComponentConfiguration.DefaultConfiguration` | Delivered as a file instead of over IPC. Upgrade rule as above |
+| `ComponentDependencies.<managed>` | Dropped, because the daemon replaces it (SF-038 `replace`) |
+| `ComponentPublisher` | Not stored; the catalog owner identifies the publisher |
+
+**Corrections to the SF-028 fixtures.** Three SF-028 expectations changed:
+
+- An artifact-only manifest with an empty `Lifecycle` was expected to translate. It is now rejected, because natively it would invoke the platform updater (`scripts/test_greengrass_runtime.py` demonstrates this).
+- `install` is now reported.
+- The deferred configuration and `accessControl` cases now have the outcomes described above.
+
+## IPC and SDK compatibility boundaries
+
+- **AWS IPC/SDK.** Unmodified AWS IPC clients do not work. This covers the event-stream protocol, `AWS_GG_NUCLEUS_DOMAIN_SOCKET_FILEPATH_FOR_COMPONENT` and `SVCUID`, the Greengrass component SDKs, and `greengrass-cli`. The `aws_api` level stays `undecided`.
+- **Porting a component.** A translated component that uses AWS IPC must be ported to the [native IPC v1 SDK](COMPONENT_IPC.md):
+
+  | AWS IPC | Native IPC v1 |
+  |---|---|
+  | `GetConfiguration` | `config`, or the configuration file |
+  | `UpdateState` | `health` |
+  | `PublishToTopic` / `SubscribeToTopic` on exact topics | `publish` / `receive` |
+
+  The component must run as a separately provisioned Unix user, and the operator adds its ACL.
+- **Not available natively yet.** Wildcard subscriptions, MQTT/IoT Core, shadows, streams, secrets and token exchange are SF-032 to SF-035, SF-022 and SF-057.
+- **Lambda.** Lambda functions and subscriptions are SF-064 roadmap work.
+- **Recipe compatibility is the `aws_recipe` level only.** A translated recipe runs its scripts with the stated differences. It does not make the component's own AWS SDK calls work.
 
 ## Adapter designs
 
@@ -114,16 +200,21 @@ Everything below is proposed. Each adapter runs as a supervised local service be
 make test-compat
 ```
 
-This runs `python3 scripts/greengrass_compat.py`, the checker's negative tests and the frontend validator check. The checker also validates the SF-038 [managed-component catalog](GREENGRASS_MANAGED_COMPONENTS.md). `make edge-test` runs the Rust current-API check.
+This runs `python3 scripts/greengrass_compat.py`, the checker's negative tests, and `scripts/test_greengrass_compat.cjs`. That script executes the recipe and managed-dependency fixtures against the real translator and checks every translation with the frontend recipe validator. The checker also validates the SF-038 [managed-component catalog](GREENGRASS_MANAGED_COMPONENTS.md). Two further checks run elsewhere:
+
+- `make edge-test` runs the daemon's recipe and configuration validators on every translation.
+- `make test-ota` runs `scripts/test_greengrass_runtime.py`, which translates an AWS YAML recipe with the CLI and runs it on the real daemon against the local simulator. It checks the run directory and `{work:path}`, the artifact path, the delivered default configuration, absence of the nucleus environment, the install directory, shutdown, a merge update, an upgrade, and the updater hazard behind `no-lifecycle-command`.
+
+The runtime receipt is [`docs/validation/sf037-recipe-translation.json`](validation/sf037-recipe-translation.json).
 
 | Suite | Cases evaluated by the reference model | Current-API execution | Runtime execution |
 |---|---|---|---|
-| `aws-recipe-cases.json` | 49 recipes | Daemon and frontend validators (passing) | Pending SF-037 |
+| `aws-recipe-cases.json` | 75 recipes (14 JSON/YAML texts) | Daemon and frontend validators (passing) | Passed: SF-037 translator, daemon validators and simulator run |
 | `pubsub-cases.json` | 53 filter/topic/match/ACL checks | none | Pending SF-027, SF-032 |
 | `shadow-cases.json` | 54 steps across 10 sequences | none | Pending SF-027, SF-033 |
 | `stream-cases.json` | 45 steps across 5 sequences | none | Pending SF-027, SF-034 |
 | `client-device-cases.json` | 16 authorization requests | none | Pending SF-032, SF-035 |
-| `managed-dependency-cases.json` | 47 managed-dependency classifications | none | Pending SF-037 |
+| `managed-dependency-cases.json` | 47 managed-dependency classifications | none | Passed: SF-037 translator classification |
 | `credential-provider-cases.json` | 65 steps across 7 sequences | none | Pending SF-057 |
 | `cloudwatch-metrics-cases.json` | 90 steps across 8 sequences | none | Pending SF-059 |
 | `cloudwatch-logs-cases.json` | 69 steps across 8 sequences | none | Pending SF-060 |
@@ -134,10 +225,10 @@ This runs `python3 scripts/greengrass_compat.py`, the checker's negative tests a
 
 These are recommendations only. Codex decides on approval and on any ticket changes.
 
-1. **SF-037.** Adopt the recipe subset and fixtures above as acceptance. Add YAML parsing, translator CLI/UI output and per-case migration guidance. Re-specify the deferred cases only after SF-015/SF-027 merge. Bootstrap/startup/recover/uninstall need a separate native-lifecycle decision before they can be translated.
+1. **SF-037 (implemented).** Bootstrap, startup, recover and uninstall need a separate native-lifecycle decision before they can be translated. Per-step timeouts and environment need native recipe fields. `{configuration:/pointer}` interpolation needs a native recipe feature.
 2. **SF-032/033/034/035.** Use the matching fixture files as required runtime acceptance, plus restart, disk-full, concurrency and authorization-failure tests on real processes.
 3. **`aws_api` levels** are `undecided`. Recommendations:
    - Exclude AWS control-plane API emulation.
-   - Defer AWS IPC wire/SDK compatibility until a native SF-027 API exists.
+   - AWS IPC wire/SDK compatibility is a separate decision now that the native SF-027 API exists; see [IPC and SDK compatibility boundaries](#ipc-and-sdk-compatibility-boundaries).
    - AWS cloud targets (IoT Core bridge, shadow sync, Kinesis/S3 export, token exchange, CloudWatch) are SF-038 adapters with implementation tickets SF-057 to SF-063.
 4. **SF-038.** Maps AWS-managed components, Lambda and Windows/macOS/x86 in [GREENGRASS_MANAGED_COMPONENTS.md](GREENGRASS_MANAGED_COMPONENTS.md). Lambda, industrial, ML example and non-initial platform gaps are SF-064 roadmap work, not approved exclusions.

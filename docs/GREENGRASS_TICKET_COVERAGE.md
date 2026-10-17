@@ -6,7 +6,7 @@ Reference: [AWS Greengrass V2 overview](https://docs.aws.amazon.com/greengrass/v
 
 [GREENGRASS_MANAGED_COMPONENTS.md](GREENGRASS_MANAGED_COMPONENTS.md) (SF-038) maps all 46 AWS-provided components to native equivalents, scoped adapters ([SF-057](https://github.com/tyler-suifleet/suifleet/issues/102) to [SF-063](https://github.com/tyler-suifleet/suifleet/issues/108)) or roadmap gaps ([SF-064](https://github.com/tyler-suifleet/suifleet/issues/109)). None is implemented and no live AWS check has run.
 
-[GREENGRASS_COMPATIBILITY.md](GREENGRASS_COMPATIBILITY.md) (SF-028) defines the functional, AWS-recipe and AWS-API compatibility levels, the supported platforms and the proposed adapter fixtures for SF-032–SF-035 and SF-037. Its runtime suites remain pending until those tickets execute them.
+[GREENGRASS_COMPATIBILITY.md](GREENGRASS_COMPATIBILITY.md) (SF-028) defines the functional, AWS-recipe and AWS-API compatibility levels, the supported platforms and the proposed adapter fixtures for SF-032–SF-035 and SF-037. SF-037 has executed the recipe and managed-dependency suites against its translator; the other runtime suites remain pending until their tickets execute them.
 
 P2 means broader compatibility, not optional for a full-parity claim. Each row needs executable acceptance evidence, including failures and recovery, before completion. See [the audit](GREENGRASS_PARITY_AUDIT.md).
 

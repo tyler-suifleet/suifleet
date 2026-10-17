@@ -6,6 +6,11 @@ artifacts and authenticated schema-1.0 recipes, registers versions, and discover
 versions for deployment through the existing target selector. Direct verified
 OTA remains available at `/firmware`.
 
+The same page imports an AWS Greengrass V2 recipe (SF-037). It translates the
+supported subset into these manifests, or rejects the recipe with guidance. It
+publishes only after the operator acknowledges the reported differences. See
+[GREENGRASS_COMPATIBILITY.md](GREENGRASS_COMPATIBILITY.md#aws-recipe-translation-sf-037).
+
 A shared catalog belongs to its creating publisher address. Only that address
 can register versions. Names contain 1–128 ASCII letters, digits, `.`, `_`, or
 `-`; `@` is excluded so the index `name@fullVersion` is unambiguous. Each full
