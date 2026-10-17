@@ -32,6 +32,8 @@ Move, Rust and frontend builds used the existing `sui-dev` image: Sui 1.71.1, Ru
 
 No public-chain transactions, browser-wallet acceptance test, real Walrus certification, Yocto image build, hardware flashing, reboot/power-loss test, rollback, staged rollout, fleet health service or supported-transport migration was performed. The simulator does not prove those behaviors.
 
+Later live evidence supersedes parts of this list. On 2026-10-15, SF-010 ran on Sui testnet with Walrus testnet: the package-upgrade gate (real daemon, independently read receipts and effects), the upgrade-security suite (legacy objects, old-package and impersonation attacks, revocation) and the browser wallet gate (the dApp in headless Chromium with a scripted wallet, including an on-chain abort). See [TESTNET.md](TESTNET.md#sf-010-acceptance-matrix) and [the receipt](validation/sf010-testnet.json). A real extension wallet, Yocto, hardware and rollback remain unvalidated.
+
 Existing Move linter warnings about redundant `public entry` declarations remain. The Next build reports an older Browserslist dataset. These did not fail the checks.
 
 ## Migration requirements

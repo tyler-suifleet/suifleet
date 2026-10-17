@@ -1,4 +1,4 @@
-# Testnet accounts and the live package-upgrade gate
+# Testnet accounts and live gates
 
 ## Accounts
 
@@ -17,7 +17,7 @@ The user created two dedicated **testnet-only** accounts on 2026-10-14 and autho
 - Use the wallet only through its `client.yaml`: `sui client --client.config ~/.config/suifleet/testnet/agent/client.yaml …`, or `SUIFLEET_WALLET=…` for make targets. Never through the default `~/.sui` wallet, which `make down` deletes.
 - **Recovery phrases.** Each account directory holds a `RECOVERY_PHRASE.txt` (mode 0600) for the user to move to a password manager.
 - **Directory permissions.** Keep the directory 0700.
-- **Spend.** Live runs check the chain identity and balance first, and stop at a spend ceiling (`--max-spend-mist`, default 0.6 SUI). See Cost below: a typical run costs about 0.0025 SUI.
+- **Spend.** Live runs check the chain identity, the dedicated wallet and the balance first. Every mutation is charged to a strict allowance (`--max-spend-mist`, default 0.6 SUI; `scripts/testnet_budget.py`): its gas budget and any SUI it sends to a run-owned account (test device, browser test key) are reserved before execution and settled from the effects. Failed and aborted transactions are charged; an unknown outcome keeps its whole reservation; rebates, faucet credits and sweeps never replenish it. A funded account's own transactions are bounded by its funding. See Cost below: a typical run costs about 0.0025 SUI.
 - **Record each run.** Write the transaction digests and the evidence JSON into the PR or issue. Never record keys.
 
 ## Funding
@@ -81,7 +81,7 @@ make live-gate-package-upgrade SUIFLEET_WALLET=$HOME/.config/suifleet/testnet/ag
 2. Creates a device (key provisioned by the daemon), its cap and a group with that package, then activates it into registry custody through the head package.
 3. Upgrades in place to the checked-out tree with the run's own UpgradeCap.
 4. Verifies the manifest over gRPC.
-5. Runs the real daemon with the SF-030 test updater and a local Walrus stand-in, and deploys:
+5. Runs the real daemon with the SF-030 test updater and a local Walrus stand-in (`SUIFLEET_WALRUS=testnet`: real Walrus testnet, the publisher/aggregator in the manifest), and deploys:
    - through the new package, to the device and to the pre-upgrade group;
    - through the **old** package's entry point (mixed versions);
    - an injected health failure.
@@ -110,12 +110,111 @@ The controller sets `testnet/package-upgrade` on the tested SHA, with `base:<exa
 - **Device key.** This is a signing credential: disclosure permits receipt spoofing/griefing. Never publish plaintext state in caches, artifacts or logs.
 
 **Limits:**
-- Walrus is a local stand-in, not real Walrus storage.
-- `scripts/redeploy.sh` / `scripts/publish.py` still submit through the PATH `sui` (1.81.1). On a protocol-139 network, `publish.py` upgrades would hit the same client-side check. They are not yet run against testnet (SF-006 acceptance #11) and need the same split before they are.
-- There is no browser-extension wallet: that is the `wallet` gate, still unimplemented (SF-010).
+- Walrus is a local stand-in by default (automatic CI); pass `SUIFLEET_WALRUS=testnet` for real Walrus storage.
+- `scripts/redeploy.sh` / `scripts/publish.py` still submit through the PATH `sui` (1.81.1). On a protocol-139 network, `publish.py` upgrades would hit the same client-side check. They are not yet run against testnet (SF-006 acceptance #11) and need the same split before they are. The SF-010 suites below use the split toolchain.
+- No old-package attacks or legacy objects: that is the upgrade-security suite below. No browser wallet: that is the `wallet` gate below.
 - There is no hardware: that is the `hardware` gate (SF-031).
 - The device keeps its unused report gas, about 0.03 SUI per run.
 - **No JSON-RPC.** Public testnet fullnodes no longer serve JSON-RPC (gRPC and GraphQL only). Live tooling must read over gRPC (`chain_facts`, the daemon, the frontend SDK) or through the Sui CLI. The localnet tests' JSON-RPC helper does not work there.
+
+## Upgrade-security suite (SF-010)
+
+```bash
+make live-gate-upgrade-security SUIFLEET_WALLET=$HOME/.config/suifleet/testnet/agent/client.yaml
+```
+
+`scripts/live_upgrade_security.py` proves on a public network what the Move tests prove locally: existing objects survive an upgrade, later-introduced types originate in the upgrade, and older package versions — which stay callable forever — cannot be used to bypass the new authority. Recipes and artifacts go to real Walrus testnet.
+
+The base package and its upgrade to head are cached in the fixture state (`live-state.json` beside the wallet, `security_fixtures`), keyed by the content hashes of the base and head contracts and the release compiler (as the package-upgrade fixture is). Every `sui client` command runs on the pinned transaction CLI after the read-only protocol check, and the publish and upgrade sign only bytecode verified against the release compiler's output (`scripts/sui_toolchain.py`). Before reuse the suite re-reads the UpgradeCap — still the operator's, at version 2 and pointing at the cached head, so no other upgrade was chained on top — and the shared registry, and the manifest's type origins must still split between base and head. A reused pair creates the legacy state through the base package's entry points, which older packages keep after an upgrade; the objects and types are the same as those created before it. A cached run costs about 0.03 SUI net. The allowance is charged about 0.105 SUI, because the device's 0.04 SUI of funding counts in full even though most of it is swept back. `FRESH=1` (`--fresh`) publishes a new pair (about 0.22 SUI) so the legacy state is created before the upgrade; do that for release candidates and contract-security changes.
+
+1. Publishes the pre-identity contracts `14b351b` (before SF-008), or reuses the cached pair, and creates with them a **legacy** device, its bound cap, a group, and a deployment the device reports Applied through the old `report_status`.
+2. Upgrades in place to the checked-out tree and verifies the manifest: identity types (`IdentityKey`, `DeviceOwnerCap`, …) originate in the upgrade, existing types in the base.
+3. Attacks, each required to abort on chain with the exact module, function and code, and to leave no receipt:
+
+| Attack | Expected abort |
+|---|---|
+| Device reports on a head-created deployment through the **old** package's `report_status` | `deployment_manager::receipts_mut` 5 |
+| Device calls the superseded `report_status` in the **new** package | `deployment_manager::report_status` 7 |
+| `report_verified_status` before the legacy device is activated | `device_cap::assert_active` 2 |
+| Operator reports with a cap it minted for the device (impersonation) | `device_cap::assert_signer` 0 |
+
+4. Activates the legacy device through the head package; the real daemon applies a new deployment (artifact from Walrus testnet) and its pre-upgrade cap reports Applied.
+5. Revokes the device; its next verified report aborts (`device_cap::assert_active` 2) and the receipt is unchanged.
+6. Cleans up, after a failure too. It deletes the deployments and the group and deregisters the device for the storage rebate. An activated device leaves a revoked identity tombstone, and the two DeviceCaps have no delete function, so they remain. Each cleanup transaction has a 0.02 SUI budget, so an unknown outcome cannot starve the rest.
+7. Sweeps the device key's unspent funding back to the operator. The sweep is paid from the device's charged funding and never replenishes the allowance. The key's seed is kept (0600) beside the wallet as `live-security-device.key` from before the funding until that sweep succeeds. The next run sweeps a leftover key first, charged to its own allowance.
+8. Writes evidence: abort locations, digests, receipts, type origins, cleanup failures and SUI spent and swept.
+
+## The `wallet` live gate (SF-010)
+
+```bash
+make live-gate-package-upgrade SUIFLEET_WALLET=$HOME/.config/suifleet/testnet/agent/client.yaml   # creates/refreshes the fixture
+make live-gate-wallet SUIFLEET_WALLET=$HOME/.config/suifleet/testnet/agent/client.yaml
+```
+
+`scripts/live_wallet_gate.py` bundles `scripts/browser/live-acceptance.jsx` with the dApp's real dApp Kit provider, `ConnectButton`, `useFleetTransaction` hook, transaction builders, queries and Walrus upload code, and drives it in headless Chromium (`scripts/live_wallet_browser.cjs`) against Sui testnet and Walrus testnet. It reuses the package-upgrade fixture's package and registry (no publish), so a run costs about **0.018 SUI**.
+
+The wallet is a scripted Wallet Standard wallet signing with a throwaway ed25519 key, the one stand-in for an extension. The key is funded with 0.1 SUI and swept back at the end. The funding is charged to the allowance in full (default 0.2 SUI); the sweep never replenishes it. Until the sweep succeeds its seed is kept (0600) beside the wallet as `live-browser-key.hex`; the next run sweeps it first, reserving that sweep's gas against its own allowance (the earlier run already charged the funding).
+
+Checks:
+- connect through the dApp Kit connect UI;
+- wallet rejection surfaces as an error, nothing executed;
+- fresh registration, cap issuance and activation (owner cap held by the wallet), listed by `fetchDevices`;
+- group creation and membership of the activated device;
+- recipe and artifact uploaded to Walrus testnet by the dApp; the verified deployment is listed with its resolved device and both blobs probe available;
+- an abort refused by simulation before signing, with nothing executed;
+- an abort **executed on chain** (fully resolved transaction, so the SDK does not simulate) and reported as failed by the hook; the digest's failure status is read back from the network;
+- an account without the manifest's chain is refused before signing;
+- cleanup through the dApp (deployment, membership, group, device) and the sweep.
+
+## Manual extension-wallet check
+
+A real extension (Slush or another Wallet Standard wallet) cannot be scripted and needs a person. Per release candidate:
+
+1. Run the package-upgrade gate, then resolve its fixture into a frontend manifest (free reads; IDs from `live-state.json` or the gate's evidence):
+   ```bash
+   python3 scripts/deployment_manifest.py resolve --network testnet --rpc https://fullnode.testnet.sui.io:443 \
+     --chain-identifier 4c78adac --package <head_package> --upgrade-cap <upgrade_cap> --registry <registry> \
+     --publisher https://publisher.walrus-testnet.walrus.space --aggregator https://aggregator.walrus-testnet.walrus.space \
+     --output /tmp/deployment.json
+   printf '[device]\n[apply]\n' > /tmp/device.toml   # the browser only needs frontend.env
+   python3 scripts/deployment_manifest.py generate /tmp/deployment.json --output /tmp/bundle --device-template /tmp/device.toml
+   cp /tmp/bundle/frontend.env dapp/.env.local && make dapp-dev
+   ```
+2. In a browser profile with the extension on **testnet** and a little testnet SUI, at `http://localhost:3000`:
+   - connect; the address appears;
+   - reject a signing request: an error, nothing executed;
+   - register a device, then create a group and add it;
+   - upload a small artifact and create a deployment to the group; it lists with its device;
+   - switch the extension to mainnet/devnet: submissions are refused before signing;
+   - disconnect and reconnect;
+   - delete the deployment, group and device.
+3. Record the extension name/version, browser, date and the digests in #11.
+
+## SF-010 suites in automatic CI
+
+The automatic main-only controller (`testnet.yml`, environment `live-package-upgrade`, concurrency `suifleet-testnet-ci-wallet`, the dedicated CI wallet) runs both SF-010 suites inside the same key-bearing step, after the package-upgrade gate passes (`scripts/ci_testnet_wallet.py`):
+
+- **When.** They run when the authenticated head changes anything they test against the base (`contracts/`, `dapp/`, `interfaces/`, `suifleet-edge/`, `scripts/browser/`, `scripts/live_*`, `scripts/ci_testnet*`, the manifest resolver, the budget or the `Dockerfile`), and on a manual dispatch. The manual `wallet` live gate now dispatches this controller, as `package-upgrade` already did. Scheduled main runs skip them. A suite failure fails the exact-head `testnet/package-upgrade` status.
+- **Allowances.** Each suite has its own strict allowance: upgrade-security 0.4 SUI (a fresh pair used 0.348 of it at `96c441e`, after the contracts grew), wallet 0.15 SUI (0.102 with the browser funding charged). With package-upgrade's 0.6 SUI, a run's ceiling is 1.15 SUI. Only the package gate may request the faucet.
+- **State.** The upgrade-security package pair is cached in the same encrypted fixture state, under `security_fixtures`. The wallet gate reuses the package-upgrade fixture just verified. A test key that a suite could not sweep is kept in that encrypted state under `pending_keys` and recovered by the next run, charged to that run. If the job is killed before the state is sealed, such a key is lost, with at most its 0.1 or 0.04 SUI funding.
+- **Browser.** The dev image pins the Chrome for Testing headless shell that Playwright 1.64.1 drives (156.0.8078.4, sha256-checked) and sets `CHROME_EXECUTABLE`. The browser runs only from the installed `dapp` dependencies; nothing is installed in the key-bearing step.
+- **Evidence.** The workflow uploads `evidence/*.json` (`package-upgrade`, `upgrade-security`, `wallet`), and none of it contains keys. The uploaded workflow file comes from main, so until this change is integrated the run's log is the only record of the two suites.
+
+## SF-010 acceptance matrix
+
+| Acceptance | Where | Status |
+|---|---|---|
+| Fresh registration, cap issuance | wallet gate (dApp) | testnet PASS |
+| Recipe upload | wallet gate (dApp → Walrus testnet); upgrade gates (`SUIFLEET_WALRUS=testnet`) | testnet PASS |
+| Direct and group deployment, real execution effects | package-upgrade gate (real daemon, receipts read independently, effects re-read over gRPC) | testnet PASS |
+| Existing objects and later-introduced types across an upgrade | upgrade-security suite | testnet PASS |
+| Legacy caps and old-package attacks | upgrade-security suite (4 attacks, exact aborts) | testnet PASS |
+| Revocation | upgrade-security suite | testnet PASS |
+| Wallet rejection, failure, wrong chain | wallet gate (scripted wallet) | testnet PASS |
+| Real browser-extension wallet | manual check above | **pending a person** |
+| Real device | `hardware` gate (SF-031) | **pending hardware** |
+
+Evidence (no keys): [`validation/sf010-testnet.json`](validation/sf010-testnet.json).
 
 ## Cost findings
 
@@ -155,6 +254,13 @@ These were measured on Sui testnet on 2026-10-15 with Sui CLI 1.81.1 and this re
 | 2026-10-15 | SF-006 `redeploy.sh` at `8ee6c84` | dry run, publish `0xffccacbb…` (`CKP2uM91…`), upgrade `0x34f6b171…` (`J9rwj14c…`) | ~0.17 SUI | SF-006 acceptance, posted on #56 |
 | 2026-10-15 | `14b351b` → `8ee6c84`+harness | fresh fixture, 7/7 PASS, 8 transactions | 0.176 SUI | base `0x30230efc…`, head `0x5a9686ae…` |
 | 2026-10-15 | same | **cached fixture**, 7/7 PASS, 3 transactions | **0.0025 SUI** | fixture reuse and batching |
+| 2026-10-15 | `14b351b` → SF-010 `cad0c3d` | upgrade-security 5/5 PASS, 17 transactions (5 expected aborts) | 0.221 SUI | base `0xacbd71c2…`, head `0xea8ed1de…`; real Walrus |
+| 2026-10-15 | SF-010 merged with main `6e58163` | package-upgrade, cached, real Walrus, 8/8 PASS, 3 transactions | 0.0025 SUI | fixture `bde66f05…` |
+| 2026-10-15 | SF-010 `f10612c` | wallet gate 10 checks PASS | 0.018 SUI | on-chain abort `2pNXPmXR…` read back as failure |
+| 2026-10-15 | `14b351b` → PR #70 feedback tree | upgrade-security, fresh pair, 5/5 PASS, 17 transactions (5 expected aborts, gas charged) | 0.221 SUI (allowance 0.257) | base `0x04b78bba…`, head `0x74640ff7…`; every mutation through `Budget` |
+| 2026-10-15 | same | upgrade-security, **cached pair**, 6/6 PASS, 15 transactions | 0.070 SUI (allowance 0.106) | no publish; UpgradeCap re-verified at version 2 |
+| 2026-10-15 | same | wallet gate 10 checks PASS | 0.019 SUI (allowance 0.102, funding charged) | on-chain abort `N4CwDxCK…` read back as failure |
+| 2026-10-15 | `14b351b` → SF-010 `ba71f90` (main `0a7a184` merged) | upgrade-security, cached pair, 6/6 PASS, 17 transactions (5 expected aborts) | 0.029 SUI (allowance 0.105) | cleanup: deployments deleted, group deleted and device deregistered (`DrTSQGcm…`); 0.033 SUI swept back from the device key (`7J4TvuhA…`); no pending key left |
 | 2026-10-16 | `3ff488c` → `b81ff39` (SF-056) | fresh fixture on protocol 139, 10/10 PASS, 9 transactions | 0.411 SUI | split toolchain; base `0x0644ce0d…` (`FqzLbH84…`), upgrade `0x2976ad86…` (`HLp3bSDE…`); one faucet request |
 | 2026-10-16 | same | cached fixture, 8/8 PASS, 3 transactions | 0.0020 SUI | reused the compiler-keyed fixture |
 

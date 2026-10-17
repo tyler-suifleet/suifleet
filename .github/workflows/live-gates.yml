@@ -1,4 +1,5 @@
-# Manual wallet/hardware approvals remain; package-upgrade delegates to automatic testnet.
+# Manual hardware approval remains; package-upgrade and wallet (SF-010) delegate
+# to the automatic main-only testnet controller and its dedicated CI wallet.
 name: Live gates
 
 on:
@@ -10,7 +11,7 @@ on:
         type: choice
         options: [package-upgrade, wallet, hardware]
       network:
-        description: Target network (package-upgrade supports testnet); the gate verifies chain identity itself
+        description: Target network (package-upgrade/wallet support testnet); the gate verifies chain identity itself
         required: true
         type: string
         default: testnet
@@ -23,7 +24,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ inputs.gate == 'package-upgrade' && 'suifleet-testnet-ci-wallet' || format('live-{0}', inputs.gate) }}
+  group: ${{ inputs.gate != 'hardware' && 'suifleet-testnet-ci-wallet' || 'live-hardware' }}
   cancel-in-progress: false
   queue: max
 
@@ -43,7 +44,7 @@ jobs:
           NETWORK: ${{ inputs.network }}
         run: |
           [ "$CONFIRM" = "$GATE" ] || { echo "::error::confirm must equal '$GATE'"; exit 1; }
-          if [ "$GATE" = package-upgrade ]; then
+          if [ "$GATE" = package-upgrade ] || [ "$GATE" = wallet ]; then
             [ "$GITHUB_REF" = refs/heads/main ] && [ "$NETWORK" = testnet ] || exit 1
             gh workflow run testnet.yml --ref main
             exit 0
@@ -55,10 +56,10 @@ jobs:
 
   gate:
     needs: preflight
-    if: inputs.gate != 'package-upgrade'
+    if: inputs.gate == 'hardware'
     environment: live-${{ inputs.gate }}
     # Hardware runs on a self-hosted runner attached to the test device.
-    runs-on: ${{ inputs.gate == 'hardware' && fromJSON('["self-hosted", "raspberrypi3bplus"]') || 'ubuntu-22.04' }}
+    runs-on: [self-hosted, raspberrypi3bplus]
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -69,15 +70,14 @@ jobs:
       - name: Make origin/main available for the merge base
         run: git fetch --no-tags origin main:refs/remotes/origin/main
 
-      - name: Run other gates
-        if: inputs.gate != 'package-upgrade'
+      - name: Run the hardware gate
         env:
           GATE: ${{ inputs.gate }}
           SUIFLEET_NETWORK: ${{ inputs.network }}
         run: |
-          # Suites are provided by SF-010 (wallet) and SF-031 (hardware).
+          # The suite is provided by SF-031.
           if ! make -n "live-gate-$GATE" >/dev/null 2>&1; then
-            echo "::error::make live-gate-$GATE is not implemented yet (SF-010/SF-031)"
+            echo "::error::make live-gate-$GATE is not implemented yet (SF-031)"
             exit 1
           fi
           make "live-gate-$GATE"

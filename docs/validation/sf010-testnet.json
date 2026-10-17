@@ -1,0 +1,1405 @@
+{
+  "ticket": "SF-010",
+  "issue": "https://github.com/tyler-suifleet/suifleet/issues/11",
+  "note": "Raw evidence written by the live suites; addresses, object IDs, digests and costs only (no keys).",
+  "upgrade_security": {
+    "started": "2026-10-15T05:38:32Z",
+    "network": "testnet",
+    "transactions": [
+      {
+        "label": "publish base (pre-identity)",
+        "digest": "3N72XhJACKw2PH9G4HEed7GdcD4k1hz3mb9KfvE9msSS",
+        "status": "success",
+        "gas_mist": 67629200
+      },
+      {
+        "label": "register legacy device + bound cap + group (base)",
+        "digest": "2gf3aUp1DELWwbLaVDUBgMYrjBCQZmpNgUzFbgMLxziH",
+        "status": "success",
+        "gas_mist": 12987784
+      },
+      {
+        "label": "add legacy device to group (base)",
+        "digest": "ASsDq5rzVnHUDnkToybGwK7B1shN4H3oWLaUKbrbwXCQ",
+        "status": "success",
+        "gas_mist": 1280212
+      },
+      {
+        "label": "deployment via base",
+        "digest": "3XDDTAz1k1TuKVbG3d4Y69hoEPi5pQPbtkxkP4p2ivMv",
+        "status": "success",
+        "gas_mist": 13593200
+      },
+      {
+        "label": "legacy device reports Applied via base",
+        "digest": "HE6gtyE64QcCV43TZ1gbJ5rooYvqqYswK7yF9gc1P8UP",
+        "status": "success",
+        "gas_mist": 1328472
+      },
+      {
+        "label": "upgrade to head",
+        "digest": "Cndy9ZcMUjFBAW51tcVozbCRwU3hqtMhYAydDFvb55JP",
+        "status": "success",
+        "gas_mist": 83065940
+      },
+      {
+        "label": "deployment via head",
+        "digest": "HZCMgNxcbKSKJGSVdeV4Aiutfj5S6zPQuVh55QbM6Rvp",
+        "status": "success",
+        "gas_mist": 13593200
+      },
+      {
+        "label": "old package report on a new record",
+        "digest": "CqGMXgGnEk8CEMxbu59CF9AZKSfDBYsWsNWRzWrGSvZr",
+        "status": "aborted",
+        "abort": [
+          "deployment_manager",
+          "receipts_mut",
+          "5"
+        ],
+        "sender": "device"
+      },
+      {
+        "label": "superseded report signature in the new package",
+        "digest": "5T253tW99vYEAKVbMgWEhWtxi2oDeeezVPzL8JtYLNce",
+        "status": "aborted",
+        "abort": [
+          "deployment_manager",
+          "report_status",
+          "7"
+        ],
+        "sender": "device"
+      },
+      {
+        "label": "verified report before the legacy device is activated",
+        "digest": "HVw8JUB9vz4mVCcYVLmn9FzoNgizTVw4xCbLhdp5wmfg",
+        "status": "aborted",
+        "abort": [
+          "device_cap",
+          "assert_active",
+          "2"
+        ],
+        "sender": "device"
+      },
+      {
+        "label": "operator reports with a cap it minted for the device",
+        "digest": "35cg6F8xe2iecGD64p79vZhgyx2aFehobAPY2hnVn7gc",
+        "status": "aborted",
+        "abort": [
+          "device_cap",
+          "assert_signer",
+          "0"
+        ]
+      },
+      {
+        "label": "activate the legacy device (head)",
+        "digest": "5KjjaUghYVjMkk9XPckz2ryj77GtEbGv8VcaB2wYHQFQ",
+        "status": "success",
+        "gas_mist": 8773204
+      },
+      {
+        "label": "deployment via head (after activation)",
+        "digest": "2xt81GavoXLAFKFuS5NwA3KNJ2qdLAYhJQ6tWxH8XTcH",
+        "status": "success",
+        "gas_mist": 13593200
+      },
+      {
+        "label": "revoke the device (head)",
+        "digest": "4cYgrhKiefKD9KNhjs18QxJ4Xb7jQZn1Ecz3SnN5Qags",
+        "status": "success",
+        "gas_mist": 1064220
+      },
+      {
+        "label": "verified report after revocation",
+        "digest": "9s5uu2ZMwpF7RcM9MbSNMz85WrnQUB4ubbXpUfQsSmhb",
+        "status": "aborted",
+        "abort": [
+          "device_cap",
+          "assert_active",
+          "2"
+        ],
+        "sender": "device"
+      },
+      {
+        "label": "delete head deployments",
+        "digest": "Ga78W7zgnGsEHxWm8FZtLJBTdZ5nncHaDXiw38keLn5F",
+        "status": "success",
+        "gas_mist": -24182828
+      },
+      {
+        "label": "delete base deployment",
+        "digest": "CkbKnN6kwjeYEdDg5WMWd2Hh3oG3pCgDDZ1fjygh2Dfg",
+        "status": "success",
+        "gas_mist": -11715560
+      }
+    ],
+    "checks": [
+      "base 0xacbd71c2d3\u2026: legacy device, bound cap, group and a receipted deployment created with it",
+      "upgraded in place to 0xea8ed1de9e\u2026; identity types originate in the upgrade, existing types in the base",
+      "old-package, superseded, pre-activation and impersonation reports all abort on chain; no receipt written",
+      "activated legacy device: the real daemon applied the new deployment (artifact from Walrus testnet); its existing bound cap reported Applied",
+      "after revocation the device's reports abort and its receipt is unchanged"
+    ],
+    "chain": "4c78adac",
+    "rpc": "https://fullnode.testnet.sui.io:443",
+    "operator": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+    "start_balance_mist": 1030649556,
+    "sui": "sui 1.81.1-e04cf9aa915c",
+    "head": "cad0c3d3e83a97bab3bc59f156837b516eda2522",
+    "base": "14b351b9389c058117297343ced34f262db6f3c3",
+    "walrus": "testnet",
+    "base_package": "0xacbd71c2d355f32b203237f3e5ce583557b7aa978ce8e7b3c93fa084d38dcebb",
+    "head_package": "0xea8ed1de9e362708e1845101ee85d12dbb050917eb7f81a6792fbf5cf9fabfed",
+    "registry": "0x6125c50171fa8a57423fc6c6811fcf8e1ee532590b196245e1c15988578cd6e5",
+    "type_origins": {
+      "device_registry::DeviceRegistry": "0xacbd71c2d355f32b203237f3e5ce583557b7aa978ce8e7b3c93fa084d38dcebb",
+      "device_registry::Device": "0xacbd71c2d355f32b203237f3e5ce583557b7aa978ce8e7b3c93fa084d38dcebb",
+      "device_group::DeviceGroup": "0xacbd71c2d355f32b203237f3e5ce583557b7aa978ce8e7b3c93fa084d38dcebb",
+      "device_group::GroupCreated": "0xacbd71c2d355f32b203237f3e5ce583557b7aa978ce8e7b3c93fa084d38dcebb",
+      "device_cap::DeviceCap": "0xacbd71c2d355f32b203237f3e5ce583557b7aa978ce8e7b3c93fa084d38dcebb",
+      "device_cap::DeviceAddressKey": "0xacbd71c2d355f32b203237f3e5ce583557b7aa978ce8e7b3c93fa084d38dcebb",
+      "deployment_manager::DeploymentRecord": "0xacbd71c2d355f32b203237f3e5ce583557b7aa978ce8e7b3c93fa084d38dcebb",
+      "deployment_manager::DeploymentCreated": "0xacbd71c2d355f32b203237f3e5ce583557b7aa978ce8e7b3c93fa084d38dcebb",
+      "deployment_manager::DeviceStatusUpdated": "0xacbd71c2d355f32b203237f3e5ce583557b7aa978ce8e7b3c93fa084d38dcebb",
+      "deployment_manager::TargetGroupsKey": "0xacbd71c2d355f32b203237f3e5ce583557b7aa978ce8e7b3c93fa084d38dcebb",
+      "deployment_manager::TargetDevicesKey": "0xacbd71c2d355f32b203237f3e5ce583557b7aa978ce8e7b3c93fa084d38dcebb",
+      "deployment_manager::StatusesKey": "0xacbd71c2d355f32b203237f3e5ce583557b7aa978ce8e7b3c93fa084d38dcebb",
+      "deployment_manager::RecipeDigestKey": "0xacbd71c2d355f32b203237f3e5ce583557b7aa978ce8e7b3c93fa084d38dcebb",
+      "deployment_manager::ReceiptsKey": "0xacbd71c2d355f32b203237f3e5ce583557b7aa978ce8e7b3c93fa084d38dcebb",
+      "deployment_manager::Receipts": "0xacbd71c2d355f32b203237f3e5ce583557b7aa978ce8e7b3c93fa084d38dcebb",
+      "deployment_manager::DeviceStatusReported": "0xacbd71c2d355f32b203237f3e5ce583557b7aa978ce8e7b3c93fa084d38dcebb",
+      "device_registry::IdentityKey": "0xea8ed1de9e362708e1845101ee85d12dbb050917eb7f81a6792fbf5cf9fabfed",
+      "device_registry::Identity": "0xea8ed1de9e362708e1845101ee85d12dbb050917eb7f81a6792fbf5cf9fabfed",
+      "device_registry::DeviceIdentityChanged": "0xea8ed1de9e362708e1845101ee85d12dbb050917eb7f81a6792fbf5cf9fabfed",
+      "device_registry::CustodyKey": "0xea8ed1de9e362708e1845101ee85d12dbb050917eb7f81a6792fbf5cf9fabfed",
+      "device_registry::DeviceOwnerCap": "0xea8ed1de9e362708e1845101ee85d12dbb050917eb7f81a6792fbf5cf9fabfed"
+    },
+    "receipts": {
+      "d0": {
+        "0xe4c5a6c1b4f6cf7b9c94f762cb6a6fe7a3959146a31d533f60c09c7d81ab32da": 1
+      },
+      "d2": {
+        "0xe4c5a6c1b4f6cf7b9c94f762cb6a6fe7a3959146a31d533f60c09c7d81ab32da": 1
+      }
+    },
+    "end_balance_mist": 809923704,
+    "spent_mist": 220725852,
+    "finished": "2026-10-15T05:40:50Z"
+  },
+  "package_upgrade_real_walrus": {
+    "started": "2026-10-15T06:09:17Z",
+    "network": "testnet",
+    "transactions": [
+      {
+        "label": "create 3 deployments via head",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "9WDxvEBm1KoGfCrWjazuh2fwmD6B3baTrSSQvDUhiTse",
+        "gas_mist": 38779600,
+        "allowance_used_mist": 58151824
+      },
+      {
+        "label": "create 1 deployment via base",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "A7KxiQruvHyBL7BJJCnihh1HmuQoAagMKcMPKHFzCpwr",
+        "gas_mist": 13593200,
+        "allowance_used_mist": 71745024
+      },
+      {
+        "label": "delete 4 deployments",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "9tUxmKTBbeiwxRBU2YqTigdFoSJgDGrPYgqnAwSMTVi2",
+        "gas_mist": 0,
+        "allowance_used_mist": 71745024
+      }
+    ],
+    "checks": [
+      "reused fixture bde66f056256\u2026: base 0x536ca66dcc\u2026, head 0x536ca66dcc\u2026 (re-verified on chain; no package storage spent)",
+      "head package 0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247 (package version 1); manifest verified over gRPC",
+      "head-package deployment to the device: applied, receipt Applied on chain",
+      "head-package deployment to the pre-upgrade group: applied via report_status_for_group",
+      "deployment created through the OLD package's entry point: applied and receipted (mixed versions)",
+      "injected health failure reported Failed on chain",
+      "independent gRPC reader confirmed all four receipt-writing transaction effects",
+      "deployments deleted (storage rebate)"
+    ],
+    "chain": "4c78adac",
+    "rpc": "https://fullnode.testnet.sui.io:443",
+    "operator": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+    "sui": "sui 1.81.1-e04cf9aa915c",
+    "head": "6e5816325227184c2cc244d5d9d3ad1c150faa95",
+    "base": "38beecd423ff4e722a6e54a67346852c641472ba",
+    "start_balance_mist": 528804132,
+    "walrus": "testnet",
+    "base_package": "0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247",
+    "head_package": "0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247",
+    "registry": "0xaed5cbd070dd9e7516880c9d2a05efc807deda07c9ae31d2590e758ee979eeaa",
+    "upgrade_cap": "0xda4317403c980876d3b456573f876cee527ddaa3bf60b65438a6989075fe471b",
+    "fixture": "bde66f056256536cc93d186f",
+    "type_origins": {
+      "device_registry::DeviceRegistry": "0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247",
+      "device_registry::Device": "0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247",
+      "device_group::DeviceGroup": "0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247",
+      "device_group::GroupCreated": "0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247",
+      "device_cap::DeviceCap": "0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247",
+      "device_cap::DeviceAddressKey": "0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247",
+      "deployment_manager::DeploymentRecord": "0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247",
+      "deployment_manager::DeploymentCreated": "0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247",
+      "deployment_manager::DeviceStatusUpdated": "0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247",
+      "deployment_manager::TargetGroupsKey": "0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247",
+      "deployment_manager::TargetDevicesKey": "0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247",
+      "deployment_manager::StatusesKey": "0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247",
+      "deployment_manager::RecipeDigestKey": "0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247",
+      "deployment_manager::ReceiptsKey": "0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247",
+      "deployment_manager::Receipts": "0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247",
+      "deployment_manager::DeviceStatusReported": "0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247",
+      "device_registry::IdentityKey": "0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247",
+      "device_registry::Identity": "0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247",
+      "device_registry::DeviceIdentityChanged": "0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247",
+      "device_registry::CustodyKey": "0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247",
+      "device_registry::DeviceOwnerCap": "0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247"
+    },
+    "receipts": {
+      "0x3cbaf31be418aedc6abb02652a4266bdc60f590e54ce9e834463e08e4d638e0b": {
+        "0x397c1d051dae3cd2af2504e46de60d82c7afa1d82e1d0ed9ad66ba074e4b2751": 1
+      },
+      "0xbe60287d745ba4de38d4751742e51a7fb11ac698b503f2e97fbe8e291f13eaf8": {
+        "0x397c1d051dae3cd2af2504e46de60d82c7afa1d82e1d0ed9ad66ba074e4b2751": 1
+      },
+      "0x117884ddf8a55f1d42d34b59178b0532b54a99d795266491cf107d796bca129c": {
+        "0x397c1d051dae3cd2af2504e46de60d82c7afa1d82e1d0ed9ad66ba074e4b2751": 1
+      },
+      "0x0513b28d65c59b873d2249ef79eb2d35e130de3f38607372a57db610580282e1": {
+        "0x397c1d051dae3cd2af2504e46de60d82c7afa1d82e1d0ed9ad66ba074e4b2751": 2
+      }
+    },
+    "report_transactions": [
+      {
+        "deployment": "0x3cbaf31be418aedc6abb02652a4266bdc60f590e54ce9e834463e08e4d638e0b",
+        "digest": "4nKZTjHko8cp3LFVowau15a7aYNoUX4ByHTBermvsY1F",
+        "status": "success",
+        "checkpoint": "395086090",
+        "gas_used": {
+          "computationCost": "1000000",
+          "storageCost": "8018000",
+          "storageRebate": "7689528",
+          "nonRefundableStorageFee": "77672"
+        }
+      },
+      {
+        "deployment": "0xbe60287d745ba4de38d4751742e51a7fb11ac698b503f2e97fbe8e291f13eaf8",
+        "digest": "Bd2uh9F7Zq8khrYMmtzup69hV5YYvEwsPjuvE5sthnPi",
+        "status": "success",
+        "checkpoint": "395086093",
+        "gas_used": {
+          "computationCost": "1000000",
+          "storageCost": "8018000",
+          "storageRebate": "7689528",
+          "nonRefundableStorageFee": "77672"
+        }
+      },
+      {
+        "deployment": "0x117884ddf8a55f1d42d34b59178b0532b54a99d795266491cf107d796bca129c",
+        "digest": "Gzubx7DQ2TvK56tuy5doYshSQZu1c2eKHtCegbj3NkJT",
+        "status": "success",
+        "checkpoint": "395086086",
+        "gas_used": {
+          "computationCost": "1000000",
+          "storageCost": "8018000",
+          "storageRebate": "7689528",
+          "nonRefundableStorageFee": "77672"
+        }
+      },
+      {
+        "deployment": "0x0513b28d65c59b873d2249ef79eb2d35e130de3f38607372a57db610580282e1",
+        "digest": "C8CSEg7GfTEhZZGFVycqnQgZChUb4j8ZHWaK3osvRY6Y",
+        "status": "success",
+        "checkpoint": "395086083",
+        "gas_used": {
+          "computationCost": "1000000",
+          "storageCost": "8018000",
+          "storageRebate": "7689528",
+          "nonRefundableStorageFee": "77672"
+        }
+      }
+    ],
+    "success": true,
+    "allowance_used_mist": 71745024,
+    "max_spend_mist": 300000000,
+    "end_balance_mist": 526293572,
+    "spent_mist": 2510560,
+    "finished": "2026-10-15T06:12:48Z"
+  },
+  "wallet_browser": {
+    "started": "2026-10-15T06:15:43Z",
+    "network": "testnet",
+    "transactions": [
+      {
+        "label": "fund the browser test key",
+        "digest": "DSNE72L8NgPMGGzXaKVymWanqYnNjmCcUscEdub2zX25",
+        "status": "success",
+        "gas_mist": 1009880
+      }
+    ],
+    "checks": [
+      "browser run complete; 0.0829 SUI swept back from the test key"
+    ],
+    "chain": "4c78adac",
+    "rpc": "https://fullnode.testnet.sui.io:443",
+    "operator": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+    "start_balance_mist": 509210828,
+    "sui": "sui 1.81.1-e04cf9aa915c",
+    "head": "c412c1e09bdc367418a950ba9c3e96f3719cd553",
+    "package": "0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247",
+    "registry": "0xaed5cbd070dd9e7516880c9d2a05efc807deda07c9ae31d2590e758ee979eeaa",
+    "browser": {
+      "checks": [
+        "connected through the dApp Kit connect UI as 0x0aa3c1818f\u2026 on testnet",
+        "wallet rejection surfaces as an error; nothing executed",
+        "fresh registration: device registered, cap issued and activated (owner cap held by the wallet), listed by fetchDevices",
+        "group created and the activated device added (borrowed from custody and returned)",
+        "recipe and artifact uploaded to Walrus testnet by the dApp; verified deployment listed with its resolved device; blobs probed available",
+        "a transaction that would abort is refused by simulation before signing; nothing executed",
+        "a transaction executed and aborted on chain (2pNXPmXRbJ\u2026) is reported as failed by the hook",
+        "an account without the manifest's chain is refused before signing",
+        "cleanup through the dApp (deployment, membership, group, device) and test key swept back"
+      ],
+      "transactions": [
+        {
+          "label": "wallet rejection",
+          "status": "refused",
+          "error": "User rejected signing"
+        },
+        {
+          "label": "register + issue cap + activate device",
+          "digest": "DYYftiehpyRnVZ4bbmMbxGLz79tTzY8f1TiBgobVb1uZ",
+          "status": "success"
+        },
+        {
+          "label": "create group",
+          "digest": "AHrz8JtfjpHqULWrwCXSqewo83dgG5X9VHdJRspE2ubJ",
+          "status": "success"
+        },
+        {
+          "label": "add device to group",
+          "digest": "CiX9V3jjxHfDHJRnz6dJ6MicwLbYheuftqWTHgPgZdkM",
+          "status": "success"
+        },
+        {
+          "label": "create verified deployment (group + device)",
+          "digest": "6KRbEg4o6FbFnFxCQs5JFcfCisqNcG4DsknrS2EavGWx",
+          "status": "success"
+        },
+        {
+          "label": "abort caught by simulation (device already in group)",
+          "status": "refused",
+          "error": "Transaction resolution failed: MoveAbort in 2nd command, abort code: 1, in '0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247::device_group::add_device' (instruction 28)"
+        },
+        {
+          "label": "on-chain abort (device already in group)",
+          "status": "refused",
+          "error": "MoveAbort in 2nd command, abort code: 1, in '0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247::device_group::add_device' (instruction 28)",
+          "digest": "2pNXPmXRbJGN8AuBhFBwsiTpNQt3qZx4TQV5aV6R9uUY",
+          "chain_status": {
+            "success": false,
+            "error": "MoveAbort in 2nd command, abort code: 1, in '0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247::device_group::add_device' (instruction 28)"
+          }
+        },
+        {
+          "label": "unsupported account chain",
+          "status": "refused",
+          "error": "Wallet account does not support sui:testnet"
+        },
+        {
+          "label": "delete deployment",
+          "digest": "HR44vTqoLhwVHmmeSRqrxWfyaQs2SzNbGLJfkY7KkURQ",
+          "status": "success"
+        },
+        {
+          "label": "remove device from group",
+          "digest": "eHuEZ1NUaAjgCUNgdKcT8LRkEkVndmsPsZdhKKZRcr2",
+          "status": "success"
+        },
+        {
+          "label": "delete group",
+          "digest": "3j1Srahn84ZC3UR4yQ3dmKdJj8JmFGEoAyc3Zrg7bS6G",
+          "status": "success"
+        },
+        {
+          "label": "deregister device",
+          "digest": "G2dLQw3sB5psYfFb8bT8R5s9vdRXm1mCsHANn1jbXEG9",
+          "status": "success"
+        }
+      ],
+      "blobs": [
+        {
+          "artifact": "5JU4pe5LaPbXPhffSkxUvat-65Xk1zK58ri1_dkro5c",
+          "recipe": "cQwXSX2Q_T5Lry7BOuCnsDS3KpwE_Y7x9mV0GOZImSo"
+        }
+      ],
+      "sweep": "7qqrLYSkx6w6Zu5H38HY2bZxP2UtMGywiR4QzypQKB6"
+    },
+    "python_sweep_mist": 0,
+    "returned_mist": 82860712,
+    "end_balance_mist": 491061660,
+    "spent_mist": 18149168,
+    "finished": "2026-10-15T06:16:43Z"
+  },
+  "upgrade_security_budgeted_fresh": {
+    "started": "2026-10-15T06:35:43Z",
+    "network": "testnet",
+    "transactions": [
+      {
+        "label": "publish base (pre-identity)",
+        "gas_budget_mist": 400000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "2v3585fUq5W25PmGa78bjgT4GC3S2hkkjVfZq6eWQiGe",
+        "gas_mist": 67629200,
+        "allowance_used_mist": 67629200
+      },
+      {
+        "label": "register legacy device + bound cap + group (base)",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 40000000,
+        "status": "success",
+        "digest": "GJwtqqzDxDGT2BpTs9HrjrRUhFjB97ekSGiR4VZSDo5b",
+        "gas_mist": 12987784,
+        "allowance_used_mist": 120616984
+      },
+      {
+        "label": "add legacy device to group (base)",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "g15JjJPJZF4GYXG7Ct29VUopaXCSrCnZjePAxZg5NKS",
+        "gas_mist": 1280212,
+        "allowance_used_mist": 121897196
+      },
+      {
+        "label": "deployment via base",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "8E1e5wscaZ3ZzFi6bh5tWFPkaZKC1D13tJDdgbVS1qCj",
+        "gas_mist": 13593200,
+        "allowance_used_mist": 135490396
+      },
+      {
+        "label": "legacy device reports Applied via base",
+        "gas_budget_mist": 10000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "DkBuEq1gDkhyGTvDTZafZvdBtmPKdNFcZoDcSpgEEqm5",
+        "gas_mist": 1328472,
+        "allowance_used_mist": 1328472
+      },
+      {
+        "label": "upgrade to head",
+        "gas_budget_mist": 400000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "9bCZPESi6kKR5yNXJ629kMnnRDgzNTZESRSzzzS7B4rJ",
+        "gas_mist": 83065940,
+        "allowance_used_mist": 218556336
+      },
+      {
+        "label": "deployment via head",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "276TcDipPJmEnHCqnZnQ2WiBENTBtPQtcwAXrNxR99f2",
+        "gas_mist": 13593200,
+        "allowance_used_mist": 232149536
+      },
+      {
+        "label": "old package report on a new record",
+        "gas_budget_mist": 10000000,
+        "funding_mist": 0,
+        "status": "failure",
+        "digest": "4kVLcMXkRsuQE6zfs9YX6V6eby2EQG29REB3aRaWVHFX",
+        "gas_mist": 1053960,
+        "allowance_used_mist": 2382432,
+        "abort": [
+          "deployment_manager",
+          "receipts_mut",
+          "5"
+        ]
+      },
+      {
+        "label": "superseded report signature in the new package",
+        "gas_budget_mist": 10000000,
+        "funding_mist": 0,
+        "status": "failure",
+        "digest": "AcrfzFJ9uvuvgMf81Go35yjX2t1fietyxmfALJNUKHgG",
+        "gas_mist": 1053960,
+        "allowance_used_mist": 3436392,
+        "abort": [
+          "deployment_manager",
+          "report_status",
+          "7"
+        ]
+      },
+      {
+        "label": "verified report before the legacy device is activated",
+        "gas_budget_mist": 10000000,
+        "funding_mist": 0,
+        "status": "failure",
+        "digest": "7W9dPDZcb6eeVFK2oA7KV1QGRPFgzmAVshqDTrmSGFjx",
+        "gas_mist": 1053960,
+        "allowance_used_mist": 4490352,
+        "abort": [
+          "device_cap",
+          "assert_active",
+          "2"
+        ]
+      },
+      {
+        "label": "operator reports with a cap it minted for the device",
+        "gas_budget_mist": 50000000,
+        "funding_mist": 0,
+        "status": "failure",
+        "digest": "346kEZVQXGMKXUYHrxf6gmG5kne5wZrV6ZGYvkvVxne9",
+        "gas_mist": 1044080,
+        "allowance_used_mist": 233193616,
+        "abort": [
+          "device_cap",
+          "assert_signer",
+          "0"
+        ]
+      },
+      {
+        "label": "activate the legacy device (head)",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "8NnghJEuPjLikWvJtPSTscJf5WweEL7SB3cMWNuxVbKX",
+        "gas_mist": 8773204,
+        "allowance_used_mist": 241966820
+      },
+      {
+        "label": "deployment via head (after activation)",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "3LeX7Nc6unrFEMjksueNAW3N3GpMPHGBBS5GYVzMXZHN",
+        "gas_mist": 13593200,
+        "allowance_used_mist": 255560020
+      },
+      {
+        "label": "revoke the device (head)",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "2CCBibnCCAgeTrNUx85h6AcduDqPeFVnEhNNTuwmGiRt",
+        "gas_mist": 1064220,
+        "allowance_used_mist": 256624240
+      },
+      {
+        "label": "verified report after revocation",
+        "gas_budget_mist": 10000000,
+        "funding_mist": 0,
+        "status": "failure",
+        "digest": "5RxRq8vCtdcWq7MoJHDS1CVNUtCxCDqk7Tp3Ce21Sbdb",
+        "gas_mist": 1053960,
+        "allowance_used_mist": 5544312,
+        "abort": [
+          "device_cap",
+          "assert_active",
+          "2"
+        ]
+      },
+      {
+        "label": "delete head deployments",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "C5qNAmSnKZB5GP9eMzcJpoDB4EmFU2sC8NKD17vVvY18",
+        "gas_mist": 0,
+        "allowance_used_mist": 256624240
+      },
+      {
+        "label": "delete base deployment",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "8JucsUXgygHnLDWHGVzpNchYDG7PsUDHNv1yeaf8KyuX",
+        "gas_mist": 0,
+        "allowance_used_mist": 256624240
+      }
+    ],
+    "checks": [
+      "base 0x04b78bbaa5\u2026: legacy device, bound cap, group and a receipted deployment created with it",
+      "upgraded in place to 0x74640ff7af\u2026; identity types originate in the upgrade, existing types in the base",
+      "old-package, superseded, pre-activation and impersonation reports all abort on chain; no receipt written",
+      "activated legacy device: the real daemon applied the new deployment (artifact from Walrus testnet); its existing bound cap reported Applied",
+      "after revocation the device's reports abort and its receipt is unchanged"
+    ],
+    "chain": "4c78adac",
+    "rpc": "https://fullnode.testnet.sui.io:443",
+    "operator": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+    "start_balance_mist": 1352591560,
+    "max_spend_mist": 600000000,
+    "sui": "sui 1.81.1-e04cf9aa915c",
+    "head": "c5d13cba065ab21bf67a22fa731531d3aa982cc7",
+    "base": "14b351b9389c058117297343ced34f262db6f3c3",
+    "walrus": "testnet",
+    "legacy_state": "created before the upgrade",
+    "base_package": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+    "head_package": "0x74640ff7afacec242479fcca2ceccba1a12bdbce290f855ca32e79eabe258dce",
+    "registry": "0x7b926f283ca0b492edafd82dba3be62e91d0c94e4518c165cc26affb40cb9f68",
+    "upgrade_cap": "0x9bb2a728fa5b0ebd036119233f6815db98db4592053ce8ffd8725d58987ade57",
+    "fixture": "45c90c60c2c5095491a764c4..bde66f056256536cc93d186f",
+    "type_origins": {
+      "device_registry::DeviceRegistry": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "device_registry::Device": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "device_group::DeviceGroup": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "device_group::GroupCreated": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "device_cap::DeviceCap": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "device_cap::DeviceAddressKey": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::DeploymentRecord": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::DeploymentCreated": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::DeviceStatusUpdated": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::TargetGroupsKey": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::TargetDevicesKey": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::StatusesKey": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::RecipeDigestKey": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::ReceiptsKey": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::Receipts": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::DeviceStatusReported": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "device_registry::IdentityKey": "0x74640ff7afacec242479fcca2ceccba1a12bdbce290f855ca32e79eabe258dce",
+      "device_registry::Identity": "0x74640ff7afacec242479fcca2ceccba1a12bdbce290f855ca32e79eabe258dce",
+      "device_registry::DeviceIdentityChanged": "0x74640ff7afacec242479fcca2ceccba1a12bdbce290f855ca32e79eabe258dce",
+      "device_registry::CustodyKey": "0x74640ff7afacec242479fcca2ceccba1a12bdbce290f855ca32e79eabe258dce",
+      "device_registry::DeviceOwnerCap": "0x74640ff7afacec242479fcca2ceccba1a12bdbce290f855ca32e79eabe258dce"
+    },
+    "receipts": {
+      "d0": {
+        "0x30e7fe2be1c1c3de66769bc82d0465df01bead576b0efd2614156dbea42dc4b7": 1
+      },
+      "d2": {
+        "0x30e7fe2be1c1c3de66769bc82d0465df01bead576b0efd2614156dbea42dc4b7": 1
+      }
+    },
+    "end_balance_mist": 1131865708,
+    "spent_mist": 220725852,
+    "allowance_used_mist": 256624240,
+    "finished": "2026-10-15T06:38:25Z",
+    "note": "Run from the PR #70 feedback working tree (Budget-charged mutations, cached security pair) on top of c5d13cb, before it was committed; the recorded `head` is that parent."
+  },
+  "upgrade_security_budgeted_cached": {
+    "started": "2026-10-15T06:38:31Z",
+    "network": "testnet",
+    "transactions": [
+      {
+        "label": "register legacy device + bound cap + group (base)",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 40000000,
+        "status": "success",
+        "digest": "G9PS5T7uYipKVAp3742ZPTkKGJiBvPWMXErvkSLURiTv",
+        "gas_mist": 12987784,
+        "allowance_used_mist": 52987784
+      },
+      {
+        "label": "add legacy device to group (base)",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "BgsBKD7FCoRZAyYhdZNLeEQWAdRsDsCv9BqfqCnRA72n",
+        "gas_mist": 1280212,
+        "allowance_used_mist": 54267996
+      },
+      {
+        "label": "deployment via base",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "8yyiXDZ4zBog12Pkv9vUcdbVB87JWiMjzirxhtwwXhSC",
+        "gas_mist": 13593200,
+        "allowance_used_mist": 67861196
+      },
+      {
+        "label": "legacy device reports Applied via base",
+        "gas_budget_mist": 10000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "GQ7kfGJe7PGQTNXe7uHSaFV2VN7qMXsVb7xswGZT6f2E",
+        "gas_mist": 1328472,
+        "allowance_used_mist": 1328472
+      },
+      {
+        "label": "deployment via head",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "HUvCraZWAv6itwfwM1UMv6wd78nGZjzE6Dq8xotdAqFc",
+        "gas_mist": 13593200,
+        "allowance_used_mist": 81454396
+      },
+      {
+        "label": "old package report on a new record",
+        "gas_budget_mist": 10000000,
+        "funding_mist": 0,
+        "status": "failure",
+        "digest": "DZPcEfUf36uj2GHnijN8hGraew6kEfow7xvY2qJzUMdR",
+        "gas_mist": 1053960,
+        "allowance_used_mist": 2382432,
+        "abort": [
+          "deployment_manager",
+          "receipts_mut",
+          "5"
+        ]
+      },
+      {
+        "label": "superseded report signature in the new package",
+        "gas_budget_mist": 10000000,
+        "funding_mist": 0,
+        "status": "failure",
+        "digest": "4CtGo8QQU9vTsSiYh7RNNHQ6XSj5StPBeGXto1cd3nXc",
+        "gas_mist": 1053960,
+        "allowance_used_mist": 3436392,
+        "abort": [
+          "deployment_manager",
+          "report_status",
+          "7"
+        ]
+      },
+      {
+        "label": "verified report before the legacy device is activated",
+        "gas_budget_mist": 10000000,
+        "funding_mist": 0,
+        "status": "failure",
+        "digest": "J3RohvwcJr6k5wAfp2Qzqs4fj7R2aoz45fdZiDRXRbav",
+        "gas_mist": 1053960,
+        "allowance_used_mist": 4490352,
+        "abort": [
+          "device_cap",
+          "assert_active",
+          "2"
+        ]
+      },
+      {
+        "label": "operator reports with a cap it minted for the device",
+        "gas_budget_mist": 50000000,
+        "funding_mist": 0,
+        "status": "failure",
+        "digest": "2Ukwirvh3ypKuhJepb87BBzu9Hnk88v86Zk8uUTFgBNe",
+        "gas_mist": 1044080,
+        "allowance_used_mist": 82498476,
+        "abort": [
+          "device_cap",
+          "assert_signer",
+          "0"
+        ]
+      },
+      {
+        "label": "activate the legacy device (head)",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "FBwtCJgB6cgfwRQAC8UqDb9cHE4YAJzp8SD2cYDw4bK9",
+        "gas_mist": 8773204,
+        "allowance_used_mist": 91271680
+      },
+      {
+        "label": "deployment via head (after activation)",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "6PsdPwmYHnbzmZqiHVXfbzkf2a8wqNievu8c2dW2cA7M",
+        "gas_mist": 13593200,
+        "allowance_used_mist": 104864880
+      },
+      {
+        "label": "revoke the device (head)",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "Atc95dJ9j9bnB8LAXMUrrARLWkvJvjd3SK2zQ8KA3r2a",
+        "gas_mist": 1064220,
+        "allowance_used_mist": 105929100
+      },
+      {
+        "label": "verified report after revocation",
+        "gas_budget_mist": 10000000,
+        "funding_mist": 0,
+        "status": "failure",
+        "digest": "FPhD8kuiZg9RkGLwxgxfDHe7Xi8gLt1etCagTPPknNXZ",
+        "gas_mist": 1053960,
+        "allowance_used_mist": 5544312,
+        "abort": [
+          "device_cap",
+          "assert_active",
+          "2"
+        ]
+      },
+      {
+        "label": "delete head deployments",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "145NhrBAMYamCumMbEnKPnczLs8SeyfS1EvhCxLBtQka",
+        "gas_mist": 0,
+        "allowance_used_mist": 105929100
+      },
+      {
+        "label": "delete base deployment",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "2x6t7WWaK8MpRbAtExyTSHtq3z84vXzWJp4GfGKD4ioY",
+        "gas_mist": 0,
+        "allowance_used_mist": 105929100
+      }
+    ],
+    "checks": [
+      "reused fixture 45c90c60c2c5\u2026: base 0x04b78bbaa5\u2026, head 0x74640ff7af\u2026 (UpgradeCap version 2 still points at head; re-verified on chain; no package storage spent)",
+      "base 0x04b78bbaa5\u2026's entry points, after the upgrade: legacy device, bound cap, group and a receipted deployment created with them",
+      "upgraded in place to 0x74640ff7af\u2026; identity types originate in the upgrade, existing types in the base",
+      "old-package, superseded, pre-activation and impersonation reports all abort on chain; no receipt written",
+      "activated legacy device: the real daemon applied the new deployment (artifact from Walrus testnet); its existing bound cap reported Applied",
+      "after revocation the device's reports abort and its receipt is unchanged"
+    ],
+    "chain": "4c78adac",
+    "rpc": "https://fullnode.testnet.sui.io:443",
+    "operator": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+    "start_balance_mist": 1131865708,
+    "max_spend_mist": 600000000,
+    "sui": "sui 1.81.1-e04cf9aa915c",
+    "head": "c5d13cba065ab21bf67a22fa731531d3aa982cc7",
+    "base": "14b351b9389c058117297343ced34f262db6f3c3",
+    "walrus": "testnet",
+    "legacy_state": "created through the base package after the cached upgrade",
+    "base_package": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+    "head_package": "0x74640ff7afacec242479fcca2ceccba1a12bdbce290f855ca32e79eabe258dce",
+    "registry": "0x7b926f283ca0b492edafd82dba3be62e91d0c94e4518c165cc26affb40cb9f68",
+    "upgrade_cap": "0x9bb2a728fa5b0ebd036119233f6815db98db4592053ce8ffd8725d58987ade57",
+    "fixture": "45c90c60c2c5095491a764c4..bde66f056256536cc93d186f",
+    "type_origins": {
+      "device_registry::DeviceRegistry": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "device_registry::Device": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "device_group::DeviceGroup": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "device_group::GroupCreated": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "device_cap::DeviceCap": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "device_cap::DeviceAddressKey": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::DeploymentRecord": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::DeploymentCreated": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::DeviceStatusUpdated": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::TargetGroupsKey": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::TargetDevicesKey": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::StatusesKey": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::RecipeDigestKey": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::ReceiptsKey": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::Receipts": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::DeviceStatusReported": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "device_registry::IdentityKey": "0x74640ff7afacec242479fcca2ceccba1a12bdbce290f855ca32e79eabe258dce",
+      "device_registry::Identity": "0x74640ff7afacec242479fcca2ceccba1a12bdbce290f855ca32e79eabe258dce",
+      "device_registry::DeviceIdentityChanged": "0x74640ff7afacec242479fcca2ceccba1a12bdbce290f855ca32e79eabe258dce",
+      "device_registry::CustodyKey": "0x74640ff7afacec242479fcca2ceccba1a12bdbce290f855ca32e79eabe258dce",
+      "device_registry::DeviceOwnerCap": "0x74640ff7afacec242479fcca2ceccba1a12bdbce290f855ca32e79eabe258dce"
+    },
+    "receipts": {
+      "d0": {
+        "0x7e8a9d0bf1e6554de8c22b608fd7c7b188563d8d9e503f036acec378f3e7ed5b": 1
+      },
+      "d2": {
+        "0x7e8a9d0bf1e6554de8c22b608fd7c7b188563d8d9e503f036acec378f3e7ed5b": 1
+      }
+    },
+    "end_balance_mist": 1061834996,
+    "spent_mist": 70030712,
+    "allowance_used_mist": 105929100,
+    "finished": "2026-10-15T06:40:41Z",
+    "note": "Run from the PR #70 feedback working tree (Budget-charged mutations, cached security pair) on top of c5d13cb, before it was committed; the recorded `head` is that parent."
+  },
+  "wallet_browser_budgeted": {
+    "started": "2026-10-15T06:40:50Z",
+    "network": "testnet",
+    "transactions": [
+      {
+        "label": "fund the browser test key",
+        "gas_budget_mist": 10000000,
+        "funding_mist": 100000000,
+        "status": "success",
+        "digest": "D8ZCVK9yjGu3MKRqsDu5gAh15N5pHhSrueeYHzqZM3dF",
+        "gas_mist": 1988000,
+        "allowance_used_mist": 101988000
+      }
+    ],
+    "checks": [
+      "browser run complete; 0.0829 SUI swept back from the test key"
+    ],
+    "chain": "4c78adac",
+    "rpc": "https://fullnode.testnet.sui.io:443",
+    "operator": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+    "start_balance_mist": 1061834996,
+    "max_spend_mist": 200000000,
+    "sui": "sui 1.81.1-e04cf9aa915c",
+    "head": "c5d13cba065ab21bf67a22fa731531d3aa982cc7",
+    "package": "0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247",
+    "registry": "0xaed5cbd070dd9e7516880c9d2a05efc807deda07c9ae31d2590e758ee979eeaa",
+    "browser": {
+      "checks": [
+        "connected through the dApp Kit connect UI as 0xa4f55a596a\u2026 on testnet",
+        "wallet rejection surfaces as an error; nothing executed",
+        "fresh registration: device registered, cap issued and activated (owner cap held by the wallet), listed by fetchDevices",
+        "group created and the activated device added (borrowed from custody and returned)",
+        "recipe and artifact uploaded to Walrus testnet by the dApp; verified deployment listed with its resolved device; blobs probed available",
+        "a transaction that would abort is refused by simulation before signing; nothing executed",
+        "a transaction executed and aborted on chain (N4CwDxCKAr\u2026) is reported as failed by the hook",
+        "an account without the manifest's chain is refused before signing",
+        "cleanup through the dApp (deployment, membership, group, device) and test key swept back"
+      ],
+      "transactions": [
+        {
+          "label": "wallet rejection",
+          "status": "refused",
+          "error": "User rejected signing"
+        },
+        {
+          "label": "register + issue cap + activate device",
+          "digest": "4sspwkXMRsA8D9t9dPMr7Dvr46YGfeWmA9kc8ej3s2w3",
+          "status": "success"
+        },
+        {
+          "label": "create group",
+          "digest": "7JEVG1xKtfKcDJfmXY3mDNaifp55inQitwWgaj2CpHuq",
+          "status": "success"
+        },
+        {
+          "label": "add device to group",
+          "digest": "91EZySPPsnDJtXMD2yetGtpe7iW7Lm7FsoDaQCidMbXt",
+          "status": "success"
+        },
+        {
+          "label": "create verified deployment (group + device)",
+          "digest": "75ge8ikDVaYsrAwepSKys9iMMdgyVSnR3AaKq1ExtHme",
+          "status": "success"
+        },
+        {
+          "label": "abort caught by simulation (device already in group)",
+          "status": "refused",
+          "error": "Transaction resolution failed: MoveAbort in 2nd command, abort code: 1, in '0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247::device_group::add_device' (instruction 28)"
+        },
+        {
+          "label": "on-chain abort (device already in group)",
+          "status": "refused",
+          "error": "MoveAbort in 2nd command, abort code: 1, in '0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247::device_group::add_device' (instruction 28)",
+          "digest": "N4CwDxCKAriy18JKcGGyZieeL279dvPiN8pfetGnVoy",
+          "chain_status": {
+            "success": false,
+            "error": "MoveAbort in 2nd command, abort code: 1, in '0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247::device_group::add_device' (instruction 28)"
+          }
+        },
+        {
+          "label": "unsupported account chain",
+          "status": "refused",
+          "error": "Wallet account does not support sui:testnet"
+        },
+        {
+          "label": "delete deployment",
+          "digest": "BCxxcbDxarLGpyUwASiP56FA6siNY6SSrPBcpvHXk81p",
+          "status": "success"
+        },
+        {
+          "label": "remove device from group",
+          "digest": "9XcPWT1VpDjLfVcvdAMeSdpWwVX8kCzc63w2XDkosGpY",
+          "status": "success"
+        },
+        {
+          "label": "delete group",
+          "digest": "6M3vYomSUweW2oCNQzYBgWCtS2swDYy4WwBht4VZADXe",
+          "status": "success"
+        },
+        {
+          "label": "deregister device",
+          "digest": "BgUBhKtW2sfQ6ec21cvxMCiThDsfraLZmC9KyB3E2Yon",
+          "status": "success"
+        }
+      ],
+      "blobs": [
+        {
+          "artifact": "AubGQzVxTF6X-xkO3-K-8ESLOmaafMF-jHdFetzb7fY",
+          "recipe": "uxnZlFwzEuzyw8I0c_Tg7-EXc3DtdnCGX5Utx6g8kVE"
+        }
+      ],
+      "sweep": "6Fn4p4NYhFeY6HWGY4oCpP8yM5Uqz88nEjSvzZhJS8W1"
+    },
+    "python_sweep_mist": 0,
+    "returned_mist": 82860712,
+    "end_balance_mist": 1042707708,
+    "spent_mist": 19127288,
+    "allowance_used_mist": 101988000,
+    "finished": "2026-10-15T06:41:44Z",
+    "note": "Run from the PR #70 feedback working tree (Budget-charged mutations, cached security pair) on top of c5d13cb, before it was committed; the recorded `head` is that parent."
+  },
+  "wallet_browser_sweep_charged": {
+    "started": "2026-10-15T06:59:27Z",
+    "network": "testnet",
+    "transactions": [
+      {
+        "label": "fund the browser test key",
+        "gas_budget_mist": 10000000,
+        "funding_mist": 100000000,
+        "status": "success",
+        "digest": "Ft1MBf5EGJUojjNWHLVDGkcG9c7iVavxYyMqaGoXL9kj",
+        "gas_mist": 1009880,
+        "allowance_used_mist": 101009880
+      }
+    ],
+    "checks": [
+      "browser run complete; 0.0829 SUI swept back from the test key"
+    ],
+    "chain": "4c78adac",
+    "rpc": "https://fullnode.testnet.sui.io:443",
+    "operator": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+    "start_balance_mist": 1040206572,
+    "max_spend_mist": 200000000,
+    "sui": "sui 1.81.1-e04cf9aa915c",
+    "head": "9dc797a3d8d26713fd6fa028fb963f41223d441c",
+    "package": "0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247",
+    "registry": "0xaed5cbd070dd9e7516880c9d2a05efc807deda07c9ae31d2590e758ee979eeaa",
+    "browser": {
+      "checks": [
+        "connected through the dApp Kit connect UI as 0x1118098650\u2026 on testnet",
+        "wallet rejection surfaces as an error; nothing executed",
+        "fresh registration: device registered, cap issued and activated (owner cap held by the wallet), listed by fetchDevices",
+        "group created and the activated device added (borrowed from custody and returned)",
+        "recipe and artifact uploaded to Walrus testnet by the dApp; verified deployment listed with its resolved device; blobs probed available",
+        "a transaction that would abort is refused by simulation before signing; nothing executed",
+        "a transaction executed and aborted on chain (FX1CSqCck2\u2026) is reported as failed by the hook",
+        "an account without the manifest's chain is refused before signing",
+        "cleanup through the dApp (deployment, membership, group, device) and test key swept back"
+      ],
+      "transactions": [
+        {
+          "label": "wallet rejection",
+          "status": "refused",
+          "error": "User rejected signing"
+        },
+        {
+          "label": "register + issue cap + activate device",
+          "digest": "6rHZyP9W3jvMtgF3CmfhsmdSfERHcBcUWjc4zS2sqK1v",
+          "status": "success"
+        },
+        {
+          "label": "create group",
+          "digest": "AdRFSX217bh9CiQddaHREJLLovcS2E9LCzWBm5fDzv5",
+          "status": "success"
+        },
+        {
+          "label": "add device to group",
+          "digest": "5dqjvTu3nYdHYYnCgUZQ3nNKZCu599yV2HASMto7sVPs",
+          "status": "success"
+        },
+        {
+          "label": "create verified deployment (group + device)",
+          "digest": "AiNaWQLr8J9JzY6AjgCLg5vkb62fHemixiVBBw3W4hcm",
+          "status": "success"
+        },
+        {
+          "label": "abort caught by simulation (device already in group)",
+          "status": "refused",
+          "error": "Transaction resolution failed: MoveAbort in 2nd command, abort code: 1, in '0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247::device_group::add_device' (instruction 28)"
+        },
+        {
+          "label": "on-chain abort (device already in group)",
+          "status": "refused",
+          "error": "MoveAbort in 2nd command, abort code: 1, in '0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247::device_group::add_device' (instruction 28)",
+          "digest": "FX1CSqCck2Lm7hjYPMB8A7wZpmPUaJK6nFZVrshv96LG",
+          "chain_status": {
+            "success": false,
+            "error": "MoveAbort in 2nd command, abort code: 1, in '0x536ca66dcc4fba537b8c7db0bd9d28fa65b98dd2e552e8cbe470fb76df166247::device_group::add_device' (instruction 28)"
+          }
+        },
+        {
+          "label": "unsupported account chain",
+          "status": "refused",
+          "error": "Wallet account does not support sui:testnet"
+        },
+        {
+          "label": "delete deployment",
+          "digest": "C39uYESwZNXpSWCy3rEtfJH2oZQ7nydCzDtLKBxaUPyp",
+          "status": "success"
+        },
+        {
+          "label": "remove device from group",
+          "digest": "GHF8G3MkYZpNwgmGacq8jgA4esx9bKbPuN7jfPBu15EC",
+          "status": "success"
+        },
+        {
+          "label": "delete group",
+          "digest": "95Yzr4bCofobUykpQ6vxiSj7zhmCAgBKXTExDGcdxsNe",
+          "status": "success"
+        },
+        {
+          "label": "deregister device",
+          "digest": "AD1Q744mMrVgiCcxjkyofXbXWd7U95Kq3t1qsCzcvzZ8",
+          "status": "success"
+        }
+      ],
+      "blobs": [
+        {
+          "artifact": "KYEZbp289maeCfCB97xZwnAWY2YzX34iiUacyhiwjKE",
+          "recipe": "IxOP3ppiLhfO1QGN_AmwKpivT4YrQYM5q44FPvT23uk"
+        }
+      ],
+      "sweep": "CAmTfZUpip1A6W1Qkdt6R16Ufys27pWmLr87cvTA19qi"
+    },
+    "python_sweep_mist": 0,
+    "returned_mist": 82860712,
+    "end_balance_mist": 1022057404,
+    "spent_mist": 18149168,
+    "allowance_used_mist": 101009880,
+    "finished": "2026-10-15T07:00:12Z",
+    "note": "Wallet gate rerun on the uncommitted tree over 9dc797a after routing every test-key sweep through the strict Budget (recovered keys charged to the current run). The browser swept the key itself, so the Python sweep found under 5,000,000 MIST and submitted nothing; the recovery path is covered by scripts/tests/test_live_common.py SweepTests, not by this run."
+  },
+  "upgrade_security_cleanup_swept": {
+    "started": "2026-10-15T07:23:27Z",
+    "network": "testnet",
+    "transactions": [
+      {
+        "label": "register legacy device + bound cap + group (base)",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 40000000,
+        "status": "success",
+        "digest": "DvPhLzQjqat1eQc7rEuL3pp782dgfzX44BUNiDeuZ7Gz",
+        "gas_mist": 12009664,
+        "allowance_used_mist": 52009664
+      },
+      {
+        "label": "add legacy device to group (base)",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "7yQxwDgLnveqPdTqLSrJNGdqAnb9uoLENFTovMiy4dp6",
+        "gas_mist": 1280212,
+        "allowance_used_mist": 53289876
+      },
+      {
+        "label": "deployment via base",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "Cbd8NomsK7yAkxdyt7noR9NERd2vhvSQ473RwkMSNsnf",
+        "gas_mist": 13593200,
+        "allowance_used_mist": 66883076
+      },
+      {
+        "label": "legacy device reports Applied via base",
+        "gas_budget_mist": 10000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "9EBMB18psVTMoRT44j4k3WFT2nEtyc46KRXX9utaZHTG",
+        "gas_mist": 1328472,
+        "allowance_used_mist": 1328472
+      },
+      {
+        "label": "deployment via head",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "AZd5FPsUDBLhyWdjYdUz2gYJZkk6XEg81aqjnKuGZ3X9",
+        "gas_mist": 13593200,
+        "allowance_used_mist": 80476276
+      },
+      {
+        "label": "old package report on a new record",
+        "gas_budget_mist": 10000000,
+        "funding_mist": 0,
+        "status": "failure",
+        "digest": "AfgWm6GrunbmEN9AuwPe88iyKXWcAiBfiMQkkhvH85VF",
+        "gas_mist": 1053960,
+        "allowance_used_mist": 2382432,
+        "abort": [
+          "deployment_manager",
+          "receipts_mut",
+          "5"
+        ]
+      },
+      {
+        "label": "superseded report signature in the new package",
+        "gas_budget_mist": 10000000,
+        "funding_mist": 0,
+        "status": "failure",
+        "digest": "J9nnHringoQtXFCKcK7AFtiBLtJzcrTd7W1vD43NtTJy",
+        "gas_mist": 1053960,
+        "allowance_used_mist": 3436392,
+        "abort": [
+          "deployment_manager",
+          "report_status",
+          "7"
+        ]
+      },
+      {
+        "label": "verified report before the legacy device is activated",
+        "gas_budget_mist": 10000000,
+        "funding_mist": 0,
+        "status": "failure",
+        "digest": "3w3RxDNQpf9d85unXjPbwpY5qRCcUHoX8JpPEaPJV94W",
+        "gas_mist": 1053960,
+        "allowance_used_mist": 4490352,
+        "abort": [
+          "device_cap",
+          "assert_active",
+          "2"
+        ]
+      },
+      {
+        "label": "operator reports with a cap it minted for the device",
+        "gas_budget_mist": 50000000,
+        "funding_mist": 0,
+        "status": "failure",
+        "digest": "84nYzo115MHLmwsjxRstLwAkHwgWWCZA6ex24qWuU5zw",
+        "gas_mist": 1044080,
+        "allowance_used_mist": 81520356,
+        "abort": [
+          "device_cap",
+          "assert_signer",
+          "0"
+        ]
+      },
+      {
+        "label": "activate the legacy device (head)",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "Fsk1kG97pSXHLnYBNDQ8dUtNvbvXF5vk2JhxeJFsfBCn",
+        "gas_mist": 8773204,
+        "allowance_used_mist": 90293560
+      },
+      {
+        "label": "deployment via head (after activation)",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "4zZeXMAMCzhgLbPZyN2aRGQEoVpXi9BWV7cLGSoANWux",
+        "gas_mist": 13593200,
+        "allowance_used_mist": 103886760
+      },
+      {
+        "label": "revoke the device (head)",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "7iMV22HbTV9ms97fj3c2skkiqENuc9oMnGGDt6Lx431N",
+        "gas_mist": 1064220,
+        "allowance_used_mist": 104950980
+      },
+      {
+        "label": "verified report after revocation",
+        "gas_budget_mist": 10000000,
+        "funding_mist": 0,
+        "status": "failure",
+        "digest": "8GLoyvb8gU8rH4HQAwC1Kqhc4c1TnXgCTVXJAYZZiZTq",
+        "gas_mist": 1053960,
+        "allowance_used_mist": 5544312,
+        "abort": [
+          "device_cap",
+          "assert_active",
+          "2"
+        ]
+      },
+      {
+        "label": "delete head deployments",
+        "gas_budget_mist": 20000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "ESSwF5VYkjG6eRq93TRanb9UDdpyWU9geAidn2bN9XwD",
+        "gas_mist": 0,
+        "allowance_used_mist": 104950980
+      },
+      {
+        "label": "delete base deployment",
+        "gas_budget_mist": 20000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "EvmRowweJEqsQaPG7JQ1JuXJ35SyjpZwi7DKa4QfLiv7",
+        "gas_mist": 0,
+        "allowance_used_mist": 104950980
+      },
+      {
+        "label": "delete the legacy group and deregister the device",
+        "gas_budget_mist": 20000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "DrTSQGcm8CbGj2YGcovfe1NELbCobfQsRSVbfQW4hSro",
+        "gas_mist": 0,
+        "allowance_used_mist": 104950980
+      },
+      {
+        "label": "sweep the device key",
+        "gas_budget_mist": 3000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "7J4TvuhAKaDwd4RQ4VMpoHhC2eug73s1knUUewNbMGWx",
+        "gas_mist": 1009880,
+        "allowance_used_mist": 6554192
+      }
+    ],
+    "checks": [
+      "reused fixture 45c90c60c2c5\u2026: base 0x04b78bbaa5\u2026, head 0x74640ff7af\u2026 (UpgradeCap version 2 still points at head; re-verified on chain; no package storage spent)",
+      "base 0x04b78bbaa5\u2026's entry points, after the upgrade: legacy device, bound cap, group and a receipted deployment created with them",
+      "upgraded in place to 0x74640ff7af\u2026; identity types originate in the upgrade, existing types in the base",
+      "old-package, superseded, pre-activation and impersonation reports all abort on chain; no receipt written",
+      "activated legacy device: the real daemon applied the new deployment (artifact from Walrus testnet); its existing bound cap reported Applied",
+      "after revocation the device's reports abort and its receipt is unchanged"
+    ],
+    "chain": "4c78adac",
+    "rpc": "https://fullnode.testnet.sui.io:443",
+    "operator": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+    "start_balance_mist": 1022057404,
+    "max_spend_mist": 600000000,
+    "sui": "sui 1.81.1-e04cf9aa915c",
+    "head": "ba71f90df7013e054e7a6b7d0c7f614f552cb877",
+    "base": "14b351b9389c058117297343ced34f262db6f3c3",
+    "walrus": "testnet",
+    "legacy_state": "created through the base package after the cached upgrade",
+    "base_package": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+    "head_package": "0x74640ff7afacec242479fcca2ceccba1a12bdbce290f855ca32e79eabe258dce",
+    "registry": "0x7b926f283ca0b492edafd82dba3be62e91d0c94e4518c165cc26affb40cb9f68",
+    "upgrade_cap": "0x9bb2a728fa5b0ebd036119233f6815db98db4592053ce8ffd8725d58987ade57",
+    "fixture": "45c90c60c2c5095491a764c4..bde66f056256536cc93d186f",
+    "type_origins": {
+      "device_registry::DeviceRegistry": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "device_registry::Device": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "device_group::DeviceGroup": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "device_group::GroupCreated": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "device_cap::DeviceCap": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "device_cap::DeviceAddressKey": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::DeploymentRecord": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::DeploymentCreated": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::DeviceStatusUpdated": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::TargetGroupsKey": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::TargetDevicesKey": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::StatusesKey": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::RecipeDigestKey": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::ReceiptsKey": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::Receipts": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "deployment_manager::DeviceStatusReported": "0x04b78bbaa5e99ab05058c84abe7f48b544f3949d160f440650ef492016b85a63",
+      "device_registry::IdentityKey": "0x74640ff7afacec242479fcca2ceccba1a12bdbce290f855ca32e79eabe258dce",
+      "device_registry::Identity": "0x74640ff7afacec242479fcca2ceccba1a12bdbce290f855ca32e79eabe258dce",
+      "device_registry::DeviceIdentityChanged": "0x74640ff7afacec242479fcca2ceccba1a12bdbce290f855ca32e79eabe258dce",
+      "device_registry::CustodyKey": "0x74640ff7afacec242479fcca2ceccba1a12bdbce290f855ca32e79eabe258dce",
+      "device_registry::DeviceOwnerCap": "0x74640ff7afacec242479fcca2ceccba1a12bdbce290f855ca32e79eabe258dce"
+    },
+    "receipts": {
+      "d0": {
+        "0x1d93d4e7813164bc896f96f662a1265c345b4391aaa38073c53d67d87e762031": 1
+      },
+      "d2": {
+        "0x1d93d4e7813164bc896f96f662a1265c345b4391aaa38073c53d67d87e762031": 1
+      }
+    },
+    "device_sweep_mist": 33127216,
+    "end_balance_mist": 992711820,
+    "spent_mist": 29345584,
+    "allowance_used_mist": 104950980,
+    "finished": "2026-10-15T07:27:49Z"
+  }
+}
