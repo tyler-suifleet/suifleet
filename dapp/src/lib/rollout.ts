@@ -2,7 +2,7 @@ import { bcs } from "@mysten/sui/bcs";
 import { Transaction } from "@mysten/sui/transactions";
 import type { SuiGrpcClient } from "@mysten/sui/grpc";
 import { normalizeStructTag, normalizeSuiAddress } from "@mysten/sui/utils";
-import { calls, deployment_manager_RolloutBcs } from "./fleet-protocol";
+import { calls, deployment_manager_DeploymentRecordBcs, deployment_manager_RolloutBcs } from "./fleet-protocol";
 import { PACKAGE_ID } from "./constants";
 import { moveType, requireManifest } from "./deployment-manifest";
 import { fetchFleetHealth, type DeviceHealth } from "./telemetry";
@@ -46,25 +46,34 @@ export async function readRollout(client: Pick<SuiGrpcClient, "getDynamicField">
  * Offline/unavailable/unverified reports supply no permission or success sample.
  * The creator signs this attestation; chain state is the durable coordinator.
  */
-export function rolloutHealth(r: Rollout, id: string, health: Record<string, DeviceHealth>, now = Date.now()) {
+export function rolloutHealth(r: Rollout, id: string, target: { componentName: string; version: string }, health: Record<string, DeviceHealth>, now = Date.now()) {
   const online: string[] = [], healthy: string[] = [], unhealthy: string[] = [];
   r.members.forEach((device, i) => {
     const h = health[device];
     if (!h || !["healthy", "degraded"].includes(h.status) || h.observedMs === undefined ||
       h.observedMs > now || now - h.observedMs > 120000) return;
     online.push(device);
-    const component = h.components.find(c => normalizeSuiAddress(c.deployment_id) === normalizeSuiAddress(id));
+    const component = h.components.find(c => c.name === target.componentName && c.version === target.version &&
+      normalizeSuiAddress(c.deployment_id) === normalizeSuiAddress(id));
     if (!component || !component.installed || BigInt(h.observedMs) < BigInt(r.admitted_at[i])) return;
     if (h.status === "healthy") healthy.push(device);
     else unhealthy.push(device);
   });
   return { online, healthy, unhealthy };
 }
-export async function buildAdvanceRolloutTx(client: Pick<SuiGrpcClient, "getDynamicField">, id: string, owner: string, token: string) {
+export async function readRolloutTarget(client: Pick<SuiGrpcClient, "getObject">, id: string, owner: string) {
+  const { object } = await client.getObject({ objectId: id, include: { content: true } });
+  if (normalizeStructTag(object.type) !== normalizeStructTag(moveType("deployment_manager::DeploymentRecord"))) throw new Error("Unexpected rollout deployment type");
+  const record = deployment_manager_DeploymentRecordBcs.parse(object.content);
+  if (record.schema_version !== "3" || normalizeSuiAddress(record.id) !== normalizeSuiAddress(id) ||
+    normalizeSuiAddress(record.creator) !== normalizeSuiAddress(owner)) throw new Error("Rollout deployment identity or creator mismatch");
+  return { componentName: record.component_name, version: record.version };
+}
+export async function buildAdvanceRolloutTx(client: Pick<SuiGrpcClient, "getDynamicField" | "getObject">, id: string, owner: string, token: string) {
   requireManifest();
-  const r = await readRollout(client, id);
+  const [r, target] = await Promise.all([readRollout(client, id), readRolloutTarget(client, id, owner)]);
   const health = await fetchFleetHealth(client, r.members, owner, undefined, token);
-  const a = rolloutHealth(r, id, health);
+  const a = rolloutHealth(r, id, target, health);
   const tx = new Transaction();
   calls.deployment_manager_advance_rollout(tx, PACKAGE_ID, id, a.online, a.healthy, a.unhealthy, "0x6");
   return tx;

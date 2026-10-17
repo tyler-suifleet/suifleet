@@ -27,7 +27,7 @@ create a new rollout rather than weaken the policy.
 
 Current device identity-bound telemetry is verified by the existing telemetry
 client. Configure its read token on Devices first. Reports must be at most
-120 seconds old, not from the future, and identify this deployment as installed
+120 seconds old, not from the future, and identify this deployment’s exact root component name/version as installed
 after its admission timestamp to supply an applied health sample. Unavailable,
 unverified, offline or missing reports never pass health gates. The creator's
 transaction attests the online/healthy/degraded lists; Move does not verify
