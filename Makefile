@@ -337,6 +337,12 @@ test-deployment-control-localnet:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
 	$(RUN) python3 scripts/test_deployment_control_localnet.py
 
+# Real daemon, component UIDs and Eclipse Mosquitto; host Docker, host network.
+.PHONY: test-messaging
+test-messaging:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+	python3 scripts/test_messaging.py --image "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}"
+
 # Start a disposable indexed loopback node/faucet first; network-none Docker only.
 .PHONY: test-rollout-localnet
 test-rollout-localnet:

@@ -1,0 +1,20 @@
+{
+  "ticket": "SF-032",
+  "head": "a238a2fe14aac2f062eb5e751bef289d7e3e8cba",
+  "broker": "eclipse-mosquitto:2.0.20@sha256:21421af7b32bf9ce508e9090c8eb13bb81f410ca778dc205506180a6f862d0eb",
+  "broker_version": "mosquitto version 2.0.20",
+  "checks": [
+    "ACLs: unauthorized publish and subscribe refused, wildcard grants literal, no cross-component access",
+    "LAN client -> component: QoS 1 bridged into durable pub/sub, received and acknowledged",
+    "rejected inbound: a 5000-byte LAN message is rejected and counted once (not redelivered forever); the following message arrives",
+    "component -> LAN client: published under device1/ on the local broker",
+    "broker down: 5 publications spooled on disk, delivered in order after reconnect",
+    "spool exhausted: 20 accepted, 5 refused and counted; after a daemon restart exactly the 20 spooled publications arrived in order",
+    "inbound backpressure: 23 LAN messages into a 20-message queue; refusals counted, none lost (redelivered by the broker after draining; duplicates possible at least once)"
+  ],
+  "fixture": {
+    "file": "interfaces/compat/pubsub-cases.json",
+    "cases": 53,
+    "executed_by": "make edge-test: pubsub::tests::shared_topic_filter_match_and_authorization_cases"
+  }
+}
