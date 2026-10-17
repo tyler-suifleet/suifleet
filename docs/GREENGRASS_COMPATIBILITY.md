@@ -125,7 +125,7 @@ This runs `python3 scripts/greengrass_compat.py`, the checker's negative tests a
 | `aws-recipe-cases.json` | 49 recipes | Daemon and frontend validators (passing) | Pending SF-037 |
 | `pubsub-cases.json` | 53 filter/topic/match/ACL checks | none | Pending SF-027, SF-032 |
 | `shadow-cases.json` | 54 steps across 10 sequences | none | Pending SF-027, SF-033 |
-| `stream-cases.json` | 45 steps across 5 sequences | Daemon stream store (passing) | Passed: SF-034 daemon, IPC UIDs, crashes and export ([receipt](validation/sf034-streams.json)) |
+| `stream-cases.json` | 46 steps across 5 sequences | Daemon stream store (passing) | Passed: SF-034 daemon, IPC UIDs, crashes and export ([receipt](validation/sf034-streams.json)) |
 | `client-device-cases.json` | 16 authorization requests | none | Pending SF-032, SF-035 |
 | `managed-dependency-cases.json` | 47 managed-dependency classifications | none | Pending SF-037 |
 | `credential-provider-cases.json` | 65 steps across 7 sequences | none | Pending SF-057 |

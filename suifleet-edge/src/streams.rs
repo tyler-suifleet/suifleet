@@ -37,6 +37,11 @@ pub const MAX_MESSAGE_BYTES: usize = 1 << 20;
 pub const MAX_READ: u64 = 1000;
 pub const MANIFEST_SCHEMA: u32 = 1;
 const HEADER: usize = 24; // len u32, sequence u64, appended_ms u64, crc32 u32
+/// What each message costs against `max_size` besides its bytes: at least
+/// its on-disk header and its in-memory index entry, so `max_size` bounds
+/// disk and memory use even for tiny messages.
+pub const MESSAGE_OVERHEAD: u64 = 64;
+const _: () = assert!(HEADER as u64 <= MESSAGE_OVERHEAD && std::mem::size_of::<Entry>() as u64 <= MESSAGE_OVERHEAD);
 /// Sequence numbers are reserved in blocks persisted before use, so a crash
 /// (or a corrupt segment) skips at most this many numbers instead of reusing
 /// any; a clean close persists the exact next number. Receivers deduplicate
@@ -249,6 +254,14 @@ struct Entry {
     len: u32,
     at: Location,
 }
+impl Entry {
+    fn cost(&self) -> u64 {
+        cost(self.len as usize)
+    }
+}
+fn cost(len: usize) -> u64 {
+    len as u64 + MESSAGE_OVERHEAD
+}
 
 struct Stream {
     def: Definition,
@@ -393,7 +406,7 @@ impl Stream {
 
     fn evict_front(&mut self) {
         if let Some(entry) = self.entries.pop_front() {
-            self.bytes -= entry.len as u64;
+            self.bytes -= entry.cost();
         }
         self.oldest = self.entries.front().map_or(self.next, |e| e.sequence);
     }
@@ -531,8 +544,9 @@ impl Stream {
                 }
                 last_sequence = Some(sequence);
                 if sequence >= meta.oldest {
-                    stream.entries.push_back(Entry { sequence, appended_ms, len: len as u32, at: Location::Disk { segment: *first, offset: at as u64 } });
-                    stream.bytes += len as u64;
+                    let entry = Entry { sequence, appended_ms, len: len as u32, at: Location::Disk { segment: *first, offset: at as u64 } };
+                    stream.bytes += entry.cost();
+                    stream.entries.push_back(entry);
                 }
                 at = end;
             }
@@ -691,11 +705,11 @@ impl Store {
 
     pub fn append(&mut self, name: &str, data: &[u8], now_ms: u64) -> anyhow::Result<u64> {
         let stream = self.get(name)?;
-        if data.is_empty() || data.len() > MAX_MESSAGE_BYTES || data.len() as u64 > stream.def.max_size {
-            return fail("invalid", "message must be 1 byte to min(max_size, 1 MiB)");
+        if data.is_empty() || data.len() > MAX_MESSAGE_BYTES || cost(data.len()) > stream.def.max_size {
+            return fail("invalid", "message must be 1 byte to min(max_size - 64, 1 MiB)");
         }
         stream.retire(now_ms)?;
-        while stream.bytes + data.len() as u64 > stream.def.max_size {
+        while stream.bytes + cost(data.len()) > stream.def.max_size {
             if stream.def.strategy_on_full == Strategy::RejectNewData {
                 return fail("full", format!("stream {name:?} is full"));
             }
@@ -717,7 +731,7 @@ impl Store {
             Persistence::File => stream.write_record(sequence, now_ms, data)?,
         };
         stream.entries.push_back(Entry { sequence, appended_ms: now_ms, len: data.len() as u32, at });
-        stream.bytes += data.len() as u64;
+        stream.bytes += cost(data.len());
         stream.next += 1;
         if stream.entries.len() == 1 {
             stream.oldest = sequence;
@@ -1093,7 +1107,7 @@ mod tests {
             store.append("o", &[i as u8; 100], i).unwrap();
         }
         let d = store.describe("o", 1000).unwrap();
-        assert_eq!((d["newest"].as_i64(), d["bytes"].as_u64()), (Some(999), Some(8100)));
+        assert_eq!((d["newest"].as_i64(), d["bytes"].as_u64()), (Some(999), Some(49 * (100 + MESSAGE_OVERHEAD))));
         let disk: u64 = std::fs::read_dir(path.join(dir_name("o"))).unwrap().map(|e| e.unwrap().metadata().unwrap().len()).sum();
         assert!(disk < 8192 * 3, "evicted segments are deleted ({disk} bytes on disk)");
         let oldest = d["oldest"].as_u64().unwrap();
@@ -1131,13 +1145,13 @@ mod tests {
             batch_max_bytes: 1024, batch_interval_seconds: 1, max_backoff_seconds: 5 });
         store.reconfigure(discard, 0).unwrap();
         for i in 0..3u8 {
-            store.append("second", &[i; 300], 0).unwrap();
+            store.append("second", &[i; 250], 0).unwrap();
         }
-        assert_eq!(code(&store.append("second", &[9; 300], 0).unwrap_err()), "full");
+        assert_eq!(code(&store.append("second", &[9; 250], 0).unwrap_err()), "full");
         let (_, first) = store.export_batch("second", 2, 1024, 0).unwrap().unwrap();
         assert_eq!(first.iter().map(|m| m.sequence).collect::<Vec<_>>(), vec![0, 1], "batch_max_messages");
         store.export_ack("second", 1, 0).unwrap();
-        assert_eq!(store.append("second", &[9; 300], 0).unwrap(), 3, "exported messages discarded to make room");
+        assert_eq!(store.append("second", &[9; 250], 0).unwrap(), 3, "exported messages discarded to make room");
         let bad = ExportConfig { url: "http://user:pw@host/x".into(), ..store.definition("second").unwrap().export.clone().unwrap() };
         assert!(bad.validate().is_err(), "no credentials in URLs");
         assert_eq!(code(&store.append("missing", b"x", 0).unwrap_err()), "not-found");
@@ -1276,6 +1290,44 @@ mod tests {
         assert_eq!(store.read("d", d, 1, 1, 2_000).unwrap()[0].data, b"after");
         assert!(store.append("t", b"more", 2_000).unwrap() > t);
         FAULTS.set(Faults::default());
+        drop(store);
+        let _ = std::fs::remove_dir_all(&path);
+    }
+
+    fn disk_use(path: &Path) -> u64 {
+        std::fs::read_dir(path).unwrap().map(|e| e.unwrap().metadata().unwrap().len()).sum()
+    }
+
+    /// Per-message overhead counts against max_size, so tiny messages cannot
+    /// multiply disk use: the documented bound is max_size plus one segment
+    /// of retired records (and meta.json).
+    #[test]
+    fn small_messages_stay_within_the_disk_bound() {
+        let path = dir("small");
+        let mut store = Store::open(&path, Quota { max_streams: 4, max_total_bytes: 3 * 8192 }, 0).unwrap();
+        store.create(def("reject", 8192, Strategy::RejectNewData)).unwrap();
+        let mut accepted = 0;
+        while store.append("reject", b"x", 0).is_ok() {
+            accepted += 1;
+        }
+        assert_eq!(accepted, 8192 / (1 + MESSAGE_OVERHEAD), "a 1-byte message costs 1 + {MESSAGE_OVERHEAD}");
+        assert_eq!(store.describe("reject", 0).unwrap()["bytes"].as_u64(), Some(accepted * (1 + MESSAGE_OVERHEAD)));
+        store.create(def("ring", 8192, Strategy::OverwriteOldestData)).unwrap();
+        let mut memory = def("memory", 8192, Strategy::OverwriteOldestData);
+        memory.persistence = Persistence::Memory;
+        store.create(memory).unwrap();
+        let mut peak = 0;
+        for i in 0..5000u64 {
+            store.append("ring", &vec![i as u8; 1 + (i % 7) as usize], i).unwrap();
+            store.append("memory", b"m", i).unwrap();
+            peak = peak.max(disk_use(&path.join(dir_name("ring"))));
+        }
+        let segment = 4096; // max_size / 8 clamped to 4 KiB..4 MiB
+        let meta = std::fs::metadata(path.join(dir_name("ring")).join("meta.json")).unwrap().len();
+        assert!(peak <= 8192 + segment + meta, "ring peaked at {peak} bytes on disk");
+        assert!(disk_use(&path.join(dir_name("reject"))) <= 8192 + meta);
+        assert!(store.describe("memory", 0).unwrap()["bytes"].as_u64().unwrap() <= 8192);
+        assert_eq!(code(&store.append("reject", &vec![1; (8192 - MESSAGE_OVERHEAD + 1) as usize], 0).unwrap_err()), "invalid");
         drop(store);
         let _ = std::fs::remove_dir_all(&path);
     }

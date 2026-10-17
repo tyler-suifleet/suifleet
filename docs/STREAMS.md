@@ -16,7 +16,7 @@ max_total_bytes = 67108864                # sum of every stream's max_size
 
 [[streams.definitions]]
 name = "telemetry"                        # 1-255 of [A-Za-z0-9 ,._-]
-max_size = 16777216                       # 1 KiB..=1 GiB of message bytes
+max_size = 16777216                       # 1 KiB..=1 GiB; each message costs its bytes + 64
 strategy_on_full = "RejectNewData"        # or "OverwriteOldestData"
 persistence = "File"                      # or "Memory"
 # time_to_live_seconds = 86400            # retire older messages
@@ -39,7 +39,7 @@ max_backoff_seconds = 300                 # retry backoff cap, 1..=3600
   - Numbers are reserved in blocks of 1024 that are persisted before use. If persisting a reservation fails, the append fails and the next append retries it. A clean shutdown records the exact next number.
   - After a crash, or after a corrupt segment, numbering resumes at the end of the reserved block, so a crash leaves a gap of fewer than 1024 numbers.
   - Receivers deduplicate by sequence, so reusing a number would silently drop new data; skipping ahead is the safe choice.
-- **When full.** `RejectNewData` refuses an append with `full`. `OverwriteOldestData` evicts the oldest messages, one at a time, until the new one fits. `max_size` counts message bytes.
+- **When full.** `RejectNewData` refuses an append with `full`. `OverwriteOldestData` evicts the oldest messages, one at a time, until the new one fits. `max_size` counts each message's bytes plus a fixed 64-byte overhead, which covers its 24-byte disk header and its in-memory index entry; `stream_describe` reports this charged total as `bytes`. A stream of 1-byte messages therefore holds at most `max_size/65` of them.
 - **Retention.** `time_to_live_seconds` retires messages older than the limit. `discard_exported` retires messages once the export checkpoint has passed them. Without either option, messages leave a stream only through the full-stream strategy.
 - **Reads** take `{start, min, max}`, defaulting to 0, 1 and 1, with `1 ≤ min ≤ max ≤ 1000`.
   - A read below the oldest retained message returns `evicted` with `oldest`, so consumers detect the loss.
@@ -47,10 +47,10 @@ max_backoff_seconds = 300                 # retry backoff cap, 1..=3600
   - Reads do not consume: each consumer keeps its own cursor.
 - **Persistence.**
   - Each stream has a directory named by the SHA-256 of its name, so every valid name fits the file name limit. A stream whose state cannot be opened is left untouched, and creating a stream with its name fails with `exists`.
-  - `File` streams append CRC-framed records to segment files under `<state_dir>/streams/<SHA-256 of the name, hex>/`, and sync each append before returning its sequence number. If a write or sync fails, the segment is cut back to its last acknowledged record (a segment the append started is removed) and the append fails without using a number; if that undo fails too, appends to the stream fail with `unavailable` until it succeeds, or until retention deletes that segment with its torn tail. On open, a torn record at the end is truncated. A corrupt record ends its segment, and the result is counted in `corrupt_segments`. Segments are deleted once all their messages are retired. Disk use is at most `max_size` plus one segment, which is `max_size/8` clamped to 4 KiB–4 MiB.
-  - `Memory` streams keep their messages in memory and lose them on restart. Their numbering continues as above.
-- **Quota.** A stream reserves its `max_size` against `max_total_bytes`, so creating it fails with `quota` if the sum would exceed the limit, or if `max_streams` is reached.
-- **Messages.** A message is 1 byte up to min(`max_size`, 1 MiB) in the store. Over IPC, the payload is any JSON value, and its compact JSON bytes are what is stored and counted. The 64 KiB IPC frame limits a single append.
+  - `File` streams append CRC-framed records to segment files under `<state_dir>/streams/<SHA-256 of the name, hex>/`, and sync each append before returning its sequence number. If a write or sync fails, the segment is cut back to its last acknowledged record (a segment the append started is removed) and the append fails without using a number; if that undo fails too, appends to the stream fail with `unavailable` until it succeeds, or until retention deletes that segment with its torn tail. On open, a torn record at the end is truncated. A corrupt record ends its segment, and the result is counted in `corrupt_segments`. Segments are deleted once all their messages are retired. Because the overhead is charged, a stream's disk use is at most `max_size`, plus the retired records left in its oldest segment, plus `meta.json` (a few KiB at most). Those retired records are less than one segment: `max_size/8` clamped to 4 KiB–4 MiB, or a single larger message. While an undo is pending, its torn record adds at most one message.
+  - `Memory` streams keep their messages in memory and lose them on restart. Their numbering continues as above. Their retained messages and index use at most `max_size` bytes, plus allocator overhead.
+- **Quota.** A stream reserves its `max_size` against `max_total_bytes`, so creating it fails with `quota` if the sum would exceed the limit, or if `max_streams` is reached. The worst-case disk use of all streams is therefore `max_total_bytes` plus, per `File` stream, one segment of retired records and its `meta.json`.
+- **Messages.** A message is 1 byte up to min(`max_size` − 64, 1 MiB) in the store. Over IPC, the payload is any JSON value, and its compact JSON bytes are what is stored and counted. The 64 KiB IPC frame limits a single append.
 
 ## IPC
 

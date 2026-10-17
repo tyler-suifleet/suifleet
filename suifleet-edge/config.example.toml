@@ -101,7 +101,7 @@ replay_history = false
 # max_total_bytes = 67108864        # sum of all streams' max_size
 # [[streams.definitions]]
 # name = "telemetry"
-# max_size = 16777216
+# max_size = 16777216               # each message costs its bytes + 64
 # strategy_on_full = "RejectNewData"  # or "OverwriteOldestData"
 # [streams.definitions.export]
 # url = "https://ingest.example/v1/streams"

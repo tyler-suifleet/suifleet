@@ -351,7 +351,7 @@ def run(evidence=None):
             if evidence:
                 head = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], text=True, capture_output=True).stdout.strip()
                 Path(evidence).write_text(json.dumps({"ticket": "SF-034", "head": head or None, "checks": passed,
-                    "fixture": {"file": "interfaces/compat/stream-cases.json", "sequences": 5, "steps": 45,
+                    "fixture": {"file": "interfaces/compat/stream-cases.json", "sequences": 5, "steps": 46,
                                 "executed_by": "make edge-test: streams::tests::shared_stream_cases"},
                     "signature_verification": "independent: SHA-256 body binding, BLAKE2b personal-message intent digest, RFC 8032 Ed25519 (Python), signer address"},
                     indent=2) + "\n")
