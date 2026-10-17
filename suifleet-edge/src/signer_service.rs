@@ -250,6 +250,30 @@ pub fn check_telemetry(policy: &Policy, message: &[u8]) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Check a log-batch personal message (SF-020): exactly the canonical JSON of
+/// one bounded schema-1 batch, of this chain and registry, naming this key.
+/// Its lines are the daemon's own redacted log text, like telemetry content.
+pub fn check_logs(policy: &Policy, message: &[u8]) -> anyhow::Result<()> {
+    use crate::logs::{validate, Batch, MAX_MESSAGE_BYTES};
+    anyhow::ensure!(message.len() <= MAX_MESSAGE_BYTES, "log batch exceeds {MAX_MESSAGE_BYTES} bytes");
+    let batch: Batch = serde_json::from_slice(message).map_err(|e| anyhow::anyhow!("not a log batch: {e}"))?;
+    anyhow::ensure!(serde_json::to_vec(&batch)? == message, "log batch is not in canonical form");
+    validate(&batch)?;
+    anyhow::ensure!(batch.chain_identifier == policy.chain_identifier, "log batch is for another chain");
+    anyhow::ensure!(Address::from_str(&batch.registry).ok() == Some(policy.registry), "log batch is not for this fleet's registry");
+    anyhow::ensure!(Address::from_str(&batch.signer).ok() == Some(policy.device), "log batch names another signer");
+    Ok(())
+}
+
+/// A personal message the service signs: a telemetry snapshot or a log batch.
+pub fn check_personal(policy: &Policy, message: &[u8]) -> anyhow::Result<()> {
+    let kind = serde_json::from_slice::<serde_json::Value>(message).ok().and_then(|v| v.get("kind").and_then(|k| k.as_str()).map(str::to_owned));
+    match kind.as_deref() {
+        Some(crate::logs::KIND) => check_logs(policy, message),
+        _ => check_telemetry(policy, message),
+    }
+}
+
 /// Who may ask for what.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Callers {
@@ -498,7 +522,7 @@ pub fn handle(
                     peer.uid
                 );
                 let message = STANDARD.decode(request["message"].as_str().unwrap_or(""))?;
-                check_telemetry(policy, &message)?;
+                check_personal(policy, &message)?;
                 Ok(json!({ "signature": STANDARD.encode(key.sign_personal_message(&message)?) }))
             }
             _ => anyhow::bail!("unknown request"),
@@ -761,6 +785,47 @@ mod tests {
         let mut snapshot = snapshot(&binding, "0xa0", 1, 0, SyncHealth::default(), Inventory::default(), 2);
         edit(&mut snapshot);
         serde_json::to_vec(&snapshot).unwrap()
+    }
+
+    fn log_batch(edit: impl FnOnce(&mut crate::logs::Batch)) -> Vec<u8> {
+        let mut batch = crate::logs::Batch {
+            schema: 1,
+            kind: "logs".into(),
+            chain_identifier: "4c78adac".into(),
+            registry: "0x13".into(),
+            device_id: "0x10".into(),
+            signer: "0xa0".into(),
+            seq: 7,
+            observed_ms: 2,
+            dropped_lines: 0,
+            redactions: 1,
+            records: vec![crate::logs::Record { source: "component:app".into(), line: "started".into() }],
+        };
+        edit(&mut batch);
+        serde_json::to_vec(&batch).unwrap()
+    }
+
+    #[test]
+    fn signs_only_this_devices_canonical_log_batches() {
+        let p = policy();
+        check_personal(&p, &log_batch(|_| {})).unwrap();
+        for (label, bad) in [
+            ("another chain", log_batch(|b| b.chain_identifier = "35834a8a".into())),
+            ("another registry", log_batch(|b| b.registry = "0x14".into())),
+            ("another signer", log_batch(|b| b.signer = "0xa1".into())),
+            ("no records", log_batch(|b| b.records.clear())),
+            ("overlong line", log_batch(|b| b.records[0].line = "x".repeat(crate::logs::MAX_LINE + 1))),
+            ("bad source", log_batch(|b| b.records[0].source = "root".into())),
+            ("schema", log_batch(|b| b.schema = 2)),
+        ] {
+            assert!(check_personal(&p, &bad).is_err(), "{label} was accepted");
+        }
+        let mut spaced = log_batch(|_| {});
+        spaced.insert(1, b' ');
+        assert!(check_personal(&p, &spaced).is_err(), "non-canonical batch was accepted");
+        // A transaction is never signed as a log batch, nor vice versa.
+        assert!(check_personal(&p, &Tx::default().bytes()).is_err());
+        assert!(check(&p, &log_batch(|_| {})).is_err());
     }
 
     #[test]

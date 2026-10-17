@@ -105,3 +105,9 @@ replay_history = false
 # max_plaintext_bytes = 134217728
 # A provider credential (not device identity): api_key_name = "X-API-Key",
 # api_key_file = "/etc/suifleet/seal-api-key" inside a key server's entry.
+
+# Redacted remote logs to the fleet indexer (needs [telemetry]; docs/LOGS.md).
+# [logs]
+# interval_seconds = 60
+# max_lines_per_interval = 512
+# buffer_max = 256
