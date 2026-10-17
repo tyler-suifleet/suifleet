@@ -36,7 +36,7 @@ max_backoff_seconds = 300                 # retry backoff cap, 1..=3600
 ## Semantics
 
 - **Numbering.** Sequence numbers start at 0 and increase by one per append. A number is never reused, even after eviction, a restart or a crash.
-  - Numbers are reserved in blocks of 1024 that are persisted before use. A clean shutdown records the exact next number.
+  - Numbers are reserved in blocks of 1024 that are persisted before use. If persisting a reservation fails, the append fails and the next append retries it. A clean shutdown records the exact next number.
   - After a crash, or after a corrupt segment, numbering resumes at the end of the reserved block, so a crash leaves a gap of fewer than 1024 numbers.
   - Receivers deduplicate by sequence, so reusing a number would silently drop new data; skipping ahead is the safe choice.
 - **When full.** `RejectNewData` refuses an append with `full`. `OverwriteOldestData` evicts the oldest messages, one at a time, until the new one fits. `max_size` counts message bytes.

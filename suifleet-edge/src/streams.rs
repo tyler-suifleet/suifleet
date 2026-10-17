@@ -594,8 +594,14 @@ impl Store {
         }
         let sequence = stream.next;
         if sequence + 1 > stream.reserved {
+            // Hand out a number only once its reservation is durable; on a
+            // failed write the next append retries it.
+            let previous = stream.reserved;
             stream.reserved = sequence + RESERVE;
-            stream.save_meta()?;
+            if let Err(error) = stream.save_meta() {
+                stream.reserved = previous;
+                return Err(error);
+            }
         }
         let at = match stream.def.persistence {
             Persistence::Memory => Location::Memory(data.to_vec()),
@@ -1037,6 +1043,26 @@ mod tests {
         assert!((5..=RESERVE).contains(&next), "after a crash numbering skips ahead, never back ({next})");
         assert!(!std::fs::read_dir(path.join(dir_name("m"))).unwrap().any(|e| e.unwrap().path().extension().is_some_and(|x| x == "seg")));
         let _ = std::fs::remove_dir_all(&path);
+    }
+
+    #[test]
+    fn a_failed_reservation_write_hands_out_no_number() {
+        for persistence in [Persistence::Memory, Persistence::File] {
+            let path = dir(&format!("reserve-{persistence:?}"));
+            let mut store = Store::open(&path, QUOTA, 0).unwrap();
+            store.create(Definition { persistence, ..def("r", 4096, Strategy::RejectNewData) }).unwrap();
+            // The atomic write's temporary file cannot be created.
+            let blocker = path.join(dir_name("r")).join("meta.tmp");
+            std::fs::create_dir(&blocker).unwrap();
+            assert!(store.append("r", b"x", 0).is_err(), "no durable reservation, no number");
+            std::fs::remove_dir(&blocker).unwrap();
+            assert_eq!(store.append("r", b"x", 0).unwrap(), 0);
+            std::mem::forget(store); // a crash after the retried reservation
+            let mut store = Store::open(&path, QUOTA, 0).unwrap();
+            assert_eq!(store.append("r", b"y", 0).unwrap(), RESERVE, "{persistence:?}: the retried reservation was persisted");
+            drop(store);
+            let _ = std::fs::remove_dir_all(&path);
+        }
     }
 
     #[test]
