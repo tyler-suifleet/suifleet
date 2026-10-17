@@ -86,13 +86,10 @@
     },
     "SF-020": {
       "deferred_checks": [
-        "hosted indexer (TLS, rate limiting, webhook delivery) and physical Pi log shipping and power loss",
-        "public-network operation",
         "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
       ],
       "acceptance_issues": [
-        "https://github.com/tyler-suifleet/suifleet/issues/32",
-        "https://github.com/tyler-suifleet/suifleet/issues/11"
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
       ],
       "retained_gates": [
         "all source/security findings repaired",
