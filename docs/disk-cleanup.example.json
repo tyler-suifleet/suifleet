@@ -6,6 +6,7 @@
   ],
   "retain_days": 3,
   "max_bytes_per_run": 53687091200,
+  "uninspectable_uids_accepted": [],
   "budget": {
     "warn_used_fraction": 0.85,
     "critical_used_fraction": 0.95,
