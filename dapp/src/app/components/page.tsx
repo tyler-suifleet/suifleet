@@ -66,7 +66,7 @@ export default function ComponentsPage() {
     <div className="space-y-3 border p-4"><label className="block">Component name <input value={name} onChange={e=>setName(e.target.value)} /></label>
       <label className="block">Semantic version <input value={version} placeholder="1.0.0" onChange={e=>setVersion(e.target.value)}/></label>
       {rows.map((r,i)=><div key={i} className="border p-3 space-y-2"><p>Manifest {i+1}</p>
-        <label>OS <select value={r.os} onChange={e=>change(i,{os:e.target.value})}><option>linux</option><option>*</option></select></label>{' '}
+        <label>OS <select value={r.os} onChange={e=>change(i,{os:e.target.value})}><option>linux</option><option>macos</option><option>*</option></select></label>{' '}
         <label>Architecture <select value={r.arch} onChange={e=>change(i,{arch:e.target.value})}>{['x86_64','aarch64','arm','x86','*'].map(a=><option key={a}>{a}</option>)}</select></label>
         <label className="block">Artifact <input type="file" onChange={e=>change(i,{file:e.target.files?.[0]})}/></label>
         <label className="block">Optional install command <input value={r.install} onChange={e=>change(i,{install:e.target.value})}/></label>
