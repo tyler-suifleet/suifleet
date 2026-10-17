@@ -143,7 +143,7 @@ toolchain-versions:
 # CI entry point (run inside the dev image): each step's output is kept under
 # ci-logs/ for failure diagnostics. No step publishes, spends gas or uses secrets.
 ci: SHELL := /bin/bash
-CI_STEPS := indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat edge-test test-ota test-component dapp-typecheck dapp-build
+CI_STEPS := indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat edge-test test-ota test-component test-edge-acceptance dapp-typecheck dapp-build
 ci:
 	@mkdir -p ci-logs
 	@$(MAKE) --no-print-directory toolchain-versions | tee ci-logs/toolchain-versions.txt
@@ -166,6 +166,7 @@ check:
 	$(MAKE) edge-test
 	$(MAKE) test-ota
 	$(MAKE) test-component
+	$(MAKE) test-edge-acceptance
 	$(MAKE) dapp-typecheck
 	$(MAKE) dapp-build
 	git diff --check
@@ -281,6 +282,24 @@ test-deployment-control-localnet:
 .PHONY: test-rollout-localnet
 test-rollout-localnet:
 	$(RUN) python3 scripts/test_rollout_localnet.py
+
+# SF-065 wallet-to-edge acceptance harness for SF-031 (docs/EDGE_ACCEPTANCE.md).
+# Offline: profiles, matrix, locks, SSH pinning, fake-fleet runs with the real updater.
+.PHONY: test-edge-acceptance test-edge-acceptance-localnet edge-acceptance
+test-edge-acceptance:
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_edge_acceptance.py'
+
+# The harness end to end on a disposable localnet (start it first).
+test-edge-acceptance-localnet:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_edge_acceptance_localnet.py
+
+# An operator run on the host (needs sui, ssh and ticket on PATH):
+#   make edge-acceptance PROFILE=p.json EVIDENCE=e.json [HARDWARE=1] LOCK_ARGS="--agent A --model M --session S"
+edge-acceptance:
+	@test -n "$(PROFILE)" && test -n "$(EVIDENCE)" || { echo "set PROFILE and EVIDENCE (docs/EDGE_ACCEPTANCE.md)"; exit 1; }
+	PYTHONDONTWRITEBYTECODE=1 python3 scripts/edge_acceptance.py run --profile "$(PROFILE)" --evidence "$(EVIDENCE)" \
+		$(if $(HARDWARE),--hardware) $(LOCK_ARGS)
 
 # Root only inside a disposable, network-isolated container: real SO_PEERCRED UIDs.
 .PHONY: test-ipc
