@@ -11,6 +11,8 @@ LAN clients are Mosquitto's own mosquitto_pub/mosquitto_sub.
 
   ACL                 -> unauthorized publish/subscribe refused; literal filters
   LAN -> component    -> lan/commands/# bridged into pub/sub; QoS 1 receive/ack
+  rejected inbound    -> a LAN message pub/sub can never accept is rejected and
+                         counted once; the next message still arrives
   component -> LAN    -> sensors/... bridged out under device1/
   broker down         -> component publications spooled on disk, delivered in
                          order after the broker returns (reconnect)
@@ -249,6 +251,18 @@ def host(args):
         assert message["sender"].startswith("@bridge"), message
         assert ipc(SUB_UID, "ack", "sub", "lan/commands/#", message["id"])["data"]["acknowledged"]
         check("LAN client -> component: QoS 1 bridged into durable pub/sub, received and acknowledged")
+
+        # A LAN message pub/sub can never accept does not block the bridge.
+        lan_pub("lan/commands/big", "x" * 5000)
+        lan_pub("lan/commands/after", '{"cmd":"after"}')
+        wait(lambda: ipc(SUB_UID, "receive", "sub", "lan/commands/#")["data"], "the message after a rejected one did not arrive")
+        message = ipc(SUB_UID, "receive", "sub", "lan/commands/#")["data"]
+        assert message["topic"] == "lan/commands/after", message
+        assert ipc(SUB_UID, "ack", "sub", "lan/commands/#", message["id"])["data"]["acknowledged"]
+        inbound = [m for m in messaging()["bridge"]["mappings"] if m["source"] == "LocalMqtt"][0]
+        assert inbound["rejected"] == 1 and "payload exceeds" in inbound["last_rejected"] and inbound["refused"] == 0, inbound
+        check("rejected inbound: a 5000-byte LAN message is rejected and counted once (not redelivered forever); "
+              "the following message arrives")
 
         # Component -> LAN client.
         assert not lan_sub("device1/sensors/#", None, timeout=1)  # create the persistent LAN session

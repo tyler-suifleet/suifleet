@@ -14,7 +14,10 @@
 //! - **LocalMqtt → Pubsub:** the bridge subscribes at QoS 1 and acknowledges a
 //!   message only after it is durably queued for every matching subscriber. If
 //!   a subscriber queue is full it does not acknowledge, counts the refusal and
-//!   reconnects later, so the broker redelivers; nothing is silently lost.
+//!   reconnects later, so the broker redelivers; nothing is silently lost. A
+//!   message pub/sub can never accept (its payload or prefixed topic exceeds
+//!   the limits) is rejected instead: acknowledged so the broker does not
+//!   redeliver it forever, logged and counted in the mapping's `rejected`.
 //! - **No loops:** messages the bridge put into pub/sub are never forwarded
 //!   back out, and configurations whose outbound topics could re-enter an
 //!   inbound mapping are refused.
@@ -129,6 +132,9 @@ pub struct MappingStats {
     pub forwarded: u64,
     /// Messages not accepted because a subscriber queue was full.
     pub refused: u64,
+    /// Inbound messages dropped because pub/sub can never accept them.
+    pub rejected: u64,
+    pub last_rejected: Option<String>,
 }
 
 #[derive(Debug, Default, Clone, Serialize)]
@@ -312,15 +318,24 @@ impl Bridge {
         }
     }
 
-    /// One message from the broker into every matching inbound mapping.
+    /// One message from the broker into every matching inbound mapping. An
+    /// error leaves it unacknowledged for redelivery; a mapping whose target
+    /// can never accept it rejects it instead.
     fn inbound(&self, topic: &str, payload: &[u8]) -> anyhow::Result<()> {
         let value = to_value(payload);
+        let sender = format!("{BRIDGE_PRINCIPAL}/LocalMqtt");
+        let (mut targets, mut rejected) = (Vec::new(), Vec::new());
         for (index, mapping) in self.config.mappings.iter().enumerate() {
             if mapping.source != Endpoint::LocalMqtt || !pubsub::matches(&mapping.topic, topic) {
                 continue;
             }
             let target = format!("{}{}", mapping.target_topic_prefix, topic);
-            let sender = format!("{BRIDGE_PRINCIPAL}/LocalMqtt");
+            match pubsub::invalid_publication(&target, &value) {
+                Some(reason) => rejected.push((index, reason)),
+                None => targets.push((index, target)),
+            }
+        }
+        for (index, target) in targets {
             let result = self.broker.lock().unwrap().publish(&sender, &target, &value, Some(BRIDGE_PRINCIPAL));
             match result {
                 Ok(_) => self.stats.lock().unwrap().mappings[index].forwarded += 1,
@@ -332,6 +347,13 @@ impl Bridge {
                 }
                 Err(error) => return Err(error),
             }
+        }
+        // Counted only once the message is acknowledged, not per redelivery.
+        for (index, reason) in rejected {
+            warn!(topic, mapping = index, %reason, "MQTT bridge rejected an inbound message pub/sub can never accept");
+            let mut stats = self.stats.lock().unwrap();
+            stats.mappings[index].rejected += 1;
+            stats.mappings[index].last_rejected = Some(format!("{topic}: {reason}"));
         }
         self.save_stats();
         Ok(())
@@ -378,6 +400,37 @@ mod tests {
         assert_eq!(to_value(br#"{"v":1}"#), json!({ "v": 1 }));
         assert_eq!(to_value(b"plain text"), json!("plain text"));
         assert_eq!(to_value(&[0xff, 0x00]), json!({ "base64": "/wA=" }));
+    }
+
+    #[test]
+    fn inbound_rejects_what_pubsub_can_never_accept_and_retries_full_queues() {
+        let dir = std::env::temp_dir().join(format!("suifleet-bridge-inbound-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut store = pubsub::Broker::open(&dir.join("pubsub"), pubsub::Limits { max_messages: 3, max_bytes: 1 << 20, qos0_messages: 1 }).unwrap();
+        store.subscribe("component", "#", 1).unwrap();
+        let broker = Arc::new(Mutex::new(store));
+        let prefix = "p/".repeat(60);
+        let bridge = Bridge::new(config(vec![mapping("lan/#", Endpoint::LocalMqtt, Endpoint::Pubsub, ""), mapping("lan/#", Endpoint::LocalMqtt, Endpoint::Pubsub, &prefix)]),
+            broker.clone(), dir.join("bridge.json")).unwrap();
+        let mappings = |b: &Bridge| b.stats.lock().unwrap().mappings.iter().map(|m| (m.forwarded, m.refused, m.rejected)).collect::<Vec<_>>();
+        // Too large for pub/sub after conversion: rejected by both mappings, acknowledged (Ok), nothing stored.
+        bridge.inbound("lan/big", &vec![b'x'; pubsub::MAX_PAYLOAD + 1]).unwrap();
+        assert_eq!(mappings(&bridge), [(0, 0, 1), (0, 0, 1)]);
+        assert!(bridge.stats.lock().unwrap().mappings[0].last_rejected.as_deref().unwrap().contains("payload exceeds"));
+        assert!(broker.lock().unwrap().receive("component", "#").unwrap().is_none());
+        // A topic only the prefixed mapping makes too long: that mapping rejects, the other forwards.
+        let long = format!("lan/{}", "t".repeat(pubsub::MAX_TOPIC - 4));
+        bridge.inbound(&long, br#"{"v":1}"#).unwrap();
+        assert_eq!(mappings(&bridge), [(1, 0, 1), (0, 0, 2)]);
+        assert!(bridge.stats.lock().unwrap().mappings[1].last_rejected.as_deref().unwrap().contains("invalid topic"));
+        // Valid traffic still progresses.
+        bridge.inbound("lan/ok", br#"{"v":2}"#).unwrap();
+        assert_eq!(mappings(&bridge), [(2, 0, 1), (1, 0, 2)]);
+        // A full queue is retryable: an error (no PUBACK), counted as refused, not rejected.
+        assert!(bridge.inbound("lan/more", br#"{"v":3}"#).is_err());
+        assert_eq!(mappings(&bridge), [(2, 1, 1), (1, 0, 2)]);
+        let saved: Value = serde_json::from_slice(&std::fs::read(dir.join("bridge.json")).unwrap()).unwrap();
+        assert_eq!(saved["mappings"][1]["rejected"], 2);
     }
 
     #[test]

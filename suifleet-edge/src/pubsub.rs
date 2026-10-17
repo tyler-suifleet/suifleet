@@ -128,6 +128,15 @@ pub fn validate_policies(policies: &[Policy]) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Why a publication can never be accepted, whatever the queues hold.
+pub fn invalid_publication(topic: &str, payload: &Value) -> Option<String> {
+    if !valid_topic(topic) {
+        return Some("invalid topic".into());
+    }
+    let size = serde_json::to_vec(payload).map_or(usize::MAX, |b| b.len());
+    (size > MAX_PAYLOAD).then(|| format!("payload exceeds {MAX_PAYLOAD} bytes"))
+}
+
 // --- Durable broker ------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
@@ -317,8 +326,9 @@ impl Broker {
         if let Some(reason) = &self.poisoned {
             anyhow::bail!("messaging store needs a daemon restart: {reason}");
         }
-        anyhow::ensure!(valid_topic(topic), "invalid topic");
-        anyhow::ensure!(serde_json::to_vec(payload)?.len() <= MAX_PAYLOAD, "payload exceeds {MAX_PAYLOAD} bytes");
+        if let Some(reason) = invalid_publication(topic, payload) {
+            anyhow::bail!(reason);
+        }
         let targets: Vec<(String, String)> = self
             .subs
             .iter()
