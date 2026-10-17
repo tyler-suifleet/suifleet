@@ -996,12 +996,13 @@ mod tests {
         let text = format!("started pid 7; password=hunter2 api_key: abc123 \"secret\": \"s3\" Authorization: Bearer xyz.uvw \
             token {token} {access_key} suiprivkey1qqqq key {key} deployment 0x{key} url=https://example.com/a -----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY----- done");
         let out = redact_text(&text);
-        for secret in ["hunter2", "abc123", "s3\"", "xyz.uvw", token.as_str(), access_key.as_str(), "suiprivkey1qqqq", "MIIE"] {
-            assert!(!out.contains(secret), "{secret} leaked: {out}");
+        // Failure messages name only the fixture index, never the text itself.
+        for (i, secret) in ["hunter2", "abc123", "s3\"", "xyz.uvw", token.as_str(), access_key.as_str(), "suiprivkey1qqqq", "MIIE"].iter().enumerate() {
+            assert!(!out.contains(secret), "secret fixture {i} leaked");
         }
-        assert!(!out.contains(&format!(" {key} ")), "{out}");
-        for kept in ["started pid 7", "url=https://example.com/a", "done", &format!("0x{key}")] {
-            assert!(out.contains(kept), "{kept} lost: {out}");
+        assert!(!out.contains(&format!(" {key} ")), "bare key leaked");
+        for (i, kept) in ["started pid 7", "url=https://example.com/a", "done", &format!("0x{key}")].iter().enumerate() {
+            assert!(out.contains(kept), "diagnostic fixture {i} lost");
         }
         let value = json!({"name": "svc", "nested": {"privateKey": "x", "list": [{"aws_secret_access_key": "y"}], "note": "pin=1234"}, "port": 80});
         let out = redact_value(&value, 0);

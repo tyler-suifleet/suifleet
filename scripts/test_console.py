@@ -290,8 +290,8 @@ def run(browser=False):
             full = c.call('logs', token=ops['token'], component='svc', limit=200)['data']['lines']
             assert len(full) == 200
             text = json.dumps(full)
-            for secret in (CANARY, ops['token'], 'suiprivkey1abc', '07' * 32):
-                assert secret not in text, (secret, text)
+            for i, secret in enumerate((CANARY, ops['token'], 'suiprivkey1abc', '07' * 32)):
+                assert secret not in text, f'log canary {i} leaked'
             assert 'late password=[redacted]' in text, text
             configuration = c.call('configuration', token=ops['token'], component='svc')['data']
             assert configuration['effective']['answer'] == 42 and configuration['effective']['nested']['port'] == 8080
@@ -397,7 +397,7 @@ def run(browser=False):
             entries = [json.loads(line) for line in audit_path.read_text().splitlines()]
             text = audit_path.read_text()
             for secret in (ops['token'], viewer['token'], ops['token_sha256'], csrf, cookie.split('=', 1)[1], CANARY):
-                assert secret not in text, secret
+                assert secret not in text, 'credential in the audit log'
             def seen(**match):
                 return any(all(e.get(k) == v for k, v in match.items()) for e in entries)
             assert seen(user='ops', operation='restart', component='svc', status='requested')
