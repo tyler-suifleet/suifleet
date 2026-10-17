@@ -1,5 +1,7 @@
 # Greengrass compatibility specification
 
+The [SF-064 remaining functional roadmap](GREENGRASS_REMAINING_ROADMAP.md) defines versioned executable subcontracts and maps every selected remaining scope to published implementation tickets SF-069–SF-079. These remain pending implementations, not runtime or live acceptance.
+
 SF-028 defines what "Greengrass compatible" may mean for SuiFleet. It also proposes adapter contracts for messaging, shadows, streams and client devices, with executable fixtures. This is a specification. It is not a parity claim and implements no runtime adapter. The [parity audit](GREENGRASS_PARITY_AUDIT.md) and [ticket map](GREENGRASS_TICKET_COVERAGE.md) remain the roadmap.
 
 The machine-readable source of truth is [`interfaces/compat/greengrass-compat.json`](../interfaces/compat/greengrass-compat.json). Statuses there describe the commit that contains the file. Work in open PRs counts as "proposed" until it is merged.

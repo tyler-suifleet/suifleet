@@ -156,3 +156,8 @@ remain within the response frame. Run `make test-ipc` as root when already insid
 a disposable container; the host target starts its own root container.
 Physical Pi/target integration remains [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32);
 no physical or public-network result is implied by simulator acceptance.
+
+SF-057 adds a separate [scoped AWS credential adapter](AWS_CREDENTIALS.md) using
+the same distinct-UID provisioning boundary. Native IPC ACLs do not implicitly
+grant AWS credentials; its credential socket has an explicit operator grant list.
+Shared-daemon-UID components remain denied.

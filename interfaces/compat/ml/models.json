@@ -1,0 +1,154 @@
+{
+  "format_version": 1,
+  "model_version": "1.0.0",
+  "license": "MIT",
+  "tolerance_absolute": 1e-06,
+  "preprocessing": "canonical P5 4x4 uint8 grayscale PGM; float32(pixel)/255; no resize/crop; classifier row-major [1,16], detector NHWC [1,4,4,1]",
+  "classifier": {
+    "labels": [
+      "dark",
+      "bright"
+    ],
+    "tie": "dark",
+    "output": "[1-mean, mean] brightness scores, not calibrated probabilities"
+  },
+  "detector": {
+    "label": "bright-marker",
+    "threshold": 0.75,
+    "output": "row-major non-overlapping 2x2 tile mean scores; boxes integer pixel XYXY; no NMS"
+  },
+  "files": {
+    "LICENSE": "ffe75528e1ad7fcacb4c50150c71ab6c56784e29a0673819ac19c95ce2ca7aa4",
+    "images/bright.pgm": "f1a32e59b54d65041ae3397da0fbb8581db17be6325c6500c49a89aa52706f58",
+    "images/dark.pgm": "5eb9065a6fc396330bb6b1b0763fd939d1bb9688a758b7db09ca80b3a44ed6f0",
+    "images/gray.pgm": "b8418588898e41ac34afd85f617829f8d182b2d7cfec8ad907f38752fdeebac8",
+    "images/marker.pgm": "5e896032efbb77a73918dd79ee28c1de703132afbb42fa3cccfcc4ffe29f4a4d",
+    "images/two-markers.pgm": "c8dd44a3f53b715fa029f871a02ce5fecbe0cbe065db07f63dd08f1e392d0604",
+    "licenses/tensorflow-LICENSE.txt": "71c6915d04265772a0339bed47276942c678b45cc01534210ebe6984fd1aec65",
+    "licenses/tensorflow-THIRD_PARTY_NOTICES.txt": "fbbedc619d20c26b5e486bf82acdb1efeafff032fb5c854435651924afec0cb8",
+    "models/classifier-1.0.0.tflite": "f725d0043c8170e4a28571b4e633f8c3d46185f4cc3ffcef23f7724b4f60b8a5",
+    "models/detector-1.0.0.tflite": "bf8d1fc319589b030420706b9c92fb0393df4667c8a1bac9971ab1fa67e28dda"
+  },
+  "cases": [
+    {
+      "image": "dark",
+      "classifier_scores": [
+        1,
+        0
+      ],
+      "classifier_label": "dark",
+      "detector_scores": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "boxes_xyxy": []
+    },
+    {
+      "image": "bright",
+      "classifier_scores": [
+        0,
+        1
+      ],
+      "classifier_label": "bright",
+      "detector_scores": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "boxes_xyxy": [
+        [
+          0,
+          0,
+          2,
+          2
+        ],
+        [
+          2,
+          0,
+          4,
+          2
+        ],
+        [
+          0,
+          2,
+          2,
+          4
+        ],
+        [
+          2,
+          2,
+          4,
+          4
+        ]
+      ]
+    },
+    {
+      "image": "marker",
+      "classifier_scores": [
+        0.75,
+        0.25
+      ],
+      "classifier_label": "dark",
+      "detector_scores": [
+        1,
+        0,
+        0,
+        0
+      ],
+      "boxes_xyxy": [
+        [
+          0,
+          0,
+          2,
+          2
+        ]
+      ]
+    },
+    {
+      "image": "two-markers",
+      "classifier_scores": [
+        0.5,
+        0.5
+      ],
+      "classifier_label": "dark",
+      "detector_scores": [
+        0,
+        1,
+        1,
+        0
+      ],
+      "boxes_xyxy": [
+        [
+          2,
+          0,
+          4,
+          2
+        ],
+        [
+          0,
+          2,
+          2,
+          4
+        ]
+      ]
+    },
+    {
+      "image": "gray",
+      "classifier_scores": [
+        0.4980392156862745,
+        0.5019607843137255
+      ],
+      "classifier_label": "bright",
+      "detector_scores": [
+        0.5019607843137255,
+        0.5019607843137255,
+        0.5019607843137255,
+        0.5019607843137255
+      ],
+      "boxes_xyxy": []
+    }
+  ]
+}
