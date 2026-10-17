@@ -4,7 +4,9 @@
 //! `interfaces/log-redaction-cases.json`.
 //!
 //! Redacted, replacing the secret (never quoting it):
-//! - Sui private keys (`suiprivkey1…`) and PEM private-key lines;
+//! - Sui private keys (`suiprivkey1…`), PEM private-key marker lines, and
+//!   whole lines of 64 or 70 base64 characters (the body line width of PEM
+//!   and OpenSSH keys; the daemon also drops every line between the markers);
 //! - values after secret-like names (`password=`, `token: `, `api_key=`,
 //!   `secret`, `pin`, `mnemonic`, `seed`, `private_key`, `credential`,
 //!   `authorization`), quoted or not, and `Bearer` tokens;
@@ -32,7 +34,10 @@ pub fn redact(line: &str, secrets: &[String]) -> (String, usize) {
     let mut count = 0;
     let mut text = line.to_owned();
     if text.contains("PRIVATE KEY") && text.contains("-----") {
-        return (format!("{MARK} (private key block line)"), 1);
+        return (key_block_line(), 1);
+    }
+    if is_key_body_width(&text) {
+        return (key_block_line(), 1);
     }
     for secret in secrets {
         if !secret.is_empty() && text.contains(secret.as_str()) {
@@ -55,6 +60,21 @@ pub fn redact(line: &str, secrets: &[String]) -> (String, usize) {
     let (text, n) = phrases(&text);
     count += n;
     (text, count)
+}
+
+/// What replaces a line of a PEM private-key block.
+pub fn key_block_line() -> String {
+    format!("{MARK} (private key block line)")
+}
+
+/// A whole line at PEM (64) or OpenSSH (70) key body width, in the standard
+/// base64 alphabet. Such a body can hold no `+`, `/` or `=` at all, so the
+/// run rule below would keep it. Plain hex is left to the hex rule.
+fn is_key_body_width(line: &str) -> bool {
+    let body = line.trim();
+    (body.len() == 64 || body.len() == 70)
+        && body.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'='))
+        && !body.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 fn sui_private_keys(text: &str) -> (String, usize) {

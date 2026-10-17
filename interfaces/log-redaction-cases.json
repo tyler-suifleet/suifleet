@@ -215,5 +215,29 @@
     ],
     "redacted": "a [REDACTED] [REDACTED]",
     "count": 2
+  },
+  {
+    "name": "PEM body line without + / or =",
+    "line": "MC4CAQAwBQYDK2VwBCIEIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "redacted": "[REDACTED] (private key block line)",
+    "count": 1
+  },
+  {
+    "name": "OpenSSH key body line",
+    "line": "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW",
+    "redacted": "[REDACTED] (private key block line)",
+    "count": 1
+  },
+  {
+    "name": "64-digit hex line left to the hex rule",
+    "line": "abababababababababababababababababababababababababababababababab",
+    "redacted": "[REDACTED]",
+    "count": 1
+  },
+  {
+    "name": "short base64 line kept",
+    "line": "aGVsbG8gd29ybGQ",
+    "redacted": "aGVsbG8gd29ybGQ",
+    "count": 0
   }
 ]
