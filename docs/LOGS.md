@@ -55,6 +55,8 @@ The rules lean towards over-redaction. They are a safety net; components still m
 - It is signed as a Sui personal message, like telemetry, so it can never be valid as a transaction.
 - With the key in the signing service (SF-053), the service signs only such a canonical, bounded batch for this chain, registry and key, and only for the daemon's main process.
 
+**CloudWatch Logs.** The same daemon and component logs can also be exported to Amazon CloudWatch Logs by the separate SF-060 adapter, which reads them under its own user with `[runtime] log_group_read = true`. See [CLOUDWATCH_LOGS.md](CLOUDWATCH_LOGS.md).
+
 ## Indexer
 
 ```bash

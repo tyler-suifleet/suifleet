@@ -128,7 +128,7 @@ This runs `python3 scripts/greengrass_compat.py`, the checker's negative tests a
 | `managed-dependency-cases.json` | 47 managed-dependency classifications | none | Pending SF-037 |
 | `credential-provider-cases.json` | 65 steps across 7 sequences | none | Pending SF-057 |
 | `cloudwatch-metrics-cases.json` | 90 steps across 8 sequences | none | Pending SF-059 |
-| `cloudwatch-logs-cases.json` | 69 steps across 8 sequences | none | Pending SF-060 |
+| `cloudwatch-logs-cases.json` | 69 steps across 8 sequences | none | Passed: SF-060 adapter and local emulator ([receipt](validation/sf060-cloudwatch-logs.json)) |
 
 `scripts/greengrass_compat.py` contains small **specification reference models**. They make each expected value checkable and keep the fixtures internally consistent. They are not the daemon, a translator or an adapter, and agreement with them proves nothing about runtime conformance. Each owning ticket must execute the same fixture files against its real implementation. That ticket then sets the suite to `passed` with a committed runtime receipt, and only after that may it raise any `aws_*` status. Fixtures may be corrected in review if they contradict AWS behaviour or an approved design. Correct them deliberately; never loosen them to make an implementation pass.
 

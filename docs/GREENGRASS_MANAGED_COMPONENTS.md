@@ -2,7 +2,7 @@
 
 The [SF-064 remaining functional roadmap](GREENGRASS_REMAINING_ROADMAP.md) defines versioned executable subcontracts and maps every selected remaining scope to published implementation tickets SF-069–SF-079. These remain pending implementations, not runtime or live acceptance.
 
-SF-038 maps every AWS-provided Greengrass component to one of three things: a SuiFleet native equivalent, a scoped adapter with its own implementation ticket, or a roadmap gap tracked by [SF-064](https://github.com/tyler-suifleet/suifleet/issues/109). For each adapter it records the platforms, AWS service and authentication dependencies, licensing constraints and executable acceptance. The catalog is a specification with per-adapter runtime receipts. SF-057 implements the scoped Linux credential adapter; other adapters remain pending. It records no permanent exclusion and makes no general parity claim. It extends the [SF-028 compatibility specification](GREENGRASS_COMPATIBILITY.md), whose levels and statuses apply here.
+SF-038 maps every AWS-provided Greengrass component to one of three things: a SuiFleet native equivalent, a scoped adapter with its own implementation ticket, or a roadmap gap tracked by [SF-064](https://github.com/tyler-suifleet/suifleet/issues/109). For each adapter it records the platforms, AWS service and authentication dependencies, licensing constraints and executable acceptance. The catalog is a specification with per-adapter runtime receipts. SF-057 implements the scoped Linux credential adapter and SF-060 the CloudWatch Logs export adapter ([CLOUDWATCH_LOGS.md](CLOUDWATCH_LOGS.md)); other adapters remain pending. It records no permanent exclusion and makes no general parity claim. It extends the [SF-028 compatibility specification](GREENGRASS_COMPATIBILITY.md), whose levels and statuses apply here.
 
 The machine-readable source of truth is [`interfaces/compat/managed-components.json`](../interfaces/compat/managed-components.json). The [compatibility matrix](../interfaces/compat/greengrass-compat.json) cross-references it, and `make test-compat` checks both.
 
@@ -207,14 +207,14 @@ Ranges use the native comparator grammar. x-ranges, hyphen ranges, `||` and non-
 make test-compat
 ```
 
-The checker validates the catalog's structure and its cross-references to the backlog, the SF-028 platforms and the suites. It also evaluates the four SF-038 suites against reference models in `scripts/greengrass_managed.py`. As with SF-028, these models only make the fixtures checkable. Agreement with them proves nothing about an adapter. All four suites and all seven adapters stay `runtime_execution: pending` until the implementation ticket runs the same fixtures and commits a receipt.
+The checker validates the catalog's structure and its cross-references to the backlog, the SF-028 platforms and the suites. It also evaluates the four SF-038 suites against reference models in `scripts/greengrass_managed.py`. As with SF-028, these models only make the fixtures checkable. Agreement with them proves nothing about an adapter. A suite and its adapter stay `runtime_execution: pending` until the implementation ticket runs the same fixtures and commits a receipt; SF-057 and SF-060 have.
 
 | Suite | Cases | Runtime execution |
 |---|---|---|
 | `managed-dependency-cases.json` | 47 classifications | Pending SF-037 |
 | `credential-provider-cases.json` | 65 steps across 7 sequences | Pending SF-057 |
 | `cloudwatch-metrics-cases.json` | 90 steps across 8 sequences | Pending SF-059 |
-| `cloudwatch-logs-cases.json` | 69 steps across 8 sequences | Pending SF-060 |
+| `cloudwatch-logs-cases.json` | 69 steps across 8 sequences | Passed: SF-060 adapter against a request-checking local emulator ([receipt](validation/sf060-cloudwatch-logs.json)); live AWS unrun |
 
 A `complete` adapter specification must pin an exact AWS version and name at least one executable reference suite; the checker enforces both. `stream-export-aws` uses the SF-028 `stream-cases.json` checkpoint suite.
 

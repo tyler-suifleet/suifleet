@@ -222,12 +222,13 @@
     "environment": "Network-none container with a local AWS API emulator",
     "deferred": ["Real AWS account metrics; needs separate user authorization (unrun)"]
    }},
-  {"id": "cloudwatch-logs-export", "specification": "complete", "implementation_ticket": "SF-060", "runtime_execution": "pending", "replaces": {"aws.greengrass.LogManager": "2.3.14"},
+  {"id": "cloudwatch-logs-export", "specification": "complete", "implementation_ticket": "SF-060", "runtime_execution": "passed",
+   "runtime_evidence": "docs/validation/sf060-cloudwatch-logs.json", "replaces": {"aws.greengrass.LogManager": "2.3.14"},
    "summary": "Uploads SF-020 collected component and system logs to CloudWatch Logs with per-source retention, redaction and bounded local spool.",
    "platforms": ["linux-x86_64", "linux-aarch64", "linux-arm"],
    "aws_services": ["Amazon CloudWatch Logs (logs.<region>.amazonaws.com:443)"],
    "auth": "credential-provider credentials; the device role needs logs:CreateLogGroup, logs:CreateLogStream and logs:PutLogEvents on the configured groups only.",
-   "licensing": "Clean-room implementation using the Apache-2.0 AWS SDK for Rust.",
+   "licensing": "Clean-room implementation of the documented CloudWatch Logs JSON API and SigV4 signing. No AWS SDK or AWS component code.",
    "depends_on": ["SF-020", "SF-057"],
    "acceptance": {
     "reference_suites": ["cloudwatch-logs-cases.json"],
