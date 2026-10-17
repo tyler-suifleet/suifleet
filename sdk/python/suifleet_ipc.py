@@ -75,6 +75,31 @@ class Client:
     def receive(self, topic):
         return self.request('receive', topic=topic)
 
+    # Durable streams (SF-034). Errors carry protocol codes such as 'full',
+    # 'evicted', 'not-enough-messages', 'not-found', 'exists', 'quota'.
+    def stream_create(self, name, max_size, strategy_on_full='RejectNewData', persistence='File',
+                      time_to_live_seconds=None):
+        definition = dict(max_size=max_size, strategy_on_full=strategy_on_full, persistence=persistence)
+        if time_to_live_seconds is not None:
+            definition['time_to_live_seconds'] = time_to_live_seconds
+        return self.request('stream_create', topic=name, payload=definition)
+
+    def stream_append(self, name, value):
+        return self.request('stream_append', topic=name, payload=value)['sequence']
+
+    def stream_read(self, name, start=0, min_messages=1, max_messages=1):
+        return self.request('stream_read', topic=name,
+                            payload=dict(start=start, min=min_messages, max=max_messages))['messages']
+
+    def stream_describe(self, name):
+        return self.request('stream_describe', topic=name)
+
+    def stream_delete(self, name):
+        return self.request('stream_delete', topic=name)
+
+    def stream_list(self):
+        return self.request('stream_list')['streams']
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -82,7 +107,9 @@ def main():
     parser.add_argument('--component', default='')
     parser.add_argument('operation', choices=['install', 'list', 'start', 'stop',
                                             'restart', 'status', 'logs', 'config',
-                                            'health', 'publish', 'receive'])
+                                            'health', 'publish', 'receive', 'stream_create',
+                                            'stream_delete', 'stream_append', 'stream_read',
+                                            'stream_describe', 'stream_list'])
     parser.add_argument('--topic', default='')
     parser.add_argument('--payload', help='JSON value; install takes a quoted deployment ID')
     args = parser.parse_args()
