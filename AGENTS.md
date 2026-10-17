@@ -6,6 +6,12 @@
 
 An explicit user exception applies only to its stated model and scope. Humans retain control of the tracker. This is an agent workflow rule; shared GitHub credentials do not enforce model identity technically.
 
+## Capture conversation findings — user requirement
+
+Codex must capture actionable bugs, missing features, changed requirements and acceptance gaps discovered in conversations as tracker work before handing off the turn. First check for an existing issue: update its specification/acceptance rather than create a duplicate. Publish genuinely new work to GitHub Issues and the Project, keep the seed backlog/publication records synchronized, and report the issue links. Publish and verify remote IDs before introducing a new seed entry so other models never fail refresh on an unpublished ticket. Preserve existing ownership and meaningful dependencies; reporting a finding does not authorize stealing its implementation.
+
+Distinguish confirmed defects, implementation requirements, outstanding acceptance and speculative business/design ideas. Keep unapproved opportunities in the business/design documents rather than silently turning them into implementation commitments. Other models still report findings through the existing issue/handoff for Codex to triage; the Codex-only creation rule remains unchanged. Do not leave a concrete discovery only in chat or mark it fixed merely because a ticket was created.
+
 ## Commit policy — user requirement
 
 Keep commits small, contained and itemized. Each commit must have one clear purpose, stage only its intended paths/hunks, and use a descriptive subject with an itemized body explaining the change and verification. Separate unrelated functional changes, dependency updates, formatting, infrastructure and documentation. Keep coupled API/lockfile changes together when separating them would break the build. Do not sweep a mixed working tree into one commit.
@@ -87,7 +93,13 @@ make check
 | Packaging/toolchain | Rebuild the relevant image or Yocto recipe and record exact versions |
 | Tracking bootstrap | Offline tracking tests and dry run; no remote mutation in tests |
 
+Normal CI also runs CodeQL and dependency/secret/configuration security gates; see [SECURITY_CI.md](docs/SECURITY_CI.md). Keep raw scanner reports private and publish only sanitized diagnostics. Do not suppress findings or treat a successful scanner process as a clean result.
+
 Do not replace tests with type casts, ignored failures or mocked success. A returned digest does not prove transaction success; inspect execution effects. Record exact commands, results, limitations and changed behavior in the PR/handoff. Do not claim tests ran when they did not. [VALIDATION.md](docs/VALIDATION.md) is historical evidence and must not be treated as a current test run.
+
+## Platform update boundary — user requirement
+
+SuiFleet delivers authenticated artifacts, executes explicitly configured component lifecycle commands and records their reported results. Platform scripts/tools (for example SWUpdate or RAUC integrations) own updater selection, OS installation, partition/bootloader layout, reboot decisions, boot confirmation and firmware rollback. Do not add automatic updater detection, SuiFleet-triggered system reboot, a firmware boot/recovery state machine or mandatory A/B partitioning as Greengrass-parity requirements. Preserve SuiFleet journals and component state across platform-controlled restarts; do not infer healthy boot from command exit zero or replay ambiguous destructive work. Component process supervision and explicitly configured application recovery remain separate runtime responsibilities. Platform-specific recovery tests establish only the tested integration.
 
 ## Keeping clients and contracts synchronized
 
@@ -119,7 +131,9 @@ The user authorized agents to spend **testnet** SUI from two dedicated accounts 
 - Public testnet is normal automated relevant validation, with standing authorization and no approval per run. Preserve preflight and the strict non-replenishing spending allowance (including failed transactions and device gas).
 - Record digests and evidence in the PR or issue.
 
-**Funding.** Use `sui client faucet --address …` with Sui ≥ 1.82.1, which solves a proof of work. The pinned CLI cannot.
+**Funding.** Use `sui client faucet --address …` with Sui ≥ 1.82.1, which solves a proof of work. The pinned 1.81.1 compiler CLI cannot.
+
+**Two CLIs.** Live runs compile with the pinned release compiler (`sui`, 1.81.1). They read, sign and submit with the checksum-pinned transaction CLI at `/opt/sui-network/sui` (1.82.1), which must support the network's protocol version (138 and 139 respectively). Package bytecode is verified in the unsigned transaction before signing. See [TESTNET.md](docs/TESTNET.md#toolchain-release-compiler-and-transaction-cli).
 
 **No JSON-RPC.** Public fullnodes no longer serve JSON-RPC, so live checks must use gRPC or the Sui CLI.
 
@@ -133,11 +147,11 @@ The user authorized agents to spend **testnet** SUI from two dedicated accounts 
 - **The gas budget is not the cost, but it must not exceed the balance.** Gas selection fails before execution otherwise, and a failed execution still charges. Keep budgets near real cost (0.4 SUI is ample for a publish).
 - **Upgrades only chain from the latest version.** To test a base→head upgrade, key the fixture by the (base, head) pair. Never test X→Y in place of base→Y.
 - **Reuse funded test identities.** For example, keep the test device's key and gas, and top it up only when low.
-- **Record each transaction's net gas** in the run's evidence. A cached package-upgrade run costs about 0.0025 SUI; a fresh fixture about 0.18 SUI.
+- **Record each transaction's net gas** in the run's evidence. A cached package-upgrade run costs about 0.0025 SUI; a fresh fixture whose base and head differ costs about 0.41 SUI.
 
 CI uses a main-sourced controller, successful originating CI and server-side write-authority/exact-head checks before executing trusted same-repository revisions; forks remain offline. Dedicated testnet environment protection is main-only without reviewers. Never weaken live-wallet, live-hardware or release protections. All CI testnet paths share one serialized wallet concurrency group. Cache device signing state only as authenticated ciphertext derived from the protected CI secret; plaintext belongs only in a private temporary runtime directory and never in public caches/artifacts. Evidence contains no keys.
 
-Machine sessions must acquire/assert/renew `network:suifleet-testnet` only during shared-wallet mutations, coordinate in #11/#63, and unlock promptly. Funding is automatic when needed, at most one faucet request per run with a separately checksum-verified Sui 1.82.1 tool; faucet credits and storage refunds never replenish the run allowance. Testnet availability does not add external-acceptance blockers to unrelated implementation tickets.
+Machine sessions must acquire/assert/renew `network:suifleet-testnet` only during shared-wallet mutations, coordinate in #11/#63, and unlock promptly. Funding is automatic when needed, at most one faucet request per run through the checksum-pinned transaction CLI; faucet credits and storage refunds never replenish the run allowance. Testnet availability does not add external-acceptance blockers to unrelated implementation tickets.
 
 **Mainnet** and any other account still need explicit user authorization.
 
@@ -159,8 +173,15 @@ Unattended reciprocal reviews and feedback repair are coordinated by [the PR ser
 
 User merge-completion policy: owned implementation PRs must include `Closes #ISSUE`, not only `Refs`. A verified merge closes the linked GitHub implementation issue and reconciles the atomic ticket and Project to Done, including external merges and retrying missed notifications. Preserve unfulfilled live/hardware validation in an acceptance ticket or follow-up; issue closure does not establish those test results. The PR service's automatic merge acceptance gates still apply.
 
-Automatic implementation dispatch is described in [PR coordination](docs/PR_COORDINATION.md). When enabled, `ticket-dispatcher.service` refreshes and atomically claims the next eligible ticket for an available configured model slot. Workers must finish their assigned implementation, provide evidence, hand off to Review and exit; they must not claim successors themselves. Failed or uncertain workers retain reservations and stop their slot until explicit recovery. Review/merge checks and deployment authorization still apply.
+Automatic implementation dispatch is described in [PR coordination](docs/PR_COORDINATION.md). When enabled, `ticket-dispatcher.service` refreshes and atomically claims the next eligible ticket for an available configured model slot. Workers must finish their assigned implementation, provide evidence, hand off to Review and exit; they must not claim successors themselves. Failed or uncertain workers retain reservations. Verified stopped workers may be parked/quarantined to free execution capacity for unrelated tickets; their existing ticket/PR remains reserved for explicit recovery. Missing process identity or surviving worker subprocesses still consume capacity. Review/merge checks and deployment authorization still apply.
 
 User-authorized implementation/integration acceptance split: follow [IMPLEMENTATION_ACCEPTANCE.md](docs/IMPLEMENTATION_ACCEPTANCE.md) and its per-ticket tracked scope. Reviewed implementations may merge before the explicitly deferred Pi, real-wallet, public-network or production-release integration checks. Keep code findings, local compatibility/regression evidence and CI as merge gates; retain the linked acceptance tickets and never claim deferred tests ran.
 
 The user explicitly authorizes automatic public Sui testnet acceptance using the dedicated testnet agent/CI wallets described in PR #63 and SF-010/#11. Verify chain/account/authority, preserve keys, honor run spend limits and acquire `network:suifleet-testnet` only during machine-session mutations; coordinate with Claude before using shared state. Mainnet, other wallets, physical programming and production credential operations remain outside this grant. Testnet availability does not reinstate blanket external-acceptance merge blockers.
+
+
+## Physical target acceptance — current user direction
+
+Physical Pi work must not block software implementation, review or merge. The user explicitly permits resolving target issues later. Apply this rule to future tickets too: physical boot/networking, target reboot/power-loss, hardware-only isolation/performance and device-specific integration stay in SF-031/#32. The unfinished refreshed SD image SF-066/#111 is on hold; do not require that image for an offline software harness or unrelated feature. Do not claim a new image or physical result exists.
+
+Preserve real software/API dependencies, source/security review, meaningful unit/simulator/host integration checks and normal authorized automatic testnet CI. This deferral grants no hardware programming authority and does not waive failing software tests. Packaging/image work must still produce actual artifacts before its own completion; an on-hold target ticket is not Done. Platform scripts remain responsible for reboot and firmware recovery.

@@ -22,8 +22,10 @@ SF-025's recipe pins source/crates and separates first-boot identity generation 
 6. Exercise offline delivery, reconnect, daemon restart, reporting failure/retry, unauthorized targets, tampered recipes/artifacts and updater failure. Verify rejected work did not execute and failed work is not reported Applied.
 7. Collect redacted evidence with tool versions, transaction/blob IDs, binary/payload hashes and test results. Preserve keys and journals; clean up only test-owned resources.
 
+The runner for this flow is [`scripts/edge_acceptance.py`](EDGE_ACCEPTANCE.md) (SF-065). It validates an explicit profile, keeps the hardware lock only while it touches the Pi, records each case as passed, failed, skipped or blocked, and never reports SF-031 as passed without hardware, extension-wallet and SF-022 evidence. Its local and testnet runs use a stand-in device and are not physical acceptance.
+
 Manual wallet acceptance and unattended test-account automation are separate modes. Automated account transactions do not establish that the browser wallet works. Testnet accounts and funding must be explicitly selected; local profiles provide a repeatable alternative to testnet resets and storage expiry.
 
 ## Growing coverage
 
-The initial test app uses the supported one-shot updater and writes only to its isolated test directory. Add supervised run/stop/readiness, configuration, dependency resolution, health telemetry, cancellation, rollback and daemon self-update cases as their implementations land. Track every case as passed, failed, skipped or blocked. Real A/B firmware/reboot/power-loss acceptance belongs to SF-016 and cannot be inferred from a harmless application update.
+The initial test app uses the supported one-shot updater and writes only to its isolated test directory. Add supervised run/stop/readiness, configuration, dependency resolution, health telemetry, cancellation, rollback and daemon self-update cases as their implementations land. Track every case as passed, failed, skipped or blocked. Platform scripts/tools own OS installation, reboot, boot confirmation and firmware rollback. SF-016 validates configured installer handoff and SuiFleet journal/result behavior across platform-controlled restarts; selected-platform physical recovery evidence is separate and cannot be inferred from a harmless application update.

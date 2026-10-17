@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "profile": "testnet",
+  "manifest": "deployment.json",
+  "wallet": {"mode": "scripted", "address": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+             "client_config": "client.yaml"},
+  "walrus": {"mode": "stand-in", "bind": "127.0.0.1"},
+  "device": {"mode": "local", "root": "device"},
+  "artifact_profile": "public",
+  "budget": {"max_spend_mist": 250000000}
+}

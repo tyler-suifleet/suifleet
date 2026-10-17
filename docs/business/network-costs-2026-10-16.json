@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "observed_at_utc": "2026-10-16T04:34:09.960818+00:00",
+  "network": "mainnet",
+  "read_only": true,
+  "transactions_submitted": 0,
+  "sources": {
+    "graphql": "https://graphql.mainnet.sui.io/graphql",
+    "walrus_system_object": "0x2134d52768ea07e8c43570ef975eb3e4c27a39fa6396bef985b5abc58d03ddd2",
+    "relay_tip_config": "https://upload-relay.mainnet.walrus.space/v1/tip-config",
+    "walrus_units_and_network": "https://docs.wal.app/docs/network-reference",
+    "encoded_size_formula": "https://docs.wal.app/docs/system-overview/storage-costs"
+  },
+  "queries": {
+    "sui": "{ epoch { referenceGasPrice } protocolConfigs { configs { key value } } }",
+    "walrus": "{ object(address:\"0x2134d52768ea07e8c43570ef975eb3e4c27a39fa6396bef985b5abc58d03ddd2\") { dynamicFields(first:10) { nodes { name { json } value { __typename ... on MoveValue { json } ... on MoveObject { contents { json } } } } } } }"
+  },
+  "sui": {
+    "reference_gas_price_mist": "100",
+    "protocol_config": {
+      "base_tx_cost_fixed": "1000",
+      "storage_gas_price": "76",
+      "storage_rebate_rate": "9999",
+      "obj_data_cost_refundable": "100",
+      "obj_metadata_cost_non_refundable": "50"
+    }
+  },
+  "walrus": {
+    "epoch": 41,
+    "storage_price_frost_per_encoded_mib_per_epoch": "47069",
+    "write_price_frost_per_encoded_mib": "85547",
+    "epoch_days": 14,
+    "raw_selected_state": {
+      "storage_price_per_unit_size": "47069",
+      "write_price_per_unit_size": "85547"
+    }
+  },
+  "upload_relay": {
+    "send_tip": {
+      "address": "0x765a6ff2c13b47e2603416d0b5a156df498a5c51bc8085be3838e43e06086256",
+      "kind": {
+        "linear": {
+          "base": 0,
+          "encoded_size_mul_per_kib": 40
+        }
+      }
+    }
+  },
+  "workload": {
+    "devices": 1000,
+    "shared_releases": 4,
+    "original_bytes_per_release": 500000000,
+    "retention_epochs": 2,
+    "receipts_per_device_per_release": 1,
+    "encoding_factor_approximation": 4.5,
+    "metadata_bytes_approximation": 64000000,
+    "encoded_mib_per_blob_rounded": 2207,
+    "encoded_kib_per_blob_rounded": 2259766
+  },
+  "derived_estimates": {
+    "storage_wal": "0.831050264",
+    "writes_wal": "0.755208916",
+    "artifact_wal_total": "1.586259180",
+    "upload_relay_sui": "0.36156256",
+    "receipt_minimum_computation_sui": "0.4",
+    "not_a_complete_bill": true
+  },
+  "exclusions": [
+    "Exact Walrus SDK encoding/rounding/subsidy verification and storage purchase boundary epochs",
+    "Walrus reserve/register/certify Sui gas and object deposits",
+    "Recipe blobs",
+    "Deployment/targeting object creation and storage",
+    "Receipt storage and actual computation buckets",
+    "Onboarding, rotation, retries, extra progress reports and cleanup",
+    "Paid RPC, gateways, indexer, hosting and service availability",
+    "Labor, markup and subscription fees"
+  ],
+  "notes": [
+    "No mainnet execution or paid upload was performed. These are live public fee reads and derived estimates, not an invoice.",
+    "Published USD storage approximation and this raw WAL-price snapshot were not reconciled; no USD-pegged-price claim follows from these observations.",
+    "The two-epoch example is a 28-day capacity interval; exact upload expiry alignment must be quoted by the client.",
+    "Minimum computation excludes storage; do not add it to artifact estimates and label the result a complete fleet bill."
+  ]
+}

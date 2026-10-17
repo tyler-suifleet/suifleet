@@ -35,14 +35,17 @@ const deploymentBytes = schema.DeploymentBcs.serialize({ id: deployment, creator
   c.getObjects = async ({ objectIds }) => ({ objects: objectIds.map((objectId) => ({ objectId, type: `${m.type_origins["device_group::DeviceGroup"]}::device_group::DeviceGroup`, content: objectId === group ? groupBytes : deploymentBytes })) });
   assert.deepEqual((await sui.fetchGroups(c, owner))[0].deviceIds, [device]);
   assert.deepEqual(eventCursors, [undefined, "scanned-next"]);
-  c.getDynamicField = async () => ({ dynamicField: { value: { type: `${m.type_origins["deployment_manager::Receipts"]}::deployment_manager::Receipts`, bcs: schema.ReceiptsBcs.serialize({ version: 2, statuses: { contents: [{ key: device, value: 1 }] } }).toBytes() } } });
+  c.getDynamicField = async ({name}) => {
+    if (name.type.endsWith("::ControlKey")) throw new ObjectError("missing", "missing", {reason:"notFound"});
+    return ({ dynamicField: { value: { type: `${m.type_origins["deployment_manager::Receipts"]}::deployment_manager::Receipts`, bcs: schema.ReceiptsBcs.serialize({ version: 2, statuses: { contents: [{ key: device, value: 1 }] } }).toBytes() } } });
+  };
   const deployments = await sui.fetchDeploymentEvents(c, owner);
   assert.equal(deployments[0].timestampMs, 456); assert.equal(deployments[0].receiptsVerified, true);
   assert.deepEqual(deployments[0].resolvedDeviceIds, [device]);
   assert.deepEqual(deployments[0].statuses, { [device]: 1 });
   // Empty recipe bytes are valid in legacy records; only the authenticated schema
   // selects catalog cleanup. Exercise both queries and actual generated Move calls.
-  for (const schemaVersion of ["1", "2"]) {
+  for (const schemaVersion of ["1", "2", "3"]) {
     const emptyBlob = schema.DeploymentBcs.serialize({ id: deployment, creator: owner, component_name: "app", version: "1",
       recipe_blob_id: "", artifact_sha256: "", created_at: 456, schema_version: schemaVersion }).toBytes();
     c.getObjects = async ({ objectIds }) => ({ objects: objectIds.map(objectId => ({ objectId,
@@ -52,9 +55,9 @@ const deploymentBytes = schema.DeploymentBcs.serialize({ id: deployment, creator
     assert.equal(record.recipeBlobId, "");
     const call = sui.buildDeleteDeploymentTx(record.deploymentId, record.schemaVersion).getData().commands[0].MoveCall;
     assert.equal(call.module, schemaVersion === "2" ? "component_catalog" : "deployment_manager");
-    assert.equal(call.function, "delete_deployment");
+    assert.equal(call.function, schemaVersion === "3" ? "delete_rollout" : "delete_deployment");
   }
-  assert.throws(() => sui.buildDeleteDeploymentTx(deployment, "3"), /Unsupported DeploymentRecord schema/);
+  assert.throws(() => sui.buildDeleteDeploymentTx(deployment, "4"), /Unsupported DeploymentRecord schema/);
   c.getObjects = async () => ({ objects: [new ObjectError("notExists", "deleted", { reason: "deleted" })] });
   assert.deepEqual(await sui.fetchDeploymentEvents(c, owner), []);
   c.getObjects = async () => ({ objects: [new ObjectError("unknown", "transport failure", { reason: "unknown" })] });

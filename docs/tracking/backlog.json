@@ -336,10 +336,10 @@
       "evidence": "Only one-shot install/apply exists; run/shutdown are deliberately rejected.",
       "acceptance": [
         "Implement persistent versioned workspaces, process lifecycle, readiness and restart policy.",
-        "Handle shutdown/replacement/bootstrap/reboot without leaving unmanaged descendants.",
+        "Handle component shutdown/replacement/bootstrap and restore supervision after platform-controlled daemon/device restart without leaving unmanaged descendants. Component supervision does not authorize SuiFleet to request system reboot or govern OS installation/boot recovery.",
         "Expose genuine runtime state and enable UI recipe fields only after behavior is tested."
       ],
-      "validation": "Supervisor start/crash/restart/shutdown/reboot-stage integration tests.",
+      "validation": "Supervisor start/crash/restart/shutdown and component-bootstrap integration tests, including restoration after platform-controlled restart. Platform scripts/tools own system reboot and firmware recovery.",
       "description": "Supervise component install, run, shutdown, bootstrap and recovery. Implement persistent versioned workspaces, process lifecycle, readiness and restart policy."
     },
     {
@@ -368,7 +368,7 @@
     },
     {
       "key": "SF-016",
-      "title": "Add health-based application and reboot-aware firmware rollback",
+      "title": "Support platform-owned installers and explicit application recovery",
       "priority": "P1",
       "area": "edge",
       "phase": "ota",
@@ -382,14 +382,16 @@
         "suifleet-edge/meta-suifleet/",
         "scripts/"
       ],
-      "evidence": "Applied currently means updater exit zero; no post-boot health or A/B rollback is implemented.",
+      "evidence": "Configured lifecycle commands can invoke platform installers. SuiFleet must preserve execution state and accurately report supplied results across daemon/device restarts without owning OS installation, partitions, reboot or firmware recovery.",
       "acceptance": [
-        "Persist last-known-good state and application health rollback.",
-        "Implement a validated RAUC/SWUpdate A/B adapter with reboot intent and boot confirmation.",
-        "Distinguish ambiguous interrupted work, installation success, healthy boot and rollback."
+        "Deliver verified artifacts to explicitly configured lifecycle commands, including platform installer scripts; do not autodetect or select an updater, require A/B partitions, or prescribe an OS-update architecture.",
+        "Platform scripts/tools own OS installation, reboot decisions, boot confirmation and firmware rollback. SuiFleet must not initiate reboot or implement a firmware boot/recovery state machine.",
+        "Preserve SuiFleet execution/journal state across platform-controlled restarts; distinguish command completion from interrupted/unknown work and record only results explicitly supplied by configured commands or platform reporting. Never infer successful boot from exit zero or automatically repeat ambiguous destructive work.",
+        "For application components, persist last-known-good versions/configuration and perform previous-version rollback through explicitly configured lifecycle/recovery commands when deployment or health checks fail. Test the resulting component version and state. This application-only rollback does not authorize OS installation, system reboot or firmware rollback.",
+        "Demonstrate a configured installer handoff with a harmless fixture and, on a supported platform, an installer-script integration. Platform-specific physical recovery evidence documents that integration and is not a universal prerequisite for SuiFleet lifecycle infrastructure."
       ],
-      "validation": "Real-hardware power-loss/reboot/bad-image/health-failure recovery tests and simulator coverage.",
-      "description": "Add health-based application and reboot-aware firmware rollback. Persist last-known-good state and application health rollback."
+      "validation": "Artifact-integrity and configured-command handoff tests; daemon restart/interrupted-work journal tests; explicit-result and application-recovery tests. Record platform installer integration separately. No implicit updater detection, SuiFleet-triggered reboot or mandatory A/B acceptance.",
+      "description": "Support verified artifact delivery and configured lifecycle commands for platform-owned installers such as SWUpdate or RAUC. Platform scripts/tools own updater selection, installation, reboot, boot confirmation and firmware rollback. Application recovery is a separate explicitly configured component-lifecycle concern."
     },
     {
       "key": "SF-017",
@@ -515,29 +517,35 @@
     },
     {
       "key": "SF-022",
-      "title": "Distribute confidential artifacts, secrets and rotated credentials",
-      "priority": "P1",
+      "title": "Require Seal-encrypted artifact delivery and scoped decryption for customer readiness",
+      "priority": "P0",
       "area": "security",
-      "phase": "fleet",
+      "phase": "baseline",
       "kind": "type:feature",
       "depends_on": [
         "SF-008",
         "SF-015",
-        "SF-021"
+        "SF-021",
+        "SF-053"
       ],
       "paths": [
         "suifleet-edge/src/",
         "contracts/",
         "dapp/src/"
       ],
-      "evidence": "Walrus/chain data is public; there is no confidential secret/config service.",
+      "evidence": "Current artifact uploads send original bytes and recipe JSON to Walrus; hashes and deployment authority do not provide confidentiality. The user explicitly requires Seal encryption and scoped access as a commercial prototype/customer-readiness baseline.",
       "acceptance": [
-        "Implement encrypted policy-controlled delivery/cache with scoped access and revocation.",
-        "Rotate secrets without embedding plaintext in public data or logs.",
-        "Define offline cache expiry and deletion behavior."
+        "Encrypt proprietary artifacts and confidential recipe/configuration content client-side before any publisher/relay/Walrus upload. Default the customer-facing path to confidential delivery; allow clearly labeled explicit public artifacts for public/open-source tests. Never silently fall back to plaintext.",
+        "Define versioned Seal policy identities for releases/artifacts and explicit account/device/group decryption scopes. An authorized administrator grants/revokes access with signed onchain transactions; recipients use their own keys. Enforce publish/deploy/admin operations separately through actual Move authority, not frontend visibility or possession of a decryption key. Document any role/capability transfer and delegation semantics.",
+        "Implement unattended edge Seal authentication with its own enrolled device signer and bounded session credentials, including correct personal-message/session signing for supported software/hardware signers. Never copy the administrator wallet seed, recovery phrase or private key to an edge client or require an administrator signature per download. Keep private keys local to their signer.",
+        "Check active device identity and policy scope before key release; validate configured key-server identities and transport. Include device/group authorization, removal, revoked/rotated identities, policy/package upgrades and old-policy namespace bypass attempts. Do not promise atomic revocation across asynchronously observed chain state.",
+        "Decrypt locally with bounded resource use and verify authenticated encryption plus the defined artifact/recipe digests before execution. Specify which metadata/digests are public and ciphertext-versus-plaintext binding. Never log/cache plaintext confidential data or reusable decryption keys outside explicitly protected runtime/cache paths.",
+        "Define key/session lifetime, rotation, offline caching/expiry and disk cleanup. State that previously obtained plaintext or decryption keys cannot be remotely revoked; fresh protected versions need suitable new encryption identities/keys. Define whether offline execution is permitted and the resulting revocation limitation.",
+        "Choose and validate suitable production key providers/authentication, fees, availability and recovery; provider API credentials are distinct from device identity and must not be baked into public frontend assets/images. Respect Seal documented data-sensitivity exclusions; no unqualified KMS/HSM/regulated-data claims.",
+        "Provide reproducible encrypted upload -> authorized edge decryption/application -> onchain result acceptance and unauthorized-account/device, tamper, wrong-network/policy, expiry, keyserver outage, rotation/revocation and offline-cache failures. Public OTA smoke tests may proceed earlier but do not establish confidential customer readiness."
       ],
-      "validation": "Cross-device unauthorized access/revocation/rotation/offline-cache tests.",
-      "description": "Distribute confidential artifacts, secrets and rotated credentials. Implement encrypted policy-controlled delivery/cache with scoped access and revocation."
+      "validation": "Move policy/authority and upgrade tests; frontend typecheck/build with verified pre-upload encryption; Rust signer/session/decryption tests and encrypted OTA simulator; authorized public-testnet encrypted delivery/effects checks. Track real extension-wallet/Pi acceptance separately in SF-010/SF-031. Record actual key-provider/network costs and limitations; no plaintext fallback or administrator secret distribution.",
+      "description": "Implement Seal-based encryption before Walrus upload and authenticated, policy-scoped edge decryption. This is required before claiming readiness for proprietary customer deployments; intentionally public test artifacts remain an explicit mode. Existing deployment/admin authority remains enforced separately by Move capabilities and roles."
     },
     {
       "key": "SF-023",
@@ -630,12 +638,12 @@
       ],
       "evidence": "No independent recovery path exists when replacing the daemon itself.",
       "acceptance": [
-        "Perform staged self-update with persistent bootstrap intent and known-good fallback.",
+        "Support explicitly configured daemon replacement with durable handoff and a platform/service-manager-provided startup fallback; do not require a SuiFleet-owned OS updater or bootloader.",
         "Preserve device identity, journals and protocol compatibility across process replacement.",
-        "Recover failed startup/reboot without relying on the failed daemon."
+        "Verify failed daemon startup can recover through the configured external service manager/bootstrap mechanism without relying on the failed daemon. The platform owns any system reboot, boot confirmation and OS rollback."
       ],
-      "validation": "Process/power-loss and broken-binary self-update recovery acceptance.",
-      "description": "Update the daemon safely with bootstrap handoff and fallback. Perform staged self-update with persistent bootstrap intent and known-good fallback."
+      "validation": "Configured daemon replacement, interrupted handoff, identity/journal preservation and broken-binary startup recovery tests. Record platform-specific power-loss evidence separately; SuiFleet does not decide system reboot or firmware recovery.",
+      "description": "Update the daemon through a configured replacement/handoff mechanism while preserving identity, journals and protocol compatibility. An external platform/service-manager mechanism supplies startup fallback; system reboot and firmware recovery remain platform-owned."
     },
     {
       "key": "SF-027",
@@ -669,9 +677,7 @@
       "area": "compatibility",
       "phase": "extended",
       "kind": "type:epic",
-      "depends_on": [
-        "SF-027"
-      ],
+      "depends_on": [],
       "paths": [
         "docs/",
         "suifleet-edge/src/"
@@ -680,10 +686,11 @@
       "acceptance": [
         "Define exact functional vs AWS API/recipe compatibility and supported platforms/components.",
         "Design messaging/shadows/stream/client-device adapters and an acceptance suite.",
-        "Codex splits approved implementation scope into existing or new authorized issues; other models only report recommendations."
+        "Codex splits approved implementation scope into existing or new authorized issues; other models only report recommendations.",
+        "Specify proposed interfaces and contract/fixture acceptance independently of unfinished IPC/runtime implementations. Track implementation-dependent execution as pending; do not claim those tests passed or change implementation APIs by assumption."
       ],
       "validation": "Reviewed compatibility matrix and executable acceptance specifications, not a parity claim.",
-      "description": "Specify and validate broader Greengrass compatibility adapters. Define exact functional vs AWS API/recipe compatibility and supported platforms/components."
+      "description": "Specify and validate broader Greengrass compatibility adapters. Define exact functional vs AWS API/recipe compatibility and supported platforms/components. This is specification work and does not wait for IPC implementation. Distinguish current APIs from proposed contracts; use executable contract/fixture specifications without inventing unpublished runtime APIs or claiming runtime conformance."
     },
     {
       "key": "SF-029",
@@ -749,7 +756,8 @@
         "SF-005",
         "SF-006",
         "SF-029",
-        "SF-030"
+        "SF-030",
+        "SF-065"
       ],
       "paths": [
         "scripts/",
@@ -765,10 +773,11 @@
         "Exercise offline catch-up, daemon restart, report retry, recipe/artifact tampering, unauthorized targets and failed updater; expected failures must not report Applied.",
         "Keep private keys on their intended host, separate manual wallet steps from unattended test-account automation, document testnet resets/retention, and preserve device identity/journal during cleanup.",
         "Publish a capability-based acceptance matrix so future runtime/config/rollback/self-update features add cases; do not claim this baseline tests every Greengrass feature or A/B firmware safety.",
-        "Start the enrolled client before creating the first test deployment so enrollment baseline behavior does not intentionally skip it; verify a fetched/applied test component and matching chain receipt. A read-only authenticated inventory/health query is an optional earlier connectivity smoke test, not OTA acceptance."
+        "Start the enrolled client before creating the first test deployment so enrollment baseline behavior does not intentionally skip it; verify a fetched/applied test component and matching chain receipt. A read-only authenticated inventory/health query is an optional earlier connectivity smoke test, not OTA acceptance.",
+        "Retain a clearly labeled public-artifact baseline smoke test, then add the SF-022 Seal-encrypted artifact/recipe profile: permitted account/device decrypts and runs; unauthorized/revoked identities, ciphertext tamper and key-service failures cannot execute or report success. Missing confidential-profile evidence must remain explicit; a public smoke pass does not establish proprietary-customer readiness."
       ],
-      "validation": "Offline harness tests and an actual frontend-wallet -> Sui/Walrus -> Pi -> on-chain receipt run, with reproducible evidence and explicit skipped/blocked cases. Hardware reboot/power-loss tests stay in SF-016.",
-      "description": "Run wallet-to-testnet-to-Raspberry-Pi OTA acceptance tests. Provide an opt-in test runner with local-network and Sui testnet profiles using a verified network manifest, compatible Sui/Walrus endpoints and explicitly supplied funded test accounts; fail preflight clearly when APIs or funding are unavailable.\n\nThis is a deferred integration acceptance ticket. It must not be used as a blanket dependency for unrelated implementation merges; its own live/hardware/production evidence is still required before completion."
+      "validation": "Offline harness tests and an actual frontend-wallet -> Sui/Walrus -> Pi -> on-chain receipt run, with reproducible evidence and explicit skipped/blocked cases. Platform installer/reboot/power-loss evidence is recorded separately for the selected platform; SF-016 validates SuiFleet handoff, journal preservation and explicit results, not ownership of firmware recovery.",
+      "description": "Run wallet-to-testnet-to-Raspberry-Pi OTA acceptance tests. Provide an opt-in test runner with local-network and Sui testnet profiles using a verified network manifest, compatible Sui/Walrus endpoints and explicitly supplied funded test accounts; fail preflight clearly when APIs or funding are unavailable.\n\nThis is a deferred integration acceptance ticket. It must not be used as a blanket dependency for unrelated implementation merges; its own live/hardware/production evidence is still required before completion. Customer-ready proprietary deployments additionally require SF-022 encrypted-delivery acceptance; this does not block earlier public-artifact Pi smoke testing."
     },
     {
       "key": "SF-032",
@@ -1133,6 +1142,875 @@
       ],
       "validation": "Offline regressions, exact-head CI/testnet, independent review, actual automatic reuse evidence.",
       "description": "<!-- suifleet-tracking:SF-046 -->\n\nNarrow SF-043 automatic-testnet reliability follow-up authorized by the original user request. Actual Actions artifact discovery returned fixture artifact 11955229354 (created 07:28:18Z, run38697912560) before newer artifact11954559410 (created07:32:10Z, run38697500271). The merged helper selects the first API result, losing fixtures added by the later run and causing unnecessary publication/spend. IDs/API response ordering are not a trustworthy creation-time ordering, especially across reruns.\n\nScope: select the newest valid main-workflow ciphertext by explicit validated creation timestamp across bounded artifact discovery, preserving producer trust, authentication, safe modes and fail-closed behavior. Add offline regression for this real out-of-order response and bounded pagination. No secrets or live writes in unit tests.\n\nAcceptance: offline regressions and exact-head CI/testnet pass; independent review and sole-orchestrator integration; observe actual restored unchanged-fixture reuse without publish/upgrade afterward. Preserve no-human-approval automation, budget, wallet isolation and mandatory exact-head gate. No bootstrap gate exemption is requested: the existing main workflow now works.\n\nExisting actual normal automatic successes remain valid: PR run38697912560 and main run38697500271 attempt2. Local Walrus/host updater only; wallet/Pi/public-Walrus acceptance remains #11/#32.\n"
+    },
+    {
+      "key": "SF-047",
+      "title": "Refresh blocked reviews when exact-head CI completes",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "baseline",
+      "kind": "type:bug",
+      "depends_on": [
+        "SF-044",
+        "SF-043"
+      ],
+      "paths": [
+        "tools/pr-coordinator",
+        "docs/PR_COORDINATION.md"
+      ],
+      "evidence": "Blocked reviews117/116/114 demonstrate review staleness after CI success.",
+      "acceptance": [
+        "- Bind review freshness to meaningful exact-head CI/status and required current-base testnet evidence, with deterministic ordering and no timestamp/receipt loops.",
+        "- Automatically re-review when pending or failed checks become successful; never reuse a prior blocked verdict as approval.",
+        "- Avoid expensive premature reviews while required checks are absent, pending or failing; repairs for actionable code feedback/base integration must still run.",
+        "- Preserve independent exact head/base approval, one active worker per PR, retained genuine hardware/acceptance blockers, and serial merge gates.",
+        "- Offline regressions cover pending-to-success, failures, missing/wrong-base testnet, stable reordered checks, restart/deduplication and actual coordinator dispatch decisions.",
+        "- Install verified coordinator update without interrupting live workers and record review-queue behavior."
+      ],
+      "validation": "Offline scheduler regressions and installed-service observation.",
+      "description": "Independent reviews can finish blocked solely because exact-head CI/testnet is pending. The coordinator fingerprint omits CI state; later successful checks do not trigger a new review, leaving correct implementation PRs and their dependencies stalled.\n\nAcceptance:\n- Bind review freshness to meaningful exact-head CI/status and required current-base testnet evidence, with deterministic ordering and no timestamp/receipt loops.\n- Automatically re-review when pending or failed checks become successful; never reuse a prior blocked verdict as approval.\n- Avoid expensive premature reviews while required checks are absent, pending or failing; repairs for actionable code feedback/base integration must still run.\n- Preserve independent exact head/base approval, one active worker per PR, retained genuine hardware/acceptance blockers, and serial merge gates.\n- Offline regressions cover pending-to-success, failures, missing/wrong-base testnet, stable reordered checks, restart/deduplication and actual coordinator dispatch decisions.\n- Install verified coordinator update without interrupting live workers and record review-queue behavior.\n"
+    },
+    {
+      "key": "SF-048",
+      "title": "Add automated security audits to normal CI",
+      "priority": "P1",
+      "area": "security",
+      "phase": "baseline",
+      "kind": "type:infrastructure",
+      "depends_on": [],
+      "paths": [
+        ".github",
+        "scripts",
+        "docs"
+      ],
+      "evidence": "No security audit job currently exists in normal CI.",
+      "acceptance": [
+        "- Scan every PR, main update and periodically for newly disclosed vulnerabilities, without deployment credentials or public-chain mutations.",
+        "- Add pinned official CodeQL analysis for JavaScript/TypeScript, Python, Rust and GitHub Actions; enforce actionable high/critical security results, not only successful scanner execution.",
+        "- Scan the committed frontend/Rust lockfiles, secrets and deployment configuration with a checksum-verified maintained scanner, including development dependencies where supported.",
+        "- Fail closed on scanner errors or malformed/missing reports; retain useful sanitized diagnostics without publishing secret matches or source excerpts containing credentials.",
+        "- Use minimal permissions, immutable action/tool references and safe fork events. Never execute untrusted PR code with testnet or production secrets.",
+        "- Document coverage, thresholds, remediation and limitations. Verify offline positive/negative gate behavior and run genuine scans/current-head CI. Do not silently suppress discovered vulnerabilities; fix scoped findings or track precise blockers."
+      ],
+      "validation": "Scanner/gate regression tests, genuine dependency/secrets/configuration scans and exact-head CI.",
+      "description": "Add normal automated security auditing for the deployed dApp, Rust edge client, CI/release workflows and deployment configuration. Current CI validates behavior but has no static security, dependency vulnerability or secret scan.\n\nAcceptance:\n- Scan every PR, main update and periodically for newly disclosed vulnerabilities, without deployment credentials or public-chain mutations.\n- Add pinned official CodeQL analysis for JavaScript/TypeScript, Python, Rust and GitHub Actions; enforce actionable high/critical security results, not only successful scanner execution.\n- Scan the committed frontend/Rust lockfiles, secrets and deployment configuration with a checksum-verified maintained scanner, including development dependencies where supported.\n- Fail closed on scanner errors or malformed/missing reports; retain useful sanitized diagnostics without publishing secret matches or source excerpts containing credentials.\n- Use minimal permissions, immutable action/tool references and safe fork events. Never execute untrusted PR code with testnet or production secrets.\n- Document coverage, thresholds, remediation and limitations. Verify offline positive/negative gate behavior and run genuine scans/current-head CI. Do not silently suppress discovered vulnerabilities; fix scoped findings or track precise blockers.\n"
+    },
+    {
+      "key": "SF-049",
+      "title": "Remediate high and critical frontend dependency findings",
+      "priority": "P0",
+      "area": "security",
+      "phase": "baseline",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "dapp",
+        "scripts",
+        "docs"
+      ],
+      "evidence": "Trivy0.76.0 finds19blocking frontend dependency advisories.",
+      "acceptance": [
+        "- Reproduce with the checksum-verified Trivy0.76.0 scanner and document exact findings, runtime/build applicability and fixed versions from primary advisories.",
+        "- Upgrade the supported Next/React combination and affected transitive dependencies deliberately, preserving wallet/Sui SDK pins unless a verified security fix requires changing them. Keep manifest/lockfile changes coupled.",
+        "- Resolve every HIGH/CRITICAL finding without broad ignore files, turning off scanners, skipping tests or suppressing failed audits. For unpatched advisories, implement and test a targeted mitigation/patch or report a precise real blocker; do not silently accept risk.",
+        "- Run locked frontend install, query/transaction/schema tests, typecheck and production build; test affected runtime behavior and real-wallet acceptance limits honestly.",
+        "- Re-run the genuine dependency/secret/configuration scan against the final branch; preserve both Rust lockfile and Dockerfile coverage. Record exact scan results and current-head CI."
+      ],
+      "validation": "Locked frontend checks/build, relevant regression tests and genuine final vulnerability scan.",
+      "description": "The first genuine SF-048 filesystem audit reports 19 HIGH/CRITICAL frontend dependency findings (2 CRITICAL,17 HIGH) in the locked dependency tree, including Next14.2.35, browserslist4.28.2, nanoid3.3.12, PostCSS8.4.31/8.5.13, source-map-js1.2.1 and braces3.0.3. These package advisories do not by themselves prove exploitability of the static deployed dApp, but the new no-suppression CI gate correctly blocks them.\n\nAcceptance:\n- Reproduce with the checksum-verified Trivy0.76.0 scanner and document exact findings, runtime/build applicability and fixed versions from primary advisories.\n- Upgrade the supported Next/React combination and affected transitive dependencies deliberately, preserving wallet/Sui SDK pins unless a verified security fix requires changing them. Keep manifest/lockfile changes coupled.\n- Resolve every HIGH/CRITICAL finding without broad ignore files, turning off scanners, skipping tests or suppressing failed audits. For unpatched advisories, implement and test a targeted mitigation/patch or report a precise real blocker; do not silently accept risk.\n- Run locked frontend install, query/transaction/schema tests, typecheck and production build; test affected runtime behavior and real-wallet acceptance limits honestly.\n- Re-run the genuine dependency/secret/configuration scan against the final branch; preserve both Rust lockfile and Dockerfile coverage. Record exact scan results and current-head CI.\n\nThis is the prerequisite remediation for SF-048/#78 security-gate adoption; use a standalone branch from current main so it can merge before the audit workflow. Do not include the security workflow implementation in this PR. Scope is dependency fixes, not production deployment or hardware programming.\n"
+    },
+    {
+      "key": "SF-051",
+      "title": "Document network-first business economics and reassess Sui-stack opportunities",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "docs/BUSINESS_PLAN.md",
+        "docs/business/",
+        "README.md"
+      ],
+      "evidence": "User explicitly requires business plans to reflect the usage-based network-cost opportunity, replacing unsupported SaaS price assumptions, and asks for a fresh ranking of adjacent AWS-like services. No business-plan document exists in the current checkout.",
+      "acceptance": [
+        "Document the user-originated thesis: measured low marginal authority/storage costs may support materially lower customer pricing and a margin on measured usage; do not claim a proven full-service margin or assign arbitrary subscriptions.",
+        "Preserve dated public Mainnet fee observations and explicit cost formulas, workload and exclusions; distinguish testnet measurements, Mainnet estimates and measured production invoices.",
+        "Rank adjacent products by avoidable customer charges and Sui/Walrus fit; identify counterexamples where AWS operations are cheaper and workloads still need paid compute, delivery, querying or key services.",
+        "Use authoritative current sources, disclose absent AWS product-margin/revenue data, and link discoverable business documentation."
+      ],
+      "validation": "JSON, formula arithmetic, source/link and scope checks plus independent review; documentation-only, no mainnet transactions or full application build.",
+      "description": "Write a network-first business plan and reassess opportunities using actual protocol economics, excluding labor from the base comparison and keeping unmeasured service costs explicit."
+    },
+    {
+      "key": "SF-052",
+      "title": "Record mandatory Seal confidentiality and explain wallet delegation and edge authentication",
+      "priority": "P1",
+      "area": "security",
+      "phase": "baseline",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "AGENTS.md",
+        "README.md",
+        "docs/ACCESS_AND_ENCRYPTION.md",
+        "docs/BUSINESS_PLAN.md",
+        "docs/ISSUE_TRACKING.md",
+        "docs/tracking/backlog.json",
+        "docs/tracking/github-state.json"
+      ],
+      "evidence": "User requires tickets to reflect customer-ready Seal encryption and asks how administrators grant wallet access and how edge authentication credentials are provisioned. Existing scoped roles/device keys must be distinguished from planned Seal integration.",
+      "description": "Update existing SF-022/SF-031 acceptance and commercial/security guidance; explain implemented wallet delegation and device identity versus planned Seal sessions. Documentation/tracker changes only.",
+      "acceptance": [
+        "Make Seal-encrypted proprietary delivery an explicit customer-readiness gate without blocking clearly labeled public OTA smoke tests.",
+        "Describe actual scoped deployer roles/revocation and separate decryption privileges from operational authority.",
+        "Explain local device key generation, enrollment, optional claim credentials and future headless Seal sessions; no admin passphrase/private key distribution.",
+        "Preserve honest current-versus-planned boundaries, revocation/cache limitations and unmeasured production key-service costs.",
+        "Persist the user requirement to capture actionable conversation findings in existing or published issues/Project records before handoff; deduplicate work, preserve ownership and avoid publishing unapproved speculative implementation scope. Record the missing key-isolation and complete-cost follow-ups."
+      ],
+      "validation": "Source/issue consistency, local-link/JSON checks, offline tracking tests and independent review; no application implementation or mainnet transactions."
+    },
+    {
+      "area": "security",
+      "phase": "baseline",
+      "kind": "type:feature",
+      "priority": "P0",
+      "resources": [],
+      "key": "SF-053",
+      "title": "Isolate device signing keys and credentials from component lifecycle processes",
+      "depends_on": [
+        "SF-009",
+        "SF-014",
+        "SF-021"
+      ],
+      "paths": [
+        "suifleet-edge/src",
+        "suifleet-edge/meta-suifleet",
+        "scripts",
+        "docs"
+      ],
+      "evidence": "Conversation source inspection found that device.key is mode0600 owned by suifleet while configured lifecycle commands run as that same UID. Read-only /etc protection does not prevent component commands reading that identity key. Optional PKCS11 does not by itself prevent authorized-process signing misuse.",
+      "description": "Close the real key-isolation gap before proprietary customer readiness. Separate identity/session/key-service credentials from unprivileged component execution while preserving explicitly platform-owned privileged installers and unattended operation.",
+      "acceptance": [
+        "Define and enforce a credential boundary so configured unprivileged install/run/shutdown/bootstrap/recovery processes cannot read device signing keys, bootstrap credentials, signer PINs, reusable Seal session credentials or unrelated decrypted keys, including via inherited environment/file descriptors, proc, filesystem aliases or child processes. Audit all actual execution paths; permissions under the same UID are insufficient.",
+        "Select and document a bounded execution/signing design (for example separate identities and a narrow signer service). Validate permitted transaction/personal-message/session intents, callers and scope; never expose an unrestricted arbitrary-signing oracle or bypass verify-before-sign protections. Coordinate the stable signer interface with SF-022 before dependent implementation.",
+        "Keep per-device software keys generated at runtime and preserve existing identities/journals through migration. Never include fleet/admin private keys, recovery phrases or provisioned credentials in image builds. Device reporting and headless Seal signing must remain unattended using separate correct signing intents.",
+        "Support the existing optional PKCS11 boundary without claiming untested hardware protection: document required non-extractable key provisioning, PIN/service access and the distinction between extraction resistance and unauthorized signing. Physical TPM/secure-element acceptance is separately evidenced; software tokens do not establish it.",
+        "Add real negative component-process tests attempting key/PIN/session access, fd/env/proc leakage and unauthorized signing, plus positive daemon-report/session flows, process restart and migration regression checks. Explicitly privileged root platform scripts remain inside the documented trusted platform boundary; do not claim protection against arbitrary root/platform compromise."
+      ],
+      "validation": "Rust and signer/transaction-vector tests, OTA/supervisor tests, real service/UID sandbox isolation tests, wrong-caller/intent signing negatives, relevant build/image inspections and exact commands/evidence. Hardware and live-chain checks only under actual authorization; no unsupported secure-boot/physical claims."
+    },
+    {
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "priority": "P1",
+      "resources": [],
+      "key": "SF-054",
+      "title": "Measure complete network-only encrypted fleet deployment costs",
+      "depends_on": [
+        "SF-022"
+      ],
+      "paths": [
+        "scripts",
+        "docs/business",
+        "docs/TESTNET.md"
+      ],
+      "evidence": "The commercial discussion identified live network parameters and partial fees but not a complete production deployment bill. Snapshot arithmetic excludes actual receipt storage, deployment/target objects, Walrus transactions, recipe blobs, renewal, key providers and selected delivery services; raw WAL prices differ from advertised USD approximation.",
+      "description": "Produce a reproducible complete cost model from actual effects/quotes for the customer-ready encrypted path, excluding labor and arbitrary subscriptions from the base case. Keep measured costs distinct from lower bounds and unexecuted estimates.",
+      "acceptance": [
+        "Capture network/epoch/protocol/token quotes and exact workload: devices, shared releases, recipe/artifact bytes, targets, reports, retries and retention; use exact client encoding and expiry rules rather than approximate content-to-encoded-size formulas.",
+        "Account for registration/onboarding, deployment/target objects, all receipt transactions/storage, Walrus reserve/register/certify writes and gas, recipe blobs, renewal, cleanup/rebates and failed/unknown execution. Separate refundable deposits, gas budgets/funding balances and consumed fees. Reconcile raw WAL-price snapshot with documented USD storage approximations/subsidies/conversions.",
+        "Include actual production Seal provider/relay/gateway/RPC/indexer charges where selected, or mark them unquoted explicitly. No free unlimited production SLA or per-read delivery claim from public test services. Report labor separately and do not invent subscription/margin allocations.",
+        "Use read-only Mainnet quotes/simulation where supported and authorized Testnet execution for behavioral/effects measurements, labeling each clearly. Mainnet transactions/publication or paid service purchases require explicit authorization; no silently treating Testnet fixtures as a measured Mainnet invoice.",
+        "Publish per-release/per-device workload tables and break-even comparisons against matched AWS pricing, retention and availability. State exactly which data is measured, simulated, estimated, excluded or blocked. A partial subtotal cannot be a full bill."
+      ],
+      "validation": "Offline cost arithmetic/fixture tests, exact transaction effects and token-accounting evidence, independently checked read-only Mainnet rates, reproducible results and peer review. Testnet mutation only with standing wallet locks/allowances; no unauthorized Mainnet spend."
+    },
+    {
+      "key": "SF-055",
+      "title": "Reconcile implementation acceptance and publish missing compatibility work",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "baseline",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "docs",
+        "AGENTS.md"
+      ],
+      "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
+      "description": "Reconcile implementation acceptance and publish missing compatibility work. Apply the standing implementation/integration acceptance split to SF-015 and SF-019: physical Pi, actual extension-wallet and provisioned hosted-service acceptance stay in SF-010/SF-031; preserve source/security/regression/local compatibility and relevant automatic testnet CI gates.",
+      "acceptance": [
+        "Apply the standing implementation/integration acceptance split to SF-015 and SF-019: physical Pi, actual extension-wallet and provisioned hosted-service acceptance stay in SF-010/SF-031; preserve source/security/regression/local compatibility and relevant automatic testnet CI gates.",
+        "Publish and link actual AWS adapter implementation scopes for SF-038 without claiming proposed interfaces are implemented; Linux-first is a prototype phase, not a permanent exclusion of the full parity roadmap.",
+        "Reconcile stopped worker dispatch receipts with verified process/exit/owner evidence and preserve valid Review/Blocked claims; do not fabricate completion or steal claims.",
+        "Persist scoped policy and tracker changes, obtain fresh independent exact-head/base/policy reviews and leave merges to sole coordinator. Keep production signing held and physical programming unauthorized."
+      ],
+      "validation": "Offline tracking/policy/coordinator checks, source/link consistency and independently reviewed documentation. No hardware or Mainnet mutation.",
+      "resources": []
+    },
+    {
+      "key": "SF-056",
+      "title": "Repair live Sui tooling compatibility for current public testnet protocol",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "baseline",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "Dockerfile",
+        ".github/workflows",
+        "scripts",
+        "docs/TESTNET.md"
+      ],
+      "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
+      "description": "Repair live Sui tooling compatibility for current public testnet protocol. Reproduce the fresh-fixture protocol139 versus pinned CLI138 failure without assuming all cached testnet runs fail; identify and checksum-pin a compatible supported transaction CLI with explicit version/protocol evidence.",
+      "acceptance": [
+        "Reproduce the fresh-fixture protocol139 versus pinned CLI138 failure without assuming all cached testnet runs fail; identify and checksum-pin a compatible supported transaction CLI with explicit version/protocol evidence.",
+        "Add cheap read-only chain/protocol/account compatibility preflight before writes. Preserve dedicated wallets, serialized mutations, non-replenishing allowance, failure charging, encrypted state and protected CI authority.",
+        "Separate release compilation from live network submission explicitly, or deliberately upgrade the shared toolchain with bytecode/ABI/origin/lockfile regressions. test-publish/test-upgrade compile as well as submit: changing PATH must not silently change the framework or fixtures.",
+        "Include actual build/network CLI and framework provenance in evidence/fixture compatibility where required; never reuse a fixture for a different base-to-head upgrade. Verify cached and fresh-fixture acceptance with actual effects under bounded spending.",
+        "Update relevant pinned downloads/checksums, docs and regression tests; do not disable mandatory testnet statuses, inflate spend to hide faults or use the funding-only CLI as unsupported proof of compatibility."
+      ],
+      "validation": "Offline preflight/cache/toolchain regressions, real cheap protocol probes, fresh and cached public-testnet acceptance/effects and exact-head CI. No Mainnet spending.",
+      "resources": []
+    },
+    {
+      "key": "SF-057",
+      "title": "Implement scoped AWS component credential exchange",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-021",
+        "SF-027",
+        "SF-053"
+      ],
+      "paths": [
+        "suifleet-edge/src",
+        "scripts",
+        "docs"
+      ],
+      "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
+      "description": "Implement scoped AWS component credential exchange. Implement the declared SDK-compatible local credential endpoint backed by an explicitly configured separately provisioned AWS X.509 identity/provider; a Sui/Seal identity does not create AWS credentials.",
+      "acceptance": [
+        "Implement the declared SDK-compatible local credential endpoint backed by an explicitly configured separately provisioned AWS X.509 identity/provider; a Sui/Seal identity does not create AWS credentials.",
+        "Enforce deny-by-default component grants, bounded per-start tokens, caller identity, refresh/expiry/backoff and no secret logging/journaling or sibling-process access. Use SF-022 when protected distribution is selected; mock-backed adapter work need not await live AWS accounts.",
+        "Execute declared credential-provider fixtures against the actual process and unmodified supported AWS SDK clients plus a local mTLS upstream. Distinguish semantic compatibility and reference-model checks from actual adapter execution.",
+        "Retain live AWS account/service acceptance explicitly pending until authorized. No silently purchased services, production credentials or unsupported HSM/regulated-data claims."
+      ],
+      "validation": "Actual adapter/local TLS and SDK-client integration tests, wrong-caller/expiry/rotation/outage cases, scoped Rust/IPC regressions and documented live acceptance boundary.",
+      "resources": []
+    },
+    {
+      "key": "SF-058",
+      "title": "Implement Kinesis and S3 durable stream exporters",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-034",
+        "SF-057"
+      ],
+      "paths": [
+        "suifleet-edge/src",
+        "scripts",
+        "docs"
+      ],
+      "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
+      "description": "Implement Kinesis and S3 durable stream exporters. Implement explicitly configured Kinesis and S3 exporters over durable stream storage and scoped credentials using actual request/response semantics.",
+      "acceptance": [
+        "Implement explicitly configured Kinesis and S3 exporters over durable stream storage and scoped credentials using actual request/response semantics.",
+        "Handle partial success, retry/backoff, lost responses and crash-safe export checkpoints; support multipart resume/abort cleanup and configured bandwidth/batch limits without silently losing or advancing unexported data.",
+        "Run reference fixtures against the real exporter and local API emulators, including actual payload assertions and restart/failure cases. Keep SiteWise/other service exports visible as remaining roadmap work.",
+        "Record authorized live AWS service acceptance separately; emulators do not establish AWS-account behavior or complete StreamManager parity."
+      ],
+      "validation": "Actual exporter/emulator, partial-batch/multipart/crash/checkpoint/permissions tests and supported SDK/recipe integration.",
+      "resources": []
+    },
+    {
+      "key": "SF-059",
+      "title": "Implement CloudWatch component and device metrics export",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-019",
+        "SF-032",
+        "SF-057"
+      ],
+      "paths": [
+        "suifleet-edge/src",
+        "scripts",
+        "docs"
+      ],
+      "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
+      "description": "Implement CloudWatch component and device metrics export. Implement version-pinned AWS component metrics semantics with explicitly configured CloudWatch PutMetricData export using scoped credentials.",
+      "acceptance": [
+        "Implement version-pinned AWS component metrics semantics with explicitly configured CloudWatch PutMetricData export using scoped credentials.",
+        "Validate granted publishers, schema/dimensions/units, batching, timestamps, bounded durable queues and declared retry/drop behavior.",
+        "Execute metrics fixtures against the actual adapter and emulator-observed requests; demonstrate unauthorized publication, outage/restart, over-limit and rejected-record behavior.",
+        "Keep actual AWS metrics delivery pending explicit account authorization and evidence; existing Sui telemetry and fixture-only reference checks are prerequisites, not implementation proof."
+      ],
+      "validation": "Real adapter/emulator assertions, messaging/telemetry regressions and quota/restart/redaction/permission cases.",
+      "resources": []
+    },
+    {
+      "key": "SF-060",
+      "title": "Implement CloudWatch Logs export for managed components",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-020",
+        "SF-057"
+      ],
+      "paths": [
+        "suifleet-edge/src",
+        "scripts",
+        "docs"
+      ],
+      "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
+      "description": "Implement CloudWatch Logs export for managed components. Implement the declared LogManager-compatible file selection/naming and CloudWatch upload path with scoped credentials.",
+      "acceptance": [
+        "Implement the declared LogManager-compatible file selection/naming and CloudWatch upload path with scoped credentials.",
+        "Redact before durable spool, apply Unicode-safe splitting and request limits, and preserve explicit at-least-once checkpoint behavior through restart, rejection and lost responses.",
+        "Execute declared log fixtures against the actual adapter and request-checking emulator; test sibling access denial, rollover, oversize events, outage and disk limits.",
+        "Do not claim end-to-end AWS LogManager/live-service parity from local file collection or fixtures; track authorized real account acceptance explicitly."
+      ],
+      "validation": "Actual adapter, spool/checkpoint, request-shape and failure-path tests plus diagnostics/permissions regressions.",
+      "resources": []
+    },
+    {
+      "key": "SF-061",
+      "title": "Implement AWS IoT Core bridge and shadow connection",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-032",
+        "SF-033",
+        "SF-021"
+      ],
+      "paths": [
+        "suifleet-edge/src",
+        "scripts",
+        "docs"
+      ],
+      "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
+      "description": "Implement AWS IoT Core bridge and shadow connection. Implement the declared AWS IoT connection using explicitly configured separate AWS thing certificates/keys and endpoints; retain Sui device identity as a separate trust domain.",
+      "acceptance": [
+        "Implement the declared AWS IoT connection using explicitly configured separate AWS thing certificates/keys and endpoints; retain Sui device identity as a separate trust domain.",
+        "Support mTLS/ALPN where required, ACL enforcement, connection recovery, certificate rotation, IotCore topic routes and version/conflict-aware shadow reconciliation.",
+        "Run actual adapter against a local TLS broker and AWS-shaped shadow harness, including unauthorized identities/topics, reconnect/outage and credential rotation.",
+        "Record service/account-specific AWS acceptance separately; Linux-first implementation is phased support rather than a permanent platform exclusion."
+      ],
+      "validation": "Actual broker/bridge/shadow adapter tests, TLS identity/ACL/rotation/recovery regressions and explicit unrun live-account cases.",
+      "resources": []
+    },
+    {
+      "key": "SF-062",
+      "title": "Implement Device Defender device-side metrics export",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-019",
+        "SF-061"
+      ],
+      "paths": [
+        "suifleet-edge/src",
+        "scripts",
+        "docs"
+      ],
+      "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
+      "description": "Implement Device Defender device-side metrics export. Implement a version/schema-pinned Device Defender device-side metrics component and AWS topic export using the configured IoT connection.",
+      "acceptance": [
+        "Implement a version/schema-pinned Device Defender device-side metrics component and AWS topic export using the configured IoT connection.",
+        "Enforce bounded configured sampling, correct accepted/rejected handling, authorization and disconnected buffering/retry behavior.",
+        "Run executable schema/topic fixtures against the real adapter; do not present the AWS server-side Detect service as locally replicated or covered by this device component."
+      ],
+      "validation": "Actual metrics/topic adapter, sampling/rejection/disconnection tests and explicit authorized live AWS acceptance gaps.",
+      "resources": []
+    },
+    {
+      "key": "SF-063",
+      "title": "Package and supervise a configured secure-tunneling destination adapter",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-025",
+        "SF-014",
+        "SF-027",
+        "SF-061"
+      ],
+      "paths": [
+        "suifleet-edge/src",
+        "scripts",
+        "docs"
+      ],
+      "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
+      "description": "Package and supervise a configured secure-tunneling destination adapter. Provide explicitly enabled, allow-listed local-service destination proxy lifecycle using the selected platform tunnel configuration and AWS-shaped notifications.",
+      "acceptance": [
+        "Provide explicitly enabled, allow-listed local-service destination proxy lifecycle using the selected platform tunnel configuration and AWS-shaped notifications.",
+        "Protect ephemeral tokens, restrict destinations/callers, bound sessions/concurrency/timeouts, and stop/revoke/clean up correctly after failures or component replacement. Platform scripts/admins own SSH daemon, firewall and service configuration.",
+        "Exercise actual supervised proxy/process with stub notifications/tunnel endpoint, denied targets, token leakage negatives and connection failures. This does not authorize arbitrary remote commands or SuiFleet-driven platform reboot.",
+        "Record real AWS tunnel acceptance separately until account/network authorization exists. Do not permanently exclude remote-access components merely because platform configuration remains platform-owned."
+      ],
+      "validation": "Actual process supervision/proxy, token/ACL/timeout/restart/cleanup tests and separately evidenced live service integration.",
+      "resources": []
+    },
+    {
+      "key": "SF-064",
+      "title": "Complete remaining managed-component functional compatibility roadmap",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-038"
+      ],
+      "paths": [
+        "docs",
+        "interfaces/compat",
+        "scripts"
+      ],
+      "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
+      "description": "Complete remaining managed-component functional compatibility roadmap. Keep Lambda invocation/subscriptions, industrial/SiteWise/Kinesis-video functions, ML example-equivalent packaging and platform expansion visible as missing functional work, not user-approved permanent exclusions.",
+      "acceptance": [
+        "Keep Lambda invocation/subscriptions, industrial/SiteWise/Kinesis-video functions, ML example-equivalent packaging and platform expansion visible as missing functional work, not user-approved permanent exclusions.",
+        "Define versioned executable semantics and split each selected implementation scope into concrete Codex-published issues with dependencies and acceptance before claiming roadmap closure. Reuse existing tickets where actual implementation scope already exists.",
+        "Linux x86_64/aarch64/arm is the initial prototype phase; other platforms remain tracked gaps unless the user explicitly changes the full parity goal. Respect upstream licensing through clean-room functional alternatives without relabeling native wrappers as existing compatibility.",
+        "Preserve separate reference-model, actual-adapter and authorized live service/hardware evidence; no whole-catalog parity claim from seven adapter tickets or fixture checks."
+      ],
+      "validation": "Reviewed capability-to-ticket matrix and executable specifications, no false implemented/runtime/full-parity claims.",
+      "resources": []
+    },
+    {
+      "key": "SF-065",
+      "title": "Implement offline wallet-to-edge acceptance harness",
+      "priority": "P1",
+      "area": "clients",
+      "phase": "baseline",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-030"
+      ],
+      "paths": [
+        "scripts",
+        "tests",
+        "docs"
+      ],
+      "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
+      "description": "Implement offline wallet-to-edge acceptance harness. Implement the missing SF-031 harness and deterministic local-network/Testnet profiles without requiring a physical Pi to write or test the runner. Physical Pi hardware, bootable target image and target acceptance are deferred separately and do not block this offline software harness.",
+      "acceptance": [
+        "Implement the missing SF-031 harness and deterministic local-network/Testnet profiles without requiring a physical Pi to write or test the runner.",
+        "Validate explicit device/SSH/manifest/accounts/endpoints, preserve keys/journals, generate isolated test-component artifacts and verify digests and reported results. Support offline harness tests and an explicit hardware execution mode with hardware lock only while actually used.",
+        "Support public-artifact baseline and a clearly pending SF-022 encrypted profile; separate real extension-wallet steps from scripted wallet/test-account automation. Missing physical or extension evidence cannot become a fake pass.",
+        "Keep SF-031/#32 open for actual physical/wallet/network acceptance after this implementation merges; no disk flashing, guessed target, unapproved Mainnet or production credential use."
+      ],
+      "validation": "Offline runner/protocol/command/failure-path tests and local simulator execution; exact public-testnet checks where relevant/available. Physical Pi and extension acceptance explicitly remain in SF031.",
+      "resources": []
+    },
+    {
+      "key": "SF-066",
+      "title": "Refresh the Pi image to a coherent reviewed signer-service release",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "baseline",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-029",
+        "SF-053",
+        "SF-026"
+      ],
+      "paths": [
+        "kas",
+        "suifleet-edge/meta-suifleet",
+        "scripts",
+        "docs"
+      ],
+      "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
+      "description": "Refresh the Pi image to a coherent reviewed signer-service release. Update the fixed daemon source revision, crate include and Cargo.lock digest together to a coherent reviewed release containing the signer-service and self-update integration. Preserve the existing image as a labeled older public smoke baseline, not evidence of current customer-ready security.",
+      "acceptance": [
+        "Update the fixed daemon source revision, crate include and Cargo.lock digest together to a coherent reviewed release containing the signer-service and self-update integration. Preserve the existing image as a labeled older public smoke baseline, not evidence of current customer-ready security.",
+        "Build the actual raspberrypi3-64 BitBake SD image using pinned layers/toolchains, include all required launcher/signer/service binaries and permissions, and inspect identity/session credential separation and public-key SSH/DHCP first-boot state.",
+        "Publish new checksum/package manifest/build provenance and version compatibility checks; no device keys/enrollment secrets in image. Actual build and filesystem checks are required, not an SSH binary copy.",
+        "No physical Pi is needed to build; preserve physical flashing/boot/network/recovery acceptance in SF031. Do not program a device or silently override platform reboot/updater ownership."
+      ],
+      "validation": "Real BitBake image build, artifact/rootfs/service/permissions and manifest/client compatibility inspection; exact source/image/binary hashes and explicit deferred physical tests.",
+      "resources": []
+    },
+    {
+      "key": "SF-067",
+      "title": "Recover stopped automation capacity without losing ticket ownership",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "baseline",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator",
+        "docs/PR_COORDINATION.md",
+        "AGENTS.md"
+      ],
+      "resources": [],
+      "description": "Make implementation and review automation robust to stopped workers and blocked work so eligible tickets keep progressing.",
+      "evidence": "User requests robust automation and no unused workers; expired/orphaned reservations currently consume family capacity despite stopped processes.",
+      "acceptance": [
+        "Separate verified stopped blocked jobs from active worker capacity while preserving their ticket reservations and evidence.",
+        "Reconcile durable completed handoffs after service restarts and revisit orphan records safely; process identity and live-worker checks must prevent duplicate mutation workers.",
+        "Keep ambiguous claims isolated and visible without permanently consuming unrelated implementation capacity; bound concurrency for genuinely running workers and never auto-reclaim uncertain ownership.",
+        "Provide regression tests for dead/live/PID-reused wrappers, blocked results, restart reconciliation and ownership changes; document diagnostics and deploy reviewed automation changes."
+      ],
+      "validation": "Dispatcher/coordinator regression tests, offline tracking validation, service status and operational capacity evidence; no relaxed review or acceptance gates."
+    },
+    {
+      "key": "SF-068",
+      "title": "Defer physical Pi and target-image acceptance without blocking software delivery",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "baseline",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "AGENTS.md",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Apply the user instruction that Pi work must not block software progress; target issues can be resolved later.",
+      "evidence": "User explicitly requests no Pi blocking and allows working through target issues later.",
+      "acceptance": [
+        "Keep physical Pi boot, networking, power-loss and target-only integration acceptance open in SF031 without blocking unrelated software implementation or merge.",
+        "Place refreshed target-image build SF066 on hold and retain its incomplete build evidence; do not claim a new image exists or remove real software API dependencies.",
+        "Apply physical-target-only deferrals to existing and future software implementation tickets in checked-in and running acceptance policy, retaining source/security/local tests and normal automatic testnet gates.",
+        "Remove target-image prerequisites from the offline harness specification; preserve real fixture/component requirements and publish policy notes on affected PRs."
+      ],
+      "validation": "Offline tracking and policy consistency checks, dependency audit, independent documentation review; no physical hardware or new image required."
+    },
+    {
+      "key": "SF-069",
+      "title": "Implement clean-room Lambda invocation and legacy subscriptions",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-014",
+        "SF-027",
+        "SF-032",
+        "SF-037"
+      ],
+      "paths": [
+        "suifleet-edge",
+        "scripts",
+        "interfaces/compat",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Version invocation envelopes, long-lived versus on-demand lifecycle, event subscriptions, timeout/concurrency/isolation and error responses. Execute real function processes and subscription routing; generic run wrappers alone do not establish Lambda compatibility.",
+      "evidence": "SF-064 audit identifies this remaining Greengrass functional scope; existing native foundations and reference fixtures are not runtime implementation evidence.",
+      "acceptance": [
+        "Version invocation envelopes, long-lived versus on-demand lifecycle, event subscriptions, timeout/concurrency/isolation and error responses. Execute real function processes and subscription routing; generic run wrappers alone do not establish Lambda compatibility.",
+        "Pin and review exact upstream semantic/version references before implementation; preserve clean-room licensing and distinguish specification/reference models from actual component execution.",
+        "Provide meaningful local/emulator/software-runner failure and recovery evidence. Physical Pi/target acceptance is deferred under user direction; normal authorized testnet CI remains required where relevant.",
+        "Track authorized live AWS acceptance separately. No AWS account mutations, paid services, production credentials, physical programming or unsupported full-parity claims are authorized."
+      ],
+      "validation": "Function invocation, payload/error/timeout, duplicate/subscription, permissions and process-restart fixtures; clean-room licensing boundary."
+    },
+    {
+      "key": "SF-070",
+      "title": "Implement industrial Modbus and OPC UA collection with a simulator",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-027",
+        "SF-032",
+        "SF-034"
+      ],
+      "paths": [
+        "suifleet-edge",
+        "scripts",
+        "interfaces/compat",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Implement versioned configured polling/subscription, data typing/timestamps/quality and authenticated collector output. Provide deterministic local Modbus and OPC UA server simulators; bound polling/reconnect/backpressure and preserve configured protocol security.",
+      "evidence": "SF-064 audit identifies this remaining Greengrass functional scope; existing native foundations and reference fixtures are not runtime implementation evidence.",
+      "acceptance": [
+        "Implement versioned configured polling/subscription, data typing/timestamps/quality and authenticated collector output. Provide deterministic local Modbus and OPC UA server simulators; bound polling/reconnect/backpressure and preserve configured protocol security.",
+        "Pin and review exact upstream semantic/version references before implementation; preserve clean-room licensing and distinguish specification/reference models from actual component execution.",
+        "Provide meaningful local/emulator/software-runner failure and recovery evidence. Physical Pi/target acceptance is deferred under user direction; normal authorized testnet CI remains required where relevant.",
+        "Track authorized live AWS acceptance separately. No AWS account mutations, paid services, production credentials, physical programming or unsupported full-parity claims are authorized."
+      ],
+      "validation": "Actual collector-to-simulator interoperability, wrong credentials, malformed data, disconnect, resubscription and durable stream tests."
+    },
+    {
+      "key": "SF-071",
+      "title": "Implement SiteWise-compatible edge processing and publishing",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-070",
+        "SF-034",
+        "SF-057"
+      ],
+      "paths": [
+        "suifleet-edge",
+        "scripts",
+        "interfaces/compat",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Define independently reviewed SiteWise measurement/property/alias mapping, processing and buffering semantics, and implement configured publishing with bounded credentials. Validate actual request bodies and checkpoints against a local service emulator; collectors alone are not SiteWise delivery.",
+      "evidence": "SF-064 audit identifies this remaining Greengrass functional scope; existing native foundations and reference fixtures are not runtime implementation evidence.",
+      "acceptance": [
+        "Define independently reviewed SiteWise measurement/property/alias mapping, processing and buffering semantics, and implement configured publishing with bounded credentials. Validate actual request bodies and checkpoints against a local service emulator; collectors alone are not SiteWise delivery.",
+        "Pin and review exact upstream semantic/version references before implementation; preserve clean-room licensing and distinguish specification/reference models from actual component execution.",
+        "Provide meaningful local/emulator/software-runner failure and recovery evidence. Physical Pi/target acceptance is deferred under user direction; normal authorized testnet CI remains required where relevant.",
+        "Track authorized live AWS acceptance separately. No AWS account mutations, paid services, production credentials, physical programming or unsupported full-parity claims are authorized."
+      ],
+      "validation": "Transformation/quality/time tests, partial failures, rejected records, restart/checkpoints and request-checking emulator evidence; live AWS acceptance separate."
+    },
+    {
+      "key": "SF-072",
+      "title": "Implement Kinesis Video edge ingestion and durable upload",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-034",
+        "SF-057"
+      ],
+      "paths": [
+        "suifleet-edge",
+        "scripts",
+        "interfaces/compat",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Version the configured media ingestion, stream credentials and fragment/session semantics. Implement actual media path with bounded buffering, reconnect/backpressure and restart recovery; generic file streaming is not Kinesis Video compatibility.",
+      "evidence": "SF-064 audit identifies this remaining Greengrass functional scope; existing native foundations and reference fixtures are not runtime implementation evidence.",
+      "acceptance": [
+        "Version the configured media ingestion, stream credentials and fragment/session semantics. Implement actual media path with bounded buffering, reconnect/backpressure and restart recovery; generic file streaming is not Kinesis Video compatibility.",
+        "Pin and review exact upstream semantic/version references before implementation; preserve clean-room licensing and distinguish specification/reference models from actual component execution.",
+        "Provide meaningful local/emulator/software-runner failure and recovery evidence. Physical Pi/target acceptance is deferred under user direction; normal authorized testnet CI remains required where relevant.",
+        "Track authorized live AWS acceptance separately. No AWS account mutations, paid services, production credentials, physical programming or unsupported full-parity claims are authorized."
+      ],
+      "validation": "Deterministic media source and local protocol emulator verifying fragments/timestamps, interruption, expiry, rejection and replay semantics."
+    },
+    {
+      "key": "SF-073",
+      "title": "Package reproducible ML inference runtimes and classifier/detector examples",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-011",
+        "SF-023"
+      ],
+      "paths": [
+        "suifleet-edge",
+        "scripts",
+        "interfaces/compat",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Provide authenticated model/runtime components and executable classification/detection examples with pinned model/runtime versions, declared preprocessing/output tolerances and per-platform selection. Verify digests and licenses; no unsupported SageMaker service or generic-wrapper compatibility claim.",
+      "evidence": "SF-064 audit identifies this remaining Greengrass functional scope; existing native foundations and reference fixtures are not runtime implementation evidence.",
+      "acceptance": [
+        "Provide authenticated model/runtime components and executable classification/detection examples with pinned model/runtime versions, declared preprocessing/output tolerances and per-platform selection. Verify digests and licenses; no unsupported SageMaker service or generic-wrapper compatibility claim.",
+        "Pin and review exact upstream semantic/version references before implementation; preserve clean-room licensing and distinguish specification/reference models from actual component execution.",
+        "Provide meaningful local/emulator/software-runner failure and recovery evidence. Physical Pi/target acceptance is deferred under user direction; normal authorized testnet CI remains required where relevant.",
+        "Track authorized live AWS acceptance separately. No AWS account mutations, paid services, production credentials, physical programming or unsupported full-parity claims are authorized."
+      ],
+      "validation": "Actual inference on committed redistributable fixtures with expected outputs/tolerances, wrong-digest/model/version/input and unsupported-platform tests; no physical Pi required."
+    },
+    {
+      "key": "SF-074",
+      "title": "Implement Windows runtime and service integration",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-014",
+        "SF-025",
+        "SF-027"
+      ],
+      "paths": [
+        "suifleet-edge",
+        "scripts",
+        "interfaces/compat",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Specify and implement Windows process/service lifecycle, IPC authentication, filesystem/secret ACLs and component selection with supported software-runner acceptance. Preserve platform-owned reboot/OS installation and explicitly enumerate unsupported APIs.",
+      "evidence": "SF-064 audit identifies this remaining Greengrass functional scope; existing native foundations and reference fixtures are not runtime implementation evidence.",
+      "acceptance": [
+        "Specify and implement Windows process/service lifecycle, IPC authentication, filesystem/secret ACLs and component selection with supported software-runner acceptance. Preserve platform-owned reboot/OS installation and explicitly enumerate unsupported APIs.",
+        "Pin and review exact upstream semantic/version references before implementation; preserve clean-room licensing and distinguish specification/reference models from actual component execution.",
+        "Provide meaningful local/emulator/software-runner failure and recovery evidence. Physical Pi/target acceptance is deferred under user direction; normal authorized testnet CI remains required where relevant.",
+        "Track authorized live AWS acceptance separately. No AWS account mutations, paid services, production credentials, physical programming or unsupported full-parity claims are authorized."
+      ],
+      "validation": "Windows software VM/CI tests for real service start/stop/restart, descendant containment, ACL/caller denial, component install and interrupted lifecycle; physical target tests deferred."
+    },
+    {
+      "key": "SF-075",
+      "title": "Implement macOS runtime and service integration",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-014",
+        "SF-025",
+        "SF-027"
+      ],
+      "paths": [
+        "suifleet-edge",
+        "scripts",
+        "interfaces/compat",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Specify and implement macOS process/service lifecycle, IPC authentication, secret permissions and component selection on a supported software runner. Preserve platform-owned reboot/OS installation and enumerate unsupported platform APIs.",
+      "evidence": "SF-064 audit identifies this remaining Greengrass functional scope; existing native foundations and reference fixtures are not runtime implementation evidence.",
+      "acceptance": [
+        "Specify and implement macOS process/service lifecycle, IPC authentication, secret permissions and component selection on a supported software runner. Preserve platform-owned reboot/OS installation and enumerate unsupported platform APIs.",
+        "Pin and review exact upstream semantic/version references before implementation; preserve clean-room licensing and distinguish specification/reference models from actual component execution.",
+        "Provide meaningful local/emulator/software-runner failure and recovery evidence. Physical Pi/target acceptance is deferred under user direction; normal authorized testnet CI remains required where relevant.",
+        "Track authorized live AWS acceptance separately. No AWS account mutations, paid services, production credentials, physical programming or unsupported full-parity claims are authorized."
+      ],
+      "validation": "macOS software-runner tests for actual service lifecycle, descendant containment, permissions/caller negatives, install and restart recovery; physical target tests deferred."
+    },
+    {
+      "key": "SF-076",
+      "title": "Implement and validate Linux x86 32-bit runtime packaging",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-023",
+        "SF-025"
+      ],
+      "paths": [
+        "suifleet-edge",
+        "scripts",
+        "interfaces/compat",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Declare supported 32-bit Linux ABI/toolchain and implement build/packaging and component platform selection. Exercise actual 32-bit runtime under a software runner/emulator without claiming x86_64 tests establish 32-bit compatibility.",
+      "evidence": "SF-064 audit identifies this remaining Greengrass functional scope; existing native foundations and reference fixtures are not runtime implementation evidence.",
+      "acceptance": [
+        "Declare supported 32-bit Linux ABI/toolchain and implement build/packaging and component platform selection. Exercise actual 32-bit runtime under a software runner/emulator without claiming x86_64 tests establish 32-bit compatibility.",
+        "Pin and review exact upstream semantic/version references before implementation; preserve clean-room licensing and distinguish specification/reference models from actual component execution.",
+        "Provide meaningful local/emulator/software-runner failure and recovery evidence. Physical Pi/target acceptance is deferred under user direction; normal authorized testnet CI remains required where relevant.",
+        "Track authorized live AWS acceptance separately. No AWS account mutations, paid services, production credentials, physical programming or unsupported full-parity claims are authorized."
+      ],
+      "validation": "Actual 32-bit binary/package build, software runtime lifecycle/IPC/identity/OTA fixtures, incompatible artifact rejection and documented limitations."
+    },
+    {
+      "key": "SF-077",
+      "title": "Implement Firehose durable stream export",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-034",
+        "SF-057"
+      ],
+      "paths": [
+        "suifleet-edge",
+        "scripts",
+        "interfaces/compat",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Implement versioned Firehose export over configured durable streams and scoped credentials, including batch request limits, per-record partial results and checkpoint/retry semantics. Reuse stream foundations without presenting Kinesis Data Streams as Firehose.",
+      "evidence": "SF-064 audit identifies this remaining Greengrass functional scope; existing native foundations and reference fixtures are not runtime implementation evidence.",
+      "acceptance": [
+        "Implement versioned Firehose export over configured durable streams and scoped credentials, including batch request limits, per-record partial results and checkpoint/retry semantics. Reuse stream foundations without presenting Kinesis Data Streams as Firehose.",
+        "Pin and review exact upstream semantic/version references before implementation; preserve clean-room licensing and distinguish specification/reference models from actual component execution.",
+        "Provide meaningful local/emulator/software-runner failure and recovery evidence. Physical Pi/target acceptance is deferred under user direction; normal authorized testnet CI remains required where relevant.",
+        "Track authorized live AWS acceptance separately. No AWS account mutations, paid services, production credentials, physical programming or unsupported full-parity claims are authorized."
+      ],
+      "validation": "Actual exporter/local emulator request assertions, partial failures, outage, credential expiry and restart/checkpoint tests; live AWS acceptance separate."
+    },
+    {
+      "key": "SF-078",
+      "title": "Implement SNS publication and event routing",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-032",
+        "SF-057"
+      ],
+      "paths": [
+        "suifleet-edge",
+        "scripts",
+        "interfaces/compat",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Implement explicitly configured versioned SNS topic publication and event routing using scoped credentials, declared payload/attribute semantics, backpressure and bounded delivery/retry behavior. Enforce per-component/topic grants; do not imply SNS server-side service replication.",
+      "evidence": "SF-064 audit identifies this remaining Greengrass functional scope; existing native foundations and reference fixtures are not runtime implementation evidence.",
+      "acceptance": [
+        "Implement explicitly configured versioned SNS topic publication and event routing using scoped credentials, declared payload/attribute semantics, backpressure and bounded delivery/retry behavior. Enforce per-component/topic grants; do not imply SNS server-side service replication.",
+        "Pin and review exact upstream semantic/version references before implementation; preserve clean-room licensing and distinguish specification/reference models from actual component execution.",
+        "Provide meaningful local/emulator/software-runner failure and recovery evidence. Physical Pi/target acceptance is deferred under user direction; normal authorized testnet CI remains required where relevant.",
+        "Track authorized live AWS acceptance separately. No AWS account mutations, paid services, production credentials, physical programming or unsupported full-parity claims are authorized."
+      ],
+      "validation": "Actual publisher/local emulator tests for messages/attributes, caller/topic denial, throttling, lost responses, retry/duplicate behavior and restart; live AWS acceptance separate."
+    },
+    {
+      "key": "SF-079",
+      "title": "Implement authenticated local support debug console",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-019",
+        "SF-027",
+        "SF-053"
+      ],
+      "paths": [
+        "suifleet-edge",
+        "scripts",
+        "interfaces/compat",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Implement a versioned local diagnostic console with authenticated authorization-scoped inventory, health and configured support operations. Default to loopback/local access, redact secrets before output and audit operations; a public unauthenticated admin console is forbidden.",
+      "evidence": "SF-064 audit identifies this remaining Greengrass functional scope; existing native foundations and reference fixtures are not runtime implementation evidence.",
+      "acceptance": [
+        "Implement a versioned local diagnostic console with authenticated authorization-scoped inventory, health and configured support operations. Default to loopback/local access, redact secrets before output and audit operations; a public unauthenticated admin console is forbidden.",
+        "Pin and review exact upstream semantic/version references before implementation; preserve clean-room licensing and distinguish specification/reference models from actual component execution.",
+        "Provide meaningful local/emulator/software-runner failure and recovery evidence. Physical Pi/target acceptance is deferred under user direction; normal authorized testnet CI remains required where relevant.",
+        "Track authorized live AWS acceptance separately. No AWS account mutations, paid services, production credentials, physical programming or unsupported full-parity claims are authorized."
+      ],
+      "validation": "Actual console/API auth, CSRF/origin where applicable, role/caller denial, redaction, bounded queries and audit tests; no production exposure or credentials provisioned."
     }
   ]
 }

@@ -1,0 +1,477 @@
+{
+  "ticket": "SF-065",
+  "agent": "Claude",
+  "model": "claude-opus-5-5",
+  "date": "2026-10-16",
+  "scope": "Public-testnet run of scripts/edge_acceptance.py with a local stand-in device and a loopback Walrus stand-in. Not Raspberry Pi, extension-wallet, public-Walrus or SF-022 evidence; SF-031/#32 stays open.",
+  "fixture": {
+    "note": "published by scripts/live_package_upgrade.py --base-ref HEAD (current contracts); cached in the agent wallet's live-state.json",
+    "contracts_digest": "0329a8409243c63eff18cea9",
+    "package": "0x3950bbbc43c451b612ea52acbaa8ea77f1fd61a25e2bdadf4cde98fa5a63b634",
+    "registry": "0x2342f5add855fd3b80c0888ef0fdab0a3be2e5f84bac3b7ea44f7fbddd67e809",
+    "upgrade_cap": "0x117c05c02cc1f11233e635c4856cb75026111642714da70c774717a2f4c8eeb4",
+    "live_gate_checks": [
+      "base package 0x3950bbbc43c451b612ea52acbaa8ea77f1fd61a25e2bdadf4cde98fa5a63b634 published; device, cap and group created with it",
+      "head contracts equal the base contracts; no upgrade to test",
+      "head package 0x3950bbbc43c451b612ea52acbaa8ea77f1fd61a25e2bdadf4cde98fa5a63b634 (package version 1); manifest verified over gRPC",
+      "head-package deployment to the device: applied, receipt Applied on chain",
+      "head-package deployment to the pre-upgrade group: applied via report_status_for_group",
+      "deployment created through the OLD package's entry point: applied and receipted (mixed versions)",
+      "injected health failure reported Failed on chain"
+    ],
+    "live_gate_transactions": [
+      {
+        "label": "publish base",
+        "digest": "FKEkhzjy3J16P8PrVrjpayDitKEKGsXxScQvmF8FkZMz",
+        "status": "success",
+        "gas_mist": 185109200,
+        "funding_mist": 0
+      },
+      {
+        "label": "register device + issue cap (base)",
+        "digest": "CBvpK6Uids1FHmnZ4DaHpwZCm8qoiC2yQ9k6CDuHaPMS",
+        "status": "success",
+        "gas_mist": 8425378,
+        "funding_mist": 0
+      },
+      {
+        "label": "add device to group (base)",
+        "digest": "3Ah9CiZQtdAbzQLZSsBT3gQNuVat6bRq1VEZTFVha6HH",
+        "status": "success",
+        "gas_mist": 1243578,
+        "funding_mist": 0
+      },
+      {
+        "label": "activate identity in registry custody",
+        "digest": "4FUkjB5xt3V5CLhEVhqyBVE2gsKLXn3eVm2qStrH9kp2",
+        "status": "success",
+        "gas_mist": 8737163,
+        "funding_mist": 0
+      },
+      {
+        "label": "top up device gas",
+        "digest": "9mrvhGU8r2wFRMtjhYj3t6CEVsyU3nZzk63J6QMCY2Xy",
+        "status": "success",
+        "gas_mist": 1000099,
+        "funding_mist": 30000000
+      },
+      {
+        "label": "create 3 deployments via head",
+        "digest": "D1gc8h8K1criA8xiHRj73T5axna6bCV5WEhTguCU7v9h",
+        "status": "success",
+        "gas_mist": 38072800,
+        "funding_mist": 0
+      },
+      {
+        "label": "create 1 deployment via base",
+        "digest": "HBDW2DxGFWP8jtdhtKVWRyFFH8tRFmwCWXM4xQjru6y",
+        "status": "success",
+        "gas_mist": 13357600,
+        "funding_mist": 0
+      },
+      {
+        "label": "bounded abort cleanup",
+        "digest": "A2GLpAodgkiVj4UpZfsSZ3hzP2Rq9AozbSvXuHMG6TWF",
+        "status": "success",
+        "gas_mist": 0,
+        "funding_mist": 0
+      }
+    ],
+    "live_gate_allowance_used_mist": 285945818,
+    "live_gate_note": "on-chain checks passed; its final independent Node effects proof (testnet_receipt_effects.cjs) exited 1 on this host, so that gate run is not a full pass"
+  },
+  "interrupted_attempt": {
+    "note": "first harness attempt stopped when the host disk filled (coordinator lock-assert failed, so no further mutation ran); leftovers found by read-only GraphQL and deleted",
+    "leftover_cleanup_digest": "Bqt7ugyEUh1zFpoTw2ep7Z38jbf8SbsWWWbw2hZYwtuH",
+    "status": "success",
+    "net_gas_mist": -15824540
+  },
+  "harness_run": {
+    "schema": 1,
+    "harness": "scripts/edge_acceptance.py",
+    "started": "2026-10-16T14:31:23Z",
+    "profile": "testnet",
+    "wallet_mode": "scripted",
+    "artifact_profile": "public",
+    "device_mode": "local",
+    "tools": {
+      "sui": "sui 1.81.1-e04cf9aa915c",
+      "python": "3.10.12",
+      "git_head": "a80784b97f41492558ad33bcb753a0a20505a3a0"
+    },
+    "transactions": [
+      {
+        "label": "register decoy device",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "CMynbsWBKLST9VZfpc9h8c9uQP4wt2WV9GuczhKpA1kF",
+        "gas_mist": 2976178,
+        "allowance_used_mist": 2976178,
+        "source": "scripted"
+      },
+      {
+        "label": "create group",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "5zCgXKC4NPm33W4hmKuESYzu6tquVuX2eLxSj9d17nZ",
+        "gas_mist": 3097600,
+        "allowance_used_mist": 6073778,
+        "source": "scripted"
+      },
+      {
+        "label": "add device to group",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "GVgJgnao5Qzyucw8rdRDJ1x3F1gyBnvu61SiVRk3XH4u",
+        "gas_mist": 1243753,
+        "allowance_used_mist": 7317531,
+        "source": "scripted"
+      },
+      {
+        "label": "create direct v1",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "8ay3tGFVv7rgbGHogGapHmR8S5QrcgdPEMETEXQVauqm",
+        "gas_mist": 13509600,
+        "allowance_used_mist": 20827131,
+        "source": "scripted"
+      },
+      {
+        "label": "fund device report gas",
+        "gas_budget_mist": 199172869,
+        "funding_mist": 30000000,
+        "status": "success",
+        "digest": "ALoxbcRjYkeMZG87eXjf5cGqjtcwvehT2eEfHVqzemGs",
+        "gas_mist": 1988000,
+        "allowance_used_mist": 52815131,
+        "source": "scripted"
+      },
+      {
+        "label": "create group v2",
+        "gas_budget_mist": 197184869,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "83HLgg8enNbnyKjz85bHh7fa91QuHxveVRgtMSsMjy1u",
+        "gas_mist": 13509600,
+        "allowance_used_mist": 66324731,
+        "source": "scripted"
+      },
+      {
+        "label": "create failure-path deployments",
+        "gas_budget_mist": 183675269,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "BaUoJWEj81fyCRZkvm1L42dNRfkxyQEkgijX5XSJ9eou",
+        "gas_mist": 63548000,
+        "allowance_used_mist": 129872731,
+        "source": "scripted"
+      },
+      {
+        "label": "create deployment while the daemon is stopped",
+        "gas_budget_mist": 120127269,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "57HXSFkBUkenqoKbxMxe1DBvP1UqAeUUnNpYkVifWsZ5",
+        "gas_mist": 13509600,
+        "allowance_used_mist": 143382331,
+        "source": "scripted"
+      },
+      {
+        "label": "delete test deployments",
+        "gas_budget_mist": 106617669,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "9Y8Xv8wnHcwWaZHAJPKWysgyr4jZvL5fhJWWjkDPUDiU",
+        "gas_mist": 0,
+        "allowance_used_mist": 143382331,
+        "source": "scripted"
+      },
+      {
+        "label": "delete acceptance group",
+        "gas_budget_mist": 106617669,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "DHEz4t4yLetPDnJVVgBPn8KXsJAwoCo27SyFbGV3HD3o",
+        "gas_mist": 0,
+        "allowance_used_mist": 143382331,
+        "source": "scripted"
+      },
+      {
+        "label": "deregister decoy device",
+        "gas_budget_mist": 106617669,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "FFGGYeiCUK2PH6mEknriT27MThikHqKCr1UuxiUrFa66",
+        "gas_mist": 0,
+        "allowance_used_mist": 143382331,
+        "source": "scripted"
+      }
+    ],
+    "chain": "4c78adac",
+    "operator": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+    "start_balance_mist": 551691390,
+    "device": {
+      "kind": "local-stand-in",
+      "arch": "x86_64",
+      "binary_sha256": "c106e419c77fa89b9a5609cb87a6992192406dec3c4b75fcc3abbccda144bcf0",
+      "updater_sha256": "ed6f56c9c63ede1e2c71b1db1b40fa1504e13866ff62485cb268187c37dd4400",
+      "address": "0x29be4c0e2124a86bf5d2fd4716f5717099e53043f7663379925edabefae7bcdd",
+      "key_mode": "0o600"
+    },
+    "manifest_package": "0x3950bbbc43c451b612ea52acbaa8ea77f1fd61a25e2bdadf4cde98fa5a63b634",
+    "registry": "0x2342f5add855fd3b80c0888ef0fdab0a3be2e5f84bac3b7ea44f7fbddd67e809",
+    "run_id": "accept-e02710f8d9fd",
+    "artifacts": {
+      "pre": {
+        "version": "0.9.0",
+        "fail": "none",
+        "artifact_sha256": "f3719c9cf305b001ca0d327dc2dc6cd71891b8604a19a53f48200d100b61f3dd",
+        "served_sha256": "f3719c9cf305b001ca0d327dc2dc6cd71891b8604a19a53f48200d100b61f3dd",
+        "artifact_blob": "artifact-accept-e02710f8d9fd-0-9-0",
+        "recipe_blob": "recipe-accept-e02710f8d9fd-0-9-0",
+        "recipe_sha256": "1b104f305143bb46e1ae85cee8eb50669b7afcdf1017c3eaa62d7c1020f2c60e",
+        "bytes": 1402
+      },
+      "v1": {
+        "version": "1.0.0",
+        "fail": "none",
+        "artifact_sha256": "2f3f38b3f3ee5e3e1063cd03f6c1ca1dcc5c1820965769af91ddb8dc320e2555",
+        "served_sha256": "2f3f38b3f3ee5e3e1063cd03f6c1ca1dcc5c1820965769af91ddb8dc320e2555",
+        "artifact_blob": "artifact-accept-e02710f8d9fd-1-0-0",
+        "recipe_blob": "recipe-accept-e02710f8d9fd-1-0-0",
+        "recipe_sha256": "049cefc609de9c798d2818a0a00fb46ed96790290cf147fc9c16a221359d8cf8",
+        "bytes": 1402
+      },
+      "v2": {
+        "version": "2.0.0",
+        "fail": "none",
+        "artifact_sha256": "8a5b561e7c8bd387e9425af72d624d2334009408ee05646e4d21363bc44bfa72",
+        "served_sha256": "8a5b561e7c8bd387e9425af72d624d2334009408ee05646e4d21363bc44bfa72",
+        "artifact_blob": "artifact-accept-e02710f8d9fd-2-0-0",
+        "recipe_blob": "recipe-accept-e02710f8d9fd-2-0-0",
+        "recipe_sha256": "f811846f5c02a97d69717f7acb918eec002bfbfbc8543039b073300f4f3c9c3d",
+        "bytes": 1402
+      },
+      "install-fail": {
+        "version": "3.0.0",
+        "fail": "install",
+        "artifact_sha256": "3d330485cb017cd851e57b4bf9a2e8fe29d39dc4a1165ca8a10173ca8380dd33",
+        "served_sha256": "3d330485cb017cd851e57b4bf9a2e8fe29d39dc4a1165ca8a10173ca8380dd33",
+        "artifact_blob": "artifact-accept-e02710f8d9fd-3-0-0",
+        "recipe_blob": "recipe-accept-e02710f8d9fd-3-0-0",
+        "recipe_sha256": "274fcf11dd193252ff27f3d57eda3c2458003059ea25ff0df761346ed9960139",
+        "bytes": 1408
+      },
+      "health-fail": {
+        "version": "3.1.0",
+        "fail": "health",
+        "artifact_sha256": "2d84752132e251e9da34f2f6d659f31c41398b07b09bfcf412c3432e995e3d15",
+        "served_sha256": "2d84752132e251e9da34f2f6d659f31c41398b07b09bfcf412c3432e995e3d15",
+        "artifact_blob": "artifact-accept-e02710f8d9fd-3-1-0",
+        "recipe_blob": "recipe-accept-e02710f8d9fd-3-1-0",
+        "recipe_sha256": "030e8271ffc0efe8d7c66ac03fbee942c1f25d4411ae61446159e60839850200",
+        "bytes": 1406
+      },
+      "recipe-tamper": {
+        "version": "3.2.0",
+        "fail": "none",
+        "artifact_sha256": "931d25f64ed07b215540692a96f8ea3586b5c132bfbd6feae36aaf60ababdf38",
+        "served_sha256": "931d25f64ed07b215540692a96f8ea3586b5c132bfbd6feae36aaf60ababdf38",
+        "artifact_blob": "artifact-accept-e02710f8d9fd-3-2-0",
+        "recipe_blob": "recipe-accept-e02710f8d9fd-3-2-0",
+        "recipe_sha256": "eff6ceb1d81f8fa097b46bc8ce3c55c8a20ad3dfd402be7cbd31e5913ea679fa",
+        "bytes": 1402
+      },
+      "artifact-tamper": {
+        "version": "3.3.0",
+        "fail": "none",
+        "artifact_sha256": "ec6fa84e761f57f5069d7e1af56e061e49110a0d20c74e1a9d631c2a75f83e9b",
+        "served_sha256": "07c807ae9107a2fa799807cdfc6e69baf1b5e8b983971d2e3eb8898b8d347370",
+        "artifact_blob": "artifact-tampered-accept-e02710f8d9fd-3-3-0",
+        "recipe_blob": "recipe-accept-e02710f8d9fd-3-3-0",
+        "recipe_sha256": "af39423c518a0865385e43f6b551ba81a4593d689b158ba2d02360d2baa9c136",
+        "bytes": 1402
+      },
+      "elsewhere": {
+        "version": "3.4.0",
+        "fail": "none",
+        "artifact_sha256": "ccbb98f44331a861d1d706897eea7fa43b8f40f22e3ac003898a5a9ed21d8ef6",
+        "served_sha256": "ccbb98f44331a861d1d706897eea7fa43b8f40f22e3ac003898a5a9ed21d8ef6",
+        "artifact_blob": "artifact-accept-e02710f8d9fd-3-4-0",
+        "recipe_blob": "recipe-accept-e02710f8d9fd-3-4-0",
+        "recipe_sha256": "db305a2c2e53575a4f168a38ddf50a4e1122f47803ce43962aad6860e2fc0df5",
+        "bytes": 1402
+      },
+      "offline": {
+        "version": "4.0.0",
+        "fail": "none",
+        "artifact_sha256": "035bfc883a3c9cff00ca17926c54a7fc77477fd705dab6b6b9fb644dd461872f",
+        "served_sha256": "035bfc883a3c9cff00ca17926c54a7fc77477fd705dab6b6b9fb644dd461872f",
+        "artifact_blob": "artifact-accept-e02710f8d9fd-4-0-0",
+        "recipe_blob": "recipe-accept-e02710f8d9fd-4-0-0",
+        "recipe_sha256": "07aba8eb9e54ac19ca827ac2643cd302a36d497fc236239fe9c965956be506d6",
+        "bytes": 1402
+      }
+    },
+    "enrollment": {
+      "device": "0xd840e66d62e725f97f887a768d5edb89653f4d6a23b85ca10e00517fc6bfa9e9",
+      "cap": "0xab70b727598d6c2c26a4541badf8d0db2946d8eed762002637650503ff455c16",
+      "owner_cap": "0xc9a0bedaafd5a24ee6a239c8934232e968f87bd3922726baf8837d5e1a776eac",
+      "address": "0x29be4c0e2124a86bf5d2fd4716f5717099e53043f7663379925edabefae7bcdd",
+      "source": "existing enrollment named by the profile"
+    },
+    "test_objects": {
+      "deployments": [
+        "0x3de1c07074d1e85ce8939cfc7090a86d70751ba03272cf75e56da5016b61cfdc",
+        "0xe5883889973b8070df9ca8fafd2f2b6d4c64c266d85f367c619ab3ea30d4a215",
+        "0x1718a90f22bd96f109ed74326b9a24ead8f5f8b0582d454abc08151cf6c7d3a1",
+        "0x4c977799badce899092bfc951843dd3227d3d255717e4b77655dbc978d518a6f",
+        "0x801dbf319cbdfcc35e99dde0150ad56b2c84c2a257adadbb5b50e15a07082781",
+        "0xa99c7f68a22e893b4d6d39bb96794ba0be3f09595ebc35b9242a5d524f567f06",
+        "0xd05299893041c943330e1709b86b7588ce43cc095f7fe668c273a5b76f118368",
+        "0x5a5d5178a308ba79a720b816aeed1397372d41301c7442d6b1cde2d5f369e551"
+      ],
+      "group": "0x96ca5be7c29d46551e2407cd26470d2d685b666680deaed7ca5d4b4143e93fc9",
+      "decoy": "0x507b452ed10b3bb74c580fef3b36bc69d0dadb75019f26c684991d3929ebdd6f",
+      "device": "0xd840e66d62e725f97f887a768d5edb89653f4d6a23b85ca10e00517fc6bfa9e9"
+    },
+    "device_manifest_walrus": {
+      "publisher_url": "http://127.0.0.1:39013",
+      "aggregator_url": "http://127.0.0.1:39013"
+    },
+    "spent_mist": 143382331,
+    "device_log_tail": "g is skipped)\n\u001b[2m2026-10-16T14:32:12.066230Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Sync failed; retrying without advancing cursor \u001b[3merror\u001b[0m\u001b[2m=\u001b[0mevent history before checkpoint 392765723 is pruned on this node, but this device resumes at checkpoint 0; point rpc_url at a node that retains it (nothing is skipped)\n\u001b[2m2026-10-16T14:32:18.581070Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Daemon started with durable deployment polling \u001b[3maddress\u001b[0m\u001b[2m=\u001b[0m\"0x29be4c0e2124a86bf5d2fd4716f5717099e53043f7663379925edabefae7bcdd\"\n\u001b[2m2026-10-16T14:32:19.921115Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Deployment admission notice (UTC); no disruptive work started \u001b[3mdeployment\u001b[0m\u001b[2m=\u001b[0m\"0x5a5d5178a308ba79a720b816aeed1397372d41301c7442d6b1cde2d5f369e551\" \u001b[3mreason\u001b[0m\u001b[2m=\u001b[0m\"ready for admission\" \u001b[3mnotice_ms\u001b[0m\u001b[2m=\u001b[0m0\n\u001b[2m2026-10-16T14:32:20.009684Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msuifleet::walrus_client\u001b[0m\u001b[2m:\u001b[0m Downloading blob artifact-accept-e02710f8d9fd-4-0-0 from http://127.0.0.1:39013/v1/blobs/artifact-accept-e02710f8d9fd-4-0-0\n\u001b[2m2026-10-16T14:32:20.016918Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msuifleet::walrus_client\u001b[0m\u001b[2m:\u001b[0m Downloaded 1402 bytes, sha256=035bfc883a3c9cff00ca17926c54a7fc77477fd705dab6b6b9fb644dd461872f\n\u001b[2m2026-10-16T14:32:20.193837Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Apply admitted; subsequent control changes do not interrupt this plan \u001b[3mdeployment\u001b[0m\u001b[2m=\u001b[0m\"0x5a5d5178a308ba79a720b816aeed1397372d41301c7442d6b1cde2d5f369e551\"\n\u001b[2m2026-10-16T14:32:20.229807Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Component installed \u001b[3mdeployment\u001b[0m\u001b[2m=\u001b[0m\"0x5a5d5178a308ba79a720b816aeed1397372d41301c7442d6b1cde2d5f369e551\" \u001b[3mcomponent\u001b[0m\u001b[2m=\u001b[0m\"suifleet-test-app\" \u001b[3mversion\u001b[0m\u001b[2m=\u001b[0m\"4.0.0\"\n\u001b[2m2026-10-16T14:32:20.229899Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Deployment finished \u001b[3mdeployment\u001b[0m\u001b[2m=\u001b[0m\"0x5a5d5178a308ba79a720b816aeed1397372d41301c7442d6b1cde2d5f369e551\" \u001b[3mstatus\u001b[0m\u001b[2m=\u001b[0m1 \u001b[3merror\u001b[0m\u001b[2m=\u001b[0mNone\n\u001b[2m2026-10-16T14:32:20.324468Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Sync failed; retrying without advancing cursor \u001b[3merror\u001b[0m\u001b[2m=\u001b[0mevent history before checkpoint 392765723 is pruned on this node, but this device resumes at checkpoint 0; point rpc_url at a node that retains it (nothing is skipped)\n\u001b[2m2026-10-16T14:32:23.005360Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Sync failed; retrying without advancing cursor \u001b[3merror\u001b[0m\u001b[2m=\u001b[0mevent history before checkpoint 392765723 is pruned on this node, but this device resumes at checkpoint 0; point rpc_url at a node that retains it (nothing is skipped)\n\u001b[2m2026-10-16T14:32:24.581661Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Daemon started with durable deployment polling \u001b[3maddress\u001b[0m\u001b[2m=\u001b[0m\"0x29be4c0e2124a86bf5d2fd4716f5717099e53043f7663379925edabefae7bcdd\"\n\u001b[2m2026-10-16T14:32:24.330849Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Sync failed; retrying without advancing cursor \u001b[3merror\u001b[0m\u001b[2m=\u001b[0mevent history before checkpoint 392765723 is pruned on this node, but this device resumes at checkpoint 0; point rpc_url at a node that retains it (nothing is skipped)\n\u001b[2m2026-10-16T14:32:26.131925Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Sync failed; retrying without advancing cursor \u001b[3merror\u001b[0m\u001b[2m=\u001b[0mevent history before checkpoint 392765723 is pruned on this node, but this device resumes at checkpoint 0; point rpc_url at a node that retains it (nothing is skipped)\n\u001b[2m2026-10-16T14:32:27.936324Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Sync failed; retrying without advancing cursor \u001b[3merror\u001b[0m\u001b[2m=\u001b[0mevent history before checkpoint 392765723 is pruned on this node, but this device resumes at checkpoint 0; point rpc_url at a node that retains it (nothing is skipped)\n\u001b[2m2026-10-16T14:32:29.734988Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Sync failed; retrying without advancing cursor \u001b[3merror\u001b[0m\u001b[2m=\u001b[0mevent history before checkpoint 392765723 is pruned on this node, but this device resumes at checkpoint 0; point rpc_url at a node that retains it (nothing is skipped)\n\u001b[2m2026-10-16T14:32:31.548036Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Sync failed; retrying without advancing cursor \u001b[3merror\u001b[0m\u001b[2m=\u001b[0mevent history before checkpoint 392765723 is pruned on this node, but this device resumes at checkpoint 0; point rpc_url at a node that retains it (nothing is skipped)\n\u001b[2m2026-10-16T14:32:33.344999Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Sync failed; retrying without advancing cursor \u001b[3merror\u001b[0m\u001b[2m=\u001b[0mevent history before checkpoint 392765723 is pruned on this node, but this device resumes at checkpoint 0; point rpc_url at a node that retains it (nothing is skipped)\n\u001b[2m2026-10-16T14:32:35.138378Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Sync failed; retrying without advancing cursor \u001b[3merror\u001b[0m\u001b[2m=\u001b[0mevent history before checkpoint 392765723 is pruned on this node, but this device resumes at checkpoint 0; point rpc_url at a node that retains it (nothing is skipped)\n\u001b[2m2026-10-16T14:32:36.939421Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Sync failed; retrying without advancing cursor \u001b[3merror\u001b[0m\u001b[2m=\u001b[0mevent history before checkpoint 392765723 is pruned on this node, but this device resumes at checkpoint 0; point rpc_url at a node that retains it (nothing is skipped)\n\u001b[2m2026-10-16T14:32:38.732950Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Sync failed; retrying without advancing cursor \u001b[3merror\u001b[0m\u001b[2m=\u001b[0mevent history before checkpoint 392765723 is pruned on this node, but this device resumes at checkpoint 0; point rpc_url at a node that retains it (nothing is skipped)\n\u001b[2m2026-10-16T14:32:40.516507Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Sync failed; retrying without advancing cursor \u001b[3merror\u001b[0m\u001b[2m=\u001b[0mevent history before checkpoint 392765723 is pruned on this node, but this device resumes at checkpoint 0; point rpc_url at a node that retains it (nothing is skipped)\n",
+    "cases": {
+      "preflight": {
+        "status": "passed",
+        "capability": "network, manifest, account, funding, Walrus and device preflight",
+        "detail": "chain 4c78adac, package 0x3950bbbc43c451b612ea52acbaa8ea77f1fd61a25e2bdadf4cde98fa5a63b634, operator 0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965, 551691390 MIST, device local-stand-in x86_64 0x29be4c0e2124a86bf5d2fd4716f5717099e53043f7663379925edabefae7bcdd"
+      },
+      "image-identity": {
+        "status": "skipped",
+        "capability": "SF-029 image: aarch64, packaged binary/updater hashes, first-boot identity and key mode",
+        "detail": "local stand-in device; physical Raspberry Pi evidence is required (SF-031)"
+      },
+      "artifacts": {
+        "status": "passed",
+        "capability": "isolated test-component artifacts and recipes uploaded and read back by SHA-256",
+        "detail": "9 artifacts/recipes for run accept-e02710f8d9fd, read back by SHA-256"
+      },
+      "enrollment": {
+        "status": "passed",
+        "capability": "register/issue-cap/activate through the wallet, verified effects; enrolled daemon started before any test deployment",
+        "detail": "device 0xd840e66d62e725f97f887a768d5edb89653f4d6a23b85ca10e00517fc6bfa9e9, cap 0xab70b727598d6c2c26a4541badf8d0db2946d8eed762002637650503ff455c16 (existing enrollment named by the profile); daemon enrolled before any test deployment"
+      },
+      "baseline-skip": {
+        "status": "skipped",
+        "capability": "a deployment created before enrollment never runs",
+        "detail": "the device journal already has a cursor; first-enrollment baseline needs a fresh device state"
+      },
+      "direct-v1": {
+        "status": "passed",
+        "capability": "direct deployment v1: Applied on chain, device receipt names v1, this run ID and the artifact SHA-256",
+        "detail": "deployment 0x3de1c07074d1e85ce8939cfc7090a86d70751ba03272cf75e56da5016b61cfdc: Applied on chain; receipt v1, run accept-e02710f8d9fd"
+      },
+      "report-retry": {
+        "status": "passed",
+        "capability": "apply succeeds while the device cannot pay for its report; the report is retried once gas arrives",
+        "detail": "applied while unable to pay; Applied receipt after gas arrived"
+      },
+      "group-v2": {
+        "status": "passed",
+        "capability": "group deployment v2: Applied on chain, device receipt names v2",
+        "detail": "deployment 0xe5883889973b8070df9ca8fafd2f2b6d4c64c266d85f367c619ab3ea30d4a215 via group 0x96ca5be7c29d46551e2407cd26470d2d685b666680deaed7ca5d4b4143e93fc9: Applied on chain"
+      },
+      "updater-install-failure": {
+        "status": "passed",
+        "capability": "injected install failure: Failed on chain, previous version kept",
+        "detail": "deployment 0xa99c7f68a22e893b4d6d39bb96794ba0be3f09595ebc35b9242a5d524f567f06: Failed on chain, outcome apply command failed with exit code 10"
+      },
+      "updater-health-failure": {
+        "status": "passed",
+        "capability": "injected health failure: Failed on chain, receipt says health failed",
+        "detail": "deployment 0x4c977799badce899092bfc951843dd3227d3d255717e4b77655dbc978d518a6f: Failed on chain, outcome apply command failed with exit code 20"
+      },
+      "recipe-tamper": {
+        "status": "passed",
+        "capability": "recipe bytes not matching the on-chain digest: Failed, updater never invoked",
+        "detail": "deployment 0x1718a90f22bd96f109ed74326b9a24ead8f5f8b0582d454abc08151cf6c7d3a1: Failed on chain, outcome recipe SHA-256 mismatch"
+      },
+      "artifact-tamper": {
+        "status": "passed",
+        "capability": "artifact bytes not matching the authenticated hash: Failed, updater never invoked",
+        "detail": "deployment 0x801dbf319cbdfcc35e99dde0150ad56b2c84c2a257adadbb5b50e15a07082781: Failed on chain, outcome SHA-256 mismatch: expected ec6fa84e761f57f5069d7e1af56e061e49110a0d20c74e1a9d631c2a75f83e9b got 07c807ae9107a2fa799807cdfc6e69baf1b5e8b983971d2e3eb8898b8d347370"
+      },
+      "unauthorized-target": {
+        "status": "passed",
+        "capability": "deployment for another device never runs on this one",
+        "detail": "deployment 0xd05299893041c943330e1709b86b7588ce43cc095f7fe668c273a5b76f118368 for decoy 0x507b452ed10b3bb74c580fef3b36bc69d0dadb75019f26c684991d3929ebdd6f never ran"
+      },
+      "offline-catch-up": {
+        "status": "passed",
+        "capability": "deployment created while the daemon is stopped is applied after it starts",
+        "detail": "deployment 0x5a5d5178a308ba79a720b816aeed1397372d41301c7442d6b1cde2d5f369e551 created while stopped: Applied after start"
+      },
+      "daemon-restart": {
+        "status": "passed",
+        "capability": "daemon restart keeps the journal and replays no applied work",
+        "detail": "journal kept 7 outcomes; no replay"
+      },
+      "key-journal-preserved": {
+        "status": "passed",
+        "capability": "device key digest, address and journal unchanged by the run",
+        "detail": "key digest and address unchanged; journal present"
+      },
+      "cleanup": {
+        "status": "passed",
+        "capability": "test-owned deployments, group and decoy device deleted; device identity kept",
+        "detail": "8 deployments, group and decoy deleted; device 0xd840e66d62e725f97f887a768d5edb89653f4d6a23b85ca10e00517fc6bfa9e9 kept"
+      },
+      "extension-wallet": {
+        "status": "blocked",
+        "capability": "a real browser-extension wallet signed enrollment and deployments in the dApp",
+        "detail": "scripted test-account automation does not establish browser-wallet behavior; run an extension-wallet profile"
+      },
+      "encrypted-delivery": {
+        "status": "blocked",
+        "capability": "SF-022 Seal-encrypted artifact/recipe: permitted device decrypts; unauthorized, revoked, tampered and key-service failure never run",
+        "detail": "SF-022 Seal-encrypted delivery is not implemented; the public-artifact baseline does not establish it"
+      },
+      "supervised-lifecycle": {
+        "status": "skipped",
+        "capability": "SF-014 supervised run/stop/restart of a component on the Pi",
+        "detail": "not exercised by the public-artifact baseline; add a case when acceptance covers it"
+      },
+      "component-configuration": {
+        "status": "skipped",
+        "capability": "SF-015 configuration merge/reset on the Pi",
+        "detail": "not exercised by the public-artifact baseline; add a case when acceptance covers it"
+      },
+      "desired-state": {
+        "status": "skipped",
+        "capability": "SF-013 desired-state reconciliation on the Pi",
+        "detail": "not exercised by the public-artifact baseline; add a case when acceptance covers it"
+      },
+      "daemon-self-update": {
+        "status": "skipped",
+        "capability": "SF-026 daemon self-update and fallback on the Pi",
+        "detail": "not exercised by the public-artifact baseline; add a case when acceptance covers it"
+      },
+      "platform-restart-recovery": {
+        "status": "skipped",
+        "capability": "platform-owned reboot/power-loss with journal preservation (SF-016/SF-025)",
+        "detail": "not exercised by the public-artifact baseline; add a case when acceptance covers it"
+      }
+    },
+    "verdict": "incomplete",
+    "finished": "2026-10-16T14:32:42Z"
+  },
+  "balance_mist": {
+    "before_harness_run": 551691390,
+    "after_harness_run": 511447467
+  }
+}

@@ -10,7 +10,7 @@ scripts/test_daemon_localnet.py.
 from deployment_manifest import REQUIRED_TYPES, object_id
 from pathlib import Path
 import json
-_PROTOCOL_RECIPE_VERSION = json.loads((Path(__file__).resolve().parents[1] / "interfaces/recipe.schema.json").read_text())["properties"]["schemaVersion"]["const"]
+_PROTOCOL_RECIPE_VERSION = json.loads((Path(__file__).resolve().parents[1] / "interfaces/recipe.schema.json").read_text())["properties"]["schemaVersion"]["enum"][0]
 import argparse
 import base64
 import hashlib
@@ -18,6 +18,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -75,7 +76,8 @@ def wait_for(condition, message, process=None):
 
 
 class Simulator:
-    def __init__(self):
+    def __init__(self, device=DEVICE, cap=CAP):
+        self.device, self.cap = device, cap
         self.latest_package = PACKAGE
         self.chain = "1234abcd"
         self.events = []
@@ -92,16 +94,25 @@ class Simulator:
         self.chain_checks = 0
         self.truncate_next_artifact = True  # First artifact transfer drops mid-body.
         self.ranges = []
+        # Desired state (SF-013): group objects, DeviceAddedToGroup events,
+        # per-group desired components and records marked managed.
+        self.groups = {GROUP: {"admin": OPERATOR, "device_ids": [self.device]}}
+        self.memberships = []
+        self.desired = {}
+        self.managed = set()
+        self.controls = {}
 
-    def add(self, id, *, creator=OPERATOR, groups=None, direct=True, bad_hash=False, run=False, expired=False):
+    def add(self, id, *, creator=OPERATOR, groups=None, direct=True, bad_hash=False, run=False, expired=False, event=None, recipe=None):
+        """Publish deployment `id`. `event`/`recipe` override fields before
+        publication: a polling daemon must never see a half-built deployment."""
         digest = "f" * 64 if bad_hash else HASH
-        event = dict(deployment_id=id, component_name=f"app-{id}", version="1.0.0",
+        fields = dict(deployment_id=id, component_name=f"app-{id}", version="1.0.0",
             recipe_blob_id=f"recipe-{id}", artifact_sha256=digest,
-            target_groups=groups or [], target_devices=[DEVICE] if direct else [], creator=creator)
-        recipe = dict(schemaVersion=_PROTOCOL_RECIPE_VERSION, componentName=event["component_name"], componentVersion="1.0.0",
-            artifactBlobId="expired" if expired else "artifact", artifactSha256=digest, lifecycle={"run": "sleep 10"} if run else {}, configuration={})
-        self.recipes[event["recipe_blob_id"]] = recipe
-        self.events.append(dict(id={"txDigest":f"event-{len(self.events)}", "eventSeq":"0"}, parsedJson=event))
+            target_groups=groups or [], target_devices=[self.device] if direct else [], creator=creator) | (event or {})
+        self.recipes[fields["recipe_blob_id"]] = dict(schemaVersion=_PROTOCOL_RECIPE_VERSION, componentName=fields["component_name"],
+            componentVersion=fields["version"], artifactBlobId="expired" if expired else "artifact", artifactSha256=fields["artifact_sha256"],
+            lifecycle={"run": "sleep 10"} if run else {}, configuration={}) | (recipe or {})
+        self.events.append(dict(id={"txDigest":f"event-{len(self.events)}", "eventSeq":"0"}, parsedJson=fields))
 
     def obj(self, id):
         if id in self.deleted:
@@ -110,17 +121,19 @@ class Simulator:
             return {"data":{"content":{"type":"0x2::package::UpgradeCap","fields":{"package":self.latest_package,"version":"3"}}}}
         if id == REGISTRY:
             type, fields, owner = "device_registry::DeviceRegistry", {}, None
-        elif id == DEVICE:  # Activated: held by the registry, operated through OWNER_CAP.
+        elif id == self.device:  # Activated: held by the registry, operated through OWNER_CAP.
             type, fields, owner = "device_registry::Device", {"device_address":ADDRESS}, {"ObjectOwner":CUSTODY_FIELD}
         elif id == OWNER_CAP:
-            type, fields, owner = "device_registry::DeviceOwnerCap", {"device_id":DEVICE}, OPERATOR
-        elif id == CAP:
-            type, fields, owner = "device_cap::DeviceCap", {"device_id":DEVICE}, ADDRESS
-        elif id == GROUP:
-            type, fields, owner = "device_group::DeviceGroup", {"admin":OPERATOR,"device_ids":[DEVICE]}, None
+            type, fields, owner = "device_registry::DeviceOwnerCap", {"device_id":self.device}, OPERATOR
+        elif id == self.cap:
+            type, fields, owner = "device_cap::DeviceCap", {"device_id":self.device}, ADDRESS
+        elif id in self.groups:
+            type, fields, owner = "device_group::DeviceGroup", dict(self.groups[id]), None
         else:
             event = next(e["parsedJson"] for e in self.events if e["parsedJson"]["deployment_id"] == id)
-            type, fields, owner = "deployment_manager::DeploymentRecord", {**event,"schema_version":"1"}, None
+            fields = {key: event[key] for key in ("creator", "component_name", "version", "recipe_blob_id", "artifact_sha256")}
+            type, owner = "deployment_manager::DeploymentRecord", None
+            fields["schema_version"] = "1"
         fields.update(self.schema_fields.get(id, {}))
         if fields.get("schema_version") is None:
             fields.pop("schema_version", None)
@@ -138,15 +151,18 @@ class Simulator:
         if method == "shim_fields":
             key = lambda name: f"{TYPE_ORIGINS[name]}::{name}"
             empty = "00"  # An empty key struct is one `false` dummy byte.
-            fields = [[CAP, key("device_cap::DeviceAddressKey"), empty],
-                      [REGISTRY, key("device_registry::IdentityKey"), object_id(DEVICE)[2:]]]
+            fields = [[self.cap, key("device_cap::DeviceAddressKey"), empty],
+                      [REGISTRY, key("device_registry::IdentityKey"), object_id(self.device)[2:]]]
+            fields += [[group, key("desired_state::DesiredKey"), empty] for group in self.groups]
             for event in self.events:
                 parent = event["parsedJson"]["deployment_id"]
                 fields += [[parent, key(name), empty] for name in (
                     "deployment_manager::RecipeDigestKey", "deployment_manager::TargetDevicesKey",
-                    "deployment_manager::TargetGroupsKey")]
+                    "deployment_manager::TargetGroupsKey", "deployment_manager::ManagedKey", "deployment_manager::ControlKey")]
             return fields
         if method == "shim_events":
+            if params[0] == f"{ORIGIN}::device_group::DeviceAddedToGroup":
+                return [dict(group_id=group, device_id=device) for group, device in self.memberships]
             assert params[0] == f"{ORIGIN}::deployment_manager::DeploymentCreated"
             return [e["parsedJson"] for e in self.events]
         if method == "sui_getObject" and params[0] == PACKAGE:
@@ -168,9 +184,18 @@ class Simulator:
             if params[0] == REGISTRY:
                 assert params[1]["type"] == f"{PACKAGE}::device_registry::IdentityKey"
                 return {"data":{"content":{"fields":{"value":self.identity}}}}
-            if params[0] == CAP:
+            if params[0] == self.cap:
                 assert params[1]["type"] == f"{PACKAGE}::device_cap::DeviceAddressKey"
                 return {"data":{"content":{"fields":{"value":ADDRESS}}}}
+            if params[1]["type"].endswith("::desired_state::DesiredKey"):
+                state = self.desired.get(params[0])
+                value = state and {"revision": str(state[0]), "updated_at": "0",
+                    "components": {"contents": [{"key": k, "value": v} for k, v in state[1].items()]}}
+                return {"data":{"content":{"fields":{"value":value}}}}
+            if params[1]["type"].endswith("::deployment_manager::ControlKey"):
+                return {"data":{"content":{"fields":{"value":self.controls.get(params[0])}}}}
+            if params[1]["type"].endswith("::deployment_manager::ManagedKey"):
+                return {"data":{"content":{"fields":{"value":True if params[0] in self.managed else None}}}}
             event = next(e["parsedJson"] for e in self.events if e["parsedJson"]["deployment_id"] == params[0])
             if params[1]["type"].endswith("RecipeDigestKey"):
                 assert params[1]["type"] == f"{RECIPE_ORIGIN}::deployment_manager::RecipeDigestKey"
@@ -186,8 +211,8 @@ class Simulator:
             assert params[0] == ADDRESS and params[1] == PACKAGE
             assert params[2] == "deployment_manager"
             args = params[5]
-            assert args[1] == REGISTRY and args[2] == CAP
-            assert (params[3] == "report_verified_status" and len(args) == 4) or (params[3] == "report_verified_status_for_group" and args[3] == GROUP and len(args) == 5)
+            assert args[1] == REGISTRY and args[2] == self.cap
+            assert (params[3] == "report_verified_status" and len(args) == 4) or (params[3] == "report_verified_status_for_group" and args[3] in self.groups and len(args) == 5)
             if not self.allow_reports:
                 raise ConnectionError("simulated unavailable transaction service")
             self.built.append((args[0], int(args[-1])))
@@ -203,7 +228,7 @@ class Simulator:
         raise AssertionError(f"unexpected RPC method {method}")
 
 
-def run(binary, firmware_helper=False, daemon_user=None):
+def run(binary, firmware_helper=False, daemon_user=None, platform_installer=False):
     """With firmware_helper, updates go through `suifleet --firmware-helper`, run
     here as the path unit would. With daemon_user (requires root), the daemon
     runs as that user while the helper keeps root, as in the systemd units."""
@@ -273,6 +298,9 @@ def run(binary, firmware_helper=False, daemon_user=None):
             updater.write_text("import json, pathlib, sys\nwith open(" + repr(str(applied)) + ", 'a') as output:\n    output.write(json.dumps(pathlib.Path(sys.argv[1]).read_bytes().decode()) + '\\n')\n")
             url = f"http://127.0.0.1:{server.server_port}"
             command = f"{sys.executable} {updater}"
+            if platform_installer:
+                installer = Path(__file__).resolve().parents[1] / "tests/components/platform-installer/install.sh"
+                command = shlex.join(["/bin/sh", str(installer), str(root / "installed-artifact"), str(updater)])
             manifest = dict(schema_version=1, protocol_version=1, network="localnet", chain_identifier=sim.chain,
                 rpc_url=rpc_url, call_package_id=PACKAGE, upgrade_cap_id=UPGRADE_CAP, package_version="3", type_origins=TYPE_ORIGINS,
                 shared_objects={"registry": {"id": REGISTRY, "initial_shared_version": "1"}},
@@ -350,7 +378,7 @@ def run(binary, firmware_helper=False, daemon_user=None):
                 sim.add("0x103", creator="0xbad")
                 # Unsupported records must fail individually, with no downloads,
                 # and must not poison discovery of the valid group deployment.
-                for id, version in (("0x10b", "3"), ("0x10c", None), ("0x10d", "invalid")):
+                for id, version in (("0x10b", "4"), ("0x10c", None), ("0x10d", "invalid")):
                     sim.schema_fields[id] = {"schema_version": version}
                     sim.add(id)
                 sim.add("0x104", groups=[GROUP], direct=False)
@@ -413,6 +441,9 @@ def run(binary, firmware_helper=False, daemon_user=None):
             print("PASS: provisioning and independent signing/address vector")
             print("PASS: mixed per-type origins and runtime chain-reset/stale-call-package rejection")
             print("PASS: safe enrollment; paginated direct/group deployment and recipe-to-artifact flow")
+            if platform_installer:
+                assert (root / "installed-artifact").read_bytes() == ARTIFACT
+                print("PASS: explicitly configured Linux installer script received verified bytes; command completion only")
             print("PASS: artifact/recipe hash mismatch, unsupported lifecycle, untrusted creator and deleted targets rejected")
             print("PASS: future/missing/malformed deployment schemas failed without downloads; later v1 applied and cursor advanced")
             print("PASS: offline catch-up, restart deduplication, failed execution and durable report retry")
@@ -432,8 +463,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, default=Path(__file__).resolve().parents[1] / "suifleet-edge/target/debug/suifleet")
     parser.add_argument("--firmware-helper", action="store_true", help="apply through the privileged firmware helper")
+    parser.add_argument("--platform-installer", action="store_true", help="exercise the explicit Linux installer script fixture")
     parser.add_argument("--daemon-user", help="run the daemon as this user; requires root (helper stays root)")
     args = parser.parse_args()
     if args.daemon_user and os.geteuid() != 0:
         parser.error("--daemon-user requires root")
-    run(args.binary.resolve(), args.firmware_helper or bool(args.daemon_user), args.daemon_user)
+    run(args.binary.resolve(), args.firmware_helper or bool(args.daemon_user), args.daemon_user, args.platform_installer)

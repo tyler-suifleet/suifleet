@@ -10,7 +10,7 @@ This runbook describes current local operations and the intended release gates. 
 - Browser frontend: `http://localhost:3000` after `make dapp-dev`.
 - Cache/wallet volumes: `cargo-registry`, `cargo-git`, `pnpm-store`, `move-cache`, `sui-config`.
 - Device service: `suifleet.service`, config/key in `/etc/suifleet`, journal under `/var/lib/suifleet`; service provisioning is idempotent.
-- Sui authorizes deployments/reports, Walrus holds recipes/artifacts, and the device invokes an operator-configured updater. No production indexer, coordinator, health ingress, secrets service or hosting deployment is currently recorded.
+- Sui authorizes deployments/reports, Walrus holds recipes/artifacts, and the device invokes an operator-configured updater. Devices can report signed heartbeat and health telemetry to the fleet indexer ([TELEMETRY.md](TELEMETRY.md)). No production indexer, coordinator, hosted health ingress, secrets service or hosting deployment is currently recorded.
 
 ## Reproducible local checks
 
@@ -210,6 +210,38 @@ The daemon talks to the manifest's `rpc_url` over the Sui gRPC v2 API only (Myst
 - `make test-ota` and `make test-component` run the daemon against the Python simulator through `suifleet-edge/examples/grpc_sim_shim.rs`, which verifies signatures with Mysten's `sui-crypto`.
 - `make test-daemon-localnet` runs it against a real disposable localnet (start `sui start --with-faucet --force-regenesis` first): direct, group, failure, offline catch-up and cursor-migration paths, judged from on-chain receipts.
 
+## Desired state (SF-013)
+
+A group can carry a **desired state**: a revisioned map from component name to the deployment its members should run (`desired_state` module, a `DesiredKey` field on the group).
+
+**Changing it on chain:**
+- Only the group admin can change it, one revision at a time. In a PTB: `begin`, then `set_component`/`remove_component`, then `commit`.
+- A revision's changes commit together.
+- `set_component` accepts only the admin's own, verified-recipe deployments that target the group, and marks them managed.
+- The dApp's firmware page creates the deployment and commits it as the groups' desired version in one transaction, by default. Targeting individual devices stays a one-shot deployment.
+
+**How the daemon reconciles each poll:**
+- **Group discovery.** It finds its groups from `DeviceAddedToGroup` events, scanned from genesis with their own journal cursor.
+- **Membership check.** It confirms membership, and that the group's admin is the device's operator, from each group object.
+- **Merge.** It merges the groups' current revisions. Groups naming different deployments for one component are a conflict: the component is left as installed, and the dApp shows it.
+- **Plan.** In name order, it compares each desired deployment with what the component currently runs: the deployment it last started for that component, one-shot or desired, recorded with that deployment's intent. It applies desired deployments that have never run here, journaling the step and then the intent before the updater starts.
+  - The first step that does not apply stops the plan, and that desired state is not retried until it changes. The step is journaled with the desired state it was started for, and the stop is read back from the journal on every poll, so it holds across a crash. A newer desired state waits while the step's update is still in flight in the privileged helper. Once that update settles (Failed or indeterminate), the newer state is planned, even with no further change and across restarts.
+  - A crash mid-step is settled Failed on restart and never re-executed. Later steps of the same desired state stay stopped.
+  - A deployment never runs twice: its ID is also its journal entry, firmware request and receipt. If a revision selects a deployment again after the component has moved on (A → B → A, or a one-shot update after a desired one), the daemon logs that this is unsupported and leaves the component as installed, without recording it as converged. To return to a version, create a new deployment record for it.
+- **Results.** Superseded deployments are never applied. New members receive the current state.
+  - Members that leave, and components removed from a revision, are retired from management. They are not uninstalled: there are no lifecycle hooks yet (SF-014).
+- **One-shot path.** It ignores records marked managed. Unmanaged deployments keep their one-shot behaviour.
+
+**Limits:**
+- There is no device-level desired state yet. It waits for SF-008's device custody; use a one-device group meanwhile.
+- Membership discovery needs the node to retain `DeviceAddedToGroup` history. Pruned history stops reconciliation with an explicit error, as for deployment events.
+- No public-network or hardware acceptance has been run.
+
+**Tests:**
+- Simulator: `scripts/test_desired_state.py` (in `make test-ota`).
+- Real localnet across an upgrade of main's contracts: `make test-desired-state-localnet`.
+- dApp builder executed on chain: `scripts/test_frontend_live.cjs`.
+
 ## Deployment process
 
 1. Determine the explicit deployment scope and target network; verify the RPC's chain identity, signer address, gas and UpgradeCap ownership. Environment aliases alone are insufficient, especially after devnet resets.
@@ -250,7 +282,7 @@ The frontend reads only `NEXT_PUBLIC_DEPLOYMENT_MANIFEST`; the daemon reads the 
 
 Install the daemon, systemd service and real config through the validated image/package workflow. The separate root first-boot provisioning service invokes `--provision`; the unprivileged daemon starts after enrollment config appears and creates its state directory. Register the printed address, record Device/DeviceCap IDs, and fund report gas. Apply success currently means updater exit code zero, not post-boot health.
 
-The Yocto layer is `suifleet-edge/meta-suifleet`. [YOCTO_PACKAGING.md](YOCTO_PACKAGING.md) describes its pinned source/crate graph, Scarthgap Rust-mixin and Wrynose build profiles and separate first-boot provisioning/enrollment services. The source pin includes the merged SF-004 gRPC migration; offline packaging/boot acceptance remains distinct from supported-network OTA acceptance. Record actual build and boot results rather than inferring them from recipe presence. SWUpdate/RAUC and A/B recovery remain external adapter work.
+The Yocto layer is `suifleet-edge/meta-suifleet`. [YOCTO_PACKAGING.md](YOCTO_PACKAGING.md) describes its pinned source/crate graph, Scarthgap Rust-mixin and Wrynose build profiles and separate first-boot provisioning/enrollment services. The source pin includes the merged SF-004 gRPC migration; offline packaging/boot acceptance remains distinct from supported-network OTA acceptance. Record actual build and boot results rather than inferring them from recipe presence. SWUpdate/RAUC installation and A/B recovery are platform-owned; SuiFleet invokes configured installer commands.
 
 ## Execution privileges
 
@@ -273,7 +305,7 @@ Claiming and withdrawal cannot both succeed, so a timeout never misreports an up
 - `apply.timeout_seconds` (plus 30 s for the path unit to start the helper) bounds only the wait for a claim. When it expires, the daemon withdraws by unlinking `<id>.json`. If that succeeds, the updater never ran and the deployment reports Failed. If the request was already claimed, the daemon keeps waiting while the helper holds the lock.
 - If the helper dies mid-update (crash, power loss, reboot), the outcome is unknown. The deployment is marked indeterminate: it gets no status, is neither reported nor re-applied, and is never turned into Failed, including across restarts. The error is kept in the journal. The path unit also watches `*.claimed`, so the next helper run, at the latest at boot, turns the abandoned claim into an "interrupted" result without re-running the updater.
 - Request IDs are derived from the deployment ID and journaled before the update starts. On every poll the daemon collects results for deployments still without a status, including updates that finished after it stopped waiting or restarted. A result is removed only after its outcome is journaled.
-- On startup, a deployment the previous run left without a status is settled from the spool before anything else reads the journal. A written result or a claim keeps it pending for the collector. An unclaimed request is withdrawn (it never runs) and reports Failed, as does a helper-mode deployment that never submitted a request. Deployments without a helper request keep the direct-mode policy: an interrupted apply reports Failed and is never re-applied.
+- On startup, a deployment the previous run left without a status is settled from the spool before anything else reads the journal. A written result or a claim keeps it pending for the collector. An unclaimed request is withdrawn (it never runs) and reports Failed, as does a helper-mode deployment that never submitted a request. Deployments without a helper request remain unknown and unreported after interruption, and are never re-applied. Killed or timed-out installer commands similarly have unknown completion; explicit exit codes are command results, never boot confirmation. See [configured installers and application recovery](PLATFORM_INSTALLERS.md).
 
 A compromised daemon can only submit an image to that updater. Keep the updater's own image-signature verification enabled (for example SWUpdate signed images), and keep `fs.protected_hardlinks=1`, the systemd default. Recipe `install` scripts never reach root.
 
@@ -292,6 +324,62 @@ Verified locally (container, not hardware):
 - `systemd-analyze security --offline`: daemon 1.7 OK (was 9.6 UNSAFE); helper 5.5 MEDIUM, by design, for device access.
 
 SF-025 verified the actual BitBake `useradd` package for `raspberrypi3-64` and booted the ARM64 QEMU image with provisioning/enrollment units; see [packaging evidence](YOCTO_PACKAGING.md#recorded-target-validation-2026-10-14). Physical Pi boot, DNS under `RestrictAddressFamilies`, and SWUpdate/RAUC under the helper sandbox remain unverified.
+
+## Supervised components (SF-014)
+
+A recipe with `lifecycle.run` is a supervised component rather than a one-shot update. Like `install`, it needs `apply.allow_recipe_commands = true` on the device; otherwise the deployment fails without running anything. Older daemons reject such recipes.
+
+```json
+"lifecycle": {
+  "install": "chmod +x {artifact}",
+  "run": "exec {artifact} --data {work}",
+  "readiness": "test -e {work}/ready",
+  "shutdown": "kill -TERM {pid}",
+  "restart": "on-failure"
+}
+```
+
+- **Substitutions** (shell-quoted): `{artifact}` is the verified artifact in the version's workspace, `{artifacts}` that workspace, `{work}` the component's persistent working directory (also its cwd and HOME), and `{pid}` (readiness/shutdown only) the run's process. Run, readiness and shutdown commands get the same cleared environment and limits as updaters, plus `SUIFLEET_COMPONENT`, `SUIFLEET_COMPONENT_VERSION` and the recovery marker `SUIFLEET_SUPERVISOR`.
+- **Workspaces:** `<state_dir>/supervised/<name>/versions/<version>-<deployment>/` holds each version's artifact; `install` runs there while the old version keeps running. The committed and previous versions are kept; older ones are removed. `<name>/work/` persists across versions; output goes to `<name>/component.log` (mode 0600, rotated at 1 MiB).
+- **Readiness:** with `readiness`, the command is retried every second until it succeeds or `runtime.component_ready_timeout_seconds` (60) passes; without it, a run that survives `component_startup_seconds` (3) is ready. A deployment is reported Applied only once its component is ready.
+- **Replacement:** the old version is stopped, the new one started. If the new one never becomes ready, it is stopped, the previous version is started again, and the deployment is reported Failed with "rolled back to …". For opted-in applications, an explicit recovery command restores the retained artifact/configuration and readiness before the journal confirms the previous identity; interrupted installer work stays unknown. See [application recovery](PLATFORM_INSTALLERS.md).
+- **Replacement without `run`:** a same-name version without a run command ends supervision. Its install runs while the supervised version keeps running; if the install fails, that version stays running and committed. Once it succeeds, the supervised version is stopped with its descendants and removed from `active.json` and `status.json` (its `work/` and log are kept), so no daemon start brings it back. If that cannot be recorded, the deployment is reported Failed.
+- **Restart policy:** `on-failure` (default) restarts after a non-zero exit, a signal, or a failed readiness check; `always` also after a clean exit; `never` leaves it Exited. Backoff doubles from 1 s to 60 s (reset after a minute of stable running). More than `component_max_restarts` (5) restarts within ten minutes makes it Broken. Opted-in applications with a retained previous version run [explicit recovery](PLATFORM_INSTALLERS.md); otherwise it waits until the next deployment or daemon start.
+- **Stopping:** the `shutdown` command (or SIGTERM) gets `component_stop_timeout_seconds` (10), then SIGTERM again and SIGKILL to the whole process group. Run commands must stay in the foreground: the daemon is a child subreaper and kills any descendant that left the group and was orphaned. The systemd unit uses `KillMode=mixed`: `systemctl stop` sends SIGTERM only to the daemon, which runs each component's shutdown (dependents first), and systemd then SIGKILLs whatever remains in the cgroup. With the default `control-group` mode, systemd would SIGTERM every component at once, bypassing their shutdown commands and ordering. Keep `TimeoutStopSec` (default 90 s) above the components' combined stop time.
+- **Bootstrap after daemon/device restart:** the versions in `supervised/active.json` (written only after readiness) start on every daemon start. A crash mid-replacement therefore restarts the previous version, and the interrupted deployment remains unknown and unreported. Explicit application recovery has its own durable guard and fails closed across interrupted recovery; see [SF-016](PLATFORM_INSTALLERS.md). Runs left by a daemon that was killed outright are killed before anything starts again: the recorded runs (matched by PID and kernel start time) and their process groups, every process carrying the state root's `SUIFLEET_SUPERVISOR` environment marker (which survives setsid and reparenting), and all of their descendants (including ones that cleared their environment). They are frozen with SIGSTOP until the set stops growing, then killed. If any survives SIGKILL for 5 s, the daemon refuses to start.
+- **Fail-closed restart after a crash:** a descendant that cleared its environment, started its own session and lost its parent chain is invisible to that recovery. So the daemon records itself in `supervised/instance.json` while it supervises components and removes the record only after stopping them all. Before it starts the first component process (an install or a run), it marks the record on disk. If it finds a marked record (or an unreadable one) from an instance that did not stop its components, even one killed during a first install that recorded no status yet, it starts only if no process of that instance can remain. That holds after a reboot (another kernel boot ID), or when the instance's cgroup v2 can't be left (no `cgroup.procs` from it up to the root is writable) and holds no process but the new daemon. Under the systemd unit (`KillMode=mixed`, which still kills the whole cgroup once the daemon is gone, and `ProtectControlGroups=yes`) this holds after every crash. Elsewhere, such as a container or a login session, it never does: the daemon kills the leftovers it can find, then refuses to start, and keeps refusing. To recover, reboot, or check that no process started by a component remains and delete `supervised/instance.json`. A record from a daemon that is still running (same PID and start time) also stops a second instance before it touches anything.
+- **Runtime state:** `supervised/status.json` holds each component's version, deployment, phase (`starting`, `running`, `backoff`, `stopping`, `stopped`, `exited`, `broken`), PID, restart count, last exit and transition time. It is local. With `[telemetry]`, the daemon reports it off-chain in signed snapshots, together with installed versions and sync health ([TELEMETRY.md](TELEMETRY.md)); chain receipts stay per deployment.
+- **Sandbox:** components run inside the daemon's systemd sandbox (`ProtectSystem=strict`, same user), so they can write only the state directory.
+- **Dependencies (SF-012):** a dependency recipe with `run` is supervised too. Dependencies are installed and become ready before their dependents start, and bootstrap starts committed components in dependency order. A dependent is not stopped when a dependency fails.
+- **Bootstrap and systemd:** the daemon reports ready to systemd (and starts its watchdog) before bootstrap, which can take up to a readiness timeout per committed component. Unready components therefore cannot exceed the unit's start deadline and restart the daemon into the same bootstrap; deployment polling, which can deliver a repair, starts once bootstrap finishes. A stop during bootstrap stops every component already started.
+- **Not yet:** configured component bootstrap steps (system reboot remains platform-owned) and coupling a dependency's failure to its dependents. Component configuration is described below.
+
+`make test-ota` runs `scripts/test_supervisor.py`: the real daemon against the simulator, through readiness, a crash restart, an unready replacement rolled back, a graceful replacement, daemon SIGTERM with grouped and escaped descendants, a daemon restart, a daemon SIGKILL (its successor kills the setsid and environment-cleared leftovers, then refuses to start over a descendant that also cleared its environment, started its own session and was reparented, until the record is cleared), and a one-shot version replacing the supervised one. Hardware reboot and power loss are not covered.
+
+`make test-supervisor-systemd` (on the host; needs Docker) runs `scripts/test_supervisor_systemd.py`: the shipped `suifleet.service` and `suifleet-provision.service`, unchanged, under real systemd (PID 1) on cgroup v2 in a disposable privileged container, against the simulator. The run's grouped, setsid, environment-cleared and reparented environment-cleared setsid descendants are all in the unit's cgroup. A component crash restarts the run and kills all of them. A daemon SIGKILL makes systemd empty the cgroup and restart the unit; the successor logs that none of the previous instance's processes can remain (sealed cgroup), bootstraps the component, and exactly one instance runs with no earlier process left. `systemctl stop` runs the component's own shutdown command (not just a signal from systemd), records it as stopped, and leaves the cgroup empty. With two committed components that never become ready (60 s readiness timeout each), the unit stays active with no start timeout or restart while bootstrap outlasts the 90 s start deadline, then the same daemon applies a repair deployment; `systemctl stop` during bootstrap stops the started and the still-starting component and leaves the cgroup empty. Recorded run: [`validation/sf014-systemd.json`](validation/sf014-systemd.json). Readiness checks in a persistent work directory should be bound to the current run (for example, compare a marker with `{pid}`), or a stale marker can declare a new run ready early.
+
+## Component configuration (SF-015)
+
+Recipe schema `1.2` adds a configuration to any component with an `install` or `run` command (supervised or one-shot, root or dependency). Older daemons reject 1.2 recipes; 1.0/1.1 recipes must keep `"configuration": {}`.
+
+```json
+"lifecycle": { "run": "exec {artifact} --config {configuration}", "validate": "{artifact} --check {configuration}" },
+"configuration": {
+  "defaults": { "port": 8080, "log": { "level": "info" }, "db": { "host": "db1" } },
+  "reset": ["/log/level"],
+  "merge": { "port": 9000 },
+  "confidential": ["/db/password"]
+}
+```
+
+- **Effective configuration:** each install computes the component's next configuration from the one committed for it (none before its first install), in this order. (1) `defaults` fill in what is missing; values the device already has are kept, so a new version's changed default applies only once reset. (2) Each `reset` [JSON pointer](https://www.rfc-editor.org/rfc/rfc6901) takes its default value again, or is removed if the defaults have none; `""` resets the whole configuration. (3) `merge` is applied recursively: objects merge key by key; arrays, scalars and `null` replace. (4) `confidential` pointers are removed. Pointers address object members only; one that passes through an array or scalar fails the deployment.
+- **Persistence:** `<state_dir>/configuration/<name>/committed.json` (0600, directory 0700) holds the deployment, version, defaults and effective configuration of what the component runs now. An install stages `staged.json` first. It is committed once the install is confirmed (or the supervisor committed the version), kept while a privileged update's outcome is unknown, and discarded otherwise, including after a daemon crash. A failed deployment or rollback therefore leaves the previous configuration in place. After an application recovery restores a previous supervised version, `committed.json` is restored to the record that version was deployed with (removed for a version that predates configuration management), so later updates build on it rather than on the failed version's. Configuration changes only through deployments; the [local IPC](COMPONENT_IPC.md) reads committed configuration and installs authenticated configuration deployments; it does not bypass deployment validation with local edits.
+- **Delivery:** the component receives the effective configuration plus its device overlay as a 0600 JSON file: `{configuration}` in `install`, `run`, `readiness`, `shutdown` and `validate`, and `$SUIFLEET_CONFIGURATION` in supervised commands. For a supervised component it lives in the version's workspace and is rewritten on every start, so a rollback restores the previous version's configuration and a rotated overlay value applies on the next restart. A one-shot component's install gets a temporary copy and must keep what it needs. A redeployment of the same version with a new configuration restarts a supervised component with it; components can poll their public committed configuration over [IPC v1](COMPONENT_IPC.md); no in-place mutation of running configuration is performed.
+- **Validation before apply:** after every artifact of the plan is verified and before the first install, the daemon computes and checks each configuration (pointers, at most 4096 values and depth 32, provisioned confidential values) and runs the recipe's `validate` command, if any, against a candidate file. Exit 0 accepts. Exit 75 defers: nothing changes and the deployment is retried on later polls, for at most `components.configuration_defer_max_seconds` (86400) after the first deferral. Any other exit, or a timeout (`apply.timeout_seconds`), rejects it and the deployment is reported Failed with nothing changed. `validate` needs `apply.allow_recipe_commands`; it runs in the component's `{work}` directory (where a running instance can leave state for it) with `{artifact}`, `{artifacts}` and `{configuration}` substituted, and its output goes to `<state_dir>/supervised/<name>/component.log`. So does the output of every other lifecycle command (`install`, for install-only components too, `run`, `readiness` and `shutdown`), since each receives the materialized configuration; the daemon log never carries it.
+- **Confidential values:** recipes are public (Walrus). Values at `confidential` pointers come only from the device overlay `components.configuration_overlay_dir/<name>.json` (default `/etc/suifleet/component-config`), a JSON object of pointer to value such as `{"/db/password": "…"}`. The file must not be accessible to other users (`chmod o-rwx`); the daemon refuses it otherwise. A deployment whose confidential pointer is not provisioned fails before anything changes. Both clients reject a recipe with a value at, or a non-object above, a confidential pointer. Committed records, the journal, status reports and the daemon log hold no overlay values, and errors name pointers, never values. Overlay values reach only the 0600 materialized configuration files and whatever the component's own commands write, including their output in the 0600 `component.log`. The staged and committed records and each version's workspace are fsynced, directory entries included, before an install starts or a record is committed. The overlay may also set non-confidential pointers; it is applied last. Encrypted distribution and rotation of secrets remain SF-022.
+- **Catalog versions:** a catalog version's recipe is immutable, so its `merge`/`reset` apply each time that version is deployed. A per-deployment configuration update for catalog deployments would need an on-chain field on the deployment record; schema-1 deployments carry their own recipe and therefore their own update.
+
+`make test-ota` runs `scripts/test_configuration.py`: the real daemon against the simulator, through defaults with an overlay-provided confidential value, a merge and a version upgrade with reset, an invalid reset, a rejecting validate command and an unprovisioned confidential value (each Failed with nothing changed), a deferral that later applies and one that expires, a daemon restart with a rotated overlay value, install scripts, a failing then passing readiness check and a shutdown command printing their configuration on stdout and stderr (supervised and install-only) with that output only in their 0600 component log, a one-shot component's install receiving its configuration, a deferred deployment deleted on chain (dropped, deferral pruned), and a scan proving no overlay value appears in state, the journal or the daemon log.
 
 ## Artifact storage and downloads
 
@@ -334,3 +422,86 @@ Not verified:
 - Persistent report failures: inspect effects, target membership, chain/IDs and gas. The journal preserves pending reports.
 - Stale frontend IDs: regenerate config and rebuild the static app.
 - `make down`: removes cache and wallet volumes; use only when deliberately discarding them, after preserving required state.
+
+## Deployment admission controls (SF-018)
+
+The deployment creator can pause/resume admission, permanently cancel admission,
+and set UTC Unix-millisecond not-before, expiry, a single absolute maintenance
+window `[start,end)`, and an advance-notice duration (at most seven days).
+Zero disables the respective deadline/window/notice. These are admission times,
+not promises that an update finishes before the window closes. A closed window
+waits for an operator to edit it; it does not recur automatically. Expiry and
+cancellation observed by a device are terminal: create a new deployment to retry.
+Removing a desired component or deleting a record remains distinct from cancellation.
+
+On **Deploy component**, select **Create paused** to publish the control in the
+same transaction as the deployment (including catalog and desired-state creation).
+Then use **Deployments → Edit schedule / notice**, save while paused, and resume.
+This prevents immediate admission before a schedule is configured. Pause, resume,
+cancel and schedule editing require the creator's wallet; deployer roles do not
+grant control authority. The UI displays the control state, actionable reason,
+UTC times and notice. It does not imply every device has received the change:
+check device logs/journals and authoritative final receipts separately.
+
+The daemon persists notices and deferrals in `state.json` separately from apply
+outcomes. A deferred one-shot deployment survives event-cursor advancement and
+restarts. Desired-state deferrals are reconsidered under the current group plan;
+a superseded revision is never selected from the deferred queue. The notice timer
+starts when this device first observes a control revision and survives restarts;
+editing controls (including resume) starts a new notice. Notices are structured
+local log messages before disruptive work, not an interactive approval prompt.
+Devices need a synchronized UTC clock. Schedule/window checks use current UTC,
+so correcting a forward clock step restores later admission decisions. A notice
+timestamp ahead of corrected UTC restarts that device's notice interval. Per-record
+terminal cancellation/expiry observations survive clock correction and control edits;
+correct a bad clock before creating a replacement for an already expired record.
+Extending an expired record can split the fleet: devices that observed expiry keep
+it terminal, while devices that did not may admit it. Create a replacement instead.
+No offline or cached admission is allowed.
+
+Controls are checked before preparation, then read again after all artifacts are
+verified and immediately before journaling apply intent. Read/validation failures
+fail closed. The last successful read is the **admission boundary**: later pause,
+cancel, expiry or window closure does not interrupt the admitted dependency plan,
+kill its updater, roll it back or change its actual success/failure receipt. A
+control transaction racing after that read can therefore coexist with a successful
+apply. A crash after intent retains the existing no-reapply/helper reconciliation
+rules. There is no distributed atomic transaction spanning Sui and a local updater.
+
+This is an additive compatible contract upgrade: record layouts/signatures remain
+stable. `deployment_manager::ControlKey` and `Control` originate in the upgrade;
+regenerate manifests and both clients rather than assigning their original package
+origin. Absence of the field preserves immediate admission on existing records.
+Deploy daemon **0.2.1** to the fleet before relying on controls. Newly generated
+manifests require edge >= 0.2.1 and reject earlier daemons; older daemons
+cannot enforce fields introduced later. Old package entry points remain callable;
+status writes do not change controls, and deletion still prevents later object
+reads. Do not interpret deleting a record through an older package as acknowledged
+cancellation or retain a deleted record as an apply authorization.
+
+Validation commands (disposable network only for the final two):
+
+```bash
+make test-contracts
+make check-interfaces
+make edge-test
+make test-ota                         # includes SF-018 race/restart tests
+make dapp-typecheck
+make dapp-build
+make test-deployment-control-localnet # start isolated loopback node/faucet first
+node scripts/test_frontend_live.cjs   # actual gRPC control builders/BCS reads
+```
+
+The simulator covers pause/resume across restart/cursor advancement, offline
+expiry/cancel, not-before plus notice, pause/cancel/expiry/window closure during
+fetch, window editing and cancellation during an admitted updater. The local-chain
+test upgrades main's package with an existing record, checks distinct control type
+origins, old-package calls, irreversible cancellation and cleanup. These do not
+establish public-network interoperability, real extension-wallet acceptance or
+physical firmware/power-loss safety.
+
+## Staged rollouts (SF-017)
+
+See [staged rollout operation and recovery](STAGED_ROLLOUTS.md) for immutable cohorts,
+creator-signed admission/health ticks, rate/concurrency/bake limits, offline slots,
+audited pause/abort and schema-3 manifest/upgrade requirements.

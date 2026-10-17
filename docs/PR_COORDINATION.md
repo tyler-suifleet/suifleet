@@ -42,6 +42,8 @@ The service requires:
 - Every reported CI/status check explicitly successful; missing, pending, failed, skipped or cancelled checks block integration.
 - No remaining formal GitHub change request from any reviewer.
 
+Independent reviews wait until every reported check succeeds and any required testnet status succeeds for the exact integration base. Pending, absent, failed, skipped or cancelled checks leave the PR waiting; actionable change requests and base-integration repairs still run. Review fingerprints include normalized check outcomes and required testnet state/base evidence, so a completed check automatically invalidates a stale blocked review and requests a fresh independent decision. Reordering checks or changing display timestamps, URLs or IDs alone does not trigger another review. A genuine acceptance blocker remains blocked until new evidence or scope changes.
+
 A branch must include the current integration base before independent approval; otherwise its existing owner is automatically asked to merge/rebase and rerun checks. Changed head/base/comments/reviews invalidate a receipt. Coordinator-generated publication receipts do not cause an infinite review loop. Gates are refreshed before preparing a merge and again before push. Integrations use a clean detached base worktree and a local merge commit with Tyler Bush's verified author and committer identity. They use a normal fast-forward push; a competing main update is rejected, never overwritten. Another actor can still update a PR during a network operation: the engine verifies GitHub's merged state and exact head before completing the ticket. Cooperative workers must leave merges to this single coordinator; repository branch protections remain independently applicable.
 
 Integration intent is recorded before push, and completion is retried after a crash or tracker mirror error. A prepared commit absent from remote main retries the guarded push; an already included commit awaiting GitHub’s merged notification waits for reconciliation without dispatching another worker. Individual PR failures do not abort other PRs/projects. Completed clean scratch worktrees are removed without force; dirty diagnostics remain available. Automatic integration requires matching complete acceptance. Verified merges are marked Done through `ticket complete` under the merge-closes-issue policy below; external merges do not establish missing live or hardware evidence.
@@ -102,29 +104,13 @@ logs and process/exit receipts under `implementations/`. `--status` prints no to
 and performs no GitHub operations. Without `--execute`, a scan performs no actions.
 Tests run offline with `python3 -m unittest discover -s tools/pr-coordinator/tests`.
 
-Active or blocked manual claims consume implementation capacity even when expired.
-Managed claims count once, alongside their durable dispatcher reservation.
-An active repair retains its ticket ownership and also counts toward the
-implementation ceiling; repair limits do not grant additional implementation capacity. Each
-uncertain/orphaned reservation consumes one worker position; remaining capacity can
-run independent tickets without recovering or restarting that worker. Review and
-repair categories have independent capacity and do not pause implementation dispatch.
-Existing work is not preempted. A worker starts
-only after a successful refresh, fetch, atomic claim, published ownership and assert.
-It inherits only the configured project's account token and existing claim; SSH
-remotes remain unchanged. It heartbeats its own claim, implements and tests, pushes
-small user-authored commits and opens a linked PR. It writes a `review_ready` receipt
-and exits after handing off to Review. Only a stopped worker with an exit-zero
-receipt, published Review/Done ownership and recorded evidence frees the slot.
-This allows another independent implementation while the previous PR is reviewed.
+Manual active or blocked claims without durable worker identity still consume implementation capacity, including expired reservations. Managed claims count once alongside their dispatcher records. Review and repair categories have separate capacity; existing workers are not preempted.
 
-Interrupted claims, failed launches, lost ownership or missing/failed receipts retain
-that worker position and ticket reservation. Restarts adopt live process identities
-using PID plus process start time; they never steal expired claims or restart an
-uncertain implementation. To recover, stop and inspect the original worker, preserve
-its worktree and evidence, then follow `docs/ATOMIC_TICKETING.md`. The dispatcher has
-no automatic reset command: after explicit ticket recovery, an operator must archive
-or update the corresponding private dispatcher receipt before enabling that slot.
+A worker starts only after refresh, fetch, atomic claim, published ownership and assert. It inherits the configured project's account token and claim, heartbeats, pushes scoped user-authored commits, and opens a linked PR. A successful stopped `review_ready` worker with published Review/Done ownership frees its implementation slot. Reconciliation revisits orphaned records after restart, so a delayed valid handoff is not permanently stranded.
+
+Verified stopped blocked workers are **parked**. Verified stopped jobs without a valid handoff are **quarantined**. Both retain ticket ownership, branch, logs and evidence, but no longer consume execution capacity for unrelated tickets. Quarantined review/repair jobs retain exclusion on their original PR. Neither state authorizes automatic claim release, duplicate implementation or retry of an uncertain mutation. Explicit recovery still requires inspection and the atomic ticket workflow. Implementation slots stop claiming when their combined parked/quarantined count reaches `max_quarantined` (default 3, integer 1–16). Quarantine also applies persistent project/family exponential backoff (60–900 seconds), reset only by a valid completed handoff, never merely by starting a process. Review/repair reservations stop after three quarantined jobs per family/category across projects; each quarantine adds durable exponential backoff (300–3600 seconds). These retention caps require explicit operator recovery; they bound a systemic fast-failure cascade while allowing limited unrelated progress. The diagnostics are visible in dispatcher `--status`, the private review-job database and service journal.
+
+Stopped means the recorded PID/start-time wrapper has exited **and** a Linux `/proc` scan finds no non-zombie process in its worker session. A surviving model subprocess in that session keeps the slot occupied. A subprocess that deliberately daemonizes or uses `setsid` can escape this session scan; workers must not detach subprocesses. This is cooperative process tracking, not cgroup containment. Missing process identity, unreadable process state, interrupted claims and ambiguous launches fail closed. A malformed dispatcher receipt is isolated to its own job rather than aborting all reconciliation. Capacity counts running, launching and uncertain jobs against configured limits; it does not count verified parked/quarantined jobs. An idle slot can still indicate no dependency-eligible ticket, a retry backoff, or an unverified manual reservation; it is not permission to bypass dependencies or fabricate work.
 
 Set a slot's `enabled` to `false` and restart the service to prevent its next claim,
 or run `systemctl --user disable --now ticket-dispatcher.service` to stop dispatching.

@@ -47,7 +47,7 @@ edge-build:
 	$(RUN) bash -c "cd suifleet-edge && cargo build --locked --release"
 
 edge-test:
-	$(RUN) bash -c "cd suifleet-edge && cargo test --locked"
+	$(RUN) bash -c "cd suifleet-edge && cargo test --locked && cargo test --locked --features pkcs11"
 
 .PHONY: test-ota test-component dapp-typecheck
 
@@ -56,9 +56,37 @@ edge-test:
 test-ota:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
 	$(RUN) python3 scripts/test_ota.py
+	$(RUN) python3 scripts/test_ota.py --platform-installer
 	$(RUN) python3 scripts/test_catalog_ota.py
+	$(RUN) python3 scripts/test_dependency_ota.py
 	$(RUN) python3 scripts/test_ota.py --firmware-helper
 	$(RUN) python3 scripts/test_firmware_restart.py
+	$(RUN) python3 scripts/test_supervisor.py
+	$(RUN) python3 scripts/test_configuration.py
+	$(RUN) python3 scripts/test_daemon_update.py
+	$(RUN) python3 scripts/test_desired_state.py
+	$(RUN) python3 scripts/test_deployment_control.py
+	$(RUN) python3 scripts/test_telemetry.py
+	$(RUN) python3 scripts/test_rollout.py
+
+# Supervised components under the shipped systemd units on real systemd and
+# cgroup v2 (SF-014): a disposable privileged container with systemd as PID 1.
+# Runs on the host (needs Docker), not inside the dev container.
+.PHONY: test-supervisor-systemd test-daemon-update-systemd test-key-isolation-systemd
+# Daemon self-update under the shipped unit on real systemd (SF-026); host, needs Docker.
+test-daemon-update-systemd:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+	PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_daemon_update_systemd.py --evidence "$${SUIFLEET_EVIDENCE:-daemon-update-systemd-evidence.json}"
+
+# Device-key isolation under the shipped units on real systemd (SF-053); host, needs Docker.
+test-key-isolation-systemd:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+	PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_key_isolation_systemd.py --evidence "$${SUIFLEET_EVIDENCE:-key-isolation-systemd-evidence.json}"
+
+.PHONY: test-supervisor-systemd
+test-supervisor-systemd:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+	PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_supervisor_systemd.py --evidence "$${SUIFLEET_EVIDENCE:-supervisor-systemd-evidence.json}"
 
 # SF-030 harmless test component: fixture tests (system shell, plus busybox when
 # installed), then the real daemon applying it through suifleet-test-updater.
@@ -81,6 +109,8 @@ check-interfaces:
 	$(RUN) python3 scripts/test_generated_interfaces.py
 	$(RUN) node scripts/test_protocol.cjs
 	$(RUN) node scripts/test_component_catalog.cjs
+	$(RUN) node scripts/test_deployment_control.cjs
+	$(RUN) node scripts/test_rollout.cjs
 
 generate-interfaces:
 	$(RUN) python3 scripts/generate_interfaces.py
@@ -92,6 +122,16 @@ test-protocol-live:
 .PHONY: test-catalog-live
 test-catalog-live:
 	$(RUN) python3 scripts/test_catalog_localnet.py
+
+# SF-028 Greengrass compatibility matrix, reference-model fixtures and current
+# frontend validator check (docs/GREENGRASS_COMPATIBILITY.md). Offline.
+.PHONY: test-compat
+test-compat:
+	$(RUN) python3 scripts/greengrass_compat.py
+	$(RUN) python3 scripts/greengrass_roadmap.py
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_greengrass_roadmap.py'
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_greengrass_compat.py'
+	$(RUN) node scripts/test_greengrass_compat.cjs
 
 # Offline regression tests for the drift gate itself (synthetic summaries).
 test-interfaces:
@@ -105,7 +145,7 @@ toolchain-versions:
 # CI entry point (run inside the dev image): each step's output is kept under
 # ci-logs/ for failure diagnostics. No step publishes, spends gas or uses secrets.
 ci: SHELL := /bin/bash
-CI_STEPS := indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces edge-test test-ota test-component dapp-typecheck dapp-build
+CI_STEPS := indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat edge-test test-ota test-component test-edge-acceptance dapp-typecheck dapp-build
 ci:
 	@mkdir -p ci-logs
 	@$(MAKE) --no-print-directory toolchain-versions | tee ci-logs/toolchain-versions.txt
@@ -124,9 +164,11 @@ check:
 	$(MAKE) test-contracts
 	$(MAKE) test-interfaces
 	$(MAKE) check-interfaces
+	$(MAKE) test-compat
 	$(MAKE) edge-test
 	$(MAKE) test-ota
 	$(MAKE) test-component
+	$(MAKE) test-edge-acceptance
 	$(MAKE) dapp-typecheck
 	$(MAKE) dapp-build
 	git diff --check
@@ -172,10 +214,19 @@ test-manifest:
 	$(RUN) node scripts/test_deployment_receipts.cjs
 	$(RUN) node scripts/test_frontend_queries.cjs
 	$(RUN) node scripts/test_target_groups.cjs
+	$(RUN) node scripts/test_desired_state.cjs
+	$(RUN) node scripts/test_telemetry.cjs
 
 test-manifest-live:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
 	$(RUN) python3 scripts/test_manifest_upgrades.py
+
+# SF-013 desired state on a disposable localnet (start it first): main's
+# contracts upgraded in place, then reconciliation judged by on-chain receipts.
+.PHONY: test-desired-state-localnet
+test-desired-state-localnet:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_desired_state_localnet.py
 
 # SF-024 fleet indexer, API and CLI (suifleet-indexer/, docs/INDEXER.md).
 .PHONY: indexer-build indexer-test test-indexer-localnet
@@ -188,7 +239,7 @@ indexer-test:
 # Against a disposable localnet (start it first): API vs chain, restart,
 # auth, signed CLI bulk operation, chain-binding refusal and load.
 test-indexer-localnet: indexer-build
-	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --example chain_facts
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_indexer_localnet.py
 
 # SF-006 publisher against a disposable localnet (start it first): refusals, dry
@@ -197,6 +248,13 @@ test-indexer-localnet: indexer-build
 test-publish-localnet:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_publish_localnet.py
+
+# SF-021 on a disposable localnet (start it first): claim enrollment, delegated
+# deployer roles and a SoftHSM2 PKCS#11 signer (needs softhsm2 + opensc).
+.PHONY: test-enrollment-localnet
+test-enrollment-localnet:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts --features pkcs11
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_enrollment_localnet.py
 
 # Live gate (spends testnet gas; docs/TESTNET.md): base contracts published,
 # upgraded in place to this tree, real daemon, on-chain receipts.
@@ -221,3 +279,41 @@ test-daemon-localnet:
 test-testnet:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_testnet*.py'
 	$(RUN) node scripts/test_testnet_cache.cjs
+
+.PHONY: test-deployment-control-localnet
+test-deployment-control-localnet:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+	$(RUN) python3 scripts/test_deployment_control_localnet.py
+
+# Start a disposable indexed loopback node/faucet first; network-none Docker only.
+.PHONY: test-rollout-localnet
+test-rollout-localnet:
+	$(RUN) python3 scripts/test_rollout_localnet.py
+
+# SF-065 wallet-to-edge acceptance harness for SF-031 (docs/EDGE_ACCEPTANCE.md).
+# Offline: profiles, matrix, locks, SSH pinning, fake-fleet runs with the real updater.
+.PHONY: test-edge-acceptance test-edge-acceptance-localnet edge-acceptance
+test-edge-acceptance:
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_edge_acceptance.py'
+
+# The harness end to end on a disposable localnet (start it first).
+test-edge-acceptance-localnet:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_edge_acceptance_localnet.py
+
+# An operator run on the host (needs sui, ssh and ticket on PATH):
+#   make edge-acceptance PROFILE=p.json EVIDENCE=e.json [HARDWARE=1] LOCK_ARGS="--agent A --model M --session S"
+edge-acceptance:
+	@test -n "$(PROFILE)" && test -n "$(EVIDENCE)" || { echo "set PROFILE and EVIDENCE (docs/EDGE_ACCEPTANCE.md)"; exit 1; }
+	PYTHONDONTWRITEBYTECODE=1 python3 scripts/edge_acceptance.py run --profile "$(PROFILE)" --evidence "$(EVIDENCE)" \
+		$(if $(HARDWARE),--hardware) $(LOCK_ARGS)
+
+# Root only inside a disposable, network-isolated container: real SO_PEERCRED UIDs.
+.PHONY: test-ipc
+test-ipc:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+ifdef INSIDE_DEV_CONTAINER
+	python3 scripts/test_ipc.py
+else
+	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" python3 scripts/test_ipc.py
+endif

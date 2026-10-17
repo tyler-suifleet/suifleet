@@ -1,3 +1,4 @@
+import { readDeploymentControl, type DeploymentControl } from "./deployment-control";
 import { calls } from "./fleet-protocol";
 import { SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS } from "./protocol-version";
 import { requireManifest, moveType, verifyDeployment } from "./deployment-manifest";
@@ -37,6 +38,7 @@ export interface DeviceGroup {
 }
 
 export interface DeploymentEvent {
+  control: DeploymentControl;
   deploymentId: string;
   schemaVersion: string;
   componentName: string;
@@ -190,18 +192,26 @@ export function buildCreateDeploymentTx(
   recipeSha256: string,
   targetGroupIds: string[],
   targetDeviceIds: string[] = [],
+  initiallyPaused = false,
 ): Transaction {
   requireManifest();
   const tx = new Transaction();
-  calls.deployment_manager_create_deployment_verified(tx, PACKAGE_ID, componentName, version, recipeBlobId, artifactSha256, recipeSha256, targetGroupIds, targetDeviceIds, "0x6");
+  if (initiallyPaused) {
+    const [record] = calls.deployment_manager_new_deployment_verified(tx, PACKAGE_ID, componentName, version, recipeBlobId, artifactSha256, recipeSha256, targetGroupIds, targetDeviceIds, "0x6");
+    calls.deployment_manager_set_control(tx, PACKAGE_ID, record, 1, 0, 0, 0, 0, 0);
+    calls.deployment_manager_share_deployment(tx, PACKAGE_ID, record);
+  } else {
+    calls.deployment_manager_create_deployment_verified(tx, PACKAGE_ID, componentName, version, recipeBlobId, artifactSha256, recipeSha256, targetGroupIds, targetDeviceIds, "0x6");
+  }
   return tx;
 }
 
 export function buildDeleteDeploymentTx(deploymentObjectId: string, schemaVersion = "1"): Transaction {
   requireManifest();
-  if (schemaVersion !== "1" && schemaVersion !== "2") throw new Error("Unsupported DeploymentRecord schema");
+  if (schemaVersion !== "1" && schemaVersion !== "2" && schemaVersion !== "3") throw new Error("Unsupported DeploymentRecord schema");
   const tx = new Transaction();
   if (schemaVersion === "2") calls.component_catalog_delete_deployment(tx, PACKAGE_ID, deploymentObjectId);
+  else if (schemaVersion === "3") calls.deployment_manager_delete_rollout(tx, PACKAGE_ID, deploymentObjectId);
   else calls.deployment_manager_delete_deployment(tx, PACKAGE_ID, deploymentObjectId);
   return tx;
 }
@@ -307,7 +317,7 @@ export async function fetchDeploymentEvents(client: SuiGrpcClient, owner?: strin
       return group && group.admin === record.creator ? group.device_ids : [];
     })])];
     const { verified, statuses } = await readReceipts(client, event.deployment_id);
-    return { deploymentId: event.deployment_id, schemaVersion: record.schema_version, componentName: record.component_name, version: record.version,
+    return { control: await readDeploymentControl(client, event.deployment_id), deploymentId: event.deployment_id, schemaVersion: record.schema_version, componentName: record.component_name, version: record.version,
       recipeBlobId: record.recipe_blob_id, artifactSha256: record.artifact_sha256,
       targetGroups: event.target_groups, targetDevices: event.target_devices,
       creator: record.creator, timestampMs: Number(record.created_at), statuses, receiptsVerified: verified,

@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 import threading
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 spec = importlib.util.spec_from_file_location('coordinator',Path(__file__).resolve().parents[1]/'coordinator.py')
 c = importlib.util.module_from_spec(spec);spec.loader.exec_module(c)
@@ -29,6 +29,70 @@ class Gates(unittest.TestCase):
         for field,value in [('network','mainnet'),('chain_identifier','35834a8a'),('lock_resource','')]:
             with self.subTest(field=field),self.assertRaises(ValueError):
                 c.network_authorization({'testnet_authorization':{**grant,field:value}})
+
+    def test_stopped_quarantine_frees_family_but_preserves_pr_exclusion(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store=c.Store(Path(directory)/'jobs.sqlite3')
+            pr=fixture()[0]
+            first=store.reserve('project',pr,'Codex','fix',Path(directory))
+            store.db.execute("UPDATE jobs SET status='quarantined' WHERE id=?",(first,))
+            self.assertIsNone(store.reserve('project',pr,'Claude','review',Path(directory)))
+            self.assertIsNotNone(store.reserve('project',{**pr,'number':50},'Codex','fix',Path(directory)))
+
+    def test_collect_quarantines_only_proven_stopped_orphan(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store=c.Store(Path(directory)/'jobs.sqlite3')
+            job=store.reserve('project',fixture()[0],'Codex','fix',Path(directory))
+            store.db.execute("UPDATE jobs SET status='orphaned',pid=123,started='old' WHERE id=?",(job,))
+            coordinator=c.Coordinator.__new__(c.Coordinator)
+            coordinator.store=store; coordinator.children={}; coordinator.publish_results=Mock()
+            with patch.object(c,'worker_stopped',return_value=False):
+                coordinator.collect({'id':'project'},[])
+            self.assertEqual(store.db.execute('SELECT status FROM jobs').fetchone()[0],'orphaned')
+            with patch.object(c,'worker_stopped',return_value=True):
+                coordinator.collect({'id':'project'},[])
+            self.assertEqual(store.db.execute('SELECT status FROM jobs').fetchone()[0],'quarantined')
+
+    def test_stopped_orphans_back_off_and_cap_cross_pr_cascade(self):
+        for kind in ('fix', 'review'):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory)/'jobs.sqlite3'
+                store = c.Store(path)
+                coordinator = c.Coordinator.__new__(c.Coordinator)
+                coordinator.store=store; coordinator.children={}; coordinator.publish_results=Mock()
+                claims = []
+                with patch.object(c.time,'time') as now, patch.object(c,'worker_stopped',return_value=True):
+                    for tick in range(20):
+                        now.return_value = tick*10000
+                        job = store.reserve('project',{**fixture()[0],'number':tick},'Codex',kind,Path(directory))
+                        if job is None: continue
+                        claims.append(job)
+                        store.db.execute("UPDATE jobs SET status='orphaned',pid=123,started='old' WHERE id=?", (job,))
+                        coordinator.collect({'id':'project'}, [])
+                        self.assertIsNone(store.reserve('other',{**fixture()[0],'number':100+tick},'Codex',kind,Path(directory)))
+                        attempts, deadline = store.db.execute('SELECT attempts,retry_after FROM quarantine_backoff').fetchone()
+                        self.assertEqual(attempts, len(claims))
+                        self.assertEqual(deadline, tick*10000 + 300*2**(len(claims)-1))
+                    self.assertEqual(len(claims), 3)
+                    self.assertIsNone(c.Store(path).reserve('other',{**fixture()[0],'number':999},'Codex',kind,Path(directory)))
+                    # The other family/category can still make progress.
+                    self.assertIsNotNone(store.reserve('other',fixture()[0],'Claude',kind,Path(directory)))
+
+    def test_worker_stopped_requires_identity_and_complete_session_scan(self):
+        self.assertFalse(c.worker_stopped(None,None))
+        with patch.object(c,'process_identity',return_value='same'):
+            self.assertFalse(c.worker_stopped(999,'same'))
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            child=root/'123'; child.mkdir()
+            (child/'stat').write_text('123 (child) S 1 999 999 '+'0 '*16)
+            with patch.object(c,'process_identity',return_value=None),patch.object(c.Path,'iterdir',return_value=iter([child])):
+                self.assertFalse(c.worker_stopped(999,'old'))
+            (child/'stat').write_text('123 (child) Z 1 999 999 '+'0 '*16)
+            with patch.object(c,'process_identity',return_value=None),patch.object(c.Path,'iterdir',return_value=iter([child])):
+                self.assertTrue(c.worker_stopped(999,'old'))
+        with patch.object(c,'process_identity',return_value=None),patch.object(c.Path,'iterdir',side_effect=PermissionError):
+            self.assertFalse(c.worker_stopped(999,'old'))
 
     def test_long_feedback_build_does_not_occupy_readonly_review_slot(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -92,11 +156,14 @@ class Gates(unittest.TestCase):
     def test_testnet_status_required_even_before_workflow_is_queued(self):
         pr, owner, review = fixture()
         pr['_testnet_required'] = True
+        review['feedback'] = c.feedback(pr)
         self.assertIn('testnet', c.gate(pr, owner, review))
         for state, base in [('pending', pr['baseRefOid']), ('failure', pr['baseRefOid']), ('success', 'old')]:
             pr['_testnet_status'] = dict(state=state, description='base:' + base)
+            review['feedback'] = c.feedback(pr)
             self.assertIn('testnet', c.gate(pr, owner, review))
         pr['_testnet_status'] = dict(state='success', description='base:' + pr['baseRefOid'])
+        review['feedback'] = c.feedback(pr)
         self.assertIsNone(c.gate(pr, owner, review))
 
     def test_current_independent_review_passes(self):
@@ -494,4 +561,116 @@ class PublicationTests(unittest.TestCase):
                 self.assertEqual(coordinator.store.db.execute('SELECT COUNT(*) FROM integrations').fetchone()[0],0)
 
 
-if __name__=='__main__':unittest.main()
+
+class CheckFreshnessTests(unittest.TestCase):
+    def test_fingerprint_tracks_outcomes_not_order_or_display_metadata(self):
+        pr,_,_=fixture()
+        pr['statusCheckRollup']=[{'__typename':'CheckRun','name':'ci','workflowName':'CI','status':'IN_PROGRESS','conclusion':None},
+                                {'__typename':'StatusContext','context':'external','state':'SUCCESS'}]
+        pending=c.feedback(pr)
+        pr['statusCheckRollup'][0].update(status='COMPLETED',conclusion='SUCCESS')
+        successful=c.feedback(pr)
+        self.assertNotEqual(pending,successful)
+        pr['statusCheckRollup'].reverse()
+        for check in pr['statusCheckRollup']:
+            check.update(id='new-id',detailsUrl='https://example.test/new',targetUrl='https://example.test/new',startedAt='later',completedAt='later')
+        self.assertEqual(successful,c.feedback(pr))
+        pr['statusCheckRollup'].append({'__typename':'CheckRun','name':'another','status':'COMPLETED','conclusion':'SUCCESS'})
+        self.assertNotEqual(successful,c.feedback(pr))
+
+    def test_testnet_evidence_invalidates_prior_approval(self):
+        pr,owner,review=fixture()
+        pr.update(_testnet_required=True,_testnet_status={'state':'pending','description':'base:'+pr['baseRefOid']})
+        pending=c.feedback(pr)
+        pr['_testnet_status']['state']='success'
+        ready=c.feedback(pr)
+        self.assertNotEqual(pending,ready)
+        review['feedback']=ready
+        self.assertIsNone(c.gate(pr,owner,review))
+        pr['_testnet_status'].update(id='new',target_url='https://example.test/run',updated_at='later')
+        self.assertEqual(ready,c.feedback(pr))
+        pr['_testnet_status']['description']='base:wrong'
+        self.assertNotEqual(ready,c.feedback(pr))
+        self.assertIsNotNone(c.gate(pr,owner,review))
+
+    def setup_scan(self,directory,pr,verdict='blocked'):
+        owner=fixture()[1]
+        owner.update(key='T1',token='local',branch='work/test',spec={'priority':'P1'})
+        pr.update(headRefName='work/test',baseRefName='main',title='test')
+        project={'id':'test','root':directory,'repository':'owner/repo'}
+        engine=c.Coordinator({'workers':{'Codex':['true'],'Claude':['true']},'projects':[project]},Path(directory))
+        job=engine.store.reserve('test',pr,'Claude','review',Path(directory)/'old')
+        result=dict(verdict=verdict,acceptance_complete=False,model='fixture',evidence='pending checks or genuine missing acceptance')
+        engine.store.db.execute("UPDATE jobs SET status='done',publication_done=1,result=? WHERE id=?",(json.dumps(result),job))
+        self.configure_scan(engine,pr,owner)
+        return engine,project,owner
+
+    def configure_scan(self,engine,pr,owner):
+        engine.owners=lambda project:[owner]
+        engine.collect=lambda *args:None
+        engine.discover_merged=lambda *args:None
+        engine.prs=lambda project:[pr]
+        engine.ensure_closing_reference=lambda *args:None
+
+    def test_completed_checks_dispatch_fresh_review_once_across_restart(self):
+        with tempfile.TemporaryDirectory() as directory:
+            pr=fixture()[0]
+            pr['statusCheckRollup'][0].update(status='IN_PROGRESS',conclusion=None)
+            engine,project,owner=self.setup_scan(directory,pr)
+            with patch.object(engine,'launch') as launch:
+                engine.tick(True)
+                launch.assert_not_called()
+            pr['statusCheckRollup'][0].update(status='COMPLETED',conclusion='SUCCESS')
+            launched=[]
+            def launch(project,current,owner,kind):
+                job=engine.store.reserve(project['id'],current,'Claude',kind,Path(directory)/'new')
+                if job is not None:launched.append(job)
+            with patch.object(engine,'launch',side_effect=launch):engine.tick(True)
+            self.assertEqual(len(launched),1)
+            engine=c.Coordinator(engine.config,Path(directory))
+            self.configure_scan(engine,pr,owner)
+            with patch.object(engine,'launch',side_effect=launch):engine.tick(True)
+            self.assertEqual(len(launched),1)
+            self.assertEqual(engine.store.db.execute('SELECT COUNT(*) FROM jobs').fetchone()[0],2)
+
+    def test_unready_checks_wait_but_actionable_repairs_still_run(self):
+        cases=[
+            [],[{'__typename':'CheckRun','status':'IN_PROGRESS','conclusion':None}],
+            [{'__typename':'CheckRun','status':'COMPLETED','conclusion':'FAILURE'}],
+            [{'__typename':'CheckRun','status':'COMPLETED','conclusion':'SKIPPED'}],
+            [{'__typename':'CheckRun','status':'COMPLETED','conclusion':'CANCELLED'}],
+            [{'__typename':'StatusContext','state':'PENDING'}],
+            [{'__typename':'StatusContext','state':'FAILURE'}]]
+        for checks in cases:
+            with self.subTest(checks=checks),tempfile.TemporaryDirectory() as directory:
+                pr=fixture()[0];pr['statusCheckRollup']=checks
+                engine,project,owner=self.setup_scan(directory,pr)
+                # Force stale feedback: no expensive review until checks succeed.
+                pr['comments'].append({'id':'request','body':'recheck','updatedAt':'now'})
+                with patch.object(engine,'launch') as launch:
+                    engine.tick(True);launch.assert_not_called()
+                    pr['baseIncluded']=False
+                    engine.tick(True);self.assertEqual(launch.call_args.args[-1],'fix')
+                pr['baseIncluded']=True
+                engine.store.db.execute("UPDATE jobs SET result=?",(json.dumps(dict(verdict='changes_requested',acceptance_complete=False,model='fixture',evidence='fix source')),))
+                with patch.object(engine,'launch') as launch:
+                    engine.tick(True);self.assertEqual(launch.call_args.args[-1],'fix')
+
+    def test_testnet_waits_for_current_base_and_genuine_acceptance_stays_blocked(self):
+        for state,base in [(None,None),('pending','current'),('failure','current'),('success','old')]:
+            with self.subTest(state=state,base=base),tempfile.TemporaryDirectory() as directory:
+                pr=fixture()[0];pr['_testnet_required']=True
+                engine,project,owner=self.setup_scan(directory,pr)
+                if state:pr['_testnet_status']={'state':state,'description':'base:'+(pr['baseRefOid'] if base=='current' else 'old')}
+                with patch.object(engine,'launch') as launch:
+                    engine.tick(True);launch.assert_not_called()
+                    pr['_testnet_status']={'state':'success','description':'base:'+pr['baseRefOid']}
+                    engine.tick(True);self.assertEqual(launch.call_args.args[-1],'review')
+        with tempfile.TemporaryDirectory() as directory:
+            engine,_,_=self.setup_scan(directory,fixture()[0])
+            with patch.object(engine,'launch') as launch:
+                engine.tick(True);engine.tick(True);launch.assert_not_called()
+
+
+if __name__ == '__main__':
+    unittest.main()

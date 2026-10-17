@@ -1,6 +1,6 @@
 [package]
 name = "suifleet"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 
 [[bin]]
@@ -47,19 +47,25 @@ base64 = "0.21"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
+# PKCS#11 signer (feature "pkcs11"): token access and P-256 encoding
+cryptoki = { version = "0.10", optional = true }
+p256 = { version = "0.13", optional = true, features = ["ecdsa"] }
+
 # systemd watchdog (optional; only links when building on systemd systems)
 sd-notify = { version = "0.4", optional = true }
 
 [dev-dependencies]
 # Test-only gRPC front end for the Python chain simulator (examples/grpc_sim_shim.rs).
 tonic = { version = "0.14", features = ["transport", "router"] }
-sui-crypto = { version = "0.4.0", features = ["ed25519"] }
+sui-crypto = { version = "0.4.0", features = ["ed25519", "secp256r1"] }
 tokio-stream = { version = "0.1", features = ["net"] }
 prost = "0.14"
 
 [features]
 default = ["systemd"]
 systemd = ["sd-notify"]
+# Device keys in PKCS#11 tokens (SF-021): Sui secp256r1 signatures.
+pkcs11 = ["dep:cryptoki", "dep:p256"]
 
 [profile.release]
 opt-level = "z"

@@ -24,6 +24,19 @@ export const MOVE_ABI = {
         ],
         "returns": []
       },
+      "create_deployment_paused": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::component_catalog::ComponentVersion",
+          "vector<sui::object::ID>",
+          "vector<sui::object::ID>",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
       "delete_deployment": {
         "visibility": "Public",
         "entry": false,
@@ -256,6 +269,20 @@ export const MOVE_ABI = {
   },
   "deployment_manager": {
     "functions": {
+      "advance_rollout": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::deployment_manager::DeploymentRecord",
+          "vector<sui::object::ID>",
+          "vector<sui::object::ID>",
+          "vector<sui::object::ID>",
+          "&sui::clock::Clock",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
       "artifact_sha256": {
         "visibility": "Public",
         "entry": false,
@@ -266,6 +293,42 @@ export const MOVE_ABI = {
         "returns": [
           "&std::string::String"
         ]
+      },
+      "component_name": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::deployment_manager::DeploymentRecord"
+        ],
+        "returns": [
+          "&std::string::String"
+        ]
+      },
+      "control": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::deployment_manager::DeploymentRecord"
+        ],
+        "returns": [
+          "sui_edge::deployment_manager::Control"
+        ]
+      },
+      "control_rollout": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::deployment_manager::DeploymentRecord",
+          "u8",
+          "vector<sui::object::ID>",
+          "std::string::String",
+          "&sui::clock::Clock",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
       },
       "create_deployment": {
         "visibility": "Public",
@@ -300,9 +363,41 @@ export const MOVE_ABI = {
         ],
         "returns": []
       },
+      "creator": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::deployment_manager::DeploymentRecord"
+        ],
+        "returns": [
+          "address"
+        ]
+      },
+      "delegate": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::deployment_manager::DeploymentRecord"
+        ],
+        "returns": [
+          "std::option::Option<address>"
+        ]
+      },
       "delete_deployment": {
         "visibility": "Public",
         "entry": true,
+        "type_parameters": [],
+        "parameters": [
+          "sui_edge::deployment_manager::DeploymentRecord",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "delete_rollout": {
+        "visibility": "Public",
+        "entry": false,
         "type_parameters": [],
         "parameters": [
           "sui_edge::deployment_manager::DeploymentRecord",
@@ -332,6 +427,28 @@ export const MOVE_ABI = {
           "bool"
         ]
       },
+      "has_recipe_digest": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::deployment_manager::DeploymentRecord"
+        ],
+        "returns": [
+          "bool"
+        ]
+      },
+      "is_managed": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::deployment_manager::DeploymentRecord"
+        ],
+        "returns": [
+          "bool"
+        ]
+      },
       "migrate": {
         "visibility": "Public",
         "entry": false,
@@ -340,6 +457,46 @@ export const MOVE_ABI = {
           "&mut sui_edge::deployment_manager::DeploymentRecord"
         ],
         "returns": []
+      },
+      "new_deployment_verified": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "std::string::String",
+          "std::string::String",
+          "std::string::String",
+          "std::string::String",
+          "std::string::String",
+          "vector<sui::object::ID>",
+          "vector<sui::object::ID>",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": [
+          "sui_edge::deployment_manager::DeploymentRecord"
+        ]
+      },
+      "new_rollout_verified": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "std::string::String",
+          "std::string::String",
+          "std::string::String",
+          "std::string::String",
+          "std::string::String",
+          "vector<sui::object::ID>",
+          "vector<sui::object::ID>",
+          "vector<u64>",
+          "sui_edge::deployment_manager::RolloutPolicy",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": [
+          "sui_edge::deployment_manager::DeploymentRecord"
+        ]
       },
       "receipt_status": {
         "visibility": "Public",
@@ -449,6 +606,83 @@ export const MOVE_ABI = {
         ],
         "returns": []
       },
+      "rollout": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::deployment_manager::DeploymentRecord"
+        ],
+        "returns": [
+          "sui_edge::deployment_manager::Rollout"
+        ]
+      },
+      "rollout_eligible": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::deployment_manager::DeploymentRecord",
+          "sui::object::ID"
+        ],
+        "returns": [
+          "bool"
+        ]
+      },
+      "rollout_policy": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "u64",
+          "u64",
+          "u64",
+          "u64",
+          "u64",
+          "u64",
+          "u64"
+        ],
+        "returns": [
+          "sui_edge::deployment_manager::RolloutPolicy"
+        ]
+      },
+      "rollout_progress": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::deployment_manager::DeploymentRecord"
+        ],
+        "returns": [
+          "u8",
+          "u64"
+        ]
+      },
+      "set_control": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::deployment_manager::DeploymentRecord",
+          "u8",
+          "u64",
+          "u64",
+          "u64",
+          "u64",
+          "u64",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "share_deployment": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "sui_edge::deployment_manager::DeploymentRecord"
+        ],
+        "returns": []
+      },
       "status_applied": {
         "visibility": "Public",
         "entry": false,
@@ -502,6 +736,72 @@ export const MOVE_ABI = {
       }
     },
     "structs": {
+      "Control": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "revision",
+            "u64"
+          ],
+          [
+            "state",
+            "u8"
+          ],
+          [
+            "not_before_ms",
+            "u64"
+          ],
+          [
+            "expires_ms",
+            "u64"
+          ],
+          [
+            "window_start_ms",
+            "u64"
+          ],
+          [
+            "window_end_ms",
+            "u64"
+          ],
+          [
+            "notice_ms",
+            "u64"
+          ]
+        ]
+      },
+      "ControlKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "dummy_field",
+            "bool"
+          ]
+        ]
+      },
+      "DelegateKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "dummy_field",
+            "bool"
+          ]
+        ]
+      },
       "DeploymentCreated": {
         "abilities": [
           "Copy",
@@ -646,6 +946,20 @@ export const MOVE_ABI = {
           ]
         ]
       },
+      "ManagedKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "dummy_field",
+            "bool"
+          ]
+        ]
+      },
       "Receipts": {
         "abilities": [
           "Store"
@@ -690,6 +1004,149 @@ export const MOVE_ABI = {
           ]
         ]
       },
+      "Rollout": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "policy",
+            "sui_edge::deployment_manager::RolloutPolicy"
+          ],
+          [
+            "members",
+            "vector<sui::object::ID>"
+          ],
+          [
+            "cohorts",
+            "vector<u64>"
+          ],
+          [
+            "admitted_at",
+            "vector<u64>"
+          ],
+          [
+            "outcomes",
+            "vector<u8>"
+          ],
+          [
+            "skipped",
+            "vector<bool>"
+          ],
+          [
+            "cohort",
+            "u64"
+          ],
+          [
+            "state",
+            "u8"
+          ],
+          [
+            "bake_started_ms",
+            "u64"
+          ],
+          [
+            "progress_ms",
+            "u64"
+          ],
+          [
+            "revision",
+            "u64"
+          ]
+        ]
+      },
+      "RolloutDecision": {
+        "abilities": [
+          "Copy",
+          "Drop"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "deployment_id",
+            "sui::object::ID"
+          ],
+          [
+            "revision",
+            "u64"
+          ],
+          [
+            "cohort",
+            "u64"
+          ],
+          [
+            "state",
+            "u8"
+          ],
+          [
+            "reason",
+            "std::string::String"
+          ],
+          [
+            "at_ms",
+            "u64"
+          ],
+          [
+            "admitted",
+            "vector<sui::object::ID>"
+          ]
+        ]
+      },
+      "RolloutKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "dummy_field",
+            "bool"
+          ]
+        ]
+      },
+      "RolloutPolicy": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "concurrency",
+            "u64"
+          ],
+          [
+            "rate_count",
+            "u64"
+          ],
+          [
+            "rate_window_ms",
+            "u64"
+          ],
+          [
+            "bake_ms",
+            "u64"
+          ],
+          [
+            "minimum_samples",
+            "u64"
+          ],
+          [
+            "failure_bps",
+            "u64"
+          ],
+          [
+            "offline_timeout_ms",
+            "u64"
+          ]
+        ]
+      },
       "StatusesKey": {
         "abilities": [
           "Copy",
@@ -729,6 +1186,171 @@ export const MOVE_ABI = {
           [
             "dummy_field",
             "bool"
+          ]
+        ]
+      }
+    }
+  },
+  "desired_state": {
+    "functions": {
+      "begin": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::device_group::DeviceGroup",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": [
+          "sui_edge::desired_state::RevisionPlan"
+        ]
+      },
+      "commit": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "sui_edge::desired_state::RevisionPlan",
+          "&mut sui_edge::device_group::DeviceGroup",
+          "&sui::clock::Clock",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "components": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::device_group::DeviceGroup"
+        ],
+        "returns": [
+          "sui::vec_map::VecMap<std::string::String,sui::object::ID>"
+        ]
+      },
+      "plan_components": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::desired_state::RevisionPlan"
+        ],
+        "returns": [
+          "&sui::vec_map::VecMap<std::string::String,sui::object::ID>"
+        ]
+      },
+      "remove_component": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::desired_state::RevisionPlan",
+          "std::string::String"
+        ],
+        "returns": []
+      },
+      "revision": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::device_group::DeviceGroup"
+        ],
+        "returns": [
+          "u64"
+        ]
+      },
+      "set_component": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::desired_state::RevisionPlan",
+          "&mut sui_edge::deployment_manager::DeploymentRecord"
+        ],
+        "returns": []
+      }
+    },
+    "structs": {
+      "DesiredKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "dummy_field",
+            "bool"
+          ]
+        ]
+      },
+      "DesiredState": {
+        "abilities": [
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "revision",
+            "u64"
+          ],
+          [
+            "components",
+            "sui::vec_map::VecMap<std::string::String,sui::object::ID>"
+          ],
+          [
+            "updated_at",
+            "u64"
+          ]
+        ]
+      },
+      "DesiredStateChanged": {
+        "abilities": [
+          "Copy",
+          "Drop"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "group_id",
+            "sui::object::ID"
+          ],
+          [
+            "revision",
+            "u64"
+          ],
+          [
+            "component_names",
+            "vector<std::string::String>"
+          ],
+          [
+            "deployments",
+            "vector<sui::object::ID>"
+          ]
+        ]
+      },
+      "RevisionPlan": {
+        "abilities": [],
+        "type_parameters": [],
+        "fields": [
+          [
+            "group_id",
+            "sui::object::ID"
+          ],
+          [
+            "admin",
+            "address"
+          ],
+          [
+            "base_revision",
+            "u64"
+          ],
+          [
+            "components",
+            "sui::vec_map::VecMap<std::string::String,sui::object::ID>"
           ]
         ]
       }
@@ -1505,6 +2127,454 @@ export const MOVE_ABI = {
           ],
           [
             "admin",
+            "address"
+          ]
+        ]
+      }
+    }
+  },
+  "enrollment": {
+    "functions": {
+      "add_claims": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::enrollment::EnrollmentPolicy",
+          "vector<address>",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "close": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::enrollment::EnrollmentPolicy",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "create_policy": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::device_registry::DeviceRegistry",
+          "u64",
+          "u64",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "enroll": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::enrollment::EnrollmentPolicy",
+          "&mut sui_edge::device_registry::DeviceRegistry",
+          "std::string::String",
+          "std::string::String",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "enrolled": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::enrollment::EnrollmentPolicy"
+        ],
+        "returns": [
+          "u64"
+        ]
+      },
+      "is_claim": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::enrollment::EnrollmentPolicy",
+          "address"
+        ],
+        "returns": [
+          "bool"
+        ]
+      },
+      "is_open": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::enrollment::EnrollmentPolicy"
+        ],
+        "returns": [
+          "bool"
+        ]
+      },
+      "operator": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::enrollment::EnrollmentPolicy"
+        ],
+        "returns": [
+          "address"
+        ]
+      },
+      "remaining": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::enrollment::EnrollmentPolicy"
+        ],
+        "returns": [
+          "u64"
+        ]
+      },
+      "revoke_claim": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::enrollment::EnrollmentPolicy",
+          "address",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "set_limits": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::enrollment::EnrollmentPolicy",
+          "u64",
+          "u64",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      }
+    },
+    "structs": {
+      "DeviceEnrolled": {
+        "abilities": [
+          "Copy",
+          "Drop"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "policy_id",
+            "sui::object::ID"
+          ],
+          [
+            "device_id",
+            "sui::object::ID"
+          ],
+          [
+            "device_address",
+            "address"
+          ],
+          [
+            "claim",
+            "address"
+          ],
+          [
+            "operator",
+            "address"
+          ],
+          [
+            "owner_cap",
+            "sui::object::ID"
+          ],
+          [
+            "device_cap",
+            "sui::object::ID"
+          ]
+        ]
+      },
+      "EnrollmentPolicy": {
+        "abilities": [
+          "Key"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "id",
+            "sui::object::UID"
+          ],
+          [
+            "operator",
+            "address"
+          ],
+          [
+            "registry",
+            "sui::object::ID"
+          ],
+          [
+            "claims",
+            "sui::table::Table<address,bool>"
+          ],
+          [
+            "remaining",
+            "u64"
+          ],
+          [
+            "expires_at_ms",
+            "u64"
+          ],
+          [
+            "open",
+            "bool"
+          ],
+          [
+            "enrolled",
+            "u64"
+          ]
+        ]
+      },
+      "PolicyCreated": {
+        "abilities": [
+          "Copy",
+          "Drop"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "policy_id",
+            "sui::object::ID"
+          ],
+          [
+            "operator",
+            "address"
+          ],
+          [
+            "registry",
+            "sui::object::ID"
+          ]
+        ]
+      }
+    }
+  },
+  "roles": {
+    "functions": {
+      "allow_group": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::roles::RoleBuilder",
+          "&sui_edge::device_group::DeviceGroup"
+        ],
+        "returns": []
+      },
+      "create_deployment_as": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::roles::DeployerRole",
+          "&sui_edge::device_registry::DeviceRegistry",
+          "std::string::String",
+          "std::string::String",
+          "std::string::String",
+          "std::string::String",
+          "std::string::String",
+          "vector<sui::object::ID>",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "grant": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "sui_edge::roles::RoleBuilder",
+          "&mut sui_edge::device_registry::DeviceRegistry",
+          "address",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "is_active": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::device_registry::DeviceRegistry",
+          "&sui_edge::roles::DeployerRole"
+        ],
+        "returns": [
+          "bool"
+        ]
+      },
+      "new_deployer_role": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": [
+          "sui_edge::roles::RoleBuilder"
+        ]
+      },
+      "revoke": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::device_registry::DeviceRegistry",
+          "sui::object::ID",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "role_groups": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::roles::DeployerRole"
+        ],
+        "returns": [
+          "&vector<sui::object::ID>"
+        ]
+      },
+      "role_operator": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::roles::DeployerRole"
+        ],
+        "returns": [
+          "address"
+        ]
+      }
+    },
+    "structs": {
+      "DelegatedDeployment": {
+        "abilities": [
+          "Copy",
+          "Drop"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "deployment_id",
+            "sui::object::ID"
+          ],
+          [
+            "role_id",
+            "sui::object::ID"
+          ],
+          [
+            "operator",
+            "address"
+          ],
+          [
+            "delegate",
+            "address"
+          ]
+        ]
+      },
+      "DeployerRole": {
+        "abilities": [
+          "Key",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "id",
+            "sui::object::UID"
+          ],
+          [
+            "operator",
+            "address"
+          ],
+          [
+            "groups",
+            "vector<sui::object::ID>"
+          ]
+        ]
+      },
+      "RoleBuilder": {
+        "abilities": [],
+        "type_parameters": [],
+        "fields": [
+          [
+            "operator",
+            "address"
+          ],
+          [
+            "groups",
+            "vector<sui::object::ID>"
+          ]
+        ]
+      },
+      "RoleGranted": {
+        "abilities": [
+          "Copy",
+          "Drop"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "role_id",
+            "sui::object::ID"
+          ],
+          [
+            "operator",
+            "address"
+          ],
+          [
+            "delegate",
+            "address"
+          ],
+          [
+            "groups",
+            "vector<sui::object::ID>"
+          ]
+        ]
+      },
+      "RoleKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "role_id",
+            "sui::object::ID"
+          ]
+        ]
+      },
+      "RoleRevoked": {
+        "abilities": [
+          "Copy",
+          "Drop"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "role_id",
+            "sui::object::ID"
+          ],
+          [
+            "operator",
             "address"
           ]
         ]

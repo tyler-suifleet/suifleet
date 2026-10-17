@@ -3,6 +3,8 @@
 //!   suifleet-indexer serve --manifest deployment.json --db fleet.db
 //!                          [--listen 127.0.0.1:8650] (--tokens FILE | --public-read)
 //!                          [--interval-seconds 2] [--reconcile-batch 500] [--reset]
+//!                          [--telemetry-db telemetry.db [--telemetry-retain 1000]]
+//!                          [--cors-origin https://dapp.example]
 //!   suifleet-indexer index --manifest deployment.json --db fleet.db [--reconcile-batch 500]
 //!                          [--reset] [--rebuild-from-objects]
 //!   suifleet-indexer ctl ...   (see `suifleet-indexer ctl help`)
@@ -15,6 +17,7 @@ mod devices;
 mod indexer;
 mod manifest;
 mod store;
+mod telemetry;
 mod txbuild;
 
 use std::collections::BTreeMap;
@@ -98,14 +101,35 @@ async fn main() -> anyhow::Result<()> {
             };
             let chain = chain::Chain::new(&manifest.rpc_url)?;
             let types = manifest.verify(&chain).await?;
+            let registry = chain::normalize(&manifest.shared_objects.registry.id).unwrap_or_default();
+            let telemetry = match values.get("--telemetry-db") {
+                Some(path) => {
+                    let binding = telemetry::Binding {
+                        chain_identifier: manifest.chain_identifier.clone(),
+                        registry: registry.clone(),
+                    };
+                    let retain: usize = values
+                        .get("--telemetry-retain")
+                        .map(|s| s.parse())
+                        .transpose()?
+                        .unwrap_or(1000);
+                    anyhow::ensure!(retain > 0, "--telemetry-retain must be positive");
+                    let path = PathBuf::from(path);
+                    let writer = telemetry::open(&path, &binding, flags.iter().any(|f| f == "--reset"))?;
+                    Some(Arc::new(telemetry::Service { path, binding, retain, writer: std::sync::Mutex::new(writer) }))
+                }
+                None => None,
+            };
             let state = api::AppState {
                 readers: store::Readers::new(&db_path),
                 tokens,
                 public_read,
                 chain,
                 call_package: chain::normalize(&manifest.call_package_id).unwrap_or_default(),
-                registry: chain::normalize(&manifest.shared_objects.registry.id).unwrap_or_default(),
+                registry,
                 types: Arc::new(types),
+                telemetry,
+                cors_origin: values.get("--cors-origin").cloned(),
             };
             let interval = std::time::Duration::from_secs(
                 values

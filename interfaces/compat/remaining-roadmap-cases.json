@@ -1,0 +1,1754 @@
+{
+  "format_version": 1,
+  "cases": [
+    {
+      "id": "lambda.baseline",
+      "scope": "lambda",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "mode": "on-demand",
+        "elapsed_ms": 1,
+        "timeout_ms": 100,
+        "active": 0,
+        "concurrency": 2,
+        "subscriptions": [
+          {
+            "source": "sensor",
+            "subject": "temperature",
+            "target": "fn"
+          },
+          {
+            "source": "sensor",
+            "subject": "temperature",
+            "target": "fn"
+          }
+        ],
+        "source": "sensor",
+        "subject": "temperature",
+        "payload": {
+          "value": 42
+        }
+      },
+      "expected": {
+        "status": "invoke",
+        "targets": [
+          "fn"
+        ],
+        "payload": {
+          "value": 42
+        }
+      }
+    },
+    {
+      "id": "lambda.version",
+      "scope": "lambda",
+      "request": {
+        "version": 2,
+        "authorized": true,
+        "mode": "on-demand",
+        "elapsed_ms": 1,
+        "timeout_ms": 100,
+        "active": 0,
+        "concurrency": 2,
+        "subscriptions": [
+          {
+            "source": "sensor",
+            "subject": "temperature",
+            "target": "fn"
+          },
+          {
+            "source": "sensor",
+            "subject": "temperature",
+            "target": "fn"
+          }
+        ],
+        "source": "sensor",
+        "subject": "temperature",
+        "payload": {
+          "value": 42
+        }
+      },
+      "expected": {
+        "status": "unsupported-version"
+      }
+    },
+    {
+      "id": "lambda.denied",
+      "scope": "lambda",
+      "request": {
+        "version": 1,
+        "authorized": false,
+        "mode": "on-demand",
+        "elapsed_ms": 1,
+        "timeout_ms": 100,
+        "active": 0,
+        "concurrency": 2,
+        "subscriptions": [
+          {
+            "source": "sensor",
+            "subject": "temperature",
+            "target": "fn"
+          },
+          {
+            "source": "sensor",
+            "subject": "temperature",
+            "target": "fn"
+          }
+        ],
+        "source": "sensor",
+        "subject": "temperature",
+        "payload": {
+          "value": 42
+        }
+      },
+      "expected": {
+        "status": "denied"
+      }
+    },
+    {
+      "id": "industrial.baseline",
+      "scope": "industrial",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "value": 42,
+        "timestamp_ns": 100,
+        "quality": "GOOD"
+      },
+      "expected": {
+        "status": "measurement",
+        "value": 42,
+        "timestamp_ns": 100,
+        "quality": "GOOD"
+      }
+    },
+    {
+      "id": "industrial.version",
+      "scope": "industrial",
+      "request": {
+        "version": 2,
+        "authorized": true,
+        "value": 42,
+        "timestamp_ns": 100,
+        "quality": "GOOD"
+      },
+      "expected": {
+        "status": "unsupported-version"
+      }
+    },
+    {
+      "id": "industrial.denied",
+      "scope": "industrial",
+      "request": {
+        "version": 1,
+        "authorized": false,
+        "value": 42,
+        "timestamp_ns": 100,
+        "quality": "GOOD"
+      },
+      "expected": {
+        "status": "denied"
+      }
+    },
+    {
+      "id": "sitewise.baseline",
+      "scope": "sitewise",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "value": 42,
+        "timestamp_ns": 100,
+        "quality": "UNCERTAIN",
+        "alias": "temperature",
+        "aliases": [
+          "temperature"
+        ],
+        "scale": 2,
+        "offset": 1
+      },
+      "expected": {
+        "status": "measurement",
+        "value": 85,
+        "timestamp_ns": 100,
+        "quality": "UNCERTAIN"
+      }
+    },
+    {
+      "id": "sitewise.version",
+      "scope": "sitewise",
+      "request": {
+        "version": 2,
+        "authorized": true,
+        "value": 42,
+        "timestamp_ns": 100,
+        "quality": "UNCERTAIN",
+        "alias": "temperature",
+        "aliases": [
+          "temperature"
+        ],
+        "scale": 2,
+        "offset": 1
+      },
+      "expected": {
+        "status": "unsupported-version"
+      }
+    },
+    {
+      "id": "sitewise.denied",
+      "scope": "sitewise",
+      "request": {
+        "version": 1,
+        "authorized": false,
+        "value": 42,
+        "timestamp_ns": 100,
+        "quality": "UNCERTAIN",
+        "alias": "temperature",
+        "aliases": [
+          "temperature"
+        ],
+        "scale": 2,
+        "offset": 1
+      },
+      "expected": {
+        "status": "denied"
+      }
+    },
+    {
+      "id": "video.baseline",
+      "scope": "video",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "records": [
+          {
+            "sequence": 0,
+            "bytes": 10,
+            "result": "ack"
+          },
+          {
+            "sequence": 1,
+            "bytes": 10,
+            "result": "ambiguous"
+          },
+          {
+            "sequence": 2,
+            "bytes": 10,
+            "result": "ack"
+          }
+        ],
+        "max_bytes": 100,
+        "checkpoint": -1
+      },
+      "expected": {
+        "status": "retained",
+        "checkpoint": 0
+      }
+    },
+    {
+      "id": "video.version",
+      "scope": "video",
+      "request": {
+        "version": 2,
+        "authorized": true,
+        "records": [
+          {
+            "sequence": 0,
+            "bytes": 10,
+            "result": "ack"
+          },
+          {
+            "sequence": 1,
+            "bytes": 10,
+            "result": "ambiguous"
+          },
+          {
+            "sequence": 2,
+            "bytes": 10,
+            "result": "ack"
+          }
+        ],
+        "max_bytes": 100,
+        "checkpoint": -1
+      },
+      "expected": {
+        "status": "unsupported-version"
+      }
+    },
+    {
+      "id": "video.denied",
+      "scope": "video",
+      "request": {
+        "version": 1,
+        "authorized": false,
+        "records": [
+          {
+            "sequence": 0,
+            "bytes": 10,
+            "result": "ack"
+          },
+          {
+            "sequence": 1,
+            "bytes": 10,
+            "result": "ambiguous"
+          },
+          {
+            "sequence": 2,
+            "bytes": 10,
+            "result": "ack"
+          }
+        ],
+        "max_bytes": 100,
+        "checkpoint": -1
+      },
+      "expected": {
+        "status": "denied"
+      }
+    },
+    {
+      "id": "ml.baseline",
+      "scope": "ml",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "actual_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "runtime": "tflite-pinned",
+        "expected_runtime": "tflite-pinned",
+        "shape": [
+          1,
+          2
+        ],
+        "expected_shape": [
+          1,
+          2
+        ],
+        "actual": [
+          0.9,
+          0.1
+        ],
+        "expected": [
+          0.91,
+          0.09
+        ],
+        "tolerance": 0.02
+      },
+      "expected": {
+        "status": "within-tolerance"
+      }
+    },
+    {
+      "id": "ml.version",
+      "scope": "ml",
+      "request": {
+        "version": 2,
+        "authorized": true,
+        "actual_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "runtime": "tflite-pinned",
+        "expected_runtime": "tflite-pinned",
+        "shape": [
+          1,
+          2
+        ],
+        "expected_shape": [
+          1,
+          2
+        ],
+        "actual": [
+          0.9,
+          0.1
+        ],
+        "expected": [
+          0.91,
+          0.09
+        ],
+        "tolerance": 0.02
+      },
+      "expected": {
+        "status": "unsupported-version"
+      }
+    },
+    {
+      "id": "ml.denied",
+      "scope": "ml",
+      "request": {
+        "version": 1,
+        "authorized": false,
+        "actual_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "runtime": "tflite-pinned",
+        "expected_runtime": "tflite-pinned",
+        "shape": [
+          1,
+          2
+        ],
+        "expected_shape": [
+          1,
+          2
+        ],
+        "actual": [
+          0.9,
+          0.1
+        ],
+        "expected": [
+          0.91,
+          0.09
+        ],
+        "tolerance": 0.02
+      },
+      "expected": {
+        "status": "denied"
+      }
+    },
+    {
+      "id": "windows.baseline",
+      "scope": "windows",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "platform": "windows-x86_64",
+        "artifact_platform": "windows-x86_64",
+        "contained": true,
+        "private_identity": true,
+        "interrupted": false
+      },
+      "expected": {
+        "status": "eligible"
+      }
+    },
+    {
+      "id": "windows.version",
+      "scope": "windows",
+      "request": {
+        "version": 2,
+        "authorized": true,
+        "platform": "windows-x86_64",
+        "artifact_platform": "windows-x86_64",
+        "contained": true,
+        "private_identity": true,
+        "interrupted": false
+      },
+      "expected": {
+        "status": "unsupported-version"
+      }
+    },
+    {
+      "id": "windows.denied",
+      "scope": "windows",
+      "request": {
+        "version": 1,
+        "authorized": false,
+        "platform": "windows-x86_64",
+        "artifact_platform": "windows-x86_64",
+        "contained": true,
+        "private_identity": true,
+        "interrupted": false
+      },
+      "expected": {
+        "status": "denied"
+      }
+    },
+    {
+      "id": "macos.baseline",
+      "scope": "macos",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "platform": "darwin-aarch64",
+        "artifact_platform": "darwin-aarch64",
+        "contained": true,
+        "private_identity": true,
+        "interrupted": false
+      },
+      "expected": {
+        "status": "eligible"
+      }
+    },
+    {
+      "id": "macos.version",
+      "scope": "macos",
+      "request": {
+        "version": 2,
+        "authorized": true,
+        "platform": "darwin-aarch64",
+        "artifact_platform": "darwin-aarch64",
+        "contained": true,
+        "private_identity": true,
+        "interrupted": false
+      },
+      "expected": {
+        "status": "unsupported-version"
+      }
+    },
+    {
+      "id": "macos.denied",
+      "scope": "macos",
+      "request": {
+        "version": 1,
+        "authorized": false,
+        "platform": "darwin-aarch64",
+        "artifact_platform": "darwin-aarch64",
+        "contained": true,
+        "private_identity": true,
+        "interrupted": false
+      },
+      "expected": {
+        "status": "denied"
+      }
+    },
+    {
+      "id": "linux-x86.baseline",
+      "scope": "linux-x86",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "platform": "linux-i686",
+        "artifact_platform": "linux-i686",
+        "contained": true,
+        "private_identity": true,
+        "interrupted": false
+      },
+      "expected": {
+        "status": "eligible"
+      }
+    },
+    {
+      "id": "linux-x86.version",
+      "scope": "linux-x86",
+      "request": {
+        "version": 2,
+        "authorized": true,
+        "platform": "linux-i686",
+        "artifact_platform": "linux-i686",
+        "contained": true,
+        "private_identity": true,
+        "interrupted": false
+      },
+      "expected": {
+        "status": "unsupported-version"
+      }
+    },
+    {
+      "id": "linux-x86.denied",
+      "scope": "linux-x86",
+      "request": {
+        "version": 1,
+        "authorized": false,
+        "platform": "linux-i686",
+        "artifact_platform": "linux-i686",
+        "contained": true,
+        "private_identity": true,
+        "interrupted": false
+      },
+      "expected": {
+        "status": "denied"
+      }
+    },
+    {
+      "id": "firehose.baseline",
+      "scope": "firehose",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "records": [
+          {
+            "sequence": 0,
+            "bytes": 10,
+            "result": "ack"
+          },
+          {
+            "sequence": 1,
+            "bytes": 10,
+            "result": "rejected"
+          },
+          {
+            "sequence": 2,
+            "bytes": 10,
+            "result": "ack"
+          }
+        ],
+        "max_bytes": 100,
+        "checkpoint": -1
+      },
+      "expected": {
+        "status": "retained",
+        "checkpoint": 0
+      }
+    },
+    {
+      "id": "firehose.version",
+      "scope": "firehose",
+      "request": {
+        "version": 2,
+        "authorized": true,
+        "records": [
+          {
+            "sequence": 0,
+            "bytes": 10,
+            "result": "ack"
+          },
+          {
+            "sequence": 1,
+            "bytes": 10,
+            "result": "rejected"
+          },
+          {
+            "sequence": 2,
+            "bytes": 10,
+            "result": "ack"
+          }
+        ],
+        "max_bytes": 100,
+        "checkpoint": -1
+      },
+      "expected": {
+        "status": "unsupported-version"
+      }
+    },
+    {
+      "id": "firehose.denied",
+      "scope": "firehose",
+      "request": {
+        "version": 1,
+        "authorized": false,
+        "records": [
+          {
+            "sequence": 0,
+            "bytes": 10,
+            "result": "ack"
+          },
+          {
+            "sequence": 1,
+            "bytes": 10,
+            "result": "rejected"
+          },
+          {
+            "sequence": 2,
+            "bytes": 10,
+            "result": "ack"
+          }
+        ],
+        "max_bytes": 100,
+        "checkpoint": -1
+      },
+      "expected": {
+        "status": "denied"
+      }
+    },
+    {
+      "id": "sns.baseline",
+      "scope": "sns",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "records": [
+          {
+            "sequence": 0,
+            "bytes": 10,
+            "result": "ambiguous"
+          }
+        ],
+        "max_bytes": 100,
+        "checkpoint": -1
+      },
+      "expected": {
+        "status": "retained",
+        "checkpoint": -1
+      }
+    },
+    {
+      "id": "sns.version",
+      "scope": "sns",
+      "request": {
+        "version": 2,
+        "authorized": true,
+        "records": [
+          {
+            "sequence": 0,
+            "bytes": 10,
+            "result": "ambiguous"
+          }
+        ],
+        "max_bytes": 100,
+        "checkpoint": -1
+      },
+      "expected": {
+        "status": "unsupported-version"
+      }
+    },
+    {
+      "id": "sns.denied",
+      "scope": "sns",
+      "request": {
+        "version": 1,
+        "authorized": false,
+        "records": [
+          {
+            "sequence": 0,
+            "bytes": 10,
+            "result": "ambiguous"
+          }
+        ],
+        "max_bytes": 100,
+        "checkpoint": -1
+      },
+      "expected": {
+        "status": "denied"
+      }
+    },
+    {
+      "id": "console.baseline",
+      "scope": "console",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "origin": "local",
+        "expected_origin": "local",
+        "operation": "inventory",
+        "grants": [
+          "inventory"
+        ],
+        "fields": {
+          "component": "demo",
+          "version": "1.0",
+          "health": "ok",
+          "key": "must-not-appear",
+          "token": "must-not-appear"
+        }
+      },
+      "expected": {
+        "status": "ok",
+        "fields": {
+          "component": "demo",
+          "version": "1.0",
+          "health": "ok"
+        }
+      }
+    },
+    {
+      "id": "console.version",
+      "scope": "console",
+      "request": {
+        "version": 2,
+        "authorized": true,
+        "origin": "local",
+        "expected_origin": "local",
+        "operation": "inventory",
+        "grants": [
+          "inventory"
+        ],
+        "fields": {
+          "component": "demo",
+          "version": "1.0",
+          "health": "ok",
+          "key": "must-not-appear",
+          "token": "must-not-appear"
+        }
+      },
+      "expected": {
+        "status": "unsupported-version"
+      }
+    },
+    {
+      "id": "console.denied",
+      "scope": "console",
+      "request": {
+        "version": 1,
+        "authorized": false,
+        "origin": "local",
+        "expected_origin": "local",
+        "operation": "inventory",
+        "grants": [
+          "inventory"
+        ],
+        "fields": {
+          "component": "demo",
+          "version": "1.0",
+          "health": "ok",
+          "key": "must-not-appear",
+          "token": "must-not-appear"
+        }
+      },
+      "expected": {
+        "status": "denied"
+      }
+    },
+    {
+      "id": "lambda.on-demand",
+      "scope": "lambda",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "mode": "on-demand",
+        "elapsed_ms": 1,
+        "timeout_ms": 100,
+        "active": 0,
+        "concurrency": 2,
+        "subscriptions": [
+          {
+            "source": "sensor",
+            "subject": "temperature",
+            "target": "fn"
+          },
+          {
+            "source": "sensor",
+            "subject": "temperature",
+            "target": "fn"
+          }
+        ],
+        "source": "sensor",
+        "subject": "temperature",
+        "payload": {
+          "value": 42
+        }
+      },
+      "expected": {
+        "status": "invoke",
+        "targets": [
+          "fn"
+        ],
+        "payload": {
+          "value": 42
+        }
+      }
+    },
+    {
+      "id": "lambda.long-lived",
+      "scope": "lambda",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "mode": "long-lived",
+        "elapsed_ms": 1,
+        "timeout_ms": 100,
+        "active": 0,
+        "concurrency": 2,
+        "subscriptions": [
+          {
+            "source": "sensor",
+            "subject": "temperature",
+            "target": "fn"
+          },
+          {
+            "source": "sensor",
+            "subject": "temperature",
+            "target": "fn"
+          }
+        ],
+        "source": "sensor",
+        "subject": "temperature",
+        "payload": {
+          "value": 42
+        }
+      },
+      "expected": {
+        "status": "invoke",
+        "targets": [
+          "fn"
+        ],
+        "payload": {
+          "value": 42
+        }
+      }
+    },
+    {
+      "id": "lambda.timeout",
+      "scope": "lambda",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "mode": "on-demand",
+        "elapsed_ms": 100,
+        "timeout_ms": 100,
+        "active": 0,
+        "concurrency": 2,
+        "subscriptions": [
+          {
+            "source": "sensor",
+            "subject": "temperature",
+            "target": "fn"
+          },
+          {
+            "source": "sensor",
+            "subject": "temperature",
+            "target": "fn"
+          }
+        ],
+        "source": "sensor",
+        "subject": "temperature",
+        "payload": {
+          "value": 42
+        }
+      },
+      "expected": {
+        "status": "timeout"
+      }
+    },
+    {
+      "id": "lambda.busy",
+      "scope": "lambda",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "mode": "on-demand",
+        "elapsed_ms": 1,
+        "timeout_ms": 100,
+        "active": 2,
+        "concurrency": 2,
+        "subscriptions": [
+          {
+            "source": "sensor",
+            "subject": "temperature",
+            "target": "fn"
+          },
+          {
+            "source": "sensor",
+            "subject": "temperature",
+            "target": "fn"
+          }
+        ],
+        "source": "sensor",
+        "subject": "temperature",
+        "payload": {
+          "value": 42
+        }
+      },
+      "expected": {
+        "status": "busy"
+      }
+    },
+    {
+      "id": "lambda.invalid-mode",
+      "scope": "lambda",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "mode": "shell",
+        "elapsed_ms": 1,
+        "timeout_ms": 100,
+        "active": 0,
+        "concurrency": 2,
+        "subscriptions": [
+          {
+            "source": "sensor",
+            "subject": "temperature",
+            "target": "fn"
+          },
+          {
+            "source": "sensor",
+            "subject": "temperature",
+            "target": "fn"
+          }
+        ],
+        "source": "sensor",
+        "subject": "temperature",
+        "payload": {
+          "value": 42
+        }
+      },
+      "expected": {
+        "status": "invalid-mode"
+      }
+    },
+    {
+      "id": "lambda.unrouted",
+      "scope": "lambda",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "mode": "on-demand",
+        "elapsed_ms": 1,
+        "timeout_ms": 100,
+        "active": 0,
+        "concurrency": 2,
+        "subscriptions": [
+          {
+            "source": "sensor",
+            "subject": "temperature",
+            "target": "fn"
+          },
+          {
+            "source": "sensor",
+            "subject": "temperature",
+            "target": "fn"
+          }
+        ],
+        "source": "sensor",
+        "subject": "unknown",
+        "payload": {
+          "value": 42
+        }
+      },
+      "expected": {
+        "status": "invoke",
+        "targets": [],
+        "payload": {
+          "value": 42
+        }
+      }
+    },
+    {
+      "id": "industrial.quality",
+      "scope": "industrial",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "value": 42,
+        "timestamp_ns": 100,
+        "quality": "unknown"
+      },
+      "expected": {
+        "status": "invalid-quality"
+      }
+    },
+    {
+      "id": "industrial.boolean-value",
+      "scope": "industrial",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "value": true,
+        "timestamp_ns": 100,
+        "quality": "GOOD"
+      },
+      "expected": {
+        "status": "invalid-measurement"
+      }
+    },
+    {
+      "id": "industrial.timestamp",
+      "scope": "industrial",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "value": 42,
+        "timestamp_ns": -1,
+        "quality": "GOOD"
+      },
+      "expected": {
+        "status": "invalid-measurement"
+      }
+    },
+    {
+      "id": "sitewise.quality",
+      "scope": "sitewise",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "value": 42,
+        "timestamp_ns": 100,
+        "quality": "unknown",
+        "alias": "temperature",
+        "aliases": [
+          "temperature"
+        ],
+        "scale": 2,
+        "offset": 1
+      },
+      "expected": {
+        "status": "invalid-quality"
+      }
+    },
+    {
+      "id": "sitewise.boolean-value",
+      "scope": "sitewise",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "value": true,
+        "timestamp_ns": 100,
+        "quality": "UNCERTAIN",
+        "alias": "temperature",
+        "aliases": [
+          "temperature"
+        ],
+        "scale": 2,
+        "offset": 1
+      },
+      "expected": {
+        "status": "invalid-measurement"
+      }
+    },
+    {
+      "id": "sitewise.timestamp",
+      "scope": "sitewise",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "value": 42,
+        "timestamp_ns": -1,
+        "quality": "UNCERTAIN",
+        "alias": "temperature",
+        "aliases": [
+          "temperature"
+        ],
+        "scale": 2,
+        "offset": 1
+      },
+      "expected": {
+        "status": "invalid-measurement"
+      }
+    },
+    {
+      "id": "sitewise.alias",
+      "scope": "sitewise",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "value": 42,
+        "timestamp_ns": 100,
+        "quality": "UNCERTAIN",
+        "alias": "unknown",
+        "aliases": [
+          "temperature"
+        ],
+        "scale": 2,
+        "offset": 1
+      },
+      "expected": {
+        "status": "unknown-alias"
+      }
+    },
+    {
+      "id": "video.quota",
+      "scope": "video",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "records": [
+          {
+            "sequence": 0,
+            "bytes": 10,
+            "result": "ack"
+          },
+          {
+            "sequence": 1,
+            "bytes": 10,
+            "result": "ambiguous"
+          },
+          {
+            "sequence": 2,
+            "bytes": 10,
+            "result": "ack"
+          }
+        ],
+        "max_bytes": 1,
+        "checkpoint": -1
+      },
+      "expected": {
+        "status": "backpressure",
+        "checkpoint": -1
+      }
+    },
+    {
+      "id": "video.ack",
+      "scope": "video",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "records": [
+          {
+            "sequence": 0,
+            "bytes": 10,
+            "result": "ack"
+          }
+        ],
+        "max_bytes": 100,
+        "checkpoint": -1
+      },
+      "expected": {
+        "status": "acknowledged",
+        "checkpoint": 0
+      }
+    },
+    {
+      "id": "video.restart-retry",
+      "scope": "video",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "records": [
+          {
+            "sequence": 1,
+            "bytes": 10,
+            "result": "ack"
+          }
+        ],
+        "max_bytes": 100,
+        "checkpoint": 0
+      },
+      "expected": {
+        "status": "acknowledged",
+        "checkpoint": 1
+      }
+    },
+    {
+      "id": "video.gap",
+      "scope": "video",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "records": [
+          {
+            "sequence": 1,
+            "bytes": 10,
+            "result": "ack"
+          }
+        ],
+        "max_bytes": 100,
+        "checkpoint": -1
+      },
+      "expected": {
+        "status": "retained",
+        "checkpoint": -1
+      }
+    },
+    {
+      "id": "firehose.quota",
+      "scope": "firehose",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "records": [
+          {
+            "sequence": 0,
+            "bytes": 10,
+            "result": "ack"
+          },
+          {
+            "sequence": 1,
+            "bytes": 10,
+            "result": "rejected"
+          },
+          {
+            "sequence": 2,
+            "bytes": 10,
+            "result": "ack"
+          }
+        ],
+        "max_bytes": 1,
+        "checkpoint": -1
+      },
+      "expected": {
+        "status": "backpressure",
+        "checkpoint": -1
+      }
+    },
+    {
+      "id": "firehose.ack",
+      "scope": "firehose",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "records": [
+          {
+            "sequence": 0,
+            "bytes": 10,
+            "result": "ack"
+          }
+        ],
+        "max_bytes": 100,
+        "checkpoint": -1
+      },
+      "expected": {
+        "status": "acknowledged",
+        "checkpoint": 0
+      }
+    },
+    {
+      "id": "firehose.restart-retry",
+      "scope": "firehose",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "records": [
+          {
+            "sequence": 1,
+            "bytes": 10,
+            "result": "ack"
+          }
+        ],
+        "max_bytes": 100,
+        "checkpoint": 0
+      },
+      "expected": {
+        "status": "acknowledged",
+        "checkpoint": 1
+      }
+    },
+    {
+      "id": "firehose.gap",
+      "scope": "firehose",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "records": [
+          {
+            "sequence": 1,
+            "bytes": 10,
+            "result": "ack"
+          }
+        ],
+        "max_bytes": 100,
+        "checkpoint": -1
+      },
+      "expected": {
+        "status": "retained",
+        "checkpoint": -1
+      }
+    },
+    {
+      "id": "sns.quota",
+      "scope": "sns",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "records": [
+          {
+            "sequence": 0,
+            "bytes": 10,
+            "result": "ambiguous"
+          }
+        ],
+        "max_bytes": 1,
+        "checkpoint": -1
+      },
+      "expected": {
+        "status": "backpressure",
+        "checkpoint": -1
+      }
+    },
+    {
+      "id": "sns.ack",
+      "scope": "sns",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "records": [
+          {
+            "sequence": 0,
+            "bytes": 10,
+            "result": "ack"
+          }
+        ],
+        "max_bytes": 100,
+        "checkpoint": -1
+      },
+      "expected": {
+        "status": "acknowledged",
+        "checkpoint": 0
+      }
+    },
+    {
+      "id": "sns.restart-retry",
+      "scope": "sns",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "records": [
+          {
+            "sequence": 1,
+            "bytes": 10,
+            "result": "ack"
+          }
+        ],
+        "max_bytes": 100,
+        "checkpoint": 0
+      },
+      "expected": {
+        "status": "acknowledged",
+        "checkpoint": 1
+      }
+    },
+    {
+      "id": "sns.gap",
+      "scope": "sns",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "records": [
+          {
+            "sequence": 1,
+            "bytes": 10,
+            "result": "ack"
+          }
+        ],
+        "max_bytes": 100,
+        "checkpoint": -1
+      },
+      "expected": {
+        "status": "retained",
+        "checkpoint": -1
+      }
+    },
+    {
+      "id": "ml.digest",
+      "scope": "ml",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "actual_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "expected_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "runtime": "tflite-pinned",
+        "expected_runtime": "tflite-pinned",
+        "shape": [
+          1,
+          2
+        ],
+        "expected_shape": [
+          1,
+          2
+        ],
+        "actual": [
+          0.9,
+          0.1
+        ],
+        "expected": [
+          0.91,
+          0.09
+        ],
+        "tolerance": 0.02
+      },
+      "expected": {
+        "status": "digest-mismatch"
+      }
+    },
+    {
+      "id": "ml.runtime",
+      "scope": "ml",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "actual_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "runtime": "unknown",
+        "expected_runtime": "tflite-pinned",
+        "shape": [
+          1,
+          2
+        ],
+        "expected_shape": [
+          1,
+          2
+        ],
+        "actual": [
+          0.9,
+          0.1
+        ],
+        "expected": [
+          0.91,
+          0.09
+        ],
+        "tolerance": 0.02
+      },
+      "expected": {
+        "status": "incompatible-input"
+      }
+    },
+    {
+      "id": "ml.shape",
+      "scope": "ml",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "actual_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "runtime": "tflite-pinned",
+        "expected_runtime": "tflite-pinned",
+        "shape": [
+          2,
+          1
+        ],
+        "expected_shape": [
+          1,
+          2
+        ],
+        "actual": [
+          0.9,
+          0.1
+        ],
+        "expected": [
+          0.91,
+          0.09
+        ],
+        "tolerance": 0.02
+      },
+      "expected": {
+        "status": "incompatible-input"
+      }
+    },
+    {
+      "id": "ml.output",
+      "scope": "ml",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "actual_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "runtime": "tflite-pinned",
+        "expected_runtime": "tflite-pinned",
+        "shape": [
+          1,
+          2
+        ],
+        "expected_shape": [
+          1,
+          2
+        ],
+        "actual": [
+          0.1,
+          0.9
+        ],
+        "expected": [
+          0.91,
+          0.09
+        ],
+        "tolerance": 0.02
+      },
+      "expected": {
+        "status": "output-mismatch"
+      }
+    },
+    {
+      "id": "windows.wrong-artifact",
+      "scope": "windows",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "platform": "windows-x86_64",
+        "artifact_platform": "linux-x86_64",
+        "contained": true,
+        "private_identity": true,
+        "interrupted": false
+      },
+      "expected": {
+        "status": "incompatible-artifact"
+      }
+    },
+    {
+      "id": "windows.containment",
+      "scope": "windows",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "platform": "windows-x86_64",
+        "artifact_platform": "windows-x86_64",
+        "contained": false,
+        "private_identity": true,
+        "interrupted": false
+      },
+      "expected": {
+        "status": "unsafe-runtime"
+      }
+    },
+    {
+      "id": "windows.identity",
+      "scope": "windows",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "platform": "windows-x86_64",
+        "artifact_platform": "windows-x86_64",
+        "contained": true,
+        "private_identity": false,
+        "interrupted": false
+      },
+      "expected": {
+        "status": "unsafe-runtime"
+      }
+    },
+    {
+      "id": "windows.interrupted",
+      "scope": "windows",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "platform": "windows-x86_64",
+        "artifact_platform": "windows-x86_64",
+        "contained": true,
+        "private_identity": true,
+        "interrupted": true
+      },
+      "expected": {
+        "status": "recover-interrupted"
+      }
+    },
+    {
+      "id": "macos.wrong-artifact",
+      "scope": "macos",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "platform": "darwin-aarch64",
+        "artifact_platform": "linux-x86_64",
+        "contained": true,
+        "private_identity": true,
+        "interrupted": false
+      },
+      "expected": {
+        "status": "incompatible-artifact"
+      }
+    },
+    {
+      "id": "macos.containment",
+      "scope": "macos",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "platform": "darwin-aarch64",
+        "artifact_platform": "darwin-aarch64",
+        "contained": false,
+        "private_identity": true,
+        "interrupted": false
+      },
+      "expected": {
+        "status": "unsafe-runtime"
+      }
+    },
+    {
+      "id": "macos.identity",
+      "scope": "macos",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "platform": "darwin-aarch64",
+        "artifact_platform": "darwin-aarch64",
+        "contained": true,
+        "private_identity": false,
+        "interrupted": false
+      },
+      "expected": {
+        "status": "unsafe-runtime"
+      }
+    },
+    {
+      "id": "macos.interrupted",
+      "scope": "macos",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "platform": "darwin-aarch64",
+        "artifact_platform": "darwin-aarch64",
+        "contained": true,
+        "private_identity": true,
+        "interrupted": true
+      },
+      "expected": {
+        "status": "recover-interrupted"
+      }
+    },
+    {
+      "id": "linux-x86.wrong-artifact",
+      "scope": "linux-x86",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "platform": "linux-i686",
+        "artifact_platform": "linux-x86_64",
+        "contained": true,
+        "private_identity": true,
+        "interrupted": false
+      },
+      "expected": {
+        "status": "incompatible-artifact"
+      }
+    },
+    {
+      "id": "linux-x86.containment",
+      "scope": "linux-x86",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "platform": "linux-i686",
+        "artifact_platform": "linux-i686",
+        "contained": false,
+        "private_identity": true,
+        "interrupted": false
+      },
+      "expected": {
+        "status": "unsafe-runtime"
+      }
+    },
+    {
+      "id": "linux-x86.identity",
+      "scope": "linux-x86",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "platform": "linux-i686",
+        "artifact_platform": "linux-i686",
+        "contained": true,
+        "private_identity": false,
+        "interrupted": false
+      },
+      "expected": {
+        "status": "unsafe-runtime"
+      }
+    },
+    {
+      "id": "linux-x86.interrupted",
+      "scope": "linux-x86",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "platform": "linux-i686",
+        "artifact_platform": "linux-i686",
+        "contained": true,
+        "private_identity": true,
+        "interrupted": true
+      },
+      "expected": {
+        "status": "recover-interrupted"
+      }
+    },
+    {
+      "id": "console.origin",
+      "scope": "console",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "origin": "remote",
+        "expected_origin": "local",
+        "operation": "inventory",
+        "grants": [
+          "inventory"
+        ],
+        "fields": {
+          "component": "demo",
+          "version": "1.0",
+          "health": "ok",
+          "key": "must-not-appear",
+          "token": "must-not-appear"
+        }
+      },
+      "expected": {
+        "status": "invalid-origin"
+      }
+    },
+    {
+      "id": "console.grant",
+      "scope": "console",
+      "request": {
+        "version": 1,
+        "authorized": true,
+        "origin": "local",
+        "expected_origin": "local",
+        "operation": "shell",
+        "grants": [
+          "inventory"
+        ],
+        "fields": {
+          "component": "demo",
+          "version": "1.0",
+          "health": "ok",
+          "key": "must-not-appear",
+          "token": "must-not-appear"
+        }
+      },
+      "expected": {
+        "status": "denied"
+      }
+    }
+  ]
+}

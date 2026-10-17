@@ -5,8 +5,9 @@
 //! daemon uses by calling the simulator's JSON methods:
 //!
 //! - GetServiceInfo: chain identifier (as a genesis digest) and height;
-//! - GetObject: objects, packages (as real BCS with a type origin table) and
-//!   dynamic fields, matched by their derived object IDs;
+//! - GetObject: objects, packages (as real BCS with a type origin table),
+//!   Move objects the simulator supplies as BCS contents, and dynamic
+//!   fields, matched by their derived object IDs;
 //! - ListEvents: simulator events as checkpoints 1..n, two per page, with
 //!   opaque resume cursors;
 //! - GetTransaction: checkpoint of a simulator event ("event-<n>");
@@ -22,7 +23,7 @@ use std::{str::FromStr, sync::Arc};
 use serde_json::{json, Value};
 use sui_crypto::SuiVerifier;
 use sui_rpc::proto::sui::rpc::v2 as proto;
-use sui_sdk_types::{Address, Digest, Object, ObjectData, TypeTag};
+use sui_sdk_types::{Address, Digest, MoveStruct, Object, ObjectData, StructTag, TypeTag};
 use tonic::{Request, Response, Status};
 
 const PAGE: usize = 2;
@@ -74,7 +75,8 @@ impl Shim {
                 .await?;
             let value = &field["data"]["content"]["fields"]["value"];
             if value.is_null() {
-                return Ok(None);
+                // A known field that does not exist: absent, as a node reports it.
+                return Err(Status::not_found(format!("dynamic field {id} not found")));
             }
             let mut object = proto::Object::default();
             object.object_type = Some(format!("0x2::dynamic_field::Field<{key}, unknown>"));
@@ -154,6 +156,31 @@ impl proto::ledger_service_server::LedgerService for Shim {
         if wants_bcs {
             let package = self.call("sui_getObject", json!([id, {"showBcs": true}])).await?;
             let data = &package["data"];
+            if data["bcs"]["dataType"] == "moveObject" {
+                let tag = StructTag::from_str(data["bcs"]["type"].as_str().unwrap_or(""))
+                    .map_err(|e| Status::internal(e.to_string()))?;
+                let contents = hex::decode(data["bcs"]["bcsBytes"].as_str().unwrap_or(""))
+                    .map_err(|e| Status::internal(e.to_string()))?;
+                let value = MoveStruct::new(tag, false, number(&data["version"]), contents)
+                    .ok_or_else(|| Status::internal("Move object contents lack an ID"))?;
+                let owner = if let Some(shared) = data["owner"].get("Shared") {
+                    sui_sdk_types::Owner::Shared(number(&shared["initial_shared_version"]))
+                } else if data["owner"] == "Immutable" {
+                    sui_sdk_types::Owner::Immutable
+                } else {
+                    let owner = data["owner"]["AddressOwner"].as_str().unwrap_or("");
+                    sui_sdk_types::Owner::Address(
+                        Address::from_str(owner).map_err(|e| Status::internal(e.to_string()))?,
+                    )
+                };
+                let object = Object::new(ObjectData::Struct(value), owner, Digest::ZERO, 0);
+                let mut bcs = proto::Bcs::default();
+                bcs.value = Some(bcs::to_bytes(&object).map_err(|e| Status::internal(e.to_string()))?.into());
+                let mut object = proto::Object::default();
+                object.bcs = Some(bcs);
+                response.object = Some(object);
+                return Ok(Response::new(response));
+            }
             let origins = data["bcs"]["typeOriginTable"]
                 .as_array()
                 .ok_or_else(|| Status::not_found("not a package"))?

@@ -1,78 +1,154 @@
 {
   "schema_version": 1,
-  "authorization": "User explicitly permits reviewed implementation merges before Pi/Sui-network integration; external acceptance remains separately tracked. No code/test/CI/review gate is waived. The direct SF043 task also authorizes one-time reviewed main-only controller bootstrap and its narrowly necessary SF045 repair before the first full automatic Actions execution; that execution remains mandatory to complete the overall request.",
+  "authorization": "User explicitly permits reviewed implementation merges before Pi/Sui-network integration; external acceptance remains separately tracked. No code/test/CI/review gate is waived. The direct SF043 task also authorizes one-time reviewed main-only controller bootstrap and its narrowly necessary SF045 repair before the first full automatic Actions execution; that execution remains mandatory to complete the overall request. Latest user instruction: physical Pi/target work must not block software delivery; target issues may be resolved later. Apply physical-only deferral to current/future software tickets. SF-031 and unfinished SF-066 stay open/on hold; normal automatic testnet, source/security and local regression gates remain required.",
   "tickets": {
     "SF-006": {
       "deferred_checks": [
-        "public-testnet publish/upgrade, execution effects and generated-client acceptance"
+        "public-testnet publish/upgrade, execution effects and generated-client acceptance",
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
       ],
       "acceptance_issues": [
-        "https://github.com/tyler-suifleet/suifleet/issues/11"
+        "https://github.com/tyler-suifleet/suifleet/issues/11",
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
       ]
     },
     "SF-008": {
       "deferred_checks": [
         "public-network existing-object mixed-client identity lifecycle",
-        "real extension-wallet connect/sign/network/error flows"
+        "real extension-wallet connect/sign/network/error flows",
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
       ],
       "acceptance_issues": [
         "https://github.com/tyler-suifleet/suifleet/issues/11",
         "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
       ]
     },
     "SF-011": {
       "deferred_checks": [
         "real extension-wallet catalog/deploy/delete acceptance",
-        "physical ARM/Pi and public-network interoperability"
+        "physical ARM/Pi and public-network interoperability",
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
       ],
       "acceptance_issues": [
         "https://github.com/tyler-suifleet/suifleet/issues/11",
         "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
       ]
     },
     "SF-013": {
       "deferred_checks": [
         "public-network desired-state upgrade and real extension-wallet acceptance",
-        "physical Pi reconciliation and recovery"
+        "physical Pi reconciliation and recovery",
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
       ],
       "acceptance_issues": [
         "https://github.com/tyler-suifleet/suifleet/issues/11",
         "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
       ]
+    },
+    "SF-014": {
+      "deferred_checks": [
+        "physical Pi boot, reboot, power-loss and supervised component recovery",
+        "real extension-wallet lifecycle (run/readiness/shutdown/restart) deploy UI acceptance",
+        "physical Pi boot/reboot, power-loss and component recovery acceptance",
+        "real extension-wallet acceptance for component lifecycle UI fields",
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32",
+        "https://github.com/tyler-suifleet/suifleet/issues/11"
+      ],
+      "retained_gates": [
+        "all source/security findings repaired",
+        "daemon unit tests and the full local simulator suite (make test-ota), including supervised crash, replacement, rollback, daemon SIGKILL and dependency cases",
+        "real systemd/cgroup-v2 evidence under the shipped suifleet.service (scripts/test_supervisor_systemd.py): component crash, setsid/env-cleared/reparented descendant containment, daemon SIGKILL with successful successor bootstrap, no overlapping or unmanaged descendants",
+        "exact-head ordinary CI and current-head/base testnet status",
+        "fresh independent review of exact head/base/feedback/policy",
+        "actual end-to-end sealed-cgroup systemd crash/restart and containment evidence; fake-cgroup unit tests alone are insufficient",
+        "all actionable source/security findings and failure-path regressions resolved",
+        "relevant builds/tests and exact-head/current-base CI and testnet checks successful",
+        "fresh independent exact-head/base/feedback/policy review",
+        "owner must commit this SF-014 scope to docs/tracking/acceptance-policy.json and docs/IMPLEMENTATION_ACCEPTANCE.md before merge; do not claim deferred checks ran",
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
+      ],
+      "authorization": "User explicitly requested applying the implementation/integration acceptance split to SF-014 on 2026-10-15. Physical Pi and real extension-wallet checks remain required in linked acceptance tickets."
     },
     "SF-024": {
       "deferred_checks": [
-        "hosted/public-node and archival-retention integration"
+        "hosted/public-node and archival-retention integration",
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
       ],
       "acceptance_issues": [
-        "https://github.com/tyler-suifleet/suifleet/issues/11"
+        "https://github.com/tyler-suifleet/suifleet/issues/11",
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
       ]
     },
     "SF-025": {
       "deferred_checks": [
-        "physical Pi boot, reboot, power-loss and OTA recovery"
+        "physical Pi boot, reboot, power-loss and OTA recovery",
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
       ],
       "acceptance_issues": [
         "https://github.com/tyler-suifleet/suifleet/issues/29",
         "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
+      ]
+    },
+    "SF-026": {
+      "deferred_checks": [
+        "physical Pi power loss during daemon handoff and platform-specific boot behavior",
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "all source/security findings repaired",
+        "daemon unit tests and make test-ota, including scripts/test_daemon_update.py (working update, startup-failure rollback, preflight rejection, interrupted handoff)",
+        "real systemd/cgroup-v2 evidence under the shipped unit (scripts/test_daemon_update_systemd.py): handoff via service-manager restart, start-timeout and exit rollback without the new daemon",
+        "exact-head ordinary CI and current-head/base testnet status",
+        "fresh independent review of exact head/base/feedback/policy",
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
       ]
     },
     "SF-039": {
       "deferred_checks": [
         "production protected signing environment and provisioned trust roots",
-        "exact production release workflow execution and Pi trust delivery"
+        "exact production release workflow execution and Pi trust delivery",
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
       ],
       "acceptance_issues": [
         "https://github.com/tyler-suifleet/suifleet/issues/62",
         "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
       ]
     },
     "SF-043": {
       "deferred_checks": [
-        "first genuine automatic public-testnet GitHub Actions execution, which requires the reviewed main-only controller to exist on main"
+        "first genuine automatic public-testnet GitHub Actions execution, which requires the reviewed main-only controller to exist on main",
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
       ],
       "acceptance_issues": [
-        "https://github.com/tyler-suifleet/suifleet/issues/64"
+        "https://github.com/tyler-suifleet/suifleet/issues/64",
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
       ],
       "bootstrap_only": true,
       "authorization": "Direct user task explicitly authorizes reviewed main integration before the first main-only automatic run; continuation must observe the real automatic run and record URL/effects/cost before declaring the overall request complete. This is a one-time bootstrap ordering, not a normal-CI bypass.",
@@ -81,16 +157,19 @@
         "exact-head local/regression and GitHub CI checks successful",
         "fresh independent review of exact head/base/policy",
         "mandatory exact-head/base testnet status once workflow exists on main",
-        "no mainnet/production/physical programming/unrelated-wallet authorization"
+        "no mainnet/production/physical programming/unrelated-wallet authorization",
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
       ]
     },
     "SF-045": {
       "deferred_checks": [
-        "first successful normal CI-triggered full testnet Actions run after reviewed repair integration"
+        "first successful normal CI-triggered full testnet Actions run after reviewed repair integration",
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
       ],
       "acceptance_issues": [
         "https://github.com/tyler-suifleet/suifleet/issues/69",
-        "https://github.com/tyler-suifleet/suifleet/issues/64"
+        "https://github.com/tyler-suifleet/suifleet/issues/64",
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
       ],
       "bootstrap_only": true,
       "authorization": "User explicitly authorizes narrowly necessary post-merge reliability follow-ups for the SF043 automatic-CI goal through the same review process. The old main controller fails before test submission; full automatic success must be observed after the reviewed repair is on main, not invented before it.",
@@ -100,16 +179,19 @@
         "genuinely executed exact-head/current-base public-testnet validation with independent receipt effects and truthful status provenance",
         "fresh independent review",
         "mandatory status remains enforced; no fabricated status or waiver of a failing test",
-        "overall SF043 goal remains incomplete until actual automatic full testnet Actions success is recorded"
+        "overall SF043 goal remains incomplete until actual automatic full testnet Actions success is recorded",
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
       ]
     },
     "SF-046": {
       "deferred_checks": [
-        "first automatic POST-INTEGRATION execution of the updated main-sourced artifact restore helper with unchanged-fixture reuse"
+        "first automatic POST-INTEGRATION execution of the updated main-sourced artifact restore helper with unchanged-fixture reuse",
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
       ],
       "acceptance_issues": [
         "https://github.com/tyler-suifleet/suifleet/issues/72",
-        "https://github.com/tyler-suifleet/suifleet/issues/64"
+        "https://github.com/tyler-suifleet/suifleet/issues/64",
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
       ],
       "bootstrap_only": true,
       "authorization": "The direct SF043 user task explicitly permits reviewed integration before main-only automatic execution, requires continuing through the actual resulting run, and authorizes narrowly necessary postmerge reliability follow-ups through the same review process. This entry records only that unavoidable ordering for the SF046 main-sourced helper. Existing automatic CI already works; no failing test or mandatory status is waived.",
@@ -119,7 +201,356 @@
         "genuine successful exact-head/current-base automatic testnet status with independent effects and budget evidence",
         "fresh independent review of exact head/base/feedback/policy",
         "mandatory testnet status enforcement and sole-orchestrator integration",
-        "overall SF043 request incomplete until actual automatic updated-helper restoration/reuse after integration is observed and recorded"
+        "overall SF043 request incomplete until actual automatic updated-helper restoration/reuse after integration is observed and recorded",
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
+      ]
+    },
+    "SF-029": {
+      "deferred_checks": [
+        "physical SD flashing, Pi first boot and on-device network/identity/persistence acceptance"
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "authorization": "User explicitly requests building the flashable image now without physical Pi; user will flash it. Build and image inspection must complete; physical evidence remains separately tracked, not passed.",
+      "retained_gates": [
+        "real BitBake SD-image build, checksum, package manifest and pinned source/layer evidence",
+        "wired DHCP and SSH public-key access configured and inspected",
+        "fresh independent code/security review and relevant tests/CI",
+        "no physical programming or private identity/enrollment keys in image"
+      ]
+    },
+    "SF-053": {
+      "deferred_checks": [
+        "physical Pi image/service acceptance of the signing service, and hardware-token (TPM/secure element) protection",
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "all source/security findings repaired",
+        "daemon unit tests including signer policy/caller negatives, and make test-ota",
+        "real systemd/cgroup-v2 evidence under the shipped units (scripts/test_key_isolation_systemd.py): component key/PIN/config/proc/env/fd/socket negatives, signed daemon reports, restarts and key migration",
+        "exact-head ordinary CI and current-head/base testnet status",
+        "fresh independent review of exact head/base/feedback/policy",
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
+      ]
+    },
+    "SF-015": {
+      "deferred_checks": [
+        "physical Pi configuration persistence/restart acceptance",
+        "real extension-wallet connect/sign/network/error acceptance for component configuration UI",
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/11",
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "authorization": "Apply the standing user-authorized implementation/integration split under the 2026-10-16 request to restore progress after these precise acceptance blockers were reported. Deferred checks remain required and unrun.",
+      "retained_gates": [
+        "all actionable code/security findings fixed and local configuration merge/reset/validation/failure regressions pass",
+        "relevant Rust/Move/frontend builds and exact-head/current-base CI and automatic testnet checks pass",
+        "available dedicated-Testnet feature validation remains normal authorized work; do not substitute package-upgrade success for configuration behavior evidence",
+        "commit the matching SF-015 scope in implementation acceptance documentation and policy",
+        "fresh independent exact-head/base/feedback/policy review; no physical programming or production deployment authorization",
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
+      ]
+    },
+    "SF-019": {
+      "deferred_checks": [
+        "physical Pi heartbeat/reboot/power-loss acceptance",
+        "real extension-wallet telemetry/dashboard acceptance",
+        "provisioned hosted indexer deployment and dashboard integration acceptance",
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/11",
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "authorization": "Apply the standing user-authorized implementation/integration split under the 2026-10-16 request to restore progress after these precise acceptance blockers were reported. Deferred checks remain required and unrun.",
+      "retained_gates": [
+        "all actionable code/security findings fixed and telemetry authenticity/privacy/quota/offline-buffer/API regressions pass",
+        "relevant Rust/indexer/Move/frontend builds and exact-head/current-base CI and automatic testnet checks pass",
+        "public-Testnet telemetry validation using dedicated wallets and a disposable local indexer remains authorized where feasible; hosted production deployment is not a precondition for implementation",
+        "commit the matching SF-019 scope in implementation acceptance documentation and policy",
+        "fresh independent exact-head/base/feedback/policy review; no physical programming or production deployment authorization",
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
+      ]
+    },
+    "SF-010": {
+      "deferred_checks": [
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
+      ]
+    },
+    "SF-017": {
+      "deferred_checks": [
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
+      ]
+    },
+    "SF-020": {
+      "deferred_checks": [
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
+      ]
+    },
+    "SF-022": {
+      "deferred_checks": [
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
+      ]
+    },
+    "SF-027": {
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "deferred_checks": [
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
+      ],
+      "retained_gates": [
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
+      ]
+    },
+    "SF-032": {
+      "deferred_checks": [
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
+      ]
+    },
+    "SF-033": {
+      "deferred_checks": [
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
+      ]
+    },
+    "SF-034": {
+      "deferred_checks": [
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
+      ]
+    },
+    "SF-035": {
+      "deferred_checks": [
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
+      ]
+    },
+    "SF-036": {
+      "deferred_checks": [
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
+      ]
+    },
+    "SF-037": {
+      "deferred_checks": [
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
+      ]
+    },
+    "SF-038": {
+      "deferred_checks": [
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
+      ]
+    },
+    "SF-050": {
+      "deferred_checks": [
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
+      ]
+    },
+    "SF-054": {
+      "deferred_checks": [
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
+      ]
+    },
+    "SF-057": {
+      "deferred_checks": [
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
+      ]
+    },
+    "SF-058": {
+      "deferred_checks": [
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
+      ]
+    },
+    "SF-059": {
+      "deferred_checks": [
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
+      ]
+    },
+    "SF-060": {
+      "deferred_checks": [
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
+      ]
+    },
+    "SF-061": {
+      "deferred_checks": [
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
+      ]
+    },
+    "SF-062": {
+      "deferred_checks": [
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
+      ]
+    },
+    "SF-063": {
+      "deferred_checks": [
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
+      ]
+    },
+    "SF-064": {
+      "deferred_checks": [
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
+      ]
+    },
+    "SF-065": {
+      "deferred_checks": [
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
+      ]
+    },
+    "SF-068": {
+      "deferred_checks": [
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
+      ]
+    },
+    "SF-017": {
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "deferred_checks": [
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
+      ],
+      "retained_gates": [
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
       ]
     }
   }

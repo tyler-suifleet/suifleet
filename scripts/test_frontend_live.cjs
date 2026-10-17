@@ -84,6 +84,35 @@ let stage = "startup";
     stage = "create deployment"; await execute(sui.buildCreateDeploymentTx("test-app", "1.0.0", "fixture-recipe", "ab".repeat(32), "cd".repeat(32), [groups[0].objectId], [devices[0].objectId]));
     stage = "deployment history"; let deployments = await sui.fetchDeploymentEvents(client, operator.toSuiAddress());
     assert.equal(deployments.length, 1); assert.equal(deployments[0].receiptsVerified, true); assert.deepEqual(deployments[0].statuses, {});
+    const control = loader()("lib/deployment-control.ts");
+    stage = "pause deployment";
+    await execute(control.buildDeploymentControlTx(deployments[0].deploymentId, { ...control.immediateControl, state: 1, notice_ms: "5000" }));
+    assert.equal((await control.readDeploymentControl(client, deployments[0].deploymentId)).state, 1);
+    stage = "resume deployment";
+    await execute(control.buildDeploymentControlTx(deployments[0].deploymentId, { ...control.immediateControl, state: 0 }));
+    assert.equal((await control.readDeploymentControl(client, deployments[0].deploymentId)).revision, "2");
+    stage = "cancel deployment";
+    await execute(control.buildDeploymentControlTx(deployments[0].deploymentId, { ...control.immediateControl, state: 2 }));
+    assert.equal((await sui.fetchDeploymentEvents(client, operator.toSuiAddress()))[0].control.state, 2);
+    // Bypass preflight simulation to require real failed execution effects for
+    // irreversible cancellation, using only this disposable signer's gas.
+    const { object: cancelledRecord } = await client.getObject({ objectId: deployments[0].deploymentId });
+    const cancelGas = (await client.listCoins({ owner: operator.toSuiAddress() })).objects[0];
+    const { referenceGasPrice: cancelPrice } = await client.getReferenceGasPrice();
+    const resume = new Transaction(); resume.setSender(operator.toSuiAddress());
+    resume.setGasPayment([{ objectId: cancelGas.objectId, version: cancelGas.version, digest: cancelGas.digest }]);
+    resume.setGasPrice(cancelPrice); resume.setGasBudget(100000000);
+    resume.moveCall({ target: `${packageId}::deployment_manager::set_control`, arguments: [
+      resume.sharedObjectRef({ objectId: cancelledRecord.objectId, initialSharedVersion: cancelledRecord.owner.Shared.initialSharedVersion, mutable: true }),
+      resume.pure.u8(0), ...Array.from({length:5}, () => resume.pure.u64(0)),
+    ] });
+    const resumeBytes = await resume.build(), resumeSignature = await operator.signTransaction(resumeBytes);
+    stage = "cancelled resume execution";
+    const rejectedResume = await client.executeTransaction({ transaction: resumeBytes, signatures: [resumeSignature.signature], include: {effects:true} });
+    assert.equal(rejectedResume.$kind, "FailedTransaction");
+    await checkpointed(rejectedResume.FailedTransaction.digest);
+    assert.equal((await control.readDeploymentControl(client, deployments[0].deploymentId)).state, 2);
+    console.log(`PASS: real gRPC control pause/resume/cancel and irreversible cancellation (failed execution ${rejectedResume.FailedTransaction.digest})`);
     const report = new Transaction();
     const protocol = loader()("lib/fleet-protocol.ts");
     protocol.calls.deployment_manager_report_verified_status(report, packageId, deployments[0].deploymentId, registryId, caps.objects[0].objectId, protocol.STATUS.applied);
@@ -134,6 +163,20 @@ let stage = "startup";
     stage = "delete deployment";
     for (const deployment of deployments) await execute(sui.buildDeleteDeploymentTx(deployment.deploymentId, deployment.schemaVersion));
     assert.deepEqual(await sui.fetchDeploymentEvents(client, operator.toSuiAddress()), []);
+    // SF-013: the dApp's own desired-state revision builder, executed for real.
+    const desired = loader()("lib/desired-state.ts"), group = groups[0].objectId;
+    stage = "desired revision"; await execute(desired.buildDesiredRevisionTx([group], { componentName: "test-app", version: "2.0.0",
+      recipeBlobId: "fixture-recipe-2", artifactSha256: "ab".repeat(32), recipeSha256: "cd".repeat(32) }));
+    let states = await desired.fetchDesiredStates(client, [group]);
+    assert.equal(states[group].revision, 1); assert.deepEqual(Object.keys(states[group].components), ["test-app"]);
+    const managed = states[group].components["test-app"];
+    deployments = await sui.fetchDeploymentEvents(client, operator.toSuiAddress());
+    assert.deepEqual(deployments.map((d) => [d.deploymentId, d.version, d.targetGroups, d.targetDevices]), [[managed, "2.0.0", [group], []]]);
+    stage = "desired removal"; await execute(desired.buildDesiredRevisionTx([group], undefined, ["test-app"]));
+    states = await desired.fetchDesiredStates(client, [group]);
+    assert.equal(states[group].revision, 2); assert.deepEqual(states[group].components, {});
+    stage = "delete managed deployment"; await execute(sui.buildDeleteDeploymentTx(managed));
+    assert.deepEqual(await sui.fetchDeploymentEvents(client, operator.toSuiAddress()), []);
     if (process.env.CATALOG_TEST === "1") {
       const catalog = loader()("lib/catalog.ts"), selector = loader()("lib/component-selector.ts");
       stage = "catalog create"; await execute(catalog.buildCreateCatalogTx());
@@ -162,6 +205,7 @@ let stage = "startup";
       console.log("PASS: generated SDK catalog registration, immutable/type-authenticated discovery and SemVer sorting, both platform selectors, mixed targets and schema2 cleanup");
     }
     console.log("PASS: real gRPC publish/register+activate/borrowed group add and cap reissue/deployment/receipt/deregister/delete, invalid and foreign target history, failed execution effects");
+    console.log("PASS: dApp desired-state revision (create+commit in one transaction), removal revision and managed-record deletion on chain");
     console.log(JSON.stringify({ chain: manifest.chain_identifier, package: packageId, registry: registryId }));
   } finally { await fs.rm(temporary, { recursive: true, force: true }); }
 })().catch((error) => { console.error(`${stage}: ${error.message}`); process.exitCode = 1; });
