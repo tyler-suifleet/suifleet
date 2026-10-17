@@ -293,3 +293,13 @@ edge-acceptance:
 	@test -n "$(PROFILE)" && test -n "$(EVIDENCE)" || { echo "set PROFILE and EVIDENCE (docs/EDGE_ACCEPTANCE.md)"; exit 1; }
 	PYTHONDONTWRITEBYTECODE=1 python3 scripts/edge_acceptance.py run --profile "$(PROFILE)" --evidence "$(EVIDENCE)" \
 		$(if $(HARDWARE),--hardware) $(LOCK_ARGS)
+
+# Root only inside a disposable, network-isolated container: real SO_PEERCRED UIDs.
+.PHONY: test-ipc
+test-ipc:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+ifdef INSIDE_DEV_CONTAINER
+	python3 scripts/test_ipc.py
+else
+	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" python3 scripts/test_ipc.py
+endif
