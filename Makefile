@@ -67,6 +67,7 @@ test-ota:
 	$(RUN) python3 scripts/test_desired_state.py
 	$(RUN) python3 scripts/test_deployment_control.py
 	$(RUN) python3 scripts/test_telemetry.py
+	$(RUN) python3 scripts/test_rollout.py
 
 # Supervised components under the shipped systemd units on real systemd and
 # cgroup v2 (SF-014): a disposable privileged container with systemd as PID 1.
@@ -109,6 +110,7 @@ check-interfaces:
 	$(RUN) node scripts/test_protocol.cjs
 	$(RUN) node scripts/test_component_catalog.cjs
 	$(RUN) node scripts/test_deployment_control.cjs
+	$(RUN) node scripts/test_rollout.cjs
 
 generate-interfaces:
 	$(RUN) python3 scripts/generate_interfaces.py
@@ -285,6 +287,11 @@ test-testnet:
 test-deployment-control-localnet:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
 	$(RUN) python3 scripts/test_deployment_control_localnet.py
+
+# Start a disposable indexed loopback node/faucet first; network-none Docker only.
+.PHONY: test-rollout-localnet
+test-rollout-localnet:
+	$(RUN) python3 scripts/test_rollout_localnet.py
 
 # SF-065 wallet-to-edge acceptance harness for SF-031 (docs/EDGE_ACCEPTANCE.md).
 # Offline: profiles, matrix, locks, SSH pinning, fake-fleet runs with the real updater.
