@@ -1,0 +1,23 @@
+{
+  "ticket": "SF-037",
+  "head": "092fcbe",
+  "scope": "Local/offline evidence only: translator, daemon validators and the real daemon against the local chain/Walrus simulator. No public network, real wallet, AWS account or physical target was used.",
+  "environment": {"image": "suifleet-dev (pinned Dockerfile)", "sui": "1.81.1", "rustc": "1.94.0", "node": "22.22.2", "pnpm": "11.0.8", "python": "3.10.12", "yaml": "2.9.1"},
+  "suites": {
+    "aws-recipe-cases.json": {
+      "cases": 75,
+      "texts": 14,
+      "checks": [
+        "node scripts/test_greengrass_compat.cjs: the SF-037 translator executed every case (JSON/YAML texts through its parser); 12 translations accepted by the frontend recipe validator; guidance present for every reason and reported difference",
+        "cargo test compat_tests: every AWS document rejected as a native recipe; every translation accepted by the daemon recipe and configuration validators; the configuration-limits rejection matches the daemon",
+        "python3 scripts/test_greengrass_runtime.py: an AWS YAML recipe translated by the CLI ran on the real daemon: run in {work:path}, artifact at {artifacts:path}/<file>, default configuration delivered, no nucleus environment, install in the version's artifact directory, shutdown before restart, merge update, upgrade kept the device value, and a native recipe without install or run reached the platform updater"
+      ]
+    },
+    "managed-dependency-cases.json": {
+      "cases": 47,
+      "checks": ["node scripts/test_greengrass_compat.cjs: translator classifyManagedDependency matched all 47 SF-038 classifications"]
+    }
+  },
+  "make_targets_passed": ["indexer-test", "test-testnet", "test-manifest", "test-publish", "test-contracts", "test-interfaces", "check-interfaces", "edge-test", "test-ota", "test-component", "test-edge-acceptance", "dapp-typecheck", "dapp-build", "test-compat"],
+  "not_run": ["real extension-wallet import/publish through the Components page", "public testnet catalog registration of a translated recipe", "physical Pi execution (SF-031/#32)", "any AWS service or unmodified AWS IPC/SDK client"]
+}

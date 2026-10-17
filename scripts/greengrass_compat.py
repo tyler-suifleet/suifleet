@@ -885,7 +885,7 @@ def main() -> int:
         return 1
     total = sum(counts.values())
     detail = ", ".join(f"{name}={count}" for name, count in counts.items())
-    print(f"PASS: compatibility matrix and {total} reference-model fixture checks ({detail}); runtime execution remains pending per matrix")
+    print(f"PASS: compatibility matrix and {total} reference-model fixture checks ({detail}); runtime execution as recorded in the matrix")
     return 0
 
 

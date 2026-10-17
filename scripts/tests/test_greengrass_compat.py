@@ -18,11 +18,16 @@ class RepositoryTests(unittest.TestCase):
         self.assertEqual(set(counts), set(compat.SUITE_RUNNERS))
         self.assertTrue(all(count > 0 for count in counts.values()))
 
-    def test_every_suite_is_still_pending(self):
+    def test_only_executed_suites_passed(self):
         # Flipping a suite to passed needs a runtime receipt from the owning
-        # implementation; this specification ticket records none.
+        # implementation; only SF-037 has executed its suites.
         matrix = json.loads((ROOT / compat.COMPAT / "greengrass-compat.json").read_text())
-        self.assertEqual({s["runtime_execution"] for s in matrix["suites"].values()}, {"pending"})
+        passed = {name for name, s in matrix["suites"].items() if s["runtime_execution"] == "passed"}
+        self.assertEqual(passed, {"aws-recipe-cases.json", "managed-dependency-cases.json"})
+        for name in passed:
+            receipt = json.loads((ROOT / matrix["suites"][name]["runtime_evidence"]).read_text())
+            self.assertEqual(receipt["ticket"], "SF-037")
+            self.assertIn(name, receipt["suites"])
 
 
 class MatrixGateTests(unittest.TestCase):
@@ -99,6 +104,10 @@ class FixtureGateTests(unittest.TestCase):
                 for path in platform.get("current_evidence", []):
                     (root / path).parent.mkdir(parents=True, exist_ok=True)
                     (root / path).touch()
+            for suite in json.loads((ROOT / compat.COMPAT / "greengrass-compat.json").read_text())["suites"].values():
+                if "runtime_evidence" in suite:
+                    (root / suite["runtime_evidence"]).parent.mkdir(parents=True, exist_ok=True)
+                    (root / suite["runtime_evidence"]).touch()
             compat.run(root)  # unmodified copy passes
             path = root / compat.COMPAT / name
             value = json.loads(path.read_text())
