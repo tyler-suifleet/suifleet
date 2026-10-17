@@ -208,9 +208,10 @@ export function buildCreateDeploymentTx(
 
 export function buildDeleteDeploymentTx(deploymentObjectId: string, schemaVersion = "1"): Transaction {
   requireManifest();
-  if (schemaVersion !== "1" && schemaVersion !== "2") throw new Error("Unsupported DeploymentRecord schema");
+  if (schemaVersion !== "1" && schemaVersion !== "2" && schemaVersion !== "3") throw new Error("Unsupported DeploymentRecord schema");
   const tx = new Transaction();
   if (schemaVersion === "2") calls.component_catalog_delete_deployment(tx, PACKAGE_ID, deploymentObjectId);
+  else if (schemaVersion === "3") calls.deployment_manager_delete_rollout(tx, PACKAGE_ID, deploymentObjectId);
   else calls.deployment_manager_delete_deployment(tx, PACKAGE_ID, deploymentObjectId);
   return tx;
 }

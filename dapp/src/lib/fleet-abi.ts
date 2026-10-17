@@ -269,6 +269,20 @@ export const MOVE_ABI = {
   },
   "deployment_manager": {
     "functions": {
+      "advance_rollout": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::deployment_manager::DeploymentRecord",
+          "vector<sui::object::ID>",
+          "vector<sui::object::ID>",
+          "vector<sui::object::ID>",
+          "&sui::clock::Clock",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
       "artifact_sha256": {
         "visibility": "Public",
         "entry": false,
@@ -301,6 +315,20 @@ export const MOVE_ABI = {
         "returns": [
           "sui_edge::deployment_manager::Control"
         ]
+      },
+      "control_rollout": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::deployment_manager::DeploymentRecord",
+          "u8",
+          "vector<sui::object::ID>",
+          "std::string::String",
+          "&sui::clock::Clock",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
       },
       "create_deployment": {
         "visibility": "Public",
@@ -360,6 +388,16 @@ export const MOVE_ABI = {
       "delete_deployment": {
         "visibility": "Public",
         "entry": true,
+        "type_parameters": [],
+        "parameters": [
+          "sui_edge::deployment_manager::DeploymentRecord",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "delete_rollout": {
+        "visibility": "Public",
+        "entry": false,
         "type_parameters": [],
         "parameters": [
           "sui_edge::deployment_manager::DeploymentRecord",
@@ -432,6 +470,27 @@ export const MOVE_ABI = {
           "std::string::String",
           "vector<sui::object::ID>",
           "vector<sui::object::ID>",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": [
+          "sui_edge::deployment_manager::DeploymentRecord"
+        ]
+      },
+      "new_rollout_verified": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "std::string::String",
+          "std::string::String",
+          "std::string::String",
+          "std::string::String",
+          "std::string::String",
+          "vector<sui::object::ID>",
+          "vector<sui::object::ID>",
+          "vector<u64>",
+          "sui_edge::deployment_manager::RolloutPolicy",
           "&sui::clock::Clock",
           "&mut sui::tx_context::TxContext"
         ],
@@ -546,6 +605,58 @@ export const MOVE_ABI = {
           "&sui::tx_context::TxContext"
         ],
         "returns": []
+      },
+      "rollout": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::deployment_manager::DeploymentRecord"
+        ],
+        "returns": [
+          "sui_edge::deployment_manager::Rollout"
+        ]
+      },
+      "rollout_eligible": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::deployment_manager::DeploymentRecord",
+          "sui::object::ID"
+        ],
+        "returns": [
+          "bool"
+        ]
+      },
+      "rollout_policy": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "u64",
+          "u64",
+          "u64",
+          "u64",
+          "u64",
+          "u64",
+          "u64"
+        ],
+        "returns": [
+          "sui_edge::deployment_manager::RolloutPolicy"
+        ]
+      },
+      "rollout_progress": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::deployment_manager::DeploymentRecord"
+        ],
+        "returns": [
+          "u8",
+          "u64"
+        ]
       },
       "set_control": {
         "visibility": "Public",
@@ -890,6 +1001,149 @@ export const MOVE_ABI = {
           [
             "dummy_field",
             "bool"
+          ]
+        ]
+      },
+      "Rollout": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "policy",
+            "sui_edge::deployment_manager::RolloutPolicy"
+          ],
+          [
+            "members",
+            "vector<sui::object::ID>"
+          ],
+          [
+            "cohorts",
+            "vector<u64>"
+          ],
+          [
+            "admitted_at",
+            "vector<u64>"
+          ],
+          [
+            "outcomes",
+            "vector<u8>"
+          ],
+          [
+            "skipped",
+            "vector<bool>"
+          ],
+          [
+            "cohort",
+            "u64"
+          ],
+          [
+            "state",
+            "u8"
+          ],
+          [
+            "bake_started_ms",
+            "u64"
+          ],
+          [
+            "progress_ms",
+            "u64"
+          ],
+          [
+            "revision",
+            "u64"
+          ]
+        ]
+      },
+      "RolloutDecision": {
+        "abilities": [
+          "Copy",
+          "Drop"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "deployment_id",
+            "sui::object::ID"
+          ],
+          [
+            "revision",
+            "u64"
+          ],
+          [
+            "cohort",
+            "u64"
+          ],
+          [
+            "state",
+            "u8"
+          ],
+          [
+            "reason",
+            "std::string::String"
+          ],
+          [
+            "at_ms",
+            "u64"
+          ],
+          [
+            "admitted",
+            "vector<sui::object::ID>"
+          ]
+        ]
+      },
+      "RolloutKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "dummy_field",
+            "bool"
+          ]
+        ]
+      },
+      "RolloutPolicy": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "concurrency",
+            "u64"
+          ],
+          [
+            "rate_count",
+            "u64"
+          ],
+          [
+            "rate_window_ms",
+            "u64"
+          ],
+          [
+            "bake_ms",
+            "u64"
+          ],
+          [
+            "minimum_samples",
+            "u64"
+          ],
+          [
+            "failure_bps",
+            "u64"
+          ],
+          [
+            "offline_timeout_ms",
+            "u64"
           ]
         ]
       },
