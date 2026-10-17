@@ -193,13 +193,15 @@ test-publish:
 .PHONY: release-image release-artifacts release-verify
 RELEASE_IMAGE ?= suifleet-release:local
 RELEASE_OUT ?= dist
+# aarch64-unknown-linux-gnu or i686-unknown-linux-gnu (32-bit x86, docs/LINUX_X86.md).
+RELEASE_TARGET ?= aarch64-unknown-linux-gnu
 
 release-image:
 	docker build -f docker/release.Dockerfile --build-arg USER_UID=$(UID) --build-arg USER_GID=$(GID) -t $(RELEASE_IMAGE) docker/
 
 # Builds the committed HEAD twice and fails unless the bundles are identical.
 release-artifacts: release-image
-	python3 scripts/release.py build --out $(RELEASE_OUT) --image $(RELEASE_IMAGE) --reproduce
+	python3 scripts/release.py build --out $(RELEASE_OUT) --image $(RELEASE_IMAGE) --target $(RELEASE_TARGET) --reproduce
 
 # x86 catalog manifests across a real base-to-current package upgrade, on a
 # disposable network-none localnet (host, needs Docker and a warm Move cache).
