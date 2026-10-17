@@ -21,6 +21,7 @@ mod signer_service;
 mod state;
 mod sui_client;
 mod supervisor;
+mod streams;
 mod telemetry;
 mod walrus_client;
 
@@ -178,6 +179,21 @@ async fn main() -> anyhow::Result<()> {
     }
     let mut ipc_server = cfg.ipc.as_ref().map(ipc::bind).transpose()?;
     let mut ipc_messages = ipc::Messages::default();
+    // Durable streams (SF-034): operator definitions are applied at start.
+    let streams = match &cfg.streams {
+        Some(settings) => {
+            let mut store = streams::Store::open(&cfg.runtime.state_dir.join("streams"), settings.quota(), telemetry::now_ms())?;
+            for def in &settings.definitions {
+                if store.definition(&def.name).is_some() {
+                    store.reconfigure(def.clone(), telemetry::now_ms())?;
+                } else {
+                    store.create(def.clone())?;
+                }
+            }
+            Some(std::sync::Arc::new(std::sync::Mutex::new(store)))
+        }
+        None => None,
+    };
     let runner = ApplyRunner::new(cfg.apply.clone());
     let store = components::Store::open(&cfg.runtime.state_dir, &cfg.components);
     // Committed components start again on every daemon start (bootstrap/reboot).
@@ -234,6 +250,22 @@ async fn main() -> anyhow::Result<()> {
             None
         }
     };
+    let exporters: Vec<_> = match (&cfg.streams, &streams) {
+        (Some(settings), Some(store)) => settings.definitions.iter().filter_map(|def| def.export.clone().map(|export| {
+            tokio::spawn(streams::Exporter {
+                store: store.clone(),
+                stream: def.name.clone(),
+                config: export,
+                binding: streams::Binding {
+                    chain_identifier: sui.manifest().chain_identifier.clone(),
+                    registry: sui.manifest().shared_objects.registry.id.clone(),
+                    device_id: cfg.device.device_object_id.clone(),
+                },
+                signer: signer.clone(),
+            }.run())
+        })).collect(),
+        _ => Vec::new(),
+    };
     // A new daemon is confirmed only after this complete local startup
     // (configuration, identity, chain validation, journal and supervisor).
     if let Some(update) = confirm_after_startup.take() {
@@ -286,7 +318,7 @@ async fn main() -> anyhow::Result<()> {
                         if pending.reply.is_closed() { continue; }
                         let result = tokio::select! {
                             result = local_request(&cfg, &sui, &walrus, &runner, store.as_ref(), &configs,
-                                &mut supervisor, &mut journal, &mut ipc_messages, pending.uid, &pending.request) => result,
+                                &mut supervisor, &mut journal, &mut ipc_messages, streams.as_deref(), pending.uid, &pending.request) => result,
                             _ = &mut shutdown => { stopped = true; break; }
                         };
                         if let Err(error) = &result { warn!(operation = pending.request.operation, %error, "Local IPC request failed"); }
@@ -300,6 +332,13 @@ async fn main() -> anyhow::Result<()> {
     // Spooled snapshots stay for the next start.
     if let Some(reporter) = reporter {
         reporter.abort();
+    }
+    // Exports resume from their checkpoints; counters are persisted exactly.
+    for exporter in exporters {
+        exporter.abort();
+    }
+    if let Some(store) = &streams {
+        store.lock().unwrap().close();
     }
     // Components stop with the daemon (shutdown command, then the whole group).
     supervisor.stop_all().await;
@@ -316,7 +355,7 @@ async fn local_request(
     cfg: &Config, sui: &SuiClient, walrus: &WalrusClient, runner: &ApplyRunner,
     store: Option<&components::Store>, configs: &configuration::Store,
     supervisor: &mut supervisor::Supervisor, journal: &mut Journal,
-    messages: &mut ipc::Messages, uid: u32, request: &ipc::Request,
+    messages: &mut ipc::Messages, streams: Option<&std::sync::Mutex<streams::Store>>, uid: u32, request: &ipc::Request,
 ) -> anyhow::Result<serde_json::Value> {
     use serde_json::json;
     let policy = cfg.ipc.as_ref().ok_or_else(|| anyhow::anyhow!("IPC disabled"))?;
@@ -333,6 +372,13 @@ async fn local_request(
         "logs" => Ok(json!({"tail":supervisor.local_logs(name)?})),
         "config" => Ok(json!({"configuration":configs.committed(name)?})),
         "health" | "publish" | "receive" => messages.handle(policy, request, &principal),
+        op if op.starts_with("stream_") => {
+            let store = streams.ok_or_else(|| anyhow::anyhow!("streams are not enabled ([streams])"))?;
+            let declared: Vec<String> = cfg.streams.iter().flat_map(|s| s.definitions.iter().map(|d| d.name.clone())).collect();
+            let acl = policy.components.get(&principal);
+            let visible = |name: &str| acl.map_or(true, |a| a.streams.iter().any(|p| streams::glob(p, name)));
+            streams::handle(store, &declared, op, &request.topic, &request.payload, &visible)
+        }
         "install" => {
             let id = request.payload.as_str().ok_or_else(|| anyhow::anyhow!("deployment ID required"))?;
             anyhow::ensure!(id.starts_with("0x") && id.len() <= 66 && id.len() > 2

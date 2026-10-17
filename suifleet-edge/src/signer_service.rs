@@ -439,7 +439,11 @@ pub fn handle(
                     peer.uid
                 );
                 let message = STANDARD.decode(request["message"].as_str().unwrap_or(""))?;
-                check_telemetry(policy, &message)?;
+                // A telemetry snapshot, or a stream export manifest (SF-034).
+                if let Err(telemetry) = check_telemetry(policy, &message) {
+                    crate::streams::check_manifest(&message, &policy.chain_identifier, &policy.registry.to_string(), &policy.device.to_string())
+                        .map_err(|manifest| anyhow::anyhow!("{telemetry:#}; {manifest:#}"))?;
+                }
                 Ok(json!({ "signature": STANDARD.encode(key.sign_personal_message(&message)?) }))
             }
             _ => anyhow::bail!("unknown request"),

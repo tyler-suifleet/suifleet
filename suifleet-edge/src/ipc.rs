@@ -25,6 +25,9 @@ pub struct Acl {
     pub publish: Vec<String>,
     #[serde(default)]
     pub subscribe: Vec<String>,
+    /// Stream names this component may use (SF-034); `*` is a glob.
+    #[serde(default)]
+    pub streams: Vec<String>,
 }
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -57,7 +60,8 @@ impl Drop for Server {
         }
     }
 }
-const OPS: &[&str] = &["list", "status", "start", "stop", "restart", "logs", "config", "health", "publish", "receive", "install"];
+const OPS: &[&str] = &["list", "status", "start", "stop", "restart", "logs", "config", "health", "publish", "receive", "install",
+    "stream_create", "stream_delete", "stream_append", "stream_read", "stream_describe", "stream_list"];
 impl Settings {
     pub fn validate(&self) -> anyhow::Result<()> {
         anyhow::ensure!(self.socket.is_absolute(), "IPC socket must be absolute");
@@ -77,6 +81,8 @@ impl Settings {
                 && acl.subscribe.len() <= 128, "IPC ACL too large");
             anyhow::ensure!(acl.operations.iter().all(|op| OPS.contains(&op.as_str()) && op != "install" && op != "list"), "invalid component IPC operation");
             anyhow::ensure!(acl.publish.iter().chain(&acl.subscribe).all(|t| topic(t)), "invalid IPC topic");
+            anyhow::ensure!(acl.streams.len() <= 64 && acl.streams.iter().all(|p| crate::streams::valid_name(&p.replace('*', "x"))),
+                "invalid IPC stream pattern");
         }
         anyhow::ensure!(!self.administrators.contains(&daemon_uid) || daemon_uid == 0,
             "shared daemon UID cannot be an IPC administrator");
@@ -91,6 +97,9 @@ impl Settings {
         anyhow::ensure!(r.component == *name && acl.operations.contains(&r.operation), "forbidden");
         if r.operation == "publish" { anyhow::ensure!(acl.publish.contains(&r.topic), "forbidden_topic"); }
         if r.operation == "receive" { anyhow::ensure!(acl.subscribe.contains(&r.topic), "forbidden_topic"); }
+        if r.operation.starts_with("stream_") && r.operation != "stream_list" {
+            anyhow::ensure!(acl.streams.iter().any(|p| crate::streams::glob(p, &r.topic)), "forbidden_stream");
+        }
         Ok(name.clone())
     }
 }
@@ -100,6 +109,14 @@ fn topic(t: &str) -> bool {
 pub fn response(result: anyhow::Result<Value>) -> Value {
     match result {
         Ok(data) => json!({"version":1,"ok":true,"data":data}),
+        // Stream outcomes (full, evicted, ...) are part of the protocol.
+        Err(error) if error.downcast_ref::<crate::streams::StreamError>().is_some() => {
+            let e = error.downcast_ref::<crate::streams::StreamError>().unwrap();
+            match e.oldest {
+                Some(oldest) => json!({"version":1,"ok":false,"error":e.code,"oldest":oldest}),
+                None => json!({"version":1,"ok":false,"error":e.code}),
+            }
+        }
         // Runtime diagnostics may contain private paths/commands/configuration.
         // Detailed local failure evidence remains in the daemon's private logs.
         Err(_) => json!({"version":1,"ok":false,"error":"request_failed"}),
@@ -211,8 +228,8 @@ mod tests {
     fn policy() -> Settings {
         Settings { socket: "/run/suifleet/ipc.sock".into(), administrators: vec![0],
             components: BTreeMap::from([
-                ("a".into(), Acl { uid: 61001, operations: vec!["config".into(), "health".into(), "publish".into(), "receive".into()], publish: vec!["a/events".into()], subscribe: vec!["a/events".into()] }),
-                ("b".into(), Acl { uid: 61002, operations: vec!["receive".into()], publish: vec![], subscribe: vec!["a/events".into()] }),
+                ("a".into(), Acl { uid: 61001, operations: vec!["config".into(), "health".into(), "publish".into(), "receive".into()], publish: vec!["a/events".into()], subscribe: vec!["a/events".into()], streams: vec![] }),
+                ("b".into(), Acl { uid: 61002, operations: vec!["receive".into()], publish: vec![], subscribe: vec!["a/events".into()], streams: vec![] }),
             ]) }
     }
     fn request(op: &str) -> Request {
