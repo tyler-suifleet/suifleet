@@ -76,7 +76,7 @@ class Client:
         return self.request('receive', topic=topic)
 
     # Durable streams (SF-034). Errors carry protocol codes such as 'full',
-    # 'evicted', 'not-enough-messages', 'not-found', 'exists', 'quota'.
+    # 'evicted', 'not-enough-messages', 'not-found', 'exists', 'quota', 'unavailable'.
     def stream_create(self, name, max_size, strategy_on_full='RejectNewData', persistence='File',
                       time_to_live_seconds=None):
         definition = dict(max_size=max_size, strategy_on_full=strategy_on_full, persistence=persistence)

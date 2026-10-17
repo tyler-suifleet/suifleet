@@ -263,6 +263,9 @@ struct Stream {
     segments: BTreeMap<u64, u64>,
     corrupt: u64,
     export_status: Value,
+    /// A failed append whose undo also failed: the segment to cut back to
+    /// its tracked length (`None`: remove it). Appends fail until it is.
+    torn: Option<(PathBuf, Option<u64>)>,
 }
 
 fn crc32(parts: &[&[u8]]) -> u32 {
@@ -299,6 +302,83 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
         std::fs::File::open(parent)?.sync_all()?;
     }
     Ok(())
+}
+
+/// Restore a segment after a failed append: truncate it to `len`, or remove
+/// it if the append created it.
+fn undo_write(path: &Path, len: Option<u64>) -> std::io::Result<()> {
+    faults::undo()?;
+    match len {
+        Some(len) => {
+            let file = std::fs::OpenOptions::new().write(true).open(path)?;
+            file.set_len(len)?;
+            file.sync_data()
+        }
+        None => match std::fs::remove_file(path) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error),
+            _ => Ok(()),
+        },
+    }
+}
+
+/// Segment write fault injection for tests; no-ops otherwise.
+#[cfg(not(test))]
+mod faults {
+    use std::io::Write;
+    pub fn write_all(file: &mut std::fs::File, bytes: &[u8]) -> std::io::Result<()> {
+        file.write_all(bytes)
+    }
+    pub fn sync(file: &std::fs::File) -> std::io::Result<()> {
+        file.sync_data()
+    }
+    pub fn undo() -> std::io::Result<()> {
+        Ok(())
+    }
+}
+#[cfg(test)]
+mod faults {
+    use std::{cell::Cell, io::Write};
+    #[derive(Clone, Copy, Default)]
+    pub struct Faults {
+        /// Write only this many bytes of the next record, then fail.
+        pub partial: Option<usize>,
+        /// Fail the next sync after writing the whole record.
+        pub sync: bool,
+        /// Fail this many undo attempts.
+        pub undo: u32,
+    }
+    thread_local! {
+        pub static FAULTS: Cell<Faults> = Cell::new(Faults::default());
+    }
+    fn injected() -> std::io::Error {
+        std::io::Error::other("injected fault")
+    }
+    pub fn write_all(file: &mut std::fs::File, bytes: &[u8]) -> std::io::Result<()> {
+        let mut faults = FAULTS.get();
+        if let Some(n) = faults.partial.take() {
+            FAULTS.set(faults);
+            file.write_all(&bytes[..n.min(bytes.len())])?;
+            return Err(injected());
+        }
+        file.write_all(bytes)
+    }
+    pub fn sync(file: &std::fs::File) -> std::io::Result<()> {
+        let mut faults = FAULTS.get();
+        if std::mem::take(&mut faults.sync) {
+            FAULTS.set(faults);
+            return Err(injected());
+        }
+        file.sync_data()
+    }
+    pub fn undo() -> std::io::Result<()> {
+        let mut faults = FAULTS.get();
+        if faults.undo > 0 {
+            faults.undo -= 1;
+            FAULTS.set(faults);
+            return Err(injected());
+        }
+        Ok(())
+    }
 }
 
 impl Stream {
@@ -357,6 +437,12 @@ impl Stream {
     }
 
     fn write_record(&mut self, sequence: u64, appended_ms: u64, data: &[u8]) -> anyhow::Result<Location> {
+        if let Some((path, len)) = self.torn.clone() {
+            if let Err(error) = undo_write(&path, len) {
+                return fail("unavailable", format!("stream {:?} cannot undo an earlier failed write: {error}", self.def.name));
+            }
+            self.torn = None;
+        }
         let record_len = (HEADER + data.len()) as u64;
         let last = self.segments.iter().next_back().map(|(f, l)| (*f, *l));
         let first = match last {
@@ -364,18 +450,34 @@ impl Stream {
             _ => sequence,
         };
         let path = segment_path(&self.dir, first);
-        let mut file = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
-        let offset = *self.segments.get(&first).unwrap_or(&0);
+        let tracked = self.segments.get(&first).copied();
+        let offset = tracked.unwrap_or(0);
         let mut record = Vec::with_capacity(record_len as usize);
         record.extend_from_slice(&(data.len() as u32).to_le_bytes());
         record.extend_from_slice(&sequence.to_le_bytes());
         record.extend_from_slice(&appended_ms.to_le_bytes());
         record.extend_from_slice(&crc32(&[&sequence.to_le_bytes(), &appended_ms.to_le_bytes(), data]).to_le_bytes());
         record.extend_from_slice(data);
-        file.write_all(&record)?;
-        file.sync_data()?;
-        if offset == 0 {
-            std::fs::File::open(&self.dir)?.sync_all()?;
+        let written = (|| -> std::io::Result<()> {
+            let mut file = std::fs::OpenOptions::new().create(true).write(true).open(&path)?;
+            file.seek(SeekFrom::Start(offset))?;
+            faults::write_all(&mut file, &record)?;
+            faults::sync(&file)?;
+            if offset == 0 {
+                std::fs::File::open(&self.dir)?.sync_all()?;
+            }
+            Ok(())
+        })();
+        if let Err(error) = written {
+            // A failed write or sync may leave part or all of the record in
+            // the file. Cut the segment back to its tracked length, so a
+            // retry and recovery see only acknowledged records; if that fails
+            // too, appends fail until it succeeds.
+            if let Err(undo) = undo_write(&path, tracked) {
+                warn!(stream = self.def.name, %undo, "Could not undo a failed stream write; appends fail until it is undone");
+                self.torn = Some((path, tracked));
+            }
+            return Err(error.into());
         }
         self.segments.insert(first, offset + record_len);
         Ok(Location::Disk { segment: first, offset })
@@ -395,6 +497,7 @@ impl Stream {
             segments: BTreeMap::new(),
             corrupt: 0,
             export_status: Value::Null,
+            torn: None,
         };
         if stream.def.persistence == Persistence::Memory {
             stream.oldest = stream.next;
@@ -545,7 +648,7 @@ impl Store {
         std::fs::create_dir_all(&dir)?;
         let stream = Stream {
             def: def.clone(), dir, entries: VecDeque::new(), bytes: 0, next: 0, oldest: 0, exported: -1, reserved: 0,
-            segments: BTreeMap::new(), corrupt: 0, export_status: Value::Null,
+            segments: BTreeMap::new(), corrupt: 0, export_status: Value::Null, torn: None,
         };
         stream.save_meta()?;
         std::fs::File::open(&self.dir)?.sync_all()?;
@@ -1071,6 +1174,64 @@ mod tests {
             drop(store);
             let _ = std::fs::remove_dir_all(&path);
         }
+    }
+
+    #[test]
+    fn a_failed_segment_write_leaves_only_acknowledged_records() {
+        use faults::{Faults, FAULTS};
+        let path = dir("torn-write");
+        let seg_dir = path.join(dir_name("w"));
+        let seg_len = |first: u64| std::fs::metadata(segment_path(&seg_dir, first)).map(|m| m.len()).ok();
+        let all = |store: &mut Store| -> Vec<(u64, Vec<u8>)> {
+            let n = store.describe("w", 0).unwrap()["messages"].as_u64().unwrap();
+            store.read("w", 0, n, n, 0).unwrap().into_iter().map(|m| (m.sequence, m.data)).collect()
+        };
+        let mut store = Store::open(&path, QUOTA, 0).unwrap();
+        // 1000-byte messages are 1024-byte records; a segment holds four.
+        store.create(def("w", 1 << 15, Strategy::RejectNewData)).unwrap();
+        let big = |b: u8| vec![b; 1000];
+        assert_eq!(store.append("w", &big(0), 0).unwrap(), 0);
+
+        // A partial write (e.g. disk full) is cut back; the retry is intact.
+        FAULTS.set(Faults { partial: Some(30), ..Faults::default() });
+        assert!(store.append("w", &big(b'A'), 0).is_err());
+        assert_eq!(seg_len(0), Some(1024));
+        assert_eq!(store.append("w", &big(1), 0).unwrap(), 1);
+        // A failed sync after the whole record was written is undone too.
+        FAULTS.set(Faults { sync: true, ..Faults::default() });
+        assert!(store.append("w", &big(b'B'), 0).is_err());
+        assert_eq!(seg_len(0), Some(2048));
+        assert_eq!(store.append("w", &big(2), 0).unwrap(), 2);
+        // If the undo fails as well, appends fail until it succeeds.
+        FAULTS.set(Faults { partial: Some(500), undo: 2, ..Faults::default() });
+        assert!(store.append("w", &big(b'C'), 0).is_err());
+        assert_eq!(code(&store.append("w", &big(3), 0).unwrap_err()), "unavailable");
+        assert_eq!(seg_len(0), Some(3072 + 500));
+        assert_eq!(store.append("w", &big(3), 0).unwrap(), 3);
+        assert_eq!(seg_len(0), Some(4096));
+        // A failed write that started a segment removes it.
+        FAULTS.set(Faults { partial: Some(10), ..Faults::default() });
+        assert!(store.append("w", &big(b'D'), 0).is_err());
+        assert_eq!(seg_len(4), None);
+        let expected: Vec<(u64, Vec<u8>)> = (0..4).map(|i| (i, big(i as u8))).collect();
+        assert_eq!(all(&mut store), expected);
+        drop(store);
+        let mut store = Store::open(&path, QUOTA, 0).unwrap();
+        assert_eq!(all(&mut store), expected, "every acknowledged record survives reopening");
+        assert_eq!(store.append("w", &big(4), 0).unwrap(), 4);
+
+        // A crash with an undo still pending: recovery cuts the torn tail.
+        FAULTS.set(Faults { partial: Some(700), undo: 1, ..Faults::default() });
+        assert!(store.append("w", &big(b'E'), 0).is_err());
+        assert_eq!(seg_len(4), Some(1024 + 700));
+        std::mem::forget(store);
+        let mut store = Store::open(&path, QUOTA, 0).unwrap();
+        assert_eq!(seg_len(4), Some(1024));
+        assert_eq!(all(&mut store).len(), 5);
+        assert!(store.append("w", &big(5), 0).unwrap() > 4);
+        FAULTS.set(Faults::default());
+        drop(store);
+        let _ = std::fs::remove_dir_all(&path);
     }
 
     #[test]

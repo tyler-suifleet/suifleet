@@ -47,7 +47,7 @@ max_backoff_seconds = 300                 # retry backoff cap, 1..=3600
   - Reads do not consume: each consumer keeps its own cursor.
 - **Persistence.**
   - Each stream has a directory named by the SHA-256 of its name, so every valid name fits the file name limit. A stream whose state cannot be opened is left untouched, and creating a stream with its name fails with `exists`.
-  - `File` streams append CRC-framed records to segment files under `<state_dir>/streams/<SHA-256 of the name, hex>/`, and sync each append before returning its sequence number. On open, a torn record at the end is truncated. A corrupt record ends its segment, and the result is counted in `corrupt_segments`. Segments are deleted once all their messages are retired. Disk use is at most `max_size` plus one segment, which is `max_size/8` clamped to 4 KiB–4 MiB.
+  - `File` streams append CRC-framed records to segment files under `<state_dir>/streams/<SHA-256 of the name, hex>/`, and sync each append before returning its sequence number. If a write or sync fails, the segment is cut back to its last acknowledged record (a segment the append started is removed) and the append fails without using a number; if that undo fails too, appends to the stream fail with `unavailable` until it succeeds. On open, a torn record at the end is truncated. A corrupt record ends its segment, and the result is counted in `corrupt_segments`. Segments are deleted once all their messages are retired. Disk use is at most `max_size` plus one segment, which is `max_size/8` clamped to 4 KiB–4 MiB.
   - `Memory` streams keep their messages in memory and lose them on restart. Their numbering continues as above.
 - **Quota.** A stream reserves its `max_size` against `max_total_bytes`, so creating it fails with `quota` if the sum would exceed the limit, or if `max_streams` is reached.
 - **Messages.** A message is 1 byte up to min(`max_size`, 1 MiB) in the store. Over IPC, the payload is any JSON value, and its compact JSON bytes are what is stored and counted. The 64 KiB IPC frame limits a single append.
@@ -57,7 +57,7 @@ max_backoff_seconds = 300                 # retry backoff cap, 1..=3600
 | Operation | `topic` | `payload` | Result |
 |---|---|---|---|
 | `stream_create` | name | `{max_size, strategy_on_full, persistence?, time_to_live_seconds?}` | `{created}`; `exists`, `invalid`, `quota` |
-| `stream_append` | name | any JSON value | `{sequence}`; `full`, `invalid`, `not-found` |
+| `stream_append` | name | any JSON value | `{sequence}`; `full`, `invalid`, `not-found`, `unavailable` (an earlier failed write is not yet undone) |
 | `stream_read` | name | `{start?, min?, max?}` | `{messages: [{sequence, appended_ms, payload}]}`; `evicted` (+`oldest`), `not-enough-messages` |
 | `stream_describe` | name | — | `oldest`, `newest` (last assigned), `exported` (−1 before any), `bytes`, `messages`, the definition and export status (destination without query string, batches, failures, last error) |
 | `stream_delete` | name | — | `{deleted}`; `declared` for operator streams |
@@ -125,7 +125,7 @@ The device key signs it as a Sui personal message, which can never be valid as a
 
 | Command | Covers |
 |---|---|
-| `make edge-test` | All 5 `interfaces/compat/stream-cases.json` sequences (45 steps) against the store, including restart. Crash recovery: a torn tail truncated, records after a corrupt one dropped and their numbers never reused, a clean close exact. Overwrite: segment reclamation, eviction reproduced after a crash. Time-to-live, quota, `discard_exported`, export batches and `lost_before`. Memory streams after a crash. Manifests binding the body, checked by the signing service. IPC request handling. CRC check value |
+| `make edge-test` | All 5 `interfaces/compat/stream-cases.json` sequences (45 steps) against the store, including restart. Crash recovery: a torn tail truncated, records after a corrupt one dropped and their numbers never reused, a clean close exact. Overwrite: segment reclamation, eviction reproduced after a crash. Time-to-live, quota, `discard_exported`, export batches and `lost_before`. A failed partial write, sync or undo leaves only acknowledged records, through retry and reopen. Memory streams after a crash. Manifests binding the body, checked by the signing service. IPC request handling. CRC check value |
 | `make test-streams` | The real daemon as root with two real component UIDs, the chain simulator and a local export receiver, without network. ACLs, quota, operator-only exports and declared streams. Offline buffering: 25 messages exported in order in signed batches after the destination returns. Interrupted export: a batch stored but answered 500 is retried with the same Idempotency-Key, and the checkpoint advances only after a 2xx. Crash: kill -9 with unexported messages plus a torn tail; everything intact, numbering resumes without reuse, export resumes. Clean restart: numbering exact. `full` from a full stream. Overwrite retention while offline: `evicted` reads, and the export reports the retired count. The receiver checks every body hash and verifies every signature independently (BLAKE2b intent digest and RFC 8032 Ed25519 in Python), and rejects forged manifests. Receipt: [sf034-streams.json](validation/sf034-streams.json) |
 
 **Not yet covered:**
