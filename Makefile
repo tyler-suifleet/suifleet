@@ -203,6 +203,19 @@ release-image:
 release-artifacts: release-image
 	python3 scripts/release.py build --out $(RELEASE_OUT) --image $(RELEASE_IMAGE) --target $(RELEASE_TARGET) --reproduce
 
+# 32-bit Linux x86 (SF-076, docs/LINUX_X86.md), on the host with Docker: an
+# i686 cross build in the release image, then the real-daemon simulator suites
+# in a 32-bit i386 userland. LINUX_X86_BUNDLE=dir also checks a 32-bit release
+# bundle (make release-artifacts RELEASE_TARGET=i686-unknown-linux-gnu).
+.PHONY: linux-x86-image test-linux-x86
+LINUX_X86_IMAGE ?= suifleet-linux-x86:local
+linux-x86-image:
+	docker build -f docker/linux-x86.Dockerfile --build-arg USER_UID=$(UID) --build-arg USER_GID=$(GID) -t $(LINUX_X86_IMAGE) docker/
+
+test-linux-x86: release-image linux-x86-image
+	PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_linux_x86.py --release-image $(RELEASE_IMAGE) --runner-image $(LINUX_X86_IMAGE) \
+		$(if $(LINUX_X86_BUNDLE),--bundle $(LINUX_X86_BUNDLE)) $(if $(LINUX_X86_EVIDENCE),--evidence $(LINUX_X86_EVIDENCE))
+
 # x86 catalog manifests across a real base-to-current package upgrade, on a
 # disposable network-none localnet (host, needs Docker and a warm Move cache).
 .PHONY: test-x86-catalog-localnet
