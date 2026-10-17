@@ -1,6 +1,6 @@
 {
   "ticket": "SF-034",
-  "head": "78c855a11902c0f1ce42457c4a9fa16eb562ff5b",
+  "head": "d0aa38ad9099e6198981d2969d9f4041aac607b9",
   "checks": [
     "ACLs per component, exports and declared streams operator-only, quota enforced",
     "offline buffering: 25 messages exported in order in 3 signed batches after the destination returned; forged manifests fail verification",
