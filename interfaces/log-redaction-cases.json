@@ -87,13 +87,13 @@
     "count": 1
   },
   {
-    "name": "short overlay values ignored",
+    "name": "short overlay values redacted",
     "line": "mode on",
     "secrets": [
       "on"
     ],
-    "redacted": "mode on",
-    "count": 0
+    "redacted": "mode [REDACTED]",
+    "count": 1
   },
   {
     "name": "pem private key line",
@@ -136,5 +136,84 @@
     "line": "secret='a b c' rest",
     "redacted": "secret='[REDACTED]' rest",
     "count": 1
+  },
+  {
+    "name": "non-ASCII before a run",
+    "line": "€ ready",
+    "redacted": "€ ready",
+    "count": 0
+  },
+  {
+    "name": "non-ASCII before a hex key",
+    "line": "€xabababababababababababababababababababababababababababababababab",
+    "redacted": "€xabababababababababababababababababababababababababababababababab",
+    "count": 0
+  },
+  {
+    "name": "non-ASCII then hex key",
+    "line": "clé abababababababababababababababababababababababababababababababab",
+    "redacted": "clé [REDACTED]",
+    "count": 1
+  },
+  {
+    "name": "authorization scheme without value",
+    "line": "Authorization: Bearer ",
+    "redacted": "Authorization: Bearer ",
+    "count": 0
+  },
+  {
+    "name": "authorization basic without value",
+    "line": "Authorization: Basic ",
+    "redacted": "Authorization: Basic ",
+    "count": 0
+  },
+  {
+    "name": "secret name without value",
+    "line": "password=",
+    "redacted": "password=",
+    "count": 0
+  },
+  {
+    "name": "escaped double quote",
+    "line": "password=\"abc\\\"remaining-secret\" next",
+    "redacted": "password=\"[REDACTED]\" next",
+    "count": 1
+  },
+  {
+    "name": "escaped single quote",
+    "line": "secret='it\\'s-hidden' next",
+    "redacted": "secret='[REDACTED]' next",
+    "count": 1
+  },
+  {
+    "name": "JSON escaped value",
+    "line": "{\"token\": \"a\\\\\\\"b\\\"c\", \"ok\": 1}",
+    "redacted": "{\"token\": \"[REDACTED]\", \"ok\": 1}",
+    "count": 1
+  },
+  {
+    "name": "trailing backslash in unterminated quote",
+    "line": "password=\"abc\\",
+    "redacted": "password=\"[REDACTED]",
+    "count": 1
+  },
+  {
+    "name": "short confidential value",
+    "line": "login with 123",
+    "secrets": [
+      "123"
+    ],
+    "redacted": "login with [REDACTED]",
+    "count": 1
+  },
+  {
+    "name": "one-character confidential value keeps the mark intact",
+    "line": "a long-secret-value E",
+    "secrets": [
+      "long-secret-value",
+      "E"
+    ],
+    "redacted": "a [REDACTED] [REDACTED]",
+    "count": 2
   }
 ]

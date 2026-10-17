@@ -12,7 +12,8 @@
 //!   keys), and base64 runs of 40 or more characters that carry `+`, `/` or
 //!   `=` (encoded keys; base58 digests and base64url blob IDs are kept);
 //! - runs of 12 or more short lowercase words (recovery phrases);
-//! - the device's exact confidential values (configuration overlays).
+//! - the device's exact confidential values (configuration overlays),
+//!   however short: a short value is redacted wherever it appears.
 //!
 //! The rules prefer over-redaction. They are a safety net, not a licence to
 //! log secrets: components and the daemon must still not write them.
@@ -34,9 +35,13 @@ pub fn redact(line: &str, secrets: &[String]) -> (String, usize) {
         return (format!("{MARK} (private key block line)"), 1);
     }
     for secret in secrets {
-        if secret.chars().count() >= 4 && text.contains(secret.as_str()) {
-            count += text.matches(secret.as_str()).count();
-            text = text.replace(secret.as_str(), MARK);
+        if !secret.is_empty() && text.contains(secret.as_str()) {
+            // Not inside an earlier replacement: a short value may occur in the mark.
+            let parts: Vec<String> = text.split(MARK).map(|part| {
+                count += part.matches(secret.as_str()).count();
+                part.replace(secret.as_str(), MARK)
+            }).collect();
+            text = parts.join(MARK);
         }
     }
     let (text, n) = sui_private_keys(&text);
@@ -119,14 +124,21 @@ fn named_values(text: &str) -> (String, usize) {
                 }
             }
             out.extend(&chars[i..j]);
-            // The value: quoted, or up to whitespace or a separator.
+            if j >= chars.len() {
+                // A scheme with no value (`Authorization: Bearer `).
+                i = j;
+                continue;
+            }
+            // The value: quoted (a backslash escapes the next character, as
+            // in JSON), or up to whitespace or a separator.
             let mut k = j;
             if chars[k] == '"' || chars[k] == '\'' {
                 let quote = chars[k];
                 k += 1;
                 while k < chars.len() && chars[k] != quote {
-                    k += 1;
+                    k += if chars[k] == '\\' { 2 } else { 1 };
                 }
+                k = k.min(chars.len());
                 out.push(quote);
                 out.push_str(MARK);
                 if k < chars.len() {
@@ -199,7 +211,7 @@ fn long_runs(text: &str) -> (String, usize) {
                 padded += 1;
             }
             let run = &text[start..end];
-            let after_0x = start >= 2 && &text[start - 2..start] == "0x"
+            let after_0x = start >= 2 && &bytes[start - 2..start] == b"0x"
                 && (start == 2 || !bytes[start - 3].is_ascii_alphanumeric());
             let hex = run.len() >= 64 && run.bytes().all(|b| b.is_ascii_hexdigit()) && !after_0x;
             let base64 = end - start >= 40
