@@ -297,8 +297,9 @@ fn collection_redacts_classifies_and_reads_each_line_once() {
     assert_eq!(svc_lines[5], "plain");
     assert!(got.iter().filter(|m| m.0 == "svc").all(|m| m.1 == 5_000), "lines without a time take the read time");
     let spool = std::fs::read_to_string(root.join("spool").join(JOURNAL)).unwrap();
-    for secret in ["k3y-abcdef0123", "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7", "sibling"] {
-        assert!(!spool.contains(secret), "{secret} reached the spool");
+    // The failure message names only which value leaked, never the value.
+    for (index, secret) in ["k3y-abcdef0123", "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7", "sibling"].iter().enumerate() {
+        assert!(!spool.contains(secret), "test value {index} reached the spool");
     }
     assert!(spool.contains("Ov3rlay-PIN"), "confidential values are remembered in the (0600) spool");
     // Nothing new: nothing spooled, the journal does not grow. Then a rotation.

@@ -41,7 +41,7 @@
   ],
   "source_sha256": {
     "suifleet-edge/src/cloudwatch_logs.rs": "6d58dd9898994dfdd60cf07b24e9f8bfe4f6eaf6e9902b2d69bea8147ae88fb1",
-    "suifleet-edge/src/cloudwatch_logs_tests.rs": "eb85390e06e9f4487b79da9c0cc2b676c51a6981e4382a8ac68f2fa21788648c",
+    "suifleet-edge/src/cloudwatch_logs_tests.rs": "0a32bdd3e3e3fbaa5072f806c64b6ef0637e4ca9c7512b4e4c9d17cf5e30da51",
     "suifleet-edge/src/logs.rs": "1489186155a313e618833779317c01dd13c3f3915a5861a5145297c3054b39e0",
     "scripts/cloudwatch_logs_emulator.py": "f13d1978edc03683d3f93fe8cf6ebd421e3f86ebd4bbe228dff8d362a537a286",
     "scripts/test_cloudwatch_logs.py": "15246ff1275dfe3b0455e4f196809c5480b94b6f8f3240985e2dd1636a7f0da6",
@@ -54,5 +54,8 @@
     "System is the daemon's log file; systemd-journal forwarding (SystemLogForwarder), platform-managed component log files, regex selection, deletion after upload and multi-line grouping are not implemented.",
     "Physical Pi/target integration is deferred to SF-031/#32.",
     "Reference-model agreement (make test-compat) is separate from adapter execution; no general Greengrass or LogManager parity claim."
+  ],
+  "post_ci_repairs": [
+    "CodeQL rust/cleartext-logging (HIGH) in a test assertion message that would print a fixture secret on failure: the message now names only the value's index. cargo test cloudwatch: 16 passed."
   ]
 }
