@@ -38,7 +38,6 @@
   "expected": {
    "outcome": "translate",
    "reasons": [],
-   "requires": [],
    "manifests": [
     {
      "os": "linux",
@@ -59,7 +58,8 @@
    ],
    "omitted_manifests": [],
    "informational": [
-    "ComponentPublisher"
+    "ComponentPublisher",
+    "Lifecycle.install"
    ]
   }
  },
@@ -117,7 +117,9 @@
      ]
     },
     {
-     "Lifecycle": {},
+     "Lifecycle": {
+      "install": "echo any"
+     },
      "Artifacts": [
       {
        "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
@@ -148,7 +150,6 @@
   "expected": {
    "outcome": "translate",
    "reasons": [],
-   "requires": [],
    "manifests": [
     {
      "os": "linux",
@@ -207,7 +208,9 @@
       "componentVersion": "1.0.0",
       "artifactBlobId": "blob_hello",
       "artifactSha256": "abababababababababababababababababababababababababababababababab",
-      "lifecycle": {},
+      "lifecycle": {
+       "install": "echo any"
+      },
       "configuration": {},
       "componentDependencies": {
        "com.example.Lib": {
@@ -225,7 +228,8 @@
     0
    ],
    "informational": [
-    "ComponentPublisher"
+    "ComponentPublisher",
+    "Lifecycle.install"
    ]
   }
  },
@@ -273,7 +277,6 @@
   "expected": {
    "outcome": "translate",
    "reasons": [],
-   "requires": [],
    "manifests": [
     {
      "os": "linux",
@@ -293,7 +296,8 @@
    ],
    "omitted_manifests": [],
    "informational": [
-    "ComponentPublisher"
+    "ComponentPublisher",
+    "Lifecycle.install"
    ]
   }
  },
@@ -338,8 +342,7 @@
    "outcome": "reject",
    "reasons": [
     "artifact-digest-mismatch"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -383,8 +386,7 @@
    "outcome": "reject",
    "reasons": [
     "artifact-digest-mismatch"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -427,7 +429,6 @@
   "expected": {
    "outcome": "translate",
    "reasons": [],
-   "requires": [],
    "manifests": [
     {
      "os": "linux",
@@ -450,8 +451,113 @@
    "omitted_manifests": [],
    "informational": [
     "ComponentPublisher",
+    "Lifecycle.install",
     "Lifecycle.run",
     "Lifecycle.shutdown"
+   ]
+  }
+ },
+ {
+  "id": "configuration-defaults-translate",
+  "note": "DefaultConfiguration becomes native recipe 1.2 defaults, delivered as the {configuration} file and $SUIFLEET_CONFIGURATION; existing device values are kept and new defaults fill gaps, as in Greengrass. Dependencies stay in the same 1.2 recipe.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "Manifests": [
+    {
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Lifecycle": {
+      "run": "exec python3 {artifacts:path}/hello.tar"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ],
+   "ComponentDescription": "Configured hello",
+   "ComponentConfiguration": {
+    "DefaultConfiguration": {
+     "port": 8080,
+     "log": {
+      "level": "info",
+      "targets": [
+       "file",
+       "stdout"
+      ]
+     },
+     "enabled": true,
+     "ratio": 0.5,
+     "peer": null
+    }
+   },
+   "ComponentDependencies": {
+    "com.example.Lib": {
+     "VersionRequirement": "^1.0.0",
+     "DependencyType": "HARD"
+    }
+   }
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "translate",
+   "reasons": [],
+   "manifests": [
+    {
+     "os": "linux",
+     "arch": "aarch64",
+     "recipe": {
+      "schemaVersion": "1.2",
+      "componentName": "com.example.Hello",
+      "componentVersion": "1.0.0",
+      "artifactBlobId": "blob_hello",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {
+       "run": "exec python3 {artifact}"
+      },
+      "configuration": {
+       "defaults": {
+        "port": 8080,
+        "log": {
+         "level": "info",
+         "targets": [
+          "file",
+          "stdout"
+         ]
+        },
+        "enabled": true,
+        "ratio": 0.5,
+        "peer": null
+       }
+      },
+      "description": "Configured hello",
+      "componentDependencies": {
+       "com.example.Lib": {
+        "versionRequirement": "^1.0.0",
+        "dependencyType": "HARD"
+       }
+      }
+     }
+    }
+   ],
+   "omitted_manifests": [],
+   "informational": [
+    "ComponentConfiguration.DefaultConfiguration",
+    "Lifecycle.run"
    ]
   }
  },
@@ -493,7 +599,6 @@
   "expected": {
    "outcome": "translate",
    "reasons": [],
-   "requires": [],
    "manifests": [
     {
      "os": "linux",
@@ -557,8 +662,7 @@
    "outcome": "reject",
    "reasons": [
     "unmappable-artifact-path"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -600,8 +704,7 @@
    "outcome": "reject",
    "reasons": [
     "unmappable-artifact-path"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -643,8 +746,7 @@
    "outcome": "reject",
    "reasons": [
     "unmappable-artifact-path"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -686,8 +788,7 @@
    "outcome": "reject",
    "reasons": [
     "quoted-variable"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -729,8 +830,7 @@
    "outcome": "reject",
    "reasons": [
     "native-placeholder-collision"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -772,8 +872,7 @@
    "outcome": "reject",
    "reasons": [
     "work-path-in-install"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -817,10 +916,10 @@
   "expected": {
    "outcome": "reject",
    "reasons": [
+    "no-lifecycle-command",
     "unsupported-lifecycle-step",
     "unsupported-step-key"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -862,10 +961,10 @@
   "expected": {
    "outcome": "reject",
    "reasons": [
+    "no-lifecycle-command",
     "shutdown-without-run",
     "unsupported-lifecycle-step"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -910,8 +1009,7 @@
    "outcome": "reject",
    "reasons": [
     "step-timeout-or-env"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -956,13 +1054,12 @@
    "outcome": "reject",
    "reasons": [
     "step-timeout-or-env"
-   ],
-   "requires": []
+   ]
   }
  },
  {
-  "id": "configuration-deferred",
-  "note": "Default configuration and configuration interpolation need SF-015.",
+  "id": "configuration-variable-rejected",
+  "note": "Native commands receive the whole configuration as a file ({configuration}), never an inline value; {configuration:/pointer} has no equivalent and is rejected with guidance.",
   "recipe": {
    "RecipeFormatVersion": "2020-01-25",
    "ComponentName": "com.example.Hello",
@@ -1001,19 +1098,257 @@
    }
   },
   "expected": {
-   "outcome": "defer",
+   "outcome": "reject",
    "reasons": [
-    "component-configuration",
     "configuration-variable"
-   ],
-   "requires": [
-    "SF-015"
    ]
   }
  },
  {
-  "id": "access-control-deferred",
-  "note": "IPC authorization policies need the SF-027 IPC ACL model.",
+  "id": "configuration-key-case-collision-rejected",
+  "note": "Greengrass configuration keys are case-insensitive; native keys are case-sensitive, so keys differing only in case would split one AWS value in two.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "Manifests": [
+    {
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Lifecycle": {
+      "install": "echo installed"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ],
+   "ComponentConfiguration": {
+    "DefaultConfiguration": {
+     "log": {
+      "Level": "info",
+      "level": "debug"
+     }
+    }
+   }
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "configuration-key-case-collision"
+   ]
+  }
+ },
+ {
+  "id": "configuration-limits-rejected",
+  "note": "Native configuration depth is at most 32 (the defaults object is level 1); deeper defaults are rejected before publication rather than failing on every device.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "Manifests": [
+    {
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Lifecycle": {
+      "install": "echo installed"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ],
+   "ComponentConfiguration": {
+    "DefaultConfiguration": {
+     "d": {
+      "d": {
+       "d": {
+        "d": {
+         "d": {
+          "d": {
+           "d": {
+            "d": {
+             "d": {
+              "d": {
+               "d": {
+                "d": {
+                 "d": {
+                  "d": {
+                   "d": {
+                    "d": {
+                     "d": {
+                      "d": {
+                       "d": {
+                        "d": {
+                         "d": {
+                          "d": {
+                           "d": {
+                            "d": {
+                             "d": {
+                              "d": {
+                               "d": {
+                                "d": {
+                                 "d": {
+                                  "d": {
+                                   "d": {
+                                    "d": 1
+                                   }
+                                  }
+                                 }
+                                }
+                               }
+                              }
+                             }
+                            }
+                           }
+                          }
+                         }
+                        }
+                       }
+                      }
+                     }
+                    }
+                   }
+                  }
+                 }
+                }
+               }
+              }
+             }
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "configuration-limits"
+   ]
+  }
+ },
+ {
+  "id": "configuration-without-command-rejected",
+  "note": "Native configuration reaches only install or run commands; a manifest without either cannot receive it.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "Manifests": [
+    {
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Lifecycle": {},
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ],
+   "ComponentConfiguration": {
+    "DefaultConfiguration": {
+     "port": 1
+    }
+   }
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "configuration-without-command"
+   ]
+  }
+ },
+ {
+  "id": "configuration-placeholder-collision-rejected",
+  "note": "{configuration} is literal text to Greengrass but a native substitution.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "Manifests": [
+    {
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Lifecycle": {
+      "install": "echo {configuration}"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "native-placeholder-collision"
+   ]
+  }
+ },
+ {
+  "id": "access-control-rejected",
+  "note": "accessControl authorizes the AWS IPC protocol, which is not implemented; native IPC ACLs are operator configuration, never recipe privileges. The pub/sub policy is reported as the equivalent operator ACL (exact topics only).",
   "recipe": {
    "RecipeFormatVersion": "2020-01-25",
    "ComponentName": "com.example.Hello",
@@ -1063,13 +1398,118 @@
    }
   },
   "expected": {
-   "outcome": "defer",
+   "outcome": "reject",
    "reasons": [
     "ipc-access-control"
    ],
-   "requires": [
-    "SF-027"
-   ]
+   "ipc_acl": {
+    "operations": [
+     "config",
+     "health",
+     "publish"
+    ],
+    "publish": [
+     "t"
+    ],
+    "subscribe": [],
+    "unmapped": []
+   }
+  }
+ },
+ {
+  "id": "access-control-unmappable-reported",
+  "note": "Glob topics, MQTT proxy and other IPC services have no native ACL equivalent and are listed as unmapped; exact pub/sub topics map to publish/subscribe.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "Manifests": [
+    {
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Lifecycle": {
+      "install": "echo installed"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ],
+   "ComponentConfiguration": {
+    "DefaultConfiguration": {
+     "accessControl": {
+      "aws.greengrass.ipc.pubsub": {
+       "p1": {
+        "policyDescription": "x",
+        "operations": [
+         "*"
+        ],
+        "resources": [
+         "sensor/events",
+         "sensor/*"
+        ]
+       },
+       "p2": {
+        "operations": [
+         "aws.greengrass#SubscribeToTopic"
+        ],
+        "resources": [
+         "sensor/commands"
+        ]
+       }
+      },
+      "aws.greengrass.ipc.mqttproxy": {
+       "p3": {
+        "operations": [
+         "aws.greengrass#PublishToIoTCore"
+        ],
+        "resources": [
+         "a"
+        ]
+       }
+      }
+     }
+    }
+   }
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "ipc-access-control"
+   ],
+   "ipc_acl": {
+    "operations": [
+     "config",
+     "health",
+     "publish",
+     "receive"
+    ],
+    "publish": [
+     "sensor/events"
+    ],
+    "subscribe": [
+     "sensor/commands",
+     "sensor/events"
+    ],
+    "unmapped": [
+     "aws.greengrass.ipc.mqttproxy/p3",
+     "aws.greengrass.ipc.pubsub/p1/sensor/*"
+    ]
+   }
   }
  },
  {
@@ -1117,8 +1557,7 @@
    "reasons": [
     "dependency-variable",
     "work-path-in-install"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -1160,8 +1599,7 @@
    "outcome": "reject",
    "reasons": [
     "aws-runtime-variable"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -1203,8 +1641,7 @@
    "outcome": "reject",
    "reasons": [
     "aws-runtime-variable"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -1249,8 +1686,7 @@
    "outcome": "reject",
    "reasons": [
     "privileged-step"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -1295,8 +1731,7 @@
    "outcome": "reject",
    "reasons": [
     "unsupported-step-key"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -1337,9 +1772,9 @@
   "expected": {
    "outcome": "reject",
    "reasons": [
+    "no-lifecycle-command",
     "unsupported-lifecycle-step"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -1384,8 +1819,7 @@
    "reasons": [
     "lambda-source",
     "unsupported-component-type"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -1428,13 +1862,12 @@
    "outcome": "reject",
    "reasons": [
     "unsupported-component-type"
-   ],
-   "requires": []
+   ]
   }
  },
  {
   "id": "aws-managed-dependency-rejected",
-  "note": "AWS-managed component dependencies need SF-038 native equivalents.",
+  "note": "SF-038 classification: TokenExchangeService maps to the unimplemented credential-provider adapter (SF-057), so the recipe is rejected and the classification reported.",
   "recipe": {
    "RecipeFormatVersion": "2020-01-25",
    "ComponentName": "com.example.Hello",
@@ -1477,7 +1910,159 @@
    "reasons": [
     "aws-managed-dependency"
    ],
-   "requires": []
+   "managed_dependencies": {
+    "aws.greengrass.TokenExchangeService": {
+     "outcome": "defer",
+     "adapter": "credential-provider",
+     "requires": [
+      "SF-021",
+      "SF-027",
+      "SF-053"
+     ],
+     "implementation_ticket": "SF-057"
+    }
+   }
+  }
+ },
+ {
+  "id": "nucleus-dependency-dropped",
+  "note": "SF-038 'replace': the daemon replaces the nucleus, so the dependency is dropped and reported, never silently; other dependencies keep native rules.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "Manifests": [
+    {
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Lifecycle": {
+      "install": "echo installed"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ],
+   "ComponentDependencies": {
+    "aws.greengrass.Nucleus": {
+     "VersionRequirement": ">=2.0.0 <3.0.0",
+     "DependencyType": "SOFT"
+    }
+   }
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "translate",
+   "reasons": [],
+   "manifests": [
+    {
+     "os": "linux",
+     "arch": "aarch64",
+     "recipe": {
+      "schemaVersion": "1.0",
+      "componentName": "com.example.Hello",
+      "componentVersion": "1.0.0",
+      "artifactBlobId": "blob_hello",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {
+       "install": "echo installed"
+      },
+      "configuration": {}
+     }
+    }
+   ],
+   "omitted_manifests": [],
+   "informational": [
+    "ComponentDependencies.aws.greengrass.Nucleus",
+    "Lifecycle.install"
+   ],
+   "managed_dependencies": {
+    "aws.greengrass.Nucleus": {
+     "outcome": "replace",
+     "tickets": [
+      "SF-004",
+      "SF-014",
+      "SF-026"
+     ]
+    }
+   }
+  }
+ },
+ {
+  "id": "managed-roadmap-dependency-rejected",
+  "note": "Roadmap gaps and natively packaged AWS components are rejected with their SF-038 classification.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "Manifests": [
+    {
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Lifecycle": {
+      "install": "echo installed"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ],
+   "ComponentDependencies": {
+    "aws.greengrass.LambdaManager": {
+     "VersionRequirement": "^2.0.0"
+    },
+    "variant.DLR": {
+     "VersionRequirement": "*"
+    }
+   }
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "aws-managed-dependency"
+   ],
+   "managed_dependencies": {
+    "aws.greengrass.LambdaManager": {
+     "outcome": "reject",
+     "reason": "roadmap-gap",
+     "tickets": [
+      "SF-064"
+     ]
+    },
+    "variant.DLR": {
+     "outcome": "package-natively",
+     "tickets": [
+      "SF-011"
+     ]
+    }
+   }
   }
  },
  {
@@ -1524,8 +2109,7 @@
    "outcome": "reject",
    "reasons": [
     "unsupported-version-range"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -1572,8 +2156,7 @@
    "outcome": "reject",
    "reasons": [
     "unsupported-version-range"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -1614,8 +2197,7 @@
    "outcome": "reject",
    "reasons": [
     "platform-regex"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -1658,8 +2240,7 @@
    "outcome": "reject",
    "reasons": [
     "unsupported-platform-key"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -1701,8 +2282,7 @@
    "outcome": "reject",
    "reasons": [
     "unsupported-platform-key"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -1743,8 +2323,7 @@
    "outcome": "reject",
    "reasons": [
     "unsupported-platform-value"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -1797,8 +2376,7 @@
    "outcome": "reject",
    "reasons": [
     "no-supported-platform"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -1854,8 +2432,7 @@
    "outcome": "reject",
    "reasons": [
     "duplicate-platform"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -1898,8 +2475,7 @@
    "outcome": "reject",
    "reasons": [
     "unsupported-unarchive"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -1944,8 +2520,7 @@
    "outcome": "reject",
    "reasons": [
     "unsupported-artifact-permission"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -1978,8 +2553,7 @@
    "outcome": "reject",
    "reasons": [
     "unbound-artifact"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -2024,8 +2598,7 @@
    "outcome": "reject",
    "reasons": [
     "artifact-count"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -2063,8 +2636,7 @@
    "outcome": "reject",
    "reasons": [
     "artifact-count"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -2114,8 +2686,7 @@
    "outcome": "reject",
    "reasons": [
     "global-lifecycle-selections"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -2157,8 +2728,7 @@
    "outcome": "reject",
    "reasons": [
     "unsupported-format-version"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -2201,8 +2771,7 @@
    "outcome": "reject",
    "reasons": [
     "unknown-field"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -2244,8 +2813,7 @@
    "outcome": "reject",
    "reasons": [
     "invalid-component-version"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -2287,8 +2855,7 @@
    "outcome": "reject",
    "reasons": [
     "invalid-component-name"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -2330,8 +2897,133 @@
    "outcome": "reject",
    "reasons": [
     "unknown-variable"
+   ]
+  }
+ },
+ {
+  "id": "aws-environment-variable-rejected",
+  "note": "The nucleus-provided environment (SVCUID, AWS_GG_*, AWS_IOT_THING_NAME, AWS_REGION, ...) is absent: the daemon clears the environment.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "Manifests": [
+    {
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Lifecycle": {
+      "run": "exec {artifacts:path}/hello.tar --thing $AWS_IOT_THING_NAME --socket ${AWS_GG_NUCLEUS_DOMAIN_SOCKET_FILEPATH_FOR_COMPONENT}"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "aws-environment-variable"
+   ]
+  }
+ },
+ {
+  "id": "no-lifecycle-command-rejected",
+  "note": "Correction to the SF-028 subset: a native recipe without install or run hands its artifact to the platform updater; an AWS artifact-only manifest never does, so it is rejected.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "Manifests": [
+    {
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Lifecycle": {},
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "no-lifecycle-command"
+   ]
+  }
+ },
+ {
+  "id": "invalid-description-rejected",
+  "note": "ComponentDescription must be a string in the native recipe.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "Manifests": [
+    {
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Lifecycle": {
+      "install": "echo installed"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
    ],
-   "requires": []
+   "ComponentDescription": [
+    "not",
+    "a",
+    "string"
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "invalid-description"
+   ]
   }
  },
  {
@@ -2374,8 +3066,7 @@
    "outcome": "reject",
    "reasons": [
     "unsupported-lifecycle-step"
-   ],
-   "requires": []
+   ]
   }
  },
  {
@@ -2418,8 +3109,473 @@
    "outcome": "reject",
    "reasons": [
     "unsupported-lifecycle-step"
+   ]
+  }
+ },
+ {
+  "id": "yaml-recipe-translates",
+  "format": "yaml",
+  "note": "A YAML recipe in the AWS developer-guide shape parses to the pinned JSON value and translates; a missing architecture means any.",
+  "recipe_text": "---\n# The AWS developer guide's YAML recipe shape\nRecipeFormatVersion: '2020-01-25'\nComponentName: com.example.Hello\nComponentVersion: '1.0.0'\nComponentDescription: My first AWS IoT Greengrass component.\nComponentPublisher: Amazon\nComponentConfiguration:\n  DefaultConfiguration:\n    Message: world\n    Count: 3\n    Enabled: true\nManifests:\n  - Platform:\n      os: linux\n    Lifecycle:\n      run: |\n        python3 -u {artifacts:path}/hello.tar\n    Artifacts:\n      - Uri: s3://example-bucket/hello/1.0.0/hello.tar\n",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentDescription": "My first AWS IoT Greengrass component.",
+   "ComponentPublisher": "Amazon",
+   "ComponentConfiguration": {
+    "DefaultConfiguration": {
+     "Message": "world",
+     "Count": 3,
+     "Enabled": true
+    }
+   },
+   "Manifests": [
+    {
+     "Platform": {
+      "os": "linux"
+     },
+     "Lifecycle": {
+      "run": "python3 -u {artifacts:path}/hello.tar\n"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "translate",
+   "reasons": [],
+   "manifests": [
+    {
+     "os": "linux",
+     "arch": "*",
+     "recipe": {
+      "schemaVersion": "1.2",
+      "componentName": "com.example.Hello",
+      "componentVersion": "1.0.0",
+      "artifactBlobId": "blob_hello",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {
+       "run": "python3 -u {artifact}\n"
+      },
+      "configuration": {
+       "defaults": {
+        "Message": "world",
+        "Count": 3,
+        "Enabled": true
+       }
+      },
+      "description": "My first AWS IoT Greengrass component."
+     }
+    }
    ],
-   "requires": []
+   "omitted_manifests": [],
+   "informational": [
+    "ComponentPublisher",
+    "ComponentConfiguration.DefaultConfiguration",
+    "Lifecycle.run"
+   ]
+  }
+ },
+ {
+  "id": "yaml-unquoted-date-version",
+  "format": "yaml",
+  "note": "An unquoted RecipeFormatVersion is a timestamp only in YAML 1.1 schemas the Greengrass parser does not apply; it reads as the string in both.",
+  "recipe_text": "---\n# The AWS developer guide's YAML recipe shape\nRecipeFormatVersion: 2020-01-25\nComponentName: com.example.Hello\nComponentVersion: '1.0.0'\nComponentDescription: My first AWS IoT Greengrass component.\nComponentPublisher: Amazon\nComponentConfiguration:\n  DefaultConfiguration:\n    Message: world\n    Count: 3\n    Enabled: true\nManifests:\n  - Platform:\n      os: linux\n    Lifecycle:\n      run: |\n        python3 -u {artifacts:path}/hello.tar\n    Artifacts:\n      - Uri: s3://example-bucket/hello/1.0.0/hello.tar\n",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentDescription": "My first AWS IoT Greengrass component.",
+   "ComponentPublisher": "Amazon",
+   "ComponentConfiguration": {
+    "DefaultConfiguration": {
+     "Message": "world",
+     "Count": 3,
+     "Enabled": true
+    }
+   },
+   "Manifests": [
+    {
+     "Platform": {
+      "os": "linux"
+     },
+     "Lifecycle": {
+      "run": "python3 -u {artifacts:path}/hello.tar\n"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "translate",
+   "reasons": [],
+   "manifests": [
+    {
+     "os": "linux",
+     "arch": "*",
+     "recipe": {
+      "schemaVersion": "1.2",
+      "componentName": "com.example.Hello",
+      "componentVersion": "1.0.0",
+      "artifactBlobId": "blob_hello",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {
+       "run": "python3 -u {artifact}\n"
+      },
+      "configuration": {
+       "defaults": {
+        "Message": "world",
+        "Count": 3,
+        "Enabled": true
+       }
+      },
+      "description": "My first AWS IoT Greengrass component."
+     }
+    }
+   ],
+   "omitted_manifests": [],
+   "informational": [
+    "ComponentPublisher",
+    "ComponentConfiguration.DefaultConfiguration",
+    "Lifecycle.run"
+   ]
+  }
+ },
+ {
+  "id": "yaml-yes-boolean-ambiguous",
+  "format": "yaml",
+  "note": "yes is true in YAML 1.1 (Greengrass) but the string 'yes' in YAML 1.2; the meaning is not guessed.",
+  "recipe_text": "---\n# The AWS developer guide's YAML recipe shape\nRecipeFormatVersion: '2020-01-25'\nComponentName: com.example.Hello\nComponentVersion: '1.0.0'\nComponentDescription: My first AWS IoT Greengrass component.\nComponentPublisher: Amazon\nComponentConfiguration:\n  DefaultConfiguration:\n    Message: world\n    Count: 3\n    Enabled: yes\nManifests:\n  - Platform:\n      os: linux\n    Lifecycle:\n      run: |\n        python3 -u {artifacts:path}/hello.tar\n    Artifacts:\n      - Uri: s3://example-bucket/hello/1.0.0/hello.tar\n",
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "yaml-ambiguous-scalar"
+   ]
+  }
+ },
+ {
+  "id": "yaml-octal-ambiguous",
+  "format": "yaml",
+  "note": "0755 is octal 493 in YAML 1.1 but decimal 755 in YAML 1.2.",
+  "recipe_text": "---\n# The AWS developer guide's YAML recipe shape\nRecipeFormatVersion: '2020-01-25'\nComponentName: com.example.Hello\nComponentVersion: '1.0.0'\nComponentDescription: My first AWS IoT Greengrass component.\nComponentPublisher: Amazon\nComponentConfiguration:\n  DefaultConfiguration:\n    Message: world\n    Count: 0755\n    Enabled: true\nManifests:\n  - Platform:\n      os: linux\n    Lifecycle:\n      run: |\n        python3 -u {artifacts:path}/hello.tar\n    Artifacts:\n      - Uri: s3://example-bucket/hello/1.0.0/hello.tar\n",
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "yaml-ambiguous-scalar"
+   ]
+  }
+ },
+ {
+  "id": "yaml-sexagesimal-ambiguous",
+  "format": "yaml",
+  "note": "1:20 is the base-60 integer 80 in YAML 1.1 but a string in YAML 1.2.",
+  "recipe_text": "---\n# The AWS developer guide's YAML recipe shape\nRecipeFormatVersion: '2020-01-25'\nComponentName: com.example.Hello\nComponentVersion: '1.0.0'\nComponentDescription: My first AWS IoT Greengrass component.\nComponentPublisher: Amazon\nComponentConfiguration:\n  DefaultConfiguration:\n    Message: world\n    Count: 1:20\n    Enabled: true\nManifests:\n  - Platform:\n      os: linux\n    Lifecycle:\n      run: |\n        python3 -u {artifacts:path}/hello.tar\n    Artifacts:\n      - Uri: s3://example-bucket/hello/1.0.0/hello.tar\n",
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "yaml-ambiguous-scalar"
+   ]
+  }
+ },
+ {
+  "id": "yaml-merge-key-ambiguous",
+  "format": "yaml",
+  "note": "<< merges a mapping in YAML 1.1 but is an ordinary key in YAML 1.2.",
+  "recipe_text": "---\n# The AWS developer guide's YAML recipe shape\nRecipeFormatVersion: '2020-01-25'\nComponentName: com.example.Hello\nComponentVersion: '1.0.0'\nComponentDescription: My first AWS IoT Greengrass component.\nComponentPublisher: Amazon\nComponentConfiguration:\n  DefaultConfiguration:\n    <<: {Message: world}\n    Count: 3\n    Enabled: true\nManifests:\n  - Platform:\n      os: linux\n    Lifecycle:\n      run: |\n        python3 -u {artifacts:path}/hello.tar\n    Artifacts:\n      - Uri: s3://example-bucket/hello/1.0.0/hello.tar\n",
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "yaml-ambiguous-scalar"
+   ]
+  }
+ },
+ {
+  "id": "yaml-duplicate-key-rejected",
+  "format": "yaml",
+  "note": "Which duplicate a parser keeps is not guessed.",
+  "recipe_text": "---\n# The AWS developer guide's YAML recipe shape\nRecipeFormatVersion: '2020-01-25'\nComponentName: com.example.Hello\nComponentVersion: '1.0.0'\nComponentDescription: My first AWS IoT Greengrass component.\nComponentPublisher: Amazon\nComponentConfiguration:\n  DefaultConfiguration:\n    Message: world\n    Count: 3\n    Count: 4\n    Enabled: true\nManifests:\n  - Platform:\n      os: linux\n    Lifecycle:\n      run: |\n        python3 -u {artifacts:path}/hello.tar\n    Artifacts:\n      - Uri: s3://example-bucket/hello/1.0.0/hello.tar\n",
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "duplicate-key"
+   ]
+  }
+ },
+ {
+  "id": "yaml-custom-tag-rejected",
+  "format": "yaml",
+  "note": "Application tags have no JSON meaning.",
+  "recipe_text": "---\n# The AWS developer guide's YAML recipe shape\nRecipeFormatVersion: '2020-01-25'\nComponentName: com.example.Hello\nComponentVersion: '1.0.0'\nComponentDescription: My first AWS IoT Greengrass component.\nComponentPublisher: Amazon\nComponentConfiguration:\n  DefaultConfiguration:\n    Message: !Sub world\n    Count: 3\n    Enabled: true\nManifests:\n  - Platform:\n      os: linux\n    Lifecycle:\n      run: |\n        python3 -u {artifacts:path}/hello.tar\n    Artifacts:\n      - Uri: s3://example-bucket/hello/1.0.0/hello.tar\n",
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "yaml-non-json-value"
+   ]
+  }
+ },
+ {
+  "id": "yaml-alias-rejected",
+  "format": "yaml",
+  "note": "Anchors and aliases are not translated.",
+  "recipe_text": "---\n# The AWS developer guide's YAML recipe shape\nRecipeFormatVersion: '2020-01-25'\nComponentName: com.example.Hello\nComponentVersion: '1.0.0'\nComponentDescription: My first AWS IoT Greengrass component.\nComponentPublisher: Amazon\nComponentConfiguration:\n  DefaultConfiguration:\n    Message: &m world\n    Copy: *m\n    Count: 3\n    Enabled: true\nManifests:\n  - Platform:\n      os: linux\n    Lifecycle:\n      run: |\n        python3 -u {artifacts:path}/hello.tar\n    Artifacts:\n      - Uri: s3://example-bucket/hello/1.0.0/hello.tar\n",
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "yaml-non-json-value"
+   ]
+  }
+ },
+ {
+  "id": "yaml-infinity-rejected",
+  "format": "yaml",
+  "note": "Non-finite numbers have no JSON representation.",
+  "recipe_text": "---\n# The AWS developer guide's YAML recipe shape\nRecipeFormatVersion: '2020-01-25'\nComponentName: com.example.Hello\nComponentVersion: '1.0.0'\nComponentDescription: My first AWS IoT Greengrass component.\nComponentPublisher: Amazon\nComponentConfiguration:\n  DefaultConfiguration:\n    Message: world\n    Count: .inf\n    Enabled: true\nManifests:\n  - Platform:\n      os: linux\n    Lifecycle:\n      run: |\n        python3 -u {artifacts:path}/hello.tar\n    Artifacts:\n      - Uri: s3://example-bucket/hello/1.0.0/hello.tar\n",
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "yaml-non-json-value"
+   ]
+  }
+ },
+ {
+  "id": "yaml-multiple-documents-rejected",
+  "format": "yaml",
+  "note": "One recipe per document.",
+  "recipe_text": "---\n# The AWS developer guide's YAML recipe shape\nRecipeFormatVersion: '2020-01-25'\nComponentName: com.example.Hello\nComponentVersion: '1.0.0'\nComponentDescription: My first AWS IoT Greengrass component.\nComponentPublisher: Amazon\nComponentConfiguration:\n  DefaultConfiguration:\n    Message: world\n    Count: 3\n    Enabled: true\nManifests:\n  - Platform:\n      os: linux\n    Lifecycle:\n      run: |\n        python3 -u {artifacts:path}/hello.tar\n    Artifacts:\n      - Uri: s3://example-bucket/hello/1.0.0/hello.tar\n---\nComponentName: other\n",
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "multiple-documents"
+   ]
+  }
+ },
+ {
+  "id": "yaml-syntax-error-rejected",
+  "format": "yaml",
+  "note": "A partial parse is never translated.",
+  "recipe_text": "---\n# The AWS developer guide's YAML recipe shape\nRecipeFormatVersion: '2020-01-25'\nComponentName: com.example.Hello\nComponentVersion: '1.0.0'\nComponentDescription: My first AWS IoT Greengrass component.\nComponentPublisher: Amazon\nComponentConfiguration:\n  DefaultConfiguration:\n    Message: world\n    Count: 3\n    Enabled: true\nManifests: [\n  - Platform:\n      os: linux\n    Lifecycle:\n      run: |\n        python3 -u {artifacts:path}/hello.tar\n    Artifacts:\n      - Uri: s3://example-bucket/hello/1.0.0/hello.tar\n",
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "invalid-yaml"
+   ]
+  }
+ },
+ {
+  "id": "json-recipe-translates",
+  "format": "json",
+  "note": "JSON text is read as JSON (here with a \\/ escape YAML 1.1 lacks) and translates like the parsed object.",
+  "recipe_text": "{\n  \"RecipeFormatVersion\": \"2020-01-25\",\n  \"ComponentName\": \"com.example.Hello\",\n  \"ComponentVersion\": \"1.0.0\",\n  \"ComponentPublisher\": \"Example\",\n  \"Manifests\": [\n    {\n      \"Lifecycle\": {\n        \"install\": \"echo installed\"\n      },\n      \"Platform\": {\n        \"os\": \"linux\",\n        \"architecture\": \"aarch64\"\n      },\n      \"Artifacts\": [\n        {\n          \"Uri\": \"s3://example-bucket/hello/1.0.0/hello.tar\"\n        }\n      ]\n    }\n  ],\n  \"ComponentDescription\": \"path a\\/b\"\n}",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": "echo installed"
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ],
+   "ComponentDescription": "path a/b"
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "translate",
+   "reasons": [],
+   "manifests": [
+    {
+     "os": "linux",
+     "arch": "aarch64",
+     "recipe": {
+      "schemaVersion": "1.0",
+      "componentName": "com.example.Hello",
+      "componentVersion": "1.0.0",
+      "artifactBlobId": "blob_hello",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {
+       "install": "echo installed"
+      },
+      "configuration": {},
+      "description": "path a/b"
+     }
+    }
+   ],
+   "omitted_manifests": [],
+   "informational": [
+    "ComponentPublisher",
+    "Lifecycle.install"
+   ]
+  }
+ },
+ {
+  "id": "json-duplicate-key-rejected",
+  "format": "json",
+  "note": "JSON parsers disagree on duplicate keys; they are rejected.",
+  "recipe_text": "{\n  \"RecipeFormatVersion\": \"2020-01-25\",\n  \"ComponentName\": \"com.example.Hello\",\n  \"ComponentVersion\": \"1.0.0\",\n  \"ComponentVersion\": \"2.0.0\",\n  \"ComponentPublisher\": \"Example\",\n  \"Manifests\": [\n    {\n      \"Lifecycle\": {\n        \"install\": \"echo installed\"\n      },\n      \"Platform\": {\n        \"os\": \"linux\",\n        \"architecture\": \"aarch64\"\n      },\n      \"Artifacts\": [\n        {\n          \"Uri\": \"s3://example-bucket/hello/1.0.0/hello.tar\"\n        }\n      ]\n    }\n  ],\n  \"ComponentDescription\": \"Hello component\"\n}",
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "duplicate-key"
+   ]
   }
  }
 ]

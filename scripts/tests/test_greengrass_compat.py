@@ -110,7 +110,16 @@ class FixtureGateTests(unittest.TestCase):
     def test_recipe_outcome_and_translation_pinned(self):
         self.run_mutated("aws-recipe-cases.json", lambda c: c[0]["expected"].update(outcome="reject"))
         self.run_mutated("aws-recipe-cases.json", lambda c: c[0]["expected"]["manifests"][0]["recipe"].update(componentVersion="2.0.0"))
-        self.run_mutated("aws-recipe-cases.json", lambda c: next(x for x in c if x["expected"]["outcome"] == "defer")["expected"].update(requires=[]))
+        acl = lambda c: next(x for x in c if x["id"] == "access-control-rejected")
+        self.run_mutated("aws-recipe-cases.json", lambda c: acl(c)["expected"]["ipc_acl"].update(publish=[]))
+        self.run_mutated("aws-recipe-cases.json", lambda c: acl(c)["expected"].pop("ipc_acl"))
+        managed = lambda c: next(x for x in c if x["id"] == "nucleus-dependency-dropped")
+        self.run_mutated("aws-recipe-cases.json", lambda c: managed(c)["expected"].pop("managed_dependencies"))
+        text = lambda c: next(x for x in c if x["id"] == "json-recipe-translates")
+        self.run_mutated("aws-recipe-cases.json", lambda c: text(c).update(recipe_text=text(c)["recipe_text"].replace("1.0.0", "1.0.1")))
+        parse = lambda c: next(x for x in c if x["id"] == "yaml-yes-boolean-ambiguous")
+        self.run_mutated("aws-recipe-cases.json", lambda c: parse(c)["expected"].update(reasons=["unknown-field"]))
+        self.run_mutated("aws-recipe-cases.json", lambda c: c.append(copy.deepcopy(c[0])))
         self.run_mutated("aws-recipe-cases.json", lambda c: c[0]["expected"].pop("manifests"))
 
     def test_pubsub_expectations_pinned(self):
@@ -330,8 +339,8 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(store.apply({"op": "delete", "version": 1}), {"version": 2})
 
     def test_translation_rejects_non_objects_and_reports_all_reasons(self):
-        self.assertEqual(compat.translate_recipe([], {})["outcome"], "reject")
-        result = compat.translate_recipe({"RecipeFormatVersion": "x", "ComponentType": "aws.greengrass.nucleus"}, {})
+        self.assertEqual(compat.translate_recipe([], {}, {})["outcome"], "reject")
+        result = compat.translate_recipe({"RecipeFormatVersion": "x", "ComponentType": "aws.greengrass.nucleus"}, {}, {})
         self.assertEqual(result["outcome"], "reject")
         self.assertIn("unsupported-format-version", result["reasons"])
         self.assertIn("unsupported-component-type", result["reasons"])

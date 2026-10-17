@@ -1,7 +1,9 @@
-//! SF-028: current-API checks for the AWS recipe compatibility fixtures.
-//! The daemon has no AWS recipe translator; these tests pin that AWS-format
-//! documents are rejected and that every proposed translation targets the
-//! existing native recipe contract. They do not exercise SF-037 itself.
+//! SF-028/SF-037: daemon checks for the AWS recipe compatibility fixtures.
+//! The daemon never reads AWS recipes: these tests pin that AWS-format
+//! documents are rejected, and that every translation the SF-037 translator
+//! (dapp/src/lib/greengrass-recipe.ts) must produce satisfies the daemon's own
+//! recipe and configuration validation. scripts/test_greengrass_runtime.py
+//! runs translated recipes on the real daemon.
 use crate::recipe::Recipe;
 use serde_json::Value;
 
@@ -39,10 +41,23 @@ fn proposed_translations_satisfy_native_recipe_contract() {
                     true,
                 )
                 .unwrap_or_else(|e| panic!("{}: {e}", case["id"]));
+            crate::configuration::validate_recipe(&recipe.configuration)
+                .unwrap_or_else(|e| panic!("{}: {e}", case["id"]));
             assert!(["linux", "*"].contains(&manifest["os"].as_str().unwrap()));
             assert!(["x86_64", "aarch64", "arm", "*"].contains(&manifest["arch"].as_str().unwrap()));
             translated += 1;
         }
     }
-    assert!(translated >= 5);
+    assert!(translated >= 10);
+}
+
+#[test]
+fn rejected_configuration_limits_match_the_daemon() {
+    let case = cases()
+        .into_iter()
+        .find(|c| c["id"] == "configuration-limits-rejected")
+        .unwrap();
+    let defaults = case["recipe"]["ComponentConfiguration"]["DefaultConfiguration"].clone();
+    let configuration = serde_json::from_value(serde_json::json!({ "defaults": defaults })).unwrap();
+    assert!(crate::configuration::validate_recipe(&configuration).is_err());
 }
