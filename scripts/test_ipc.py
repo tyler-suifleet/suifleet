@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import test_ota
@@ -111,6 +112,10 @@ def run():
                 assert client.status()['runtime']['phase'] == 'running'
                 assert client.configuration()['effective'] == dict(answer=42)
                 assert 'hello' in client.logs()
+                # Control bytes expand sixfold when JSON encoded. Even a full
+                # binary/control-character tail must fit the response frame.
+                (state / 'supervised/svc/component.log').write_bytes(b'\x01' * (16 * 1024))
+                assert client.logs() == '\x01' * (8 * 1024)
                 before = client.status()['runtime']['pid']
                 client.stop()
                 assert client.status()['runtime']['phase'] == 'stopped'
@@ -162,6 +167,27 @@ def run():
                 client.publish('svc/events', 'operator message')
                 assert as_uid(61002, 'receive', component='other', topic='svc/events')['sender'] == '@operator/0'
                 print('PASS: kernel-authenticated component SDK config/health/messaging, unknown UID, cross-component and topic denial')
+                # Idle peers from an unmapped UID or a mapped component must
+                # not consume the operator's admission capacity. The child keeps
+                # every socket open until the parent completes an admin request.
+                for uid in (61003, 61001):
+                    code = ('import os,socket,sys; os.setgroups([]); '
+                            'os.setgid(int(sys.argv[2])); os.setuid(int(sys.argv[2])); '
+                            'peers=[socket.socket(socket.AF_UNIX) for _ in range(40)]; '
+                            '[s.connect(sys.argv[1]) for s in peers]; '
+                            'print("ready", flush=True); sys.stdin.readline()')
+                    idle = subprocess.Popen([sys.executable, '-c', code, str(path), str(uid)],
+                        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                    try:
+                        assert idle.stdout.readline().strip() == 'ready'
+                        assert client.status()['runtime']['phase'] == 'running'
+                        # All admitted idle connections expire in three seconds.
+                        time.sleep(4)
+                        assert as_uid(61001, 'config')['configuration']['effective'] == dict(answer=42)
+                    finally:
+                        idle.communicate('done\n', timeout=10)
+                    assert idle.returncode == 0
+                print('PASS: unmapped and mapped idle floods preserve administrator access; framing timeout releases UID slots')
                 # Spoofed caller fields and future versions cannot reach handlers.
                 for request in [dict(version=1, operation='list', uid=0), dict(version=2, operation='list')]:
                     with socket.socket(socket.AF_UNIX) as connection:

@@ -70,7 +70,7 @@ no keys, user accounts or enrollment settings are embedded by package builds.
 | `list` | no component needed | Administrator only. Installed journal entries and supervised runtime statuses. |
 | `start`, `stop`, `restart` | `component` | Controls only an already committed supervised version. Start waits for readiness and requires dependencies Running. Stop/restart refuses while a committed dependent is supervised. |
 | `status` | `component` | Installed record, supervisor runtime status and separately identified self-reported health, or nulls when unknown. |
-| `logs` | `component` | Last 16 KiB of the committed supervised component's private log, UTF-8 with replacement. No arbitrary paths or log creation. |
+| `logs` | `component` | Last 8 KiB of the committed supervised component's private log, UTF-8 with replacement. No arbitrary paths or log creation. |
 | `config` | `component` | Public committed configuration record, including version/deployment/effective/defaults. Confidential device-overlay values are never returned. Poll the record to observe configuration changes. |
 | `health` | `component`, `payload` = `healthy`, `degraded` or `broken` | Volatile self-reported health plus server timestamp. Does not assert firmware boot health, change supervisor phase or override signed fleet telemetry. Principal must exist in the configured ACL. |
 | `publish` | `component`, exact `topic`, JSON `payload` | Fanout to configured subscribers, message envelope includes authenticated component name (or `@operator/UID` for administrators). Payload <=4096 serialized bytes. Atomic backpressure if any inbox is full. |
@@ -123,8 +123,10 @@ and optional `payload` (default null). No pipelining or streaming. Responses con
 do not disclose private command/configuration diagnostics; operators inspect daemon
 logs. A denied/invalid/future-version request has no handler side effects.
 
-The server caps simultaneous clients and queued work at 32 each and connection
-lifetime at 120 seconds. State-changing requests run serially between poll cycles;
+The server rejects unmapped kernel UIDs before allocating client slots. It caps
+simultaneous clients at 32 globally and four per UID, queued work at 32, request
+framing at three seconds and total connection lifetime at 120 seconds.
+State-changing requests run serially between poll cycles;
 they do not interrupt an in-flight install. Long chain/bootstrap/updater operations
 can delay local calls. No availability SLA or real-time lifecycle response is promised.
 Oversize responses are rejected, never silently truncated (except the specified
@@ -144,6 +146,10 @@ spoofed caller fields, future versions, bounded frames, socket lifecycle, health
 atomic inbox backpressure. `scripts/test_ipc.py` exercises the real daemon and SDK
 against local gRPC/Walrus simulators, using real distinct Unix UIDs in a disposable
 root container for authorization tests. It covers every local-management workflow,
-wrong-target and digest rejection, no install replay, messaging and cleanup.
+wrong-target and digest rejection, no install replay, messaging and cleanup. Idle
+floods from unmapped and mapped UIDs must preserve administrator access, and
+request timeouts must release principal slots. Control-character log tails must
+remain within the response frame. Run `make test-ipc` as root when already inside
+a disposable container; the host target starts its own root container.
 Physical Pi/target integration remains [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32);
 no physical or public-network result is implied by simulator acceptance.

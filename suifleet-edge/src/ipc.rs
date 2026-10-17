@@ -117,6 +117,10 @@ pub fn bind(settings: &Settings) -> anyhow::Result<Server> {
     let inode = std::fs::symlink_metadata(&settings.socket)?.ino();
     let (sender, requests) = mpsc::channel(32);
     let slots = Arc::new(Semaphore::new(32));
+    // Bounded at configuration time; no attacker-controlled UID map growth.
+    let principals: BTreeMap<_, _> = settings.administrators.iter().copied()
+        .chain(settings.components.values().map(|acl| acl.uid))
+        .map(|uid| (uid, Arc::new(Semaphore::new(4)))).collect();
     let policy = settings.clone();
     let task = tokio::spawn(async move {
         let mut clients = tokio::task::JoinSet::new();
@@ -124,12 +128,16 @@ pub fn bind(settings: &Settings) -> anyhow::Result<Server> {
             tokio::select! {
                 result = listener.accept() => {
                     let Ok((stream, _)) = result else { break };
+                    let Ok(cred) = stream.peer_cred() else { continue };
+                    let uid = cred.uid();
+                    let Some(limit) = principals.get(&uid) else { continue };
+                    let Ok(principal_slot) = limit.clone().try_acquire_owned() else { continue };
                     let Ok(slot) = slots.clone().try_acquire_owned() else { continue };
                     let sender = sender.clone();
                     let policy = policy.clone();
                     clients.spawn(async move {
-                        let _slot = slot;
-                        let _ = tokio::time::timeout(Duration::from_secs(120), connection(stream, sender, policy)).await;
+                        let _slot = (slot, principal_slot);
+                        let _ = tokio::time::timeout(Duration::from_secs(120), connection(stream, sender, policy, uid)).await;
                     });
                 }
                 _ = clients.join_next(), if !clients.is_empty() => {}
@@ -138,14 +146,14 @@ pub fn bind(settings: &Settings) -> anyhow::Result<Server> {
     });
     Ok(Server { requests, task, socket: settings.socket.clone(), inode })
 }
-async fn connection(stream: UnixStream, sender: mpsc::Sender<Pending>, policy: Settings) -> anyhow::Result<()> {
-    let uid = stream.peer_cred()?.uid();
+async fn connection(stream: UnixStream, sender: mpsc::Sender<Pending>, policy: Settings, uid: u32) -> anyhow::Result<()> {
     let (read, mut write) = stream.into_split();
     let mut read = BufReader::new(read);
     let mut bytes = Vec::new();
     // take() caps allocation even without a newline (read_until alone does not).
     use tokio::io::AsyncReadExt;
-    let count = (&mut read).take((MAX_FRAME + 1) as u64).read_until(b'\n', &mut bytes).await?;
+    let count = tokio::time::timeout(Duration::from_secs(3),
+        (&mut read).take((MAX_FRAME + 1) as u64).read_until(b'\n', &mut bytes)).await??;
     let result = async {
         anyhow::ensure!(count > 0 && count <= MAX_FRAME && bytes.last() == Some(&b'\n'), "invalid_frame");
         let request: Request = serde_json::from_slice(&bytes)?;
@@ -261,18 +269,24 @@ mod tests {
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
         let mut p = policy();
         p.socket = dir.join("ipc.sock");
-        // An unmapped actual caller must never enter the management queue.
+        // Unmapped peers are closed before reading any bytes.
         p.administrators.clear();
         let mut server = bind(&p).unwrap();
-        for bytes in [b"{\"version\":1,\"operation\":\"list\"}\n".to_vec(),
-            b"{\"version\":1,\"operation\":\"list\",\"uid\":0}\n".to_vec(),
+        let mut denied = UnixStream::connect(&p.socket).await.unwrap();
+        let mut byte = [0];
+        assert_eq!(tokio::time::timeout(Duration::from_secs(1), denied.read(&mut byte)).await.unwrap().unwrap(), 0);
+        assert!(server.requests.try_recv().is_err());
+        p.administrators = vec![0];
+        for bytes in [b"{\"version\":1,\"operation\":\"list\",\"uid\":0}\n".to_vec(),
             vec![b'x'; MAX_FRAME + 1]] {
-            let mut stream = UnixStream::connect(&p.socket).await.unwrap();
+            let (mut stream, peer) = UnixStream::pair().unwrap();
+            let (sender, mut requests) = mpsc::channel(1);
+            tokio::spawn(connection(peer, sender, p.clone(), 0));
             stream.write_all(&bytes).await.unwrap();
             let mut reply = Vec::new();
             stream.read_to_end(&mut reply).await.unwrap();
             assert_eq!(serde_json::from_slice::<Value>(&reply).unwrap()["ok"], false);
-            assert!(server.requests.try_recv().is_err());
+            assert!(requests.try_recv().is_err());
         }
         // Existing paths are preserved, including a live socket.
         assert!(bind(&p).is_err());

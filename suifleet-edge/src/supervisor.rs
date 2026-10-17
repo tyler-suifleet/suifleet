@@ -634,9 +634,10 @@ impl Supervisor {
         let mut file = std::fs::OpenOptions::new().read(true)
             .custom_flags(libc::O_NOFOLLOW).open(self.root.join(name).join("component.log"))?;
         let size = file.metadata()?.len();
-        file.seek(SeekFrom::Start(size.saturating_sub(16 * 1024)))?;
+        file.seek(SeekFrom::Start(size.saturating_sub(8 * 1024)))?;
         let mut bytes = Vec::new();
-        file.take(16 * 1024).read_to_end(&mut bytes)?;
+        // Worst-case JSON escaping costs six bytes per input byte.
+        file.take(8 * 1024).read_to_end(&mut bytes)?;
         Ok(String::from_utf8_lossy(&bytes).into_owned())
     }
 
