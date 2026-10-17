@@ -1581,7 +1581,7 @@ mod tests {
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(&dir).unwrap();
             let runner = ApplyRunner::new(ApplyConfig {
-                command: "/bin/true".into(),
+                command: "/usr/bin/true".into(),
                 timeout_seconds: 5,
                 allow_recipe_commands: true,
                 mode: ApplyMode::Direct,

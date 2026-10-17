@@ -267,7 +267,7 @@ mod tests {
     #[tokio::test]
     async fn propagates_apply_failure() {
         let (_dir, artifact) = workdir("false");
-        let error = runner("/bin/false", false)
+        let error = runner("/usr/bin/false", false)
             .apply(&artifact, None, "test", None, None)
             .await
             .unwrap_err();
@@ -277,7 +277,7 @@ mod tests {
     #[tokio::test]
     async fn times_out_hung_apply() {
         let (_dir, artifact) = workdir("hung");
-        let error = runner("/bin/true", true)
+        let error = runner("/usr/bin/true", true)
             .apply(&artifact, Some("exec sleep 10"), "test", None, None)
             .await
             .unwrap_err();
@@ -290,7 +290,7 @@ mod tests {
         let (dir, artifact) = workdir("descendants");
         let marker = dir.join("survivor");
         let script = format!("(sleep 2; touch {}) & exec sleep 10", marker.display());
-        assert!(runner("/bin/true", true)
+        assert!(runner("/usr/bin/true", true)
             .apply(&artifact, Some(&script), "test", None, None)
             .await
             .is_err());
@@ -320,7 +320,7 @@ mod tests {
     async fn denied_system_write_inside_updater_fails() {
         let (_dir, artifact) = workdir("denied");
         // An unprivileged updater cannot change kernel settings; the denial must surface.
-        let error = runner("/bin/true", true)
+        let error = runner("/usr/bin/true", true)
             .apply(&artifact, Some("echo suifleet > /proc/sys/kernel/hostname"), "test", None, None)
             .await
             .unwrap_err();
@@ -330,7 +330,7 @@ mod tests {
     #[tokio::test]
     async fn exit_126_is_reported_as_privilege_failure() {
         let (_dir, artifact) = workdir("exit126");
-        let error = runner("/bin/true", true)
+        let error = runner("/usr/bin/true", true)
             .apply(&artifact, Some("exit 126"), "test", None, None)
             .await
             .unwrap_err();
@@ -345,7 +345,7 @@ mod tests {
         let (dir, artifact) = workdir("configuration");
         let configuration = dir.join("my config.json");
         std::fs::write(&configuration, b"{\"port\":1}").unwrap();
-        runner("/bin/true", true)
+        runner("/usr/bin/true", true)
             .apply(&artifact, Some("cp {configuration} seen.json"), "test", Some(&configuration), None)
             .await
             .unwrap();
@@ -359,7 +359,7 @@ mod tests {
         std::fs::write(&configuration, b"{\"port\":1}").unwrap();
         let log = dir.join("component.log");
         let output = std::fs::File::create(&log).unwrap();
-        runner("/bin/true", true)
+        runner("/usr/bin/true", true)
             .apply(&artifact, Some("cat {configuration}; echo; cat {configuration} >&2"), "test", Some(&configuration), Some(output))
             .await
             .unwrap();
@@ -375,7 +375,7 @@ mod tests {
             "{{ env; echo core=$(ulimit -c); echo files=$(ulimit -n); echo cwd=$(pwd); }} > {}",
             out.display()
         );
-        runner("/bin/true", true)
+        runner("/usr/bin/true", true)
             .apply(&artifact, Some(&script), "test", None, None)
             .await
             .unwrap();
@@ -386,6 +386,7 @@ mod tests {
             "{seen}"
         );
         assert!(seen.contains(&format!("HOME={}", dir.display())), "{seen}");
-        assert!(seen.contains(&format!("cwd={}", dir.display())), "{seen}");
+        // (pwd prints the resolved path: on macOS /var is /private/var.)
+        assert!(seen.contains(&format!("cwd={}", dir.canonicalize().unwrap().display())), "{seen}");
     }
 }

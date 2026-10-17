@@ -713,13 +713,13 @@ mod tests {
     fn linux_only_features_are_refused_on_macos() {
         let base = "[sui]\nmanifest_path='deployment.json'\n[device]\nkeypair_path='/k'\ndevice_object_id='0x1'\ndevice_cap_id='0x2'\n";
         let parse = |extra: &str| -> Config { toml::from_str(&format!("{base}{extra}")).unwrap() };
-        let plain = parse("[apply]\ncommand='/bin/true'\n");
+        let plain = parse("[apply]\ncommand='/usr/bin/true'\n");
         assert_eq!(unsupported_on("macos", &plain), None);
         for (extra, needle) in [
-            ("[device.signer]\nkind='service'\nsocket='/s'\n[apply]\ncommand='/bin/true'\n", "signing service"),
-            ("[apply]\ncommand='/bin/true'\nmode='privileged-helper'\n", "firmware helper"),
-            ("[apply]\ncommand='/bin/true'\nmax_memory_bytes=1000000\n", "max_memory_bytes"),
-            ("[apply]\ncommand='/bin/true'\n[daemon_update]\nenabled=true\ncomponent='suifleet'\n", "self-update"),
+            ("[device.signer]\nkind='service'\nsocket='/s'\n[apply]\ncommand='/usr/bin/true'\n", "signing service"),
+            ("[apply]\ncommand='/usr/bin/true'\nmode='privileged-helper'\n", "firmware helper"),
+            ("[apply]\ncommand='/usr/bin/true'\nmax_memory_bytes=1000000\n", "max_memory_bytes"),
+            ("[apply]\ncommand='/usr/bin/true'\n[daemon_update]\nenabled=true\ncomponent='suifleet'\n", "self-update"),
         ] {
             let cfg = parse(extra);
             assert!(unsupported_on("macos", &cfg).is_some_and(|reason| reason.contains(needle)), "{extra}");
