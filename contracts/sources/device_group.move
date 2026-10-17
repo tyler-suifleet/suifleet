@@ -77,6 +77,7 @@ module sui_edge::device_group {
         transfer::share_object(group);
     }
 
+    #[allow(lint(prefer_mut_tx_context))]
     public fun add_device(
         group: &mut DeviceGroup,
         device: &Device,
@@ -93,6 +94,7 @@ module sui_edge::device_group {
         });
     }
 
+    #[allow(lint(prefer_mut_tx_context))]
     public fun remove_device(
         group: &mut DeviceGroup,
         device_id: ID,
@@ -108,6 +110,7 @@ module sui_edge::device_group {
         });
     }
 
+    #[allow(lint(prefer_mut_tx_context, public_entry))]
     public entry fun delete_group(group: DeviceGroup, ctx: &TxContext) {
         assert!(ctx.sender() == group.admin, ENotAdmin);
         let DeviceGroup { id, name: _, description: _, admin, device_ids: _, created_at: _, schema_version: _ } = group;

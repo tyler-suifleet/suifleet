@@ -53,7 +53,14 @@ def require_localnet():
     url = next(e["rpc"] for e in envs if e["alias"] == active)
     if urlparse(url).hostname not in {"127.0.0.1", "localhost"}:
         sys.exit(f"Refusing to run: active env {active} uses {url}, not a localnet")
-    return active, url, sui("chain-identifier").stdout.strip()
+    output = sui("chain-identifier").stdout.strip()
+    # Sui 1.81.1 prints both Base58 and Hex; the manifest compares the
+    # canonical eight-digit hex identifier, not the formatted CLI display.
+    match = re.fullmatch(r"[0-9a-fA-F]{8}", output) or re.search(r"(?m)^Hex: ([0-9a-fA-F]{8})$", output)
+    if not match:
+        sys.exit("Unrecognized local chain identifier output")
+    chain = (match.group(1) if match.lastindex else match.group()).lower()
+    return active, url, chain
 
 
 def rpc(method, params, url=None):

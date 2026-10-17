@@ -1,0 +1,9 @@
+[package]
+name = "fleet_security_specs"
+edition = "2024.beta"
+
+[dependencies]
+sui_edge = { local = ".." }
+
+[addresses]
+fleet_security_specs = "0x50"
