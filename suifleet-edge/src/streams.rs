@@ -903,11 +903,13 @@ impl Exporter {
             .header("x-suifleet-signature", STANDARD.encode(&batch.signature))
             .body(batch.body.clone());
         if let Some(path) = &self.config.bearer_token_file {
-            let token = std::fs::read_to_string(path)?;
+            let token = std::fs::read_to_string(path).map_err(|e| anyhow::anyhow!("cannot read bearer_token_file: {}", e.kind()))?;
             request = request.bearer_auth(token.trim());
         }
         // Redirects are not followed (see `http_client`), so a 3xx is a failure.
-        let status = request.send().await?.status();
+        // Errors leave out the URL: its query may carry a credential, and
+        // they reach the log and components' stream_describe.
+        let status = request.send().await.map_err(|e| anyhow::anyhow!("{}", sanitized(e, &self.config.url)))?.status();
         anyhow::ensure!(status.is_success(), "destination answered {status}");
         Ok(())
     }
@@ -967,6 +969,22 @@ impl Exporter {
                 tokio::time::sleep(Duration::from_secs(delay)).await;
             }
         }
+    }
+}
+
+/// A transport error without its URL, with its cause chain; any remaining
+/// copy of the query string is masked too.
+fn sanitized(error: reqwest::Error, url: &str) -> String {
+    let error = error.without_url();
+    let mut text = error.to_string();
+    let mut source = std::error::Error::source(&error);
+    while let Some(cause) = source {
+        text = format!("{text}: {cause}");
+        source = cause.source();
+    }
+    match reqwest::Url::parse(url).ok().and_then(|u| u.query().map(str::to_owned)) {
+        Some(query) if !query.is_empty() => text.replace(&query, "<redacted>"),
+        _ => text,
     }
 }
 
@@ -1415,6 +1433,46 @@ mod tests {
             drop(store);
             let _ = std::fs::remove_dir_all(&path);
         }
+    }
+
+    /// Export errors reach the log and components' stream_describe, so they
+    /// must not carry the destination's query (a signed-URL credential) or
+    /// the token file's path.
+    #[tokio::test]
+    async fn export_errors_do_not_disclose_the_destination_query_or_token_path() {
+        let path = dir("redact");
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap();
+        let store = Arc::new(Mutex::new(Store::open(&path, QUOTA, 0).unwrap()));
+        let mut d = def("e", 4096, Strategy::RejectNewData);
+        d.export = Some(ExportConfig { url: format!("http://{closed}/ingest?token=REVIEW_SECRET"), bearer_token_file: None,
+            batch_max_messages: 10, batch_max_bytes: 1024, batch_interval_seconds: 1, max_backoff_seconds: 1 });
+        store.lock().unwrap().create(d.clone()).unwrap();
+        store.lock().unwrap().append("e", b"data", 0).unwrap();
+        let exporter = |config: ExportConfig| Exporter { store: store.clone(), stream: "e".into(), config,
+            binding: Binding { chain_identifier: "chain".into(), registry: "0x5".into(), device_id: "0xd".into() }, signer: Arc::new(Key) };
+        let error = exporter(d.export.clone().unwrap()).step(&Exporter::http_client().unwrap()).await.unwrap_err();
+        assert!(!format!("{error:#}").contains("REVIEW_SECRET"), "{error:#}");
+        let mut with_token = d.export.clone().unwrap();
+        with_token.bearer_token_file = Some(PathBuf::from("/private/REVIEW_TOKEN_PATH"));
+        let error = exporter(with_token).step(&Exporter::http_client().unwrap()).await.unwrap_err();
+        assert!(!format!("{error:#}").contains("REVIEW_TOKEN_PATH"), "{error:#}");
+        // The status a component sees through IPC after a failed attempt.
+        let run = tokio::spawn(exporter(d.export.clone().unwrap()).run());
+        let mut status = Value::Null;
+        for _ in 0..200 {
+            let all = |_: &str| true;
+            status = handle(&store, &[], "stream_describe", "e", &Value::Null, &all).unwrap();
+            if status["export"]["status"]["failures"].as_u64().unwrap_or(0) > 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        run.abort();
+        assert!(status["export"]["status"]["last_error"].is_string(), "{status}");
+        assert_eq!(status["export"]["url"], format!("http://{closed}/ingest"));
+        assert!(!status.to_string().contains("REVIEW_SECRET"), "{status}");
+        drop(store);
+        let _ = std::fs::remove_dir_all(&path);
     }
 
     struct Key;

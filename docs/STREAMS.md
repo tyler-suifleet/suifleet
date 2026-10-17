@@ -110,7 +110,7 @@ The device key signs it as a Sui personal message, which can never be valid as a
 - **Restarts.** A daemon restart or crash resumes from the persisted checkpoint.
 - **Duplicates.** A batch the destination stored, but whose answer was lost, is sent again. If more messages arrived in the meantime, the retry may cover a longer range.
 - **Lost before export.** Messages retired before they could be exported, by overwrite or time-to-live, are counted in `lost_before` of the next batch. They are never silently skipped.
-- **Permanent refusals.** A 4xx is retried like any other failure: the stream backs up rather than discarding data. The status shows the last error.
+- **Permanent refusals.** A 4xx is retried like any other failure: the stream backs up rather than discarding data. The status shows the last error. Errors, in the status and in the log, leave out the destination URL and its query string (which may hold a credential) and the token file's path.
 
 **Cost and limits.** Each export makes one request per batch, carrying at most `batch_max_messages` messages and `batch_max_bytes` bytes, with base64 adding about a third. While data is flowing, a stream sends at most one batch at a time, back to back; when idle, it polls every `batch_interval_seconds`. Signing one manifest per batch is the only use of the device key.
 
