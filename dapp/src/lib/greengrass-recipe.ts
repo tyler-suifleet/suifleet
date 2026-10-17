@@ -95,6 +95,7 @@ export const GUIDANCE: Record<string, string> = {
   "artifact-digest-mismatch": "The recipe Digest must be the SHA-256 (Algorithm SHA-256) of exactly the bound upload.",
   "no-lifecycle-command": "Add an install or run step. A native recipe without either hands its artifact to the platform updater, which an AWS component never does.",
   "invalid-step": "A lifecycle step must be a script string or an object with a Script string.",
+  "empty-step": "A lifecycle script must contain a command. Remove the empty step; a native recipe without install or run hands its artifact to the platform updater.",
   "unsupported-step-key": "Remove Skipif and BootstrapOnRollback; express conditions inside the script.",
   "privileged-step": "RequiresPrivilege other than false has no native equivalent: components run as the daemon user. Move privileged work into a platform installer (docs/PLATFORM_INSTALLERS.md).",
   "step-timeout-or-env": "Remove Timeout and Setenv: native step timeouts are operator configuration and the environment is cleared. Set variables inside the script.",
@@ -119,6 +120,10 @@ export const GUIDANCE: Record<string, string> = {
 const isObject = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 const has = (value: object, key: string) => Object.prototype.hasOwnProperty.call(value, key);
+// Own data property: plain assignment of "__proto__" would set the prototype and drop the key.
+const define = <T>(target: Record<string, T>, key: string, value: T) =>
+  Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true });
+const BLANK = /^[ \t\n\r]*$/;
 
 /** SemVer 2.0.0 precedence key, as scripts/greengrass_managed.py `_key`. */
 function precedence(version: string): [number, number, number, number, [number, number, string][]] {
@@ -271,6 +276,11 @@ function step(name: string, value: unknown, basename: string | null, reasons: Se
   }
   if (typeof text !== "string") {
     reasons.add("invalid-step");
+    return null;
+  }
+  // The native validators accept only a nonempty install or run command.
+  if (BLANK.test(text)) {
+    reasons.add("empty-step");
     return null;
   }
   return script(name, text, basename, reasons);
@@ -426,7 +436,7 @@ export function translateGreengrassRecipe(recipe: unknown, bindings: Record<stri
     if (MANAGED_PREFIXES.some(p => dependency.startsWith(p))) {
       const classification = classifyManagedDependency(dependency, spec);
       if (classification.reason === "invalid-dependency" || classification.reason === "unsupported-version-range") { reasons.add(classification.reason); continue; }
-      managed[dependency] = classification;
+      define(managed, dependency, classification);
       // A native replacement is the daemon itself: the dependency is dropped and reported.
       if (classification.outcome === "replace") note(`ComponentDependencies.${dependency}`);
       else reasons.add("aws-managed-dependency");
@@ -436,7 +446,7 @@ export function translateGreengrassRecipe(recipe: unknown, bindings: Record<stri
     const requirement = spec.VersionRequirement;
     if (typeof requirement !== "string" || !RANGE.test(requirement)) { reasons.add("unsupported-version-range"); continue; }
     if (has(spec, "DependencyType") && spec.DependencyType !== "HARD" && spec.DependencyType !== "SOFT") { reasons.add("invalid-dependency"); continue; }
-    dependencies[dependency] = { versionRequirement: requirement, ...(has(spec, "DependencyType") ? { dependencyType: spec.DependencyType as "HARD" | "SOFT" } : {}) };
+    define(dependencies, dependency, { versionRequirement: requirement, ...(has(spec, "DependencyType") ? { dependencyType: spec.DependencyType as "HARD" | "SOFT" } : {}) });
   }
   const dependent = Object.keys(dependencies).length > 0;
 

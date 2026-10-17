@@ -61,3 +61,27 @@ fn rejected_configuration_limits_match_the_daemon() {
     let configuration = serde_json::from_value(serde_json::json!({ "defaults": defaults })).unwrap();
     assert!(crate::configuration::validate_recipe(&configuration).is_err());
 }
+
+#[test]
+fn empty_lifecycle_commands_are_rejected_by_the_daemon() {
+    // What a translator copying the empty run would emit; empty-step rejects it first.
+    let case = cases()
+        .into_iter()
+        .find(|c| c["id"] == "empty-run-with-configuration-rejected")
+        .unwrap();
+    let binding = &case["bindings"]["s3://example-bucket/hello/1.0.0/hello.tar"];
+    let recipe: Recipe = serde_json::from_value(serde_json::json!({
+        "schemaVersion": "1.2",
+        "componentName": case["recipe"]["ComponentName"],
+        "componentVersion": case["recipe"]["ComponentVersion"],
+        "artifactBlobId": binding["artifactBlobId"],
+        "artifactSha256": binding["artifactSha256"],
+        "lifecycle": case["recipe"]["Manifests"][0]["Lifecycle"],
+        "configuration": { "defaults": case["recipe"]["ComponentConfiguration"]["DefaultConfiguration"] },
+    }))
+    .unwrap();
+    let error = recipe
+        .validate_component(&recipe.component_name, &recipe.component_version, &recipe.artifact_sha256, true)
+        .unwrap_err();
+    assert!(error.to_string().contains("install or run command"), "{error}");
+}

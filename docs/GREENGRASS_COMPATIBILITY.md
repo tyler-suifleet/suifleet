@@ -92,10 +92,10 @@ Field names are exact: Greengrass's case variants, such as `Install`, are reject
 | `ComponentDescription`, `ComponentPublisher` | The description must be a string and is copied. The publisher is reported |
 | `ComponentConfiguration.DefaultConfiguration` | Becomes native recipe 1.2 `configuration.defaults`, which is reported. The rules are under [Configuration and permissions](#configuration-and-permissions) |
 | `accessControl` | Rejected (`ipc-access-control`); the equivalent operator ACL is reported. See [Configuration and permissions](#configuration-and-permissions) |
-| `ComponentDependencies` | Native comparator grammar and HARD/SOFT. x-ranges, hyphen ranges and `\|\|` are rejected. AWS-managed names (`aws.greengrass.*`, `aws.iot.*`, `variant.*`) are classified with the SF-038 catalog. A `replace` (the daemon provides the function, for example `aws.greengrass.Nucleus`) is dropped and reported. Every other classification is rejected (`aws-managed-dependency`) and reported in `managed_dependencies` |
+| `ComponentDependencies` | Every name is kept as given, including `__proto__`. Native comparator grammar and HARD/SOFT. x-ranges, hyphen ranges and `\|\|` are rejected. AWS-managed names (`aws.greengrass.*`, `aws.iot.*`, `variant.*`) are classified with the SF-038 catalog. A `replace` (the daemon provides the function, for example `aws.greengrass.Nucleus`) is dropped and reported. Every other classification is rejected (`aws-managed-dependency`) and reported in `managed_dependencies` |
 | `Manifests[].Platform` | `os`/`architecture` exact or `*` only; `amd64`→`x86_64`. Regex, `architecture.detail`, `runtime` and custom keys are rejected. Windows/macOS/x86 manifests are omitted and reported. No supported manifest, or a duplicate pair, is rejected |
 | `Manifests[].Artifacts` | Exactly one bound artifact. `Unarchive` other than `NONE`, or non-default `Permission` (Read `OWNER`, Execute `NONE`), is rejected. An AWS `Digest` must be SHA-256 and equal the binding |
-| `install`, `run`, `shutdown` | String or `{Script}` (with `RequiresPrivilege: false` at most), mapped to the native command of the same name. Each is reported; see [Reported differences](#reported-differences). `shutdown` without `run` is rejected |
+| `install`, `run`, `shutdown` | String or `{Script}` (with `RequiresPrivilege: false` at most), mapped to the native command of the same name. Each is reported; see [Reported differences](#reported-differences). `shutdown` without `run` is rejected. An empty or whitespace-only script is rejected (`empty-step`) |
 | A manifest with neither `install` nor `run` | Rejected (`no-lifecycle-command`). Natively it would hand the artifact to the platform updater |
 | `bootstrap`, `startup`, `recover`, `uninstall` | Rejected: no native equivalent |
 | Step `Timeout`, `Setenv`, `Lifecycle.Setenv`, `RequiresPrivilege` other than `false` (including the string `"true"`), `Skipif`, `BootstrapOnRollback` | Rejected |
@@ -211,7 +211,7 @@ The runtime receipt is [`docs/validation/sf037-recipe-translation.json`](validat
 
 | Suite | Cases evaluated by the reference model | Current-API execution | Runtime execution |
 |---|---|---|---|
-| `aws-recipe-cases.json` | 75 recipes (14 JSON/YAML texts) | Daemon and frontend validators (passing) | Passed: SF-037 translator, daemon validators and simulator run |
+| `aws-recipe-cases.json` | 81 recipes (16 JSON/YAML texts) | Daemon and frontend validators (passing) | Passed: SF-037 translator, daemon validators and simulator run |
 | `pubsub-cases.json` | 53 filter/topic/match/ACL checks | none | Pending SF-027, SF-032 |
 | `shadow-cases.json` | 54 steps across 10 sequences | none | Pending SF-027, SF-033 |
 | `stream-cases.json` | 45 steps across 5 sequences | none | Pending SF-027, SF-034 |

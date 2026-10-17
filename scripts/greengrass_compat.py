@@ -126,6 +126,10 @@ def _step(step_name: str, step, basename: str, reasons: set):
     else:
         reasons.add("invalid-step")
         return None
+    # The native validators accept only a nonempty install or run command.
+    if not script.strip(" \t\n\r"):
+        reasons.add("empty-step")
+        return None
     return _script(step_name, script, basename, reasons)
 
 

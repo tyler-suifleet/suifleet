@@ -3624,5 +3624,298 @@
     "duplicate-key"
    ]
   }
+ },
+ {
+  "id": "json-proto-dependency-kept",
+  "format": "json",
+  "note": "A dependency named __proto__ is an ordinary name: the HARD constraint is kept in the native recipe, never dropped by a prototype setter.",
+  "recipe_text": "{\n  \"RecipeFormatVersion\": \"2020-01-25\",\n  \"ComponentName\": \"com.example.Hello\",\n  \"ComponentVersion\": \"1.0.0\",\n  \"ComponentDependencies\": {\n    \"__proto__\": {\n      \"VersionRequirement\": \"1.0.0\",\n      \"DependencyType\": \"HARD\"\n    }\n  },\n  \"Manifests\": [\n    {\n      \"Platform\": {\n        \"os\": \"linux\"\n      },\n      \"Lifecycle\": {\n        \"run\": \"echo hello\"\n      },\n      \"Artifacts\": [\n        {\n          \"Uri\": \"s3://example-bucket/hello/1.0.0/hello.tar\"\n        }\n      ]\n    }\n  ]\n}",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentDependencies": {
+    "__proto__": {
+     "VersionRequirement": "1.0.0",
+     "DependencyType": "HARD"
+    }
+   },
+   "Manifests": [
+    {
+     "Platform": {
+      "os": "linux"
+     },
+     "Lifecycle": {
+      "run": "echo hello"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   }
+  },
+  "expected": {
+   "outcome": "translate",
+   "reasons": [],
+   "manifests": [
+    {
+     "os": "linux",
+     "arch": "*",
+     "recipe": {
+      "schemaVersion": "1.1",
+      "componentName": "com.example.Hello",
+      "componentVersion": "1.0.0",
+      "artifactBlobId": "blob_hello",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {
+       "run": "echo hello"
+      },
+      "configuration": {},
+      "componentDependencies": {
+       "__proto__": {
+        "versionRequirement": "1.0.0",
+        "dependencyType": "HARD"
+       }
+      }
+     }
+    }
+   ],
+   "omitted_manifests": [],
+   "informational": [
+    "Lifecycle.run"
+   ]
+  }
+ },
+ {
+  "id": "yaml-proto-dependency-kept",
+  "format": "yaml",
+  "note": "The same __proto__ dependency read from YAML is kept.",
+  "recipe_text": "RecipeFormatVersion: '2020-01-25'\nComponentName: com.example.Hello\nComponentVersion: '1.0.0'\nComponentDependencies:\n  __proto__:\n    VersionRequirement: 1.0.0\n    DependencyType: HARD\nManifests:\n  - Platform:\n      os: linux\n    Lifecycle:\n      run: echo hello\n    Artifacts:\n      - Uri: s3://example-bucket/hello/1.0.0/hello.tar\n",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentDependencies": {
+    "__proto__": {
+     "VersionRequirement": "1.0.0",
+     "DependencyType": "HARD"
+    }
+   },
+   "Manifests": [
+    {
+     "Platform": {
+      "os": "linux"
+     },
+     "Lifecycle": {
+      "run": "echo hello"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   }
+  },
+  "expected": {
+   "outcome": "translate",
+   "reasons": [],
+   "manifests": [
+    {
+     "os": "linux",
+     "arch": "*",
+     "recipe": {
+      "schemaVersion": "1.1",
+      "componentName": "com.example.Hello",
+      "componentVersion": "1.0.0",
+      "artifactBlobId": "blob_hello",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {
+       "run": "echo hello"
+      },
+      "configuration": {},
+      "componentDependencies": {
+       "__proto__": {
+        "versionRequirement": "1.0.0",
+        "dependencyType": "HARD"
+       }
+      }
+     }
+    }
+   ],
+   "omitted_manifests": [],
+   "informational": [
+    "Lifecycle.run"
+   ]
+  }
+ },
+ {
+  "id": "empty-run-with-configuration-rejected",
+  "note": "An empty run is not a command: the native validators reject configuration without a nonempty install or run, so the translator rejects before upload.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentConfiguration": {
+    "DefaultConfiguration": {
+     "a": 1
+    }
+   },
+   "Manifests": [
+    {
+     "Platform": {
+      "os": "linux"
+     },
+     "Lifecycle": {
+      "run": ""
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "configuration-without-command",
+    "empty-step"
+   ]
+  }
+ },
+ {
+  "id": "empty-install-rejected",
+  "note": "An empty install is not a command; the manifest would reach the platform updater.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "Manifests": [
+    {
+     "Platform": {
+      "os": "linux"
+     },
+     "Lifecycle": {
+      "install": ""
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "empty-step",
+    "no-lifecycle-command"
+   ]
+  }
+ },
+ {
+  "id": "whitespace-run-rejected",
+  "note": "A whitespace-only run is not a command.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "Manifests": [
+    {
+     "Platform": {
+      "os": "linux"
+     },
+     "Lifecycle": {
+      "run": {
+       "Script": " \n\t"
+      }
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "empty-step",
+    "no-lifecycle-command"
+   ]
+  }
+ },
+ {
+  "id": "empty-shutdown-rejected",
+  "note": "An empty shutdown next to a usable run is rejected rather than silently dropped.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "Manifests": [
+    {
+     "Platform": {
+      "os": "linux"
+     },
+     "Lifecycle": {
+      "run": "echo hello",
+      "shutdown": ""
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "empty-step"
+   ]
+  }
  }
 ]
