@@ -936,6 +936,42 @@ class FleetRunTests(unittest.TestCase):
         self.assertIn("allowance", evidence["cases"]["enrollment"]["detail"])
         self.assertLessEqual(evidence["spent_mist"], 3_000_000)
 
+    def test_pre_funded_device_gas_is_charged_to_the_allowance(self):
+        for wallet in ("scripted", "extension"):
+            self.setup(wallet=wallet)
+            self.chain.balances[self.device.address_value] = 30_000_000
+            evidence, code = self.run_fleet(self.extension_prompt(self.chain) if wallet == "extension" else None)
+            self.assertEqual(evidence["cases"]["direct-v1"]["status"], "passed", wallet)
+            self.assertEqual(evidence["device_gas"]["status"], "charged", wallet)
+            self.assertEqual(evidence["device_gas"]["held_mist"], 30_000_000, wallet)
+            charged = sum(t.get("gas_mist", 0) + t.get("funding_mist", 0) for t in evidence["transactions"])
+            self.assertEqual(evidence["spent_mist"], charged + 30_000_000, wallet)
+            self.assertFalse(any(t["label"] == "fund device report gas" for t in evidence["transactions"]), wallet)
+
+    def test_pre_funded_device_gas_beyond_the_allowance_refuses_before_the_daemon_starts(self):
+        for wallet in ("scripted", "extension"):
+            self.setup(wallet=wallet, budget={"max_spend_mist": 3_000_000})
+            self.chain.balances[self.device.address_value] = 30_000_000
+            prompt = self.extension_prompt(self.chain)
+            evidence, code = self.run_fleet(prompt if wallet == "extension" else None)
+            self.assertEqual((evidence["cases"]["enrollment"]["status"], code), ("failed", 1), wallet)
+            self.assertIn("allowance", evidence["cases"]["enrollment"]["detail"])
+            self.assertEqual(evidence["cases"]["direct-v1"]["status"], "blocked", wallet)
+            self.assertEqual((evidence["device_gas"]["status"], evidence["spent_mist"]), ("refused", 0), wallet)
+            self.assertEqual((self.device.starts, evidence["transactions"], prompt.steps), (0, [], []), wallet)
+
+    def test_unreadable_device_balance_is_not_treated_as_zero(self):
+        self.setup()
+        def unreadable(address=None):
+            if address:
+                raise RuntimeError("sui client gas failed")
+            return self.chain.balances[OPERATOR]
+        self.cli.balance = unreadable
+        evidence, code = self.run_fleet()
+        self.assertEqual((evidence["cases"]["enrollment"]["status"], code), ("failed", 1))
+        self.assertIn("refusing to assume it is zero", evidence["cases"]["enrollment"]["detail"])
+        self.assertEqual((self.device.starts, evidence["transactions"]), (0, []))
+
     def test_unverifiable_extension_answers_keep_their_reservation(self):
         for answer, expected in (("not a digest", "blocked"), ("9" * 44, "failed")):
             self.setup(wallet="extension")

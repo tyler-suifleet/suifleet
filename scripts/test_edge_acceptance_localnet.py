@@ -142,6 +142,8 @@ def run(rpc_url, faucet_url, keep=None):
             assert second["cases"][id]["status"] == "skipped", second["cases"][id]
         assert second["enrollment"]["address"] == first["enrollment"]["address"]
         assert second["enrollment"]["source"] == "existing enrollment named by the profile"
+        gas = second["device_gas"]  # Leftover report gas from the first run counts against this run's allowance.
+        assert gas["status"] == "charged" and gas["held_mist"] > 0 and second["spent_mist"] >= gas["held_mist"], gas
         history = [json.loads(line) for line in (device_root / "state/test-components/suifleet-test-app/history.jsonl").read_text().splitlines()]
         assert [r["runId"] for r in history].count(first["run_id"]) == 5, "earlier run's work was replayed"
         print("PASS: second run reused the enrollment, key and journal; report-retry/baseline-skip skipped, no replay")

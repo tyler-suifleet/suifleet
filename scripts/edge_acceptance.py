@@ -1272,8 +1272,8 @@ class Runner:
         self.stage = "artifacts"
         self.build_artifacts()
         self.stage = "enrollment"
+        unfunded = self.charge_device_gas(address) == 0
         self.enroll(address)
-        unfunded = self.device_balance(address) == 0
         if not self.extension:
             self.decoy_device()
         self.group_setup()
@@ -1330,11 +1330,23 @@ class Runner:
         if self.extension:
             self.results.set("extension-wallet", "passed", "operator-signed enrollment, group and deployments verified on chain")
 
-    def device_balance(self, address):
+    def charge_device_gas(self, address):
+        """Gas the device already holds can pay its reports, so the allowance counts all of it.
+
+        This runs before the daemon starts; a balance that does not fit refuses the run.
+        """
         try:
-            return self.cli.balance(address)
-        except RuntimeError:
-            return 0
+            held = self.cli.balance(address)
+        except (RuntimeError, ValueError) as error:
+            raise CaseFailure(f"cannot read the device's gas balance; refusing to assume it is zero ({error})") from error
+        entry = self.evidence["device_gas"] = {"address": address, "held_mist": held, "status": "refused"}
+        try:
+            self.ledger.grant(held)
+            entry["status"] = "charged"
+        finally:
+            entry["allowance_used_mist"] = self.ledger.used
+            self.checkpoint()
+        return held
 
     def check_receipt(self, name, health):
         a = self.artifacts[name]
