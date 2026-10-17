@@ -125,6 +125,10 @@ async fn main() -> anyhow::Result<()> {
         #[cfg(target_os = "linux")]
         anyhow::ensure!(unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) } == 0, "cannot make the daemon non-dumpable");
     }
+    #[cfg(target_os = "macos")]
+    if cfg.device.signer.is_none() {
+        identity::ensure_private(&cfg.device.keypair_path)?;
+    }
     // One signer for transactions and telemetry (a PKCS#11 module is
     // initialized once per process).
     let signer = identity::signer(&cfg.device)?;

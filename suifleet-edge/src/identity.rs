@@ -11,6 +11,23 @@ pub fn load(path: &Path) -> anyhow::Result<SigningKey> {
     Ok(SigningKey::from_bytes(&key))
 }
 
+/// Refuse a key file anyone but its owner, the daemon user, can reach. On
+/// macOS (SF-075) no service unit or provisioning script guards it at start.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn ensure_private(path: &Path) -> anyhow::Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = std::fs::symlink_metadata(path)?;
+    anyhow::ensure!(metadata.is_file(), "{} is not a regular file", path.display());
+    anyhow::ensure!(
+        metadata.mode() & 0o077 == 0,
+        "{} is accessible to its group or others; make it 0600",
+        path.display()
+    );
+    // SAFETY: plain geteuid.
+    anyhow::ensure!(metadata.uid() == unsafe { libc::geteuid() }, "{} is not owned by the daemon user", path.display());
+    Ok(())
+}
+
 pub fn hash(bytes: &[u8]) -> Vec<u8> {
     Blake2b::<U32>::digest(bytes).to_vec()
 }
@@ -288,6 +305,26 @@ fn publish_key(
 mod tests {
     use super::*;
     use ed25519_dalek::{Signature, Verifier};
+
+    #[test]
+    fn only_a_private_key_file_of_the_daemon_user_is_accepted() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!("suifleet-private-{}", rand::random::<u128>()));
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("device.key");
+        provision(&path).unwrap();
+        ensure_private(&path).unwrap();
+        for mode in [0o640, 0o604, 0o660] {
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
+            assert!(ensure_private(&path).is_err(), "{mode:o}");
+        }
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let link = root.join("link.key");
+        std::os::unix::fs::symlink(&path, &link).unwrap();
+        assert!(ensure_private(&link).is_err(), "a symlink was followed");
+        assert!(ensure_private(&root.join("missing.key")).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn interrupted_key_write_leaves_no_published_key_and_can_retry() {
