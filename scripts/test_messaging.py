@@ -184,9 +184,13 @@ def lan_pub(topic, message):
 
 
 def lan_sub(topic, count, timeout=30, client="lanclient"):
-    """Messages from a persistent LAN session (created on first use)."""
+    """Messages from a persistent LAN session (created on first use).
+
+    With count None it only subscribes for `timeout` seconds; mosquitto_sub
+    rejects `-C 0` without connecting."""
+    limit = [] if count is None else ["-C", str(count)]
     out = sh("docker", "exec", BROKER, "mosquitto_sub", "-h", "127.0.0.1", "-p", str(BROKER_PORT), "-q", "1", "-c", "-i", client,
-             "-t", topic, "-C", str(count), "-W", str(timeout), "-v", check=False)
+             "-t", topic, *limit, "-W", str(timeout), "-v", check=False)
     return [line for line in out.splitlines() if line]
 
 
@@ -247,7 +251,7 @@ def host(args):
         check("LAN client -> component: QoS 1 bridged into durable pub/sub, received and acknowledged")
 
         # Component -> LAN client.
-        lan_sub("device1/sensors/#", 0, timeout=1)  # create the persistent LAN session
+        assert not lan_sub("device1/sensors/#", None, timeout=1)  # create the persistent LAN session
         assert ipc(PUB_UID, "publish", "pub", "sensors/a/temp", {"t": 21})["ok"]
         got = lan_sub("device1/sensors/#", 1)
         assert got == ['device1/sensors/a/temp {"t":21}'], got
