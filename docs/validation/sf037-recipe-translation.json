@@ -1,6 +1,6 @@
 {
   "ticket": "SF-037",
-  "head": "092fcbe",
+  "head": "026507c", "head_note": "merge of main c530b75; first full run at 092fcbe also passed",
   "scope": "Local/offline evidence only: translator, daemon validators and the real daemon against the local chain/Walrus simulator. No public network, real wallet, AWS account or physical target was used.",
   "environment": {"image": "suifleet-dev (pinned Dockerfile)", "sui": "1.81.1", "rustc": "1.94.0", "node": "22.22.2", "pnpm": "11.0.8", "python": "3.10.12", "yaml": "2.9.1"},
   "suites": {
