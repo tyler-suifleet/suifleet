@@ -185,6 +185,17 @@ class PlanTests(Fixture):
         for bad in ("/etc", "a/../b", "", "./target"):
             self.assertFalse(dc.plain_relative(bad), bad)
 
+    def test_missing_or_malformed_config_exits_with_a_message(self):
+        malformed = self.tmp / "malformed.json"
+        malformed.write_text("{not json")
+        listed = self.tmp / "list.json"
+        listed.write_text("[]")
+        for path, expected in ((self.tmp / "absent.json", "no configuration"),
+                               (malformed, "cannot read configuration"), (listed, "must be a JSON object")):
+            with self.assertRaises(SystemExit, msg=path) as raised:
+                dc.load_config(path)
+            self.assertIn(expected, str(raised.exception.code))
+
     def test_tracked_unignored_and_protected_content_is_refused(self):
         a = self.worktree("SF-40")
         (a / "target/device.key").write_text("secret")

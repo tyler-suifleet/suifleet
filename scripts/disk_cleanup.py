@@ -295,7 +295,14 @@ def filesystems(paths, budget):
 # --- Policy ------------------------------------------------------------------------
 
 def load_config(path):
-    config = json.loads(Path(path).read_text())
+    try:
+        config = json.loads(Path(path).read_text())
+    except FileNotFoundError:
+        raise SystemExit(f"{path}: no configuration; copy docs/disk-cleanup.example.json and review it") from None
+    except (OSError, ValueError) as error:
+        raise SystemExit(f"{path}: cannot read configuration: {error}") from None
+    if not isinstance(config, dict):
+        raise SystemExit(f"{path}: configuration must be a JSON object")
     if config.get("schema_version") != SCHEMA:
         raise SystemExit(f"{path}: schema_version must be {SCHEMA}")
     for entry in config.get("worktree_outputs", DEFAULT_OUTPUTS):
