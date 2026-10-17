@@ -189,6 +189,8 @@ async fn main() -> anyhow::Result<()> {
     let mut ipc_messages = ipc::Messages::default();
     let runner = ApplyRunner::new(cfg.apply.clone());
     let store = components::Store::open(&cfg.runtime.state_dir, &cfg.components);
+    // Before any component runs: their log lines are covered from here on.
+    logs::initialize(&cfg.runtime.state_dir)?;
     // Committed components start again on every daemon start (bootstrap/reboot).
     let mut supervisor = supervisor::Supervisor::open(
         &cfg.runtime.state_dir,
@@ -1166,7 +1168,7 @@ async fn prepare_configurations(
                 effective: configuration::next(previous.as_ref().map(|r| &r.effective), configuration)?,
                 confidential: configuration.confidential.clone().unwrap_or_default(),
             };
-            let overlay = configuration::overlay(&configs.overlay_dir, &install.name)?;
+            let overlay = configs.overlay(&install.name)?;
             let materialized = configuration::materialize(&record, &overlay)?;
             install.record = record;
             let Some(command) = &install.validate else {
@@ -1214,7 +1216,7 @@ fn install_configuration(
     directory: &Path,
     index: usize,
 ) -> anyhow::Result<PathBuf> {
-    let overlay = configuration::overlay(&configs.overlay_dir, &install.name)?;
+    let overlay = configs.overlay(&install.name)?;
     let file = directory.join(format!("configuration-{index}.json"));
     configuration::write_private(&file, &configuration::materialize(&install.record, &overlay)?)?;
     Ok(file)
