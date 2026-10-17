@@ -275,6 +275,12 @@ test-deployment-control-localnet:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
 	$(RUN) python3 scripts/test_deployment_control_localnet.py
 
+# Real daemon, component UIDs and Eclipse Mosquitto; host Docker, host network.
+.PHONY: test-messaging
+test-messaging:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+	python3 scripts/test_messaging.py --image "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}"
+
 # Root only inside a disposable, network-isolated container: real SO_PEERCRED UIDs.
 .PHONY: test-ipc
 test-ipc:
