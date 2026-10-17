@@ -57,6 +57,8 @@ LOG = Path("/var/log/suifleet/daemon.log")
 # Outside any home directory, so the daemon user can run it.
 PROBE = Path("/usr/local/libexec/suifleet-test/macos_proc.py")
 PERL_SETSID = "/usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV'"
+# The same, for use inside a single-quoted sh -c script.
+PERL_SETSID_QUOTED = '/usr/bin/perl -MPOSIX -e "POSIX::setsid(); exec @ARGV"'
 
 # The run records itself and keeps four kinds of descendants: one in its
 # group, one escaped with setsid, one with a cleared environment, and an
@@ -65,7 +67,7 @@ PERL_SETSID = "/usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV'"
 RUN = ("rm -f ready middle detached; echo run >> runs; echo $$ > pid; "
        "/bin/sleep 300 & echo $! > grouped; "
        f"{PERL_SETSID} /bin/sleep 300 & echo $! > escaped; "
-       f"/bin/sh -c 'env -i {PERL_SETSID} /bin/sleep 300 & echo $! > detached; echo $$ > middle; exec /bin/sleep 300' & "
+       f"/bin/sh -c 'env -i {PERL_SETSID_QUOTED} /bin/sleep 300 & echo $! > detached; echo $$ > middle; exec /bin/sleep 300' & "
        "env -i /bin/sleep 300 & echo $! > cleared; "
        "[ -s escape ] || /usr/bin/python3 " + str(PROBE) + " escape {target} > escape 2>&1; "
        # Also asks the services that start jobs for a user to start one.
