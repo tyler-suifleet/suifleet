@@ -3,7 +3,7 @@
 SF-057 supplies an opt-in Linux companion adapter in
 [`scripts/aws_credentials.py`](../scripts/aws_credentials.py) and an exec wrapper in
 [`sdk/python/suifleet_aws.py`](../sdk/python/suifleet_aws.py). Python 3.10+ and Linux 6.5+
-SO_PEERPIDFD support are required. The adapter implements the container credential endpoint for
+SO_PEERPIDFD support, system libacl and POSIX ACL support on the runtime filesystem are required. The adapter implements the container credential endpoint for
 TokenExchangeService **2.0.3**, rechecked against the
 [AWS component reference](https://docs.aws.amazon.com/greengrass/v2/developerguide/token-exchange-service-component.html)
 on 2026-10-16. It uses the documented
@@ -52,8 +52,8 @@ component workspaces. Store this JSON configuration at an absolute path, for exa
 
 Replace example UIDs/endpoints with the actual provisioned values. All PEM files
 must also be owner-only and adapter-owned. File ancestors must be root/adapter-owned,
-non-writable by group/others, and contain no symlinks. The socket directory must
-be adapter-owned, mode 0755, with equally protected ancestors. Configuration must
+non-writable by group/others, and contain no symlinks. The adapter grants socket access only to its exact configured component UIDs through a POSIX ACL; neither the owning group nor other users receive access. The socket directory must
+be adapter-owned, traversable by its configured component UIDs (for example mode 0755, or 0700 plus named UID execute ACLs), with equally protected ancestors. Configuration must
 list the actual daemon UID to prevent mapping shared daemon processes as a component.
 Never allow untrusted code under the adapter, daemon or another component's UID.
 Root, the adapter identity and operator policy/code remain trusted infrastructure.

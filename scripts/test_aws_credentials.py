@@ -55,6 +55,13 @@ def actor(pipe, uid):
                 body = json.loads(response.read())
                 pipe.send((response.status, dict(response.getheaders()), body))
                 client.close()
+            elif command['op'] == 'connect-denied':
+                try:
+                    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+                        sock.connect(command['path'])
+                    pipe.send(False)
+                except PermissionError:
+                    pipe.send(True)
             elif command['op'] == 'read-denied':
                 try:
                     with open(command['path'], 'rb') as source:
@@ -107,6 +114,7 @@ class Upstream(__import__('http.server', fromlist=['HTTPServer']).HTTPServer):
                 self.wfile.write(body)
         super().__init__(('127.0.0.1', 0), Handler)
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.load_cert_chain(directory / 'server.crt', directory / 'server.key')
         context.load_verify_locations(directory / 'ca.crt')
         context.verify_mode = ssl.CERT_REQUIRED
@@ -125,7 +133,7 @@ class Runtime(unittest.TestCase):
         if os.geteuid() != 0:
             raise RuntimeError('run only as root in a disposable network-none container')
         cls.directory = Path(tempfile.mkdtemp(prefix='sf057-', dir='/run'))
-        os.chmod(cls.directory, 0o755)
+        adapter.allow_principals(cls.directory, (61001, 61002, 61003), '--x')
         def openssl(*args):
             subprocess.run(['openssl', *map(str, args)], cwd=cls.directory,
                            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -156,7 +164,7 @@ class Runtime(unittest.TestCase):
         self.assertTrue(self.pipe.poll(10))
         self.uri, self.pid = self.pipe.recv()
         self.actors = {}
-        for name, uid in self.settings['components'].items():
+        for name, uid in {**self.settings['components'], 'unknown': 61004}.items():
             parent, child = mp.Pipe()
             process = mp.Process(target=actor, args=(child, uid))
             process.start()
@@ -250,6 +258,7 @@ class Runtime(unittest.TestCase):
         self.start(['c1', 'c2'], ttl=10)
         self.upstream.results.put(dict(result='ok', credential_set='set-1', expiration=3600))
         token = self.bootstrap('c1')['AWS_CONTAINER_AUTHORIZATION_TOKEN']
+        self.assertTrue(self.ask('unknown', op='connect-denied', path=self.socket))
         self.assertEqual(self.request('c2', token)[0], 401)
         self.assertEqual(self.request('c1', 'foreign')[0], 401)
         self.assertFalse(self.ask('c2', op='control', socket=self.socket, operation='start', component='c1')['ok'])
@@ -261,7 +270,8 @@ class Runtime(unittest.TestCase):
         self.assertEqual(self.request('c1', newer)[0], 200)
         self.timestamp.value = 10
         self.assertEqual(self.request('c1', newer)[0], 401)
-        for path in [str(self.directory / 'client.key'), f'/proc/{self.pid}/environ']:
+        for path in [str(self.directory / 'client.key'), f'/proc/{self.pid}/environ',
+                     f'/proc/{self.actors["c1"][1].pid}/environ']:
             self.assertTrue(self.ask('c2', op='read-denied', path=path))
         pipe, process = self.actors['c1']
         token = self.bootstrap('c1')['AWS_CONTAINER_AUTHORIZATION_TOKEN']

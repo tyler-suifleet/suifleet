@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Linux scoped AWS IoT credential adapter. Python 3.10+, no third-party runtime.
+"""Linux scoped AWS IoT credential adapter. Python 3.10+ and system libacl; no third-party Python runtime.
 
 Run as a dedicated trusted service, never as a component. Local control uses
 SO_PEERCRED; HTTP requests additionally match the kernel's TCP connection UID.
 """
 import argparse
+import ctypes
 import datetime
 import hmac
 import http.client
@@ -27,6 +28,34 @@ PATH = '/2016-11-01/credentialprovider/'
 MAX_FRAME = 16384
 # Linux uapi SO_PEERPIDFD (6.5+); Python 3.10 does not expose the name.
 SO_PEERPIDFD = getattr(socket, 'SO_PEERPIDFD', 77)
+
+
+def allow_principals(path, uids, access):
+    """POSIX ACL grants to exact UIDs; no group or world access.
+
+    libacl is a platform dependency. Failure to apply an ACL is fatal, never a
+    fallback to a globally accessible socket/directory.
+    """
+    if access not in ('rw-', '--x'):
+        raise ValueError('invalid ACL access')
+    library = ctypes.CDLL('libacl.so.1', use_errno=True)
+    library.acl_from_text.argtypes = [ctypes.c_char_p]
+    library.acl_from_text.restype = ctypes.c_void_p
+    library.acl_set_file.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.c_void_p]
+    library.acl_set_file.restype = ctypes.c_int
+    library.acl_free.argtypes = [ctypes.c_void_p]
+    library.acl_free.restype = ctypes.c_int
+    owner = 'rw-' if access == 'rw-' else 'rwx'
+    entries = [f'u::{owner}', 'g::---', 'o::---', f'm::{access}']
+    entries.extend(f'u:{uid}:{access}' for uid in sorted(set(uids)))
+    acl = library.acl_from_text(','.join(entries).encode('ascii'))
+    if not acl:
+        raise OSError(ctypes.get_errno(), 'ACL creation failed')
+    try:
+        if library.acl_set_file(os.fsencode(path), 0x8000, acl) != 0:  # ACL_TYPE_ACCESS
+            raise OSError(ctypes.get_errno(), 'ACL application failed')
+    finally:
+        library.acl_free(acl)
 
 
 def private_file(path):
@@ -386,7 +415,15 @@ class Adapter:
             self.http.server_close()
             raise
         self.path, self.inode = path, path.lstat().st_ino
-        os.chmod(path, 0o666)
+        os.chmod(path, 0o600)
+        try:
+            allow_principals(path, self.policy.principals.values(), 'rw-')
+        except BaseException:
+            self.control.server_close()
+            self.http.server_close()
+            if path.lstat().st_ino == self.inode:
+                path.unlink()
+            raise
         self.control.uri = f'http://127.0.0.1:{self.http.server_address[1]}' + PATH
         for server in (self.http, self.control):
             server.policy, server.provider = self.policy, self.provider
