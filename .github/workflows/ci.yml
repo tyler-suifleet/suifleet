@@ -69,6 +69,9 @@ jobs:
             -v "$PWD/.ci-cache/move:/home/dev/.move" \
             suifleet-dev:ci make ci
 
+      - name: Scoped AWS credentials with unmodified SDKs and local mTLS
+        run: make test-aws-credentials SUIFLEET_DEV_IMAGE=suifleet-dev:ci
+
       - name: Component IPC with distinct Unix peer identities
         run: |
           docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 \
