@@ -236,8 +236,14 @@ impl Broker {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
             Err(e) => return Err(e.into()),
         };
-        // `seq` is the commit point: queue files above it are uncommitted.
-        let seq: u64 = std::fs::read_to_string(dir.join("seq")).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
+        // `seq` is the commit point: queue files above it are uncommitted. Only
+        // a store that never committed has none; a marker that cannot be read
+        // stops startup before any queue file is removed.
+        let seq: u64 = match std::fs::read_to_string(dir.join("seq")) {
+            Ok(text) => text.trim().parse().map_err(|e| anyhow::anyhow!("invalid pubsub commit marker {}: {e}", dir.join("seq").display()))?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => 0,
+            Err(e) => return Err(anyhow::Error::new(e).context(format!("cannot read pubsub commit marker {}", dir.join("seq").display()))),
+        };
         let mut subs = BTreeMap::new();
         for record in records {
             let dir_q = queue_dir(dir, &record.principal, &record.filter);
@@ -648,6 +654,33 @@ mod tests {
             assert_eq!(std::fs::read_dir(queue_dir(&d, principal, "t")).unwrap().count(), 0);
         }
         assert_eq!(broker.publish("p", "t", &json!("next"), None).unwrap()["id"], 2);
+    }
+
+    #[test]
+    fn an_unreadable_commit_marker_stops_open_and_keeps_committed_messages() {
+        let d = dir("bad-seq");
+        let mut broker = Broker::open(&d, Limits::default()).unwrap();
+        broker.subscribe("b", "t", 1).unwrap();
+        broker.publish("p", "t", &json!("committed"), None).unwrap();
+        drop(broker);
+        let seq = d.join("seq");
+        let saved = std::fs::read(&seq).unwrap();
+        let queued = || std::fs::read_dir(queue_dir(&d, "b", "t")).unwrap().count();
+        // Unreadable (EISDIR) and unparsable markers both fail open; the queue file stays.
+        std::fs::remove_file(&seq).unwrap();
+        std::fs::create_dir(&seq).unwrap();
+        assert!(format!("{:#}", Broker::open(&d, Limits::default()).err().unwrap()).contains("cannot read pubsub commit marker"));
+        assert_eq!(queued(), 1);
+        std::fs::remove_dir(&seq).unwrap();
+        for garbage in [&b"not a number"[..], b""] {
+            std::fs::write(&seq, garbage).unwrap();
+            assert!(format!("{:#}", Broker::open(&d, Limits::default()).err().unwrap()).contains("invalid pubsub commit marker"));
+            assert_eq!(queued(), 1);
+        }
+        // With the marker restored the committed message is delivered.
+        std::fs::write(&seq, saved).unwrap();
+        let mut broker = Broker::open(&d, Limits::default()).unwrap();
+        assert_eq!(broker.receive("b", "t").unwrap().unwrap().payload, json!("committed"));
     }
 
     #[test]

@@ -69,7 +69,7 @@ target = "Pubsub"
 **Bounds, never silent loss.**
 - A QoS 1 publication is all or nothing: if any matching QoS 1 queue is full (messages or bytes), nothing is stored, the publisher gets `backpressure` and each full subscription's `refused` counter increases.
 - Byte limits count each message as it is stored on disk (the JSON envelope with id, topic, sender, payload and timestamp, including escaping).
-- A storage failure on any target (for example a full disk) is also `backpressure`: the copies already written are removed and no subscriber receives the publication. Each copy is staged, synced and renamed into place, and the synced `<state_dir>/pubsub/seq` file then commits it. On start the daemon removes queue files above `seq`, so a crash part way through a fanout delivers to nobody either. If a failed publication's copies cannot be removed, publishing is refused until the daemon restarts.
+- A storage failure on any target (for example a full disk) is also `backpressure`: the copies already written are removed and no subscriber receives the publication. Each copy is staged, synced and renamed into place, and the synced `<state_dir>/pubsub/seq` file then commits it. On start the daemon removes queue files above `seq`, so a crash part way through a fanout delivers to nobody either. Only a store that never committed has no `seq`; if the file exists but cannot be read or parsed, the daemon refuses to start and removes nothing. If a failed publication's copies cannot be removed, publishing is refused until the daemon restarts.
 - QoS 0 queues drop their oldest message and count it in `dropped`.
 
 ## The bridge
@@ -99,7 +99,7 @@ Client(component='sensor').publish('sensors/a/temp', {'t': 21})
 
 | Command | Covers |
 |---|---|
-| `make edge-test` | All 53 `interfaces/compat/pubsub-cases.json` cases against the daemon's module. QoS 1 order, redelivery and durability across reopen. Full queues refusing whole publications, QoS 0 dropping oldest. Invalid input. IPC policies (wildcard grants literal, no cross-component access, fail closed without `[pubsub]`). MQTT 3.1.1 encoding vectors and decoding. Bridge validation and loop detection |
+| `make edge-test` | All 53 `interfaces/compat/pubsub-cases.json` cases against the daemon's module. QoS 1 order, redelivery and durability across reopen. Full queues refusing whole publications, QoS 0 dropping oldest. Invalid input. A commit marker that cannot be read or parsed stops startup and keeps queued messages. IPC policies (wildcard grants literal, no cross-component access, fail closed without `[pubsub]`). MQTT 3.1.1 encoding vectors and decoding. Bridge validation and loop detection. |
 | `make test-messaging` | The real daemon as root with two real component UIDs, the chain simulator and a real Eclipse Mosquitto 2.0.20 broker; LAN clients are `mosquitto_pub`/`mosquitto_sub`. ACL refusals. LAN → component at QoS 1 with receive and ack. Component → LAN under a prefix. Broker stopped: publications spooled and delivered in order after reconnect. Spool exhausted: refusals counted, then after a daemon restart exactly the accepted publications arrive in order. Inbound backpressure: a full subscriber queue leaves LAN messages with the broker; all arrive after draining. Receipt: [sf032-messaging.json](validation/sf032-messaging.json) |
 
 **Not yet covered:**
