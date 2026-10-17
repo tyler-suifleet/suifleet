@@ -59,6 +59,17 @@ def actor(pipe, uid):
                 client.close()
             elif command['op'] == 'slow-http':
                 parsed = __import__('urllib.parse', fromlist=['urlsplit']).urlsplit(command['uri'])
+                def drip(sock):
+                    # Keep incomplete requests active beyond the server's 3 s
+                    # idle timeout while the victim exercises admission. The
+                    # server's separate 15 s total deadline still bounds them.
+                    try:
+                        while True:
+                            sock.sendall(b'G')
+                            time.sleep(.25)
+                    except OSError:
+                        pass
+
                 for _ in range(24):
                     sock = socket.create_connection((parsed.hostname, parsed.port), timeout=2)
                     try:
@@ -66,6 +77,7 @@ def actor(pipe, uid):
                     except OSError:
                         pass
                     slow.append(sock)
+                    threading.Thread(target=drip, args=(sock,), daemon=True).start()
                 pipe.send(True)
             elif command['op'] == 'connect-denied':
                 try:
