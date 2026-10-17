@@ -24,7 +24,7 @@ Deploy the configured component (for example `suifleet-daemon 0.3.0`) to devices
 ## What happens on the device
 
 1. **Stage.** After the downloads, the running daemon re-reads the deployment's admission, as for every apply. A cancellation, pause, expiry or closed maintenance window during a slow download, or an unavailable control read, leaves the deployment deferred, with nothing installed and no restart. Otherwise it installs the verified binary at `<install_dir>/versions/<version>-<deployment>/suifleet` (0755, synced).
-2. **Preflight.** It runs `suifleet --self-check CONFIG` from the new binary. This is an offline check that the new build accepts this device's configuration, manifest (protocol and type origins), identity key and journal. A failure is reported as Failed and the running daemon is unchanged, with no restart.
+2. **Preflight.** An ELF binary whose class, byte order or machine differs from the running daemon is refused first, before it is installed or run: an x86_64 kernel also runs i686 binaries, so an architecture change could pass the check below ([LINUX_X86.md](LINUX_X86.md)). It then runs `suifleet --self-check CONFIG` from the new binary. This is an offline check that the new build accepts this device's configuration, manifest (protocol and type origins), identity key and journal. A failure is reported as Failed and the running daemon is unchanged, with no restart.
 3. **Hand off.** It records a pending handoff in `<install_dir>/handoff.json` (atomic, synced) and journals the deployment as pending. Pending deployments are never settled as interrupted applies. It then stops its components and exits with status 75, and the service manager restarts the unit.
 4. **Launch.** The base binary (`--launch`) counts the attempt durably and `exec`s the new daemon. It keeps the same PID, so the unit's readiness, watchdog, cgroup and kill semantics apply to the new daemon.
 5. **Confirm.** The new daemon confirms only after a complete local startup: configuration, identity, chain validation, journal and supervisor, then readiness. It records the handoff Confirmed, makes itself `current`, reports the deployment Applied, and removes all but the current and previous versions.
@@ -41,6 +41,7 @@ Identity, journals and protocol compatibility are preserved: every binary uses t
   - the confirmed update restarting after a crash;
   - a binary that passes preflight but fails every start, rolled back after two counted attempts and reported Failed;
   - an unrunnable binary rejected by preflight with no restart;
+  - the same daemon rebuilt for another ELF architecture, refused before install or preflight with no restart;
   - cancellation and maintenance-window closure during a slow daemon download, with no preflight, handoff, restart or outcome; the reopened window then applies the update;
   - a daemon killed right after staging, whose next start completes the handoff.
 - `make test-daemon-update-systemd` (host, needs Docker) runs `scripts/test_daemon_update_systemd.py` on real systemd 252 and cgroup v2 with the shipped units. The only change is a test drop-in shortening `TimeoutStartSec` to 15 s. It covers:
