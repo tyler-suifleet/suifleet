@@ -44,11 +44,11 @@
    "current_evidence": ["docs/YOCTO_PACKAGING.md"], "tickets": ["SF-029", "SF-031"], "notes": "Yocto QEMU aarch64 boot evidence; physical Raspberry Pi 3 B+ acceptance pending in SF-031."},
   {"id": "linux-arm", "aws": {"os": "linux", "architecture": "arm"}, "native": {"os": "linux", "arch": "arm"}, "status": "proposed",
    "tickets": ["SF-011"], "notes": "Catalog selection vectors only; architecture.detail (arm61/arm71/arm81) is not represented and is rejected by translation."},
-  {"id": "linux-x86", "aws": {"os": "linux", "architecture": "x86"}, "native": null, "status": "roadmap", "tickets": ["SF-064"],
+  {"id": "linux-x86", "aws": {"os": "linux", "architecture": "x86"}, "native": null, "status": "roadmap", "tickets": ["SF-064", "SF-076"],
    "notes": "Outside the SF-038 initial Linux prototype phase; a tracked gap. Translated recipes omit x86 manifests and report them."},
-  {"id": "windows", "aws": {"os": "windows"}, "native": null, "status": "roadmap", "tickets": ["SF-064"],
+  {"id": "windows", "aws": {"os": "windows"}, "native": null, "status": "roadmap", "tickets": ["SF-064", "SF-074"],
    "notes": "No Windows runtime; outside the SF-038 initial Linux prototype phase and a tracked gap. Translated recipes omit Windows manifests."},
-  {"id": "darwin", "aws": {"os": "darwin"}, "native": null, "status": "roadmap", "tickets": ["SF-064"], "notes": "No macOS runtime; outside the SF-038 initial Linux prototype phase and a tracked gap."}
+  {"id": "darwin", "aws": {"os": "darwin"}, "native": null, "status": "roadmap", "tickets": ["SF-064", "SF-075"], "notes": "No macOS runtime; outside the SF-038 initial Linux prototype phase and a tracked gap."}
  ],
  "suites": {
   "aws-recipe-cases.json": {
@@ -80,8 +80,8 @@
   },
   "credential-provider-cases.json": {
    "description": "SF-038 credential-provider (token exchange equivalent) grants, tokens, caching and upstream retry.",
-   "runtime_execution": "pending", "pending_on": ["SF-057"],
-   "notes": "Runtime execution belongs to the credential-provider implementation ticket SF-057. Reference-model agreement is not adapter execution."
+   "runtime_execution": "passed", "runtime_evidence": "docs/validation/sf057-credentials.json",
+   "notes": "SF-057 ran all declared fixtures against the actual local Linux adapter and mTLS upstream. Live AWS acceptance remains unrun; see the scoped runtime receipt."
   },
   "cloudwatch-metrics-cases.json": {
    "description": "SF-038 cloudwatch-metrics-export adapter pinned to aws.greengrass.Cloudwatch 4.0.0: request validation, grants, batching, retention and retry.",
@@ -158,20 +158,21 @@
    "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable", "tickets": ["SF-035"],
    "notes": "Native discovery returns broker endpoints and CA from an authenticated source; the AWS discovery REST API is not proposed by default."},
   {"id": "cloud.credentials", "area": "cloud", "aws_reference": "aws.greengrass.TokenExchangeService 2.0.3 container-credentials protocol",
-   "functional": "proposed", "aws_api": "proposed", "aws_recipe": "not-applicable",
+   "functional": "partial", "aws_api": "partial", "aws_recipe": "not-applicable",
+   "current_evidence": ["docs/AWS_CREDENTIALS.md", "docs/validation/sf057-credentials.json"],
    "tickets": ["SF-027", "SF-038", "SF-057"], "suites": ["credential-provider-cases.json"],
-   "notes": "SF-038 credential-provider adapter, implemented by SF-057: unmodified AWS SDKs read AWS_CONTAINER_CREDENTIALS_FULL_URI/AWS_CONTAINER_AUTHORIZATION_TOKEN. Upstream uses a separately provisioned AWS X.509 identity, not the Sui signer or Seal identity."},
+   "notes": "SF-057 local Linux IoT credential adapter with separate platform-managed UIDs; live AWS and physical integration remain pending: unmodified AWS SDKs read AWS_CONTAINER_CREDENTIALS_FULL_URI/AWS_CONTAINER_AUTHORIZATION_TOKEN. Upstream uses a separately provisioned AWS X.509 identity, not the Sui signer or Seal identity."},
   {"id": "components.aws-managed", "area": "components", "aws_reference": "46 AWS-provided and machine learning components (managed-components.json)",
    "functional": "proposed", "aws_api": "roadmap", "aws_recipe": "proposed",
-   "tickets": ["SF-037", "SF-038", "SF-064"], "suites": ["managed-dependency-cases.json"],
+   "tickets": ["SF-037", "SF-038", "SF-064", "SF-069", "SF-070", "SF-071", "SF-072", "SF-073", "SF-074", "SF-075", "SF-076", "SF-077", "SF-078", "SF-079"], "suites": ["managed-dependency-cases.json"],
    "notes": "Each component maps to a native equivalent, a scoped adapter (SF-057 to SF-063) or an SF-064 roadmap gap. Recipe dependencies on them stay rejected until SF-037 adopts the classification."},
   {"id": "components.lambda", "area": "components", "aws_reference": "aws.greengrass.lambda component type, LambdaManager 2.3.9, launcher, runtimes, legacy subscription router",
    "functional": "roadmap", "aws_api": "roadmap", "aws_recipe": "proposed",
-   "tickets": ["SF-014", "SF-037", "SF-038", "SF-064"], "suites": ["aws-recipe-cases.json", "managed-dependency-cases.json"],
+   "tickets": ["SF-014", "SF-037", "SF-038", "SF-064", "SF-069"], "suites": ["aws-recipe-cases.json", "managed-dependency-cases.json"],
    "notes": "Lambda invocation and subscriptions are SF-064 roadmap work. Meanwhile functions can be repackaged as generic native components, which is not Lambda compatibility; Lambda recipes and dependencies are rejected with guidance."},
   {"id": "components.ml-inference", "area": "components", "aws_reference": "variant.DLR 1.6.16, variant.TensorFlowLite 2.5.15, model stores, SageMaker AI Edge Manager (discontinued 2024-04-26)",
    "functional": "proposed", "aws_api": "not-applicable", "aws_recipe": "proposed",
-   "tickets": ["SF-011", "SF-023", "SF-038", "SF-064"], "suites": ["managed-dependency-cases.json"],
+   "tickets": ["SF-011", "SF-023", "SF-038", "SF-064", "SF-073"], "suites": ["managed-dependency-cases.json"],
    "notes": "Runtimes and models are native components with authenticated artifacts. Example-equivalent inference components are SF-064 roadmap work; Edge Manager is discontinued."},
   {"id": "cloud.metrics", "area": "cloud", "aws_reference": "aws.greengrass.Cloudwatch 4.0.0, aws.greengrass.DeviceDefender 4.0.0, telemetry NucleusEmitter 1.0.14",
    "functional": "proposed", "aws_api": "proposed", "aws_recipe": "not-applicable",
@@ -186,7 +187,7 @@
    "notes": "SSH daemon, firewall and service configuration stay platform-owned. The secure-tunneling adapter (SF-063) is an explicitly configured supervised destination proxy that coexists with them; the open-source SSM agent can be packaged as a native component."},
   {"id": "industrial.protocols", "area": "industrial", "aws_reference": "aws.greengrass.Modbus 2.1.11, IoT SiteWise OPC UA collector/publisher/processor, EdgeConnectorForKVS 1.0.5",
    "functional": "proposed", "aws_api": "roadmap", "aws_recipe": "proposed",
-   "tickets": ["SF-011", "SF-032", "SF-034", "SF-038", "SF-064"], "suites": ["managed-dependency-cases.json"],
+   "tickets": ["SF-011", "SF-032", "SF-034", "SF-038", "SF-064", "SF-070", "SF-071", "SF-072"], "suites": ["managed-dependency-cases.json"],
    "notes": "Protocol collectors are native components over SF-032/SF-034. SiteWise and Kinesis Video functions are SF-064 roadmap work."},
   {"id": "cli.local", "area": "operations", "aws_reference": "greengrass-cli deployment/component commands",
    "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable", "tickets": ["SF-027"]},

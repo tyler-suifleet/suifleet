@@ -55,7 +55,7 @@ AWS provides device/group targets, component dependency resolution, deployment r
 | Desired fleet state and revisions | Implemented for groups, locally tested (SF-013): revisioned component → deployment map per group; supersession; cross-group conflicts left as installed | Device-level desired state (after SF-008 custody); public-network/hardware acceptance | P1 |
 | Newly joined devices receive desired state | Implemented, locally tested (SF-013): membership from DeviceAddedToGroup events, verified against the group object each poll | Event retention for long-lived fleets; public-network acceptance | P1 |
 | Multi-component atomic deployments | Partial (SF-013): one revision commits several components atomically on chain; devices run an ordered, journaled plan that stops at the first failed step; each step installs its dependencies first (SF-012) | Ordering across desired components by dependency (steps run in name order), device-side rollback and lifecycle supervision (SF-014) | P1 |
-| Staged/canary rollout | Missing | Cohorts, concurrency/rate limits, bake period and release gates | P1 |
+| Staged/canary rollout | SF-017 implementation awaiting review | [Creator-coordinated durable cohorts, grant/rate/concurrency/bake gates and failure abort](STAGED_ROLLOUTS.md); physical acceptance remains SF-031 | P1 |
 | Failure-threshold abort | Missing | Fleet aggregation, minimum sample size and threshold evaluation | P1 |
 | Pause/resume/cancel | Missing | Durable state transitions; deletion is not cancellation | P1 |
 | Device update timeout | Partial: bounded command/download | End-to-end deadline, offline expiry, retry policy and backoff | P1 |
@@ -118,7 +118,7 @@ The [compatibility specification](GREENGRASS_COMPATIBILITY.md) (SF-028) separate
 | Device shadows | Missing | Desired/reported state with version/conflict semantics and local sync | P2 |
 | Stream manager/store-and-forward | Missing | Bounded durable streams, export adapters and recovery | P2 |
 | Client-device discovery/authentication | Missing | Local device discovery, credentials, certificates and gateway authorization | P2 |
-| Token exchange/cloud credentials | Missing | Scoped credential provider or equivalent decentralized service credentials | P2 |
+| Token exchange/cloud credentials | Opt-in Linux SDK endpoint and IoT X.509 adapter; local mTLS/SDK evidence in [AWS_CREDENTIALS.md](AWS_CREDENTIALS.md) | Separately provisioned AWS identity and IAM policy; platform-managed distinct UIDs; live AWS account/service acceptance remains unrun | P2 |
 | ML inference/industrial/cloud integrations | Missing | Optional component ecosystem/adapters and compatibility tests | P2 |
 | Windows/macOS runtime | Missing: Linux-oriented | Explicit OS support matrix and implementation/testing | P2 |
 

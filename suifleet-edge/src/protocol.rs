@@ -5,13 +5,13 @@ use serde::{Deserialize, Serialize};
 pub const PROTOCOL_VERSION: u64 = 1;
 pub const MANIFEST_SCHEMA_VERSION: u64 = 1;
 pub const DEPLOYMENT_SCHEMA_VERSION: u64 = 1;
-pub const SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS: &[u64] = &[1, 2];
+pub const SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS: &[u64] = &[1, 2, 3];
 pub const CATALOG_TYPES: &[&str] = &["component_catalog::ComponentCatalog", "component_catalog::ComponentVersion", "component_catalog::CatalogCreated", "component_catalog::VersionPublished", "component_catalog::CatalogBindingKey", "component_catalog::CatalogBinding"];
 pub const RECIPE_VERSION: &str = "1.0";
 pub const RECIPE_VERSIONS: &[&str] = &["1.0", "1.1", "1.2"];
 pub const STATUS_APPLIED: u8 = 1;
 pub const STATUS_FAILED: u8 = 2;
-pub const REQUIRED_TYPES: &[&str] = &["device_registry::DeviceRegistry", "device_registry::Device", "device_group::DeviceGroup", "device_group::GroupCreated", "device_cap::DeviceCap", "device_cap::DeviceAddressKey", "deployment_manager::DeploymentRecord", "deployment_manager::DeploymentCreated", "deployment_manager::DeviceStatusUpdated", "deployment_manager::TargetGroupsKey", "deployment_manager::TargetDevicesKey", "deployment_manager::StatusesKey", "deployment_manager::RecipeDigestKey", "deployment_manager::ReceiptsKey", "deployment_manager::Receipts", "deployment_manager::DeviceStatusReported", "device_registry::IdentityKey", "device_registry::Identity", "device_registry::DeviceIdentityChanged", "device_registry::CustodyKey", "device_registry::DeviceOwnerCap", "deployment_manager::DelegateKey", "enrollment::EnrollmentPolicy", "enrollment::DeviceEnrolled", "roles::DeployerRole", "roles::RoleKey", "roles::RoleGranted", "device_group::DeviceAddedToGroup", "deployment_manager::ManagedKey", "desired_state::DesiredKey", "desired_state::DesiredState", "desired_state::DesiredStateChanged", "deployment_manager::ControlKey", "deployment_manager::Control"];
+pub const REQUIRED_TYPES: &[&str] = &["device_registry::DeviceRegistry", "device_registry::Device", "device_group::DeviceGroup", "device_group::GroupCreated", "device_cap::DeviceCap", "device_cap::DeviceAddressKey", "deployment_manager::DeploymentRecord", "deployment_manager::DeploymentCreated", "deployment_manager::DeviceStatusUpdated", "deployment_manager::TargetGroupsKey", "deployment_manager::TargetDevicesKey", "deployment_manager::StatusesKey", "deployment_manager::RecipeDigestKey", "deployment_manager::ReceiptsKey", "deployment_manager::Receipts", "deployment_manager::DeviceStatusReported", "device_registry::IdentityKey", "device_registry::Identity", "device_registry::DeviceIdentityChanged", "device_registry::CustodyKey", "device_registry::DeviceOwnerCap", "deployment_manager::DelegateKey", "enrollment::EnrollmentPolicy", "enrollment::DeviceEnrolled", "roles::DeployerRole", "roles::RoleKey", "roles::RoleGranted", "device_group::DeviceAddedToGroup", "deployment_manager::ManagedKey", "desired_state::DesiredKey", "desired_state::DesiredState", "desired_state::DesiredStateChanged", "deployment_manager::ControlKey", "deployment_manager::Control", "deployment_manager::RolloutKey", "deployment_manager::Rollout", "deployment_manager::RolloutPolicy", "deployment_manager::RolloutDecision"];
 pub const MOVE_ABI_JSON: &str = include_str!("../../interfaces/fleet-v1.json");
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Entry<K, V> { pub key: K, pub value: V }
@@ -85,20 +85,24 @@ pub mod component_catalog {
 pub mod deployment_manager {
     use super::*;
     pub const MODULE: &str = "deployment_manager";
+    pub const ADVANCE_ROLLOUT: &str = "advance_rollout";
     pub const ARTIFACT_SHA256: &str = "artifact_sha256";
     pub const COMPONENT_NAME: &str = "component_name";
     pub const CONTROL: &str = "control";
+    pub const CONTROL_ROLLOUT: &str = "control_rollout";
     pub const CREATE_DEPLOYMENT: &str = "create_deployment";
     pub const CREATE_DEPLOYMENT_VERIFIED: &str = "create_deployment_verified";
     pub const CREATOR: &str = "creator";
     pub const DELEGATE: &str = "delegate";
     pub const DELETE_DEPLOYMENT: &str = "delete_deployment";
+    pub const DELETE_ROLLOUT: &str = "delete_rollout";
     pub const HAS_CURRENT_RECEIPTS: &str = "has_current_receipts";
     pub const HAS_RECEIPTS: &str = "has_receipts";
     pub const HAS_RECIPE_DIGEST: &str = "has_recipe_digest";
     pub const IS_MANAGED: &str = "is_managed";
     pub const MIGRATE: &str = "migrate";
     pub const NEW_DEPLOYMENT_VERIFIED: &str = "new_deployment_verified";
+    pub const NEW_ROLLOUT_VERIFIED: &str = "new_rollout_verified";
     pub const RECEIPT_STATUS: &str = "receipt_status";
     pub const RECEIPT_STATUSES: &str = "receipt_statuses";
     pub const RECEIPTS_VERSION: &str = "receipts_version";
@@ -108,6 +112,10 @@ pub mod deployment_manager {
     pub const REPORT_STATUS_FOR_GROUP: &str = "report_status_for_group";
     pub const REPORT_VERIFIED_STATUS: &str = "report_verified_status";
     pub const REPORT_VERIFIED_STATUS_FOR_GROUP: &str = "report_verified_status_for_group";
+    pub const ROLLOUT: &str = "rollout";
+    pub const ROLLOUT_ELIGIBLE: &str = "rollout_eligible";
+    pub const ROLLOUT_POLICY: &str = "rollout_policy";
+    pub const ROLLOUT_PROGRESS: &str = "rollout_progress";
     pub const SET_CONTROL: &str = "set_control";
     pub const SHARE_DEPLOYMENT: &str = "share_deployment";
     pub const STATUS_APPLIED: &str = "status_applied";
@@ -202,6 +210,48 @@ pub mod deployment_manager {
         pub dummy_field: bool,
     }
     impl RecipeDigestKey { pub const MOVE_TYPE: &'static str = "deployment_manager::RecipeDigestKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct RolloutPolicy {
+        pub concurrency: u64,
+        pub rate_count: u64,
+        pub rate_window_ms: u64,
+        pub bake_ms: u64,
+        pub minimum_samples: u64,
+        pub failure_bps: u64,
+        pub offline_timeout_ms: u64,
+    }
+    impl RolloutPolicy { pub const MOVE_TYPE: &'static str = "deployment_manager::RolloutPolicy"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Rollout {
+        pub policy: super::deployment_manager::RolloutPolicy,
+        pub members: Vec<[u8; 32]>,
+        pub cohorts: Vec<u64>,
+        pub admitted_at: Vec<u64>,
+        pub outcomes: Vec<u8>,
+        pub skipped: Vec<bool>,
+        pub cohort: u64,
+        pub state: u8,
+        pub bake_started_ms: u64,
+        pub progress_ms: u64,
+        pub revision: u64,
+    }
+    impl Rollout { pub const MOVE_TYPE: &'static str = "deployment_manager::Rollout"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct RolloutDecision {
+        pub deployment_id: [u8; 32],
+        pub revision: u64,
+        pub cohort: u64,
+        pub state: u8,
+        pub reason: String,
+        pub at_ms: u64,
+        pub admitted: Vec<[u8; 32]>,
+    }
+    impl RolloutDecision { pub const MOVE_TYPE: &'static str = "deployment_manager::RolloutDecision"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct RolloutKey {
+        pub dummy_field: bool,
+    }
+    impl RolloutKey { pub const MOVE_TYPE: &'static str = "deployment_manager::RolloutKey"; }
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct StatusesKey {
         pub dummy_field: bool,

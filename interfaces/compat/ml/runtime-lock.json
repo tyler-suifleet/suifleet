@@ -1,0 +1,69 @@
+{
+  "format_version": 1,
+  "runtime": "tflite-runtime",
+  "runtime_version": "2.14.0",
+  "numpy_version": "1.26.4",
+  "python": "3.10",
+  "platforms": {
+    "linux-x86_64-cp310": {
+      "glibc_min": "2.17",
+      "wheels": [
+        {
+          "name": "tflite-runtime",
+          "version": "2.14.0",
+          "filename": "tflite_runtime-2.14.0-cp310-cp310-manylinux2014_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/9e/1f/aade0d066bacbe697946ae21f0467a702d81adb939bb64515e9abebae9ed/tflite_runtime-2.14.0-cp310-cp310-manylinux2014_x86_64.whl",
+          "sha256": "bb11df4283e281cd609c621ac9470ad0cb5674408593272d7593a2c6bde8a808",
+          "license": "Apache-2.0",
+          "source": "https://pypi.org/project/tflite-runtime/2.14.0/",
+          "notices": {}
+        },
+        {
+          "name": "numpy",
+          "version": "1.26.4",
+          "filename": "numpy-1.26.4-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/4b/d7/ecf66c1cd12dc28b4040b15ab4d17b773b87fa9d29ca16125de01adb36cd/numpy-1.26.4-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+          "sha256": "ffa75af20b44f8dba823498024771d5ac50620e6915abac414251bd971b4529f",
+          "license": "BSD-3-Clause AND bundled-notices",
+          "source": "https://pypi.org/project/numpy/1.26.4/",
+          "notices": {
+            "numpy/random/LICENSE.md": "103166b62b80443afb9eb3488e052ea06be0cff566b908f199e561fde49af19f",
+            "numpy/core/include/numpy/random/LICENSE.txt": "fbc539f47d0cf83bc61378080fb873d5c14630126cacbfe754035c3926daa5ec",
+            "numpy/ma/LICENSE": "05f3b88351988ecfad10abe92c0c50e5875c6452d5009a0084cc291551ffcca6",
+            "numpy-1.26.4.dist-info/LICENSE.txt": "1107b0c831e918d4f1dbc28a33190c77215ef278d4a4c4009572088770d4334a"
+          }
+        }
+      ]
+    },
+    "linux-aarch64-cp310": {
+      "glibc_min": "2.34",
+      "wheels": [
+        {
+          "name": "tflite-runtime",
+          "version": "2.14.0",
+          "filename": "tflite_runtime-2.14.0-cp310-cp310-manylinux_2_34_aarch64.whl",
+          "url": "https://files.pythonhosted.org/packages/04/dd/a701667be92bb884644eeec91ebbde57e197d27d9a79241169b6ce15e1ad/tflite_runtime-2.14.0-cp310-cp310-manylinux_2_34_aarch64.whl",
+          "sha256": "d38c6885f5e9673c11a61ccec5cad7c032ab97340718d26b17794137f398b780",
+          "license": "Apache-2.0",
+          "source": "https://pypi.org/project/tflite-runtime/2.14.0/",
+          "notices": {}
+        },
+        {
+          "name": "numpy",
+          "version": "1.26.4",
+          "filename": "numpy-1.26.4-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl",
+          "url": "https://files.pythonhosted.org/packages/fc/a5/4beee6488160798683eed5bdb7eead455892c3b4e1f78d79d8d3f3b084ac/numpy-1.26.4-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl",
+          "sha256": "d209d8969599b27ad20994c8e41936ee0964e6da07478d6c35016bc386b66ad4",
+          "license": "BSD-3-Clause AND bundled-notices",
+          "source": "https://pypi.org/project/numpy/1.26.4/",
+          "notices": {
+            "numpy/ma/LICENSE": "05f3b88351988ecfad10abe92c0c50e5875c6452d5009a0084cc291551ffcca6",
+            "numpy/core/include/numpy/random/LICENSE.txt": "fbc539f47d0cf83bc61378080fb873d5c14630126cacbfe754035c3926daa5ec",
+            "numpy/random/LICENSE.md": "103166b62b80443afb9eb3488e052ea06be0cff566b908f199e561fde49af19f",
+            "numpy-1.26.4.dist-info/LICENSE.txt": "b01a781fe2f8b83292cf6ebca087576437fbe514218a0062f841e458bdafe4ba"
+          }
+        }
+      ]
+    }
+  }
+}
