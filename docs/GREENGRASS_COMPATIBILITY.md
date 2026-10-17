@@ -14,9 +14,9 @@ Each capability has a separate status for each level. A higher level never follo
 |---|---|---|
 | `functional` | Equivalent behaviour through SuiFleet's own chain, recipe and local APIs | The product goal |
 | `aws_recipe` | AWS recipe documents are translated, or rejected with a stated reason | Proposed subset (SF-037); never silently reinterpreted |
-| `aws_api` | Unmodified AWS IPC/SDK/CLI/cloud-API clients work | `undecided` everywhere; each needs an explicit scope decision |
+| `aws_api` | Unmodified AWS IPC/SDK/CLI/cloud-API clients work | `undecided` unless scoped: SF-038 adapters with implementation tickets are `proposed`, SF-064 gaps are `roadmap` |
 
-Statuses: `implemented`/`partial` (merged, with cited local evidence), `proposed`, `undecided`, `excluded` (approved decision only) and `not-applicable`. The checker enforces several rules:
+Statuses: `implemented`/`partial` (merged, with cited local evidence), `proposed`, `undecided`, `roadmap` (tracked missing work, not an exclusion), `excluded` (approved decision only) and `not-applicable`. The checker enforces several rules:
 
 - `partial` and `implemented` must cite files that exist.
 - No row may claim `aws_api` or `aws_recipe` `partial`/`implemented` without a suite whose `runtime_execution` is `passed`.
@@ -31,8 +31,8 @@ Statuses: `implemented`/`partial` (merged, with cited local evidence), `proposed
 | Linux x86_64 | `linux`/`amd64` | `linux`/`x86_64` | Partial: daemon, simulator and localnet evidence |
 | Linux aarch64 | `linux`/`aarch64` | `linux`/`aarch64` | Partial: Yocto QEMU; physical Pi pending in SF-031 |
 | Linux 32-bit ARM | `linux`/`arm` | `linux`/`arm` | Proposed: selection vectors only. `architecture.detail` is rejected |
-| Linux x86 | `linux`/`x86` | none | Undecided (SF-038). Translation omits these manifests |
-| Windows, macOS | `windows`, `darwin` | none | Undecided (SF-038). Translation omits these manifests |
+| Linux x86 | `linux`/`x86` | none | Roadmap gap (SF-064), outside the SF-038 initial Linux phase. Translation omits these manifests |
+| Windows, macOS | `windows`, `darwin` | none | Roadmap gap (SF-064), outside the SF-038 initial Linux phase. Translation omits these manifests |
 
 ## Current APIs versus proposed contracts
 
@@ -114,7 +114,7 @@ Everything below is proposed. Each adapter runs as a supervised local service be
 make test-compat
 ```
 
-This runs `python3 scripts/greengrass_compat.py`, the checker's negative tests and the frontend validator check. `make edge-test` runs the Rust current-API check.
+This runs `python3 scripts/greengrass_compat.py`, the checker's negative tests and the frontend validator check. The checker also validates the SF-038 [managed-component catalog](GREENGRASS_MANAGED_COMPONENTS.md). `make edge-test` runs the Rust current-API check.
 
 | Suite | Cases evaluated by the reference model | Current-API execution | Runtime execution |
 |---|---|---|---|
@@ -123,6 +123,10 @@ This runs `python3 scripts/greengrass_compat.py`, the checker's negative tests a
 | `shadow-cases.json` | 54 steps across 10 sequences | none | Pending SF-027, SF-033 |
 | `stream-cases.json` | 45 steps across 5 sequences | none | Pending SF-027, SF-034 |
 | `client-device-cases.json` | 16 authorization requests | none | Pending SF-032, SF-035 |
+| `managed-dependency-cases.json` | 47 managed-dependency classifications | none | Pending SF-037 |
+| `credential-provider-cases.json` | 65 steps across 7 sequences | none | Pending SF-057 |
+| `cloudwatch-metrics-cases.json` | 90 steps across 8 sequences | none | Pending SF-059 |
+| `cloudwatch-logs-cases.json` | 69 steps across 8 sequences | none | Pending SF-060 |
 
 `scripts/greengrass_compat.py` contains small **specification reference models**. They make each expected value checkable and keep the fixtures internally consistent. They are not the daemon, a translator or an adapter, and agreement with them proves nothing about runtime conformance. Each owning ticket must execute the same fixture files against its real implementation. That ticket then sets the suite to `passed` with a committed runtime receipt, and only after that may it raise any `aws_*` status. Fixtures may be corrected in review if they contradict AWS behaviour or an approved design. Correct them deliberately; never loosen them to make an implementation pass.
 
@@ -135,5 +139,5 @@ These are recommendations only. Codex decides on approval and on any ticket chan
 3. **`aws_api` levels** are `undecided`. Recommendations:
    - Exclude AWS control-plane API emulation.
    - Defer AWS IPC wire/SDK compatibility until a native SF-027 API exists.
-   - Treat each AWS cloud target (IoT Core bridge, shadow sync, Kinesis/S3 export, token exchange) as an SF-038 adapter decision.
-4. **SF-038.** Owns Windows/macOS/x86, AWS-managed components and Lambda.
+   - AWS cloud targets (IoT Core bridge, shadow sync, Kinesis/S3 export, token exchange, CloudWatch) are SF-038 adapters with implementation tickets SF-057 to SF-063.
+4. **SF-038.** Maps AWS-managed components, Lambda and Windows/macOS/x86 in [GREENGRASS_MANAGED_COMPONENTS.md](GREENGRASS_MANAGED_COMPONENTS.md). Lambda, industrial, ML example and non-initial platform gaps are SF-064 roadmap work, not approved exclusions.
