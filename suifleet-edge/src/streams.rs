@@ -615,7 +615,36 @@ pub struct Store {
 }
 
 impl Store {
-    pub fn open(dir: &Path, quota: Quota, now_ms: u64) -> anyhow::Result<Self> {
+    /// Open the store and apply the operator's definitions. The resulting
+    /// inventory, including persisted component-created streams, must fit
+    /// the current quota; otherwise startup fails before anything changes.
+    pub fn start(dir: &Path, quota: Quota, definitions: &[Definition], now_ms: u64) -> anyhow::Result<Self> {
+        let mut store = Self::open(dir, quota, now_ms)?;
+        let mut sizes: BTreeMap<&str, u64> = store.streams.iter().map(|(name, s)| (name.as_str(), s.def.max_size)).collect();
+        for def in definitions {
+            def.validate()?;
+            if let Some(stream) = store.streams.get(&def.name) {
+                anyhow::ensure!(stream.def.persistence == def.persistence, "stream {:?}: persistence cannot change; delete and recreate it", def.name);
+            }
+            sizes.insert(&def.name, def.max_size);
+        }
+        let (count, total) = (sizes.len(), sizes.values().sum::<u64>());
+        anyhow::ensure!(count <= quota.max_streams && total <= quota.max_total_bytes,
+            "stored and declared streams need {count} streams and {total} bytes, over [streams] max_streams = {} / max_total_bytes = {}; \
+             raise the limits, or delete streams under the old limits first (stream data left untouched)",
+            quota.max_streams, quota.max_total_bytes);
+        // The final inventory fits, so shrink and update before creating.
+        let (existing, new): (Vec<_>, Vec<_>) = definitions.iter().partition(|d| store.streams.contains_key(&d.name));
+        for def in existing {
+            store.apply(def.clone(), now_ms)?;
+        }
+        for def in new {
+            store.create(def.clone())?;
+        }
+        Ok(store)
+    }
+
+    fn open(dir: &Path, quota: Quota, now_ms: u64) -> anyhow::Result<Self> {
         std::fs::create_dir_all(dir)?;
         let mut streams = BTreeMap::new();
         for entry in std::fs::read_dir(dir)? {
@@ -687,6 +716,14 @@ impl Store {
         }
         anyhow::ensure!(stream.def.persistence == def.persistence, "stream {:?}: persistence cannot change; delete and recreate it", def.name);
         anyhow::ensure!(others + def.max_size <= quota.max_total_bytes, "stream {:?}: max_size exceeds the stream quota", def.name);
+        self.apply(def, now_ms)
+    }
+
+    fn apply(&mut self, def: Definition, now_ms: u64) -> anyhow::Result<()> {
+        let stream = self.get(&def.name)?;
+        if stream.def == def {
+            return Ok(());
+        }
         stream.def = def;
         while stream.bytes > stream.def.max_size {
             stream.evict_front();
@@ -1173,6 +1210,47 @@ mod tests {
         let bad = ExportConfig { url: "http://user:pw@host/x".into(), ..store.definition("second").unwrap().export.clone().unwrap() };
         assert!(bad.validate().is_err(), "no credentials in URLs");
         assert_eq!(code(&store.append("missing", b"x", 0).unwrap_err()), "not-found");
+        let _ = std::fs::remove_dir_all(&path);
+    }
+
+    #[test]
+    fn startup_enforces_the_current_quota_on_stored_streams() {
+        let path = dir("restored-quota");
+        let quota = Quota { max_streams: 2, max_total_bytes: 16384 };
+        let mut store = Store::start(&path, quota, &[], 0).unwrap();
+        // Component-created streams, absent from the operator definitions.
+        store.create(def("a", 8192, Strategy::RejectNewData)).unwrap();
+        store.create(def("b", 8192, Strategy::RejectNewData)).unwrap();
+        store.append("a", b"kept", 0).unwrap();
+        drop(store);
+        let snapshot = || std::fs::read_dir(&path).unwrap().flat_map(|e| std::fs::read_dir(e.unwrap().path()).unwrap())
+            .map(|e| { let p = e.unwrap().path(); (p.clone(), std::fs::read(p).unwrap()) }).collect::<BTreeMap<_, _>>();
+        let before = snapshot();
+        // Reduced count or byte budgets fail startup and change nothing.
+        for reduced in [Quota { max_streams: 1, max_total_bytes: 16384 }, Quota { max_streams: 2, max_total_bytes: 1024 }] {
+            let error = Store::start(&path, reduced, &[], 0).err().expect("over-quota inventory refused");
+            assert!(error.to_string().contains("need 2 streams and 16384 bytes"), "{error}");
+        }
+        // A declared definition is counted with its new size, as is a new one.
+        let shrink = [def("a", 4096, Strategy::RejectNewData)];
+        assert!(Store::start(&path, Quota { max_streams: 2, max_total_bytes: 8192 }, &shrink, 0).is_err());
+        let grow = [def("c", 1024, Strategy::RejectNewData)];
+        assert!(Store::start(&path, quota, &grow, 0).is_err());
+        let mut memory = def("a", 8192, Strategy::RejectNewData);
+        memory.persistence = Persistence::Memory;
+        assert!(Store::start(&path, quota, &[memory], 0).is_err(), "persistence change refused before any change");
+        assert_eq!(snapshot(), before, "refused startups leave stream data untouched");
+        // Unchanged budgets reopen; shrinking declared streams into a smaller budget works.
+        let mut store = Store::start(&path, quota, &[], 0).unwrap();
+        assert_eq!(store.read("a", 0, 1, 1, 0).unwrap()[0].data, b"kept");
+        drop(store);
+        let both = [def("a", 4096, Strategy::RejectNewData), def("b", 4096, Strategy::RejectNewData)];
+        let mut store = Store::start(&path, Quota { max_streams: 2, max_total_bytes: 8192 }, &both, 0).unwrap();
+        assert_eq!(store.reserved_bytes(None), 8192);
+        store.append("b", &[0; 1500], 0).unwrap();
+        store.append("b", &[0; 1500], 0).unwrap();
+        assert_eq!(code(&store.append("b", &[0; 1500], 0).unwrap_err()), "full", "the new size is enforced");
+        drop(store);
         let _ = std::fs::remove_dir_all(&path);
     }
 

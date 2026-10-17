@@ -195,19 +195,11 @@ async fn main() -> anyhow::Result<()> {
     }
     let mut ipc_server = cfg.ipc.as_ref().map(ipc::bind).transpose()?;
     let mut ipc_messages = ipc::Messages::default();
-    // Durable streams (SF-034): operator definitions are applied at start.
+    // Durable streams (SF-034): operator definitions are applied at start,
+    // and every stored stream must fit the configured quota.
     let streams = match &cfg.streams {
-        Some(settings) => {
-            let mut store = streams::Store::open(&cfg.runtime.state_dir.join("streams"), settings.quota(), telemetry::now_ms())?;
-            for def in &settings.definitions {
-                if store.definition(&def.name).is_some() {
-                    store.reconfigure(def.clone(), telemetry::now_ms())?;
-                } else {
-                    store.create(def.clone())?;
-                }
-            }
-            Some(std::sync::Arc::new(std::sync::Mutex::new(store)))
-        }
+        Some(settings) => Some(std::sync::Arc::new(std::sync::Mutex::new(streams::Store::start(
+            &cfg.runtime.state_dir.join("streams"), settings.quota(), &settings.definitions, telemetry::now_ms())?))),
         None => None,
     };
     // Durable pub/sub and its MQTT bridge (SF-032).
