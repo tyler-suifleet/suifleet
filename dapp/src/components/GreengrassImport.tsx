@@ -33,6 +33,8 @@ export function GreengrassImport({catalog,owner,execute,onPublished,disabled}:{c
     try{
       const preview=await translate((_,i)=>`pending-${i}`);
       if(preview.outcome!=='translate'||!preview.manifests) throw new Error('The recipe does not translate');
+      // Reject an unusable native recipe before any artifact upload.
+      for(const m of preview.manifests) assertComponentRecipe(m.recipe);
       if(!catalog) throw new Error('Choose a catalog');
       const used=new Set(preview.manifests.map(m=>m.recipe.artifactBlobId));
       const uploaded:Record<string,{blobId:string;sha256:string}>={},warnings:string[]=[];
