@@ -19,6 +19,9 @@ pub struct Config {
     pub telemetry: Option<TelemetryConfig>,
     #[serde(default)]
     pub daemon_update: DaemonUpdateConfig,
+    /// Local support console (SF-079, docs/LOCAL_CONSOLE.md); none when omitted.
+    #[serde(default)]
+    pub console: Option<crate::console::Settings>,
     /// The file this configuration was loaded from (for the update preflight).
     #[serde(skip)]
     pub path: PathBuf,
@@ -460,6 +463,7 @@ impl Config {
         let raw = std::fs::read_to_string(path)?;
         let mut cfg: Self = toml::from_str(&raw)?;
         if let Some(ipc) = &cfg.ipc { ipc.validate()?; }
+        if let Some(console) = &cfg.console { console.validate()?; }
         cfg.path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
         anyhow::ensure!(
             !cfg.daemon_update.enabled
