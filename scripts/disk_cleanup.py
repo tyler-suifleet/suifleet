@@ -8,8 +8,8 @@
   plan   dry run: which allowlisted outputs are eligible now and why every
          other one is not. Read-only.
   apply  removes only the plan's candidates that still pass every check,
-         re-evaluated under the coordinator lock build:TICKET immediately
-         before each removal, and records the bytes actually reclaimed.
+         re-evaluated and rescanned under the coordinator lock build:TICKET
+         immediately before each removal, and records the bytes reclaimed.
 
 Eligible worktree outputs: an allowlisted relative path in the worktree of a
 ticket the coordinator reports `done`, inactive for `retain_days`, ignored and
@@ -72,6 +72,10 @@ class System:
         args = ["lock", resource, "--agent", "Other", "--model", "disk_cleanup.py", "--session", self.session,
                 "--purpose", purpose, "--ttl", "900"] + (["--ticket", ticket] if ticket else [])
         return self.ticket(project, *args)["token"]
+
+    def renew(self, project, resource, token):
+        """Extend the lease; refused (Unverifiable) once it is no longer ours."""
+        self.ticket(project, "lock-renew", resource, "--lock-token", token, "--ttl", "900")
 
     def unlock(self, project, resource, token):
         self.ticket(project, "unlock", resource, "--lock-token", token)
@@ -513,27 +517,42 @@ def recheck(ctx, planned, target, now, retain):
     return ctx.in_use(str(target), also_cwd_under=scope)
 
 
-def retire(config, system, planned, record, path, retain):
-    """Under the exclusion lock: final fresh check with the output still in
-    place, rename it aside, check again, release the lock. Returns
-    (aside path to delete, None) or (None, refusal reason)."""
+def retire(config, system, planned, evaluate, budget_left):
+    """Under the exclusion lock: evaluate and scan the output in place (it
+    stays usable), check the run's remaining budget, confirm the lease is still
+    held, recheck, rename it aside, check again, release the lock. Holding the
+    lock before the scan means a cooperative writer that finished before it was
+    taken left its changes for this scan to see. Returns (record, aside path to
+    delete, None) or (record, None, refusal reason)."""
     project, resource, ticket = exclusion_lock(config, planned)
     if not project:
-        return None, "no coordinator project to take the exclusion lock in"
+        return planned, None, "no coordinator project to take the exclusion lock in"
     try:
-        token = system.lock(project, resource, ticket, f"disk cleanup retiring {path}")
+        token = system.lock(project, resource, ticket, f"disk cleanup retiring {planned['path']}")
     except Unverifiable as error:
-        return None, f"exclusion lock {resource} not available: {error}"
+        return planned, None, f"exclusion lock {resource} not available: {error}"
+    record = planned
     try:
+        record, reason = evaluate()
+        if reason:
+            return record, None, reason
+        if budget_left is not None and record["bytes"] > budget_left:
+            return record, None, f"over this run's max_bytes_per_run ({record['bytes']} > {budget_left} remaining)"
+        # The scan can be long: decide only while the lease is still ours.
+        try:
+            system.renew(project, resource, token)
+        except Unverifiable as error:
+            return record, None, f"exclusion lock {resource} lost during the scan: {error}"
+        path, retain = Path(record["path"]), retain_seconds(config, planned)
         ctx, now = Context(config, system), system.now()
         reason = recheck(ctx, planned, path, now, retain)
         if reason:
-            return None, reason
+            return record, None, reason
         aside = path.with_name(f".{path.name}.retiring-{os.getpid()}")
         try:
             os.rename(path, aside)
         except OSError as error:
-            return None, f"rename failed: {error}"
+            return record, None, f"rename failed: {error}"
         # A writer that ignored the lock and entered or locked it between the
         # check and the rename is caught here; the output is renamed back.
         ctx, now = Context(config, system), system.now()
@@ -541,10 +560,10 @@ def retire(config, system, planned, record, path, retain):
         if reason:
             if os.path.lexists(path):
                 record["left_aside"] = str(aside)
-                return None, reason + "; the original path was recreated, so the old tree is left aside, not deleted"
+                return record, None, reason + "; the original path was recreated, so the old tree is left aside, not deleted"
             os.rename(aside, path)
-            return None, reason
-        return aside, None
+            return record, None, reason
+        return record, aside, None
     finally:
         try:
             system.unlock(project, resource, token)
@@ -552,11 +571,38 @@ def retire(config, system, planned, record, path, retain):
             record["unlock_error"] = str(error)
 
 
+def evaluator(config, system, planned):
+    """The in-place evaluation and scan of a planned candidate on a fresh
+    snapshot, or the reason it no longer matches the configuration."""
+    if planned["kind"] == "worktree-output":
+        project = next((p for p in config.get("projects", []) if p["id"] == planned["project"]), None)
+        if not project:
+            return None, "ticket or worktree changed"
+        if planned["relative"] not in config.get("worktree_outputs", DEFAULT_OUTPUTS):
+            return None, "no longer allowlisted"
+
+        def evaluate():
+            ctx, now = Context(config, system), system.now()
+            claim = next((c for c in ctx.claims.get(planned["project"], []) if c["key"] == planned["ticket"]), None)
+            if not claim or claim.get("worktree") != planned["worktree"]:
+                return planned, "ticket or worktree changed"
+            return evaluate_output(ctx, project, claim, planned["relative"], now)
+        return evaluate, None
+    tree = next((t for t in config.get("yocto", []) if t["path"] == planned["tree"] and planned["relative"] in t.get("retire", [])), None)
+    if not tree:
+        return None, "no longer configured"
+
+    def evaluate():
+        ctx, now = Context(config, system), system.now()
+        return evaluate_yocto(ctx, tree, planned["relative"], now)
+    return evaluate, None
+
+
 def apply(config, system, plan_data):
-    """For each candidate: re-evaluate and rescan it in place on a fresh
-    snapshot (it stays usable throughout the scan) and check the run's
-    cumulative budget; then take the exclusion lock, recheck, rename it aside,
-    recheck once more and delete it. Any refusal leaves the output in place."""
+    """For each candidate: take the exclusion lock, re-evaluate and rescan it
+    in place on a fresh snapshot and check the run's cumulative budget; then
+    recheck, rename it aside, recheck once more, release the lock and delete
+    it. Any refusal leaves the output in place."""
     if plan_data.get("kind") != "disk-cleanup-plan" or plan_data.get("schema_version") != SCHEMA:
         raise SystemExit("not a disk-cleanup plan")
     if not shutil.rmtree.avoids_symlink_attacks:
@@ -565,27 +611,11 @@ def apply(config, system, plan_data):
     before = filesystems([os.path.dirname(r) for r in roots] or ["/"], {})
     budget, spent, results = config.get("max_bytes_per_run"), 0, []
     for planned in plan_data["candidates"]:
-        ctx, now = Context(config, system), system.now()
-        if planned["kind"] == "worktree-output":
-            project = next((p for p in config.get("projects", []) if p["id"] == planned["project"]), None)
-            claim = next((c for c in ctx.claims.get(planned["project"], []) if c["key"] == planned["ticket"]), None)
-            if not project or not claim or claim.get("worktree") != planned["worktree"]:
-                results.append({**planned, "result": "skipped", "reason": "ticket or worktree changed"})
-                continue
-            if planned["relative"] not in config.get("worktree_outputs", DEFAULT_OUTPUTS):
-                results.append({**planned, "result": "skipped", "reason": "no longer allowlisted"})
-                continue
-            record, reason = evaluate_output(ctx, project, claim, planned["relative"], now)
-        else:
-            tree = next((t for t in config.get("yocto", []) if t["path"] == planned["tree"] and planned["relative"] in t.get("retire", [])), None)
-            if not tree:
-                results.append({**planned, "result": "skipped", "reason": "no longer configured"})
-                continue
-            record, reason = evaluate_yocto(ctx, tree, planned["relative"], now)
-        if not reason and budget and spent + record["bytes"] > budget:
-            reason = f"over this run's max_bytes_per_run ({spent} + {record['bytes']} > {budget})"
-        if not reason:
-            aside, reason = retire(config, system, planned, record, Path(record["path"]), retain_seconds(config, planned))
+        evaluate, reason = evaluator(config, system, planned)
+        if reason:
+            results.append({**planned, "result": "skipped", "reason": reason})
+            continue
+        record, aside, reason = retire(config, system, planned, evaluate, budget - spent if budget else None)
         if reason:
             results.append({**record, "result": "skipped", "reason": reason})
             continue

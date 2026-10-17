@@ -53,6 +53,12 @@ class FakeSystem:
                                 "expires": time.time() + 900, "token": f"tok-{resource}"})
         return f"tok-{resource}"
 
+    def renew(self, project, resource, token):
+        held = next((l for l in self.locks_list if l.get("token") == token and l["resource"] == resource), None)
+        if not held or held["expires"] < time.time():
+            raise dc.Unverifiable(f"{resource} lease lost")
+        held["expires"] = time.time() + 900
+
     def unlock(self, project, resource, token):
         self.locks_list = [l for l in self.locks_list if l.get("token") != token]
 
@@ -350,23 +356,95 @@ class ApplyTests(Fixture):
         # Once released, the worker gets the lock and a fresh output.
         system.lock(None, "build:SF-200", "SF-200", "SF-200 rebuild", session="worker")
 
-    def test_worker_lock_taken_during_scan_blocks_the_cleanup_lock(self):
+    def test_cleanup_holds_the_lock_through_its_scan(self):
         a = self.worktree("SF-201")
         system = FakeSystem(self.claims)
         plan = self.plan(system)
-        renamed = []
-        with self.during_apply_scan(lambda path: system.lock(None, "build:SF-201", "SF-201", "rebuild", session="worker")), \
-                self.before_rename(renamed.append):
+        refused = []
+
+        def worker(path):
+            with self.assertRaises(dc.Unverifiable) as error:
+                system.lock(None, "build:SF-201", "SF-201", "rebuild", session="worker")
+            refused.append(str(error.exception))
+        with self.during_apply_scan(worker):
+            result = dc.apply(self.config(), system, plan)
+        self.assertEqual(len(refused), 1, "a cooperative writer cannot start while the cleanup scans")
+        self.assertEqual(result["results"][0]["result"], "removed")
+        # A worker already holding the lock blocks the cleanup before any scan.
+        a = self.worktree("SF-205")
+        system = FakeSystem(self.claims)
+        plan = self.plan(system)
+        system.lock(None, "build:SF-205", "SF-205", "rebuild", session="worker")
+        scanned = []
+        with self.during_apply_scan(scanned.append):
             result = dc.apply(self.config(), system, plan)
         self.assertEqual(result["results"][0]["result"], "skipped")
-        self.assertIn("build:SF-201", result["results"][0]["reason"])
-        self.assertEqual(renamed, [])
+        self.assertIn("exclusion lock build:SF-205 not available", result["results"][0]["reason"])
+        self.assertEqual(scanned, [])
         self.assertTrue((a / "target/debug/app").exists())
         # The coordinator being unavailable for the lock also fails closed.
         system = FakeSystem(self.claims)
         system.lock = mock.Mock(side_effect=dc.Unverifiable("coordinator unavailable"))
         result = dc.apply(self.config(), system, self.plan(FakeSystem(self.claims)))
-        self.assertIn("exclusion lock build:SF-201 not available", result["results"][0]["reason"])
+        self.assertIn("exclusion lock build:SF-205 not available", result["results"][0]["reason"])
+        self.assertTrue((a / "target/debug/app").exists())
+
+    def writer_before_cleanup_lock(self, system, ticket, write):
+        """A cooperative worker that locks, writes and releases just before
+        the cleanup asks for its exclusion lock."""
+        real = system.lock
+
+        def lock(project, resource, ticket_key, purpose, session=None):
+            if session is None and resource == f"build:{ticket}" and not getattr(lock, "done", False):
+                lock.done = True
+                token = real(project, resource, ticket, "rebuild", session="worker")
+                write()
+                system.unlock(project, resource, token)
+            return real(project, resource, ticket_key, purpose, session)
+        system.lock = lock
+
+    def test_writer_that_finished_before_the_cleanup_lock_is_seen_by_the_scan(self):
+        a = self.worktree("SF-206")
+        system = FakeSystem(self.claims)
+        plan = self.plan(system)
+
+        def write():
+            (a / "target/device.key").write_text("k")
+            (a / "target/debug/new-output").write_bytes(b"n" * 200_000)
+        self.writer_before_cleanup_lock(system, "SF-206", write)
+        result = dc.apply(self.config(max_bytes_per_run=150_000), system, plan)
+        record = result["results"][0]
+        self.assertEqual(record["result"], "skipped")
+        self.assertRegex(record["reason"], "protected files inside|recently modified")
+        self.assertTrue((a / "target/device.key").exists() and (a / "target/debug/new-output").exists())
+        self.assertEqual(system.locks_list, [])
+        # Backdated (no recency signal) and unprotected: the fresh size still meets the budget.
+        b = self.worktree("SF-207")
+        system = FakeSystem(self.claims)
+        plan = self.plan(system, max_bytes_per_run=150_000)
+        self.assertEqual(len(plan["candidates"]), 1)
+
+        def grow():
+            (b / "target/debug/new-output").write_bytes(b"n" * 200_000)
+            age(b / "target", 10)
+        self.writer_before_cleanup_lock(system, "SF-207", grow)
+        result = dc.apply(self.config(max_bytes_per_run=150_000), system, plan)
+        record = result["results"][0]
+        self.assertEqual(record["result"], "skipped")
+        self.assertIn("max_bytes_per_run", record["reason"])
+        self.assertGreaterEqual(record["bytes"], 300_000, "the budget is checked on the size measured under the lock")
+        self.assertTrue((b / "target/debug/new-output").exists())
+
+    def test_lease_lost_during_the_scan_keeps_the_output(self):
+        a = self.worktree("SF-208")
+        system = FakeSystem(self.claims)
+        plan = self.plan(system)
+        renamed = []
+        with self.during_apply_scan(lambda path: system.locks_list.clear()), self.before_rename(renamed.append):
+            result = dc.apply(self.config(), system, plan)
+        self.assertEqual(result["results"][0]["result"], "skipped")
+        self.assertIn("lost during the scan", result["results"][0]["reason"])
+        self.assertEqual(renamed, [])
         self.assertTrue((a / "target/debug/app").exists())
 
     def test_uncooperative_lock_or_process_before_rename_is_caught_and_restored(self):
