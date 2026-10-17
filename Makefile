@@ -194,13 +194,39 @@ test-publish:
 .PHONY: release-image release-artifacts release-verify
 RELEASE_IMAGE ?= suifleet-release:local
 RELEASE_OUT ?= dist
+# aarch64-unknown-linux-gnu or i686-unknown-linux-gnu (32-bit x86, docs/LINUX_X86.md).
+RELEASE_TARGET ?= aarch64-unknown-linux-gnu
 
 release-image:
 	docker build -f docker/release.Dockerfile --build-arg USER_UID=$(UID) --build-arg USER_GID=$(GID) -t $(RELEASE_IMAGE) docker/
 
 # Builds the committed HEAD twice and fails unless the bundles are identical.
 release-artifacts: release-image
-	python3 scripts/release.py build --out $(RELEASE_OUT) --image $(RELEASE_IMAGE) --reproduce
+	python3 scripts/release.py build --out $(RELEASE_OUT) --image $(RELEASE_IMAGE) --target $(RELEASE_TARGET) --reproduce
+
+# 32-bit Linux x86 (SF-076, docs/LINUX_X86.md), on the host with Docker: an
+# i686 cross build in the release image, then the real-daemon simulator suites
+# in a 32-bit i386 userland. LINUX_X86_BUNDLE=dir also checks a 32-bit release
+# bundle (make release-artifacts RELEASE_TARGET=i686-unknown-linux-gnu).
+.PHONY: linux-x86-image test-linux-x86
+LINUX_X86_IMAGE ?= suifleet-linux-x86:local
+linux-x86-image:
+	docker build -f docker/linux-x86.Dockerfile --build-arg USER_UID=$(UID) --build-arg USER_GID=$(GID) -t $(LINUX_X86_IMAGE) docker/
+
+test-linux-x86: release-image linux-x86-image
+	PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_linux_x86.py --release-image $(RELEASE_IMAGE) --runner-image $(LINUX_X86_IMAGE) \
+		$(if $(LINUX_X86_BUNDLE),--bundle $(LINUX_X86_BUNDLE)) $(if $(LINUX_X86_EVIDENCE),--evidence $(LINUX_X86_EVIDENCE))
+
+# x86 catalog manifests across a real base-to-current package upgrade, on a
+# disposable network-none localnet (host, needs Docker and a warm Move cache).
+.PHONY: test-x86-catalog-localnet
+X86_CATALOG_BASE ?= origin/main
+test-x86-catalog-localnet:
+	rm -rf .x86-catalog-base && mkdir .x86-catalog-base && git archive $(X86_CATALOG_BASE) contracts | tar -x -C .x86-catalog-base
+	docker run --rm --network none -e PYTHONDONTWRITEBYTECODE=1 -v "$(CURDIR):/workspace" -w /workspace \
+		-v "$${SUIFLEET_MOVE_CACHE:-$(notdir $(CURDIR))_move-cache}:/home/dev/.move" "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" \
+		python3 scripts/test_x86_catalog_localnet.py --base-contracts .x86-catalog-base/contracts; \
+		status=$$?; rm -rf .x86-catalog-base; exit $$status
 
 # make release-verify BUNDLE=dist TRUST=release/trust.toml
 release-verify:

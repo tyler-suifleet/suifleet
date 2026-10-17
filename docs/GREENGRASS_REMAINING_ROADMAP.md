@@ -23,8 +23,10 @@ whole-catalog compatibility. Closing SF-064 completes the plan, not its children
 | SNS publication/routing | [SF-078](https://github.com/tyler-suifleet/suifleet/issues/132) | SF-032/057 | Actual messages/attributes, caller/topic grants, throttling, ambiguous responses and bounded retries |
 | Local support debug console | [SF-079](https://github.com/tyler-suifleet/suifleet/issues/133) | SF-019/027/053 | Local authenticated API/UI, scoped operations, origin/CSRF defenses, redaction, bounded queries and audit |
 
-Linux x86_64/aarch64/arm remains the initial prototype phase. Windows, macOS and
-32-bit Linux x86 remain implementation gaps, not permanent exclusions. Each
+Linux x86_64/aarch64/arm remains the initial prototype phase. Windows and macOS
+remain implementation gaps, not permanent exclusions. SF-076 adds the native
+32-bit Linux x86 daemon, packaging and catalog selection
+([LINUX_X86.md](LINUX_X86.md)); managed adapters there remain outside the phase. Each
 platform ticket must declare exact supported OS/ABI versions and exercise its own
 runner; a Linux x86_64 result cannot establish another platform's support.
 Platform scripts retain OS installation, reboot and firmware recovery ownership.
@@ -88,6 +90,11 @@ expectations. No AWS upstream behavior is newly asserted by these local contract
   queries. A configured origin alone is never authentication.
 
 ## Evidence and closure
+
+SF-076 adds the [32-bit Linux x86 runtime](LINUX_X86.md): an i686 build and
+release bundle, `x86` catalog selection and the real-daemon suites run in a
+32-bit userland. Its receipt is separate evidence; the reference vectors below
+remain specification checks.
 
 SF-073 adds [native reproducible ML components](ML_COMPONENTS.md), with original
 models and actual TensorFlow Lite software-runner inference tests. This separate
