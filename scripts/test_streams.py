@@ -348,6 +348,20 @@ def run(evidence=None):
             assert sorted(receiver.received("ring")) == list(range(d["oldest"], 100))
             print(f"PASS: retention: OverwriteOldestData kept {100 - d['oldest']} of 100 while offline; reads report evicted; "
                   f"the export reported {ring[0]['lost']} retired messages")
+            # A lowered quota below the stored inventory refuses startup, data kept.
+            stop()
+            full = config.read_text()
+            config.write_text(full.replace("max_total_bytes = 262144", "max_total_bytes = 131072"))
+            refused = subprocess.run([str(binary)], env={**os.environ, "EDGE_CONFIG": str(config)}, capture_output=True, text=True, timeout=60)
+            assert refused.returncode != 0, "daemon started over the lowered stream quota"
+            assert "need 3 streams and 135168 bytes" in refused.stdout + refused.stderr, refused.stderr[-2000:]
+            if socket_path.exists():
+                socket_path.unlink()
+            config.write_text(full)
+            start()
+            kept = ipc(PRODUCER, "stream_read", "local-a", {"start": 0, "max": accepted})["data"]["messages"]
+            assert len(kept) == accepted, len(kept)
+            print(f"PASS: lowered quota: startup refused for 3 stored streams over max_total_bytes; with the old limits all {accepted} local-a messages remain")
             if evidence:
                 head = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], text=True, capture_output=True).stdout.strip()
                 Path(evidence).write_text(json.dumps({"ticket": "SF-034", "head": head or None, "checks": passed,
