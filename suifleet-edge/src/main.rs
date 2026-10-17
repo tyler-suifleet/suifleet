@@ -12,6 +12,7 @@ mod handoff;
 mod identity;
 mod logs;
 mod mqtt;
+mod platform;
 mod reconcile;
 mod recipe;
 mod redact;
@@ -135,8 +136,14 @@ async fn main() -> anyhow::Result<()> {
         // service, keep them from ptracing the daemon (and so signing as it)
         // or taking its descriptors. execve restores the default for each
         // component.
+        // (Linux only: configuration loading refuses this signer elsewhere.)
         // SAFETY: plain prctl on this process.
+        #[cfg(target_os = "linux")]
         anyhow::ensure!(unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) } == 0, "cannot make the daemon non-dumpable");
+    }
+    #[cfg(target_os = "macos")]
+    if cfg.device.signer.is_none() {
+        identity::ensure_private(&cfg.device.keypair_path)?;
     }
     // One signer for transactions and telemetry (a PKCS#11 module is
     // initialized once per process).
