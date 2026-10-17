@@ -34,6 +34,7 @@
 use crate::{
     apply::{self, ApplyRunner},
     configuration,
+    platform::{processes, start_time, Proc},
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -233,8 +234,11 @@ impl Supervisor {
             .ok()
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
             .unwrap_or_default();
-        contain_descendants()?;
-        let left = reap_previous_runs(&root, &previous_status)?;
+        contain_descendants(&root)?;
+        // A sealed coalition recorded by the previous instance (macOS) holds
+        // all of its descendants, wherever they went.
+        let previous_coalition = previous.as_ref().filter(|previous| previous.same_boot(&current)).and_then(|previous| previous.coalition);
+        let left = reap_previous_runs(&root, &previous_status, previous_coalition)?;
         if left > 0 {
             warn!(left, "Killed component runs left by a previous daemon instance");
         }
@@ -260,6 +264,15 @@ impl Supervisor {
                 rebooted = !previous.same_boot(&current),
                 "Previous daemon instance ended without stopping its components; none of its processes can remain"
             );
+        }
+        // Only now that no leftover remains can this instance's coalition be
+        // its own.
+        let current = Instance { coalition: dedicated_coalition(), ..current };
+        set_sweep_coalition(current.coalition);
+        if cfg!(target_os = "macos") && current.coalition.is_none() {
+            warn!("Not the only process of a sealed launchd coalition: descendants that leave their \
+                   process group and clear their environment cannot be contained, and a crash of this \
+                   daemon cannot be recovered from without a reboot");
         }
         let record = Record {
             path: root.join(INSTANCE),
@@ -1055,16 +1068,6 @@ fn write_status(root: &Path, status: &Mutex<BTreeMap<String, Status>>) -> anyhow
 
 // --- Descendant containment -------------------------------------------------
 
-/// Kernel start time of a live (non-zombie) process, from /proc.
-fn start_time(pid: u32) -> Option<u64> {
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    let rest = stat.rsplit_once(')')?.1;
-    let fields: Vec<&str> = rest.split_whitespace().collect();
-    // Fields 3.. follow the command; starttime is field 22.
-    (fields.first() != Some(&"Z")).then_some(())?;
-    fields.get(19)?.parse().ok()
-}
-
 /// Environment variable naming the supervisor that started a process. Every
 /// component process inherits it (across setsid too), so a later daemon can
 /// find runs left behind even after they were reparented away from it.
@@ -1075,39 +1078,8 @@ fn marker(root: &Path) -> String {
     hex::encode(&crate::identity::hash(root.as_os_str().as_encoded_bytes())[..16])
 }
 
-struct Proc {
-    pid: u32,
-    ppid: u32,
-    pgrp: u32,
-}
-
-/// Every live (non-zombie) process, from /proc.
-fn processes() -> Vec<Proc> {
-    let Ok(entries) = std::fs::read_dir("/proc") else {
-        return Vec::new();
-    };
-    entries
-        .flatten()
-        .filter_map(|entry| {
-            let pid = entry.file_name().to_str()?.parse::<u32>().ok()?;
-            let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-            // Fields after the parenthesised command: state ppid pgrp ...
-            let fields: Vec<&str> = stat.rsplit_once(')')?.1.split_whitespace().collect();
-            (fields.first() != Some(&"Z")).then_some(())?;
-            Some(Proc {
-                pid,
-                ppid: fields.get(1)?.parse().ok()?,
-                pgrp: fields.get(2)?.parse().ok()?,
-            })
-        })
-        .collect()
-}
-
 fn carries(pid: u32, marker: &str) -> bool {
-    let entry = format!("{MARKER}={marker}");
-    std::fs::read(format!("/proc/{pid}/environ"))
-        .map(|environ| environ.split(|b| *b == 0).any(|var| var == entry.as_bytes()))
-        .unwrap_or(false)
+    crate::platform::carries(pid, format!("{MARKER}={marker}").as_bytes())
 }
 
 /// A daemon that died without stopping its components (crash, SIGKILL)
@@ -1118,7 +1090,7 @@ fn carries(pid: u32, marker: &str) -> bool {
 /// descendants (including ones that cleared their environment). They are
 /// frozen with SIGSTOP until the set is closed, so none can fork away, then
 /// killed. Fails if any survives: no component may run twice.
-fn reap_previous_runs(root: &Path, previous: &BTreeMap<String, Status>) -> anyhow::Result<usize> {
+fn reap_previous_runs(root: &Path, previous: &BTreeMap<String, Status>, coalition: Option<u64>) -> anyhow::Result<usize> {
     let me = std::process::id();
     let marker = marker(root);
     let mut runs = BTreeSet::new();
@@ -1142,7 +1114,7 @@ fn reap_previous_runs(root: &Path, previous: &BTreeMap<String, Status>) -> anyho
         let mut found: BTreeSet<u32> = table
             .iter()
             .filter(|p| p.pid != me)
-            .filter(|p| runs.contains(&p.pid) || groups.contains(&p.pgrp) || carries(p.pid, &marker))
+            .filter(|p| runs.contains(&p.pid) || groups.contains(&p.pgrp) || carries(p.pid, &marker) || in_coalition(p.pid, coalition))
             .map(|p| p.pid)
             .collect();
         loop {
@@ -1215,6 +1187,10 @@ struct Instance {
     boot_id: Option<String>,
     /// Its cgroup v2 path, when known.
     cgroup: Option<String>,
+    /// Its resource coalition (macOS), recorded only when it was the sole
+    /// member and could not leave it: every process it started is in it.
+    #[serde(default)]
+    coalition: Option<u64>,
     /// Recorded before it started any component process: none can remain.
     /// Missing (or an unreadable record) proves nothing.
     #[serde(default)]
@@ -1226,14 +1202,13 @@ impl Instance {
         Self {
             pid,
             pid_start: start_time(pid),
-            boot_id: std::fs::read_to_string("/proc/sys/kernel/random/boot_id")
-                .ok()
-                .map(|id| id.trim().to_owned()),
+            boot_id: crate::platform::boot_id(),
             cgroup: std::fs::read_to_string("/proc/self/cgroup").ok().and_then(|text| {
                 text.lines()
                     .find_map(|line| line.strip_prefix("0::"))
                     .map(str::to_owned)
             }),
+            coalition: None,
             idle: true,
         }
     }
@@ -1270,6 +1245,32 @@ impl Instance {
         if !self.same_boot(current) {
             return Ok(());
         }
+        #[cfg(target_os = "macos")]
+        {
+            let _ = (cgroups, writable);
+            self.coalition_left_nothing(current, crate::platform::coalition_members)
+        }
+        #[cfg(not(target_os = "macos"))]
+        self.cgroup_left_nothing(current, cgroups, writable)
+    }
+
+    /// The macOS equivalent of a sealed cgroup: the sealed coalition it
+    /// recorded holds no process but this one.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    fn coalition_left_nothing(&self, current: &Self, members: impl Fn(u64) -> Vec<u32>) -> Result<(), String> {
+        let Some(id) = self.coalition else {
+            return Err("it recorded no sealed coalition of its own".into());
+        };
+        let others = members(id).into_iter().filter(|&pid| pid != current.pid).count();
+        if others == 0 {
+            Ok(())
+        } else {
+            Err(format!("its coalition {id} still holds {others} other process(es)"))
+        }
+    }
+
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    fn cgroup_left_nothing(&self, current: &Self, cgroups: &Path, writable: impl Fn(&Path) -> bool) -> Result<(), String> {
         let Some(path) = &self.cgroup else {
             return Err("its cgroup is unknown".into());
         };
@@ -1390,6 +1391,7 @@ pub fn spawn_tracked(command: &mut tokio::process::Command) -> std::io::Result<T
 /// sweep of a concurrently running supervisor test leaves it alone. Pass the
 /// PID to [`forget_std_tracked`] once reaped.
 #[cfg(test)]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub fn spawn_std_tracked(command: &mut std::process::Command) -> std::io::Result<std::process::Child> {
     let mut children = CHILDREN.lock().unwrap();
     let child = command.spawn()?;
@@ -1397,30 +1399,34 @@ pub fn spawn_std_tracked(command: &mut std::process::Command) -> std::io::Result
     Ok(child)
 }
 #[cfg(test)]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub fn forget_std_tracked(pid: u32) {
     CHILDREN.lock().unwrap().remove(&pid);
 }
 
-/// Become a child subreaper and kill orphans as they arrive.
-fn contain_descendants() -> anyhow::Result<()> {
+/// Become a child subreaper (Linux) and kill orphans as they arrive.
+fn contain_descendants(root: &Path) -> anyhow::Result<()> {
     #[cfg(target_os = "linux")]
     {
-        static STARTED: std::sync::Once = std::sync::Once::new();
+        let _ = root;
         // SAFETY: plain prctl on this process.
         if unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) } != 0 {
             return Err(std::io::Error::last_os_error().into());
         }
-        // A plain thread: independent of any one async runtime.
-        STARTED.call_once(|| {
-            std::thread::spawn(|| loop {
-                let killed = sweep_orphans();
-                if killed > 0 {
-                    warn!(killed, "Killed unmanaged descendants orphaned into the supervisor");
-                }
-                std::thread::sleep(Duration::from_secs(1));
-            });
-        });
     }
+    #[cfg(target_os = "macos")]
+    MARKERS.lock().unwrap().insert(marker(root));
+    static STARTED: std::sync::Once = std::sync::Once::new();
+    // A plain thread: independent of any one async runtime.
+    STARTED.call_once(|| {
+        std::thread::spawn(|| loop {
+            let killed = sweep_orphans();
+            if killed > 0 {
+                warn!(killed, "Killed unmanaged descendants orphaned into the supervisor");
+            }
+            std::thread::sleep(Duration::from_secs(1));
+        });
+    });
     Ok(())
 }
 
@@ -1464,7 +1470,97 @@ pub fn sweep_orphans() -> usize {
     }
     killed
 }
-#[cfg(not(target_os = "linux"))]
+
+/// Markers of the state roots this process supervises (macOS orphan sweep).
+#[cfg(target_os = "macos")]
+static MARKERS: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
+/// This daemon's sealed coalition, when it has one (macOS orphan sweep).
+#[cfg(target_os = "macos")]
+static COALITION: Mutex<Option<u64>> = Mutex::new(None);
+
+fn set_sweep_coalition(coalition: Option<u64>) {
+    #[cfg(target_os = "macos")]
+    {
+        *COALITION.lock().unwrap() = coalition;
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = coalition;
+}
+
+/// Whether a process belongs to the given coalition (macOS only).
+fn in_coalition(pid: u32, coalition: Option<u64>) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        coalition.is_some() && crate::platform::coalition(pid) == coalition
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (pid, coalition);
+        false
+    }
+}
+
+/// This process's coalition, when it is a sealed one of its own (macOS): it
+/// is the only member, so a launchd job's, and it is not root, so neither it
+/// nor anything it starts can spawn into another coalition. Then every
+/// descendant, however detached, stays a member.
+fn dedicated_coalition() -> Option<u64> {
+    #[cfg(target_os = "macos")]
+    {
+        // SAFETY: plain geteuid.
+        if unsafe { libc::geteuid() } == 0 {
+            return None;
+        }
+        let me = std::process::id();
+        let id = crate::platform::coalition(me)?;
+        (crate::platform::coalition_members(id) == [me]).then_some(id)
+    }
+    #[cfg(not(target_os = "macos"))]
+    None
+}
+
+/// macOS has no subreaper: an orphan is reparented to launchd. Kill every
+/// process that is not this one or its descendant, yet is a member of this
+/// daemon's sealed coalition (it descended from a component, however it
+/// detached), or is an orphan of this user still carrying a supervised state
+/// root's marker (without a sealed coalition, a descendant that cleared its
+/// environment escapes this). Returns how many were killed.
+#[cfg(target_os = "macos")]
+pub fn sweep_orphans() -> usize {
+    let me = std::process::id();
+    // Held across the scan, so no child is spawned and registered meanwhile.
+    let _known = CHILDREN.lock().unwrap();
+    let coalition = *COALITION.lock().unwrap();
+    let markers: Vec<String> = MARKERS.lock().unwrap().iter().map(|m| format!("{MARKER}={m}")).collect();
+    // SAFETY: plain getuid.
+    let uid = unsafe { libc::getuid() };
+    let table = processes();
+    let mut mine = BTreeSet::from([me]);
+    loop {
+        let more: Vec<u32> = table.iter().filter(|p| !mine.contains(&p.pid) && mine.contains(&p.ppid)).map(|p| p.pid).collect();
+        if more.is_empty() {
+            break;
+        }
+        mine.extend(more);
+    }
+    let mut killed = 0;
+    for p in table.iter().filter(|p| !mine.contains(&p.pid)) {
+        let orphan = in_coalition(p.pid, coalition)
+            || (p.ppid == 1
+                && crate::platform::owner(p.pid) == Some(uid)
+                && markers.iter().any(|entry| crate::platform::carries(p.pid, entry.as_bytes())));
+        if orphan {
+            // SAFETY: plain kill of a process of this user.
+            unsafe {
+                libc::kill(p.pid as i32, libc::SIGKILL);
+            }
+            killed += 1;
+        }
+    }
+    killed
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 pub fn sweep_orphans() -> usize {
     0
 }
@@ -1553,11 +1649,11 @@ mod tests {
     }
 
     fn alive(pid: u32) -> bool {
-        std::fs::read_to_string(format!("/proc/{pid}/stat"))
-            .ok()
-            .and_then(|stat| stat.rsplit_once(')').map(|(_, rest)| rest.split_whitespace().next() != Some("Z")))
-            .unwrap_or(false)
+        start_time(pid).is_some()
     }
+
+    /// Run a command in a new session (macOS has no setsid(1)).
+    const SETSID: &str = if cfg!(target_os = "macos") { "/usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV'" } else { "setsid" };
 
     async fn until(what: &str, mut condition: impl FnMut() -> bool) {
         for _ in 0..100 {
@@ -1605,7 +1701,7 @@ mod tests {
         // A background child in the group and one that escapes it with setsid.
         let spec = f.spec(
             "1.0.0",
-            "sleep 300 & echo $! > {work}/grouped; setsid sleep 300 & echo $! > {work}/escaped; cat {artifact} > {work}/seen; exec sleep 300",
+            &format!("sleep 300 & echo $! > {{work}}/grouped; {SETSID} sleep 300 & echo $! > {{work}}/escaped; cat {{artifact}} > {{work}}/seen; exec sleep 300"),
         );
         f.deploy(&mut s, spec, None).await.unwrap();
         let status = s.status()["app"].clone();
@@ -2012,7 +2108,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         // A leftover run (no status.json records it) with a setsid-escaped
         // child and one that cleared its environment; and an unrelated process.
-        let script = "setsid sleep 300 & echo $! > escaped; env -i sleep 300 & echo $! > cleared; exec sleep 300";
+        let script = format!("{SETSID} sleep 300 & echo $! > escaped; env -i sleep 300 & echo $! > cleared; exec sleep 300");
         let mut leftover = tokio::process::Command::new("/bin/sh");
         leftover.arg("-c").arg(script).current_dir(&f.dir).env(MARKER, marker(&root));
         let mut leftover = spawn_tracked(&mut leftover).unwrap();
@@ -2025,7 +2121,7 @@ mod tests {
         until("the children to exec", || carries(escaped, &marker(&root)) && alive(cleared)).await;
         assert!(!carries(cleared, &marker(&root)));
 
-        assert!(reap_previous_runs(&root, &BTreeMap::new()).unwrap() >= 3);
+        assert!(reap_previous_runs(&root, &BTreeMap::new(), None).unwrap() >= 3);
         assert!(!alive(leftover.pid()) && !alive(escaped) && !alive(cleared), "a leftover survived recovery");
         let _ = leftover.wait().await;
         assert!(alive(other.pid()), "recovery killed another supervisor's process");
@@ -2091,6 +2187,7 @@ mod tests {
         assert!(!record.exists(), "a clean stop kept the instance record");
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn leftovers_are_ruled_out_only_by_a_sealed_empty_cgroup_or_a_reboot() {
         let cgroups = std::env::temp_dir().join(format!("suifleet-cgroups-{}", std::process::id()));
@@ -2100,7 +2197,7 @@ mod tests {
         for dir in [&cgroups, &cgroups.join("system.slice")] {
             std::fs::write(dir.join("cgroup.procs"), "1\n2\n").unwrap();
         }
-        let current = Instance { pid: 40, pid_start: Some(1), boot_id: Some("b".into()), cgroup: Some("/system.slice/suifleet.service".into()), idle: false };
+        let current = Instance { pid: 40, pid_start: Some(1), boot_id: Some("b".into()), cgroup: Some("/system.slice/suifleet.service".into()), coalition: None, idle: false };
         let previous = Instance { pid: 30, ..current.clone() };
         let sealed = |_: &Path| false;
         let procs = |dir: &Path, pids: &str| std::fs::write(dir.join("cgroup.procs"), pids).unwrap();
@@ -2132,6 +2229,30 @@ mod tests {
         let _ = std::fs::remove_dir_all(&cgroups);
     }
 
+    #[test]
+    fn leftovers_are_ruled_out_only_by_a_sealed_empty_coalition() {
+        let current = Instance { pid: 40, pid_start: Some(1), boot_id: Some("b".into()), cgroup: None, coalition: Some(7), idle: false };
+        let previous = Instance { pid: 30, ..current.clone() };
+        // Only the new instance left in the old one's coalition (launchd reuses
+        // a job's coalition), or nothing at all in it.
+        assert_eq!(previous.coalition_left_nothing(&current, |id| if id == 7 { vec![40] } else { vec![] }), Ok(()));
+        assert_eq!(previous.coalition_left_nothing(&current, |_| vec![]), Ok(()));
+        // A survivor, however detached.
+        let error = previous.coalition_left_nothing(&current, |_| vec![40, 77]).unwrap_err();
+        assert!(error.contains("1 other process"), "{error}");
+        // No sealed coalition of its own (shared, or running as root) proves nothing.
+        let unsealed = Instance { coalition: None, ..previous.clone() };
+        assert!(unsealed.coalition_left_nothing(&current, |_| vec![]).is_err());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_test_process_has_no_sealed_coalition_of_its_own() {
+        // The test runner shares its coalition with its parents: never one to
+        // sweep or to prove anything with.
+        assert_eq!(dedicated_coalition(), None);
+    }
+
     #[tokio::test]
     async fn readiness_and_shutdown_keep_the_component_environment() {
         std::env::set_var("SUIFLEET_TEST_SECRET", "leak");
@@ -2155,7 +2276,7 @@ mod tests {
     async fn retired_component_is_stopped_and_not_restarted() {
         let mut f = Fixture::new("retire");
         let mut s = f.open();
-        let v1 = f.spec("1.0.0", "echo run >> {work}/runs; setsid sleep 300 & echo $! > {work}/escaped; exec sleep 300");
+        let v1 = f.spec("1.0.0", &format!("echo run >> {{work}}/runs; {SETSID} sleep 300 & echo $! > {{work}}/escaped; exec sleep 300"));
         f.deploy(&mut s, v1, None).await.unwrap();
         let main = s.status()["app"].pid.unwrap();
         let escaped: u32 = f.read("escaped").trim().parse().unwrap();

@@ -566,9 +566,7 @@ pub fn ingress_url(base: &str) -> anyhow::Result<reqwest::Url> {
 }
 
 pub fn boot_id() -> Option<String> {
-    std::fs::read_to_string("/proc/sys/kernel/random/boot_id")
-        .ok()
-        .map(|id| bounded(id.trim(), 64))
+    crate::platform::boot_id().map(|id| bounded(&id, 64))
 }
 
 #[cfg(test)]

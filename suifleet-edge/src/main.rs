@@ -9,6 +9,7 @@ mod deps;
 mod firmware;
 mod handoff;
 mod identity;
+mod platform;
 mod reconcile;
 mod recipe;
 mod protocol;
