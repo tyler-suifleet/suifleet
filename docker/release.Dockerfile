@@ -28,6 +28,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc-11-aarch64-linux-gnu=11.4.0-1ubuntu1~22.04.3cross1 \
     binutils-aarch64-linux-gnu=2.38-4ubuntu2.12 \
     libc6-dev-arm64-cross=2.35-0ubuntu1cross3 \
+    gcc-i686-linux-gnu=4:11.2.0-1ubuntu1 \
+    gcc-11-i686-linux-gnu=11.4.0-1ubuntu1~22.04.3cross1 \
+    binutils-i686-linux-gnu=2.38-4ubuntu2.12 \
+    libc6-dev-i386-cross=2.35-0ubuntu1cross3 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --gid ${USER_GID} builder \
@@ -41,15 +45,19 @@ ENV CARGO_HOME=/home/builder/.cargo \
     PATH=/home/builder/.cargo/bin:${PATH} \
     CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
     CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc \
-    AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar
+    AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar \
+    CARGO_TARGET_I686_UNKNOWN_LINUX_GNU_LINKER=i686-linux-gnu-gcc \
+    CC_i686_unknown_linux_gnu=i686-linux-gnu-gcc \
+    AR_i686_unknown_linux_gnu=i686-linux-gnu-ar
 
 RUN curl -fsSL -o /tmp/rustup-init \
       "https://static.rust-lang.org/rustup/archive/${RUSTUP_VERSION}/x86_64-unknown-linux-gnu/rustup-init" \
     && echo "${RUSTUP_SHA256}  /tmp/rustup-init" | sha256sum -c - \
     && chmod +x /tmp/rustup-init \
     && /tmp/rustup-init -y --no-modify-path --profile minimal --default-toolchain "${RUST_VERSION}" \
-         --target aarch64-unknown-linux-gnu \
+         --target aarch64-unknown-linux-gnu --target i686-unknown-linux-gnu \
     && rm /tmp/rustup-init \
-    && rustc --version && aarch64-linux-gnu-gcc --version | head -1
+    && rustc --version && aarch64-linux-gnu-gcc --version | head -1 \
+    && i686-linux-gnu-gcc --version | head -1
 
 WORKDIR /workspace

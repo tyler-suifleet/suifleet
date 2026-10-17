@@ -84,6 +84,22 @@
       ],
       "authorization": "User explicitly requested applying the implementation/integration acceptance split to SF-014 on 2026-10-15. Physical Pi and real extension-wallet checks remain required in linked acceptance tickets."
     },
+    "SF-020": {
+      "deferred_checks": [
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "retained_gates": [
+        "all source/security findings repaired",
+        "edge and indexer unit tests including shared redaction cases, quota, auth and alert rules",
+        "real-daemon log shipping (scripts/test_logs.py) and the real localnet indexer end-to-end log/diagnostics/alert check (make test-indexer-localnet)",
+        "exact-head ordinary CI and current-head/base testnet status",
+        "fresh independent review of exact head/base/feedback/policy",
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
+      ]
+    },
     "SF-024": {
       "deferred_checks": [
         "hosted/public-node and archival-retention integration",
@@ -290,17 +306,6 @@
       ]
     },
     "SF-017": {
-      "deferred_checks": [
-        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
-      ],
-      "acceptance_issues": [
-        "https://github.com/tyler-suifleet/suifleet/issues/32"
-      ],
-      "retained_gates": [
-        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
-      ]
-    },
-    "SF-020": {
       "deferred_checks": [
         "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
       ],

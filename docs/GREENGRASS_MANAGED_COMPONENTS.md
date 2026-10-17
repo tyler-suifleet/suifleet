@@ -112,7 +112,7 @@ The initial prototype phase is the SF-028 Linux rows: `x86_64`, `aarch64` and `a
 | Linux x86_64, aarch64, arm | Initial prototype | Development hosts, Yocto/Raspberry Pi and 32-bit ARM catalog selection |
 | Windows | Roadmap gap (SF-074) | The daemon depends on systemd and cgroups (SF-014) and on Yocto packaging. Translation omits and reports Windows manifests meanwhile |
 | macOS | Roadmap gap (SF-075) | No runtime. AWS lists only Linux and Windows for the catalog components |
-| Linux x86 (32-bit) | Roadmap gap (SF-076) | No Yocto or test target |
+| Linux x86 (32-bit) | Roadmap gap (SF-076) | Native daemon, release bundle and `x86` catalog selection with 32-bit software-runner evidence ([LINUX_X86.md](LINUX_X86.md)). Managed adapters and AWS recipe translation do not target it; no Yocto image |
 
 These gaps are not approved exclusions; they stay tracked unless the user changes the full parity goal. Windows support would need its own supervisor, service packaging, filesystem permissions and the full test suite. It is not an adapter.
 

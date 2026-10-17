@@ -221,6 +221,9 @@ pub async fn stage(
         !version.is_empty() && version.len() <= 64 && version.bytes().all(|b| b.is_ascii_alphanumeric() || b"._+-".contains(&b)),
         "daemon version is not a safe path segment"
     );
+    // An ELF build for another architecture may still execute (an x86_64
+    // kernel also runs i686 binaries), so its preflight would not catch it.
+    same_abi(artifact, &std::env::current_exe()?)?;
     let dir = install_dir(config, state_dir);
     if let Some(existing) = read(&dir)? {
         anyhow::ensure!(existing.phase != Phase::Pending, "another daemon update ({}) is still pending", existing.deployment);
@@ -261,6 +264,55 @@ pub async fn stage(
         phase: Phase::Pending,
         error: None,
     })?;
+    Ok(())
+}
+
+/// ELF class (32/64-bit), byte order and machine, or `None` for a file
+/// without a well-formed ELF identification.
+fn elf_abi(path: &Path) -> anyhow::Result<Option<(u8, u8, u16)>> {
+    use std::io::Read;
+    let mut header = [0u8; 20];
+    let mut file = std::fs::File::open(path)?;
+    let mut filled = 0;
+    while filled < header.len() {
+        match file.read(&mut header[filled..])? {
+            0 => return Ok(None),
+            n => filled += n,
+        }
+    }
+    if &header[..4] != b"\x7fELF" || !matches!(header[4], 1 | 2) || !matches!(header[5], 1 | 2) || header[6] != 1 {
+        return Ok(None);
+    }
+    let machine = [header[18], header[19]];
+    let machine = if header[5] == 2 { u16::from_be_bytes(machine) } else { u16::from_le_bytes(machine) };
+    Ok(Some((header[4], header[5], machine)))
+}
+
+fn describe((class, data, machine): (u8, u8, u16)) -> String {
+    let name = match machine {
+        3 => "x86".to_owned(),
+        40 => "arm".to_owned(),
+        62 => "x86_64".to_owned(),
+        183 => "aarch64".to_owned(),
+        other => format!("machine {other}"),
+    };
+    let bits = match class { 1 => "32-bit", 2 => "64-bit", _ => "unknown class" };
+    let order = match data { 1 => "little-endian", 2 => "big-endian", _ => "unknown byte order" };
+    format!("{name} {bits} {order}")
+}
+
+/// A daemon ELF candidate must have the running daemon's ELF ABI. Non-ELF
+/// candidates (for example interpreter scripts) are left to the preflight.
+fn same_abi(candidate: &Path, running: &Path) -> anyhow::Result<()> {
+    let (Some(candidate), Some(running)) = (elf_abi(candidate)?, elf_abi(running)?) else {
+        return Ok(());
+    };
+    anyhow::ensure!(
+        candidate == running,
+        "daemon artifact is built for another architecture ({}; this daemon is {}); the running daemon is unchanged",
+        describe(candidate),
+        describe(running)
+    );
     Ok(())
 }
 
@@ -406,6 +458,50 @@ mod tests {
         assert_eq!(decide(Some(&h), Some(stale), 3), (Start::Confirmed(h.previous.clone().unwrap()), None));
         h.previous = None;
         assert_eq!(decide(Some(&h), Some(stale), 3), (Start::Base, None));
+    }
+
+    fn elf(d: &Path, name: &str, class: u8, data: u8, machine: u16) -> PathBuf {
+        let mut bytes = vec![0x7f, b'E', b'L', b'F', class, data, 1];
+        bytes.resize(18, 0);
+        let machine = if data == 2 { machine.to_be_bytes() } else { machine.to_le_bytes() };
+        bytes.extend_from_slice(&machine);
+        bytes.resize(64, 0);
+        let path = d.join(name);
+        std::fs::write(&path, bytes).unwrap();
+        path
+    }
+
+    #[test]
+    fn daemon_candidates_must_match_the_running_elf_abi() {
+        let d = dir("abi");
+        let i686 = elf(&d, "i686", 1, 1, 3);
+        let x86_64 = elf(&d, "x86_64", 2, 1, 62);
+        let aarch64 = elf(&d, "aarch64", 2, 1, 183);
+        let big = elf(&d, "big", 2, 2, 183);
+        assert_eq!(elf_abi(&i686).unwrap(), Some((1, 1, 3)));
+        assert_eq!(elf_abi(&big).unwrap(), Some((2, 2, 183)));
+        assert!(same_abi(&i686, &elf(&d, "i686-copy", 1, 1, 3)).is_ok());
+        for (candidate, running) in [(&x86_64, &i686), (&i686, &x86_64), (&aarch64, &x86_64), (&big, &aarch64)] {
+            let error = same_abi(candidate, running).unwrap_err().to_string();
+            assert!(error.contains("another architecture"), "{error}");
+        }
+        assert!(same_abi(&x86_64, &i686).unwrap_err().to_string().contains("x86_64 64-bit little-endian; this daemon is x86 32-bit"));
+        // Scripts and truncated files are not ELF: the preflight decides.
+        let script = d.join("script");
+        std::fs::write(&script, "#!/bin/sh\nexit 1\n").unwrap();
+        let short = d.join("short");
+        std::fs::write(&short, b"\x7fELF\x01").unwrap();
+        let garbage = d.join("garbage");
+        std::fs::write(&garbage, b"\x7fELF this is not an executable\n").unwrap();
+        for path in [&script, &short, &garbage] {
+            assert_eq!(elf_abi(path).unwrap(), None);
+            assert!(same_abi(path, &i686).is_ok());
+        }
+        // This test binary is ELF itself, with its own ABI.
+        let me = std::env::current_exe().unwrap();
+        assert!(elf_abi(&me).unwrap().is_some());
+        assert!(same_abi(&me, &me).is_ok());
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     fn dir(name: &str) -> PathBuf {

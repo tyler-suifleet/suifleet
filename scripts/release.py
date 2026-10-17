@@ -2,6 +2,7 @@
 """Reproducible SuiFleet daemon release bundles (SF-039).
 
     release.py build --out dist [--ref HEAD] [--image suifleet-release:local] [--reproduce]
+                     [--target aarch64-unknown-linux-gnu|i686-unknown-linux-gnu]
 
 On the host: exports exactly the committed tree of REF with `git archive` (so
 uncommitted files can never leak into a release), then builds inside the
@@ -31,6 +32,9 @@ import sys
 import tarfile
 import tempfile
 
+# Supported release targets and their pinned cross linkers (docker/release.Dockerfile).
+# i686 is 32-bit Linux x86 (SF-076, docs/LINUX_X86.md).
+LINKERS = {"aarch64-unknown-linux-gnu": "aarch64-linux-gnu-gcc", "i686-unknown-linux-gnu": "i686-linux-gnu-gcc"}
 TARGET = "aarch64-unknown-linux-gnu"
 NAMESPACE = "https://github.com/tyler-suifleet/suifleet/releases"
 
@@ -77,7 +81,8 @@ def build(args):
                 "-v", "sui_cargo-git:/home/builder/.cargo/git",
                 "-e", f"SOURCE_DATE_EPOCH={epoch}", "-e", f"RELEASE_COMMIT={commit}",
                 "-e", f"RELEASE_BUILDER_IMAGE={image_id}",
-                args.image, "python3", "/src/scripts/release.py", "container-build", "--src", "/src", "--out", "/out")
+                args.image, "python3", "/src/scripts/release.py", "container-build", "--src", "/src", "--out", "/out",
+                "--target", args.target)
             bundles.append({p.name: sha256(p) for p in result.iterdir()})
     if args.reproduce:
         first, second = bundles
@@ -93,6 +98,8 @@ def build(args):
 # ── Inside the release image ────────────────────────────────────────────────
 
 def container_build(args):
+    global TARGET
+    TARGET = args.target
     src, out = Path(args.src), Path(args.out)
     epoch = int(os.environ["SOURCE_DATE_EPOCH"])
     commit = os.environ["RELEASE_COMMIT"]
@@ -135,7 +142,7 @@ def container_build(args):
         "target": TARGET,
         "rustc": run("rustc", "-vV", capture=True).splitlines(),
         "cargo": run("cargo", "-V", capture=True),
-        "linker": run("aarch64-linux-gnu-gcc", "--version", capture=True).splitlines()[0],
+        "linker": run(LINKERS[TARGET], "--version", capture=True).splitlines()[0],
         "cargo_lock_sha256": sha256(edge / "Cargo.lock"),
         "builder_image": os.environ.get("RELEASE_BUILDER_IMAGE", "unknown"),
         "binary_sha256": sha256(binary),
@@ -287,9 +294,11 @@ def main():
     builder.add_argument("--ref", default="HEAD")
     builder.add_argument("--image", default="suifleet-release:local")
     builder.add_argument("--reproduce", action="store_true")
+    builder.add_argument("--target", choices=sorted(LINKERS), default=TARGET)
     inside = commands.add_parser("container-build")
     inside.add_argument("--src", required=True)
     inside.add_argument("--out", required=True)
+    inside.add_argument("--target", choices=sorted(LINKERS), default=TARGET)
     args = parser.parse_args()
     build(args) if args.command == "build" else container_build(args)
 
