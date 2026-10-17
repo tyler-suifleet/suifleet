@@ -195,6 +195,17 @@ impl std::fmt::Display for Backpressure {
 }
 impl std::error::Error for Backpressure {}
 
+/// Why a publication can never be accepted with the configured limits: its
+/// share of some queue exceeds them even when that queue is empty.
+#[derive(Debug)]
+pub struct Unfittable(pub String);
+impl std::fmt::Display for Unfittable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "publication exceeds the subscription limits even when empty: {}", self.0)
+    }
+}
+impl std::error::Error for Unfittable {}
+
 pub struct Broker {
     dir: PathBuf,
     limits: Limits,
@@ -323,90 +334,140 @@ impl Broker {
     /// Fan a publication out to every matching subscription, except those of
     /// `skip_principal` (the bridge's loop breaker). All or nothing for QoS 1.
     pub fn publish(&mut self, sender: &str, topic: &str, payload: &Value, skip_principal: Option<&str>) -> anyhow::Result<Value> {
+        let mut results = self.publish_all(sender, &[(topic.to_owned(), payload.clone())], skip_principal)?;
+        Ok(results.remove(0))
+    }
+
+    /// Publish several messages, in order, as one commit: either every QoS 1
+    /// copy of every message is stored or none is. A queue that lacks room
+    /// for its share of the batch refuses all of it with `Backpressure`; a
+    /// queue whose share exceeds its limits even when empty returns
+    /// `Unfittable`, since retrying can never succeed.
+    pub fn publish_all(&mut self, sender: &str, publications: &[(String, Value)], skip_principal: Option<&str>) -> anyhow::Result<Vec<Value>> {
         if let Some(reason) = &self.poisoned {
             anyhow::bail!("messaging store needs a daemon restart: {reason}");
         }
-        if let Some(reason) = invalid_publication(topic, payload) {
-            anyhow::bail!(reason);
+        anyhow::ensure!(!publications.is_empty(), "nothing to publish");
+        let now = crate::telemetry::now_ms();
+        // Per publication: its message, stored bytes and matching subscriptions.
+        let mut batch: Vec<(Message, Vec<u8>, Vec<(String, String)>)> = Vec::new();
+        for (offset, (topic, payload)) in publications.iter().enumerate() {
+            if let Some(reason) = invalid_publication(topic, payload) {
+                anyhow::bail!(reason);
+            }
+            let targets: Vec<(String, String)> = self
+                .subs
+                .iter()
+                .filter(|((principal, filter), _)| matches(filter, topic) && Some(principal.as_str()) != skip_principal)
+                .map(|(k, _)| k.clone())
+                .collect();
+            // Ids are taken only if the batch is committed.
+            let message = Message { id: self.seq + 1 + offset as u64, topic: topic.clone(), sender: sender.to_owned(), payload: payload.clone(), published_ms: now };
+            // Bounds count the bytes actually stored, including escaping.
+            let encoded = serde_json::to_vec(&message)?;
+            batch.push((message, encoded, targets));
         }
-        let targets: Vec<(String, String)> = self
-            .subs
+        // What the batch adds to each durable queue: (messages, bytes).
+        let mut added: BTreeMap<&(String, String), (usize, u64)> = BTreeMap::new();
+        for (_, encoded, targets) in &batch {
+            for key in targets.iter().filter(|k| self.subs[*k].record.qos == 1) {
+                let entry = added.entry(key).or_default();
+                entry.0 += 1;
+                entry.1 += encoded.len() as u64;
+            }
+        }
+        let unfittable: Vec<String> = added
             .iter()
-            .filter(|((principal, filter), _)| matches(filter, topic) && Some(principal.as_str()) != skip_principal)
-            .map(|(k, _)| k.clone())
+            .filter(|(_, (count, bytes))| *count > self.limits.max_messages || *bytes > self.limits.max_bytes)
+            .map(|((principal, filter), _)| format!("{principal} {filter}"))
             .collect();
-        // The id is taken only if the publication is committed.
-        let message = Message { id: self.seq + 1, topic: topic.to_owned(), sender: sender.to_owned(), payload: payload.clone(), published_ms: crate::telemetry::now_ms() };
-        let encoded = serde_json::to_vec(&message)?;
-        // Bounds count the bytes actually stored, including escaping.
-        let size = encoded.len() as u64;
-        let full: Vec<String> = targets
+        if !unfittable.is_empty() {
+            return Err(Unfittable(unfittable.join(", ")).into());
+        }
+        let full: Vec<(String, String)> = added
             .iter()
-            .filter(|k| {
-                let s = &self.subs[*k];
-                s.record.qos == 1
-                    && (s.queued.len() >= self.limits.max_messages
-                        || s.queued.iter().map(|(_, b)| b).sum::<u64>() + size > self.limits.max_bytes)
+            .filter(|(key, (count, bytes))| {
+                let s = &self.subs[**key];
+                s.queued.len() + count > self.limits.max_messages || s.queued.iter().map(|(_, b)| b).sum::<u64>() + bytes > self.limits.max_bytes
             })
-            .map(|(principal, filter)| format!("{principal} {filter}"))
+            .map(|(key, _)| (*key).clone())
             .collect();
         if !full.is_empty() {
-            for (principal, filter) in &targets {
-                if full.contains(&format!("{principal} {filter}")) {
-                    self.subs.get_mut(&(principal.clone(), filter.clone())).unwrap().record.refused += 1;
-                }
+            for key in &full {
+                self.subs.get_mut(key).unwrap().record.refused += 1;
             }
             self.save()?;
-            return Err(Backpressure(full.join(", ")).into());
+            return Err(Backpressure(full.iter().map(|(p, f)| format!("{p} {f}")).collect::<Vec<_>>().join(", ")).into());
         }
-        let dirs: Vec<PathBuf> = targets.iter().map(|k| &self.subs[k]).filter(|s| s.record.qos == 1).map(|s| s.dir.clone()).collect();
-        self.spool(&dirs, message.id, &encoded)?;
-        self.seq = message.id;
-        let (mut durable, mut volatile) = (0, 0);
-        for key in &targets {
-            let sub = self.subs.get_mut(key).unwrap();
-            if sub.record.qos == 1 {
-                sub.queued.push_back((message.id, size));
-                durable += 1;
-            } else {
-                if sub.qos0.len() >= self.limits.qos0_messages {
-                    sub.qos0.pop_front();
-                    sub.record.dropped += 1;
+        let copies: Vec<(Vec<PathBuf>, u64, &[u8])> = batch
+            .iter()
+            .map(|(message, encoded, targets)| {
+                let dirs = targets.iter().map(|k| &self.subs[k]).filter(|s| s.record.qos == 1).map(|s| s.dir.clone()).collect();
+                (dirs, message.id, encoded.as_slice())
+            })
+            .collect();
+        self.spool(&copies)?;
+        self.seq = batch.last().unwrap().0.id;
+        let mut results = Vec::new();
+        let mut any_volatile = false;
+        for (message, encoded, targets) in &batch {
+            let (mut durable, mut volatile) = (0, 0);
+            for key in targets {
+                let sub = self.subs.get_mut(key).unwrap();
+                if sub.record.qos == 1 {
+                    sub.queued.push_back((message.id, encoded.len() as u64));
+                    durable += 1;
+                } else {
+                    if sub.qos0.len() >= self.limits.qos0_messages {
+                        sub.qos0.pop_front();
+                        sub.record.dropped += 1;
+                    }
+                    sub.qos0.push_back(message.clone());
+                    volatile += 1;
                 }
-                sub.qos0.push_back(message.clone());
-                volatile += 1;
             }
+            any_volatile |= volatile > 0;
+            results.push(json!({ "id": message.id, "durable": durable, "volatile": volatile }));
         }
         // Committed: a counter that cannot be saved must not turn this into a refusal.
-        if volatile > 0 {
+        if any_volatile {
             if let Err(error) = self.save() {
                 tracing::warn!("cannot save pubsub counters: {error:#}");
             }
         }
-        Ok(json!({ "id": message.id, "durable": durable, "volatile": volatile }))
+        Ok(results)
     }
 
-    /// Store message `id` in every durable queue in `dirs`, or in none. Copies
-    /// are staged and synced, renamed into place, then committed by the synced
-    /// `seq` file. Any failure removes this id's copies again and returns
-    /// `Backpressure`, so the publisher (or the bridge's broker) retries later.
-    fn spool(&mut self, dirs: &[PathBuf], id: u64, encoded: &[u8]) -> anyhow::Result<()> {
-        // Every path this publication may have created, for the undo.
+    /// Store each `(dirs, id, bytes)` copy in every durable queue in its
+    /// `dirs`, or store nothing. Copies are staged and synced, renamed into
+    /// place, then committed together by the synced `seq` file (the highest
+    /// id). Any failure removes the copies again and returns `Backpressure`,
+    /// so the publisher (or the bridge's broker) retries later.
+    fn spool(&mut self, copies: &[(Vec<PathBuf>, u64, &[u8])]) -> anyhow::Result<()> {
+        let Some(last) = copies.iter().map(|(_, id, _)| *id).max() else {
+            return Ok(());
+        };
+        let name = |id: u64, extension: &str| format!("{id:020}.{extension}");
+        // Every path this commit may have created, for the undo.
         let mut made: Vec<PathBuf> = Vec::new();
         let mut commit = || -> std::io::Result<()> {
-            for d in dirs {
-                made.push(d.join(format!("{id:020}.tmp")));
-                write_file_synced(made.last().unwrap(), encoded)?;
+            for (dirs, id, encoded) in copies {
+                for d in dirs {
+                    made.push(d.join(name(*id, "tmp")));
+                    write_file_synced(made.last().unwrap(), encoded)?;
+                }
             }
-            for d in dirs {
-                let placed = d.join(format!("{id:020}.json"));
-                std::fs::rename(d.join(format!("{id:020}.tmp")), &placed)?;
-                made.push(placed);
+            for (dirs, id, _) in copies {
+                for d in dirs {
+                    let placed = d.join(name(*id, "json"));
+                    std::fs::rename(d.join(name(*id, "tmp")), &placed)?;
+                    made.push(placed);
+                }
             }
-            for d in dirs {
+            for d in copies.iter().flat_map(|(dirs, ..)| dirs) {
                 sync_dir(d)?;
             }
-            write_synced(&self.dir.join("seq"), id.to_string().as_bytes())
+            write_synced(&self.dir.join("seq"), last.to_string().as_bytes())
         };
         let Err(error) = commit() else {
             return Ok(());
@@ -415,19 +476,19 @@ impl Broker {
             for path in &made {
                 remove_if_present(path)?;
             }
-            for d in dirs {
+            for d in copies.iter().flat_map(|(dirs, ..)| dirs) {
                 sync_dir(d)?;
             }
             Ok(())
         };
         if let Err(undo_error) = undo() {
             // Uncommitted copies may remain; `open` removes them. Until then, no
-            // later publication may commit an id at or above this one.
-            let reason = format!("message {id} was refused ({error}) but not removed ({undo_error})");
+            // later publication may commit an id at or above these.
+            let reason = format!("message {last} was refused ({error}) but not removed ({undo_error})");
             self.poisoned = Some(reason.clone());
             anyhow::bail!(reason);
         }
-        Err(Backpressure(format!("cannot spool message {id}: {error}")).into())
+        Err(Backpressure(format!("cannot spool message {last}: {error}")).into())
     }
 
     /// The next message of a subscription. QoS 1 stays queued until acked
@@ -573,7 +634,8 @@ mod tests {
         let payload = json!("x".repeat(3600));
         let mut tiny = Broker::open(&dir("escaped"), Limits { max_messages: 100, max_bytes: 4096, qos0_messages: 1 }).unwrap();
         tiny.subscribe("b", "#", 1).unwrap();
-        assert!(tiny.publish("a", &topic, &payload, None).unwrap_err().downcast_ref::<Backpressure>().is_some());
+        // Larger than the limit even for an empty queue: never retryable.
+        assert!(tiny.publish("a", &topic, &payload, None).unwrap_err().downcast_ref::<Unfittable>().is_some());
         assert_eq!(tiny.stats(None)[0]["bytes"], 0);
         // Exactly at the bound is accepted; one byte less is refused.
         let mut sized = Broker::open(&dir("escaped-size"), Limits::default()).unwrap();
@@ -594,6 +656,38 @@ mod tests {
             assert!(broker.receive(principal, "t").unwrap().is_none(), "{principal} received a refused publication");
             assert_eq!(broker.stats(Some(principal))[0]["bytes"], 0);
         }
+    }
+
+    #[test]
+    fn a_batch_is_stored_whole_or_not_at_all() {
+        let d = dir("batch");
+        let mut broker = Broker::open(&d, Limits { max_messages: 3, max_bytes: 1 << 20, qos0_messages: 1 }).unwrap();
+        broker.subscribe("s", "#", 1).unwrap();
+        broker.subscribe("only-b", "b/#", 1).unwrap();
+        broker.publish("p", "x", &json!(0), None).unwrap();
+        let batch = [("a/t".to_owned(), json!(1)), ("b/t".to_owned(), json!(2))];
+        let three = [("a/t".to_owned(), json!(1)), ("b/t".to_owned(), json!(2)), ("c/t".to_owned(), json!(3))];
+        // Room for two of `s`'s three new copies: refused whole, and counted once.
+        assert!(broker.publish_all("p", &three, None).unwrap_err().downcast_ref::<Backpressure>().is_some());
+        assert_eq!(broker.stats(Some("s"))[0]["queued"], 1);
+        assert_eq!(broker.stats(Some("s"))[0]["refused"], 1);
+        assert!(broker.receive("only-b", "b/#").unwrap().is_none());
+        // More than an empty queue holds: never retryable, nothing counted.
+        let four: Vec<(String, Value)> = (0..4).map(|i| (format!("a/{i}"), json!(i))).collect();
+        assert!(broker.publish_all("p", &four, None).unwrap_err().downcast_ref::<Unfittable>().is_some());
+        // A batch that fits is stored in order with consecutive ids and survives a reopen.
+        let results = broker.publish_all("p", &batch, None).unwrap();
+        assert_eq!((results[0]["id"].as_u64(), results[1]["id"].as_u64()), (Some(2), Some(3)));
+        assert_eq!(results[1]["durable"], 2);
+        drop(broker);
+        let mut broker = Broker::open(&d, Limits { max_messages: 3, max_bytes: 1 << 20, qos0_messages: 1 }).unwrap();
+        let mut topics = Vec::new();
+        while let Some(m) = broker.receive("s", "#").unwrap() {
+            broker.ack("s", "#", m.id).unwrap();
+            topics.push(m.topic);
+        }
+        assert_eq!(topics, ["x", "a/t", "b/t"]);
+        assert_eq!(broker.receive("only-b", "b/#").unwrap().unwrap().topic, "b/t");
     }
 
     #[test]

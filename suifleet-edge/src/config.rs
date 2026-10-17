@@ -37,6 +37,11 @@ impl PubsubConfig {
         anyhow::ensure!((1..=10_000).contains(&self.qos0_messages_per_subscription), "pubsub.qos0_messages_per_subscription must be 1..=10000");
         if let Some(bridge) = &self.bridge {
             bridge.validate()?;
+            // Inbound copies of one MQTT message are stored together, so a
+            // queue must hold them all or the message could never be accepted.
+            let copies = bridge.max_inbound_copies();
+            anyhow::ensure!(copies <= self.max_messages_per_subscription,
+                "pubsub.max_messages_per_subscription must be at least {copies}, the most overlapping LocalMqtt→Pubsub mappings");
         }
         Ok(())
     }
@@ -702,6 +707,16 @@ mod tests {
                 _ => unreachable!(),
             }
             assert!(bad.validate().is_err(), "{field}");
+        }
+    }
+    #[test]
+    fn pubsub_queues_must_hold_every_inbound_copy_of_a_message() {
+        let bridge = "[bridge]\nbroker='127.0.0.1:1883'\n\
+            [[bridge.mappings]]\ntopic='lan/#'\nsource='LocalMqtt'\ntarget='Pubsub'\ntarget_topic_prefix='a/'\n\
+            [[bridge.mappings]]\ntopic='lan/+'\nsource='LocalMqtt'\ntarget='Pubsub'\ntarget_topic_prefix='b/'\n";
+        for (messages, valid) in [(1, false), (2, true)] {
+            let pubsub: PubsubConfig = toml::from_str(&format!("max_messages_per_subscription={messages}\n{bridge}")).unwrap();
+            assert_eq!(pubsub.validate().is_ok(), valid, "{messages}");
         }
     }
     #[test]

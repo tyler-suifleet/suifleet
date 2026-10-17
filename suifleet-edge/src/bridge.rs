@@ -12,9 +12,11 @@
 //!   after the broker's PUBACK, so delivery is at least once and in order per
 //!   mapping (a reconnect resends the in-flight message with DUP).
 //! - **LocalMqtt → Pubsub:** the bridge subscribes at QoS 1 and acknowledges a
-//!   message only after it is durably queued for every matching subscriber. If
-//!   a subscriber queue is full it does not acknowledge, counts the refusal and
-//!   reconnects later, so the broker redelivers; nothing is silently lost. A
+//!   message only after it is durably queued for every matching subscriber.
+//!   The copies for all matching mappings are one commit, so a redelivery
+//!   never replays copies already stored. If a subscriber queue lacks room it
+//!   does not acknowledge, counts the refusal and reconnects later, so the
+//!   broker redelivers; nothing is silently lost. A
 //!   message pub/sub can never accept (its payload or prefixed topic exceeds
 //!   the limits) is rejected instead: acknowledged so the broker does not
 //!   redeliver it forever, logged and counted in the mapping's `rejected`.
@@ -117,6 +119,14 @@ impl BridgeConfig {
             }
         }
         Ok(())
+    }
+
+    /// The most pub/sub copies one MQTT message can become: the largest set of
+    /// inbound mappings whose filters overlap one mapping's filter (every
+    /// mapping matching a topic overlaps each other mapping matching it).
+    pub fn max_inbound_copies(&self) -> usize {
+        let inbound: Vec<&Mapping> = self.mappings.iter().filter(|m| m.source == Endpoint::LocalMqtt).collect();
+        inbound.iter().map(|m| inbound.iter().filter(|n| overlap(&m.topic, &n.topic)).count()).max().unwrap_or(0)
     }
 }
 
@@ -318,9 +328,12 @@ impl Bridge {
         }
     }
 
-    /// One message from the broker into every matching inbound mapping. An
-    /// error leaves it unacknowledged for redelivery; a mapping whose target
-    /// can never accept it rejects it instead.
+    /// One message from the broker into every matching inbound mapping, as
+    /// one pub/sub commit: every mapping's copy is stored or none is, so a
+    /// redelivery never replays copies that were already stored. An error
+    /// leaves it unacknowledged for redelivery. A mapping whose target can
+    /// never accept it rejects it; if the copies together can never fit the
+    /// subscription limits, every mapping rejects it.
     fn inbound(&self, topic: &str, payload: &[u8]) -> anyhow::Result<()> {
         let value = to_value(payload);
         let sender = format!("{BRIDGE_PRINCIPAL}/LocalMqtt");
@@ -335,15 +348,29 @@ impl Bridge {
                 None => targets.push((index, target)),
             }
         }
-        for (index, target) in targets {
-            let result = self.broker.lock().unwrap().publish(&sender, &target, &value, Some(BRIDGE_PRINCIPAL));
+        if !targets.is_empty() {
+            let publications: Vec<(String, Value)> = targets.iter().map(|(_, target)| (target.clone(), value.clone())).collect();
+            let result = self.broker.lock().unwrap().publish_all(&sender, &publications, Some(BRIDGE_PRINCIPAL));
             match result {
-                Ok(_) => self.stats.lock().unwrap().mappings[index].forwarded += 1,
+                Ok(_) => {
+                    let mut stats = self.stats.lock().unwrap();
+                    for (index, _) in &targets {
+                        stats.mappings[*index].forwarded += 1;
+                    }
+                }
                 Err(error) if error.downcast_ref::<pubsub::Backpressure>().is_some() => {
-                    self.stats.lock().unwrap().mappings[index].refused += 1;
+                    {
+                        let mut stats = self.stats.lock().unwrap();
+                        for (index, _) in &targets {
+                            stats.mappings[*index].refused += 1;
+                        }
+                    }
                     self.save_stats();
                     // Not acknowledged: reconnect so the broker redelivers it.
-                    anyhow::bail!("subscriber queue full for {target}; message left with the broker for redelivery");
+                    anyhow::bail!("{error}; message on {topic} left with the broker for redelivery");
+                }
+                Err(error) if error.downcast_ref::<pubsub::Unfittable>().is_some() => {
+                    rejected.extend(targets.iter().map(|(index, _)| (*index, error.to_string())));
                 }
                 Err(error) => return Err(error),
             }
@@ -426,9 +453,9 @@ mod tests {
         // Valid traffic still progresses.
         bridge.inbound("lan/ok", br#"{"v":2}"#).unwrap();
         assert_eq!(mappings(&bridge), [(2, 0, 1), (1, 0, 2)]);
-        // A full queue is retryable: an error (no PUBACK), counted as refused, not rejected.
+        // A full queue is retryable: an error (no PUBACK), counted as refused by every mapping, not rejected.
         assert!(bridge.inbound("lan/more", br#"{"v":3}"#).is_err());
-        assert_eq!(mappings(&bridge), [(2, 1, 1), (1, 0, 2)]);
+        assert_eq!(mappings(&bridge), [(2, 1, 1), (1, 1, 2)]);
         let saved: Value = serde_json::from_slice(&std::fs::read(dir.join("bridge.json")).unwrap()).unwrap();
         assert_eq!(saved["mappings"][1]["rejected"], 2);
     }
@@ -444,5 +471,119 @@ mod tests {
         let mut subs: Vec<String> = broker.stats(None).iter().map(|s| format!("{} {}", s["principal"].as_str().unwrap(), s["filter"].as_str().unwrap())).collect();
         subs.sort();
         assert_eq!(subs, ["@bridge/0 a/#", "component x"]);
+    }
+
+    #[test]
+    fn copies_one_message_can_become() {
+        let c = config(vec![mapping("lan/#", Endpoint::LocalMqtt, Endpoint::Pubsub, "a/"), mapping("lan/x", Endpoint::LocalMqtt, Endpoint::Pubsub, "b/"),
+                            mapping("other/#", Endpoint::LocalMqtt, Endpoint::Pubsub, ""), mapping("sensors/#", Endpoint::Pubsub, Endpoint::LocalMqtt, "")]);
+        assert_eq!(c.max_inbound_copies(), 2);
+        assert_eq!(config(vec![mapping("s/#", Endpoint::Pubsub, Endpoint::LocalMqtt, "")]).max_inbound_copies(), 0);
+    }
+
+    #[test]
+    fn inbound_copies_that_can_never_fit_together_are_rejected_not_retried() {
+        let dir = std::env::temp_dir().join(format!("suifleet-bridge-unfittable-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        // Configuration validation refuses this; the bridge must still not stall on it.
+        let mut store = pubsub::Broker::open(&dir.join("pubsub"), pubsub::Limits { max_messages: 1, max_bytes: 1 << 20, qos0_messages: 1 }).unwrap();
+        store.subscribe("component", "#", 1).unwrap();
+        let broker = Arc::new(Mutex::new(store));
+        let bridge = Bridge::new(config(vec![mapping("lan/#", Endpoint::LocalMqtt, Endpoint::Pubsub, "a/"), mapping("lan/#", Endpoint::LocalMqtt, Endpoint::Pubsub, "b/")]),
+            broker.clone(), dir.join("bridge.json")).unwrap();
+        bridge.inbound("lan/x", b"1").unwrap();
+        let stats = bridge.stats.lock().unwrap().clone();
+        assert!(stats.mappings.iter().all(|m| (m.forwarded, m.refused, m.rejected) == (0, 0, 1)), "{stats:?}");
+        assert!(stats.mappings[0].last_rejected.as_deref().unwrap().contains("even when empty"));
+        assert!(broker.lock().unwrap().receive("component", "#").unwrap().is_none());
+    }
+
+    /// Overlapping inbound mappings share one bounded subscriber queue. A
+    /// message refused for lack of room must, after draining, arrive once per
+    /// mapping (no replay of earlier copies), be PUBACKed, and let the next
+    /// message through. Uses the real session against a loopback MQTT peer.
+    #[tokio::test]
+    async fn overlapping_inbound_mappings_progress_across_redelivery() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let dir = std::env::temp_dir().join(format!("suifleet-bridge-redeliver-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut store = pubsub::Broker::open(&dir.join("pubsub"), pubsub::Limits { max_messages: 2, max_bytes: 1 << 20, qos0_messages: 1 }).unwrap();
+        store.subscribe("component", "#", 1).unwrap();
+        // One slot taken: the two copies of the first LAN message cannot both fit.
+        store.publish("component", "local/pending", &json!(0), None).unwrap();
+        let broker = Arc::new(Mutex::new(store));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mut cfg = config(vec![mapping("lan/#", Endpoint::LocalMqtt, Endpoint::Pubsub, "a/"), mapping("lan/#", Endpoint::LocalMqtt, Endpoint::Pubsub, "b/")]);
+        cfg.broker = listener.local_addr().unwrap().to_string();
+        assert_eq!(cfg.max_inbound_copies(), 2);
+        let bridge = Bridge::new(cfg, broker.clone(), dir.join("bridge.json")).unwrap();
+        let drain = |broker: &Arc<Mutex<pubsub::Broker>>| {
+            let mut b = broker.lock().unwrap();
+            let mut topics = Vec::new();
+            while let Some(m) = b.receive("component", "#").unwrap() {
+                b.ack("component", "#", m.id).unwrap();
+                topics.push(m.topic);
+            }
+            topics
+        };
+        // Accept a connection, CONNACK it and SUBACK its subscription.
+        async fn accept(listener: &tokio::net::TcpListener) -> tokio::net::TcpStream {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buffer = Vec::new();
+            for reply in [vec![0x20, 2, 0, 0], vec![0x90, 3, 0, 1, 1]] {
+                read_packet(&mut stream, &mut buffer).await.unwrap();
+                stream.write_all(&reply).await.unwrap();
+            }
+            stream
+        }
+        async fn read_packet(stream: &mut tokio::net::TcpStream, buffer: &mut Vec<u8>) -> Option<mqtt::Packet> {
+            loop {
+                if let Some((packet, used)) = mqtt::decode(buffer).unwrap() {
+                    buffer.drain(..used);
+                    return Some(packet);
+                }
+                let mut chunk = [0u8; 4096];
+                let read = tokio::time::timeout(Duration::from_secs(10), stream.read(&mut chunk)).await.unwrap().unwrap();
+                if read == 0 {
+                    return None;
+                }
+                buffer.extend_from_slice(&chunk[..read]);
+            }
+        }
+        let peer = {
+            let broker = broker.clone();
+            tokio::spawn(async move {
+                let mut delivered = Vec::new();
+                // First delivery: refused (queue lacks room for both copies), no PUBACK.
+                let mut stream = accept(&listener).await;
+                stream.write_all(&mqtt::publish("lan/x", b"1", 1, Some(7), false)).await.unwrap();
+                assert_eq!(read_packet(&mut stream, &mut Vec::new()).await, None, "refused message must not be acknowledged");
+                delivered.extend(drain(&broker));
+                // Redelivery after draining: both copies stored, then PUBACK.
+                let mut stream = accept(&listener).await;
+                let mut buffer = Vec::new();
+                stream.write_all(&mqtt::publish("lan/x", b"1", 1, Some(7), true)).await.unwrap();
+                assert_eq!(read_packet(&mut stream, &mut buffer).await, Some(mqtt::Packet::PubAck(7)));
+                delivered.extend(drain(&broker));
+                // The following message progresses on the same connection.
+                stream.write_all(&mqtt::publish("lan/y", b"2", 1, Some(8), false)).await.unwrap();
+                assert_eq!(read_packet(&mut stream, &mut buffer).await, Some(mqtt::Packet::PubAck(8)));
+                delivered.extend(drain(&broker));
+                // Returned so the connection stays open until the session is dropped.
+                (delivered, stream)
+            })
+        };
+        let mut inflight: Vec<Option<InFlight>> = vec![None, None];
+        let first = tokio::time::timeout(Duration::from_secs(20), bridge.session(None, &mut inflight)).await.unwrap();
+        assert!(format!("{:#}", first.unwrap_err()).contains("redelivery"));
+        let second = tokio::time::timeout(Duration::from_secs(20), async {
+            tokio::select! {
+                result = bridge.session(None, &mut inflight) => panic!("session ended early: {result:?}"),
+                finished = peer => finished.unwrap().0,
+            }
+        }).await.unwrap();
+        assert_eq!(second, ["local/pending", "a/lan/x", "b/lan/x", "a/lan/y", "b/lan/y"]);
+        let stats = bridge.stats.lock().unwrap().clone();
+        assert_eq!(stats.mappings.iter().map(|m| (m.forwarded, m.refused, m.rejected)).collect::<Vec<_>>(), [(2, 1, 0), (2, 1, 0)]);
     }
 }
