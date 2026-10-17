@@ -89,6 +89,11 @@ expectations. No AWS upstream behavior is newly asserted by these local contract
 
 ## Evidence and closure
 
+SF-073 adds [native reproducible ML components](ML_COMPONENTS.md), with original
+models and actual TensorFlow Lite software-runner inference tests. This separate
+implementation evidence does not turn the AWS-named catalog or the reference
+evaluator below into an AWS-compatible runtime.
+
 Run `make test-compat`. It checks the existing catalog and reference suites plus
 76 remaining-roadmap vectors and negative ownership/publication/evidence guards.
 `python3 scripts/greengrass_roadmap.py` runs just the new roadmap checks. The
