@@ -79,7 +79,7 @@ impl Version {
         let mut pairs = std::collections::BTreeSet::new();
         for i in 0..n {
             anyhow::ensure!(
-                matches!(self.platform_os[i].as_str(), "linux" | "*")
+                matches!(self.platform_os[i].as_str(), "linux" | "macos" | "*")
                     && matches!(
                         self.platform_arch[i].as_str(),
                         "x86_64" | "aarch64" | "arm" | "*"

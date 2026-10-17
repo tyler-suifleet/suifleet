@@ -81,9 +81,11 @@ module sui_edge::component_catalog_tests {
         ts::next_tx(&mut s, @0xAD);
         let mut c = ts::take_shared<ComponentCatalog>(&s);
         let clock = clock::create_for_testing(ts::ctx(&mut s));
-        let os = if (mode == 0) vector[] else vector[string::utf8(b"linux"), string::utf8(b"linux")];
+        let os = if (mode == 0) vector[] else if (mode == 4) vector[string::utf8(b"linux"), string::utf8(b"darwin")]
+            else vector[string::utf8(b"linux"), string::utf8(b"linux")];
         let arch = if (mode == 1) vector[string::utf8(b"x86_64")] else if (mode == 2)
-            vector[string::utf8(b"x86_64"), string::utf8(b"x86_64")] else
+            vector[string::utf8(b"x86_64"), string::utf8(b"x86_64")] else if (mode == 4)
+            vector[string::utf8(b"x86_64"), string::utf8(b"aarch64")] else
             vector[string::utf8(b"x86_64"), string::utf8(b"armv7")];
         catalog::publish_version(&mut c, string::utf8(b"app"), string::utf8(b"1.0.0"), os, arch,
             vector[string::utf8(b"one"),string::utf8(b"two")],
@@ -99,5 +101,25 @@ module sui_edge::component_catalog_tests {
     fun duplicate_platforms() { invalid_manifest(2); }
     #[test, expected_failure(abort_code = 3, location = sui_edge::component_catalog)]
     fun unsupported_platform() { invalid_manifest(3); }
+    #[test, expected_failure(abort_code = 3, location = sui_edge::component_catalog)]
+    fun unsupported_os() { invalid_manifest(4); }
+    #[test]
+    fun linux_and_macos_manifests_of_one_version() {
+        let mut s = ts::begin(@0xAD);
+        catalog::create_catalog(ts::ctx(&mut s));
+        ts::next_tx(&mut s, @0xAD);
+        let mut c = ts::take_shared<ComponentCatalog>(&s);
+        let clock = clock::create_for_testing(ts::ctx(&mut s));
+        catalog::publish_version(&mut c, string::utf8(b"app"), string::utf8(b"1.0.0"),
+            vector[string::utf8(b"linux"), string::utf8(b"macos")],
+            vector[string::utf8(b"aarch64"), string::utf8(b"aarch64")],
+            vector[string::utf8(b"recipe_linux"), string::utf8(b"recipe_macos")],
+            vector[string::utf8(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),string::utf8(b"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")],
+            vector[string::utf8(b"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"),string::utf8(b"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")],
+            &clock, ts::ctx(&mut s));
+        clock::destroy_for_testing(clock);
+        assert!(catalog::versions(&c).size() == 1);
+        ts::return_shared(c); ts::end(s);
+    }
 
 }
