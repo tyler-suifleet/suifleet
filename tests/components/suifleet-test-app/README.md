@@ -75,4 +75,4 @@ Rollback, a supervised run/stop lifecycle and configuration are not implemented.
 - **`scripts/tests/test_test_component.py`**, offline. It covers determinism, unsafe identifiers, v1→v2 receipts, install versus health failure, malformed and symlinked artifacts, and that writes stay under the root. It runs under the system shell and, when busybox is installed, again with a busybox-only `PATH` like the Yocto image.
 - **`scripts/test_component_ota.py`**: the real daemon against the local chain/Walrus simulator, using the real updater for v1, v2, an install failure and a health failure. It checks on-chain statuses, reports and receipts.
 
-The Raspberry Pi run is SF-031. Take `ticket lock hardware:raspberrypi3bplus` only while flashing or testing.
+The Raspberry Pi run is SF-031, driven by [`scripts/edge_acceptance.py`](../../../docs/EDGE_ACCEPTANCE.md). Take `ticket lock hardware:raspberrypi3bplus` only while flashing or testing; the harness does this itself for hardware runs.

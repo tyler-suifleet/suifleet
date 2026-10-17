@@ -1,0 +1,625 @@
+[
+ {
+  "id": "nucleus-replaced",
+  "dependency": "aws.greengrass.Nucleus",
+  "spec": {
+   "VersionRequirement": ">=2.0.0 <3.0.0",
+   "DependencyType": "SOFT"
+  },
+  "expected": {
+   "outcome": "replace",
+   "tickets": [
+    "SF-004",
+    "SF-014",
+    "SF-026"
+   ]
+  }
+ },
+ {
+  "id": "nucleus-range-irrelevant",
+  "dependency": "aws.greengrass.Nucleus",
+  "spec": {
+   "VersionRequirement": ">=2.0.0 <2.16.0"
+  },
+  "expected": {
+   "outcome": "replace",
+   "tickets": [
+    "SF-004",
+    "SF-014",
+    "SF-026"
+   ]
+  }
+ },
+ {
+  "id": "nucleus-lite-not-applicable",
+  "dependency": "aws.greengrass.NucleusLite",
+  "spec": {
+   "VersionRequirement": "^2.0.0"
+  },
+  "expected": {
+   "outcome": "reject",
+   "reason": "not-applicable"
+  }
+ },
+ {
+  "id": "tes-defers-to-adapter",
+  "dependency": "aws.greengrass.TokenExchangeService",
+  "spec": {
+   "VersionRequirement": "^2.0.0",
+   "DependencyType": "HARD"
+  },
+  "expected": {
+   "outcome": "defer",
+   "adapter": "credential-provider",
+   "requires": [
+    "SF-021",
+    "SF-027",
+    "SF-053"
+   ],
+   "implementation_ticket": "SF-057"
+  }
+ },
+ {
+  "id": "tes-aws-style-any",
+  "dependency": "aws.greengrass.TokenExchangeService",
+  "spec": {
+   "VersionRequirement": ">=0.0.0"
+  },
+  "expected": {
+   "outcome": "defer",
+   "adapter": "credential-provider",
+   "requires": [
+    "SF-021",
+    "SF-027",
+    "SF-053"
+   ],
+   "implementation_ticket": "SF-057"
+  }
+ },
+ {
+  "id": "tes-missing-requirement-is-any",
+  "dependency": "aws.greengrass.TokenExchangeService",
+  "spec": {},
+  "expected": {
+   "outcome": "defer",
+   "adapter": "credential-provider",
+   "requires": [
+    "SF-021",
+    "SF-027",
+    "SF-053"
+   ],
+   "implementation_ticket": "SF-057"
+  }
+ },
+ {
+  "id": "tes-exact-reference",
+  "dependency": "aws.greengrass.TokenExchangeService",
+  "spec": {
+   "VersionRequirement": "=2.0.3"
+  },
+  "expected": {
+   "outcome": "defer",
+   "adapter": "credential-provider",
+   "requires": [
+    "SF-021",
+    "SF-027",
+    "SF-053"
+   ],
+   "implementation_ticket": "SF-057"
+  }
+ },
+ {
+  "id": "tes-tilde-reference",
+  "dependency": "aws.greengrass.TokenExchangeService",
+  "spec": {
+   "VersionRequirement": "~2.0.0"
+  },
+  "expected": {
+   "outcome": "defer",
+   "adapter": "credential-provider",
+   "requires": [
+    "SF-021",
+    "SF-027",
+    "SF-053"
+   ],
+   "implementation_ticket": "SF-057"
+  }
+ },
+ {
+  "id": "tes-future-major-unsupported",
+  "dependency": "aws.greengrass.TokenExchangeService",
+  "spec": {
+   "VersionRequirement": ">=3.0.0"
+  },
+  "expected": {
+   "outcome": "reject",
+   "reason": "unsupported-aws-version",
+   "adapter": "credential-provider"
+  }
+ },
+ {
+  "id": "tes-newer-patch-unsupported",
+  "dependency": "aws.greengrass.TokenExchangeService",
+  "spec": {
+   "VersionRequirement": ">2.0.3"
+  },
+  "expected": {
+   "outcome": "reject",
+   "reason": "unsupported-aws-version",
+   "adapter": "credential-provider"
+  }
+ },
+ {
+  "id": "tes-x-range-rejected",
+  "dependency": "aws.greengrass.TokenExchangeService",
+  "spec": {
+   "VersionRequirement": "2.x"
+  },
+  "expected": {
+   "outcome": "reject",
+   "reason": "unsupported-version-range"
+  }
+ },
+ {
+  "id": "tes-or-range-rejected",
+  "dependency": "aws.greengrass.TokenExchangeService",
+  "spec": {
+   "VersionRequirement": "^1.0.0 || ^2.0.0"
+  },
+  "expected": {
+   "outcome": "reject",
+   "reason": "unsupported-version-range"
+  }
+ },
+ {
+  "id": "cloudwatch-generic-line",
+  "dependency": "aws.greengrass.Cloudwatch",
+  "spec": {
+   "VersionRequirement": "^4.0.0"
+  },
+  "expected": {
+   "outcome": "defer",
+   "adapter": "cloudwatch-metrics-export",
+   "requires": [
+    "SF-019",
+    "SF-032",
+    "SF-057"
+   ],
+   "implementation_ticket": "SF-059"
+  }
+ },
+ {
+  "id": "cloudwatch-lambda-line-unsupported",
+  "dependency": "aws.greengrass.Cloudwatch",
+  "spec": {
+   "VersionRequirement": "^2.0.0"
+  },
+  "expected": {
+   "outcome": "reject",
+   "reason": "unsupported-aws-version",
+   "adapter": "cloudwatch-metrics-export"
+  }
+ },
+ {
+  "id": "cloudwatch-v3-line-unsupported",
+  "dependency": "aws.greengrass.Cloudwatch",
+  "spec": {
+   "VersionRequirement": "^3.0.0"
+  },
+  "expected": {
+   "outcome": "reject",
+   "reason": "unsupported-aws-version",
+   "adapter": "cloudwatch-metrics-export"
+  }
+ },
+ {
+  "id": "device-defender-adapter-specification-incomplete",
+  "dependency": "aws.greengrass.DeviceDefender",
+  "spec": {
+   "VersionRequirement": "^4.0.0"
+  },
+  "expected": {
+   "outcome": "reject",
+   "reason": "adapter-specification-incomplete",
+   "adapter": "device-defender-metrics",
+   "implementation_ticket": "SF-062"
+  }
+ },
+ {
+  "id": "secure-tunneling-adapter-specification-incomplete",
+  "dependency": "aws.greengrass.SecureTunneling",
+  "spec": {
+   "VersionRequirement": ">=2.0.0"
+  },
+  "expected": {
+   "outcome": "reject",
+   "reason": "adapter-specification-incomplete",
+   "adapter": "secure-tunneling",
+   "implementation_ticket": "SF-063"
+  }
+ },
+ {
+  "id": "stream-manager-native",
+  "dependency": "aws.greengrass.StreamManager",
+  "spec": {
+   "VersionRequirement": "^2.0.0"
+  },
+  "expected": {
+   "outcome": "replace",
+   "tickets": [
+    "SF-034"
+   ]
+  }
+ },
+ {
+  "id": "log-manager-native",
+  "dependency": "aws.greengrass.LogManager",
+  "spec": {
+   "VersionRequirement": "^2.0.0"
+  },
+  "expected": {
+   "outcome": "replace",
+   "tickets": [
+    "SF-020"
+   ]
+  }
+ },
+ {
+  "id": "shadow-manager-native",
+  "dependency": "aws.greengrass.ShadowManager",
+  "spec": {
+   "VersionRequirement": "^2.0.0",
+   "DependencyType": "SOFT"
+  },
+  "expected": {
+   "outcome": "replace",
+   "tickets": [
+    "SF-033"
+   ]
+  }
+ },
+ {
+  "id": "bridge-native",
+  "dependency": "aws.greengrass.clientdevices.mqtt.Bridge",
+  "spec": {
+   "VersionRequirement": "^2.0.0"
+  },
+  "expected": {
+   "outcome": "replace",
+   "tickets": [
+    "SF-032"
+   ]
+  }
+ },
+ {
+  "id": "client-device-auth-native",
+  "dependency": "aws.greengrass.clientdevices.Auth",
+  "spec": {
+   "VersionRequirement": "^2.5.0"
+  },
+  "expected": {
+   "outcome": "replace",
+   "tickets": [
+    "SF-035"
+   ]
+  }
+ },
+ {
+  "id": "docker-manager-native",
+  "dependency": "aws.greengrass.DockerApplicationManager",
+  "spec": {
+   "VersionRequirement": "^2.0.0"
+  },
+  "expected": {
+   "outcome": "replace",
+   "tickets": [
+    "SF-036"
+   ]
+  }
+ },
+ {
+  "id": "secret-manager-native",
+  "dependency": "aws.greengrass.SecretManager",
+  "spec": {
+   "VersionRequirement": "^2.1.0"
+  },
+  "expected": {
+   "outcome": "replace",
+   "tickets": [
+    "SF-022"
+   ]
+  }
+ },
+ {
+  "id": "lambda-manager-roadmap-gap",
+  "dependency": "aws.greengrass.LambdaManager",
+  "spec": {
+   "VersionRequirement": "^2.0.0"
+  },
+  "expected": {
+   "outcome": "reject",
+   "reason": "roadmap-gap",
+   "tickets": [
+    "SF-064"
+   ]
+  }
+ },
+ {
+  "id": "lambda-launcher-roadmap-gap",
+  "dependency": "aws.greengrass.LambdaLauncher",
+  "spec": {
+   "VersionRequirement": "^2.0.0"
+  },
+  "expected": {
+   "outcome": "reject",
+   "reason": "roadmap-gap",
+   "tickets": [
+    "SF-064"
+   ]
+  }
+ },
+ {
+  "id": "legacy-router-roadmap-gap",
+  "dependency": "aws.greengrass.LegacySubscriptionRouter",
+  "spec": {
+   "VersionRequirement": "^2.1.0"
+  },
+  "expected": {
+   "outcome": "reject",
+   "reason": "roadmap-gap",
+   "tickets": [
+    "SF-064"
+   ]
+  }
+ },
+ {
+  "id": "sagemaker-discontinued",
+  "dependency": "aws.greengrass.SageMakerEdgeManager",
+  "spec": {
+   "VersionRequirement": "^1.3.0"
+  },
+  "expected": {
+   "outcome": "reject",
+   "reason": "discontinued-aws-service"
+  }
+ },
+ {
+  "id": "dlr-runtime-packaged",
+  "dependency": "variant.DLR",
+  "spec": {
+   "VersionRequirement": "^1.6.0"
+  },
+  "expected": {
+   "outcome": "package-natively",
+   "tickets": [
+    "SF-011"
+   ]
+  }
+ },
+ {
+  "id": "tflite-model-store-packaged",
+  "dependency": "variant.TensorFlowLite.ImageClassification.ModelStore",
+  "spec": {
+   "VersionRequirement": "^2.0.0"
+  },
+  "expected": {
+   "outcome": "package-natively",
+   "tickets": [
+    "SF-011",
+    "SF-023"
+   ]
+  }
+ },
+ {
+  "id": "dlr-sample-roadmap-gap",
+  "dependency": "aws.greengrass.DLRImageClassification",
+  "spec": {
+   "VersionRequirement": "^2.1.0"
+  },
+  "expected": {
+   "outcome": "reject",
+   "reason": "roadmap-gap",
+   "tickets": [
+    "SF-064"
+   ]
+  }
+ },
+ {
+  "id": "modbus-packaged",
+  "dependency": "aws.greengrass.Modbus",
+  "spec": {
+   "VersionRequirement": "^2.1.0"
+  },
+  "expected": {
+   "outcome": "package-natively",
+   "tickets": [
+    "SF-011",
+    "SF-032",
+    "SF-064"
+   ]
+  }
+ },
+ {
+  "id": "ssm-agent-packaged",
+  "dependency": "aws.greengrass.SystemsManagerAgent",
+  "spec": {
+   "VersionRequirement": "^1.0.0"
+  },
+  "expected": {
+   "outcome": "package-natively",
+   "tickets": [
+    "SF-011",
+    "SF-022"
+   ]
+  }
+ },
+ {
+  "id": "sitewise-collector-roadmap-gap",
+  "dependency": "aws.iot.SiteWiseEdgeCollectorOpcua",
+  "spec": {
+   "VersionRequirement": "^2.0.0"
+  },
+  "expected": {
+   "outcome": "reject",
+   "reason": "roadmap-gap",
+   "tickets": [
+    "SF-064"
+   ]
+  }
+ },
+ {
+  "id": "kvs-connector-roadmap-gap",
+  "dependency": "aws.iot.EdgeConnectorForKVS",
+  "spec": {
+   "VersionRequirement": ">=1.0.0"
+  },
+  "expected": {
+   "outcome": "reject",
+   "reason": "roadmap-gap",
+   "tickets": [
+    "SF-064"
+   ]
+  }
+ },
+ {
+  "id": "firehose-roadmap-gap",
+  "dependency": "aws.greengrass.KinesisFirehose",
+  "spec": {
+   "VersionRequirement": "^2.1.0"
+  },
+  "expected": {
+   "outcome": "reject",
+   "reason": "roadmap-gap",
+   "tickets": [
+    "SF-064"
+   ]
+  }
+ },
+ {
+  "id": "sns-roadmap-gap",
+  "dependency": "aws.greengrass.SNS",
+  "spec": {
+   "VersionRequirement": "^2.1.0"
+  },
+  "expected": {
+   "outcome": "reject",
+   "reason": "roadmap-gap",
+   "tickets": [
+    "SF-064"
+   ]
+  }
+ },
+ {
+  "id": "debug-console-roadmap-gap",
+  "dependency": "aws.greengrass.LocalDebugConsole",
+  "spec": {
+   "VersionRequirement": "^2.0.0"
+  },
+  "expected": {
+   "outcome": "reject",
+   "reason": "roadmap-gap",
+   "tickets": [
+    "SF-064"
+   ]
+  }
+ },
+ {
+  "id": "unknown-aws-greengrass",
+  "dependency": "aws.greengrass.Unlisted",
+  "spec": {
+   "VersionRequirement": "^1.0.0"
+  },
+  "expected": {
+   "outcome": "reject",
+   "reason": "unknown-managed-component"
+  }
+ },
+ {
+  "id": "unknown-aws-iot",
+  "dependency": "aws.iot.Unlisted",
+  "spec": {
+   "VersionRequirement": "^1.0.0"
+  },
+  "expected": {
+   "outcome": "reject",
+   "reason": "unknown-managed-component"
+  }
+ },
+ {
+  "id": "unknown-variant",
+  "dependency": "variant.Unlisted",
+  "spec": {
+   "VersionRequirement": "^1.0.0"
+  },
+  "expected": {
+   "outcome": "reject",
+   "reason": "unknown-managed-component"
+  }
+ },
+ {
+  "id": "case-sensitive-name",
+  "dependency": "aws.greengrass.tokenexchangeservice",
+  "spec": {
+   "VersionRequirement": "^2.0.0"
+  },
+  "expected": {
+   "outcome": "reject",
+   "reason": "unknown-managed-component"
+  }
+ },
+ {
+  "id": "customer-component-not-managed",
+  "dependency": "com.example.Sensor",
+  "spec": {
+   "VersionRequirement": "^1.0.0",
+   "DependencyType": "HARD"
+  },
+  "expected": {
+   "outcome": "not-managed"
+  }
+ },
+ {
+  "id": "invalid-dependency-type",
+  "dependency": "aws.greengrass.TokenExchangeService",
+  "spec": {
+   "VersionRequirement": "^2.0.0",
+   "DependencyType": "OPTIONAL"
+  },
+  "expected": {
+   "outcome": "reject",
+   "reason": "invalid-dependency"
+  }
+ },
+ {
+  "id": "unknown-spec-key",
+  "dependency": "aws.greengrass.TokenExchangeService",
+  "spec": {
+   "VersionRequirement": "^2.0.0",
+   "Optional": true
+  },
+  "expected": {
+   "outcome": "reject",
+   "reason": "invalid-dependency"
+  }
+ },
+ {
+  "id": "non-object-spec",
+  "dependency": "aws.greengrass.TokenExchangeService",
+  "spec": "^2.0.0",
+  "expected": {
+   "outcome": "reject",
+   "reason": "invalid-dependency"
+  }
+ },
+ {
+  "id": "non-string-requirement",
+  "dependency": "aws.greengrass.TokenExchangeService",
+  "spec": {
+   "VersionRequirement": 2
+  },
+  "expected": {
+   "outcome": "reject",
+   "reason": "unsupported-version-range"
+  }
+ }
+]
