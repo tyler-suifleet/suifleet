@@ -239,6 +239,15 @@ fn number(value: &Value) -> Option<u64> {
             *n <= 9_007_199_254_740_991.0 && n.fract() == 0.0).map(|n| n as u64))
 }
 
+fn byte_vector(value: &Value) -> anyhow::Result<Vec<u8>> {
+    if let Some(encoded) = value.as_str() {
+        return STANDARD.decode(encoded).map_err(Into::into);
+    }
+    value.as_array().ok_or_else(|| anyhow::anyhow!("invalid byte vector"))?
+        .iter().map(|v| number(v).and_then(|n| u8::try_from(n).ok())
+            .ok_or_else(|| anyhow::anyhow!("invalid byte vector element"))).collect()
+}
+
 fn id_list(value: &Value) -> Vec<String> {
     value
         .as_array()
@@ -766,7 +775,9 @@ impl SuiClient {
         if state == 3 { return Ok(Some("rollout complete")); }
         let members = id_list(&r["members"]);
         let admitted = r["admitted_at"].as_array().ok_or_else(|| anyhow::anyhow!("invalid rollout grants"))?;
-        let outcomes = r["outcomes"].as_array().ok_or_else(|| anyhow::anyhow!("invalid rollout outcomes"))?;
+        // gRPC renders Move vector<u8> as base64; simulator/older JSON
+        // renderings may use numeric arrays. Validate either representation.
+        let outcomes = byte_vector(&r["outcomes"])?;
         let skipped = r["skipped"].as_array().ok_or_else(|| anyhow::anyhow!("invalid rollout exclusions"))?;
         anyhow::ensure!(!members.is_empty() && members.len() <= 512 &&
             [admitted.len(), outcomes.len(), skipped.len()].iter().all(|n| *n == members.len()),
@@ -775,7 +786,8 @@ impl SuiClient {
             return Ok(Some("outside rollout cohort snapshot"));
         };
         let grant = number(&admitted[index]).ok_or_else(|| anyhow::anyhow!("invalid rollout grant"))?;
-        let outcome = number(&outcomes[index]).ok_or_else(|| anyhow::anyhow!("invalid rollout outcome"))?;
+        let outcome = outcomes[index];
+        anyhow::ensure!(outcome <= 2, "invalid rollout outcome");
         let skip = skipped[index].as_bool().ok_or_else(|| anyhow::anyhow!("invalid rollout exclusion"))?;
         Ok(if grant != 0 && outcome == 0 && !skip { None } else { Some("waiting for rollout eligibility") })
     }
@@ -1158,6 +1170,14 @@ fn execution_digest(executed: &proto::ExecutedTransaction) -> anyhow::Result<Str
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn protobuf_byte_vectors_are_base64_or_exact_bytes() {
+        assert_eq!(super::byte_vector(&serde_json::json!("AAEC")).unwrap(), vec![0,1,2]);
+        assert_eq!(super::byte_vector(&serde_json::json!([0.0,1.0,2.0])).unwrap(), vec![0,1,2]);
+        for value in [serde_json::json!([256]), serde_json::json!([0.5]), serde_json::json!("!")] {
+            assert!(super::byte_vector(&value).is_err());
+        }
+    }
     #[test]
     fn protobuf_numbers_require_exact_safe_integers() {
         use serde_json::json;

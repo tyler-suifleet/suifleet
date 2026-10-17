@@ -118,8 +118,10 @@ def run():
                     tx('--move-call',f'{new}::deployment_manager::advance_rollout',f'@{live}',f'vector[@{device}]','vector[]','vector[]','@0x6')
                     wait_for(lambda:state().get('deployments',{}).get(live,{}).get('reported'),'real-chain grant did not apply/report',process)
                     assert applied.exists() and state()['deployments'][live]['status']==1
-                    field=dm.rpc(rpc,'suix_getDynamicFieldObject',[live,{'type':f'{new}::deployment_manager::RolloutKey','value':{'dummy_field':False}}])
-                    assert [int(n) for n in field['data']['content']['fields']['value']['fields']['outcomes']]==[1]
+                    def live_outcomes():
+                        field=dm.rpc(rpc,'suix_getDynamicFieldObject',[live,{'type':f'{new}::deployment_manager::RolloutKey','value':{'dummy_field':False}}])
+                        return [int(n) for n in field['data']['content']['fields']['value']['fields']['outcomes']]
+                    wait_for(lambda:live_outcomes()==[1], 'live rollout outcome not settled: '+str(live_outcomes()), process)
                     receipt=dm.rpc(rpc,'suix_getDynamicFieldObject',[live,{'type':f"{origins['deployment_manager::ReceiptsKey']}::deployment_manager::ReceiptsKey",'value':{'dummy_field':False}}])
                     previous=dm.rpc(rpc,'sui_getObject',[receipt['data']['objectId'],{'showPreviousTransaction':True}])['data']['previousTransaction']
                     assert dm.rpc(rpc,'sui_getTransactionBlock',[previous,{'showEffects':True}])['effects']['status']['status']=='success'

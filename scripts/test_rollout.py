@@ -3,6 +3,7 @@
 Move tests/localnet cover coordinator transitions; this exercises device enforcement.
 """
 import json
+import base64
 import os
 from pathlib import Path
 import subprocess
@@ -26,7 +27,7 @@ def run():
                 return super().rpc(method, params) + [[RECORD, f"{TYPE_ORIGINS['deployment_manager::RolloutKey']}::deployment_manager::RolloutKey", '00']]
             if method == 'suix_getDynamicFieldObject' and params[1]['type'].endswith('::RolloutKey'):
                 if fault[0]: raise ConnectionError('injected rollout read outage')
-                return {'data':{'content':{'fields':{'value':rollout}}}}
+                return {'data':{'content':{'fields':{'value':{**rollout,'outcomes':base64.b64encode(bytes(rollout['outcomes'])).decode()}}}}}
             return super().rpc(method, params)
     handles = []
     try:
