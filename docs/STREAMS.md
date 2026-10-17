@@ -105,7 +105,7 @@ The device key signs it as a Sui personal message, which can never be valid as a
 4. deduplicate by (device, stream, sequence).
 
 **Delivery.**
-- **At least once, in order.** The checkpoint advances only after a 2xx answer.
+- **At least once, in order.** The checkpoint advances only after a 2xx answer from the declared URL. Redirects are not followed, so a 3xx is a failure.
 - **Retries.** Any other answer, a timeout or a network error keeps the checkpoint and retries the same start, backing off from 1 s to `max_backoff_seconds`.
 - **Restarts.** A daemon restart or crash resumes from the persisted checkpoint.
 - **Duplicates.** A batch the destination stored, but whose answer was lost, is sent again. If more messages arrived in the meantime, the retry may cover a longer range.

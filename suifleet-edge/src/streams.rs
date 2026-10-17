@@ -783,6 +783,7 @@ impl Exporter {
             let token = std::fs::read_to_string(path)?;
             request = request.bearer_auth(token.trim());
         }
+        // Redirects are not followed (see `http_client`), so a 3xx is a failure.
         let status = request.send().await?.status();
         anyhow::ensure!(status.is_success(), "destination answered {status}");
         Ok(())
@@ -803,8 +804,15 @@ impl Exporter {
         Ok(true)
     }
 
+    /// Only a 2xx from the declared URL itself acknowledges a batch: a
+    /// followed redirect would turn the POST into a GET elsewhere (a login
+    /// page, say) whose 2xx would advance the checkpoint for undelivered data.
+    pub fn http_client() -> reqwest::Result<reqwest::Client> {
+        reqwest::Client::builder().timeout(Duration::from_secs(30)).redirect(reqwest::redirect::Policy::none()).build()
+    }
+
     pub async fn run(self) {
-        let http = match reqwest::Client::builder().timeout(Duration::from_secs(30)).build() {
+        let http = match Self::http_client() {
             Ok(http) => http,
             Err(error) => return warn!(%error, "Stream export disabled: no HTTP client"),
         };
@@ -1088,17 +1096,80 @@ mod tests {
         let _ = std::fs::remove_dir_all(&path);
     }
 
+    /// An HTTP server answering POSTs with `post_status` and anything else
+    /// with 200; it records request lines.
+    fn http_server(post_status: &'static str) -> (String, Arc<Mutex<Vec<String>>>) {
+        use std::io::BufRead;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/ingest", listener.local_addr().unwrap());
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let log = seen.clone();
+        std::thread::spawn(move || {
+            for connection in listener.incoming() {
+                let Ok(mut connection) = connection else { return };
+                let mut reader = std::io::BufReader::new(connection.try_clone().unwrap());
+                let (mut line, mut length) = (String::new(), 0usize);
+                reader.read_line(&mut line).unwrap();
+                let request = line.trim().to_string();
+                loop {
+                    line.clear();
+                    reader.read_line(&mut line).unwrap();
+                    if line.trim().is_empty() {
+                        break;
+                    }
+                    if let Some((key, value)) = line.split_once(':') {
+                        if key.eq_ignore_ascii_case("content-length") {
+                            length = value.trim().parse().unwrap();
+                        }
+                    }
+                }
+                reader.read_exact(&mut vec![0; length]).unwrap();
+                let status = if request.starts_with("POST") { post_status } else { "200 OK" };
+                log.lock().unwrap().push(request);
+                write!(connection, "HTTP/1.1 {status}\r\nLocation: /login\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok").unwrap();
+            }
+        });
+        (url, seen)
+    }
+
+    #[tokio::test]
+    async fn only_a_2xx_from_the_declared_url_advances_the_checkpoint() {
+        for (status, delivered) in [("302 Found", false), ("307 Temporary Redirect", false), ("200 OK", true)] {
+            let path = dir(&format!("redirect-{}", &status[..3]));
+            let (url, seen) = http_server(status);
+            let store = Arc::new(Mutex::new(Store::open(&path, QUOTA, 0).unwrap()));
+            let mut d = def("e", 4096, Strategy::RejectNewData);
+            d.discard_exported = true;
+            d.export = Some(ExportConfig { url, bearer_token_file: None, batch_max_messages: 10, batch_max_bytes: 1024,
+                batch_interval_seconds: 1, max_backoff_seconds: 1 });
+            store.lock().unwrap().create(d.clone()).unwrap();
+            store.lock().unwrap().append("e", b"data", 0).unwrap();
+            let exporter = Exporter { store: store.clone(), stream: "e".into(), config: d.export.unwrap(),
+                binding: Binding { chain_identifier: "chain".into(), registry: "0x5".into(), device_id: "0xd".into() }, signer: Arc::new(Key) };
+            let result = exporter.step(&Exporter::http_client().unwrap()).await;
+            assert_eq!(result.is_ok(), delivered, "{status}: {result:?}");
+            let described = store.lock().unwrap().describe("e", 0).unwrap();
+            assert_eq!((described["exported"].as_i64(), described["messages"].as_u64()),
+                if delivered { (Some(0), Some(0)) } else { (Some(-1), Some(1)) }, "{status}");
+            assert_eq!(*seen.lock().unwrap(), vec!["POST /ingest HTTP/1.1"], "{status}: the redirect is not followed");
+            drop(exporter);
+            drop(store);
+            let _ = std::fs::remove_dir_all(&path);
+        }
+    }
+
+    struct Key;
+    impl TxSigner for Key {
+        fn address(&self) -> String {
+            "0xabc".into()
+        }
+        fn sign_digest(&self, _: &[u8]) -> anyhow::Result<Vec<u8>> {
+            Ok(vec![1])
+        }
+    }
+
     #[test]
     fn manifests_bind_the_body_and_the_signer_service_checks_them() {
-        struct Key;
-        impl TxSigner for Key {
-            fn address(&self) -> String {
-                "0xabc".into()
-            }
-            fn sign_digest(&self, _: &[u8]) -> anyhow::Result<Vec<u8>> {
-                Ok(vec![1])
-            }
-        }
         let binding = Binding { chain_identifier: "chain".into(), registry: "0x5".into(), device_id: "0xd".into() };
         assert!(same_address("0x05", &format!("0x{:0>64}", "5")) && !same_address("0x5", "0x6") && !same_address("zz", "zz"));
         let messages = vec![Message { sequence: 4, appended_ms: 1, data: b"hi".to_vec() }, Message { sequence: 6, appended_ms: 2, data: b"yo".to_vec() }];
