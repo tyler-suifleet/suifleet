@@ -323,11 +323,11 @@
       ]
     },
     "SF-027": {
-      "deferred_checks": [
-        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
-      ],
       "acceptance_issues": [
         "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "deferred_checks": [
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
       ],
       "retained_gates": [
         "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."

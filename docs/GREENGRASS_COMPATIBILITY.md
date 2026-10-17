@@ -40,7 +40,7 @@ The following is merged today and is the only thing the daemon and frontend exec
 
 - **Native recipes** (`interfaces/recipe.schema.json`) are versions 1.0/1.1, with one authenticated artifact, empty configuration and native dependency ranges. The lifecycle is `install`, plus the SF-014 supervised `run`/`shutdown`/`readiness`/`restart` ([OPERATIONS.md](OPERATIONS.md#supervised-components-sf-014)). Commands use the shell-quoted substitutions `{artifact}`, `{artifacts}` and `{work}` (`{work}` only in supervised commands), and `{pid}` in readiness/shutdown.
 - **The catalog** has platform manifests `linux|*` × `x86_64|aarch64|arm|*`, selected by first match.
-- **There is no** IPC, pub/sub, MQTT broker, shadow, stream, client-device or AWS recipe support.
+- **Native IPC v1** provides UID-authenticated component APIs, operator management and bounded volatile messaging ([COMPONENT_IPC.md](COMPONENT_IPC.md)). Shared-daemon-user components cannot receive individual ACLs; separate platform Unix identities are required. There is no AWS IPC wire compatibility, durable pub/sub, MQTT broker, shadow, stream, client-device or AWS recipe support.
 
 Everything else here is proposed. The fixtures pin its semantics. The owning tickets implement them and may revise them through review. Implementers must not treat this document as a published runtime API, and must not change merged APIs to fit it by assumption.
 
