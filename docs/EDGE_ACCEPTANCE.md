@@ -33,7 +33,7 @@ A profile is a JSON file. Relative paths resolve against the profile's directory
   - A localnet profile needs a loopback node and, if `faucet_url` is set, a loopback faucet.
 - **Wallet.** `wallet.client_config` is always explicit, never the default wallet. `wallet.address` must be that config's active address; preflight checks it and the active environment's chain.
   - On testnet, the address must be one of the two dedicated accounts in [TESTNET.md](TESTNET.md), and `budget.max_spend_mist` is required (at most 0.5 SUI).
-  - Spending uses the [non-replenishing allowance](../scripts/testnet_budget.py). Device gas counts as a grant. Extension-wallet transactions are charged to the same allowance (see [extension-wallet runs](#extension-wallet-runs)).
+  - Spending uses the [non-replenishing allowance](../scripts/testnet_budget.py). Device gas counts as a grant, including gas the device already holds: before the daemon starts, the harness reads the device balance and charges all of it. A balance that does not fit the remaining allowance refuses the run, and an unreadable balance fails it rather than counting as zero. The `device_gas` evidence entry records the amount and outcome. Extension-wallet transactions are charged to the same allowance (see [extension-wallet runs](#extension-wallet-runs)).
 - **No secrets.** A field named like a key, token, password or recovery phrase is refused, as is any value that looks like a Sui private key.
 - **Walrus.**
   - `stand-in` serves this run's blobs over HTTP. A local device needs a loopback bind. A Pi needs this host's explicit LAN address; loopback and `0.0.0.0` are refused.
@@ -121,10 +121,10 @@ Device report gas comes from the scripted `client_config` account; that transact
   - evidence redaction, and checkpointed evidence after an interrupted run;
   - full runs against a fake chain and a fake daemon that executes the real SF-030 updater.
 
-  Injected faults include tampered input that runs, failures reported as Applied, untargeted or pre-enrollment work that runs, reports without gas, replay after restart, a changed key, failed effects, wrong chain or account, an exhausted allowance, a foreign enrollment, missing, reused, unverifiable or wrongly signed extension digests, extension transactions over their reservation or the allowance, a deployment with the wrong targets, component, recipe digest or type origin, and the encrypted profile. Each must fail or block; none may pass.
+  Injected faults include tampered input that runs, failures reported as Applied, untargeted or pre-enrollment work that runs, reports without gas, replay after restart, a changed key, failed effects, wrong chain or account, an exhausted allowance, pre-funded device gas beyond the allowance or an unreadable device balance, a foreign enrollment, missing, reused, unverifiable or wrongly signed extension digests, extension transactions over their reservation or the allowance, a deployment with the wrong targets, component, recipe digest or type origin, and the encrypted profile. Each must fail or block; none may pass.
 - **`make test-edge-acceptance-localnet`** (disposable localnet, started first as for the other `*-localnet` targets): `scripts/test_edge_acceptance_localnet.py` publishes the actual contracts and runs the harness three times:
   - a fresh enrollment, where every case a stand-in can establish must pass and the verdict must stay `incomplete`;
-  - a run reusing that enrollment, key and journal, with no replay;
+  - a run reusing that enrollment, key and journal, with no replay; the device's leftover report gas must be charged to that run's allowance;
   - the encrypted profile, blocked with no transaction sent.
 
 ## Recorded runs (2026-10-16, Claude claude-opus-5-5)
