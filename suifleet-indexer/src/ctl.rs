@@ -27,6 +27,10 @@ pub const USAGE: &str = "usage: suifleet-indexer ctl [--api URL] [--token-file F
   deployments  [--creator ADDR] [--component NAME] [--group ID] [--device ID] [--include-deleted]
   device|group|deployment ID
   changes      [--after SEQ] [--follow]
+  alerts       [--owner ADDR] [--group ID]
+  logs DEVICE  [--q TEXT] [--source daemon|component:NAME] [--since-ms MS] [--max N]   (support token)
+  diagnostics DEVICE [--out FILE]                                                (support token)
+  audit        [--limit N]                                                       (operate token)
   add-devices    --sender ADDR --group ID DEVICE...           (bulk)
   remove-devices --sender ADDR --group ID DEVICE...           (bulk)
   create-deployment --sender ADDR --component NAME --version V --recipe-blob ID
@@ -394,6 +398,57 @@ pub async fn main(raw: &[String]) -> anyhow::Result<()> {
                 ]),
             )
             .await?
+        }
+        "alerts" => {
+            let body = api.get("/v1/alerts", &filters(&[("--owner", "owner"), ("--group", "group")])).await?;
+            for alert in body["items"].as_array().into_iter().flatten() {
+                println!("{alert}");
+            }
+        }
+        "logs" => {
+            let device = args.positional.get(1).ok_or_else(|| anyhow::anyhow!("logs needs a device ID\n{USAGE}"))?;
+            let max: usize = args.one("--max").map(str::parse).transpose()?.unwrap_or(1000);
+            let mut query = filters(&[("--q", "q"), ("--source", "source"), ("--since-ms", "since_ms")]);
+            let mut printed = 0;
+            loop {
+                let body = api.get(&format!("/v1/devices/{device}/logs"), &query).await?;
+                for line in body["items"].as_array().into_iter().flatten() {
+                    if printed == max {
+                        return Ok(());
+                    }
+                    println!("{line}");
+                    printed += 1;
+                }
+                match body["next"].as_str() {
+                    Some(next) if printed < max => {
+                        query.retain(|(name, _)| *name != "before");
+                        query.push(("before", next.to_owned()));
+                    }
+                    _ => break,
+                }
+            }
+        }
+        "diagnostics" => {
+            let device = args.positional.get(1).ok_or_else(|| anyhow::anyhow!("diagnostics needs a device ID\n{USAGE}"))?;
+            let body = api.get(&format!("/v1/devices/{device}/diagnostics"), &[]).await?;
+            let text = serde_json::to_string_pretty(&body)?;
+            match args.one("--out") {
+                Some(path) => {
+                    use std::os::unix::fs::OpenOptionsExt;
+                    use std::io::Write;
+                    // Support data: readable by its owner only.
+                    std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(path)?.write_all(text.as_bytes())?;
+                    eprintln!("wrote {path}");
+                }
+                None => println!("{text}"),
+            }
+        }
+        "audit" => {
+            let limit = args.one("--limit").unwrap_or("100").to_owned();
+            let body = api.get("/v1/support/audit", &[("limit", limit)]).await?;
+            for entry in body["items"].as_array().into_iter().flatten() {
+                println!("{entry}");
+            }
         }
         "device" | "group" | "deployment" => {
             let id = args

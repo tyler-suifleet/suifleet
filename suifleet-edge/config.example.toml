@@ -87,3 +87,9 @@ replay_history = false
 # url = "https://fleet.example"   # indexer base URL (POST {url}/v1/telemetry)
 # interval_seconds = 60           # 10..=3600
 # buffer_max = 1024               # snapshots kept offline; oldest dropped beyond
+
+# Redacted remote logs to the fleet indexer (needs [telemetry]; docs/LOGS.md).
+# [logs]
+# interval_seconds = 60
+# max_lines_per_interval = 512
+# buffer_max = 256

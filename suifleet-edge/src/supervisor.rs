@@ -344,7 +344,7 @@ impl Supervisor {
             "previous application artifact digest mismatch; recovery refused");
         // Like the version's other commands, it may see its configuration,
         // so its output goes to the private component log.
-        let materialized = materialize(&self.settings.overlay_dir, &previous.name, &workspace)?;
+        let materialized = materialize(&self.root, &self.settings.overlay_dir, &previous.name, &workspace)?;
         let output = self.component_log(&previous.name)?;
         self.record.arm()?;
         runner.apply(&workspace.join("artifact"), Some(&command), request, materialized.as_deref(), Some(output)).await
@@ -405,7 +405,7 @@ impl Supervisor {
         std::fs::File::open(&installed)?.sync_all()?;
         atomic_write(&workspace.join("artifact.sha256"), crate::walrus_client::sha256_file(&installed)?.as_bytes())?;
         configuration::write_private(&workspace.join(CONFIGURATION_STATE), configuration)?;
-        let materialized = materialize(&self.settings.overlay_dir, &spec.name, &workspace)?;
+        let materialized = materialize(&self.root, &self.settings.overlay_dir, &spec.name, &workspace)?;
         let previous = self.active.get(&spec.name).cloned();
         if let Some(script) = install {
             self.record.arm().map_err(|error| error.context("install not started"))?;
@@ -852,7 +852,7 @@ impl Context {
         std::fs::create_dir_all(&work)?;
         // Every start reads the overlay again: a provisioned or rotated
         // device-local value applies on the next restart.
-        materialize(&self.settings.overlay_dir, &self.spec.name, &self.workspace)?;
+        materialize(&self.root, &self.settings.overlay_dir, &self.spec.name, &self.workspace)?;
         self.record.arm()?;
         let log = open_log(&self.component.join("component.log"))?;
         let mut command = self.command(&self.spec.run, None);
@@ -993,8 +993,9 @@ fn signal_group(pid: u32, signal: i32) {
 
 /// Write a workspace's `configuration.json` from its public record and the
 /// device overlay; returns its path, or nothing for a version deployed
-/// without configuration management.
-fn materialize(overlay_dir: &Path, name: &str, workspace: &Path) -> anyhow::Result<Option<PathBuf>> {
+/// without configuration management. The overlay's values are recorded for
+/// log redaction first (`root` is `<state_dir>/supervised`).
+fn materialize(root: &Path, overlay_dir: &Path, name: &str, workspace: &Path) -> anyhow::Result<Option<PathBuf>> {
     let Some(record) = std::fs::read(workspace.join(CONFIGURATION_STATE))
         .ok()
         .map(|bytes| serde_json::from_slice::<configuration::Record>(&bytes))
@@ -1002,7 +1003,9 @@ fn materialize(overlay_dir: &Path, name: &str, workspace: &Path) -> anyhow::Resu
     else {
         return Ok(None);
     };
-    let value = configuration::materialize(&record, &configuration::overlay(overlay_dir, name)?)?;
+    let overlay = configuration::overlay(overlay_dir, name)?;
+    crate::logs::remember(root.parent().unwrap_or(root), &overlay)?;
+    let value = configuration::materialize(&record, &overlay)?;
     let path = workspace.join(CONFIGURATION);
     configuration::write_private(&path, &value)?;
     Ok(Some(path))
@@ -2273,6 +2276,10 @@ mod tests {
         until("restarted", || f.work("seen.json").exists()).await;
         assert_eq!(seen(&f, "seen.json"), serde_json::json!({"port": 1, "db": {"password": "two"}}));
         s.stop_all().await;
+        // Each value was recorded for log redaction before a component got it.
+        let retained: serde_json::Value = serde_json::from_slice(&std::fs::read(f.dir.join("logs/confidential.json")).unwrap()).unwrap();
+        let values: Vec<_> = retained["values"].as_object().unwrap().keys().cloned().collect();
+        assert_eq!(values, ["one", "two"]);
     }
 
     #[tokio::test]
