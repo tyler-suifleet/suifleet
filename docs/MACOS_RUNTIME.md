@@ -206,5 +206,10 @@ The `macOS runtime (launchd)` CI job runs on every pull request:
 - [test_ipc.py](../scripts/test_ipc.py) through `sudo`: kernel-authenticated
   IPC across distinct UIDs, caller/topic denial and idle-flood limits.
 
+First full pass: [CI run 39011599674](https://github.com/tyler-suifleet/suifleet/actions/runs/39011599674)
+(macOS 15.7.9 24G830 arm64, rustc 1.94.0): 166 unit tests, 10 launchd checks
+(the component's coalition spawn failed with `EPERM`; its `crontab` and `at`
+were refused) and 4 IPC checks passed.
+
 These are hosted-runner software results. No physical Mac, AWS account, paid
 service or production credential is involved.
