@@ -37,7 +37,7 @@ from test_ota import CAP, DEVICE, PACKAGE, REGISTRY, TYPE_ORIGINS, UPGRADE_CAP, 
 
 ROOT = Path(__file__).resolve().parents[1]
 BINARY = ROOT / 'suifleet-edge/target/debug/suifleet'
-SECRET = 'hunter2-log-secret'
+CANARY = 'hunter2-log-secret'
 
 
 def free_port():
@@ -220,8 +220,11 @@ def run(browser=False):
             c = Console(port)
             wait_for(lambda: 'Local support console listening' in log_path.read_text(), 'console did not start', process)
             sim.add(test_ota.object_id('0x791'), event=dict(component_name='svc'), recipe=dict(schemaVersion='1.2',
-                lifecycle=dict(run=f'echo hello; echo "password={SECRET} token {ops["token"]}"; '
-                               'i=0; while [ $i -lt 300 ]; do echo line $i; i=$((i+1)); done; exec sleep 300'),
+                # Every run ends its output with canary credentials, so they are
+                # always in the bounded tail the console serves.
+                lifecycle=dict(run=f'echo hello; i=0; while [ $i -lt 300 ]; do echo line $i; i=$((i+1)); done; '
+                               f'echo "late password={CANARY} Authorization: Bearer {ops["token"]} suiprivkey1abc {"07" * 32}"; '
+                               'exec sleep 300'),
                 configuration=dict(defaults=dict(answer=42, nested=dict(password='recipe-secret', port=8080)))))
 
             sim.add(test_ota.object_id('0x792'), event=dict(component_name='svc2'), recipe=dict(lifecycle=dict(run='exec sleep 300')))
@@ -277,21 +280,17 @@ def run(browser=False):
             print('PASS: grant denial, unknown operation/version/field, path and limit validation')
 
             # Redaction and bounds.
-            wait_for(lambda: 'line 299' in '\n'.join(c.call('logs', token=ops['token'], component='svc', limit=200)['data']['lines']),
+            wait_for(lambda: 'late password' in '\n'.join(c.call('logs', token=ops['token'], component='svc', limit=200)['data']['lines']),
                      'component log incomplete', process)
-            text = json.dumps(c.call('logs', token=ops['token'], component='svc', limit=200)['data'])
-            # Raw log holds the secrets; the console view does not.
+            # Raw log holds the canaries; the console view does not.
             raw_log = (state / 'supervised/svc/component.log').read_text()
-            assert SECRET in raw_log and ops['token'] in raw_log
+            assert CANARY in raw_log and ops['token'] in raw_log
             two = c.call('logs', token=ops['token'], component='svc', limit=2)['data']['lines']
-            assert two == ['line 298', 'line 299'], two
+            assert two[0] == 'line 299' and two[1].startswith('late password=[redacted]'), two
             full = c.call('logs', token=ops['token'], component='svc', limit=200)['data']['lines']
             assert len(full) == 200
-            # Log secrets near the start are outside the bounded tail; write more to check redaction.
-            with (state / 'supervised/svc/component.log').open('a') as log:
-                log.write(f'late password={SECRET} Authorization: Bearer {ops["token"]} suiprivkey1abc {"07" * 32}\n')
-            text = json.dumps(c.call('logs', token=ops['token'], component='svc', limit=5)['data'])
-            for secret in (SECRET, ops['token'], 'suiprivkey1abc', '07' * 32):
+            text = json.dumps(full)
+            for secret in (CANARY, ops['token'], 'suiprivkey1abc', '07' * 32):
                 assert secret not in text, (secret, text)
             assert 'late password=[redacted]' in text, text
             configuration = c.call('configuration', token=ops['token'], component='svc')['data']
@@ -354,8 +353,6 @@ def run(browser=False):
                         f'http://127.0.0.1:{port}/', ops['token']], capture_output=True, text=True, timeout=120)
                     assert result.returncode == 0, result.stdout + result.stderr
                     return json.loads(result.stdout.strip().splitlines()[-1])
-                with (state / 'supervised/svc/component.log').open('a') as log:
-                    log.write(f'browser password={SECRET}\n')
                 before = runtime()['pid']
                 assert node('ui')['ok']
                 wait_for(lambda: runtime()['phase'] == 'running' and runtime()['pid'] != before, 'UI restart did not run', process)
@@ -399,7 +396,7 @@ def run(browser=False):
             assert audit_path.stat().st_mode & 0o777 == 0o600
             entries = [json.loads(line) for line in audit_path.read_text().splitlines()]
             text = audit_path.read_text()
-            for secret in (ops['token'], viewer['token'], ops['token_sha256'], csrf, cookie.split('=', 1)[1], SECRET):
+            for secret in (ops['token'], viewer['token'], ops['token_sha256'], csrf, cookie.split('=', 1)[1], CANARY):
                 assert secret not in text, secret
             def seen(**match):
                 return any(all(e.get(k) == v for k, v in match.items()) for e in entries)

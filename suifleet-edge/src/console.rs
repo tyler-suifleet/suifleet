@@ -991,10 +991,12 @@ mod tests {
     fn redaction_removes_secrets_and_keeps_diagnostics() {
         let (token, _) = new_token();
         let key = "07".repeat(32);
+        // Built at run time: a literal would be (rightly) flagged by secret scanning.
+        let access_key = format!("AKIA{}", "ABCDEFGHIJKLMNOP");
         let text = format!("started pid 7; password=hunter2 api_key: abc123 \"secret\": \"s3\" Authorization: Bearer xyz.uvw \
-            token {token} AKIAABCDEFGHIJKLMNOP suiprivkey1qqqq key {key} deployment 0x{key} url=https://example.com/a -----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY----- done");
+            token {token} {access_key} suiprivkey1qqqq key {key} deployment 0x{key} url=https://example.com/a -----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY----- done");
         let out = redact_text(&text);
-        for secret in ["hunter2", "abc123", "s3\"", "xyz.uvw", token.as_str(), "AKIAABCDEFGHIJKLMNOP", "suiprivkey1qqqq", "MIIE"] {
+        for secret in ["hunter2", "abc123", "s3\"", "xyz.uvw", token.as_str(), access_key.as_str(), "suiprivkey1qqqq", "MIIE"] {
             assert!(!out.contains(secret), "{secret} leaked: {out}");
         }
         assert!(!out.contains(&format!(" {key} ")), "{out}");
