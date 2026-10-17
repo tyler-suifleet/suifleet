@@ -281,3 +281,13 @@ test-deployment-control-localnet:
 .PHONY: test-rollout-localnet
 test-rollout-localnet:
 	$(RUN) python3 scripts/test_rollout_localnet.py
+
+# Root only inside a disposable, network-isolated container: real SO_PEERCRED UIDs.
+.PHONY: test-ipc
+test-ipc:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+ifdef INSIDE_DEV_CONTAINER
+	python3 scripts/test_ipc.py
+else
+	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" python3 scripts/test_ipc.py
+endif

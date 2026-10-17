@@ -10,6 +10,7 @@ merging implementation does not establish them or authorize deployment.
 | SF-006 publishing and SF-008 identity | [SF-010: public-network upgrade and wallet acceptance](https://github.com/tyler-suifleet/suifleet/issues/11) |
 | SF-011 catalog and SF-013 desired state | SF-010 plus [SF-031: physical Pi OTA and recovery](https://github.com/tyler-suifleet/suifleet/issues/32) |
 | SF-014 component supervisor | SF-031 physical Pi boot/reboot/power-loss component recovery, plus SF-010 extension-wallet lifecycle UI; real systemd/cgroup-v2 crash/containment/restart evidence under the shipped unit remains a premerge gate |
+| SF-027 native component IPC | SF-031 physical Pi/target Unix-user provisioning, socket access and restart integration. Local real-UID IPC authorization/management and normal CI/testnet gates remain required. |
 | SF-026 daemon self-update | SF-031 physical power loss during handoff and platform boot behavior; real systemd/cgroup-v2 handoff and fallback evidence remains a premerge gate |
 | SF-053 device-key isolation | SF-031 physical Pi acceptance and hardware-token protection; real systemd/cgroup-v2 isolation evidence remains a premerge gate |
 | SF-015 component configuration | SF-010 real extension-wallet configuration UI; SF-031 physical Pi configuration persistence/restart. Relevant local and authorized automatic testnet checks remain required. |
@@ -78,3 +79,10 @@ Verified stopped SF-019 and SF-031 dispatcher processes were reconciled using th
 The fresh-fixture protocol mismatch is [SF-056/#101](https://github.com/tyler-suifleet/suifleet/issues/101). Cached testnet success is not evidence that fresh publish/upgrade works; preserve the release compiler/framework while deliberately verifying any separate network CLI. This is a genuine integration repair, not an excuse to disable mandatory testnet validation.
 
 SF-038's adapter implementations are now published as [SF-057 through SF-063](https://github.com/tyler-suifleet/suifleet/issues/102), with the remaining managed-function/platform roadmap in [SF-064/#109](https://github.com/tyler-suifleet/suifleet/issues/109). These issue links establish tracked scope, not implemented API compatibility or live AWS service acceptance. Linux-first means initial implementation phase; do not convert other platforms/functions into permanent exclusions or claim user approval for removing parity requirements. No AWS account mutation or production credential provisioning is authorized by publication.
+
+
+## Pi-independent software delivery
+
+The user's latest instruction is that Pi work must not block anything; target issues can be resolved later. Physical target-only acceptance is therefore deferred for all current and future software tickets to SF-031/#32. This includes physical boot, networking, reboot/power-loss and device-specific integration. Retain host-executable compatibility/security evidence, source review, regression checks and normal automatic testnet CI.
+
+SF-031 physical acceptance and SF-066/#111 refreshed image build are on hold. Their incomplete target/build evidence remains incomplete; no new image or physical pass is claimed. SF-065's offline harness depends on its test component (SF-030), not the bootable Pi image. Software may use local Linux stand-ins and simulators without silently claiming target equivalence. Real API dependencies remain required; production signing remains held separately.

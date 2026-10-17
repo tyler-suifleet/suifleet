@@ -1,3 +1,4 @@
+mod ipc;
 mod catalog;
 mod control;
 mod apply;
@@ -175,6 +176,8 @@ async fn main() -> anyhow::Result<()> {
             "Removed leftover artifacts from a previous run"
         );
     }
+    let mut ipc_server = cfg.ipc.as_ref().map(ipc::bind).transpose()?;
+    let mut ipc_messages = ipc::Messages::default();
     let runner = ApplyRunner::new(cfg.apply.clone());
     let store = components::Store::open(&cfg.runtime.state_dir, &cfg.components);
     // Committed components start again on every daemon start (bootstrap/reboot).
@@ -267,10 +270,31 @@ async fn main() -> anyhow::Result<()> {
                 },
                 _ = &mut shutdown => { info!("Stopping; interrupted apply requires inspection on restart"); break; }
             }
-            tokio::select! {
-                _ = tokio::time::sleep(Duration::from_secs(cfg.runtime.poll_seconds)) => {}
-                _ = &mut shutdown => break,
+            let delay = tokio::time::sleep(Duration::from_secs(cfg.runtime.poll_seconds));
+            tokio::pin!(delay);
+            let mut stopped = false;
+            loop {
+                tokio::select! {
+                    _ = &mut delay => break,
+                    _ = &mut shutdown => { stopped = true; break; }
+                    Some(pending) = async {
+                        match ipc_server.as_mut() {
+                            Some(server) => server.requests.recv().await,
+                            None => std::future::pending().await,
+                        }
+                    } => {
+                        if pending.reply.is_closed() { continue; }
+                        let result = tokio::select! {
+                            result = local_request(&cfg, &sui, &walrus, &runner, store.as_ref(), &configs,
+                                &mut supervisor, &mut journal, &mut ipc_messages, pending.uid, &pending.request) => result,
+                            _ = &mut shutdown => { stopped = true; break; }
+                        };
+                        if let Err(error) = &result { warn!(operation = pending.request.operation, %error, "Local IPC request failed"); }
+                        let _ = pending.reply.send(ipc::response(result));
+                    }
+                }
             }
+            if stopped { break; }
         }
     }
     // Spooled snapshots stay for the next start.
@@ -279,10 +303,59 @@ async fn main() -> anyhow::Result<()> {
     }
     // Components stop with the daemon (shutdown command, then the whole group).
     supervisor.stop_all().await;
+    // process::exit below does not run destructors: close IPC before handoff.
+    drop(ipc_server);
     if restart_for_handoff {
         std::process::exit(handoff::RESTART_EXIT);
     }
     Ok(())
+}
+
+/// Executed by the poll-loop owner: IPC never races a deployment or a journal save.
+async fn local_request(
+    cfg: &Config, sui: &SuiClient, walrus: &WalrusClient, runner: &ApplyRunner,
+    store: Option<&components::Store>, configs: &configuration::Store,
+    supervisor: &mut supervisor::Supervisor, journal: &mut Journal,
+    messages: &mut ipc::Messages, uid: u32, request: &ipc::Request,
+) -> anyhow::Result<serde_json::Value> {
+    use serde_json::json;
+    let policy = cfg.ipc.as_ref().ok_or_else(|| anyhow::anyhow!("IPC disabled"))?;
+    let principal = policy.authorize(uid, request)?;
+    let name = &request.component;
+    match request.operation.as_str() {
+        "list" => Ok(json!({"installed":journal.state.components,"supervised":supervisor.status()})),
+        "status" => Ok(json!({"installed":journal.state.components.get(name),
+            "runtime":supervisor.status().get(name),"reported_health":messages.health(name)})),
+        "start" | "stop" | "restart" => {
+            supervisor.local_control(name, &request.operation).await?;
+            Ok(json!({"runtime":supervisor.status().get(name)}))
+        }
+        "logs" => Ok(json!({"tail":supervisor.local_logs(name)?})),
+        "config" => Ok(json!({"configuration":configs.committed(name)?})),
+        "health" | "publish" | "receive" => messages.handle(policy, request, &principal),
+        "install" => {
+            let id = request.payload.as_str().ok_or_else(|| anyhow::anyhow!("deployment ID required"))?;
+            anyhow::ensure!(id.starts_with("0x") && id.len() <= 66 && id.len() > 2
+                && id[2..].bytes().all(|b| b.is_ascii_hexdigit()), "invalid deployment ID");
+            let canonical_id = format!("0x{:0>64}", id[2..].to_ascii_lowercase());
+            let id = canonical_id.as_str();
+            sui.validate_deployment().await?;
+            sui.validate_cap(&cfg.device.device_cap_id, &cfg.device.device_object_id).await?;
+            let (event, record) = sui.deployment(id).await?.ok_or_else(|| anyhow::anyhow!("missing deployment"))?;
+            anyhow::ensure!(sui.authorized_target(&event, &cfg.device.device_object_id).await?, "unauthorized target");
+            anyhow::ensure!(!sui.is_managed(id).await?, "desired-state deployments belong to reconciliation");
+            anyhow::ensure!(!cfg.daemon_update.enabled || event.component_name != cfg.daemon_update.component,
+                "daemon updates belong to reconciliation");
+            // No replay/force operation: ambiguous destructive work is never rerun.
+            if let Some((_, outcome)) = journal.state.deployments.iter().find(|(key, _)| sui_client::same_id(key, id)) {
+                return Ok(json!({"outcome":outcome}));
+            }
+            let status = execute(cfg, sui, walrus, runner, store, configs, supervisor, journal, &event, &record).await?;
+            settle_configuration(configs, journal, supervisor)?;
+            Ok(json!({"status":status,"outcome":journal.state.deployments.get(id),"deferred":journal.state.deferred.get(id)}))
+        }
+        _ => anyhow::bail!("unknown operation"),
+    }
 }
 
 /// Record a resolved daemon update's outcome, then drop its handoff record.

@@ -589,9 +589,56 @@ impl Supervisor {
         }
     }
 
-    #[cfg(test)]
     pub fn status(&self) -> BTreeMap<String, Status> {
         self.status.lock().unwrap().clone()
+    }
+
+    /// Local control retains the committed version. Stops last until an explicit
+    /// start/restart, deployment replacement or daemon restart.
+    pub async fn local_control(&mut self, name: &str, operation: &str) -> anyhow::Result<()> {
+        let spec = self.active.get(name).cloned()
+            .ok_or_else(|| anyhow::anyhow!("component is not supervised"))?;
+        if operation == "stop" || operation == "restart" {
+            anyhow::ensure!(!self.active.values().any(|s| s.name != name &&
+                s.after.iter().any(|d| d == name) && self.running.contains_key(&s.name)),
+                "stop dependents first");
+            self.stop(name).await;
+            // An already-finished Broken/Exited task cannot observe the stop
+            // signal. Record explicit intent so the next poll does not recover
+            // and restart a component the operator just stopped.
+            if let Some(status) = self.status.lock().unwrap().get_mut(name) {
+                status.phase = Phase::Stopped;
+                status.pid = None;
+                status.pid_start = None;
+                status.since = SystemTime::now().duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_secs()).unwrap_or(0);
+            }
+            write_status(&self.root, &self.status)?;
+        }
+        if operation == "start" || operation == "restart" {
+            let status = self.status();
+            anyhow::ensure!(spec.after.iter().all(|d| status.get(d)
+                .is_some_and(|s| s.phase == Phase::Running)), "dependency is not ready");
+            if self.running.get(name).is_some_and(|h| h.task.is_finished()) {
+                self.stop(name).await;
+            }
+            if !self.running.contains_key(name) { self.start(spec); }
+            self.wait_ready(name).await?;
+        }
+        Ok(())
+    }
+
+    pub fn local_logs(&self, name: &str) -> anyhow::Result<String> {
+        use std::io::{Read, Seek, SeekFrom};
+        anyhow::ensure!(safe_segment(name) && self.active.contains_key(name), "unknown component");
+        let mut file = std::fs::OpenOptions::new().read(true)
+            .custom_flags(libc::O_NOFOLLOW).open(self.root.join(name).join("component.log"))?;
+        let size = file.metadata()?.len();
+        file.seek(SeekFrom::Start(size.saturating_sub(8 * 1024)))?;
+        let mut bytes = Vec::new();
+        // Worst-case JSON escaping costs six bytes per input byte.
+        file.take(8 * 1024).read_to_end(&mut bytes)?;
+        Ok(String::from_utf8_lossy(&bytes).into_owned())
     }
 
     fn workspace(&self, spec: &Spec) -> PathBuf {
@@ -1527,6 +1574,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn local_management_preserves_dependency_order_and_committed_versions() {
+        let mut f = Fixture::new("local-control");
+        let mut s = f.open();
+        let dependency = f.spec("1.0.0", "echo dependency; exec sleep 300");
+        f.deploy(&mut s, dependency, None).await.unwrap();
+        let mut dependent = f.spec("1.0.0", "exec sleep 300");
+        dependent.name = "consumer".into();
+        dependent.after = vec!["app".into()];
+        f.deploy(&mut s, dependent, None).await.unwrap();
+        let before = s.status()["app"].pid;
+        assert!(s.local_control("app", "stop").await.is_err());
+        assert!(s.local_control("app", "restart").await.is_err());
+        assert_eq!(s.status()["app"].pid, before);
+        s.local_control("consumer", "stop").await.unwrap();
+        s.local_control("app", "stop").await.unwrap();
+        assert!(s.local_control("consumer", "start").await.is_err());
+        s.local_control("app", "start").await.unwrap();
+        s.local_control("consumer", "start").await.unwrap();
+        assert!(s.local_control("missing", "start").await.is_err());
+        assert!(s.local_logs("../app").is_err());
+        assert_eq!(f.active().len(), 2);
+        s.stop_all().await;
+    }
+
+    #[tokio::test]
     async fn starts_ready_and_stops_with_its_descendants() {
         let mut f = Fixture::new("lifecycle");
         let mut s = f.open();
@@ -1708,6 +1780,27 @@ mod tests {
         let mut s = f.open();
         s.bootstrap().await;
         assert!(s.restored("app", &v1.deployment));
+        s.stop_all().await;
+    }
+
+    #[tokio::test]
+    async fn explicit_local_stop_of_broken_component_prevents_recovery() {
+        let mut f = Fixture::new("local-stop-broken");
+        let mut s = f.open_with(0);
+        let v1 = f.spec("1.0.0", "exec sleep 300");
+        f.deploy(&mut s, v1, None).await.unwrap();
+        let trigger = f.dir.join("crash");
+        let v2 = f.spec("2.0.0", &format!("while test ! -e {}; do sleep 0.05; done; exit 9", quote(&trigger)));
+        f.deploy(&mut s, v2.clone(), None).await.unwrap();
+        let marker = f.dir.join("must-not-recover");
+        s.configure_recovery(BTreeMap::from([("app".into(), format!("touch {}", quote(&marker)))]));
+        std::fs::write(trigger, "crash").unwrap();
+        until("runtime failure", || phase(&s) == Phase::Broken).await;
+        s.local_control("app", "stop").await.unwrap();
+        assert_eq!(phase(&s), Phase::Stopped);
+        s.recover_broken(&f.runner, |_| true).await.unwrap();
+        assert!(!marker.exists());
+        assert_eq!(s.committed("app"), Some(v2.deployment.as_str()));
         s.stop_all().await;
     }
 
