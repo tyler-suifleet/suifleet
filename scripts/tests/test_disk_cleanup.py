@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import disk_cleanup as dc  # noqa: E402
@@ -31,8 +32,9 @@ def age(path, days):
 
 
 class FakeSystem:
-    def __init__(self, claims, locks=(), processes=(), mounts=(), docker_ok=True, ticket_ok=True):
+    def __init__(self, claims, locks=(), processes=(), mounts=(), docker_ok=True, ticket_ok=True, uninspectable=()):
         self.claims_list, self.locks_list = list(claims), list(locks)
+        self.uninspectable = list(uninspectable)
         self.process_paths, self.mount_list = list(processes), list(mounts)
         self.docker_ok, self.ticket_ok = docker_ok, ticket_ok
         self.on_evaluate = None
@@ -48,7 +50,7 @@ class FakeSystem:
         return list(self.locks_list)
 
     def processes(self):
-        return list(self.process_paths), 0
+        return list(self.process_paths), list(self.uninspectable)
 
     def container_mounts(self):
         if not self.docker_ok:
@@ -258,6 +260,118 @@ class ApplyTests(Fixture):
         with self.assertRaises(SystemExit):
             dc.apply(self.config(), system, {"kind": "other"})
 
+    def during_final_scan(self, action):
+        """Run `action` inside apply's scan of the renamed-aside tree."""
+        real = dc.measure
+
+        def measure(path, *args, **kwargs):
+            if ".retiring-" in str(path):
+                action(Path(path))
+            return real(path, *args, **kwargs)
+        return mock.patch.object(dc, "measure", measure)
+
+    def test_lock_or_process_appearing_during_final_scan_aborts_and_restores(self):
+        a = self.worktree("SF-110")
+        b = self.worktree("SF-111")
+        c = self.worktree("SF-112")
+        system = FakeSystem(self.claims)
+        plan = self.plan(system)
+        self.assertEqual(len(plan["candidates"]), 3)
+
+        def race(aside):
+            name = aside.parent.name
+            if name == "sf-110":
+                system.locks_list.append({"resource": "build:sf-110", "purpose": "SF-110 rebuild", "expires": time.time() + 600})
+            elif name == "sf-111":
+                system.process_paths.append(str(aside / "debug"))
+            else:
+                system.claims_list[2]["status"] = "in_progress"
+        with self.during_final_scan(race):
+            result = dc.apply(self.config(), system, plan)
+        by_ticket = {r["ticket"]: r for r in result["results"]}
+        self.assertIn("build:sf-110", by_ticket["SF-110"]["reason"])
+        self.assertIn("in use by a process", by_ticket["SF-111"]["reason"])
+        self.assertIn("ticket status in_progress", by_ticket["SF-112"]["reason"])
+        for path in (a, b, c):
+            self.assertTrue((path / "target/debug/app").exists(), "aborted candidates are renamed back intact")
+            self.assertEqual(list(path.glob(".target.retiring-*")), [])
+        self.assertTrue(all(r["result"] == "skipped" for r in result["results"]))
+        self.assertEqual(result["measured_freed_bytes"], 0)
+
+    def test_recreated_output_during_final_scan_keeps_old_tree_aside(self):
+        a = self.worktree("SF-115")
+        system = FakeSystem(self.claims)
+        plan = self.plan(system)
+
+        def race(aside):
+            system.process_paths.append(str(aside))
+            (aside.parent / "target").mkdir()
+        with self.during_final_scan(race):
+            result = dc.apply(self.config(), system, plan)
+        record = result["results"][0]
+        self.assertEqual(record["result"], "skipped")
+        self.assertIn("left aside, not deleted", record["reason"])
+        self.assertTrue((Path(record["left_aside"]) / "debug/app").exists())
+
+    def test_apply_enforces_cumulative_budget_on_fresh_sizes(self):
+        a = self.worktree("SF-120")
+        b = self.worktree("SF-121")
+        system = FakeSystem(self.claims)
+        plan = self.plan(system)
+        self.assertEqual(len(plan["candidates"]), 2)
+        # The configured ceiling shrank after planning: nothing fits.
+        result = dc.apply(self.config(max_bytes_per_run=1), system, plan)
+        self.assertTrue(all(r["result"] == "skipped" and "max_bytes_per_run" in r["reason"] for r in result["results"]))
+        self.assertTrue((a / "target/debug/app").exists() and (b / "target/debug/app").exists())
+        # Room for one: the second is refused on the cumulative total.
+        result = dc.apply(self.config(max_bytes_per_run=150_000), system, plan)
+        self.assertEqual(sorted(r["result"] for r in result["results"]), ["removed", "skipped"])
+        self.assertLessEqual(result["measured_freed_bytes"], 150_000)
+
+    def test_apply_measures_grown_candidate_against_budget(self):
+        c = self.worktree("SF-122")
+        system = FakeSystem(self.claims)
+        plan = self.plan(system, max_bytes_per_run=150_000)
+        self.assertEqual(len(plan["candidates"]), 1)
+        (c / "target/debug/grown").write_bytes(b"g" * 100_000)
+        age(c, 10)
+        result = dc.apply(self.config(max_bytes_per_run=150_000), system, plan)
+        self.assertEqual(result["results"][0]["result"], "skipped")
+        self.assertIn("max_bytes_per_run", result["results"][0]["reason"])
+        self.assertTrue((c / "target/debug/grown").exists())
+
+    def test_uninspectable_processes_fail_closed(self):
+        a = self.worktree("SF-130")
+        result = self.plan(FakeSystem(self.claims, uninspectable=[4242]))
+        self.assertEqual(result["candidates"], [])
+        self.assertEqual(result["unreadable_processes"], 1)
+        self.assertIn("could not be inspected", self.reasons(result)[("sf-130", "target")])
+        # An explicitly accepted foreign uid does not block...
+        accepted = self.plan(FakeSystem(self.claims, uninspectable=[4242]), uninspectable_uids_accepted=[4242])
+        self.assertEqual(len(accepted["candidates"]), 1)
+        # ...but acceptance never covers the candidate owner's own processes.
+        owner = (a / "target").lstat().st_uid
+        result = self.plan(FakeSystem(self.claims, uninspectable=[owner]), uninspectable_uids_accepted=[owner])
+        self.assertIn(f"owner uid {owner} could not be inspected", self.reasons(result)[("sf-130", "target")])
+        # Becoming uninspectable during apply also aborts.
+        system = FakeSystem(self.claims)
+        plan = self.plan(system)
+        with self.during_final_scan(lambda aside: system.uninspectable.append(4242)):
+            result = dc.apply(self.config(), system, plan)
+        self.assertEqual(result["results"][0]["result"], "skipped")
+        self.assertTrue((a / "target/debug/app").exists())
+
+    def test_system_processes_counts_partial_inspection_as_uninspectable(self):
+        real_readlink = os.readlink
+
+        def readlink(path, *args, **kwargs):
+            if "/fd/" in str(path):
+                raise PermissionError(13, "denied")
+            return real_readlink(path, *args, **kwargs)
+        with mock.patch.object(dc.os, "readlink", readlink):
+            paths, uninspectable = dc.System({}).processes()
+        self.assertGreater(len(uninspectable), 0, "a denied descriptor is not silently skipped")
+
 
 class YoctoTests(Fixture):
     def tree(self, days=10):
@@ -301,6 +415,35 @@ class YoctoTests(Fixture):
         fresh = self.tree(days=0)
         self.assertIn("tree active", self.reasons(dc.plan(config, FakeSystem(self.claims)))[("tmp", "tmp/work")])
         self.assertTrue((fresh / "tmp/work/x/obj").exists())
+
+    def test_unreadable_subtree_blocks_plan_and_apply(self):
+        build = self.tree()
+        hidden = build / "tmp/work/x/secret"
+        hidden.mkdir()
+        (hidden / "device.key").write_text("k")
+        age(build.parent, 10)
+        config = self.config(yocto=[{"path": str(build), "retire": ["tmp/work"]}])
+        system = FakeSystem(self.claims)
+        plan = dc.plan(config, system)
+        self.assertEqual(len(plan["candidates"]), 0, "protected material is visible while readable")
+        (hidden / "device.key").unlink()
+        age(build.parent, 10)
+        plan = dc.plan(config, system)
+        self.assertEqual(len(plan["candidates"]), 1)
+        (hidden / "device.key").write_text("k")
+        hidden.chmod(0)
+        age(build.parent, 10)
+        if os.geteuid() == 0:
+            self.skipTest("root reads everything")
+        self.assertIn("unreadable entries", self.reasons(dc.plan(config, system))[("tmp", "tmp/work")])
+        result = dc.apply(config, system, plan)
+        self.assertEqual(result["results"][0]["result"], "skipped")
+        self.assertIn("unreadable entries", result["results"][0]["reason"])
+        hidden.chmod(0o700)
+        self.assertTrue((hidden / "device.key").exists(), "unverifiable tree restored intact")
+        hidden.chmod(0)
+        report = dc.audit(config, system)
+        self.assertEqual(report["yocto"][0]["unreadable"], {"tmp/work": 1})
 
 
 class AuditTests(Fixture):

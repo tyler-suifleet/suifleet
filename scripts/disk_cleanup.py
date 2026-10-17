@@ -66,26 +66,35 @@ class System:
         return self.ticket(project, "locks")
 
     def processes(self):
-        """(paths in use by readable processes, count of unreadable processes)."""
-        paths, unreadable = [], 0
+        """(paths in use by inspected processes, uids of processes that could
+        not be fully inspected). A process that exits mid-scan is skipped; a
+        descriptor closed mid-scan is transient; any other failure, including
+        a permission error on a single descriptor, makes the process
+        uninspectable."""
+        paths, uninspectable = [], []
         for pid in filter(str.isdigit, os.listdir("/proc")):
             if int(pid) == os.getpid():
                 continue
             base = f"/proc/{pid}"
             try:
+                uid = os.stat(base).st_uid
                 found = [os.readlink(f"{base}/cwd"), os.readlink(f"{base}/root")]
                 for fd in os.listdir(f"{base}/fd"):
                     try:
                         found.append(os.readlink(f"{base}/fd/{fd}"))
-                    except OSError:
+                    except FileNotFoundError:
                         pass
                 with open(f"{base}/maps") as maps:
                     found += [line.split(None, 5)[5].strip() for line in maps if len(line.split(None, 5)) == 6]
-            except (PermissionError, FileNotFoundError, ProcessLookupError):
-                unreadable += 1
+            except (FileNotFoundError, ProcessLookupError):
+                if os.path.exists(base):
+                    uninspectable.append(uid)
+                continue
+            except OSError:
+                uninspectable.append(uid)
                 continue
             paths += [p.removesuffix(" (deleted)") for p in found if p.startswith("/")]
-        return paths, unreadable
+        return paths, uninspectable
 
     def container_mounts(self):
         ids = subprocess.run(["docker", "ps", "-q"], text=True, capture_output=True, timeout=60)
@@ -254,7 +263,15 @@ class Context:
                 self.locks += system.locks(project)
             except Unverifiable as error:
                 self.errors.append(str(error))
-        self.process_paths, self.unreadable_processes = system.processes()
+        self.process_paths, self.uninspectable_uids = system.processes()
+        self.unreadable_processes = len(self.uninspectable_uids)
+        # Uninspectable processes may be using any candidate. Fail closed unless
+        # the operator explicitly accepted that uid (never one owning a candidate).
+        accepted = set(config.get("uninspectable_uids_accepted", []))
+        refused = sorted(set(self.uninspectable_uids) - accepted)
+        if refused:
+            self.errors.append(f"{sum(u in refused for u in self.uninspectable_uids)} processes could not be inspected "
+                               f"(uids {refused}; run as their owner or list a uid in uninspectable_uids_accepted)")
         try:
             self.mounts = system.container_mounts()
         except Unverifiable as error:
@@ -278,6 +295,12 @@ class Context:
 
     def in_use(self, path, also_cwd_under=None):
         """Why the path is busy, or None."""
+        try:
+            owner = os.lstat(path).st_uid
+        except OSError as error:
+            return f"cannot stat: {error}"
+        if owner in self.uninspectable_uids:
+            return f"a process of its owner uid {owner} could not be inspected"
         for used in self.process_paths:
             if inside(used, path) or (also_cwd_under and inside(used, also_cwd_under)):
                 return f"in use by a process ({used})"
@@ -319,13 +342,21 @@ def evaluate_output(ctx, project, claim, relative, now, scan=True):
     if scan:
         measured = measure(path, ctx.config.get("protected", PROTECTED))
         record.update(bytes=measured["bytes"], files=measured["files"])
-        if measured["protected"]:
-            return record, f"protected files inside: {measured['protected'][:3]}"
-        if measured["unreadable"]:
-            return record, f"{measured['unreadable']} unreadable entries"
-        if now - measured["newest_mtime"] < retain:
-            return record, "recently modified inside"
+        reason = scan_refusal(measured, now, retain)
+        if reason:
+            return record, reason
     return record, None
+
+
+def scan_refusal(measured, now, retain, allow_protected=False):
+    """Why a measured tree must be kept, or None."""
+    if measured["protected"] and not allow_protected:
+        return f"protected files inside: {measured['protected'][:3]}"
+    if measured["unreadable"]:
+        return f"{measured['unreadable']} unreadable entries (contents unverifiable)"
+    if now - measured["newest_mtime"] < retain:
+        return "recently modified inside"
+    return None
 
 
 def yocto_activity(build):
@@ -366,8 +397,9 @@ def evaluate_yocto(ctx, tree, entry, now, scan=True):
     if scan:
         measured = measure(path, ctx.config.get("protected", PROTECTED))
         record.update(bytes=measured["bytes"], files=measured["files"])
-        if measured["protected"] and not tree.get("allow_protected_names"):
-            return record, f"protected files inside: {measured['protected'][:3]}"
+        reason = scan_refusal(measured, now, retain, allow_protected=tree.get("allow_protected_names"))
+        if reason:
+            return record, reason
     return record, None
 
 
@@ -398,31 +430,66 @@ def plan(config, system):
         candidates = kept
     return {"schema_version": SCHEMA, "kind": "disk-cleanup-plan", "created": now, "dry_run": True,
             "candidates": candidates, "candidate_bytes": sum(c.get("bytes", 0) for c in candidates),
-            "excluded": excluded, "unverifiable": ctx.errors, "unreadable_processes": ctx.unreadable_processes}
+            "excluded": excluded, "unverifiable": ctx.errors, "unreadable_processes": ctx.unreadable_processes,
+            "uninspectable_process_uids": sorted(set(ctx.uninspectable_uids))}
 
 
-def remove(path, record):
-    """Rename aside atomically (writers then recreate a fresh output) and
-    delete without following symlinks. Returns the errors."""
-    if not shutil.rmtree.avoids_symlink_attacks:
-        return ["this platform's rmtree is not symlink-attack safe"]
-    aside = path.with_name(f".{path.name}.retiring-{os.getpid()}")
-    os.rename(path, aside)
+def delete(aside):
+    """Delete a renamed-aside tree without following symlinks. Returns the errors."""
     errors = []
     shutil.rmtree(aside, onexc=lambda fn, p, exc: errors.append(f"{p}: {exc}")) if sys.version_info >= (3, 12) else \
         shutil.rmtree(aside, onerror=lambda fn, p, exc: errors.append(f"{p}: {exc[1]}"))
-    record["left_aside"] = str(aside) if aside.exists() else None
     return errors
 
 
+def retain_seconds(config, planned):
+    tree = next((t for t in config.get("yocto", []) if t["path"] == planned.get("tree")), {})
+    return tree.get("retain_days", config.get("retain_days", 3)) * 86400
+
+
+def recheck(ctx, planned, aside, now, retain):
+    """With the candidate renamed aside and scanned, take a fresh snapshot and
+    confirm nothing claimed, locked, entered or reactivated it meanwhile."""
+    if ctx.errors:
+        return "unverifiable: " + "; ".join(ctx.errors)
+    if planned["kind"] == "worktree-output":
+        worktree = planned["worktree"]
+        claim = next((c for c in ctx.claims.get(planned["project"], []) if c["key"] == planned["ticket"]), None)
+        if not claim or claim.get("worktree") != worktree:
+            return "ticket or worktree changed"
+        if claim["status"] != "done" or claim.get("publish_pending"):
+            return f"ticket status {claim['status']}" + (" (publication pending)" if claim.get("publish_pending") else "")
+        if now - git_activity(worktree) < retain:
+            return "worktree became active"
+        locks = ctx.lock_naming(claim["key"], worktree, os.path.basename(worktree))
+        scope = worktree
+    else:
+        build = Path(planned["tree"])
+        if (build / "bitbake.lock").exists():
+            return "bitbake.lock present (a build may be running)"
+        if now - yocto_activity(build) < retain:
+            return "tree became active"
+        locks = ctx.lock_naming(str(build), build.parent.name, "yocto", "bitbake")
+        scope = str(build)
+    if locks:
+        return f"resource locks name it: {', '.join(sorted(set(locks)))}"
+    return ctx.in_use(str(aside), also_cwd_under=scope)
+
+
 def apply(config, system, plan_data):
+    """For each candidate still eligible on a fresh snapshot: rename it aside
+    (new writers then get a fresh output and cannot reach the old tree), scan
+    the aside tree, take another fresh snapshot, and delete only if nothing
+    changed and the run's cumulative budget allows it; otherwise rename it back."""
     if plan_data.get("kind") != "disk-cleanup-plan" or plan_data.get("schema_version") != SCHEMA:
         raise SystemExit("not a disk-cleanup plan")
+    if not shutil.rmtree.avoids_symlink_attacks:
+        raise SystemExit("this platform's rmtree is not symlink-attack safe")
     roots = sorted({c["path"] for c in plan_data["candidates"]})
     before = filesystems([os.path.dirname(r) for r in roots] or ["/"], {})
-    results = []
+    budget, spent, results = config.get("max_bytes_per_run"), 0, []
+    protected = config.get("protected", PROTECTED)
     for planned in plan_data["candidates"]:
-        # Re-evaluate everything right before this removal.
         ctx, now = Context(config, system), system.now()
         if planned["kind"] == "worktree-output":
             project = next((p for p in config.get("projects", []) if p["id"] == planned["project"]), None)
@@ -433,24 +500,46 @@ def apply(config, system, plan_data):
             if planned["relative"] not in config.get("worktree_outputs", DEFAULT_OUTPUTS):
                 results.append({**planned, "result": "skipped", "reason": "no longer allowlisted"})
                 continue
-            record, reason = evaluate_output(ctx, project, claim, planned["relative"], now)
+            record, reason = evaluate_output(ctx, project, claim, planned["relative"], now, scan=False)
         else:
             tree = next((t for t in config.get("yocto", []) if t["path"] == planned["tree"] and planned["relative"] in t.get("retire", [])), None)
             if not tree:
                 results.append({**planned, "result": "skipped", "reason": "no longer configured"})
                 continue
-            record, reason = evaluate_yocto(ctx, tree, planned["relative"], now)
+            record, reason = evaluate_yocto(ctx, tree, planned["relative"], now, scan=False)
         if reason:
             results.append({**record, "result": "skipped", "reason": reason})
             continue
         path = Path(record["path"])
+        aside = path.with_name(f".{path.name}.retiring-{os.getpid()}")
         try:
-            errors = remove(path, record)
+            os.rename(path, aside)
         except OSError as error:
             results.append({**record, "result": "failed", "reason": str(error)})
             continue
-        remaining = measure(Path(record["left_aside"]))["bytes"] if record.get("left_aside") else 0
-        results.append({**record, "result": "partial" if errors else "removed", "freed_bytes": record.get("bytes", 0) - remaining,
+        retain = retain_seconds(config, planned)
+        measured = measure(aside, protected)
+        record.update(bytes=measured["bytes"], files=measured["files"])
+        allow = planned["kind"] == "yocto-work" and tree.get("allow_protected_names")
+        reason = scan_refusal(measured, now, retain, allow_protected=allow)
+        if not reason:
+            ctx, now = Context(config, system), system.now()
+            reason = recheck(ctx, planned, aside, now, retain)
+        if not reason and budget and spent + measured["bytes"] > budget:
+            reason = f"over this run's max_bytes_per_run ({spent} + {measured['bytes']} > {budget})"
+        if reason:
+            if os.path.lexists(path):
+                record["left_aside"] = str(aside)
+                reason += "; the original path was recreated, so the old tree is left aside, not deleted"
+            else:
+                os.rename(aside, path)
+            results.append({**record, "result": "skipped", "reason": reason})
+            continue
+        spent += measured["bytes"]
+        errors = delete(aside)
+        record["left_aside"] = str(aside) if aside.exists() else None
+        remaining = measure(aside)["bytes"] if record["left_aside"] else 0
+        results.append({**record, "result": "partial" if errors else "removed", "freed_bytes": measured["bytes"] - remaining,
                         "errors": errors[:10], "error_count": len(errors)})
     after = filesystems([b["path"] for b in before], {})
     return {"schema_version": SCHEMA, "kind": "disk-cleanup-result", "finished": system.now(), "results": results,
@@ -481,16 +570,17 @@ def audit(config, system):
         build = Path(tree["path"])
         if not build.is_dir():
             continue
-        parts = {}
+        parts, unreadable = {}, {}
         for child in sorted(build.iterdir()):
             if child.is_dir() and not child.is_symlink():
-                if child.name.startswith("tmp"):
-                    for sub in sorted(child.iterdir()):
-                        if sub.is_dir() and not sub.is_symlink():
-                            parts[f"{child.name}/{sub.name}"] = measure(sub)["bytes"]
-                else:
-                    parts[child.name] = measure(child)["bytes"]
+                for sub in (sorted(s for s in child.iterdir() if s.is_dir() and not s.is_symlink()) if child.name.startswith("tmp") else [child]):
+                    name = str(sub.relative_to(build))
+                    measured = measure(sub)
+                    parts[name] = measured["bytes"]
+                    if measured["unreadable"]:
+                        unreadable[name] = measured["unreadable"]
         yocto.append({"path": str(build), "configured_retire": tree.get("retire", []), "bytes": sum(parts.values()), "parts": parts,
+                      "unreadable": unreadable,
                       "idle_days": round((system.now() - yocto_activity(build)) / 86400, 1)})
     extra = [{"path": p, **{k: v for k, v in measure(Path(p)).items() if k != "protected"}} for p in config.get("report_paths", []) if Path(p).exists()]
     roots = [p["root"] for p in config.get("projects", [])] + [t["path"] for t in config.get("yocto", [])] + config.get("report_paths", [])
@@ -500,6 +590,7 @@ def audit(config, system):
             "docker": {**system.docker_usage(), "note": "Docker's logical sizes overlap (shared layers, build cache) and are not physical "
                        "usage; its root directory is not scanned (permission-limited). Docker storage is never removed by this tool."},
             "unverifiable": ctx.errors, "unreadable_processes": ctx.unreadable_processes,
+            "uninspectable_process_uids": sorted(set(ctx.uninspectable_uids)),
             "note": "Bytes are allocated blocks with hard links counted once; entries that could not be read are counted, not sized."}
 
 
