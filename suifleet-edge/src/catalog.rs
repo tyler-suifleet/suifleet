@@ -187,14 +187,17 @@ pub async fn resolve(
         fields["schema_version"] == "1"
             || fields["schema_version"] == 1
             || fields["schema_version"] == "2"
-            || fields["schema_version"] == 2,
+            || fields["schema_version"] == 2
+            || fields["schema_version"] == "3"
+            || fields["schema_version"] == 3,
         "unsupported DeploymentRecord schema version"
     );
     anyhow::ensure!(
         fields["component_name"] == event.component_name && fields["version"] == event.version,
         "deployment identity mismatch"
     );
-    if fields["schema_version"] == "1" || fields["schema_version"] == 1 {
+    if fields["schema_version"] == "1" || fields["schema_version"] == 1
+        || fields["schema_version"] == "3" || fields["schema_version"] == 3 {
         let digest = sui
             .dynamic_field(&event.deployment_id, "deployment_manager::RecipeDigestKey")
             .await?;

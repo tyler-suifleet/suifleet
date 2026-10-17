@@ -20,6 +20,7 @@ export default function DeploymentsPage() {
     <div className="space-y-4 max-w-5xl">
       <div className="flex items-center justify-between">
         <PageHeader title="Deployments" subtitle="Firmware deployments to core device groups" />
+        <Link href="/rollouts" className="text-sm text-blue-600">Staged rollouts</Link>
         <Link
           href="/firmware"
           className="bg-[#4DA2FF] hover:bg-[#2e8ed4] text-white text-sm px-4 py-2 rounded"

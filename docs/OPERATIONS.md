@@ -500,3 +500,9 @@ test upgrades main's package with an existing record, checks distinct control ty
 origins, old-package calls, irreversible cancellation and cleanup. These do not
 establish public-network interoperability, real extension-wallet acceptance or
 physical firmware/power-loss safety.
+
+## Staged rollouts (SF-017)
+
+See [staged rollout operation and recovery](STAGED_ROLLOUTS.md) for immutable cohorts,
+creator-signed admission/health ticks, rate/concurrency/bake limits, offline slots,
+audited pause/abort and schema-3 manifest/upgrade requirements.

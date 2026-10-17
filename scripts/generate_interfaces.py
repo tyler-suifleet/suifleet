@@ -294,6 +294,8 @@ def generate(catalog, recipe):
                     types += [f"{arg}: string[]"]; arguments += [f"tx.pure(bcs.vector(bcs.string()).serialize({arg}))"]
                 elif base in ["vector<sui::object::ID>", "vector<address>"]:
                     types += [f"{arg}: string[]"]; arguments += [f"tx.pure(bcs.vector(bcs.Address).serialize({arg}))"]
+                elif base == "vector<u64>":
+                    types += [f"{arg}: (number | bigint | string)[]"]; arguments += [f"tx.pure(bcs.vector(bcs.u64()).serialize({arg}))"]
                 elif base == "u8":
                     types += [f"{arg}: number"]; arguments += [f"tx.pure.u8({arg})"]
                 elif base == "vector<u8>":
@@ -305,7 +307,25 @@ def generate(catalog, recipe):
             calls += [f'  {module}_{name}: (tx: Transaction, packageId: string{", " if types else ""}{", ".join(types)}) => tx.moveCall({{ target: `${{packageId}}::{module}::{name}`, arguments: [{", ".join(arguments)}] }}),']
         rust += [f"pub mod {module} {{", "    use super::*;", f'    pub const MODULE: &str = "{module}";']
         rust += [f'    pub const {name.upper()}: &str = "{name}";' for name in contents["functions"]]
-        for name, struct in contents["structs"].items():
+        # BCS constants are evaluated eagerly. Emit nested local structs before
+        # their users even when the reviewed ABI is alphabetically ordered.
+        ordered = []
+        visiting = set()
+        def emit_struct(name):
+            if name in ordered:
+                return
+            if name in visiting:
+                raise ValueError("recursive struct layout")
+            visiting.add(name)
+            for _, datatype in contents["structs"][name]["fields"]:
+                for dependency in re.findall(r"sui_edge::" + module + r"::([A-Za-z_][A-Za-z_0-9]*)", datatype):
+                    emit_struct(dependency)
+            visiting.remove(name)
+            ordered.append(name)
+        for name in contents["structs"]:
+            emit_struct(name)
+        for name in ordered:
+            struct = contents["structs"][name]
             if struct["type_parameters"]:
                 raise ValueError("generic contract structs require explicit support")
             fields = ", ".join(f"{name}: {bcs_type(t)}" for name, t in struct["fields"])
