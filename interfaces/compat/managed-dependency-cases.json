@@ -340,7 +340,8 @@
    "outcome": "reject",
    "reason": "roadmap-gap",
    "tickets": [
-    "SF-064"
+    "SF-064",
+    "SF-069"
    ]
   }
  },
@@ -354,7 +355,8 @@
    "outcome": "reject",
    "reason": "roadmap-gap",
    "tickets": [
-    "SF-064"
+    "SF-064",
+    "SF-069"
    ]
   }
  },
@@ -368,7 +370,8 @@
    "outcome": "reject",
    "reason": "roadmap-gap",
    "tickets": [
-    "SF-064"
+    "SF-064",
+    "SF-069"
    ]
   }
  },
@@ -392,7 +395,8 @@
   "expected": {
    "outcome": "package-natively",
    "tickets": [
-    "SF-011"
+    "SF-011",
+    "SF-073"
    ]
   }
  },
@@ -406,7 +410,8 @@
    "outcome": "package-natively",
    "tickets": [
     "SF-011",
-    "SF-023"
+    "SF-023",
+    "SF-073"
    ]
   }
  },
@@ -420,7 +425,8 @@
    "outcome": "reject",
    "reason": "roadmap-gap",
    "tickets": [
-    "SF-064"
+    "SF-064",
+    "SF-073"
    ]
   }
  },
@@ -435,7 +441,8 @@
    "tickets": [
     "SF-011",
     "SF-032",
-    "SF-064"
+    "SF-064",
+    "SF-070"
    ]
   }
  },
@@ -463,7 +470,8 @@
    "outcome": "reject",
    "reason": "roadmap-gap",
    "tickets": [
-    "SF-064"
+    "SF-064",
+    "SF-070"
    ]
   }
  },
@@ -477,7 +485,8 @@
    "outcome": "reject",
    "reason": "roadmap-gap",
    "tickets": [
-    "SF-064"
+    "SF-064",
+    "SF-072"
    ]
   }
  },
@@ -491,7 +500,8 @@
    "outcome": "reject",
    "reason": "roadmap-gap",
    "tickets": [
-    "SF-064"
+    "SF-064",
+    "SF-077"
    ]
   }
  },
@@ -505,7 +515,8 @@
    "outcome": "reject",
    "reason": "roadmap-gap",
    "tickets": [
-    "SF-064"
+    "SF-064",
+    "SF-078"
    ]
   }
  },
@@ -519,7 +530,8 @@
    "outcome": "reject",
    "reason": "roadmap-gap",
    "tickets": [
-    "SF-064"
+    "SF-064",
+    "SF-079"
    ]
   }
  },

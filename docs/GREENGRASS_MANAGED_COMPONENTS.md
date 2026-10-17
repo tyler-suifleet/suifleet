@@ -1,5 +1,7 @@
 # AWS-managed component and cloud-service adapter coverage
 
+The [SF-064 remaining functional roadmap](GREENGRASS_REMAINING_ROADMAP.md) defines versioned executable subcontracts and maps every selected remaining scope to published implementation tickets SF-069–SF-079. These remain pending implementations, not runtime or live acceptance.
+
 SF-038 maps every AWS-provided Greengrass component to one of three things: a SuiFleet native equivalent, a scoped adapter with its own implementation ticket, or a roadmap gap tracked by [SF-064](https://github.com/tyler-suifleet/suifleet/issues/109). For each adapter it records the platforms, AWS service and authentication dependencies, licensing constraints and executable acceptance. The catalog is a specification with per-adapter runtime receipts. SF-057 implements the scoped Linux credential adapter; other adapters remain pending. It records no permanent exclusion and makes no general parity claim. It extends the [SF-028 compatibility specification](GREENGRASS_COMPATIBILITY.md), whose levels and statuses apply here.
 
 The machine-readable source of truth is [`interfaces/compat/managed-components.json`](../interfaces/compat/managed-components.json). The [compatibility matrix](../interfaces/compat/greengrass-compat.json) cross-references it, and `make test-compat` checks both.
@@ -34,7 +36,7 @@ Until SF-037 (open) adopts the dependency classification, recipe dependencies on
 | `native` | A SuiFleet subsystem owned by the listed tickets provides the function. No AWS interface is reproduced |
 | `native-component` | No SuiFleet runtime change. The operator packages equivalent open software as an ordinary native component |
 | `adapter` | Scoped adapter to the AWS service or its local interface, owned by its implementation ticket. Its specification is `complete` (pinned AWS version and executable reference suite) or `incomplete` (the ticket must finish it first) |
-| `roadmap` | Not provided in the initial Linux prototype phase. SF-064 tracks it as missing functional work and must split it into concrete tickets before implementation. This is not an approved permanent exclusion. The listed native equivalent is an interim workaround, not AWS API or recipe compatibility |
+| `roadmap` | Not provided in the initial Linux prototype phase. SF-064 tracks it as missing functional work and links concrete SF-069–SF-079 implementation tickets through the remaining roadmap. This is not an approved permanent exclusion. The listed native equivalent is an interim workaround, not AWS API or recipe compatibility |
 | `not-applicable` | No meaning for SuiFleet, including services AWS discontinued |
 
 ## Required families
@@ -108,9 +110,9 @@ The initial prototype phase is the SF-028 Linux rows: `x86_64`, `aarch64` and `a
 | Platform | Phase | Reason |
 |---|---|---|
 | Linux x86_64, aarch64, arm | Initial prototype | Development hosts, Yocto/Raspberry Pi and 32-bit ARM catalog selection |
-| Windows | Roadmap gap (SF-064) | The daemon depends on systemd and cgroups (SF-014) and on Yocto packaging. Translation omits and reports Windows manifests meanwhile |
-| macOS | Roadmap gap (SF-064) | No runtime. AWS lists only Linux and Windows for the catalog components |
-| Linux x86 (32-bit) | Roadmap gap (SF-064) | No Yocto or test target |
+| Windows | Roadmap gap (SF-074) | The daemon depends on systemd and cgroups (SF-014) and on Yocto packaging. Translation omits and reports Windows manifests meanwhile |
+| macOS | Roadmap gap (SF-075) | No runtime. AWS lists only Linux and Windows for the catalog components |
+| Linux x86 (32-bit) | Roadmap gap (SF-076) | No Yocto or test target |
 
 These gaps are not approved exclusions; they stay tracked unless the user changes the full parity goal. Windows support would need its own supervisor, service packaging, filesystem permissions and the full test suite. It is not an adapter.
 
