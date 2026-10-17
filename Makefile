@@ -137,8 +137,10 @@ test-compat:
 # Only download needs network; inference tests use the verified local cache.
 .PHONY: test-ml
 test-ml:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
 	$(RUN) python3 scripts/ml_component.py download --platform linux-x86_64-cp310 --wheels .ci-cache/ml-wheels
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_ml_components.py --wheels .ci-cache/ml-wheels -v
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_ml_ota.py --wheels .ci-cache/ml-wheels
 
 # Offline regression tests for the drift gate itself (synthetic summaries).
 test-interfaces:

@@ -126,8 +126,20 @@ The generated recipe uses schema 1.0 with an `install` lifecycle that installs
 the runtime and executes the selected model on the marker fixture. Enable
 `[apply] allow_recipe_commands = true` explicitly for trusted recipe commands.
 The workspace `{artifact}` and `{artifacts}` placeholders use the daemon's
-existing shell quoting. There is no long-lived `run` lifecycle or supervisor
-health claim; consumers invoke `infer` for each image and check its exit/result.
+existing shell quoting. The supervised `run` lifecycle repeats marker inference every 60 seconds and
+exits on failure; `readiness` requires a successful inference. This is an example
+worker, not an inference server or firmware health check. The existing supervisor
+retains the authenticated bundle as `artifact` and the installed `ml-runtime` in
+`<state_dir>/supervised/suifleet-ml-<task>/versions/1.0.0-<deployment-tag>/`,
+independently of the temporary deployment directory. Read `active.json` in
+`<state_dir>/supervised/` for the selected deployment/version; do not select an
+arbitrary retained version. Authorized local consumers invoke
+`python3 -I -B <version-directory>/artifact infer --state <version-directory>/ml-runtime --image /path/to/input.pgm`
+and check its exit/result. Normal supervisor replacement stops the old worker
+and installs into a separate deployment workspace; failed replacement retains
+the prior active version under the existing recovery policy. A clean daemon
+restart resumes the committed worker. Old version retention/cleanup follows the
+existing supervisor policy; no global Python environment is modified.
 
 The chain-bound outer artifact digest is the trust root. The runner's internal
 manifest alone cannot authenticate a bundle supplied with an attacker-chosen
@@ -160,7 +172,9 @@ No proprietary AWS model artifacts or production credentials are included.
 
 `make test-ml` runs in ordinary `make ci`/`make check`. It downloads only the
 locked x86_64 wheels, then runs offline subprocess tests with actual native
-libraries. The tests check all five image fixtures for both tasks, exact labels
+libraries. The real-daemon gRPC/Walrus regression deploys both exact generated
+recipes and proves inference after temporary deployment cleanup, same-component
+replacement and a clean daemon restart. The tests check all five image fixtures for both tasks, exact labels
 and boxes and per-element tolerance; deterministic bundles; generated recipe
 execution; wrong model/digest/version/input; unsupported platform/libc;
 wheel/license and installed-library tampering; symlink/path traversal rejection;
@@ -176,3 +190,7 @@ live AWS acceptance is unauthorized and unrun, recorded separately in
 CI and automatic Sui testnet status still apply to the PR; neither a local
 inference result nor a package-upgrade result proves AWS compatibility, Walrus
 certification, physical performance, or production readiness.
+
+The locked CPython 3.10 bundles do not match the newer Python ABI in the pinned
+Yocto images. Image ABI/runtime selection and actual ARM execution remain target
+acceptance in SF-031/#32; no working Yocto ML runtime is claimed.

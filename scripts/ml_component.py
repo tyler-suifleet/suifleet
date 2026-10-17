@@ -103,12 +103,16 @@ def recipe(artifact, blob):
         raise ValueError("unsupported model")
     command = "python3 -I -B {artifact}"
     # Workspace-local paths need no cross-component filesystem permissions.
-    # Install self-tests both the runtime and its selected model before success.
+    # A run lifecycle retains the version workspace after deployment cleanup.
+    # Repeat the fixture as an executable example; consumers can also invoke infer.
+    inference = command + " infer --state {artifacts}/ml-runtime --fixture marker"
     return {"schemaVersion": "1.0", "componentName": "suifleet-ml-" + task,
             "componentVersion": "1.0.0", "artifactBlobId": blob, "artifactSha256": sha(artifact),
             "description": "Native TF Lite fixture; " + manifest["platform"],
             "lifecycle": {"install": command + " install --state {artifacts}/ml-runtime && " +
-                          command + " infer --state {artifacts}/ml-runtime --fixture marker"},
+                          inference,
+                          "run": "while true; do " + inference + " || exit $?; sleep 60; done",
+                          "readiness": inference},
             "configuration": {}}
 
 
