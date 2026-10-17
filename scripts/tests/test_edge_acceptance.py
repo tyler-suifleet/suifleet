@@ -30,6 +30,11 @@ def object_id(n):
     return dm.object_id(hex(n))
 
 
+def fake_digest(n):
+    """A well-formed (base58, 44-character) transaction digest for the nth fake transaction."""
+    return ("D" + "".join("123456789A"[int(c)] for c in str(n))).ljust(44, "z")
+
+
 class Workspace:
     """A temporary directory holding a manifest, wallet config and SSH key file."""
 
@@ -378,12 +383,13 @@ class EvidenceTests(unittest.TestCase):
             ea.write_evidence(path, {"ok": True})
             self.assertEqual(json.loads(path.read_text()), {"ok": True})
 
-    def test_prompt_accepts_only_digests(self):
+    def test_prompt_blank_means_not_signed(self):
         out = io.StringIO()
         digest = "9" * 44
         self.assertEqual(ea.Prompt(io.StringIO(digest + "\n"), out)("step"), digest)
-        self.assertIsNone(ea.Prompt(io.StringIO("\n"), out)("step"))
-        self.assertIsNone(ea.Prompt(io.StringIO("rm -rf /\n"), out)("step"))
+        self.assertIsNone(ea.Prompt(io.StringIO("\n"), out)("step"), "blank: nothing was signed")
+        # Anything else goes to verify_extension, which keeps the reservation for an unverifiable answer.
+        self.assertEqual(ea.Prompt(io.StringIO("rm -rf /\n"), out)("step"), "rm -rf /")
         self.assertIsNone(ea.Prompt(None, out)("step"), "no operator input means no digest")
 
 
@@ -394,6 +400,10 @@ class FakeChain:
         self.objects, self.receipts, self.balances = {}, {}, {OPERATOR: 10**12}
         self.deployments, self.counter, self.txs, self.calls = [], 0x1000, {}, []
         self.fail_calls = set()
+        self.origins = dict(FIXTURE["type_origins"])  # Tests may substitute a foreign origin.
+
+    def type_of(self, suffix):
+        return f"{self.origins.get(suffix, FIXTURE['call_package_id'])}::{suffix}"
 
     def new(self, suffix, owner, **fields):
         id = object_id(self.counter)
@@ -427,7 +437,16 @@ class FakeCli:
     def receipts(self, deployment):
         return dict(self.chain.receipts.get(dm.object_id(deployment), {}))
 
+    def record_fields(self, deployment):
+        fields = self.chain.objects[dm.object_id(deployment)]["fields"]
+        origin = lambda key: self.chain.origins[f"deployment_manager::{key}"]
+        return {"RecipeDigestKey": (origin("RecipeDigestKey"), fields["recipe_sha256"]),
+                "TargetDevicesKey": (origin("TargetDevicesKey"), fields["devices"]),
+                "TargetGroupsKey": (origin("TargetGroupsKey"), fields["groups"])}
+
     def transaction_block(self, digest):
+        if digest not in self.chain.txs:
+            raise RuntimeError(f"sui client tx-block failed: {digest} not found")
         return self.chain.txs[digest]
 
     def __call__(self, *args, json_output=True):
@@ -437,7 +456,8 @@ class FakeCli:
         if verb == "object":
             id = dm.object_id(args[1])
             o = self.chain.objects[id]
-            return {"objectId": id, "owner": self.chain.owner_json(o["owner"]), "objType": o["type"], "content": {"fields": o["fields"]}}
+            return {"objectId": id, "owner": self.chain.owner_json(o["owner"]), "objType": self.chain.type_of(o["type"]),
+                    "content": {"fields": o["fields"]}}
         if verb == "ptb":
             return self.ptb(list(args[1:]))
         raise AssertionError(f"unexpected sui client {args}")
@@ -482,7 +502,7 @@ class FakeCli:
             call, a = target.split("::", 1)[1], tokens[i + 2:j]
             chain.calls.append(call)
             if call in chain.fail_calls:
-                return {"digest": f"D{len(chain.txs)}", "effects": {"status": {"status": "failure", "error": "abort"},
+                return {"digest": fake_digest(len(chain.txs)), "effects": {"status": {"status": "failure", "error": "abort"},
                         "gasUsed": {"computationCost": "1000", "storageCost": "0", "storageRebate": "0"}}, "objectChanges": []}
             created = []
             if call == "device_registry::register_device":
@@ -519,7 +539,7 @@ class FakeCli:
             changes += [{"type": "created", "objectType": f"{FIXTURE['call_package_id']}::{chain.objects[c]['type']}", "objectId": c}
                         for c in created]
             i = j
-        digest = f"D{len(chain.txs)}"
+        digest = fake_digest(len(chain.txs))
         result = {"digest": digest, "effects": {"status": {"status": "success"},
                   "gasUsed": {"computationCost": "1000", "storageCost": "500", "storageRebate": "100"}}, "objectChanges": changes}
         chain.txs[digest] = result
@@ -820,8 +840,11 @@ class FleetRunTests(unittest.TestCase):
         self.assertEqual(chain.calls, [])
         self.assertTrue(all(s in ("blocked", "skipped") for s in self.statuses(evidence).values()))
 
-    def extension_prompt(self, chain, operator=OPERATOR, skip=None):
-        """Plays the operator: performs each dApp step on the fake chain, returns its digest."""
+    def extension_prompt(self, chain, operator=OPERATOR, skip=None, alter=None, cost=None, answer=None):
+        """Plays the operator: performs each dApp step on the fake chain, returns its digest.
+
+        alter(step, call) may change a deployment call the way a wrong dApp action would;
+        cost overrides the computation cost; answer replaces the digest for matching steps."""
         cli = FakeCli(chain)
         steps = []
 
@@ -829,6 +852,9 @@ class FleetRunTests(unittest.TestCase):
             steps.append(step)
             if skip and skip in step:
                 return None
+            if answer and answer[0] in step:
+                return answer[1]
+            step = step.split(". Keep the wallet's gas budget")[0]
             if "register device address" in step:
                 address = step.split("address ")[1].split()[0]
                 result = cli.ptb(["--move-call", "p::device_registry::register_device", "@r", '"n"', f"@{address}", '"a"', "@0x6",
@@ -850,8 +876,11 @@ class FleetRunTests(unittest.TestCase):
                 target = step.split(" to ")[1].split(":")[0].split()
                 devices = f"vector[@{target[1]}]" if target[0] == "device" else "vector[]"
                 groups = f"vector[@{target[1]}]" if target[0] == "group" else "vector[]"
-                result = cli.ptb(["--move-call", "p::deployment_manager::create_deployment_verified", '"suifleet-test-app"',
-                                  f'"{version}"', f'"{recipe_blob}"', f'"{artifact}"', f'"{recipe}"', groups, devices, "@0x6"])
+                call = ["--move-call", "p::deployment_manager::create_deployment_verified", '"suifleet-test-app"',
+                        f'"{version}"', f'"{recipe_blob}"', f'"{artifact}"', f'"{recipe}"', groups, devices, "@0x6"]
+                result = cli.ptb(alter(step, call) if alter else call)
+            if cost:
+                result["effects"]["gasUsed"]["computationCost"] = str(cost)
             result.setdefault("transaction", {"data": {"sender": operator}})
             return result["digest"]
         prompt.steps = steps
@@ -880,6 +909,92 @@ class FleetRunTests(unittest.TestCase):
         self.assertEqual(evidence["cases"]["group-v2"]["status"], "blocked")
         self.assertEqual(evidence["cases"]["extension-wallet"]["status"], "blocked")
         self.assertEqual((evidence["verdict"], code), ("incomplete", 3))
+
+    def test_extension_transactions_are_charged_to_the_allowance(self):
+        self.setup(wallet="extension")
+        prompt = self.extension_prompt(self.chain)
+        evidence, code = self.run_fleet(prompt)
+        extension = [t for t in evidence["transactions"] if t["source"] == "extension-wallet"]
+        self.assertTrue(extension and all(t["gas_mist"] == 1400 and t["status"] == "success" for t in extension))
+        charged = sum(t.get("gas_mist", 0) + t.get("funding_mist", 0) for t in evidence["transactions"])
+        self.assertEqual(evidence["spent_mist"], charged)
+        self.assertTrue(all(f"at or below {ea.EXTENSION_GAS} MIST" in step for step in prompt.steps))
+
+    def test_extension_cost_beyond_its_reservation_is_charged_and_fails(self):
+        self.setup(wallet="extension")
+        evidence, code = self.run_fleet(self.extension_prompt(self.chain, cost=ea.EXTENSION_GAS + 5_000_000))
+        self.assertEqual(code, 1)
+        self.assertIn("exceeds", evidence["cases"]["enrollment"]["detail"])
+        self.assertGreaterEqual(evidence["spent_mist"], ea.EXTENSION_GAS + 5_000_000)
+
+    def test_exhausted_allowance_invites_no_further_extension_step(self):
+        self.setup(wallet="extension", budget={"max_spend_mist": 3_000_000})
+        prompt = self.extension_prompt(self.chain, cost=1_500_000)
+        evidence, code = self.run_fleet(prompt)
+        self.assertEqual(code, 1)
+        self.assertEqual(len(prompt.steps), 1, "only the first step fitted the allowance")
+        self.assertIn("allowance", evidence["cases"]["enrollment"]["detail"])
+        self.assertLessEqual(evidence["spent_mist"], 3_000_000)
+
+    def test_unverifiable_extension_answers_keep_their_reservation(self):
+        for answer, expected in (("not a digest", "blocked"), ("9" * 44, "failed")):
+            self.setup(wallet="extension")
+            evidence, code = self.run_fleet(self.extension_prompt(self.chain, answer=("register device", answer)))
+            self.assertEqual(evidence["cases"]["enrollment"]["status"], expected, answer)
+            self.assertEqual(evidence["transactions"][0]["status"], "unknown")
+            self.assertEqual(evidence["spent_mist"], ea.EXTENSION_GAS)
+        # A blank answer means nothing was signed and releases the reservation.
+        self.setup(wallet="extension")
+        evidence, _ = self.run_fleet(self.extension_prompt(self.chain, skip="register device"))
+        self.assertEqual((evidence["transactions"][0]["status"], evidence["spent_mist"]), ("not_submitted", 0))
+
+    def test_extension_digest_reused_for_another_step_fails(self):
+        self.setup(wallet="extension")
+        evidence, code = self.run_fleet(self.extension_prompt(self.chain, answer=("create a group", fake_digest(0))))
+        self.assertEqual(code, 1)
+        self.assertIn("already used", evidence["cases"]["enrollment"]["detail"])
+
+    def assert_extension_deployment_rejected(self, case, alter, detail):
+        self.setup(wallet="extension")
+        evidence, code = self.run_fleet(self.extension_prompt(self.chain, alter=alter))
+        self.assertEqual((evidence["cases"][case]["status"], code), ("failed", 1), evidence["cases"][case])
+        self.assertIn(detail, evidence["cases"][case]["detail"])
+        self.assertNotEqual(evidence["cases"]["extension-wallet"]["status"], "passed")
+
+    def test_direct_deployment_instead_of_the_group_fails(self):
+        def direct(step, call):
+            if "version 2.0.0" in step:  # The device itself instead of its group.
+                device = next(i for i, o in self.chain.objects.items() if o["type"] == "device_registry::Device")
+                call[7], call[8] = "vector[]", f"vector[@{device}]"
+            return call
+        self.assert_extension_deployment_rejected("group-v2", direct, "targets devices")
+
+    def test_wrong_component_or_recipe_digest_fails(self):
+        def component_name(step, call):
+            if "version 1.0.0" in step:
+                call[2] = '"another-app"'
+            return call
+        self.assert_extension_deployment_rejected("direct-v1", component_name, "component/version/recipe/artifact")
+
+        def digest(step, call):
+            if "version 1.0.0" in step:
+                call[6] = '"' + "0" * 64 + '"'
+            return call
+        self.assert_extension_deployment_rejected("direct-v1", digest, "binds recipe digest")
+
+    def test_foreign_type_origin_fails_for_either_wallet(self):
+        for key in ("deployment_manager::DeploymentRecord", "deployment_manager::TargetGroupsKey"):
+            for wallet in ("scripted", "extension"):
+                self.setup(wallet=wallet)
+                self.chain.origins[key] = object_id(0x77)
+                prompt = self.extension_prompt(self.chain) if wallet == "extension" else None
+                evidence, code = self.run_fleet(prompt)
+                self.assertEqual(code, 1, (key, wallet))
+                self.assertIn("type", evidence["cases"]["enrollment"]["detail"])
+                if wallet == "scripted":  # A rejected record is still deleted.
+                    self.assertFalse(any(o["type"].endswith("DeploymentRecord") for o in self.chain.objects.values()))
+                else:
+                    self.assertEqual(len(evidence["test_objects"]["deployments"]), 1)
 
     def test_extension_digest_from_another_signer_fails(self):
         self.setup(wallet="extension")

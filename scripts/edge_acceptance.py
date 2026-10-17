@@ -59,7 +59,7 @@ from urllib.request import Request, urlopen
 
 import deployment_manifest as dm
 import test_component as component
-from testnet_budget import Budget
+from testnet_budget import Budget, Spent
 
 ROOT = Path(__file__).resolve().parents[1]
 DAEMON = ROOT / "suifleet-edge/target/debug/suifleet"
@@ -72,6 +72,9 @@ DEDICATED_TESTNET = {
 }
 TESTNET_MAX_SPEND = 500_000_000  # MIST; a single run never needs more.
 DEVICE_FUNDING = 30_000_000  # MIST of report gas sent to the device.
+# Reserved before each extension-wallet step; the operator keeps the wallet's gas budget within it.
+EXTENSION_GAS = 50_000_000
+DIGEST = re.compile(r"[1-9A-HJ-NP-Za-km-z]{32,44}")
 HARDWARE_LOCK = "hardware:raspberrypi3bplus"
 TESTNET_LOCK = "network:suifleet-testnet"
 LOCK_RENEW_SECONDS = 240
@@ -505,6 +508,17 @@ class SuiCli:
             return {dm.object_id(e["key"]): int(e["value"]) for e in receipt["statuses"]["contents"]}
         return {}
 
+    def record_fields(self, deployment):
+        """A deployment's typed dynamic fields: key name -> (key type origin, value)."""
+        fields = {}
+        for field in self("dynamic-field", deployment).get("dynamicFields", []):
+            value = self("object", field["fieldId"])
+            match = re.search(r"(0x[0-9a-fA-F]+)::deployment_manager::(\w+Key)\b",
+                              str(value.get("objType") or value.get("type") or ""))
+            if match:
+                fields[match.group(2)] = (match.group(1), plain(value.get("content", {}))["value"])
+        return fields
+
     def transaction_block(self, digest):
         return self("tx-block", digest)
 
@@ -897,8 +911,7 @@ class Prompt:
             return None
         print(f"\n[extension wallet] {step}\nEnter the transaction digest (blank if not performed): ", end="", file=self.out, flush=True)
         line = self.stream.readline()
-        digest = line.strip()
-        return digest if re.fullmatch(r"[1-9A-HJ-NP-Za-km-z]{32,44}", digest) else None
+        return line.strip() or None  # Blank: the operator did not sign anything.
 
 
 class Runner:
@@ -929,24 +942,59 @@ class Runner:
         finally:
             if len(self.evidence["transactions"]) > count:
                 self.evidence["transactions"][-1]["source"] = "scripted"
-            self.evidence["test_objects"] = {"deployments": list(self.cleanup), "group": self.ids.get("group"),
-                                             "decoy": self.ids.get("decoy"), "device": self.ids.get("device")}
-            self.checkpoint()
+            self.save_progress()
+
+    def save_progress(self):
+        self.evidence["test_objects"] = {"deployments": list(self.cleanup), "group": self.ids.get("group"),
+                                         "decoy": self.ids.get("decoy"), "device": self.ids.get("device")}
+        self.checkpoint()
 
     def verify_extension(self, label, step, expect):
-        """A digest from the operator, checked on chain: success, signer and objects."""
-        digest = self.prompt(step)
-        if not digest:
-            raise CaseBlocked(f"no extension-wallet digest for: {label}")
-        result = self.cli.transaction_block(digest)
-        status = result.get("effects", {}).get("status", {}).get("status")
-        sender = sender_of(result)
-        self.evidence["transactions"].append({"label": label, "digest": digest, "status": status,
-                                              "source": "extension-wallet", "sender": sender})
+        """A digest from the operator, checked on chain: success, signer and objects.
+
+        The step is charged to the same allowance as scripted transactions: a
+        reservation before the prompt, the verified net gas afterwards. Only a
+        blank answer (nothing signed) releases it; an unverifiable answer keeps it.
+        """
+        self.network_lock.assert_()
+        reserved = min(EXTENSION_GAS, self.ledger.remaining)
+        if reserved < 2_000_000:
+            raise Spent(f"insufficient remaining allowance before {label}")
+        self.ledger.used += reserved
+        entry = {"label": label, "gas_budget_mist": reserved, "funding_mist": 0, "status": "unknown",
+                 "source": "extension-wallet"}
+        self.evidence["transactions"].append(entry)
+        try:
+            digest = self.prompt(f"{step}. Keep the wallet's gas budget at or below {reserved} MIST")
+            if not digest:
+                self.ledger.used -= reserved
+                entry["status"] = "not_submitted"
+                raise CaseBlocked(f"no extension-wallet digest for: {label}")
+            if not DIGEST.fullmatch(digest):
+                raise CaseBlocked(f"{label}: the answer is not a transaction digest; its reservation stays spent")
+            if any(t.get("digest") == digest for t in self.evidence["transactions"]):
+                raise CaseFailure(f"{label}: digest {digest} was already used by another step")
+            entry["digest"] = digest
+            result = self.cli.transaction_block(digest)
+            effects = result.get("effects", {})
+            status = effects.get("status", {}).get("status")
+            sender = sender_of(result)
+            entry["sender"] = sender
+            if not sender or dm.object_id(sender) != self.profile["wallet"]["address"]:
+                raise CaseFailure(f"{label}: signed by {sender}, not the profile's wallet account")
+            gas = effects["gasUsed"]
+            cost = max(0, int(gas["computationCost"]) + int(gas["storageCost"]) - int(gas["storageRebate"]))
+            self.ledger.used += cost - reserved  # Actual cost, even beyond the reservation.
+            entry.update(status=status, gas_mist=cost)
+            if cost > reserved:
+                raise CaseFailure(f"{label}: cost {cost} MIST exceeds the {reserved} MIST reserved for it")
+            if self.ledger.used > self.ledger.limit:
+                raise Spent(f"{label}: the run spent {self.ledger.used} MIST, above its {self.ledger.limit} MIST allowance")
+        finally:
+            entry["allowance_used_mist"] = self.ledger.used
+            self.save_progress()
         if status != "success":
             raise CaseFailure(f"{label}: execution effects {status}")
-        if not sender or dm.object_id(sender) != self.profile["wallet"]["address"]:
-            raise CaseFailure(f"{label}: signed by {sender}, not the profile's wallet account")
         objects = {suffix: created(result, suffix) for suffix in expect}
         if not all(objects.values()):
             raise CaseFailure(f"{label}: transaction did not create {[s for s, v in objects.items() if not v]}")
@@ -1067,9 +1115,11 @@ class Runner:
                         f"version {a['version']} to {target}: recipe blob {a['recipe_blob']}, "
                         f"artifact SHA-256 {a['artifact_sha256']}, recipe SHA-256 {a['recipe_sha256']}")
                 _, objects = self.verify_extension(f"{label}: {name}", step, ["::deployment_manager::DeploymentRecord"])
-                records[name] = self._check_record(objects["::deployment_manager::DeploymentRecord"][0], name)
+                record = objects["::deployment_manager::DeploymentRecord"][0]
+                self.cleanup.append(record)  # Named for deletion even if it is the wrong record.
+                self.save_progress()
+                records[name] = self._check_record(record, name, devices, groups)
             self.deployments.update(records)
-            self.cleanup += records.values()
             return records
         ptb = [arg for name, devices, groups in specs for arg in self.deploy_args(name, devices, groups)]
         result = self.transaction(label, *ptb)
@@ -1078,18 +1128,41 @@ class Runner:
             content = plain(self.cli("object", record).get("content", {}))
             name = next(n for n, a in self.artifacts.items() if a["version"] == content["version"])
             records[name] = record
+        self.cleanup += records.values()
         if set(records) != {name for name, _, _ in specs}:
             raise CaseFailure(f"{label}: created {sorted(records)}")
+        for name, devices, groups in specs:
+            self._check_record(records[name], name, devices, groups)
         self.deployments.update(records)
-        self.cleanup += records.values()
         return records
 
-    def _check_record(self, record, name):
-        content = plain(self.cli("object", record).get("content", {}))
+    def _origin(self, name):
+        return dm.object_id(self.manifest["type_origins"][name])
+
+    def _check_record(self, record, name, devices, groups):
+        """The record is exactly what was requested: type origin, fields, recipe digest and targets."""
+        obj = self.cli("object", record)
+        kind = str(obj.get("objType") or obj.get("type") or "")
+        address, _, rest = kind.partition("::")
+        if rest != "deployment_manager::DeploymentRecord" or dm.object_id(address) != self._origin(
+                "deployment_manager::DeploymentRecord"):
+            raise CaseFailure(f"deployment {record} has type {kind}, not the manifest's DeploymentRecord")
+        content = plain(obj.get("content", {}))
         a = self.artifacts[name]
-        if (content.get("version"), content.get("recipe_blob_id"), content.get("artifact_sha256")) != (
-                a["version"], a["recipe_blob"], a["artifact_sha256"]):
-            raise CaseFailure(f"deployment {record} does not carry this run's {name} version/recipe/artifact")
+        if (content.get("component_name"), content.get("version"), content.get("recipe_blob_id"), content.get("artifact_sha256")) != (
+                component.DEFAULT_COMPONENT, a["version"], a["recipe_blob"], a["artifact_sha256"]):
+            raise CaseFailure(f"deployment {record} does not carry this run's {name} component/version/recipe/artifact")
+        fields = self.cli.record_fields(record)
+        for key in ("RecipeDigestKey", "TargetDevicesKey", "TargetGroupsKey"):
+            origin = fields.get(key, (None, None))[0]
+            if origin is None or dm.object_id(origin) != self._origin(f"deployment_manager::{key}"):
+                raise CaseFailure(f"deployment {record}: {key} is missing or not of the manifest's type origin")
+        if fields["RecipeDigestKey"][1] != a["recipe_sha256"]:
+            raise CaseFailure(f"deployment {record} binds recipe digest {fields['RecipeDigestKey'][1]}, not {name}'s")
+        for key, wanted in (("TargetDevicesKey", devices), ("TargetGroupsKey", groups)):
+            actual = sorted(dm.object_id(v) for v in fields[key][1] or [])
+            if actual != sorted(dm.object_id(v) for v in wanted):
+                raise CaseFailure(f"deployment {record} targets {key[6:-3].lower()} {actual}, not the requested {list(wanted)}")
         return record
 
     def enroll(self, address):
