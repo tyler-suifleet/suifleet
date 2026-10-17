@@ -201,6 +201,17 @@ release-image:
 release-artifacts: release-image
 	python3 scripts/release.py build --out $(RELEASE_OUT) --image $(RELEASE_IMAGE) --reproduce
 
+# x86 catalog manifests across a real base-to-current package upgrade, on a
+# disposable network-none localnet (host, needs Docker and a warm Move cache).
+.PHONY: test-x86-catalog-localnet
+X86_CATALOG_BASE ?= origin/main
+test-x86-catalog-localnet:
+	rm -rf .x86-catalog-base && mkdir .x86-catalog-base && git archive $(X86_CATALOG_BASE) contracts | tar -x -C .x86-catalog-base
+	docker run --rm --network none -e PYTHONDONTWRITEBYTECODE=1 -v "$(CURDIR):/workspace" -w /workspace \
+		-v "$${SUIFLEET_MOVE_CACHE:-$(notdir $(CURDIR))_move-cache}:/home/dev/.move" "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" \
+		python3 scripts/test_x86_catalog_localnet.py --base-contracts .x86-catalog-base/contracts; \
+		status=$$?; rm -rf .x86-catalog-base; exit $$status
+
 # make release-verify BUNDLE=dist TRUST=release/trust.toml
 release-verify:
 	$(RUN) bash -c "cd suifleet-edge && cargo run --locked --quiet --bin suifleet -- --verify-release ../$(BUNDLE) ../$(TRUST)"
