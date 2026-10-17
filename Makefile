@@ -128,6 +128,8 @@ test-catalog-live:
 .PHONY: test-compat
 test-compat:
 	$(RUN) python3 scripts/greengrass_compat.py
+	$(RUN) python3 scripts/greengrass_roadmap.py
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_greengrass_roadmap.py'
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_greengrass_compat.py'
 	$(RUN) node scripts/test_greengrass_compat.cjs
 
