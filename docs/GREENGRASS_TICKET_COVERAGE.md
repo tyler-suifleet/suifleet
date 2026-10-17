@@ -1,5 +1,7 @@
 # Greengrass capability-to-ticket coverage
 
+The [SF-064 remaining functional roadmap](GREENGRASS_REMAINING_ROADMAP.md) defines versioned executable subcontracts and maps every selected remaining scope to published implementation tickets SF-069–SF-079. These remain pending implementations, not runtime or live acceptance.
+
 The 51-capability audit is a functional OTA/fleet and broader-runtime roadmap, not proof of complete AWS API or managed-component compatibility. All rows have a tracked owner scope below; [SF-038](https://github.com/tyler-suifleet/suifleet/issues/39) remains a specification epic that must produce separate implementation tickets for selected managed adapters and platform support. AWS-managed components span many service-specific integrations; no finite seed backlog guarantees every future feature is covered.
 
 Reference: [AWS Greengrass V2 overview](https://docs.aws.amazon.com/greengrass/v2/developerguide/what-is-iot-greengrass.html) and [AWS-provided components](https://docs.aws.amazon.com/greengrass/v2/developerguide/public-components.html), checked 2026-10-13.
