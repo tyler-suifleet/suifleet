@@ -88,7 +88,7 @@ def inspect(image, work, mtools_dir, expected_keys=None, debugfs="debugfs", e2fs
     def exists(path):
         out, err = debug('stat '+path)
         return 'Inode:' in out and 'File not found' not in err
-    absent = ['/etc/suifleet/device.key','/etc/suifleet/device.address','/etc/suifleet/config.toml','/etc/suifleet/deployment.json','/etc/suifleet/firmware.toml','/var/lib/suifleet','/home/operator/.ssh/id_ed25519','/root/.ssh/id_ed25519']
+    absent = ['/etc/suifleet/device.key','/etc/suifleet/device.address','/etc/suifleet/config.toml','/etc/suifleet/deployment.json','/etc/suifleet/firmware.toml','/etc/suifleet/signer.toml','/etc/suifleet/pkcs11.pin','/etc/suifleet/env','/run/suifleet-signer','/var/lib/suifleet','/home/operator/.ssh/id_ed25519','/root/.ssh/id_ed25519']
     for path in absent:
         assert not exists(path), 'runtime secret/state baked into image: '+path
     ssh_listing = debug('ls -p /etc/ssh')[0]
@@ -124,6 +124,37 @@ def inspect(image, work, mtools_dir, expected_keys=None, debugfs="debugfs", e2fs
     assert any(exists(path) for path in ['/etc/systemd/system/sockets.target.wants/sshd.socket', '/etc/systemd/system/multi-user.target.wants/sshd.service']), 'SSH not enabled'
     assert 'ConditionPathExists=/etc/suifleet/config.toml' in read('/usr/lib/systemd/system/suifleet.service')
     assert 'User=suifleet' in read('/usr/lib/systemd/system/suifleet.service')
+    # SF-066: the launcher and signer are modes of the same immutable binary.
+    daemon_unit = read('/usr/lib/systemd/system/suifleet.service')
+    for setting in ['ExecStart=/usr/bin/suifleet --launch',
+                    'ExecStartPost=+/usr/bin/suifleet --record-main-process',
+                    'NotifyAccess=main', 'KillMode=mixed']:
+        assert setting in daemon_unit, setting
+    signer_unit = read('/usr/lib/systemd/system/suifleet-signer.service')
+    for setting in ['User=suifleet-signer', 'Group=suifleet-signer',
+                    '--signer-service /etc/suifleet/signer.toml',
+                    'ConditionPathExists=/etc/suifleet/signer.toml',
+                    'IPAddressDeny=any', 'NoNewPrivileges=yes']:
+        assert setting in signer_unit, setting
+    assert exists('/etc/systemd/system/sockets.target.wants/suifleet-signer.socket')
+    passwd = read('/etc/passwd').splitlines()
+    groups = read('/etc/group').splitlines()
+    def account_id(lines, name):
+        return next(line.split(':')[2] for line in lines if line.startswith(name+':'))
+    assert account_id(passwd, 'suifleet') != account_id(passwd, 'suifleet-signer')
+    signer_group = next(line.split(':')[3] for line in groups if line.startswith('suifleet-signer:'))
+    assert 'suifleet' not in signer_group.split(','), 'daemon belongs to signer group'
+    for path, mode, group in [
+            ('/etc/suifleet', '0750', 'suifleet'),
+            ('/etc/suifleet/config.toml.example', '0640', 'suifleet'),
+            ('/etc/suifleet/signer.toml.example', '0640', 'suifleet-signer'),
+            ('/usr/bin/suifleet', '0755', 'root'),
+            ('/usr/libexec/suifleet-provision', '0755', 'root')]:
+        info, _ = debug('stat '+path)
+        assert 'Mode:  '+mode in info, 'unsafe mode: '+path
+        assert re.search(r'User:\s+0\s', info), 'not root owned: '+path
+        assert re.search(r'Group:\s+'+account_id(groups, group)+r'\s', info), 'wrong group: '+path
+    assert 'kind = "service"' in read('/etc/suifleet/config.toml.example')
     assert exists('/etc/ssl/certs/ca-certificates.crt')
     build_info = read('/usr/share/suifleet/build-info')
     assert 'source_revision=' in build_info and 'lock_sha256=' in build_info and 'crate_version=' in build_info
@@ -136,7 +167,7 @@ def inspect(image, work, mtools_dir, expected_keys=None, debugfs="debugfs", e2fs
     with (work/'suifleet').open('rb') as stream:
         elf = stream.read(20)
     assert elf[:4] == b'\x7fELF' and elf[4:6] == b'\x02\x01' and struct.unpack_from('<H',elf,18)[0] == 183, 'daemon must be AArch64 ELF64'
-    return dict(image=str(image.resolve()),sha256=sha(image),size=image.stat().st_size,uncompressed_size=disk.stat().st_size,uncompressed_sha256=sha(disk),partitions=parts,boot_files=boot_files,boot_file_sha256=boot_hashes,boot_config=config,boot_command_line=command_line,daemon_build_info=build_info,binaries=binaries,authorized_public_key_count=len(keys),authorized_keys_match_expected=True if expected_keys is not None else None,runtime_state_absent=absent,enabled_services=enabled,ext4_fsck_read_only_passed=fsck_checked,physical_boot_tested=False)
+    return dict(image=str(image.resolve()),sha256=sha(image),size=image.stat().st_size,uncompressed_size=disk.stat().st_size,uncompressed_sha256=sha(disk),partitions=parts,boot_files=boot_files,boot_file_sha256=boot_hashes,boot_config=config,boot_command_line=command_line,daemon_build_info=build_info,binaries=binaries,authorized_public_key_count=len(keys),authorized_keys_match_expected=True if expected_keys is not None else None,runtime_state_absent=absent,enabled_services=enabled,ext4_fsck_read_only_passed=fsck_checked,signer_service_separation_inspected=True,physical_boot_tested=False)
 
 
 def main():
