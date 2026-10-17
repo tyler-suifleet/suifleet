@@ -1,11 +1,55 @@
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
+/// `[pubsub]` (docs/MESSAGING.md).
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct PubsubConfig {
+    #[serde(default = "default_pubsub_messages")]
+    pub max_messages_per_subscription: usize,
+    #[serde(default = "default_pubsub_bytes")]
+    pub max_bytes_per_subscription: u64,
+    #[serde(default = "default_pubsub_qos0")]
+    pub qos0_messages_per_subscription: usize,
+    #[serde(default)]
+    pub bridge: Option<crate::bridge::BridgeConfig>,
+}
+fn default_pubsub_messages() -> usize {
+    1000
+}
+fn default_pubsub_bytes() -> u64 {
+    4 * 1024 * 1024
+}
+fn default_pubsub_qos0() -> usize {
+    100
+}
+impl PubsubConfig {
+    pub fn limits(&self) -> crate::pubsub::Limits {
+        crate::pubsub::Limits {
+            max_messages: self.max_messages_per_subscription,
+            max_bytes: self.max_bytes_per_subscription,
+            qos0_messages: self.qos0_messages_per_subscription,
+        }
+    }
+    pub fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!((1..=100_000).contains(&self.max_messages_per_subscription), "pubsub.max_messages_per_subscription must be 1..=100000");
+        anyhow::ensure!((4096..=1 << 30).contains(&self.max_bytes_per_subscription), "pubsub.max_bytes_per_subscription must be 4 KiB..=1 GiB");
+        anyhow::ensure!((1..=10_000).contains(&self.qos0_messages_per_subscription), "pubsub.qos0_messages_per_subscription must be 1..=10000");
+        if let Some(bridge) = &self.bridge {
+            bridge.validate()?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Deserialize, Debug, Clone)]
 pub struct Config {
     pub sui: SuiConfig,
     #[serde(default)]
     pub ipc: Option<crate::ipc::Settings>,
+    /// Durable pub/sub and the local MQTT bridge (SF-032); none when omitted.
+    #[serde(default)]
+    pub pubsub: Option<PubsubConfig>,
     pub device: DeviceConfig,
     #[serde(default)]
     pub walrus: WalrusConfig,
@@ -460,6 +504,7 @@ impl Config {
         let raw = std::fs::read_to_string(path)?;
         let mut cfg: Self = toml::from_str(&raw)?;
         if let Some(ipc) = &cfg.ipc { ipc.validate()?; }
+        if let Some(pubsub) = &cfg.pubsub { pubsub.validate()?; }
         cfg.path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
         anyhow::ensure!(
             !cfg.daemon_update.enabled
