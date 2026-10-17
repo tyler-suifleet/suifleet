@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "profile": "testnet",
+  "manifest": "deployment.json",
+  "wallet": {"mode": "scripted", "address": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+             "client_config": "client.yaml"},
+  "walrus": {"mode": "stand-in", "bind": "<THIS_HOST_LAN_IP>"},
+  "device": {
+    "mode": "ssh",
+    "host": "<PI_DHCP_ADDRESS>",
+    "user": "operator",
+    "port": 22,
+    "host_key_sha256": "SHA256:<FINGERPRINT_VERIFIED_ON_THE_PI_CONSOLE>",
+    "identity_file": "/home/<you>/.ssh/id_ed25519_suifleet",
+    "expected_binary_sha256": "<SHA256_OF_/usr/bin/suifleet_FROM_THE_IMAGE_MANIFEST>"
+  },
+  "artifact_profile": "public",
+  "budget": {"max_spend_mist": 250000000}
+}

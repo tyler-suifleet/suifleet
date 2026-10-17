@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "profile": "testnet",
+  "manifest": "deployment.json",
+  "wallet": {"mode": "extension", "address": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+             "client_config": "client.yaml", "dapp_url": "http://127.0.0.1:3000"},
+  "walrus": {"mode": "stand-in", "bind": "<THIS_HOST_LAN_IP>"},
+  "device": {
+    "mode": "ssh",
+    "host": "<PI_DHCP_ADDRESS>",
+    "user": "operator",
+    "host_key_sha256": "SHA256:<FINGERPRINT_VERIFIED_ON_THE_PI_CONSOLE>",
+    "identity_file": "/home/<you>/.ssh/id_ed25519_suifleet"
+  },
+  "artifact_profile": "public",
+  "budget": {"max_spend_mist": 100000000}
+}
