@@ -398,4 +398,3 @@ mod tests {
         assert!(revoked.authorize(62002, &receive).is_err());
     }
 }
-
