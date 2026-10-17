@@ -19,10 +19,10 @@ class RepositoryTests(unittest.TestCase):
         self.assertTrue(all(count > 0 for count in counts.values()))
 
     def test_runtime_receipts_are_scoped_to_executed_suites(self):
-        # SF-057 executed its declared suite; all other adapters remain pending.
+        # SF-057 and SF-032 executed their declared suites; all others remain pending.
         matrix = json.loads((ROOT / compat.COMPAT / "greengrass-compat.json").read_text())
         self.assertEqual({name for name, s in matrix["suites"].items() if s["runtime_execution"] == "passed"},
-                         {"credential-provider-cases.json"})
+                         {"credential-provider-cases.json", "pubsub-cases.json"})
 
 
 class MatrixGateTests(unittest.TestCase):

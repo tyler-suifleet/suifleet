@@ -75,6 +75,20 @@ class Client:
     def receive(self, topic):
         return self.request('receive', topic=topic)
 
+    def subscribe(self, topic_filter, qos=1):
+        """Durable subscription (MQTT filter); QoS 1 messages wait for ack."""
+        return self.request('subscribe', topic=topic_filter, payload={'qos': qos})
+
+    def unsubscribe(self, topic_filter):
+        return self.request('unsubscribe', topic=topic_filter)
+
+    def ack(self, topic_filter, message_id):
+        return self.request('ack', topic=topic_filter, payload=message_id)
+
+    def messaging(self):
+        """Administrator only: subscription and bridge counters."""
+        return self.request('messaging')
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -82,7 +96,9 @@ def main():
     parser.add_argument('--component', default='')
     parser.add_argument('operation', choices=['install', 'list', 'start', 'stop',
                                             'restart', 'status', 'logs', 'config',
-                                            'health', 'publish', 'receive'])
+                                            'health', 'publish', 'receive',
+                                            'subscribe', 'unsubscribe', 'ack',
+                                            'messaging'])
     parser.add_argument('--topic', default='')
     parser.add_argument('--payload', help='JSON value; install takes a quoted deployment ID')
     args = parser.parse_args()
