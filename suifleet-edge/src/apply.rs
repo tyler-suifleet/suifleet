@@ -197,7 +197,11 @@ pub fn exit_result(status: std::process::ExitStatus) -> anyhow::Result<()> {
 
 #[cfg(unix)]
 fn limit_child(max_memory_bytes: Option<u64>) -> std::io::Result<()> {
-    fn set(resource: libc::__rlimit_resource_t, limit: u64) -> std::io::Result<()> {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    type Resource = libc::__rlimit_resource_t;
+    #[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+    type Resource = libc::c_int;
+    fn set(resource: Resource, limit: u64) -> std::io::Result<()> {
         let mut current = libc::rlimit {
             rlim_cur: 0,
             rlim_max: 0,

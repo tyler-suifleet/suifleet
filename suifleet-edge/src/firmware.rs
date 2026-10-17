@@ -533,11 +533,43 @@ impl Dir {
         }
         Ok(())
     }
+    #[cfg(target_os = "linux")]
     fn names(&self) -> std::io::Result<Vec<String>> {
         // /proc/self/fd/N re-opens this exact directory, not a re-resolved path.
         Ok(std::fs::read_dir(format!("/proc/self/fd/{}", self.raw()))?
             .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
             .collect())
+    }
+    #[cfg(not(target_os = "linux"))]
+    fn names(&self) -> std::io::Result<Vec<String>> {
+        // A duplicate of this exact directory's descriptor, not a re-resolved path.
+        let fd = unsafe { libc::dup(self.raw()) };
+        if fd < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        let dir = unsafe { libc::fdopendir(fd) };
+        if dir.is_null() {
+            let error = std::io::Error::last_os_error();
+            unsafe { libc::close(fd) };
+            return Err(error);
+        }
+        // The duplicate shares the directory offset: read from the start.
+        unsafe { libc::rewinddir(dir) };
+        let mut names = Vec::new();
+        loop {
+            let entry = unsafe { libc::readdir(dir) };
+            if entry.is_null() {
+                break;
+            }
+            let name = unsafe { std::ffi::CStr::from_ptr((*entry).d_name.as_ptr()) };
+            if let Ok(name) = name.to_str() {
+                if name != "." && name != ".." {
+                    names.push(name.to_owned());
+                }
+            }
+        }
+        unsafe { libc::closedir(dir) };
+        Ok(names)
     }
     fn owner(&self) -> std::io::Result<(u32, u32)> {
         let mut stat: libc::stat = unsafe { std::mem::zeroed() };
