@@ -324,3 +324,8 @@ ifdef INSIDE_DEV_CONTAINER
 else
 	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" python3 scripts/test_ipc.py
 endif
+
+# SF-057: online public SDK preparation, then network-none actual adapter/mTLS tests.
+.PHONY: test-aws-credentials
+test-aws-credentials:
+	bash scripts/test_aws_credentials.sh

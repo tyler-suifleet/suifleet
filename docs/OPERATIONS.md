@@ -500,6 +500,14 @@ origins, old-package calls, irreversible cancellation and cleanup. These do not
 establish public-network interoperability, real extension-wallet acceptance or
 physical firmware/power-loss safety.
 
+## Optional AWS component credentials
+
+See [AWS_CREDENTIALS.md](AWS_CREDENTIALS.md) for the separately provisioned X.509
+IoT role-alias adapter, dedicated component UIDs, per-start exec wrapper, refresh
+and revocation behavior, and `make test-aws-credentials`. This opt-in companion
+does not use the Sui/Seal identity or grant shared-UID supervised processes access.
+Live AWS account/service acceptance remains unauthorized and unrun.
+
 ## Staged rollouts (SF-017)
 
 See [staged rollout operation and recovery](STAGED_ROLLOUTS.md) for immutable cohorts,
