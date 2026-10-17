@@ -96,7 +96,7 @@ export const GUIDANCE: Record<string, string> = {
   "no-lifecycle-command": "Add an install or run step. A native recipe without either hands its artifact to the platform updater, which an AWS component never does.",
   "invalid-step": "A lifecycle step must be a script string or an object with a Script string.",
   "unsupported-step-key": "Remove Skipif and BootstrapOnRollback; express conditions inside the script.",
-  "privileged-step": "RequiresPrivilege: true has no native equivalent: components run as the daemon user. Move privileged work into a platform installer (docs/PLATFORM_INSTALLERS.md).",
+  "privileged-step": "RequiresPrivilege other than false has no native equivalent: components run as the daemon user. Move privileged work into a platform installer (docs/PLATFORM_INSTALLERS.md).",
   "step-timeout-or-env": "Remove Timeout and Setenv: native step timeouts are operator configuration and the environment is cleared. Set variables inside the script.",
   "unsupported-lifecycle-step": "bootstrap, startup, recover and uninstall have no native equivalent: use install for setup, run for the long-running process (the supervisor restarts it), and platform tooling for reboots and removal.",
   "unknown-lifecycle-step": "Lifecycle step names are exact lowercase install, run or shutdown.",
@@ -264,7 +264,8 @@ function step(name: string, value: unknown, basename: string | null, reasons: Se
   let text: unknown = value;
   if (isObject(value)) {
     if (Object.keys(value).some(k => !STEP_KEYS.has(k)) || has(value, "Skipif") || has(value, "BootstrapOnRollback")) reasons.add("unsupported-step-key");
-    if (value.RequiresPrivilege === true) reasons.add("privileged-step");
+    // Only an explicit false keeps AWS semantics; Greengrass may coerce strings such as "true".
+    if (has(value, "RequiresPrivilege") && value.RequiresPrivilege !== false) reasons.add("privileged-step");
     if (has(value, "Timeout") || has(value, "Setenv")) reasons.add("step-timeout-or-env");
     text = value.Script;
   }

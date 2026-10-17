@@ -1690,6 +1690,51 @@
   }
  },
  {
+  "id": "privileged-step-string-rejected",
+  "note": "Only an explicit RequiresPrivilege false keeps the AWS meaning; a string such as \"true\" may be coerced by Greengrass and is rejected.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Lifecycle": {
+      "install": {
+       "Script": "apt-get install x",
+       "RequiresPrivilege": "true"
+      }
+     },
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "privileged-step"
+   ]
+  }
+ },
+ {
   "id": "skipif-rejected",
   "note": "Skipif is not translated.",
   "recipe": {

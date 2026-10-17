@@ -115,7 +115,7 @@ def _step(step_name: str, step, basename: str, reasons: set):
     elif isinstance(step, dict):
         if set(step) - STEP_KEYS or "Skipif" in step or "BootstrapOnRollback" in step:
             reasons.add("unsupported-step-key")
-        if step.get("RequiresPrivilege") is True:
+        if "RequiresPrivilege" in step and step["RequiresPrivilege"] is not False:
             reasons.add("privileged-step")
         if "Timeout" in step or "Setenv" in step:
             reasons.add("step-timeout-or-env")
