@@ -5,7 +5,7 @@
 //! supervised component's `component.log` (rotated by the supervisor). A
 //! shipper tails them with per-source cursors (inode and offset) that follow
 //! rotation into the `.1` file, so a line is read once. Every line is
-//! redacted ([`crate::redact`], including the device's confidential
+//! redacted (by the [`redact`] module, including the device's confidential
 //! configuration values) and truncated before it leaves the daemon.
 //!
 //! Lines go out as canonical schema-1 batches, signed with the device key as
