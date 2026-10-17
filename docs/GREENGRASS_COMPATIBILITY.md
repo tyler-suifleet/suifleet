@@ -83,6 +83,8 @@ Everything below is proposed. Each adapter runs as a supervised local service be
 
 ### Messaging (SF-032)
 
+Implemented for local pub/sub and the LocalMqtt/Pubsub bridge: see [MESSAGING.md](MESSAGING.md). The rest of this section is the specification it follows.
+
 - **Topics follow MQTT 3.1.1/5 §4.7.** `+` matches one level and `#` matches the remaining levels; `#` is only valid as the last level. Topic names may not contain wildcards. Filters that begin with a wildcard do not match `$` topics. Matching is case-sensitive, and empty levels are significant.
 - **Local pub/sub authorization mirrors AWS `aws.greengrass.ipc.pubsub` policies.** Operations are `aws.greengrass#PublishToTopic`, `aws.greengrass#SubscribeToTopic` or `*`. A resource is a glob in which only `*` is special. `+` and `#` are literal in resources, so a grant of `test/topic/#` permits subscribing to that filter, not to `test/topic/x`. Any matching policy grants.
 - **Brokers and bridging.** A standard MQTT 3.1.1/5 broker serves LAN clients. Bridge mappings are `{topic, source, target, targetTopicPrefix?}`, with source and target taken from `LocalMqtt` and `Pubsub`. Source and target must differ. Any cloud target is a separately approved adapter. The spool is bounded and on disk. The bridge forwards QoS 1 at least once with per-mapping ordering, and on overflow it applies backpressure and an explicit drop counter, never silent loss.
@@ -122,7 +124,7 @@ This runs `python3 scripts/greengrass_compat.py`, the checker's negative tests a
 | Suite | Cases evaluated by the reference model | Current-API execution | Runtime execution |
 |---|---|---|---|
 | `aws-recipe-cases.json` | 49 recipes | Daemon and frontend validators (passing) | Pending SF-037 |
-| `pubsub-cases.json` | 53 filter/topic/match/ACL checks | none | Pending SF-027, SF-032 |
+| `pubsub-cases.json` | 53 filter/topic/match/ACL checks | Daemon pub/sub module (passing) | Passed: SF-032 daemon, IPC UIDs and Mosquitto ([receipt](validation/sf032-messaging.json)) |
 | `shadow-cases.json` | 54 steps across 10 sequences | none | Pending SF-027, SF-033 |
 | `stream-cases.json` | 45 steps across 5 sequences | none | Pending SF-027, SF-034 |
 | `client-device-cases.json` | 16 authorization requests | none | Pending SF-032, SF-035 |
