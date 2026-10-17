@@ -1,0 +1,927 @@
+{
+  "ticket": "SF-065",
+  "agent": "Claude",
+  "model": "claude-opus-5-5",
+  "date": "2026-10-16",
+  "scope": "scripts/test_edge_acceptance_localnet.py on a disposable network-none localnet (Sui 1.81.1) with the local stand-in device; not Raspberry Pi, extension-wallet, public-network or SF-022 evidence",
+  "runs": {
+    "fresh": {
+      "schema": 1,
+      "harness": "scripts/edge_acceptance.py",
+      "started": "2026-10-16T14:35:29Z",
+      "profile": "localnet",
+      "wallet_mode": "scripted",
+      "artifact_profile": "public",
+      "device_mode": "local",
+      "tools": {
+        "sui": "sui 1.81.1-e04cf9aa915c",
+        "python": "3.10.12",
+        "git_head": "a80784b97f41492558ad33bcb753a0a20505a3a0"
+      },
+      "transactions": [
+        {
+          "label": "register, issue cap and activate device",
+          "gas_budget_mist": 200000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "Cg2L2CDMTRBBUdQmdeyo8gFVPXS3B46WqPmPhy4s4Kmx",
+          "gas_mist": 14418864,
+          "allowance_used_mist": 14418864,
+          "source": "scripted"
+        },
+        {
+          "label": "register decoy device",
+          "gas_budget_mist": 200000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "DgEPFHX6KP6G8sTc8JuYhTPeo5cpvqiqNKdgxsHL2Hq8",
+          "gas_mist": 3003664,
+          "allowance_used_mist": 17422528,
+          "source": "scripted"
+        },
+        {
+          "label": "create group",
+          "gas_budget_mist": 200000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "HrTWRgyqNdURYub4DVtKBXCJzhZaorSoUY4JmbuSpL6m",
+          "gas_mist": 3107480,
+          "allowance_used_mist": 20530008,
+          "source": "scripted"
+        },
+        {
+          "label": "add device to group",
+          "gas_budget_mist": 200000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "4s8NAy9FssfeqWTiKojtCN66egVAgN7mMSGKFpdLP8bE",
+          "gas_mist": 1308408,
+          "allowance_used_mist": 21838416,
+          "source": "scripted"
+        },
+        {
+          "label": "create pre-enrollment deployment",
+          "gas_budget_mist": 200000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "3JBR9XSMqgYsyc2B24epMpZV2yZdJPdypmnRefCrSkJJ",
+          "gas_mist": 13519480,
+          "allowance_used_mist": 35357896,
+          "source": "scripted"
+        },
+        {
+          "label": "create direct v1",
+          "gas_budget_mist": 200000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "4KphCA9hpx1teh4YNxfnmE9dN7bDqwTUKMLsq7Kb2kFT",
+          "gas_mist": 13519480,
+          "allowance_used_mist": 48877376,
+          "source": "scripted"
+        },
+        {
+          "label": "fund device report gas",
+          "gas_budget_mist": 200000000,
+          "funding_mist": 30000000,
+          "status": "success",
+          "digest": "GvNheRkxGYMteNNr3KfSwdv7ah4EtHKN17XgcCbqN8PZ",
+          "gas_mist": 1997880,
+          "allowance_used_mist": 80875256,
+          "source": "scripted"
+        },
+        {
+          "label": "create group v2",
+          "gas_budget_mist": 200000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "P3owCS2kUGxxR8gjDkHj6WfubNLU4z4NSxUcKWc4n2B",
+          "gas_mist": 13519480,
+          "allowance_used_mist": 94394736,
+          "source": "scripted"
+        },
+        {
+          "label": "create failure-path deployments",
+          "gas_budget_mist": 200000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "AzPvy4YTndzS1GoRk77Bn6qGx97ZdSLNNQmvBdXmBChu",
+          "gas_mist": 63557880,
+          "allowance_used_mist": 157952616,
+          "source": "scripted"
+        },
+        {
+          "label": "create deployment while the daemon is stopped",
+          "gas_budget_mist": 200000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "HbyKi5FzzxBki8n9WCbpgW4eFKaDt6i5qPW1RgtWZSrJ",
+          "gas_mist": 13519480,
+          "allowance_used_mist": 171472096,
+          "source": "scripted"
+        },
+        {
+          "label": "delete test deployments",
+          "gas_budget_mist": 200000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "BYi6fdt3YuvCkNH5xdBTrhHyVQvHT3unHyjk1epm3iig",
+          "gas_mist": 0,
+          "allowance_used_mist": 171472096,
+          "source": "scripted"
+        },
+        {
+          "label": "delete acceptance group",
+          "gas_budget_mist": 200000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "366t76KpoMLMzCUye7WSH8nrmSm9Qor94bEMLuJBMsCm",
+          "gas_mist": 0,
+          "allowance_used_mist": 171472096,
+          "source": "scripted"
+        },
+        {
+          "label": "deregister decoy device",
+          "gas_budget_mist": 200000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "4vMzub8EUKNVkC8tFW3GdZf8oHJv2C33EwU69N6iMb7U",
+          "gas_mist": 0,
+          "allowance_used_mist": 171472096,
+          "source": "scripted"
+        }
+      ],
+      "chain": "3c00a7c2",
+      "operator": "0x519da528dc4880756108c967aff536aa79e0ccd60d8a1634f772d17916a8b9f8",
+      "start_balance_mist": 999818783400,
+      "device": {
+        "kind": "local-stand-in",
+        "arch": "x86_64",
+        "binary_sha256": "c106e419c77fa89b9a5609cb87a6992192406dec3c4b75fcc3abbccda144bcf0",
+        "updater_sha256": "ed6f56c9c63ede1e2c71b1db1b40fa1504e13866ff62485cb268187c37dd4400",
+        "address": "0x4eee42dc4b9aae0274e09c8afbcf5599072e8000db2b658d98f4ac8e0a6e3a0a",
+        "key_mode": "0o600"
+      },
+      "manifest_package": "0x7bca7dee813ec829c0c9ac86bcf82f236ae11f4c2b5473c65c18f4ad5b88134a",
+      "registry": "0x6fd4b1e99df5dd4485f267867a9eb3388fd310f381977c61dae9815c394d6b2f",
+      "run_id": "accept-75b0171ffdab",
+      "artifacts": {
+        "pre": {
+          "version": "0.9.0",
+          "fail": "none",
+          "artifact_sha256": "bd697a224631f816aab8676190ced6743ead346a9ef89635df6b184869d97b2b",
+          "served_sha256": "bd697a224631f816aab8676190ced6743ead346a9ef89635df6b184869d97b2b",
+          "artifact_blob": "artifact-accept-75b0171ffdab-0-9-0",
+          "recipe_blob": "recipe-accept-75b0171ffdab-0-9-0",
+          "recipe_sha256": "7af655a0167414db70b9cece0c02217db32cf17d19dc35ed56579b5d54c1185a",
+          "bytes": 1402
+        },
+        "v1": {
+          "version": "1.0.0",
+          "fail": "none",
+          "artifact_sha256": "6e2c9cd2cc03af1fc03e32ca4c6edc6e88a098fa14b7fee101a282736d04ad74",
+          "served_sha256": "6e2c9cd2cc03af1fc03e32ca4c6edc6e88a098fa14b7fee101a282736d04ad74",
+          "artifact_blob": "artifact-accept-75b0171ffdab-1-0-0",
+          "recipe_blob": "recipe-accept-75b0171ffdab-1-0-0",
+          "recipe_sha256": "f72dcfd027e9603f55a492eed132d888cd8b90872b101928f384db38759cd4a5",
+          "bytes": 1402
+        },
+        "v2": {
+          "version": "2.0.0",
+          "fail": "none",
+          "artifact_sha256": "46a68fbd7df19a6ca8977b92c99bf2e47608b0272199c671b82018bf9e65cc70",
+          "served_sha256": "46a68fbd7df19a6ca8977b92c99bf2e47608b0272199c671b82018bf9e65cc70",
+          "artifact_blob": "artifact-accept-75b0171ffdab-2-0-0",
+          "recipe_blob": "recipe-accept-75b0171ffdab-2-0-0",
+          "recipe_sha256": "503cb4dd0df7ac247fa56c559dda4aa6a55b7983eb76c5ed80c71bb9eefe4972",
+          "bytes": 1402
+        },
+        "install-fail": {
+          "version": "3.0.0",
+          "fail": "install",
+          "artifact_sha256": "d9316f5227175ff2c088c811bcf268faedf112f0476e6c7416c6acc329b2ab2f",
+          "served_sha256": "d9316f5227175ff2c088c811bcf268faedf112f0476e6c7416c6acc329b2ab2f",
+          "artifact_blob": "artifact-accept-75b0171ffdab-3-0-0",
+          "recipe_blob": "recipe-accept-75b0171ffdab-3-0-0",
+          "recipe_sha256": "ac45a878d90ef00a30c1d7c23ee4e9d62b9b27861c45917ac6d4e98e4de04d19",
+          "bytes": 1408
+        },
+        "health-fail": {
+          "version": "3.1.0",
+          "fail": "health",
+          "artifact_sha256": "e45f5910e1a9ca281675cccd5cd0a572f5efe4d6619d8a3073c1f0e3295d0a37",
+          "served_sha256": "e45f5910e1a9ca281675cccd5cd0a572f5efe4d6619d8a3073c1f0e3295d0a37",
+          "artifact_blob": "artifact-accept-75b0171ffdab-3-1-0",
+          "recipe_blob": "recipe-accept-75b0171ffdab-3-1-0",
+          "recipe_sha256": "a6648d6bce435246dc7e9a315e12794462e51a8288d80daf5c766d8c603335a8",
+          "bytes": 1406
+        },
+        "recipe-tamper": {
+          "version": "3.2.0",
+          "fail": "none",
+          "artifact_sha256": "fba475db03d0c04bde76c3f277e46cad301ebac2ec54b2d521eac79f8d037eb0",
+          "served_sha256": "fba475db03d0c04bde76c3f277e46cad301ebac2ec54b2d521eac79f8d037eb0",
+          "artifact_blob": "artifact-accept-75b0171ffdab-3-2-0",
+          "recipe_blob": "recipe-accept-75b0171ffdab-3-2-0",
+          "recipe_sha256": "441e60865fbe23c546abbb0d8422e750e1ac2e7bad8bdf32dca1da6e492d2dc6",
+          "bytes": 1402
+        },
+        "artifact-tamper": {
+          "version": "3.3.0",
+          "fail": "none",
+          "artifact_sha256": "99e562688a572867de08249d87bc49a4fd8801825fedb86063649b990cda8659",
+          "served_sha256": "78ee4995ce8236770ec84fdb637637ced8cfc6cf08e5d5787dadacef76583200",
+          "artifact_blob": "artifact-tampered-accept-75b0171ffdab-3-3-0",
+          "recipe_blob": "recipe-accept-75b0171ffdab-3-3-0",
+          "recipe_sha256": "40c8421ab29cfb01f44779635f2b7458d9ba4a0a1e473f0aedc0d8c7fa0fd7bb",
+          "bytes": 1402
+        },
+        "elsewhere": {
+          "version": "3.4.0",
+          "fail": "none",
+          "artifact_sha256": "2101800994737df3d24ec114be8f86ec4ad70742aa319edde771eb999ae0824f",
+          "served_sha256": "2101800994737df3d24ec114be8f86ec4ad70742aa319edde771eb999ae0824f",
+          "artifact_blob": "artifact-accept-75b0171ffdab-3-4-0",
+          "recipe_blob": "recipe-accept-75b0171ffdab-3-4-0",
+          "recipe_sha256": "da16bd83da4767dce8f9e283349ecfac84838087882a165114c9e806909df471",
+          "bytes": 1402
+        },
+        "offline": {
+          "version": "4.0.0",
+          "fail": "none",
+          "artifact_sha256": "869ba85b372b9e444e70d2c658414a32d80203cabf224e0cb50c3f29dae8a90a",
+          "served_sha256": "869ba85b372b9e444e70d2c658414a32d80203cabf224e0cb50c3f29dae8a90a",
+          "artifact_blob": "artifact-accept-75b0171ffdab-4-0-0",
+          "recipe_blob": "recipe-accept-75b0171ffdab-4-0-0",
+          "recipe_sha256": "c38f589e6522a328bfc8eb9c38a6f3ec6bed2b24fdcadff4815815ad6e2b6da2",
+          "bytes": 1402
+        }
+      },
+      "test_objects": {
+        "deployments": [
+          "0xda14c85fe32791e415790d7c86ca7fa3428300c43c5751cdb53d926207ba81d4",
+          "0xecc782507421764ff5f616807e2d30d5ba49234a7966e3c8758c53d39e031f18",
+          "0xca5b89fa798e10c80cc22986fb288c64f1b12e7ac04b3f0cc1d8175ca809976e",
+          "0x1e6cc3c4e03c48f6f6175a7b5a9c39b2f51a1f9201ba3b4127a0f8b0c22c957c",
+          "0x711099848b93cb5979f826dec8116c14ff096be75fcf75722b7aef663fa95a0a",
+          "0x74b11466d4af353289838c85c8dd0b0cba00591b15c569078a6e85a21e6c47a1",
+          "0xbf216b3f664628cb0695d44dd15d14857d6d9e6f2c71dacb4fddf109fa3c48ef",
+          "0xf5f6decd04aae536180790e269d2c9eddc890602f2fd24a671fbe2507e37d8cf",
+          "0xdd5a6be1dfcfbc41188cd9bb5af2c93c3a7222b6f53fda8fde86a599dafe4f0c"
+        ],
+        "group": "0xe6593b029e2c11bf28f8ecb1d5c53e76cf685f82521f673a7b26d6dc2ed6adaf",
+        "decoy": "0x6be00591174917c731b3a89400a2d4691257af3e5a3ad6cb78c6063b0121090d",
+        "device": "0x0271eb7e154d70a96b0a29cf12148530d48008b4375f2a07c7a940a334d1d467"
+      },
+      "enrollment": {
+        "device": "0x0271eb7e154d70a96b0a29cf12148530d48008b4375f2a07c7a940a334d1d467",
+        "cap": "0xc8d8d614fbf89df28d4d53a01eb27a481a0d51cb4d3a00c4a7433fc03b73fc10",
+        "owner_cap": "0x37d52126329a3c8a1114696826c81f26c96c99d5ce8044e8486391094f50eed2",
+        "address": "0x4eee42dc4b9aae0274e09c8afbcf5599072e8000db2b658d98f4ac8e0a6e3a0a",
+        "source": "scripted test account"
+      },
+      "device_manifest_walrus": {
+        "publisher_url": "http://127.0.0.1:40515",
+        "aggregator_url": "http://127.0.0.1:40515"
+      },
+      "spent_mist": 171472096,
+      "device_log_tail": "t\u001b[0m\u001b[2m=\u001b[0m\"0x1e6cc3c4e03c48f6f6175a7b5a9c39b2f51a1f9201ba3b4127a0f8b0c22c957c\" \u001b[3mstatus\u001b[0m\u001b[2m=\u001b[0m2 \u001b[3merror\u001b[0m\u001b[2m=\u001b[0mSome(\"SHA-256 mismatch: expected 99e562688a572867de08249d87bc49a4fd8801825fedb86063649b990cda8659 got 78ee4995ce8236770ec84fdb637637ced8cfc6cf08e5d5787dadacef76583200\")\n\u001b[2m2026-10-16T14:35:42.773839Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Status report remains queued \u001b[3mid\u001b[0m\u001b[2m=\u001b[0m0x711099848b93cb5979f826dec8116c14ff096be75fcf75722b7aef663fa95a0a \u001b[3merror\u001b[0m\u001b[2m=\u001b[0mClient specified an invalid argument: Transaction is rejected as invalid by more than 1/3 of validators by stake (non-retriable). Non-retriable errors: [Transaction needs to be rebuilt because object 0xc8d8d614fbf89df28d4d53a01eb27a481a0d51cb4d3a00c4a7433fc03b73fc10 version 0x10b (HcPZf3B5EejivN8EKSK7K3qh14AeQ71iZiAYcfJDkDu5) is unavailable for consumption, current version: 0x13d { k#99f25ef6.. } with 10000 stake].\n\u001b[2m2026-10-16T14:35:42.786207Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Status report remains queued \u001b[3mid\u001b[0m\u001b[2m=\u001b[0m0x74b11466d4af353289838c85c8dd0b0cba00591b15c569078a6e85a21e6c47a1 \u001b[3merror\u001b[0m\u001b[2m=\u001b[0mClient specified an invalid argument: Transaction is rejected as invalid by more than 1/3 of validators by stake (non-retriable). Non-retriable errors: [Transaction needs to be rebuilt because object 0xc8d8d614fbf89df28d4d53a01eb27a481a0d51cb4d3a00c4a7433fc03b73fc10 version 0x10b (HcPZf3B5EejivN8EKSK7K3qh14AeQ71iZiAYcfJDkDu5) is unavailable for consumption, current version: 0x13d { k#99f25ef6.. } with 10000 stake].\n\u001b[2m2026-10-16T14:35:42.798239Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Status report remains queued \u001b[3mid\u001b[0m\u001b[2m=\u001b[0m0xf5f6decd04aae536180790e269d2c9eddc890602f2fd24a671fbe2507e37d8cf \u001b[3merror\u001b[0m\u001b[2m=\u001b[0mClient specified an invalid argument: Transaction is rejected as invalid by more than 1/3 of validators by stake (non-retriable). Non-retriable errors: [Transaction needs to be rebuilt because object 0xc8d8d614fbf89df28d4d53a01eb27a481a0d51cb4d3a00c4a7433fc03b73fc10 version 0x10b (HcPZf3B5EejivN8EKSK7K3qh14AeQ71iZiAYcfJDkDu5) is unavailable for consumption, current version: 0x13d { k#99f25ef6.. } with 10000 stake].\n\u001b[2m2026-10-16T14:35:44.018192Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Status report remains queued \u001b[3mid\u001b[0m\u001b[2m=\u001b[0m0x74b11466d4af353289838c85c8dd0b0cba00591b15c569078a6e85a21e6c47a1 \u001b[3merror\u001b[0m\u001b[2m=\u001b[0mClient specified an invalid argument: Transaction is rejected as invalid by more than 1/3 of validators by stake (non-retriable). Non-retriable errors: [Transaction needs to be rebuilt because object 0xc8d8d614fbf89df28d4d53a01eb27a481a0d51cb4d3a00c4a7433fc03b73fc10 version 0x13d (46RrMBsjrCUVqBrJXkcakKGCdfH5y3D4uLGT13sxxMCY) is unavailable for consumption, current version: 0x13e { k#99f25ef6.. } with 10000 stake].\n\u001b[2m2026-10-16T14:35:44.028995Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Status report remains queued \u001b[3mid\u001b[0m\u001b[2m=\u001b[0m0xf5f6decd04aae536180790e269d2c9eddc890602f2fd24a671fbe2507e37d8cf \u001b[3merror\u001b[0m\u001b[2m=\u001b[0mClient specified an invalid argument: Transaction is rejected as invalid by more than 1/3 of validators by stake (non-retriable). Non-retriable errors: [Transaction needs to be rebuilt because object 0xc8d8d614fbf89df28d4d53a01eb27a481a0d51cb4d3a00c4a7433fc03b73fc10 version 0x13d (46RrMBsjrCUVqBrJXkcakKGCdfH5y3D4uLGT13sxxMCY) is unavailable for consumption, current version: 0x13e { k#99f25ef6.. } with 10000 stake].\n\u001b[2m2026-10-16T14:35:45.258650Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Status report remains queued \u001b[3mid\u001b[0m\u001b[2m=\u001b[0m0xf5f6decd04aae536180790e269d2c9eddc890602f2fd24a671fbe2507e37d8cf \u001b[3merror\u001b[0m\u001b[2m=\u001b[0mClient specified an invalid argument: Transaction is rejected as invalid by more than 1/3 of validators by stake (non-retriable). Non-retriable errors: [Transaction needs to be rebuilt because object 0xc8d8d614fbf89df28d4d53a01eb27a481a0d51cb4d3a00c4a7433fc03b73fc10 version 0x13e (Dxxkb3QDMZoaB1v2KrBk6ZAcdmD47SizJozPJN8Pc5C) is unavailable for consumption, current version: 0x13f { k#99f25ef6.. } with 10000 stake].\n\u001b[2m2026-10-16T14:35:56.549741Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Daemon started with durable deployment polling \u001b[3maddress\u001b[0m\u001b[2m=\u001b[0m\"0x4eee42dc4b9aae0274e09c8afbcf5599072e8000db2b658d98f4ac8e0a6e3a0a\"\n\u001b[2m2026-10-16T14:35:56.571106Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Deployment admission notice (UTC); no disruptive work started \u001b[3mdeployment\u001b[0m\u001b[2m=\u001b[0m\"0xdd5a6be1dfcfbc41188cd9bb5af2c93c3a7222b6f53fda8fde86a599dafe4f0c\" \u001b[3mreason\u001b[0m\u001b[2m=\u001b[0m\"ready for admission\" \u001b[3mnotice_ms\u001b[0m\u001b[2m=\u001b[0m0\n\u001b[2m2026-10-16T14:35:56.578485Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msuifleet::walrus_client\u001b[0m\u001b[2m:\u001b[0m Downloading blob artifact-accept-75b0171ffdab-4-0-0 from http://127.0.0.1:40515/v1/blobs/artifact-accept-75b0171ffdab-4-0-0\n\u001b[2m2026-10-16T14:35:56.581852Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msuifleet::walrus_client\u001b[0m\u001b[2m:\u001b[0m Downloaded 1402 bytes, sha256=869ba85b372b9e444e70d2c658414a32d80203cabf224e0cb50c3f29dae8a90a\n\u001b[2m2026-10-16T14:35:56.592074Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Apply admitted; subsequent control changes do not interrupt this plan \u001b[3mdeployment\u001b[0m\u001b[2m=\u001b[0m\"0xdd5a6be1dfcfbc41188cd9bb5af2c93c3a7222b6f53fda8fde86a599dafe4f0c\"\n\u001b[2m2026-10-16T14:35:56.623170Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Component installed \u001b[3mdeployment\u001b[0m\u001b[2m=\u001b[0m\"0xdd5a6be1dfcfbc41188cd9bb5af2c93c3a7222b6f53fda8fde86a599dafe4f0c\" \u001b[3mcomponent\u001b[0m\u001b[2m=\u001b[0m\"suifleet-test-app\" \u001b[3mversion\u001b[0m\u001b[2m=\u001b[0m\"4.0.0\"\n\u001b[2m2026-10-16T14:35:56.623255Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Deployment finished \u001b[3mdeployment\u001b[0m\u001b[2m=\u001b[0m\"0xdd5a6be1dfcfbc41188cd9bb5af2c93c3a7222b6f53fda8fde86a599dafe4f0c\" \u001b[3mstatus\u001b[0m\u001b[2m=\u001b[0m1 \u001b[3merror\u001b[0m\u001b[2m=\u001b[0mNone\n\u001b[2m2026-10-16T14:35:58.908078Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Daemon started with durable deployment polling \u001b[3maddress\u001b[0m\u001b[2m=\u001b[0m\"0x4eee42dc4b9aae0274e09c8afbcf5599072e8000db2b658d98f4ac8e0a6e3a0a\"\n",
+      "cases": {
+        "preflight": {
+          "status": "passed",
+          "capability": "network, manifest, account, funding, Walrus and device preflight",
+          "detail": "chain 3c00a7c2, package 0x7bca7dee813ec829c0c9ac86bcf82f236ae11f4c2b5473c65c18f4ad5b88134a, operator 0x519da528dc4880756108c967aff536aa79e0ccd60d8a1634f772d17916a8b9f8, 999818783400 MIST, device local-stand-in x86_64 0x4eee42dc4b9aae0274e09c8afbcf5599072e8000db2b658d98f4ac8e0a6e3a0a"
+        },
+        "image-identity": {
+          "status": "skipped",
+          "capability": "SF-029 image: aarch64, packaged binary/updater hashes, first-boot identity and key mode",
+          "detail": "local stand-in device; physical Raspberry Pi evidence is required (SF-031)"
+        },
+        "artifacts": {
+          "status": "passed",
+          "capability": "isolated test-component artifacts and recipes uploaded and read back by SHA-256",
+          "detail": "9 artifacts/recipes for run accept-75b0171ffdab, read back by SHA-256"
+        },
+        "enrollment": {
+          "status": "passed",
+          "capability": "register/issue-cap/activate through the wallet, verified effects; enrolled daemon started before any test deployment",
+          "detail": "device 0x0271eb7e154d70a96b0a29cf12148530d48008b4375f2a07c7a940a334d1d467, cap 0xc8d8d614fbf89df28d4d53a01eb27a481a0d51cb4d3a00c4a7433fc03b73fc10 (scripted test account); daemon enrolled before any test deployment"
+        },
+        "baseline-skip": {
+          "status": "passed",
+          "capability": "a deployment created before enrollment never runs",
+          "detail": "pre-enrollment deployment 0xda14c85fe32791e415790d7c86ca7fa3428300c43c5751cdb53d926207ba81d4 never ran"
+        },
+        "direct-v1": {
+          "status": "passed",
+          "capability": "direct deployment v1: Applied on chain, device receipt names v1, this run ID and the artifact SHA-256",
+          "detail": "deployment 0xecc782507421764ff5f616807e2d30d5ba49234a7966e3c8758c53d39e031f18: Applied on chain; receipt v1, run accept-75b0171ffdab"
+        },
+        "report-retry": {
+          "status": "passed",
+          "capability": "apply succeeds while the device cannot pay for its report; the report is retried once gas arrives",
+          "detail": "applied while unable to pay; Applied receipt after gas arrived"
+        },
+        "group-v2": {
+          "status": "passed",
+          "capability": "group deployment v2: Applied on chain, device receipt names v2",
+          "detail": "deployment 0xca5b89fa798e10c80cc22986fb288c64f1b12e7ac04b3f0cc1d8175ca809976e via group 0xe6593b029e2c11bf28f8ecb1d5c53e76cf685f82521f673a7b26d6dc2ed6adaf: Applied on chain"
+        },
+        "updater-install-failure": {
+          "status": "passed",
+          "capability": "injected install failure: Failed on chain, previous version kept",
+          "detail": "deployment 0x74b11466d4af353289838c85c8dd0b0cba00591b15c569078a6e85a21e6c47a1: Failed on chain, outcome apply command failed with exit code 10"
+        },
+        "updater-health-failure": {
+          "status": "passed",
+          "capability": "injected health failure: Failed on chain, receipt says health failed",
+          "detail": "deployment 0xf5f6decd04aae536180790e269d2c9eddc890602f2fd24a671fbe2507e37d8cf: Failed on chain, outcome apply command failed with exit code 20"
+        },
+        "recipe-tamper": {
+          "status": "passed",
+          "capability": "recipe bytes not matching the on-chain digest: Failed, updater never invoked",
+          "detail": "deployment 0x711099848b93cb5979f826dec8116c14ff096be75fcf75722b7aef663fa95a0a: Failed on chain, outcome recipe SHA-256 mismatch"
+        },
+        "artifact-tamper": {
+          "status": "passed",
+          "capability": "artifact bytes not matching the authenticated hash: Failed, updater never invoked",
+          "detail": "deployment 0x1e6cc3c4e03c48f6f6175a7b5a9c39b2f51a1f9201ba3b4127a0f8b0c22c957c: Failed on chain, outcome SHA-256 mismatch: expected 99e562688a572867de08249d87bc49a4fd8801825fedb86063649b990cda8659 got 78ee4995ce8236770ec84fdb637637ced8cfc6cf08e5d5787dadacef76583200"
+        },
+        "unauthorized-target": {
+          "status": "passed",
+          "capability": "deployment for another device never runs on this one",
+          "detail": "deployment 0xbf216b3f664628cb0695d44dd15d14857d6d9e6f2c71dacb4fddf109fa3c48ef for decoy 0x6be00591174917c731b3a89400a2d4691257af3e5a3ad6cb78c6063b0121090d never ran"
+        },
+        "offline-catch-up": {
+          "status": "passed",
+          "capability": "deployment created while the daemon is stopped is applied after it starts",
+          "detail": "deployment 0xdd5a6be1dfcfbc41188cd9bb5af2c93c3a7222b6f53fda8fde86a599dafe4f0c created while stopped: Applied after start"
+        },
+        "daemon-restart": {
+          "status": "passed",
+          "capability": "daemon restart keeps the journal and replays no applied work",
+          "detail": "journal kept 7 outcomes; no replay"
+        },
+        "key-journal-preserved": {
+          "status": "passed",
+          "capability": "device key digest, address and journal unchanged by the run",
+          "detail": "key digest and address unchanged; journal present"
+        },
+        "cleanup": {
+          "status": "passed",
+          "capability": "test-owned deployments, group and decoy device deleted; device identity kept",
+          "detail": "9 deployments, group and decoy deleted; device 0x0271eb7e154d70a96b0a29cf12148530d48008b4375f2a07c7a940a334d1d467 kept"
+        },
+        "extension-wallet": {
+          "status": "blocked",
+          "capability": "a real browser-extension wallet signed enrollment and deployments in the dApp",
+          "detail": "scripted test-account automation does not establish browser-wallet behavior; run an extension-wallet profile"
+        },
+        "encrypted-delivery": {
+          "status": "blocked",
+          "capability": "SF-022 Seal-encrypted artifact/recipe: permitted device decrypts; unauthorized, revoked, tampered and key-service failure never run",
+          "detail": "SF-022 Seal-encrypted delivery is not implemented; the public-artifact baseline does not establish it"
+        },
+        "supervised-lifecycle": {
+          "status": "skipped",
+          "capability": "SF-014 supervised run/stop/restart of a component on the Pi",
+          "detail": "not exercised by the public-artifact baseline; add a case when acceptance covers it"
+        },
+        "component-configuration": {
+          "status": "skipped",
+          "capability": "SF-015 configuration merge/reset on the Pi",
+          "detail": "not exercised by the public-artifact baseline; add a case when acceptance covers it"
+        },
+        "desired-state": {
+          "status": "skipped",
+          "capability": "SF-013 desired-state reconciliation on the Pi",
+          "detail": "not exercised by the public-artifact baseline; add a case when acceptance covers it"
+        },
+        "daemon-self-update": {
+          "status": "skipped",
+          "capability": "SF-026 daemon self-update and fallback on the Pi",
+          "detail": "not exercised by the public-artifact baseline; add a case when acceptance covers it"
+        },
+        "platform-restart-recovery": {
+          "status": "skipped",
+          "capability": "platform-owned reboot/power-loss with journal preservation (SF-016/SF-025)",
+          "detail": "not exercised by the public-artifact baseline; add a case when acceptance covers it"
+        }
+      },
+      "verdict": "incomplete",
+      "finished": "2026-10-16T14:36:07Z"
+    },
+    "reuse": {
+      "schema": 1,
+      "harness": "scripts/edge_acceptance.py",
+      "started": "2026-10-16T14:36:07Z",
+      "profile": "localnet",
+      "wallet_mode": "scripted",
+      "artifact_profile": "public",
+      "device_mode": "local",
+      "tools": {
+        "sui": "sui 1.81.1-e04cf9aa915c",
+        "python": "3.10.12",
+        "git_head": "a80784b97f41492558ad33bcb753a0a20505a3a0"
+      },
+      "transactions": [
+        {
+          "label": "register decoy device",
+          "gas_budget_mist": 200000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "8WLDCSYW7Y4uatg7y4a6Y1ksERCtqa8iUrvrUX6WSS65",
+          "gas_mist": 3003664,
+          "allowance_used_mist": 3003664,
+          "source": "scripted"
+        },
+        {
+          "label": "create group",
+          "gas_budget_mist": 200000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "5cb9eJMRonqh4LWNztN2ULuYKcGiJU8YcR5B9x9kVua3",
+          "gas_mist": 3107480,
+          "allowance_used_mist": 6111144,
+          "source": "scripted"
+        },
+        {
+          "label": "add device to group",
+          "gas_budget_mist": 200000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "BYAywUMburJ61sJeRNswd2LT3f7L3PmPAjvnzQBcc79C",
+          "gas_mist": 1308408,
+          "allowance_used_mist": 7419552,
+          "source": "scripted"
+        },
+        {
+          "label": "create direct v1",
+          "gas_budget_mist": 200000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "HiFzRBysxxNK5NgSJ1bcezden4iChKiZcaREQc3XvRTN",
+          "gas_mist": 13519480,
+          "allowance_used_mist": 20939032,
+          "source": "scripted"
+        },
+        {
+          "label": "create group v2",
+          "gas_budget_mist": 200000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "3hjBgTxeh29cLgNdhDpSDQMDKjudjkhZhTKFuaDmZTX7",
+          "gas_mist": 13519480,
+          "allowance_used_mist": 34458512,
+          "source": "scripted"
+        },
+        {
+          "label": "create failure-path deployments",
+          "gas_budget_mist": 200000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "CKA6NQMDHD1JqDhvE2A1YQpQ6XyEFz1kuXjLS2XxDBNM",
+          "gas_mist": 63557880,
+          "allowance_used_mist": 98016392,
+          "source": "scripted"
+        },
+        {
+          "label": "create deployment while the daemon is stopped",
+          "gas_budget_mist": 200000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "6myM3x7XrCtfWsu3jK6Tq7eDMss1FH73UuXF3m9Lzaks",
+          "gas_mist": 13519480,
+          "allowance_used_mist": 111535872,
+          "source": "scripted"
+        },
+        {
+          "label": "delete test deployments",
+          "gas_budget_mist": 200000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "EkMXoCV5H3RbuMmUMSA1SDRqFMkK7MfFf3equtqpBeGH",
+          "gas_mist": 0,
+          "allowance_used_mist": 111535872,
+          "source": "scripted"
+        },
+        {
+          "label": "delete acceptance group",
+          "gas_budget_mist": 200000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "AzzuxZXP5fhbTLFiCtwAqQdEPV848B2e8hdFYNASV4ug",
+          "gas_mist": 0,
+          "allowance_used_mist": 111535872,
+          "source": "scripted"
+        },
+        {
+          "label": "deregister decoy device",
+          "gas_budget_mist": 200000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "H7dW97pMfU3BjR9NYzkeZW6ZvBDkfVtovXpUs4XB24T3",
+          "gas_mist": 0,
+          "allowance_used_mist": 111535872,
+          "source": "scripted"
+        }
+      ],
+      "chain": "3c00a7c2",
+      "operator": "0x519da528dc4880756108c967aff536aa79e0ccd60d8a1634f772d17916a8b9f8",
+      "start_balance_mist": 999761736092,
+      "device": {
+        "kind": "local-stand-in",
+        "arch": "x86_64",
+        "binary_sha256": "c106e419c77fa89b9a5609cb87a6992192406dec3c4b75fcc3abbccda144bcf0",
+        "updater_sha256": "ed6f56c9c63ede1e2c71b1db1b40fa1504e13866ff62485cb268187c37dd4400",
+        "address": "0x4eee42dc4b9aae0274e09c8afbcf5599072e8000db2b658d98f4ac8e0a6e3a0a",
+        "key_mode": "0o600"
+      },
+      "manifest_package": "0x7bca7dee813ec829c0c9ac86bcf82f236ae11f4c2b5473c65c18f4ad5b88134a",
+      "registry": "0x6fd4b1e99df5dd4485f267867a9eb3388fd310f381977c61dae9815c394d6b2f",
+      "run_id": "accept-066de8da2f10",
+      "artifacts": {
+        "pre": {
+          "version": "0.9.0",
+          "fail": "none",
+          "artifact_sha256": "9488bf52584611d3e79c8685700663c1f576d163e972e5ad2a3b9b7273b88cf5",
+          "served_sha256": "9488bf52584611d3e79c8685700663c1f576d163e972e5ad2a3b9b7273b88cf5",
+          "artifact_blob": "artifact-accept-066de8da2f10-0-9-0",
+          "recipe_blob": "recipe-accept-066de8da2f10-0-9-0",
+          "recipe_sha256": "3796d21e4822dcb7e08ac552256e62380d65263ba822c964c6f2e3709615905a",
+          "bytes": 1402
+        },
+        "v1": {
+          "version": "1.0.0",
+          "fail": "none",
+          "artifact_sha256": "9412c1fa3bbdebac3154d238e8b87f9f63a7900f2f831a72788e6b6633be4e13",
+          "served_sha256": "9412c1fa3bbdebac3154d238e8b87f9f63a7900f2f831a72788e6b6633be4e13",
+          "artifact_blob": "artifact-accept-066de8da2f10-1-0-0",
+          "recipe_blob": "recipe-accept-066de8da2f10-1-0-0",
+          "recipe_sha256": "1081cceb2b6de836e168b48007cc48fd2879f31e153c223f175c3e193e68f2a2",
+          "bytes": 1402
+        },
+        "v2": {
+          "version": "2.0.0",
+          "fail": "none",
+          "artifact_sha256": "2966a7fd9d08a8abe74781d1e48612217568ed838d015d4db29b8f0ce00cabec",
+          "served_sha256": "2966a7fd9d08a8abe74781d1e48612217568ed838d015d4db29b8f0ce00cabec",
+          "artifact_blob": "artifact-accept-066de8da2f10-2-0-0",
+          "recipe_blob": "recipe-accept-066de8da2f10-2-0-0",
+          "recipe_sha256": "15aacff5ee45e2db5128c971220a4da1f607633cce80698c52b60458bf4f8def",
+          "bytes": 1402
+        },
+        "install-fail": {
+          "version": "3.0.0",
+          "fail": "install",
+          "artifact_sha256": "05e0fc1e0f08bd68b148ed92ea3a56d77d9981156a4e578fafaa62cbd411d0be",
+          "served_sha256": "05e0fc1e0f08bd68b148ed92ea3a56d77d9981156a4e578fafaa62cbd411d0be",
+          "artifact_blob": "artifact-accept-066de8da2f10-3-0-0",
+          "recipe_blob": "recipe-accept-066de8da2f10-3-0-0",
+          "recipe_sha256": "7dee493076d1af5065f79eb82cf44a2382756ad365eead145749b99c072940f7",
+          "bytes": 1408
+        },
+        "health-fail": {
+          "version": "3.1.0",
+          "fail": "health",
+          "artifact_sha256": "402d09faa57e6d8f9ee3975e96b7263933704310af3cdc6195700485e6a85398",
+          "served_sha256": "402d09faa57e6d8f9ee3975e96b7263933704310af3cdc6195700485e6a85398",
+          "artifact_blob": "artifact-accept-066de8da2f10-3-1-0",
+          "recipe_blob": "recipe-accept-066de8da2f10-3-1-0",
+          "recipe_sha256": "3899c64decfbcffa5a5246d9a86bd76bec27f3ffe43965ba1031c814bdcedc29",
+          "bytes": 1406
+        },
+        "recipe-tamper": {
+          "version": "3.2.0",
+          "fail": "none",
+          "artifact_sha256": "5ffb7d2bc8df9eb873850cc12b0f253a718bb936366c6c5c6060b702d8ab180d",
+          "served_sha256": "5ffb7d2bc8df9eb873850cc12b0f253a718bb936366c6c5c6060b702d8ab180d",
+          "artifact_blob": "artifact-accept-066de8da2f10-3-2-0",
+          "recipe_blob": "recipe-accept-066de8da2f10-3-2-0",
+          "recipe_sha256": "ffe4c9f4f4fa6d14d3190754f8ec62088ec408b417bdd0dd9bf6410ed39ba176",
+          "bytes": 1402
+        },
+        "artifact-tamper": {
+          "version": "3.3.0",
+          "fail": "none",
+          "artifact_sha256": "08f84c7107655b0d7d939d0d51538b6564e55d8962c2ea94d205ded69333199a",
+          "served_sha256": "f4eb02f13c767a696268cad816bc8ff46c0f6003acb9d6519597e4336f43739c",
+          "artifact_blob": "artifact-tampered-accept-066de8da2f10-3-3-0",
+          "recipe_blob": "recipe-accept-066de8da2f10-3-3-0",
+          "recipe_sha256": "cea4a17ac7b24021b235344e1df5e365e7631e60991d83c9362e8f3563047580",
+          "bytes": 1402
+        },
+        "elsewhere": {
+          "version": "3.4.0",
+          "fail": "none",
+          "artifact_sha256": "9eec2c99378699291cce80ae532573b5d02858d144a7058d52dd4ca25d666a9d",
+          "served_sha256": "9eec2c99378699291cce80ae532573b5d02858d144a7058d52dd4ca25d666a9d",
+          "artifact_blob": "artifact-accept-066de8da2f10-3-4-0",
+          "recipe_blob": "recipe-accept-066de8da2f10-3-4-0",
+          "recipe_sha256": "f6f2cd3c3a3e2202accc44c79db9a668c84917d1903664f100ecfa3ac43c9086",
+          "bytes": 1402
+        },
+        "offline": {
+          "version": "4.0.0",
+          "fail": "none",
+          "artifact_sha256": "277aa9590ef049eba9f500e161e02af9e0c32485e745bb374dcb48feb8e6401c",
+          "served_sha256": "277aa9590ef049eba9f500e161e02af9e0c32485e745bb374dcb48feb8e6401c",
+          "artifact_blob": "artifact-accept-066de8da2f10-4-0-0",
+          "recipe_blob": "recipe-accept-066de8da2f10-4-0-0",
+          "recipe_sha256": "828eb8cc26472e734048000df037250df5ff4c4886422d85c3f011715fab1aca",
+          "bytes": 1402
+        }
+      },
+      "enrollment": {
+        "device": "0x0271eb7e154d70a96b0a29cf12148530d48008b4375f2a07c7a940a334d1d467",
+        "cap": "0xc8d8d614fbf89df28d4d53a01eb27a481a0d51cb4d3a00c4a7433fc03b73fc10",
+        "owner_cap": "0x37d52126329a3c8a1114696826c81f26c96c99d5ce8044e8486391094f50eed2",
+        "address": "0x4eee42dc4b9aae0274e09c8afbcf5599072e8000db2b658d98f4ac8e0a6e3a0a",
+        "source": "existing enrollment named by the profile"
+      },
+      "test_objects": {
+        "deployments": [
+          "0x5cdc6cbb5e3a5db74c1fd6acd830c48e91209d4e4bee087e59a3b2e394713859",
+          "0x55ec5b000a8dc589deef3075c43d851600169206134bb51dbcdedec670653ca1",
+          "0x148e430fe66163dd53eb4ade9bdb35986771e82b7b47dadbfda29dc1a7c91e56",
+          "0xb4430c7b99d159d4cdeb135a7879b11c69e6550d2f7ddc3934c42a61f2d08cd7",
+          "0xc2a0cddbb13eb7eb03c63008189da419e082fe744f1734be4f0b97abacf01ec7",
+          "0xc2e3d68100578acffe011b5546596822f1096b63aefa026fd6b6a7ee63fb45c0",
+          "0xf57d262a456bbafef7f1413e07f8f2ae5088c4f8c5242f6f90c47db07ab4c02d",
+          "0xe6616b5ba8f79fe2aafdeee365b5780071b8d8d1d9e89cc8e4bcd4714b941029"
+        ],
+        "group": "0xe6fa202b6bc2c04aba0fac97d842d6848aab1515f4af2f91aba32721a7197d4f",
+        "decoy": "0x82122b668c837cff83b18bfc6204e99b311bf13e8086a000174da5a36fd7dd82",
+        "device": "0x0271eb7e154d70a96b0a29cf12148530d48008b4375f2a07c7a940a334d1d467"
+      },
+      "device_manifest_walrus": {
+        "publisher_url": "http://127.0.0.1:38813",
+        "aggregator_url": "http://127.0.0.1:38813"
+      },
+      "spent_mist": 111535872,
+      "device_log_tail": "\u001b[0m\u001b[2m=\u001b[0m\"0xb4430c7b99d159d4cdeb135a7879b11c69e6550d2f7ddc3934c42a61f2d08cd7\" \u001b[3mstatus\u001b[0m\u001b[2m=\u001b[0m2 \u001b[3merror\u001b[0m\u001b[2m=\u001b[0mSome(\"SHA-256 mismatch: expected 08f84c7107655b0d7d939d0d51538b6564e55d8962c2ea94d205ded69333199a got f4eb02f13c767a696268cad816bc8ff46c0f6003acb9d6519597e4336f43739c\")\n\u001b[2m2026-10-16T14:36:18.728886Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Status report remains queued \u001b[3mid\u001b[0m\u001b[2m=\u001b[0m0xb4430c7b99d159d4cdeb135a7879b11c69e6550d2f7ddc3934c42a61f2d08cd7 \u001b[3merror\u001b[0m\u001b[2m=\u001b[0mClient specified an invalid argument: Transaction is rejected as invalid by more than 1/3 of validators by stake (non-retriable). Non-retriable errors: [Transaction needs to be rebuilt because object 0xc8d8d614fbf89df28d4d53a01eb27a481a0d51cb4d3a00c4a7433fc03b73fc10 version 0x3ca (2hMaVmDGjJYDoyP8o49c18QdhqjeQRmVD6x8NmJ7vCKY) is unavailable for consumption, current version: 0x404 { k#99f25ef6.. } with 10000 stake].\n\u001b[2m2026-10-16T14:36:18.740264Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Status report remains queued \u001b[3mid\u001b[0m\u001b[2m=\u001b[0m0xc2a0cddbb13eb7eb03c63008189da419e082fe744f1734be4f0b97abacf01ec7 \u001b[3merror\u001b[0m\u001b[2m=\u001b[0mClient specified an invalid argument: Transaction is rejected as invalid by more than 1/3 of validators by stake (non-retriable). Non-retriable errors: [Transaction needs to be rebuilt because object 0xc8d8d614fbf89df28d4d53a01eb27a481a0d51cb4d3a00c4a7433fc03b73fc10 version 0x3ca (2hMaVmDGjJYDoyP8o49c18QdhqjeQRmVD6x8NmJ7vCKY) is unavailable for consumption, current version: 0x404 { k#99f25ef6.. } with 10000 stake].\n\u001b[2m2026-10-16T14:36:18.751207Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Status report remains queued \u001b[3mid\u001b[0m\u001b[2m=\u001b[0m0xc2e3d68100578acffe011b5546596822f1096b63aefa026fd6b6a7ee63fb45c0 \u001b[3merror\u001b[0m\u001b[2m=\u001b[0mClient specified an invalid argument: Transaction is rejected as invalid by more than 1/3 of validators by stake (non-retriable). Non-retriable errors: [Transaction needs to be rebuilt because object 0xc8d8d614fbf89df28d4d53a01eb27a481a0d51cb4d3a00c4a7433fc03b73fc10 version 0x3ca (2hMaVmDGjJYDoyP8o49c18QdhqjeQRmVD6x8NmJ7vCKY) is unavailable for consumption, current version: 0x404 { k#99f25ef6.. } with 10000 stake].\n\u001b[2m2026-10-16T14:36:19.969145Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Status report remains queued \u001b[3mid\u001b[0m\u001b[2m=\u001b[0m0xc2a0cddbb13eb7eb03c63008189da419e082fe744f1734be4f0b97abacf01ec7 \u001b[3merror\u001b[0m\u001b[2m=\u001b[0mClient specified an invalid argument: Transaction is rejected as invalid by more than 1/3 of validators by stake (non-retriable). Non-retriable errors: [Transaction needs to be rebuilt because object 0xc8d8d614fbf89df28d4d53a01eb27a481a0d51cb4d3a00c4a7433fc03b73fc10 version 0x404 (FVJNLU8cD3iVZuBamae1GQDtspKLrqKF4Q8j23kYfA3W) is unavailable for consumption, current version: 0x405 { k#99f25ef6.. } with 10000 stake].\n\u001b[2m2026-10-16T14:36:19.980203Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Status report remains queued \u001b[3mid\u001b[0m\u001b[2m=\u001b[0m0xc2e3d68100578acffe011b5546596822f1096b63aefa026fd6b6a7ee63fb45c0 \u001b[3merror\u001b[0m\u001b[2m=\u001b[0mClient specified an invalid argument: Transaction is rejected as invalid by more than 1/3 of validators by stake (non-retriable). Non-retriable errors: [Transaction needs to be rebuilt because object 0xc8d8d614fbf89df28d4d53a01eb27a481a0d51cb4d3a00c4a7433fc03b73fc10 version 0x404 (FVJNLU8cD3iVZuBamae1GQDtspKLrqKF4Q8j23kYfA3W) is unavailable for consumption, current version: 0x405 { k#99f25ef6.. } with 10000 stake].\n\u001b[2m2026-10-16T14:36:21.217352Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Status report remains queued \u001b[3mid\u001b[0m\u001b[2m=\u001b[0m0xc2e3d68100578acffe011b5546596822f1096b63aefa026fd6b6a7ee63fb45c0 \u001b[3merror\u001b[0m\u001b[2m=\u001b[0mClient specified an invalid argument: Transaction is rejected as invalid by more than 1/3 of validators by stake (non-retriable). Non-retriable errors: [Transaction needs to be rebuilt because object 0xc8d8d614fbf89df28d4d53a01eb27a481a0d51cb4d3a00c4a7433fc03b73fc10 version 0x405 (Hr18VN3yokN1kFHjhnzcqQUqrnY7vJsSMaKHUqXQbCa9) is unavailable for consumption, current version: 0x406 { k#99f25ef6.. } with 10000 stake].\n\u001b[2m2026-10-16T14:36:32.516119Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Daemon started with durable deployment polling \u001b[3maddress\u001b[0m\u001b[2m=\u001b[0m\"0x4eee42dc4b9aae0274e09c8afbcf5599072e8000db2b658d98f4ac8e0a6e3a0a\"\n\u001b[2m2026-10-16T14:36:32.541106Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Deployment admission notice (UTC); no disruptive work started \u001b[3mdeployment\u001b[0m\u001b[2m=\u001b[0m\"0xe6616b5ba8f79fe2aafdeee365b5780071b8d8d1d9e89cc8e4bcd4714b941029\" \u001b[3mreason\u001b[0m\u001b[2m=\u001b[0m\"ready for admission\" \u001b[3mnotice_ms\u001b[0m\u001b[2m=\u001b[0m0\n\u001b[2m2026-10-16T14:36:32.552188Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msuifleet::walrus_client\u001b[0m\u001b[2m:\u001b[0m Downloading blob artifact-accept-066de8da2f10-4-0-0 from http://127.0.0.1:38813/v1/blobs/artifact-accept-066de8da2f10-4-0-0\n\u001b[2m2026-10-16T14:36:32.556041Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msuifleet::walrus_client\u001b[0m\u001b[2m:\u001b[0m Downloaded 1402 bytes, sha256=277aa9590ef049eba9f500e161e02af9e0c32485e745bb374dcb48feb8e6401c\n\u001b[2m2026-10-16T14:36:32.569378Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Apply admitted; subsequent control changes do not interrupt this plan \u001b[3mdeployment\u001b[0m\u001b[2m=\u001b[0m\"0xe6616b5ba8f79fe2aafdeee365b5780071b8d8d1d9e89cc8e4bcd4714b941029\"\n\u001b[2m2026-10-16T14:36:32.608224Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Component installed \u001b[3mdeployment\u001b[0m\u001b[2m=\u001b[0m\"0xe6616b5ba8f79fe2aafdeee365b5780071b8d8d1d9e89cc8e4bcd4714b941029\" \u001b[3mcomponent\u001b[0m\u001b[2m=\u001b[0m\"suifleet-test-app\" \u001b[3mversion\u001b[0m\u001b[2m=\u001b[0m\"4.0.0\"\n\u001b[2m2026-10-16T14:36:32.608299Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Deployment finished \u001b[3mdeployment\u001b[0m\u001b[2m=\u001b[0m\"0xe6616b5ba8f79fe2aafdeee365b5780071b8d8d1d9e89cc8e4bcd4714b941029\" \u001b[3mstatus\u001b[0m\u001b[2m=\u001b[0m1 \u001b[3merror\u001b[0m\u001b[2m=\u001b[0mNone\n\u001b[2m2026-10-16T14:36:34.869799Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msuifleet\u001b[0m\u001b[2m:\u001b[0m Daemon started with durable deployment polling \u001b[3maddress\u001b[0m\u001b[2m=\u001b[0m\"0x4eee42dc4b9aae0274e09c8afbcf5599072e8000db2b658d98f4ac8e0a6e3a0a\"\n",
+      "cases": {
+        "preflight": {
+          "status": "passed",
+          "capability": "network, manifest, account, funding, Walrus and device preflight",
+          "detail": "chain 3c00a7c2, package 0x7bca7dee813ec829c0c9ac86bcf82f236ae11f4c2b5473c65c18f4ad5b88134a, operator 0x519da528dc4880756108c967aff536aa79e0ccd60d8a1634f772d17916a8b9f8, 999761736092 MIST, device local-stand-in x86_64 0x4eee42dc4b9aae0274e09c8afbcf5599072e8000db2b658d98f4ac8e0a6e3a0a"
+        },
+        "image-identity": {
+          "status": "skipped",
+          "capability": "SF-029 image: aarch64, packaged binary/updater hashes, first-boot identity and key mode",
+          "detail": "local stand-in device; physical Raspberry Pi evidence is required (SF-031)"
+        },
+        "artifacts": {
+          "status": "passed",
+          "capability": "isolated test-component artifacts and recipes uploaded and read back by SHA-256",
+          "detail": "9 artifacts/recipes for run accept-066de8da2f10, read back by SHA-256"
+        },
+        "enrollment": {
+          "status": "passed",
+          "capability": "register/issue-cap/activate through the wallet, verified effects; enrolled daemon started before any test deployment",
+          "detail": "device 0x0271eb7e154d70a96b0a29cf12148530d48008b4375f2a07c7a940a334d1d467, cap 0xc8d8d614fbf89df28d4d53a01eb27a481a0d51cb4d3a00c4a7433fc03b73fc10 (existing enrollment named by the profile); daemon enrolled before any test deployment"
+        },
+        "baseline-skip": {
+          "status": "skipped",
+          "capability": "a deployment created before enrollment never runs",
+          "detail": "the device journal already has a cursor; first-enrollment baseline needs a fresh device state"
+        },
+        "direct-v1": {
+          "status": "passed",
+          "capability": "direct deployment v1: Applied on chain, device receipt names v1, this run ID and the artifact SHA-256",
+          "detail": "deployment 0x5cdc6cbb5e3a5db74c1fd6acd830c48e91209d4e4bee087e59a3b2e394713859: Applied on chain; receipt v1, run accept-066de8da2f10"
+        },
+        "report-retry": {
+          "status": "skipped",
+          "capability": "apply succeeds while the device cannot pay for its report; the report is retried once gas arrives",
+          "detail": "device already had gas; reuse a fresh, unfunded identity to test report retry"
+        },
+        "group-v2": {
+          "status": "passed",
+          "capability": "group deployment v2: Applied on chain, device receipt names v2",
+          "detail": "deployment 0x55ec5b000a8dc589deef3075c43d851600169206134bb51dbcdedec670653ca1 via group 0xe6fa202b6bc2c04aba0fac97d842d6848aab1515f4af2f91aba32721a7197d4f: Applied on chain"
+        },
+        "updater-install-failure": {
+          "status": "passed",
+          "capability": "injected install failure: Failed on chain, previous version kept",
+          "detail": "deployment 0xc2a0cddbb13eb7eb03c63008189da419e082fe744f1734be4f0b97abacf01ec7: Failed on chain, outcome apply command failed with exit code 10"
+        },
+        "updater-health-failure": {
+          "status": "passed",
+          "capability": "injected health failure: Failed on chain, receipt says health failed",
+          "detail": "deployment 0xc2e3d68100578acffe011b5546596822f1096b63aefa026fd6b6a7ee63fb45c0: Failed on chain, outcome apply command failed with exit code 20"
+        },
+        "recipe-tamper": {
+          "status": "passed",
+          "capability": "recipe bytes not matching the on-chain digest: Failed, updater never invoked",
+          "detail": "deployment 0x148e430fe66163dd53eb4ade9bdb35986771e82b7b47dadbfda29dc1a7c91e56: Failed on chain, outcome recipe SHA-256 mismatch"
+        },
+        "artifact-tamper": {
+          "status": "passed",
+          "capability": "artifact bytes not matching the authenticated hash: Failed, updater never invoked",
+          "detail": "deployment 0xb4430c7b99d159d4cdeb135a7879b11c69e6550d2f7ddc3934c42a61f2d08cd7: Failed on chain, outcome SHA-256 mismatch: expected 08f84c7107655b0d7d939d0d51538b6564e55d8962c2ea94d205ded69333199a got f4eb02f13c767a696268cad816bc8ff46c0f6003acb9d6519597e4336f43739c"
+        },
+        "unauthorized-target": {
+          "status": "passed",
+          "capability": "deployment for another device never runs on this one",
+          "detail": "deployment 0xf57d262a456bbafef7f1413e07f8f2ae5088c4f8c5242f6f90c47db07ab4c02d for decoy 0x82122b668c837cff83b18bfc6204e99b311bf13e8086a000174da5a36fd7dd82 never ran"
+        },
+        "offline-catch-up": {
+          "status": "passed",
+          "capability": "deployment created while the daemon is stopped is applied after it starts",
+          "detail": "deployment 0xe6616b5ba8f79fe2aafdeee365b5780071b8d8d1d9e89cc8e4bcd4714b941029 created while stopped: Applied after start"
+        },
+        "daemon-restart": {
+          "status": "passed",
+          "capability": "daemon restart keeps the journal and replays no applied work",
+          "detail": "journal kept 14 outcomes; no replay"
+        },
+        "key-journal-preserved": {
+          "status": "passed",
+          "capability": "device key digest, address and journal unchanged by the run",
+          "detail": "key digest and address unchanged; journal present"
+        },
+        "cleanup": {
+          "status": "passed",
+          "capability": "test-owned deployments, group and decoy device deleted; device identity kept",
+          "detail": "8 deployments, group and decoy deleted; device 0x0271eb7e154d70a96b0a29cf12148530d48008b4375f2a07c7a940a334d1d467 kept"
+        },
+        "extension-wallet": {
+          "status": "blocked",
+          "capability": "a real browser-extension wallet signed enrollment and deployments in the dApp",
+          "detail": "scripted test-account automation does not establish browser-wallet behavior; run an extension-wallet profile"
+        },
+        "encrypted-delivery": {
+          "status": "blocked",
+          "capability": "SF-022 Seal-encrypted artifact/recipe: permitted device decrypts; unauthorized, revoked, tampered and key-service failure never run",
+          "detail": "SF-022 Seal-encrypted delivery is not implemented; the public-artifact baseline does not establish it"
+        },
+        "supervised-lifecycle": {
+          "status": "skipped",
+          "capability": "SF-014 supervised run/stop/restart of a component on the Pi",
+          "detail": "not exercised by the public-artifact baseline; add a case when acceptance covers it"
+        },
+        "component-configuration": {
+          "status": "skipped",
+          "capability": "SF-015 configuration merge/reset on the Pi",
+          "detail": "not exercised by the public-artifact baseline; add a case when acceptance covers it"
+        },
+        "desired-state": {
+          "status": "skipped",
+          "capability": "SF-013 desired-state reconciliation on the Pi",
+          "detail": "not exercised by the public-artifact baseline; add a case when acceptance covers it"
+        },
+        "daemon-self-update": {
+          "status": "skipped",
+          "capability": "SF-026 daemon self-update and fallback on the Pi",
+          "detail": "not exercised by the public-artifact baseline; add a case when acceptance covers it"
+        },
+        "platform-restart-recovery": {
+          "status": "skipped",
+          "capability": "platform-owned reboot/power-loss with journal preservation (SF-016/SF-025)",
+          "detail": "not exercised by the public-artifact baseline; add a case when acceptance covers it"
+        }
+      },
+      "verdict": "incomplete",
+      "finished": "2026-10-16T14:36:43Z"
+    },
+    "encrypted": {
+      "schema": 1,
+      "harness": "scripts/edge_acceptance.py",
+      "started": "2026-10-16T14:36:43Z",
+      "profile": "localnet",
+      "wallet_mode": "scripted",
+      "artifact_profile": "sf022-encrypted",
+      "device_mode": "local",
+      "tools": {
+        "sui": "sui 1.81.1-e04cf9aa915c",
+        "python": "3.10.12",
+        "git_head": "a80784b97f41492558ad33bcb753a0a20505a3a0"
+      },
+      "transactions": [],
+      "cases": {
+        "preflight": {
+          "status": "blocked",
+          "capability": "network, manifest, account, funding, Walrus and device preflight",
+          "detail": "the SF-022 encrypted profile cannot run until SF-022 lands"
+        },
+        "image-identity": {
+          "status": "skipped",
+          "capability": "SF-029 image: aarch64, packaged binary/updater hashes, first-boot identity and key mode",
+          "detail": "local stand-in device; physical Raspberry Pi evidence is required (SF-031)"
+        },
+        "artifacts": {
+          "status": "blocked",
+          "capability": "isolated test-component artifacts and recipes uploaded and read back by SHA-256",
+          "detail": "the SF-022 encrypted profile cannot run until SF-022 lands"
+        },
+        "enrollment": {
+          "status": "blocked",
+          "capability": "register/issue-cap/activate through the wallet, verified effects; enrolled daemon started before any test deployment",
+          "detail": "the SF-022 encrypted profile cannot run until SF-022 lands"
+        },
+        "baseline-skip": {
+          "status": "blocked",
+          "capability": "a deployment created before enrollment never runs",
+          "detail": "the SF-022 encrypted profile cannot run until SF-022 lands"
+        },
+        "direct-v1": {
+          "status": "blocked",
+          "capability": "direct deployment v1: Applied on chain, device receipt names v1, this run ID and the artifact SHA-256",
+          "detail": "the SF-022 encrypted profile cannot run until SF-022 lands"
+        },
+        "report-retry": {
+          "status": "blocked",
+          "capability": "apply succeeds while the device cannot pay for its report; the report is retried once gas arrives",
+          "detail": "the SF-022 encrypted profile cannot run until SF-022 lands"
+        },
+        "group-v2": {
+          "status": "blocked",
+          "capability": "group deployment v2: Applied on chain, device receipt names v2",
+          "detail": "the SF-022 encrypted profile cannot run until SF-022 lands"
+        },
+        "updater-install-failure": {
+          "status": "blocked",
+          "capability": "injected install failure: Failed on chain, previous version kept",
+          "detail": "the SF-022 encrypted profile cannot run until SF-022 lands"
+        },
+        "updater-health-failure": {
+          "status": "blocked",
+          "capability": "injected health failure: Failed on chain, receipt says health failed",
+          "detail": "the SF-022 encrypted profile cannot run until SF-022 lands"
+        },
+        "recipe-tamper": {
+          "status": "blocked",
+          "capability": "recipe bytes not matching the on-chain digest: Failed, updater never invoked",
+          "detail": "the SF-022 encrypted profile cannot run until SF-022 lands"
+        },
+        "artifact-tamper": {
+          "status": "blocked",
+          "capability": "artifact bytes not matching the authenticated hash: Failed, updater never invoked",
+          "detail": "the SF-022 encrypted profile cannot run until SF-022 lands"
+        },
+        "unauthorized-target": {
+          "status": "blocked",
+          "capability": "deployment for another device never runs on this one",
+          "detail": "the SF-022 encrypted profile cannot run until SF-022 lands"
+        },
+        "offline-catch-up": {
+          "status": "blocked",
+          "capability": "deployment created while the daemon is stopped is applied after it starts",
+          "detail": "the SF-022 encrypted profile cannot run until SF-022 lands"
+        },
+        "daemon-restart": {
+          "status": "blocked",
+          "capability": "daemon restart keeps the journal and replays no applied work",
+          "detail": "the SF-022 encrypted profile cannot run until SF-022 lands"
+        },
+        "key-journal-preserved": {
+          "status": "blocked",
+          "capability": "device key digest, address and journal unchanged by the run",
+          "detail": "the SF-022 encrypted profile cannot run until SF-022 lands"
+        },
+        "cleanup": {
+          "status": "blocked",
+          "capability": "test-owned deployments, group and decoy device deleted; device identity kept",
+          "detail": "the SF-022 encrypted profile cannot run until SF-022 lands"
+        },
+        "extension-wallet": {
+          "status": "blocked",
+          "capability": "a real browser-extension wallet signed enrollment and deployments in the dApp",
+          "detail": "scripted test-account automation does not establish browser-wallet behavior; run an extension-wallet profile"
+        },
+        "encrypted-delivery": {
+          "status": "blocked",
+          "capability": "SF-022 Seal-encrypted artifact/recipe: permitted device decrypts; unauthorized, revoked, tampered and key-service failure never run",
+          "detail": "SF-022 Seal-encrypted delivery is not implemented; the public-artifact baseline does not establish it"
+        },
+        "supervised-lifecycle": {
+          "status": "skipped",
+          "capability": "SF-014 supervised run/stop/restart of a component on the Pi",
+          "detail": "not exercised by the public-artifact baseline; add a case when acceptance covers it"
+        },
+        "component-configuration": {
+          "status": "skipped",
+          "capability": "SF-015 configuration merge/reset on the Pi",
+          "detail": "not exercised by the public-artifact baseline; add a case when acceptance covers it"
+        },
+        "desired-state": {
+          "status": "skipped",
+          "capability": "SF-013 desired-state reconciliation on the Pi",
+          "detail": "not exercised by the public-artifact baseline; add a case when acceptance covers it"
+        },
+        "daemon-self-update": {
+          "status": "skipped",
+          "capability": "SF-026 daemon self-update and fallback on the Pi",
+          "detail": "not exercised by the public-artifact baseline; add a case when acceptance covers it"
+        },
+        "platform-restart-recovery": {
+          "status": "skipped",
+          "capability": "platform-owned reboot/power-loss with journal preservation (SF-016/SF-025)",
+          "detail": "not exercised by the public-artifact baseline; add a case when acceptance covers it"
+        }
+      },
+      "verdict": "incomplete",
+      "finished": "2026-10-16T14:36:43Z"
+    }
+  }
+}
