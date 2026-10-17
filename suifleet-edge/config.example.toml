@@ -101,3 +101,9 @@ replay_history = false
 # source = "Pubsub"
 # target = "LocalMqtt"
 # target_topic_prefix = "device1/"
+
+# Redacted remote logs to the fleet indexer (needs [telemetry]; docs/LOGS.md).
+# [logs]
+# interval_seconds = 60
+# max_lines_per_interval = 512
+# buffer_max = 256

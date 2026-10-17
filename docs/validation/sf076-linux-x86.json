@@ -1,0 +1,221 @@
+{
+  "ticket": "SF-076",
+  "target": "i686-unknown-linux-gnu",
+  "commit": "0546fa6282fa7f597e83b7b11a278d65f0e962ee",
+  "worktree_clean": true,
+  "host": {
+    "kernel": "6.6.87.2-microsoft-standard-WSL2",
+    "machine": "x86_64"
+  },
+  "release_image": "sha256:2734b6212b71b925acde009728c722133a97ae4028f5bf64478c4e28d268896f",
+  "runner_image": "sha256:da4652ef27665187d20bdc9b6a343bbb6125067b0dc51d2f4960c7558acc9c00",
+  "toolchain": {
+    "rustc": [
+      "rustc 1.94.0 (4a4ef493e 2026-03-02)",
+      "host: x86_64-unknown-linux-gnu",
+      "release: 1.94.0"
+    ],
+    "linker": "i686-linux-gnu-gcc (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0",
+    "glibc_symbol_floor": "2.34"
+  },
+  "binaries": {
+    "suifleet": {
+      "sha256": "1e5632729e1d44161ffb0ef6d214e67e351c5eb65539ba6cf4a42e0e6c9e1cf1",
+      "elf_class": 32,
+      "machine": "EM_386",
+      "interpreter": "/lib/ld-linux.so.2"
+    },
+    "examples/grpc_sim_shim": {
+      "sha256": "35f1c4591155383826701d9ac632cd659bbf4697d24fb46b9b2a65c3af7a0c51",
+      "elf_class": 32,
+      "machine": "EM_386",
+      "interpreter": "/lib/ld-linux.so.2"
+    },
+    "examples/sign_release": {
+      "sha256": "5333c03be8e42380ec3780e584cf583c5c995b65d47e3c02892b880d6390345d",
+      "elf_class": 32,
+      "machine": "EM_386",
+      "interpreter": "/lib/ld-linux.so.2"
+    }
+  },
+  "environment": {
+    "dpkg_architecture": "i386",
+    "python_pointer_bits": 32,
+    "uname_machine": "i686",
+    "x86_64_loader_present": false,
+    "glibc": "2.36"
+  },
+  "identity": {
+    "fresh_unique": true,
+    "existing_preserved": true,
+    "corrupt_refused": true,
+    "independent_address_vector": true
+  },
+  "suites": [
+    {
+      "suite": "test_ota.py",
+      "root": false,
+      "exit": 0,
+      "seconds": 35,
+      "pass_lines": [
+        "PASS: provisioning and independent signing/address vector",
+        "PASS: mixed per-type origins and runtime chain-reset/stale-call-package rejection",
+        "PASS: safe enrollment; paginated direct/group deployment and recipe-to-artifact flow",
+        "PASS: artifact/recipe hash mismatch, unsupported lifecycle, untrusted creator and deleted targets rejected",
+        "PASS: future/missing/malformed deployment schemas failed without downloads; later v1 applied and cursor advanced",
+        "PASS: offline catch-up, restart deduplication, failed execution and durable report retry",
+        "PASS: revoked registry identity stops applying and reporting",
+        "PASS: interrupted artifact transfer resumed; expired blob reported Failed; artifact cache emptied"
+      ]
+    },
+    {
+      "suite": "test_catalog_ota.py",
+      "root": false,
+      "exit": 0,
+      "seconds": 11,
+      "pass_lines": [
+        "PASS: schema2 actual-daemon (x86) different manifests; unsupported, x86_64-only, invalid unselected hash, mutable/wrong type rejected before downloads; cursor/restart/durable reports, no duplicate apply"
+      ]
+    },
+    {
+      "suite": "test_component_ota.py",
+      "root": false,
+      "exit": 0,
+      "seconds": 7,
+      "pass_lines": [
+        "PASS: real daemon applied test component v1/v2 via suifleet-test-updater; receipts match version, run ID and SHA-256",
+        "PASS: injected install failure (previous version kept) and health failure reported Failed with distinct receipts"
+      ]
+    },
+    {
+      "suite": "test_dependency_ota.py",
+      "root": false,
+      "exit": 0,
+      "seconds": 43,
+      "pass_lines": [
+        "PASS: actual-daemon dependency-first multi-component install; unavailable platform/soft omission; installed-dependent conflict and cycle rejected before downloads/installs; installed reuse; failed dependency stops dependent; cached offline candidates only under the cached policy and download limits; supervised dependency ready before its dependent at deploy and at daemon start"
+      ]
+    },
+    {
+      "suite": "test_supervisor.py",
+      "root": false,
+      "exit": 0,
+      "seconds": 31,
+      "pass_lines": [
+        "PASS: supervised v1 applied once ready; status.json Running with its real pid",
+        "PASS: crashed run restarted (on-failure); all of its descendants were killed",
+        "PASS: v2 failed health; explicit recovery restored v1 artifact/configuration and journal identity",
+        "PASS: v3 replaced v1 (graceful shutdown) and was committed",
+        "PASS: runtime crash budget exhaustion restored v1 artifact/configuration, committed configuration and journal without rewriting command receipt",
+        "PASS: a merge-only update after the recovery built on the recovered v1 configuration",
+        "PASS: daemon SIGTERM stopped v3 gracefully; no descendant outlived the daemon",
+        "PASS: daemon start (reboot stage) restarted the committed v3",
+        "PASS: after a daemon SIGKILL the successor killed every leftover it can find and refused to start over an undetectable (env-cleared, setsid, reparented) one; once cleared, exactly one instance runs",
+        "PASS: one-shot v4 replaced supervised v3: v3 stopped, uncommitted, not restarted",
+        "PASS: after a daemon SIGKILL during a first install (no status yet) the successor refused to start over the install's undetectable descendant, repeatedly",
+        "PASS: once cleared, the interrupted v5 remained unknown, unreported and not committed",
+        "PASS: five explicit outcomes reported; interrupted install remains unreported"
+      ]
+    },
+    {
+      "suite": "test_configuration.py",
+      "root": false,
+      "exit": 0,
+      "seconds": 31,
+      "pass_lines": [
+        "PASS: defaults applied; the confidential value came from the device overlay only; install and readiness output went to the private component log",
+        "PASS: merge applied over the persisted configuration; the component restarted with it",
+        "PASS: new version: customized values kept, new defaults added, reset pointer took its default",
+        "PASS: invalid reset, a rejecting validate command and an unprovisioned confidential value each failed the deployment before anything changed",
+        "PASS: a deferring validate command held the update until it accepted it",
+        "PASS: an update deferred past configuration_defer_max_seconds failed",
+        "PASS: after a daemon restart the component ran with its persisted configuration and the rotated overlay value; the next update built on the persisted configuration",
+        "PASS: an install-only component's install received its configuration; its output went to its private component log",
+        "PASS: a deferred deployment deleted on chain is dropped without applying; its deferral is pruned",
+        "PASS: confidential values only in 0600 materialized files; none in state, journal or logs"
+      ]
+    },
+    {
+      "suite": "test_daemon_update.py",
+      "root": false,
+      "exit": 0,
+      "seconds": 50,
+      "pass_lines": [
+        "PASS: new daemon staged, preflighted and started by the launcher; confirmed; Applied reported with the same identity and journal",
+        "PASS: after a crash the launcher starts the confirmed update again",
+        "PASS: a new daemon that fails at startup: two counted attempts, then the launcher restarted v2, which reported Failed",
+        "PASS: an unrunnable binary failed its preflight self-check; the running daemon was kept (no restart)",
+        "PASS: a daemon built for another ELF architecture was refused before install/preflight (no restart)",
+        "PASS: cancel during a slow daemon download: rechecked before preflight/handoff; no restart, no outcome",
+        "PASS: window during a slow daemon download: rechecked before preflight/handoff; no restart, no outcome",
+        "PASS: a window deferral is retryable: once reopened, the daemon update staged, handed over and applied",
+        "PASS: a daemon killed right after staging: the next start handed over and v5 confirmed",
+        "PASS: all outcomes reported on chain (Applied, Failed, Failed, Failed, Applied, Applied); the cancelled update has none"
+      ]
+    },
+    {
+      "suite": "test_ipc.py",
+      "root": true,
+      "exit": 0,
+      "seconds": 15,
+      "pass_lines": [
+        "PASS: local install/list/start/stop/restart/status/logs/config; no replay, wrong-target and digest rejection",
+        "PASS: kernel-authenticated component SDK config/health/messaging, unknown UID, cross-component and topic denial",
+        "PASS: unmapped and mapped idle floods preserve administrator access; framing timeout releases UID slots",
+        "PASS: malformed/version rejection and graceful socket cleanup"
+      ]
+    }
+  ],
+  "bundle": {
+    "bundle_target": "i686-unknown-linux-gnu",
+    "packaged_binary_sha256": "8efd9683f96225ee51385fb59cccb244f3d6b95a8168257c98795640f000dcf4",
+    "packaged_elf": [
+      32,
+      3,
+      "/lib/ld-linux.so.2"
+    ],
+    "verification": {
+      "debug": "verified; wrong target refused",
+      "packaged": "verified; wrong target refused"
+    },
+    "packaged_identity": "provisioned",
+    "retargeted_manifest_refused": true,
+    "release_json_sha256": "46ae3ba4d13ff2ef5e06573f7446c891ab9452149af60c14e47789867410e73b",
+    "release": {
+      "commit": "fe486fabd2629c4ed833f6cd99146a658839df71",
+      "target": "i686-unknown-linux-gnu",
+      "files": [
+        {
+          "path": "suifleet-0.2.1-fe486fabd262-i686-unknown-linux-gnu.tar.gz",
+          "sha256": "f86e383a86abb7516f6ebf27e17d346fb52146e28a63a4556699cd9788766546",
+          "size": 2994044
+        },
+        {
+          "path": "sbom.spdx.json",
+          "sha256": "bcf231f1afe3a3f9d1c01056149f6e6bb478cd0a748928b6bb758a5eaaba804d",
+          "size": 222406
+        },
+        {
+          "path": "provenance.json",
+          "sha256": "774c25d3a48d07aad2d80d4da19bc6cb1cb28d10ce2405911c002e784eb405a3",
+          "size": 913
+        }
+      ],
+      "reproducible": "scripts/release.py build --target i686-unknown-linux-gnu --reproduce: 4 files byte-identical across two clean builds",
+      "signature": "unsigned release; signed in the runner with a throwaway key for verification only"
+    }
+  },
+  "limitations": [
+    "32-bit userland on the host kernel's IA-32 compatibility layer; no 32-bit kernel, physical i686 machine or production OS image",
+    "systemd/cgroup-v2 service-manager evidence for the shipped units was not run on 32-bit",
+    "public Sui network, real wallets and Walrus are outside this run (local simulators only)"
+  ],
+  "result": "passed",
+  "command": "python3 scripts/test_linux_x86.py --release-image suifleet-release:sf076 --runner-image suifleet-linux-x86:sf076 --bundle dist-i686 --evidence ...",
+  "runner_model": "Claude claude-opus-5-5 (machine session; no keys, wallets or public networks used)",
+  "related_runs": {
+    "move_tests": "sui move test --path contracts (sui 1.81.1): 93 passed, 0 failed",
+    "x86_catalog_localnet": "make test-x86-catalog-localnet (base origin/main c530b75c45179e71145790d5fc557c2cfd0f297b, disposable network-none localnet, sui 1.81.1): base package refuses x86 and registers x86_64; compatible in-place upgrade with the same UpgradeCap; x86 registered on the existing catalog (immutable, base type origin); old package still refuses x86",
+    "x86_64_regressions": "cargo test --locked (165) and --features pkcs11 (167); test_catalog_ota.py and test_daemon_update.py on x86_64"
+  }
+}

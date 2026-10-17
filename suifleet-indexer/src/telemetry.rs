@@ -41,6 +41,20 @@ CREATE TABLE IF NOT EXISTS reports (
   observed_ms INTEGER NOT NULL, received_ms INTEGER NOT NULL, digest TEXT NOT NULL,
   message TEXT NOT NULL, signature TEXT NOT NULL, PRIMARY KEY (device_id, seq));
 CREATE INDEX IF NOT EXISTS reports_signer ON reports(device_id, signer, seq);
+CREATE TABLE IF NOT EXISTS log_batches (
+  device_id TEXT NOT NULL, seq INTEGER NOT NULL, signer TEXT NOT NULL,
+  observed_ms INTEGER NOT NULL, received_ms INTEGER NOT NULL, digest TEXT NOT NULL,
+  dropped_lines INTEGER NOT NULL, redactions INTEGER NOT NULL,
+  message TEXT NOT NULL, signature TEXT NOT NULL, PRIMARY KEY (device_id, seq));
+CREATE TABLE IF NOT EXISTS log_lines (
+  device_id TEXT NOT NULL, seq INTEGER NOT NULL, idx INTEGER NOT NULL,
+  source TEXT NOT NULL, line TEXT NOT NULL, observed_ms INTEGER NOT NULL,
+  PRIMARY KEY (device_id, seq, idx));
+CREATE TABLE IF NOT EXISTS support_audit (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, at_ms INTEGER NOT NULL, token TEXT NOT NULL,
+  route TEXT NOT NULL, device_id TEXT, detail TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS alert_state (
+  key TEXT PRIMARY KEY, first_ms INTEGER NOT NULL, notified_ms INTEGER, body TEXT NOT NULL);
 "#;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -106,13 +120,13 @@ pub struct Verdict {
 }
 
 impl Verdict {
-    fn ok(status: &'static str, seq: u64) -> Self {
+    pub(crate) fn ok(status: &'static str, seq: u64) -> Self {
         Self { status, seq: Some(seq), error: None }
     }
-    fn rejected(error: impl Into<String>, seq: Option<u64>) -> Self {
+    pub(crate) fn rejected(error: impl Into<String>, seq: Option<u64>) -> Self {
         Self { status: "rejected", seq, error: Some(error.into()) }
     }
-    fn retry(error: impl Into<String>, seq: Option<u64>) -> Self {
+    pub(crate) fn retry(error: impl Into<String>, seq: Option<u64>) -> Self {
         Self { status: "retry", seq, error: Some(error.into()) }
     }
 }
@@ -160,7 +174,9 @@ pub fn open(path: &Path, binding: &Binding, reset: bool) -> anyhow::Result<Conne
         ),
         _ => {
             let transaction = connection.unchecked_transaction()?;
-            transaction.execute("DELETE FROM reports", [])?;
+            for table in ["reports", "log_batches", "log_lines", "alert_state"] {
+                transaction.execute(&format!("DELETE FROM {table}"), [])?;
+            }
             for (key, value) in [("chain_identifier", &wanted.0), ("registry", &wanted.1)] {
                 transaction.execute(
                     "INSERT INTO meta (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -199,6 +215,14 @@ pub fn now_ms() -> u64 {
 /// Verify the signature over the exact message bytes and return the snapshot
 /// with the signer's address.
 pub fn verify(envelope: &Envelope) -> Result<(Snapshot, String), String> {
+    let (bytes, address) = verify_bytes(envelope)?;
+    let snapshot: Snapshot = serde_json::from_slice(&bytes).map_err(|e| format!("invalid snapshot: {e}"))?;
+    Ok((snapshot, address))
+}
+
+/// Verify a device personal-message envelope (telemetry or logs): the exact
+/// bytes and the normalized address of the ed25519/P-256 key that signed them.
+pub fn verify_bytes(envelope: &Envelope) -> Result<(Vec<u8>, String), String> {
     let bytes = STANDARD.decode(&envelope.message).map_err(|_| "message is not base64")?;
     if bytes.len() > MAX_MESSAGE_BYTES {
         return Err(format!("message exceeds {MAX_MESSAGE_BYTES} bytes"));
@@ -215,8 +239,7 @@ pub fn verify(envelope: &Envelope) -> Result<(Snapshot, String), String> {
     sui_crypto::UserSignatureVerifier::new()
         .verify_personal_message(&sui_sdk_types::PersonalMessage(bytes.as_slice().into()), &signature)
         .map_err(|_| "signature does not verify")?;
-    let snapshot: Snapshot = serde_json::from_slice(&bytes).map_err(|e| format!("invalid snapshot: {e}"))?;
-    Ok((snapshot, chain::normalize(&address.to_string()).unwrap_or_default()))
+    Ok((bytes, chain::normalize(&address.to_string()).unwrap_or_default()))
 }
 
 /// Bounds a schema-1 snapshot must keep.
