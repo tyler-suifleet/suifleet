@@ -24,7 +24,7 @@
   "commands": [
     {
       "command": "make edge-test (pinned dev container)",
-      "result": "passed: cargo test --locked 172 passed; --features pkcs11 170 passed; 0 failed"
+      "result": "passed on the merged tree: cargo test --locked 172 passed; --features pkcs11 174 passed; 0 failed (before the merge: 170 and 172)"
     },
     {
       "command": "make test-compat",
@@ -40,7 +40,7 @@
     },
     {
       "command": "docker run --rm ... suifleet-dev:sf010-chrome python3 scripts/test_console.py --browser",
-      "result": "passed: 13 checks including real-browser UI and cross-origin attack page; 140 audit records"
+      "result": "passed on the merged tree: 13 checks including real-browser UI and cross-origin attack page; 141 audit records"
     },
     {
       "command": "docker run --rm --network none --user 0:0 ... suifleet-dev:sf056 python3 scripts/test_ipc.py",
@@ -53,7 +53,7 @@
     "suifleet-edge/src/console/index.html": "127d9ef2f34416830509f2f91e0990a93869d59b29d8046e649b2f944ca6c7f6",
     "suifleet-edge/src/console/console.js": "8add9140e4fcc658abd5302d8ae71fd3bb7b69ea5a2e1bc8baca06e2cd61387a",
     "suifleet-edge/src/console/console.css": "e4c19b3253b6e14f1673f140e0fc6bb018215c58d36e68cca4de5e12bdbe74dd",
-    "suifleet-edge/src/main.rs": "d2bc7cec8f1ada3313b36ffc3a13024fd45b34168ed518ad6579a96cf8724a8b",
+    "suifleet-edge/src/main.rs": "0dc76f8055a5456320f417d1283d30ef5e5c5c29b77d9baaf79c8c5abeeca925",
     "suifleet-edge/src/config.rs": "82e3b90280391f15dbff093f776cf31e8d26de224144e2835513a43c5c682d35",
     "scripts/test_console.py": "2b4675093c1977ffc8f12ef136047949c971caa6bfd7cd5cb32d0553e04f477d",
     "scripts/test_console_browser.cjs": "655be209b5496347abac83c573acdde84bb1592ac469e01584a80b52a056469a",
@@ -66,5 +66,6 @@
     "Real-browser coverage is one headless Chrome build; no other browsers.",
     "Not AWS LocalDebugConsole UI/API compatibility: no configuration editor, pub/sub/MQTT client or stream manager views.",
     "No AWS account, service, production credential or production exposure was used or provisioned."
-  ]
+  ],
+  "tested_tree": "merge of origin/main 00c8690 (commit 0af9bb4)"
 }
