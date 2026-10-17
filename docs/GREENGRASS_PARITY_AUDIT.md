@@ -118,7 +118,7 @@ The [compatibility specification](GREENGRASS_COMPATIBILITY.md) (SF-028) separate
 | Device shadows | Missing | Desired/reported state with version/conflict semantics and local sync | P2 |
 | Stream manager/store-and-forward | Missing | Bounded durable streams, export adapters and recovery | P2 |
 | Client-device discovery/authentication | Missing | Local device discovery, credentials, certificates and gateway authorization | P2 |
-| Token exchange/cloud credentials | Missing | Scoped credential provider or equivalent decentralized service credentials | P2 |
+| Token exchange/cloud credentials | Opt-in Linux SDK endpoint and IoT X.509 adapter; local mTLS/SDK evidence in [AWS_CREDENTIALS.md](AWS_CREDENTIALS.md) | Separately provisioned AWS identity and IAM policy; platform-managed distinct UIDs; live AWS account/service acceptance remains unrun | P2 |
 | ML inference/industrial/cloud integrations | Missing | Optional component ecosystem/adapters and compatibility tests | P2 |
 | Windows/macOS runtime | Missing: Linux-oriented | Explicit OS support matrix and implementation/testing | P2 |
 

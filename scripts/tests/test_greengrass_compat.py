@@ -18,11 +18,11 @@ class RepositoryTests(unittest.TestCase):
         self.assertEqual(set(counts), set(compat.SUITE_RUNNERS))
         self.assertTrue(all(count > 0 for count in counts.values()))
 
-    def test_every_suite_is_still_pending(self):
-        # Flipping a suite to passed needs a runtime receipt from the owning
-        # implementation; this specification ticket records none.
+    def test_runtime_receipts_are_scoped_to_executed_suites(self):
+        # SF-057 executed its declared suite; all other adapters remain pending.
         matrix = json.loads((ROOT / compat.COMPAT / "greengrass-compat.json").read_text())
-        self.assertEqual({s["runtime_execution"] for s in matrix["suites"].values()}, {"pending"})
+        self.assertEqual({name for name, s in matrix["suites"].items() if s["runtime_execution"] == "passed"},
+                         {"credential-provider-cases.json"})
 
 
 class MatrixGateTests(unittest.TestCase):
@@ -208,15 +208,16 @@ class ManagedCatalogGateTests(unittest.TestCase):
     def test_baseline_has_no_errors(self):
         self.assertEqual(self.errors(lambda c: None), [])
 
-    def test_adapters_link_published_tickets_and_stay_unexecuted(self):
+    def test_adapters_link_published_tickets_and_scoped_execution(self):
         # Published scoped implementation tickets (Codex, PR #91 feedback).
-        # Linking a ticket is not runtime evidence: every adapter stays pending.
+        # Only the executed credential adapter has an owning runtime receipt.
         self.assertEqual({a["id"]: a["implementation_ticket"] for a in self.catalog["adapters"]}, {
             "credential-provider": "SF-057", "stream-export-aws": "SF-058",
             "cloudwatch-metrics-export": "SF-059", "cloudwatch-logs-export": "SF-060",
             "aws-iot-core-connection": "SF-061", "device-defender-metrics": "SF-062",
             "secure-tunneling": "SF-063"})
-        self.assertEqual({a["runtime_execution"] for a in self.catalog["adapters"]}, {"pending"})
+        self.assertEqual({a["id"] for a in self.catalog["adapters"] if a["runtime_execution"] == "passed"},
+                         {"credential-provider"})
         self.assertFalse(self.catalog["parity_claim"])
         for entry in self.catalog["components"] + self.catalog["platform_phases"]:
             self.assertNotIn("approval", entry)
@@ -258,7 +259,7 @@ class ManagedCatalogGateTests(unittest.TestCase):
         self.has(lambda c: self.adapter(c, "credential-provider").update(implementation_ticket="SF-999"), "unknown implementation ticket")
         self.has(lambda c: self.adapter(c, "credential-provider").update(implementation_ticket=None), "unknown implementation ticket")
         self.has(lambda c: self.adapter(c, "credential-provider")["depends_on"].append("SF-057"), "its own implementation ticket")
-        self.has(lambda c: self.adapter(c, "credential-provider").update(runtime_execution="passed"), "runtime_evidence")
+        self.has(lambda c: self.adapter(c, "credential-provider").update(runtime_execution="passed", runtime_evidence=None), "runtime_evidence")
         self.has(lambda c: self.adapter(c, "credential-provider").update(runtime_execution="passed", runtime_evidence="docs/NOPE.json"),
                  "runtime_evidence")
         self.has(lambda c: self.adapter(c, "credential-provider").pop("runtime_execution"), "runtime_execution")
