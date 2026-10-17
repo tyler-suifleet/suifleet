@@ -332,6 +332,7 @@ fn read<T: for<'de> Deserialize<'de>>(path: &Path) -> anyhow::Result<Option<T>> 
 
 pub struct Store {
     root: PathBuf,
+    state_dir: PathBuf,
     pub overlay_dir: PathBuf,
 }
 
@@ -351,7 +352,15 @@ impl Store {
         let root = state_dir.join("configuration");
         std::fs::create_dir_all(&root)?;
         std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700))?;
-        Ok(Self { root, overlay_dir: overlay_dir.to_owned() })
+        Ok(Self { root, state_dir: state_dir.to_owned(), overlay_dir: overlay_dir.to_owned() })
+    }
+
+    /// The overlay of `name`, for materializing: its values are first
+    /// recorded for log redaction ([`crate::logs::remember`]).
+    pub fn overlay(&self, name: &str) -> anyhow::Result<Map<String, Value>> {
+        let overlay = overlay(&self.overlay_dir, name)?;
+        crate::logs::remember(&self.state_dir, &overlay)?;
+        Ok(overlay)
     }
 
     fn dir(&self, name: &str) -> anyhow::Result<PathBuf> {
