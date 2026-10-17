@@ -68,6 +68,9 @@ RUN = ("rm -f ready middle detached; echo run >> runs; echo $$ > pid; "
        f"/bin/sh -c 'env -i {PERL_SETSID} /bin/sleep 300 & echo $! > detached; echo $$ > middle; exec /bin/sleep 300' & "
        "env -i /bin/sleep 300 & echo $! > cleared; "
        "[ -s escape ] || /usr/bin/python3 " + str(PROBE) + " escape {target} > escape 2>&1; "
+       # Also asks the services that start jobs for a user to start one.
+       "[ -s delegated ] || { echo '* * * * * /bin/sleep 302' | crontab -; echo crontab=$?; "
+       "echo '/bin/sleep 303' | at now; echo at=$?; } > delegated 2>&1; "
        "while [ ! -s middle ] || [ ! -s detached ]; do sleep 0.05; done; "
        "trap 'echo graceful > stopped; exit 0' TERM; echo $$ > ready; while true; do sleep 0.2; done")
 READY = 'test "$(cat ready 2>/dev/null)" = {pid}'
@@ -276,6 +279,11 @@ def run(args):
         assert attempt["child"] in ("None", str(coalition)) and attempt["child"] != str(target), attempt
         assert attempt["spawn"] != "0" or attempt["child"] == str(coalition), attempt
         check(f"a component cannot spawn into another coalition (posix_spawnattr_setcoalition_np: {read('escape')})")
+        wait(lambda: "at=" in read("delegated"), f"delegated launch attempts did not finish: {read('delegated')!r}")
+        delegated = dict(line.split("=", 1) for line in read("delegated").splitlines() if re.match(r"^(crontab|at)=\d+$", line))
+        assert delegated.get("crontab") not in (None, "0") and delegated.get("at") not in (None, "0"), read("delegated")
+        delegated_at = time.monotonic()
+        check(f"the installer's cron/at denial refuses a component's crontab and at jobs ({delegated})")
 
         os.kill(first["pid"], signal.SIGKILL)
         wait(lambda: status().get("phase") == "running" and status().get("restarts") == 1 and status().get("pid") != first["pid"],
@@ -370,6 +378,11 @@ def run(args):
         assert not instance(), "a clean stop kept the instance record"
         assert not sim.errors, sim.errors
         check("launchctl bootout: graceful shutdown command ran; coalition empty; status stopped; instance record cleared")
+        # Long enough for cron's minute tick: nothing it could have started runs.
+        time.sleep(max(0, 65 - (time.monotonic() - delegated_at)))
+        leftover = sh("pgrep", "-U", str(account.pw_uid), "-f", "sleep 30[23]", check=False).stdout.split()
+        assert not leftover, f"a delegated job ran as {USER}: {leftover}"
+        check(f"no cron/at job of {USER} ran at least 65 s after the attempts")
     finally:
         sh("launchctl", "bootout", f"system/{LABEL}", check=False)
         shim.kill()

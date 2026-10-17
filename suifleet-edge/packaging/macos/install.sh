@@ -43,7 +43,9 @@ if ! dscl . -read "/Users/$user" >/dev/null 2>&1; then
     dscl . -create "/Users/$user" IsHidden 1
 fi
 
-install -d -o root -g wheel -m 0755 /usr/local/bin "$etc"
+# Never re-own an existing /usr/local/bin (Homebrew owns it on Intel Macs).
+[ -d /usr/local/bin ] || install -d -o root -g wheel -m 0755 /usr/local/bin
+install -d -o root -g wheel -m 0755 "$etc"
 install -o root -g wheel -m 0755 "$binary" /usr/local/bin/suifleet
 install -d -o "$user" -g "$user" -m 0700 "$state"
 install -d -o "$user" -g "$user" -m 0750 "$logs"
@@ -58,6 +60,18 @@ printf '%s\n' "$address" | grep -Eq '^0x[0-9a-f]{64}$'
 printf '%s\n' "$address" > "$etc/device.address"
 chown "root:$user" "$etc/device.address"
 chmod 0640 "$etc/device.address"
+
+# Components run as the daemon user. cron would start their jobs outside the
+# daemon's launchd coalition (at jobs too, if atrun is enabled): deny both.
+for tool in cron at; do
+    allow=/usr/lib/cron/$tool.allow deny=/usr/lib/cron/$tool.deny
+    if [ -f "$allow" ] && grep -qx "$user" "$allow"; then
+        echo "install.sh: $allow lists $user; remove it" >&2
+        exit 1
+    fi
+    touch "$deny"
+    grep -qx "$user" "$deny" || printf '%s\n' "$user" >> "$deny"
+done
 
 install -o root -g wheel -m 0644 "$here/$label.plist" "$plist"
 plutil -lint "$plist" >/dev/null

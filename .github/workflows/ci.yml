@@ -120,6 +120,7 @@ jobs:
           { sw_vers; uname -a; cargo --version; rustc --version; python3 --version; } | tee ci-logs/macos-versions.txt
 
       - name: Daemon unit tests
+        timeout-minutes: 15
         env:
           RUSTUP_TOOLCHAIN: 1.94.0
         run: |
@@ -132,6 +133,7 @@ jobs:
         run: cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
 
       - name: LaunchDaemon lifecycle, containment, recovery and secrets
+        timeout-minutes: 15
         run: |
           set -o pipefail
           sudo env PYTHONDONTWRITEBYTECODE=1 "$(command -v python3)" scripts/test_supervisor_launchd.py \
