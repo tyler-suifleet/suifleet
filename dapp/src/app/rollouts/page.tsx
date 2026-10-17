@@ -19,12 +19,12 @@ export default function RolloutsPage() {
   const [selected, setSelected] = useState(""); const [reason, setReason] = useState(""); const [skip, setSkip] = useState("");
   const [error, setError] = useState(""); const [preparing, setPreparing] = useState(false);
   const { mutateAsync, isPending } = useFleetTransaction();
-  const { data: rollout, refetch, error: readError } = useQuery({ queryKey: ["rollout", selected],
+  const { data: rollout, refetch, error: readError } = useQuery({ queryKey: ["rollout", account?.address, selected],
     queryFn: () => readRollout(client, selected), enabled: !!selected, refetchInterval: 10000 });
   const pending = isPending || preparing;
   async function submit(build: () => Transaction | Promise<Transaction>) {
     setError(""); setPreparing(true);
-    try { await mutateAsync({ transaction: await build() }); await refetch(); }
+    try { await mutateAsync({ transaction: await build() }); if (selected) await refetch(); }
     catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     finally { setPreparing(false); }
   }
