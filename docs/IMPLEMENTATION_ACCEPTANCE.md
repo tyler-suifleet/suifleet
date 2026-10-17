@@ -10,6 +10,7 @@ merging implementation does not establish them or authorize deployment.
 | SF-006 publishing and SF-008 identity | [SF-010: public-network upgrade and wallet acceptance](https://github.com/tyler-suifleet/suifleet/issues/11) |
 | SF-011 catalog and SF-013 desired state | SF-010 plus [SF-031: physical Pi OTA and recovery](https://github.com/tyler-suifleet/suifleet/issues/32) |
 | SF-014 component supervisor | SF-031 physical Pi boot/reboot/power-loss component recovery, plus SF-010 extension-wallet lifecycle UI; real systemd/cgroup-v2 crash/containment/restart evidence under the shipped unit remains a premerge gate |
+| SF-027 native component IPC | SF-031 physical Pi/target Unix-user provisioning, socket access and restart integration. Local real-UID IPC authorization/management and normal CI/testnet gates remain required. |
 | SF-026 daemon self-update | SF-031 physical power loss during handoff and platform boot behavior; real systemd/cgroup-v2 handoff and fallback evidence remains a premerge gate |
 | SF-053 device-key isolation | SF-031 physical Pi acceptance and hardware-token protection; real systemd/cgroup-v2 isolation evidence remains a premerge gate |
 | SF-015 component configuration | SF-010 real extension-wallet configuration UI; SF-031 physical Pi configuration persistence/restart. Relevant local and authorized automatic testnet checks remain required. |
