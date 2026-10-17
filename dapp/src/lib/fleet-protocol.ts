@@ -59,6 +59,12 @@ export const roles_RoleBuilderBcs = bcs.struct("RoleBuilder", { operator: bcs.Ad
 export const roles_RoleGrantedBcs = bcs.struct("RoleGranted", { role_id: bcs.Address, operator: bcs.Address, delegate: bcs.Address, groups: bcs.vector(bcs.Address) });
 export const roles_RoleKeyBcs = bcs.struct("RoleKey", { role_id: bcs.Address });
 export const roles_RoleRevokedBcs = bcs.struct("RoleRevoked", { role_id: bcs.Address, operator: bcs.Address });
+export const seal_policy_AccessAdminCapBcs = bcs.struct("AccessAdminCap", { id: bcs.Address, policy_id: bcs.Address });
+export const seal_policy_AccessChangedBcs = bcs.struct("AccessChanged", { policy_id: bcs.Address, scope: bcs.u8(), subject: bcs.Address, granted: bcs.bool() });
+export const seal_policy_AccessPolicyBcs = bcs.struct("AccessPolicy", { id: bcs.Address, version: bcs.u64(), name: bcs.string(), key_epoch: bcs.u64(), accounts: bcs.vector(bcs.Address), devices: bcs.vector(bcs.Address), groups: bcs.vector(bcs.Address) });
+export const seal_policy_KeyEpochRotatedBcs = bcs.struct("KeyEpochRotated", { policy_id: bcs.Address, key_epoch: bcs.u64() });
+export const seal_policy_PolicyCreatedBcs = bcs.struct("PolicyCreated", { policy_id: bcs.Address, cap_id: bcs.Address, name: bcs.string(), creator: bcs.Address });
+export const seal_policy_PolicyMigratedBcs = bcs.struct("PolicyMigrated", { policy_id: bcs.Address, version: bcs.u64() });
 export const calls = {
   component_catalog_create_catalog: (tx: Transaction, packageId: string) => tx.moveCall({ target: `${packageId}::component_catalog::create_catalog`, arguments: [] }),
   component_catalog_create_deployment: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: string[], a2: string[], a3: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::component_catalog::create_deployment`, arguments: [tx.object(a0), tx.pure(bcs.vector(bcs.Address).serialize(a1)), tx.pure(bcs.vector(bcs.Address).serialize(a2)), tx.object(a3)] }),
@@ -156,6 +162,28 @@ export const calls = {
   roles_new_deployer_role: (tx: Transaction, packageId: string) => tx.moveCall({ target: `${packageId}::roles::new_deployer_role`, arguments: [] }),
   roles_revoke: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: string) => tx.moveCall({ target: `${packageId}::roles::revoke`, arguments: [tx.object(a0), tx.pure.address(a1)] }),
   roles_role_operator: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::roles::role_operator`, arguments: [tx.object(a0)] }),
+  seal_policy_account_allowed: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Uint8Array | number[], a2: string) => tx.moveCall({ target: `${packageId}::seal_policy::account_allowed`, arguments: [tx.object(a0), tx.pure.vector("u8", a1), tx.pure.address(a2)] }),
+  seal_policy_cap_policy_id: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::seal_policy::cap_policy_id`, arguments: [tx.object(a0)] }),
+  seal_policy_code_version: (tx: Transaction, packageId: string) => tx.moveCall({ target: `${packageId}::seal_policy::code_version`, arguments: [] }),
+  seal_policy_create_policy: (tx: Transaction, packageId: string, a0: string) => tx.moveCall({ target: `${packageId}::seal_policy::create_policy`, arguments: [tx.pure.string(a0)] }),
+  seal_policy_device_allowed: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Uint8Array | number[], a2: Parameters<Transaction["object"]>[0], a3: string, a4: string) => tx.moveCall({ target: `${packageId}::seal_policy::device_allowed`, arguments: [tx.object(a0), tx.pure.vector("u8", a1), tx.object(a2), tx.pure.address(a3), tx.pure.address(a4)] }),
+  seal_policy_grant_account: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: string) => tx.moveCall({ target: `${packageId}::seal_policy::grant_account`, arguments: [tx.object(a0), tx.object(a1), tx.pure.address(a2)] }),
+  seal_policy_grant_device: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: Parameters<Transaction["object"]>[0], a3: string) => tx.moveCall({ target: `${packageId}::seal_policy::grant_device`, arguments: [tx.object(a0), tx.object(a1), tx.object(a2), tx.pure.address(a3)] }),
+  seal_policy_grant_group: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::seal_policy::grant_group`, arguments: [tx.object(a0), tx.object(a1), tx.object(a2)] }),
+  seal_policy_group_device_allowed: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Uint8Array | number[], a2: Parameters<Transaction["object"]>[0], a3: Parameters<Transaction["object"]>[0], a4: string, a5: string) => tx.moveCall({ target: `${packageId}::seal_policy::group_device_allowed`, arguments: [tx.object(a0), tx.pure.vector("u8", a1), tx.object(a2), tx.object(a3), tx.pure.address(a4), tx.pure.address(a5)] }),
+  seal_policy_identity_matches: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Uint8Array | number[]) => tx.moveCall({ target: `${packageId}::seal_policy::identity_matches`, arguments: [tx.object(a0), tx.pure.vector("u8", a1)] }),
+  seal_policy_identity_prefix: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::seal_policy::identity_prefix`, arguments: [tx.object(a0)] }),
+  seal_policy_key_epoch: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::seal_policy::key_epoch`, arguments: [tx.object(a0)] }),
+  seal_policy_migrate: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::seal_policy::migrate`, arguments: [tx.object(a0), tx.object(a1)] }),
+  seal_policy_name: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::seal_policy::name`, arguments: [tx.object(a0)] }),
+  seal_policy_revoke_account: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: string) => tx.moveCall({ target: `${packageId}::seal_policy::revoke_account`, arguments: [tx.object(a0), tx.object(a1), tx.pure.address(a2)] }),
+  seal_policy_revoke_device: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: string) => tx.moveCall({ target: `${packageId}::seal_policy::revoke_device`, arguments: [tx.object(a0), tx.object(a1), tx.pure.address(a2)] }),
+  seal_policy_revoke_group: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: string) => tx.moveCall({ target: `${packageId}::seal_policy::revoke_group`, arguments: [tx.object(a0), tx.object(a1), tx.pure.address(a2)] }),
+  seal_policy_rotate_key_epoch: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::seal_policy::rotate_key_epoch`, arguments: [tx.object(a0), tx.object(a1)] }),
+  seal_policy_seal_approve_account: (tx: Transaction, packageId: string, a0: Uint8Array | number[], a1: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::seal_policy::seal_approve_account`, arguments: [tx.pure.vector("u8", a0), tx.object(a1)] }),
+  seal_policy_seal_approve_device: (tx: Transaction, packageId: string, a0: Uint8Array | number[], a1: Parameters<Transaction["object"]>[0], a2: Parameters<Transaction["object"]>[0], a3: string) => tx.moveCall({ target: `${packageId}::seal_policy::seal_approve_device`, arguments: [tx.pure.vector("u8", a0), tx.object(a1), tx.object(a2), tx.pure.address(a3)] }),
+  seal_policy_seal_approve_group_device: (tx: Transaction, packageId: string, a0: Uint8Array | number[], a1: Parameters<Transaction["object"]>[0], a2: Parameters<Transaction["object"]>[0], a3: Parameters<Transaction["object"]>[0], a4: string) => tx.moveCall({ target: `${packageId}::seal_policy::seal_approve_group_device`, arguments: [tx.pure.vector("u8", a0), tx.object(a1), tx.object(a2), tx.object(a3), tx.pure.address(a4)] }),
+  seal_policy_version: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::seal_policy::version`, arguments: [tx.object(a0)] }),
 };
 export const TYPES = {
   component_catalog_CatalogBinding: "component_catalog::CatalogBinding",
@@ -214,4 +242,10 @@ export const TYPES = {
   roles_RoleGranted: "roles::RoleGranted",
   roles_RoleKey: "roles::RoleKey",
   roles_RoleRevoked: "roles::RoleRevoked",
+  seal_policy_AccessAdminCap: "seal_policy::AccessAdminCap",
+  seal_policy_AccessChanged: "seal_policy::AccessChanged",
+  seal_policy_AccessPolicy: "seal_policy::AccessPolicy",
+  seal_policy_KeyEpochRotated: "seal_policy::KeyEpochRotated",
+  seal_policy_PolicyCreated: "seal_policy::PolicyCreated",
+  seal_policy_PolicyMigrated: "seal_policy::PolicyMigrated",
 } as const;

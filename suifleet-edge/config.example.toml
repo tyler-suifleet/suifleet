@@ -88,6 +88,24 @@ replay_history = false
 # interval_seconds = 60           # 10..=3600
 # buffer_max = 1024               # snapshots kept offline; oldest dropped beyond
 
+# Confidential delivery (docs/CONFIDENTIAL_DELIVERY.md): decrypt Seal-encrypted
+# recipes and artifacts with this device's own identity. "required" refuses
+# unencrypted ones. Key servers are trusted by object ID; their URL and public
+# key come from chain. Testnet values shown (Mysten's open key servers).
+# [seal]
+# mode = "required"
+# key_server_package = "0x0f16e84a49dec8425e6900cfdfe3730aaf1e8bc608d9f0500fcfa2c2267abfb4"
+# key_servers = [
+#   { object_id = "0x73d05d62c18d9374e3ea529e8e0ed6161da1a141a94d3f76ae3fe4e99356db75" },
+#   { object_id = "0xf5d14a81a982144ae441cd7d64b09027f116a468bd36e7eca494f750591623c8" },
+# ]
+# min_threshold = 2
+# session_ttl_minutes = 10   # with [device.signer] kind = "service", set in signer.toml instead
+# key_cache_seconds = 120    # fetched keys stay in memory only this long
+# max_plaintext_bytes = 134217728
+# A provider credential (not device identity): api_key_name = "X-API-Key",
+# api_key_file = "/etc/suifleet/seal-api-key" inside a key server's entry.
+
 # Durable local pub/sub and the local MQTT bridge (SF-032; docs/MESSAGING.md).
 # Components need pubsub_policies under [ipc.components.NAME].
 # [pubsub]

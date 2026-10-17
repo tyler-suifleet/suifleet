@@ -18,7 +18,7 @@ Direct reports require a targeted DeviceCap. Group reports additionally require 
 
 ## Access and confidential delivery
 
-See [wallet delegation, edge identity and encryption](docs/ACCESS_AND_ENCRYPTION.md). Current OTA uploads are unencrypted. Seal-encrypted proprietary delivery is a required customer-readiness gate tracked in SF-022; public-artifact smoke tests do not establish confidentiality.
+See [wallet delegation, edge identity and encryption](docs/ACCESS_AND_ENCRYPTION.md) and [confidential delivery](docs/CONFIDENTIAL_DELIVERY.md). Uploads are Seal-encrypted in the browser by default (SF-022), with on-chain access policies for accounts, devices and groups; devices decrypt with their own identity. Explicitly public uploads remain for public content. Real extension-wallet and Pi acceptance remain SF-010/SF-031.
 
 ## Business model
 
