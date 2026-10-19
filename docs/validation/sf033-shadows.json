@@ -1,10 +1,10 @@
 {
   "ticket": "SF-033",
-  "head": "6bc661db5860e1cd4b86b71a7093a653caad6aa1",
+  "head": "8a63c4fec8df5c7cb8be220894d7e7438ea629b3",
   "checks": [
-    "ACLs: per-component operations, shadow resources and sections (reported-only writer); deny by default",
+    "ACLs: per-component operations, shadow resources and sections (reported-only writer); a write-only updater gets its request echoed, not the stored state; deny by default",
     "delta notification: desired change published on the AWS-shaped delta topic and received with QoS 1",
-    "stale version 1 rejected with conflict; invalid/too-large/null-in-array refused without a version change; version 2 accepted",
+    "stale version 1 rejected with conflict; invalid/too-large/null-in-array (also nested in an array object) refused without a version change; version 2 accepted",
     "cloud desired change pulled, versioned locally and announced as a delta to the component",
     "offline edits on both sides reconciled after reconnect: one-sided keys kept from each side; the 2 conflicts (desired.mode, reported.temp) settled by owner (cloud owns desired, device owns reported)",
     "concurrent cloud writer: the device's put lost with 409, it re-read, merged and converged without losing either change",
@@ -16,7 +16,7 @@
   "fixture": {
     "file": "interfaces/compat/shadow-cases.json",
     "sequences": 10,
-    "steps": 54,
+    "steps": 55,
     "executed_by": "make edge-test: shadows::tests::shared_shadow_cases (each step also after reopening the store)"
   },
   "signature_verification": "independent: SHA-256 body binding, BLAKE2b personal-message intent digest, RFC 8032 Ed25519 (Python), signer address",
