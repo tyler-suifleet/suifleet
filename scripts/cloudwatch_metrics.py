@@ -20,6 +20,7 @@ import struct
 import threading
 import time
 import urllib.parse
+import xml.etree.ElementTree as ET
 
 from aws_credentials import allow_principals, private_file
 METRIC_UNITS = frozenset(
@@ -111,6 +112,9 @@ class Transport:
     def __init__(self, region, credential_env, endpoint=None, *, emulator=False):
         if not re.fullmatch(r'[a-z]{2}(?:-[a-z]+)+-\d', region):
             raise ValueError('invalid region')
+        self.context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        self.context.load_default_certs()
+        self.context.minimum_version = ssl.TLSVersion.TLSv1_2
         self.region = region
         self.endpoint = urllib.parse.urlsplit(endpoint or f'https://monitoring.{region}.amazonaws.com/')
         if self.endpoint.scheme != 'https' and not (emulator and self.endpoint.scheme == 'http' and self.endpoint.hostname == '127.0.0.1'):
@@ -157,7 +161,7 @@ class Transport:
             signature = hmac.new(key, to_sign.encode(), hashlib.sha256).hexdigest()
             headers['Authorization'] = f"AWS4-HMAC-SHA256 Credential={credentials['AccessKeyId']}/{scope}, SignedHeaders={signed}, Signature={signature}"
             cls = http.client.HTTPSConnection if endpoint.scheme == 'https' else http.client.HTTPConnection
-            conn = cls(endpoint.hostname, endpoint.port, timeout=5)
+            conn = cls(endpoint.hostname, endpoint.port, timeout=5, **({'context': self.context} if endpoint.scheme == 'https' else {}))
             with deadline(conn):
                 conn.request('POST', '/', payload, headers)
                 response = conn.getresponse()
@@ -171,7 +175,13 @@ class Transport:
                 # Permission/credential errors may be repairable: retain instead of losing data.
                 if response.status in (401, 403):
                     return 'connection-error'
-                return 'invalid'
+                try:
+                    code = next((node.text for node in ET.fromstring(raw).iter() if node.tag.split('}')[-1] == 'Code'), '')
+                except ET.ParseError:
+                    code = ''
+                if response.status == 400 and code in {'InvalidParameterValue', 'InvalidParameterCombination', 'MissingParameter', 'ValidationError', 'InvalidRequest'}:
+                    return 'invalid'
+                return 'connection-error'
         except (OSError, ValueError, KeyError, TypeError, http.client.HTTPException):
             return 'connection-error'
 
