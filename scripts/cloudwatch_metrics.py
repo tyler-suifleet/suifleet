@@ -190,8 +190,7 @@ class Transport:
 
 class Exporter:
     def __init__(self, path, transport, core_name, interval=10, retain=5000, clock=time.monotonic):
-        if type(interval) is not int or not 0 <= interval <= 900 or type(retain) is not int or not 2000 <= retain <= 10000:
-            raise ValueError('invalid limits')
+        self.configure(interval, retain)
         if not isinstance(core_name, str) or not 0 < len(core_name) <= 255:
             raise ValueError('invalid core name')
         self.transport, self.core, self.interval, self.retain, self.clock = transport, core_name, interval, retain, clock
@@ -213,6 +212,11 @@ class Exporter:
         if self.db.execute('SELECT count(*) FROM metrics').fetchone()[0] > retain:
             raise ValueError('queue exceeds configured retention')
         self.db.commit()
+
+    def configure(self, interval, retain):
+        if type(interval) is not int or not 0 <= interval <= 900 or type(retain) is not int or not 2000 <= retain <= 10000:
+            raise ValueError('invalid limits')
+        self.interval, self.retain = interval, retain
 
     def close(self):
         self.db.close()

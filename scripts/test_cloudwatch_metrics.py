@@ -79,11 +79,11 @@ class MetricsTests(unittest.TestCase):
                     elif kind == 'configure':
                         interval = op.get('publish_interval', adapter.interval)
                         retain = op.get('max_metrics_to_retain', adapter.retain)
-                        if type(interval) is not int or not 0 <= interval <= 900 or type(retain) is not int or not 2000 <= retain <= 10000:
-                            actual = dict(status='invalid-config')
-                        else:
-                            adapter.interval, adapter.retain = interval, retain
+                        try:
+                            adapter.configure(interval, retain)
                             actual = dict(status='ok')
+                        except ValueError:
+                            actual = dict(status='invalid-config')
                     elif kind == 'upstream':
                         for result in op['results']:
                             self.results.put(result)
@@ -93,11 +93,14 @@ class MetricsTests(unittest.TestCase):
                         adapter = Exporter(path, self.transport(), 'core-fixture', adapter.interval, adapter.retain, lambda: now[0])
                         actual = adapter.state()
                     elif kind == 'put':
-                        if op['publisher'] not in grants:
-                            actual = dict(status='fail', error='Unauthorized')
-                        else:
-                            for _ in range(op.get('count', 1)):
-                                actual = adapter.put(op['message'])
+                        for _ in range(op.get('count', 1)):
+                            client, server = socket.socketpair()
+                            try:
+                                client.sendall(json.dumps(op['message']).encode()+b'\n')
+                                actual = receive(server, op['publisher'], grants, adapter)
+                            finally:
+                                client.close()
+                                server.close()
                     elif kind == 'tick':
                         start = len(self.observed)
                         actual = adapter.tick()
