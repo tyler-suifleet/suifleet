@@ -287,19 +287,62 @@ s=socket.socket(socket.AF_UNIX);s.connect(sys.argv[1]);s.sendall(json.dumps({"re
                 messages(dict(source, schema=2), "Native")
             adapter.close()
 
+    def test_full_batch_outage_retry_pacing(self):
+        for interval in (0, 10, 900):
+            for failure in ('connection-error', 'throttled', 'server-error'):
+                with self.subTest(interval=interval, failure=failure), tempfile.TemporaryDirectory() as directory:
+                    now = [0]
+                    path = Path(directory)/'queue'
+                    adapter = Exporter(path, self.transport(), 'device', interval=interval, clock=lambda: now[0])
+                    def put(namespace):
+                        return adapter.put(dict(request=dict(namespace=namespace, metricData=dict(metricName='x', value=1))))
+                    for _ in range(60):
+                        put('Outage')
+                    put('Healthy')
+                    self.results.put(failure)
+                    self.results.put('ok')
+                    first = adapter.tick()
+                    self.assertEqual([(c['namespace'], c['count'], c['result']) for c in first['calls']],
+                                     [('Outage', 20, failure), ('Healthy', 1, 'ok')])
+                    self.assertEqual(first['buffered'], 60)
+                    deadline = max(1, interval)
+                    for instant in (0, deadline/2, deadline-.001):
+                        now[0] = instant
+                        self.assertEqual(put('Outage')['status'], 'success')
+                        self.assertEqual(adapter.tick()['calls'], [])
+                    # A newly full healthy namespace proceeds during the outage cooldown.
+                    for _ in range(20):
+                        put('Healthy')
+                    self.results.put('ok')
+                    self.assertEqual([c['namespace'] for c in adapter.tick()['calls']], ['Healthy'])
+                    now[0] = deadline
+                    self.results.put(failure)
+                    self.assertEqual(len(adapter.tick()['calls']), 1)
+                    self.assertEqual(adapter.tick()['calls'], [])
+                    now[0] += deadline
+                    for _ in range(4):
+                        self.results.put('ok')
+                    recovered = adapter.tick()
+                    self.assertEqual([c['count'] for c in recovered['calls']], [20, 20, 20, 3])
+                    self.assertEqual(recovered['buffered'], 0)
+                    adapter.close()
+        self.assertTrue(self.results.empty())
+
     def test_wire_values_and_restart(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)/'queue'
-            adapter = Exporter(path, self.transport(), 'device', interval=0)
+            now = [0]
+            adapter = Exporter(path, self.transport(), 'device', interval=0, clock=lambda: now[0])
             message = dict(request=dict(namespace='Device', metricData=dict(metricName='cpu', value=12.5, unit='Percent',
                            timestamp=1539027324, dimensions=[dict(name='component', value='sensor')])))
             self.assertEqual(adapter.put(message)['status'], 'success')
             self.results.put('server-error')
             self.assertEqual(adapter.tick()['buffered'], 1)
             adapter.close()
-            adapter = Exporter(path, self.transport(), 'device', interval=0)
+            adapter = Exporter(path, self.transport(), 'device', interval=0, clock=lambda: now[0])
             self.results.put('expired')
             self.assertEqual(adapter.tick()['buffered'], 1)
+            now[0] += 1
             self.results.put('ok')
             self.assertEqual(adapter.tick()['buffered'], 0)
             fields, _ = self.observed[-1]

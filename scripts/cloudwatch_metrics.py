@@ -195,6 +195,7 @@ class Exporter:
             raise ValueError('invalid core name')
         self.transport, self.core, self.interval, self.retain, self.clock = transport, core_name, interval, retain, clock
         self.last = clock()
+        self.retry_after = {}
         self.lock = open(str(path) + '.lock', 'a')
         try:
             fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -248,12 +249,16 @@ class Exporter:
 
     def tick(self):
         namespaces = list(self.db.execute('SELECT namespace,count(*) FROM metrics GROUP BY namespace ORDER BY min(id)'))
+        active = {namespace for namespace, _ in namespaces}
+        self.retry_after = {namespace: deadline for namespace, deadline in self.retry_after.items() if namespace in active}
         now = self.clock()
         if now - self.last < self.interval and not any(count >= 20 for _, count in namespaces):
             return self.state(calls=[])
         self.last = now
         calls = []
         for namespace, _ in namespaces:
+            if now < self.retry_after.get(namespace, 0):
+                continue
             rows = list(self.db.execute('SELECT id,data FROM metrics WHERE namespace=? ORDER BY id', (namespace,)))
             while rows:
                 batch = []
@@ -266,6 +271,12 @@ class Exporter:
                 time.sleep(0.01)  # below pinned 150 requests/second, even on loopback
                 result = self.transport.send(namespace, [e for _, e in batch])
                 calls.append(dict(namespace=namespace, count=len(batch), first=batch[0][1]['MetricName'], last=batch[-1][1]['MetricName'], result=result))
+                if result not in ('ok', 'invalid'):
+                    # Full batches and new ingress must not bypass outage pacing.
+                    # Start the delay after I/O, including credential failures.
+                    self.retry_after[namespace] = self.clock() + max(1, self.interval)
+                    break
+                self.retry_after.pop(namespace, None)
                 if result in ('ok', 'invalid'):
                     with self.db:
                         self.db.executemany('DELETE FROM metrics WHERE id=?', [(i,) for i, _ in batch])

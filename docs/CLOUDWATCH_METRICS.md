@@ -132,8 +132,12 @@ freed pages. Reserve disk headroom for the journal. Disk/permission/corruption
 errors stop the service; they are never acknowledged as successful enqueues.
 
 Throttling, 5xx, transport and credential/permission failures retain batches for
-retry on the next publish tick. Recognized HTTP-400 validation errors reject the batch and
-increment `rejected`; unknown errors retain it, including expired credentials. Interval restarts after restart. At most 100 calls per second
+retry after the configured interval (at least one second when interval is zero),
+measured from completion of the failed request. The first retained failure stops
+that namespace for the tick; queued full batches and new ingress cannot bypass its
+cooldown. Other namespaces can still flush. Recognized HTTP-400 validation errors
+reject the batch and increment `rejected`; unknown errors retain it, including
+expired credentials. Retry cooldowns and the publish interval restart after restart. At most 100 calls per second
 are initiated (10 ms minimum spacing). HTTPS and credential exchanges have
 five-second connection/socket timeouts and a five-second total response deadline.
 One serial ingress/flush loop bounds active work: a slow publisher gets one second
