@@ -1,13 +1,13 @@
 {
   "ticket": "SF-070",
-  "head": "5233b84724edb1b46e83aab58826ee34c5d8368c",
+  "head": "843f2b02c205fb30443d649e53fc0ab9319fdf5e",
   "model": "Claude claude-opus-5-5",
   "date": "2026-10-19",
   "suites": {
     "make test-industrial": {
       "command": "PYTHONPATH=.ci-cache/industrial-runtime/site python3 scripts/test_industrial.py",
       "runner": "suifleet-dev container (Ubuntu 22.04, Python 3.10.12, OpenSSL 3.0.2), --network none, uid 1001",
-      "result": "27 tests OK",
+      "result": "28 tests OK",
       "cryptography": "44.0.3 (interfaces/compat/industrial/crypto-lock.json)",
       "config_vectors": "interfaces/compat/industrial/config-cases.json (51 cases)"
     },
@@ -15,13 +15,13 @@
       "command": "python3 scripts/test_industrial_daemon.py .ci-cache/industrial-runtime/site",
       "runner": "suifleet-dev container as root, --network none; collector as UID 62101; debug daemon built with cargo --locked",
       "checks": [
-        "interoperability through the component boundary: zip application ee594ddf1b4507f0 as UID 62101, Modbus TCP and OPC UA Basic256Sha256/SignAndEncrypt + UserName records exported in signed batches",
+        "interoperability through the component boundary: zip application 67da72f3e9bba30e as UID 62101, Modbus TCP and OPC UA Basic256Sha256/SignAndEncrypt + UserName records exported in signed batches",
         "backpressure: the daemon refused appends with 'full'; buffer held 400/400, Modbus polls skipped and OPC UA Publish withheld, then gap records reported the interval",
         "daemon kill -9: the collector buffered and retried; appends and signed export resumed after restart",
         "collector SIGTERM: buffered records flushed (exit 0) and a new boot continued the stream",
-        "no loss: 1007 records from 2 collector boots arrived contiguously in 14 verified signed batches (stream lost_before only for the crash numbering gap)"
+        "no loss: 977 records from 2 collector boots arrived contiguously in 13 verified signed batches (stream lost_before only for the crash numbering gap)"
       ],
-      "bundle_sha256": "ee594ddf1b4507f0cb7214eb44c5f3075248b8826cb9ed9cc1c5e22b832e5680",
+      "bundle_sha256": "67da72f3e9bba30e25e284d0edba3cbcb86867a8008f85bf1cda9cd98bdf44eb",
       "signature_verification": "independent: SHA-256 body binding, BLAKE2b personal-message intent digest, RFC 8032 Ed25519 (Python), signer address (scripts/test_streams.py Receiver)"
     },
     "cross-implementation": {
@@ -49,5 +49,6 @@
     "OPC UA policies other than None/Basic256Sha256, X.509 user tokens, browse/node filters, events and deadbands not implemented",
     "Modbus writes and MODBUS/TCP Security role authorization not implemented",
     "SF-034 reports kill -9 sequence-number gaps as lost_before when discard_exported retired earlier messages (reported on SF-070 for Codex triage; no data loss)"
-  ]
+  ],
+  "security_ci": "CodeQL py/weak-sensitive-data-hashing on the spec-mandated SHA-1 certificate thumbprint resolved by using the X.509 fingerprint API (no suppression); see commit b0d00ad"
 }
