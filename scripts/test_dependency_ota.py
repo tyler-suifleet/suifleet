@@ -7,7 +7,9 @@ Move-object BCS by the gRPC shim. Covers dependency-first install order,
 unavailable platform and soft dependencies, rejection of conflicts with
 installed components and of cycles before any artifact download or install,
 reuse of installed versions, a failed dependency install that stops its
-dependent, and the `cached` offline policy against `never`.
+dependent, and the `cached` offline policy against `never`. SF-037: a
+dependency translated from AWS SOFT is required, and a supervised dependency's
+restart does not restart its dependent (no AWS HARD restart coupling).
 
 Local simulator evidence only: no public network, wallet or hardware.
 """
@@ -28,6 +30,20 @@ OTHER_ARCH = 'arm' if platform.machine() in ('x86_64', 'aarch64') else 'x86_64'
 def tag(name, version):
     """Blob IDs allow only letters, digits, '-' and '_'."""
     return f'{name}-{version}'.replace('.', '_')
+
+
+def translated_dependencies(dependencies):
+    """componentDependencies the real SF-037 translator emits for an AWS recipe."""
+    recipe = dict(RecipeFormatVersion='2020-01-25', ComponentName='aws-app', ComponentVersion='1.0.0',
+                  ComponentDependencies=dependencies,
+                  Manifests=[dict(Platform=dict(os='linux'), Lifecycle=dict(install='true'), Artifacts=[dict(Uri='s3://b/app.tar')])])
+    with tempfile.NamedTemporaryFile('w', suffix='.json') as file:
+        json.dump(recipe, file); file.flush()
+        done = subprocess.run(['node', 'scripts/greengrass_translate.cjs', file.name, '--bind', 's3://b/app.tar=blob:' + 'ab' * 32],
+                              capture_output=True, text=True)
+    result = json.loads(done.stdout)
+    assert done.returncode == 0 and 'ComponentDependencies' in result['informational'], (done.stdout, done.stderr)
+    return result['manifests'][0]['recipe']['componentDependencies']
 
 
 def uleb(n):
@@ -198,6 +214,10 @@ def run():
             sim.publish('tool', '1.0.0', {'lib-log': {'versionRequirement': '^1.0.0'}})
             sim.publish('broken-dep', '1.0.0', fail='install')
             sim.publish('uses-broken', '1.0.0', {'broken-dep': {'versionRequirement': '1.0.0'}})
+            # SF-037: AWS SOFT still requires the dependency at start, so the translation is native HARD.
+            aws_dependencies = translated_dependencies({'gg-required': {'VersionRequirement': '^1.0.0', 'DependencyType': 'SOFT'}})
+            assert aws_dependencies == {'gg-required': {'versionRequirement': '^1.0.0'}}, aws_dependencies
+            sim.publish('aws-app', '1.0.0', aws_dependencies)
 
             configure('never')
             process = start(); ota.wait_for(lambda: state().get('initialized'), 'enrollment', process)
@@ -234,6 +254,14 @@ def run():
             assert outcome['status'] == 2 and 'dependency broken-dep 1.0.0 install failed' in outcome['error'], outcome
             assert installs()[-1] == 'broken-dep@1.0.0' and 'uses-broken' not in registry(), installs()
             assert registry()['broken-dep'] == ('1.0.0', False)
+
+            # A translated AWS SOFT dependency that nothing satisfies fails the deployment
+            # before any download; unlike native SOFT (metrics above), it is never omitted.
+            before = (installs(), registry())
+            sim.deploy('0x60d', 'aws-app', '1.0.0')
+            outcome = settle('0x60d')
+            assert outcome['status'] == 2 and 'no available version of gg-required' in outcome['error'], outcome
+            assert (installs(), registry()) == before and not artifact_downloads(('aws-app', '1.0.0')), sim.downloads
             stop(process)
 
             # The cached offline policy keeps authenticated candidates locally.
@@ -319,13 +347,21 @@ def run():
             ota.wait_for(both_running, 'supervised components did not restart on daemon start', process)
             assert starts()[2:] == ['svc-db', 'svc-app'], starts()
             assert supervised()['svc-app']['restarts'] == 0, supervised()
+            # No AWS HARD restart coupling (reported by the SF-037 translator): a
+            # dependency crash restarts only the dependency, never its dependent.
+            app_pid = supervised()['svc-app']['pid']
+            os.kill(supervised()['svc-db']['pid'], signal.SIGKILL)
+            ota.wait_for(lambda: supervised()['svc-db']['restarts'] == 1 and both_running(), 'svc-db did not restart', process)
+            assert supervised()['svc-app']['pid'] == app_pid and supervised()['svc-app']['restarts'] == 0, supervised()
+            assert starts()[4:] == ['svc-db'], starts()
             stop(process); process = None
             assert not sim.errors, sim.errors
             log.close()
         print('PASS: actual-daemon dependency-first multi-component install; unavailable platform/soft omission; '
               'installed-dependent conflict and cycle rejected before downloads/installs; installed reuse; '
               'failed dependency stops dependent; cached offline candidates only under the cached policy and download limits; '
-              'supervised dependency ready before its dependent at deploy and at daemon start')
+              'supervised dependency ready before its dependent at deploy and at daemon start; '
+              'translated AWS SOFT dependency required, not omitted; dependency restart leaves its dependent running')
     finally:
         if process and process.poll() is None:
             process.kill(); process.wait()
