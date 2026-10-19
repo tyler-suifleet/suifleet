@@ -271,7 +271,7 @@ class Simulator:
             return self._create_session(conn, request_id, request)
         with self.lock:
             session = self.sessions.get(request["request_header"]["authentication_token"])
-        if session is None or session.conn not in (conn, None):
+        if session is None or (session.conn is not conn and name != "ActivateSessionRequest"):
             return self._fault(conn, request_id, request, ua.STATUS["BadSessionIdInvalid"])
         session.last_activity = time.monotonic()
         if name == "ActivateSessionRequest":
