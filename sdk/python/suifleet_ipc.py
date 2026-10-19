@@ -114,6 +114,33 @@ class Client:
     def stream_list(self):
         return self.request('stream_list')['streams']
 
+    # Device shadows (SF-033). Errors carry protocol codes such as 'not-found',
+    # 'conflict', 'invalid', 'too-large', 'quota', 'unavailable'. '' is the
+    # classic shadow.
+    def shadow_get(self, name=''):
+        return self.request('shadow_get', topic=name)
+
+    def shadow_update(self, name, state, version=None, client_token=None):
+        """state is {'desired': {...}, 'reported': {...}}; null deletes a key."""
+        request = dict(state=state)
+        if version is not None:
+            request['version'] = version
+        if client_token is not None:
+            request['clientToken'] = client_token
+        return self.request('shadow_update', topic=name, payload=request)
+
+    def shadow_delete(self, name='', version=None):
+        return self.request('shadow_delete', topic=name,
+                            payload=None if version is None else dict(version=version))
+
+    def shadow_list(self):
+        """Named shadows the caller may list (not the classic shadow)."""
+        return self.request('shadow_list')['shadows']
+
+    def shadows(self):
+        """Administrator only: versions, sync status and notification counters."""
+        return self.request('shadows')
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -125,7 +152,9 @@ def main():
                                             'subscribe', 'unsubscribe', 'ack',
                                             'messaging', 'stream_create',
                                             'stream_delete', 'stream_append', 'stream_read',
-                                            'stream_describe', 'stream_list'])
+                                            'stream_describe', 'stream_list',
+                                            'shadow_get', 'shadow_update', 'shadow_delete',
+                                            'shadow_list', 'shadows'])
     parser.add_argument('--topic', default='')
     parser.add_argument('--payload', help='JSON value; install takes a quoted deployment ID')
     args = parser.parse_args()

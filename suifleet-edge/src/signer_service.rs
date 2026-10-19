@@ -229,12 +229,14 @@ pub fn check_logs(policy: &Policy, message: &[u8]) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// A personal message the service signs: a telemetry snapshot or a log batch.
+/// A personal message the service signs: a telemetry snapshot, a log batch,
+/// a stream export manifest or a shadow sync manifest.
 pub fn check_personal(policy: &Policy, message: &[u8]) -> anyhow::Result<()> {
     let kind = serde_json::from_slice::<serde_json::Value>(message).ok().and_then(|v| v.get("kind").and_then(|k| k.as_str()).map(str::to_owned));
     match kind.as_deref() {
         Some(crate::logs::KIND) => check_logs(policy, message),
         Some(crate::streams::MANIFEST_KIND) => crate::streams::check_manifest(message, &policy.chain_identifier, &policy.registry.to_string(), &policy.device.to_string()),
+        Some(crate::shadows::MANIFEST_KIND) => crate::shadows::check_manifest(message, &policy.chain_identifier, &policy.registry.to_string(), &policy.device.to_string()),
         _ => check_telemetry(policy, message),
     }
 }

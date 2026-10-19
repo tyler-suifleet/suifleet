@@ -74,6 +74,9 @@ pub struct Config {
     /// Durable local streams and exports (SF-034); none when omitted.
     #[serde(default)]
     pub streams: Option<StreamsConfig>,
+    /// Local device shadows and cloud sync (SF-033); none when omitted.
+    #[serde(default)]
+    pub shadows: Option<ShadowsConfig>,
     /// The file this configuration was loaded from (for the update preflight).
     #[serde(skip)]
     pub path: PathBuf,
@@ -114,6 +117,32 @@ impl StreamsConfig {
         }
         anyhow::ensure!(self.definitions.iter().map(|d| d.max_size).sum::<u64>() <= self.max_total_bytes,
             "stream definitions exceed streams.max_total_bytes");
+        Ok(())
+    }
+}
+
+/// `[shadows]`: local device shadows (docs/SHADOWS.md).
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct ShadowsConfig {
+    /// The AWS-style thing name in shadow resources and notification topics.
+    pub thing_name: String,
+    #[serde(default = "default_max_shadows")]
+    pub max_shadows: usize,
+    /// The cloud sync adapter; none when omitted.
+    #[serde(default)]
+    pub sync: Option<crate::shadows::SyncConfig>,
+}
+fn default_max_shadows() -> usize {
+    64
+}
+impl ShadowsConfig {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(crate::shadows::valid_thing(&self.thing_name), "shadows.thing_name must be 1-128 of [A-Za-z0-9:_-]");
+        anyhow::ensure!((1..=crate::shadows::MAX_SHADOWS).contains(&self.max_shadows), "shadows.max_shadows must be 1..=256");
+        if let Some(sync) = &self.sync {
+            sync.validate(self.max_shadows)?;
+        }
         Ok(())
     }
 }
@@ -666,6 +695,9 @@ impl Config {
         if let Some(streams) = &cfg.streams {
             streams.validate()?;
         }
+        if let Some(shadows) = &cfg.shadows {
+            shadows.validate()?;
+        }
         Ok(cfg)
     }
 }
@@ -747,6 +779,22 @@ mod tests {
     use super::*;
     fn fixture() -> DeploymentManifest {
         serde_json::from_str(include_str!("../../manifests/fixture.localnet.json")).unwrap()
+    }
+    #[test]
+    fn shadows_need_a_thing_name_and_bounded_limits() {
+        for (text, valid) in [
+            ("thing_name = \"dev-1:a_b\"", true),
+            ("thing_name = \"\"", false),
+            ("thing_name = \"a b\"", false),
+            ("thing_name = \"d\"\nmax_shadows = 0", false),
+            ("thing_name = \"d\"\nmax_shadows = 129", false),
+            ("thing_name = \"d\"\nmax_shadows = 2\n[sync]\nurl = \"https://x\"\nshadows = [\"\", \"b\"]", true),
+            ("thing_name = \"d\"\nmax_shadows = 2\n[sync]\nurl = \"https://x\"\nshadows = [\"a\", \"b\", \"c\"]", false),
+        ] {
+            let cfg: ShadowsConfig = toml::from_str(text).unwrap();
+            assert_eq!(cfg.validate().is_ok(), valid, "{text}");
+        }
+        assert!(toml::from_str::<ShadowsConfig>("thing_name = \"d\"\nunknown = 1").is_err());
     }
     #[test]
     fn mixed_origins_and_compatibility() {

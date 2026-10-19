@@ -28,6 +28,7 @@ mod state;
 mod sui_client;
 mod supervisor;
 mod streams;
+mod shadows;
 mod telemetry;
 mod walrus_client;
 
@@ -215,6 +216,12 @@ async fn main() -> anyhow::Result<()> {
             pubsub::Broker::open(&cfg.runtime.state_dir.join("pubsub"), settings.limits())?))),
         None => None,
     };
+    // Device shadows (SF-033); changes are announced on durable pub/sub.
+    let shadow_store = match &cfg.shadows {
+        Some(settings) => Some(std::sync::Arc::new(std::sync::Mutex::new(shadows::Store::open(
+            &cfg.runtime.state_dir.join("shadows"), settings.max_shadows, &settings.thing_name, durable.clone())?))),
+        None => None,
+    };
     let bridge_task = match (&cfg.pubsub, &durable) {
         (Some(settings), Some(broker)) => match &settings.bridge {
             Some(bridge) => Some(tokio::spawn(bridge::Bridge::new(bridge.clone(), broker.clone(),
@@ -318,6 +325,19 @@ async fn main() -> anyhow::Result<()> {
         })).collect(),
         _ => Vec::new(),
     };
+    let shadow_sync = match (&cfg.shadows, &shadow_store) {
+        (Some(settings), Some(store)) => settings.sync.clone().map(|config| tokio::spawn(shadows::Syncer {
+            store: store.clone(),
+            config,
+            binding: streams::Binding {
+                chain_identifier: sui.manifest().chain_identifier.clone(),
+                registry: sui.manifest().shared_objects.registry.id.clone(),
+                device_id: cfg.device.device_object_id.clone(),
+            },
+            signer: signer.clone(),
+        }.run())),
+        _ => None,
+    };
     // A new daemon is confirmed only after this complete local startup
     // (configuration, identity, chain validation, journal and supervisor).
     if let Some(update) = confirm_after_startup.take() {
@@ -370,7 +390,7 @@ async fn main() -> anyhow::Result<()> {
                         if pending.reply.is_closed() { continue; }
                         let result = tokio::select! {
                             result = local_request(&cfg, &sui, &walrus, &runner, store.as_ref(), &configs,
-                                &mut supervisor, &mut journal, &mut ipc_messages, durable.as_deref(), streams.as_deref(), pending.uid, &pending.request) => result,
+                                &mut supervisor, &mut journal, &mut ipc_messages, durable.as_deref(), streams.as_deref(), shadow_store.as_deref(), pending.uid, &pending.request) => result,
                             _ = &mut shutdown => { stopped = true; break; }
                         };
                         if let Err(error) = &result { warn!(operation = pending.request.operation, %error, "Local IPC request failed"); }
@@ -391,6 +411,10 @@ async fn main() -> anyhow::Result<()> {
     // Exports resume from their checkpoints; counters are persisted exactly.
     for exporter in exporters {
         exporter.abort();
+    }
+    // Every shadow change is already on disk; sync resumes from its base.
+    if let Some(task) = shadow_sync {
+        task.abort();
     }
     if let Some(store) = &streams {
         store.lock().unwrap().close();
@@ -414,7 +438,8 @@ async fn local_request(
     store: Option<&components::Store>, configs: &configuration::Store,
     supervisor: &mut supervisor::Supervisor, journal: &mut Journal,
     messages: &mut ipc::Messages, durable: Option<&std::sync::Mutex<pubsub::Broker>>,
-    streams: Option<&std::sync::Mutex<streams::Store>>, uid: u32, request: &ipc::Request,
+    streams: Option<&std::sync::Mutex<streams::Store>>, shadow_store: Option<&std::sync::Mutex<shadows::Store>>,
+    uid: u32, request: &ipc::Request,
 ) -> anyhow::Result<serde_json::Value> {
     use serde_json::json;
     let policy = cfg.ipc.as_ref().ok_or_else(|| anyhow::anyhow!("IPC disabled"))?;
@@ -444,6 +469,12 @@ async fn local_request(
             let acl = policy.components.get(&principal);
             let visible = |name: &str| acl.map_or(true, |a| a.streams.iter().any(|p| streams::glob(p, name)));
             streams::handle(store, &declared, op, &request.topic, &request.payload, &visible)
+        }
+        "shadow_get" | "shadow_update" | "shadow_delete" | "shadow_list" | "shadows" => {
+            let store = shadow_store.ok_or_else(|| anyhow::anyhow!("shadows are not enabled ([shadows])"))?;
+            // Administrators (no component ACL) may use every shadow.
+            let policies = policy.components.get(&principal).map(|acl| acl.shadow_policies.as_slice());
+            shadows::handle(store, policies, &request.operation, &request.topic, &request.payload)
         }
         "install" => {
             let id = request.payload.as_str().ok_or_else(|| anyhow::anyhow!("deployment ID required"))?;
