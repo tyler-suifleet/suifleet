@@ -100,7 +100,14 @@ def certificate_public_key(der):
 
 
 def thumbprint(der):
-    return hashlib.sha1(der).digest()
+    """ReceiverCertificateThumbprint: the X.509 SHA-1 fingerprint that OPC 10000-6 6.7.2.3
+    prescribes. It only names the certificate; authentication comes from the pinned
+    certificate bytes, the RSA signature and decryption with our private key."""
+    x509, hashes, *_ = _crypto()
+    try:
+        return x509.load_der_x509_certificate(der).fingerprint(hashes.SHA1())
+    except ValueError:
+        raise SecurityError("invalid certificate", ua.STATUS["BadCertificateInvalid"]) from None
 
 
 def p_sha256(secret, seed, length):
