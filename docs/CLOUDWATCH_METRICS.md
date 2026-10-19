@@ -4,13 +4,14 @@ SF-059 provides an opt-in Linux companion, `scripts/cloudwatch_metrics.py`, pinn
 to the request, units, value bounds and batching semantics of
 [`aws.greengrass.Cloudwatch` 4.0.0](https://docs.aws.amazon.com/greengrass/v2/developerguide/cloudwatch-metrics-component.html)
 (reference checked 2026-10-19). It accepts component and device measurements;
-collectors explicitly publish them. It does not automatically forward Sui telemetry,
+collectors explicitly publish them. An explicit SF-019 snapshot sender is described below. It does not automatically forward Sui telemetry,
 translate AWS recipes or load AWS component artifacts.
 
 The adapter sends the CloudWatch Query API `PutMetricData`, version `2010-08-01`,
 signed with SigV4 for `monitoring`. Production endpoints are derived from an explicit
 AWS region; no endpoint override, proxy environment, static credentials, profile or
 instance metadata provider is used. China/isolated AWS partitions are not implemented.
+TLS uses an explicit verifying context and ignores SSLKEYLOGFILE session-key logging.
 Actual AWS delivery remains **unrun and unauthorized**, tracked in
 [SF-059/#104](https://github.com/tyler-suifleet/suifleet/issues/104).
 Physical target acceptance remains [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32).
@@ -86,6 +87,31 @@ reject timestamps outside its own acceptance window. Invalid schema/frame gives
 records receive `success`, `buffered`, `dropped`, `rejected`. These counters describe
 local acceptance/delivery, not CloudWatch ingestion verification.
 
+## Native device and component telemetry
+
+`scripts/cloudwatch_telemetry.py` maps an explicitly supplied **trusted** SF-019
+schema-1 snapshot to the same socket. Run it as a dedicated granted publisher UID,
+with read access only to an operator-exported snapshot. Do not grant shared daemon
+UID access, expose the daemon state directory, or feed unverified remote messages.
+The sender performs schema/counter bounds checks, not signature authentication;
+remote exports must first pass the indexer signature/identity verification.
+
+```sh
+python3 /opt/suifleet/scripts/cloudwatch_telemetry.py \
+  --snapshot /run/metrics-input/snapshot.json --namespace Fleet \
+  --socket /run/suifleet-metrics/metrics.sock
+```
+
+The numeric allowlist is `Healthy`, `Uptime` (Seconds), `TelemetryDropped`,
+`PendingReceipts`, `SyncFailures`, and per-component `Installed`/`Restarts` (Count).
+Each uses the snapshot observation timestamp; component records carry the
+`component` dimension and the adapter adds `coreName`. Error/exit/reason text,
+signatures, registry and signer IDs are omitted. This is a SuiFleet mapping, not
+a claim that NucleusEmitter produces identical names. The sender exports once;
+the platform chooses collection/scheduling. A failure midway can leave a partial
+set queued, so retry can duplicate values. The existing SF-019 signed fixture is
+executed through this mapping and the actual adapter into observed HTTP requests.
+
 ## Durability, bounds and failure behavior
 
 `interval` is 0–900 seconds; `retain` is 2000–10000 records (5000 default).
@@ -106,8 +132,8 @@ freed pages. Reserve disk headroom for the journal. Disk/permission/corruption
 errors stop the service; they are never acknowledged as successful enqueues.
 
 Throttling, 5xx, transport and credential/permission failures retain batches for
-retry on the next publish tick. Other non-200 responses reject the batch and
-increment `rejected`. Interval restarts after restart. At most 100 calls per second
+retry on the next publish tick. Recognized HTTP-400 validation errors reject the batch and
+increment `rejected`; unknown errors retain it, including expired credentials. Interval restarts after restart. At most 100 calls per second
 are initiated (10 ms minimum spacing). HTTPS and credential exchanges have
 five-second connection/socket timeouts and a five-second total response deadline.
 One serial ingress/flush loop bounds active work: a slow publisher gets one second
@@ -133,7 +159,7 @@ Only hash-locked public SDK preparation uses networking. Tests run as root in a
 read-only, network-none disposable container with local HTTP fixture endpoints;
 production CLI cannot enable plaintext upstream or substitute test clocks.
 All 90 pinned fixture steps execute against the real queue and transport, with
-emulator-observed Query API requests. Additional cases cover real kernel peer UID
+emulator-observed Query API requests. Additional cases cover SF-019 telemetry numeric mapping/privacy, TLS key-log suppression, real kernel peer UID
 grants, unauthorized callers, frame/payload bounds and splitting, private queue
 access, singleton ownership, unavailable credentials, production CLI startup/clean
 shutdown, outage/reopen recovery, exact wire values and independent botocore SigV4

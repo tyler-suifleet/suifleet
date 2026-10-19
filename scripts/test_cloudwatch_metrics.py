@@ -38,9 +38,10 @@ class MetricsTests(unittest.TestCase):
                 raw = self.rfile.read(int(self.headers['Content-Length']))
                 cls.observed.append((urllib.parse.parse_qs(raw.decode()), dict(self.headers)))
                 result = cls.results.get_nowait()
-                self.send_response(dict(ok=200, invalid=400, throttled=429, **{'server-error':503, 'connection-error':403})[result])
+                self.send_response(dict(ok=200, invalid=400, expired=400, throttled=429, **{'server-error':503, 'connection-error':403})[result])
                 self.end_headers()
-                self.wfile.write(b'<Error/>' if result != 'ok' else b'<PutMetricDataResponse/>')
+                code = "InvalidParameterValue" if result == "invalid" else "ExpiredToken" if result == "expired" else "Other"
+                self.wfile.write(f"<Error><Code>{code}</Code></Error>".encode() if result != 'ok' else b'<PutMetricDataResponse/>')
         cls.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()
@@ -243,6 +244,39 @@ s=socket.socket(socket.AF_UNIX);s.connect(sys.argv[1]);s.sendall(json.dumps({"re
             self.assertEqual(adapter.tick()["buffered"], 1)
             adapter.close()
 
+    def test_sf019_native_snapshot_and_tls_redaction(self):
+        from cloudwatch_telemetry import messages
+        source = json.loads((ROOT/"interfaces/telemetry-cases.json").read_text())["signed"]["snapshot"]
+        with tempfile.TemporaryDirectory() as directory:
+            keylog = Path(directory)/"tls-keys"
+            previous = os.environ.get("SSLKEYLOGFILE")
+            os.environ["SSLKEYLOGFILE"] = str(keylog)
+            try:
+                transport = self.transport()
+            finally:
+                if previous is None:
+                    del os.environ["SSLKEYLOGFILE"]
+                else:
+                    os.environ["SSLKEYLOGFILE"] = previous
+            self.assertIsNone(transport.context.keylog_filename)
+            self.assertFalse(keylog.exists())
+            adapter = Exporter(Path(directory)/"queue", transport, "device", interval=0)
+            for message in messages(source, "Native"):
+                self.assertEqual(adapter.put(message)["status"], "success")
+            self.results.put("ok")
+            self.assertEqual(adapter.tick()["buffered"], 0)
+            fields, _ = self.observed[-1]
+            self.assertEqual(fields["MetricData.member.3.MetricName"], ["TelemetryDropped"])
+            self.assertEqual(fields["MetricData.member.3.Value"], ["2"])
+            self.assertEqual(fields["MetricData.member.8.MetricName"], ["Restarts"])
+            self.assertEqual(fields["MetricData.member.8.Value"], ["2"])
+            wire = json.dumps(fields)
+            for sensitive in ("last_error", "last_exit", "signer", "registry", "exit status"):
+                self.assertNotIn(sensitive, wire)
+            with self.assertRaises(ValueError):
+                messages(dict(source, schema=2), "Native")
+            adapter.close()
+
     def test_wire_values_and_restart(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)/'queue'
@@ -254,6 +288,8 @@ s=socket.socket(socket.AF_UNIX);s.connect(sys.argv[1]);s.sendall(json.dumps({"re
             self.assertEqual(adapter.tick()['buffered'], 1)
             adapter.close()
             adapter = Exporter(path, self.transport(), 'device', interval=0)
+            self.results.put('expired')
+            self.assertEqual(adapter.tick()['buffered'], 1)
             self.results.put('ok')
             self.assertEqual(adapter.tick()['buffered'], 0)
             fields, _ = self.observed[-1]
