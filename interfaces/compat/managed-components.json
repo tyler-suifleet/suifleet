@@ -204,7 +204,7 @@
     "environment": "Network-none container with a local AWS API emulator",
     "deferred": ["Real AWS account Kinesis/S3 export; needs separate user authorization (unrun)"]
    }},
-  {"id": "cloudwatch-metrics-export", "specification": "complete", "implementation_ticket": "SF-059", "runtime_execution": "pending", "replaces": {"aws.greengrass.Cloudwatch": "4.0.0"},
+  {"id": "cloudwatch-metrics-export", "specification": "complete", "implementation_ticket": "SF-059", "runtime_execution": "passed", "runtime_evidence": "docs/validation/sf059-metrics.json", "replaces": {"aws.greengrass.Cloudwatch": "4.0.0"},
    "summary": "Exports SF-019 native metrics and component-published metric requests to CloudWatch PutMetricData with a bounded retention buffer and publish interval.",
    "platforms": ["linux-x86_64", "linux-aarch64", "linux-arm"],
    "aws_services": ["Amazon CloudWatch (monitoring.<region>.amazonaws.com:443)"],

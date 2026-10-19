@@ -19,10 +19,10 @@ class RepositoryTests(unittest.TestCase):
         self.assertTrue(all(count > 0 for count in counts.values()))
 
     def test_runtime_receipts_are_scoped_to_executed_suites(self):
-        # SF-057, SF-032, SF-033 and SF-034 executed their declared suites; all others remain pending.
+        # SF-059, SF-057, SF-032, SF-033 and SF-034 executed their declared suites; all others remain pending.
         matrix = json.loads((ROOT / compat.COMPAT / "greengrass-compat.json").read_text())
         self.assertEqual({name for name, s in matrix["suites"].items() if s["runtime_execution"] == "passed"},
-                         {"credential-provider-cases.json", "pubsub-cases.json", "shadow-cases.json", "stream-cases.json"})
+                         {"credential-provider-cases.json", "cloudwatch-metrics-cases.json", "pubsub-cases.json", "shadow-cases.json", "stream-cases.json"})
 
 
 class MatrixGateTests(unittest.TestCase):
@@ -99,6 +99,12 @@ class FixtureGateTests(unittest.TestCase):
                 for path in platform.get("current_evidence", []):
                     (root / path).parent.mkdir(parents=True, exist_ok=True)
                     (root / path).touch()
+            matrix = json.loads((ROOT / compat.COMPAT / "greengrass-compat.json").read_text())
+            catalog = json.loads((ROOT / compat.COMPAT / "managed-components.json").read_text())
+            for row in list(matrix["suites"].values()) + catalog["adapters"]:
+                if path := row.get("runtime_evidence"):
+                    (root / path).parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy(ROOT / path, root / path)
             compat.run(root)  # unmodified copy passes
             path = root / compat.COMPAT / name
             value = json.loads(path.read_text())
@@ -217,7 +223,7 @@ class ManagedCatalogGateTests(unittest.TestCase):
             "aws-iot-core-connection": "SF-061", "device-defender-metrics": "SF-062",
             "secure-tunneling": "SF-063"})
         self.assertEqual({a["id"] for a in self.catalog["adapters"] if a["runtime_execution"] == "passed"},
-                         {"credential-provider"})
+                         {"credential-provider", "cloudwatch-metrics-export"})
         self.assertFalse(self.catalog["parity_claim"])
         for entry in self.catalog["components"] + self.catalog["platform_phases"]:
             self.assertNotIn("approval", entry)

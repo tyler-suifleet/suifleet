@@ -207,13 +207,13 @@ Ranges use the native comparator grammar. x-ranges, hyphen ranges, `||` and non-
 make test-compat
 ```
 
-The checker validates the catalog's structure and its cross-references to the backlog, the SF-028 platforms and the suites. It also evaluates the four SF-038 suites against reference models in `scripts/greengrass_managed.py`. As with SF-028, these models only make the fixtures checkable. Agreement with them proves nothing about an adapter. All four suites and all seven adapters stay `runtime_execution: pending` until the implementation ticket runs the same fixtures and commits a receipt.
+The checker validates the catalog's structure and its cross-references to the backlog, the SF-028 platforms and the suites. It also evaluates the four SF-038 suites against reference models in `scripts/greengrass_managed.py`. As with SF-028, these models only make the fixtures checkable. Agreement with them proves nothing about an adapter. Each suite and adapter stays `runtime_execution: pending` until its implementation ticket runs the same fixtures and commits a receipt. The metrics and credential adapters now have scoped local receipts; other pending adapters remain unverified.
 
 | Suite | Cases | Runtime execution |
 |---|---|---|
 | `managed-dependency-cases.json` | 47 classifications | Pending SF-037 |
 | `credential-provider-cases.json` | 65 steps across 7 sequences | Pending SF-057 |
-| `cloudwatch-metrics-cases.json` | 90 steps across 8 sequences | Pending SF-059 |
+| `cloudwatch-metrics-cases.json` | 90 steps across 8 sequences | Passed: local adapter/HTTP/SQLite ([receipt](validation/sf059-metrics.json)); AWS delivery pending |
 | `cloudwatch-logs-cases.json` | 69 steps across 8 sequences | Pending SF-060 |
 
 A `complete` adapter specification must pin an exact AWS version and name at least one executable reference suite; the checker enforces both. `stream-export-aws` uses the SF-028 `stream-cases.json` checkpoint suite.

@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "ticket": "SF-059",
+  "agent": "Codex",
+  "model": "gpt-6.1-sol",
+  "date": "2026-10-19",
+  "tested_predecessor_head": "4d78c06494310c67e3087efdcccd55d99190f621",
+  "environment": {
+    "image": "suifleet-dev:sf035",
+    "adapter_test_network": "none",
+    "checkout": "read-only",
+    "user": "root for distinct kernel UID tests",
+    "uids": [
+      61001,
+      61002,
+      61003
+    ]
+  },
+  "commands": [
+    {
+      "command": "make test-cloudwatch-metrics SUIFLEET_DEV_IMAGE=suifleet-dev:sf035",
+      "result": "passed six adapter tests before final additions; hash-locked public SDK preparation then network-none execution"
+    },
+    {
+      "command": "docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONPATH=/workspace/.ci-cache/aws-python -v \"$PWD:/workspace:ro\" -w /workspace suifleet-dev:sf035 python3 scripts/test_cloudwatch_metrics.py",
+      "result": "passed seven tests in 11.190s, including all 90 metrics fixture steps, SF-019 telemetry mapping, observed Query API requests, independent botocore signing, kernel UID authorization, production CLI, private queue, retry/restart, expired credentials and frame/payload limits"
+    },
+    {
+      "command": "python3 scripts/greengrass_compat.py",
+      "result": "490 reference checks passed"
+    },
+    {
+      "command": "python3 scripts/greengrass_roadmap.py",
+      "result": "76 reference checks passed"
+    },
+    {
+      "command": "python3 -m unittest discover -s scripts/tests -p test_greengrass_compat.py",
+      "result": "39 passed"
+    },
+    {
+      "command": "python3 -m unittest discover -s scripts/tests -p test_greengrass_roadmap.py",
+      "result": "11 passed"
+    },
+    {
+      "command": "node scripts/test_greengrass_compat.cjs (Node 22.22.2 container after frozen pnpm installation)",
+      "result": "49 AWS recipe rejects and seven native translations passed"
+    }
+  ],
+  "sdk_versions": {
+    "botocore": "1.43.114"
+  },
+  "source_sha256": {
+    "scripts/cloudwatch_metrics.py": "7f5b38d8695d3f4d774fa954966e4b89935971be38eb38b53d312a62b4df40be",
+    "scripts/cloudwatch_telemetry.py": "d0f309e9b5b65acf4e2f4c1524f823f481a44882a788a9c8ce99d83947aa5310",
+    "scripts/test_cloudwatch_metrics.py": "eb5326e6e6b5168da2d812f504ebdd84dab3192f67debb83350491acd89a6e04",
+    "interfaces/compat/cloudwatch-metrics-cases.json": "d36aaffd5cee5903f9102bd80f7482a27fe2ceb33b0d741fd0ad2acd99cb5a0b",
+    "interfaces/telemetry-cases.json": "ec976563bc2221df79a0dff24a229aa81a9c91b5cae0c464f50adf5185b6d2a1"
+  },
+  "limits": [
+    "Local Linux x86_64 adapter execution only; no AWS account or actual CloudWatch delivery authorized or performed. AWS acceptance remains pending in SF-059/#104.",
+    "Physical Pi/target integration deferred to SF-031/#32.",
+    "Explicit authenticated dedicated Unix socket ingress and selected trusted SF-019 snapshot mapping; no automatic native pubsub subscription, AWS recipe translation or NucleusEmitter naming equivalence.",
+    "Trusted operator-exported or indexer-verified snapshots required; sender does not verify signatures.",
+    "At-least-once retry can duplicate measurements; bounded serial flush can delay ingestion."
+  ]
+}
