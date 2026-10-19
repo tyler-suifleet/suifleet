@@ -134,3 +134,17 @@ replay_history = false
 # [streams.definitions.export]
 # url = "https://ingest.example/v1/streams"
 # bearer_token_file = "/etc/suifleet/stream-export.token"
+
+# Local device shadows and cloud sync (SF-033; docs/SHADOWS.md). Components need
+# shadow operations and shadow_policies under [ipc.components.NAME]; change
+# notifications need [pubsub].
+# [shadows]
+# thing_name = "device1"            # in $aws/things/<thing>/shadow resources and topics
+# max_shadows = 64                  # 1..=128 existing shadows
+# [shadows.sync]
+# url = "https://shadows.example/v1/sync"
+# bearer_token_file = "/etc/suifleet/shadow-sync.token"
+# shadows = ["", "config"]          # "" is the classic shadow
+# interval_seconds = 30
+# desired_conflict = "cloud"        # who wins a key both sides changed
+# reported_conflict = "device"

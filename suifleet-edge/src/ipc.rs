@@ -31,6 +31,9 @@ pub struct Acl {
     /// Stream names this component may use (SF-034); `*` is a glob.
     #[serde(default)]
     pub streams: Vec<String>,
+    /// Device shadows (SF-033): AWS ShadowManager-style policies.
+    #[serde(default)]
+    pub shadow_policies: Vec<crate::shadows::Policy>,
 }
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -65,7 +68,8 @@ impl Drop for Server {
 }
 const OPS: &[&str] = &["list", "status", "start", "stop", "restart", "logs", "config", "health", "publish", "receive", "install",
     "subscribe", "unsubscribe", "ack", "messaging", "client_devices",
-    "stream_create", "stream_delete", "stream_append", "stream_read", "stream_describe", "stream_list"];
+    "stream_create", "stream_delete", "stream_append", "stream_read", "stream_describe", "stream_list",
+    "shadow_get", "shadow_update", "shadow_delete", "shadow_list", "shadows"];
 impl Settings {
     pub fn validate(&self) -> anyhow::Result<()> {
         anyhow::ensure!(self.socket.is_absolute(), "IPC socket must be absolute");
@@ -83,12 +87,12 @@ impl Settings {
                 && uids.insert(acl.uid), "IPC components require distinct non-root, non-daemon, non-admin UIDs");
             anyhow::ensure!(acl.operations.len() <= OPS.len() && acl.publish.len() <= 128
                 && acl.subscribe.len() <= 128, "IPC ACL too large");
-            anyhow::ensure!(acl.operations.iter().all(|op| OPS.contains(&op.as_str()) && op != "install" && op != "list" && op != "messaging"
-                && op != "client_devices"), "invalid component IPC operation");
+            anyhow::ensure!(acl.operations.iter().all(|op| OPS.contains(&op.as_str()) && !["install", "list", "messaging", "shadows", "client_devices"].contains(&op.as_str())), "invalid component IPC operation");
             anyhow::ensure!(acl.publish.iter().chain(&acl.subscribe).all(|t| topic(t)), "invalid IPC topic");
             anyhow::ensure!(acl.streams.len() <= 64 && acl.streams.iter().all(|p| crate::streams::valid_name(&p.replace('*', "x"))),
                 "invalid IPC stream pattern");
             crate::pubsub::validate_policies(&acl.pubsub_policies)?;
+            crate::shadows::validate_policies(&acl.shadow_policies)?;
         }
         anyhow::ensure!(!self.administrators.contains(&daemon_uid) || daemon_uid == 0,
             "shared daemon UID cannot be an IPC administrator");
@@ -128,6 +132,9 @@ pub fn response(result: anyhow::Result<Value>) -> Value {
                 Some(oldest) => json!({"version":1,"ok":false,"error":e.code,"oldest":oldest}),
                 None => json!({"version":1,"ok":false,"error":e.code}),
             }
+        }
+        Err(error) if error.downcast_ref::<crate::shadows::ShadowError>().is_some() => {
+            json!({"version":1,"ok":false,"error":error.downcast_ref::<crate::shadows::ShadowError>().unwrap().code})
         }
         // Runtime diagnostics may contain private paths/commands/configuration.
         // Detailed local failure evidence remains in the daemon's private logs.
@@ -283,8 +290,8 @@ mod tests {
     fn policy() -> Settings {
         Settings { socket: "/run/suifleet/ipc.sock".into(), administrators: vec![0],
             components: BTreeMap::from([
-                ("a".into(), Acl { uid: 61001, operations: vec!["config".into(), "health".into(), "publish".into(), "receive".into()], publish: vec!["a/events".into()], subscribe: vec!["a/events".into()], pubsub_policies: vec![], streams: vec![] }),
-                ("b".into(), Acl { uid: 61002, operations: vec!["receive".into()], publish: vec![], subscribe: vec!["a/events".into()], pubsub_policies: vec![], streams: vec![] }),
+                ("a".into(), Acl { uid: 61001, operations: vec!["config".into(), "health".into(), "publish".into(), "receive".into()], publish: vec!["a/events".into()], subscribe: vec!["a/events".into()], pubsub_policies: vec![], streams: vec![], shadow_policies: vec![] }),
+                ("b".into(), Acl { uid: 61002, operations: vec!["receive".into()], publish: vec![], subscribe: vec!["a/events".into()], pubsub_policies: vec![], streams: vec![], shadow_policies: vec![] }),
             ]) }
     }
     fn request(op: &str) -> Request {
@@ -316,6 +323,20 @@ mod tests {
         let mut p = policy();
         p.components.get_mut("a").unwrap().operations.push("install".into());
         assert!(p.validate().is_err());
+        // Shadow status is administrator only; shadow policies are validated.
+        let mut p = policy();
+        p.components.get_mut("a").unwrap().operations.push("shadows".into());
+        assert!(p.validate().is_err());
+        let mut p = policy();
+        p.components.get_mut("a").unwrap().shadow_policies = serde_json::from_value(json!([
+            {"operations": ["aws.greengrass#PublishToTopic"], "resources": ["$aws/things/d/shadow"]}])).unwrap();
+        assert!(p.validate().is_err());
+    }
+    #[test]
+    fn shadow_outcomes_are_protocol_codes_and_other_errors_stay_opaque() {
+        let error = crate::shadows::ShadowError { code: "conflict", detail: "private".into() };
+        assert_eq!(response(Err(error.into())), json!({"version":1,"ok":false,"error":"conflict"}));
+        assert_eq!(response(Err(anyhow::anyhow!("forbidden_shadow"))), json!({"version":1,"ok":false,"error":"request_failed"}));
     }
     #[test]
     fn messaging_backpressure_is_atomic_and_health_is_bounded() {
@@ -375,9 +396,9 @@ mod tests {
             socket: "/tmp/x.sock".into(), administrators: vec![0],
             components: [
                 ("pub".into(), Acl { uid: 62001, operations: ops(&["publish"]), publish: vec![], subscribe: vec![],
-                    pubsub_policies: vec![Policy { operations: vec!["aws.greengrass#PublishToTopic".into()], resources: vec!["sensors/*".into()] }], streams: vec![] }),
+                    pubsub_policies: vec![Policy { operations: vec!["aws.greengrass#PublishToTopic".into()], resources: vec!["sensors/*".into()] }], streams: vec![], shadow_policies: vec![] }),
                 ("sub".into(), Acl { uid: 62002, operations: ops(&["subscribe", "receive", "ack", "unsubscribe"]), publish: vec![], subscribe: vec![],
-                    pubsub_policies: vec![Policy { operations: vec!["aws.greengrass#SubscribeToTopic".into()], resources: vec!["sensors/#".into()] }], streams: vec![] }),
+                    pubsub_policies: vec![Policy { operations: vec!["aws.greengrass#SubscribeToTopic".into()], resources: vec!["sensors/#".into()] }], streams: vec![], shadow_policies: vec![] }),
             ].into_iter().collect(),
         }
     }
@@ -430,7 +451,7 @@ mod tests {
         p.components.insert("mig".into(), Acl { uid: 61003,
             operations: ["receive", "subscribe", "unsubscribe", "ack"].map(String::from).to_vec(),
             publish: vec![], subscribe: vec!["a/events".into()],
-            pubsub_policies: vec![Policy { operations: vec!["aws.greengrass#SubscribeToTopic".into()], resources: vec!["a/events".into()] }], streams: vec![] });
+            pubsub_policies: vec![Policy { operations: vec!["aws.greengrass#SubscribeToTopic".into()], resources: vec!["a/events".into()] }], streams: vec![], shadow_policies: vec![] });
         // Only mig subscribes, so other inboxes cannot fill.
         p.components.get_mut("a").unwrap().subscribe.clear();
         p.components.get_mut("b").unwrap().subscribe.clear();

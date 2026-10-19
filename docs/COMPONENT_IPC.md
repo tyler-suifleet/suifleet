@@ -79,6 +79,9 @@ no keys, user accounts or enrollment settings are embedded by package builds.
 | `stream_create`, `stream_delete`, `stream_append`, `stream_read`, `stream_describe` | `component`, stream name as `topic` | Durable streams (SF-034, [STREAMS.md](STREAMS.md)); need `[streams]` and a matching `streams` glob in the component's ACL. |
 | `stream_list` | `component` | Stream names the caller's `streams` globs match. |
 | `subscribe`, `unsubscribe`, `ack` | `component`, filter `topic` | Durable pub/sub (SF-032); need `[pubsub]` and a `SubscribeToTopic` policy. |
+| `shadow_get`, `shadow_update`, `shadow_delete` | `component`, shadow name as `topic` (`""` is classic) | Device shadows (SF-033, [SHADOWS.md](SHADOWS.md)); need `[shadows]` and a matching `shadow_policies` grant. |
+| `shadow_list` | `component` | Named shadows a `ListNamedShadowsForThing` grant matches. |
+| `shadows` | no component needed | Administrator only. Shadow versions, sync and notification counters. |
 | `messaging` | no component needed | Administrator only. Durable subscription and bridge counters. |
 | `client_devices` | `payload` = `{action, ...}` | Administrator only; components cannot be granted it. LAN client-device enrollment from a CSR, revocation, removal and status (SF-035, [CLIENT_DEVICES.md](CLIENT_DEVICES.md)); needs `[client_devices]`. |
 
@@ -126,8 +129,8 @@ disconnecting does not revoke an accepted request: it may still execute or finis
 One UTF-8 JSON object plus LF per connection, at most 65536 bytes including LF.
 Requests have `version: 1`, `operation`, optional `component`/`topic` (default empty)
 and optional `payload` (default null). No pipelining or streaming. Responses contain
-`version: 1`, `ok` and either `data` or `error: "request_failed"` (stream operations
-return their protocol codes instead, such as `full` or `evicted`). Errors deliberately
+`version: 1`, `ok` and either `data` or `error: "request_failed"` (stream and shadow
+operations return their protocol codes instead, such as `full`, `evicted` or `conflict`). Errors deliberately
 do not disclose private command/configuration diagnostics; operators inspect daemon
 logs. A denied/invalid/future-version request has no handler side effects.
 

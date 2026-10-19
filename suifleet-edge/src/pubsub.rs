@@ -85,7 +85,7 @@ pub struct Policy {
     pub resources: Vec<String>,
 }
 
-fn glob(pattern: &str, text: &str) -> bool {
+pub(crate) fn glob(pattern: &str, text: &str) -> bool {
     // Only `*` is special; it matches any run of characters, `/` included.
     let parts: Vec<&str> = pattern.split('*').collect();
     if parts.len() == 1 {
@@ -221,7 +221,7 @@ fn queue_dir(root: &Path, principal: &str, filter: &str) -> PathBuf {
     root.join("queues").join(tag)
 }
 
-fn write_synced(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) fn write_synced(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let temporary = path.with_extension("tmp");
     write_file_synced(&temporary, bytes)?;
     std::fs::rename(&temporary, path)?;

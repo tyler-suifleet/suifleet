@@ -379,9 +379,18 @@ def _valid_version(value) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 1
 
 
-def _has_null_in_array(value) -> bool:
+def _contains_null(value) -> bool:
     if isinstance(value, list):
-        return any(v is None or _has_null_in_array(v) for v in value)
+        return any(_contains_null(v) for v in value)
+    if isinstance(value, dict):
+        return any(_contains_null(v) for v in value.values())
+    return value is None
+
+
+def _has_null_in_array(value) -> bool:
+    """A null anywhere under an array, including in objects nested in it."""
+    if isinstance(value, list):
+        return any(_contains_null(v) for v in value)
     if isinstance(value, dict):
         return any(_has_null_in_array(v) for v in value.values())
     return False
