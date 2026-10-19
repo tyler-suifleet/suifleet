@@ -100,7 +100,7 @@ class Exporter:
                 aws = session.client(config['service'], endpoint_url=config.get('endpoint'),
                                      config=Config(connect_timeout=5, read_timeout=30,
                                                    retries={'total_max_attempts': 1},
-                                                   proxies={}, s3={'addressing_style': 'path'},
+                                                   proxies={}, ignore_configured_endpoint_urls=True, s3={'addressing_style': 'path'},
                                                    request_checksum_calculation='when_required',
                                                    response_checksum_validation='when_required'))
             self.aws = aws

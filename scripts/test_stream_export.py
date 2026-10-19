@@ -636,6 +636,18 @@ else:
         self.assertEqual(len(self.emu.records), 1)
         self.assertEqual(self.checkpoint(), 0)
 
+    def test_environment_cannot_override_explicit_endpoint_policy(self):
+        # Construct only: never send a request to a real AWS service.
+        self.config.pop('endpoint')
+        os.environ['AWS_ENDPOINT_URL'] = 'http://127.0.0.1:9/implicit-global'
+        os.environ['AWS_ENDPOINT_URL_KINESIS'] = 'http://127.0.0.1:9/implicit-kinesis'
+        os.environ['AWS_ENDPOINT_URL_S3'] = 'http://127.0.0.1:9/implicit-s3'
+        for service, endpoint in [('kinesis', 'https://kinesis.us-east-1.amazonaws.com'),
+                                  ('s3', 'https://s3.amazonaws.com')]:
+            exporter = self.open(s3=service == 's3')
+            self.assertEqual(exporter.aws.meta.endpoint_url, endpoint)
+            self.assertFalse(self.emu.calls)
+
     def test_no_default_profile_credentials_and_invalid_limits(self):
         os.environ.pop('AWS_CONTAINER_CREDENTIALS_FULL_URI')
         os.environ.update(AWS_ACCESS_KEY_ID='WRONG', AWS_SECRET_ACCESS_KEY='WRONG')

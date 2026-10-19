@@ -88,7 +88,9 @@ as defense against abandoned uploads after loss of the local state. The program
 never creates a bucket, stream, policy or lifecycle rule. Normal AWS endpoints use
 TLS and standard certificate validation. The optional `endpoint` override accepts
 only loopback HTTP for local API emulators; it cannot redirect credentials to a
-remote endpoint. SDK proxies and automatic SDK retries are disabled.
+remote endpoint. SDK proxies, implicit environment/profile endpoint URLs and automatic SDK retries
+are disabled; only the validated explicit emulator override can replace the standard
+AWS service endpoint.
 
 Launch with the SF-057 wrapper, as the mapped exporter UID:
 
