@@ -14,10 +14,10 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
-from xml.etree import ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / 'sdk/python'), str(ROOT / '.ci-cache/aws-export-python')]
+from defusedxml import ElementTree as ET
 from suifleet_stream_export import Exporter, validate
 from suifleet_ipc import Client, IpcError
 from test_ota import Simulator, start_grpc, wait_for, PACKAGE, REGISTRY, DEVICE, CAP, UPGRADE_CAP, TYPE_ORIGINS

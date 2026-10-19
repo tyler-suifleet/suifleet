@@ -95,9 +95,9 @@
     "sdk/python/suifleet_ipc.py": "e8c803bd69b2124e1be68a30e3dae2e97e4569c02daa6d35493453cebcd4b741",
     "suifleet-edge/src/streams.rs": "4b77367a3bcb57c790cb9ec642a44638ed29757da2143f9c78c28e10dc5eba38",
     "suifleet-edge/src/ipc.rs": "a7e593bcafd8716cbf979c522ce925b3e0006e9485972c770834659e02d4e0bd",
-    "scripts/test_stream_export.py": "90562fc3da10f38b9ca4c6e1ea46c3be5a38dc3566fb187e71db0dd46d115266",
+    "scripts/test_stream_export.py": "cfa43c2d1fbf48e46b1a7bdf74f140d31b650c4fcd559f1ba582466e4d52dc95",
     "scripts/test_stream_export.sh": "025412c7cdc556802464901ab52d2ac93895ce5833085279b5711c29b5920e9f",
-    "sdk/stream-export/requirements.txt": "99d39dfa305cbd75ca38c41e8431187884710619510474acfe8dbaad489ca2b4",
+    "sdk/stream-export/requirements.txt": "0f9437010b884f1d050934f6cd96391d6240f18d34484bb66055c3a3893cc7b8",
     "interfaces/compat/stream-cases.json": "42056fc9187463f68a2e608bccf4dfc89f25833bb0531197fc43dea0e38b1bc1"
   },
   "limits": [
@@ -111,5 +111,12 @@
     "SiteWise/Firehose/other service exporters remain visible in SF-064/#109 and linked roadmap tickets.",
     "Physical integration deferred to https://github.com/tyler-suifleet/suifleet/issues/32; no hardware programming or new image.",
     "No general Greengrass/StreamManager parity, firmware safety or production deployment claim."
-  ]
+  ],
+  "post_ci_repair": {
+    "over_head": "c800dadbe58e400dd200a8d7d90ecf9623257f89",
+    "finding": "Sanitized CodeQL py/xml-bomb in local emulator fixture; raw scanner diagnostics remain private.",
+    "change": "Use pinned defusedxml 0.7.1 instead of stdlib XML parsing. No source suppression or gate change.",
+    "command": "make test-stream-export SUIFLEET_DEV_IMAGE=suifleet-dev:sf035",
+    "result": "19 passed in 28.558s after hash-required dependency preparation; production exporter/daemon source unchanged."
+  }
 }
