@@ -259,10 +259,11 @@ def run(evidence=None):
             assert update(APP, "config", {"reported": {"mode": "x"}}, version=True) == {"ok": False, "error": "invalid"}
             assert update(APP, "config", {"reported": {"pad": "z" * 9000}}) == {"ok": False, "error": "too-large"}
             assert update(APP, "config", {"reported": {"a": [1, None]}}) == {"ok": False, "error": "invalid"}
+            assert update(APP, "config", {"reported": {"a": [{"b": None}]}}) == {"ok": False, "error": "invalid"}
             assert get("config")["data"]["version"] == version
             r = update(APP, "config", {"reported": {"mode": "run", "rate": 5}}, version=version)
             assert r["ok"] and r["data"]["version"] == version + 1 and "delta" not in r["data"]["state"], r
-            print(f"PASS: stale version {version - 1} rejected with conflict; invalid/too-large/null-in-array refused without a version change; "
+            print(f"PASS: stale version {version - 1} rejected with conflict; invalid/too-large/null-in-array (also nested in an array object) refused without a version change; "
                   f"version {version} accepted")
 
             # Cloud → device: a cloud-side desired change is pulled and announced.
@@ -357,7 +358,7 @@ def run(evidence=None):
             if evidence:
                 head = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], text=True, capture_output=True).stdout.strip()
                 Path(evidence).write_text(json.dumps({"ticket": "SF-033", "head": head or None, "checks": passed,
-                    "fixture": {"file": "interfaces/compat/shadow-cases.json", "sequences": 10, "steps": 54,
+                    "fixture": {"file": "interfaces/compat/shadow-cases.json", "sequences": 10, "steps": 55,
                                 "executed_by": "make edge-test: shadows::tests::shared_shadow_cases (each step also after reopening the store)"},
                     "signature_verification": "independent: SHA-256 body binding, BLAKE2b personal-message intent digest, RFC 8032 Ed25519 (Python), signer address",
                     "cloud": "local reference shadow service (scripts/test_shadows.py); no public network"},

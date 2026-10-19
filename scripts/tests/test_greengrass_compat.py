@@ -319,6 +319,12 @@ class ModelTests(unittest.TestCase):
             self.assertEqual(store.apply({"op": "update", "request": {"state": {"desired": {"values": value}}}}), {"error": "invalid"})
         self.assertEqual(store.apply({"op": "get"}), {"state": {"desired": {"a": 1}, "delta": {"a": 1}}, "version": 1})
 
+    def test_shadow_null_nested_in_array_is_invalid(self):
+        store = compat.ShadowStore()
+        for value in ([{"x": None}], [[None]], [{"x": [{"y": None}]}]):
+            self.assertEqual(store.apply({"op": "update", "request": {"state": {"reported": {"items": value}}}}), {"error": "invalid"})
+        self.assertEqual(store.apply({"op": "get"}), {"error": "not-found"})
+
     def test_shadow_version_must_be_integer_and_rejection_changes_nothing(self):
         store = compat.ShadowStore()
         created = store.apply({"op": "update", "request": {"state": {"desired": {"enabled": False}}}})

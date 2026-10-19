@@ -91,9 +91,11 @@ fn depth(value: &Value) -> usize {
     }
 }
 
+/// A `null` anywhere under an array, including in objects nested in it:
+/// arrays replace whole, so it would be stored and fail `check_document`.
 fn null_in_array(value: &Value) -> bool {
     match value {
-        Value::Array(items) => items.iter().any(|v| v.is_null() || null_in_array(v)),
+        Value::Array(items) => items.iter().any(contains_null),
         Value::Object(map) => map.values().any(null_in_array),
         _ => false,
     }
@@ -425,6 +427,10 @@ impl Store {
         }
         if serde_json::to_vec(&document)?.len() > MAX_STATE_BYTES {
             return fail("too-large", format!("the state would exceed {MAX_STATE_BYTES} bytes"));
+        }
+        // Never store a document that would stop the next startup.
+        if let Err(error) = check_document(&document) {
+            return fail("invalid", error.to_string());
         }
         let version = self.commit(name, Some(document.clone()), None, now)?;
         let mut result = json!({"state": state_view(&document), "version": version});
@@ -1025,7 +1031,7 @@ mod tests {
             }
             let _ = std::fs::remove_dir_all(&path);
         }
-        assert_eq!(steps, 54, "shadow-cases.json has 54 steps");
+        assert_eq!(steps, 55, "shadow-cases.json has 55 steps");
     }
 
     #[test]
@@ -1068,6 +1074,22 @@ mod tests {
         drop(store);
         assert!(Store::open(&path, 1, "thing", None).is_err());
         assert_eq!(Store::open(&path, 2, "thing", None).unwrap().get("b").unwrap()["version"], 3);
+        let _ = std::fs::remove_dir_all(&path);
+    }
+
+    #[test]
+    fn null_nested_in_an_array_is_refused_and_restart_still_works() {
+        let path = dir("nested-null");
+        let mut store = Store::open(&path, 4, "thing", None).unwrap();
+        store.update("a", &json!({"state": {"reported": {"x": 1}}}), 1).unwrap();
+        for items in [json!([{"x": null}]), json!([[null]]), json!([{"x": [{"y": null}]}])] {
+            let error = store.update("a", &json!({"state": {"reported": {"items": items}}}), 1).unwrap_err();
+            assert_eq!(code(&error), "invalid", "{items}");
+        }
+        assert_eq!(store.get("a").unwrap(), json!({"state": {"reported": {"x": 1}}, "version": 1}));
+        drop(store);
+        let store = Store::open(&path, 4, "thing", None).unwrap();
+        assert_eq!(store.get("a").unwrap(), json!({"state": {"reported": {"x": 1}}, "version": 1}));
         let _ = std::fs::remove_dir_all(&path);
     }
 
@@ -1128,6 +1150,7 @@ mod tests {
         assert!(handle(&store, p, "shadows", "", &Value::Null).is_err());
         assert_eq!(handle(&store, p, "shadow_list", "", &Value::Null).unwrap(), json!({"shadows": ["pub-a"]}));
         assert_eq!(handle(&store, None, "shadow_list", "", &Value::Null).unwrap(), json!({"shadows": ["config", "pub-a", "secret"]}));
+
         let _ = std::fs::remove_dir_all(&path);
     }
 

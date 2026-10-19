@@ -66,7 +66,7 @@
   "shadow-cases.json": {
    "description": "Named shadow update/merge/delta/version/delete semantics.",
    "runtime_execution": "passed", "runtime_evidence": "docs/validation/sf033-shadows.json",
-   "runtime_scope": "The daemon's shadow store executes all 54 steps of the 10 sequences, each also after reopening the store from disk (make edge-test); scripts/test_shadows.py exercises the same semantics through real IPC UIDs, restarts, kill -9 and a verifying reference cloud shadow service."
+   "runtime_scope": "The daemon's shadow store executes all 55 steps of the 10 sequences, each also after reopening the store from disk (make edge-test); scripts/test_shadows.py exercises the same semantics through real IPC UIDs, restarts, kill -9 and a verifying reference cloud shadow service."
   },
   "stream-cases.json": {
    "description": "Durable stream append/read/eviction/restart/export-checkpoint semantics.",
