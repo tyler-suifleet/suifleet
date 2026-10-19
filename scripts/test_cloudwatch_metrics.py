@@ -17,6 +17,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from cloudwatch_metrics import Exporter, Transport, body, receive
+from aws_credentials import allow_principals
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -139,11 +140,11 @@ class MetricsTests(unittest.TestCase):
     @unittest.skipUnless(os.geteuid() == 0, "distinct UIDs require disposable root container")
     def test_kernel_uid_grants_and_frame_limits(self):
         with tempfile.TemporaryDirectory() as directory:
-            os.chmod(directory, 0o755)
+            allow_principals(directory, (61001, 61002), "--x")
             path = directory + "/metrics.sock"
             listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             listener.bind(path)
-            os.chmod(path, 0o777)  # deliberately bypass filesystem ACL to verify kernel authorization
+            allow_principals(path, (61001, 61002), "rw-")  # kernel policy still denies 61002
             listener.listen()
             adapter = Exporter(Path(directory)/"queue", self.transport(), "device")
             message = dict(request=dict(namespace="Device", metricData=dict(metricName="cpu", value=1)))
@@ -171,7 +172,7 @@ s=socket.socket(socket.AF_UNIX);s.connect(sys.argv[1]);s.sendall(sys.argv[2].enc
     def test_production_cli_restart_and_private_queue(self):
         with tempfile.TemporaryDirectory(dir="/run", prefix="sf059-") as directory:
             root = Path(directory)
-            root.chmod(0o755)
+            allow_principals(root, (61001,), "--x")
             state = root/"state"
             state.mkdir(mode=0o700)
             for marker in (root/".owner", state/".owner"):

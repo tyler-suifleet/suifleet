@@ -52,7 +52,7 @@
   "source_sha256": {
     "scripts/cloudwatch_metrics.py": "7f5b38d8695d3f4d774fa954966e4b89935971be38eb38b53d312a62b4df40be",
     "scripts/cloudwatch_telemetry.py": "d0f309e9b5b65acf4e2f4c1524f823f481a44882a788a9c8ce99d83947aa5310",
-    "scripts/test_cloudwatch_metrics.py": "eb5326e6e6b5168da2d812f504ebdd84dab3192f67debb83350491acd89a6e04",
+    "scripts/test_cloudwatch_metrics.py": "31e46d0a66bd0b86f9a3b8831184aed7ff97c522366f88d1ab8be21b9dada384",
     "interfaces/compat/cloudwatch-metrics-cases.json": "d36aaffd5cee5903f9102bd80f7482a27fe2ceb33b0d741fd0ad2acd99cb5a0b",
     "interfaces/telemetry-cases.json": "ec976563bc2221df79a0dff24a229aa81a9c91b5cae0c464f50adf5185b6d2a1"
   },
@@ -62,5 +62,10 @@
     "Explicit authenticated dedicated Unix socket ingress and selected trusted SF-019 snapshot mapping; no automatic native pubsub subscription, AWS recipe translation or NucleusEmitter naming equivalence.",
     "Trusted operator-exported or indexer-verified snapshots required; sender does not verify signatures.",
     "At-least-once retry can duplicate measurements; bounded serial flush can delay ingestion."
-  ]
+  ],
+  "security_repair": {
+    "finding": "CodeQL overly-permissive test fixture directory/socket modes",
+    "change": "Replace broad directory/socket modes with named-UID POSIX ACLs; retain kernel UID denial even when the disallowed UID has socket ACL access.",
+    "validation": "Seven network-none adapter tests pass in 12.762s after repair; no suppressed finding."
+  }
 }
