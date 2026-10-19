@@ -281,6 +281,18 @@ async fn read_frame<R: AsyncRead + Unpin>(reader: &mut R, buffer: &mut Vec<u8>) 
 
 type Pending = Arc<Mutex<HashMap<u16, Vec<bool>>>>;
 
+/// A session the gateway ends for authorization (not a network failure): the
+/// broker gets a clean DISCONNECT, so it does not publish the will on the
+/// denied client's behalf.
+#[derive(Debug)]
+struct Denied(String);
+impl std::fmt::Display for Denied {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+impl std::error::Error for Denied {}
+
 /// Answer CONNECT with a refusal code and close.
 async fn refuse<W: AsyncWrite + Unpin>(authority: &Authority, client: &mut W, thing: &str, code: u8, reason: &'static str) -> anyhow::Result<()> {
     authority.count_denial(reason);
@@ -325,6 +337,12 @@ async fn mqtt_session(shared: &Shared, tcp: TcpStream) -> anyhow::Result<()> {
     let mut upstream = connect.clone();
     upstream.username = authority.settings.broker_username.clone();
     upstream.password = shared.password.clone();
+    // A persistent broker session keeps the subscriptions granted when it was
+    // opened: resume one only under the policy it was opened with.
+    if !authority.resume_session(&thing)? && !connect.clean_session {
+        info!(thing, "Device groups changed since its last session: starting a clean broker session");
+        upstream.clean_session = true;
+    }
     let (broker_read, mut broker_write) = broker.into_split();
     broker_write.write_all(&mqtt::encode_connect(&upstream)).await?;
     let _session = authority.session(&thing);
@@ -336,21 +354,24 @@ async fn mqtt_session(shared: &Shared, tcp: TcpStream) -> anyhow::Result<()> {
             tokio::time::sleep(RECHECK).await;
             if let Err(denial) = authority.authenticate(&presented, now_ms()) {
                 authority.count_denial(denial.as_str());
-                return Err(anyhow::anyhow!("identity no longer valid: {denial}"));
+                return Err(anyhow::Error::new(Denied(format!("identity no longer valid: {denial}"))));
             }
         }
     };
     let result = tokio::select! {
-        result = client_to_broker(authority, &presented, client_read, inbound, broker_write, local, pending.clone()) => result,
+        result = client_to_broker(authority, &presented, client_read, inbound, &mut broker_write, local, pending.clone()) => result,
         result = broker_to_client(broker_read, client_write, replies, pending) => result,
         result = watchdog => result,
     };
+    if result.as_ref().is_err_and(|e| e.downcast_ref::<Denied>().is_some()) {
+        let _ = broker_write.write_all(&[0xe0, 0]).await;
+    }
     info!(thing, outcome = ?result.as_ref().err().map(|e| e.to_string()), "Client device disconnected");
     result
 }
 
 async fn client_to_broker<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(authority: &Authority, presented: &str, mut client: R,
-    mut buffer: Vec<u8>, mut broker: W, local: mpsc::Sender<Vec<u8>>, pending: Pending) -> anyhow::Result<()> {
+    mut buffer: Vec<u8>, broker: &mut W, local: mpsc::Sender<Vec<u8>>, pending: Pending) -> anyhow::Result<()> {
     loop {
         let Some((first, body, raw)) = read_frame(&mut client, &mut buffer).await? else { return Ok(()) };
         let now = now_ms();
@@ -361,7 +382,7 @@ async fn client_to_broker<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(authority
                 // ends the session (and is never forwarded).
                 if !crate::pubsub::valid_topic(&topic) || !authority.permits(presented, "mqtt:publish", &format!("mqtt:topic:{topic}"), now) {
                     authority.count_denial("publish");
-                    anyhow::bail!("publish to {topic:?} denied");
+                    return Err(anyhow::Error::new(Denied(format!("publish to {topic:?} denied"))));
                 }
                 broker.write_all(&raw).await?;
             }
@@ -571,6 +592,7 @@ mod tests {
         built.settings.mqtt_listen = format!("127.0.0.1:{mqtt}");
         built.settings.https_listen = format!("127.0.0.1:{https}");
         built.settings.broker_username = Some("gateway".into());
+        built.settings.min_rotation_interval_seconds = 0;
         let authority = Arc::new(built);
         let gateway = start(authority.clone()).await.unwrap();
         Fixture { dir, authority, mqtt, https, broker, _gateway: gateway }
@@ -683,6 +705,7 @@ mod tests {
         let mut byte = [0u8; 1];
         let ended = tokio::time::timeout(Duration::from_secs(5), tls.read(&mut byte)).await.unwrap();
         assert!(matches!(ended, Ok(0) | Err(_)), "{ended:?}");
+        assert_eq!(read_packet(&mut broker, &mut upstream).await.unwrap().0, 0xe0, "DISCONNECT, so the broker drops the will");
         assert!(refused(connect_tls(&fx, fx.mqtt, Some(pair())).await).await, "revoked identity reconnects");
         let status = fx.authority.status(now_ms());
         assert!(status["denied"]["revoked"].as_u64().unwrap() >= 2, "{status}");
@@ -706,6 +729,8 @@ mod tests {
         tls.write_all(&mqtt::publish("sensors/sensor-1/temp", b"x", 0, None, false)).await.unwrap();
         let mut byte = [0u8; 1];
         assert!(matches!(tokio::time::timeout(Duration::from_secs(5), tls.read(&mut byte)).await.unwrap(), Ok(0) | Err(_)));
+        let (first, _, _) = read_packet(&mut broker, &mut upstream).await.expect("DISCONNECT");
+        assert_eq!(first, 0xe0, "a clean DISCONNECT (no will), never the publish");
         assert!(read_packet(&mut broker, &mut upstream).await.is_none(), "nothing forwarded");
         assert_eq!(fx.authority.status(now_ms())["denied"]["publish"], 1);
         std::fs::remove_dir_all(&fx.dir).unwrap();

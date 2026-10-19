@@ -51,6 +51,9 @@ pub struct Settings {
     pub server_certificate_validity_seconds: u64,
     #[serde(default = "default_grace")]
     pub rotation_grace_seconds: u64,
+    /// A certificate younger than this cannot rotate (bounds registry writes).
+    #[serde(default = "default_rotation_interval")]
+    pub min_rotation_interval_seconds: u64,
     #[serde(default = "default_ttl")]
     pub discovery_ttl_seconds: u64,
     /// Extra DNS names for the gateway's server certificate and discovery.
@@ -76,6 +79,9 @@ fn default_validity() -> u64 {
 }
 fn default_grace() -> u64 {
     300
+}
+fn default_rotation_interval() -> u64 {
+    60
 }
 fn default_ttl() -> u64 {
     3600
@@ -113,6 +119,7 @@ impl Settings {
                 "client_devices.{what} must be {MIN_VALIDITY_SECONDS}..={MAX_VALIDITY_SECONDS}");
         }
         anyhow::ensure!(self.rotation_grace_seconds <= 86_400, "client_devices.rotation_grace_seconds must be 0..=86400");
+        anyhow::ensure!(self.min_rotation_interval_seconds <= 86_400, "client_devices.min_rotation_interval_seconds must be 0..=86400");
         anyhow::ensure!((60..=86_400).contains(&self.discovery_ttl_seconds), "client_devices.discovery_ttl_seconds must be 60..=86400");
         anyhow::ensure!((1..=1024).contains(&self.max_connections), "client_devices.max_connections must be 1..=1024");
         anyhow::ensure!((1..=100_000).contains(&self.max_devices), "client_devices.max_devices must be 1..=100000");
@@ -204,6 +211,8 @@ struct Group {
 #[derive(Debug, Clone)]
 pub struct Policy {
     groups: Vec<Group>,
+    /// SHA-256 of the groups document, to notice policy changes.
+    digest: String,
 }
 
 fn parse_selection_rule(rule: &str) -> anyhow::Result<Vec<Selector>> {
@@ -250,7 +259,7 @@ impl Policy {
                 statements: statements.values().cloned().collect(),
             })
         }).collect::<anyhow::Result<_>>()?;
-        Ok(Self { groups })
+        Ok(Self { groups, digest: hex::encode(Sha256::digest(raw.as_bytes())) })
     }
 
     /// Whether the groups selecting `thing` grant `operation` on `resource`.
@@ -312,6 +321,11 @@ pub struct Thing {
     #[serde(default)]
     pub revoked_ms: Option<u64>,
     pub certificates: Vec<Certificate>,
+    /// The policy digest under which its broker session was last opened: a
+    /// persistent session (and the subscriptions in it) is only resumed under
+    /// the same policy.
+    #[serde(default)]
+    pub session_policy: Option<String>,
 }
 impl Thing {
     /// Active with at least one usable certificate.
@@ -594,7 +608,7 @@ impl Authority {
         let issued = self.issue(thing, csr_pem, validity, now_ms)?;
         let mut next = RegistryFile { format: 1, things: registry.file.things.clone() };
         next.things.insert(thing.to_owned(), Thing { state: State::Active, enrolled_ms: now_ms, validity_seconds: validity,
-            revoked_ms: None, certificates: vec![issued.record.clone()] });
+            revoked_ms: None, certificates: vec![issued.record.clone()], session_policy: None });
         self.save(&next)?;
         *registry = Registry::new(next);
         Ok(issued)
@@ -607,8 +621,10 @@ impl Authority {
         let thing = self.authenticate(presented, now_ms).map_err(|d| anyhow::anyhow!("not authenticated: {d}"))?;
         let mut registry = self.registry.lock().unwrap();
         let current = registry.file.things.get(&thing).ok_or_else(|| anyhow::anyhow!("not authenticated: unknown"))?;
-        anyhow::ensure!(current.certificates.iter().any(|c| c.sha256 == presented && c.retire_ms.is_none()),
-            "only the current certificate may rotate");
+        let presented_record = current.certificates.iter().find(|c| c.sha256 == presented && c.retire_ms.is_none())
+            .ok_or_else(|| anyhow::anyhow!("only the current certificate may rotate"))?;
+        anyhow::ensure!(now_ms >= presented_record.issued_ms + self.settings.min_rotation_interval_seconds * 1000,
+            "certificate rotated too recently (client_devices.min_rotation_interval_seconds)");
         // Rotation keeps the lifetime the thing was enrolled with (within the current bound).
         let validity = current.validity_seconds.min(self.settings.certificate_validity_seconds);
         let issued = self.issue(&thing, csr_pem, validity, now_ms)?;
@@ -624,6 +640,22 @@ impl Authority {
         self.save(&next)?;
         *registry = Registry::new(next);
         Ok(issued)
+    }
+
+    /// Whether the broker may resume `thing`'s persistent session: only if it
+    /// was opened under the current policy. Records the current policy as the
+    /// session's from now on (the caller then opens a clean session if not).
+    pub fn resume_session(&self, thing: &str) -> anyhow::Result<bool> {
+        let mut registry = self.registry.lock().unwrap();
+        let record = registry.file.things.get(thing).ok_or_else(|| anyhow::anyhow!("unknown thing"))?;
+        if record.session_policy.as_deref() == Some(self.policy.digest.as_str()) {
+            return Ok(true);
+        }
+        let mut next = RegistryFile { format: 1, things: registry.file.things.clone() };
+        next.things.get_mut(thing).unwrap().session_policy = Some(self.policy.digest.clone());
+        self.save(&next)?;
+        *registry = Registry::new(next);
+        Ok(false)
     }
 
     pub fn revoke(&self, thing: &str, now_ms: u64) -> anyhow::Result<()> {
@@ -823,7 +855,7 @@ pub mod tests {
     pub fn settings(dir: &Path, groups: &str) -> Settings {
         let path = dir.join("groups.json");
         std::fs::write(&path, groups).unwrap();
-        toml::from_str(&format!("device_groups_file = {:?}\nbroker = \"127.0.0.1:1883\"\nrotation_grace_seconds = 10\n", path)).unwrap()
+        toml::from_str(&format!("device_groups_file = {:?}\nbroker = \"127.0.0.1:1883\"\nrotation_grace_seconds = 10\nmin_rotation_interval_seconds = 1\n", path)).unwrap()
     }
 
     pub fn authority(dir: &Path, groups: &str, now_ms: u64) -> Authority {
@@ -858,7 +890,7 @@ pub mod tests {
                 let mut registry = RegistryFile { format: 1, things: BTreeMap::new() };
                 for (name, identity) in case["config"]["identities"].as_object().unwrap() {
                     let state = if identity["state"] == "active" { State::Active } else { State::Revoked };
-                    registry.things.insert(name.clone(), Thing { state, enrolled_ms: 0, validity_seconds: 60, revoked_ms: None, certificates: vec![Certificate {
+                    registry.things.insert(name.clone(), Thing { state, enrolled_ms: 0, validity_seconds: 60, revoked_ms: None, session_policy: None, certificates: vec![Certificate {
                         sha256: name.clone(), serial: "1".into(), issued_ms: 0, not_after_ms: identity["expires"].as_u64().unwrap(), retire_ms: None }] });
                 }
                 *guard = Registry::new(registry);
@@ -912,6 +944,7 @@ pub mod tests {
             |s: &mut Settings| s.mqtt_listen = s.https_listen.clone(),
             |s: &mut Settings| s.certificate_validity_seconds = 10,
             |s: &mut Settings| s.rotation_grace_seconds = 90_000,
+            |s: &mut Settings| s.min_rotation_interval_seconds = 90_000,
             |s: &mut Settings| s.hostnames = vec!["bad host".into()],
             |s: &mut Settings| s.broker_password_file = Some("/x".into()),
             |s: &mut Settings| s.device_groups_file = "/nonexistent".into(),
@@ -957,6 +990,7 @@ pub mod tests {
         assert_eq!(authority.authenticate(&first, now + 5000), Ok("sensor-1".into()));
         assert_eq!(authority.authenticate(&first, now + 11_000), Err(Denial::Superseded));
         assert!(authority.rotate(&first, &request, now + 2000).is_err(), "a superseded certificate cannot rotate again");
+        assert!(authority.rotate(&second, &request, now + 1500).is_err(), "rotated again within the minimum interval");
         // Rotating again drops the earlier superseded certificate immediately.
         let third = authority.rotate(&second, &request, now + 3000).unwrap().record.sha256;
         assert_eq!(authority.authenticate(&first, now + 3001), Err(Denial::Unknown));
@@ -976,6 +1010,16 @@ pub mod tests {
         reopened.remove("sensor-1").unwrap();
         assert_eq!(reopened.authenticate(&third, now), Err(Denial::Unknown));
         reopened.enroll("sensor-1", &request, None, now).unwrap();
+        // Persistent broker sessions resume only under the policy they were opened with.
+        assert!(!reopened.resume_session("sensor-1").unwrap(), "first session after enrollment");
+        assert!(reopened.resume_session("sensor-1").unwrap());
+        drop(reopened);
+        let changed = GROUPS.replace("commands/+", "commands/x");
+        let signer = Arc::new(Ed25519File(ed25519_dalek::SigningKey::from_bytes(&[7; 32])));
+        let gateway = Gateway { chain: "c".into(), registry: "0x13".into(), device_object_id: "0x1".into(), address: signer.address() };
+        let reopened = Authority::open(&dir.join("cd"), settings(&dir, &changed), gateway, signer, now).unwrap();
+        assert!(!reopened.resume_session("sensor-1").unwrap(), "the policy changed: clean session");
+        assert!(reopened.resume_session("sensor-1").unwrap());
         let mut reserving = reopened;
         reserving.reserve_client_id("sensor-bridge");
         assert!(reserving.enroll("sensor-bridge", &request, None, now).is_err(), "a reserved broker client ID");
