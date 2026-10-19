@@ -50,9 +50,9 @@
     "botocore": "1.43.114"
   },
   "source_sha256": {
-    "scripts/cloudwatch_metrics.py": "867269f47976871c7c4efaf25e3ad9d6840a6ddeca410b833b47af2706dfff12",
+    "scripts/cloudwatch_metrics.py": "8c1f25c93d0db3ef0f34f54918e2564234efc9e0be02bc628134861a17d77815",
     "scripts/cloudwatch_telemetry.py": "d0f309e9b5b65acf4e2f4c1524f823f481a44882a788a9c8ce99d83947aa5310",
-    "scripts/test_cloudwatch_metrics.py": "b923b9f676d66430a9726b972c8ce24a5328280ff42f84f6ea92f9f6d1370219",
+    "scripts/test_cloudwatch_metrics.py": "54c69ccb392874046c60548ad61e2b2967cae29b9a72efa3c37c2d24899a7e50",
     "interfaces/compat/cloudwatch-metrics-cases.json": "d36aaffd5cee5903f9102bd80f7482a27fe2ceb33b0d741fd0ad2acd99cb5a0b",
     "interfaces/telemetry-cases.json": "ec976563bc2221df79a0dff24a229aa81a9c91b5cae0c464f50adf5185b6d2a1"
   },
@@ -75,5 +75,10 @@
     "finding": "PR #149 independent review: full batches bypassed publish interval after retained failures and remaining batches continued during outage.",
     "change": "Per-namespace retry cooldown measured after failed I/O: configured interval with one-second minimum; stop that namespace after first retained failure, preserve other namespaces, discard cooldown entries for absent namespaces. Cooldowns reset on process restart; credentials still fetched per batch and flush remains serial.",
     "validation": "make test-cloudwatch-metrics SUIFLEET_DEV_IMAGE=suifleet-dev:sf035: eight tests passed in 16.202s on final source in network-none root container; all 90 pinned steps plus 9 full-queue outage cases (intervals 0/10/900 and connection/throttle/server failures), ingress/cooldown/recovery and other-namespace progress. python3 scripts/greengrass_compat.py: 490 checks passed; python3 scripts/greengrass_roadmap.py: 76 passed; unittest compatibility: 39 passed; unittest roadmap: 11 passed; git diff --check passed."
+  },
+  "cooldown_trigger_repair": {
+    "finding": "PR #149 Finding A: a full cooled-down namespace triggered early partial flushes in healthy namespaces.",
+    "change": "Only namespaces eligible for retry can trigger a full-batch flush. Idle cooldown ticks preserve last-publish time; eligible full healthy queues still trigger normally.",
+    "validation": "make test-cloudwatch-metrics SUIFLEET_DEV_IMAGE=suifleet-dev:sf035: nine network-none tests passed in 17.896s, including 90 pinned fixture steps and repeated subsecond cooldown ticks with partial healthy ingress at intervals 10/900, followed by interval-boundary delivery. python3 scripts/greengrass_compat.py: 490 checks passed; python3 scripts/greengrass_roadmap.py: 76 passed; python3 -m unittest discover -s scripts/tests -p test_greengrass_*.py: 50 tests passed; git diff --check passed."
   }
 }

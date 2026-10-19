@@ -252,7 +252,9 @@ class Exporter:
         active = {namespace for namespace, _ in namespaces}
         self.retry_after = {namespace: deadline for namespace, deadline in self.retry_after.items() if namespace in active}
         now = self.clock()
-        if now - self.last < self.interval and not any(count >= 20 for _, count in namespaces):
+        if now - self.last < self.interval and not any(
+                count >= 20 and now >= self.retry_after.get(namespace, 0)
+                for namespace, count in namespaces):
             return self.state(calls=[])
         self.last = now
         calls = []

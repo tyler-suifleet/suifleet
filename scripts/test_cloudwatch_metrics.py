@@ -328,6 +328,34 @@ s=socket.socket(socket.AF_UNIX);s.connect(sys.argv[1]);s.sendall(json.dumps({"re
                     adapter.close()
         self.assertTrue(self.results.empty())
 
+    def test_cooldown_full_queue_preserves_partial_namespace_interval(self):
+        for interval in (10, 900):
+            with self.subTest(interval=interval), tempfile.TemporaryDirectory() as directory:
+                now = [0]
+                adapter = Exporter(Path(directory)/'queue', self.transport(), 'device',
+                                   interval=interval, clock=lambda: now[0])
+                def put(namespace):
+                    adapter.put(dict(request=dict(namespace=namespace, metricData=dict(metricName='x', value=1))))
+                for _ in range(25):
+                    put('Denied')
+                self.results.put('connection-error')
+                self.assertEqual(len(adapter.tick()['calls']), 1)
+                for second in range(1, 10):
+                    put('Healthy')
+                    for subtick in range(5):
+                        now[0] = second + subtick / 5
+                        self.assertEqual(adapter.tick()['calls'], [])
+                        self.assertEqual(adapter.last, 0)
+                self.assertEqual(adapter.state()['buffered'], 34)
+                now[0] = interval
+                self.results.put('connection-error')
+                self.results.put('ok')
+                self.assertEqual([(c['namespace'], c['count'], c['result']) for c in adapter.tick()['calls']],
+                                 [('Denied', 20, 'connection-error'), ('Healthy', 9, 'ok')])
+                self.assertEqual(adapter.state()['buffered'], 25)
+                adapter.close()
+        self.assertTrue(self.results.empty())
+
     def test_wire_values_and_restart(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)/'queue'

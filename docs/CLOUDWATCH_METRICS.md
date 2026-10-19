@@ -135,7 +135,9 @@ Throttling, 5xx, transport and credential/permission failures retain batches for
 retry after the configured interval (at least one second when interval is zero),
 measured from completion of the failed request. The first retained failure stops
 that namespace for the tick; queued full batches and new ingress cannot bypass its
-cooldown. Other namespaces can still flush. Recognized HTTP-400 validation errors
+cooldown. A full namespace in cooldown does not trigger a flush of other namespaces;
+partial batches keep their publish interval. Other namespaces can still trigger a
+flush when they reach 20 records. Recognized HTTP-400 validation errors
 reject the batch and increment `rejected`; unknown errors retain it, including
 expired credentials. Retry cooldowns and the publish interval restart after restart. At most 100 calls per second
 are initiated (10 ms minimum spacing). HTTPS and credential exchanges have
