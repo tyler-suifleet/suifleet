@@ -98,7 +98,7 @@ Implemented for local shadows and an HTTP(S) sync adapter: see [SHADOWS.md](SHAD
 - **Limits.** Depth may not exceed 8 in either section. The section object is level 1, and every nested object or array adds a level, including objects inside arrays and arrays inside arrays; this array rule is the proposed SuiFleet convention. A rejected request leaves the document and version unchanged. `clientToken` may not exceed 64 bytes, and the serialized state may not exceed 8 KiB (`too-large`). Shadow names are 1–64 characters of `[A-Za-z0-9:_-]`, and `""` is the classic shadow.
 - **Proposed differences from AWS.**
   - Deleting a shadow increments the version, and a recreated shadow continues the sequence. There is no 48-hour reset.
-  - Cloud synchronization is a selected adapter with an explicit conflict policy (SF-033: a device-signed HTTP(S) adapter; AWS IoT Device Shadow sync is SF-061).
+  - Cloud synchronization is a selected adapter with an explicit conflict policy: a device-signed HTTP(S) adapter (SF-033) or AWS IoT Device Shadow over the AWS IoT Core connection (SF-061, [AWS_IOT.md](AWS_IOT.md)).
 
 ### Streams (SF-034)
 
@@ -130,6 +130,7 @@ This runs `python3 scripts/greengrass_compat.py`, the checker's negative tests a
 | `aws-recipe-cases.json` | 49 recipes | Daemon and frontend validators (passing) | Pending SF-037 |
 | `pubsub-cases.json` | 53 filter/topic/match/ACL checks | Daemon pub/sub module (passing) | Passed: SF-032 daemon, IPC UIDs and Mosquitto ([receipt](validation/sf032-messaging.json)) |
 | `shadow-cases.json` | 55 steps across 10 sequences | Daemon shadow store, each step also after a reopen (passing) | Passed: SF-033 daemon, IPC UIDs, restarts and a verifying sync service ([receipt](validation/sf033-shadows.json)) |
+| `aws-iot-cases.json` | 94 connection/topic/mapping/patch/answer/denial checks | Daemon connection, bridge and shadow modules (passing) | Passed: SF-061 daemon against Mosquitto with mutual TLS and an AWS-shaped endpoint ([receipt](validation/sf061-aws-iot.json)) |
 | `stream-cases.json` | 46 steps across 5 sequences | Daemon stream store (passing) | Passed: SF-034 daemon, IPC UIDs, crashes and export ([receipt](validation/sf034-streams.json)) |
 | `client-device-cases.json` | 16 authorization requests | none | Pending SF-032, SF-035 |
 | `managed-dependency-cases.json` | 47 managed-dependency classifications | none | Pending SF-037 |

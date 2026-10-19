@@ -94,11 +94,11 @@ Until SF-037 (open) adopts the dependency classification, recipe dependencies on
 | `aws.greengrass.SNS` | lambda; Linux | roadmap | Interim: SF-020 alerts | SF-064 |
 | `aws.greengrass.clientdevices.Auth` | plugin; Linux, Windows | native | SF-035 | SF-035 |
 | `aws.greengrass.clientdevices.IPDetector` | plugin; Linux, Windows | native | SF-035 discovery | SF-035 |
-| `aws.greengrass.clientdevices.mqtt.Bridge` | plugin; Linux, Windows | native | SF-032 bridge; IotCore target via `aws-iot-core-connection` | SF-032 |
+| `aws.greengrass.clientdevices.mqtt.Bridge` | plugin; Linux, Windows | native | SF-032 bridge; Pubsub/IotCore mappings via `aws-iot-core-connection` | SF-032 |
 | `aws.greengrass.clientdevices.mqtt.Moquette` | plugin; Linux, Windows | native | SF-032 broker | SF-032 |
 | `aws.greengrass.clientdevices.mqtt.EMQX` | generic; Linux, Windows | native | SF-032 broker | SF-032 |
 | `aws.greengrass.DiskSpooler` | plugin; Linux, Windows | native | SF-032 spool | SF-032 |
-| `aws.greengrass.ShadowManager` | plugin; Linux, Windows | native | SF-033 shadows; sync via `aws-iot-core-connection` | SF-033 |
+| `aws.greengrass.ShadowManager` | plugin; Linux, Windows | native | SF-033 shadows; AWS IoT Device Shadow sync via `aws-iot-core-connection` | SF-033 |
 | `aws.greengrass.SecretManager` | plugin; Linux, Windows | native | SF-022 secrets (not AWS Secrets Manager) | SF-022 |
 | `aws.greengrass.crypto.Pkcs11Provider` | plugin; Linux | native | SF-021 hardware signer | SF-021 |
 | `aws.greengrass.DockerApplicationManager` | generic; Linux, Windows | native | SF-036 OCI components | SF-036 |
@@ -135,7 +135,7 @@ AWS credentials are a separate trust domain. The `credential-provider` and `aws-
 | `stream-export-aws` | SF-058 | complete | StreamManager 2.3.1 export | Kinesis Data Streams, S3 | credential-provider; `kinesis:PutRecords`, `kinesis:ListShards`, `s3:PutObject` | SF-034, SF-057 |
 | `cloudwatch-metrics-export` | SF-059 | complete | Cloudwatch 4.0.0 | CloudWatch | credential-provider; `cloudwatch:PutMetricData` | SF-019, SF-032, SF-057 |
 | `cloudwatch-logs-export` | SF-060 | complete | LogManager 2.3.14 upload | CloudWatch Logs | credential-provider; `logs:CreateLogGroup`, `logs:CreateLogStream`, `logs:PutLogEvents` | SF-020, SF-057 |
-| `aws-iot-core-connection` | SF-061 | incomplete | Bridge IotCore target, shadow sync | AWS IoT Core | Separate AWS IoT thing certificate and policy | SF-021, SF-032, SF-033 |
+| `aws-iot-core-connection` | SF-061 | complete | Bridge 2.3.3 IotCore routes, ShadowManager 2.3.15 sync | AWS IoT Core, Device Shadow | Separate AWS IoT thing certificate and policy | SF-021, SF-032, SF-033 |
 | `device-defender-metrics` | SF-062 | incomplete | DeviceDefender 4.0.0 | Device Defender (device-side metrics), IoT Core | `aws-iot-core-connection` | SF-019, SF-061 |
 | `secure-tunneling` | SF-063 | incomplete | SecureTunneling 2.0.1 | IoT secure tunneling, IoT Core | `aws-iot-core-connection`; ephemeral per-tunnel token | SF-014, SF-025, SF-027, SF-061 |
 
@@ -145,7 +145,7 @@ The `stream-export-aws` adapter leaves out three destinations:
 - `IoTSiteWiseConfig`, which is SF-064 roadmap work;
 - `HTTPConfig`, because generic HTTP export is native SF-034 scope.
 
-An `incomplete` specification names its `specification_gap`. SF-061 must pin the Bridge and ShadowManager versions it matches and add a reference suite. SF-062 and SF-063 must add executable schema/topic and notification/destination suites.
+An `incomplete` specification names its `specification_gap`. SF-062 and SF-063 must add executable schema/topic and notification/destination suites. SF-061 pinned Bridge 2.3.3 and ShadowManager 2.3.15 and added `aws-iot-cases.json` ([AWS_IOT.md](AWS_IOT.md)).
 
 The `secure-tunneling` adapter is explicitly enabled and starts the local proxy only for allow-listed local services. SSH daemon, firewall and service configuration stay with platform scripts and administrators. The adapter neither manages nor replaces them, runs no arbitrary remote commands and never triggers a platform reboot.
 
@@ -215,6 +215,7 @@ The checker validates the catalog's structure and its cross-references to the ba
 | `credential-provider-cases.json` | 65 steps across 7 sequences | Pending SF-057 |
 | `cloudwatch-metrics-cases.json` | 90 steps across 8 sequences | Pending SF-059 |
 | `cloudwatch-logs-cases.json` | 69 steps across 8 sequences | Pending SF-060 |
+| `aws-iot-cases.json` | 94 checks | Passed: SF-061 ([receipt](validation/sf061-aws-iot.json)) |
 
 A `complete` adapter specification must pin an exact AWS version and name at least one executable reference suite; the checker enforces both. `stream-export-aws` uses the SF-028 `stream-cases.json` checkpoint suite.
 
