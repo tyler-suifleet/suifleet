@@ -186,8 +186,9 @@ class Spool:
                 self.db.execute('INSERT INTO binding VALUES (?,0,0,?)', (config.identity, ''))
             elif row[0] != config.identity:
                 raise ValueError('spool belongs to different stream/codec configuration')
-        usage = self.db.execute('SELECT coalesce(sum(length(media)+256),0),count(*) FROM fragments').fetchone()
-        if usage[0] > config.v['max_spool_bytes'] or usage[1] > config.v['max_fragments']:
+        usage = self.db.execute('SELECT coalesce(sum(length(media)+256),0),count(*),coalesce(max(length(media)),0) FROM fragments').fetchone()
+        if (usage[0] > config.v['max_spool_bytes'] or usage[1] > config.v['max_fragments']
+                or usage[2] > config.v['max_fragment_bytes']):
             raise ValueError('configured quota below retained media')
         os.chmod(root/'media.sqlite', 0o600)
 

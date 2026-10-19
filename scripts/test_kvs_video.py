@@ -446,6 +446,9 @@ class VideoTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             video.Spool(video.Config(dict(self.v, stream_name='other')))
         with self.assertRaises(ValueError):
+            video.Spool(video.Config(dict(self.v, max_fragment_bytes=1024)))
+        self.assertEqual(len(self.spool.pending()), 2)
+        with self.assertRaises(ValueError):
             video.ingest(io.BytesIO(b'\x00\x00\x00\x05abc'), self.spool, io.StringIO())
 
     def test_corrupt_media_retained(self):
