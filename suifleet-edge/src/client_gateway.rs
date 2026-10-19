@@ -90,26 +90,33 @@ fn names(settings: &crate::clientdevices::Settings, listeners: &[SocketAddr], ad
 /// Up, non-loopback (unless included) unicast interface addresses.
 pub fn local_addresses(loopback: bool, link_local: bool) -> Vec<IpAddr> {
     let mut found = Vec::new();
-    let mut list: *mut libc::ifaddrs = std::ptr::null_mut();
-    // SAFETY: getifaddrs allocates a list that is only read here and freed below.
-    if unsafe { libc::getifaddrs(&mut list) } != 0 {
+    let mut list = std::mem::MaybeUninit::<*mut libc::ifaddrs>::uninit();
+    // SAFETY: getifaddrs writes the list head on success; it is only read
+    // here and freed below.
+    if unsafe { libc::getifaddrs(list.as_mut_ptr()) } != 0 {
         return found;
     }
+    // SAFETY: initialized by the successful call above.
+    let list = unsafe { list.assume_init() };
     let mut cursor = list;
-    while !cursor.is_null() {
-        // SAFETY: cursor is a node of the list getifaddrs returned.
-        let entry = unsafe { &*cursor };
+    // SAFETY (each as_ref): non-null pointers in the list point to nodes and
+    // sockaddrs getifaddrs allocated, valid until freeifaddrs; null is None.
+    while let Some(entry) = unsafe { cursor.as_ref() } {
         cursor = entry.ifa_next;
-        if entry.ifa_addr.is_null() || entry.ifa_flags & libc::IFF_UP as u32 == 0 {
+        if entry.ifa_flags & libc::IFF_UP as u32 == 0 {
             continue;
         }
-        // SAFETY: ifa_addr is non-null and its family selects the sockaddr type.
-        let ip = unsafe {
-            match (*entry.ifa_addr).sa_family as i32 {
-                libc::AF_INET => IpAddr::from(u32::from_be((*(entry.ifa_addr as *const libc::sockaddr_in)).sin_addr.s_addr).to_be_bytes()),
-                libc::AF_INET6 => IpAddr::from((*(entry.ifa_addr as *const libc::sockaddr_in6)).sin6_addr.s6_addr),
-                _ => continue,
-            }
+        let Some(address) = (unsafe { entry.ifa_addr.as_ref() }) else { continue };
+        let ip = match address.sa_family as i32 {
+            libc::AF_INET => match unsafe { (entry.ifa_addr as *const libc::sockaddr_in).as_ref() } {
+                Some(v4) => IpAddr::from(u32::from_be(v4.sin_addr.s_addr).to_be_bytes()),
+                None => continue,
+            },
+            libc::AF_INET6 => match unsafe { (entry.ifa_addr as *const libc::sockaddr_in6).as_ref() } {
+                Some(v6) => IpAddr::from(v6.sin6_addr.s6_addr),
+                None => continue,
+            },
+            _ => continue,
         };
         let is_link_local = match ip {
             IpAddr::V4(v4) => v4.is_link_local(),
@@ -120,7 +127,7 @@ pub fn local_addresses(loopback: bool, link_local: bool) -> Vec<IpAddr> {
         }
         found.push(ip);
     }
-    // SAFETY: the list came from getifaddrs above.
+    // SAFETY: the list came from getifaddrs above and is no longer used.
     unsafe { libc::freeifaddrs(list) };
     found.sort();
     found.dedup();
