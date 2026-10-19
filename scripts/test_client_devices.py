@@ -21,9 +21,14 @@ Client keys and CSRs come from the openssl CLI (P-256 and Ed25519).
   denial         -> no/untrusted certificate, foreign client ID, MQTT 5,
                     unauthorized subscribe (SUBACK 0x80) and publish (session
                     ends, nothing delivered), no direct broker access
+  wills          -> an abrupt disconnect publishes the will; a session the
+                    gateway ends for revocation does not
   revocation     -> live session ended, reconnect and HTTPS refused
   rotation       -> new certificate over HTTPS; old one usable for the grace
-                    period only; its live session then ends
+                    period only; its live session then ends; too-early
+                    rotation refused
+  policy change  -> a persistent broker session resumes under the same policy,
+                    and restarts clean (no stale subscriptions) after a change
   restart        -> CA, registry, rotation and revocation persist
   offline expiry -> with the chain unavailable, the gateway keeps serving;
                     a certificate's live session ends at expiry and it cannot
@@ -147,7 +152,8 @@ def serve():
         '[client_devices]\ndevice_groups_file = "groups.json"\nbroker = "127.0.0.1:1883"\n'
         f'broker_username = "gateway"\nbroker_password_file = "{root / "gateway-password"}"\n'
         f'mqtt_listen = "0.0.0.0:{MQTT_PORT}"\nhttps_listen = "0.0.0.0:{HTTPS_PORT}"\nudp_discovery = "0.0.0.0:{UDP_PORT}"\n'
-        f'rotation_grace_seconds = {GRACE_SECONDS}\ncertificate_validity_seconds = 3600\nhostnames = ["gateway.test"]\n')
+        f'rotation_grace_seconds = {GRACE_SECONDS}\nmin_rotation_interval_seconds = {GRACE_SECONDS}\n'
+        'certificate_validity_seconds = 3600\nhostnames = ["gateway.test"]\n')
     daemon = {"process": None}
     log = (root / "daemon.log").open("a")
 
@@ -189,6 +195,9 @@ def serve():
                 elif self.path == "/restart":
                     stop_daemon()
                     start_daemon()
+                    result = {"ok": True}
+                elif self.path == "/groups":
+                    (root / "groups.json").write_text(json.dumps(body["groups"]))
                     result = {"ok": True}
                 elif self.path == "/chain-stop":
                     shim.terminate()
@@ -233,8 +242,12 @@ def mqtt_packet(first, body):
             return bytes([first]) + encoded + body
 
 
-def mqtt_connect(client_id, level=4):
-    return mqtt_packet(0x10, mqtt_string("MQTT") + bytes([level, 0x02]) + struct.pack(">H", 30) + mqtt_string(client_id))
+def mqtt_connect(client_id, level=4, clean=True, will=None):
+    flags = (0x02 if clean else 0) | (0x04 | 0x08 if will else 0)  # will at QoS 1
+    body = mqtt_string("MQTT") + bytes([level, flags]) + struct.pack(">H", 30) + mqtt_string(client_id)
+    if will:
+        body += mqtt_string(will[0]) + mqtt_string(will[1])
+    return mqtt_packet(0x10, body)
 
 
 def mqtt_publish(topic, payload, packet_id=None):
@@ -312,13 +325,14 @@ class Client:
             pass
 
 
-def mqtt_session(ip, ca, identity, client_id):
-    """A connected session (CONNACK 0) or the CONNACK code / None."""
+def mqtt_session(ip, ca, identity, client_id, clean=True, will=None):
+    """A connected session (CONNACK 0) or the CONNACK code / None. The
+    session's `present` is CONNACK's session-present flag."""
     try:
         client = Client(ip, identity, ca=ca)
     except (OSError, ssl.SSLError):
         return None
-    if not client.send(mqtt_connect(client_id)):
+    if not client.send(mqtt_connect(client_id, clean=clean, will=will)):
         return None
     try:
         reply = client.packet()
@@ -330,6 +344,7 @@ def mqtt_session(ip, ca, identity, client_id):
     if reply[2][1] != 0:
         client.close()
         return reply[2][1]
+    client.present = bool(reply[2][0] & 1)
     return client
 
 
@@ -391,8 +406,8 @@ class Harness:
         head, _, payload = response.partition(b"\r\n\r\n")
         return int(head.split(b" ")[1]) if head else None, json.loads(payload) if payload else None
 
-    def session(self, thing, identity=None):
-        return mqtt_session(self.ip, self.ca, identity or (self.certs / f"{thing}.crt", self.certs / f"{thing}.key"), thing)
+    def session(self, thing, identity=None, **options):
+        return mqtt_session(self.ip, self.ca, identity or (self.certs / f"{thing}.crt", self.certs / f"{thing}.key"), thing, **options)
 
     def mosquitto_sub(self, thing, topic, count, timeout):
         """mosquitto_sub (libmosquitto/OpenSSL) in its own container on the network."""
@@ -624,17 +639,33 @@ def host(args):
               "gets CONNACK 5 and MQTT 5 CONNACK 1; an unauthorized filter gets SUBACK 0x80 beside a granted one; an "
               "unauthorized publish ends the session and reaches nobody; the broker is not reachable from the LAN")
 
-        # Revocation of a live session.
-        live = h.session("sensor-2")
+        # Wills: an abrupt disconnect publishes the will (the control) ...
+        process, lines, subscribed = h.mosquitto_sub("ctl-1", "sensors/#", 1, 20)
+        assert subscribed.wait(30), lines
+        abrupt = h.session("sensor-2", will=("sensors/sensor-2/gone", b'{"will":"abrupt"}'))
+        assert isinstance(abrupt, Client), abrupt
+        abrupt.sock.shutdown(socket.SHUT_RDWR)
+        abrupt.close()
+        process.wait(timeout=30)
+        assert messages(lines) == ['sensors/sensor-2/gone {"will":"abrupt"}'], lines
+        check("wills: an authorized will was published by the broker when a LAN client vanished without DISCONNECT")
+
+        # ... and revocation of a live session does not.
+        process, lines, subscribed = h.mosquitto_sub("ctl-1", "sensors/#", 1, 8)
+        assert subscribed.wait(30), lines
+        live = h.session("sensor-2", will=("sensors/sensor-2/gone", b'{"will":"revoked"}'))
         assert isinstance(live, Client), live
         revoked_at = time.monotonic()
         assert h.ipc(0, "client_devices", payload={"action": "revoke", "thing": "sensor-2"})["ok"]
         ended = live.closed_within(10)
         assert ended is not None, "the revoked session stayed open"
         ended = time.monotonic() - revoked_at
+        process.wait(timeout=30)
+        assert messages(lines) == [], f"the revoked client's will was published: {lines}"
         assert h.session("sensor-2") is None, "a revoked identity reconnected"
         assert h.https(victim["identity"], "GET", "/discover") == (403, {"error": "revoked"})
-        check(f"revocation: the live session ended {ended:.1f} s after the revoke; reconnect and HTTPS refused (403 revoked)")
+        check(f"revocation: the live session ended {ended:.1f} s after the revoke without its will being published; "
+              "reconnect and HTTPS refused (403 revoked)")
 
         # Rotation over HTTPS with a grace period for the old certificate.
         # One client ID has one broker session at a time (MQTT takeover), so
@@ -646,6 +677,8 @@ def host(args):
         rotated_at = time.monotonic()
         (h.certs / "sensor-1-new.crt").write_text(issued["certificate"])
         new = (h.certs / "sensor-1-new.crt", new_key)
+        assert h.https(new, "POST", "/rotate", h.keypair("sensor-1-soon")[1]) == (400, {"error": "rotation refused"}), \
+            "rotated again within min_rotation_interval_seconds"
         fresh = mqtt_session(ip, h.ca, new, "sensor-1")
         assert isinstance(fresh, Client), "the new certificate"
         fresh.close()
@@ -659,18 +692,47 @@ def host(args):
         code, envelope = h.https(new, "GET", "/discover")
         assert code == 200 and verify_discovery(envelope, address, ca_sha256)["certificate"]["sha256"] == issued["sha256"]
         check(f"rotation: a new certificate issued over HTTPS works at once; the old one connected during the "
-              f"{GRACE_SECONDS} s grace, its live session ended after {retired:.1f} s, then it was refused (superseded)")
+              f"{GRACE_SECONDS} s grace, its live session ended after {retired:.1f} s, then it was refused (superseded); "
+              "rotating again within the minimum interval was refused")
 
-        # Daemon restart: CA, registry, rotation and revocation persist.
+        # Persistent sessions resume under the same policy ...
+        persistent = mqtt_session(ip, h.ca, new, "sensor-1", clean=False)
+        assert isinstance(persistent, Client)
+        assert persistent.send(mqtt_subscribe(11, [("device1/sensors/#", 1)])) and persistent.packet()[2] == b"\x00\x0b\x01"
+        persistent.send(b"\xe0\x00")
+        persistent.close()
+        resumed = mqtt_session(ip, h.ca, new, "sensor-1", clean=False)
+        assert isinstance(resumed, Client) and resumed.present, "the persistent session did not resume"
+        resumed.send(b"\xe0\x00")
+        resumed.close()
+
+        # Daemon restart with a changed policy (sensors lose device1/sensors/#):
+        # CA, registry, rotation and revocation persist; the old session does not.
+        changed = json.loads(json.dumps(GROUPS))
+        changed["policies"]["sensor"]["subscribe"]["resources"] = ["mqtt:topicfilter:device1/none/#"]
+        assert h.control("/groups", groups=changed)["ok"]
         h.control("/restart")
         wait(lambda: h.status() is not None, "daemon did not return")
         assert h.status()["ca_sha256"] == ca_sha256, "the CA changed across a restart"
+        # The first sensor-1 connection since the change asks to resume.
+        stale = mqtt_session(ip, h.ca, new, "sensor-1", clean=False)
+        assert isinstance(stale, Client) and not stale.present, "a session from the old policy resumed"
+        wait(lambda: (h.ipc(0, "messaging")["data"] or {}).get("bridge", {}).get("connected"), "the bridge did not reconnect")
+        assert h.ipc(PUB_UID, "publish", "pub", "sensors/b/temp", {"t": 9})["ok"]
+        try:
+            leaked = stale.packet(timeout=5)
+        except socket.timeout:
+            leaked = None
+        assert leaked is None or leaked[0] != 3, f"a stale subscription delivered {leaked}"
+        assert stale.send(mqtt_subscribe(12, [("device1/sensors/#", 1)])) and stale.packet()[2] == b"\x00\x0c\x80"
+        stale.close()
         after = mqtt_session(ip, h.ca, new, "sensor-1")
         assert isinstance(after, Client), "the rotated certificate after restart"
         after.close()
         assert mqtt_session(ip, h.ca, old, "sensor-1") is None and h.session("sensor-2") is None
         check("restart: the CA and registry persisted; the rotated certificate connects, the superseded and the revoked "
-              "ones stay refused")
+              "ones stay refused. A persistent session resumed under the same policy; after the policy changed it "
+              "restarted clean, so a subscription the new policy refuses delivered nothing")
 
         # Chain unavailable: the gateway keeps serving; expiry is enforced offline.
         h.control("/chain-stop")
