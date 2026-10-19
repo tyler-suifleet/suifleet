@@ -80,6 +80,7 @@ no keys, user accounts or enrollment settings are embedded by package builds.
 | `stream_list` | `component` | Stream names the caller's `streams` globs match. |
 | `subscribe`, `unsubscribe`, `ack` | `component`, filter `topic` | Durable pub/sub (SF-032); need `[pubsub]` and a `SubscribeToTopic` policy. |
 | `messaging` | no component needed | Administrator only. Durable subscription and bridge counters. |
+| `client_devices` | `payload` = `{action, ...}` | Administrator only; components cannot be granted it. LAN client-device enrollment from a CSR, revocation, removal and status (SF-035, [CLIENT_DEVICES.md](CLIENT_DEVICES.md)); needs `[client_devices]`. |
 
 Stops are runtime controls: explicit start, replacement deployment or daemon restart
 may start the committed version again. Stop does not uninstall or alter chain desired
