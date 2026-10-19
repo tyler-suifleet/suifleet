@@ -506,13 +506,15 @@ impl Store {
     pub fn sync_apply(&mut self, name: &str, observed: Option<&Map<String, Value>>, agreed: Option<Map<String, Value>>,
                       cloud_version: u64, now: u64) -> anyhow::Result<bool> {
         let current = self.records.get(name).and_then(|r| r.document.clone());
-        let mut target = if same_document(current.as_ref(), observed) {
+        let target = if same_document(current.as_ref(), observed) {
             agreed.clone()
         } else {
             merge3(observed, current.as_ref(), agreed.as_ref(), Owners { desired: Side::Device, reported: Side::Device }, &mut Vec::new())
         };
-        if target.as_ref().is_some_and(|d| check_document(d).is_err()) {
-            target = current.clone();
+        // Keep the old base: recording the agreed one without its changes
+        // here would let the next cycle overwrite them in the cloud.
+        if let Some(Err(error)) = target.as_ref().map(check_document) {
+            anyhow::bail!("local edits made during synchronization cannot be merged with the cloud document: {error}");
         }
         let sync = SyncState { base: agreed, cloud_version };
         if same_document(current.as_ref(), target.as_ref()) {
@@ -534,6 +536,14 @@ impl Store {
     pub fn set_sync_status(&mut self, name: &str, status: Value) {
         self.sync_status.insert(name.into(), status);
     }
+}
+
+/// A received document as an update would store it: empty objects removed.
+/// If that differs from the cloud's copy, the next merge pushes it back.
+fn normalize(document: &Map<String, Value>) -> Map<String, Value> {
+    let mut out = Map::new();
+    merge(&mut out, document);
+    out
 }
 
 fn delta_of(document: &Map<String, Value>) -> Map<String, Value> {
@@ -869,7 +879,7 @@ impl Syncer {
             None | Some(Value::Null) => None,
             Some(Value::Object(document)) => {
                 check_document(document).map_err(|e| anyhow::anyhow!("cloud shadow refused: {e}"))?;
-                Some(document.clone())
+                Some(normalize(document))
             }
             Some(_) => anyhow::bail!("cloud shadow refused: not an object"),
         };
@@ -1219,6 +1229,23 @@ mod tests {
         drop(store);
         let store = Store::open(&path, 4, "thing", None).unwrap();
         assert_eq!(store.sync_snapshot("s").1.cloud_version, 7);
+        let _ = std::fs::remove_dir_all(&path);
+    }
+
+    #[test]
+    fn sync_apply_refuses_an_unmergeable_edit_and_keeps_the_old_base() {
+        let path = dir("apply-limit");
+        let mut store = Store::open(&path, 4, "thing", None).unwrap();
+        store.update("s", &json!({"state": {"reported": {"r": 1}}}), 1).unwrap();
+        let (observed, before) = store.sync_snapshot("s");
+        store.update("s", &json!({"state": {"reported": {"big": "x".repeat(5000)}}}), 1).unwrap();
+        let agreed = doc(json!({"desired": {"other": "y".repeat(5000)}, "reported": {"r": 1}}));
+        assert!(store.sync_apply("s", observed.as_ref(), agreed, 9, 1).is_err());
+        assert_eq!(store.sync_snapshot("s").1, before);
+        assert_eq!(store.get("s").unwrap()["version"], 2);
+        // Received documents are stored as updates would store them.
+        assert_eq!(Value::Object(normalize(&doc(json!({"desired": {"a": {}, "b": {"c": {}}, "d": 1}, "reported": {}})).unwrap())),
+            json!({"desired": {"d": 1}}));
         let _ = std::fs::remove_dir_all(&path);
     }
 
