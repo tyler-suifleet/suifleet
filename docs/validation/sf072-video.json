@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "ticket": "SF-072",
+  "model": "gpt-6.1-sol",
+  "runtime_execution": "passed",
+  "date": "2026-10-19",
+  "command": "make test-video",
+  "result": "17 subprocess/media/emulator regression tests passed in 20.237s; ten H.264 frames independently decoded with exact pixel hashes",
+  "environment": "pinned Ubuntu 22.04 test image; Python 3.10.12; FFmpeg 4.4.2-0ubuntu0.22.04.1; network none, non-root UID, read-only checkout, 128 MiB tmpfs, capabilities dropped",
+  "tested": [
+    "real Annex-B source -> binary ingestion -> durable SQLite -> multi-fragment duplex signed PutMedia -> independent FFmpeg decode",
+    "independent SigV4 request verification, endpoint discovery and absolute fragment/frame timestamps",
+    "PERSISTED-only contiguous-prefix retirement, duplicate ACKs, out-of-order ACK gaps, partial persistence and replay of identical unacknowledged fragments",
+    "transport interruption, lost response, expired credentials, active-session expiration deadline and rotated sessions",
+    "HTTP denial, permanent and transient fragment rejection, unknown ACK, oversized ACK",
+    "byte/count quota, blocking capture backpressure and vacuum reclamation",
+    "single-uploader lock, total session deadline and killed uploader recovery",
+    "source truncation, exact source retry, codec/version/time/overlap rejection and corrupt stored media"
+  ],
+  "limits": [
+    "Local independent protocol emulator is not the AWS service. Live AWS region/retention/signing/endpoint interoperability is unrun and unauthorized, tracked in SF-064/#109 and SF-072/#126.",
+    "Baseline H.264 single-video-track native media subset; no proprietary EdgeConnectorForKVS control-plane or Greengrass recipe compatibility claim.",
+    "Physical Pi/camera/reboot/power-loss checks deferred to SF-031/#32. No image or hardware result claimed.",
+    "At-least-once remote delivery; unacknowledged/incomplete source GOPs need source-owned persistence/retry. No exactly-once or lossless camera-capture claim.",
+    "Current-head ordinary CI and automatic Sui testnet status remain required at PR handoff; local results do not stand in for those checks."
+  ]
+}

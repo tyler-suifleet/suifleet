@@ -1,6 +1,6 @@
 # AWS-managed component and cloud-service adapter coverage
 
-The [SF-064 remaining functional roadmap](GREENGRASS_REMAINING_ROADMAP.md) defines versioned executable subcontracts and maps every selected remaining scope to published implementation tickets SF-069–SF-079. These remain pending implementations, not runtime or live acceptance.
+The [SF-064 remaining functional roadmap](GREENGRASS_REMAINING_ROADMAP.md) defines versioned executable subcontracts and maps every selected remaining scope to published implementation tickets SF-069–SF-079. Per-scope runtime receipts now include the [SF-072 media adapter](KINESIS_VIDEO.md); remaining scopes without receipts stay pending. No local receipt establishes live AWS acceptance.
 
 SF-038 maps every AWS-provided Greengrass component to one of three things: a SuiFleet native equivalent, a scoped adapter with its own implementation ticket, or a roadmap gap tracked by [SF-064](https://github.com/tyler-suifleet/suifleet/issues/109). For each adapter it records the platforms, AWS service and authentication dependencies, licensing constraints and executable acceptance. The catalog is a specification with per-adapter runtime receipts. SF-057 implements the scoped Linux credential adapter; other adapters remain pending. It records no permanent exclusion and makes no general parity claim. It extends the [SF-028 compatibility specification](GREENGRASS_COMPATIBILITY.md), whose levels and statuses apply here.
 

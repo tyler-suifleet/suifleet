@@ -127,7 +127,7 @@
    "disposition": "roadmap", "tickets": ["SF-064", "SF-071"], "native_equivalent": "Operator processing component", "notes": "Component identifier not confirmed on a fetched page. AWS states the data processing pack is closed to new customers."},
   {"name": "aws.iot.EdgeConnectorForKVS", "display": "Edge connector for Kinesis Video Streams", "family": "industrial", "aws": {"type": "generic", "os": ["linux"], "open_source": false},
    "reference_version": "1.0.5", "disposition": "roadmap", "tickets": ["SF-064", "SF-072"], "native_equivalent": "Operator video component using the credential-provider adapter",
-   "notes": "Closed-source and Region-limited; an operator component can use the Apache-2.0 KVS producer SDK with credential-provider."},
+   "notes": "SF-072 implements the native H.264/Matroska durable media adapter with SF-057 credentials; local subprocess/emulator/FFmpeg evidence is docs/validation/sf072-video.json. Full connector SiteWise/TwinMaker/Secrets Manager control-plane compatibility stays roadmap; live AWS acceptance is unauthorized/unrun. See docs/KINESIS_VIDEO.md."},
   {"name": "aws.greengrass.StreamManager", "display": "Stream manager", "family": "cloud-export", "aws": {"type": "generic", "os": ["linux", "windows"], "open_source": false},
    "reference_version": "2.3.1", "disposition": "native", "tickets": ["SF-034"], "adapter": "stream-export-aws",
    "native_equivalent": "SF-034 durable streams; AWS destinations through the stream-export-aws adapter"},
