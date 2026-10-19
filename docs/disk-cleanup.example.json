@@ -7,7 +7,8 @@
   "retain_days": 3,
   "max_bytes_per_run": 53687091200,
   "uninspectable_uids_accepted": [],
-  "uninspectable_helpers_accepted": [{"comm": "(sd-pam)", "parent_exe": "/usr/lib/systemd/systemd"}],
+  "uninspectable_helpers_accepted": [{"comm": "(sd-pam)", "parent_exe": "/usr/lib/systemd/systemd",
+                                     "cgroup": "/user.slice/user-*.slice/user@*.service/init.scope"}],
   "budget": {
     "warn_used_fraction": 0.85,
     "critical_used_fraction": 0.95,
