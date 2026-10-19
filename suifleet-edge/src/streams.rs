@@ -1009,7 +1009,7 @@ fn sanitized(error: reqwest::Error, url: &str) -> String {
     }
 }
 
-fn same_address(a: &str, b: &str) -> bool {
+pub fn same_address(a: &str, b: &str) -> bool {
     let canonical = |x: &str| {
         let hex = x.strip_prefix("0x").unwrap_or(x).to_ascii_lowercase();
         (hex.len() <= 64 && !hex.is_empty() && hex.bytes().all(|c| c.is_ascii_hexdigit())).then(|| format!("{hex:0>64}"))

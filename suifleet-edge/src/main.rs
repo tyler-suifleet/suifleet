@@ -1,5 +1,6 @@
 mod ipc;
 mod catalog;
+mod clientdevices;
 mod control;
 mod apply;
 mod bridge;
