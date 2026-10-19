@@ -384,3 +384,8 @@ endif
 .PHONY: test-aws-credentials
 test-aws-credentials:
 	bash scripts/test_aws_credentials.sh
+
+# SF-059: actual metrics transport, persistence and peer authorization, offline.
+.PHONY: test-cloudwatch-metrics
+test-cloudwatch-metrics:
+	bash scripts/test_cloudwatch_metrics.sh
