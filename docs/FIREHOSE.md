@@ -20,7 +20,8 @@ python3 -m pip install --require-hashes -r sdk/credentials/requirements.txt
 
 ## Operator configuration
 
-Install code and dependencies outside writable component workspaces. Provision a
+Install code and dependencies outside writable component workspaces. Install
+`sdk/python/suifleet_ipc.py` beside the exporter in the installed code directory. Provision a
 separate platform-managed service UID as described in [AWS_CREDENTIALS.md](AWS_CREDENTIALS.md).
 Grant that exact component/UID `stream_describe` and `stream_read` for the source
 stream in the native IPC ACL, and a credential grant on a dedicated SF-057
