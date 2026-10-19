@@ -32,18 +32,12 @@ def tag(name, version):
     return f'{name}-{version}'.replace('.', '_')
 
 
-def translated_dependencies(dependencies):
-    """componentDependencies the real SF-037 translator emits for an AWS recipe."""
-    recipe = dict(RecipeFormatVersion='2020-01-25', ComponentName='aws-app', ComponentVersion='1.0.0',
-                  ComponentDependencies=dependencies,
-                  Manifests=[dict(Platform=dict(os='linux'), Lifecycle=dict(install='true'), Artifacts=[dict(Uri='s3://b/app.tar')])])
-    with tempfile.NamedTemporaryFile('w', suffix='.json') as file:
-        json.dump(recipe, file); file.flush()
-        done = subprocess.run(['node', 'scripts/greengrass_translate.cjs', file.name, '--bind', 's3://b/app.tar=blob:' + 'ab' * 32],
-                              capture_output=True, text=True)
-    result = json.loads(done.stdout)
-    assert done.returncode == 0 and 'ComponentDependencies' in result['informational'], (done.stdout, done.stderr)
-    return result['manifests'][0]['recipe']['componentDependencies']
+def translated_dependencies(case_id):
+    """componentDependencies of an SF-037 golden translation. node scripts/test_greengrass_compat.cjs
+    pins these to the real translator's output; this runner may have no Node."""
+    case = next(c for c in json.loads(Path('interfaces/compat/aws-recipe-cases.json').read_text()) if c['id'] == case_id)
+    assert 'ComponentDependencies' in case['expected']['informational'], case['expected']
+    return case['recipe']['ComponentDependencies'], case['expected']['manifests'][0]['recipe']['componentDependencies']
 
 
 def uleb(n):
@@ -215,8 +209,9 @@ def run():
             sim.publish('broken-dep', '1.0.0', fail='install')
             sim.publish('uses-broken', '1.0.0', {'broken-dep': {'versionRequirement': '1.0.0'}})
             # SF-037: AWS SOFT still requires the dependency at start, so the translation is native HARD.
-            aws_dependencies = translated_dependencies({'gg-required': {'VersionRequirement': '^1.0.0', 'DependencyType': 'SOFT'}})
-            assert aws_dependencies == {'gg-required': {'versionRequirement': '^1.0.0'}}, aws_dependencies
+            aws, aws_dependencies = translated_dependencies('json-soft-dependency-required')
+            assert aws == {'example.RequiredAtStartup': {'VersionRequirement': '^1.0.0', 'DependencyType': 'SOFT'}}, aws
+            assert aws_dependencies == {'example.RequiredAtStartup': {'versionRequirement': '^1.0.0'}}, aws_dependencies
             sim.publish('aws-app', '1.0.0', aws_dependencies)
 
             configure('never')
@@ -260,7 +255,7 @@ def run():
             before = (installs(), registry())
             sim.deploy('0x60d', 'aws-app', '1.0.0')
             outcome = settle('0x60d')
-            assert outcome['status'] == 2 and 'no available version of gg-required' in outcome['error'], outcome
+            assert outcome['status'] == 2 and 'no available version of example.RequiredAtStartup' in outcome['error'], outcome
             assert (installs(), registry()) == before and not artifact_downloads(('aws-app', '1.0.0')), sim.downloads
             stop(process)
 
