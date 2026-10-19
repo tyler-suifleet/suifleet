@@ -149,11 +149,9 @@ fn valid_hostname(name: &str) -> bool {
     })
 }
 
-/// AWS thing names: 1-128 of `[a-zA-Z0-9:_-]`. The thing name is also the only
-/// MQTT client ID the device may use.
-pub fn valid_thing(name: &str) -> bool {
-    (1..=128).contains(&name.len()) && name.bytes().all(|b| b.is_ascii_alphanumeric() || b":_-".contains(&b))
-}
+/// AWS thing names (as for shadows): 1-128 of `[a-zA-Z0-9:_-]`. The thing
+/// name is also the only MQTT client ID the device may use.
+pub use crate::shadows::valid_thing;
 
 // ---------------------------------------------------------------------------
 // Device groups and policies.
