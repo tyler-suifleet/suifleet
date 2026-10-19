@@ -128,6 +128,26 @@ class Dispatcher:
                 # unrelated slots. Keep its existing capacity/ownership intact.
                 print(f"{project['id']}: reconciliation deferred for {row['session']} ({type(error).__name__})", flush=True)
 
+    def repairing(self, project):
+        """Tickets a live review-service fix job has resumed: they are counted
+        by fix capacity, not implementation capacity. A job whose snapshot is
+        not readable yet keeps counting here (fail closed)."""
+        keys = set()
+        try:
+            with sqlite3.connect(f"file:{self.state/'reviews.sqlite3'}?mode=ro", uri=True) as db:
+                rows = db.execute("SELECT directory FROM jobs WHERE project=? AND kind='fix' AND status IN ('reserved','running')",
+                                  (project,)).fetchall()
+        except sqlite3.Error:
+            return keys
+        for (directory,) in rows:
+            try:
+                key = json.loads((Path(directory)/'snapshot.json').read_text())['ticket']['key']
+            except (OSError, ValueError, TypeError, KeyError):
+                continue
+            if isinstance(key, str):
+                keys.add(key)
+        return keys
+
     def available(self, slot, owners):
         pause = self.db.execute('SELECT retry_after FROM backoff WHERE project=? AND family=?', (slot['project'],slot['family'])).fetchone()
         if pause and pause[0] > time.time():
@@ -144,9 +164,13 @@ class Dispatcher:
         # Real ticket responses preserve the dispatch session. Tests/legacy state
         # may preserve it only in the persisted claim; use both identities.
         managed_sessions.update(json.loads(r['claim']).get('session') for r in rows if r['claim'])
+        # A Review ticket resumed by a running fix job is repair work with its
+        # own capacity; counting it here would idle an implementation slot.
+        repairing = self.repairing(slot['project'])
         manual = sum(1 for owner in owners
                      if owner.get('agent') == slot['family']
                      and owner['status'] in ('in_progress', 'blocked')
+                     and not (owner['status'] == 'in_progress' and owner.get('key') in repairing)
                      and (not owner.get('session') or owner['session'] not in managed_sessions))
         # Quarantined/parked jobs retain ownership, but have no runnable worker.
         active = sum(r['status'] not in ('quarantined', 'parked') for r in rows)

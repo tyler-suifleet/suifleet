@@ -177,6 +177,27 @@ class DispatchTests(unittest.TestCase):
         self.assertTrue(self.worker.available(self.slot,[]))
         self.assertTrue(self.worker.available({**self.slot,'family':'Claude'},[]))
 
+    def test_tickets_resumed_by_fix_jobs_do_not_consume_implementation_capacity(self):
+        with sqlite3.connect(self.state/'reviews.sqlite3') as db:
+            db.execute('DROP TABLE jobs')
+            db.execute('CREATE TABLE jobs(project TEXT,family TEXT,kind TEXT,status TEXT,directory TEXT)')
+            for name, kind, status, key in [('fix-a','fix','running','SF-101'), ('fix-b','fix','reserved','SF-102'),
+                                            ('fix-done','fix','done','SF-103'), ('review','review','running','SF-104'),
+                                            ('fix-other','fix','running','SF-105')]:
+                folder = self.state/name
+                folder.mkdir()
+                (folder/'snapshot.json').write_text(json.dumps({'ticket': {'key': key}}))
+                db.execute('INSERT INTO jobs VALUES(?,?,?,?,?)', ('other' if name == 'fix-other' else 'suifleet', 'Codex', kind, status, str(folder)))
+            (self.state/'fix-unreadable').mkdir()
+            db.execute("INSERT INTO jobs VALUES('suifleet','Codex','fix','running',?)", (str(self.state/'fix-unreadable'),))
+        owner = lambda key, status='in_progress': dict(agent='Codex', status=status, key=key, session='manual-'+key)
+        self.assertEqual(self.worker.repairing('suifleet'), {'SF-101', 'SF-102'})
+        self.slot['max_workers'] = 1
+        self.assertTrue(self.worker.available(self.slot, [owner('SF-101'), owner('SF-102')]), 'repairs use fix capacity')
+        for counted in ('SF-103', 'SF-104', 'SF-105', 'SF-106'):
+            self.assertFalse(self.worker.available(self.slot, [owner('SF-101'), owner(counted)]), counted)
+        self.assertFalse(self.worker.available(self.slot, [owner('SF-101', 'blocked')]), 'blocked work still occupies its slot')
+
     def test_missing_review_database_fails_closed(self):
         (self.state/'reviews.sqlite3').unlink()
         self.assertFalse(self.worker.available(self.slot,[]))
