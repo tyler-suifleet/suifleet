@@ -71,6 +71,8 @@ jobs:
 
       - name: Scoped AWS credentials with unmodified SDKs and local mTLS
         run: make test-aws-credentials SUIFLEET_DEV_IMAGE=suifleet-dev:ci
+      - name: Durable AWS stream exporter protocols
+        run: make test-stream-export SUIFLEET_DEV_IMAGE=suifleet-dev:ci
 
       - name: Component IPC with distinct Unix peer identities
         run: |

@@ -384,3 +384,8 @@ endif
 .PHONY: test-aws-credentials
 test-aws-credentials:
 	bash scripts/test_aws_credentials.sh
+
+# SF-058: actual durable daemon IPC + unmodified SDK against local AWS API emulators.
+.PHONY: test-stream-export
+test-stream-export:
+	bash scripts/test_stream_export.sh
