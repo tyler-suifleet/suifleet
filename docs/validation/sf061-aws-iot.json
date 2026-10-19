@@ -1,6 +1,6 @@
 {
   "ticket": "SF-061",
-  "head": "2f1ee510dabc29a2cdb9b5081a47d4a0decedc03",
+  "head": "32daa0df15a4e417f77ee3c512d740c95b931837",
   "broker": "eclipse-mosquitto:2.0.20@sha256:21421af7b32bf9ce508e9090c8eb13bb81f410ca778dc205506180a6f862d0eb",
   "broker_version": "mosquitto version 2.0.20",
   "aws_endpoint": "scripts/aws_iot_harness.py (AWS-shaped, local)",
