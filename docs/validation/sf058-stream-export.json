@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "ticket": "SF-058",
+  "agent": "Codex",
+  "model": "gpt-6.1-sol",
+  "date": "2026-10-19",
+  "tested_implementation_head": "079262f0b3a615a06146abed36dde9d494e7e581",
+  "environment": {
+    "image": "suifleet-dev:sf035",
+    "image_id": "sha256:31f727258ccd2eb7d00039c26bca6cf045d6d71e4d19fe51ac899f4f239e5b5b",
+    "kernel": "6.6.87.2-microsoft-standard-WSL2",
+    "runtime_network": "none",
+    "checkout": "read-only for actual exporter tests",
+    "python": "3.10.12",
+    "rust": "1.94.0",
+    "boto3": "1.43.114",
+    "botocore": "1.43.114",
+    "moto": "5.2.4",
+    "uids": [
+      0,
+      62003,
+      62004
+    ]
+  },
+  "commands": [
+    {
+      "command": "make test-stream-export SUIFLEET_DEV_IMAGE=suifleet-dev:sf035",
+      "result": "passed; public hash-locked CPython 3.10 dependency preparation/build, then 19 real-daemon/boto3 API/Moto tests in 29.383s in a network-none container"
+    },
+    {
+      "command": "cargo test --locked --manifest-path suifleet-edge/Cargo.toml (pinned dev container, network none)",
+      "result": "247 passed; 0 failed; 0 ignored; final source, 30.10s"
+    },
+    {
+      "command": "cargo test --locked --manifest-path suifleet-edge/Cargo.toml --features pkcs11 (pinned dev container, network none)",
+      "result": "249 passed; 0 failed; 0 ignored; final source, 30.28s"
+    },
+    {
+      "command": "cargo test --locked --manifest-path suifleet-edge/Cargo.toml streams:: (pinned dev container, network none)",
+      "result": "17 passed; 0 failed; includes all five stream-cases.json fixtures (46 steps), external-export configuration and operator-only API, actual failed metadata write with no acknowledgement/retirement"
+    },
+    {
+      "command": "bash -n scripts/test_stream_export.sh; python3 -m py_compile sdk/python/suifleet_stream_export.py scripts/test_stream_export.py; git diff --check",
+      "result": "passed"
+    },
+    {
+      "command": "python3 -m unittest scripts/tests/test_greengrass_compat.py",
+      "result": "39 passed in 5.913s; scoped passed-adapter expectation includes only the actual SF-057/SF-058 receipts"
+    },
+    {
+      "command": "python3 scripts/greengrass_compat.py",
+      "result": "490 reference-model fixture checks passed; reference and adapter-runtime evidence remain separate"
+    },
+    {
+      "command": "SHA-256 receipt verification and relative documentation-link checks",
+      "result": "all eight recorded source hashes and local documentation links passed"
+    }
+  ],
+  "actual_runtime_tests": [
+    "test_partial_batch_restart_only_retries_failed_records",
+    "test_lost_kinesis_response_duplicates_identifiable_not_lost",
+    "test_permissions_and_limits_do_not_ack",
+    "test_local_ack_lost_does_not_resend_cloud",
+    "test_s3_multipart_resume_after_process_and_daemon_crash",
+    "test_s3_lost_complete_reconciles_object",
+    "test_s3_lost_initiation_abort_cleanup_then_resume",
+    "test_s3_lost_part_response_reuploads_same_part",
+    "test_s3_http200_embedded_error_is_failure",
+    "test_config_binding_and_single_writer",
+    "test_untrusted_component_cannot_ack_or_select_export",
+    "test_cli_sigkill_restart_with_dedicated_uid",
+    "test_exponential_backoff_caps_without_checkpoint_advancement",
+    "test_oversized_record_blocks_instead_of_bypassing_budget",
+    "test_expired_credentials_and_malformed_results_preserve_checkpoint",
+    "test_snapshot_disk_failure_prevents_cloud_mutation",
+    "test_moto_readback_and_reference_checkpoint_fixture",
+    "test_crash_between_all_record_acks_and_delivered_marker",
+    "test_no_default_profile_credentials_and_invalid_limits"
+  ],
+  "reference_execution": {
+    "file": "interfaces/compat/stream-cases.json",
+    "exporter_case": "export-checkpoint-idempotent",
+    "scope": "Real exporter executes successful checkpoint sequence transitions via Kinesis/Moto, restart, duplicate acknowledgement and beyond-newest rejection through actual daemon IPC. Final raw-byte retention/byte-count assertions belong to the full Rust fixture; external discard_exported intentionally retires acknowledged records.",
+    "store_scope": "All 5 complete raw-byte fixtures execute in streams::tests::shared_stream_cases."
+  },
+  "aws_semantics": [
+    "Unmodified SDK signs actual JSON PutRecords and XML S3 multipart requests using local SDK container-credential fixture.",
+    "Moto GetRecords/GetObject reads confirm exported sequences and exact JSON payloads through independent SDK API calls.",
+    "Fault emulator commits data then loses initiation/part/completion/Kinesis replies, returns partial batches/403/ExpiredToken/embedded HTTP-200 errors, and asserts actual bodies/parts/ETags/checkpoints.",
+    "Distinct exporter UID executes production CLI and survives SIGKILL/restart; untrusted UID cannot acknowledge. Source daemon SIGKILL preserves multipart progress; post-crash sequence gaps are explicit.",
+    "Actual filesystem failures in the snapshot and daemon metadata write paths block cloud mutation or retirement."
+  ],
+  "source_sha256": {
+    "sdk/python/suifleet_stream_export.py": "670d843ff34944deaab3658ba7653ac4bd5ba54d9acdefa535de361bc7696025",
+    "sdk/python/suifleet_ipc.py": "e8c803bd69b2124e1be68a30e3dae2e97e4569c02daa6d35493453cebcd4b741",
+    "suifleet-edge/src/streams.rs": "4b77367a3bcb57c790cb9ec642a44638ed29757da2143f9c78c28e10dc5eba38",
+    "suifleet-edge/src/ipc.rs": "a7e593bcafd8716cbf979c522ce925b3e0006e9485972c770834659e02d4e0bd",
+    "scripts/test_stream_export.py": "90562fc3da10f38b9ca4c6e1ea46c3be5a38dc3566fb187e71db0dd46d115266",
+    "scripts/test_stream_export.sh": "025412c7cdc556802464901ab52d2ac93895ce5833085279b5711c29b5920e9f",
+    "sdk/stream-export/requirements.txt": "99d39dfa305cbd75ca38c41e8431187884710619510474acfe8dbaad489ca2b4",
+    "interfaces/compat/stream-cases.json": "42056fc9187463f68a2e608bccf4dfc89f25833bb0531197fc43dea0e38b1bc1"
+  },
+  "limits": [
+    "Local Linux x86_64 only; no ARM, physical Pi, power-loss or cloud account acceptance.",
+    "Live AWS remains unrun/unauthorized in SF-058/#103. IAM, KMS, deployed provider/service and actual account policies require separately authorized acceptance.",
+    "Actual SF-057 adapter/mTLS/caller/refresh acceptance is separate in sf057-credentials.json; this exporter harness uses a local standard SDK credential endpoint, never production credentials.",
+    "Kinesis is at least once, with possible duplicates and out-of-order successes; consumer deduplication/reordering uses unique source_id, stream and sequence.",
+    "Exclusive S3 prefix, preserved private state and a provisioned incomplete-upload lifecycle rule are required; HeadObject size/metadata reconciliation trusts exclusive writers, not independent content download verification.",
+    "Python native IPC/cloud companion; no StreamManager SDK wire protocol, AWS recipe translation, automatic platform provisioning or shard-aware pacing.",
+    "Existing 64 KiB IPC response limit can block oversized native records; no unexported checkpoint advances.",
+    "SiteWise/Firehose/other service exporters remain visible in SF-064/#109 and linked roadmap tickets.",
+    "Physical integration deferred to https://github.com/tyler-suifleet/suifleet/issues/32; no hardware programming or new image.",
+    "No general Greengrass/StreamManager parity, firmware safety or production deployment claim."
+  ]
+}
