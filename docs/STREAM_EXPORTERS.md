@@ -50,7 +50,10 @@ fails closed on corrupt segments. Crash-reserved sequence gaps are allowed;
 sequence numbers never repeat. Only one destination/exporter is supported per
 stream: do not grant `stream_export_ack` to a producer or another consumer.
 That explicit operation plus the stream glob authorizes retiring confirmed data.
-Ordinary `stream_read` permission cannot acknowledge it. Administrators remain trusted.
+Ordinary `stream_read` permission cannot acknowledge it. Administrators remain trusted. Do not shrink `max_size` below the stream's current
+stored bytes: reconfiguration evicts oldest records even for external-export
+streams and can discard unexported data. Drain the stream before reducing its
+capacity; `sequence_gap_before` reports gaps but cannot recover discarded data.
 
 Install reviewed SDK files together in `/usr/libexec/suifleet/`, root-owned and
 read-only. Install the hash-locked boto3 dependencies in a dedicated Python
@@ -197,10 +200,18 @@ Provision least-privilege IAM separately:
 - S3: `s3:PutObject`, `s3:GetObject` (HeadObject),
   `s3:AbortMultipartUpload` for the exclusive object prefix, and
   `s3:ListBucketMultipartUploads` for the bucket, narrowed using supported IAM
-  conditions. Encrypted buckets/streams may need explicitly provisioned KMS grants.
+  conditions. Also grant `s3:ListBucket` on the bucket ARN
+  (`arn:aws:s3:::YOUR_BUCKET`), narrowed with an `s3:prefix` condition to the
+  exclusive prefix (for example `StringLike: {"s3:prefix": ["exports/device-1/*"]}`).
+  HeadObject runs before each new upload: without ListBucket, a missing key returns
+  403 instead of 404 and export blocks. Keep treating 403 as a permission failure,
+  never as proof that an object is absent. Verify the effective bucket policy
+  permits missing-key reconciliation for the selected prefix. Encrypted
+  buckets/streams may need explicitly provisioned KMS grants.
 
 Reference semantics:
 [AWS PutRecords](https://docs.aws.amazon.com/kinesis/latest/APIReference/API_PutRecords.html),
+[HeadObject permissions and missing-key responses](https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadObject.html),
 [S3 multipart upload](https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpuoverview.html),
 [CompleteMultipartUpload embedded errors](https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html).
 Verify IAM/KMS/region, credentials, TLS and bucket policies with authorized live
