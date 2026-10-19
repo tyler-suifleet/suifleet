@@ -624,7 +624,13 @@ pub fn handle(store: &Mutex<Store>, policies: Option<&[Policy]>, op: &str, name:
         "shadow_update" => {
             let sections: Vec<&str> = payload.get("state").and_then(Value::as_object).map(|s| s.keys().map(String::as_str).collect()).unwrap_or_default();
             anyhow::ensure!(allow("UpdateThingShadow", &sections), "forbidden_shadow");
-            store.update(name, payload, now)
+            let mut result = store.update(name, payload, now)?;
+            // The stored document is only for readers: a write-only caller
+            // gets its own request state back, as in AWS update/accepted.
+            if !allow("GetThingShadow", &[]) {
+                result["state"] = payload["state"].clone();
+            }
+            Ok(result)
         }
         "shadow_delete" => {
             anyhow::ensure!(allow("DeleteThingShadow", &[]), "forbidden_shadow");
@@ -1151,6 +1157,20 @@ mod tests {
         assert_eq!(handle(&store, p, "shadow_list", "", &Value::Null).unwrap(), json!({"shadows": ["pub-a"]}));
         assert_eq!(handle(&store, None, "shadow_list", "", &Value::Null).unwrap(), json!({"shadows": ["config", "pub-a", "secret"]}));
 
+        // A write-only grant updates without reading: the response echoes the
+        // request, never the stored desired state or delta.
+        let writer: Vec<Policy> = serde_json::from_value(json!([
+            {"operations": ["aws.greengrass#UpdateThingShadow"], "resources": ["$aws/things/dev/shadow/name/secret"], "sections": ["reported"]},
+        ])).unwrap();
+        let w = Some(writer.as_slice());
+        assert!(handle(&store, w, "shadow_get", "secret", &Value::Null).is_err());
+        let r = handle(&store, w, "shadow_update", "secret", &json!({"state": {"reported": {"y": 2}}, "clientToken": "c"})).unwrap();
+        assert_eq!(r, json!({"state": {"reported": {"y": 2}}, "version": 2, "clientToken": "c"}));
+        assert_eq!(handle(&store, w, "shadow_update", "secret", &json!({"state": {}})).unwrap(), json!({"state": {}, "version": 3}));
+        // Readers still get the whole document.
+        let r = handle(&store, p, "shadow_update", "config", &update("reported")).unwrap();
+        assert_eq!(r["state"], handle(&store, None, "shadow_get", "config", &Value::Null).unwrap()["state"]);
+        assert_eq!(handle(&store, None, "shadow_get", "secret", &Value::Null).unwrap()["state"]["desired"], json!({"x": 1}));
         let _ = std::fs::remove_dir_all(&path);
     }
 

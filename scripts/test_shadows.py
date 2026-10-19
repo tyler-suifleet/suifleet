@@ -173,6 +173,9 @@ def run(evidence=None):
             '[[ipc.components.ops.shadow_policies]]\noperations = ["*"]\n'
             f'resources = ["$aws/things/{THING}/shadow/name/*", "$aws/things/{THING}/shadow"]\n'
             f'[ipc.components.other]\nuid = {OTHER}\noperations = ["shadow_get", "shadow_update"]\n'
+            # A write-only reporter: may update reported on "secret" but never read it.
+            '[[ipc.components.other.shadow_policies]]\noperations = ["aws.greengrass#UpdateThingShadow"]\n'
+            f'resources = ["$aws/things/{THING}/shadow/name/secret"]\nsections = ["reported"]\n'
             '[pubsub]\n'
             f'[shadows]\nthing_name = "{THING}"\nmax_shadows = 4\n'
             f'[shadows.sync]\nurl = "http://127.0.0.1:{cloud.server.server_port}/v1/shadows"\nbearer_token_file = "{token}"\n'
@@ -236,11 +239,16 @@ def run(evidence=None):
             assert ipc(APP, "shadows") == {"ok": False, "error": "request_failed"}, "status is administrator only"
             assert update(OPS, "secret", {"desired": {"s": 1}})["ok"]
             assert get("secret", APP) == {"ok": False, "error": "request_failed"}
+            assert get("secret", OTHER) == {"ok": False, "error": "request_failed"}
+            r = update(OTHER, "secret", {"reported": {"o": 1}})
+            assert r == {"ok": True, "data": {"state": {"reported": {"o": 1}}, "version": 2}}, "a write-only caller must not read desired/delta"
+            assert update(OTHER, "secret", {})["data"] == {"state": {}, "version": 3}
             r = update(APP, "config", {"reported": {"mode": "idle"}}, clientToken="t-1")
             assert r["ok"] and r["data"]["version"] == 1 and r["data"]["clientToken"] == "t-1", r
             assert ipc(APP, "shadow_list")["data"]["shadows"] == ["config"]
             assert ipc(OPS, "shadow_list")["data"]["shadows"] == ["config", "secret"]
-            print("PASS: ACLs: per-component operations, shadow resources and sections (reported-only writer); deny by default")
+            print("PASS: ACLs: per-component operations, shadow resources and sections (reported-only writer); "
+                  "a write-only updater gets its request echoed, not the stored state; deny by default")
 
             # Delta notifications through durable pub/sub, after cloud sync has run.
             assert ipc(APP, "subscribe", DELTA, {"qos": 1})["ok"]
