@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "stream_name": "camera",
+  "region": "us-west-2",
+  "state_dir": "/var/lib/suifleet-video",
+  "width": 32,
+  "height": 32,
+  "codec_private_hex": "0142c00affe100166742c00ad9096c044000000300400000030283c4899201000568cb83cb20",
+  "max_spool_bytes": 16777216,
+  "max_fragment_bytes": 1048576,
+  "max_fragments": 1000,
+  "session_seconds": 60
+}

@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "implementation": "scripts/kvs_video.py",
+  "source_adapter": "scripts/kvs_h264_source.py",
+  "platform": "Linux Python 3.10+ (stdlib only)",
+  "media": {
+    "codec": "H.264 baseline, no B frames, single video track",
+    "codec_id": "V_MPEG4/ISO/AVC",
+    "codec_private": "AVCDecoderConfigurationRecord, one SPS and one PPS, four-byte NAL lengths",
+    "ingestion": "uint32 big-endian JSON metadata size (1..65536), version=1, frames=[{timestamp_ms,keyframe,size}], then concatenated AVCC access units; 1..1000 frames per fragment",
+    "capture": "Annex-B with AUD delimiters, fixed configured FPS, caller-supplied absolute capture start milliseconds; operator owns encoder/camera and clock accuracy",
+    "fragment": "IDR first, strictly increasing integer epoch milliseconds, <=10 seconds span, <=8 MiB configured bytes, one known-size MKV Cluster",
+    "session": "one unknown-size MKV Segment, one track header, multiple Clusters, ABSOLUTE timestamps; chunked HTTP request and simultaneous newline-delimited JSON ACK response"
+  },
+  "durability": {
+    "admission": "SQLite synchronous FULL atomic media+monotonic high-water commit before queued receipt",
+    "full": "RejectNewData API; CLI blocks reading source at one bounded fragment until capacity is released",
+    "retirement": "only contiguous PERSISTED prefix of fragments sent in this session; later ACK across gap does not release media; BUFFERING, RECEIVED, EOF and HTTP 200 never retire media",
+    "replay": "at least once; restart/reconnect resends byte-identical unacknowledged fragments with original absolute timestamps; ambiguous persistence may duplicate remote media",
+    "source_retry": "exact pending fragment or most recent admitted fragment is idempotent; conflicting/older/overlapping input fails; no unbounded historical dedupe table",
+    "rejection": "4000,4003,5000,5001 retry; other ERROR ACKs durably pause spool for operator inspection; never skip rejected media",
+    "expiry": "SF-057 container credentials fetched afresh before each session; expired or <=10 seconds remaining rejected; active session ends five seconds before expiration",
+    "binding": "state directory bound to version/stream/region/codec/dimensions/emulator/control endpoint; incompatible reuse refused"
+  },
+  "limits": {
+    "pending_fragments": "configured 1..10000",
+    "spool_bytes": "configured 2 KiB..1 GiB charged media+256 per fragment; max fragment must fit",
+    "session": "1..300 seconds, <=1000 fragments per reconnect, >=200 ms between fragments and <=12 MB/s pacing",
+    "responses": "16 KiB discovery/credential body, 4096-byte ACK line, <=8 ACKs per offered fragment +100",
+    "disk": "SQLite main file plus rollback journal (up to roughly twice live media during writes) and bounded page/schema overhead; FULL auto-vacuum reclaims deleted media",
+    "memory": "one ingress fragment and one upload fragment plus bounded ACK and list of at most 1000 session timestamps"
+  },
+  "references": [
+    {
+      "name": "EdgeConnectorForKVS 1.0.5 (functional scope only; no binary/source incorporated)",
+      "url": "https://docs.aws.amazon.com/greengrass/v2/developerguide/kvs-edge-connector-component.html",
+      "reviewed": "2026-10-19",
+      "snapshot_sha256": "1f0ce339613b9e1daeacbb258fcbec1eef7eb56bea5af1902b245e2e1857e85b"
+    },
+    {
+      "name": "Kinesis Video API 2017-09-30 PutMedia",
+      "url": "https://docs.aws.amazon.com/kinesisvideostreams/latest/APIReference/API_dataplane_PutMedia.html",
+      "reviewed": "2026-10-19",
+      "snapshot_sha256": "f80086a4dcd853dbd9a48e68ead4ea3dc8e6e7a3954846b043673d46d9844cb2"
+    },
+    {
+      "name": "GetDataEndpoint API 2017-09-30",
+      "url": "https://docs.aws.amazon.com/kinesisvideostreams/latest/APIReference/API_GetDataEndpoint.html"
+    },
+    {
+      "name": "Matroska RFC 9559 (October 2024)",
+      "url": "https://www.rfc-editor.org/rfc/rfc9559.html",
+      "sections": [
+        "5.1.3",
+        "5.1.4",
+        "10.2",
+        "11",
+        "23.2"
+      ]
+    },
+    {
+      "name": "KVS PIC v1.3.0 ACK wire declarations (Apache-2.0 reference only)",
+      "commit": "386c66ab9301d6081e4a2a32dc4d3bf12be85ee2",
+      "url": "https://github.com/awslabs/amazon-kinesis-video-streams-pic/blob/386c66ab9301d6081e4a2a32dc4d3bf12be85ee2/src/client/src/AckParser.h"
+    },
+    {
+      "name": "KVS C producer v1.5.0 signing semantics (Apache-2.0 reference only)",
+      "commit": "7d1b76f53680c1e23afb6f35f0cca97ccdb35e3f",
+      "url": "https://github.com/awslabs/amazon-kinesis-video-streams-producer-c/blob/7d1b76f53680c1e23afb6f35f0cca97ccdb35e3f/src/source/Common/AwsV4Signer.c",
+      "semantics": "streaming signature uses SHA256(empty), not UNSIGNED-PAYLOAD"
+    }
+  ],
+  "boundary": "Independently authored native functional subset. No proprietary EdgeConnectorForKVS source, Greengrass configuration or producer SDK code incorporated. Not AWS connector drop-in compatibility, RTSP discovery, audio, transcoding, exactly-once delivery or live AWS certification. Reference roadmap fixtures are separate from component execution."
+}
