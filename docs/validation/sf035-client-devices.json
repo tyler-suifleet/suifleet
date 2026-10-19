@@ -1,0 +1,34 @@
+{
+  "ticket": "SF-035",
+  "head": "d214455ea884873e95296b20bd32c2a278ff532d",
+  "broker": "eclipse-mosquitto:2.0.20@sha256:21421af7b32bf9ce508e9090c8eb13bb81f410ca778dc205506180a6f862d0eb",
+  "broker_version": "mosquitto version 2.0.20",
+  "network": "internal Docker network, no Internet route",
+  "clients": [
+    "Python ssl + raw MQTT 3.1.1 (host, P-256)",
+    "mosquitto_sub 2.0.20 / OpenSSL (container, Ed25519)",
+    "Python UDP broadcast probe (container)"
+  ],
+  "checks": [
+    "enrollment: operator IPC issued P-256 and Ed25519 client certificates from CSRs; components, duplicate and reserved (bridge client ID) enrollments refused",
+    "LAN discovery: a UDP broadcast to 172.20.255.255 found the gateway at 172.20.0.2 with its CA fingerprint and endpoints; a short (amplifying) probe got no reply",
+    "discovery: HTTPS with mutual TLS; the gateway certificate verifies for the detected address and gateway.test only; the document names the CA, endpoints and the client's certificate, and carries the device key's signed binding of that CA (Ed25519 Sui personal message, verified independently with openssl)",
+    "MQTT between two LAN clients through the gateway: Python ssl (P-256) published at QoS 1, mosquitto_sub (libmosquitto/OpenSSL, Ed25519) received it",
+    "LAN client <-> component: an authorized LAN publish reached a component through the bridge; a component publication reached the LAN client's authorized subscription",
+    "denial: no client certificate and an untrusted self-signed one fail the handshake; a foreign client ID gets CONNACK 5 and MQTT 5 CONNACK 1; an unauthorized filter gets SUBACK 0x80 beside a granted one; an unauthorized publish ends the session and reaches nobody; the broker is not reachable from the LAN",
+    "revocation: the live session ended 1.0 s after the revoke; reconnect and HTTPS refused (403 revoked)",
+    "rotation: a new certificate issued over HTTPS works at once; the old one connected during the 5 s grace, its live session ended after 5.1 s, then it was refused (superseded)",
+    "restart: the CA and registry persisted; the rotated certificate connects, the superseded and the revoked ones stay refused",
+    "offline: with the chain simulator stopped (daemon sync failing) the gateway still authenticated and authorized LAN clients; a 60 s certificate's live session ended +0.0 s from its expiry and it could not reconnect"
+  ],
+  "denied": {
+    "expired": 2,
+    "revoked": 1,
+    "superseded": 1
+  },
+  "fixture": {
+    "file": "interfaces/compat/client-device-cases.json",
+    "requests": 16,
+    "executed_by": "make edge-test: clientdevices::tests::shared_client_device_authorization_cases"
+  }
+}

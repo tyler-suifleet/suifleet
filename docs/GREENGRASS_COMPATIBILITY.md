@@ -43,7 +43,7 @@ The following is merged today and is the only thing the daemon and frontend exec
 
 - **Native recipes** (`interfaces/recipe.schema.json`) are versions 1.0/1.1, with one authenticated artifact, empty configuration and native dependency ranges. The lifecycle is `install`, plus the SF-014 supervised `run`/`shutdown`/`readiness`/`restart` ([OPERATIONS.md](OPERATIONS.md#supervised-components-sf-014)). Commands use the shell-quoted substitutions `{artifact}`, `{artifacts}` and `{work}` (`{work}` only in supervised commands), and `{pid}` in readiness/shutdown.
 - **The catalog** has platform manifests `linux|*` × `x86_64|aarch64|arm|x86|*`, selected by first match (`x86` is 32-bit i686, SF-076).
-- **Native IPC v1** provides UID-authenticated component APIs, operator management and bounded volatile messaging ([COMPONENT_IPC.md](COMPONENT_IPC.md)). Shared-daemon-user components cannot receive individual ACLs; separate platform Unix identities are required. There is no AWS IPC wire compatibility, durable pub/sub, MQTT broker, shadow, stream, client-device or AWS recipe support.
+- **Native IPC v1** provides UID-authenticated component APIs, operator management and bounded volatile messaging ([COMPONENT_IPC.md](COMPONENT_IPC.md)). Shared-daemon-user components cannot receive individual ACLs; separate platform Unix identities are required. Durable pub/sub with a local MQTT broker bridge (SF-032), streams (SF-034) and LAN client devices (SF-035) have since been implemented natively, as their sections below note. There is no AWS IPC wire compatibility, shadow or AWS recipe support.
 
 Everything else here is proposed. The fixtures pin its semantics. The owning tickets implement them and may revise them through review. Implementers must not treat this document as a published runtime API, and must not change merged APIs to fit it by assumption.
 
@@ -111,6 +111,8 @@ Implemented for local streams and HTTP(S) export: see [STREAMS.md](STREAMS.md). 
 
 ### Client devices (SF-035)
 
+Implemented for LAN things with a local CA, mutual TLS and an authorizing proxy in front of the local broker: see [CLIENT_DEVICES.md](CLIENT_DEVICES.md). The rest of this section is the specification it follows.
+
 - **Groups and policies.** These use the `aws.greengrass.clientdevices.Auth` 2.5.x shape. A selection rule has the form `thingName: pattern [OR …]`, where `*` may appear only at the start and/or end and `\:` escapes a colon. Policy statements combine `mqtt:connect` with `mqtt:clientId:`, `mqtt:publish` with `mqtt:topic:`, and `mqtt:subscribe` with `mqtt:topicfilter:`. `*` acts as a glob, and MQTT wildcards in topic filters are matched literally. The union of all matching groups applies, and anything not granted is denied.
 - **Identity.** A client identity is SuiFleet-enrolled. It is denied when unknown, revoked, or at or after its expiry time.
 - **Proposed hardening relative to AWS.** A client may connect only with a client ID equal to its own identity. Certificate issuance, rotation and offline cache expiry belong to SF-035.
@@ -129,7 +131,7 @@ This runs `python3 scripts/greengrass_compat.py`, the checker's negative tests a
 | `pubsub-cases.json` | 53 filter/topic/match/ACL checks | Daemon pub/sub module (passing) | Passed: SF-032 daemon, IPC UIDs and Mosquitto ([receipt](validation/sf032-messaging.json)) |
 | `shadow-cases.json` | 54 steps across 10 sequences | none | Pending SF-027, SF-033 |
 | `stream-cases.json` | 46 steps across 5 sequences | Daemon stream store (passing) | Passed: SF-034 daemon, IPC UIDs, crashes and export ([receipt](validation/sf034-streams.json)) |
-| `client-device-cases.json` | 16 authorization requests | none | Pending SF-032, SF-035 |
+| `client-device-cases.json` | 16 authorization requests | Daemon registry and policy engine (passing) | Passed: SF-035 daemon, Mosquitto and two TLS clients ([receipt](validation/sf035-client-devices.json)) |
 | `managed-dependency-cases.json` | 47 managed-dependency classifications | none | Pending SF-037 |
 | `credential-provider-cases.json` | 65 steps across 7 sequences | none | Pending SF-057 |
 | `cloudwatch-metrics-cases.json` | 90 steps across 8 sequences | none | Pending SF-059 |
