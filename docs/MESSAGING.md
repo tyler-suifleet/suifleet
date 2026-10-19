@@ -82,7 +82,8 @@ The bridge is an MQTT 3.1.1 client (MQTT 5 brokers accept it) with a persistent 
 - **Rejected inbound messages.** A message pub/sub can never accept is rejected rather than retried forever: its payload exceeds 4096 bytes after conversion, the mapping's prefix makes the topic longer than 256 bytes, or the matching mappings' copies together exceed a queue's limits even when it is empty (then every matching mapping rejects it). The bridge sends PUBACK so the broker drops it, logs a warning, and increments the mapping's `rejected` counter and sets `last_rejected` (topic and reason). Other mappings still receive the message. A full queue or storage failure is never treated as a rejection.
 - **Loops.** Messages sent by a bridge principal are not bridged out again, and configurations whose outbound topics could re-enter an inbound filter are refused.
 - **Reconnect** backs off from 1 s to 60 s. Stats are written to `<state_dir>/pubsub/bridge.json` and served by `messaging`.
-- **Transport.** Plain TCP to a broker on this device or a trusted network. TLS and authentication of LAN client devices are SF-035; cloud targets (AWS IoT Core or another remote broker) are a separately approved adapter (SF-061).
+- **Transport.** Plain TCP to a broker on this device or a trusted network. TLS and authentication of LAN client devices are SF-035.
+- **AWS IoT Core.** Mappings may also connect `Pubsub` with `IotCore`, over the mutual-TLS `[aws_iot]` connection ([AWS_IOT.md](AWS_IOT.md), SF-061). The spool, limits and delivery rules are the same. Messages bridged in from one broker are never sent back to that broker, but may continue to the other: route LAN messages to AWS with a LocalMqtt → Pubsub and a Pubsub → IotCore mapping. `broker` is then needed only for LocalMqtt mappings.
 
 ## SDK
 
@@ -106,7 +107,7 @@ Client(component='sensor').publish('sensors/a/temp', {'t': 21})
 
 **Not yet covered:**
 - TLS, client-device certificates and per-client MQTT authorization (SF-035);
-- cloud bridge targets (SF-061);
+- cloud targets other than AWS IoT Core ([AWS_IOT.md](AWS_IOT.md) lists what the AWS connection does not yet cover);
 - the AWS IPC wire protocol (`aws_api` remains undecided);
 - disk-full behaviour of the host filesystem beyond the configured bounds;
 - physical Pi operation (#32).
