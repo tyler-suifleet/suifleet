@@ -1,6 +1,6 @@
 {
   "ticket": "SF-033",
-  "head": "ee3db8ba9564cd4b268dfc191a50f495bf13b3eb",
+  "head": "6bc661db5860e1cd4b86b71a7093a653caad6aa1",
   "checks": [
     "ACLs: per-component operations, shadow resources and sections (reported-only writer); deny by default",
     "delta notification: desired change published on the AWS-shaped delta topic and received with QoS 1",
