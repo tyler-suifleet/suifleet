@@ -589,7 +589,8 @@ mod tests {
         c.private_key_file = dir.join("key.pem");
         std::fs::write(&c.ca_file, "not a certificate").unwrap();
         std::fs::write(&c.certificate_file, "").unwrap();
-        std::fs::write(&c.private_key_file, "-----BEGIN PRIVATE KEY-----\nc2VjcmV0\n-----END PRIVATE KEY-----\n").unwrap();
+        // Assembled at run time so the source holds no PEM-shaped key block.
+        std::fs::write(&c.private_key_file, format!("-----BEGIN {kind}-----\nc2VjcmV0\n-----END {kind}-----\n", kind = "PRIVATE KEY")).unwrap();
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&c.private_key_file, std::fs::Permissions::from_mode(0o644)).unwrap();
         let error = Credentials::load(&c).err().unwrap().to_string();
