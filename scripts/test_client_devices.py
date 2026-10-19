@@ -759,7 +759,9 @@ def host(args):
                     "broker_version": broker_version[0], "network": "internal Docker network, no Internet route",
                     "clients": ["Python ssl + raw MQTT 3.1.1 (host, P-256)", "mosquitto_sub 2.0.20 / OpenSSL (container, Ed25519)",
                                 "Python UDP broadcast probe (container)"],
-                    "checks": checks, "denied": status["denied"],
+                    "checks": checks,
+                    # In-memory counters: these cover the steps after the daemon restart.
+                    "denied_since_restart": status["denied"],
                     "fixture": {"file": "interfaces/compat/client-device-cases.json", "requests": 16,
                                 "executed_by": "make edge-test: clientdevices::tests::shared_client_device_authorization_cases"}}
         if args.evidence:
