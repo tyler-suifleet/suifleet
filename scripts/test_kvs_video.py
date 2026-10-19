@@ -8,7 +8,6 @@ import io
 import json
 import os
 from pathlib import Path
-import re
 import socket
 import struct
 import subprocess
@@ -29,9 +28,12 @@ BASE = json.loads((FIX/'example.json').read_text())
 def verify_signature(handler, body):
     """Independent SigV4 verification; never call the implementation signer."""
     auth = handler.headers['Authorization']
-    match = re.fullmatch(r'AWS4-HMAC-SHA256 Credential=([^/]+)/([^,]+), SignedHeaders=([^,]+), Signature=([a-f0-9]{64})', auth)
-    assert match, 'missing SigV4'
-    access, scope, names, signature = match.groups()
+    prefix = 'AWS4-HMAC-SHA256 '
+    assert auth.startswith(prefix), 'missing SigV4'
+    fields = dict(part.split('=', 1) for part in auth[len(prefix):].split(', '))
+    access, scope = fields['Credential'].split('/', 1)
+    names, signature = fields['SignedHeaders'], fields['Signature']
+    assert len(signature) == 64 and all(c in '0123456789abcdef' for c in signature)
     assert access == 'test-access'
     day, region, service, terminal = scope.split('/')
     assert region == 'us-west-2' and service == 'kinesisvideo' and terminal == 'aws4_request'
