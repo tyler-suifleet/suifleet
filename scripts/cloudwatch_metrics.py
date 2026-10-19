@@ -177,7 +177,7 @@ class Transport:
 
 
 class Exporter:
-    def __init__(self, path, transport, core_name, interval=10, retain=5000, clock=time.time):
+    def __init__(self, path, transport, core_name, interval=10, retain=5000, clock=time.monotonic):
         if type(interval) is not int or not 0 <= interval <= 900 or type(retain) is not int or not 2000 <= retain <= 10000:
             raise ValueError('invalid limits')
         if not isinstance(core_name, str) or not 0 < len(core_name) <= 255:
@@ -216,7 +216,7 @@ class Exporter:
         request = message['request']
         data = request['metricData']
         try:
-            timestamp = datetime.datetime.fromtimestamp(data.get('timestamp', self.clock()), datetime.timezone.utc).isoformat().replace('+00:00', 'Z')
+            timestamp = datetime.datetime.fromtimestamp(data.get('timestamp', time.time()), datetime.timezone.utc).isoformat().replace('+00:00', 'Z')
         except (ValueError, OverflowError, OSError):
             return {'status': 'fail', 'error': 'InvalidInputException'}
         entry = dict(MetricName=data['metricName'], Value=data['value'], Unit=data.get('unit', 'None'), Timestamp=timestamp,
@@ -266,7 +266,7 @@ def receive(connection, uid, publishers, exporter):
             raw = source.readline(MAX_FRAME + 1)
         if len(raw) <= MAX_FRAME and raw.endswith(b'\n'):
             return exporter.put(json.loads(raw))
-    except (OSError, ValueError, TypeError):
+    except (OSError, ValueError, TypeError, RecursionError):
         pass
     return {'status': 'fail', 'error': 'InvalidInputException'}
 

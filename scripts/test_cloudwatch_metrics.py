@@ -150,7 +150,7 @@ class MetricsTests(unittest.TestCase):
 s=socket.socket(socket.AF_UNIX);s.connect(sys.argv[1]);s.sendall(sys.argv[2].encode()+b'\\n');print(s.recv(16384).decode())
 """
             for uid, payload, expected in [(61001, json.dumps(message), "success"),
-                    (61002, json.dumps(message), "Unauthorized"), (61001, "x"*17000, "InvalidInputException")]:
+                    (61002, json.dumps(message), "Unauthorized"), (61001, "x"*17000, "InvalidInputException"), (61001, "["*2000, "InvalidInputException")]:
                 process = subprocess.Popen([sys.executable, "-c", client, path, payload], stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE, user=uid, group=uid, extra_groups=[])
                 conn, _ = listener.accept()
