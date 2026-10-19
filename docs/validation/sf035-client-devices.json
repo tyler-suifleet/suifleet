@@ -1,6 +1,6 @@
 {
   "ticket": "SF-035",
-  "head": "d214455ea884873e95296b20bd32c2a278ff532d",
+  "head": "27b1835b675a7cd33a545fc6f765524d16bf70fc",
   "broker": "eclipse-mosquitto:2.0.20@sha256:21421af7b32bf9ce508e9090c8eb13bb81f410ca778dc205506180a6f862d0eb",
   "broker_version": "mosquitto version 2.0.20",
   "network": "internal Docker network, no Internet route",
@@ -16,14 +16,16 @@
     "MQTT between two LAN clients through the gateway: Python ssl (P-256) published at QoS 1, mosquitto_sub (libmosquitto/OpenSSL, Ed25519) received it",
     "LAN client <-> component: an authorized LAN publish reached a component through the bridge; a component publication reached the LAN client's authorized subscription",
     "denial: no client certificate and an untrusted self-signed one fail the handshake; a foreign client ID gets CONNACK 5 and MQTT 5 CONNACK 1; an unauthorized filter gets SUBACK 0x80 beside a granted one; an unauthorized publish ends the session and reaches nobody; the broker is not reachable from the LAN",
-    "revocation: the live session ended 1.0 s after the revoke; reconnect and HTTPS refused (403 revoked)",
-    "rotation: a new certificate issued over HTTPS works at once; the old one connected during the 5 s grace, its live session ended after 5.1 s, then it was refused (superseded)",
-    "restart: the CA and registry persisted; the rotated certificate connects, the superseded and the revoked ones stay refused",
-    "offline: with the chain simulator stopped (daemon sync failing) the gateway still authenticated and authorized LAN clients; a 60 s certificate's live session ended +0.0 s from its expiry and it could not reconnect"
+    "wills: an authorized will was published by the broker when a LAN client vanished without DISCONNECT",
+    "revocation: the live session ended 1.0 s after the revoke without its will being published; reconnect and HTTPS refused (403 revoked)",
+    "rotation: a new certificate issued over HTTPS works at once; the old one connected during the 5 s grace, its live session ended after 5.2 s, then it was refused (superseded); rotating again within the minimum interval was refused",
+    "restart: the CA and registry persisted; the rotated certificate connects, the superseded and the revoked ones stay refused. A persistent session resumed under the same policy; after the policy changed it restarted clean, so a subscription the new policy refuses delivered nothing",
+    "offline: with the chain simulator stopped (daemon sync failing) the gateway still authenticated and authorized LAN clients; a 60 s certificate's live session ended -0.1 s from its expiry and it could not reconnect"
   ],
-  "denied": {
+  "denied_since_restart": {
     "expired": 2,
     "revoked": 1,
+    "subscribe": 1,
     "superseded": 1
   },
   "fixture": {
