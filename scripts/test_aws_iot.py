@@ -41,6 +41,10 @@ BROKER_IMAGE = "eclipse-mosquitto:2.0.20@sha256:21421af7b32bf9ce508e9090c8eb13bb
 BROKER, RUNNER = "suifleet-awsiot-broker", "suifleet-awsiot-runner"
 MOSQUITTO_PORT, CONTROL_PORT = 18883, 18997
 HOST = "iot.test.local"
+# Control-API arguments select from these constants; requests never name paths.
+IDENTITIES = {name: name for name in ("thing1a", "thing1b", "thing2", "rogue-thing1")}
+PARTS = {"cert": ("pem", "cert.pem"), "key": ("key", "key.pem")}
+PHASES = {"mosquitto": "mosquitto", "aws": "aws", "impostor": "impostor"}
 APP = 63101
 THING = "thing1"
 
@@ -148,8 +152,9 @@ def serve():
 
     def install(name, part):
         """Atomically replace the configured certificate or key (rotation)."""
-        source = pki / f"{name}.{'pem' if part == 'cert' else 'key'}"
-        target = credentials / ("cert.pem" if part == "cert" else "key.pem")
+        suffix, installed = PARTS[part]
+        source = pki / f"{IDENTITIES[name]}.{suffix}"
+        target = credentials / installed
         temporary = target.with_suffix(".new")
         temporary.write_bytes(source.read_bytes())
         temporary.chmod(0o600)
@@ -160,6 +165,7 @@ def serve():
     install("thing1a", "key")
 
     def config(phase, private_key=None):
+        phase = PHASES[phase]
         state = root / f"state-{phase}"
         port = {"mosquitto": MOSQUITTO_PORT, "aws": 443, "impostor": 9443}[phase]
         text = ('[sui]\nmanifest_path = "deployment.json"\n'
@@ -234,6 +240,7 @@ def serve():
         import ssl
         import socket as sockets
         context = ssl.create_default_context(cafile=str(pki / "ca.pem"))
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.load_cert_chain(str(pki / "thing1b.pem"), str(pki / "thing1b.key"))
         with sockets.create_connection(("127.0.0.1", 443), timeout=10) as raw, context.wrap_socket(raw, server_hostname=HOST) as tls:
             tls.sendall(bytes([0x10, 18, 0, 4]) + b"MQTT" + bytes([4, 0, 0, 30, 0, 6]) + b"thing1")
@@ -308,7 +315,7 @@ def serve():
                     else:
                         raise ValueError(op)
                 elif path == "/revoke":
-                    subprocess.run(["openssl", "ca", "-config", "/pki/cadb/ca.cnf", "-revoke", f"/pki/{body['name']}.pem"], check=True, capture_output=True)
+                    subprocess.run(["openssl", "ca", "-config", "/pki/cadb/ca.cnf", "-revoke", f"/pki/{IDENTITIES[body['name']]}.pem"], check=True, capture_output=True)
                     subprocess.run(["openssl", "ca", "-config", "/pki/cadb/ca.cnf", "-gencrl", "-out", "/pki/crl.pem"], check=True, capture_output=True)
                     os.chown("/pki/crl.pem", int(os.environ["HOST_UID"]), int(os.environ["HOST_GID"]))
                     result = {"ok": True}

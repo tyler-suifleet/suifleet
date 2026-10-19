@@ -170,6 +170,7 @@ class AwsIot:
 
     def listen(self, port, alpn=None, server_cert=None, server_key=None):
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.load_cert_chain(server_cert or self.server_cert, server_key or self.server_key)
         context.load_verify_locations(self.ca_file)
         context.verify_mode = ssl.CERT_REQUIRED
