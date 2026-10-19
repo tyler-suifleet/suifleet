@@ -533,11 +533,43 @@ impl Dir {
         }
         Ok(())
     }
+    #[cfg(target_os = "linux")]
     fn names(&self) -> std::io::Result<Vec<String>> {
         // /proc/self/fd/N re-opens this exact directory, not a re-resolved path.
         Ok(std::fs::read_dir(format!("/proc/self/fd/{}", self.raw()))?
             .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
             .collect())
+    }
+    #[cfg(not(target_os = "linux"))]
+    fn names(&self) -> std::io::Result<Vec<String>> {
+        // A duplicate of this exact directory's descriptor, not a re-resolved path.
+        let fd = unsafe { libc::dup(self.raw()) };
+        if fd < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        let dir = unsafe { libc::fdopendir(fd) };
+        if dir.is_null() {
+            let error = std::io::Error::last_os_error();
+            unsafe { libc::close(fd) };
+            return Err(error);
+        }
+        // The duplicate shares the directory offset: read from the start.
+        unsafe { libc::rewinddir(dir) };
+        let mut names = Vec::new();
+        loop {
+            let entry = unsafe { libc::readdir(dir) };
+            if entry.is_null() {
+                break;
+            }
+            let name = unsafe { std::ffi::CStr::from_ptr((*entry).d_name.as_ptr()) };
+            if let Ok(name) = name.to_str() {
+                if name != "." && name != ".." {
+                    names.push(name.to_owned());
+                }
+            }
+        }
+        unsafe { libc::closedir(dir) };
+        Ok(names)
     }
     fn owner(&self) -> std::io::Result<(u32, u32)> {
         let mut stat: libc::stat = unsafe { std::mem::zeroed() };
@@ -620,7 +652,7 @@ mod tests {
 
     #[tokio::test]
     async fn updater_failure_is_reported_not_applied() {
-        let f = fixture("fail", "/bin/false");
+        let f = fixture("fail", "/usr/bin/false");
         let (submitted, ()) = tokio::join!(
             submit(&f.config.spool_dir, ID, &f.artifact, Duration::from_secs(2)),
             helper_once(&f.config)
@@ -724,7 +756,7 @@ mod tests {
 
     #[tokio::test]
     async fn planted_result_symlink_cannot_redirect_root_writes() {
-        let f = fixture("tmplink", "/bin/true");
+        let f = fixture("tmplink", "/usr/bin/true");
         stage_request(&f.config.spool_dir, "abc");
         let victim = f.root.join("victim");
         std::fs::write(&victim, b"untouched").unwrap();
@@ -740,7 +772,7 @@ mod tests {
 
     #[tokio::test]
     async fn symlinked_spool_directories_are_refused() {
-        let f = fixture("dirlink", "/bin/true");
+        let f = fixture("dirlink", "/usr/bin/true");
         // A daemon swaps requests/ for a link to a directory it wants root to edit.
         let target = f.root.join("target");
         stage_request(&target, "abc");
@@ -833,7 +865,7 @@ mod tests {
 
     #[tokio::test]
     async fn unavailable_helper_result_stays_unknown_and_can_be_reconciled() {
-        let f = fixture("unavailable-result", "/bin/true");
+        let f = fixture("unavailable-result", "/usr/bin/true");
         let spool = &f.config.spool_dir;
         let damage_result = async {
             let request = requests(spool).join(format!("{ID}.json"));
@@ -878,7 +910,7 @@ mod tests {
 
     #[tokio::test]
     async fn live_claim_is_not_swept_as_abandoned() {
-        let f = fixture("live", "/bin/true");
+        let f = fixture("live", "/usr/bin/true");
         stage_request(&f.config.spool_dir, ID);
         let requests = requests(&f.config.spool_dir);
         let claimed = requests.join(format!("{ID}.claimed"));
@@ -905,7 +937,7 @@ mod tests {
 
     #[tokio::test]
     async fn late_result_is_collected_until_acknowledged() {
-        let f = fixture("collect", "/bin/true");
+        let f = fixture("collect", "/usr/bin/true");
         stage_request(&f.config.spool_dir, ID);
         assert_eq!(run_helper(&f.config).await.unwrap(), 1);
         assert!(collect(&f.config.spool_dir, ID).unwrap().unwrap().is_ok());
@@ -917,7 +949,7 @@ mod tests {
 
     #[tokio::test]
     async fn recover_keeps_learnable_outcomes_and_withdraws_unclaimed_requests() {
-        let f = fixture("recover", "/bin/true");
+        let f = fixture("recover", "/usr/bin/true");
         let spool = &f.config.spool_dir;
         // A written result and a claim can still be reconciled.
         stage_request(spool, "done");

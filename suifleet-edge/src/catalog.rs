@@ -79,7 +79,7 @@ impl Version {
         let mut pairs = std::collections::BTreeSet::new();
         for i in 0..n {
             anyhow::ensure!(
-                matches!(self.platform_os[i].as_str(), "linux" | "*")
+                matches!(self.platform_os[i].as_str(), "linux" | "macos" | "*")
                     && matches!(
                         self.platform_arch[i].as_str(),
                         // Rust `std::env::consts::ARCH` names; `x86` is 32-bit i686.

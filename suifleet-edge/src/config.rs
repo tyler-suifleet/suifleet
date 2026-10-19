@@ -1,11 +1,60 @@
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
+/// `[pubsub]` (docs/MESSAGING.md).
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct PubsubConfig {
+    #[serde(default = "default_pubsub_messages")]
+    pub max_messages_per_subscription: usize,
+    #[serde(default = "default_pubsub_bytes")]
+    pub max_bytes_per_subscription: u64,
+    #[serde(default = "default_pubsub_qos0")]
+    pub qos0_messages_per_subscription: usize,
+    #[serde(default)]
+    pub bridge: Option<crate::bridge::BridgeConfig>,
+}
+fn default_pubsub_messages() -> usize {
+    1000
+}
+fn default_pubsub_bytes() -> u64 {
+    4 * 1024 * 1024
+}
+fn default_pubsub_qos0() -> usize {
+    100
+}
+impl PubsubConfig {
+    pub fn limits(&self) -> crate::pubsub::Limits {
+        crate::pubsub::Limits {
+            max_messages: self.max_messages_per_subscription,
+            max_bytes: self.max_bytes_per_subscription,
+            qos0_messages: self.qos0_messages_per_subscription,
+        }
+    }
+    pub fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!((1..=100_000).contains(&self.max_messages_per_subscription), "pubsub.max_messages_per_subscription must be 1..=100000");
+        anyhow::ensure!((4096..=1 << 30).contains(&self.max_bytes_per_subscription), "pubsub.max_bytes_per_subscription must be 4 KiB..=1 GiB");
+        anyhow::ensure!((1..=10_000).contains(&self.qos0_messages_per_subscription), "pubsub.qos0_messages_per_subscription must be 1..=10000");
+        if let Some(bridge) = &self.bridge {
+            bridge.validate()?;
+            // Inbound copies of one MQTT message are stored together, so a
+            // queue must hold them all or the message could never be accepted.
+            let copies = bridge.max_inbound_copies();
+            anyhow::ensure!(copies <= self.max_messages_per_subscription,
+                "pubsub.max_messages_per_subscription must be at least {copies}, the most overlapping LocalMqtt→Pubsub mappings");
+        }
+        Ok(())
+    }
+}
+
 #[derive(Deserialize, Debug, Clone)]
 pub struct Config {
     pub sui: SuiConfig,
     #[serde(default)]
     pub ipc: Option<crate::ipc::Settings>,
+    /// Durable pub/sub and the local MQTT bridge (SF-032); none when omitted.
+    #[serde(default)]
+    pub pubsub: Option<PubsubConfig>,
     pub device: DeviceConfig,
     #[serde(default)]
     pub walrus: WalrusConfig,
@@ -22,9 +71,80 @@ pub struct Config {
     pub logs: Option<LogsConfig>,
     #[serde(default)]
     pub daemon_update: DaemonUpdateConfig,
+    /// Durable local streams and exports (SF-034); none when omitted.
+    #[serde(default)]
+    pub streams: Option<StreamsConfig>,
+    /// Local device shadows and cloud sync (SF-033); none when omitted.
+    #[serde(default)]
+    pub shadows: Option<ShadowsConfig>,
     /// The file this configuration was loaded from (for the update preflight).
     #[serde(skip)]
     pub path: PathBuf,
+}
+
+/// `[streams]`: durable local streams (docs/STREAMS.md). Streams with an
+/// export are declared here only: components cannot direct device-signed
+/// data to a destination.
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct StreamsConfig {
+    #[serde(default = "default_max_streams")]
+    pub max_streams: usize,
+    /// Sum of all streams' max_size (their disk/memory reservation).
+    #[serde(default = "default_streams_bytes")]
+    pub max_total_bytes: u64,
+    #[serde(default)]
+    pub definitions: Vec<crate::streams::Definition>,
+}
+fn default_max_streams() -> usize {
+    32
+}
+fn default_streams_bytes() -> u64 {
+    64 << 20
+}
+impl StreamsConfig {
+    pub fn quota(&self) -> crate::streams::Quota {
+        crate::streams::Quota { max_streams: self.max_streams, max_total_bytes: self.max_total_bytes }
+    }
+    pub fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!((1..=1024).contains(&self.max_streams), "streams.max_streams must be 1..=1024");
+        anyhow::ensure!((1024..=64 << 30).contains(&self.max_total_bytes), "streams.max_total_bytes must be 1 KiB..=64 GiB");
+        anyhow::ensure!(self.definitions.len() <= self.max_streams, "more stream definitions than streams.max_streams");
+        let mut names = std::collections::BTreeSet::new();
+        for def in &self.definitions {
+            def.validate().map_err(|e| anyhow::anyhow!("stream {:?}: {e}", def.name))?;
+            anyhow::ensure!(names.insert(&def.name), "stream {:?} is defined twice", def.name);
+        }
+        anyhow::ensure!(self.definitions.iter().map(|d| d.max_size).sum::<u64>() <= self.max_total_bytes,
+            "stream definitions exceed streams.max_total_bytes");
+        Ok(())
+    }
+}
+
+/// `[shadows]`: local device shadows (docs/SHADOWS.md).
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct ShadowsConfig {
+    /// The AWS-style thing name in shadow resources and notification topics.
+    pub thing_name: String,
+    #[serde(default = "default_max_shadows")]
+    pub max_shadows: usize,
+    /// The cloud sync adapter; none when omitted.
+    #[serde(default)]
+    pub sync: Option<crate::shadows::SyncConfig>,
+}
+fn default_max_shadows() -> usize {
+    64
+}
+impl ShadowsConfig {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(crate::shadows::valid_thing(&self.thing_name), "shadows.thing_name must be 1-128 of [A-Za-z0-9:_-]");
+        anyhow::ensure!((1..=crate::shadows::MAX_SHADOWS).contains(&self.max_shadows), "shadows.max_shadows must be 1..=256");
+        if let Some(sync) = &self.sync {
+            sync.validate(self.max_shadows)?;
+        }
+        Ok(())
+    }
 }
 
 /// `[telemetry]`: signed snapshots to the fleet indexer (docs/TELEMETRY.md).
@@ -499,6 +619,7 @@ impl Config {
         let raw = std::fs::read_to_string(path)?;
         let mut cfg: Self = toml::from_str(&raw)?;
         if let Some(ipc) = &cfg.ipc { ipc.validate()?; }
+        if let Some(pubsub) = &cfg.pubsub { pubsub.validate()?; }
         cfg.path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
         anyhow::ensure!(
             !cfg.daemon_update.enabled
@@ -516,6 +637,9 @@ impl Config {
             "daemon_update cannot be enabled with the service signer ([device.signer] kind = \"service\"): \
              components could replace the daemon the signing service trusts"
         );
+        if let Some(reason) = unsupported_on(std::env::consts::OS, &cfg) {
+            anyhow::bail!("{reason} (docs/MACOS_RUNTIME.md)");
+        }
         anyhow::ensure!(
             cfg.components.recovery_commands.iter().all(|(name, command)| crate::deps::valid_name(name) && !command.trim().is_empty()),
             "application recovery needs valid component names and nonempty commands"
@@ -568,12 +692,40 @@ impl Config {
             anyhow::ensure!(cfg.telemetry.is_some(), "[logs] needs [telemetry] (the fleet indexer URL)");
             logs.validate()?;
         }
+        if let Some(streams) = &cfg.streams {
+            streams.validate()?;
+        }
+        if let Some(shadows) = &cfg.shadows {
+            shadows.validate()?;
+        }
         Ok(cfg)
     }
 }
 
 fn default_timeout() -> u64 {
     600
+}
+
+/// A configured feature this platform cannot provide as specified. On macOS
+/// (SF-075) these rest on Linux/systemd mechanisms with no validated
+/// equivalent, so they are refused rather than silently weakened.
+pub fn unsupported_on(os: &str, cfg: &Config) -> Option<&'static str> {
+    if os != "macos" {
+        return None;
+    }
+    if cfg.device.signer.as_ref().is_some_and(|signer| signer.kind == "service") {
+        return Some("the device signing service needs systemd unit/cgroup caller identity; it is not supported on macOS");
+    }
+    if matches!(cfg.apply.mode, ApplyMode::PrivilegedHelper) {
+        return Some("the privileged firmware helper is a systemd path-activated unit; it is not supported on macOS");
+    }
+    if cfg.apply.max_memory_bytes.is_some() {
+        return Some("apply.max_memory_bytes is not enforced by macOS (RLIMIT_AS); it is not supported on macOS");
+    }
+    if cfg.daemon_update.enabled {
+        return Some("daemon self-update has not been validated under launchd; it is not supported on macOS");
+    }
+    None
 }
 
 impl TelemetryConfig {
@@ -629,6 +781,22 @@ mod tests {
         serde_json::from_str(include_str!("../../manifests/fixture.localnet.json")).unwrap()
     }
     #[test]
+    fn shadows_need_a_thing_name_and_bounded_limits() {
+        for (text, valid) in [
+            ("thing_name = \"dev-1:a_b\"", true),
+            ("thing_name = \"\"", false),
+            ("thing_name = \"a b\"", false),
+            ("thing_name = \"d\"\nmax_shadows = 0", false),
+            ("thing_name = \"d\"\nmax_shadows = 129", false),
+            ("thing_name = \"d\"\nmax_shadows = 2\n[sync]\nurl = \"https://x\"\nshadows = [\"\", \"b\"]", true),
+            ("thing_name = \"d\"\nmax_shadows = 2\n[sync]\nurl = \"https://x\"\nshadows = [\"a\", \"b\", \"c\"]", false),
+        ] {
+            let cfg: ShadowsConfig = toml::from_str(text).unwrap();
+            assert_eq!(cfg.validate().is_ok(), valid, "{text}");
+        }
+        assert!(toml::from_str::<ShadowsConfig>("thing_name = \"d\"\nunknown = 1").is_err());
+    }
+    #[test]
     fn mixed_origins_and_compatibility() {
         let manifest = fixture();
         manifest.validate().unwrap();
@@ -657,6 +825,16 @@ mod tests {
                 _ => unreachable!(),
             }
             assert!(bad.validate().is_err(), "{field}");
+        }
+    }
+    #[test]
+    fn pubsub_queues_must_hold_every_inbound_copy_of_a_message() {
+        let bridge = "[bridge]\nbroker='127.0.0.1:1883'\n\
+            [[bridge.mappings]]\ntopic='lan/#'\nsource='LocalMqtt'\ntarget='Pubsub'\ntarget_topic_prefix='a/'\n\
+            [[bridge.mappings]]\ntopic='lan/+'\nsource='LocalMqtt'\ntarget='Pubsub'\ntarget_topic_prefix='b/'\n";
+        for (messages, valid) in [(1, false), (2, true)] {
+            let pubsub: PubsubConfig = toml::from_str(&format!("max_messages_per_subscription={messages}\n{bridge}")).unwrap();
+            assert_eq!(pubsub.validate().is_ok(), valid, "{messages}");
         }
     }
     #[test]
@@ -748,6 +926,24 @@ mod tests {
         let error = format!("{:#}", Config::load(&path).unwrap_err());
         assert!(!error.contains("daemon_update"), "{error}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+    #[test]
+    fn linux_only_features_are_refused_on_macos() {
+        let base = "[sui]\nmanifest_path='deployment.json'\n[device]\nkeypair_path='/k'\ndevice_object_id='0x1'\ndevice_cap_id='0x2'\n";
+        let parse = |extra: &str| -> Config { toml::from_str(&format!("{base}{extra}")).unwrap() };
+        let plain = parse("[apply]\ncommand='/usr/bin/true'\n");
+        assert_eq!(unsupported_on("macos", &plain), None);
+        for (extra, needle) in [
+            ("[device.signer]\nkind='service'\nsocket='/s'\n[apply]\ncommand='/usr/bin/true'\n", "signing service"),
+            ("[apply]\ncommand='/usr/bin/true'\nmode='privileged-helper'\n", "firmware helper"),
+            ("[apply]\ncommand='/usr/bin/true'\nmax_memory_bytes=1000000\n", "max_memory_bytes"),
+            ("[apply]\ncommand='/usr/bin/true'\n[daemon_update]\nenabled=true\ncomponent='suifleet'\n", "self-update"),
+        ] {
+            let cfg = parse(extra);
+            assert!(unsupported_on("macos", &cfg).is_some_and(|reason| reason.contains(needle)), "{extra}");
+            // Linux keeps every one of them.
+            assert_eq!(unsupported_on("linux", &cfg), None, "{extra}");
+        }
     }
     #[test]
     fn legacy_network_config_rejected() {

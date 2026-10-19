@@ -25,7 +25,7 @@ export function validateComponent(name: string, version: string, manifests: Plat
   if(!manifests.length || manifests.length>16) throw new Error('Expected 1–16 manifests');
   const seen = new Set<string>();
   for(const m of manifests) {
-    if(!['linux','*'].includes(m.os) || !['x86_64','aarch64','arm','x86','*'].includes(m.arch)) throw new Error('Unsupported manifest platform');
+    if(!['linux','macos','*'].includes(m.os) || !['x86_64','aarch64','arm','x86','*'].includes(m.arch)) throw new Error('Unsupported manifest platform');
     const key=m.os+'/'+m.arch; if(seen.has(key)) throw new Error('Duplicate platform'); seen.add(key);
     if(!/^[A-Za-z0-9_-]{1,128}(?![\s\S])/.test(m.recipeBlobId) || !/^[a-f0-9]{64}(?![\s\S])/.test(m.recipeSha256) || !/^[a-f0-9]{64}(?![\s\S])/.test(m.artifactSha256)) throw new Error('Invalid manifest blob/digest');
   }

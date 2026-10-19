@@ -44,6 +44,7 @@ Critical known gaps:
 | `dapp/src` | Wallet UI, transaction builders, queries and Walrus uploads |
 | `suifleet-edge/src` | Identity, chain adapter, recipes, updater and durable journal |
 | `suifleet-edge/meta-suifleet` | Yocto recipe and systemd service |
+| `suifleet-edge/packaging/macos` | macOS LaunchDaemon plist and installer; see [MACOS_RUNTIME.md](docs/MACOS_RUNTIME.md) |
 | `scripts/redeploy.sh`, `scripts/publish.py` | Verified publish/upgrade; records releases and generates both client configs |
 | `scripts/test_ota.py` | Real daemon against local chain/Walrus simulators |
 | `Dockerfile`, `docker-compose.yml`, `Makefile` | Development environment and build/test entry points |

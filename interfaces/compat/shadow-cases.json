@@ -357,6 +357,26 @@
      "shadow": "",
      "request": {
       "state": {
+       "reported": {
+        "items": [
+         {
+          "x": null
+         }
+        ]
+       }
+      }
+     }
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "update",
+     "shadow": "",
+     "request": {
+      "state": {
        "desired": {
         "a": 1
        }

@@ -101,6 +101,13 @@ models and actual TensorFlow Lite software-runner inference tests. This separate
 implementation evidence does not turn the AWS-named catalog or the reference
 evaluator below into an AWS-compatible runtime.
 
+SF-075 adds a [native macOS runtime](MACOS_RUNTIME.md): a LaunchDaemon whose
+launchd coalition contains component descendants, peer-UID IPC, private key
+checks and the catalog OS `macos`, exercised by real launchd service, crash,
+interrupted-install and permission tests on a hosted macOS runner. It is not
+Greengrass platform compatibility, and the `macos` scope below stays a reference
+model.
+
 Run `make test-compat`. It checks the existing catalog and reference suites plus
 76 remaining-roadmap vectors and negative ownership/publication/evidence guards.
 `python3 scripts/greengrass_roadmap.py` runs just the new roadmap checks. The
