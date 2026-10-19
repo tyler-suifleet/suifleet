@@ -208,7 +208,7 @@ os._exit(0)
             exporter.firehose._request_signer._credentials._expiry_time = datetime.now(timezone.utc) - timedelta(seconds=1)
             state['credentials'] = False
             before = len(state['requests'])
-            with self.assertRaises(Exception):
+            with self.assertNoLogs(), self.assertRaises(Exception):
                 exporter.step()
             self.assertEqual(len(state['requests']), before)
             state['credentials'] = True

@@ -4,6 +4,7 @@ import argparse
 import fcntl
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -35,6 +36,12 @@ def config(value):
 
 def aws_client(cfg):
     # Use ONLY the scoped container provider, never ambient profiles/static keys.
+    # The pinned SDK logs refresh exceptions at WARNING with raw provider text.
+    # This executable emits only its own bounded, redacted diagnostics.
+    sdk_logger = logging.getLogger('botocore')
+    sdk_logger.addHandler(logging.NullHandler())
+    sdk_logger.propagate = False
+    sdk_logger.setLevel(logging.CRITICAL + 1)
     import botocore.session
     from botocore.config import Config
     from botocore.credentials import ContainerProvider
