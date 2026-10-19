@@ -226,3 +226,9 @@ SF-038 does not create tickets ([AGENTS.md](../AGENTS.md#ticket-authority--user-
 2. SF-064 splits the remaining Lambda, industrial, ML and platform roadmap into concrete tickets before any of it is implemented.
 3. The open SF-037 translation ticket adopts `managed-dependency-cases.json` for managed dependencies.
 4. Live AWS acceptance for every adapter needs a separate user authorization for an AWS account. None exists, and none of those checks has run.
+
+SF-059 runtime evidence: the opt-in Linux [CloudWatch metrics companion](CLOUDWATCH_METRICS.md)
+now executes the 90 pinned metrics fixture steps against its SQLite queue and
+HTTP-observed SigV4 transport, plus permission/restart/bounds cases. This is
+separate from reference-only conformance; actual AWS delivery remains unrun and
+unauthorized in #104, and physical integration remains #32.
