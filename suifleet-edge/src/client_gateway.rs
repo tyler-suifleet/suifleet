@@ -2,7 +2,8 @@
 //! authorizing MQTT 3.1.1 proxy in front of the local broker, authenticated
 //! discovery and certificate rotation over HTTPS, and unauthenticated UDP
 //! discovery hints (docs/CLIENT_DEVICES.md). Identity and policy decisions
-//! are `clientdevices::Authority`'s; this module only enforces them.
+//! belong to the client-device Authority (clientdevices.rs); this module only
+//! enforces them.
 use crate::clientdevices::{fingerprint, Authority};
 use crate::{mqtt, telemetry::now_ms};
 use rcgen::SanType;
