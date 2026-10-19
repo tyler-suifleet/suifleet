@@ -4,3 +4,4 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     python3 ffmpeg=7:4.4.2-0ubuntu0.22.04.1 && rm -rf /var/lib/apt/lists/*
 ENV PYTHONDONTWRITEBYTECODE=1
 WORKDIR /workspace
+USER 65532:65532
