@@ -398,6 +398,25 @@ class ModbusTests(Harness):
         self.assertEqual([r["id"] for r in records], sorted((r["id"] for r in records), key=lambda i: int(i.split(":")[-1])),
                          "records leave the buffer in order")
         self.assertEqual(self.collector.buffer.dropped, 0, "backpressure skips polls instead of dropping records")
+        batches = [m["batch"] for m in sink.messages]
+        self.assertEqual(len(batches), len(set(batches)), "each stored message has its own batch id")
+        self.assertGreater(sink.attempts, len(sink.messages), "failed appends were retried")
+
+    def test_lost_acknowledgement_resends_identical_batch(self):
+        class AckLost(MemorySink):
+            """Stores the first message, then reports a failure, as after an IPC timeout."""
+            def append(self, message):
+                stored = super().append(message)
+                if len(self.messages) == 1:
+                    raise col.SinkError("ipc: timed out")
+                return stored
+        sink = AckLost()
+        self.start(self.config(), sink)
+        wait_until(lambda: len(sink.messages) >= 3)
+        self.assertEqual(sink.messages[0], sink.messages[1], "the retry is byte-for-byte the same message")
+        unique = {m["batch"]: m for m in sink.messages}
+        ids = [r["id"] for m in unique.values() for r in m["records"]]
+        self.assertEqual(len(ids), len(set(ids)), "deduplicating by batch removes the duplicate")
 
     def test_tls_mutual_authentication(self):
         with tempfile.TemporaryDirectory() as tmp:

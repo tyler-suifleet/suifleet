@@ -424,8 +424,8 @@ class Writer(threading.Thread):
     """Moves records from the buffer to the sink in bounded messages, retrying with backoff.
 
     A record leaves the buffer only after the daemon acknowledged its append.
-    An IPC timeout has an unknown outcome, so a retried message can be stored
-    twice; consumers deduplicate by the message's `batch` identifier.
+    An IPC timeout has an unknown outcome, so a failed message is retried
+    unchanged and may be stored twice; consumers deduplicate by its `batch`.
     """
 
     def __init__(self, collector):
@@ -436,14 +436,15 @@ class Writer(threading.Thread):
         self.batches, self.stopping = 0, StopEvent()
 
     def run(self):
-        backoff = self.retry_min
+        backoff, message = self.retry_min, None
         while not self.stopping.deadline_passed():
-            records = self.c.buffer.peek(self.limit, 0.2)
-            if not records:
-                if self.stopping.is_set():
-                    return
-                continue
-            message = self._message(records)
+            if message is None:                    # a failed append is retried with the identical message
+                records = self.c.buffer.peek(self.limit, 0.2)
+                if not records:
+                    if self.stopping.is_set():
+                        return
+                    continue
+                message = self._message(records)
             try:
                 sequence = self.c.sink.append(message)
             except SinkError as error:
@@ -465,6 +466,7 @@ class Writer(threading.Thread):
                 for record in message["records"]:
                     if not self.c.sink.publish(record):
                         self.c.stats["publish_failures"] += 1
+            message = None
 
     def _message(self, records):
         """Largest prefix that stays below MAX_MESSAGE_BYTES (a record is at most a few KiB)."""
