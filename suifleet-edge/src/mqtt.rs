@@ -2,10 +2,11 @@
 //! (SF-032): CONNECT/CONNACK, PUBLISH at QoS 0 and 1, PUBACK, SUBSCRIBE/SUBACK,
 //! PINGREQ/PINGRESP. MQTT 5 brokers accept 3.1.1 clients. The bridge keeps a
 //! persistent session, so it never needs a clean DISCONNECT.
-//! Plain TCP to a broker on this device or a trusted local network; TLS and
-//! client-certificate authentication of LAN devices are SF-035.
+//! The local broker link is plain TCP to this device or a trusted local
+//! network (TLS for LAN devices is SF-035); the AWS IoT Core link runs the
+//! same session over mutual TLS (SF-061, `iotcore.rs`).
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::TcpStream,
 };
 
@@ -26,7 +27,7 @@ fn put_string(out: &mut Vec<u8>, text: &[u8]) {
     out.extend_from_slice(text);
 }
 
-fn packet(first: u8, body: Vec<u8>) -> Vec<u8> {
+pub(crate) fn packet(first: u8, body: Vec<u8>) -> Vec<u8> {
     let mut out = vec![first];
     let mut length = body.len();
     loop {
@@ -149,21 +150,50 @@ pub fn decode(buf: &[u8]) -> anyhow::Result<Option<(Packet, usize)>> {
     Ok(Some((decoded, total)))
 }
 
+/// A byte stream a session runs over: TCP, or TLS over TCP.
+pub trait Stream: AsyncRead + AsyncWrite + Unpin + Send {}
+impl<T: AsyncRead + AsyncWrite + Unpin + Send> Stream for T {}
+
+/// The broker ended the connection cleanly (end of stream), as opposed to a
+/// transport error or timeout. AWS IoT Core does this when a client
+/// publishes to a topic its policy denies.
+#[derive(Debug)]
+pub struct Closed;
+
+impl std::fmt::Display for Closed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("broker closed the connection")
+    }
+}
+impl std::error::Error for Closed {}
+
 /// A connected session: packets in, bytes out.
 pub struct Session {
-    stream: TcpStream,
+    stream: Box<dyn Stream>,
     buffer: Vec<u8>,
+}
+
+pub async fn connect_tcp(address: &str) -> anyhow::Result<TcpStream> {
+    let stream = tokio::time::timeout(std::time::Duration::from_secs(10), TcpStream::connect(address)).await
+        .map_err(|_| anyhow::anyhow!("connecting to {address} timed out"))??;
+    stream.set_nodelay(true)?;
+    Ok(stream)
 }
 
 impl Session {
     pub async fn open(address: &str, client_id: &str, username: Option<&str>, password: Option<&[u8]>, keep_alive: u16) -> anyhow::Result<(Self, bool)> {
-        let stream = tokio::time::timeout(std::time::Duration::from_secs(10), TcpStream::connect(address)).await??;
-        stream.set_nodelay(true)?;
+        Self::start(Box::new(connect_tcp(address).await?), client_id, username, password, keep_alive).await
+    }
+
+    /// CONNECT over an established stream and wait for the CONNACK.
+    pub async fn start(stream: Box<dyn Stream>, client_id: &str, username: Option<&str>, password: Option<&[u8]>, keep_alive: u16) -> anyhow::Result<(Self, bool)> {
         let mut session = Self { stream, buffer: Vec::new() };
         // A persistent session: the broker keeps our subscriptions and the QoS 1
         // messages that arrive while the bridge is away.
         session.send(&connect(client_id, username, password, keep_alive, false)).await?;
-        match tokio::time::timeout(std::time::Duration::from_secs(10), session.next()).await?? {
+        let reply = tokio::time::timeout(std::time::Duration::from_secs(10), session.next()).await
+            .map_err(|_| anyhow::anyhow!("no CONNACK within 10 s"))?;
+        match reply? {
             Packet::ConnAck { session_present, code: 0 } => Ok((session, session_present)),
             Packet::ConnAck { code, .. } => anyhow::bail!("broker refused the connection (CONNACK {code})"),
             other => anyhow::bail!("expected CONNACK, got {other:?}"),
@@ -172,6 +202,7 @@ impl Session {
 
     pub async fn send(&mut self, bytes: &[u8]) -> anyhow::Result<()> {
         self.stream.write_all(bytes).await?;
+        self.stream.flush().await?;
         Ok(())
     }
 
@@ -182,8 +213,14 @@ impl Session {
                 return Ok(packet);
             }
             let mut chunk = [0u8; 16 * 1024];
-            let read = self.stream.read(&mut chunk).await?;
-            anyhow::ensure!(read > 0, "broker closed the connection");
+            // TLS without close_notify reports an unexpected end of stream.
+            let read = match self.stream.read(&mut chunk).await {
+                Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => 0,
+                other => other?,
+            };
+            if read == 0 {
+                return Err(Closed.into());
+            }
             self.buffer.extend_from_slice(&chunk[..read]);
             anyhow::ensure!(self.buffer.len() <= MAX_PACKET + 8, "packet too large");
         }
