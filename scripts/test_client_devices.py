@@ -264,6 +264,7 @@ class Client:
 
     def __init__(self, ip, identity, port=MQTT_PORT, server_hostname=None, ca=None):
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.load_verify_locations(str(ca))
         if identity:
             context.load_cert_chain(str(identity[0]), str(identity[1]))
