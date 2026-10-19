@@ -21,6 +21,10 @@ bcs = "0.1"
 # and no OpenSSL to cross-compile for release artifacts.
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "http2", "charset", "rustls-tls-native-roots"] }
 tokio = { version = "1", features = ["full"] }
+# AWS IoT Core mutual TLS (SF-061): the rustls/ring stack reqwest already uses.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
+zeroize = "1"
 futures-util = "0.3"
 
 # Crypto — ed25519 signing for SUI transactions

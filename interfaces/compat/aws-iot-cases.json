@@ -1,0 +1,1354 @@
+{
+ "description": "SF-061 aws-iot-core-connection reference cases: the [aws_iot] connection settings, AWS IoT Core topic limits, IotCore bridge mapping rules, the AWS Device Shadow update patch and request/answer handling, and the policy-denied publication rule. Executed by the daemon (make edge-test) and modelled by scripts/greengrass_compat.py.",
+ "pins": {
+  "aws.greengrass.clientdevices.mqtt.Bridge": "2.3.3",
+  "aws.greengrass.ShadowManager": "2.3.15"
+ },
+ "connection": [
+  {
+   "id": "defaults-8883-no-alpn",
+   "config": {
+    "endpoint": "abc123-ats.iot.us-east-1.amazonaws.com",
+    "thing_name": "dev1",
+    "ca_file": "/etc/suifleet/aws/AmazonRootCA1.pem",
+    "certificate_file": "/etc/suifleet/aws/device.pem.crt",
+    "private_key_file": "/etc/suifleet/aws/private.pem.key"
+   },
+   "expected": {
+    "valid": true,
+    "alpn": null,
+    "client_id": "dev1"
+   }
+  },
+  {
+   "id": "port-443-alpn-default",
+   "config": {
+    "endpoint": "abc123-ats.iot.us-east-1.amazonaws.com",
+    "thing_name": "dev1",
+    "ca_file": "/etc/suifleet/aws/AmazonRootCA1.pem",
+    "certificate_file": "/etc/suifleet/aws/device.pem.crt",
+    "private_key_file": "/etc/suifleet/aws/private.pem.key",
+    "port": 443
+   },
+   "expected": {
+    "valid": true,
+    "alpn": "x-amzn-mqtt-ca",
+    "client_id": "dev1"
+   }
+  },
+  {
+   "id": "port-443-explicit-alpn",
+   "config": {
+    "endpoint": "abc123-ats.iot.us-east-1.amazonaws.com",
+    "thing_name": "dev1",
+    "ca_file": "/etc/suifleet/aws/AmazonRootCA1.pem",
+    "certificate_file": "/etc/suifleet/aws/device.pem.crt",
+    "private_key_file": "/etc/suifleet/aws/private.pem.key",
+    "port": 443,
+    "alpn": "mqtt"
+   },
+   "expected": {
+    "valid": true,
+    "alpn": "mqtt",
+    "client_id": "dev1"
+   }
+  },
+  {
+   "id": "explicit-alpn-on-8883",
+   "config": {
+    "endpoint": "abc123-ats.iot.us-east-1.amazonaws.com",
+    "thing_name": "dev1",
+    "ca_file": "/etc/suifleet/aws/AmazonRootCA1.pem",
+    "certificate_file": "/etc/suifleet/aws/device.pem.crt",
+    "private_key_file": "/etc/suifleet/aws/private.pem.key",
+    "alpn": "x-amzn-mqtt-ca"
+   },
+   "expected": {
+    "valid": true,
+    "alpn": "x-amzn-mqtt-ca",
+    "client_id": "dev1"
+   }
+  },
+  {
+   "id": "explicit-client-id",
+   "config": {
+    "endpoint": "abc123-ats.iot.us-east-1.amazonaws.com",
+    "thing_name": "dev1",
+    "ca_file": "/etc/suifleet/aws/AmazonRootCA1.pem",
+    "certificate_file": "/etc/suifleet/aws/device.pem.crt",
+    "private_key_file": "/etc/suifleet/aws/private.pem.key",
+    "client_id": "dev1-bridge"
+   },
+   "expected": {
+    "valid": true,
+    "alpn": null,
+    "client_id": "dev1-bridge"
+   }
+  },
+  {
+   "id": "keep-alive-30",
+   "config": {
+    "endpoint": "abc123-ats.iot.us-east-1.amazonaws.com",
+    "thing_name": "dev1",
+    "ca_file": "/etc/suifleet/aws/AmazonRootCA1.pem",
+    "certificate_file": "/etc/suifleet/aws/device.pem.crt",
+    "private_key_file": "/etc/suifleet/aws/private.pem.key",
+    "keep_alive_seconds": 30
+   },
+   "expected": {
+    "valid": true,
+    "alpn": null,
+    "client_id": "dev1"
+   }
+  },
+  {
+   "id": "keep-alive-1200",
+   "config": {
+    "endpoint": "abc123-ats.iot.us-east-1.amazonaws.com",
+    "thing_name": "dev1",
+    "ca_file": "/etc/suifleet/aws/AmazonRootCA1.pem",
+    "certificate_file": "/etc/suifleet/aws/device.pem.crt",
+    "private_key_file": "/etc/suifleet/aws/private.pem.key",
+    "keep_alive_seconds": 1200
+   },
+   "expected": {
+    "valid": true,
+    "alpn": null,
+    "client_id": "dev1"
+   }
+  },
+  {
+   "id": "keep-alive-29",
+   "config": {
+    "endpoint": "abc123-ats.iot.us-east-1.amazonaws.com",
+    "thing_name": "dev1",
+    "ca_file": "/etc/suifleet/aws/AmazonRootCA1.pem",
+    "certificate_file": "/etc/suifleet/aws/device.pem.crt",
+    "private_key_file": "/etc/suifleet/aws/private.pem.key",
+    "keep_alive_seconds": 29
+   },
+   "expected": {
+    "valid": false
+   }
+  },
+  {
+   "id": "keep-alive-1201",
+   "config": {
+    "endpoint": "abc123-ats.iot.us-east-1.amazonaws.com",
+    "thing_name": "dev1",
+    "ca_file": "/etc/suifleet/aws/AmazonRootCA1.pem",
+    "certificate_file": "/etc/suifleet/aws/device.pem.crt",
+    "private_key_file": "/etc/suifleet/aws/private.pem.key",
+    "keep_alive_seconds": 1201
+   },
+   "expected": {
+    "valid": false
+   }
+  },
+  {
+   "id": "endpoint-with-scheme",
+   "config": {
+    "endpoint": "https://abc123-ats.iot.us-east-1.amazonaws.com",
+    "thing_name": "dev1",
+    "ca_file": "/etc/suifleet/aws/AmazonRootCA1.pem",
+    "certificate_file": "/etc/suifleet/aws/device.pem.crt",
+    "private_key_file": "/etc/suifleet/aws/private.pem.key"
+   },
+   "expected": {
+    "valid": false
+   }
+  },
+  {
+   "id": "endpoint-with-port",
+   "config": {
+    "endpoint": "abc123-ats.iot.us-east-1.amazonaws.com:8883",
+    "thing_name": "dev1",
+    "ca_file": "/etc/suifleet/aws/AmazonRootCA1.pem",
+    "certificate_file": "/etc/suifleet/aws/device.pem.crt",
+    "private_key_file": "/etc/suifleet/aws/private.pem.key"
+   },
+   "expected": {
+    "valid": false
+   }
+  },
+  {
+   "id": "endpoint-empty-label",
+   "config": {
+    "endpoint": "abc..amazonaws.com",
+    "thing_name": "dev1",
+    "ca_file": "/etc/suifleet/aws/AmazonRootCA1.pem",
+    "certificate_file": "/etc/suifleet/aws/device.pem.crt",
+    "private_key_file": "/etc/suifleet/aws/private.pem.key"
+   },
+   "expected": {
+    "valid": false
+   }
+  },
+  {
+   "id": "port-zero",
+   "config": {
+    "endpoint": "abc123-ats.iot.us-east-1.amazonaws.com",
+    "thing_name": "dev1",
+    "ca_file": "/etc/suifleet/aws/AmazonRootCA1.pem",
+    "certificate_file": "/etc/suifleet/aws/device.pem.crt",
+    "private_key_file": "/etc/suifleet/aws/private.pem.key",
+    "port": 0
+   },
+   "expected": {
+    "valid": false
+   }
+  },
+  {
+   "id": "empty-alpn",
+   "config": {
+    "endpoint": "abc123-ats.iot.us-east-1.amazonaws.com",
+    "thing_name": "dev1",
+    "ca_file": "/etc/suifleet/aws/AmazonRootCA1.pem",
+    "certificate_file": "/etc/suifleet/aws/device.pem.crt",
+    "private_key_file": "/etc/suifleet/aws/private.pem.key",
+    "alpn": ""
+   },
+   "expected": {
+    "valid": false
+   }
+  },
+  {
+   "id": "thing-name-space",
+   "config": {
+    "endpoint": "abc123-ats.iot.us-east-1.amazonaws.com",
+    "thing_name": "dev 1",
+    "ca_file": "/etc/suifleet/aws/AmazonRootCA1.pem",
+    "certificate_file": "/etc/suifleet/aws/device.pem.crt",
+    "private_key_file": "/etc/suifleet/aws/private.pem.key"
+   },
+   "expected": {
+    "valid": false
+   }
+  },
+  {
+   "id": "client-id-129",
+   "config": {
+    "endpoint": "abc123-ats.iot.us-east-1.amazonaws.com",
+    "thing_name": "dev1",
+    "ca_file": "/etc/suifleet/aws/AmazonRootCA1.pem",
+    "certificate_file": "/etc/suifleet/aws/device.pem.crt",
+    "private_key_file": "/etc/suifleet/aws/private.pem.key",
+    "client_id": "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+   },
+   "expected": {
+    "valid": false
+   }
+  },
+  {
+   "id": "client-id-128",
+   "config": {
+    "endpoint": "abc123-ats.iot.us-east-1.amazonaws.com",
+    "thing_name": "dev1",
+    "ca_file": "/etc/suifleet/aws/AmazonRootCA1.pem",
+    "certificate_file": "/etc/suifleet/aws/device.pem.crt",
+    "private_key_file": "/etc/suifleet/aws/private.pem.key",
+    "client_id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+   },
+   "expected": {
+    "valid": true,
+    "alpn": null,
+    "client_id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+   }
+  },
+  {
+   "id": "relative-key",
+   "config": {
+    "endpoint": "abc123-ats.iot.us-east-1.amazonaws.com",
+    "thing_name": "dev1",
+    "ca_file": "/etc/suifleet/aws/AmazonRootCA1.pem",
+    "certificate_file": "/etc/suifleet/aws/device.pem.crt",
+    "private_key_file": "private.pem.key"
+   },
+   "expected": {
+    "valid": false
+   }
+  },
+  {
+   "id": "relative-ca",
+   "config": {
+    "endpoint": "abc123-ats.iot.us-east-1.amazonaws.com",
+    "thing_name": "dev1",
+    "ca_file": "ca.pem",
+    "certificate_file": "/etc/suifleet/aws/device.pem.crt",
+    "private_key_file": "/etc/suifleet/aws/private.pem.key"
+   },
+   "expected": {
+    "valid": false
+   }
+  },
+  {
+   "id": "credential-check-4",
+   "config": {
+    "endpoint": "abc123-ats.iot.us-east-1.amazonaws.com",
+    "thing_name": "dev1",
+    "ca_file": "/etc/suifleet/aws/AmazonRootCA1.pem",
+    "certificate_file": "/etc/suifleet/aws/device.pem.crt",
+    "private_key_file": "/etc/suifleet/aws/private.pem.key",
+    "credential_check_seconds": 4
+   },
+   "expected": {
+    "valid": false
+   }
+  },
+  {
+   "id": "credential-check-3600",
+   "config": {
+    "endpoint": "abc123-ats.iot.us-east-1.amazonaws.com",
+    "thing_name": "dev1",
+    "ca_file": "/etc/suifleet/aws/AmazonRootCA1.pem",
+    "certificate_file": "/etc/suifleet/aws/device.pem.crt",
+    "private_key_file": "/etc/suifleet/aws/private.pem.key",
+    "credential_check_seconds": 3600
+   },
+   "expected": {
+    "valid": true,
+    "alpn": null,
+    "client_id": "dev1"
+   }
+  },
+  {
+   "id": "unknown-field",
+   "config": {
+    "endpoint": "abc123-ats.iot.us-east-1.amazonaws.com",
+    "thing_name": "dev1",
+    "ca_file": "/etc/suifleet/aws/AmazonRootCA1.pem",
+    "certificate_file": "/etc/suifleet/aws/device.pem.crt",
+    "private_key_file": "/etc/suifleet/aws/private.pem.key",
+    "password": "secret"
+   },
+   "expected": {
+    "valid": false
+   }
+  },
+  {
+   "id": "missing-key",
+   "config": {
+    "endpoint": "abc123-ats.iot.us-east-1.amazonaws.com",
+    "thing_name": "dev1",
+    "ca_file": "/etc/suifleet/aws/AmazonRootCA1.pem",
+    "certificate_file": "/etc/suifleet/aws/device.pem.crt"
+   },
+   "expected": {
+    "valid": false
+   }
+  }
+ ],
+ "topics": [
+  {
+   "id": "plain",
+   "topic": "dt/dev1/telemetry",
+   "within_limits": true
+  },
+  {
+   "id": "seven-slashes",
+   "topic": "a/b/c/d/e/f/g/h",
+   "within_limits": true
+  },
+  {
+   "id": "eight-slashes",
+   "topic": "a/b/c/d/e/f/g/h/i",
+   "within_limits": false
+  },
+  {
+   "id": "256-bytes",
+   "topic": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "within_limits": true
+  },
+  {
+   "id": "257-bytes",
+   "topic": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "within_limits": false
+  },
+  {
+   "id": "basic-ingest-prefix-not-counted-slashes",
+   "topic": "$aws/rules/ingest/a/b/c/d/e/f/g/h",
+   "within_limits": true
+  },
+  {
+   "id": "basic-ingest-eight-slashes",
+   "topic": "$aws/rules/ingest/a/b/c/d/e/f/g/h/i",
+   "within_limits": false
+  },
+  {
+   "id": "basic-ingest-prefix-not-counted-bytes",
+   "topic": "$aws/rules/ingest/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "within_limits": true
+  },
+  {
+   "id": "basic-ingest-257",
+   "topic": "$aws/rules/ingest/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "within_limits": false
+  },
+  {
+   "id": "shadow-topic",
+   "topic": "$aws/things/dev1/shadow/name/config/update",
+   "within_limits": true
+  },
+  {
+   "id": "filter-wildcards",
+   "topic": "dt/+/telemetry/#",
+   "within_limits": true
+  }
+ ],
+ "mappings": [
+  {
+   "id": "both-directions",
+   "aws_iot": true,
+   "mappings": [
+    {
+     "topic": "telemetry/#",
+     "source": "Pubsub",
+     "target": "IotCore",
+     "target_topic_prefix": "dt/dev1/"
+    },
+    {
+     "topic": "cmd/dev1/#",
+     "source": "IotCore",
+     "target": "Pubsub"
+    }
+   ],
+   "expected": {
+    "ok": true
+   }
+  },
+  {
+   "id": "iotcore-needs-connection",
+   "aws_iot": false,
+   "mappings": [
+    {
+     "topic": "telemetry/#",
+     "source": "Pubsub",
+     "target": "IotCore"
+    }
+   ],
+   "expected": {
+    "error": "need the [aws_iot] connection"
+   }
+  },
+  {
+   "id": "localmqtt-to-iotcore-routes-through-pubsub",
+   "aws_iot": true,
+   "mappings": [
+    {
+     "topic": "lan/#",
+     "source": "LocalMqtt",
+     "target": "IotCore"
+    }
+   ],
+   "expected": {
+    "error": "through Pubsub"
+   },
+   "broker": "127.0.0.1:1883"
+  },
+  {
+   "id": "same-endpoint",
+   "aws_iot": true,
+   "mappings": [
+    {
+     "topic": "a/#",
+     "source": "IotCore",
+     "target": "IotCore"
+    }
+   ],
+   "expected": {
+    "error": "must differ"
+   }
+  },
+  {
+   "id": "outbound-into-shadow-topics",
+   "aws_iot": true,
+   "mappings": [
+    {
+     "topic": "update",
+     "source": "Pubsub",
+     "target": "IotCore",
+     "target_topic_prefix": "$aws/things/dev1/shadow/"
+    }
+   ],
+   "expected": {
+    "error": "reaches AWS shadow topics"
+   }
+  },
+  {
+   "id": "outbound-into-another-things-shadow",
+   "aws_iot": true,
+   "mappings": [
+    {
+     "topic": "x",
+     "source": "Pubsub",
+     "target": "IotCore",
+     "target_topic_prefix": "$aws/things/other/shadow/name/n/"
+    }
+   ],
+   "expected": {
+    "error": "reaches AWS shadow topics"
+   }
+  },
+  {
+   "id": "inbound-from-shadow-topics",
+   "aws_iot": true,
+   "mappings": [
+    {
+     "topic": "$aws/things/+/shadow/#",
+     "source": "IotCore",
+     "target": "Pubsub"
+    }
+   ],
+   "expected": {
+    "error": "reaches AWS shadow topics"
+   }
+  },
+  {
+   "id": "inbound-injected-into-local-shadow-topics",
+   "aws_iot": true,
+   "mappings": [
+    {
+     "topic": "x/#",
+     "source": "IotCore",
+     "target": "Pubsub",
+     "target_topic_prefix": "$aws/things/dev1/shadow/"
+    }
+   ],
+   "expected": {
+    "error": "reaches AWS shadow topics"
+   }
+  },
+  {
+   "id": "wildcard-first-level-never-matches-dollar",
+   "aws_iot": true,
+   "mappings": [
+    {
+     "topic": "#",
+     "source": "IotCore",
+     "target": "Pubsub",
+     "target_topic_prefix": "cloud/"
+    }
+   ],
+   "expected": {
+    "ok": true
+   }
+  },
+  {
+   "id": "basic-ingest-target",
+   "aws_iot": true,
+   "mappings": [
+    {
+     "topic": "telemetry/#",
+     "source": "Pubsub",
+     "target": "IotCore",
+     "target_topic_prefix": "$aws/rules/ingest/"
+    }
+   ],
+   "expected": {
+    "ok": true
+   }
+  },
+  {
+   "id": "filter-beyond-aws-slashes",
+   "aws_iot": true,
+   "mappings": [
+    {
+     "topic": "a/b/c/d/e/f/g/h/i",
+     "source": "IotCore",
+     "target": "Pubsub"
+    }
+   ],
+   "expected": {
+    "error": "exceeds AWS IoT Core topic limits"
+   }
+  },
+  {
+   "id": "produced-beyond-aws-slashes",
+   "aws_iot": true,
+   "mappings": [
+    {
+     "topic": "e/f/g/h/i",
+     "source": "Pubsub",
+     "target": "IotCore",
+     "target_topic_prefix": "a/b/c/d/"
+    }
+   ],
+   "expected": {
+    "error": "exceeds AWS IoT Core topic limits"
+   }
+  },
+  {
+   "id": "same-broker-loop",
+   "aws_iot": true,
+   "mappings": [
+    {
+     "topic": "telemetry/#",
+     "source": "Pubsub",
+     "target": "IotCore",
+     "target_topic_prefix": "cmd/"
+    },
+    {
+     "topic": "cmd/#",
+     "source": "IotCore",
+     "target": "Pubsub"
+    }
+   ],
+   "expected": {
+    "error": "bridge loop"
+   }
+  },
+  {
+   "id": "chained-through-pubsub",
+   "aws_iot": true,
+   "mappings": [
+    {
+     "topic": "lan/#",
+     "source": "LocalMqtt",
+     "target": "Pubsub"
+    },
+    {
+     "topic": "lan/#",
+     "source": "Pubsub",
+     "target": "IotCore",
+     "target_topic_prefix": "dt/dev1/"
+    }
+   ],
+   "expected": {
+    "ok": true
+   },
+   "broker": "127.0.0.1:1883"
+  },
+  {
+   "id": "cross-broker-overlap-is-not-a-loop",
+   "aws_iot": true,
+   "mappings": [
+    {
+     "topic": "cmd/#",
+     "source": "IotCore",
+     "target": "Pubsub"
+    },
+    {
+     "topic": "cmd/#",
+     "source": "Pubsub",
+     "target": "LocalMqtt"
+    }
+   ],
+   "expected": {
+    "ok": true
+   },
+   "broker": "127.0.0.1:1883"
+  },
+  {
+   "id": "connection-without-mappings",
+   "aws_iot": true,
+   "mappings": [],
+   "expected": {
+    "ok": true
+   }
+  },
+  {
+   "id": "no-connection-no-mappings",
+   "aws_iot": false,
+   "mappings": [],
+   "expected": {
+    "error": "1-64 mappings"
+   }
+  },
+  {
+   "id": "localmqtt-needs-broker",
+   "aws_iot": true,
+   "mappings": [
+    {
+     "topic": "lan/#",
+     "source": "LocalMqtt",
+     "target": "Pubsub"
+    }
+   ],
+   "expected": {
+    "error": "need bridge.broker"
+   }
+  }
+ ],
+ "shadow_patches": [
+  {
+   "id": "identical",
+   "from": {
+    "desired": {
+     "a": 1
+    }
+   },
+   "to": {
+    "desired": {
+     "a": 1
+    }
+   },
+   "patch": {}
+  },
+  {
+   "id": "from-absent",
+   "from": {},
+   "to": {
+    "desired": {
+     "a": 1
+    },
+    "reported": {
+     "b": [
+      1,
+      2
+     ]
+    }
+   },
+   "patch": {
+    "desired": {
+     "a": 1
+    },
+    "reported": {
+     "b": [
+      1,
+      2
+     ]
+    }
+   }
+  },
+  {
+   "id": "remove-section",
+   "from": {
+    "desired": {
+     "a": 1
+    },
+    "reported": {
+     "r": 1
+    }
+   },
+   "to": {
+    "desired": {
+     "a": 1
+    }
+   },
+   "patch": {
+    "reported": null
+   }
+  },
+  {
+   "id": "nested-keys",
+   "from": {
+    "desired": {
+     "b": {
+      "x": 1,
+      "y": 2
+     }
+    }
+   },
+   "to": {
+    "desired": {
+     "b": {
+      "x": 3
+     }
+    }
+   },
+   "patch": {
+    "desired": {
+     "b": {
+      "y": null,
+      "x": 3
+     }
+    }
+   }
+  },
+  {
+   "id": "array-whole",
+   "from": {
+    "desired": {
+     "c": [
+      1,
+      2
+     ]
+    }
+   },
+   "to": {
+    "desired": {
+     "c": [
+      1
+     ]
+    }
+   },
+   "patch": {
+    "desired": {
+     "c": [
+      1
+     ]
+    }
+   }
+  },
+  {
+   "id": "object-replaces-scalar",
+   "from": {
+    "desired": {
+     "v": 1
+    }
+   },
+   "to": {
+    "desired": {
+     "v": {
+      "n": 1
+     }
+    }
+   },
+   "patch": {
+    "desired": {
+     "v": {
+      "n": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "scalar-replaces-object",
+   "from": {
+    "desired": {
+     "v": {
+      "n": 1
+     }
+    }
+   },
+   "to": {
+    "desired": {
+     "v": 1
+    }
+   },
+   "patch": {
+    "desired": {
+     "v": 1
+    }
+   }
+  },
+  {
+   "id": "typed-equality",
+   "from": {
+    "desired": {
+     "flag": 1
+    }
+   },
+   "to": {
+    "desired": {
+     "flag": true
+    }
+   },
+   "patch": {
+    "desired": {
+     "flag": true
+    }
+   }
+  },
+  {
+   "id": "mixed",
+   "from": {
+    "desired": {
+     "a": 1,
+     "gone": true,
+     "b": {
+      "x": 1
+     }
+    },
+    "reported": {
+     "r": 1
+    }
+   },
+   "to": {
+    "desired": {
+     "a": 1,
+     "b": {
+      "x": 1,
+      "z": "new"
+     },
+     "d": {
+      "n": 1
+     }
+    },
+    "reported": {
+     "r": 2
+    }
+   },
+   "patch": {
+    "desired": {
+     "gone": null,
+     "b": {
+      "z": "new"
+     },
+     "d": {
+      "n": 1
+     }
+    },
+    "reported": {
+     "r": 2
+    }
+   }
+  }
+ ],
+ "shadow_answers": [
+  {
+   "id": "get-accepted",
+   "call": "fetch",
+   "request": {
+    "op": "get",
+    "body": {}
+   },
+   "answer": {
+    "accepted": true,
+    "body": {
+     "state": {
+      "desired": {
+       "a": 1
+      },
+      "reported": {
+       "b": 2
+      },
+      "delta": {
+       "a": 1
+      }
+     },
+     "metadata": {},
+     "version": 7,
+     "timestamp": 1
+    }
+   },
+   "expected": {
+    "version": 7,
+    "document": {
+     "desired": {
+      "a": 1
+     },
+     "reported": {
+      "b": 2
+     }
+    }
+   }
+  },
+  {
+   "id": "get-absent",
+   "call": "fetch",
+   "request": {
+    "op": "get",
+    "body": {}
+   },
+   "answer": {
+    "accepted": false,
+    "body": {
+     "code": 404,
+     "message": "No shadow exists with name: 'config'"
+    }
+   },
+   "expected": {
+    "version": 0,
+    "document": null
+   }
+  },
+  {
+   "id": "get-server-error",
+   "call": "fetch",
+   "request": {
+    "op": "get",
+    "body": {}
+   },
+   "answer": {
+    "accepted": false,
+    "body": {
+     "code": 500,
+     "message": "Internal service failure"
+    }
+   },
+   "expected": {
+    "error": "rejected: 500"
+   }
+  },
+  {
+   "id": "get-empty-state",
+   "call": "fetch",
+   "request": {
+    "op": "get",
+    "body": {}
+   },
+   "answer": {
+    "accepted": true,
+    "body": {
+     "state": {},
+     "version": 3
+    }
+   },
+   "expected": {
+    "version": 3,
+    "document": {}
+   }
+  },
+  {
+   "id": "get-section-not-object",
+   "call": "fetch",
+   "request": {
+    "op": "get",
+    "body": {}
+   },
+   "answer": {
+    "accepted": true,
+    "body": {
+     "state": {
+      "desired": 5
+     },
+     "version": 3
+    }
+   },
+   "expected": {
+    "error": "not an object"
+   }
+  },
+  {
+   "id": "get-no-version",
+   "call": "fetch",
+   "request": {
+    "op": "get",
+    "body": {}
+   },
+   "answer": {
+    "accepted": true,
+    "body": {
+     "state": {}
+    }
+   },
+   "expected": {
+    "error": "no version"
+   }
+  },
+  {
+   "id": "update-compare-and-swap",
+   "call": "put",
+   "expected_version": 4,
+   "cloud": {
+    "desired": {
+     "a": 1
+    }
+   },
+   "document": {
+    "desired": {
+     "a": 2
+    },
+    "reported": {
+     "r": 1
+    }
+   },
+   "request": {
+    "op": "update",
+    "body": {
+     "state": {
+      "desired": {
+       "a": 2
+      },
+      "reported": {
+       "r": 1
+      }
+     },
+     "version": 4
+    }
+   },
+   "answer": {
+    "accepted": true,
+    "body": {
+     "state": {},
+     "version": 5
+    }
+   },
+   "expected": {
+    "stored": 5
+   }
+  },
+  {
+   "id": "update-version-conflict",
+   "call": "put",
+   "expected_version": 4,
+   "cloud": {
+    "desired": {
+     "a": 1
+    }
+   },
+   "document": {
+    "desired": {
+     "a": 2
+    }
+   },
+   "request": {
+    "op": "update",
+    "body": {
+     "state": {
+      "desired": {
+       "a": 2
+      }
+     },
+     "version": 4
+    }
+   },
+   "answer": {
+    "accepted": false,
+    "body": {
+     "code": 409,
+     "message": "Version conflict"
+    }
+   },
+   "expected": {
+    "conflict": true
+   }
+  },
+  {
+   "id": "update-refused",
+   "call": "put",
+   "expected_version": 4,
+   "cloud": {
+    "desired": {
+     "a": 1
+    }
+   },
+   "document": {
+    "desired": {
+     "a": 2
+    }
+   },
+   "request": {
+    "op": "update",
+    "body": {
+     "state": {
+      "desired": {
+       "a": 2
+      }
+     },
+     "version": 4
+    }
+   },
+   "answer": {
+    "accepted": false,
+    "body": {
+     "code": 400,
+     "message": "JSON contains too many levels of nesting; maximum is 6"
+    }
+   },
+   "expected": {
+    "error": "rejected: 400"
+   }
+  },
+  {
+   "id": "create-has-no-version",
+   "call": "put",
+   "expected_version": 0,
+   "cloud": null,
+   "document": {
+    "reported": {
+     "x": 1
+    }
+   },
+   "request": {
+    "op": "update",
+    "body": {
+     "state": {
+      "reported": {
+       "x": 1
+      }
+     }
+    }
+   },
+   "answer": {
+    "accepted": true,
+    "body": {
+     "state": {},
+     "version": 9
+    }
+   },
+   "expected": {
+    "stored": 9
+   }
+  },
+  {
+   "id": "update-did-not-advance",
+   "call": "put",
+   "expected_version": 4,
+   "cloud": {
+    "desired": {
+     "a": 1
+    }
+   },
+   "document": {
+    "desired": {
+     "a": 2
+    }
+   },
+   "request": {
+    "op": "update",
+    "body": {
+     "state": {
+      "desired": {
+       "a": 2
+      }
+     },
+     "version": 4
+    }
+   },
+   "answer": {
+    "accepted": true,
+    "body": {
+     "state": {},
+     "version": 4
+    }
+   },
+   "expected": {
+    "error": "did not advance"
+   }
+  },
+  {
+   "id": "delete",
+   "call": "put",
+   "expected_version": 3,
+   "cloud": {
+    "desired": {
+     "a": 1
+    }
+   },
+   "document": null,
+   "request": {
+    "op": "delete",
+    "body": {}
+   },
+   "answer": {
+    "accepted": true,
+    "body": {
+     "version": 3,
+     "timestamp": 1
+    }
+   },
+   "expected": {
+    "stored": 0
+   }
+  },
+  {
+   "id": "delete-already-absent",
+   "call": "put",
+   "expected_version": 3,
+   "cloud": {
+    "desired": {
+     "a": 1
+    }
+   },
+   "document": null,
+   "request": {
+    "op": "delete",
+    "body": {}
+   },
+   "answer": {
+    "accepted": false,
+    "body": {
+     "code": 404,
+     "message": "No shadow exists"
+    }
+   },
+   "expected": {
+    "conflict": true
+   }
+  }
+ ],
+ "denied_publication": [
+  {
+   "id": "rejected-after-three-closes",
+   "steps": [
+    {
+     "event": "closed-soon",
+     "expect": "retry"
+    },
+    {
+     "event": "closed-soon",
+     "expect": "retry"
+    },
+    {
+     "event": "closed-soon",
+     "expect": "rejected"
+    }
+   ]
+  },
+  {
+   "id": "puback-resets",
+   "steps": [
+    {
+     "event": "closed-soon",
+     "expect": "retry"
+    },
+    {
+     "event": "closed-soon",
+     "expect": "retry"
+    },
+    {
+     "event": "puback",
+     "expect": "delivered"
+    },
+    {
+     "event": "closed-soon",
+     "expect": "retry"
+    },
+    {
+     "event": "closed-soon",
+     "expect": "retry"
+    },
+    {
+     "event": "closed-soon",
+     "expect": "rejected"
+    }
+   ]
+  },
+  {
+   "id": "late-and-unsent-closes-do-not-count",
+   "steps": [
+    {
+     "event": "closed-soon",
+     "expect": "retry"
+    },
+    {
+     "event": "closed-late",
+     "expect": "retry"
+    },
+    {
+     "event": "closed-soon",
+     "expect": "retry"
+    },
+    {
+     "event": "closed-before-send",
+     "expect": "retry"
+    },
+    {
+     "event": "closed-soon",
+     "expect": "rejected"
+    }
+   ]
+  },
+  {
+   "id": "transport-errors-do-not-count",
+   "steps": [
+    {
+     "event": "closed-soon",
+     "expect": "retry"
+    },
+    {
+     "event": "error",
+     "expect": "retry"
+    },
+    {
+     "event": "error",
+     "expect": "retry"
+    },
+    {
+     "event": "closed-soon",
+     "expect": "retry"
+    },
+    {
+     "event": "error",
+     "expect": "retry"
+    },
+    {
+     "event": "closed-soon",
+     "expect": "rejected"
+    }
+   ]
+  }
+ ]
+}

@@ -2059,6 +2059,7 @@ dependencies = [
  "prost-types",
  "rand 0.8.6",
  "reqwest",
+ "rustls",
  "sd-notify",
  "semver",
  "serde",
@@ -2070,11 +2071,13 @@ dependencies = [
  "sui-sdk-types",
  "sui-transaction-builder",
  "tokio",
+ "tokio-rustls",
  "tokio-stream",
  "toml",
  "tonic",
  "tracing",
  "tracing-subscriber",
+ "zeroize",
 ]
 
 [[package]]

@@ -10,6 +10,7 @@ mod deps;
 mod firmware;
 mod handoff;
 mod identity;
+mod iotcore;
 mod logs;
 mod mqtt;
 mod platform;
@@ -128,6 +129,10 @@ async fn main() -> anyhow::Result<()> {
             .unwrap_or_else(|_| PathBuf::from("/etc/suifleet/config.toml"))
     };
     let cfg = Config::load(&path)?;
+    if let Some(iot) = &cfg.aws_iot {
+        // Unusable AWS IoT credentials stop startup; rotation is checked while running.
+        iotcore::Credentials::load(iot)?;
+    }
     if cfg.logs.is_some() && !check_config {
         // From here on the daemon's own log is also written for shipping.
         logs::enable_daemon_log(&cfg.runtime.state_dir)?;
@@ -222,12 +227,27 @@ async fn main() -> anyhow::Result<()> {
             &cfg.runtime.state_dir.join("shadows"), settings.max_shadows, &settings.thing_name, durable.clone())?))),
         None => None,
     };
+    // The AWS IoT Core connection (SF-061) runs in the bridge; it carries
+    // IotCore mappings and AWS Device Shadow synchronization.
+    let aws_shadow_sync = match (&cfg.aws_iot, cfg.shadows.as_ref().and_then(|s| s.aws_iot.as_ref())) {
+        (Some(iot), Some(sync)) => Some((iotcore::shadow_channel(&iot.thing_name, &sync.shadows), sync.clone())),
+        _ => None,
+    };
+    let (aws_shadow_router, aws_shadow_sync) = match aws_shadow_sync {
+        Some(((client, router, requests), sync)) => (Some((router, requests)), Some((client, sync))),
+        None => (None, None),
+    };
     let bridge_task = match (&cfg.pubsub, &durable) {
-        (Some(settings), Some(broker)) => match &settings.bridge {
-            Some(bridge) => Some(tokio::spawn(bridge::Bridge::new(bridge.clone(), broker.clone(),
-                cfg.runtime.state_dir.join("pubsub/bridge.json"))?.run())),
-            None => None,
-        },
+        (Some(settings), Some(broker)) if settings.bridge.is_some() || cfg.aws_iot.is_some() => {
+            let config = settings.bridge.clone().unwrap_or(bridge::BridgeConfig {
+                broker: None, client_id: "suifleet-bridge".into(), username: None, password_file: None, keep_alive_seconds: 30, mappings: Vec::new(),
+            });
+            let mut bridge = bridge::Bridge::new(config, broker.clone(), cfg.runtime.state_dir.join("pubsub/bridge.json"))?;
+            if let Some(iot) = &cfg.aws_iot {
+                bridge = bridge.with_iot_core(bridge::IotLink { config: iot.clone(), shadows: aws_shadow_router });
+            }
+            Some(tokio::spawn(bridge.run()))
+        }
         _ => None,
     };
     let runner = ApplyRunner::new(cfg.apply.clone());
@@ -325,8 +345,16 @@ async fn main() -> anyhow::Result<()> {
         })).collect(),
         _ => Vec::new(),
     };
-    let shadow_sync = match (&cfg.shadows, &shadow_store) {
-        (Some(settings), Some(store)) => settings.sync.clone().map(|config| tokio::spawn(shadows::Syncer {
+    let shadow_sync = match (&cfg.shadows, &shadow_store, aws_shadow_sync) {
+        (Some(_), Some(store), Some((client, sync))) => {
+            let store = store.clone();
+            Some(tokio::spawn(async move {
+                let changed = client.changed.clone();
+                shadows::run_sync(store, &sync.shadows, sync.interval_seconds, sync.max_backoff_seconds, sync.owners(),
+                                  &iotcore::AwsShadows(client), Some(changed)).await
+            }))
+        }
+        (Some(settings), Some(store), None) => settings.sync.clone().map(|config| tokio::spawn(shadows::Syncer {
             store: store.clone(),
             config,
             binding: streams::Binding {
