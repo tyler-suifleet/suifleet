@@ -15,7 +15,7 @@
     "op": {
      "op": "append",
      "stream": "telemetry",
-     "size": 1000
+     "size": 960
     },
     "expect": {
      "sequence": 0
@@ -25,7 +25,7 @@
     "op": {
      "op": "append",
      "stream": "telemetry",
-     "size": 1000
+     "size": 960
     },
     "expect": {
      "sequence": 1
@@ -65,7 +65,7 @@
      "oldest": 0,
      "newest": 1,
      "exported": -1,
-     "bytes": 2000
+     "bytes": 2048
     }
    }
   ]
@@ -86,7 +86,7 @@
     "op": {
      "op": "append",
      "stream": "logs",
-     "size": 1000
+     "size": 960
     },
     "expect": {
      "sequence": 0
@@ -96,7 +96,7 @@
     "op": {
      "op": "append",
      "stream": "logs",
-     "size": 1000
+     "size": 960
     },
     "expect": {
      "sequence": 1
@@ -106,7 +106,7 @@
     "op": {
      "op": "append",
      "stream": "logs",
-     "size": 1000
+     "size": 960
     },
     "expect": {
      "sequence": 2
@@ -121,7 +121,7 @@
      "oldest": 1,
      "newest": 2,
      "exported": -1,
-     "bytes": 2000
+     "bytes": 2048
     }
    },
    {
@@ -253,7 +253,7 @@
      "oldest": 0,
      "newest": 0,
      "exported": -1,
-     "bytes": 10
+     "bytes": 74
     }
    },
    {
@@ -361,7 +361,7 @@
      "oldest": 0,
      "newest": 1,
      "exported": 1,
-     "bytes": 2
+     "bytes": 130
     }
    }
   ]
@@ -449,6 +449,16 @@
      "op": "append",
      "stream": "dup",
      "size": 5000
+    },
+    "expect": {
+     "error": "invalid"
+    }
+   },
+   {
+    "op": {
+     "op": "append",
+     "stream": "dup",
+     "size": 4033
     },
     "expect": {
      "error": "invalid"

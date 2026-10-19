@@ -20,11 +20,13 @@ class RepositoryTests(unittest.TestCase):
 
     def test_runtime_receipts_are_scoped_to_executed_suites(self):
         # Flipping a suite to passed needs a runtime receipt from the owning
-        # implementation: SF-037 (recipes, managed dependencies) and SF-057
-        # (credential provider) executed theirs; all others remain pending.
+        # implementation: SF-037 (recipes, managed dependencies), SF-057
+        # (credential provider), SF-032 (pub/sub), SF-033 (shadows) and SF-034
+        # (streams) executed theirs; all others remain pending.
         matrix = json.loads((ROOT / compat.COMPAT / "greengrass-compat.json").read_text())
         passed = {name for name, s in matrix["suites"].items() if s["runtime_execution"] == "passed"}
-        self.assertEqual(passed, {"aws-recipe-cases.json", "managed-dependency-cases.json", "credential-provider-cases.json"})
+        self.assertEqual(passed, {"aws-recipe-cases.json", "managed-dependency-cases.json", "credential-provider-cases.json",
+                                  "pubsub-cases.json", "shadow-cases.json", "stream-cases.json"})
         for name in ("aws-recipe-cases.json", "managed-dependency-cases.json"):
             receipt = json.loads((ROOT / matrix["suites"][name]["runtime_evidence"]).read_text())
             self.assertEqual(receipt["ticket"], "SF-037")
@@ -53,21 +55,21 @@ class MatrixGateTests(unittest.TestCase):
 
     def test_aws_claim_without_passed_runtime_suite_rejected(self):
         def mutate(m):
-            row = self.row(m, "shadows.local")
+            row = self.row(m, "client-devices.auth")
             row["aws_api"] = "implemented"
             row["current_evidence"] = ["docs/GREENGRASS_COMPATIBILITY.md"]
         self.assertTrue(any("passed runtime suite" in e for e in self.errors(mutate)))
 
     def test_passed_suite_needs_existing_receipt(self):
         def mutate(m):
-            m["suites"]["shadow-cases.json"]["runtime_execution"] = "passed"
+            m["suites"]["client-device-cases.json"]["runtime_execution"] = "passed"
         self.assertTrue(any("runtime_evidence" in e for e in self.errors(mutate)))
         def missing(m):
-            m["suites"]["shadow-cases.json"].update(runtime_execution="passed", runtime_evidence="docs/validation/none.json")
+            m["suites"]["client-device-cases.json"].update(runtime_execution="passed", runtime_evidence="docs/validation/none.json")
         self.assertTrue(any("runtime_evidence" in e for e in self.errors(missing)))
 
     def test_pending_suite_needs_owner(self):
-        self.assertTrue(any("pending_on" in e for e in self.errors(lambda m: m["suites"]["stream-cases.json"].pop("pending_on"))))
+        self.assertTrue(any("pending_on" in e for e in self.errors(lambda m: m["suites"]["cloudwatch-logs-cases.json"].pop("pending_on"))))
 
     def test_partial_needs_existing_evidence(self):
         def missing(m):
@@ -337,6 +339,12 @@ class ModelTests(unittest.TestCase):
         for value in ([deep], [[[[[[[[1]]]]]]]], {"x": [[{"y": [[[[1]]]]}]]}):
             self.assertEqual(store.apply({"op": "update", "request": {"state": {"desired": {"values": value}}}}), {"error": "invalid"})
         self.assertEqual(store.apply({"op": "get"}), {"state": {"desired": {"a": 1}, "delta": {"a": 1}}, "version": 1})
+
+    def test_shadow_null_nested_in_array_is_invalid(self):
+        store = compat.ShadowStore()
+        for value in ([{"x": None}], [[None]], [{"x": [{"y": None}]}]):
+            self.assertEqual(store.apply({"op": "update", "request": {"state": {"reported": {"items": value}}}}), {"error": "invalid"})
+        self.assertEqual(store.apply({"op": "get"}), {"error": "not-found"})
 
     def test_shadow_version_must_be_integer_and_rejection_changes_nothing(self):
         store = compat.ShadowStore()

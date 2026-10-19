@@ -34,7 +34,8 @@ Statuses: `implemented`/`partial` (merged, with cited local evidence), `proposed
 | Linux aarch64 | `linux`/`aarch64` | `linux`/`aarch64` | Partial: Yocto QEMU; physical Pi pending in SF-031 |
 | Linux 32-bit ARM | `linux`/`arm` | `linux`/`arm` | Proposed: selection vectors only. `architecture.detail` is rejected |
 | Linux x86 (32-bit) | `linux`/`x86` | `linux`/`x86` | Partial: i686 daemon, release bundle and catalog selection with 32-bit software-runner evidence ([LINUX_X86.md](LINUX_X86.md)). Outside the SF-038 initial Linux phase; translation still omits these manifests |
-| Windows, macOS | `windows`, `darwin` | none | Roadmap gap (SF-064), outside the SF-038 initial Linux phase. Translation omits these manifests |
+| Windows | `windows` | none | Roadmap gap (SF-064, SF-074), outside the SF-038 initial Linux phase. Translation omits these manifests |
+| macOS | `darwin` | `macos`/`aarch64` | Partial: native LaunchDaemon runtime on a hosted macOS 15 arm64 runner ([MACOS_RUNTIME.md](MACOS_RUNTIME.md), SF-075); not a Greengrass platform. Translation still omits `darwin` manifests |
 
 ## Current APIs versus proposed contracts
 
@@ -42,10 +43,10 @@ The following is merged today and is the only thing the daemon and frontend exec
 
 - **Native recipes** (`interfaces/recipe.schema.json`) are versions 1.0–1.2, with one authenticated artifact, native dependency ranges (1.1) and SF-015 configuration (1.2: `defaults`, `merge`, `reset`, `confidential`, `validate`). The lifecycle is `install`, plus the SF-014 supervised `run`/`shutdown`/`readiness`/`restart` ([OPERATIONS.md](OPERATIONS.md#supervised-components-sf-014)). Commands use the shell-quoted substitutions `{artifact}`, `{artifacts}`, `{configuration}` and `{work}` (`{work}` only in supervised commands), and `{pid}` in readiness/shutdown. A recipe with neither `install` nor `run` hands its artifact to the platform updater.
 - **The catalog** has platform manifests `linux|*` × `x86_64|aarch64|arm|x86|*`, selected by first match (`x86` is 32-bit i686, SF-076).
-- **Native IPC v1** provides UID-authenticated component APIs, operator management and bounded volatile messaging ([COMPONENT_IPC.md](COMPONENT_IPC.md)). Shared-daemon-user components cannot receive individual ACLs; separate platform Unix identities are required.
+- **Native IPC v1** provides UID-authenticated component APIs, operator management and bounded volatile messaging ([COMPONENT_IPC.md](COMPONENT_IPC.md)). Shared-daemon-user components cannot receive individual ACLs; separate platform Unix identities are required. Durable pub/sub with a bridge to a local broker (SF-032, [MESSAGING.md](MESSAGING.md)), streams (SF-034, [STREAMS.md](STREAMS.md)) and shadows (SF-033, [SHADOWS.md](SHADOWS.md)) are native IPC operations.
 - **AWS recipe translation** (SF-037, below) turns the supported Greengrass V2 recipe subset into native catalog manifests, offline, in the dApp and a CLI. The daemon itself never reads AWS recipes.
 
-There is no AWS IPC wire compatibility, durable pub/sub, MQTT broker, shadow, stream or client-device support. Everything else here is proposed. The fixtures pin its semantics. The owning tickets implement them and may revise them through review. Implementers must not treat this document as a published runtime API, and must not change merged APIs to fit it by assumption.
+There is no AWS IPC wire compatibility, embedded MQTT broker or client-device support. Everything else here is proposed. The fixtures pin its semantics. The owning tickets implement them and may revise them through review. Implementers must not treat this document as a published runtime API, and must not change merged APIs to fit it by assumption.
 
 ## AWS recipe translation (SF-037)
 
@@ -168,20 +169,26 @@ Everything below is proposed. Each adapter runs as a supervised local service be
 
 ### Messaging (SF-032)
 
+Implemented for local pub/sub and the LocalMqtt/Pubsub bridge: see [MESSAGING.md](MESSAGING.md). The rest of this section is the specification it follows.
+
 - **Topics follow MQTT 3.1.1/5 §4.7.** `+` matches one level and `#` matches the remaining levels; `#` is only valid as the last level. Topic names may not contain wildcards. Filters that begin with a wildcard do not match `$` topics. Matching is case-sensitive, and empty levels are significant.
 - **Local pub/sub authorization mirrors AWS `aws.greengrass.ipc.pubsub` policies.** Operations are `aws.greengrass#PublishToTopic`, `aws.greengrass#SubscribeToTopic` or `*`. A resource is a glob in which only `*` is special. `+` and `#` are literal in resources, so a grant of `test/topic/#` permits subscribing to that filter, not to `test/topic/x`. Any matching policy grants.
 - **Brokers and bridging.** A standard MQTT 3.1.1/5 broker serves LAN clients. Bridge mappings are `{topic, source, target, targetTopicPrefix?}`, with source and target taken from `LocalMqtt` and `Pubsub`. Source and target must differ. Any cloud target is a separately approved adapter. The spool is bounded and on disk. The bridge forwards QoS 1 at least once with per-mapping ordering, and on overflow it applies backpressure and an explicit drop counter, never silent loss.
 
 ### Shadows (SF-033)
 
+Implemented for local shadows and an HTTP(S) sync adapter: see [SHADOWS.md](SHADOWS.md). The rest of this section is the specification it follows.
+
 - **Document semantics follow AWS IoT Device Shadow.** A request has the shape `{state:{desired?,reported?}, version?, clientToken?}`, and unknown request keys are invalid. Updates merge recursively. Arrays are values that are replaced whole and may not contain `null`. A `null` value deletes its key, and a `null` section deletes the section. Objects left empty are removed.
 - **Delta and versions.** The delta contains the desired keys that differ from reported, giving the path from the root; keys that exist only in reported are ignored. Values are compared as JSON types, so `true` differs from `1` and `[false]` differs from `[0]`. Each accepted change increments the version by 1. A supplied version must equal the current one, or the result is `conflict` (AWS 409). A supplied version, on update or delete, must be a JSON integer of at least 1; anything else, including a boolean, a string or a non-integer number, is `invalid` and checked before `not-found` or `conflict`.
 - **Limits.** Depth may not exceed 8 in either section. The section object is level 1, and every nested object or array adds a level, including objects inside arrays and arrays inside arrays; this array rule is the proposed SuiFleet convention. A rejected request leaves the document and version unchanged. `clientToken` may not exceed 64 bytes, and the serialized state may not exceed 8 KiB (`too-large`). Shadow names are 1–64 characters of `[A-Za-z0-9:_-]`, and `""` is the classic shadow.
 - **Proposed differences from AWS.**
   - Deleting a shadow increments the version, and a recreated shadow continues the sequence. There is no 48-hour reset.
-  - Cloud synchronization is a selected adapter with an explicit conflict policy.
+  - Cloud synchronization is a selected adapter with an explicit conflict policy (SF-033: a device-signed HTTP(S) adapter; AWS IoT Device Shadow sync is SF-061).
 
 ### Streams (SF-034)
+
+Implemented for local streams and HTTP(S) export: see [STREAMS.md](STREAMS.md). The rest of this section is the specification it follows.
 
 - **Stream definitions.** Each stream has a name of 1–255 characters (`[A-Za-z0-9 ,._-]`), a byte bound of at least 1 KiB, a `strategy_on_full` of `RejectNewData` or `OverwriteOldestData`, and a persistence of `File` (the default) or `Memory`.
 - **Sequence numbers.** Numbers start at 0 for each stream. They are gap-free at append, monotonic, and never reused, even after eviction or restart.
@@ -212,9 +219,9 @@ The runtime receipt is [`docs/validation/sf037-recipe-translation.json`](validat
 | Suite | Cases evaluated by the reference model | Current-API execution | Runtime execution |
 |---|---|---|---|
 | `aws-recipe-cases.json` | 81 recipes (16 JSON/YAML texts) | Daemon and frontend validators (passing) | Passed: SF-037 translator, daemon validators and simulator run |
-| `pubsub-cases.json` | 53 filter/topic/match/ACL checks | none | Pending SF-027, SF-032 |
-| `shadow-cases.json` | 54 steps across 10 sequences | none | Pending SF-027, SF-033 |
-| `stream-cases.json` | 45 steps across 5 sequences | none | Pending SF-027, SF-034 |
+| `pubsub-cases.json` | 53 filter/topic/match/ACL checks | Daemon pub/sub module (passing) | Passed: SF-032 daemon, IPC UIDs and Mosquitto ([receipt](validation/sf032-messaging.json)) |
+| `shadow-cases.json` | 55 steps across 10 sequences | Daemon shadow store, each step also after a reopen (passing) | Passed: SF-033 daemon, IPC UIDs, restarts and a verifying sync service ([receipt](validation/sf033-shadows.json)) |
+| `stream-cases.json` | 46 steps across 5 sequences | Daemon stream store (passing) | Passed: SF-034 daemon, IPC UIDs, crashes and export ([receipt](validation/sf034-streams.json)) |
 | `client-device-cases.json` | 16 authorization requests | none | Pending SF-032, SF-035 |
 | `managed-dependency-cases.json` | 47 managed-dependency classifications | none | Passed: SF-037 translator classification |
 | `credential-provider-cases.json` | 65 steps across 7 sequences | none | Passed: SF-057 local adapter ([receipt](validation/sf057-credentials.json)) |

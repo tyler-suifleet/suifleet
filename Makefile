@@ -320,6 +320,12 @@ test-deployment-control-localnet:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
 	$(RUN) python3 scripts/test_deployment_control_localnet.py
 
+# Real daemon, component UIDs and Eclipse Mosquitto; host Docker, host network.
+.PHONY: test-messaging
+test-messaging:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+	python3 scripts/test_messaging.py --image "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}"
+
 # Start a disposable indexed loopback node/faucet first; network-none Docker only.
 .PHONY: test-rollout-localnet
 test-rollout-localnet:
@@ -342,6 +348,29 @@ edge-acceptance:
 	@test -n "$(PROFILE)" && test -n "$(EVIDENCE)" || { echo "set PROFILE and EVIDENCE (docs/EDGE_ACCEPTANCE.md)"; exit 1; }
 	PYTHONDONTWRITEBYTECODE=1 python3 scripts/edge_acceptance.py run --profile "$(PROFILE)" --evidence "$(EVIDENCE)" \
 		$(if $(HARDWARE),--hardware) $(LOCK_ARGS)
+
+# Streams (SF-034): real daemon, component UIDs and a verifying export
+# receiver; root only inside a disposable, network-isolated container.
+.PHONY: test-streams
+test-streams:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+ifdef INSIDE_DEV_CONTAINER
+	python3 scripts/test_streams.py $(STREAMS_EVIDENCE)
+else
+	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" python3 scripts/test_streams.py $(STREAMS_EVIDENCE)
+endif
+
+# Device shadows (SF-033): real daemon, component UIDs and a verifying
+# reference cloud shadow service; root only inside a disposable,
+# network-isolated container.
+.PHONY: test-shadows
+test-shadows:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+ifdef INSIDE_DEV_CONTAINER
+	python3 scripts/test_shadows.py $(SHADOWS_EVIDENCE)
+else
+	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" python3 scripts/test_shadows.py $(SHADOWS_EVIDENCE)
+endif
 
 # Root only inside a disposable, network-isolated container: real SO_PEERCRED UIDs.
 .PHONY: test-ipc
