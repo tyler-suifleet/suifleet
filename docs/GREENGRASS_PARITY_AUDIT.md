@@ -119,7 +119,7 @@ The [compatibility specification](GREENGRASS_COMPATIBILITY.md) (SF-028) separate
 | Stream manager/store-and-forward | Bounded durable streams over native IPC: crash-safe segment files, reject/overwrite, time-to-live, quotas, and signed resumable HTTP(S) export with checkpoints ([STREAMS.md](STREAMS.md)) | AWS export targets (Kinesis/S3, SF-058; SiteWise, SF-064), Stream Manager SDK wire protocol | P2 |
 | Client-device discovery/authentication | Missing | Local device discovery, credentials, certificates and gateway authorization | P2 |
 | Token exchange/cloud credentials | Opt-in Linux SDK endpoint and IoT X.509 adapter; local mTLS/SDK evidence in [AWS_CREDENTIALS.md](AWS_CREDENTIALS.md) | Separately provisioned AWS identity and IAM policy; platform-managed distinct UIDs; live AWS account/service acceptance remains unrun | P2 |
-| ML inference/industrial/cloud integrations | Missing | Optional component ecosystem/adapters and compatibility tests | P2 |
+| ML inference/industrial/cloud integrations | Industrial: native Modbus/OPC UA collector into durable streams with simulators ([INDUSTRIAL.md](INDUSTRIAL.md)); ML: native TF Lite components ([ML_COMPONENTS.md](ML_COMPONENTS.md)). Others missing | SiteWise processing/publishing (SF-071), video, Firehose/SNS; AWS-named component compatibility; physical/PLC acceptance | P2 |
 | Windows/macOS runtime | macOS: native LaunchDaemon with coalition containment, peer-UID IPC, private key checks and `macos` catalog selection, tested on a hosted macOS 15 arm64 runner ([MACOS_RUNTIME.md](MACOS_RUNTIME.md)). Windows: missing | Windows runtime (SF-074); macOS sandboxing, service signer, daemon self-update, Intel/physical Mac acceptance | P2 |
 
 ## Release gates and sequencing

@@ -91,6 +91,13 @@ expectations. No AWS upstream behavior is newly asserted by these local contract
 
 ## Evidence and closure
 
+SF-070 adds a [native industrial collector](INDUSTRIAL.md) for Modbus (TCP, TLS,
+RTU) and OPC UA (policy None and Basic256Sha256), with deterministic simulators.
+Collector-to-simulator, real-daemon durable-stream and cross-implementation
+(asyncua, pymodbus) tests are its separate evidence. The `industrial` scope below
+stays a reference model: no AWS Modbus Lambda, SiteWise collector or SiteWise
+publishing compatibility is claimed, and SiteWise processing remains SF-071.
+
 SF-076 adds the [32-bit Linux x86 runtime](LINUX_X86.md): an i686 build and
 release bundle, `x86` catalog selection and the real-daemon suites run in a
 32-bit userland. Its receipt is separate evidence; the reference vectors below
