@@ -43,7 +43,7 @@ class MetricsTests(unittest.TestCase):
                 self.send_response(dict(ok=200, invalid=400, expired=400, throttled=429, **{'server-error':503, 'connection-error':403})[result])
                 self.end_headers()
                 code = "InvalidParameterValue" if result == "invalid" else "ExpiredToken" if result == "expired" else "Other"
-                self.wfile.write(f"<Error><Code>{code}</Code></Error>".encode() if result != 'ok' else b'<PutMetricDataResponse/>')
+                self.wfile.write(f"<Error><Code>{code}</Code><Message>Throttl-like metric name</Message></Error>".encode() if result != 'ok' else b'<PutMetricDataResponse/>')
         cls.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()

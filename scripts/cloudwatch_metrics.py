@@ -170,17 +170,17 @@ class Transport:
                 raw = response.read(16385)
                 if response.status == 200:
                     return 'ok'
-                if response.status == 429 or b'Throttl' in raw:
+                try:
+                    code = next((node.text for node in ET.fromstring(raw).iter() if node.tag.split('}')[-1] == 'Code'), '')
+                except ET.ParseError:
+                    code = ''
+                if response.status == 429 or code in {'Throttling', 'ThrottlingException', 'ThrottledException', 'TooManyRequestsException', 'RequestLimitExceeded'}:
                     return 'throttled'
                 if response.status >= 500:
                     return 'server-error'
                 # Permission/credential errors may be repairable: retain instead of losing data.
                 if response.status in (401, 403):
                     return 'connection-error'
-                try:
-                    code = next((node.text for node in ET.fromstring(raw).iter() if node.tag.split('}')[-1] == 'Code'), '')
-                except ET.ParseError:
-                    code = ''
                 if response.status == 400 and code in {'InvalidParameterValue', 'InvalidParameterCombination', 'MissingParameter', 'ValidationError', 'InvalidRequest'}:
                     return 'invalid'
                 return 'connection-error'

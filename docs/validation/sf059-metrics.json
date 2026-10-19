@@ -50,9 +50,9 @@
     "botocore": "1.43.114"
   },
   "source_sha256": {
-    "scripts/cloudwatch_metrics.py": "610f59762d27a8e7550490eec9fb405bd1502f59f443fdfe1b852f35fcd7768c",
+    "scripts/cloudwatch_metrics.py": "04daa2b2eaf115c0ad3f5664f69cba711d25f3d4cdff6c5b7c4173ea61da9d85",
     "scripts/cloudwatch_telemetry.py": "d0f309e9b5b65acf4e2f4c1524f823f481a44882a788a9c8ce99d83947aa5310",
-    "scripts/test_cloudwatch_metrics.py": "326dca03390d17fced9f23ea0ea43c2bd268e40f1c3d0f2410943d810538671d",
+    "scripts/test_cloudwatch_metrics.py": "2392718ad50f672b5e2981ef2d4acc13c2c362b99dda51755021e3003a766f59",
     "interfaces/compat/cloudwatch-metrics-cases.json": "d36aaffd5cee5903f9102bd80f7482a27fe2ceb33b0d741fd0ad2acd99cb5a0b",
     "interfaces/telemetry-cases.json": "ec976563bc2221df79a0dff24a229aa81a9c91b5cae0c464f50adf5185b6d2a1"
   },
@@ -69,5 +69,6 @@
     "validation": "Seven network-none adapter tests pass in 12.762s after repair; no suppressed finding."
   },
   "credential_failure_validation": "Seven network-none adapter tests pass in 23.141s after adding actual HTTP malformed-credential response retention; wrong-type/naive/expired credentials cannot crash the exporter or discard the queue.",
-  "fixture_ingress_validation": "make test-cloudwatch-metrics SUIFLEET_DEV_IMAGE=suifleet-dev:sf035: seven tests passed in 12.476s after all fixture puts moved through the production framed ingress handler over socketpairs, including permission failures; fixture configure operations call the production limit validator. Fixture principal identifiers are constructor-policy inputs; separate subprocess cases prove actual kernel peer UID enforcement."
+  "fixture_ingress_validation": "make test-cloudwatch-metrics SUIFLEET_DEV_IMAGE=suifleet-dev:sf035: seven tests passed in 12.476s after all fixture puts moved through the production framed ingress handler over socketpairs, including permission failures; fixture configure operations call the production limit validator. Fixture principal identifiers are constructor-policy inputs; separate subprocess cases prove actual kernel peer UID enforcement.",
+  "error_code_validation": "make test-cloudwatch-metrics SUIFLEET_DEV_IMAGE=suifleet-dev:sf035: seven tests passed in 11.396s with Throttl-like text in emulator error messages; error classification uses parsed AWS Code fields instead of message substring matching."
 }
