@@ -114,6 +114,7 @@ export const GUIDANCE: Record<string, string> = {
   "Lifecycle.install": "install runs once per deployment in the version's artifact directory (temporary for install-only components), not the AWS work folder ($PWD), as the daemon user with a cleared environment, and is bounded by the operator's apply.timeout_seconds rather than the AWS 120 s default.",
   "Lifecycle.run": "run is supervised in the component work directory ({work:path}, as in AWS) with no timeout: restart on failure with backoff, Broken after 5 restarts in 10 minutes, replacing AWS recover and step timeouts. It runs as the daemon user with a cleared environment.",
   "Lifecycle.shutdown": "shutdown is bounded by the operator's component stop timeout rather than the AWS 15 s default.",
+  "ComponentDependencies": "Every dependency becomes a native HARD dependency, also for AWS SOFT: AWS requires both types to be present and started first, while a native SOFT dependency may be left out. The native resolver therefore fails the deployment when no version satisfies a dependency. Supervised dependencies start, and become ready, first at deployment and daemon start, but a dependent still starts if a dependency fails to become ready, and there is no AWS HARD restart coupling: a dependent is not restarted or stopped when its dependency restarts, errors or is replaced. Make the component wait for and tolerate its dependency itself (for example with a readiness check), or deploy them together.",
   "ComponentConfiguration.DefaultConfiguration": "Becomes native defaults, delivered as the {configuration} file (and $SUIFLEET_CONFIGURATION to run/shutdown) instead of the IPC GetConfiguration call. On a later version, device values are kept and new defaults fill only missing keys; the AWS guide does not specify how a changed default combines with an existing value, so check upgrades that change defaults. Per-deployment reset and merge are native configuration deployments (reset before merge, as in AWS).",
 };
 
@@ -428,7 +429,7 @@ export function translateGreengrassRecipe(recipe: unknown, bindings: Record<stri
     note("ComponentConfiguration.DefaultConfiguration");
   }
 
-  const dependencies: Record<string, { versionRequirement: string; dependencyType?: "HARD" | "SOFT" }> = {};
+  const dependencies: Record<string, { versionRequirement: string }> = {};
   const managed: Record<string, ManagedClassification> = {};
   const required = has(recipe, "ComponentDependencies") ? recipe.ComponentDependencies : {};
   for (const [dependency, spec] of Object.entries(isObject(required) ? required : (reasons.add("invalid-dependency"), {}))) {
@@ -446,9 +447,13 @@ export function translateGreengrassRecipe(recipe: unknown, bindings: Record<stri
     const requirement = spec.VersionRequirement;
     if (typeof requirement !== "string" || !RANGE.test(requirement)) { reasons.add("unsupported-version-range"); continue; }
     if (has(spec, "DependencyType") && spec.DependencyType !== "HARD" && spec.DependencyType !== "SOFT") { reasons.add("invalid-dependency"); continue; }
-    define(dependencies, dependency, { versionRequirement: requirement, ...(has(spec, "DependencyType") ? { dependencyType: spec.DependencyType as "HARD" | "SOFT" } : {}) });
+    // AWS installs and starts every dependency first, HARD or SOFT (SOFT only
+    // drops restart coupling). Native SOFT may omit a dependency, so every
+    // translated dependency is native HARD (the default); see the guidance.
+    define(dependencies, dependency, { versionRequirement: requirement });
   }
   const dependent = Object.keys(dependencies).length > 0;
+  if (dependent) note("ComponentDependencies");
 
   const manifests: NativeManifest[] = [];
   const omitted: number[] = [];

@@ -166,8 +166,7 @@
       "configuration": {},
       "componentDependencies": {
        "com.example.Lib": {
-        "versionRequirement": ">=1.0.0 <2.0.0",
-        "dependencyType": "SOFT"
+        "versionRequirement": ">=1.0.0 <2.0.0"
        },
        "com.example.Log": {
         "versionRequirement": "^1.2.0"
@@ -190,8 +189,7 @@
       "configuration": {},
       "componentDependencies": {
        "com.example.Lib": {
-        "versionRequirement": ">=1.0.0 <2.0.0",
-        "dependencyType": "SOFT"
+        "versionRequirement": ">=1.0.0 <2.0.0"
        },
        "com.example.Log": {
         "versionRequirement": "^1.2.0"
@@ -214,8 +212,7 @@
       "configuration": {},
       "componentDependencies": {
        "com.example.Lib": {
-        "versionRequirement": ">=1.0.0 <2.0.0",
-        "dependencyType": "SOFT"
+        "versionRequirement": ">=1.0.0 <2.0.0"
        },
        "com.example.Log": {
         "versionRequirement": "^1.2.0"
@@ -229,6 +226,7 @@
    ],
    "informational": [
     "ComponentPublisher",
+    "ComponentDependencies",
     "Lifecycle.install"
    ]
   }
@@ -547,8 +545,7 @@
       "description": "Configured hello",
       "componentDependencies": {
        "com.example.Lib": {
-        "versionRequirement": "^1.0.0",
-        "dependencyType": "HARD"
+        "versionRequirement": "^1.0.0"
        }
       }
      }
@@ -557,6 +554,7 @@
    "omitted_manifests": [],
    "informational": [
     "ComponentConfiguration.DefaultConfiguration",
+    "ComponentDependencies",
     "Lifecycle.run"
    ]
   }
@@ -3681,8 +3679,7 @@
       "configuration": {},
       "componentDependencies": {
        "__proto__": {
-        "versionRequirement": "1.0.0",
-        "dependencyType": "HARD"
+        "versionRequirement": "1.0.0"
        }
       }
      }
@@ -3690,6 +3687,7 @@
    ],
    "omitted_manifests": [],
    "informational": [
+    "ComponentDependencies",
     "Lifecycle.run"
    ]
   }
@@ -3750,8 +3748,7 @@
       "configuration": {},
       "componentDependencies": {
        "__proto__": {
-        "versionRequirement": "1.0.0",
-        "dependencyType": "HARD"
+        "versionRequirement": "1.0.0"
        }
       }
      }
@@ -3759,6 +3756,145 @@
    ],
    "omitted_manifests": [],
    "informational": [
+    "ComponentDependencies",
+    "Lifecycle.run"
+   ]
+  }
+ },
+ {
+  "id": "json-soft-dependency-required",
+  "format": "json",
+  "note": "AWS SOFT still installs and starts the dependency first (only restart coupling differs). Native SOFT may omit an unavailable dependency, so it translates to native HARD and the dependency difference is reported.",
+  "recipe_text": "{\n  \"RecipeFormatVersion\": \"2020-01-25\",\n  \"ComponentName\": \"example.App\",\n  \"ComponentVersion\": \"1.0.0\",\n  \"ComponentDependencies\": {\n    \"example.RequiredAtStartup\": {\n      \"VersionRequirement\": \"^1.0.0\",\n      \"DependencyType\": \"SOFT\"\n    }\n  },\n  \"Manifests\": [\n    {\n      \"Platform\": {\n        \"os\": \"linux\"\n      },\n      \"Lifecycle\": {\n        \"run\": \"echo app\"\n      },\n      \"Artifacts\": [\n        {\n          \"Uri\": \"s3://example-bucket/app/1.0.0/app.tar\"\n        }\n      ]\n    }\n  ]\n}",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "example.App",
+   "ComponentVersion": "1.0.0",
+   "ComponentDependencies": {
+    "example.RequiredAtStartup": {
+     "VersionRequirement": "^1.0.0",
+     "DependencyType": "SOFT"
+    }
+   },
+   "Manifests": [
+    {
+     "Platform": {
+      "os": "linux"
+     },
+     "Lifecycle": {
+      "run": "echo app"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/app/1.0.0/app.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/app/1.0.0/app.tar": {
+    "artifactBlobId": "blob_app",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   }
+  },
+  "expected": {
+   "outcome": "translate",
+   "reasons": [],
+   "manifests": [
+    {
+     "os": "linux",
+     "arch": "*",
+     "recipe": {
+      "schemaVersion": "1.1",
+      "componentName": "example.App",
+      "componentVersion": "1.0.0",
+      "artifactBlobId": "blob_app",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {
+       "run": "echo app"
+      },
+      "configuration": {},
+      "componentDependencies": {
+       "example.RequiredAtStartup": {
+        "versionRequirement": "^1.0.0"
+       }
+      }
+     }
+    }
+   ],
+   "omitted_manifests": [],
+   "informational": [
+    "ComponentDependencies",
+    "Lifecycle.run"
+   ]
+  }
+ },
+ {
+  "id": "yaml-soft-dependency-required",
+  "format": "yaml",
+  "note": "The same SOFT dependency read from YAML translates to native HARD.",
+  "recipe_text": "RecipeFormatVersion: '2020-01-25'\nComponentName: example.App\nComponentVersion: '1.0.0'\nComponentDependencies:\n  example.RequiredAtStartup:\n    VersionRequirement: ^1.0.0\n    DependencyType: SOFT\nManifests:\n  - Platform:\n      os: linux\n    Lifecycle:\n      run: echo app\n    Artifacts:\n      - Uri: s3://example-bucket/app/1.0.0/app.tar\n",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "example.App",
+   "ComponentVersion": "1.0.0",
+   "ComponentDependencies": {
+    "example.RequiredAtStartup": {
+     "VersionRequirement": "^1.0.0",
+     "DependencyType": "SOFT"
+    }
+   },
+   "Manifests": [
+    {
+     "Platform": {
+      "os": "linux"
+     },
+     "Lifecycle": {
+      "run": "echo app"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/app/1.0.0/app.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/app/1.0.0/app.tar": {
+    "artifactBlobId": "blob_app",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   }
+  },
+  "expected": {
+   "outcome": "translate",
+   "reasons": [],
+   "manifests": [
+    {
+     "os": "linux",
+     "arch": "*",
+     "recipe": {
+      "schemaVersion": "1.1",
+      "componentName": "example.App",
+      "componentVersion": "1.0.0",
+      "artifactBlobId": "blob_app",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {
+       "run": "echo app"
+      },
+      "configuration": {},
+      "componentDependencies": {
+       "example.RequiredAtStartup": {
+        "versionRequirement": "^1.0.0"
+       }
+      }
+     }
+    }
+   ],
+   "omitted_manifests": [],
+   "informational": [
+    "ComponentDependencies",
     "Lifecycle.run"
    ]
   }

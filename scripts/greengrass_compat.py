@@ -303,12 +303,13 @@ def translate_recipe(recipe, bindings: dict, catalog: dict) -> dict:
         requirement = spec.get("VersionRequirement")
         if not isinstance(requirement, str) or not RANGE.match(requirement):
             reasons.add("unsupported-version-range"); continue
-        entry = {"versionRequirement": requirement}
-        if "DependencyType" in spec:
-            if spec["DependencyType"] not in ("HARD", "SOFT"):
-                reasons.add("invalid-dependency"); continue
-            entry["dependencyType"] = spec["DependencyType"]
-        dependencies[dep] = entry
+        if "DependencyType" in spec and spec["DependencyType"] not in ("HARD", "SOFT"):
+            reasons.add("invalid-dependency"); continue
+        # AWS SOFT still requires the dependency at start; native SOFT may omit
+        # it, so every translated dependency is native HARD (the default).
+        dependencies[dep] = {"versionRequirement": requirement}
+    if dependencies:
+        note("ComponentDependencies")
     manifests, omitted, seen = [], [], set()
     raw = recipe.get("Manifests")
     if not isinstance(raw, list) or not raw:
