@@ -74,6 +74,9 @@ pub struct Config {
     /// Durable local streams and exports (SF-034); none when omitted.
     #[serde(default)]
     pub streams: Option<StreamsConfig>,
+    /// LAN client-device authentication and discovery (SF-035); none when omitted.
+    #[serde(default)]
+    pub client_devices: Option<crate::clientdevices::Settings>,
     /// The file this configuration was loaded from (for the update preflight).
     #[serde(skip)]
     pub path: PathBuf,
@@ -665,6 +668,14 @@ impl Config {
         }
         if let Some(streams) = &cfg.streams {
             streams.validate()?;
+        }
+        if let Some(client_devices) = &mut cfg.client_devices {
+            if client_devices.device_groups_file.is_relative() {
+                client_devices.device_groups_file = path.parent().unwrap_or(Path::new(".")).join(&client_devices.device_groups_file);
+            }
+            client_devices.validate()?;
+            anyhow::ensure!(cfg.ipc.as_ref().is_some_and(|ipc| !ipc.administrators.is_empty()),
+                "[client_devices] needs [ipc] administrators: enrollment and revocation are operator IPC requests");
         }
         Ok(cfg)
     }

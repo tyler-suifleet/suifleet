@@ -64,7 +64,7 @@ impl Drop for Server {
     }
 }
 const OPS: &[&str] = &["list", "status", "start", "stop", "restart", "logs", "config", "health", "publish", "receive", "install",
-    "subscribe", "unsubscribe", "ack", "messaging",
+    "subscribe", "unsubscribe", "ack", "messaging", "client_devices",
     "stream_create", "stream_delete", "stream_append", "stream_read", "stream_describe", "stream_list"];
 impl Settings {
     pub fn validate(&self) -> anyhow::Result<()> {
@@ -83,7 +83,8 @@ impl Settings {
                 && uids.insert(acl.uid), "IPC components require distinct non-root, non-daemon, non-admin UIDs");
             anyhow::ensure!(acl.operations.len() <= OPS.len() && acl.publish.len() <= 128
                 && acl.subscribe.len() <= 128, "IPC ACL too large");
-            anyhow::ensure!(acl.operations.iter().all(|op| OPS.contains(&op.as_str()) && op != "install" && op != "list" && op != "messaging"), "invalid component IPC operation");
+            anyhow::ensure!(acl.operations.iter().all(|op| OPS.contains(&op.as_str()) && op != "install" && op != "list" && op != "messaging"
+                && op != "client_devices"), "invalid component IPC operation");
             anyhow::ensure!(acl.publish.iter().chain(&acl.subscribe).all(|t| topic(t)), "invalid IPC topic");
             anyhow::ensure!(acl.streams.len() <= 64 && acl.streams.iter().all(|p| crate::streams::valid_name(&p.replace('*', "x"))),
                 "invalid IPC stream pattern");

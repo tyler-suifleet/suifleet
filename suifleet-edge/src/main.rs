@@ -1,6 +1,7 @@
 mod ipc;
 mod catalog;
 mod clientdevices;
+mod client_gateway;
 mod control;
 mod apply;
 mod bridge;
@@ -224,6 +225,26 @@ async fn main() -> anyhow::Result<()> {
         },
         _ => None,
     };
+    // LAN client devices (SF-035): the CA and registry, then the gateway's
+    // listeners (bound here, so a bad address stops startup).
+    let client_devices = match &cfg.client_devices {
+        Some(settings) => {
+            let mut authority = clientdevices::Authority::open(
+                &cfg.runtime.state_dir.join("clientdevices"), settings.clone(),
+                clientdevices::Gateway { chain: sui.manifest().chain_identifier.clone(),
+                    registry: sui.manifest().shared_objects.registry.id.clone(), device_object_id: cfg.device.device_object_id.clone(), address: sui.address() },
+                signer.clone(), telemetry::now_ms())?;
+            if let Some(bridge) = cfg.pubsub.as_ref().and_then(|p| p.bridge.as_ref()) {
+                authority.reserve_client_id(&bridge.client_id);
+            }
+            Some(std::sync::Arc::new(authority))
+        }
+        None => None,
+    };
+    let gateway_task = match &client_devices {
+        Some(authority) => Some(client_gateway::start(authority.clone()).await?),
+        None => None,
+    };
     let runner = ApplyRunner::new(cfg.apply.clone());
     let store = components::Store::open(&cfg.runtime.state_dir, &cfg.components);
     // Before any component runs: their log lines are covered from here on.
@@ -371,7 +392,8 @@ async fn main() -> anyhow::Result<()> {
                         if pending.reply.is_closed() { continue; }
                         let result = tokio::select! {
                             result = local_request(&cfg, &sui, &walrus, &runner, store.as_ref(), &configs,
-                                &mut supervisor, &mut journal, &mut ipc_messages, durable.as_deref(), streams.as_deref(), pending.uid, &pending.request) => result,
+                                &mut supervisor, &mut journal, &mut ipc_messages, durable.as_deref(), streams.as_deref(),
+                                client_devices.as_deref(), pending.uid, &pending.request) => result,
                             _ = &mut shutdown => { stopped = true; break; }
                         };
                         if let Err(error) = &result { warn!(operation = pending.request.operation, %error, "Local IPC request failed"); }
@@ -399,6 +421,9 @@ async fn main() -> anyhow::Result<()> {
     if let Some(task) = bridge_task {
         task.abort();
     }
+    if let Some(task) = gateway_task {
+        task.abort();
+    }
     // Components stop with the daemon (shutdown command, then the whole group).
     supervisor.stop_all().await;
     // process::exit below does not run destructors: close IPC before handoff.
@@ -415,7 +440,8 @@ async fn local_request(
     store: Option<&components::Store>, configs: &configuration::Store,
     supervisor: &mut supervisor::Supervisor, journal: &mut Journal,
     messages: &mut ipc::Messages, durable: Option<&std::sync::Mutex<pubsub::Broker>>,
-    streams: Option<&std::sync::Mutex<streams::Store>>, uid: u32, request: &ipc::Request,
+    streams: Option<&std::sync::Mutex<streams::Store>>, client_devices: Option<&clientdevices::Authority>,
+    uid: u32, request: &ipc::Request,
 ) -> anyhow::Result<serde_json::Value> {
     use serde_json::json;
     let policy = cfg.ipc.as_ref().ok_or_else(|| anyhow::anyhow!("IPC disabled"))?;
@@ -439,6 +465,9 @@ async fn local_request(
         }
         "health" | "publish" | "receive" | "subscribe" | "unsubscribe" | "ack" =>
             messages.handle(policy, request, &principal, durable),
+        // Administrators only (component ACLs cannot list it).
+        "client_devices" => client_devices.ok_or_else(|| anyhow::anyhow!("client devices are not enabled ([client_devices])"))?
+            .handle(&request.payload, telemetry::now_ms()),
         op if op.starts_with("stream_") => {
             let store = streams.ok_or_else(|| anyhow::anyhow!("streams are not enabled ([streams])"))?;
             let declared: Vec<String> = cfg.streams.iter().flat_map(|s| s.definitions.iter().map(|d| d.name.clone())).collect();
