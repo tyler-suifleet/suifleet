@@ -91,6 +91,14 @@ jobs:
           retention-days: 14
           if-no-files-found: warn
 
+  video:
+    name: Kinesis Video media and recovery (offline)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - run: make test-video
+
   macos:
     # SF-075: the daemon on a hosted macOS runner, a disposable VM. Unit tests,
     # then the shipped LaunchDaemon (installed as root) and kernel-authenticated
