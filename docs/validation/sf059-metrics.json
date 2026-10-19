@@ -50,9 +50,9 @@
     "botocore": "1.43.114"
   },
   "source_sha256": {
-    "scripts/cloudwatch_metrics.py": "7f5b38d8695d3f4d774fa954966e4b89935971be38eb38b53d312a62b4df40be",
+    "scripts/cloudwatch_metrics.py": "6f83b318c2e96cdcc2563fc99cb58301ca23f9d5d40a2ae23f0c48025e6aa0e4",
     "scripts/cloudwatch_telemetry.py": "d0f309e9b5b65acf4e2f4c1524f823f481a44882a788a9c8ce99d83947aa5310",
-    "scripts/test_cloudwatch_metrics.py": "31e46d0a66bd0b86f9a3b8831184aed7ff97c522366f88d1ab8be21b9dada384",
+    "scripts/test_cloudwatch_metrics.py": "058e325b332aaf06874d468d8b43c8db13c14db9e05a09e68caa5c9e17939d5f",
     "interfaces/compat/cloudwatch-metrics-cases.json": "d36aaffd5cee5903f9102bd80f7482a27fe2ceb33b0d741fd0ad2acd99cb5a0b",
     "interfaces/telemetry-cases.json": "ec976563bc2221df79a0dff24a229aa81a9c91b5cae0c464f50adf5185b6d2a1"
   },
@@ -67,5 +67,6 @@
     "finding": "CodeQL overly-permissive test fixture directory/socket modes",
     "change": "Replace broad directory/socket modes with named-UID POSIX ACLs; retain kernel UID denial even when the disallowed UID has socket ACL access.",
     "validation": "Seven network-none adapter tests pass in 12.762s after repair; no suppressed finding."
-  }
+  },
+  "credential_failure_validation": "Seven network-none adapter tests pass in 23.141s after adding actual HTTP malformed-credential response retention; wrong-type/naive/expired credentials cannot crash the exporter or discard the queue."
 }

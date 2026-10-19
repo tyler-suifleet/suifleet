@@ -27,13 +27,14 @@ class MetricsTests(unittest.TestCase):
     def setUpClass(cls):
         cls.results = queue.Queue()
         cls.observed = []
+        cls.bad_credentials = False
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *_):
                 pass
             def do_GET(self):
                 self.send_response(200)
                 self.end_headers()
-                self.wfile.write(json.dumps(dict(AccessKeyId="FIXTURE", SecretAccessKey="fixture-secret", Token="fixture-token",
+                self.wfile.write(json.dumps({'Expiration': 123} if cls.bad_credentials else dict(AccessKeyId="FIXTURE", SecretAccessKey="fixture-secret", Token="fixture-token",
                     Expiration="2099-01-01T00:00:00Z")).encode())
             def do_POST(self):
                 raw = self.rfile.read(int(self.headers['Content-Length']))
@@ -241,6 +242,11 @@ s=socket.socket(socket.AF_UNIX);s.connect(sys.argv[1]);s.sendall(json.dumps({"re
             calls = adapter.tick()["calls"]
             self.assertEqual([c["count"] for c in calls], [3, 2])
             adapter.put(dict(request=dict(namespace="Test", metricData=dict(metricName="x", value=1))))
+            type(self).bad_credentials = True
+            try:
+                self.assertEqual(adapter.tick()["buffered"], 1)
+            finally:
+                type(self).bad_credentials = False
             adapter.transport.provider = urllib.parse.urlsplit("http://127.0.0.1:1/2016-11-01/credentialprovider/")
             self.assertEqual(adapter.tick()["buffered"], 1)
             adapter.close()

@@ -137,8 +137,10 @@ class Transport:
             if response.status != 200 or len(raw) > 16384:
                 raise ValueError('credentials unavailable')
             value = json.loads(raw)
-            expiry = datetime.datetime.fromisoformat(value['Expiration'].replace('Z', '+00:00')).timestamp()
-            if expiry <= time.time() or not all(isinstance(value[k], str) and value[k] for k in ('AccessKeyId', 'SecretAccessKey', 'Token')):
+            if not isinstance(value, dict) or not all(isinstance(value.get(k), str) and value[k] for k in ('AccessKeyId', 'SecretAccessKey', 'Token', 'Expiration')):
+                raise ValueError('invalid credentials')
+            expires = datetime.datetime.fromisoformat(value['Expiration'].replace('Z', '+00:00'))
+            if expires.tzinfo is None or expires.timestamp() <= time.time():
                 raise ValueError('invalid credentials')
             return value
 
