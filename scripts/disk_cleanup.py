@@ -49,6 +49,25 @@ class Unverifiable(RuntimeError):
 
 # --- Environment: everything outside the filesystem walk, injectable in tests ----
 
+def accepted_helper(proc, pid, helpers):
+    """True when an uninspectable process is a configured session helper:
+    its name matches exactly and its parent, owned by the same uid, is
+    inspectable and runs the configured executable (for example systemd's
+    `(sd-pam)` under `/usr/lib/systemd/systemd`). Such helpers are
+    non-dumpable by design and never run builds."""
+    base = os.path.join(proc, str(pid))
+    try:
+        name = Path(base, "comm").read_text().strip()
+        stat = Path(base, "stat").read_text()
+        ppid = int(stat[stat.rindex(")") + 2:].split()[1])
+        parent = os.path.join(proc, str(ppid))
+        same_owner = os.stat(base).st_uid == os.stat(parent).st_uid
+        parent_exe = os.readlink(os.path.join(parent, "exe"))
+    except (OSError, ValueError, IndexError):
+        return False
+    return same_owner and any(h.get("comm") == name and h.get("parent_exe") == parent_exe for h in helpers)
+
+
 class System:
     def __init__(self, config):
         self.config = config
@@ -107,7 +126,8 @@ class System:
                     uninspectable.append(uid)
                 continue
             except OSError:
-                uninspectable.append(uid)
+                if not accepted_helper("/proc", pid, self.config.get("uninspectable_helpers_accepted", [])):
+                    uninspectable.append(uid)
                 continue
             paths += [p.removesuffix(" (deleted)") for p in found if p.startswith("/")]
         return paths, uninspectable

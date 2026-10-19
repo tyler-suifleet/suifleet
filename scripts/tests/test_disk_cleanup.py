@@ -130,6 +130,29 @@ class Fixture(unittest.TestCase):
         return sorted((str(p), p.lstat().st_mtime) for p in self.tmp.rglob("*"))
 
 
+class HelperTests(unittest.TestCase):
+    def test_only_named_helpers_under_the_configured_parent_are_accepted(self):
+        proc = Path(tempfile.mkdtemp(prefix="sf080-proc-"))
+        try:
+            (proc / "10").mkdir()
+            os.symlink("/usr/lib/systemd/systemd", proc / "10/exe")
+            (proc / "11").mkdir()
+            (proc / "11/comm").write_text("(sd-pam)\n")
+            (proc / "11/stat").write_text("11 ((sd-pam)) S 10 11 11 0 -1\n")
+            (proc / "12").mkdir()
+            (proc / "12/comm").write_text("cargo\n")
+            (proc / "12/stat").write_text("12 (cargo) S 10 12 12 0 -1\n")
+            helper = [{"comm": "(sd-pam)", "parent_exe": "/usr/lib/systemd/systemd"}]
+            self.assertTrue(dc.accepted_helper(str(proc), 11, helper))
+            self.assertFalse(dc.accepted_helper(str(proc), 12, helper), "another name under the same parent")
+            self.assertFalse(dc.accepted_helper(str(proc), 11, [{"comm": "(sd-pam)", "parent_exe": "/usr/bin/other"}]))
+            self.assertFalse(dc.accepted_helper(str(proc), 11, []), "nothing accepted by default")
+            os.unlink(proc / "10/exe")
+            self.assertFalse(dc.accepted_helper(str(proc), 11, helper), "an uninspectable parent fails closed")
+        finally:
+            subprocess.run(["rm", "-rf", str(proc)])
+
+
 class PlanTests(Fixture):
     def test_dry_run_selects_only_done_idle_outputs_and_mutates_nothing(self):
         done = self.worktree("SF-1")
