@@ -50,22 +50,34 @@ class Unverifiable(RuntimeError):
 # --- Environment: everything outside the filesystem walk, injectable in tests ----
 
 def accepted_helper(proc, pid, helpers):
-    """True when an uninspectable process is a configured session helper:
-    its name matches exactly and its parent, owned by the same uid, is
-    inspectable and runs the configured executable (for example systemd's
-    `(sd-pam)` under `/usr/lib/systemd/systemd`). Such helpers are
-    non-dumpable by design and never run builds."""
+    """True when an uninspectable process is a configured session helper,
+    established from what the kernel still reports for a non-dumpable process
+    rather than from its name alone: its name and its whole command line are
+    exactly the configured `comm`; its parent, owned by the same uid, is
+    inspectable and runs the configured `parent_exe`; and it shares the
+    parent's cgroup, whose path matches the configured `cgroup` pattern. For
+    systemd's `(sd-pam)` that is the manager's own `init.scope`: user services
+    and processes reparented to the manager keep their own unit cgroups, so a
+    child that merely renames itself does not match. An entry without
+    `cgroup` matches nothing."""
     base = os.path.join(proc, str(pid))
     try:
         name = Path(base, "comm").read_text().strip()
+        argv = Path(base, "cmdline").read_bytes().rstrip(b"\0").split(b"\0")
         stat = Path(base, "stat").read_text()
         ppid = int(stat[stat.rindex(")") + 2:].split()[1])
         parent = os.path.join(proc, str(ppid))
         same_owner = os.stat(base).st_uid == os.stat(parent).st_uid
         parent_exe = os.readlink(os.path.join(parent, "exe"))
+        cgroup = Path(base, "cgroup").read_text().strip()
+        parent_cgroup = Path(parent, "cgroup").read_text().strip()
     except (OSError, ValueError, IndexError):
         return False
-    return same_owner and any(h.get("comm") == name and h.get("parent_exe") == parent_exe for h in helpers)
+    # A single cgroup v2 line, identical to the parent's; anything else is unknown.
+    unified = cgroup == parent_cgroup and "\n" not in cgroup and cgroup.startswith("0::")
+    return same_owner and unified and argv == [name.encode()] and any(
+        h.get("comm") == name and h.get("parent_exe") == parent_exe and h.get("cgroup")
+        and fnmatch.fnmatchcase(cgroup[3:], h["cgroup"]) for h in helpers)
 
 
 class System:
@@ -110,10 +122,10 @@ class System:
         for pid in filter(str.isdigit, os.listdir("/proc")):
             if int(pid) == os.getpid():
                 continue
-            base = f"/proc/{pid}"
+            base, uid, found = f"/proc/{pid}", None, []
             try:
                 uid = os.stat(base).st_uid
-                found = [os.readlink(f"{base}/cwd"), os.readlink(f"{base}/root")]
+                found += [os.readlink(f"{base}/cwd"), os.readlink(f"{base}/root")]
                 for fd in os.listdir(f"{base}/fd"):
                     try:
                         found.append(os.readlink(f"{base}/fd/{fd}"))
@@ -124,11 +136,10 @@ class System:
             except (FileNotFoundError, ProcessLookupError):
                 if os.path.exists(base):
                     uninspectable.append(uid)
-                continue
             except OSError:
                 if not accepted_helper("/proc", pid, self.config.get("uninspectable_helpers_accepted", [])):
                     uninspectable.append(uid)
-                continue
+            # Paths seen before an inspection failure are still in use.
             paths += [p.removesuffix(" (deleted)") for p in found if p.startswith("/")]
         return paths, uninspectable
 

@@ -131,26 +131,69 @@ class Fixture(unittest.TestCase):
 
 
 class HelperTests(unittest.TestCase):
-    def test_only_named_helpers_under_the_configured_parent_are_accepted(self):
-        proc = Path(tempfile.mkdtemp(prefix="sf080-proc-"))
+    SCOPE = "/user.slice/user-1000.slice/user@1000.service/init.scope"
+    HELPER = [{"comm": "(sd-pam)", "parent_exe": "/usr/lib/systemd/systemd",
+               "cgroup": "/user.slice/user-*.slice/user@*.service/init.scope"}]
+
+    def setUp(self):
+        self.proc = Path(tempfile.mkdtemp(prefix="sf080-proc-"))
+        (self.proc / "10").mkdir()
+        os.symlink("/usr/lib/systemd/systemd", self.proc / "10/exe")
+        (self.proc / "10/cgroup").write_text(f"0::{self.SCOPE}\n")
+
+    def tearDown(self):
+        subprocess.run(["rm", "-rf", str(self.proc)])
+
+    def child(self, pid, comm="(sd-pam)", argv=(b"(sd-pam)",), cgroup=SCOPE):
+        (self.proc / str(pid)).mkdir()
+        (self.proc / f"{pid}/comm").write_text(comm + "\n")
+        (self.proc / f"{pid}/cmdline").write_bytes(b"\0".join(argv) + b"\0")
+        (self.proc / f"{pid}/stat").write_text(f"{pid} ({comm}) S 10 {pid} {pid} 0 -1\n")
+        (self.proc / f"{pid}/cgroup").write_text(f"0::{cgroup}\n")
+        return pid
+
+    def accepted(self, pid, helpers=HELPER):
+        return dc.accepted_helper(str(self.proc), pid, helpers)
+
+    def test_only_the_manager_scoped_helper_is_accepted(self):
+        self.assertTrue(self.accepted(self.child(11)))
+        self.assertFalse(self.accepted(self.child(12, comm="cargo", argv=(b"cargo",))), "another name under the same parent")
+        self.assertFalse(self.accepted(11, [{**self.HELPER[0], "parent_exe": "/usr/bin/other"}]))
+        self.assertFalse(self.accepted(11, []), "nothing accepted by default")
+        self.assertFalse(self.accepted(11, [{"comm": "(sd-pam)", "parent_exe": "/usr/lib/systemd/systemd"}]),
+                         "an entry without a cgroup accepts nothing")
+        os.unlink(self.proc / "10/exe")
+        self.assertFalse(self.accepted(11), "an uninspectable parent fails closed")
+
+    def test_a_renamed_service_child_of_the_manager_is_not_accepted(self):
+        service = "/user.slice/user-1000.slice/user@1000.service/app.slice/build.service"
+        # Same parent and same name, but a user service (or a process reparented
+        # to the manager) keeps its own unit cgroup.
+        self.assertFalse(self.accepted(self.child(13, cgroup=service)))
+        # Same parent, name and cgroup, but running an arbitrary executable.
+        self.assertFalse(self.accepted(self.child(14, argv=(b"/usr/bin/python3", b"build.py"))))
+        # A scope the configuration does not name is refused even when shared.
+        (self.proc / "10/cgroup").write_text(f"0::{service}\n")
+        self.assertFalse(self.accepted(self.child(15, cgroup=service)))
+
+    def test_paths_seen_before_an_inspection_failure_still_block(self):
+        work = Path(tempfile.mkdtemp(prefix="sf080-cwd-"))
+        child = subprocess.Popen(["sleep", "30"], cwd=work)
         try:
-            (proc / "10").mkdir()
-            os.symlink("/usr/lib/systemd/systemd", proc / "10/exe")
-            (proc / "11").mkdir()
-            (proc / "11/comm").write_text("(sd-pam)\n")
-            (proc / "11/stat").write_text("11 ((sd-pam)) S 10 11 11 0 -1\n")
-            (proc / "12").mkdir()
-            (proc / "12/comm").write_text("cargo\n")
-            (proc / "12/stat").write_text("12 (cargo) S 10 12 12 0 -1\n")
-            helper = [{"comm": "(sd-pam)", "parent_exe": "/usr/lib/systemd/systemd"}]
-            self.assertTrue(dc.accepted_helper(str(proc), 11, helper))
-            self.assertFalse(dc.accepted_helper(str(proc), 12, helper), "another name under the same parent")
-            self.assertFalse(dc.accepted_helper(str(proc), 11, [{"comm": "(sd-pam)", "parent_exe": "/usr/bin/other"}]))
-            self.assertFalse(dc.accepted_helper(str(proc), 11, []), "nothing accepted by default")
-            os.unlink(proc / "10/exe")
-            self.assertFalse(dc.accepted_helper(str(proc), 11, helper), "an uninspectable parent fails closed")
+            real_readlink = os.readlink
+
+            def readlink(path, *args, **kwargs):
+                if str(path).startswith(f"/proc/{child.pid}/fd/"):
+                    raise PermissionError(13, "denied")
+                return real_readlink(path, *args, **kwargs)
+            with mock.patch.object(dc.os, "readlink", readlink), \
+                    mock.patch.object(dc, "accepted_helper", lambda proc, pid, helpers: int(pid) == child.pid):
+                paths, uninspectable = dc.System({}).processes()
+            self.assertIn(str(work.resolve()), paths, "the accepted process's observed cwd is kept")
         finally:
-            subprocess.run(["rm", "-rf", str(proc)])
+            child.kill()
+            child.wait()
+            work.rmdir()
 
 
 class PlanTests(Fixture):
