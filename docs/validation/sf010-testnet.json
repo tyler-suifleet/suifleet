@@ -1401,5 +1401,139 @@
     "spent_mist": 29345584,
     "allowance_used_mist": 104950980,
     "finished": "2026-10-15T07:27:49Z"
+  },
+  "extension_wallet_slush": {
+    "started": "2026-10-19T21:05:00Z",
+    "network": "testnet",
+    "chain": "4c78adac",
+    "head": "15ce62dc54d9294fa6c572d29e27a18c6276d8ba",
+    "extension": {
+      "name": "Slush \u2014 A Sui wallet",
+      "version": "26.21.4",
+      "id": "opcgpfmipidbgpenhmajoajpbobppdil",
+      "source": "Chrome Web Store CRX",
+      "crx_sha256": "5f7e1a7ab0000d0155963eb688b725747fcbbb89d29d201487e9f32f0f924bba"
+    },
+    "browser": {
+      "name": "Chrome for Testing",
+      "version": "156.0.8078.4",
+      "mode": "--headless=new, extension loaded unpacked with its store key",
+      "zip_sha256": "43fd31766c7533a02dda2ded5ad50c2f861cd5400be7509c0abad71129f79d79",
+      "driver": "Playwright 1.64.1 clicking the extension's own popups"
+    },
+    "dapp": {
+      "source": "dapp/ at this head, next dev (Next 16.4.1, dApp Kit React 2.1.40, Sui SDK 2.36.0) in the pinned dev image",
+      "manifest": "resolved with deployment_manifest.py from the CI package-upgrade fixture for these contracts (fa83c390\u2026)",
+      "package": "0x57ff9cdec07120a0f46eabdbdfc9f8b7e2cba9aa9472667018f7ee6cc355efdb",
+      "registry": "0x4f9f07046cf48a4195f2c2d8ff1d5e00ed8e41efac669ba2b3aa3b7e28a3ffa2"
+    },
+    "operator": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+    "extension_account": "0x788384ed912c58eabe01775e43ad2d5b4c81cbac875ef1be16333318e484523a",
+    "operator_transactions": [
+      {
+        "label": "fund the Slush extension test key",
+        "gas_budget_mist": 10000000,
+        "funding_mist": 100000000,
+        "status": "success",
+        "digest": "GU3wxu65cHQdw7X68Q2fn3zomc4bp3ryoChoGbgarTbA",
+        "gas_mist": 1988000,
+        "allowance_used_mist": 101988000
+      },
+      {
+        "label": "sweep the Slush extension test key (charged to its funding)",
+        "gas_budget_mist": 3000000,
+        "status": "success",
+        "digest": "HvLUaMVHQAgPU6rPARtmfbH8pHMy5Edap3YrqTKrJ2gV",
+        "gas_mist": 1000099,
+        "returned_mist": 78727271
+      }
+    ],
+    "extension_transactions": [
+      {
+        "label": "register + issue cap + activate (DeviceOwnerCap to the wallet)",
+        "digest": "4WwVauih5CXLTL9xTcaCQRXoKbM7yn8Sr4reoxqNyKDm",
+        "status": "success",
+        "net_gas_mist": 14262277
+      },
+      {
+        "label": "issue cap again",
+        "digest": "J7eFkAbLCxoQ44B9RhXsDf47kbKugkHShYdp2WQcVGZm",
+        "status": "success",
+        "net_gas_mist": 4640842
+      },
+      {
+        "label": "create group",
+        "digest": "8paQZCZsLkEQp6QPpojPvzi9KTkuArJuwBcQPARvAfBL",
+        "status": "success",
+        "net_gas_mist": 2869699
+      },
+      {
+        "label": "add device to group",
+        "digest": "8Ag5ri7ihcfxugVNE1mmXYuZo4rdqerAtwJhps9o3q15",
+        "status": "success",
+        "net_gas_mist": 1243829
+      },
+      {
+        "label": "create verified group deployment (recipe and artifact on Walrus testnet)",
+        "digest": "7EExE9YkB5TyTo6Ard46xgrLbLQLzyZz7b4KmxhxtN7K",
+        "status": "success",
+        "net_gas_mist": 13608499
+      },
+      {
+        "label": "create group with the extension set to Mainnet (processed on testnet)",
+        "digest": "HJM2cG4C8NQbBGMACet3phfuBPDRviRo1PGmc5aprLS1",
+        "status": "success",
+        "net_gas_mist": 2900099
+      },
+      {
+        "label": "delete deployment",
+        "digest": "29iqqmBf5qmWZ8nYs3a2M9iQwQMLCYPpEuj8ijC69Xu2",
+        "status": "success",
+        "net_gas_mist": -11607040
+      },
+      {
+        "label": "remove device from group",
+        "digest": "8ATZTfxEej1DHEwSx1xpEAJueFHESdMtsG3H38kFNWq4",
+        "status": "success",
+        "net_gas_mist": 757110
+      },
+      {
+        "label": "delete group",
+        "digest": "GaLuEvcJxZfx4xf2GHA9dgtv3R4XqYo3Zvm8y5r2dVHh",
+        "status": "success",
+        "net_gas_mist": -869314
+      },
+      {
+        "label": "delete group (wrong-network one)",
+        "digest": "DY5WScZhp3DJrp9g4qGwpyPiZtS5u5gQaCCF2jExHRXQ",
+        "status": "success",
+        "net_gas_mist": -899711
+      },
+      {
+        "label": "deregister device",
+        "digest": "4U2gRNJvDujv88k12yVB4MW7wQPxCcDQfsiLV8F4ArDh",
+        "status": "success",
+        "net_gas_mist": -5633561
+      }
+    ],
+    "checks": [
+      "connect: dApp Kit modal listed Slush; rejecting the connection popup showed 'Connection failed' and left the dApp disconnected; Retry + Approve connected 0x7883\u2026523a",
+      "sign rejection: Register \u2192 Slush popup \u2192 Reject surfaced 'Registration failed: User rejected the request.'; nothing executed (one register_device transaction exists, the approved one)",
+      "registration: one PTB register_device + issue_cap + activate_device; Slush's own preview showed DeviceOwnerCap to the wallet and DeviceCap to the device; listed by the dApp",
+      "cap issuance via the Issue cap action: 'DeviceCap issued to 0x71929b8f\u2026'",
+      "group create and add_device; membership listed",
+      "artifact uploaded by the dApp to Walrus testnet (blob nEg_gWC4_C6IVkGuvbWwcxCfhe_ZKpRrud30sFJ5bro, sha256 60c2e327\u2026), recipe uploaded, create_deployment_verified approved; deployment listed with its group and resolved device 0xac25cd99\u2026, recipe blob available",
+      "wrong network: with Slush switched to Mainnet the dApp still requested sui:testnet (the manifest network); Slush warned 'This app is running on testnet, but your Slush network is set to mainnet \u2026 this transaction will process on testnet'; approved transaction executed and was confirmed on testnet. Slush accounts advertise sui:mainnet, sui:devnet and sui:testnet, so the dApp's missing-chain refusal is exercised only by the scripted gate",
+      "disconnect all \u2192 'Connect your wallet to manage devices.'; reconnect required a new Slush approval",
+      "cleanup through the dApp: deployment, membership, both groups and the device deleted; listings empty",
+      "all 11 extension transactions SUCCESS (GraphQL, sender filter); spot digests re-read with sui 1.82.1 tx-block",
+      "sweep returned 0.0787 SUI; the extension key holds 0 MIST afterwards"
+    ],
+    "not_covered": [
+      "an abort refused by simulation and an abort executed on chain through the extension (scripted gate covers both)",
+      "a wallet account lacking sui:testnet (not reachable with Slush; scripted gate covers the refusal)"
+    ],
+    "extension_net_gas_mist": 21272729,
+    "operator_net_cost_mist": 24260828
   }
 }

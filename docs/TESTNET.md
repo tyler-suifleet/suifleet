@@ -166,9 +166,9 @@ Checks:
 - an account without the manifest's chain is refused before signing;
 - cleanup through the dApp (deployment, membership, group, device) and the sweep.
 
-## Manual extension-wallet check
+## Extension-wallet check
 
-A real extension (Slush or another Wallet Standard wallet) cannot be scripted and needs a person. Per release candidate:
+A real extension (Slush or another Wallet Standard wallet) is not part of the automatic suites. Run this check per release candidate, either by hand or by driving the extension's own popups as in the 2026-10-19 run below:
 
 1. Run the package-upgrade gate, then resolve its fixture into a frontend manifest (free reads; IDs from `live-state.json` or the gate's evidence):
    ```bash
@@ -185,10 +185,23 @@ A real extension (Slush or another Wallet Standard wallet) cannot be scripted an
    - reject a signing request: an error, nothing executed;
    - register a device, then create a group and add it;
    - upload a small artifact and create a deployment to the group; it lists with its device;
-   - switch the extension to mainnet/devnet: submissions are refused before signing;
+   - switch the extension to mainnet/devnet: the dApp still requests `sui:testnet` (the manifest network), and the wallet either refuses or executes on testnet. Nothing may execute on another chain;
    - disconnect and reconnect;
    - delete the deployment, group and device.
 3. Record the extension name/version, browser, date and the digests in #11.
+
+**Run of 2026-10-19 (Slush).** The run used Slush 26.21.4 from the Chrome Web Store, in Chrome for Testing 156.0.8078.4 (`--headless=new`). Playwright clicked through Slush's own onboarding, connection and transaction popups. The dApp was this branch's `dapp/` (`next dev`), using the CI package-upgrade fixture `0x57ff9cde…` for these contracts. The Slush account was a throwaway key, funded with 0.1 SUI from the agent wallet and swept back afterwards. All checks passed:
+- rejecting the connection gave "Connection failed";
+- rejecting a signature gave "Registration failed: User rejected the request." and nothing executed;
+- registration, cap and activation ran as one PTB; Slush's preview showed the `DeviceOwnerCap` going to the wallet;
+- the Issue cap action, group creation and membership worked;
+- the dApp uploaded the artifact and recipe to Walrus testnet; the verified deployment was listed with its resolved device;
+- disconnect and reconnect (with a new approval) worked;
+- cleanup deleted everything.
+
+Slush accounts advertise `sui:mainnet`, `sui:devnet` and `sui:testnet`, so the dApp's missing-chain refusal cannot trigger with Slush. Switched to Mainnet, Slush warned that "this transaction will process on testnet", and the approved transaction executed and was confirmed on testnet. The refusal itself, simulation refusals and executed aborts remain covered by the scripted wallet gate.
+
+The run made 11 extension transactions, all successful, costing 0.0213 SUI of the test key's gas; the agent wallet's net cost was 0.0243 SUI. Digests are in [`validation/sf010-testnet.json`](validation/sf010-testnet.json) under `extension_wallet_slush`.
 
 ## SF-010 suites in automatic CI
 
@@ -211,7 +224,7 @@ The automatic main-only controller (`testnet.yml`, environment `live-package-upg
 | Legacy caps and old-package attacks | upgrade-security suite (4 attacks, exact aborts) | testnet PASS |
 | Revocation | upgrade-security suite | testnet PASS |
 | Wallet rejection, failure, wrong chain | wallet gate (scripted wallet) | testnet PASS |
-| Real browser-extension wallet | manual check above | **pending a person** |
+| Real browser-extension wallet | extension-wallet check above (Slush 26.21.4, Chrome for Testing 156, 2026-10-19) | testnet PASS |
 | Real device | `hardware` gate (SF-031) | **pending hardware** |
 
 Evidence (no keys): [`validation/sf010-testnet.json`](validation/sf010-testnet.json).

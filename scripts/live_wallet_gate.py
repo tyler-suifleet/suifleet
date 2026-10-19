@@ -19,8 +19,8 @@ a verified deployment (listed with its resolved device; blobs available),
 an abort refused by simulation before signing, an abort executed on chain
 and reported as failure, wrong-chain refusal, and cleanup.
 
-A real browser-extension wallet (Slush etc.) still needs a person:
-docs/TESTNET.md, "Manual extension-wallet check".
+A real browser-extension wallet (Slush etc.) is checked separately, per
+release candidate: docs/TESTNET.md, "Extension-wallet check".
 """
 import argparse
 import json
