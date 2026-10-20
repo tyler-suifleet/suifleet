@@ -73,9 +73,10 @@
       "components": [
         "aws.iot.EdgeConnectorForKVS"
       ],
-      "runtime_execution": "pending",
+      "runtime_execution": "passed",
       "live_execution": "pending",
-      "acceptance": "Deterministic media source and local protocol emulator verifying fragments/timestamps, interruption, expiry, rejection and replay semantics."
+      "acceptance": "Deterministic media source and local protocol emulator verifying fragments/timestamps, interruption, expiry, rejection and replay semantics.",
+      "runtime_evidence": "docs/validation/sf072-video.json"
     },
     {
       "id": "ml",
@@ -113,7 +114,8 @@
         "SF-027"
       ],
       "components": [],
-      "runtime_execution": "pending",
+      "runtime_execution": "passed",
+      "runtime_evidence": "docs/validation/sf074-windows.json",
       "live_execution": "pending",
       "acceptance": "Windows software VM/CI tests for real service start/stop/restart, descendant containment, ACL/caller denial, component install and interrupted lifecycle; physical target tests deferred."
     },

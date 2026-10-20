@@ -1,0 +1,81 @@
+"use client";
+// SF-037: publish an AWS Greengrass recipe as an immutable catalog version.
+// Every rejection and reported difference is shown with its guidance; nothing
+// is uploaded until the translation succeeds and the operator acknowledges
+// the reported differences.
+import { useState } from 'react';
+import { artifactUris,parseGreengrassRecipe,translateGreengrassRecipe,GUIDANCE,ipcAclToml,type ArtifactBinding,type Translation } from '@/lib/greengrass-recipe';
+import { assertComponentRecipe } from '@/lib/recipe-schema';
+import { uploadArtifact,uploadRecipe,storageWarnings,renewalCommand } from '@/lib/walrus';
+import { buildPublishVersionTx } from '@/lib/catalog';
+import type { Transaction } from '@mysten/sui/transactions';
+
+async function sha256(file:File){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await file.arrayBuffer())),b=>b.toString(16).padStart(2,'0')).join('');}
+const guidance=(code:string)=>GUIDANCE[code.startsWith('ComponentDependencies.')?'aws-managed-dependency':code];
+
+export function GreengrassImport({catalog,owner,execute,onPublished,disabled}:{catalog:string;owner:string;execute:(a:{transaction:Transaction})=>Promise<unknown>;onPublished:()=>void;disabled:boolean}) {
+  const [text,setText]=useState(''),[files,setFiles]=useState<Record<string,File>>({});
+  const [result,setResult]=useState<Translation|null>(null),[acknowledged,setAcknowledged]=useState(false);
+  const [busy,setBusy]=useState(false),[message,setMessage]=useState('');
+  const parsed=text.trim()?parseGreengrassRecipe(text):null;
+  const uris=parsed&&'recipe' in parsed?artifactUris(parsed.recipe):[];
+  // Placeholder blob IDs mark which uploads the translated manifests use.
+  async function translate(blob:(uri:string,index:number)=>string){
+    if(!parsed) throw new Error('Paste a recipe');
+    if(!('recipe' in parsed)) return parsed;
+    const bindings:Record<string,ArtifactBinding>={};
+    for(const [i,uri] of uris.entries()) if(files[uri]) bindings[uri]={artifactBlobId:blob(uri,i),artifactSha256:await sha256(files[uri])};
+    return translateGreengrassRecipe(parsed.recipe,bindings);
+  }
+  async function check(){setMessage('');setAcknowledged(false);try{setResult(await translate((_,i)=>`pending-${i}`));}catch(e){setMessage(String(e));}}
+  async function publish(){
+    setBusy(true);setMessage('');
+    try{
+      const preview=await translate((_,i)=>`pending-${i}`);
+      if(preview.outcome!=='translate'||!preview.manifests) throw new Error('The recipe does not translate');
+      // Reject an unusable native recipe before any artifact upload.
+      for(const m of preview.manifests) assertComponentRecipe(m.recipe);
+      if(!catalog) throw new Error('Choose a catalog');
+      const used=new Set(preview.manifests.map(m=>m.recipe.artifactBlobId));
+      const uploaded:Record<string,{blobId:string;sha256:string}>={},warnings:string[]=[];
+      for(const [i,uri] of uris.entries()){
+        if(!used.has(`pending-${i}`)) continue;
+        const artifact=await uploadArtifact(files[uri],owner);
+        uploaded[uri]=artifact;warnings.push(`Artifact ${uri}: storage expires at epoch ${artifact.storage.endEpoch??'unknown'}`,...storageWarnings(artifact.storage));
+      }
+      // Translate again with the real uploads; the digests were already checked locally.
+      const final=await translate(uri=>uploaded[uri]?.blobId??'unused');
+      if(final.outcome!=='translate'||!final.manifests||final.manifests.length!==preview.manifests.length) throw new Error('Translation changed after upload');
+      for(const m of final.manifests) assertComponentRecipe(m.recipe);
+      const manifests=[];
+      for(const m of final.manifests){
+        const recipe=await uploadRecipe(m.recipe,owner);
+        warnings.push(`Recipe ${m.os}/${m.arch}: storage expires at epoch ${recipe.storage.endEpoch??'unknown'}`,...storageWarnings(recipe.storage));
+        const renew=renewalCommand(recipe.storage);if(renew) warnings.push(renew);
+        manifests.push({os:m.os,arch:m.arch,recipeBlobId:recipe.blobId,recipeSha256:recipe.sha256,artifactSha256:m.recipe.artifactSha256});
+      }
+      const {componentName,componentVersion}=final.manifests[0].recipe;
+      await execute({transaction:buildPublishVersionTx(catalog,componentName,componentVersion,manifests)});
+      setMessage('Translated version registered. '+warnings.join('\n'));onPublished();
+    }catch(e){setMessage(String(e));}finally{setBusy(false);}
+  }
+  const name=parsed&&'recipe' in parsed&&typeof (parsed.recipe as {ComponentName?:unknown})?.ComponentName==='string'?(parsed.recipe as {ComponentName:string}).ComponentName:'component';
+  const differences=result?.informational??[];
+  return <div className="space-y-3 border p-4"><h2>Import AWS Greengrass recipe</h2>
+    <p>Translates the supported Greengrass V2 subset (docs/GREENGRASS_COMPATIBILITY.md). AWS IPC, Lambda and the nucleus environment are not emulated; unsupported fields are rejected with guidance.</p>
+    <label className="block">Recipe (JSON or YAML)<textarea rows={10} className="w-full font-mono" value={text} onChange={e=>{setText(e.target.value);setResult(null);}}/></label>
+    {uris.map(uri=><label key={uri} className="block">Artifact for <code>{uri}</code> <input type="file" onChange={e=>{const f=e.target.files?.[0];setFiles(({[uri]:_,...rest})=>f?{...rest,[uri]:f}:rest);setResult(null);}}/></label>)}
+    <button disabled={busy||!text.trim()} onClick={check}>Check translation</button>
+    {result&&<div role="status" className="space-y-2">
+      <p>{result.outcome==='translate'?`Translates to ${result.manifests!.length} native manifest(s)`:'Rejected'}{result.omitted_manifests?.length?`; manifests ${result.omitted_manifests.join(', ')} omitted (platform not translated: Windows, macOS or 32-bit x86)`:''}</p>
+      <ul>{result.reasons.map(r=><li key={r}><code>{r}</code>: {guidance(r)}</li>)}</ul>
+      {result.manifests?.map((m,i)=><p key={i}>{i+1}. {m.os}/{m.arch} · recipe {m.recipe.schemaVersion}</p>)}
+      {result.managed_dependencies&&<ul>{Object.entries(result.managed_dependencies).map(([d,c])=><li key={d}><code>{d}</code>: {c.outcome}{c.reason?` (${c.reason})`:''}{c.tickets?.length?` · ${c.tickets.join(', ')}`:''}{c.implementation_ticket?` · ${c.implementation_ticket}`:''}</li>)}</ul>}
+      {result.ipc_acl&&<div><p>Equivalent operator IPC ACL for a ported component (recipes never grant it):</p><pre>{ipcAclToml(name,result.ipc_acl)}</pre>{result.ipc_acl.unmapped.length>0&&<p>No native equivalent: {result.ipc_acl.unmapped.join(', ')}</p>}</div>}
+      {differences.length>0&&<div><p>Reported differences from AWS behaviour:</p><ul>{differences.map(d=><li key={d}><code>{d}</code>: {guidance(d)}</li>)}</ul>
+        <label><input type="checkbox" checked={acknowledged} onChange={e=>setAcknowledged(e.target.checked)}/> I reviewed these differences</label></div>}
+    </div>}
+    <button disabled={disabled||busy||result?.outcome!=='translate'||(differences.length>0&&!acknowledged)} onClick={publish}>{busy?'Uploading…':'Upload and register translated version'}</button>
+    {message&&<p className="whitespace-pre-wrap" role="status">{message}</p>}
+  </div>;
+}

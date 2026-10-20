@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "ticket": "SF-077",
+  "implementation": "scripts/firehose_export.py",
+  "reference_reviewed": "2026-10-19",
+  "references": [
+    {"url": "https://docs.aws.amazon.com/greengrass/v2/developerguide/kinesis-firehose-component.html", "version": "aws.greengrass.KinesisFirehose 2.1.10", "scope": "functional reference only; no Lambda/subscription wire compatibility"},
+    {"url": "https://docs.aws.amazon.com/firehose/latest/APIReference/API_PutRecordBatch.html", "version": "Firehose API 2015-08-04", "scope": "ordered per-record results, ambiguous writes may duplicate"}
+  ],
+  "sdk_lock": "sdk/credentials/requirements.txt",
+  "max_records": 500,
+  "max_record_bytes": 1024000,
+  "max_batch_bytes": 4194304,
+  "encoding": "compact UTF-8 JSON followed by LF per IPC payload",
+  "checkpoint": "destination/source-bound contiguous acknowledged prefix; later successes may duplicate",
+  "live_aws": "unrun; separate authorization required; tracked in SF-077/#131",
+  "physical_target": "unrun; deferred to SF-031/#32",
+  "license": "clean-room original implementation; no AWS component code copied"
+}

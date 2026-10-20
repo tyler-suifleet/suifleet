@@ -1,0 +1,39 @@
+name: Windows runtime
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: windows-runtime-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows-runtime:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Install pinned Rust
+        shell: pwsh
+        run: rustup toolchain install 1.94.0 --profile minimal
+      - name: Build native daemon and acceptance component
+        shell: pwsh
+        run: |
+          cargo +1.94.0 build --locked --manifest-path suifleet-edge/Cargo.toml --no-default-features
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo +1.94.0 test --locked --manifest-path suifleet-edge/windows-runtime/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo +1.94.0 build --locked --manifest-path suifleet-edge/windows-runtime/Cargo.toml --example component
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Real SCM, Job Object, caller/ACL and recovery acceptance
+        shell: pwsh
+        run: ./scripts/test_windows_runtime.ps1
+      - name: Upload sanitized evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-runtime-evidence
+          path: windows-evidence.json
+          if-no-files-found: error
+          retention-days: 14

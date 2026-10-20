@@ -83,6 +83,9 @@ pub struct ComponentHealth {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Snapshot {
+    /// Digest of the redacted effective IPC service summary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_configuration_sha256: Option<String>,
     pub schema: u64,
     pub chain_identifier: String,
     pub registry: String,
@@ -256,6 +259,7 @@ pub fn validate(snapshot: &Snapshot) -> Result<(), String> {
     if !matches!(snapshot.health.as_str(), "healthy" | "degraded") {
         return Err("health must be healthy or degraded".into());
     }
+    if snapshot.service_configuration_sha256.as_ref().is_some_and(|s| s.len() != 64 || !s.bytes().all(|b| b.is_ascii_hexdigit())) { return Err("invalid service configuration digest".into()); }
     if snapshot.health == "healthy" && !snapshot.reasons.is_empty() {
         return Err("a healthy snapshot lists no reasons".into());
     }
@@ -529,6 +533,7 @@ pub(crate) mod tests {
 
     pub(crate) fn snapshot(seq: u64, observed_ms: u64) -> Snapshot {
         Snapshot {
+            service_configuration_sha256: None,
             schema: 1, chain_identifier: "abcd1234".into(), registry: "0x5".into(), device_id: "0xd1".into(),
             signer: address(&KEY), seq, observed_ms, interval_seconds: 60, daemon_version: "0.2.1".into(),
             boot_id: None, started_ms: 0, dropped: 0,

@@ -1,5 +1,7 @@
 # Native component IPC and SDK (v1)
 
+Fleet deployments can supply service configuration and component grants through [recipe services](DEPLOYMENT_SERVICES.md); device-local sections remain explicit overrides.
+
 SF-027 provides an opt-in Unix-stream API (Linux, and macOS since SF-075; see
 [MACOS_RUNTIME.md](MACOS_RUNTIME.md#ipc-authentication)) and a dependency-free Python 3.10+
 SDK/CLI in [`sdk/python/suifleet_ipc.py`](../sdk/python/suifleet_ipc.py). This is a
@@ -77,12 +79,14 @@ no keys, user accounts or enrollment settings are embedded by package builds.
 | `publish` | `component`, exact `topic`, JSON `payload` | Fanout to configured subscribers, message envelope includes authenticated component name (or `@operator/UID` for administrators). Payload <=4096 serialized bytes. Atomic backpressure if any inbox is full. |
 | `receive` | `component`, exact `topic` | Destructive nonblocking dequeue, or null. Each principal/topic has 32 messages maximum. With a durable subscription to that filter, its oldest message instead ([MESSAGING.md](MESSAGING.md)). |
 | `stream_create`, `stream_delete`, `stream_append`, `stream_read`, `stream_describe` | `component`, stream name as `topic` | Durable streams (SF-034, [STREAMS.md](STREAMS.md)); need `[streams]` and a matching `streams` glob in the component's ACL. |
+| `stream_export_ack` | `component`, stream name as `topic`, `{sequence}` | Trusted [external exporter](STREAM_EXPORTERS.md) only: explicit operation + stream glob, operator-declared `external_export` required. Persists confirmed remote delivery before retirement. |
 | `stream_list` | `component` | Stream names the caller's `streams` globs match. |
 | `subscribe`, `unsubscribe`, `ack` | `component`, filter `topic` | Durable pub/sub (SF-032); need `[pubsub]` and a `SubscribeToTopic` policy. |
 | `shadow_get`, `shadow_update`, `shadow_delete` | `component`, shadow name as `topic` (`""` is classic) | Device shadows (SF-033, [SHADOWS.md](SHADOWS.md)); need `[shadows]` and a matching `shadow_policies` grant. |
 | `shadow_list` | `component` | Named shadows a `ListNamedShadowsForThing` grant matches. |
 | `shadows` | no component needed | Administrator only. Shadow versions, sync and notification counters. |
 | `messaging` | no component needed | Administrator only. Durable subscription and bridge counters. |
+| `client_devices` | `payload` = `{action, ...}` | Administrator only; components cannot be granted it. LAN client-device enrollment from a CSR, revocation, removal and status (SF-035, [CLIENT_DEVICES.md](CLIENT_DEVICES.md)); needs `[client_devices]`. |
 
 Stops are runtime controls: explicit start, replacement deployment or daemon restart
 may start the committed version again. Stop does not uninstall or alter chain desired

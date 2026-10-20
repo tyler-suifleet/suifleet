@@ -63,12 +63,24 @@ test-ota:
 	$(RUN) python3 scripts/test_firmware_restart.py
 	$(RUN) python3 scripts/test_supervisor.py
 	$(RUN) python3 scripts/test_configuration.py
+	$(RUN) python3 scripts/test_greengrass_runtime.py
 	$(RUN) python3 scripts/test_daemon_update.py
 	$(RUN) python3 scripts/test_desired_state.py
 	$(RUN) python3 scripts/test_deployment_control.py
 	$(RUN) python3 scripts/test_telemetry.py
 	$(RUN) python3 scripts/test_logs.py
 	$(RUN) python3 scripts/test_rollout.py
+
+# Fleet service configuration, root only in a disposable network-none container
+# for real SO_PEERCRED principals (no host credentials or public network).
+.PHONY: test-services
+test-services:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+ifdef INSIDE_DEV_CONTAINER
+	python3 scripts/test_services.py
+else
+	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" python3 scripts/test_services.py
+endif
 
 # Supervised components under the shipped systemd units on real systemd and
 # cgroup v2 (SF-014): a disposable privileged container with systemd as PID 1.
@@ -124,8 +136,14 @@ test-protocol-live:
 test-catalog-live:
 	$(RUN) python3 scripts/test_catalog_localnet.py
 
-# SF-028 Greengrass compatibility matrix, reference-model fixtures and current
-# frontend validator check (docs/GREENGRASS_COMPATIBILITY.md). Offline.
+# Independent media decode, protocol-emulator and process-recovery suite.
+.PHONY: test-video
+test-video:
+	bash scripts/test_kvs_video.sh
+
+# SF-028 Greengrass compatibility matrix and reference-model fixtures, and the
+# SF-037 translator executing the recipe/managed-dependency fixtures
+# (docs/GREENGRASS_COMPATIBILITY.md). Offline; needs the dApp dependencies.
 .PHONY: test-compat
 test-compat:
 	$(RUN) python3 scripts/greengrass_compat.py
@@ -259,6 +277,11 @@ tracking-plan:
 test-tracking:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_tracking.py'
 
+# Offline: disk audit and cleanup safety (docs/DISK_CLEANUP.md); temp dirs only.
+.PHONY: test-disk-cleanup
+test-disk-cleanup:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_disk_cleanup.py'
+
 .PHONY: test-manifest test-manifest-live
 test-manifest:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_deployment_manifest.py'
@@ -387,6 +410,13 @@ edge-acceptance:
 	PYTHONDONTWRITEBYTECODE=1 python3 scripts/edge_acceptance.py run --profile "$(PROFILE)" --evidence "$(EVIDENCE)" \
 		$(if $(HARDWARE),--hardware) $(LOCK_ARGS)
 
+# LAN client devices (SF-035): real daemon, Mosquitto and two TLS clients on an
+# internal Docker network without an Internet route; host Docker.
+.PHONY: test-client-devices
+test-client-devices:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+	python3 scripts/test_client_devices.py --image "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" $(CLIENT_DEVICES_EVIDENCE)
+
 # Streams (SF-034): real daemon, component UIDs and a verifying export
 # receiver; root only inside a disposable, network-isolated container.
 .PHONY: test-streams
@@ -424,3 +454,22 @@ endif
 .PHONY: test-aws-credentials
 test-aws-credentials:
 	bash scripts/test_aws_credentials.sh
+
+# SF-059: actual metrics transport, persistence and peer authorization, offline.
+.PHONY: test-cloudwatch-metrics
+test-cloudwatch-metrics:
+	bash scripts/test_cloudwatch_metrics.sh
+
+# SF-058: actual durable daemon IPC + unmodified SDK against local AWS API emulators.
+.PHONY: test-stream-export
+test-stream-export:
+	bash scripts/test_stream_export.sh
+
+# SDK wheels are prepared by test-aws-credentials (or the command in FIREHOSE.md).
+# All service/IPC traffic stays in a disposable offline container.
+.PHONY: test-firehose
+test-firehose:
+	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 \
+	  -e PYTHONPATH=/workspace/.ci-cache/aws-python \
+	  -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:?set pinned dev image}" \
+	  sh -ec 'python3 -m unittest discover -s scripts/tests -p test_firehose_export.py -v; python3 scripts/test_streams.py --firehose'

@@ -29,6 +29,8 @@ The service is not a signing oracle. It decodes every request itself, independen
 - **Enrollment** (SF-021): exactly `enrollment::enroll` with the manifest's registry, sponsored by another address within the enrollment gas ceiling. Signed only for root, the provisioning operator.
 - **Telemetry** (SF-019, [TELEMETRY.md](TELEMETRY.md)): a Sui personal message, never valid as a transaction, that is exactly the canonical JSON of one telemetry snapshot: known schema and fields only, at most 64 KiB, the manifest's chain identifier and registry, and this key as signer. Signed only for the daemon's main process, by the same rule as status reports. Its health content is the daemon's own report: a compromised daemon could misreport its own device's health, as it could misreport a deployment status, but cannot sign for another chain, registry or key.
 
+- **Client-device CA binding** (SF-035, [CLIENT_DEVICES.md](CLIENT_DEVICES.md#discovery)): a Sui personal message that is exactly the canonical JSON `{schema: 1, kind: "client-device-ca", ...}` naming the manifest's chain and registry, this key as signer, a device ID and a SHA-256 CA fingerprint; at most 1 KiB. Signed only for the daemon's main process, by the same rule as telemetry. A compromised daemon could bind its own device to another CA, as it already controls that device's gateway, but cannot sign for another chain, registry or key.
+
 Any process may read the device's public address. There is no export, arbitrary-bytes, arbitrary personal-message or session operation.
 
 ## Migration
