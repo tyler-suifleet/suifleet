@@ -64,7 +64,7 @@ P2 means broader compatibility, not optional for a full-parity claim. Each row n
 | Stream manager/store-and-forward | [SF-034](https://github.com/tyler-suifleet/suifleet/issues/34) |
 | Client-device discovery/authentication | [SF-035](https://github.com/tyler-suifleet/suifleet/issues/38) |
 | Token exchange/cloud credentials | [SF-022](https://github.com/tyler-suifleet/suifleet/issues/25), [SF-038](https://github.com/tyler-suifleet/suifleet/issues/39), [SF-057](https://github.com/tyler-suifleet/suifleet/issues/102) |
-| ML inference/industrial/cloud integrations | [SF-038](https://github.com/tyler-suifleet/suifleet/issues/39), [SF-058](https://github.com/tyler-suifleet/suifleet/issues/103) to [SF-063](https://github.com/tyler-suifleet/suifleet/issues/108), [SF-064](https://github.com/tyler-suifleet/suifleet/issues/109) |
+| ML inference/industrial/cloud integrations | [SF-038](https://github.com/tyler-suifleet/suifleet/issues/39), [SF-058](https://github.com/tyler-suifleet/suifleet/issues/103) to [SF-063](https://github.com/tyler-suifleet/suifleet/issues/108), [SF-064](https://github.com/tyler-suifleet/suifleet/issues/109), [SF-070](https://github.com/tyler-suifleet/suifleet/issues/124) (industrial collector) |
 | Windows/macOS runtime | [SF-064](https://github.com/tyler-suifleet/suifleet/issues/109) (roadmap; SF-038 defines the initial Linux phase), [SF-074](https://github.com/tyler-suifleet/suifleet/issues/128) (Windows), [SF-075](https://github.com/tyler-suifleet/suifleet/issues/129) (macOS) |
 
 ## Hardware acceptance
