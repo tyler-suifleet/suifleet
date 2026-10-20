@@ -52,7 +52,7 @@ There is no AWS IPC wire compatibility, embedded MQTT broker or client-device su
 
 The translator is [`dapp/src/lib/greengrass-recipe.ts`](../dapp/src/lib/greengrass-recipe.ts). Operators use it in two places:
 
-- the **Import AWS Greengrass recipe** panel on the dApp's Components page, which uploads the bound artifacts and translated recipes and registers an immutable catalog version;
+- the **Import AWS Greengrass recipe** panel on the dApp's Components page, which uploads the bound artifacts and translated recipes and registers an immutable catalog version (accepted with the Slush extension on Sui and Walrus testnet: [receipt](validation/sf037-recipe-translation.json), `extension_wallet_testnet`);
 - the offline CLI:
 
   ```bash

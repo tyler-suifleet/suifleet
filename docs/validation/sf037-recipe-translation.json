@@ -1,7 +1,7 @@
 {
   "ticket": "SF-037",
   "head": "merge of main e4ca763 after be00ac8, with the dependency-type fix", "head_note": "rerun after merging main e4ca763 (SF-032, SF-033, SF-034, SF-075) and translating every dependency (including AWS SOFT) to native HARD with the reported ComponentDependencies difference; earlier runs on bases 568fabb and c530b75 and full runs at 026507c and 092fcbe also passed",
-  "scope": "Local/offline evidence only: translator, daemon validators and the real daemon against the local chain/Walrus simulator. No public network, real wallet, AWS account or physical target was used.",
+  "scope": "Local/offline evidence: translator, daemon validators and the real daemon against the local chain/Walrus simulator, plus one real extension-wallet run of the import panel on Sui testnet and Walrus testnet (extension_wallet_testnet). No AWS account or physical target was used.",
   "environment": {"image": "suifleet-dev (pinned Dockerfile)", "sui": "1.81.1", "rustc": "1.94.0", "node": "22.22.2", "pnpm": "11.0.8", "python": "3.10.12", "yaml": "2.9.1"},
   "suites": {
     "aws-recipe-cases.json": {
@@ -21,5 +21,52 @@
   },
   "make_targets_passed": ["test-compat", "check-interfaces", "dapp-typecheck", "edge-test", "dapp-build", "test-ota"],
   "make_targets_passed_earlier": "indexer-test, test-testnet, test-manifest, test-publish, test-contracts, test-interfaces, test-component and test-edge-acceptance passed at 026507c; not rerun locally on the e4ca763 merge (exact-head CI covers the merged head)",
-  "not_run": ["real extension-wallet import/publish through the Components page", "public testnet catalog registration of a translated recipe", "physical Pi execution (SF-031/#32)", "any AWS service or unmodified AWS IPC/SDK client"]
+  "extension_wallet_testnet": {
+    "date": "2026-10-19",
+    "network": "testnet",
+    "chain": "4c78adac",
+    "head": "59271442be3df07587087353b492d697319dde8b",
+    "head_note": "exact tree of the merge of main ebeab97 into 8c13689 (git archive), dApp run with next dev",
+    "extension": {"name": "Slush — A Sui wallet", "version": "26.21.4", "id": "opcgpfmipidbgpenhmajoajpbobppdil", "source": "Chrome Web Store CRX", "crx_sha256": "5f7e1a7ab0000d0155963eb688b725747fcbbb89d29d201487e9f32f0f924bba"},
+    "browser": {"name": "Chrome for Testing", "version": "156.0.8078.4", "mode": "--headless=new, extension loaded unpacked with its store key", "driver": "Playwright 1.64.1 clicking the dApp and the extension's own onboarding, connection and transaction popups; no stand-in wallet"},
+    "dapp": {
+      "source": "dapp/ at this head, next dev (Next 16.4.1, dApp Kit React 2.1.40, Sui SDK 2.36.0) in the pinned dev image",
+      "manifest": "resolved and verified on chain with deployment_manifest.py from the SF-010 package-upgrade fixture for these contracts (contracts unchanged since 15ce62d)",
+      "package": "0x57ff9cdec07120a0f46eabdbdfc9f8b7e2cba9aa9472667018f7ee6cc355efdb",
+      "registry": "0x4f9f07046cf48a4195f2c2d8ff1d5e00ed8e41efac669ba2b3aa3b7e28a3ffa2",
+      "walrus": {"publisher": "https://publisher.walrus-testnet.walrus.space", "aggregator": "https://aggregator.walrus-testnet.walrus.space"}
+    },
+    "operator": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+    "extension_account": "0x6d822877da480a16887d7089d1326463d654d5289858b0f96bfe5cef977ae80d",
+    "key": "throwaway ed25519 key imported into Slush, funded with 0.1 SUI from the agent wallet and swept back; deleted after the run",
+    "lock": "network:suifleet-testnet held from funding to sweep",
+    "checks": [
+      "connected through the dApp Kit connect UI after approving Slush's connection popup; the Components page loaded for 0x6d82…e80d on testnet",
+      "Create publisher catalog: Slush previewed a shared ComponentCatalog; approved and listed by the page",
+      "a recipe with Lifecycle.bootstrap, accessControl and {configuration:/Message} was rejected in the panel with configuration-variable, ipc-access-control and unsupported-lifecycle-step plus their guidance and the suggested operator IPC ACL; the upload button stayed disabled and nothing was uploaded or signed",
+      "an AWS YAML recipe (linux/aarch64, linux/amd64 and windows manifests; aws.greengrass.Nucleus and a SOFT dependency; DefaultConfiguration; install/run/shutdown) translated to 2 native manifests, windows omitted, Nucleus classified replace; every reported difference was shown with guidance and the upload button stayed disabled until the acknowledgement was checked",
+      "after the uploads, rejecting the registration in Slush's transaction popup surfaced 'User rejected the request.'; no transaction was executed and no version was listed",
+      "approving the retried registration executed publish_version; Slush previewed an Immutable ComponentVersion; the page listed com.suifleet.live.GreengrassImport 1.0.0 with both manifests",
+      "independent verification (scripts outside the dApp): the created ComponentVersion read over GraphQL from the effects; each recipe fetched from the Walrus aggregator matched its on-chain recipe SHA-256, passed the frontend assertComponentRecipe and equalled byte-for-byte the translator CLI output for the same bindings; each artifact matched its on-chain SHA-256 and the uploaded file; the AWS SOFT dependency is the native HARD form (versionRequirement only)"
+    ],
+    "catalog": "0x097eb172dd8b64a423bacc5cf06c7f9351bafad3394ae3928c529e8b47103a9f",
+    "component_version": "0x7bdc49291c1b76abeaa56258f25fe0a6a377bfe5df8863e06c9bf0ed97398307",
+    "manifests": [
+      {"os": "linux", "arch": "aarch64", "recipe_blob": "l29CFDMuTbPYbbt3gsoeEW20UBPCbyEY313VD3v6q8I", "recipe_sha256": "868399d91bf4c575caa8439f1a57af81be5756f54bb3ccf98f0803ace966c37c", "artifact_blob": "tXgf0UvBFqq05zg2rxb058_WX2WHo5rf4TVPVY_VZtQ", "artifact_sha256": "1a21e0a6db2850cec3cf3a02375d4e765fe3be3e90546818010e894fb61707a1"},
+      {"os": "linux", "arch": "x86_64", "recipe_blob": "AHH17zjUlItgK7RX75FnCeAx-IxFBKFJN7Nv9yYYq8Y", "recipe_sha256": "b94e25393103750f11520ff7db5b9e3dca4ff0f258c12767b4a438b06f497a9d", "artifact_blob": "vO4KMb9UXLVttt6WfriN_WHQhREkx0FmDCYyPVOSQ-Y", "artifact_sha256": "ee3918275b5296b6ae4f81847e4c7e0e496af1f65bcf1634c4beb4d267006475"}
+    ],
+    "translation": {"outcome": "translate", "omitted_manifests": [2], "informational": ["ComponentPublisher", "ComponentConfiguration.DefaultConfiguration", "ComponentDependencies.aws.greengrass.Nucleus", "ComponentDependencies", "Lifecycle.install", "Lifecycle.run", "Lifecycle.shutdown"], "managed_dependencies": {"aws.greengrass.Nucleus": "replace"}},
+    "operator_transactions": [
+      {"label": "fund the Slush extension test key (SF-037)", "gas_budget_mist": 10000000, "funding_mist": 100000000, "status": "success", "digest": "EKumewQdAU3KXALV5vQ33PSMRu8KBpd1UuUXoKYe6AzF", "gas_mist": 1000099, "allowance_used_mist": 101000099},
+      {"label": "sweep the Slush extension test key (SF-037)", "gas_budget_mist": 3000000, "funding_mist": 0, "status": "success", "digest": "Dqd9hpxH3ZHmqMa9F5TwRzihR2HXk1AVdkG2wwfxzpRG", "gas_mist": 1000099, "allowance_used_mist": 1000099}
+    ],
+    "extension_transactions": [
+      {"label": "create catalog", "digest": "3cvVVxPcyU9YN2yjMWZNiE3ZEFEiE1Vix2RdYf6fkosr", "status": "success", "net_gas_mist": 2694899},
+      {"label": "registration rejected in Slush", "status": "refused", "digest": null},
+      {"label": "register the translated version (publish_version)", "digest": "2hJ9GihfxaF2Dfrzm7L9xaYY4xSZvTvAmV1t64B6yQ4b", "status": "success", "checkpoint": 396945996, "net_gas_mist": 6806668}
+    ],
+    "cost": {"returned_mist": 89498334, "operator_net_mist": 11501765, "note": "the catalog (shared) and version (immutable) have no delete entry point and remain on testnet"},
+    "limitations": "One extension (Slush) in headless Chrome for Testing. The registered version was not deployed to a device in this run; translated runtime behaviour is covered by the simulator suites above, and physical execution stays in SF-031/#32."
+  },
+  "not_run": ["physical Pi execution (SF-031/#32)", "any AWS service or unmodified AWS IPC/SDK client", "deployment of the testnet-registered translated version to a device"]
 }
