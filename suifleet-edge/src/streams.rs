@@ -253,6 +253,8 @@ pub struct Message {
 
 #[derive(Serialize, Deserialize)]
 struct Meta {
+    #[serde(default, skip_serializing_if = "is_false")]
+    retired: bool,
     definition: Definition,
     /// Lowest retained sequence number when last persisted.
     oldest: u64,
@@ -281,6 +283,7 @@ fn cost(len: usize) -> u64 {
 }
 
 struct Stream {
+    retired: bool,
     def: Definition,
     dir: PathBuf,
     entries: VecDeque<Entry>,
@@ -417,7 +420,7 @@ impl Stream {
     }
 
     fn save_meta(&self) -> anyhow::Result<()> {
-        let meta = Meta { definition: self.def.clone(), oldest: self.oldest, next_floor: self.reserved.max(self.next), exported: self.exported };
+        let meta = Meta { retired: self.retired, definition: self.def.clone(), oldest: self.oldest, next_floor: self.reserved.max(self.next), exported: self.exported };
         write_atomic(&self.dir.join("meta.json"), &serde_json::to_vec_pretty(&meta)?)
     }
 
@@ -431,6 +434,7 @@ impl Stream {
     /// Retire by time-to-live and exported checkpoint; then drop segment files
     /// that hold only retired messages (persisting the floor first).
     fn retire(&mut self, now_ms: u64) -> anyhow::Result<()> {
+        if self.retired { return Ok(()); }
         if let Some(ttl) = self.def.time_to_live_seconds {
             while self.entries.front().is_some_and(|e| e.appended_ms.saturating_add(ttl * 1000) <= now_ms) {
                 self.evict_front();
@@ -522,6 +526,7 @@ impl Stream {
     fn load(dir: &Path, now_ms: u64, recover: bool) -> anyhow::Result<Self> {
         let meta: Meta = serde_json::from_slice(&std::fs::read(dir.join("meta.json"))?)?;
         let mut stream = Stream {
+            retired: meta.retired,
             def: meta.definition,
             dir: dir.to_owned(),
             entries: VecDeque::new(),
@@ -569,7 +574,7 @@ impl Stream {
             }
             if at < bytes.len() {
                 if index + 1 == firsts.len() {
-                    if recover {
+                    if recover && !stream.retired {
                         warn!(stream = stream.def.name, bytes = bytes.len() - at, "Truncating a torn record at the end of a stream");
                         let file = std::fs::OpenOptions::new().write(true).open(&path)?;
                         file.set_len(at as u64)?;
@@ -589,7 +594,7 @@ impl Stream {
         stream.oldest = stream.entries.front().map_or(stream.next, |e| e.sequence).max(meta.oldest.min(stream.next));
         // Re-apply the size bound: the retained set is always the longest
         // suffix that fits, so this reproduces evictions not yet persisted.
-        if recover {
+        if recover && !stream.retired {
             while stream.bytes > stream.def.max_size { stream.evict_front(); }
             stream.retire(now_ms)?;
         }
@@ -610,7 +615,7 @@ impl Stream {
     }
 
     fn describe(&self) -> Value {
-        json!({
+        json!({"retired": self.retired,
             "name": self.def.name, "max_size": self.def.max_size, "strategy_on_full": self.def.strategy_on_full,
             "persistence": self.def.persistence, "time_to_live_seconds": self.def.time_to_live_seconds,
             "external_export": self.def.external_export, "discard_exported": self.def.discard_exported,
@@ -630,10 +635,33 @@ fn redact_url(url: &str) -> String {
     }).unwrap_or_default()
 }
 
+/// Retired declarations remain on disk and read-only. Their reservations
+/// still block new allocations; a smaller restored budget may carry existing
+/// retained overage only when neither bytes nor stream count grows.
+fn check_inventory(previous: &BTreeMap<String, (u64, bool)>, quota: Quota, definitions: &[Definition], retiring: &[String]) -> anyhow::Result<()> {
+    let mut next = previous.clone();
+    for name in retiring { if let Some(entry) = next.get_mut(name) { entry.1 = true; } }
+    for def in definitions { next.insert(def.name.clone(), (def.max_size, false)); }
+    let sum = |entries: &BTreeMap<String, (u64,bool)>, active: bool| entries.values().filter(|(_, retired)| !active || !retired)
+        .try_fold(0u64, |a,(b,_)| a.checked_add(*b)).ok_or_else(|| anyhow::anyhow!("stream quota overflow"));
+    let total = sum(&next,false)?;
+    let active = next.values().filter(|(_,retired)| !retired).count();
+    let fits_all = next.len() <= quota.max_streams && total <= quota.max_total_bytes;
+    let retained_only = active <= quota.max_streams && sum(&next,true)? <= quota.max_total_bytes
+        && next.len() <= previous.len() && total <= sum(previous,false)?;
+    anyhow::ensure!(fits_all || retained_only,
+        "stored and declared streams need {} streams and {total} bytes, over [streams] max_streams = {} / max_total_bytes = {}; raise the limits, or delete streams under the old limits first (stream data left untouched)",
+        next.len(), quota.max_streams, quota.max_total_bytes);
+    Ok(())
+}
+
 /// Read metadata only when a previously disabled stream service is enabled.
 /// Conservatively refuse shrinking a persisted reservation without a live
 /// inventory; no segment is loaded, truncated, retired or evicted here.
 pub fn preflight_disk(dir: &Path, quota: Quota, definitions: &[Definition]) -> anyhow::Result<()> {
+    preflight_disk_transition(dir, quota, definitions, false)
+}
+pub fn preflight_disk_transition(dir: &Path, quota: Quota, definitions: &[Definition], recovery: bool) -> anyhow::Result<()> {
     let mut sizes = BTreeMap::new();
     if dir.exists() {
         for entry in std::fs::read_dir(dir)? {
@@ -641,20 +669,17 @@ pub fn preflight_disk(dir: &Path, quota: Quota, definitions: &[Definition]) -> a
             if !path.exists() { continue; }
             let meta: Meta = serde_json::from_slice(&std::fs::read(path)?)?;
             if let Some(next) = definitions.iter().find(|d| d.name == meta.definition.name) {
-                anyhow::ensure!(next.persistence == meta.definition.persistence && next.max_size >= meta.definition.max_size,
+                anyhow::ensure!(next.persistence == meta.definition.persistence && (recovery || next.max_size >= meta.definition.max_size),
                     "cannot shrink or change persisted stream while enabling service");
             }
-            sizes.insert(meta.definition.name, meta.definition.max_size);
+            sizes.insert(meta.definition.name, (meta.definition.max_size, meta.retired));
         }
     }
     for def in definitions {
         def.validate()?;
         anyhow::ensure!(sizes.contains_key(&def.name) || !dir.join(dir_name(&def.name)).exists(), "stream has orphaned state");
-        sizes.insert(def.name.clone(), def.max_size);
     }
-    let total = sizes.values().try_fold(0u64, |a,b| a.checked_add(*b)).ok_or_else(|| anyhow::anyhow!("quota overflow"))?;
-    anyhow::ensure!(sizes.len() <= quota.max_streams && total <= quota.max_total_bytes, "stored and declared streams need {} streams and {total} bytes, over [streams] max_streams = {} / max_total_bytes = {}; raise the limits, or delete streams under the old limits first (stream data left untouched)",
-        sizes.len(), quota.max_streams, quota.max_total_bytes);
+    check_inventory(&sizes,quota,definitions,&[])?;
     Ok(())
 }
 
@@ -671,19 +696,7 @@ impl Store {
     /// the current quota; otherwise startup fails before anything changes.
     pub fn start(dir: &Path, quota: Quota, definitions: &[Definition], now_ms: u64) -> anyhow::Result<Self> {
         let mut store = Self::open(dir, quota, now_ms)?;
-        let mut sizes: BTreeMap<&str, u64> = store.streams.iter().map(|(name, s)| (name.as_str(), s.def.max_size)).collect();
-        for def in definitions {
-            def.validate()?;
-            if let Some(stream) = store.streams.get(&def.name) {
-                anyhow::ensure!(stream.def.persistence == def.persistence, "stream {:?}: persistence cannot change; delete and recreate it", def.name);
-            }
-            sizes.insert(&def.name, def.max_size);
-        }
-        let (count, total) = (sizes.len(), sizes.values().sum::<u64>());
-        anyhow::ensure!(count <= quota.max_streams && total <= quota.max_total_bytes,
-            "stored and declared streams need {count} streams and {total} bytes, over [streams] max_streams = {} / max_total_bytes = {}; \
-             raise the limits, or delete streams under the old limits first (stream data left untouched)",
-            quota.max_streams, quota.max_total_bytes);
+        store.preflight_transition(quota,definitions,&[],true)?;
         // The final inventory fits, so shrink and update before creating.
         let (existing, new): (Vec<_>, Vec<_>) = definitions.iter().partition(|d| store.streams.contains_key(&d.name));
         for def in existing {
@@ -696,55 +709,62 @@ impl Store {
     }
 
     /// Read-only live preflight: never load/truncate segments or run retention.
+    #[cfg(test)]
     pub fn preflight(&self, quota: Quota, definitions: &[Definition]) -> anyhow::Result<()> {
-        let mut sizes: BTreeMap<String, u64> = self.streams.iter().map(|(n, s)| (n.clone(), s.def.max_size)).collect();
+        self.preflight_transition(quota,definitions,&[],false)
+    }
+    pub fn preflight_transition(&self, quota: Quota, definitions: &[Definition], retiring: &[String], recovery: bool) -> anyhow::Result<()> {
+        let sizes = self.streams.iter().map(|(n,s)| (n.clone(),(s.def.max_size,s.retired))).collect();
         for def in definitions {
             def.validate()?;
             if let Some(old) = self.streams.get(&def.name) {
                 anyhow::ensure!(old.def.persistence == def.persistence, "stream persistence cannot change");
-                anyhow::ensure!(old.bytes <= def.max_size, "stream shrink would discard retained data");
+                anyhow::ensure!(recovery || old.bytes <= def.max_size, "stream shrink would discard retained data");
             } else {
                 anyhow::ensure!(!self.dir.join(dir_name(&def.name)).exists(), "stream has unreadable or orphaned state");
             }
-            sizes.insert(def.name.clone(), def.max_size);
         }
-        let total = sizes.values().try_fold(0u64, |a, b| a.checked_add(*b)).ok_or_else(|| anyhow::anyhow!("stream quota overflow"))?;
-        anyhow::ensure!(sizes.len() <= quota.max_streams && total <= quota.max_total_bytes, "stored and declared streams need {} streams and {total} bytes, over [streams] max_streams = {} / max_total_bytes = {}; raise the limits, or delete streams under the old limits first (stream data left untouched)",
-        sizes.len(), quota.max_streams, quota.max_total_bytes);
-        Ok(())
+        check_inventory(&sizes,quota,definitions,retiring)
     }
 
     /// Activate metadata without retention/eviction. Removed declarations keep
     /// their data but lose exports; data deletion remains an explicit operation.
+    #[cfg(test)]
     pub fn reconfigure(&mut self, quota: Quota, definitions: &[Definition]) -> anyhow::Result<()> {
-        self.preflight(quota, definitions)?;
-        let previous: Vec<_> = self.streams.values().map(|s| s.def.clone()).collect();
+        self.reconfigure_transition(quota,definitions,&[],false)
+    }
+    pub fn reconfigure_transition(&mut self, quota: Quota, definitions: &[Definition], retiring: &[String], recovery: bool) -> anyhow::Result<()> {
+        self.preflight_transition(quota, definitions, retiring, recovery)?;
+        let previous: Vec<_> = self.streams.values().map(|s| (s.def.clone(),s.retired)).collect();
         let old_quota = self.quota;
         self.quota = quota;
         let result = (|| {
             for stream in self.streams.values_mut() {
+                if retiring.contains(&stream.def.name) { stream.retired = true; }
                 stream.def.export = None;
                 stream.def.external_export = false;
                 stream.def.discard_exported = false;
             }
+            for def in definitions.iter().filter(|d| self.streams.contains_key(&d.name)).cloned().collect::<Vec<_>>() {
+                let stream = self.streams.get_mut(&def.name).unwrap();
+                stream.def = def;
+                stream.retired = false;
+            }
             for def in definitions {
-                if let Some(stream) = self.streams.get_mut(&def.name) {
-                    stream.def = def.clone();
-                } else {
-                    self.create(def.clone())?;
-                }
+                if !self.streams.contains_key(&def.name) { self.create(def.clone())?; }
             }
             for stream in self.streams.values() { stream.save_meta()?; }
             Ok(())
         })();
         if result.is_err() {
             self.quota = old_quota;
-            let names: std::collections::BTreeSet<_> = previous.iter().map(|d| d.name.clone()).collect();
+            let names: std::collections::BTreeSet<_> = previous.iter().map(|(d,_)| d.name.clone()).collect();
             let added: Vec<_> = self.streams.keys().filter(|n| !names.contains(*n)).cloned().collect();
             for name in added { self.delete(&name)?; }
-            for def in previous {
+            for (def, retired) in previous {
                 let stream = self.streams.get_mut(&def.name).unwrap();
                 stream.def = def;
+                stream.retired = retired;
                 stream.save_meta()?;
             }
         }
@@ -753,17 +773,33 @@ impl Store {
 
     /// Reversible activation: read segments without truncation or retention,
     /// and do not persist counters on Drop until the journal has committed.
+    #[cfg(test)]
     pub fn stage(dir: &Path, quota: Quota, definitions: &[Definition], now_ms: u64) -> anyhow::Result<Self> {
-        preflight_disk(dir, quota, definitions)?;
+        Self::stage_transition(dir,quota,definitions,now_ms,false)
+    }
+    pub fn stage_transition(dir: &Path, quota: Quota, definitions: &[Definition], now_ms: u64, recovery: bool) -> anyhow::Result<Self> {
+        preflight_disk_transition(dir, quota, definitions, recovery)?;
         let mut store = Self::open_mode(dir, quota, now_ms, false)?;
-        store.reconfigure(quota, definitions)?;
+        store.reconfigure_transition(quota, definitions,&[],recovery)?;
         Ok(store)
+    }
+    pub fn restore_metadata(&mut self) -> anyhow::Result<()> {
+        for stream in self.streams.values_mut() {
+            let meta: Meta = serde_json::from_slice(&std::fs::read(stream.dir.join("meta.json"))?)?;
+            stream.def = meta.definition;
+            stream.retired = meta.retired;
+        }
+        Ok(())
     }
     pub fn is_staged(&self) -> bool { self.staged }
     pub fn promote(&mut self, now_ms: u64) -> anyhow::Result<()> {
-        if !self.staged { return Ok(()); }
         self.staged = false;
-        for stream in self.streams.values_mut() { stream.retire(now_ms)?; }
+        for stream in self.streams.values_mut() {
+            if stream.retired { continue; }
+            while stream.bytes > stream.def.max_size { stream.evict_front(); }
+            stream.save_meta()?;
+            stream.retire(now_ms)?;
+        }
         Ok(())
     }
     fn open(dir: &Path, quota: Quota, now_ms: u64) -> anyhow::Result<Self> {
@@ -824,6 +860,7 @@ impl Store {
         }
         std::fs::create_dir_all(&dir)?;
         let stream = Stream {
+            retired: false,
             def: def.clone(), dir, entries: VecDeque::new(), bytes: 0, next: 0, oldest: 0, exported: -1, reserved: 0,
             segments: BTreeMap::new(), corrupt: 0, export_status: Value::Null, torn: None,
         };
@@ -837,10 +874,11 @@ impl Store {
     /// checked its persistence and the quota.
     fn apply(&mut self, def: Definition, now_ms: u64) -> anyhow::Result<()> {
         let stream = self.get(&def.name)?;
-        if stream.def == def {
+        if stream.def == def && !stream.retired {
             return Ok(());
         }
         stream.def = def;
+        stream.retired = false;
         while stream.bytes > stream.def.max_size {
             stream.evict_front();
         }
@@ -858,6 +896,7 @@ impl Store {
 
     pub fn append(&mut self, name: &str, data: &[u8], now_ms: u64) -> anyhow::Result<u64> {
         let stream = self.get(name)?;
+        if stream.retired { return fail("retired", "stream is retained read-only; redeclare it before appending"); }
         if data.is_empty() || data.len() > MAX_MESSAGE_BYTES || cost(data.len()) > stream.def.max_size {
             return fail("invalid", "message must be 1 byte to min(max_size - 64, 1 MiB)");
         }
@@ -1179,6 +1218,54 @@ mod tests {
         path
     }
     const QUOTA: Quota = Quota { max_streams: 32, max_total_bytes: 1 << 26 };
+
+    #[test]
+    fn rollback_budget_keeps_retired_records_but_cannot_fund_new_allocations() {
+        let path = dir("rollback-retained");
+        let large = Quota { max_streams: 3, max_total_bytes: 12288 };
+        let small = Quota { max_streams: 2, max_total_bytes: 8192 };
+        let a = def("a",4096,Strategy::RejectNewData);
+        let b = def("b",4096,Strategy::RejectNewData);
+        let mut c = def("c",4096,Strategy::RejectNewData);
+        c.time_to_live_seconds = Some(1);
+        let mut store = Store::start(&path,large,&[a,b.clone(),c.clone()],0).unwrap();
+        store.append("c",b"preserve",0).unwrap();
+        let removed = vec!["a".into(),"c".into()];
+        store.preflight_transition(small,&[b.clone()],&removed,true).unwrap();
+        assert!(!store.streams["c"].retired,"preflight mutated retirement");
+        store.reconfigure_transition(small,&[b.clone()],&removed,true).unwrap();
+        store.promote(2000).unwrap();
+        assert!(store.streams["c"].retired);
+        assert_eq!(store.read("c",0,1,1,2000).unwrap()[0].data,b"preserve");
+        assert!(store.append("c",b"no",2000).is_err());
+        assert!(store.create(def("d",1024,Strategy::RejectNewData)).is_err());
+        assert!(store.preflight_transition(small,&[b.clone(),def("d",1024,Strategy::RejectNewData)],&[],false).is_err());
+        store.close(); drop(store);
+        preflight_disk(&path,small,&[b.clone()]).unwrap();
+        let mut restored = Store::start(&path,small,&[b.clone()],3000).unwrap();
+        assert_eq!(restored.read("c",0,1,1,3000).unwrap()[0].data,b"preserve");
+        restored.reconfigure_transition(large,&[b,c],&[],false).unwrap();
+        assert!(!restored.streams["c"].retired,"redeclared stream stayed retired");
+        drop(restored);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn restored_size_bounds_apply_only_after_the_commit_decision() {
+        let path = dir("rollback-size");
+        let large = def("data",4096,Strategy::OverwriteOldestData);
+        let mut store = Store::start(&path,QUOTA,&[large.clone()],0).unwrap();
+        store.append("data",&vec![1;2000],0).unwrap();
+        let mut small = large; small.max_size = 1024;
+        assert!(store.preflight(QUOTA,&[small.clone()]).is_err());
+        let before = store.streams["data"].bytes;
+        store.reconfigure_transition(QUOTA,&[small],&[],true).unwrap();
+        assert_eq!(store.streams["data"].bytes,before,"staging evicted records");
+        store.promote(0).unwrap();
+        assert_eq!(store.streams["data"].bytes,0);
+        drop(store);
+        std::fs::remove_dir_all(path).unwrap();
+    }
 
     #[test]
     fn enabling_service_stages_expired_and_torn_streams_without_mutation() {

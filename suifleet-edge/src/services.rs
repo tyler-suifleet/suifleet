@@ -183,12 +183,19 @@ impl Runtime {
         Ok(runtime)
     }
     pub fn prepare(&self, generations: &BTreeMap<String, Generation>) -> anyhow::Result<Config> {
+        self.prepare_transition(generations,false)
+    }
+    fn retiring(&self, next: &Config) -> Vec<String> {
+        let wanted: BTreeSet<_> = next.streams.iter().flat_map(|s| s.definitions.iter().map(|d| d.name.clone())).collect();
+        self.effective.streams.iter().flat_map(|s| s.definitions.iter().map(|d| d.name.clone())).filter(|n| !wanted.contains(n)).collect()
+    }
+    fn prepare_transition(&self, generations: &BTreeMap<String, Generation>, recovery: bool) -> anyhow::Result<Config> {
         let cfg = effective(&self.base, generations)?;
         if let Some(settings) = &cfg.streams {
-            if let Some(store) = &self.streams { store.lock().unwrap().preflight(settings.quota(), &settings.definitions)?; }
+            if let Some(store) = &self.streams { store.lock().unwrap().preflight_transition(settings.quota(), &settings.definitions, &self.retiring(&cfg), recovery)?; }
             // A disabled service may still have persisted streams. Enabling it
             // must inspect metadata without opening/truncating segment files.
-            else { streams::preflight_disk(&self.base.runtime.state_dir.join("streams"), settings.quota(), &settings.definitions)?; }
+            else { streams::preflight_disk_transition(&self.base.runtime.state_dir.join("streams"), settings.quota(), &settings.definitions, recovery)?; }
         }
         Ok(cfg)
     }
@@ -213,17 +220,21 @@ impl Runtime {
         Ok(())
     }
     pub fn activate(&mut self, generations: &BTreeMap<String, Generation>) -> anyhow::Result<()> {
-        let next = self.prepare(generations)?;
+        self.activate_transition(generations,false)
+    }
+    fn activate_transition(&mut self, generations: &BTreeMap<String, Generation>, recovery: bool) -> anyhow::Result<()> {
+        let next = self.prepare_transition(generations,recovery)?;
+        let retiring = self.retiring(&next);
         // The caller owns the poll loop, so no IPC operation can race this.
         self.stop_tasks();
         if let Some(settings) = &next.streams {
-            if let Some(store) = &self.streams { store.lock().unwrap().reconfigure(settings.quota(), &settings.definitions)?; }
-            else { self.streams = Some(Arc::new(Mutex::new(streams::Store::stage(&self.base.runtime.state_dir.join("streams"), settings.quota(), &settings.definitions, crate::telemetry::now_ms())?))); }
+            if let Some(store) = &self.streams { store.lock().unwrap().reconfigure_transition(settings.quota(), &settings.definitions, &retiring, recovery)?; }
+            else { self.streams = Some(Arc::new(Mutex::new(streams::Store::stage_transition(&self.base.runtime.state_dir.join("streams"), settings.quota(), &settings.definitions, crate::telemetry::now_ms(), recovery)?))); }
         } else if let Some(store) = &self.streams {
             // Revoke exports without deleting stream records.
             let mut store = store.lock().unwrap();
             let quota = store.quota();
-            store.reconfigure(quota, &[])?;
+            store.reconfigure_transition(quota, &[], &retiring, recovery)?;
         }
         if let Some(settings) = &next.pubsub {
             if self.broker.is_none() { self.broker = Some(Arc::new(Mutex::new(pubsub::Broker::open(&self.base.runtime.state_dir.join("pubsub"), settings.limits())?))); }
@@ -263,6 +274,7 @@ impl Runtime {
         recover_activation(&self.base, generations)?;
         let staged = self.streams.as_ref().is_some_and(|s| s.lock().unwrap().is_staged());
         if staged { self.streams = None; }
+        else if let Some(store) = &self.streams { store.lock().unwrap().restore_metadata()?; }
         self.activate(generations)?;
         self.resume()
     }
@@ -542,14 +554,15 @@ impl std::error::Error for RecoveryRequired {}
 /// Transaction used both by deployment completion and supervisor rollback.
 pub async fn commit(cfg: &Config, journal: &mut crate::state::Journal, next: BTreeMap<String, Generation>, deployment: Option<&str>) -> anyhow::Result<()> {
     let runtime = cfg.services.as_ref().ok_or_else(|| anyhow::anyhow!("service runtime missing"))?;
-    let settings = runtime.lock().unwrap().prepare(&next)?;
+    let settings = runtime.lock().unwrap().prepare_transition(&next,deployment.is_none())?;
     let previous = journal.state.services.clone();
+    if !next.is_empty() || !previous.is_empty() { journal.require_service_reader()?; }
     quiesce(runtime).await;
     if let Err(error) = begin_activation(cfg, &next, &settings) {
         runtime.lock().unwrap().resume().map_err(|e| RecoveryRequired(e.to_string()))?;
         return Err(error);
     }
-    let activated = runtime.lock().unwrap().activate(&next);
+    let activated = runtime.lock().unwrap().activate_transition(&next,deployment.is_none());
     if let Err(error) = activated {
         runtime.lock().unwrap().abort(&previous).map_err(|undo| RecoveryRequired(format!("activation failed: {error:#}; rollback failed: {undo:#}")))?;
         return Err(error.context("service activation"));

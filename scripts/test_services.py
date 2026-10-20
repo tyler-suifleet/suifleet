@@ -187,7 +187,7 @@ def run():
                 return dict(version=1, grants={'app': dict(operations=['config', 'publish', 'stream_append', 'stream_read', 'stream_describe'], streams=[stream],
                     pubsub_policies=[dict(operations=['aws.greengrass#PublishToTopic'], resources=[topic])])},
                     pubsub=dict(bridge=dict(broker=f'127.0.0.1:{mqtt.server.server_address[1]}', mappings=[dict(source='Pubsub', target='LocalMqtt', topic=topic, target_topic_prefix=stream + '/')])),
-                    streams=dict(max_streams=8, max_total_bytes=65536, definitions=[dict(name=stream, max_size=4096, strategy_on_full='RejectNewData')]))
+                    streams=dict(max_streams=2, max_total_bytes=8192, definitions=[dict(name=stream, max_size=4096, strategy_on_full='RejectNewData')]))
 
             def deploy(id, version, services=None, **lifecycle):
                 recipe = dict(schemaVersion='1.3', lifecycle=lifecycle or dict(run='exec sleep 300'))
@@ -224,15 +224,22 @@ def run():
                 assert str(token) not in public and 'export-secret' not in public and '/ingest' not in public
                 print('PASS: upgrade revokes old grants, activates new mapping/export with independent signature verification', flush=True)
 
-                deploy('0x8021', '2.1', service('c', 'temporary'), run='exec sleep 300', restart='on-failure')
+                temporary_services = service('c', 'temporary')
+                temporary_services['streams'].update(max_streams=3, max_total_bytes=12288)
+                deploy('0x8021', '2.1', temporary_services, run='exec sleep 300', restart='on-failure')
                 wait_for(lambda: outcome('0x8021') == 1, 'runtime-recoverable generation did not apply', process)
                 assert ipc('publish', 'temporary', 1)['ok'] and not ipc('publish', 'new')['ok']
+                assert ipc('stream_append', 'c', 'preserve-c')['ok']
                 runtime_pid = json.loads((state / 'supervised/status.json').read_text())['app']['pid']
                 os.kill(runtime_pid, signal.SIGKILL)
                 wait_for(lambda: journal()['components']['app']['deployment_id'] == '0x802' and
                          journal()['services']['app']['deployment'] == '0x802', 'runtime recovery did not restore service generation', process)
                 assert ipc('publish', 'new', 8)['ok'] and not ipc('publish', 'temporary')['ok']
                 assert not ipc('stream_append', 'c', 'denied')['ok']
+                assert ipc('stream_describe', 'c', admin=True)['data']['retired']
+                assert ipc('stream_read', 'c', admin=True)['data']['messages'][0]['payload'] == 'preserve-c'
+                assert ipc('stream_append', 'c', 'denied', admin=True)['error'] == 'retired'
+                assert ipc('stream_create', 'quota-debt', {'max_size': 1024, 'strategy_on_full': 'RejectNewData'}, admin=True)['error'] == 'quota'
                 wait_for(lambda: mqtt.received('b/new', 8), 'restored bridge did not forward after runtime rollback', process)
                 assert ipc('stream_append', 'b', 'after-rollback')['ok']
                 wait_for(lambda: 'after-rollback' in receiver.received('b').values(), 'restored export did not deliver after runtime rollback', process)

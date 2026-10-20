@@ -102,6 +102,14 @@ pub struct Outcome {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub daemon_handoff: Option<String>,
 }
+/// A required-reader marker in the existing binding makes older daemons
+/// refuse the journal before opening stream files whose retirement they cannot
+/// understand. New readers accept the legacy binding and preserve this marker.
+const SERVICES_READER: &str = "/services-v1";
+fn binding_matches(stored: &str, expected: &str) -> bool {
+    stored.is_empty() || stored == expected || stored.strip_suffix(SERVICES_READER) == Some(expected)
+}
+
 /// Read-only check that this build understands the journal in `directory`
 /// and that it belongs to `binding` (no lock: the running daemon holds it).
 pub fn check(directory: &Path, binding: &str) -> anyhow::Result<()> {
@@ -112,7 +120,7 @@ pub fn check(directory: &Path, binding: &str) -> anyhow::Result<()> {
     let state: State = serde_json::from_slice(&std::fs::read(&path)?)
         .map_err(|error| anyhow::anyhow!("journal {} is not readable by this daemon: {error}", path.display()))?;
     anyhow::ensure!(
-        state.binding.is_empty() || state.binding == binding,
+        binding_matches(&state.binding, binding),
         "journal belongs to another network/package/device"
     );
     Ok(())
@@ -125,6 +133,8 @@ pub struct Journal {
 }
 impl Journal {
     pub fn open(directory: &Path, binding: String) -> anyhow::Result<Self> {
+        let requested_services = binding.ends_with(SERVICES_READER);
+        let binding = binding.strip_suffix(SERVICES_READER).unwrap_or(&binding).to_owned();
         std::fs::create_dir_all(directory)?;
         let lock = OpenOptions::new()
             .create(true)
@@ -140,10 +150,11 @@ impl Journal {
             State::default()
         };
         anyhow::ensure!(
-            state.binding.is_empty() || state.binding == binding,
+            binding_matches(&state.binding, &binding),
             "state belongs to another network/package/device; use a separate state_dir"
         );
-        state.binding = binding;
+        let needs_services = requested_services || state.binding.ends_with(SERVICES_READER) || !state.services.is_empty();
+        state.binding = if needs_services { format!("{binding}{SERVICES_READER}") } else { binding };
         let journal = Self {
             path,
             _lock: lock,
@@ -151,6 +162,14 @@ impl Journal {
         };
         journal.save()?;
         Ok(journal)
+    }
+    /// Persist the reader requirement before staging any service metadata.
+    pub fn require_service_reader(&mut self) -> anyhow::Result<()> {
+        if !self.state.binding.ends_with(SERVICES_READER) {
+            self.state.binding.push_str(SERVICES_READER);
+            self.save()?;
+        }
+        Ok(())
     }
     /// Settle deployments an interrupted run left without a status. Those
     /// `pending` says can still learn their real outcome (and indeterminate
@@ -217,6 +236,37 @@ mod tests {
         }
         Journal::open(path, "network/device".into()).unwrap()
     }
+    #[test]
+    fn service_reader_marker_preserves_binding_and_blocks_legacy_downgrade() {
+        let dir = std::env::temp_dir().join(format!("suifleet-reader-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let base = "chain/package/device/signer";
+        let mut journal = Journal::open(&dir,base.into()).unwrap();
+        journal.require_service_reader().unwrap();
+        let required = journal.state.binding.clone();
+        assert_ne!(required,base,"legacy readers would accept the service journal");
+        drop(journal);
+        check(&dir,base).unwrap();
+        let reopen = |binding: &str| {
+            for _ in 0..200 {
+                if let Ok(journal) = Journal::open(&dir,binding.into()) { return journal; }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Journal::open(&dir,binding.into()).unwrap()
+        };
+        let reopened = reopen(base);
+        assert_eq!(reopened.state.binding,required);
+        drop(reopened);
+        let mut reopened = reopen(&required);
+        assert_eq!(reopened.state.binding,required,"reader suffix duplicated");
+        reopened.state.binding = format!("{base}/services-v2");
+        reopened.save().unwrap();
+        drop(reopened);
+        assert!(check(&dir,base).is_err());
+        assert!(Journal::open(&dir,base.into()).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn restart_retains_cursor_and_does_not_reapply_uncertain_update() {
         let path = std::env::temp_dir().join(format!(

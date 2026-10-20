@@ -570,7 +570,7 @@ async fn poll(
     let old_services = journal.state.services.clone();
     if services::reconcile(&mut journal.state, supervisor.recovered()) {
         let next = std::mem::replace(&mut journal.state.services, old_services);
-        services::commit(cfg, journal, next, None).await?;
+        services::commit(cfg, journal, next, None).await.map_err(|error| services::RecoveryRequired(format!("service reconciliation failed: {error:#}")))?;
     }
     journal.save()?;
     sui.validate_deployment().await?;
