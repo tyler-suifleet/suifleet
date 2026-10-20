@@ -37,7 +37,7 @@ def receive(fd):
 
 
 class BrokerIdentity(unittest.TestCase):
-    def probe(self, expected_uid):
+    def probe(self, expected_uid, accept_delay=0):
         self.assertEqual(os.geteuid(), 0, 'run the real-UID test through make test-video')
         port_r, port_w = os.pipe()
         seen_r, seen_w = os.pipe()
@@ -63,6 +63,7 @@ class BrokerIdentity(unittest.TestCase):
                 server.timeout = 7
                 os.write(port_w, json.dumps(server.server_port).encode())
                 os.close(port_w)
+                time.sleep(accept_delay)
                 server.handle_request()
                 server.server_close()
                 os.write(seen_w, json.dumps(seen).encode())
@@ -114,9 +115,13 @@ class BrokerIdentity(unittest.TestCase):
     def test_expected_broker_uid_with_distinct_client(self):
         self.assertEqual(self.probe(BROKER_UID), (True, [True]))
 
+    def test_delayed_accept_from_expected_broker(self):
+        self.assertEqual(self.probe(BROKER_UID, accept_delay=0.25), (True, [True]))
+
     def test_unexpected_broker_uid_never_receives_token(self):
-        # This models an unexpected UID taking over a broker's former port.
-        self.assertEqual(self.probe(BROKER_UID+10), (False, []))
+        # Before accept, Linux reports UID 0/inode 0 even for this UID1101
+        # listener. That placeholder must not authenticate a root broker.
+        self.assertEqual(self.probe(0, accept_delay=0.25), (False, []))
 
 
 if __name__ == '__main__':

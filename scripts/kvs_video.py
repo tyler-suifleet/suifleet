@@ -237,8 +237,16 @@ def credentials(config):
         active = conn.sock
         # Authenticate the local issuer before disclosing the grant token. A
         # different UID must not substitute credentials after broker port reuse.
-        if tcp_uid(active) != config.v['credential_provider_uid']:
-            raise ValueError('unexpected credential broker UID')
+        identity_deadline = time.monotonic()+5
+        while True:
+            uid = tcp_uid(active, require_accepted=True)
+            if uid is not None:
+                if uid != config.v['credential_provider_uid']:
+                    raise ValueError('unexpected credential broker UID')
+                break
+            if time.monotonic() >= identity_deadline:
+                raise ValueError('credential broker identity unavailable')
+            time.sleep(0.01)
         def expire():
             try:
                 active.shutdown(socket.SHUT_RDWR)

@@ -74,7 +74,7 @@
   "credentials": {
     "version": 1,
     "issuer": "SF-057 container-credential loopback HTTP endpoint",
-    "server_identity": "required credential_provider_uid; match kernel TCP peer socket owner UID before sending Authorization; missing/ambiguous/wrong peer identity fails closed",
+    "server_identity": "required credential_provider_uid; wait up to five seconds for a nonzero peer socket inode (accepted socket), then match kernel TCP owner UID before Authorization; UID0/inode0 is not root identity; missing/ambiguous/wrong identity fails closed",
     "caller_identity": "SF-057 authenticates component UID and foreground task token; distinct component UID remains required",
     "provisioning": "operator pins broker UID explicitly; no automatic detection or static-key/default-chain fallback"
   }

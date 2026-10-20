@@ -29,9 +29,10 @@ with storage retention enabled. Live AWS interoperability remains unrun.
 ## Configure and run
 
 Install the reviewed `kvs_video.py` and `kvs_h264_source.py` beside the existing
-SF-057 `aws_credentials.py` module under a root-owned code directory readable by
-the component UID. The video client imports its kernel TCP-UID lookup helper; it
-does not start a broker under the component identity. Use an ordinary configured
+SF-057 `aws_credentials.py` module from the same reviewed revision under a root-owned code directory readable by
+the component UID. The video client uses its additive `require_accepted` TCP-UID lookup option;
+existing broker-side callers keep their default behavior. It does not start a
+broker under the component identity. Use an ordinary configured
 component lifecycle or platform service to supervise two processes: capture/ingest
 and upload. Provision a distinct component UID, an owner-only persistent state
 directory and an operator-controlled JSON configuration. Preserve that directory
@@ -52,8 +53,11 @@ Use the [SF-057 provisioning instructions](AWS_CREDENTIALS.md) to grant this com
 an AWS container-credential endpoint/token. Set the required
 `credential_provider_uid` to the trusted broker socket-owner UID (the example
 uses 0 for a root broker), not the camera component UID. Before sending its local
-authorization token, the client matches the exact peer TCP tuple in Linux
-`/proc/net/tcp` against that configured UID. Missing, ambiguous or wrong identity
+authorization token, the client waits up to five seconds for an accepted peer
+socket with a nonzero inode, then matches the exact TCP tuple in Linux
+`/proc/net/tcp` against that configured UID. An unaccepted connection can report
+UID 0/inode 0 even for a non-root listener; that placeholder never authenticates
+a root broker. Missing, ambiguous or wrong identity
 fails closed. This prevents another Unix UID taking over a stopped broker
 port from receiving the token or substituting role credentials. The client needs
 a visible `/proc/net/tcp` in the same network namespace, as SF-057 already requires.
@@ -164,11 +168,11 @@ make test-video
 
 The test-only pinned Ubuntu/FFmpeg image is prepared with public package downloads;
 the media suite then executes as a non-root UID with `--network none`, a read-only
-checkout, bounded tmpfs, no capabilities and no host credentials. Two additional
+checkout, bounded tmpfs, no capabilities and no host credentials. Three additional
 credential-issuer tests use a second disposable container with only DAC_OVERRIDE,
 SETUID and SETGID capabilities to load the checkout and drop to distinct broker
-and client UIDs. They prove a correct peer UID succeeds and an incorrect one
-receives no authorization token. The test image does not alter the daemon
+and client UIDs. They prove a correct peer UID succeeds (including delayed accept) and a non-root
+issuer cannot receive a token by presenting the pre-accept UID-0 placeholder. The test image does not alter the daemon
 image/toolchain. Tests run the real source, ingester and uploader subprocesses,
 check SigV4 independently, parse MKV clusters/timestamps in the emulator, and decode
 the captured multi-fragment MKV with unmodified FFmpeg against ten expected pixel
