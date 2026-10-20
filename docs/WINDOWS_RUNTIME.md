@@ -156,3 +156,12 @@ Physical target acceptance remains [SF-031/#32](https://github.com/tyler-suiflee
 No live AWS acceptance or account mutation was authorized or run; existing
 [SF-064/#109](https://github.com/tyler-suifleet/suifleet/issues/109) tracks remaining
 functional scope. Normal CI and applicable automatic testnet gates remain in force.
+
+Actual software evidence is recorded in
+[`validation/sf074-windows.json`](validation/sf074-windows.json):
+[hosted run 39369332544](https://github.com/tyler-suifleet/suifleet/actions/runs/39369332544)
+passed on Windows Server 2022 / NT 10.0.20348 AMD64 with Rust 1.94.0, source
+`335a1d499ef454c4216d93fd7a29188aea864b37`, tested against base
+`497bf783fda873e43e0b0cb10c42d8c663668704`. This is an actual SCM/Job/ACL
+execution receipt, distinct from the remaining-roadmap reference models.
+Current-head CI is still required for every subsequent change.

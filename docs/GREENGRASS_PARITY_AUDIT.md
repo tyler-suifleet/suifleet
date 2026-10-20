@@ -120,7 +120,7 @@ The [compatibility specification](GREENGRASS_COMPATIBILITY.md) (SF-028) separate
 | Client-device discovery/authentication | Missing | Local device discovery, credentials, certificates and gateway authorization | P2 |
 | Token exchange/cloud credentials | Opt-in Linux SDK endpoint and IoT X.509 adapter; local mTLS/SDK evidence in [AWS_CREDENTIALS.md](AWS_CREDENTIALS.md) | Separately provisioned AWS identity and IAM policy; platform-managed distinct UIDs; live AWS account/service acceptance remains unrun | P2 |
 | ML inference/industrial/cloud integrations | Missing | Optional component ecosystem/adapters and compatibility tests | P2 |
-| Windows/macOS runtime | macOS: native LaunchDaemon with coalition containment, peer-UID IPC, private key checks and `macos` catalog selection, tested on a hosted macOS 15 arm64 runner ([MACOS_RUNTIME.md](MACOS_RUNTIME.md)). Windows: missing | Windows runtime (SF-074); macOS sandboxing, service signer, daemon self-update, Intel/physical Mac acceptance | P2 |
+| Windows/macOS runtime | macOS: native LaunchDaemon with coalition containment, peer-UID IPC, private key checks and `macos` catalog selection, tested on a hosted macOS 15 arm64 runner ([MACOS_RUNTIME.md](MACOS_RUNTIME.md)). Windows: local operator executable SCM runtime with Jobs, SID/ACL enforcement and interrupted recovery ([WINDOWS_RUNTIME.md](WINDOWS_RUNTIME.md), SF-074) | Windows catalog/chain/rich IPC support; macOS sandboxing, service signer, daemon self-update, Intel/physical Mac acceptance | P2 |
 
 ## Release gates and sequencing
 
