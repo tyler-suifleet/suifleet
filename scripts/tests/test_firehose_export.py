@@ -95,7 +95,7 @@ class Source:
         self.payloads = payloads
 
     def stream_describe(self, name):
-        return dict(persistence='File', export=None)
+        return dict(persistence='File', export=None, oldest=0, corrupt_segments=0)
 
     def stream_read(self, name, start):
         if start >= len(self.payloads):
@@ -123,7 +123,7 @@ def client(cfg, url):
         return fe.aws_client(cfg)
 
 
-def exercise_native(ipc, directory):
+def exercise_native(ipc, directory, restart):
     """Called by the real daemon stream suite with its actual peer-UID client."""
     with emulator() as (state, url):
         cfg = dict(configuration(directory), stream='local-firehose')
@@ -136,6 +136,10 @@ def exercise_native(ipc, directory):
             exporter.close()
         exporter = fe.Exporter(cfg, ipc, client(cfg, url))
         try:
+            restart()
+            assert exporter.step() == 'exported'
+            assert exporter.checkpoint >= 1024
+            assert state['requests'][-1] == [b'{"native":3}\n']
             assert exporter.step() == 'idle'
         finally:
             exporter.close()
@@ -237,7 +241,7 @@ os._exit(0)
         self.cfg['state_dir'] += '-oversize'
         with emulator() as (state, url):
             exporter = self.exporter(Source(['x' * fe.MAX_RECORD]), url)
-            with self.assertRaisesRegex(ValueError, 'too large'):
+            with self.assertRaisesRegex(ValueError, 'record-too-large'):
                 exporter.step()
             self.assertEqual(state['requests'], [])
 
@@ -259,20 +263,76 @@ os._exit(0)
             with self.assertRaises(ValueError):
                 fe.Exporter(self.cfg, Source([1]), client(self.cfg, url))
 
-    def test_version_permissions_gap_and_no_credentials(self):
+    def test_version_credentials_and_redacted_diagnostics(self):
         for value in [True, 0, 2, '1']:
             with self.assertRaises(ValueError):
                 fe.config(dict(self.cfg, version=value))
         with patch.dict(os.environ, {}, clear=True):
             with self.assertRaisesRegex(ValueError, 'scoped credentials'):
                 fe.aws_client(self.cfg)
+        self.assertEqual(fe.diagnostic(ValueError('secret payload')), 'retry-pending')
+        self.assertEqual(fe.diagnostic(fe.ExportError('record-too-large')), 'record-too-large')
+        self.assertEqual(fe.diagnostic(fe.IpcError('evicted')), 'evicted')
+
+    def test_reservation_gaps_partial_retry_and_fresh_state(self):
+        source = Source([0, 1, 2, 1024, 1025])
+        def read(name, start):
+            for sequence in source.payloads:
+                if sequence >= start:
+                    return [dict(sequence=sequence, payload=sequence)]
+            raise fe.IpcError('not-enough-messages')
+        source.stream_read = read
         with emulator() as (state, url):
-            source = Source([1])
-            source.stream_read = lambda *args, **kwargs: [dict(sequence=5, payload=1)]
             exporter = self.exporter(source, url)
-            with self.assertRaisesRegex(ValueError, 'gap'):
-                exporter.step()
-            self.assertEqual(state['requests'], [])
+            state['responses'] = [(200, dict(FailedPutCount=1, RequestResponses=[
+                dict(RecordId='ok'), dict(RecordId='ok'), dict(RecordId='ok'),
+                dict(RecordId='ok'), dict(ErrorCode='failure')]))]
+            self.assertEqual(exporter.step(), 'partial')
+            self.assertEqual(exporter.checkpoint, 1024)
+            exporter.close()
+            resumed = self.exporter(source, url)
+            self.assertEqual(resumed.step(), 'exported')
+            self.assertEqual(resumed.checkpoint, 1025)
+            self.assertEqual(state['requests'][-1], [b'1025\n'])
+            self.assertEqual(resumed.step(), 'idle')
+
+    def test_loss_and_unsupported_record_preserve_prefix(self):
+        for condition in ('evicted', 'corrupt-stream', 'unsupported-payload', 'record-too-large'):
+            with self.subTest(condition=condition), emulator() as (state, url):
+                cfg = dict(self.cfg, state_dir=self.cfg['state_dir'] + condition)
+                source = Source([0, 1])
+                def read(name, start):
+                    if start == 0:
+                        return [dict(sequence=0, payload=0)]
+                    if condition == 'evicted':
+                        raise fe.IpcError('evicted')
+                    if condition == 'corrupt-stream':
+                        raise fe.ExportError('corrupt-stream')
+                    if condition == 'unsupported-payload':
+                        return [dict(sequence=1, data_base64='AA==')]
+                    return [dict(sequence=1, payload='x' * fe.MAX_RECORD)]
+                source.stream_read = read
+                exporter = fe.Exporter(cfg, source, client(cfg, url))
+                self.addCleanup(exporter.close)
+                with self.assertRaisesRegex(ValueError if condition != 'evicted' else fe.IpcError,
+                                            condition):
+                    exporter.step()
+                self.assertEqual(exporter.checkpoint, 0)
+                self.assertEqual(state['requests'], [[b'0\n']])
+                with self.assertRaises(Exception):
+                    exporter.step()
+                self.assertEqual(state['requests'], [[b'0\n']])
+
+    def test_describe_loss_and_corruption_fail_closed(self):
+        with emulator() as (state, url):
+            source = Source([0])
+            exporter = self.exporter(source, url)
+            for fields, code in [({'oldest': 1}, 'evicted'), ({'corrupt_segments': 1}, 'corrupt-stream')]:
+                source.stream_describe = lambda name: dict(persistence='File', export=None,
+                    **dict(dict(oldest=0, corrupt_segments=0), **fields))
+                with self.assertRaisesRegex(fe.ExportError, code):
+                    exporter.step()
+                self.assertEqual(state['requests'], [])
 
 
 if __name__ == '__main__':

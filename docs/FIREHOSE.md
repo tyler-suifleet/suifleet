@@ -68,11 +68,13 @@ Use a `File` stream without a native HTTP export. Start with `RejectNewData`, no
 and sufficient quota for the expected outage; the exporter never deletes source
 records or advances the native HTTP export checkpoint. Retention is operator-owned:
 plan explicit archival/rotation when the bounded stream fills. TTL/overwrite may
-remove unexported records; an evicted read or a sequence gap stops progress and
-retries with a redacted diagnostic. Inspect retained data and reconcile the source
-and destination explicitly rather than silently skipping. Sequence reservation
-gaps after a daemon crash also require reconciliation. Do not delete/recreate a
-source under an existing mapping: sequences identify one stream lifetime. For a
+remove unexported records; an evicted read or corrupt stream stops progress with a
+redacted diagnostic. Inspect retained data and reconcile source and destination
+explicitly rather than silently skipping loss. Forward sequence gaps caused by
+unused daemon reservation numbers after a crash are supported: reads must remain
+within the retained range and the stream must report no corrupt segments. The
+checkpoint records the actual acknowledged sequence, including across gaps.
+Do not delete/recreate a source under an existing mapping: sequences identify one stream lifetime. For a
 new source lifetime or changed mapping, reconcile pending data and provision a new
 private state directory. Configuration changes cannot reuse an existing checkpoint.
 
@@ -105,6 +107,11 @@ records. SDK automatic operation retries are disabled; the foreground loop backs
 off 1, 2, 4, ... 60 seconds, capped at 60, indefinitely. Idle polling is 1 second.
 There is no busy-loop on partial failure, no cloud resource creation, no automatic
 reboot, and no silent dead-letter drop. Diagnostics omit SDK text/payloads/tokens.
+Permanent local conditions use fixed codes (`evicted`, `corrupt-stream`,
+`invalid-sequence`, `unsupported-payload`, `record-too-large`); malformed service
+results use `ambiguous response`, `ambiguous record response` or
+`ambiguous-failure-count`. Other failures use `retry-pending`. A valid prefix is
+sent and checkpointed before reporting a later local blocking record/condition.
 Monitor the platform service and checkpoint; operator intervention is necessary for
 persistent configuration, quota, retention, permission or credential failures.
 
@@ -124,9 +131,11 @@ The network-none suite executes signed SDK HTTP calls to local Firehose/containe
 credential emulators: count/byte bounds, indexed partial failure, retained suffix,
 checkpoint reopen, service outage, expired token, failed mandatory credential
 refresh and recovery, ambiguous disconnect, malformed results, failed fsync,
-exclusive ownership, binding/corruption, unsupported versions and sequence gaps.
+exclusive ownership, binding/corruption, unsupported versions, reservation gaps,
+eviction/corruption and safe-prefix delivery.
 It also runs the real daemon stream suite with a Firehose path: actual durable
-appends, peer-UID IPC reads, SDK wire requests and exporter checkpoint reopen.
+appends, peer-UID IPC reads, SDK wire requests, exporter checkpoint reopen and
+daemon SIGKILL/restart followed by export across a real reservation gap.
 SF-064's pure reference vectors remain specification-only; their catalog fields
 remain pending and are not runtime evidence. Ordinary CI runs this separate suite.
 

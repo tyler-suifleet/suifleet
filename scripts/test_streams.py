@@ -289,9 +289,15 @@ def run(evidence=None, firehose=False):
                             raise IpcError(result["error"])
                         return result["data"]["messages"]
 
-                exercise_native(NativeSource(), root)
+                def restart_firehose():
+                    stop(kill=True)
+                    start()
+                    result = ipc(PRODUCER, "stream_append", "local-firehose", {"native": 3})
+                    assert result["ok"] and result["data"]["sequence"] >= 1024, result
+
+                exercise_native(NativeSource(), root, restart_firehose)
                 assert ipc(PRODUCER, "stream_delete", "local-firehose")["ok"]
-                print("PASS: Firehose actual daemon durable stream / peer-UID IPC to signed SDK HTTP request; exporter checkpoint survives reopen")
+                print("PASS: Firehose actual daemon durable stream / peer-UID IPC to signed SDK HTTP request; exporter checkpoint survives reopen and daemon SIGKILL reservation gap")
 
 
             # Offline buffering: the destination is down; messages wait on disk.

@@ -61,6 +61,18 @@ def aws_client(cfg):
                                                ignore_configured_endpoint_urls=True))
 
 
+class ExportError(ValueError):
+    """Only fixed, payload-free diagnostic codes may reach the service log."""
+
+
+def diagnostic(error):
+    if isinstance(error, ExportError):
+        return str(error)
+    if isinstance(error, IpcError) and str(error) == 'evicted':
+        return 'evicted'
+    return 'retry-pending'
+
+
 class Exporter:
     def __init__(self, cfg, ipc, firehose):
         self.cfg, self.ipc, self.firehose = config(cfg), ipc, firehose
@@ -111,49 +123,71 @@ class Exporter:
         description = self.ipc.stream_describe(self.cfg['stream'])
         if description['persistence'] != 'File' or description.get('export') is not None:
             raise ValueError('requires file stream without native export')
-        # A missing retained prefix must never be silently acknowledged. Sequence
-        # gaps after crashes are also explicit operator reconciliation events.
-        batch, size, cursor = [], 0, self.checkpoint + 1
+        # Unassigned reservation numbers can be skipped; retention loss cannot.
+        if description['corrupt_segments']:
+            raise ExportError('corrupt-stream')
+        batch, sequences, size, cursor = [], [], 0, self.checkpoint + 1
+        pending = None
         while len(batch) < 500:
             try:
+                current = self.ipc.stream_describe(self.cfg['stream'])
+                if current['corrupt_segments'] != description['corrupt_segments']:
+                    raise ExportError('corrupt-stream')
+                if cursor < current['oldest']:
+                    raise ExportError('evicted')
                 messages = self.ipc.stream_read(self.cfg['stream'], start=cursor)
             except IpcError as error:
                 if str(error) == 'not-enough-messages':
                     break
-                raise
+                pending = error
+                break
+            except ExportError as error:
+                pending = error
+                break
             message = messages[0]
-            if message['sequence'] != cursor:
-                raise ValueError('stream gap: reconcile retained data before resuming')
+            sequence = message['sequence']
+            if type(sequence) is not int or sequence < cursor:
+                pending = ExportError('invalid-sequence')
+                break
+            if 'payload' not in message:
+                pending = ExportError('unsupported-payload')
+                break
             # Version 1 is newline-delimited compact JSON, not raw/binary IPC.
             data = (json.dumps(message['payload'], ensure_ascii=False, separators=(',', ':'),
                                allow_nan=False) + '\n').encode()
             if len(data) > MAX_RECORD:
-                raise ValueError('record too large')
+                pending = ExportError('record-too-large')
+                break
             if size + len(data) > MAX_BATCH:
                 break
             batch.append({'Data': data})
+            sequences.append(sequence)
             size += len(data)
-            cursor += 1
+            cursor = sequence + 1
         if not batch:
+            if pending:
+                raise pending
             return 'idle'
         response = self.firehose.put_record_batch(DeliveryStreamName=self.cfg['delivery_stream'], Records=batch)
         results, failed = response.get('RequestResponses'), response.get('FailedPutCount')
         if not isinstance(results, list) or len(results) != len(batch) or type(failed) is not int:
-            raise ValueError('ambiguous response')
+            raise ExportError('ambiguous response')
         successes = []
         for result in results:
             if not isinstance(result, dict):
-                raise ValueError('ambiguous record response')
+                raise ExportError('ambiguous record response')
             success = isinstance(result.get('RecordId'), str) and bool(result['RecordId']) and 'ErrorCode' not in result
             failure = isinstance(result.get('ErrorCode'), str) and bool(result['ErrorCode']) and 'RecordId' not in result
             if not (success or failure):
-                raise ValueError('ambiguous record response')
+                raise ExportError('ambiguous record response')
             successes.append(success)
         if failed != successes.count(False):
-            raise ValueError('inconsistent failure count')
+            raise ExportError('ambiguous-failure-count')
         prefix = next((i for i, ok in enumerate(successes) if not ok), len(batch))
         if prefix:
-            self.save(self.checkpoint + prefix)
+            self.save(sequences[prefix - 1])
+        if pending and not failed:
+            raise pending
         return 'partial' if failed else 'exported'
 
 
@@ -176,9 +210,9 @@ def main():
                 delay = 1
                 if outcome == 'idle':
                     time.sleep(1)
-            except Exception:
+            except Exception as error:
                 # Never echo SDK error text, payload, endpoint, paths or credentials.
-                print('Firehose export retained; retry pending', file=sys.stderr, flush=True)
+                print('Firehose export retained; ' + diagnostic(error), file=sys.stderr, flush=True)
                 time.sleep(delay)
                 delay = min(60, delay * 2)
     finally:
