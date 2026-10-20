@@ -19,7 +19,7 @@ class RoadmapTests(unittest.TestCase):
     def reject(self, file, mutate):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            for directory in ('interfaces/compat', 'docs/tracking'):
+            for directory in ('interfaces/compat', 'docs/tracking', 'docs/validation'):
                 shutil.copytree(ROOT / directory, root / directory)
             path = root / file
             data = json.loads(path.read_text())
@@ -39,6 +39,17 @@ class RoadmapTests(unittest.TestCase):
 
     def test_no_runtime_promotion(self):
         self.reject('interfaces/compat/remaining-roadmap.json', lambda d: d['scopes'][0].update(runtime_execution='passed'))
+
+    def test_missing_runtime_receipt(self):
+        def mutate(d):
+            next(s for s in d['scopes'] if s['id'] == 'video').pop('runtime_evidence')
+        self.reject('interfaces/compat/remaining-roadmap.json', mutate)
+
+    def test_wrong_runtime_receipt_owner(self):
+        self.reject('docs/validation/sf072-video.json', lambda d: d.update(ticket='SF-069'))
+
+    def test_runtime_receipt_requires_limits(self):
+        self.reject('docs/validation/sf072-video.json', lambda d: d.update(limits=[]))
 
     def test_no_parity_claim(self):
         self.reject('interfaces/compat/remaining-roadmap.json', lambda d: d.update(parity_claim=True))

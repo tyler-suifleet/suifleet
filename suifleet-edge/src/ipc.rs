@@ -68,7 +68,7 @@ impl Drop for Server {
 }
 const OPS: &[&str] = &["list", "status", "start", "stop", "restart", "logs", "config", "health", "publish", "receive", "install",
     "subscribe", "unsubscribe", "ack", "messaging", "client_devices",
-    "stream_create", "stream_delete", "stream_append", "stream_read", "stream_describe", "stream_list",
+    "stream_create", "stream_delete", "stream_append", "stream_read", "stream_describe", "stream_list", "stream_export_ack",
     "shadow_get", "shadow_update", "shadow_delete", "shadow_list", "shadows"];
 impl Settings {
     pub fn validate(&self) -> anyhow::Result<()> {

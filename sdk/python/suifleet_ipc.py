@@ -113,6 +113,10 @@ class Client:
     def stream_describe(self, name):
         return self.request('stream_describe', topic=name)
 
+    def stream_export_ack(self, name, sequence):
+        """Trusted operator exporter only; acknowledge confirmed remote delivery."""
+        return self.request('stream_export_ack', topic=name, payload=dict(sequence=sequence))
+
     def stream_delete(self, name):
         return self.request('stream_delete', topic=name)
 

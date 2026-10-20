@@ -63,6 +63,7 @@ test-ota:
 	$(RUN) python3 scripts/test_firmware_restart.py
 	$(RUN) python3 scripts/test_supervisor.py
 	$(RUN) python3 scripts/test_configuration.py
+	$(RUN) python3 scripts/test_greengrass_runtime.py
 	$(RUN) python3 scripts/test_daemon_update.py
 	$(RUN) python3 scripts/test_desired_state.py
 	$(RUN) python3 scripts/test_deployment_control.py
@@ -124,8 +125,14 @@ test-protocol-live:
 test-catalog-live:
 	$(RUN) python3 scripts/test_catalog_localnet.py
 
-# SF-028 Greengrass compatibility matrix, reference-model fixtures and current
-# frontend validator check (docs/GREENGRASS_COMPATIBILITY.md). Offline.
+# Independent media decode, protocol-emulator and process-recovery suite.
+.PHONY: test-video
+test-video:
+	bash scripts/test_kvs_video.sh
+
+# SF-028 Greengrass compatibility matrix and reference-model fixtures, and the
+# SF-037 translator executing the recipe/managed-dependency fixtures
+# (docs/GREENGRASS_COMPATIBILITY.md). Offline; needs the dApp dependencies.
 .PHONY: test-compat
 test-compat:
 	$(RUN) python3 scripts/greengrass_compat.py
@@ -238,6 +245,11 @@ tracking-plan:
 test-tracking:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_tracking.py'
 
+# Offline: disk audit and cleanup safety (docs/DISK_CLEANUP.md); temp dirs only.
+.PHONY: test-disk-cleanup
+test-disk-cleanup:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_disk_cleanup.py'
+
 .PHONY: test-manifest test-manifest-live
 test-manifest:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_deployment_manifest.py'
@@ -291,15 +303,33 @@ test-enrollment-localnet:
 
 # Live gate (spends testnet gas; docs/TESTNET.md): base contracts published,
 # upgraded in place to this tree, real daemon, on-chain receipts.
+# SUIFLEET_WALRUS=testnet stores recipes/artifacts in real Walrus testnet.
 #   make live-gate-package-upgrade SUIFLEET_WALLET=~/.config/suifleet/testnet/agent/client.yaml
-.PHONY: live-gate-package-upgrade
+.PHONY: live-gate-package-upgrade live-gate-upgrade-security live-gate-wallet
 live-gate-package-upgrade:
 	@test -n "$(SUIFLEET_WALLET)" || { echo "set SUIFLEET_WALLET to a funded wallet's client.yaml"; exit 1; }
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/live_package_upgrade.py --wallet "$(SUIFLEET_WALLET)" \
 		--network "$${SUIFLEET_NETWORK:-testnet}" $(if $(BASE_REF),--base-ref "$(BASE_REF)") \
-		$(if $(SUIFLEET_STATE),--state "$(SUIFLEET_STATE)") \
+		$(if $(SUIFLEET_STATE),--state "$(SUIFLEET_STATE)") $(if $(SUIFLEET_WALRUS),--walrus "$(SUIFLEET_WALRUS)") \
 		--evidence "$${SUIFLEET_EVIDENCE:-live-evidence.json}"
+
+# Old-package/legacy-object attacks across a real upgrade. The package pair is
+# cached by contract content (~0.05 SUI reused; FRESH=1 republishes, ~0.22 SUI).
+live-gate-upgrade-security:
+	@test -n "$(SUIFLEET_WALLET)" || { echo "set SUIFLEET_WALLET to a funded wallet's client.yaml"; exit 1; }
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/live_upgrade_security.py --wallet "$(SUIFLEET_WALLET)" \
+		--network "$${SUIFLEET_NETWORK:-testnet}" $(if $(SUIFLEET_STATE),--state "$(SUIFLEET_STATE)") $(if $(FRESH),--fresh) \
+		--evidence "$${SUIFLEET_EVIDENCE:-live-security-evidence.json}"
+
+# The dApp in headless Chromium against testnet (needs dapp deps and Playwright
+# Chromium; reuses the package-upgrade fixture, so run that gate first).
+live-gate-wallet:
+	@test -n "$(SUIFLEET_WALLET)" || { echo "set SUIFLEET_WALLET to a funded wallet's client.yaml"; exit 1; }
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/live_wallet_gate.py --wallet "$(SUIFLEET_WALLET)" \
+		$(if $(SUIFLEET_STATE),--state "$(SUIFLEET_STATE)") --evidence "$${SUIFLEET_EVIDENCE:-live-wallet-evidence.json}"
 
 # Real daemon over gRPC against a disposable localnet (start it first, as for
 # test-manifest-live): direct/group/failure/offline/cursor-migration paths.
@@ -311,6 +341,7 @@ test-daemon-localnet:
 .PHONY: test-testnet
 test-testnet:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_testnet*.py'
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_live_common.py'
 	$(RUN) node scripts/test_testnet_cache.cjs
 
 .PHONY: test-deployment-control-localnet
@@ -391,3 +422,17 @@ endif
 .PHONY: test-aws-credentials
 test-aws-credentials:
 	bash scripts/test_aws_credentials.sh
+
+# SF-058: actual durable daemon IPC + unmodified SDK against local AWS API emulators.
+.PHONY: test-stream-export
+test-stream-export:
+	bash scripts/test_stream_export.sh
+
+# SDK wheels are prepared by test-aws-credentials (or the command in FIREHOSE.md).
+# All service/IPC traffic stays in a disposable offline container.
+.PHONY: test-firehose
+test-firehose:
+	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 \
+	  -e PYTHONPATH=/workspace/.ci-cache/aws-python \
+	  -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:?set pinned dev image}" \
+	  sh -ec 'python3 -m unittest discover -s scripts/tests -p test_firehose_export.py -v; python3 scripts/test_streams.py --firehose'

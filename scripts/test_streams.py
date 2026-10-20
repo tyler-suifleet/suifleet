@@ -152,7 +152,7 @@ class Receiver:
             return out
 
 
-def run(evidence=None):
+def run(evidence=None, firehose=False):
     assert os.geteuid() == 0, "run in a disposable root container (make test-streams)"
     passed = []
     import builtins
@@ -189,6 +189,12 @@ def run(evidence=None):
     with tempfile.TemporaryDirectory(prefix="sf034-") as temporary:
         root = Path(temporary)
         root.chmod(0o755)
+        # Dispatched checkouts can be owner-only. Model installed read-only SDK
+        # code in this disposable fixture, accessible to the real component UIDs.
+        sdk = root / "sdk"
+        sdk.mkdir(mode=0o755)
+        (sdk / "suifleet_ipc.py").write_bytes((ROOT / "sdk/python/suifleet_ipc.py").read_bytes())
+        (sdk / "suifleet_ipc.py").chmod(0o644)
         key = root / "device.key"
         key.write_text("07" * 32)
         key.chmod(0o600)
@@ -243,7 +249,7 @@ def run(evidence=None):
                     "try: print(json.dumps({'ok': True, 'data': Client(sys.argv[2], component=sys.argv[3]).request(sys.argv[4], topic=sys.argv[5], payload=json.loads(sys.argv[6]))}))\n"
                     "except IpcError as e: print(json.dumps({'ok': False, 'error': str(e)}))")
             out = subprocess.run([sys.executable, "-c", code, str(uid), str(socket_path), component, operation, topic, json.dumps(payload),
-                                  str(ROOT / "sdk/python")], text=True, capture_output=True)
+                                  str(sdk)], text=True, capture_output=True)
             assert out.returncode == 0, out.stderr
             return json.loads(out.stdout)
 
@@ -263,6 +269,36 @@ def run(evidence=None):
             assert ipc(OTHER, "stream_read", "other-x", {}) == {"ok": False, "error": "not-found"}
             assert ipc(PRODUCER, "stream_list")["data"]["streams"] == ["local-a", "ring", "telemetry"]
             print("PASS: ACLs per component, exports and declared streams operator-only, quota enforced")
+            if firehose:
+                sys.path.insert(0, str(ROOT / 'scripts/tests'))
+                from test_firehose_export import exercise_native
+                assert ipc(PRODUCER, "stream_create", "local-firehose", {"max_size": 4096, "strategy_on_full": "RejectNewData"})["ok"]
+                for n in range(3):
+                    assert ipc(PRODUCER, "stream_append", "local-firehose", {"native": n})["ok"]
+
+                class NativeSource:
+                    def stream_describe(self, name):
+                        result = ipc(PRODUCER, "stream_describe", name)
+                        assert result["ok"], result
+                        return result["data"]
+
+                    def stream_read(self, name, start):
+                        from suifleet_ipc import IpcError
+                        result = ipc(PRODUCER, "stream_read", name, {"start": start})
+                        if not result["ok"]:
+                            raise IpcError(result["error"])
+                        return result["data"]["messages"]
+
+                def restart_firehose():
+                    stop(kill=True)
+                    start()
+                    result = ipc(PRODUCER, "stream_append", "local-firehose", {"native": 3})
+                    assert result["ok"] and result["data"]["sequence"] >= 1024, result
+
+                exercise_native(NativeSource(), root, restart_firehose)
+                assert ipc(PRODUCER, "stream_delete", "local-firehose")["ok"]
+                print("PASS: Firehose actual daemon durable stream / peer-UID IPC to signed SDK HTTP request; exporter checkpoint survives reopen and daemon SIGKILL reservation gap")
+
 
             # Offline buffering: the destination is down; messages wait on disk.
             for i in range(25):
@@ -379,4 +415,4 @@ def run(evidence=None):
 
 
 if __name__ == "__main__":
-    run(sys.argv[1] if len(sys.argv) > 1 else None)
+    run(None if "--firehose" in sys.argv else (sys.argv[1] if len(sys.argv) > 1 else None), firehose="--firehose" in sys.argv)
