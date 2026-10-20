@@ -5,6 +5,7 @@ export const MANIFEST_SCHEMA_VERSION = 1 as const;
 export const DEPLOYMENT_SCHEMA_VERSION = 1 as const;
 export const SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS = [1, 2, 3] as const;
 export const CATALOG_TYPES = ["component_catalog::ComponentCatalog", "component_catalog::ComponentVersion", "component_catalog::CatalogCreated", "component_catalog::VersionPublished", "component_catalog::CatalogBindingKey", "component_catalog::CatalogBinding"] as const;
+export const HANDOVER_TYPES = ["fleet_handover::Handover"] as const;
 export const STATUS = {"applied": 1, "failed": 2} as const;
 export const RECIPE_VERSION = "1.0" as const;
 export const RECIPE_VERSIONS = ["1.0", "1.1", "1.2", "1.3"] as const;
