@@ -11,6 +11,14 @@ from testnet_ci import trusted_pr, plan
 
 
 class TrustTests(unittest.TestCase):
+    def test_lower_ptb_budget_does_not_raise_existing_transaction_cap(self):
+        from live_package_upgrade import transaction_gas_budget
+        self.assertEqual(transaction_gas_budget(40_000_000), 40_000_000)
+        self.assertEqual(transaction_gas_budget(200_000_000), 200_000_000)
+        for value in [0, 1_999_999, 200_000_001, True, "40000000"]:
+            with self.assertRaises(ValueError):
+                transaction_gas_budget(value)
+
     def test_checkout_must_match_immutable_authenticated_commit(self):
         from testnet_ci import verify_checkout
         run = Mock(return_value=type('Result', (), {'stdout': 'a'*40 + '\n'})())
