@@ -24,15 +24,15 @@
   "commands": [
     {
       "command": "make edge-test (pinned dev container)",
-      "result": "passed on the merged tree: cargo test --locked 172 passed; --features pkcs11 174 passed; 0 failed (before the merge: 170 and 172)"
+      "result": "passed on the merge with main d8117f0 (rust 1.94.0, suifleet-dev:sf037): cargo test --locked 253 passed; --features pkcs11 255 passed; 0 failed"
     },
     {
       "command": "make test-compat",
-      "result": "passed: 488 compatibility fixture checks, 76 remaining-roadmap reference checks, frontend validator"
+      "result": "passed on the merge with main d8117f0 (offline): 490 compatibility fixture checks, 76 remaining-roadmap reference checks, 11+39 unit tests, frontend validator"
     },
     {
       "command": "make test-ota",
-      "result": "passed: full simulator suite including scripts/test_console.py"
+      "result": "passed on the merge with main d8117f0: full simulator suite including scripts/test_logs.py and scripts/test_console.py"
     },
     {
       "command": "docker run --rm --network none ... suifleet-dev:sf056 python3 scripts/test_console.py",
@@ -44,7 +44,7 @@
     },
     {
       "command": "docker run --rm --network none --user 0:0 ... suifleet-dev:sf056 python3 scripts/test_ipc.py",
-      "result": "passed: IPC regression after main-loop change"
+      "result": "passed on the merge with main d8117f0: IPC regression after main-loop change"
     }
   ],
   "reference_vectors": "cargo test console::tests::decisions_follow_the_v1_reference_contract applies the SF-064 console vectors to the implementation's decision function and field allowlist",
@@ -53,8 +53,8 @@
     "suifleet-edge/src/console/index.html": "127d9ef2f34416830509f2f91e0990a93869d59b29d8046e649b2f944ca6c7f6",
     "suifleet-edge/src/console/console.js": "8add9140e4fcc658abd5302d8ae71fd3bb7b69ea5a2e1bc8baca06e2cd61387a",
     "suifleet-edge/src/console/console.css": "e4c19b3253b6e14f1673f140e0fc6bb018215c58d36e68cca4de5e12bdbe74dd",
-    "suifleet-edge/src/main.rs": "0dc76f8055a5456320f417d1283d30ef5e5c5c29b77d9baaf79c8c5abeeca925",
-    "suifleet-edge/src/config.rs": "82e3b90280391f15dbff093f776cf31e8d26de224144e2835513a43c5c682d35",
+    "suifleet-edge/src/main.rs": "e447fac628a20e0f8f20ae610d7fd36f807d136faa8b27efdfa32b57fb191a27",
+    "suifleet-edge/src/config.rs": "972ec3820e9d3f63553de5398b4a4309aa52af41cda21a3102c9e88a52632298",
     "scripts/test_console.py": "006285687eb15370d87362033b73372b764f375ae734422705b4188cc812da95",
     "scripts/test_console_browser.cjs": "655be209b5496347abac83c573acdde84bb1592ac469e01584a80b52a056469a",
     "interfaces/compat/remaining-roadmap-cases.json": "2b3d02d28570af01d5bf58005f7b08d5f67d1991daf3acc792492d2a7e6272b7"
@@ -67,5 +67,5 @@
     "Not AWS LocalDebugConsole UI/API compatibility: no configuration editor, pub/sub/MQTT client or stream manager views.",
     "No AWS account, service, production credential or production exposure was used or provisioned."
   ],
-  "tested_tree": "merge of origin/main 00c8690 plus the fixture fix"
+  "tested_tree": "merge of origin/main d8117f0 into 36e926e; console test files unchanged; the --browser and earlier network-none console runs predate this merge (console sources unchanged, main.rs/config.rs merged)"
 }
