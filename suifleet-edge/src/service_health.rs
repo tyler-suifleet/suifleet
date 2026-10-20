@@ -75,7 +75,7 @@ pub struct QueueHealth {
     pub dropped_recent: u64,
 }
 
-/// The pub/sub ↔ local MQTT broker bridge (counters since daemon start).
+/// The pub/sub ↔ local MQTT broker bridge (counters since the bridge started).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BridgeHealth {
@@ -202,11 +202,13 @@ impl Tracker {
     /// The increase since the previous snapshot. A counter that survives
     /// restarts (`persisted`) and exists at the first collection is its own
     /// baseline; any other counter (kept in memory, or new since) started at zero.
+    /// A counter below its previous total was restarted (a reconfigured
+    /// bridge or exporter) and counts from zero again.
     pub fn recent(&mut self, key: String, total: u64, persisted: bool) -> u64 {
         self.seen.insert(key.clone());
         let baseline = if persisted && !self.collected { total } else { 0 };
         let previous = self.totals.insert(key, total).unwrap_or(baseline);
-        total.saturating_sub(previous)
+        if total < previous { total } else { total - previous }
     }
 
     /// When `active` began: the first collection that saw it, or `first`
@@ -501,6 +503,11 @@ mod tests {
         assert_eq!(t.recent("m".into(), 1, false), 1);
         assert_eq!(t.recent("new".into(), 2, true), 2);
         assert_eq!(t.since("full".into(), true, 400), Some(400));
+        t.finish();
+        // A restarted counter (a reconfigured bridge) counts from zero.
+        assert_eq!(t.recent("m".into(), 5, false), 4);
+        t.finish();
+        assert_eq!(t.recent("m".into(), 2, false), 2);
     }
 
     #[test]
