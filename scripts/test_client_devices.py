@@ -28,7 +28,9 @@ Client keys and CSRs come from the openssl CLI (P-256 and Ed25519).
                     period only; its live session then ends; too-early
                     rotation refused
   policy change  -> a persistent broker session resumes under the same policy,
-                    and restarts clean (no stale subscriptions) after a change
+                    and restarts clean (no stale subscriptions) after a change,
+                    even when the broker refused the first clean session and
+                    the daemon restarted in between
   restart        -> CA, registry, rotation and revocation persist
   offline expiry -> with the chain unavailable, the gateway keeps serving;
                     a certificate's live session ends at expiry and it cannot
@@ -434,6 +436,14 @@ def messages(lines):
     return [line for line in lines if line.startswith("sensors/")]
 
 
+def broker_password(work, user, password):
+    """Set a broker account's password and have Mosquitto reload it (SIGHUP)."""
+    sh("docker", "run", "--rm", "--user", f"{os.getuid()}:{os.getgid()}", "-v", f"{work}:/work", BROKER_IMAGE,
+       "mosquitto_passwd", "-b", "/work/passwd", user, password)
+    sh("docker", "kill", "-s", "HUP", BROKER)
+    time.sleep(1)
+
+
 def wait(condition, message, timeout=60):
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -715,7 +725,16 @@ def host(args):
         h.control("/restart")
         wait(lambda: h.status() is not None, "daemon did not return")
         assert h.status()["ca_sha256"] == ca_sha256, "the CA changed across a restart"
-        # The first sensor-1 connection since the change asks to resume.
+        # The broker refuses the first clean session after the change (the
+        # gateway's broker password no longer matches), then the daemon
+        # restarts: the old session must still not resume afterwards.
+        broker_password(work, "gateway", secrets.token_hex(16))
+        refused = mqtt_session(ip, h.ca, new, "sensor-1", clean=False)
+        assert isinstance(refused, int) and refused != 0, f"the broker accepted a wrong password: {refused}"
+        h.control("/restart")
+        wait(lambda: h.status() is not None, "daemon did not return")
+        broker_password(work, "gateway", (work / "gateway-password").read_text())
+        # The first sensor-1 connection the broker accepts since the change asks to resume.
         stale = mqtt_session(ip, h.ca, new, "sensor-1", clean=False)
         assert isinstance(stale, Client) and not stale.present, "a session from the old policy resumed"
         wait(lambda: (h.ipc(0, "messaging")["data"] or {}).get("bridge", {}).get("connected"), "the bridge did not reconnect")
@@ -732,7 +751,8 @@ def host(args):
         after.close()
         assert mqtt_session(ip, h.ca, old, "sensor-1") is None and h.session("sensor-2") is None
         check("restart: the CA and registry persisted; the rotated certificate connects, the superseded and the revoked "
-              "ones stay refused. A persistent session resumed under the same policy; after the policy changed it "
+              f"ones stay refused. A persistent session resumed under the same policy; after the policy changed the broker "
+              f"refused the first clean session (CONNACK {refused}) and the daemon restarted, yet the next connection still "
               "restarted clean, so a subscription the new policy refuses delivered nothing")
 
         # Chain unavailable: the gateway keeps serving; expiry is enforced offline.

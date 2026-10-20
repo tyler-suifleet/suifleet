@@ -641,19 +641,38 @@ impl Authority {
     }
 
     /// Whether the broker may resume `thing`'s persistent session: only if it
-    /// was opened under the current policy. Records the current policy as the
-    /// session's from now on (the caller then opens a clean session if not).
+    /// was opened under the current policy. If not, the caller opens a clean
+    /// session, and the recorded policy is cleared first (durably): it is set
+    /// again by `session_cleaned` only once the broker has accepted that clean
+    /// session, so a refused, lost or interrupted one is never resumed.
     pub fn resume_session(&self, thing: &str) -> anyhow::Result<bool> {
         let mut registry = self.registry.lock().unwrap();
         let record = registry.file.things.get(thing).ok_or_else(|| anyhow::anyhow!("unknown thing"))?;
+        match record.session_policy.as_deref() {
+            Some(digest) if digest == self.policy.digest => return Ok(true),
+            None => return Ok(false),
+            Some(_) => {}
+        }
+        let mut next = RegistryFile { format: 1, things: registry.file.things.clone() };
+        next.things.get_mut(thing).unwrap().session_policy = None;
+        self.save(&next)?;
+        *registry = Registry::new(next);
+        Ok(false)
+    }
+
+    /// The broker accepted a clean session for `thing` under the current
+    /// policy: its persistent session may be resumed from now on.
+    pub fn session_cleaned(&self, thing: &str) -> anyhow::Result<()> {
+        let mut registry = self.registry.lock().unwrap();
+        let Some(record) = registry.file.things.get(thing) else { return Ok(()) };
         if record.session_policy.as_deref() == Some(self.policy.digest.as_str()) {
-            return Ok(true);
+            return Ok(());
         }
         let mut next = RegistryFile { format: 1, things: registry.file.things.clone() };
         next.things.get_mut(thing).unwrap().session_policy = Some(self.policy.digest.clone());
         self.save(&next)?;
         *registry = Registry::new(next);
-        Ok(false)
+        Ok(())
     }
 
     pub fn revoke(&self, thing: &str, now_ms: u64) -> anyhow::Result<()> {
@@ -1010,6 +1029,8 @@ pub mod tests {
         reopened.enroll("sensor-1", &request, None, now).unwrap();
         // Persistent broker sessions resume only under the policy they were opened with.
         assert!(!reopened.resume_session("sensor-1").unwrap(), "first session after enrollment");
+        assert!(!reopened.resume_session("sensor-1").unwrap(), "no clean session confirmed yet");
+        reopened.session_cleaned("sensor-1").unwrap();
         assert!(reopened.resume_session("sensor-1").unwrap());
         drop(reopened);
         let changed = GROUPS.replace("commands/+", "commands/x");
@@ -1017,6 +1038,21 @@ pub mod tests {
         let gateway = Gateway { chain: "c".into(), registry: "0x13".into(), device_object_id: "0x1".into(), address: signer.address() };
         let reopened = Authority::open(&dir.join("cd"), settings(&dir, &changed), gateway, signer, now).unwrap();
         assert!(!reopened.resume_session("sensor-1").unwrap(), "the policy changed: clean session");
+        // The broker never accepted that clean session (refused, lost or the
+        // daemon stopped): it stays unresumable, also across a restart, even
+        // under the policy recorded before.
+        assert!(!reopened.resume_session("sensor-1").unwrap(), "unconfirmed cleanup");
+        drop(reopened);
+        let signer = Arc::new(Ed25519File(ed25519_dalek::SigningKey::from_bytes(&[7; 32])));
+        let gateway = Gateway { chain: "c".into(), registry: "0x13".into(), device_object_id: "0x1".into(), address: signer.address() };
+        let original = Authority::open(&dir.join("cd"), settings(&dir, GROUPS), gateway, signer, now).unwrap();
+        assert!(!original.resume_session("sensor-1").unwrap(), "unconfirmed cleanup, policy reverted");
+        drop(original);
+        let signer = Arc::new(Ed25519File(ed25519_dalek::SigningKey::from_bytes(&[7; 32])));
+        let gateway = Gateway { chain: "c".into(), registry: "0x13".into(), device_object_id: "0x1".into(), address: signer.address() };
+        let reopened = Authority::open(&dir.join("cd"), settings(&dir, &changed), gateway, signer, now).unwrap();
+        assert!(!reopened.resume_session("sensor-1").unwrap(), "unconfirmed cleanup after restart");
+        reopened.session_cleaned("sensor-1").unwrap();
         assert!(reopened.resume_session("sensor-1").unwrap());
         let mut reserving = reopened;
         reserving.reserve_client_id("sensor-bridge");

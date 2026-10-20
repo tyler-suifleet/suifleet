@@ -347,12 +347,30 @@ async fn mqtt_session(shared: &Shared, tcp: TcpStream) -> anyhow::Result<()> {
     upstream.password = shared.password.clone();
     // A persistent broker session keeps the subscriptions granted when it was
     // opened: resume one only under the policy it was opened with.
-    if !authority.resume_session(&thing)? && !connect.clean_session {
-        info!(thing, "Device groups changed since its last session: starting a clean broker session");
+    let resumable = authority.resume_session(&thing)?;
+    if !resumable {
+        if !connect.clean_session {
+            info!(thing, "Device groups changed since its last session: starting a clean broker session");
+        }
         upstream.clean_session = true;
     }
-    let (broker_read, mut broker_write) = broker.into_split();
+    let (mut broker_read, mut broker_write) = broker.into_split();
     broker_write.write_all(&mqtt::encode_connect(&upstream)).await?;
+    // The clean session replaced the old one only once the broker accepts it.
+    let mut from_broker = Vec::new();
+    let connack = match tokio::time::timeout(HANDSHAKE, read_frame(&mut broker_read, &mut from_broker)).await {
+        Ok(Ok(Some((0x20, body, raw)))) if body.len() == 2 => (body[1], raw),
+        _ => return refuse(authority, &mut client_write, &thing, 3, "broker_unavailable").await,
+    };
+    if connack.0 != 0 {
+        let _ = client_write.write_all(&connack.1).await;
+        let _ = client_write.shutdown().await;
+        anyhow::bail!("{thing}: the broker refused CONNECT ({})", connack.0);
+    }
+    if !resumable {
+        authority.session_cleaned(&thing)?;
+    }
+    client_write.write_all(&connack.1).await?;
     let _session = authority.session(&thing);
     info!(thing, "Client device connected");
     let pending: Pending = Arc::default();
@@ -368,7 +386,7 @@ async fn mqtt_session(shared: &Shared, tcp: TcpStream) -> anyhow::Result<()> {
     };
     let result = tokio::select! {
         result = client_to_broker(authority, &presented, client_read, inbound, &mut broker_write, local, pending.clone()) => result,
-        result = broker_to_client(broker_read, client_write, replies, pending) => result,
+        result = broker_to_client(broker_read, from_broker, client_write, replies, pending) => result,
         result = watchdog => result,
     };
     if result.as_ref().is_err_and(|e| e.downcast_ref::<Denied>().is_some()) {
@@ -434,9 +452,8 @@ fn merge_suback(body: &[u8], pending: &Pending) -> Option<Vec<u8>> {
     Some(mqtt::suback(packet_id, &codes?))
 }
 
-async fn broker_to_client<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(mut broker: R, mut client: W,
+async fn broker_to_client<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(mut broker: R, mut buffer: Vec<u8>, mut client: W,
     mut local: mpsc::Receiver<Vec<u8>>, pending: Pending) -> anyhow::Result<()> {
-    let mut buffer = Vec::new();
     loop {
         tokio::select! {
             // Cancel safe: completed reads are already in `buffer`.
@@ -741,6 +758,36 @@ mod tests {
         assert_eq!(first, 0xe0, "a clean DISCONNECT (no will), never the publish");
         assert!(read_packet(&mut broker, &mut upstream).await.is_none(), "nothing forwarded");
         assert_eq!(fx.authority.status(now_ms())["denied"]["publish"], 1);
+        std::fs::remove_dir_all(&fx.dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn persistent_session_resumes_only_after_the_broker_accepted_a_clean_one() {
+        let fx = fixture().await;
+        let (chain, key, _) = enroll(&fx.authority, "sensor-4");
+        // Each attempt asks to resume; returns the clean-session flag the
+        // broker saw and the CONNACK the client got for `reply`.
+        let attempt = |reply: Option<u8>| {
+            let (fx, pair) = (&fx, (chain.clone(), key.clone_key()));
+            async move {
+                let mut tls = connect_tls(fx, fx.mqtt, Some(pair)).await.unwrap();
+                tls.write_all(&mqtt::connect("sensor-4", None, None, 30, false)).await.unwrap();
+                let (mut broker, _) = tokio::time::timeout(Duration::from_secs(5), fx.broker.accept()).await.unwrap().unwrap();
+                let mut upstream = Vec::new();
+                let (_, body, _) = read_packet(&mut broker, &mut upstream).await.unwrap();
+                match reply {
+                    Some(code) => broker.write_all(&mqtt::connack(code)).await.unwrap(),
+                    None => drop(broker),
+                }
+                let mut buffer = Vec::new();
+                (mqtt::parse_connect(&body).unwrap().clean_session, read_packet(&mut tls, &mut buffer).await.unwrap().2)
+            }
+        };
+        // A refused or lost clean session leaves the old one unresumable.
+        assert_eq!(attempt(Some(5)).await, (true, mqtt::connack(5)), "broker refused");
+        assert_eq!(attempt(None).await, (true, mqtt::connack(3)), "broker closed before CONNACK");
+        assert_eq!(attempt(Some(0)).await, (true, mqtt::connack(0)), "clean session accepted");
+        assert_eq!(attempt(Some(0)).await, (false, mqtt::connack(0)), "resumed under the same policy");
         std::fs::remove_dir_all(&fx.dir).unwrap();
     }
 
