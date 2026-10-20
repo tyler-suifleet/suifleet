@@ -4,6 +4,7 @@ The local IPC endpoint implements the durable QoS 1 subscribe/receive/ack/publis
 subset (head until acknowledged, exact topics). The real daemon path is
 scripts/test_lambda.py; these tests drive failure timing that needs control.
 """
+import ctypes
 import json
 import os
 from pathlib import Path
@@ -15,6 +16,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'scripts'))
@@ -31,6 +33,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from suifleet_function import FunctionError, serve
 MARK = os.environ['MARK_DIR']
 state = {'count': 0}
+RAW = {'nan': b'"status":"ok","result":NaN}', 'infinity': b'"status":"ok","result":[-Infinity]}',
+       'surrogate': b'"status":"ok","result":"\\ud800"}',
+       'error-surrogate': b'"status":"error","error":{"type":"T","message":"\\udc80"}}',
+       'bad-utf8': b'"status":"ok","result":"\xff"}',
+       'too-deep': b'"status":"ok","result":' + b'[' * 64 + b']' * 64 + b'}',
+       'deep': b'"status":"ok","result":' + b'[' * 30000 + b']' * 30000 + b'}',
+       'max-deep': b'"status":"ok","result":' + b'[' * 63 + b']' * 63 + b'}'}
 
 def mark(kind, text=''):
     with open(os.path.join(MARK, kind), 'a') as out:
@@ -86,6 +95,10 @@ def handler(payload, context):
     if op == 'version2':
         sys.stdout.write(json.dumps({'version': 2, 'invocation_id': context['invocation_id'], 'status': 'ok',
                                      'result': 1}) + '\n'); sys.stdout.flush()
+        time.sleep(30)
+    if op in RAW:   # responses outside strict JSON, written directly
+        head = '{"version":1,"invocation_id":%s,' % json.dumps(context['invocation_id'])
+        sys.stdout.buffer.write(head.encode() + RAW[op] + b'\n'); sys.stdout.flush()
         time.sleep(30)
     if op == 'flood':
         sys.stdout.write('x' * 70000); sys.stdout.flush()
@@ -285,8 +298,10 @@ class ManagerTests(unittest.TestCase):
         self.assertEqual((contract['version'], contract['ticket'], contract['implementation']), (1, 'SF-069', 'scripts/lambda_manager.py'))
         self.assertEqual(tuple(contract['statuses']), lm.STATUSES)
         self.assertEqual(tuple(contract['modes']), lm.MODES)
-        self.assertEqual(contract['limits'], dict(response_line_bytes=lm.MAX_RESPONSE, result_envelope_bytes=lm.MAX_ENVELOPE,
-                                                  timeout_ms=[1, 900000], log_bytes_per_function=2 * lm.LOG_BYTES))
+        self.assertEqual(contract['limits'], dict(response_line_bytes=lm.MAX_RESPONSE, response_nesting_depth=lm.MAX_DEPTH,
+                                                  result_envelope_bytes=lm.MAX_ENVELOPE, timeout_ms=[1, 900000],
+                                                  log_bytes_per_function=2 * lm.LOG_BYTES,
+                                                  cleanup_wait_ms=int(lm.CLEANUP_WAIT * 1000)))
         self.assertTrue(all(r['url'].startswith('https://docs.aws.amazon.com/greengrass/v2/') and r['version']
                             for r in contract['references']))
 
@@ -341,6 +356,71 @@ class ManagerTests(unittest.TestCase):
                          ('invalid-response', {}))
         self.assertEqual(lm.parse_response(json.dumps(dict(version=1, invocation_id='i', status='ok', result=1, x=2)), request),
                          ('invalid-response', {}))
+
+    def test_strict_json_responses(self):
+        request = dict(version=1, invocation_id='i')
+        head = b'{"version":1,"invocation_id":"i",'
+        for body in (b'"status":"ok","result":NaN}', b'"status":"ok","result":Infinity}', b'"status":"ok","result":"\\udfff"}',
+                     b'"status":"error","error":{"type":"\\ud800","message":""}}', b'"status":"ok","result":"\xc3"}',
+                     b'"status":"ok","result":' + b'[' * 64 + b']' * 64 + b'}'):
+            self.assertEqual(lm.parse_response(head + body, request), ('invalid-response', {}), body[:40])
+        self.assertEqual(lm.parse_response(b'[' * 60000, request), ('invalid-response', {}))
+        self.assertEqual(lm.parse_response(json.dumps(dict(request, status='ok', result='\u00e9')).encode('utf-16'), request),
+                         ('invalid-response', {}), 'only UTF-8')
+        nested = head + b'"status":"ok","result":' + b'[' * 63 + b']' * 63 + b'}'
+        self.assertEqual(lm.parse_response(nested, request)[0], 'ok')
+
+    def test_malformed_json_responses_are_contained(self):
+        f = self.fixture({'fn': on_demand(), 'other': on_demand(result_topic='functions/second')},
+                         SUBSCRIBE + [dict(source='sensor', subject='sensors/other', target='other')])
+        ops = ['nan', 'infinity', 'surrogate', 'error-surrogate', 'bad-utf8', 'too-deep', 'deep', 'max-deep']
+        for op in ops:
+            f.daemon.inject('sensor', 'sensors/temp', {'op': op})
+        f.daemon.inject('sensor', 'sensors/other', {'op': 'echo', 'tag': 'unrelated'})
+        results = sorted(f.result(len(ops)), key=lambda r: r['message_id'])
+        self.assertEqual({op: r['status'] for op, r in zip(ops, results)},
+                         dict.fromkeys(ops[:-1], 'invalid-response') | {'max-deep': 'ok'})
+        self.assertEqual(f.result(1, 'functions/second')[0]['status'], 'ok', 'unrelated function continues')
+        f.daemon.inject('sensor', 'sensors/temp', {'op': 'echo'})
+        self.assertEqual(f.result(len(ops) + 1)[-1]['status'], 'ok')
+        self.assertIsNone(f.process.poll(), 'a malformed response must not stop the manager')
+
+    def spawner(self):
+        temporary = tempfile.TemporaryDirectory(prefix='sf069-')
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        root.chmod(0o755)
+        (root / 'logs').mkdir()
+        (root / 'work/fn').mkdir(parents=True)
+        if os.geteuid() == 0:
+            os.chown(root / 'work/fn', FUNCTION_UID, FUNCTION_UID)
+        spawner = lm.Spawner(root / 'logs', root / 'work')
+        self.addCleanup(ctypes.CDLL(None).prctl, 36, 0)     # this test process is not a subreaper
+        fn = dict(mode='on-demand', command=['/bin/sleep', '300'], environment={})
+        if os.geteuid() == 0:
+            fn['run_as'] = {'uid': FUNCTION_UID, 'gid': FUNCTION_UID}
+        return spawner, spawner.spawn('fn', fn)
+
+    def test_denied_cleanup_fails_promptly(self):
+        spawner, process = self.spawner()
+        self.addCleanup(lambda: process.poll() is None and (os.killpg(process.pid, signal.SIGKILL), process.wait()))
+        started = time.monotonic()
+        with mock.patch.object(lm.os, 'killpg', side_effect=PermissionError), \
+                mock.patch.object(lm, 'KILLER', 'import sys; sys.exit(1)'), self.assertRaises(lm.CleanupError):
+            spawner.release(process)
+        self.assertLess(time.monotonic() - started, 3, 'denied cleanup is reported, not waited out')
+        self.assertTrue(spawner.failed)
+        self.assertIsNone(process.poll())
+
+    @unittest.skipUnless(os.geteuid() == 0, 'run_as needs a root manager (make test-lambda)')
+    def test_denied_signal_is_sent_as_the_function_user(self):
+        spawner, process = self.spawner()
+        started = time.monotonic()
+        with mock.patch.object(lm.os, 'killpg', side_effect=PermissionError):
+            spawner.release(process)
+        self.assertLess(time.monotonic() - started, 3)
+        self.assertEqual(process.returncode, -signal.SIGKILL)
+        self.assertIsNone(spawner.failed)
 
     def test_on_demand_invocation_fresh_isolated_process(self):
         f = self.fixture()

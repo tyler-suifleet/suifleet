@@ -34,10 +34,12 @@ NAME = re.compile(r'[A-Za-z0-9_.-]{1,64}')
 SOURCE = re.compile(r'[A-Za-z0-9_.-]{1,64}|@operator/[0-9]{1,10}|@bridge/[A-Za-z0-9_.-]{1,64}')
 ENV_NAME = re.compile(r'[A-Z_][A-Z0-9_]{0,63}')
 MAX_RESPONSE = 65536
+MAX_DEPTH = 64               # response arrays/objects nesting
 MAX_ENVELOPE = 4096          # native IPC publish payload limit
 MAX_ERROR_TYPE, MAX_ERROR_MESSAGE = 128, 1024
 LOG_BYTES = 1 << 20          # per function log, plus one rotated file
 EXIT_GRACE = 1.0
+CLEANUP_WAIT = 5.0           # SIGKILL to reaped, else the manager stops
 DEDUPE_WINDOW = 10000
 STATUSES = ('ok', 'error', 'timeout', 'busy', 'crashed', 'invalid-response',
             'unsupported-version', 'spawn-failed', 'unknown-function', 'result-too-large')
@@ -56,6 +58,13 @@ SHIM = ('import ctypes,os,resource,sys\n'
         'os.getppid()==int(sys.argv[1]) or os._exit(70)\n'
         'os.chdir(sys.argv[3])\n'
         'os.execv(sys.argv[4],sys.argv[4:])\n')
+
+# Runs as a function's user when the manager may not signal it directly (a
+# non-root manager with only CAP_SETUID/SETGID): SIGKILL each gPGID / pPID.
+KILLER = ('import os,signal,sys\n'
+          'for a in sys.argv[1:]:\n'
+          ' try:(os.killpg if a[0]=="g" else os.kill)(int(a[1:]),signal.SIGKILL)\n'
+          ' except ProcessLookupError:pass\n')
 
 
 # --- Pure decisions shared by the runtime and the SF-064 v1 subcontract ------
@@ -96,11 +105,32 @@ def reference_decision(request):
             'payload': request['payload']}
 
 
+def _no_constant(name):
+    raise ValueError(f'{name} is not JSON')
+
+
+def nested_within(value, limit):
+    stack = [(value, 1)]
+    while stack:
+        item, depth = stack.pop()
+        if isinstance(item, (dict, list)):
+            if depth > limit:
+                return False
+            stack.extend((child, depth + 1) for child in (item.values() if isinstance(item, dict) else item))
+    return True
+
+
 def parse_response(line, request):
-    """Validate one function response line; returns (status, fields)."""
+    """Validate one function response line; returns (status, fields).
+
+    Only strict UTF-8 JSON is accepted: no NaN/Infinity, lone surrogates or
+    nesting beyond MAX_DEPTH, so every accepted value re-serializes."""
     try:
-        value = json.loads(line)
-    except ValueError:
+        value = json.loads(line.decode('utf-8') if isinstance(line, bytes) else line, parse_constant=_no_constant)
+        if not nested_within(value, MAX_DEPTH):
+            return 'invalid-response', {}
+        compact(value).encode('utf-8')
+    except (ValueError, RecursionError):   # includes Unicode errors
         return 'invalid-response', {}
     if not isinstance(value, dict):
         return 'invalid-response', {}
@@ -322,12 +352,18 @@ class LogSink(threading.Thread):
                         pass
 
 
+class CleanupError(RuntimeError):
+    """A function process could not be killed and reaped; the manager must stop."""
+
+
 class Spawner:
     """Starts isolated function processes; the manager is their subreaper."""
 
     def __init__(self, logs, work):
         self.logs, self.work = logs, work
-        self.lock, self.tracked = threading.Lock(), set()
+        # Reentrant: sweep() kills through terminate(); a helper must not be swept.
+        self.lock, self.tracked, self.owners = threading.RLock(), set(), {}
+        self.failed = None
         if sys.platform.startswith('linux'):
             ctypes.CDLL(None, use_errno=True).prctl(36, 1)  # PR_SET_CHILD_SUBREAPER
 
@@ -344,16 +380,42 @@ class Spawner:
                                        user=run_as and run_as['uid'], group=run_as and run_as['gid'],
                                        extra_groups=[] if run_as else None)
             self.tracked.add(process.pid)
+            self.owners[process.pid] = (run_as['uid'], run_as['gid']) if run_as else (os.getuid(), os.getgid())
         LogSink(process.stderr, self.logs / f'{name}.log').start()
         return process
 
+    def fail(self, text):
+        self.failed = self.failed or text
+        return CleanupError(text)
+
+    def terminate(self, targets, owner):
+        """SIGKILL ('g', PGID) groups and ('p', PID) processes. Signals the manager
+        may not send directly are sent by a helper running as their owner."""
+        denied = []
+        for kind, ident in targets:
+            try:
+                (os.killpg if kind == 'g' else os.kill)(ident, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            except PermissionError:
+                denied.append(f'{kind}{ident}')
+        if not denied:
+            return
+        with self.lock:
+            try:
+                subprocess.run([sys.executable, '-I', '-c', KILLER, *denied], user=owner[0], group=owner[1],
+                               extra_groups=[], env={}, cwd='/', close_fds=True, stdin=subprocess.DEVNULL,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=CLEANUP_WAIT, check=True)
+            except (OSError, subprocess.SubprocessError) as error:
+                raise self.fail(f'cannot kill {" ".join(denied)} as {owner[0]}: {type(error).__name__}') from None
+
     def release(self, process):
-        """Kill the process group (descendants included) and reap."""
+        """Kill the process group (descendants included) and reap, or fail."""
+        self.terminate([('g', process.pid)], self.owners.get(process.pid, (os.getuid(), os.getgid())))
         try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            pass
-        process.wait()
+            process.wait(CLEANUP_WAIT)
+        except subprocess.TimeoutExpired:
+            raise self.fail(f'process {process.pid} survived SIGKILL') from None
         for stream in (process.stdin, process.stdout):
             if stream and not stream.closed:
                 try:
@@ -362,6 +424,7 @@ class Spawner:
                     pass
         with self.lock:
             self.tracked.discard(process.pid)
+            self.owners.pop(process.pid, None)
         self.sweep()
 
     def sweep(self):
@@ -373,15 +436,21 @@ class Spawner:
                     continue
                 try:
                     stat = (entry / 'stat').read_text()
+                    status = dict(line.split(':', 1) for line in (entry / 'status').read_text().splitlines() if ':' in line)
                 except OSError:
                     continue
-                if int(stat.rpartition(')')[2].split()[1]) == me:
-                    pid = int(entry.name)
-                    try:
-                        os.kill(pid, signal.SIGKILL)
-                        os.waitpid(pid, 0)
-                    except (ProcessLookupError, ChildProcessError):
-                        pass
+                if int(stat.rpartition(')')[2].split()[1]) != me:
+                    continue
+                pid = int(entry.name)
+                self.terminate([('p', pid)], (int(status['Uid'].split()[0]), int(status['Gid'].split()[0])))
+                deadline = time.monotonic() + CLEANUP_WAIT
+                try:
+                    while os.waitpid(pid, os.WNOHANG) == (0, 0):
+                        if time.monotonic() > deadline:
+                            raise self.fail(f'escaped process {pid} survived SIGKILL')
+                        time.sleep(0.01)
+                except ChildProcessError:
+                    pass
 
 
 def exit_detail(process):
@@ -418,6 +487,12 @@ class Worker(threading.Thread):
         self.inbox, self.process, self.starts = queue.Queue(), None, 0
 
     def run(self):
+        try:
+            self.serve()
+        except CleanupError:
+            pass        # the main loop stops the manager
+
+    def serve(self):
         backoff, next_start, held = 1, 0.0, None
         while not self.manager.stopping.is_set():
             if self.process is not None and self.process.poll() is not None:
@@ -477,7 +552,10 @@ def on_demand(manager, name, fn, row, request, dispatched):
             if status == 'crashed':
                 fields.update(exit_detail(process))
     finally:
-        manager.spawner.release(process)
+        try:
+            manager.spawner.release(process)
+        except CleanupError:
+            return      # the main loop stops the manager
     manager.finish(row, request, status, fields, dispatched)
 
 
@@ -550,9 +628,13 @@ class Manager:
         value = dict(version=VERSION, invocation_id=f"{row['key']}/{row['function']}", function=row['function'],
                      source=row['sender'], subject=row['subject'], message_id=row['message_id'], attempt=attempt,
                      status=status, duration_ms=duration_ms, **fields)
-        if len(compact(value).encode()) > MAX_ENVELOPE:
+        try:
+            size = len(compact(value).encode())
+        except (ValueError, RecursionError):   # defense in depth; parse_response rejects these
+            size = None
+        if size is None or size > MAX_ENVELOPE:
             value = {k: v for k, v in value.items() if k not in ('result', 'error')}
-            value['status'] = 'result-too-large'
+            value['status'] = 'invalid-response' if size is None else 'result-too-large'
         return value
 
     def finish(self, row, request, status, fields, dispatched):
@@ -608,6 +690,12 @@ class Manager:
             self.diagnostic('malformed message acknowledged without invocation')
             self.ipc.ack(subject, message['id'])
             return True
+        try:
+            compact(message.get('payload')).encode()
+        except (ValueError, RecursionError):
+            self.diagnostic('non-JSON payload acknowledged without invocation')
+            self.ipc.ack(subject, message['id'])
+            return True
         targets = route(self.subscriptions, message.get('sender'), message.get('topic'))
         if not self.journal.accept(f"{subject}#{message['id']}", message, targets):
             self.diagnostic('duplicate delivery acknowledged without invocation')
@@ -633,6 +721,8 @@ class Manager:
             self.retired = True
 
     def step(self):
+        if self.spawner.failed:
+            raise CleanupError(self.spawner.failed)
         self.collect()
         self.dispatch()
         progressed = False
@@ -648,7 +738,7 @@ class Manager:
         return progressed
 
     def close(self, grace=10):
-        deadline = time.monotonic() + grace
+        deadline = time.monotonic() + (0 if self.spawner.failed else grace)
         while (self.threads or any(self.running.values())) and time.monotonic() < deadline:
             self.collect()
             self.threads = {t for t in self.threads if t.is_alive()}
@@ -674,7 +764,7 @@ def main():
     stop = threading.Event()
     for number in (signal.SIGTERM, signal.SIGINT):
         signal.signal(number, lambda *_: stop.set())
-    delay, idle = 0.2, 0.02
+    delay, idle, exit_status = 0.2, 0.02, 0
     try:
         while not stop.is_set():
             try:
@@ -689,8 +779,15 @@ def main():
                 manager.diagnostic(f'ipc retry ({code[:64]})')
                 stop.wait(delay)
                 delay = min(30, delay * 2)
+            except CleanupError as error:
+                # Never continue with an unkilled function: stop, and let the platform
+                # unit's control-group kill end it; interrupted work reruns on restart.
+                manager.diagnostic(f'stopping: {error}')
+                exit_status = 1
+                break
     finally:
         manager.close()
+    sys.exit(exit_status)
 
 
 if __name__ == '__main__':

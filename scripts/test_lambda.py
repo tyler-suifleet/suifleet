@@ -217,14 +217,34 @@ def run(evidence=None):
             assert first['result']['pid'] == second['result']['pid']
             ok('long-lived function: started with the manager, one process keeps state across invocations')
 
+            def sleeper(tag):
+                return int(next(line for line in (marks / 'sleeping').read_text().splitlines() if line.endswith(' ' + tag)).split()[0])
+
+            # The manager may not signal the function UID directly; deadlines must still hold
+            # for functions that would outlive the whole test.
             assert ipc(SENSOR, 'publish', 'sensor', 'sensors/temp', {'op': 'raise'})['ok']
-            assert ipc(SENSOR, 'publish', 'sensor', 'sensors/temp', {'op': 'sleep', 'seconds': 10})['ok']
-            error, timeout = sorted(results(2), key=lambda r: r['message_id'])
+            assert ipc(SENSOR, 'publish', 'sensor', 'sensors/temp', {'op': 'sleep', 'seconds': 600, 'tag': 'od'})['ok']
+            error, timeout = sorted(results(2, timeout=10), key=lambda r: r['message_id'])
             assert error['status'] == 'error' and error['error'] == {'type': 'Validation', 'message': 'bad input'}, error
-            assert timeout['status'] == 'timeout' and 'result' not in timeout, timeout
-            sleeper = int((marks / 'sleeping').read_text().split()[0])
-            wait_until(lambda: not alive(sleeper), 'timed-out function process survived')
-            ok('error and timeout envelopes: handler error type/message; timed-out process group killed')
+            assert timeout['status'] == 'timeout' and 'result' not in timeout and timeout['duration_ms'] < 3000, timeout
+            wait_until(lambda: not alive(sleeper('od')), 'timed-out on-demand function survived', timeout=5)
+            assert ipc(SENSOR, 'publish', 'sensor', 'sensors/temp', {'op': 'escape'})['ok']
+            [escaped] = results(1, timeout=10)
+            escapee = int((marks / 'escaped').read_text())
+            assert escaped['status'] == 'ok', escaped
+            wait_until(lambda: not alive(escapee), 'escaped function descendant survived', timeout=5)
+            assert ipc(SENSOR, 'publish', 'sensor', 'sensors/count', {'op': 'sleep', 'seconds': 600, 'tag': 'll'})['ok']
+            [timeout] = results(1, timeout=10)
+            assert timeout['status'] == 'timeout' and timeout['duration_ms'] < 3000, timeout
+            wait_until(lambda: not alive(sleeper('ll')), 'timed-out long-lived function survived', timeout=5)
+            assert ipc(SENSOR, 'publish', 'sensor', 'sensors/temp', {'op': 'echo'})['ok']
+            assert ipc(SENSOR, 'publish', 'sensor', 'sensors/count', {'op': 'echo'})['ok']
+            after = sorted(results(2, timeout=15), key=lambda r: r['message_id'])
+            assert [r['status'] for r in after] == ['ok', 'ok'] and after[1]['result']['count'] == 1, after
+            assert processes['manager'].poll() is None
+            ok('error and timeout envelopes: handler error type/message; on-demand and long-lived functions of another '
+               'UID that outlive their deadline are killed promptly with escaped descendants; later invocations '
+               'run (long-lived restarted)')
 
             # Manager SIGKILL during an invocation: the function dies with it and runs again.
             assert ipc(SENSOR, 'publish', 'sensor', 'sensors/temp', {'op': 'sleep', 'seconds': 1, 'tag': 'restart'})['ok']
