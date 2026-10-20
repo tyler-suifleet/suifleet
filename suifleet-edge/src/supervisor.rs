@@ -2129,8 +2129,9 @@ mod tests {
         let read = |file: &str| -> u32 { std::fs::read_to_string(f.dir.join(file)).unwrap_or_default().trim().parse().unwrap_or(0) };
         until("the leftover's children to start", || read("escaped") > 0 && read("cleared") > 0).await;
         let (escaped, cleared) = (read("escaped"), read("cleared"));
-        until("the children to exec", || carries(escaped, &marker(&root)) && alive(cleared)).await;
-        assert!(!carries(cleared, &marker(&root)));
+        // The cleared child keeps the shell's environment until env(1)
+        // execs sleep; wait for that, rather than racing it.
+        until("the children to exec", || carries(escaped, &marker(&root)) && alive(cleared) && !carries(cleared, &marker(&root))).await;
 
         assert!(reap_previous_runs(&root, &BTreeMap::new(), None).unwrap() >= 3);
         assert!(!alive(leftover.pid()) && !alive(escaped) && !alive(cleared), "a leftover survived recovery");
