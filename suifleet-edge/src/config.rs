@@ -1,8 +1,8 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 /// `[pubsub]` (docs/MESSAGING.md).
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct PubsubConfig {
     #[serde(default = "default_pubsub_messages")]
@@ -11,7 +11,7 @@ pub struct PubsubConfig {
     pub max_bytes_per_subscription: u64,
     #[serde(default = "default_pubsub_qos0")]
     pub qos0_messages_per_subscription: usize,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bridge: Option<crate::bridge::BridgeConfig>,
 }
 fn default_pubsub_messages() -> usize {
@@ -49,6 +49,11 @@ impl PubsubConfig {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Config {
+    #[serde(skip)]
+    pub services: Option<std::sync::Arc<std::sync::Mutex<crate::services::Runtime>>>,
+    /// Operator-only authorization of fleet credential paths and destinations.
+    #[serde(default)]
+    pub service_credentials: Vec<crate::services::CredentialAuthorization>,
     pub sui: SuiConfig,
     #[serde(default)]
     pub ipc: Option<crate::ipc::Settings>,
@@ -88,7 +93,7 @@ pub struct Config {
 /// `[streams]`: durable local streams (docs/STREAMS.md). Streams with an
 /// export are declared here only: components cannot direct device-signed
 /// data to a destination.
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct StreamsConfig {
     #[serde(default = "default_max_streams")]

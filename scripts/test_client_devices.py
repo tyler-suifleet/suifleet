@@ -120,6 +120,12 @@ def serve():
     shim, rpc_url = start_grpc(f"http://127.0.0.1:{chain.server_port}")
     root = Path(tempfile.mkdtemp(prefix="suifleet-cd-"))
     root.chmod(0o755)
+    # Components must not need traversal of a developer's private checkout.
+    # Copy only the public SDK into this disposable test fixture.
+    sdk = root / "sdk"
+    sdk.mkdir(mode=0o755)
+    (sdk / "suifleet_ipc.py").write_bytes((ROOT / "sdk/python/suifleet_ipc.py").read_bytes())
+    (sdk / "suifleet_ipc.py").chmod(0o644)
     key = root / "device.key"
     key.write_text("07" * 32)
     key.chmod(0o600)
@@ -177,7 +183,7 @@ def serve():
 
     def ipc(uid, operation, component="", topic="", payload=None):
         code = ("import os,sys,json; os.setgid(int(sys.argv[1])); os.setuid(int(sys.argv[1])); "
-                "sys.path.insert(0,'/workspace/sdk/python'); from suifleet_ipc import Client; "
+                f"sys.path.insert(0,{str(sdk)!r}); from suifleet_ipc import Client; "
                 "c=Client(sys.argv[2], component=sys.argv[3]); "
                 "print(json.dumps(c.request(sys.argv[4], topic=sys.argv[5], payload=json.loads(sys.argv[6]))))")
         result = subprocess.run([sys.executable, "-c", code, str(uid), str(ipc_socket), component, operation, topic, json.dumps(payload)],
@@ -598,7 +604,8 @@ def host(args):
               "mosquitto_sub (libmosquitto/OpenSSL, Ed25519) received it")
 
         # LAN clients and components through the SF-032 bridge, both ways.
-        assert h.ipc(SUB_UID, "subscribe", "sub", "lan/commands/#", {"qos": 1})["ok"]
+        subscribed_component = h.ipc(SUB_UID, "subscribe", "sub", "lan/commands/#", {"qos": 1})
+        assert subscribed_component["ok"], subscribed_component
         assert client.send(mqtt_subscribe(2, [("device1/sensors/#", 1)]))
         assert client.packet()[:3:2] == (9, b"\x00\x02\x01"), "SUBACK granted QoS 1"
         assert client.send(mqtt_publish("lan/commands/reboot", b'{"cmd":"reboot"}', packet_id=3))
