@@ -12,6 +12,11 @@ This runbook describes current local operations and the intended release gates. 
 - Device service: `suifleet.service`, config/key in `/etc/suifleet`, journal under `/var/lib/suifleet`; service provisioning is idempotent.
 - Sui authorizes deployments/reports, Walrus holds recipes/artifacts, and the device invokes an operator-configured updater. Devices can report signed heartbeat and health telemetry to the fleet indexer ([TELEMETRY.md](TELEMETRY.md)). No production indexer, coordinator, hosted health ingress, secrets service or hosting deployment is currently recorded.
 
+Fleet wallet and native multisig handover uses the recipient-confirmed procedure in
+[FLEET_HANDOVER.md](FLEET_HANDOVER.md). Transfer all relevant authority records and
+explicitly supersede catalog/decryption/provider authority; transferring a device
+capability alone is not complete fleet administration migration.
+
 ## Reproducible local checks
 
 From the host:
