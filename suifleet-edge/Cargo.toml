@@ -7,7 +7,7 @@ edition = "2021"
 name = "suifleet"
 path = "src/main.rs"
 
-[dependencies]
+[target.'cfg(not(windows))'.dependencies]
 semver = "=1.0.28"
 # Sui gRPC v2 API and transaction types (Mysten's official Rust SDK)
 sui-rpc = "0.4.0"
@@ -62,7 +62,7 @@ p256 = { version = "0.13", optional = true, features = ["ecdsa"] }
 # systemd watchdog (optional; only links when building on systemd systems)
 sd-notify = { version = "0.4", optional = true }
 
-[dev-dependencies]
+[target.'cfg(not(windows))'.dev-dependencies]
 # Test-only gRPC front end for the Python chain simulator (examples/grpc_sim_shim.rs).
 tonic = { version = "0.14", features = ["transport", "router"] }
 sui-crypto = { version = "0.4.0", features = ["ed25519", "secp256r1"] }
@@ -80,3 +80,12 @@ opt-level = "z"
 lto = true
 codegen-units = 1
 strip = true
+
+[target.'cfg(windows)'.dependencies]
+anyhow = "1"
+suifleet-windows = { path = "windows-runtime" }
+
+# Native backend tests and the shipped daemon must use one dependency resolution.
+[workspace]
+members = ["windows-runtime"]
+resolver = "2"
