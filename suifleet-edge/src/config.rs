@@ -1,8 +1,8 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 /// `[pubsub]` (docs/MESSAGING.md).
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct PubsubConfig {
     #[serde(default = "default_pubsub_messages")]
@@ -11,7 +11,7 @@ pub struct PubsubConfig {
     pub max_bytes_per_subscription: u64,
     #[serde(default = "default_pubsub_qos0")]
     pub qos0_messages_per_subscription: usize,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bridge: Option<crate::bridge::BridgeConfig>,
 }
 fn default_pubsub_messages() -> usize {
@@ -49,6 +49,11 @@ impl PubsubConfig {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Config {
+    #[serde(skip)]
+    pub services: Option<std::sync::Arc<std::sync::Mutex<crate::services::Runtime>>>,
+    /// Operator-only authorization of fleet credential paths and destinations.
+    #[serde(default)]
+    pub service_credentials: Vec<crate::services::CredentialAuthorization>,
     pub sui: SuiConfig,
     #[serde(default)]
     pub ipc: Option<crate::ipc::Settings>,
@@ -80,6 +85,9 @@ pub struct Config {
     /// Local support console (SF-079, docs/LOCAL_CONSOLE.md); none when omitted.
     #[serde(default)]
     pub console: Option<crate::console::Settings>,
+    /// LAN client-device authentication and discovery (SF-035); none when omitted.
+    #[serde(default)]
+    pub client_devices: Option<crate::clientdevices::Settings>,
     /// The file this configuration was loaded from (for the update preflight).
     #[serde(skip)]
     pub path: PathBuf,
@@ -88,7 +96,7 @@ pub struct Config {
 /// `[streams]`: durable local streams (docs/STREAMS.md). Streams with an
 /// export are declared here only: components cannot direct device-signed
 /// data to a destination.
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct StreamsConfig {
     #[serde(default = "default_max_streams")]
@@ -701,6 +709,14 @@ impl Config {
         }
         if let Some(shadows) = &cfg.shadows {
             shadows.validate()?;
+        }
+        if let Some(client_devices) = &mut cfg.client_devices {
+            if client_devices.device_groups_file.is_relative() {
+                client_devices.device_groups_file = path.parent().unwrap_or(Path::new(".")).join(&client_devices.device_groups_file);
+            }
+            client_devices.validate()?;
+            anyhow::ensure!(cfg.ipc.as_ref().is_some_and(|ipc| !ipc.administrators.is_empty()),
+                "[client_devices] needs [ipc] administrators: enrollment and revocation are operator IPC requests");
         }
         Ok(cfg)
     }

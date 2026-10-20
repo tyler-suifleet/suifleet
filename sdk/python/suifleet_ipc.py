@@ -89,6 +89,11 @@ class Client:
         """Administrator only: subscription and bridge counters."""
         return self.request('messaging')
 
+    def client_devices(self, action, **fields):
+        """Administrator only (SF-035): action 'list', 'enroll' (thing, csr,
+        optional validity_seconds), 'revoke' or 'remove' (thing)."""
+        return self.request('client_devices', payload=dict(action=action, **fields))
+
     # Durable streams (SF-034). Errors carry protocol codes such as 'full',
     # 'evicted', 'not-enough-messages', 'not-found', 'exists', 'quota', 'unavailable'.
     def stream_create(self, name, max_size, strategy_on_full='RejectNewData', persistence='File',

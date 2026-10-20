@@ -1,5 +1,7 @@
 # Durable streams and export (SF-034)
 
+Fleet deployments can supply service configuration and component grants through [recipe services](DEPLOYMENT_SERVICES.md); device-local sections remain explicit overrides.
+
 Components store data in bounded local streams through the daemon's IPC socket ([COMPONENT_IPC.md](COMPONENT_IPC.md)). Data survives crashes and restarts. Streams the operator declares can be exported to an HTTP(S) destination, with retries and resumable checkpoints. The design follows AWS Stream Manager and the SF-028 specification ([GREENGRASS_COMPATIBILITY.md](GREENGRASS_COMPATIBILITY.md#streams-sf-034)). Stream data never goes on chain or to Walrus.
 
 ## Configuration
@@ -32,6 +34,15 @@ max_backoff_seconds = 300                 # retry backoff cap, 1..=3600
 ```
 
 `suifleet --check-config` and daemon startup reject invalid definitions, duplicate names, and definitions that exceed the quota. Declared streams are created at startup, or updated to match the configuration. Their persistence cannot change; delete and recreate the stream to change it. **Exports are operator configuration only:** a component can create local streams that its globs allow, but it cannot attach an export or delete a declared stream.
+
+Fleet removal/rollback can mark an operator declaration **retained read-only**.
+`stream_describe` exposes `retired`; reads/deletion remain available to authorized
+callers, while append/export/TTL retirement stop. Restoring a smaller active
+budget can retain prior overage without discarding these records. It never
+creates new capacity: all retained reservations still block new allocations,
+and overage cannot grow in count or reserved bytes. Re-declare an existing stream
+within active bounds to reactivate it, or explicitly delete retained data / raise
+the budget. See [deployment transaction recovery](DEPLOYMENT_SERVICES.md).
 
 ## Semantics
 

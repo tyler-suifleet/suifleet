@@ -1,5 +1,7 @@
 # Local pub/sub and the MQTT bridge (SF-032)
 
+Fleet deployments can supply service configuration and component grants through [recipe services](DEPLOYMENT_SERVICES.md); device-local sections remain explicit overrides.
+
 Components exchange messages through the daemon's IPC socket ([COMPONENT_IPC.md](COMPONENT_IPC.md)). With `[pubsub]`, subscriptions are durable: messages are stored on disk, survive daemon restarts and wait for an acknowledgement. An optional bridge connects this pub/sub to a standard MQTT broker that serves LAN clients. Messages never go on chain or to Walrus. The rules follow the SF-028 specification ([GREENGRASS_COMPATIBILITY.md](GREENGRASS_COMPATIBILITY.md#messaging-sf-032)).
 
 ## Configuration
@@ -82,7 +84,7 @@ The bridge is an MQTT 3.1.1 client (MQTT 5 brokers accept it) with a persistent 
 - **Rejected inbound messages.** A message pub/sub can never accept is rejected rather than retried forever: its payload exceeds 4096 bytes after conversion, the mapping's prefix makes the topic longer than 256 bytes, or the matching mappings' copies together exceed a queue's limits even when it is empty (then every matching mapping rejects it). The bridge sends PUBACK so the broker drops it, logs a warning, and increments the mapping's `rejected` counter and sets `last_rejected` (topic and reason). Other mappings still receive the message. A full queue or storage failure is never treated as a rejection.
 - **Loops.** Messages sent by a bridge principal are not bridged out again, and configurations whose outbound topics could re-enter an inbound filter are refused.
 - **Reconnect** backs off from 1 s to 60 s. Stats are written to `<state_dir>/pubsub/bridge.json` and served by `messaging`.
-- **Transport.** Plain TCP to a broker on this device or a trusted network. TLS and authentication of LAN client devices are SF-035; cloud targets (AWS IoT Core or another remote broker) are a separately approved adapter (SF-061).
+- **Transport.** Plain TCP to a broker on this device or a trusted network. LAN client devices reach the broker through the SF-035 gateway (mutual TLS, per-thing policies; [CLIENT_DEVICES.md](CLIENT_DEVICES.md)), which requires the broker to listen on loopback. Cloud targets (AWS IoT Core or another remote broker) are a separately approved adapter (SF-061).
 
 ## SDK
 
@@ -105,7 +107,7 @@ Client(component='sensor').publish('sensors/a/temp', {'t': 21})
 | `make test-messaging` | The real daemon as root with two real component UIDs, the chain simulator and a real Eclipse Mosquitto 2.0.20 broker; LAN clients are `mosquitto_pub`/`mosquitto_sub`. ACL refusals. LAN → component at QoS 1 with receive and ack. An oversized LAN message is rejected and counted once, and the next message arrives. Component → LAN under a prefix. Broker stopped: publications spooled and delivered in order after reconnect. Spool exhausted: refusals counted, then after a daemon restart exactly the accepted publications arrive in order. Inbound backpressure: a full subscriber queue leaves LAN messages with the broker; all arrive after draining. Receipt: [sf032-messaging.json](validation/sf032-messaging.json) |
 
 **Not yet covered:**
-- TLS, client-device certificates and per-client MQTT authorization (SF-035);
+- the bridge's own connection is plain TCP to a loopback broker; LAN client TLS and authorization are covered by [CLIENT_DEVICES.md](CLIENT_DEVICES.md) (SF-035);
 - cloud bridge targets (SF-061);
 - the AWS IPC wire protocol (`aws_api` remains undecided);
 - disk-full behaviour of the host filesystem beyond the configured bounds;

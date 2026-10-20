@@ -72,6 +72,17 @@ test-ota:
 	$(RUN) python3 scripts/test_console.py
 	$(RUN) python3 scripts/test_rollout.py
 
+# Fleet service configuration, root only in a disposable network-none container
+# for real SO_PEERCRED principals (no host credentials or public network).
+.PHONY: test-services
+test-services:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+ifdef INSIDE_DEV_CONTAINER
+	python3 scripts/test_services.py
+else
+	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" python3 scripts/test_services.py
+endif
+
 # Supervised components under the shipped systemd units on real systemd and
 # cgroup v2 (SF-014): a disposable privileged container with systemd as PID 1.
 # Runs on the host (needs Docker), not inside the dev container.
@@ -378,6 +389,13 @@ edge-acceptance:
 	@test -n "$(PROFILE)" && test -n "$(EVIDENCE)" || { echo "set PROFILE and EVIDENCE (docs/EDGE_ACCEPTANCE.md)"; exit 1; }
 	PYTHONDONTWRITEBYTECODE=1 python3 scripts/edge_acceptance.py run --profile "$(PROFILE)" --evidence "$(EVIDENCE)" \
 		$(if $(HARDWARE),--hardware) $(LOCK_ARGS)
+
+# LAN client devices (SF-035): real daemon, Mosquitto and two TLS clients on an
+# internal Docker network without an Internet route; host Docker.
+.PHONY: test-client-devices
+test-client-devices:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+	python3 scripts/test_client_devices.py --image "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" $(CLIENT_DEVICES_EVIDENCE)
 
 # Streams (SF-034): real daemon, component UIDs and a verifying export
 # receiver; root only inside a disposable, network-isolated container.
