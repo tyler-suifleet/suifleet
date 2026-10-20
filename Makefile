@@ -125,8 +125,12 @@ test-protocol-live:
 test-catalog-live:
 	$(RUN) python3 scripts/test_catalog_localnet.py
 
-# SF-028 Greengrass compatibility matrix, reference-model fixtures and current
-# frontend validator check (docs/GREENGRASS_COMPATIBILITY.md). Offline.
+# Independent media decode, protocol-emulator and process-recovery suite.
+.PHONY: test-video
+test-video:
+	bash scripts/test_kvs_video.sh
+
+# SF-028 Greengrass compatibility matrix and reference-model fixtures. Offline.
 .PHONY: test-compat
 test-compat:
 	$(RUN) python3 scripts/greengrass_compat.py
@@ -238,6 +242,11 @@ tracking-plan:
 
 test-tracking:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_tracking.py'
+
+# Offline: disk audit and cleanup safety (docs/DISK_CLEANUP.md); temp dirs only.
+.PHONY: test-disk-cleanup
+test-disk-cleanup:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_disk_cleanup.py'
 
 .PHONY: test-manifest test-manifest-live
 test-manifest:
@@ -404,3 +413,17 @@ endif
 .PHONY: test-aws-credentials
 test-aws-credentials:
 	bash scripts/test_aws_credentials.sh
+
+# SF-058: actual durable daemon IPC + unmodified SDK against local AWS API emulators.
+.PHONY: test-stream-export
+test-stream-export:
+	bash scripts/test_stream_export.sh
+
+# SDK wheels are prepared by test-aws-credentials (or the command in FIREHOSE.md).
+# All service/IPC traffic stays in a disposable offline container.
+.PHONY: test-firehose
+test-firehose:
+	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 \
+	  -e PYTHONPATH=/workspace/.ci-cache/aws-python \
+	  -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:?set pinned dev image}" \
+	  sh -ec 'python3 -m unittest discover -s scripts/tests -p test_firehose_export.py -v; python3 scripts/test_streams.py --firehose'

@@ -72,11 +72,13 @@ def private_file(path):
     return path
 
 
-def tcp_uid(connection):
+def tcp_uid(connection, require_accepted=False):
     """Exact reversed TCP tuple in the same Linux network namespace; fail closed.
 
     /proc/net/tcp reports the kernel socket UID. Never trust supplied caller
-    headers, a PID from a client, or a bearer token by itself.
+    headers, a PID from a client, or a bearer token by itself. Outbound clients
+    must use require_accepted: before accept(), a peer row can report UID 0
+    and inode 0 regardless of the listener owner. Such a row is not identity.
     """
     local = connection.getpeername()
     remote = connection.getsockname()
@@ -85,7 +87,8 @@ def tcp_uid(connection):
     with open('/proc/net/tcp', encoding='ascii') as source:
         matches = [int(fields[7]) for line in source.readlines()[1:]
                    if len(fields := line.split()) > 9 and fields[1] == encoded(local)
-                   and fields[2] == encoded(remote) and fields[3] == '01']
+                   and fields[2] == encoded(remote) and fields[3] == '01'
+                   and (not require_accepted or int(fields[9]) != 0)]
     return matches[0] if len(matches) == 1 else None
 
 

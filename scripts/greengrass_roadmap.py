@@ -89,7 +89,16 @@ def check(root: Path):
         key = scope['implementation_ticket']
         assert key == SCOPES[scope['id']], 'wrong implementation owner'
         assert scope['contract_version'] == 1
-        assert scope['runtime_execution'] == scope['live_execution'] == 'pending', 'roadmap is not runtime evidence'
+        assert scope['live_execution'] == 'pending', 'live acceptance requires separate authorization'
+        execution = scope['runtime_execution']
+        assert execution in ('pending', 'passed'), 'invalid runtime execution'
+        if execution == 'passed':
+            receipt_path = scope.get('runtime_evidence', '')
+            assert receipt_path.startswith('docs/validation/') and '..' not in Path(receipt_path).parts, 'runtime receipt path required'
+            assert (root / receipt_path).is_file(), 'runtime receipt missing'
+            receipt = json.loads((root / receipt_path).read_text())
+            assert receipt['schema_version'] == 1 and receipt['ticket'] == key, 'wrong runtime receipt'
+            assert receipt['runtime_execution'] == 'passed' and receipt['command'] and receipt['result'] and receipt['limits'], 'incomplete runtime evidence'
         assert scope['depends_on'] == backlog[key]['depends_on'], 'dependency drift'
         assert scope['issue'] == published[key]['url'] and published[key]['project_item_id'], 'unpublished scope'
         assert scope['acceptance'] == backlog[key]['validation'], 'acceptance drift'
@@ -118,4 +127,4 @@ def check(root: Path):
 
 
 if __name__ == '__main__':
-    print(f'PASS: {check(Path(__file__).resolve().parents[1])} remaining-roadmap reference checks; runtime/live pending')
+    print(f'PASS: {check(Path(__file__).resolve().parents[1])} remaining-roadmap reference checks; runtime evidence tracked separately; live pending')
