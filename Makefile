@@ -240,6 +240,11 @@ tracking-plan:
 test-tracking:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_tracking.py'
 
+# Offline: disk audit and cleanup safety (docs/DISK_CLEANUP.md); temp dirs only.
+.PHONY: test-disk-cleanup
+test-disk-cleanup:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_disk_cleanup.py'
+
 .PHONY: test-manifest test-manifest-live
 test-manifest:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_deployment_manifest.py'
