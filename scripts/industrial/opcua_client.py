@@ -83,6 +83,7 @@ class Client:
             conn.channel_id = token["channel_id"]
             conn.install_keys(token["token_id"], client_nonce, response["server_nonce"] or b"", True)
             lifetime = max(token["revised_lifetime"], 10000) / 1000
+            conn.sock.settimeout(self.request_timeout)  # bounds sends; receives wait for their requests
             return conn, time.monotonic() + 0.75 * lifetime
         except Exception:
             conn.close()

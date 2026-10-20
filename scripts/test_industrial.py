@@ -673,6 +673,36 @@ class OpcUaTests(Harness):
         wait_until(lambda: self.latest("counter")["value"] == 6, 5, "the new session did not resubscribe")
         self.assertTrue(self.sink.records("status", state="disconnected"))
 
+    def test_invalid_session_while_polling_creates_a_new_session(self):
+        sim = self.simulator()
+        points = [{"name": "counter", "node_id": "ns=2;s=Counter", "type": "int32", "mode": "poll", "poll_interval_ms": 50}]
+        sim.set_value("ns=2;s=Counter", 1)
+        self.start(base_config([self.opc(sim, points=points)]))
+        wait_until(lambda: self.latest("counter") and self.latest("counter")["value"] == 1, 5)
+        with sim.lock:                                # the server forgets the session; the channel stays open
+            sim.sessions.clear()
+        wait_until(lambda: sim.counters["sessions"] >= 2, 8, "an invalid session was retried instead of replaced")
+        sim.set_value("ns=2;s=Counter", 2)
+        wait_until(lambda: self.latest("counter")["value"] == 2, 5, "polling did not resume on the new session")
+        self.assertEqual(self.latest("counter")["quality"], "GOOD")
+        statuses = [r["status"] for r in self.sink.records("sample", point="counter")]
+        self.assertIn("BadSessionIdInvalid", statuses, "the failed Read is reported")
+        self.assertTrue(self.sink.records("status", state="disconnected"))
+
+    def test_idle_channel_outlives_the_connect_timeout(self):
+        sim = self.simulator()
+        points = [{"name": "temperature", "node_id": "ns=2;s=Temperature", "type": "double", "sampling_interval_ms": 50},
+                  {"name": "flag", "node_id": "ns=2;i=1001", "mode": "poll", "poll_interval_ms": 1200, "type": "boolean"}]
+        # A static value: each Publish waits a whole keepalive (100 ms x 10), longer than connect_timeout.
+        self.start(base_config([self.opc(sim, points=points, publishing_interval_ms=100, keepalive_count=10,
+                                         lifetime_count=30, connect_timeout_ms=300)]))
+        wait_until(lambda: self.latest("temperature") and self.latest("flag"), 5)
+        wait_until(lambda: self.source().stats["publish_responses"] >= 3, 8, "no keepalive arrived")
+        wait_until(lambda: len(self.sink.records("sample", point="flag")) >= 3, 5, "polling stopped")
+        self.assertEqual(sim.counters["sessions"], 1, "an idle channel was dropped")
+        self.assertFalse(self.sink.records("status", state="disconnected"), self.logs)
+        self.assertEqual([r["quality"] for r in self.sink.records("sample", point="temperature")], ["GOOD"])
+
     def test_polled_points_filling_the_buffer_make_progress(self):
         sim = self.simulator()
         def polled(count):

@@ -700,6 +700,12 @@ class Resubscribe(Exception):
     pass
 
 
+# Service results meaning the session or channel is gone: only a new session recovers.
+SESSION_LOST = frozenset(ua.STATUS[name] for name in (
+    "BadSessionIdInvalid", "BadSessionClosed", "BadSessionNotActivated",
+    "BadSecureChannelIdInvalid", "BadSecureChannelClosed"))
+
+
 class OpcUaSource(Source):
     def __init__(self, collector, config):
         super().__init__(collector, config)
@@ -834,6 +840,9 @@ class OpcUaSource(Source):
                 results = self.client.read([p["node"] for p in due])
             except ServiceError as error:          # the server answered: report it and poll again next time
                 self.poll_failed(due, ua.status_name(error.status))
+                if error.status in SESSION_LOST:   # retrying on this session can never succeed
+                    self.client.abort(ProtocolError(f"Read: {ua.status_name(error.status)}", error.status))
+                    return
                 continue
             except ProtocolError as error:
                 if error.status == ua.STATUS["BadTimeout"] and self.client.broken is None:

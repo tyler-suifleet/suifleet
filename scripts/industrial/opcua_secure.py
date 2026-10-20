@@ -240,6 +240,8 @@ class Connection:
             try:
                 chunk = self.sock.recv(n - len(out))
             except (socket.timeout, TimeoutError):
+                if deadline is None:           # an established channel waits as long as its requests allow;
+                    continue                   # the socket timeout still bounds sends
                 raise ProtocolError("receive timeout", ua.STATUS["BadTimeout"]) from None
             except OSError as error:
                 raise ProtocolError(f"receive failed: {error}") from None
