@@ -19,7 +19,7 @@
   },
   "commands": [
     {
-      "command": "docker run --network none ... suifleet-dev:sf037: cd suifleet-edge && cargo test --locked && cargo test --locked --features pkcs11 (after merging origin/main 0939649)",
+      "command": "docker run --network none ... suifleet-dev:sf037: cd suifleet-edge && cargo test --locked && cargo test --locked --features pkcs11 (after merging origin/main 570ea5b)",
       "result": "269 passed; 0 failed (default) and 271 passed; 0 failed (pkcs11), including 17 cloudwatch_logs tests and the retained-mode reconcile test"
     },
     {
@@ -40,7 +40,7 @@
     },
     {
       "command": "make test-ota INSIDE_DEV_CONTAINER=1 (network none, uid 1001)",
-      "result": "exit 0 on the head merged with origin/main 0939649: all 16 test-ota script invocations passed (111 PASS lines), after installing the locked dApp dependencies (pnpm install --frozen-lockfile) that SF-037's translator needs"
+      "result": "exit 0 on the head merged with origin/main 570ea5b: all 16 test-ota script invocations passed (111 PASS lines), after installing the locked dApp dependencies (pnpm install --frozen-lockfile) that SF-037's translator needs"
     },
     {
       "command": "make test-compat INSIDE_DEV_CONTAINER=1",
@@ -50,7 +50,7 @@
   "source_sha256": {
     "suifleet-edge/src/cloudwatch_logs.rs": "942eca926795c4b5a6f176db365bd071f46a1b6e5f7313e821a979e6a6b1c285",
     "suifleet-edge/src/cloudwatch_logs_tests.rs": "67164edf3056e0298fed9b6621e0d879162872c77c562c475e600de558f1dac0",
-    "suifleet-edge/src/logs.rs": "f72200a5f0c3378293147dc4d0ddd91b7cbdd30ba5b087d2149e6ae4c41619b3",
+    "suifleet-edge/src/logs.rs": "baa2eb0fff9ea9045a9b34b2291b751916414793d5acc40435531e1102177bca",
     "scripts/cloudwatch_logs_emulator.py": "f13d1978edc03683d3f93fe8cf6ebd421e3f86ebd4bbe228dff8d362a537a286",
     "scripts/test_cloudwatch_logs.py": "778341bba13245f3ea54f7a3a9767f856d8c3246b891c7809f667ab454882379",
     "interfaces/compat/cloudwatch-logs-cases.json": "5bd65c83a89c05ccd457430fb4a56a0b6ae17d26a2aa3d7ddc64d0cc97545693"
@@ -64,7 +64,8 @@
     "Reference-model agreement (make test-compat) is separate from adapter execution; no general Greengrass or LogManager parity claim."
   ],
   "post_ci_repairs": [
-    "CodeQL rust/cleartext-logging (HIGH) in a test assertion message that would print a fixture secret on failure: the message now names only the value's index. cargo test cloudwatch: 16 passed."
+    "CodeQL rust/cleartext-logging (HIGH) in a test assertion message that would print a fixture secret on failure: the message now names only the value's index. cargo test cloudwatch: 16 passed.",
+    "macOS runtime CI job (added on main) failed to compile the Linux-only prctl/openat2 calls: the adapter is now built for Linux only (its catalog platforms) and strict reading fails closed elsewhere; Linux cargo test 269/271 unchanged."
   ],
   "review_repairs": [
     "PR #146 review (Codex gpt-6.1-sol, head 7106552) P1: compaction kept appending to the unlinked old journal after a post-rename failure; the snapshot descriptor is now adopted at rename, a failed directory sync poisons the spool and the adapter exits for a restart.",
