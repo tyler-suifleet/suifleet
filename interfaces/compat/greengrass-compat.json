@@ -93,8 +93,8 @@
   },
   "cloudwatch-metrics-cases.json": {
    "description": "SF-038 cloudwatch-metrics-export adapter pinned to aws.greengrass.Cloudwatch 4.0.0: request validation, grants, batching, retention and retry.",
-   "runtime_execution": "pending", "pending_on": ["SF-059"],
-   "notes": "Runtime execution belongs to the cloudwatch-metrics-export implementation ticket SF-059. Reference-model agreement is not adapter execution."
+   "runtime_execution": "passed", "runtime_evidence": "docs/validation/sf059-metrics.json",
+   "notes": "SF-059 ran all 90 metrics fixture steps against the actual local Linux adapter, SQLite queue and HTTP-observed SigV4 transport. Live AWS delivery remains unrun; see the scoped runtime receipt."
   },
   "cloudwatch-logs-cases.json": {
    "description": "SF-038 cloudwatch-logs-export adapter pinned to aws.greengrass.LogManager 2.3.14: levels, redaction, group/stream names, batching, spool and checkpoint.",

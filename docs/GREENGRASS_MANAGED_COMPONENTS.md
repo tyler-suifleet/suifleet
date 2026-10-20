@@ -207,13 +207,13 @@ Ranges use the native comparator grammar. x-ranges, hyphen ranges, `||` and non-
 make test-compat
 ```
 
-The checker validates the catalog's structure and its cross-references to the backlog, the SF-028 platforms and the suites. It also evaluates the four SF-038 suites against reference models in `scripts/greengrass_managed.py`. As with SF-028, these models only make the fixtures checkable. Agreement with them proves nothing about an adapter. The credential-provider suite has passed against the SF-057 adapter and the dependency suite against the SF-037 translator. Adapters stay `runtime_execution: pending` until their implementation ticket executes the declared runtime checks and commits a receipt. SF-057 and SF-058 now have scoped local runtime receipts; the other adapters remain pending. Reference models still establish no service/account acceptance.
+The checker validates the catalog's structure and its cross-references to the backlog, the SF-028 platforms and the suites. It also evaluates the four SF-038 suites against reference models in `scripts/greengrass_managed.py`. As with SF-028, these models only make the fixtures checkable. Agreement with them proves nothing about an adapter. The credential-provider suite has passed against the SF-057 adapter and the dependency suite against the SF-037 translator. Adapters stay `runtime_execution: pending` until their implementation ticket executes the declared runtime checks and commits a receipt. SF-057, SF-058 and SF-059 now have scoped local runtime receipts; the other adapters remain pending. Reference models still establish no service/account acceptance.
 
 | Suite | Cases | Runtime execution |
 |---|---|---|
 | `managed-dependency-cases.json` | 47 classifications | Passed: SF-037 translator ([receipt](validation/sf037-recipe-translation.json)) |
 | `credential-provider-cases.json` | 65 steps across 7 sequences | Pending SF-057 |
-| `cloudwatch-metrics-cases.json` | 90 steps across 8 sequences | Pending SF-059 |
+| `cloudwatch-metrics-cases.json` | 90 steps across 8 sequences | Passed: local adapter/HTTP/SQLite ([receipt](validation/sf059-metrics.json)); AWS delivery pending |
 | `cloudwatch-logs-cases.json` | 69 steps across 8 sequences | Pending SF-060 |
 
 A `complete` adapter specification must pin an exact AWS version and name at least one executable reference suite; the checker enforces both. `stream-export-aws` uses the SF-028 `stream-cases.json` checkpoint suite.
@@ -226,3 +226,9 @@ SF-038 does not create tickets ([AGENTS.md](../AGENTS.md#ticket-authority--user-
 2. SF-064 splits the remaining Lambda, industrial, ML and platform roadmap into concrete tickets before any of it is implemented.
 3. SF-037 adopted `managed-dependency-cases.json`. When an adapter is implemented, its `defer` classification must be re-specified before recipes depending on it translate.
 4. Live AWS acceptance for every adapter needs a separate user authorization for an AWS account. None exists, and none of those checks has run.
+
+SF-059 runtime evidence: the opt-in Linux [CloudWatch metrics companion](CLOUDWATCH_METRICS.md)
+now executes the 90 pinned metrics fixture steps against its SQLite queue and
+HTTP-observed SigV4 transport, plus permission/restart/bounds cases. This is
+separate from reference-only conformance; actual AWS delivery remains unrun and
+unauthorized in #104, and physical integration remains #32.
