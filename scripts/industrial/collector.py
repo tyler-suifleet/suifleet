@@ -293,11 +293,12 @@ def validate(raw):
             raise ConfigError(f"{where}.name: duplicate source {source['name']!r}")
         names.add(source["name"])
         total += len(source["points"])
-        if protocol == "opcua" and source["max_notifications_per_publish"] > out["max_buffered_records"]:
-            raise ConfigError(f"{where}.max_notifications_per_publish: above output.max_buffered_records")
+        # One poll or Publish, plus the gap record reported before it, must fit the buffer.
+        if protocol == "opcua" and source["max_notifications_per_publish"] >= out["max_buffered_records"]:
+            raise ConfigError(f"{where}.max_notifications_per_publish: not below output.max_buffered_records")
         polled = source["points"] if protocol == "modbus" else [p for p in source["points"] if p["mode"] == "poll"]
-        if len(polled) > out["max_buffered_records"]:
-            raise ConfigError(f"{where}.points: one poll would not fit output.max_buffered_records")
+        if len(polled) >= out["max_buffered_records"]:
+            raise ConfigError(f"{where}.points: one poll and its gap record would not fit output.max_buffered_records")
         sources.append(source)
     if total > MAX_POINTS:
         raise ConfigError(f"sources: {total} points exceed the limit of {MAX_POINTS}")
@@ -560,6 +561,10 @@ class Source(threading.Thread):
         for point in points:
             self.record(point, point.get("type"), None, "BAD", status, now)
 
+    def room(self, n):
+        """Buffer space for n records, plus the gap record that a pending skip or drop will emit first."""
+        return n + (1 if self.skipped or self.stats["dropped"] else 0)
+
     def report_gap(self, reason):
         if not self.skipped and not self.stats["dropped"]:
             return
@@ -655,7 +660,7 @@ class ModbusSource(Source):
                 self.gap_from = self.gap_from or time.time_ns()
                 next_poll += late * interval
             next_poll += interval
-            if not self.c.buffer.wait_for_space(len(self.s["points"]), max(0.0, next_poll - time.monotonic())):
+            if not self.c.buffer.wait_for_space(self.room(len(self.s["points"])), max(0.0, next_poll - time.monotonic())):
                 self.skipped += 1                  # backpressure: skip this poll rather than queue unbounded data
                 self.gap_from = self.gap_from or time.time_ns()
                 self.stats["backpressure_skips"] += 1
@@ -762,7 +767,7 @@ class OpcUaSource(Source):
         publish_timeout = interval * created["revised_max_keep_alive_count"] * 2 + s["request_timeout_ms"] / 1000
         acks, paused = [], False
         while not self.c.stopping.is_set():
-            if not self.c.buffer.wait_for_space(s["max_notifications_per_publish"], interval):
+            if not self.c.buffer.wait_for_space(self.room(s["max_notifications_per_publish"]), interval):
                 self.skipped += 1                  # one publishing cycle without a Publish request
                 if not paused:
                     paused, self.gap_from = True, time.time_ns()
@@ -821,7 +826,7 @@ class OpcUaSource(Source):
                 if schedule[p["name"]] < now:
                     self.skipped += 1
                     schedule[p["name"]] = now + p["poll_interval_ms"] / 1000
-            if not self.c.buffer.wait_for_space(len(due), 0.0):
+            if not self.c.buffer.wait_for_space(self.room(len(due)), 0.0):
                 self.skipped += 1
                 self.gap_from = self.gap_from or time.time_ns()
                 continue

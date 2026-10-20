@@ -680,13 +680,18 @@ class OpcUaTests(Harness):
                     for i in range(count)]
         for i in range(101):
             sim.add_variable(f"ns=2;s=V{i}", ua.INT32, i)
-        with self.assertRaisesRegex(col.ConfigError, r"sources\[0\]\.points: one poll would not fit"):
-            col.validate(base_config([self.opc(sim, points=polled(101))], max_buffered_records=100))
-        self.start(base_config([self.opc(sim, points=polled(100))], max_buffered_records=100))
-        wait_until(lambda: len({r["point"] for r in self.sink.records("sample")}) == 100, 5,
+        with self.assertRaisesRegex(col.ConfigError, r"sources\[0\]\.points: one poll and its gap record would not fit"):
+            col.validate(base_config([self.opc(sim, points=polled(101))], max_buffered_records=101))
+        sink = MemorySink()
+        sink.blocked = True                           # the status record holds space, so polls are skipped
+        self.start(base_config([self.opc(sim, points=polled(100))], max_buffered_records=101), sink)
+        wait_until(lambda: self.source().skipped >= 2, 5, "polls were not skipped")
+        sink.blocked = False
+        wait_until(lambda: len({r["point"] for r in sink.records("sample")}) == 100, 5,
                    "a full-buffer poll group never read")
-        wait_until(lambda: len(self.sink.records("sample", point="p99")) >= 3, 5, "polling did not continue")
-        self.assertEqual(self.collector.buffer.dropped, 0)
+        wait_until(lambda: len(sink.records("sample", point="p99")) >= 3, 5, "polling did not continue")
+        self.assertTrue(sink.records("gap", source="opc"), "the skipped polls are reported")
+        self.assertEqual(self.collector.buffer.dropped, 0, "the gap record and a whole poll fit together")
 
     def test_plaintext_password_refused_unless_allowed(self):
         sim = self.simulator(users={"op": "pw"}, allow_anonymous=False)

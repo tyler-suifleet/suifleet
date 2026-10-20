@@ -460,18 +460,18 @@
    "error": "max_notifications_per_publish: expected an integer 1..10000"
   },
   {
-   "name": "opcua notifications above buffer",
+   "name": "opcua notifications not below buffer",
    "valid": false,
    "set": {
-    "output.max_buffered_records": 50
+    "output.max_buffered_records": 100
    },
-   "error": "max_notifications_per_publish: above output.max_buffered_records"
+   "error": "max_notifications_per_publish: not below output.max_buffered_records"
   },
   {
-   "name": "opcua polled points above buffer",
+   "name": "opcua polled points not below buffer",
    "valid": false,
    "set": {
-    "output.max_buffered_records": 1,
+    "output.max_buffered_records": 2,
     "sources.0.points": [
      {
       "name": "t",
@@ -483,13 +483,13 @@
     "sources.1.max_notifications_per_publish": 1,
     "sources.1.points.0.mode": "poll"
    },
-   "error": "sources[1].points: one poll would not fit output.max_buffered_records"
+   "error": "sources[1].points: one poll and its gap record would not fit output.max_buffered_records"
   },
   {
-   "name": "opcua polled points at buffer",
+   "name": "opcua polled points one below buffer",
    "valid": true,
    "set": {
-    "output.max_buffered_records": 2,
+    "output.max_buffered_records": 3,
     "sources.0.points": [
      {
       "name": "t",
