@@ -480,7 +480,7 @@ pub struct Authority {
     counters: Mutex<Counters>,
     /// MQTT client IDs of the broker's local clients (the SF-032 bridge): a
     /// thing with that name could take over their broker sessions.
-    reserved_client_ids: Vec<String>,
+    reserved_client_id: Mutex<Option<String>>,
 }
 
 impl Authority {
@@ -536,13 +536,14 @@ impl Authority {
                                 "signer": gateway.address});
         Ok(Self {
             dir: dir.to_owned(), settings, policy, ca_sha256, ca_key, ca_der, ca_pem, gateway, ca_binding,
-            registry: Mutex::new(Registry::new(registry)), counters: Mutex::new(Counters::default()), reserved_client_ids: Vec::new(),
+            registry: Mutex::new(Registry::new(registry)), counters: Mutex::new(Counters::default()), reserved_client_id: Mutex::new(None),
         })
     }
 
     /// Never enroll or admit a thing named `client_id` (another broker client).
-    pub fn reserve_client_id(&mut self, client_id: &str) {
-        self.reserved_client_ids.push(client_id.to_owned());
+    /// The effective SF-032 bridge is updated atomically with service activation.
+    pub fn set_bridge_client_id(&self, client_id: Option<&str>) {
+        *self.reserved_client_id.lock().unwrap() = client_id.map(str::to_owned);
     }
 
     pub fn ca_der(&self) -> &rustls::pki_types::CertificateDer<'static> {
@@ -596,7 +597,7 @@ impl Authority {
     /// Operator enrollment of a new thing from its CSR.
     pub fn enroll(&self, thing: &str, csr_pem: &str, validity_seconds: Option<u64>, now_ms: u64) -> anyhow::Result<Issued> {
         anyhow::ensure!(valid_thing(thing), "invalid thing name");
-        anyhow::ensure!(!self.reserved_client_ids.iter().any(|id| id == thing), "thing name is a reserved broker client ID");
+        anyhow::ensure!(self.reserved_client_id.lock().unwrap().as_deref() != Some(thing), "thing name is a reserved broker client ID");
         let validity = validity_seconds.unwrap_or(self.settings.certificate_validity_seconds);
         anyhow::ensure!((MIN_VALIDITY_SECONDS..=self.settings.certificate_validity_seconds).contains(&validity),
             "validity_seconds must be {MIN_VALIDITY_SECONDS}..=client_devices.certificate_validity_seconds");
@@ -721,7 +722,7 @@ impl Authority {
     /// authenticated identity whose groups grant `operation` on `resource`.
     pub fn permits(&self, sha256: &str, operation: &str, resource: &str, now_ms: u64) -> bool {
         self.authenticate(sha256, now_ms).is_ok_and(|thing| self.policy.permits(&thing, operation, resource)
-            && !(operation == "mqtt:connect" && self.reserved_client_ids.contains(&thing)))
+            && !(operation == "mqtt:connect" && self.reserved_client_id.lock().unwrap().as_ref() == Some(&thing)))
     }
 
     /// The registry-level check (as `client-device-cases.json` states it): an
@@ -973,6 +974,38 @@ pub mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
+    #[tokio::test]
+    async fn fleet_bridge_activation_and_rollback_refresh_reserved_client_id() {
+        let dir = temp();
+        let now = crate::telemetry::now_ms();
+        let authority = Arc::new(authority(&dir, GROUPS, now));
+        let (_, request) = csr();
+        let issued = authority.enroll("sensor-1", &request, Some(3600), now).unwrap();
+        let allowed = || authority.permits(&issued.record.sha256, "mqtt:connect", "mqtt:clientId:sensor-1", now);
+        assert!(allowed());
+        let mut base: crate::config::Config = toml::from_str("[sui]\nmanifest_path='deployment.json'\n[device]\nkeypair_path='k'\ndevice_object_id='0x1'\ndevice_cap_id='0x2'\n[apply]\ncommand='true'\n").unwrap();
+        base.runtime.state_dir = dir.join("runtime");
+        std::fs::create_dir_all(&base.runtime.state_dir).unwrap();
+        let signer = Arc::new(Ed25519File(ed25519_dalek::SigningKey::from_bytes(&[7; 32])));
+        let old = BTreeMap::new();
+        let mut runtime = crate::services::Runtime::open(&base, &old, signer, crate::streams::Binding {
+            chain_identifier: "local".into(), registry: "0x1".into(), device_id: "0x2".into() }).unwrap();
+        runtime.client_devices = Some(authority.clone());
+        let section: crate::services::Services = serde_json::from_value(serde_json::json!({"version":1,"pubsub":{"bridge":{
+            "broker":"127.0.0.1:9","client_id":"sensor-1","mappings":[{"source":"Pubsub","target":"LocalMqtt","topic":"sensors/#"}]}}})).unwrap();
+        let next = crate::services::candidate(&old, "app", "d1", Some(&section), &std::collections::BTreeSet::from(["app".into()])).unwrap();
+        runtime.activate(&next).unwrap();
+        assert!(allowed(), "staging must not change live gateway authorization");
+        runtime.resume().unwrap();
+        assert!(!allowed(), "committed bridge ID must be denied to existing LAN identities");
+        assert!(authority.enroll("sensor-1", &request, None, now).is_err());
+        runtime.activate(&old).unwrap();
+        runtime.resume().unwrap();
+        assert!(allowed(), "rollback/removal must restore gateway authorization");
+        drop(runtime);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn enrollment_rotation_revocation_and_expiry() {
         let dir = temp();
@@ -1054,8 +1087,8 @@ pub mod tests {
         assert!(!reopened.resume_session("sensor-1").unwrap(), "unconfirmed cleanup after restart");
         reopened.session_cleaned("sensor-1").unwrap();
         assert!(reopened.resume_session("sensor-1").unwrap());
-        let mut reserving = reopened;
-        reserving.reserve_client_id("sensor-bridge");
+        let reserving = reopened;
+        reserving.set_bridge_client_id(Some("sensor-bridge"));
         assert!(reserving.enroll("sensor-bridge", &request, None, now).is_err(), "a reserved broker client ID");
         let reopened = reserving;
 

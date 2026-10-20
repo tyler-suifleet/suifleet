@@ -36,6 +36,7 @@ export interface ComponentHealth {
 
 /** The daemon's signed snapshot, schema 1. */
 export interface Snapshot {
+  service_configuration_sha256?: string;
   schema: number;
   chain_identifier: string;
   registry: string;

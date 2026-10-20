@@ -30,6 +30,7 @@ mod state;
 mod sui_client;
 mod supervisor;
 mod streams;
+mod services;
 mod shadows;
 mod telemetry;
 mod walrus_client;
@@ -129,7 +130,7 @@ async fn main() -> anyhow::Result<()> {
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("/etc/suifleet/config.toml"))
     };
-    let cfg = Config::load(&path)?;
+    let mut cfg = Config::load(&path)?;
     if cfg.logs.is_some() && !check_config {
         // From here on the daemon's own log is also written for shipping.
         logs::enable_daemon_log(&cfg.runtime.state_dir)?;
@@ -203,57 +204,6 @@ async fn main() -> anyhow::Result<()> {
             "Removed leftover artifacts from a previous run"
         );
     }
-    let mut ipc_server = cfg.ipc.as_ref().map(ipc::bind).transpose()?;
-    let mut ipc_messages = ipc::Messages::default();
-    // Durable streams (SF-034): operator definitions are applied at start,
-    // and every stored stream must fit the configured quota.
-    let streams = match &cfg.streams {
-        Some(settings) => Some(std::sync::Arc::new(std::sync::Mutex::new(streams::Store::start(
-            &cfg.runtime.state_dir.join("streams"), settings.quota(), &settings.definitions, telemetry::now_ms())?))),
-        None => None,
-    };
-    // Durable pub/sub and its MQTT bridge (SF-032).
-    let durable = match &cfg.pubsub {
-        Some(settings) => Some(std::sync::Arc::new(std::sync::Mutex::new(
-            pubsub::Broker::open(&cfg.runtime.state_dir.join("pubsub"), settings.limits())?))),
-        None => None,
-    };
-    // Device shadows (SF-033); changes are announced on durable pub/sub.
-    let shadow_store = match &cfg.shadows {
-        Some(settings) => Some(std::sync::Arc::new(std::sync::Mutex::new(shadows::Store::open(
-            &cfg.runtime.state_dir.join("shadows"), settings.max_shadows, &settings.thing_name, durable.clone())?))),
-        None => None,
-    };
-    let bridge_task = match (&cfg.pubsub, &durable) {
-        (Some(settings), Some(broker)) => match &settings.bridge {
-            Some(bridge) => Some(tokio::spawn(bridge::Bridge::new(bridge.clone(), broker.clone(),
-                cfg.runtime.state_dir.join("pubsub/bridge.json"))?.run())),
-            None => None,
-        },
-        _ => None,
-    };
-    // LAN client devices (SF-035): the CA and registry, then the gateway's
-    // listeners (bound here, so a bad address stops startup).
-    let client_devices = match &cfg.client_devices {
-        Some(settings) => {
-            let mut authority = clientdevices::Authority::open(
-                &cfg.runtime.state_dir.join("clientdevices"), settings.clone(),
-                clientdevices::Gateway { chain: sui.manifest().chain_identifier.clone(),
-                    registry: sui.manifest().shared_objects.registry.id.clone(), device_object_id: cfg.device.device_object_id.clone(), address: sui.address() },
-                signer.clone(), telemetry::now_ms())?;
-            if let Some(bridge) = cfg.pubsub.as_ref().and_then(|p| p.bridge.as_ref()) {
-                authority.reserve_client_id(&bridge.client_id);
-            }
-            Some(std::sync::Arc::new(authority))
-        }
-        None => None,
-    };
-    let gateway_task = match &client_devices {
-        Some(authority) => Some(client_gateway::start(authority.clone()).await?),
-        None => None,
-    };
-    let runner = ApplyRunner::new(cfg.apply.clone());
-    let store = components::Store::open(&cfg.runtime.state_dir, &cfg.components);
     // Before any component runs: their log lines are covered from here on.
     logs::initialize(&cfg.runtime.state_dir)?;
     // Committed components start again on every daemon start (bootstrap/reboot).
@@ -270,6 +220,52 @@ async fn main() -> anyhow::Result<()> {
     )?;
     supervisor.configure_recovery(cfg.components.recovery_commands.clone());
     let configs = configuration::Store::open(&cfg.runtime.state_dir, &cfg.components.configuration_overlay_dir)?;
+    // Resolve completed application recovery before service tasks or stream
+    // loading can observe the superseded generation after a crash.
+    let recovered = supervisor.recoveries_for_start();
+    for name in recovered.keys() { configs.restore(name, supervisor.configuration(name)?.as_ref())?; }
+    services::startup_recovery(&cfg, &mut journal, &recovered)?;
+    let mut ipc_server = cfg.ipc.as_ref().map(ipc::bind).transpose()?;
+    let mut ipc_messages = ipc::Messages::default();
+    let service_runtime = std::sync::Arc::new(std::sync::Mutex::new(services::Runtime::open(
+        &cfg, &journal.state.services, signer.clone(), streams::Binding {
+            chain_identifier: sui.manifest().chain_identifier.clone(),
+            registry: sui.manifest().shared_objects.registry.id.clone(),
+            device_id: cfg.device.device_object_id.clone(),
+        })?));
+    cfg.services = Some(service_runtime.clone());
+    let streams = service_runtime.lock().unwrap().streams.clone();
+    let durable = service_runtime.lock().unwrap().broker.clone();
+    // Device shadows (SF-033); changes are announced on durable pub/sub.
+    let shadow_store = match &cfg.shadows {
+        Some(settings) => Some(std::sync::Arc::new(std::sync::Mutex::new(shadows::Store::open(
+            &cfg.runtime.state_dir.join("shadows"), settings.max_shadows, &settings.thing_name, durable.clone())?))),
+        None => None,
+    };
+    service_runtime.lock().unwrap().shadow_store = shadow_store.clone();
+    // LAN client devices (SF-035): the CA and registry, then the gateway's
+    // listeners (bound here, so a bad address stops startup).
+    let client_devices = match &cfg.client_devices {
+        Some(settings) => {
+            let authority = clientdevices::Authority::open(
+                &cfg.runtime.state_dir.join("clientdevices"), settings.clone(),
+                clientdevices::Gateway { chain: sui.manifest().chain_identifier.clone(),
+                    registry: sui.manifest().shared_objects.registry.id.clone(), device_object_id: cfg.device.device_object_id.clone(), address: sui.address() },
+                signer.clone(), telemetry::now_ms())?;
+            if let Some(bridge) = service_runtime.lock().unwrap().effective.pubsub.as_ref().and_then(|p| p.bridge.as_ref()) {
+                authority.set_bridge_client_id(Some(&bridge.client_id));
+            }
+            Some(std::sync::Arc::new(authority))
+        }
+        None => None,
+    };
+    let gateway_task = match &client_devices {
+        Some(authority) => Some(client_gateway::start(authority.clone()).await?),
+        None => None,
+    };
+    service_runtime.lock().unwrap().client_devices = client_devices.clone();
+    let runner = ApplyRunner::new(cfg.apply.clone());
+    let store = components::Store::open(&cfg.runtime.state_dir, &cfg.components);
     // The daemon is ready before its components are: bootstrap waits up to a
     // readiness timeout per component, which would otherwise exceed the
     // unit's start deadline and restart the daemon into the same bootstrap.
@@ -331,22 +327,6 @@ async fn main() -> anyhow::Result<()> {
         )),
         _ => None,
     };
-    let exporters: Vec<_> = match (&cfg.streams, &streams) {
-        (Some(settings), Some(store)) => settings.definitions.iter().filter_map(|def| def.export.clone().map(|export| {
-            tokio::spawn(streams::Exporter {
-                store: store.clone(),
-                stream: def.name.clone(),
-                config: export,
-                binding: streams::Binding {
-                    chain_identifier: sui.manifest().chain_identifier.clone(),
-                    registry: sui.manifest().shared_objects.registry.id.clone(),
-                    device_id: cfg.device.device_object_id.clone(),
-                },
-                signer: signer.clone(),
-            }.run())
-        })).collect(),
-        _ => Vec::new(),
-    };
     let shadow_sync = match (&cfg.shadows, &shadow_store) {
         (Some(settings), Some(store)) => settings.sync.clone().map(|config| tokio::spawn(shadows::Syncer {
             store: store.clone(),
@@ -368,6 +348,7 @@ async fn main() -> anyhow::Result<()> {
         settle_handoff(&mut journal, &handoff_dir, &update, Ok(()))?;
     }
     let mut restart_for_handoff = false;
+    let mut restart_for_services = false;
     let shutdown = shutdown_signal();
     tokio::pin!(shutdown);
     // A stop during bootstrap still stops whatever it already started.
@@ -387,6 +368,11 @@ async fn main() -> anyhow::Result<()> {
                     Err(error) if error.downcast_ref::<handoff::Requested>().is_some() => {
                         info!("Daemon update staged; stopping components and restarting into it");
                         restart_for_handoff = true;
+                        break;
+                    }
+                    Err(error) if error.downcast_ref::<services::RecoveryRequired>().is_some() => {
+                        warn!(%error, "Restarting to recover the service generation");
+                        restart_for_services = true;
                         break;
                     }
                     result => {
@@ -416,6 +402,12 @@ async fn main() -> anyhow::Result<()> {
                                 client_devices.as_deref(), pending.uid, &pending.request) => result,
                             _ = &mut shutdown => { stopped = true; break; }
                         };
+                        if result.as_ref().err().is_some_and(|e| e.downcast_ref::<services::RecoveryRequired>().is_some()) {
+                            let _ = pending.reply.send(ipc::response(result));
+                            restart_for_services = true;
+                            stopped = true;
+                            break;
+                        }
                         if let Err(error) = &result { warn!(operation = pending.request.operation, %error, "Local IPC request failed"); }
                         let _ = pending.reply.send(ipc::response(result));
                     }
@@ -431,19 +423,12 @@ async fn main() -> anyhow::Result<()> {
     if let Some(reporter) = reporter {
         reporter.abort();
     }
-    // Exports resume from their checkpoints; counters are persisted exactly.
-    for exporter in exporters {
-        exporter.abort();
-    }
     // Every shadow change is already on disk; sync resumes from its base.
     if let Some(task) = shadow_sync {
         task.abort();
     }
     if let Some(store) = &streams {
         store.lock().unwrap().close();
-    }
-    if let Some(task) = bridge_task {
-        task.abort();
     }
     if let Some(task) = gateway_task {
         task.abort();
@@ -452,6 +437,7 @@ async fn main() -> anyhow::Result<()> {
     supervisor.stop_all().await;
     // process::exit below does not run destructors: close IPC before handoff.
     drop(ipc_server);
+    if restart_for_services { anyhow::bail!("restart required to recover service configuration"); }
     if restart_for_handoff {
         std::process::exit(handoff::RESTART_EXIT);
     }
@@ -469,6 +455,17 @@ async fn local_request(
     uid: u32, request: &ipc::Request,
 ) -> anyhow::Result<serde_json::Value> {
     use serde_json::json;
+    let runtime = cfg.services.as_ref().ok_or_else(|| anyhow::anyhow!("service runtime missing"))?;
+    let (mut effective, live_streams, live_broker, summary) = {
+        let runtime = runtime.lock().unwrap();
+        (runtime.effective.clone(), runtime.streams.clone(), runtime.broker.clone(), runtime.summary())
+    };
+    effective.services = cfg.services.clone();
+    let cfg = &effective;
+    let streams = live_streams.as_deref().or(streams);
+    let durable = live_broker.as_deref().or(durable);
+    let streams = cfg.streams.as_ref().and(streams);
+    let durable = cfg.pubsub.as_ref().and(durable);
     let policy = cfg.ipc.as_ref().ok_or_else(|| anyhow::anyhow!("IPC disabled"))?;
     let principal = policy.authorize(uid, request)?;
     let name = &request.component;
@@ -481,7 +478,7 @@ async fn local_request(
             Ok(json!({"runtime":supervisor.status().get(name)}))
         }
         "logs" => Ok(json!({"tail":supervisor.local_logs(name)?})),
-        "config" => Ok(json!({"configuration":configs.committed(name)?})),
+        "config" => Ok(json!({"configuration":configs.committed(name)?,"services":summary})),
         "messaging" => {
             let subscriptions = messages.handle(policy, request, &principal, durable)?;
             let bridge = std::fs::read(cfg.runtime.state_dir.join("pubsub/bridge.json")).ok()
@@ -604,6 +601,11 @@ async fn poll(
             journal.state.current.insert(name.clone(), deployment.clone());
             journal.state.components.insert(name.clone(), previous);
         }
+    }
+    let old_services = journal.state.services.clone();
+    if services::reconcile(&mut journal.state, supervisor.recovered()) {
+        let next = std::mem::replace(&mut journal.state.services, old_services);
+        services::commit(cfg, journal, next, None).await.map_err(|error| services::RecoveryRequired(format!("service reconciliation failed: {error:#}")))?;
     }
     journal.save()?;
     sui.validate_deployment().await?;
@@ -783,6 +785,7 @@ async fn execute(
         let _ = std::fs::remove_dir_all(&directory);
         return Ok(None);
     }
+    if result.as_ref().err().is_some_and(|e| e.downcast_ref::<services::RecoveryRequired>().is_some()) { return result.map(|_| None); }
     let outcome = journal.state.deployments.entry(event.deployment_id.clone()).or_default();
     record_result(outcome, result);
     info!(deployment = event.deployment_id, status = outcome.status, error = ?outcome.error, "Deployment finished");
@@ -816,7 +819,7 @@ async fn stage_daemon_update(
         let dependencies = recipe.validate(event, false)?;
         let lifecycle = &recipe.lifecycle;
         anyhow::ensure!(
-            dependencies.is_empty() && lifecycle.install.is_none() && lifecycle.run.is_none() && lifecycle.shutdown.is_none(),
+            recipe.services.is_none() && dependencies.is_empty() && lifecycle.install.is_none() && lifecycle.run.is_none() && lifecycle.shutdown.is_none(),
             "a daemon update recipe carries only the daemon binary (no lifecycle commands or dependencies)"
         );
         let artifact = directory.join("artifact");
@@ -1075,6 +1078,8 @@ async fn handle_deployment(
         components::recipe(walrus, store, &event.recipe_blob_id, &resolved.recipe_sha256).await?;
     let recipe: recipe::Recipe = serde_json::from_slice(&bytes)?;
     let dependencies = recipe.validate(event, config.allow_recipe_commands)?;
+    anyhow::ensure!(recipe.services.is_none() || config.mode == config::ApplyMode::Direct || recipe.lifecycle.install.is_some() || recipe.lifecycle.run.is_some(),
+        "asynchronous firmware-only updates cannot change component services; use a component deployment");
     let root = deps::Root {
         name: event.component_name.clone(),
         version: event.version.clone(),
@@ -1092,6 +1097,11 @@ async fn handle_deployment(
     if !plan.omitted.is_empty() {
         info!(deployment = event.deployment_id, omitted = ?plan.omitted, "Unavailable soft dependencies omitted");
     }
+    let plan_components = plan.order.iter().map(|p| p.name.clone()).collect();
+    let service_next = services::candidate(&journal.state.services, &event.component_name, &event.deployment_id,
+        recipe.services.as_ref(), &plan_components)?;
+    let runtime = cfg.services.as_ref().ok_or_else(|| anyhow::anyhow!("service runtime missing"))?;
+    runtime.lock().unwrap().prepare(&service_next)?;
     let mut installs = Vec::new();
     for (index, planned) in plan.order.iter().filter(|p| p.install()).enumerate() {
         let root = planned.source == deps::Source::Root;
@@ -1266,6 +1276,7 @@ async fn handle_deployment(
         configs.commit(&install.name, &event.deployment_id)?;
         info!(deployment = event.deployment_id, component = install.name, version = install.component.version, "Component installed");
     }
+    services::commit(cfg, journal, service_next, Some(&event.deployment_id)).await?;
     if let Some(store) = store {
         let keep = journal
             .state

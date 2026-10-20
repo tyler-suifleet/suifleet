@@ -380,6 +380,7 @@ impl<'a> Loader<'a> {
         };
         let bytes = recipe(self.walrus, self.store, &value.recipe_blob_ids[i], &value.recipe_sha256s[i]).await?;
         let parsed: Recipe = serde_json::from_slice(&bytes)?;
+        anyhow::ensure!(parsed.services.is_none(), "dependency recipes cannot own deployment services; declare them in the authenticated root recipe");
         let dependencies =
             parsed.validate_component(name, version, &value.artifact_sha256s[i], self.allow_commands)?;
         self.loaded.insert(
