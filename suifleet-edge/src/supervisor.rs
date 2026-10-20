@@ -298,6 +298,14 @@ impl Supervisor {
         self.recovery_commands = commands;
     }
 
+    /// Completed recovery receipts whose committed active specs agree. At
+    /// startup no process is running yet; use these only to settle durable
+    /// configuration before bootstrap, never as evidence of current health.
+    pub fn recoveries_for_start(&self) -> BTreeMap<String,String> {
+        self.recovered.iter().filter(|(name,deployment)| self.active.get(*name).is_some_and(|s| &s.deployment == *deployment))
+            .map(|(name,deployment)| (name.clone(),deployment.clone())).collect()
+    }
+
     /// Only confirmed, running previous versions can restore the component journal.
     pub fn restored(&self, name: &str, deployment: &str) -> bool {
         self.active.get(name).is_some_and(|s| s.deployment == deployment)
@@ -1043,8 +1051,15 @@ fn open_log(path: &Path) -> std::io::Result<std::fs::File> {
         let _ = std::fs::rename(path, path.with_extension("log.1"));
     }
     let file = std::fs::OpenOptions::new().create(true).append(true).mode(0o600).open(path)?;
-    // Also tightens a log created before it held configured output.
-    file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    // Also tightens a log created before it held configured output. With
+    // `[runtime] log_group_read`, the daemon's group may read it (SF-060).
+    file.set_permissions(std::fs::Permissions::from_mode(crate::logs::private_mode()))?;
+    if let Some(component) = path.parent() {
+        crate::logs::share_dir(component)?;
+        if let Some(root) = component.parent() {
+            crate::logs::share_dir(root)?;
+        }
+    }
     Ok(file)
 }
 

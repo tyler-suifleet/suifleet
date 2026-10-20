@@ -34,7 +34,7 @@ Statuses: `implemented`/`partial` (merged, with cited local evidence), `proposed
 | Linux aarch64 | `linux`/`aarch64` | `linux`/`aarch64` | Partial: Yocto QEMU; physical Pi pending in SF-031 |
 | Linux 32-bit ARM | `linux`/`arm` | `linux`/`arm` | Proposed: selection vectors only. `architecture.detail` is rejected |
 | Linux x86 (32-bit) | `linux`/`x86` | `linux`/`x86` | Partial: i686 daemon, release bundle and catalog selection with 32-bit software-runner evidence ([LINUX_X86.md](LINUX_X86.md)). Outside the SF-038 initial Linux phase; translation still omits these manifests |
-| Windows | `windows` | none | Roadmap gap (SF-064, SF-074), outside the SF-038 initial Linux phase. Translation omits these manifests |
+| Windows | `windows` | no catalog mapping | Partial local operator runtime: SCM, Job containment, SID/ACL enforcement and interrupted recovery ([WINDOWS_RUNTIME.md](WINDOWS_RUNTIME.md), SF-074). Catalog/chain/rich IPC are unsupported; translation still omits these manifests |
 | macOS | `darwin` | `macos`/`aarch64` | Partial: native LaunchDaemon runtime on a hosted macOS 15 arm64 runner ([MACOS_RUNTIME.md](MACOS_RUNTIME.md), SF-075); not a Greengrass platform. Translation still omits `darwin` manifests |
 
 ## Current APIs versus proposed contracts
@@ -43,10 +43,10 @@ The following is merged today and is the only thing the daemon and frontend exec
 
 - **Native recipes** (`interfaces/recipe.schema.json`) are versions 1.0–1.2, with one authenticated artifact, native dependency ranges (1.1) and SF-015 configuration (1.2: `defaults`, `merge`, `reset`, `confidential`, `validate`). The lifecycle is `install`, plus the SF-014 supervised `run`/`shutdown`/`readiness`/`restart` ([OPERATIONS.md](OPERATIONS.md#supervised-components-sf-014)). Commands use the shell-quoted substitutions `{artifact}`, `{artifacts}`, `{configuration}` and `{work}` (`{work}` only in supervised commands), and `{pid}` in readiness/shutdown. A recipe with neither `install` nor `run` hands its artifact to the platform updater.
 - **The catalog** has platform manifests `linux|*` × `x86_64|aarch64|arm|x86|*`, selected by first match (`x86` is 32-bit i686, SF-076).
-- **Native IPC v1** provides UID-authenticated component APIs, operator management and bounded volatile messaging ([COMPONENT_IPC.md](COMPONENT_IPC.md)). Shared-daemon-user components cannot receive individual ACLs; separate platform Unix identities are required. Durable pub/sub with a bridge to a local broker (SF-032, [MESSAGING.md](MESSAGING.md)), streams (SF-034, [STREAMS.md](STREAMS.md)) and shadows (SF-033, [SHADOWS.md](SHADOWS.md)) are native IPC operations.
+- **Native IPC v1** provides UID-authenticated component APIs, operator management and bounded volatile messaging ([COMPONENT_IPC.md](COMPONENT_IPC.md)). Shared-daemon-user components cannot receive individual ACLs; separate platform Unix identities are required. Durable pub/sub with a bridge to a local broker (SF-032, [MESSAGING.md](MESSAGING.md)), streams (SF-034, [STREAMS.md](STREAMS.md)) and shadows (SF-033, [SHADOWS.md](SHADOWS.md)) are native IPC operations, and LAN client devices (SF-035, [CLIENT_DEVICES.md](CLIENT_DEVICES.md)) reach the local broker through a mutual-TLS gateway.
 - **AWS recipe translation** (SF-037, below) turns the supported Greengrass V2 recipe subset into native catalog manifests, offline, in the dApp and a CLI. The daemon itself never reads AWS recipes.
 
-There is no AWS IPC wire compatibility, embedded MQTT broker or client-device support. Everything else here is proposed. The fixtures pin its semantics. The owning tickets implement them and may revise them through review. Implementers must not treat this document as a published runtime API, and must not change merged APIs to fit it by assumption.
+There is no AWS IPC wire compatibility or embedded MQTT broker; LAN client devices use the native SF-035 gateway rather than the AWS discovery API. Everything else here is proposed. The fixtures pin its semantics. The owning tickets implement them and may revise them through review. Implementers must not treat this document as a published runtime API, and must not change merged APIs to fit it by assumption.
 
 ## AWS recipe translation (SF-037)
 
@@ -199,6 +199,8 @@ Implemented for local streams and HTTP(S) export: see [STREAMS.md](STREAMS.md). 
 
 ### Client devices (SF-035)
 
+Implemented for LAN things with a local CA, mutual TLS and an authorizing proxy in front of the local broker: see [CLIENT_DEVICES.md](CLIENT_DEVICES.md). The rest of this section is the specification it follows.
+
 - **Groups and policies.** These use the `aws.greengrass.clientdevices.Auth` 2.5.x shape. A selection rule has the form `thingName: pattern [OR …]`, where `*` may appear only at the start and/or end and `\:` escapes a colon. Policy statements combine `mqtt:connect` with `mqtt:clientId:`, `mqtt:publish` with `mqtt:topic:`, and `mqtt:subscribe` with `mqtt:topicfilter:`. `*` acts as a glob, and MQTT wildcards in topic filters are matched literally. The union of all matching groups applies, and anything not granted is denied.
 - **Identity.** A client identity is SuiFleet-enrolled. It is denied when unknown, revoked, or at or after its expiry time.
 - **Proposed hardening relative to AWS.** A client may connect only with a client ID equal to its own identity. Certificate issuance, rotation and offline cache expiry belong to SF-035.
@@ -222,11 +224,11 @@ The runtime receipt is [`docs/validation/sf037-recipe-translation.json`](validat
 | `pubsub-cases.json` | 53 filter/topic/match/ACL checks | Daemon pub/sub module (passing) | Passed: SF-032 daemon, IPC UIDs and Mosquitto ([receipt](validation/sf032-messaging.json)) |
 | `shadow-cases.json` | 55 steps across 10 sequences | Daemon shadow store, each step also after a reopen (passing) | Passed: SF-033 daemon, IPC UIDs, restarts and a verifying sync service ([receipt](validation/sf033-shadows.json)) |
 | `stream-cases.json` | 46 steps across 5 sequences | Daemon stream store (passing) | Passed: SF-034 daemon, IPC UIDs, crashes and export ([receipt](validation/sf034-streams.json)) |
-| `client-device-cases.json` | 16 authorization requests | none | Pending SF-032, SF-035 |
+| `client-device-cases.json` | 16 authorization requests | Daemon registry and policy engine (passing) | Passed: SF-035 daemon, Mosquitto and two TLS clients ([receipt](validation/sf035-client-devices.json)) |
 | `managed-dependency-cases.json` | 47 managed-dependency classifications | none | Passed: SF-037 translator classification |
 | `credential-provider-cases.json` | 65 steps across 7 sequences | none | Passed: SF-057 local adapter ([receipt](validation/sf057-credentials.json)) |
-| `cloudwatch-metrics-cases.json` | 90 steps across 8 sequences | none | Pending SF-059 |
-| `cloudwatch-logs-cases.json` | 69 steps across 8 sequences | none | Pending SF-060 |
+| `cloudwatch-metrics-cases.json` | 90 steps across 8 sequences | none | Passed: local adapter/HTTP/SQLite ([receipt](validation/sf059-metrics.json)); AWS delivery pending |
+| `cloudwatch-logs-cases.json` | 69 steps across 8 sequences | none | Passed: SF-060 adapter and local emulator ([receipt](validation/sf060-cloudwatch-logs.json)) |
 
 `scripts/greengrass_compat.py` contains small **specification reference models**. They make each expected value checkable and keep the fixtures internally consistent. They are not the daemon, a translator or an adapter, and agreement with them proves nothing about runtime conformance. Each owning ticket must execute the same fixture files against its real implementation. That ticket then sets the suite to `passed` with a committed runtime receipt, and only after that may it raise any `aws_*` status. Fixtures may be corrected in review if they contradict AWS behaviour or an approved design. Correct them deliberately; never loosen them to make an implementation pass.
 

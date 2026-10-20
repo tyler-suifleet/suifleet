@@ -48,6 +48,10 @@ impl Recipe {
                     .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'),
             "invalid artifact blob ID"
         );
+        if let Some(services) = &self.services {
+            anyhow::ensure!(self.schema_version == "1.3", "services requires recipe schema 1.3");
+            services.validate()?;
+        }
         let lifecycle = &self.lifecycle;
         anyhow::ensure!(
             lifecycle.run.is_some()
@@ -63,7 +67,7 @@ impl Recipe {
             || configuration.confidential.is_some()
             || lifecycle.validate.is_some();
         // Older daemons reject these fields: they need a 1.2 consumer.
-        anyhow::ensure!(!configured || self.schema_version == "1.2", "recipe configuration requires schemaVersion 1.2");
+        anyhow::ensure!(!configured || matches!(self.schema_version.as_str(), "1.2" | "1.3"), "recipe configuration requires schemaVersion 1.2");
         let command = |c: &Option<String>| c.as_deref().is_some_and(|c| !c.is_empty());
         anyhow::ensure!(
             !configured || command(&lifecycle.install) || command(&lifecycle.run),

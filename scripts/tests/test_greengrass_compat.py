@@ -21,12 +21,14 @@ class RepositoryTests(unittest.TestCase):
     def test_runtime_receipts_are_scoped_to_executed_suites(self):
         # Flipping a suite to passed needs a runtime receipt from the owning
         # implementation: SF-037 (recipes, managed dependencies), SF-057
-        # (credential provider), SF-032 (pub/sub), SF-033 (shadows) and SF-034
-        # (streams) executed theirs; all others remain pending.
+        # (credential provider), SF-032 (pub/sub), SF-033 (shadows), SF-034
+        # (streams), SF-035 (client devices), SF-059 (metrics) and SF-060
+        # (CloudWatch Logs) executed theirs; all others remain pending.
         matrix = json.loads((ROOT / compat.COMPAT / "greengrass-compat.json").read_text())
         passed = {name for name, s in matrix["suites"].items() if s["runtime_execution"] == "passed"}
-        self.assertEqual(passed, {"aws-recipe-cases.json", "managed-dependency-cases.json", "credential-provider-cases.json",
-                                  "pubsub-cases.json", "shadow-cases.json", "stream-cases.json"})
+        self.assertEqual(passed, {"aws-recipe-cases.json", "managed-dependency-cases.json", "credential-provider-cases.json", "cloudwatch-metrics-cases.json",
+                                  "cloudwatch-logs-cases.json", "pubsub-cases.json", "shadow-cases.json", "stream-cases.json",
+                                  "client-device-cases.json"})
         for name in ("aws-recipe-cases.json", "managed-dependency-cases.json"):
             receipt = json.loads((ROOT / matrix["suites"][name]["runtime_evidence"]).read_text())
             self.assertEqual(receipt["ticket"], "SF-037")
@@ -53,23 +55,33 @@ class MatrixGateTests(unittest.TestCase):
     def test_parity_claim_rejected(self):
         self.assertIn("parity_claim must be false", self.errors(lambda m: m.update(parity_claim=True)))
 
+    # Every declared suite has now executed; these gates are exercised by
+    # returning one to pending.
+    @staticmethod
+    def pending(m, name="cloudwatch-logs-cases.json"):
+        suite = m["suites"][name]
+        suite.pop("runtime_evidence", None)
+        suite.update(runtime_execution="pending", pending_on=["SF-060"])
+        return suite
+
     def test_aws_claim_without_passed_runtime_suite_rejected(self):
         def mutate(m):
-            row = self.row(m, "client-devices.auth")
+            self.pending(m)
+            row = self.row(m, "cloud.logs")
             row["aws_api"] = "implemented"
             row["current_evidence"] = ["docs/GREENGRASS_COMPATIBILITY.md"]
         self.assertTrue(any("passed runtime suite" in e for e in self.errors(mutate)))
 
     def test_passed_suite_needs_existing_receipt(self):
         def mutate(m):
-            m["suites"]["client-device-cases.json"]["runtime_execution"] = "passed"
+            self.pending(m)["runtime_execution"] = "passed"
         self.assertTrue(any("runtime_evidence" in e for e in self.errors(mutate)))
         def missing(m):
-            m["suites"]["client-device-cases.json"].update(runtime_execution="passed", runtime_evidence="docs/validation/none.json")
+            m["suites"]["cloudwatch-logs-cases.json"].update(runtime_execution="passed", runtime_evidence="docs/validation/none.json")
         self.assertTrue(any("runtime_evidence" in e for e in self.errors(missing)))
 
     def test_pending_suite_needs_owner(self):
-        self.assertTrue(any("pending_on" in e for e in self.errors(lambda m: m["suites"]["cloudwatch-logs-cases.json"].pop("pending_on"))))
+        self.assertTrue(any("pending_on" in e for e in self.errors(lambda m: self.pending(m).pop("pending_on"))))
 
     def test_partial_needs_existing_evidence(self):
         def missing(m):
@@ -107,10 +119,12 @@ class FixtureGateTests(unittest.TestCase):
                 for path in platform.get("current_evidence", []):
                     (root / path).parent.mkdir(parents=True, exist_ok=True)
                     (root / path).touch()
-            for suite in json.loads((ROOT / compat.COMPAT / "greengrass-compat.json").read_text())["suites"].values():
-                if "runtime_evidence" in suite:
-                    (root / suite["runtime_evidence"]).parent.mkdir(parents=True, exist_ok=True)
-                    (root / suite["runtime_evidence"]).touch()
+            matrix = json.loads((ROOT / compat.COMPAT / "greengrass-compat.json").read_text())
+            catalog = json.loads((ROOT / compat.COMPAT / "managed-components.json").read_text())
+            for row in list(matrix["suites"].values()) + catalog["adapters"]:
+                if path := row.get("runtime_evidence"):
+                    (root / path).parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy(ROOT / path, root / path)
             compat.run(root)  # unmodified copy passes
             path = root / compat.COMPAT / name
             value = json.loads(path.read_text())
@@ -238,7 +252,7 @@ class ManagedCatalogGateTests(unittest.TestCase):
             "aws-iot-core-connection": "SF-061", "device-defender-metrics": "SF-062",
             "secure-tunneling": "SF-063"})
         self.assertEqual({a["id"] for a in self.catalog["adapters"] if a["runtime_execution"] == "passed"},
-                         {"credential-provider", "stream-export-aws"})
+                         {"credential-provider", "cloudwatch-metrics-export", "cloudwatch-logs-export", "stream-export-aws"})
         self.assertFalse(self.catalog["parity_claim"])
         for entry in self.catalog["components"] + self.catalog["platform_phases"]:
             self.assertNotIn("approval", entry)

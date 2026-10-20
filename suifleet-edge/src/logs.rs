@@ -89,6 +89,104 @@ pub fn validate(batch: &Batch) -> anyhow::Result<()> {
 
 // --- The daemon's own log file ----------------------------------------------
 
+/// `[runtime] log_group_read` (SF-060): logs and the retained confidential
+/// values are group-readable (0640) and their directories group-traversable
+/// (0750), so a separate log reader such as the CloudWatch Logs adapter can
+/// read them through the daemon's group. Off by default (0600).
+static GROUP_READ: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_group_read(on: bool) {
+    GROUP_READ.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn group_read() -> bool {
+    GROUP_READ.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+fn mode_for(group_read: bool) -> u32 {
+    if group_read { 0o640 } else { 0o600 }
+}
+
+/// The mode of a log file or the retained values.
+pub fn private_mode() -> u32 {
+    mode_for(group_read())
+}
+
+/// With group read, let the group traverse `dir` (0750). Without, leave it.
+pub fn share_dir(dir: &Path) -> std::io::Result<()> {
+    share_dir_for(dir, group_read())
+}
+
+fn share_dir_for(dir: &Path, group_read: bool) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    if group_read {
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o750))?;
+    }
+    Ok(())
+}
+
+/// Make the logs that already exist follow `[runtime] log_group_read`, on
+/// every daemon start whether or not it writes logs: `logs/`, `supervised/`
+/// and each `supervised/NAME/` (0750, or without group access), the daemon's
+/// and every component's log and its `.1` (0640 or 0600), inactive ones
+/// included. A symbolic link is left alone. (The retained values follow it
+/// under their lock: [`initialize`].)
+pub fn reconcile_modes(state_dir: &Path) -> std::io::Result<()> {
+    reconcile_modes_for(state_dir, group_read())
+}
+
+fn reconcile_modes_for(state_dir: &Path, group_read: bool) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let logs = state_dir.join("logs");
+    let supervised = state_dir.join("supervised");
+    let mut dirs = vec![logs.clone(), supervised.clone()];
+    let mut files = vec![logs.join("daemon.log"), logs.join("daemon.log.1")];
+    match std::fs::read_dir(&supervised) {
+        Ok(entries) => {
+            for entry in entries {
+                let entry = entry?;
+                if entry.file_type()?.is_dir() {
+                    files.push(entry.path().join("component.log"));
+                    files.push(entry.path().join("component.log.1"));
+                    dirs.push(entry.path());
+                }
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    for dir in dirs {
+        if let Some(opened) = open_no_follow(&dir, libc::O_DIRECTORY)? {
+            let mode = opened.metadata()?.mode() & 0o7777;
+            let wanted = if group_read { 0o750 } else { mode & !0o070 };
+            if mode != wanted {
+                opened.set_permissions(std::fs::Permissions::from_mode(wanted))?;
+            }
+        }
+    }
+    for file in files {
+        if let Some(opened) = open_no_follow(&file, 0)? {
+            let meta = opened.metadata()?;
+            if meta.is_file() && meta.mode() & 0o777 != mode_for(group_read) {
+                opened.set_permissions(std::fs::Permissions::from_mode(mode_for(group_read)))?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `path` opened read-only without following a final symbolic link; `None`
+/// when it is missing or is a link.
+fn open_no_follow(path: &Path, flags: i32) -> std::io::Result<Option<std::fs::File>> {
+    match std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK | flags).open(path) {
+        Ok(file) => Ok(Some(file)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound || error.raw_os_error() == Some(libc::ELOOP) => Ok(None),
+        // A directory component that is not one (ENOTDIR) is not ours either.
+        Err(error) if error.raw_os_error() == Some(libc::ENOTDIR) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
 /// A size-rotated log file for `tracing` (`daemon.log`, then `daemon.log.1`).
 #[derive(Clone)]
 pub struct RotatingFile {
@@ -115,8 +213,14 @@ impl Write for RotatingFile {
             let _ = std::fs::rename(&*path, PathBuf::from(rotated));
         }
         if file.is_none() {
-            use std::os::unix::fs::OpenOptionsExt;
-            *file = Some(std::fs::OpenOptions::new().create(true).append(true).mode(0o640).open(&*path)?);
+            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+            let opened = std::fs::OpenOptions::new().create(true).append(true).mode(private_mode()).open(&*path)?;
+            // Past the service's umask, and private again once group read is turned off.
+            opened.set_permissions(std::fs::Permissions::from_mode(private_mode()))?;
+            if let Some(parent) = path.parent() {
+                share_dir(parent)?;
+            }
+            *file = Some(opened);
         }
         file.as_mut().unwrap().write(buf)
     }
@@ -180,15 +284,87 @@ pub struct Cursor {
 
 const HEAD_BYTES: u64 = 32;
 
-fn head(path: &Path) -> String {
+/// How a source is read. The remote-log shipper uses [`Reader::SHIPPER`];
+/// the CloudWatch Logs adapter (SF-060) reads longer lines and opens files
+/// strictly.
+#[derive(Debug, Clone, Copy)]
+pub struct Reader {
+    /// The longest physical line read; a longer one becomes a marker.
+    pub max_scan: usize,
+    /// Refuse a path with a symbolic link in any component, and anything but
+    /// a regular file with one link, so a component cannot point its log at
+    /// another file.
+    pub strict: bool,
+}
+
+impl Reader {
+    pub const SHIPPER: Reader = Reader { max_scan: MAX_SCAN, strict: false };
+
+    fn open(&self, path: &Path) -> std::io::Result<std::fs::File> {
+        if !self.strict {
+            return std::fs::File::open(path);
+        }
+        let file = open_no_symlinks(path)?;
+        let meta = file.metadata()?;
+        if !meta.file_type().is_file() || meta.nlink() != 1 {
+            return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "not a regular file with a single link"));
+        }
+        Ok(file)
+    }
+
+    fn metadata(&self, path: &Path) -> std::io::Result<std::fs::Metadata> {
+        if self.strict {
+            self.open(path)?.metadata()
+        } else {
+            std::fs::metadata(path)
+        }
+    }
+
+    fn omitted(&self) -> String {
+        if self.max_scan == MAX_SCAN {
+            OMITTED.into()
+        } else {
+            format!("[suifleet: line longer than {} bytes omitted]", self.max_scan)
+        }
+    }
+}
+
+/// Open read-only, resolving no symbolic link anywhere in `path` (openat2,
+/// Linux 5.6+). Fails closed where the kernel lacks it.
+#[cfg(target_os = "linux")]
+fn open_no_symlinks(path: &Path) -> std::io::Result<std::fs::File> {
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::fd::FromRawFd;
+    let name = std::ffi::CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "path holds a NUL byte"))?;
+    // SAFETY: open_how is plain data; zeroed is its documented initial state.
+    let mut how: libc::open_how = unsafe { std::mem::zeroed() };
+    how.flags = (libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOCTTY | libc::O_NONBLOCK) as u64;
+    how.resolve = libc::RESOLVE_NO_SYMLINKS | libc::RESOLVE_NO_MAGICLINKS;
+    // SAFETY: valid NUL-terminated path and open_how of the size passed.
+    let fd = unsafe { libc::syscall(libc::SYS_openat2, libc::AT_FDCWD, name.as_ptr(), &how as *const libc::open_how, std::mem::size_of::<libc::open_how>()) };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: a new descriptor owned by nobody else.
+    Ok(unsafe { std::fs::File::from_raw_fd(fd as i32) })
+}
+
+/// Strict reading is only offered on Linux: refuse elsewhere.
+#[cfg(not(target_os = "linux"))]
+fn open_no_symlinks(_path: &Path) -> std::io::Result<std::fs::File> {
+    Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "strict log reading needs Linux openat2"))
+}
+
+fn head(path: &Path, reader: &Reader) -> String {
     let mut bytes = Vec::new();
-    let _ = std::fs::File::open(path).map(|f| f.take(HEAD_BYTES).read_to_end(&mut bytes));
+    let _ = reader.open(path).map(|f| f.take(HEAD_BYTES).read_to_end(&mut bytes));
     hex::encode(bytes)
 }
 
 /// Whether `path` (with metadata `meta`) is the file `cursor` was reading.
-fn same_file(path: &Path, meta: &std::fs::Metadata, cursor: &Cursor) -> bool {
-    meta.ino() == cursor.inode && head(path).starts_with(&cursor.head)
+fn same_file(path: &Path, meta: &std::fs::Metadata, cursor: &Cursor, reader: &Reader) -> bool {
+    meta.ino() == cursor.inode && head(path, reader).starts_with(&cursor.head)
 }
 
 fn rotated(path: &Path) -> PathBuf {
@@ -198,11 +374,14 @@ fn rotated(path: &Path) -> PathBuf {
 }
 
 /// Complete lines from `file` starting at `offset`, at most `budget`; returns
-/// the offset after the last line consumed. A line longer than [`MAX_SCAN`]
-/// becomes [`OMITTED`] and `skipping` holds until its end. With `last` (a
-/// rotated file nobody writes to), an unterminated final line is a line too.
-fn read_lines(path: &Path, offset: u64, budget: usize, skipping: &mut bool, last: bool, lines: &mut Vec<String>) -> std::io::Result<u64> {
-    let mut file = std::fs::File::open(path)?;
+/// the offset after the last line consumed. A line longer than the reader's
+/// `max_scan` becomes a marker and `skipping` holds until its end. With
+/// `last` (a rotated file nobody writes to), an unterminated final line is a
+/// line too.
+#[allow(clippy::too_many_arguments)]
+fn read_lines(path: &Path, reader: &Reader, offset: u64, budget: usize, skipping: &mut bool, last: bool, lines: &mut Vec<String>) -> std::io::Result<u64> {
+    let max_scan = reader.max_scan;
+    let mut file = reader.open(path)?;
     let length = file.metadata()?.len();
     if offset >= length {
         return Ok(offset.min(length));
@@ -211,7 +390,7 @@ fn read_lines(path: &Path, offset: u64, budget: usize, skipping: &mut bool, last
     let mut bytes = Vec::new();
     // Bounded read: enough for the budget at the line limit, and for one
     // line up to the scan limit.
-    let window = (budget as u64).saturating_mul(MAX_LINE as u64 + 1).saturating_add(MAX_SCAN as u64 + 1);
+    let window = (budget as u64).saturating_mul(MAX_LINE as u64 + 1).saturating_add(max_scan as u64 + 1);
     file.take(window.min(length - offset)).read_to_end(&mut bytes)?;
     let at_end = offset + bytes.len() as u64 >= length;
     let mut start = 0usize;
@@ -228,16 +407,16 @@ fn read_lines(path: &Path, offset: u64, budget: usize, skipping: &mut bool, last
             continue;
         }
         match newline {
-            Some(n) if n <= MAX_SCAN => {
+            Some(n) if n <= max_scan => {
                 lines.push(String::from_utf8_lossy(&bytes[start..start + n]).into_owned());
                 start += n + 1;
             }
             Some(n) => {
-                lines.push(OMITTED.into());
+                lines.push(reader.omitted());
                 start += n + 1;
             }
-            None if bytes.len() - start > MAX_SCAN => {
-                lines.push(OMITTED.into());
+            None if bytes.len() - start > max_scan => {
+                lines.push(reader.omitted());
                 start = bytes.len();
                 *skipping = true;
             }
@@ -254,8 +433,13 @@ fn read_lines(path: &Path, offset: u64, budget: usize, skipping: &mut bool, last
 /// New lines of one source since `cursor`, following one rotation. Returns
 /// the lines, the new cursor and whether unseen lines were lost.
 pub fn tail(path: &Path, cursor: Cursor, budget: usize) -> std::io::Result<(Vec<String>, Cursor, bool)> {
+    tail_with(path, cursor, budget, &Reader::SHIPPER)
+}
+
+/// [`tail`] with an explicit [`Reader`].
+pub fn tail_with(path: &Path, cursor: Cursor, budget: usize, reader: &Reader) -> std::io::Result<(Vec<String>, Cursor, bool)> {
     let mut lines = Vec::new();
-    let current = match std::fs::metadata(path) {
+    let current = match reader.metadata(path) {
         Ok(m) => m,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok((lines, cursor, false)),
         Err(e) => return Err(e),
@@ -263,20 +447,20 @@ pub fn tail(path: &Path, cursor: Cursor, budget: usize) -> std::io::Result<(Vec<
     let mut lost = false;
     let mut offset = 0;
     let mut skipping = false;
-    if same_file(path, &current, &cursor) && cursor.offset <= current.len() {
+    if same_file(path, &current, &cursor, reader) && cursor.offset <= current.len() {
         offset = cursor.offset;
         skipping = cursor.skipping;
     } else if cursor.inode != 0 {
         // Rotated since the last read: finish the old file if it is `.1`,
         // including an unterminated last line (nothing will complete it).
         let old_path = rotated(path);
-        match std::fs::metadata(&old_path) {
-            Ok(old) if same_file(&old_path, &old, &cursor) => {
+        match reader.metadata(&old_path) {
+            Ok(old) if same_file(&old_path, &old, &cursor, reader) => {
                 let mut old_skipping = cursor.skipping;
-                let end = read_lines(&old_path, cursor.offset, budget, &mut old_skipping, true, &mut lines)?;
+                let end = read_lines(&old_path, reader, cursor.offset, budget, &mut old_skipping, true, &mut lines)?;
                 if end < old.len() {
                     // Budget spent inside the rotated file: continue there next time.
-                    let next = Cursor { inode: cursor.inode, offset: end, head: head(&old_path), skipping: old_skipping, key_block: 0 };
+                    let next = Cursor { inode: cursor.inode, offset: end, head: head(&old_path, reader), skipping: old_skipping, key_block: 0 };
                     return Ok((lines, next, false));
                 }
             }
@@ -284,8 +468,8 @@ pub fn tail(path: &Path, cursor: Cursor, budget: usize) -> std::io::Result<(Vec<
         }
     }
     let remaining = budget.saturating_sub(lines.len());
-    let end = read_lines(path, offset, remaining, &mut skipping, false, &mut lines)?;
-    Ok((lines, Cursor { inode: current.ino(), offset: end, head: head(path), skipping, key_block: 0 }, lost))
+    let end = read_lines(path, reader, offset, remaining, &mut skipping, false, &mut lines)?;
+    Ok((lines, Cursor { inode: current.ino(), offset: end, head: head(path, reader), skipping, key_block: 0 }, lost))
 }
 
 /// The sources present now: the daemon log and each supervised component's.
@@ -397,8 +581,8 @@ impl Retained {
         }
     }
 
-    fn save(&self, path: &Path) -> anyhow::Result<()> {
-        crate::configuration::write_private(path, self)
+    fn save(&self, path: &Path, mode: u32) -> anyhow::Result<()> {
+        crate::configuration::write_with_mode(path, self, mode)
             .map_err(|error| anyhow::anyhow!("cannot store retained confidential values: {}", error.root_cause()))
     }
 
@@ -413,7 +597,7 @@ impl Retained {
                 && std::fs::File::open(&file)
                     .and_then(|mut f| f.seek(SeekFrom::End(-1)).and_then(|_| f.read_exact(&mut last)))
                     .map_or(true, |_| last[0] != b'\n');
-            start.insert(source, Cursor { inode: meta.ino(), offset: meta.len(), head: head(&file), skipping: partial, key_block: 0 });
+            start.insert(source, Cursor { inode: meta.ino(), offset: meta.len(), head: head(&file, &Reader::SHIPPER), skipping: partial, key_block: 0 });
         }
         Self { values: BTreeMap::new(), start }
     }
@@ -444,10 +628,16 @@ impl Retained {
 
 /// Run `change` on the retained set under its lock (the shipper and every
 /// materialization share it), creating it if there is none, and store it
-/// durably if it changed.
+/// durably if it changed or its mode no longer matches `[runtime] log_group_read`
+/// (an existing installation that turned it on or off).
 fn retained<T>(state_dir: &Path, change: impl FnOnce(&mut Retained) -> T) -> anyhow::Result<T> {
+    retained_for(state_dir, group_read(), change)
+}
+
+fn retained_for<T>(state_dir: &Path, group_read: bool, change: impl FnOnce(&mut Retained) -> T) -> anyhow::Result<T> {
     let path = state_dir.join(RETAINED);
     std::fs::create_dir_all(state_dir.join("logs"))?;
+    share_dir_for(&state_dir.join("logs"), group_read)?;
     let lock = std::fs::OpenOptions::new()
         .create(true)
         .truncate(false)
@@ -460,8 +650,11 @@ fn retained<T>(state_dir: &Path, change: impl FnOnce(&mut Retained) -> T) -> any
         None => (Retained::first(state_dir), None),
     };
     let result = change(&mut set);
-    if before.as_ref() != Some(&set) {
-        set.save(&path)?;
+    let mode = mode_for(group_read);
+    let stale_mode = std::fs::symlink_metadata(&path).is_ok_and(|meta| meta.mode() & 0o777 != mode);
+    if before.as_ref() != Some(&set) || stale_mode {
+        // Rewritten, not chmod-ed: the replacement is created with the mode.
+        set.save(&path, mode)?;
     }
     Ok(result)
 }
@@ -470,6 +663,30 @@ fn retained<T>(state_dir: &Path, change: impl FnOnce(&mut Retained) -> T) -> any
 /// any component runs, so lines written from then on are all covered.
 pub fn initialize(state_dir: &Path) -> anyhow::Result<()> {
     retained(state_dir, |_| ())
+}
+
+/// The daemon's confidential values and start cursors, read without
+/// changing them, for a separate log reader (the CloudWatch Logs adapter).
+/// Fails closed: a missing, unreadable or invalid set stops that reader.
+pub fn read_retained(state_dir: &Path) -> anyhow::Result<(Vec<String>, BTreeMap<String, Cursor>)> {
+    let set = Retained::load(&state_dir.join(RETAINED))?
+        .ok_or_else(|| anyhow::anyhow!("the daemon has not recorded confidential values yet ({RETAINED})"))?;
+    Ok((set.secrets(), set.start))
+}
+
+/// Record the confidential values of every materialized configuration, as
+/// the shipper does each interval, for a separate log reader when `[logs]`
+/// is off (an installation configured before values were recorded).
+pub fn remember_materialized(state_dir: &Path) -> anyhow::Result<()> {
+    let values = materialized_values(state_dir)?;
+    if values.is_empty() {
+        return Ok(());
+    }
+    retained(state_dir, |set| {
+        for value in values {
+            set.values.entry(value).or_default();
+        }
+    })
 }
 
 /// Record every value of a component's overlay before it is materialized:
@@ -563,7 +780,7 @@ pub const MAX_KEY_BLOCK_LINES: u32 = 256;
 /// Redact one line of a source. `block` follows PEM private-key blocks,
 /// whose body lines carry no marker of their own: from a `BEGIN … PRIVATE
 /// KEY` line to its `END` line, every line is dropped.
-fn redact_line(line: &str, secrets: &[String], block: &mut u32) -> (String, usize) {
+pub fn redact_line(line: &str, secrets: &[String], block: &mut u32) -> (String, usize) {
     if line.contains("PRIVATE KEY") && line.contains("-----") {
         if line.contains("BEGIN") {
             *block = 1;
@@ -792,6 +1009,68 @@ mod tests {
     }
 
     #[test]
+    fn turning_group_read_on_or_off_reconciles_an_existing_retained_set() {
+        // An installation that started before `log_group_read` was set.
+        let state = dir("group-read");
+        retained_for(&state, false, |set| set.values.insert("ExistingValueK7".into(), Known::default())).unwrap();
+        let path = state.join(RETAINED);
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&path), 0o600);
+        let before = stored(&state);
+        // Nothing changes but the option: the start makes it readable anyway.
+        retained_for(&state, true, |_| ()).unwrap();
+        assert_eq!((mode(&path), mode(&state.join("logs"))), (0o640, 0o750));
+        assert_eq!(stored(&state), before, "the values and cursors are kept");
+        retained_for(&state, true, |set| set.values.entry("ExistingValueK7".into()).or_default().clone()).unwrap();
+        assert_eq!(mode(&path), 0o640);
+        // And private again once it is turned off.
+        retained_for(&state, false, |_| ()).unwrap();
+        assert_eq!(mode(&path), 0o600);
+        assert_eq!(stored(&state), before);
+    }
+
+    #[test]
+    fn turning_group_read_on_or_off_reconciles_existing_logs_and_directories() {
+        use std::os::unix::fs::PermissionsExt;
+        let state = dir("group-read-logs");
+        let mode = |p: &Path| std::fs::symlink_metadata(p).unwrap().permissions().mode() & 0o777;
+        let set = |p: &Path, m: u32| std::fs::set_permissions(p, std::fs::Permissions::from_mode(m)).unwrap();
+        // A daemon log with its rotation, an active and an inactive component.
+        let files: Vec<PathBuf> = ["logs/daemon.log", "logs/daemon.log.1", "supervised/svc/component.log",
+            "supervised/svc/component.log.1", "supervised/old/component.log"].iter().map(|f| state.join(f)).collect();
+        let dirs: Vec<PathBuf> = ["logs", "supervised", "supervised/svc", "supervised/old"].iter().map(|d| state.join(d)).collect();
+        for file in &files {
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            append(file, "line\n");
+            set(file, 0o600);
+        }
+        for d in &dirs {
+            set(d, 0o700);
+        }
+        // A component pointing its log elsewhere: the target is not touched.
+        let target = state.join("device.key");
+        append(&target, "secret\n");
+        set(&target, 0o600);
+        std::fs::create_dir_all(state.join("supervised/evil")).unwrap();
+        std::os::unix::fs::symlink(&target, state.join("supervised/evil/component.log")).unwrap();
+
+        reconcile_modes_for(&state, true).unwrap();
+        assert!(files.iter().all(|f| mode(f) == 0o640), "every existing log is group-readable");
+        assert!(dirs.iter().all(|d| mode(d) == 0o750));
+        assert_eq!(mode(&target), 0o600, "a link is not followed");
+        reconcile_modes_for(&state, false).unwrap();
+        assert!(files.iter().all(|f| mode(f) == 0o600), "and private again once it is turned off");
+        assert!(dirs.iter().all(|d| mode(d) == 0o700));
+        assert_eq!(mode(&target), 0o600);
+        // Off on an installation that never had it: other bits are kept.
+        set(&state.join("supervised"), 0o755);
+        reconcile_modes_for(&state, false).unwrap();
+        assert_eq!(mode(&state.join("supervised")), 0o705);
+        // Nothing yet: nothing to do.
+        reconcile_modes_for(&dir("group-read-empty"), true).unwrap();
+    }
+
+    #[test]
     fn tail_reads_complete_lines_once_and_follows_rotation() {
         let d = dir("tail");
         let log = d.join("component.log");
@@ -894,6 +1173,8 @@ mod tests {
         let old = std::fs::metadata(d.join("logs/daemon.log.1")).unwrap().len();
         assert!(current <= ROTATE_BYTES && old <= ROTATE_BYTES, "{current} {old}");
         assert!(!d.join("logs/daemon.log.1.1").exists());
+        let mode = std::fs::metadata(d.join("logs/daemon.log")).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "private without log_group_read, whatever the umask");
     }
 
     #[test]
@@ -1112,7 +1393,7 @@ mod tests {
         let expire = |state: &Path| {
             let mut known = stored(state);
             known.values.values_mut().for_each(|k| k.unused_since_ms = k.unused_since_ms.map(|_| 1));
-            known.save(&state.join(RETAINED)).unwrap();
+            known.save(&state.join(RETAINED), private_mode()).unwrap();
         };
         // The running version still holds it: in use, however long.
         expire(&state);

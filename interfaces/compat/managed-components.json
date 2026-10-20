@@ -205,7 +205,7 @@
     "environment": "Network-none container with a local AWS API emulator",
     "deferred": ["Real AWS account Kinesis/S3 export; needs separate user authorization (unrun)"]
    }},
-  {"id": "cloudwatch-metrics-export", "specification": "complete", "implementation_ticket": "SF-059", "runtime_execution": "pending", "replaces": {"aws.greengrass.Cloudwatch": "4.0.0"},
+  {"id": "cloudwatch-metrics-export", "specification": "complete", "implementation_ticket": "SF-059", "runtime_execution": "passed", "runtime_evidence": "docs/validation/sf059-metrics.json", "replaces": {"aws.greengrass.Cloudwatch": "4.0.0"},
    "summary": "Exports SF-019 native metrics and component-published metric requests to CloudWatch PutMetricData with a bounded retention buffer and publish interval.",
    "platforms": ["linux-x86_64", "linux-aarch64", "linux-arm"],
    "aws_services": ["Amazon CloudWatch (monitoring.<region>.amazonaws.com:443)"],
@@ -223,12 +223,13 @@
     "environment": "Network-none container with a local AWS API emulator",
     "deferred": ["Real AWS account metrics; needs separate user authorization (unrun)"]
    }},
-  {"id": "cloudwatch-logs-export", "specification": "complete", "implementation_ticket": "SF-060", "runtime_execution": "pending", "replaces": {"aws.greengrass.LogManager": "2.3.14"},
+  {"id": "cloudwatch-logs-export", "specification": "complete", "implementation_ticket": "SF-060", "runtime_execution": "passed",
+   "runtime_evidence": "docs/validation/sf060-cloudwatch-logs.json", "replaces": {"aws.greengrass.LogManager": "2.3.14"},
    "summary": "Uploads SF-020 collected component and system logs to CloudWatch Logs with per-source retention, redaction and bounded local spool.",
    "platforms": ["linux-x86_64", "linux-aarch64", "linux-arm"],
    "aws_services": ["Amazon CloudWatch Logs (logs.<region>.amazonaws.com:443)"],
    "auth": "credential-provider credentials; the device role needs logs:CreateLogGroup, logs:CreateLogStream and logs:PutLogEvents on the configured groups only.",
-   "licensing": "Clean-room implementation using the Apache-2.0 AWS SDK for Rust.",
+   "licensing": "Clean-room implementation of the documented CloudWatch Logs JSON API and SigV4 signing. No AWS SDK or AWS component code.",
    "depends_on": ["SF-020", "SF-057"],
    "acceptance": {
     "reference_suites": ["cloudwatch-logs-cases.json"],
@@ -296,7 +297,7 @@
   {"platform": "linux-x86", "phase": "roadmap", "tickets": ["SF-064", "SF-076"],
    "reason": "Native i686 daemon, release bundle and x86 catalog selection exist (SF-076, docs/LINUX_X86.md), but managed adapters do not target it and translation omits and reports x86 manifests. A tracked gap, not an approved exclusion."},
   {"platform": "windows", "phase": "roadmap", "tickets": ["SF-064", "SF-074"],
-   "reason": "The daemon depends on Linux systemd, cgroups (SF-014) and Yocto packaging. Windows needs its own supervisor, service packaging, permissions and test suite. A tracked gap, not an approved exclusion; translated recipes omit Windows manifests meanwhile."},
+   "reason": "Native Windows SCM/Job Object local executable runtime exists (SF-074, docs/WINDOWS_RUNTIME.md); SID/ACL and interrupted-lifecycle software evidence is separate from reference vectors. Catalog/chain/rich IPC and managed adapters remain unsupported. Translation still omits Windows manifests; remaining full-parity work stays tracked by SF-064."},
   {"platform": "darwin", "phase": "roadmap", "tickets": ["SF-064", "SF-075"], "reason": "The native macOS runtime (SF-075, docs/MACOS_RUNTIME.md) runs SuiFleet components; AWS lists only Linux and Windows for the components in this catalog, so their macOS equivalents remain a tracked gap, not an approved exclusion."}
  ]
 }

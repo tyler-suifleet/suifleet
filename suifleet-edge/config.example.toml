@@ -60,6 +60,12 @@ replay_history = false
 # component_stop_timeout_seconds = 10  # grace for shutdown/SIGTERM before SIGKILL
 # component_max_restarts = 5           # within ten minutes, then Broken
 
+# Let the daemon's group read its own and its components' logs and the
+# retained confidential values (0640, directories 0750), for a separate log
+# reader such as the CloudWatch Logs adapter (docs/CLOUDWATCH_LOGS.md).
+# Changing it applies to existing files at the next daemon start.
+# log_group_read = false
+
 # Dependency candidates: "never" (default) uses only the live catalog and
 # Walrus; "cached" keeps authenticated versions/recipes/artifacts under
 # state_dir/components for reuse and offline resolution.
@@ -101,6 +107,20 @@ replay_history = false
 # source = "Pubsub"
 # target = "LocalMqtt"
 # target_topic_prefix = "device1/"
+
+# LAN client devices: a local CA, mutual TLS and an authorizing MQTT proxy in
+# front of a loopback-only broker (SF-035; docs/CLIENT_DEVICES.md). Needs [ipc]
+# administrators, who enroll things from CSRs with the client_devices operation.
+# [client_devices]
+# device_groups_file = "client-device-groups.json"   # AWS deviceGroups JSON
+# broker = "127.0.0.1:1883"
+# broker_username = "gateway"
+# broker_password_file = "/etc/suifleet/gateway-mqtt-password"
+# mqtt_listen = "0.0.0.0:8883"
+# https_listen = "0.0.0.0:8443"
+# udp_discovery = "0.0.0.0:8442"
+# certificate_validity_seconds = 604800
+# rotation_grace_seconds = 300
 
 # Redacted remote logs to the fleet indexer (needs [telemetry]; docs/LOGS.md).
 # [logs]

@@ -90,6 +90,9 @@ pub struct ComponentHealth {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Snapshot {
+    /// Digest of the redacted effective IPC service summary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_configuration_sha256: Option<String>,
     pub schema: u64,
     pub chain_identifier: String,
     pub registry: String,
@@ -144,6 +147,7 @@ pub fn bounded(text: &str, limit: usize) -> String {
 /// What the daemon's own durable state says is installed and running.
 #[derive(Debug, Default)]
 pub struct Inventory {
+    pub service_configuration_sha256: Option<String>,
     pub components: Vec<ComponentHealth>,
     pub reasons: Vec<String>,
     pub pending_receipts: u32,
@@ -152,7 +156,9 @@ pub struct Inventory {
 /// Read the journal and supervisor files (each replaced atomically by its
 /// writer), never the live structures of the poll loop.
 pub fn inventory(state_dir: &Path) -> Inventory {
+    use sha2::Digest;
     let mut inventory = Inventory::default();
+    inventory.service_configuration_sha256 = std::fs::read(state_dir.join("services-effective.json")).ok().map(|b| hex::encode(sha2::Sha256::digest(&b)));
     let journal: Option<crate::state::State> = std::fs::read(state_dir.join("state.json"))
         .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok());
@@ -327,6 +333,7 @@ pub fn snapshot(binding: &Binding, signer: &str, seq: u64, dropped: u64, sync: S
         }
         let health = if listed.is_empty() { Health::Healthy } else { Health::Degraded };
         let snapshot = Snapshot {
+            service_configuration_sha256: inventory.service_configuration_sha256.clone(),
             schema: SCHEMA,
             chain_identifier: binding.chain_identifier.clone(),
             registry: binding.registry.clone(),
@@ -743,6 +750,7 @@ mod tests {
             components: vec![component; 500],
             reasons: (0..100).map(|_| long.clone()).collect(),
             pending_receipts: 0,
+            service_configuration_sha256: None,
         };
         let sync = SyncHealth { last_success_ms: Some(now), consecutive_failures: 1, last_error: Some(long.clone()) };
         let s = snapshot(&binding(), "0xs", 1, 0, sync, inventory, now);
