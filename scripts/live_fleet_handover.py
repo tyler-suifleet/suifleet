@@ -43,7 +43,8 @@ def run(args):
         except (ValueError, KeyError):
             raise RuntimeError('temporary recipient key response was invalid; output suppressed') from None
         live.client('switch','--address',child_address,config=config)
-        funding = 40_000_000
+        # Four bounded recipient transactions need less than this allowance.
+        funding = 20_000_000
         live.transaction('fund disposable handover recipient','--split-coins','gas',f'[{funding}]','--assign','fund',
             '--transfer-objects','[fund]',f'@{child_address}',budget=5_000_000,funding=funding)
         child = live.child(config,funding)
