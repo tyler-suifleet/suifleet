@@ -482,14 +482,22 @@ impl Spool {
         bytes.push(b'\n');
         let temporary = self.path.with_extension("tmp");
         let _ = std::fs::remove_file(&temporary);
-        let mut file = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&temporary)?;
+        // Appending through this descriptor after the rename writes the new journal.
+        let mut file = std::fs::OpenOptions::new().append(true).create_new(true).mode(0o600).open(&temporary)?;
         file.write_all(&bytes)?;
         file.sync_all()?;
         std::fs::rename(&temporary, &self.path)?;
-        std::fs::File::open(self.path.parent().unwrap_or(Path::new(".")))?.sync_all()?;
-        self.file = std::fs::OpenOptions::new().append(true).custom_flags(libc::O_NOFOLLOW).open(&self.path)?;
+        // From here the old descriptor is an unlinked inode: never append to it again.
+        self.file = file;
         self.length = bytes.len() as u64;
         self.snapshot_length = self.length;
+        // Until the directory is synced a crash may bring the old journal back,
+        // losing whatever is appended to the new one: stop rather than risk it.
+        let synced = std::fs::File::open(self.path.parent().unwrap_or(Path::new("."))).and_then(|d| d.sync_all());
+        if let Err(error) = synced {
+            self.poisoned = true;
+            anyhow::bail!("cannot sync the spool directory after compaction: {}", error.kind());
+        }
         Ok(())
     }
 
@@ -499,6 +507,11 @@ impl Spool {
 
     pub fn is_empty(&self) -> bool {
         self.events.is_empty()
+    }
+
+    /// A write could not be undone; only reopening the journal recovers.
+    pub fn poisoned(&self) -> bool {
+        self.poisoned
     }
 
     #[cfg_attr(not(test), allow(dead_code))] // the declared fixture interface
@@ -1300,6 +1313,8 @@ pub async fn run(config_path: &Path) -> anyhow::Result<()> {
             _ = terminate.recv() => break,
             _ = tokio::signal::ctrl_c() => break,
         }
+        // Exit so the service manager restarts the adapter, which reopens the journal.
+        anyhow::ensure!(!exporter.spool.poisoned(), "the CloudWatch Logs spool can no longer be written safely; restarting");
     }
     info!("CloudWatch Logs adapter stopped; the spool is kept");
     Ok(())

@@ -260,6 +260,34 @@ fn write_failures_leave_the_spool_unchanged() {
     assert_eq!(messages(&Exporter::open(&d, s).unwrap()).len(), 1);
 }
 
+#[test]
+fn a_failure_after_the_compaction_rename_loses_nothing() {
+    if unsafe { libc::geteuid() } == 0 {
+        return; // root ignores the permission this test relies on
+    }
+    let d = fresh("compact-rename");
+    let s = settings(&[("app", ComponentType::UserComponent, Level::Info)]);
+    let mut exporter = Exporter::open(&d, s.clone()).unwrap();
+    let line = "z".repeat(200_000);
+    for i in 0..4 {
+        exporter.log("app", "INFO", &line, i as f64).unwrap();
+    }
+    // Write and search but not list: the rename succeeds, syncing the directory fails.
+    std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o300)).unwrap();
+    let compacting = exporter.log("app", "INFO", &"z".repeat(300_000), 4.0);
+    std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(compacting.is_ok(), "the line was durable before compaction");
+    assert!(exporter.spool.poisoned(), "an unsynced rename stops further writes");
+    // Nothing more is accepted into a journal that a crash might replace.
+    assert!(exporter.log("app", "INFO", "after", 5.0).is_err());
+    let committed = messages(&exporter);
+    drop(exporter);
+    let reopened = Exporter::open(&d, s).unwrap();
+    assert!(!reopened.spool.poisoned());
+    assert_eq!(messages(&reopened), committed, "the restart recovers every committed event");
+    assert!(!d.join("spool.tmp").exists());
+}
+
 // --- Collection from the daemon's files ------------------------------------------
 
 fn retained(state: &Path, values: &[&str]) {
