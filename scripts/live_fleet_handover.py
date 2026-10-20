@@ -93,7 +93,14 @@ def run(args):
         live.transaction('delete transient recipient fleet objects','--move-call',call('deployment_manager','delete_deployment'),f'@{record}',
             '--move-call',call('device_group','delete_group'),f'@{group}',
             '--move-call',call('device_registry','deregister_activated_device'),f'@{registry}',f'@{owner_cap}',sender=child,budget=5_000_000)
-        live.execute('return disposable recipient gas',['pay-all-sui','--recipient',live.operator],gas=5_000_000,sender=child)
+        gas = live.client('gas', config=config)
+        coins = gas.get('gasCoins', []) if isinstance(gas, dict) else gas
+        coin_ids = [coin['gasCoinId'] for coin in coins]
+        if not coin_ids:
+            raise RuntimeError('recipient cleanup has no input gas coins; private runtime retained')
+        live.execute('return disposable recipient gas',
+            ['pay-all-sui', '--input-coins', *coin_ids, '--recipient', live.operator],
+            gas=5_000_000, sender=child)
         live.evidence['limits']=['Handover audit object and revoked device identity tombstone retained; transient group/record/device/cap deleted.',
             'Native multisig signing covered on isolated chain, not this dedicated-wallet testnet run.',
             'No physical, mainnet, hosted-provider credential or Seal acceptance.']
