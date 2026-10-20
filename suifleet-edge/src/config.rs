@@ -908,6 +908,10 @@ pub struct RuntimeConfig {
     pub component_stop_timeout_seconds: u64,
     /// Restarts allowed within ten minutes before a component is Broken.
     pub component_max_restarts: u32,
+    /// Let the daemon's group read its own and its components' logs and the
+    /// retained confidential values, for a separate log reader such as the
+    /// CloudWatch Logs adapter (SF-060). Also writes the daemon's own log.
+    pub log_group_read: bool,
 }
 impl Default for RuntimeConfig {
     fn default() -> Self {
@@ -919,6 +923,7 @@ impl Default for RuntimeConfig {
             component_ready_timeout_seconds: 60,
             component_stop_timeout_seconds: 10,
             component_max_restarts: 5,
+            log_group_read: false,
         }
     }
 }
