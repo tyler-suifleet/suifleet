@@ -5,16 +5,17 @@
   "model": "gpt-6.1-sol",
   "runtime_execution": "passed",
   "command": "cargo +1.94.0 build --locked --manifest-path suifleet-edge/Cargo.toml --no-default-features; cargo +1.94.0 test --locked --manifest-path suifleet-edge/windows-runtime/Cargo.toml; cargo +1.94.0 build --locked --manifest-path suifleet-edge/windows-runtime/Cargo.toml --example component; ./scripts/test_windows_runtime.ps1",
-  "result": "11 real Windows software acceptance checks passed; 2 manifest/quoting unit tests passed",
-  "run_url": "https://github.com/tyler-suifleet/suifleet/actions/runs/39369717842",
-  "source_head": "f180249f5ddd4251ef5e830ea22d9e2f882292ea",
-  "base": "497bf783fda873e43e0b0cb10c42d8c663668704",
-  "tested_commit": "8a182071cf771e9f95168039040bd0130594226c",
+  "result": "12 real Windows software acceptance checks passed; 2 manifest/quoting unit tests passed",
+  "run_url": "https://github.com/tyler-suifleet/suifleet/actions/runs/39373757396",
+  "source_head": "654761fa1cc8f9b15cf95fe6f30dee1dd225eede",
+  "base": "093964916ddb3401b7da3d34aaaa2e057c2414fa",
+  "tested_commit": "3f2e237f1239dc7b283ecd5ba24392492646af17",
   "platform": "Microsoft Windows NT 10.0.20348.0",
   "architecture": "AMD64",
   "rust": "rustc 1.94.0 (4a4ef493e 2026-03-02)",
   "checks": [
     "SCM start and authenticated operator status",
+    "exclusive runtime root rejects a second owner with a different IPC pipe",
     "real component install/run; secret read, state write, operator IPC and breakaway denied",
     "unconfigured local caller denied at pipe and secret filesystem ACL",
     "wrong digest and incompatible platform rejected before lifecycle mutation",
@@ -31,5 +32,7 @@
     "Local operator manifest; Linux chain reconciliation and rich IPC APIs explicitly unsupported on Windows",
     "Native local operator component manifest and one component principal per service; no Windows catalog/service-policy API compatibility claim",
     "Physical integration remains SF-031/#32; live AWS scope remains SF-064/#109, unrun and unauthorized"
-  ]
+  ],
+  "runtime_source_tree": "45d267920c23d9b9d6921179c24eed52fea47a08",
+  "acceptance_script_blob": "b062c7e863813af702e4e75a6cfe27dcc3eac6c6"
 }

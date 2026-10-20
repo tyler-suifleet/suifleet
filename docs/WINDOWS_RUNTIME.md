@@ -164,9 +164,12 @@ functional scope. Normal CI and applicable automatic testnet gates remain in for
 
 Actual software evidence is recorded in
 [`validation/sf074-windows.json`](validation/sf074-windows.json):
-[hosted run 39369717842](https://github.com/tyler-suifleet/suifleet/actions/runs/39369717842)
+[hosted run 39373757396](https://github.com/tyler-suifleet/suifleet/actions/runs/39373757396)
 passed on Windows Server 2022 / NT 10.0.20348 AMD64 with Rust 1.94.0, source
-`f180249f5ddd4251ef5e830ea22d9e2f882292ea`, tested against base
-`497bf783fda873e43e0b0cb10c42d8c663668704`. This is an actual SCM/Job/ACL
+`654761fa1cc8f9b15cf95fe6f30dee1dd225eede`, tested against base
+`093964916ddb3401b7da3d34aaaa2e057c2414fa`. This is an actual SCM/Job/ACL
 execution receipt, distinct from the remaining-roadmap reference models.
 Current-head CI is still required for every subsequent change.
+
+The receipt also pins the native source tree and acceptance-script blob so
+documentation-only commits can be distinguished from runtime/test changes.
