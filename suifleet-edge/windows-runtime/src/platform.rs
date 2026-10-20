@@ -430,13 +430,14 @@ fn save(root: &Path, state: &State) -> Result<()> {
     }
 }
 struct Runtime {
-    _lock: fs::File,
     cfg: Config,
     token: Handle,
     state: State,
     child: Option<Process>,
     restarts: u32,
     next_restart: Instant,
+    // Fields drop in declaration order: hold root ownership until the Job is empty.
+    _lock: fs::File,
 }
 impl Runtime {
     fn open(cfg: Config) -> Result<Self> {
