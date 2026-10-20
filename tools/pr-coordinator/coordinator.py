@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import random
 from pathlib import Path
 import sqlite3
 import subprocess
@@ -28,8 +29,63 @@ def network_authorization(project):
     return f'''The user authorizes automatic public Sui testnet testing only (chain 4c78adac), using the dedicated agent wallet client config {grant['wallet']} or the dedicated protected CI testnet wallet. This includes planned test publication/compatible upgrades, test objects/transactions and faucet test-gas funding. Verify actual chain, account, ownership, UpgradeCap and type origins before writes; inspect effects, enforce the configured run spend ceiling, record digests and never expose keys. Take global resource network:suifleet-testnet with ticket lock before machine-session mutations, lock-assert before each operation, renew every five minutes and release promptly; coordinate with Claude in SF-010/#11. Never run concurrent mutations against the shared wallet/deployment. Preserve existing original app objects unless explicitly selected as the verified test fixture. Mainnet, other wallets, production deployment, physical programming and production signing credentials remain unauthorized. Read-only testnet checks need no mutation lock. Isolated local-chain tests remain authorized. This grant does not turn deferred external checks into global implementation merge blockers.'''
 
 
+def retryable_read(args):
+    """Only known reads (and idempotent fetch/refresh) may be retried."""
+    if args[:2] in (['git', 'fetch'], ['git', 'ls-remote']):
+        return True
+    if args[:2] == ['gh', 'pr']:
+        return args[2:3] == ['view']
+    if args[:2] == ['gh', 'api']:
+        method = next((args[n+1].upper() for n, value in enumerate(args[:-1])
+                       if value in ('--method', '-X')), None)
+        if method not in (None, 'GET'):
+            return False
+        if args[2:3] == ['graphql']:
+            query = next((value[6:] for value in args if value.startswith('query=')), '')
+            return bool(re.match(r'^(query\b|\{)', query.lstrip())) and '--input' not in args
+        return not any(value in args for value in ('--input', '-f', '-F', '--field', '--raw-field'))
+    return args[:1] == ['ticket'] and args[-1:] == ['refresh']
+
+
+def transient_delay(error, attempt):
+    if isinstance(error, subprocess.TimeoutExpired):
+        return min(30, 2 ** attempt + random.uniform(0, 1))
+    message = (error.stderr or '').lower()
+    # Fail permanent authorization/validation errors immediately, even if their
+    # diagnostic also mentions a network operation.
+    if any(value in message for value in ('http 401', 'bad credentials', 'permission denied',
+                                         'authentication failed', 'http 404', 'http 422')):
+        return None
+    rate_limited = any(value in message for value in ('http 429', 'rate limit', 'secondary rate'))
+    if not rate_limited and not any(value in message for value in (
+            'tls handshake timeout', 'connection reset', 'connection refused',
+            'temporary failure in name resolution', 'i/o timeout', 'unexpected eof',
+            'connection timed out', 'http 500', 'http 502', 'http 503', 'http 504',
+            'could not resolve host', 'could not resolve hostname', 'network is unreachable')):
+        return None
+    retry_after = re.search(r'retry-after:\s*(\d+)', message)
+    # Long rate-limit waits belong to the next scan; never sleep less than the
+    # server requests or block all other PRs for minutes.
+    if retry_after and int(retry_after[1]) > 30:
+        return None
+    return max(int(retry_after[1]) if retry_after else (5 if rate_limited else 0),
+               min(30, 2 ** attempt + random.uniform(0, 1)))
+
+
 def run(args, cwd=None, env=None):
-    return subprocess.run(args, cwd=cwd, env=env, text=True, capture_output=True, check=True).stdout
+    safe = retryable_read(args)
+    for attempt in range(3 if safe else 1):
+        try:
+            options = {'timeout': 600 if args[:1] == ['ticket'] else 45} if safe else {}
+            return subprocess.run(args, cwd=cwd, env=env, text=True,
+                                  capture_output=True, check=True, **options).stdout
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+            delay = transient_delay(error, attempt) if safe else None
+            if attempt == 2 or delay is None:
+                raise
+            # Do not print argv, stderr, environment, tokens or request bodies.
+            print(f'{args[0]} read: transient failure; retry {attempt+1}/2 in {delay:.1f}s', flush=True)
+            time.sleep(delay)
 
 
 def publication_hash(item):
@@ -235,7 +291,13 @@ class Coordinator:
         fields = 'number,headRefOid,headRefName,baseRefName,baseRefOid,isCrossRepository,state,isDraft,mergeable,title,body,comments,reviews,statusCheckRollup,mergeCommit'
         pages = json.loads(self.gh(project,['api',f"repos/{project['repository']}/pulls?state=open&per_page=100",'--paginate','--slurp']))
         raw = [row for page in pages for row in page]
-        return [self.pr(project, row['number'], fields) for row in raw]
+        result = []
+        for row in raw:
+            try:
+                result.append(self.pr(project, row['number'], fields))
+            except Exception as error:
+                print(f"{project['id']} PR#{row['number']}: snapshot unavailable ({type(error).__name__}); skipped", flush=True)
+        return result
 
     def pr(self, project, number, fields=None):
         fields = fields or 'number,headRefOid,headRefName,baseRefName,baseRefOid,isCrossRepository,state,isDraft,mergeable,title,body,comments,reviews,statusCheckRollup,mergeCommit'
@@ -361,54 +423,57 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
     def collect(self, project, owners):
         rows = self.store.db.execute("SELECT * FROM jobs WHERE project=? AND status IN ('running','reserved','retry','orphaned')", (project['id'],)).fetchall()
         for row in rows:
-            if row['status'] == 'orphaned':
-                if worker_stopped(row['pid'], row['started']):
-                    self.store.quarantine(row)
-                    print(f"{project['id']} PR#{row['pr']}: stopped orphan quarantined; family capacity freed", flush=True)
-                continue
-            if row['status'] == 'retry':
-                if row['retry_after'] > time.time(): continue
-                receipt=Path(row['directory'])/'exit.json'
-                try:
-                    if json.loads(receipt.read_text()).get('returncode') != 0: continue
-                    normalize_result(json.loads((Path(row['directory'])/'result.json').read_text()))
-                except (OSError,ValueError,TypeError):
-                    # Leave the original deadline intact: reserve() can now relaunch.
-                    continue
-                self.store.db.execute('UPDATE jobs SET attempts=attempts+1 WHERE id=?',(row['id'],))
-            if row['status'] == 'reserved':
-                process = Path(row['directory'])/'process.json'
-                if process.exists():
-                    identity = json.loads(process.read_text())
-                    self.store.db.execute("UPDATE jobs SET status='running',pid=?,started=? WHERE id=?",(identity['pid'],identity['started'],row['id']))
-                elif time.time()-row['created'] > 30:
-                    self.store.db.execute("UPDATE jobs SET status='failed',error='launch interrupted before worker started' WHERE id=?",(row['id'],))
-                continue
-            child = self.children.get(row['id'])
-            alive = child.poll() is None if child else process_identity(row['pid']) == row['started']
-            if alive:
-                if row['kind'] == 'fix':
-                    # Locate by branch from fresh PR; never renew somebody else's claim.
-                    pr = self.pr(project, row['pr']); owner = self.owner(project, pr, owners)
-                    if owner and owner['status'] == 'in_progress': self.ticket(project, 'heartbeat', owner['key'], '--token', owner['token'])
-                continue
-            if not worker_stopped(row['pid'], row['started']):
-                continue
-            path = Path(row['directory']) / 'result.json'
             try:
-                receipt = json.loads((Path(row['directory'])/'exit.json').read_text())
-                if receipt['returncode'] != 0: raise RuntimeError(f"worker exited {receipt['returncode']}")
-                result = normalize_result(json.loads(path.read_text()))
-                self.store.db.execute("UPDATE jobs SET status='done',result=? WHERE id=?", (json.dumps(result), row['id']))
+                if row['status'] == 'orphaned':
+                    if worker_stopped(row['pid'], row['started']):
+                        self.store.quarantine(row)
+                        print(f"{project['id']} PR#{row['pr']}: stopped orphan quarantined; family capacity freed", flush=True)
+                    continue
+                if row['status'] == 'retry':
+                    if row['retry_after'] > time.time(): continue
+                    receipt=Path(row['directory'])/'exit.json'
+                    try:
+                        if json.loads(receipt.read_text()).get('returncode') != 0: continue
+                        normalize_result(json.loads((Path(row['directory'])/'result.json').read_text()))
+                    except (OSError,ValueError,TypeError):
+                        # Leave the original deadline intact: reserve() can now relaunch.
+                        continue
+                    self.store.db.execute('UPDATE jobs SET attempts=attempts+1 WHERE id=?',(row['id'],))
+                if row['status'] == 'reserved':
+                    process = Path(row['directory'])/'process.json'
+                    if process.exists():
+                        identity = json.loads(process.read_text())
+                        self.store.db.execute("UPDATE jobs SET status='running',pid=?,started=? WHERE id=?",(identity['pid'],identity['started'],row['id']))
+                    elif time.time()-row['created'] > 30:
+                        self.store.db.execute("UPDATE jobs SET status='failed',error='launch interrupted before worker started' WHERE id=?",(row['id'],))
+                    continue
+                child = self.children.get(row['id'])
+                alive = child.poll() is None if child else process_identity(row['pid']) == row['started']
+                if alive:
+                    if row['kind'] == 'fix':
+                        # Locate by branch from fresh PR; never renew somebody else's claim.
+                        pr = self.pr(project, row['pr']); owner = self.owner(project, pr, owners)
+                        if owner and owner['status'] == 'in_progress': self.ticket(project, 'heartbeat', owner['key'], '--token', owner['token'])
+                    continue
+                if not worker_stopped(row['pid'], row['started']):
+                    continue
+                path = Path(row['directory']) / 'result.json'
+                try:
+                    receipt = json.loads((Path(row['directory'])/'exit.json').read_text())
+                    if receipt['returncode'] != 0: raise RuntimeError(f"worker exited {receipt['returncode']}")
+                    result = normalize_result(json.loads(path.read_text()))
+                    self.store.db.execute("UPDATE jobs SET status='done',result=? WHERE id=?", (json.dumps(result), row['id']))
+                except Exception as error:
+                    # A disappeared process with no trustworthy receipt is not automatically restarted.
+                    receipt_path = Path(row['directory'])/'exit.json'
+                    # An actual stopped read-only CLI with a durable exit receipt can retry usage/auth errors.
+                    retry = row['kind'] == 'review' and receipt_path.exists() and process_identity(row['pid']) != row['started']
+                    status = 'retry' if retry else 'orphaned'
+                    delay = min(3600,300*(2**min(row['attempts'],4)))
+                    self.store.db.execute("UPDATE jobs SET status=?,error=?,retry_after=? WHERE id=?", (status,str(error),time.time()+delay,row['id']))
+                    print(f"{project['id']} PR#{row['pr']}: worker needs recovery: {error}", flush=True)
             except Exception as error:
-                # A disappeared process with no trustworthy receipt is not automatically restarted.
-                receipt_path = Path(row['directory'])/'exit.json'
-                # An actual stopped read-only CLI with a durable exit receipt can retry usage/auth errors.
-                retry = row['kind'] == 'review' and receipt_path.exists() and process_identity(row['pid']) != row['started']
-                status = 'retry' if retry else 'orphaned'
-                delay = min(3600,300*(2**min(row['attempts'],4)))
-                self.store.db.execute("UPDATE jobs SET status=?,error=?,retry_after=? WHERE id=?", (status,str(error),time.time()+delay,row['id']))
-                print(f"{project['id']} PR#{row['pr']}: worker needs recovery: {error}", flush=True)
+                print(f"{project['id']} PR#{row['pr']}: collection deferred ({type(error).__name__}); ownership retained", flush=True)
 
         # Publication failures must never discard a validated worker result.
         self.publish_results(project)
@@ -454,7 +519,11 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
     def tick_project(self, project, execute):
         owners = self.owners(project)
         if execute: self.collect(project,owners)
-        if execute: self.discover_merged(project,owners)
+        if execute:
+            try:
+                self.discover_merged(project,owners)
+            except Exception as error:
+                print(f"{project['id']}: merged discovery unavailable ({type(error).__name__}); continuing open PRs", flush=True)
         prs = self.prs(project)
         def priority(pr):
             owner = self.owner(project,pr,owners)
@@ -584,15 +653,20 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
         open_pages=json.loads(self.gh(project,['api',f"repos/{project['repository']}/pulls?state=open&per_page=100",'--paginate','--slurp']))
         open_branches={pr['head']['ref'] for page in open_pages for pr in page}
         for source in (pr for page in pages for pr in page):
-            if not source.get('merged_at') or (source['head'].get('repo') or {}).get('full_name') != project['repository'] or source['base']['ref'] != project.get('integration_branch','main'): continue
-            owner=next((o for o in owners if o.get('branch') == source['head']['ref']),None)
-            if not owner or owner['status'] not in ('review','done') or source['head']['ref'] in open_branches: continue
-            tip=run(['git','ls-remote','origin',f"refs/heads/{source['head']['ref']}"],cwd=project['root']).split()
-            if tip and tip[0] != source['head']['sha']: continue
-            pr=dict(number=source['number'],headRefOid=source['head']['sha'],headRefName=source['head']['ref'],baseRefName=source['base']['ref'],state='MERGED',mergeCommit={'oid':source['merge_commit_sha']})
-            row=self.store.db.execute('SELECT * FROM integrations WHERE project=? AND pr=?',(project['id'],pr['number'])).fetchone()
-            if row and row['reconciled']: continue
-            self.store.db.execute('INSERT OR IGNORE INTO integrations(project,pr,head,commit_id,reconciled) VALUES(?,?,?,?,0)',(project['id'],pr['number'],pr['headRefOid'],pr['mergeCommit']['oid']))
+            try:
+                if not source.get('merged_at') or (source['head'].get('repo') or {}).get('full_name') != project['repository'] or source['base']['ref'] != project.get('integration_branch','main'): continue
+                owner=next((o for o in owners if o.get('branch') == source['head']['ref']),None)
+                if not owner or owner['status'] not in ('review','done') or source['head']['ref'] in open_branches: continue
+                previous=self.store.db.execute('SELECT reconciled FROM integrations WHERE project=? AND pr=?',(project['id'],source['number'])).fetchone()
+                if previous and previous['reconciled']: continue
+                tip=run(['git','ls-remote','origin',f"refs/heads/{source['head']['ref']}"],cwd=project['root']).split()
+                if tip and tip[0] != source['head']['sha']: continue
+                pr=dict(number=source['number'],headRefOid=source['head']['sha'],headRefName=source['head']['ref'],baseRefName=source['base']['ref'],state='MERGED',mergeCommit={'oid':source['merge_commit_sha']})
+                row=self.store.db.execute('SELECT * FROM integrations WHERE project=? AND pr=?',(project['id'],pr['number'])).fetchone()
+                if row and row['reconciled']: continue
+                self.store.db.execute('INSERT OR IGNORE INTO integrations(project,pr,head,commit_id,reconciled) VALUES(?,?,?,?,0)',(project['id'],pr['number'],pr['headRefOid'],pr['mergeCommit']['oid']))
+            except Exception as error:
+                print(f"{project['id']} PR#{source.get('number', 'unknown')}: merged discovery deferred ({type(error).__name__})", flush=True)
 
     def reconcile(self, project, pr, owner, review):
         run(['git','fetch','origin',pr['baseRefName']],cwd=project['root'])
