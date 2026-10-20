@@ -3,9 +3,9 @@
   "ticket": "SF-069",
   "model": "claude-opus-5-5",
   "runtime_execution": "passed",
-  "date": "2026-10-19",
+  "date": "2026-10-20",
   "command": "make test-lambda SUIFLEET_DEV_IMAGE=suifleet-dev:sf037",
-  "result": "19 manager/function-process tests passed (about 21 s) and 7 real-daemon checks passed; the 18-test suite passed three consecutive times before the contract test was added; the 19 tests also passed as a non-root user with the 2 root-only tests skipped",
+  "result": "19 manager/function-process tests passed (about 21 s) and 7 real-daemon checks passed; the 18-test suite passed three consecutive times before the contract test was added; the 19 tests also passed as a non-root user with the 2 root-only tests skipped; re-run on 2026-10-20 after merging main cbf1f68 (SF-060/SF-081/SF-074/SF-035/SF-059): 19 tests OK and 7 real-daemon checks PASS, and make test-compat passed (524 fixtures, 76 roadmap checks, 15+39 Python tests, translator/validator checks)",
   "environment": "pinned dev image suifleet-dev:sf037 (Ubuntu 22.04, Python 3.10.12, util-linux setpriv 2.37.2); network none, root container creating distinct component UIDs; debug suifleet daemon and gRPC simulator shim built from this branch with cargo --locked",
   "tested": [
     "SF-064 lambda v1 reference vectors computed from the runtime's own version, timeout, admission and routing decisions",
