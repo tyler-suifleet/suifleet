@@ -231,14 +231,14 @@ class ManagedCatalogGateTests(unittest.TestCase):
 
     def test_adapters_link_published_tickets_and_scoped_execution(self):
         # Published scoped implementation tickets (Codex, PR #91 feedback).
-        # Only the executed credential adapter has an owning runtime receipt.
+        # Only executed credential and stream-export adapters have owning runtime receipts.
         self.assertEqual({a["id"]: a["implementation_ticket"] for a in self.catalog["adapters"]}, {
             "credential-provider": "SF-057", "stream-export-aws": "SF-058",
             "cloudwatch-metrics-export": "SF-059", "cloudwatch-logs-export": "SF-060",
             "aws-iot-core-connection": "SF-061", "device-defender-metrics": "SF-062",
             "secure-tunneling": "SF-063"})
         self.assertEqual({a["id"] for a in self.catalog["adapters"] if a["runtime_execution"] == "passed"},
-                         {"credential-provider"})
+                         {"credential-provider", "stream-export-aws"})
         self.assertFalse(self.catalog["parity_claim"])
         for entry in self.catalog["components"] + self.catalog["platform_phases"]:
             self.assertNotIn("approval", entry)
