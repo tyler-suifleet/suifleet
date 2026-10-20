@@ -46,7 +46,7 @@ pub enum Endpoint {
     Pubsub,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Mapping {
     /// Topic filter at the source.
@@ -65,17 +65,17 @@ fn default_keep_alive() -> u16 {
     30
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct BridgeConfig {
     /// `host:port` of the local MQTT broker.
     pub broker: String,
     #[serde(default = "default_client_id")]
     pub client_id: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub username: Option<String>,
     /// File holding the broker password (keep it 0600).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub password_file: Option<PathBuf>,
     #[serde(default = "default_keep_alive")]
     pub keep_alive_seconds: u16,

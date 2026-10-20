@@ -298,6 +298,14 @@ impl Supervisor {
         self.recovery_commands = commands;
     }
 
+    /// Completed recovery receipts whose committed active specs agree. At
+    /// startup no process is running yet; use these only to settle durable
+    /// configuration before bootstrap, never as evidence of current health.
+    pub fn recoveries_for_start(&self) -> BTreeMap<String,String> {
+        self.recovered.iter().filter(|(name,deployment)| self.active.get(*name).is_some_and(|s| &s.deployment == *deployment))
+            .map(|(name,deployment)| (name.clone(),deployment.clone())).collect()
+    }
+
     /// Only confirmed, running previous versions can restore the component journal.
     pub fn restored(&self, name: &str, deployment: &str) -> bool {
         self.active.get(name).is_some_and(|s| s.deployment == deployment)
