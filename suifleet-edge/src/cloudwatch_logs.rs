@@ -563,7 +563,8 @@ pub enum Outcome {
     /// Sent, but no complete answer came back: it may have been accepted.
     ResponseLost,
     /// Any other failure (credentials, authorization, an unexpected answer):
-    /// kept and retried.
+    /// kept and retried; after the restart that a refused credential token
+    /// causes (see [`Uploader::refused`]).
     Failed(String),
 }
 
@@ -1009,6 +1010,17 @@ impl std::fmt::Debug for CredentialSource {
 /// Refresh credentials this long before they expire.
 const REFRESH_MS: i64 = 300_000;
 
+/// Why no credentials were fetched.
+#[derive(Debug)]
+enum CredentialError {
+    /// The endpoint refused the authorization token (401 or 403). An SF-057
+    /// token expires or is revoked for good; only a new start through the
+    /// wrapper obtains another one.
+    Refused(u16),
+    /// Anything else, retried at the next upload.
+    Unavailable(String),
+}
+
 impl CredentialSource {
     pub fn from_env() -> anyhow::Result<CredentialSource> {
         let uri = std::env::var("AWS_CONTAINER_CREDENTIALS_FULL_URI")
@@ -1024,7 +1036,7 @@ impl CredentialSource {
         Ok(CredentialSource { uri, token })
     }
 
-    async fn fetch(&self, http: &reqwest::Client) -> Result<Credentials, String> {
+    async fn fetch(&self, http: &reqwest::Client) -> Result<Credentials, CredentialError> {
         #[derive(Deserialize)]
         #[serde(rename_all = "PascalCase")]
         struct Body {
@@ -1033,15 +1045,21 @@ impl CredentialSource {
             token: String,
             expiration: String,
         }
-        let response = http.get(self.uri.clone()).header("Authorization", &self.token).send().await.map_err(|_| "credential endpoint unreachable".to_owned())?;
-        if !response.status().is_success() {
-            return Err(format!("credential endpoint answered {}", response.status().as_u16()));
+        let unavailable = |reason: &str| CredentialError::Unavailable(reason.to_owned());
+        let response = http.get(self.uri.clone()).header("Authorization", &self.token).send().await.map_err(|_| unavailable("credential endpoint unreachable"))?;
+        match response.status().as_u16() {
+            200..=299 => {}
+            status @ (401 | 403) => return Err(CredentialError::Refused(status)),
+            status => return Err(CredentialError::Unavailable(format!("credential endpoint answered {status}"))),
         }
-        let bytes = response.bytes().await.map_err(|_| "credential response lost".to_owned())?;
-        let body: Body = serde_json::from_slice(&bytes).map_err(|_| "credential response malformed".to_owned())?;
-        let expires_ms = leading_time(&body.expiration).filter(|(_, rest)| rest.is_empty()).map(|(ms, _)| ms).ok_or("credential expiration malformed")?;
+        let bytes = response.bytes().await.map_err(|_| unavailable("credential response lost"))?;
+        let body: Body = serde_json::from_slice(&bytes).map_err(|_| unavailable("credential response malformed"))?;
+        let expires_ms = leading_time(&body.expiration)
+            .filter(|(_, rest)| rest.is_empty())
+            .map(|(ms, _)| ms)
+            .ok_or_else(|| unavailable("credential expiration malformed"))?;
         if body.access_key_id.is_empty() || body.secret_access_key.is_empty() || body.token.is_empty() {
-            return Err("credential response incomplete".into());
+            return Err(unavailable("credential response incomplete"));
         }
         Ok(Credentials { access_key_id: body.access_key_id, secret_access_key: body.secret_access_key, token: body.token, expires_ms })
     }
@@ -1127,6 +1145,8 @@ pub struct Uploader {
     region: String,
     source: CredentialSource,
     cached: Option<Credentials>,
+    /// The status with which the credential endpoint refused the token.
+    refused: Option<u16>,
 }
 
 enum Answer {
@@ -1149,7 +1169,7 @@ impl Uploader {
             None => endpoint.host_str().unwrap_or_default().to_owned(),
         };
         anyhow::ensure!(!host.is_empty(), "endpoint has no host");
-        Ok(Uploader { http, endpoint, host, region: region.to_owned(), source, cached: None })
+        Ok(Uploader { http, endpoint, host, region: region.to_owned(), source, cached: None, refused: None })
     }
 
     async fn credentials(&mut self) -> Result<Credentials, String> {
@@ -1166,8 +1186,23 @@ impl Uploader {
             }
             Ok(_) => Err("credentials already expired".into()),
             // Unexpired cached credentials stay usable while a refresh fails.
-            Err(error) => self.cached.clone().filter(|c| c.expires_ms > now).ok_or(error),
+            Err(error) => {
+                let reason = match error {
+                    CredentialError::Refused(status) => {
+                        self.refused = Some(status);
+                        format!("credential endpoint refused the authorization token ({status})")
+                    }
+                    CredentialError::Unavailable(reason) => reason,
+                };
+                self.cached.clone().filter(|c| c.expires_ms > now).ok_or(reason)
+            }
         }
+    }
+
+    /// Whether the credential endpoint refused the authorization token, with
+    /// its status: no later fetch can succeed until the adapter restarts.
+    pub fn refused(&self) -> Option<u16> {
+        self.refused
     }
 
     async fn call(&mut self, target: &str, body: &serde_json::Value) -> Result<Answer, String> {
@@ -1306,6 +1341,11 @@ pub async fn run(config_path: &Path) -> anyhow::Result<()> {
                     );
                 }
                 Err(error) => warn!(%error, "CloudWatch Logs upload failed"),
+            }
+            // Exit so the service manager starts the adapter again through the
+            // SF-057 wrapper, which obtains a new token. The spool is kept.
+            if let Some(status) = uploader.refused() {
+                anyhow::bail!("the credential endpoint refused the authorization token ({status}): it expired or was revoked; restarting for a new one");
             }
         }
         tokio::select! {

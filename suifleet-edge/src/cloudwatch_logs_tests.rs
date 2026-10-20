@@ -671,8 +671,28 @@ async fn uploads_create_streams_settle_rejections_and_keep_failures() {
     let uploads = exporter.tick(4_000, &mut refused).await.unwrap();
     assert!(matches!(&uploads[0].outcome, Outcome::Failed(reason) if reason.contains("401")), "{:?}", uploads[0].outcome);
     assert_eq!(exporter.spool.len(), 1);
+    assert_eq!((refused.refused(), unreachable.refused()), (Some(401), None), "only a refused token restarts the adapter");
+    // Refused while unexpired credentials are cached (an SF-057 token outlived
+    // by its credentials): they are still used, and the adapter still restarts.
+    let mut near_expiry = uploader.cached.clone().unwrap();
+    near_expiry.expires_ms = crate::telemetry::now_ms() as i64 + REFRESH_MS / 2;
+    let wrong = CredentialSource::new(&emulator.credentials_uri, "expired".into()).unwrap();
+    let mut expired = Uploader::new(reqwest::Url::parse(&emulator.base).unwrap(), "us-east-1", wrong).unwrap();
+    expired.cached = Some(near_expiry);
+    emulator.control("results", json!({"results": ["throttled"]})).await;
+    let uploads = exporter.tick(5_000, &mut expired).await.unwrap();
+    assert_eq!((&uploads[0].outcome, expired.refused()), (&Outcome::Throttled, Some(401)), "sent with the cached credentials");
+    assert_eq!(exporter.spool.len(), 1);
+    // An unreachable credential endpoint is transient: the cached credentials
+    // are used and the adapter keeps running.
+    let down = CredentialSource::new(&format!("http://127.0.0.1:{port}/2016-11-01/credentialprovider/"), "token".into()).unwrap();
+    let mut transient = Uploader::new(reqwest::Url::parse(&emulator.base).unwrap(), "us-east-1", down).unwrap();
+    transient.cached = expired.cached.clone();
+    emulator.control("results", json!({"results": ["throttled"]})).await;
+    let uploads = exporter.tick(6_000, &mut transient).await.unwrap();
+    assert_eq!((&uploads[0].outcome, transient.refused()), (&Outcome::Throttled, None));
     emulator.control("results", json!({"results": ["ok"]})).await;
-    exporter.tick(5_000, &mut uploader).await.unwrap();
+    exporter.tick(7_000, &mut uploader).await.unwrap();
     assert!(exporter.spool.is_empty());
     let observed = emulator.control("state", json!({})).await;
     assert_eq!(observed["violations"], json!([]));
