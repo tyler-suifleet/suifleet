@@ -430,6 +430,7 @@ fn save(root: &Path, state: &State) -> Result<()> {
     }
 }
 struct Runtime {
+    _lock: fs::File,
     cfg: Config,
     token: Handle,
     state: State,
@@ -439,6 +440,17 @@ struct Runtime {
 }
 impl Runtime {
     fn open(cfg: Config) -> Result<Self> {
+        // Root exclusivity is independent of the configured pipe name. Windows
+        // releases this non-shared handle on a crash; deletion is also denied.
+        use std::os::windows::fs::OpenOptionsExt;
+        let lock = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .share_mode(0)
+            .open(cfg.root.join("runtime.lock"))
+            .context("runtime root already in use or inaccessible")?;
         let token = component_token(&cfg)?;
         let mut state: State = match fs::read(cfg.root.join("state.json")) {
             Ok(bytes) => serde_json::from_slice(&bytes)?,
@@ -454,6 +466,7 @@ impl Runtime {
             save(&cfg.root, &state)?;
         }
         let mut runtime = Self {
+            _lock: lock,
             cfg,
             token,
             state,

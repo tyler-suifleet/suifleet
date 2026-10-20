@@ -71,6 +71,15 @@ try {
     Start-Service SuiFleet
     Wait-Until { $s = Status; $null -ne $s } 'SCM service ready'
     $checks.Add('SCM start and authenticated operator status')
+    # A different pipe must not admit a second journal owner for the same root.
+    $duplicateConfig = Get-Content (Join-Path $root 'config.json') | ConvertFrom-Json
+    $duplicateConfig.pipe = $pipe + '-duplicate'
+    $duplicateConfig | ConvertTo-Json | Set-Content -Encoding utf8NoBOM (Join-Path $root 'duplicate.json')
+    $duplicate = Start-Process (Join-Path $root 'suifleet.exe') -ArgumentList @('--console',('"' + (Join-Path $root 'duplicate.json') + '"')) -PassThru -WindowStyle Hidden
+    if (-not $duplicate.WaitForExit(10000)) { Stop-Process -Id $duplicate.Id -Force; throw 'Second runtime admitted for the same root' }
+    Assert-True ($duplicate.ExitCode -ne 0) 'Second root owner unexpectedly succeeded'
+    Assert-True ($null -ne (Status)) 'Root ownership failure disturbed the active service'
+    $checks.Add('exclusive runtime root rejects a second owner with a different IPC pipe')
     $digest = (Get-FileHash (Join-Path $root 'component.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
     $manifest = @{ schema_version=1; name='test.app'; version='1'; platform='windows-x86_64'; sha256=$digest; run=@('run',$root,$pipe); install=@('install'); shutdown=@('shutdown'); timeout_seconds=8; max_restarts=1 }
     Request @{operation='install';manifest=$manifest;artifact=(Join-Path $root 'component.exe')} | Out-Null

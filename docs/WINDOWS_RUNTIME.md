@@ -64,7 +64,9 @@ Stop-Service SuiFleet
 Start-Service SuiFleet
 ```
 
-SCM startup errors fail closed. Stop/shutdown closes component Jobs; abrupt daemon
+SCM startup errors fail closed. A non-shared Windows file handle locks the runtime
+root independently of the pipe name, preventing concurrent journal owners even
+when another configuration selects a different pipe. Stop/shutdown closes component Jobs; abrupt daemon
 termination also closes their non-inheritable handles and kills descendants.
 Persisted desired running state bootstraps on service restart. Process exit zero
 is not interpreted as a healthy OS boot. SCM failure restart policy is operator
