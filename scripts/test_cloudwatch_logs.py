@@ -3,9 +3,10 @@
 (`suifleet --cloudwatch-logs`) against the request-checking local CloudWatch
 Logs emulator (scripts/cloudwatch_logs_emulator.py), without AWS.
 
-  real daemon, supervised svc with      -> with [runtime] log_group_read the logs and
-  confidential overlay value, api key,     retained values are 0640; the adapter uploads
-  levels and a 300 KiB line                svc and System lines in order under the
+  real daemon, supervised svc with      -> an installation first run without, then with
+  confidential overlay value, api key,     [runtime] log_group_read: the existing logs and
+  levels and a 300 KiB line                retained values become 0640; the adapter uploads
+                                           svc and System lines in order under the
                                            LogManager 2.3.14 group/stream names; the
                                            overlay value and api key never reach the spool
                                            or the emulator; DEBUG is filtered; the long
@@ -18,6 +19,9 @@ Logs emulator (scripts/cloudwatch_logs_emulator.py), without AWS.
   small spool while the ingress is down -> oldest events dropped and counted; the journal
                                            stays bounded on disk
   missing credentials / bad config      -> the adapter refuses to start
+With --distinct-uids (root, in a disposable container: make test-cloudwatch-logs-uids)
+only the real-daemon part runs, with the daemon and the adapter under separate
+non-root UIDs and UMask 0077, the adapter reading only through the daemon's group.
 Every request's SigV4 signature, shape and PutLogEvents limits are checked by
 the emulator; the run fails on any violation.
 """
@@ -25,6 +29,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import shutil
 import signal
 import stat
 import subprocess
@@ -41,6 +46,9 @@ from test_ota import CAP, DEVICE, PACKAGE, REGISTRY, TYPE_ORIGINS, UPGRADE_CAP, 
 ROOT = Path(__file__).resolve().parents[1]
 REGION = "eu-west-1"
 THING = "fleet:pi-1"
+# --distinct-uids: the daemon's user/group and the adapter's user (in the daemon's group only).
+DAEMON_UID = 61601
+ADAPTER_UID = 61602
 OVERLAY_VALUE = "Ov3rlayValueQ9-brokerlogin"
 API_KEY = "k3y-abcdef0123"
 LONG = 300_000
@@ -70,19 +78,30 @@ def adapter_config(path, state_dir, spool_dir, endpoint, components, system=True
     return path
 
 
+def as_user(uid, groups=()):
+    """A preexec function dropping to `uid` (its own GID) under UMask 0077, as the documented units."""
+    def drop():
+        os.setgroups(list(groups))
+        os.setgid(uid)
+        os.setuid(uid)
+        os.umask(0o077)
+    return drop
+
+
 class Adapter:
-    def __init__(self, binary, config, emulator, log_path):
+    def __init__(self, binary, config, emulator, log_path, preexec=None):
         self.args = [str(binary), "--cloudwatch-logs", str(config)]
         self.env = {**os.environ, "AWS_CONTAINER_CREDENTIALS_FULL_URI": emulator.credentials_uri,
                     "AWS_CONTAINER_AUTHORIZATION_TOKEN": CREDENTIAL_TOKEN, "RUST_LOG": "suifleet=info"}
         for name in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_PROFILE"):
             self.env.pop(name, None)
         self.log_path = log_path
+        self.preexec = preexec
         self.process = None
 
     def start(self):
         self.log = open(self.log_path, "a")
-        self.process = subprocess.Popen(self.args, env=self.env, stdout=self.log, stderr=self.log)
+        self.process = subprocess.Popen(self.args, env=self.env, stdout=self.log, stderr=self.log, preexec_fn=self.preexec)
         return self
 
     def stop(self, sig=signal.SIGTERM):
@@ -117,8 +136,10 @@ def mode(path):
     return stat.S_IMODE(os.stat(path).st_mode)
 
 
-def daemon_part(binary, emulator, root):
-    """The real daemon writes the logs; the adapter exports them."""
+def daemon_part(binary, emulator, root, distinct_uids=False):
+    """The real daemon writes the logs; the adapter exports them. The
+    installation first runs without `log_group_read`, as one configured
+    before it existed, then with it."""
     sim = Simulator()
     sim.allow_reports = True
     sim.fail_execution = False
@@ -160,6 +181,12 @@ def daemon_part(binary, emulator, root):
     daemon = None
     adapter = None
     root.mkdir()
+    if distinct_uids:
+        # The service's state directory (StateDirectoryMode=0750) and a binary both users can run.
+        root.parent.chmod(0o711)
+        shutil.copy(binary, root / "suifleet")
+        binary = root / "suifleet"
+        binary.chmod(0o755)
     try:
         key = root / "device.key"
         key.write_text("07" * 32)
@@ -177,12 +204,23 @@ def daemon_part(binary, emulator, root):
         (root / "deployment.json").write_text(json.dumps(manifest))
         state_dir = root / "state"
         config = root / "config.toml"
-        config.write_text('[sui]\nmanifest_path = "deployment.json"\n'
-            f'[device]\nkeypair_path = {json.dumps(str(key))}\ndevice_object_id = "{DEVICE}"\ndevice_cap_id = "{CAP}"\n'
-            f'[walrus]\naggregator_url = "{url}"\n'
-            '[apply]\ncommand = "/bin/false"\ntimeout_seconds = 5\nallow_recipe_commands = true\n'
-            f'[runtime]\nstate_dir = {json.dumps(str(state_dir))}\npoll_seconds = 1\ncomponent_startup_seconds = 1\nlog_group_read = true\n'
-            f'[components]\nconfiguration_overlay_dir = {json.dumps(str(overlays))}\n')
+
+        def configure(group_read):
+            config.write_text('[sui]\nmanifest_path = "deployment.json"\n'
+                f'[device]\nkeypair_path = {json.dumps(str(key))}\ndevice_object_id = "{DEVICE}"\ndevice_cap_id = "{CAP}"\n'
+                f'[walrus]\naggregator_url = "{url}"\n'
+                '[apply]\ncommand = "/bin/false"\ntimeout_seconds = 5\nallow_recipe_commands = true\n'
+                f'[runtime]\nstate_dir = {json.dumps(str(state_dir))}\npoll_seconds = 1\ncomponent_startup_seconds = 1\n'
+                f'log_group_read = {json.dumps(group_read)}\n'
+                f'[components]\nconfiguration_overlay_dir = {json.dumps(str(overlays))}\n')
+
+        daemon_user = None
+        if distinct_uids:
+            state_dir.mkdir(mode=0o750)
+            for path in [root, *root.rglob("*")]:
+                os.chown(path, DAEMON_UID, DAEMON_UID)
+            root.chmod(0o750)
+            daemon_user = as_user(DAEMON_UID)
 
         def journal():
             try:
@@ -190,24 +228,62 @@ def daemon_part(binary, emulator, root):
             except (OSError, ValueError):
                 return {}
 
+        component_log = state_dir / "supervised/svc/component.log"
+        retained = state_dir / "logs/confidential.json"
+        shared = ((component_log, 0o640), (retained, 0o640), (state_dir / "logs/daemon.log", 0o640),
+                  (state_dir / "supervised/svc", 0o750), (state_dir / "supervised", 0o750), (state_dir / "logs", 0o750))
+
+        def start_daemon(out):
+            return subprocess.Popen([str(binary)], env={**os.environ, "EDGE_CONFIG": str(config)}, stdout=out, stderr=out,
+                                    preexec_fn=daemon_user)
+
+        # First without log_group_read: svc runs, prints everything and its overlay value is retained.
+        configure(False)
+        if distinct_uids:
+            os.chown(config, DAEMON_UID, DAEMON_UID)
         with (root / "daemon.out").open("w") as out:
-            daemon = subprocess.Popen([str(binary)], env={**os.environ, "EDGE_CONFIG": str(config)}, stdout=out, stderr=out)
+            daemon = start_daemon(out)
             wait_for(lambda: journal().get("initialized"), "daemon did not start", daemon)
             sim.add("0x501")
             event = sim.events[-1]["parsedJson"]
             event["component_name"] = "svc"
             sim.recipes[event["recipe_blob_id"]].update(componentName="svc", lifecycle={"run": RUN, "readiness": "test -e ready"})
             wait_for(lambda: journal().get("deployments", {}).get("0x501", {}).get("status") == 1, "svc was not applied", daemon)
+            wait_for(lambda: "tick 49" in component_log.read_text(errors="replace"), "svc did not print", daemon)
+            assert mode(retained) == 0o600 and mode(component_log) == 0o600, (oct(mode(retained)), oct(mode(component_log)))
+            assert OVERLAY_VALUE in retained.read_text(), "the overlay value was retained by the first run"
+            daemon.send_signal(signal.SIGTERM)
+            daemon.wait(timeout=30)
+            daemon = None
+        retained_before = retained.read_bytes()
 
-            component_log = state_dir / "supervised/svc/component.log"
-            for path, expected in ((component_log, 0o640), (state_dir / "logs/confidential.json", 0o640), (state_dir / "logs/daemon.log", 0o640),
-                                   (state_dir / "supervised/svc", 0o750), (state_dir / "supervised", 0o750), (state_dir / "logs", 0o750)):
-                assert mode(path) == expected, f"{path} is {oct(mode(path))}, not {oct(expected)}"
-            print("PASS: [runtime] log_group_read: component and daemon logs and retained values 0640, their directories 0750")
+        # Then with it: an existing installation, nothing new to retain.
+        configure(True)
+        with (root / "daemon.out").open("a") as out:
+            daemon = start_daemon(out)
+            def shared_modes():
+                return {str(path.relative_to(state_dir)): oct(mode(path)) if path.exists() else None for path, _ in shared}
+            expected_modes = {str(path.relative_to(state_dir)): oct(expected) for path, expected in shared}
+            try:
+                wait_for(lambda: shared_modes() == expected_modes, "the existing logs and retained values did not become group-readable", daemon)
+            finally:
+                print(f"modes after enabling log_group_read: {shared_modes()}")
+            assert json.loads(retained.read_bytes()) == json.loads(retained_before), "only the mode changed"
+            print("PASS: [runtime] log_group_read turned on for an existing installation: component and daemon logs and retained "
+                  "values 0640, their directories 0750")
 
             spool = root / "cw-spool"
             cfg = adapter_config(root / "cw.json", state_dir, spool, emulator.url, ["svc"])
-            adapter = Adapter(binary, cfg, emulator, root / "adapter.out").start()
+            adapter_user = None
+            if distinct_uids:
+                # Its own spool, and the daemon's files only through the daemon's group.
+                spool.mkdir(mode=0o700)
+                for path in (spool, cfg):
+                    os.chown(path, ADAPTER_UID, ADAPTER_UID)
+                adapter_user = as_user(ADAPTER_UID, groups=[DAEMON_UID])
+                denied = subprocess.run(["cat", str(key)], preexec_fn=adapter_user, capture_output=True)
+                assert denied.returncode != 0, "the adapter's user must not read the device key"
+            adapter = Adapter(binary, cfg, emulator, root / "adapter.out", preexec=adapter_user).start()
             wait_for(lambda: "tick 49" in messages(emulator, "svc"), "svc lines did not arrive", adapter.process, timeout=60)
             wait_for(lambda: messages(emulator, "System", "GreengrassSystemComponent"), "daemon lines did not arrive", adapter.process, timeout=30)
             svc = messages(emulator, "svc")
@@ -227,6 +303,9 @@ def daemon_part(binary, emulator, root):
                 assert all(secret not in m for m in events), f"{secret[:6]}… reached a spooled event"
             assert mode(spool) == 0o700 and mode(spool / "spool.journal") == 0o600
             check_clean(emulator)
+            if distinct_uids:
+                print(f"PASS: daemon UID {DAEMON_UID} and adapter UID {ADAPTER_UID} (supplementary group {DAEMON_UID} only, "
+                      "UMask 0077): the adapter read the logs and retained values and was denied the device key")
             print(f"PASS: real daemon: {len(svc)} svc and {len(system)} System events in CloudWatch order under "
                   f"{group('svc')} and stream /{today}/thing/fleet+pi-1; overlay value and api key redacted before the spool; "
                   "DEBUG filtered; a 300,000-byte line split into 262,118 + 37,882 bytes")
@@ -369,12 +448,18 @@ def file_part(binary, emulator, root):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--binary", type=Path, default=ROOT / "suifleet-edge/target/debug/suifleet")
-    binary = parser.parse_args().binary.resolve()
+    parser.add_argument("--distinct-uids", action="store_true", help="root only: the daemon and adapter under separate UIDs")
+    args = parser.parse_args()
+    binary = args.binary.resolve()
+    if args.distinct_uids:
+        assert os.geteuid() == 0, "run in a disposable root container (make test-cloudwatch-logs-uids)"
     emulator = Emulator()
     emulator.start()
     try:
         with tempfile.TemporaryDirectory(prefix="suifleet-cwlogs-") as temporary:
-            daemon_part(binary, emulator, Path(temporary) / "daemon")
+            daemon_part(binary, emulator, Path(temporary) / "daemon", args.distinct_uids)
+        if args.distinct_uids:
+            return
         emulator.reset()
         with tempfile.TemporaryDirectory(prefix="suifleet-cwlogs-") as temporary:
             file_part(binary, emulator, Path(temporary))

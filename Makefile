@@ -409,6 +409,17 @@ else
 	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" python3 scripts/test_ipc.py
 endif
 
+# CloudWatch Logs (SF-060) with the daemon and the adapter under separate UIDs;
+# root only inside a disposable, network-isolated container.
+.PHONY: test-cloudwatch-logs-uids
+test-cloudwatch-logs-uids:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+ifdef INSIDE_DEV_CONTAINER
+	python3 scripts/test_cloudwatch_logs.py --distinct-uids
+else
+	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" python3 scripts/test_cloudwatch_logs.py --distinct-uids
+endif
+
 # SF-057: online public SDK preparation, then network-none actual adapter/mTLS tests.
 .PHONY: test-aws-credentials
 test-aws-credentials:
