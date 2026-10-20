@@ -1,0 +1,18 @@
+{
+  "license": "CC0-1.0",
+  "source": "Generated locally from FFmpeg lavfi testsrc2; no third-party media.",
+  "generator": "FFmpeg 4.4.2-0ubuntu0.22.04.1, libx264, baseline, 32x32, 5 fps, 2 seconds, keyint=5:min-keyint=5:scenecut=0:aud=1",
+  "sha256": "3c1c40c51e2f65e4e1a5621941521a27539ccdf6346238486c46990cb4ec219b",
+  "decoded_frame_md5": [
+    "8d99d0f56f80f186115337c0ed636395",
+    "cdbc37f38b73c080d5e19b6b11e2c09a",
+    "73ba9d427a14641aa06864d84c79d91c",
+    "7305f68ee87d860459f9b88f5b621344",
+    "ce4897de840f683f31cadc3ebdbe905a",
+    "d4c5ceaac937af94b8f5587b4ca3ffb6",
+    "4897a0087c371a8c0cc0ae16cf8d1f50",
+    "c9e7cdd564fceed143f85509e3d56aa9",
+    "de798eb564240da44a193634de547d30",
+    "c03cbc2bb3a3efeb0cf16a456956db55"
+  ]
+}

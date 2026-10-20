@@ -379,9 +379,18 @@ def _valid_version(value) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 1
 
 
-def _has_null_in_array(value) -> bool:
+def _contains_null(value) -> bool:
     if isinstance(value, list):
-        return any(v is None or _has_null_in_array(v) for v in value)
+        return any(_contains_null(v) for v in value)
+    if isinstance(value, dict):
+        return any(_contains_null(v) for v in value.values())
+    return value is None
+
+
+def _has_null_in_array(value) -> bool:
+    """A null anywhere under an array, including in objects nested in it."""
+    if isinstance(value, list):
+        return any(_contains_null(v) for v in value)
     if isinstance(value, dict):
         return any(_has_null_in_array(v) for v in value.values())
     return False
@@ -494,6 +503,7 @@ class ShadowStore:
 # Durable streams (proposed SuiFleet semantics, modelled on AWS Stream Manager).
 # ---------------------------------------------------------------------------
 STREAM_NAME = re.compile(r"^[A-Za-z0-9 ,._-]{1,255}$")
+STREAM_MESSAGE_OVERHEAD = 64  # charged per message against max_size (header and index entry)
 
 
 class StreamStore:
@@ -525,15 +535,16 @@ class StreamStore:
         messages = stream["messages"]
         if kind == "append":
             size = op["size"]
-            if size > stream["max_size"] or size < 1:
+            cost = size + STREAM_MESSAGE_OVERHEAD
+            if cost > stream["max_size"] or size < 1:
                 return {"error": "invalid"}
-            while sum(m[1] for m in messages) + size > stream["max_size"]:
+            while sum(m[1] for m in messages) + cost > stream["max_size"]:
                 if stream["strategy"] == "RejectNewData":
                     return {"error": "full"}
                 messages.pop(0)
                 stream["oldest"] = messages[0][0] if messages else stream["next"]
             sequence = stream["next"]
-            messages.append((sequence, size))
+            messages.append((sequence, cost))
             stream["next"] += 1
             if len(messages) == 1:
                 stream["oldest"] = sequence

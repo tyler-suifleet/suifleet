@@ -47,14 +47,13 @@ import signal
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 import uuid
 from urllib.parse import urlparse
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
 
 import deployment_manifest as dm
+import live_common
 import sui_toolchain as toolchain
 import test_component as component
 from testnet_budget import Budget, Spent
@@ -257,22 +256,10 @@ def run(args):
         evidence["checks"].append(label)
         print("PASS:", label)
 
-    blobs = {}
-
-    class Walrus(BaseHTTPRequestHandler):
-        def log_message(self, *a):
-            pass
-
-        def do_GET(self):
-            body = blobs.get(self.path.removeprefix("/v1/blobs/"))
-            self.send_response(200 if body is not None else 404)
-            self.send_header("Content-Length", str(len(body or b"")))
-            self.end_headers()
-            self.wfile.write(body or b"")
-
-    walrus = ThreadingHTTPServer(("127.0.0.1", 0), Walrus)
-    threading.Thread(target=walrus.serve_forever, daemon=True).start()
-    aggregator = f"http://127.0.0.1:{walrus.server_port}"
+    # Recipe and artifact storage: a local stand-in (default) or real Walrus testnet.
+    walrus = live_common.Walrus(args.walrus)
+    aggregator = walrus.aggregator
+    evidence["walrus"] = walrus.mode
     process = None
     cleanup = []
     cleanup_package = None
@@ -366,7 +353,7 @@ def run(args):
             # 3. Manifest over gRPC.
             manifest = dm.resolve(SimpleNamespace(chain_identifier=chain, rpc=rpc_url, package=new, upgrade_cap=upgrade_cap,
                                                   registry=registry, network=args.network,
-                                                  publisher=aggregator, aggregator=aggregator))
+                                                  publisher=walrus.publisher, aggregator=aggregator))
             evidence.update(base_package=old, head_package=new, registry=registry, upgrade_cap=upgrade_cap,
                             fixture=key_name, type_origins=manifest["type_origins"])
             check(f"head package {new} (package version {manifest['package_version']}); manifest verified over gRPC")
@@ -387,17 +374,10 @@ def run(args):
             run_id = "live-" + uuid.uuid4().hex[:10]
 
             def call(package, version, *, groups=(), devices=(), fail="none"):
-                """PTB arguments creating one verified deployment, with its blobs served."""
-                artifact = component.build(version, run_id, fail)
-                tag = version.replace(".", "-")
-                artifact_blob, recipe_blob = f"artifact-{tag}", f"recipe-{tag}"
-                recipe = component.recipe(artifact, artifact_blob)
-                blobs[artifact_blob], blobs[recipe_blob] = artifact, recipe
-                ids = lambda values: "[" + ", ".join(f"@{v}" for v in values) + "]"
+                """PTB arguments creating one verified deployment, its recipe and artifact stored in Walrus."""
                 return ["--move-call", f"{package}::deployment_manager::create_deployment_verified",
-                        f'"{component.DEFAULT_COMPONENT}"', f'"{version}"', f'"{recipe_blob}"',
-                        f'"{hashlib.sha256(artifact).hexdigest()}"', f'"{hashlib.sha256(recipe).hexdigest()}"',
-                        f"vector{ids(groups)}", f"vector{ids(devices)}", CLOCK]
+                        *live_common.deployment_args(walrus, version, run_id, fail=fail),
+                        live_common.ids(groups), live_common.ids(devices), CLOCK]
 
             def receipts(deployment):
                 """Authoritative statuses read with the Sui CLI, independent of the daemon."""
@@ -439,7 +419,8 @@ def run(args):
             settled(via_group, 1)
             check("head-package deployment to the pre-upgrade group: applied via report_status_for_group")
             settled(via_old, 1)
-            check("deployment created through the OLD package's entry point: applied and receipted (mixed versions)")
+            check("deployment created through the OLD package's entry point: applied and receipted (mixed versions)" if old != new
+                  else "deployment through the base package (no upgrade in this run): applied and receipted")
             settled(failed, 2)
             check("injected health failure reported Failed on chain")
             assert sorted(history()) == ["1.0.0", "2.0.0", "3.0.0", "4.0.0"], history()
@@ -474,7 +455,7 @@ def run(args):
                 transaction("bounded abort cleanup", *deletes)
             except Exception as error:
                 evidence['cleanup_error'] = str(error)
-        walrus.shutdown()
+        walrus.close()
         try:
             end = balance()
         except Exception:
@@ -501,6 +482,8 @@ if __name__ == "__main__":
     parser.add_argument("--network-sui", default=os.environ.get("SUIFLEET_NETWORK_SUI", toolchain.NETWORK_DEFAULT),
                         help="pinned transaction CLI (Dockerfile SUI_NETWORK_VERSION)")
     parser.add_argument("--fresh", action="store_true", help="ignore the cache and publish a new fixture")
+    parser.add_argument("--walrus", default="local", choices=["local", "testnet"],
+                        help="recipe/artifact storage: a local stand-in (default) or real Walrus testnet")
     args = parser.parse_args()
     try:
         run(args)

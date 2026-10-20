@@ -497,9 +497,10 @@ mod tests {
             assert_eq!(elf_abi(path).unwrap(), None);
             assert!(same_abi(path, &i686).is_ok());
         }
-        // This test binary is ELF itself, with its own ABI.
+        // This test binary is ELF itself, with its own ABI; on macOS it is
+        // Mach-O, which is not ELF and is left to the preflight.
         let me = std::env::current_exe().unwrap();
-        assert!(elf_abi(&me).unwrap().is_some());
+        assert_eq!(elf_abi(&me).unwrap().is_some(), !cfg!(target_os = "macos"));
         assert!(same_abi(&me, &me).is_ok());
         let _ = std::fs::remove_dir_all(&d);
     }

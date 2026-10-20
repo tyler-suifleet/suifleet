@@ -11,6 +11,61 @@ pub fn load(path: &Path) -> anyhow::Result<SigningKey> {
     Ok(SigningKey::from_bytes(&key))
 }
 
+/// Refuse a key file anyone but its owner, the daemon user, can reach. On
+/// macOS (SF-075) no service unit or provisioning script guards it at start.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn ensure_private(path: &Path) -> anyhow::Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = std::fs::symlink_metadata(path)?;
+    anyhow::ensure!(metadata.is_file(), "{} is not a regular file", path.display());
+    anyhow::ensure!(
+        metadata.mode() & 0o077 == 0,
+        "{} is accessible to its group or others; make it 0600",
+        path.display()
+    );
+    // SAFETY: plain geteuid.
+    anyhow::ensure!(metadata.uid() == unsafe { libc::geteuid() }, "{} is not owned by the daemon user", path.display());
+    #[cfg(target_os = "macos")]
+    anyhow::ensure!(
+        !has_extended_acl(path)?,
+        "{} has an access control list, which can grant other users access whatever its mode; remove it with chmod -N",
+        path.display()
+    );
+    Ok(())
+}
+
+/// Whether a file (not followed if a symlink) carries any extended ACL entry.
+/// macOS evaluates ACL entries before the mode bits, so an allow entry can
+/// grant another user a 0600 file. Any entry is refused, deny entries too:
+/// the key needs none.
+#[cfg(target_os = "macos")]
+fn has_extended_acl(path: &Path) -> anyhow::Result<bool> {
+    use std::{ffi::CString, os::unix::ffi::OsStrExt};
+    // <sys/acl.h>, in libSystem.
+    const ACL_TYPE_EXTENDED: libc::c_int = 0x0000_0100;
+    const ACL_FIRST_ENTRY: libc::c_int = 0;
+    extern "C" {
+        fn acl_get_link_np(path: *const libc::c_char, kind: libc::c_int) -> *mut libc::c_void;
+        fn acl_get_entry(acl: *mut libc::c_void, entry_id: libc::c_int, entry: *mut *mut libc::c_void) -> libc::c_int;
+        fn acl_free(object: *mut libc::c_void) -> libc::c_int;
+    }
+    let c_path = CString::new(path.as_os_str().as_bytes())?;
+    // SAFETY: a NUL-terminated path; the returned ACL is freed below.
+    let acl = unsafe { acl_get_link_np(c_path.as_ptr(), ACL_TYPE_EXTENDED) };
+    if acl.is_null() {
+        let error = std::io::Error::last_os_error();
+        // ENOENT: the file exists (checked above) but has no extended ACL.
+        anyhow::ensure!(error.raw_os_error() == Some(libc::ENOENT), "cannot read the ACL of {}: {error}", path.display());
+        return Ok(false);
+    }
+    let mut entry = std::ptr::null_mut();
+    // SAFETY: a valid ACL from acl_get_link_np and an out pointer it fills.
+    let found = unsafe { acl_get_entry(acl, ACL_FIRST_ENTRY, &mut entry) } == 0;
+    // SAFETY: freed once; the entry pointer is not used afterwards.
+    unsafe { acl_free(acl) };
+    Ok(found)
+}
+
 pub fn hash(bytes: &[u8]) -> Vec<u8> {
     Blake2b::<U32>::digest(bytes).to_vec()
 }
@@ -288,6 +343,48 @@ fn publish_key(
 mod tests {
     use super::*;
     use ed25519_dalek::{Signature, Verifier};
+
+    #[test]
+    fn only_a_private_key_file_of_the_daemon_user_is_accepted() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!("suifleet-private-{}", rand::random::<u128>()));
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("device.key");
+        provision(&path).unwrap();
+        ensure_private(&path).unwrap();
+        for mode in [0o640, 0o604, 0o660] {
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
+            assert!(ensure_private(&path).is_err(), "{mode:o}");
+        }
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let link = root.join("link.key");
+        std::os::unix::fs::symlink(&path, &link).unwrap();
+        assert!(ensure_private(&link).is_err(), "a symlink was followed");
+        assert!(ensure_private(&root.join("missing.key")).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_key_with_an_access_control_list_is_refused_despite_mode_0600() {
+        let root = std::env::temp_dir().join(format!("suifleet-acl-{}", rand::random::<u128>()));
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("device.key");
+        provision(&path).unwrap();
+        ensure_private(&path).unwrap();
+        for ace in ["user:nobody allow read", "everyone deny write"] {
+            let chmod = |args: &[&str]| {
+                let status = std::process::Command::new("/bin/chmod").args(args).arg(&path).status().unwrap();
+                assert!(status.success(), "chmod {args:?}");
+            };
+            chmod(&["+a", ace]);
+            let error = ensure_private(&path).unwrap_err().to_string();
+            assert!(error.contains("access control list"), "{ace}: {error}");
+            chmod(&["-N"]);
+            ensure_private(&path).unwrap();
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn interrupted_key_write_leaves_no_published_key_and_can_retry() {

@@ -31,6 +31,12 @@ platform ticket must declare exact supported OS/ABI versions and exercise its ow
 runner; a Linux x86_64 result cannot establish another platform's support.
 Platform scripts retain OS installation, reboot and firmware recovery ownership.
 
+SF-072 now provides a [native H.264/Matroska media adapter](KINESIS_VIDEO.md) with
+[local runtime evidence](validation/sf072-video.json). Its protocol-specific
+configuration and media contract supplement the reference delivery model below.
+Full AWS connector control-plane compatibility and live AWS acceptance remain
+roadmap/unrun; local execution does not establish whole-catalog parity.
+
 ## Executable functional contracts, version 1
 
 [remaining-roadmap-cases.json](../interfaces/compat/remaining-roadmap-cases.json)
@@ -91,6 +97,10 @@ expectations. No AWS upstream behavior is newly asserted by these local contract
 
 ## Evidence and closure
 
+SF-077 adds the [native Firehose exporter](FIREHOSE.md), with actual SDK HTTP
+emulator and durable daemon stream evidence. The pure reference fields below
+remain specification-only; live AWS and physical target acceptance are unrun.
+
 SF-076 adds the [32-bit Linux x86 runtime](LINUX_X86.md): an i686 build and
 release bundle, `x86` catalog selection and the real-daemon suites run in a
 32-bit userland. Its receipt is separate evidence; the reference vectors below
@@ -100,6 +110,13 @@ SF-073 adds [native reproducible ML components](ML_COMPONENTS.md), with original
 models and actual TensorFlow Lite software-runner inference tests. This separate
 implementation evidence does not turn the AWS-named catalog or the reference
 evaluator below into an AWS-compatible runtime.
+
+SF-075 adds a [native macOS runtime](MACOS_RUNTIME.md): a LaunchDaemon whose
+launchd coalition contains component descendants, peer-UID IPC, private key
+checks and the catalog OS `macos`, exercised by real launchd service, crash,
+interrupted-install and permission tests on a hosted macOS runner. It is not
+Greengrass platform compatibility, and the `macos` scope below stays a reference
+model.
 
 Run `make test-compat`. It checks the existing catalog and reference suites plus
 76 remaining-roadmap vectors and negative ownership/publication/evidence guards.

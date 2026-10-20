@@ -75,6 +75,76 @@ class Client:
     def receive(self, topic):
         return self.request('receive', topic=topic)
 
+    def subscribe(self, topic_filter, qos=1):
+        """Durable subscription (MQTT filter); QoS 1 messages wait for ack."""
+        return self.request('subscribe', topic=topic_filter, payload={'qos': qos})
+
+    def unsubscribe(self, topic_filter):
+        return self.request('unsubscribe', topic=topic_filter)
+
+    def ack(self, topic_filter, message_id):
+        return self.request('ack', topic=topic_filter, payload=message_id)
+
+    def messaging(self):
+        """Administrator only: subscription and bridge counters."""
+        return self.request('messaging')
+
+    # Durable streams (SF-034). Errors carry protocol codes such as 'full',
+    # 'evicted', 'not-enough-messages', 'not-found', 'exists', 'quota', 'unavailable'.
+    def stream_create(self, name, max_size, strategy_on_full='RejectNewData', persistence='File',
+                      time_to_live_seconds=None):
+        definition = dict(max_size=max_size, strategy_on_full=strategy_on_full, persistence=persistence)
+        if time_to_live_seconds is not None:
+            definition['time_to_live_seconds'] = time_to_live_seconds
+        return self.request('stream_create', topic=name, payload=definition)
+
+    def stream_append(self, name, value):
+        return self.request('stream_append', topic=name, payload=value)['sequence']
+
+    def stream_read(self, name, start=0, min_messages=1, max_messages=1):
+        return self.request('stream_read', topic=name,
+                            payload=dict(start=start, min=min_messages, max=max_messages))['messages']
+
+    def stream_describe(self, name):
+        return self.request('stream_describe', topic=name)
+
+    def stream_export_ack(self, name, sequence):
+        """Trusted operator exporter only; acknowledge confirmed remote delivery."""
+        return self.request('stream_export_ack', topic=name, payload=dict(sequence=sequence))
+
+    def stream_delete(self, name):
+        return self.request('stream_delete', topic=name)
+
+    def stream_list(self):
+        return self.request('stream_list')['streams']
+
+    # Device shadows (SF-033). Errors carry protocol codes such as 'not-found',
+    # 'conflict', 'invalid', 'too-large', 'quota', 'unavailable'. '' is the
+    # classic shadow.
+    def shadow_get(self, name=''):
+        return self.request('shadow_get', topic=name)
+
+    def shadow_update(self, name, state, version=None, client_token=None):
+        """state is {'desired': {...}, 'reported': {...}}; null deletes a key."""
+        request = dict(state=state)
+        if version is not None:
+            request['version'] = version
+        if client_token is not None:
+            request['clientToken'] = client_token
+        return self.request('shadow_update', topic=name, payload=request)
+
+    def shadow_delete(self, name='', version=None):
+        return self.request('shadow_delete', topic=name,
+                            payload=None if version is None else dict(version=version))
+
+    def shadow_list(self):
+        """Named shadows the caller may list (not the classic shadow)."""
+        return self.request('shadow_list')['shadows']
+
+    def shadows(self):
+        """Administrator only: versions, sync status and notification counters."""
+        return self.request('shadows')
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -82,7 +152,13 @@ def main():
     parser.add_argument('--component', default='')
     parser.add_argument('operation', choices=['install', 'list', 'start', 'stop',
                                             'restart', 'status', 'logs', 'config',
-                                            'health', 'publish', 'receive'])
+                                            'health', 'publish', 'receive',
+                                            'subscribe', 'unsubscribe', 'ack',
+                                            'messaging', 'stream_create',
+                                            'stream_delete', 'stream_append', 'stream_read',
+                                            'stream_describe', 'stream_list',
+                                            'shadow_get', 'shadow_update', 'shadow_delete',
+                                            'shadow_list', 'shadows'])
     parser.add_argument('--topic', default='')
     parser.add_argument('--payload', help='JSON value; install takes a quoted deployment ID')
     args = parser.parse_args()
