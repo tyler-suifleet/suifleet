@@ -1,6 +1,6 @@
 {
   "ticket": "SF-061",
-  "head": "32daa0df15a4e417f77ee3c512d740c95b931837",
+  "head": "1865d9c5ca2ef745048649a6e1e0fd46a33a0ecc",
   "broker": "eclipse-mosquitto:2.0.20@sha256:21421af7b32bf9ce508e9090c8eb13bb81f410ca778dc205506180a6f862d0eb",
   "broker_version": "mosquitto version 2.0.20",
   "aws_endpoint": "scripts/aws_iot_harness.py (AWS-shaped, local)",
@@ -13,7 +13,8 @@
     "untrusted endpoint: a server certificate from another CA is refused (TLS handshake with iot.test.local failed: invalid peer certificate: UnknownIssuer)",
     "port 443: ALPN x-amzn-mqtt-ca negotiated by default, client id = thing name, thing certificate accepted; a client without ALPN is refused there",
     "AWS-shaped endpoint: component -> dt/thing1/ and cloud -> component at QoS 1; the policy-denied subscription cmd/forbidden/# gets SUBACK 0x80, is reported, and the other subscriptions work",
-    "policy-denied publication: AWS-style disconnect on each of 3 attempts, then the message is rejected and counted (not retried forever) and the following telemetry is delivered",
+    "policy-denied publication: an AWS-style disconnect (TLS truncated, no close_notify) on each attempt holds the message in the spool and reports it (never discarded); retried until the policy allows it, then delivered with the telemetry queued behind it",
+    "reject_denied_publications = true: after 3 such disconnects the message is rejected and counted, and the following telemetry is delivered",
     "Device Shadow: a local report is pushed; a cloud desired change is pulled within seconds although the poll interval is 3600 s (update/documents notification) and announced as a local delta",
     "outage: offline local and cloud shadow edits reconciled by three-way merge (desired.x -> cloud owner, reported.mode -> device owner, one-sided keys kept on both sides); 3 spooled publications delivered in order and a cloud command queued by the persistent session delivered after reconnect",
     "version race: the device's update is refused with 409 after a concurrent cloud write; it re-reads, merges and stores, keeping both changes",
