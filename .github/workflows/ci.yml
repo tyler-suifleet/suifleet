@@ -74,6 +74,8 @@ jobs:
       - name: Durable AWS stream exporter protocols
         run: make test-stream-export SUIFLEET_DEV_IMAGE=suifleet-dev:ci
 
+      - name: CloudWatch metrics adapter with local emulator
+        run: make test-cloudwatch-metrics SUIFLEET_DEV_IMAGE=suifleet-dev:ci
       - name: Firehose exporter with local SDK emulator and durable daemon streams
         run: make test-firehose SUIFLEET_DEV_IMAGE=suifleet-dev:ci
 
