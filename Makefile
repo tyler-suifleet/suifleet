@@ -427,6 +427,11 @@ endif
 test-aws-credentials:
 	bash scripts/test_aws_credentials.sh
 
+# SF-058: actual durable daemon IPC + unmodified SDK against local AWS API emulators.
+.PHONY: test-stream-export
+test-stream-export:
+	bash scripts/test_stream_export.sh
+
 # SDK wheels are prepared by test-aws-credentials (or the command in FIREHOSE.md).
 # All service/IPC traffic stays in a disposable offline container.
 .PHONY: test-firehose
