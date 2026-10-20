@@ -70,3 +70,23 @@ class ScanIsolation(unittest.TestCase):
                 engine.collect({'id':'test'},[owner])
                 ticket.assert_called_once()
             self.assertEqual(engine.store.db.execute("SELECT count(*) FROM jobs WHERE status='running'").fetchone()[0],2)
+
+    def test_failed_merged_branch_probe_does_not_skip_next_record(self):
+        with tempfile.TemporaryDirectory() as d:
+            engine=self.engine(d)
+            project={'id':'test','repository':'a/b','root':d}
+            sources=[{'number':n,'merged_at':'now','head':{'ref':f'work/{n}','sha':str(n)*40,'repo':{'full_name':'a/b'}},'base':{'ref':'main'},'merge_commit_sha':'c'*40} for n in (1,2)]
+            owners=[{'branch':f'work/{n}','status':'review'} for n in (1,2)]
+            with patch.object(engine,'gh',side_effect=[json.dumps([sources]),'[[]]']),patch.object(c,'run',side_effect=[RuntimeError('transport'),'']):
+                engine.discover_merged(project,owners)
+            self.assertEqual([r[0] for r in engine.store.db.execute('SELECT pr FROM integrations')],[2])
+
+    def test_reconciled_merge_needs_no_network_branch_probe(self):
+        with tempfile.TemporaryDirectory() as d:
+            engine=self.engine(d)
+            project={'id':'test','repository':'a/b','root':d}
+            source={'number':1,'merged_at':'now','head':{'ref':'work/1','sha':'a'*40,'repo':{'full_name':'a/b'}},'base':{'ref':'main'},'merge_commit_sha':'c'*40}
+            engine.store.db.execute("INSERT INTO integrations(project,pr,head,commit_id,reconciled) VALUES('test',1,'head','commit',1)")
+            with patch.object(engine,'gh',side_effect=[json.dumps([[source]]),'[[]]']),patch.object(c,'run') as run:
+                engine.discover_merged(project,[{'branch':'work/1','status':'done'}])
+                run.assert_not_called()
