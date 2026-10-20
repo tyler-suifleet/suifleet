@@ -18,10 +18,11 @@
     "source truncation, exact source retry, codec/version/time/overlap rejection and corrupt stored media"
   ],
   "limits": [
-    "Local independent protocol emulator is not the AWS service. Live AWS region/retention/signing/endpoint interoperability is unrun and unauthorized, tracked in SF-064/#109 and SF-072/#126.",
+    "Local independent protocol emulator is not the AWS service. Live AWS region/retention/signing/endpoint interoperability is unrun and unauthorized; the compatibility boundary is recorded in open SF-037/#36 and SF-072/#126. SF-064/#109 is closed planning history, not an open acceptance owner.",
     "Baseline H.264 single-video-track native media subset; no proprietary EdgeConnectorForKVS control-plane or Greengrass recipe compatibility claim.",
     "Physical Pi/camera/reboot/power-loss checks deferred to SF-031/#32. No image or hardware result claimed.",
     "At-least-once remote delivery; unacknowledged/incomplete source GOPs need source-owned persistence/retry. No exactly-once or lossless camera-capture claim.",
-    "Current-head ordinary CI and automatic Sui testnet status remain required at PR handoff; local results do not stand in for those checks."
+    "Current-head ordinary CI and automatic Sui testnet status remain required at PR handoff; local results do not stand in for those checks.",
+    "Media-byte quota excludes SQLite page/schema/journal overhead; strict filesystem-byte limits require platform filesystem quotas."
   ]
 }

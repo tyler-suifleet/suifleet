@@ -116,11 +116,11 @@ limits are checked before admission. Filesystem durability assumes working
 The configured quota charges media plus 256 bytes per fragment and also caps the
 fragment count. Full storage rejects the API admission; `ingest` blocks source
 reads while retaining one bounded fragment until the independent uploader releases
-space. It never evicts unacknowledged video. SQLite page/schema allocation adds
-bounded overhead (conservatively allow 8 KiB per retained fragment plus 64 KiB);
-rollback transactions can temporarily duplicate main-file pages. Budget filesystem
-space for twice that total, not only the logical media quota. FULL auto-vacuum
-reclaims retired pages. The source, ingester and sender each hold bounded fragment
+space. It never evicts unacknowledged video. SQLite page/schema allocation adds overhead that depends on page size and
+fragment packing; rollback transactions can temporarily duplicate main-file pages.
+The media quota is not a hard filesystem-byte ceiling. Reserve space for those
+allocations and journals, and use platform filesystem quotas if a hard disk ceiling
+is required. FULL auto-vacuum reclaims retired pages. The source, ingester and sender each hold bounded fragment
 buffers; pending timestamps are limited to 1000 per session.
 
 `BUFFERING`, `RECEIVED`, HTTP 200 and connection closure do not retire media.
@@ -164,8 +164,12 @@ SIGKILL/restart. The normal CI workflow includes this suite.
 The [runtime receipt](validation/sf072-video.json) records exact commands/results.
 The SF-064 roadmap models remain specification fixtures, not proof that this code
 executed. Live AWS API/retention/signature/endpoint interoperability requires separate
-user authorization and is retained in [SF-064/#109](https://github.com/tyler-suifleet/suifleet/issues/109)
-and [SF-072/#126](https://github.com/tyler-suifleet/suifleet/issues/126).
+user authorization. The compatibility limit is recorded in existing open
+[SF-037/#36](https://github.com/tyler-suifleet/suifleet/issues/36#issuecomment-6279814529)
+and in this implementation
+[SF-072/#126](https://github.com/tyler-suifleet/suifleet/issues/126).
+SF-064/#109 is a closed planning/history record. This records a future authorization
+requirement, without adding a paid/live AWS gate to SF-037 implementation.
 No AWS accounts/resources, paid services or production credentials were used.
 Physical Pi/camera/network/reboot/power-loss integration remains
 [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32); no image or physical
