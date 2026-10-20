@@ -227,7 +227,7 @@ The runtime receipt is [`docs/validation/sf037-recipe-translation.json`](validat
 | `client-device-cases.json` | 16 authorization requests | Daemon registry and policy engine (passing) | Passed: SF-035 daemon, Mosquitto and two TLS clients ([receipt](validation/sf035-client-devices.json)) |
 | `managed-dependency-cases.json` | 47 managed-dependency classifications | none | Passed: SF-037 translator classification |
 | `credential-provider-cases.json` | 65 steps across 7 sequences | none | Passed: SF-057 local adapter ([receipt](validation/sf057-credentials.json)) |
-| `cloudwatch-metrics-cases.json` | 90 steps across 8 sequences | none | Pending SF-059 |
+| `cloudwatch-metrics-cases.json` | 90 steps across 8 sequences | none | Passed: local adapter/HTTP/SQLite ([receipt](validation/sf059-metrics.json)); AWS delivery pending |
 | `cloudwatch-logs-cases.json` | 69 steps across 8 sequences | none | Pending SF-060 |
 
 `scripts/greengrass_compat.py` contains small **specification reference models**. They make each expected value checkable and keep the fixtures internally consistent. They are not the daemon, a translator or an adapter, and agreement with them proves nothing about runtime conformance. Each owning ticket must execute the same fixture files against its real implementation. That ticket then sets the suite to `passed` with a committed runtime receipt, and only after that may it raise any `aws_*` status. Fixtures may be corrected in review if they contradict AWS behaviour or an approved design. Correct them deliberately; never loosen them to make an implementation pass.
