@@ -88,6 +88,12 @@ jobs:
             -v "$PWD:/workspace" -w /workspace suifleet-dev:ci \
             python3 scripts/test_ipc.py
 
+      - name: Industrial collector into the real daemon's durable stream
+        run: |
+          docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 \
+            -v "$PWD:/workspace" -w /workspace suifleet-dev:ci \
+            python3 scripts/test_industrial_daemon.py .ci-cache/industrial-runtime/site
+
       - name: Deployment service configuration with distinct Unix identities
         run: |
           docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 \
