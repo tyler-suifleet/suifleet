@@ -33,7 +33,9 @@ The service is not a signing oracle. It decodes every request itself, independen
   - It signs a key request only when its transaction is solely `seal_policy::seal_approve*` calls on the fleet package, with the identity first and read-only shared objects, and the response key pair is consistent.
   - The daemon receives the public certificate and the request signature, never the session or device key. See [CONFIDENTIAL_DELIVERY.md](CONFIDENTIAL_DELIVERY.md).
 
-Any process may read the device's public address. There is no export, arbitrary-bytes or arbitrary personal-message operation; the only personal messages signed are telemetry snapshots and the Seal session certificate above.
+- **Client-device CA binding** (SF-035, [CLIENT_DEVICES.md](CLIENT_DEVICES.md#discovery)): a Sui personal message that is exactly the canonical JSON `{schema: 1, kind: "client-device-ca", ...}` naming the manifest's chain and registry, this key as signer, a device ID and a SHA-256 CA fingerprint; at most 1 KiB. Signed only for the daemon's main process, by the same rule as telemetry. A compromised daemon could bind its own device to another CA, as it already controls that device's gateway, but cannot sign for another chain, registry or key.
+
+Any process may read the device's public address. There is no export, arbitrary-bytes or arbitrary personal-message operation; the only personal messages signed are telemetry snapshots, client-device CA bindings and the Seal session certificate above.
 
 ## Migration
 

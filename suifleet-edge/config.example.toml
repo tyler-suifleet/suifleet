@@ -120,6 +120,20 @@ replay_history = false
 # target = "LocalMqtt"
 # target_topic_prefix = "device1/"
 
+# LAN client devices: a local CA, mutual TLS and an authorizing MQTT proxy in
+# front of a loopback-only broker (SF-035; docs/CLIENT_DEVICES.md). Needs [ipc]
+# administrators, who enroll things from CSRs with the client_devices operation.
+# [client_devices]
+# device_groups_file = "client-device-groups.json"   # AWS deviceGroups JSON
+# broker = "127.0.0.1:1883"
+# broker_username = "gateway"
+# broker_password_file = "/etc/suifleet/gateway-mqtt-password"
+# mqtt_listen = "0.0.0.0:8883"
+# https_listen = "0.0.0.0:8443"
+# udp_discovery = "0.0.0.0:8442"
+# certificate_validity_seconds = 604800
+# rotation_grace_seconds = 300
+
 # Redacted remote logs to the fleet indexer (needs [telemetry]; docs/LOGS.md).
 # [logs]
 # interval_seconds = 60

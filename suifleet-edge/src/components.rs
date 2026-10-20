@@ -463,6 +463,7 @@ impl<'a> Loader<'a> {
         let authentic = recipe(self.walrus, self.store, &value.recipe_blob_ids[i], &value.recipe_sha256s[i]).await?;
         self.confidential |= authentic.confidential;
         let (dependencies, supervised) = authentic.check("validation", |recipe| {
+            anyhow::ensure!(recipe.services.is_none(), "dependency recipes cannot own deployment services; declare them in the authenticated root recipe");
             let dependencies = recipe.validate_component(name, version, &value.artifact_sha256s[i], self.allow_commands)?;
             Ok((dependencies, crate::supervisor::Lifecycle::of(&recipe.lifecycle)?))
         })?;

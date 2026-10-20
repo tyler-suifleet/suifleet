@@ -9,7 +9,7 @@ pub const SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS: &[u64] = &[1, 2, 3];
 pub const CATALOG_TYPES: &[&str] = &["component_catalog::ComponentCatalog", "component_catalog::ComponentVersion", "component_catalog::CatalogCreated", "component_catalog::VersionPublished", "component_catalog::CatalogBindingKey", "component_catalog::CatalogBinding"];
 pub const SEAL_POLICY_TYPES: &[&str] = &["seal_policy::AccessPolicy", "seal_policy::AccessAdminCap", "seal_policy::PolicyCreated", "seal_policy::AccessChanged", "seal_policy::KeyEpochRotated", "seal_policy::PolicyMigrated"];
 pub const RECIPE_VERSION: &str = "1.0";
-pub const RECIPE_VERSIONS: &[&str] = &["1.0", "1.1", "1.2"];
+pub const RECIPE_VERSIONS: &[&str] = &["1.0", "1.1", "1.2", "1.3"];
 pub const STATUS_APPLIED: u8 = 1;
 pub const STATUS_FAILED: u8 = 2;
 pub const REQUIRED_TYPES: &[&str] = &["device_registry::DeviceRegistry", "device_registry::Device", "device_group::DeviceGroup", "device_group::GroupCreated", "device_cap::DeviceCap", "device_cap::DeviceAddressKey", "deployment_manager::DeploymentRecord", "deployment_manager::DeploymentCreated", "deployment_manager::DeviceStatusUpdated", "deployment_manager::TargetGroupsKey", "deployment_manager::TargetDevicesKey", "deployment_manager::StatusesKey", "deployment_manager::RecipeDigestKey", "deployment_manager::ReceiptsKey", "deployment_manager::Receipts", "deployment_manager::DeviceStatusReported", "device_registry::IdentityKey", "device_registry::Identity", "device_registry::DeviceIdentityChanged", "device_registry::CustodyKey", "device_registry::DeviceOwnerCap", "deployment_manager::DelegateKey", "enrollment::EnrollmentPolicy", "enrollment::DeviceEnrolled", "roles::DeployerRole", "roles::RoleKey", "roles::RoleGranted", "device_group::DeviceAddedToGroup", "deployment_manager::ManagedKey", "desired_state::DesiredKey", "desired_state::DesiredState", "desired_state::DesiredStateChanged", "deployment_manager::ControlKey", "deployment_manager::Control", "deployment_manager::RolloutKey", "deployment_manager::Rollout", "deployment_manager::RolloutPolicy", "deployment_manager::RolloutDecision"];
@@ -692,6 +692,9 @@ pub struct Recipe {
     #[serde(rename = "componentDependencies")]
     #[serde(default, deserialize_with = "present")]
     pub component_dependencies: Option<std::collections::BTreeMap<String, ComponentDependency>>,
+    #[serde(rename = "services")]
+    #[serde(default, deserialize_with = "present")]
+    pub services: Option<crate::services::Services>,
 }
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]

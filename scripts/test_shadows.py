@@ -137,6 +137,12 @@ def run(evidence=None):
     with tempfile.TemporaryDirectory(prefix="sf033-") as temporary:
         root = Path(temporary)
         root.chmod(0o755)
+        # The checkout may be private (0700). Give foreign IPC UIDs a
+        # readable copy of the actual SDK without changing checkout modes.
+        sdk = root / "sdk"
+        sdk.mkdir(mode=0o755)
+        (sdk / "suifleet_ipc.py").write_bytes((ROOT / "sdk/python/suifleet_ipc.py").read_bytes())
+        (sdk / "suifleet_ipc.py").chmod(0o644)
         key = root / "device.key"
         key.write_text("07" * 32)
         key.chmod(0o600)
@@ -203,7 +209,7 @@ def run(evidence=None):
                     "try: print(json.dumps({'ok': True, 'data': Client(sys.argv[2], component=sys.argv[3]).request(sys.argv[4], topic=sys.argv[5], payload=json.loads(sys.argv[6]))}))\n"
                     "except IpcError as e: print(json.dumps({'ok': False, 'error': str(e)}))")
             out = subprocess.run([sys.executable, "-c", code, str(uid), str(socket_path), component, operation, topic, json.dumps(payload),
-                                  str(ROOT / "sdk/python")], text=True, capture_output=True)
+                                  str(sdk)], text=True, capture_output=True)
             assert out.returncode == 0, out.stderr
             return json.loads(out.stdout)
 

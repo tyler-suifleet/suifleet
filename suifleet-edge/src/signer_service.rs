@@ -15,7 +15,9 @@
 //! - telemetry (SF-019): a personal message that is exactly one canonical,
 //!   bounded telemetry snapshot of the manifest's chain and registry, signed
 //!   by this key; only from the daemon's main process, like status reports.
-//!   A personal-message signature is never valid as a transaction.
+//!   A personal-message signature is never valid as a transaction. Log
+//!   batches, stream-export manifests and the client-device CA binding are
+//!   checked the same way (canonical, this chain, registry and key).
 //!
 //! Any process may ask for the device's public address. Everything else is
 //! refused. Component processes run as the daemon user and may reach the
@@ -268,13 +270,16 @@ pub fn check_logs(policy: &Policy, message: &[u8]) -> anyhow::Result<()> {
 }
 
 /// A personal message the service signs: a telemetry snapshot, a log batch,
-/// a stream export manifest or a shadow sync manifest.
+/// a stream export manifest, a shadow sync manifest or a client-device CA
+/// binding (SF-035).
 pub fn check_personal(policy: &Policy, message: &[u8]) -> anyhow::Result<()> {
     let kind = serde_json::from_slice::<serde_json::Value>(message).ok().and_then(|v| v.get("kind").and_then(|k| k.as_str()).map(str::to_owned));
     match kind.as_deref() {
         Some(crate::logs::KIND) => check_logs(policy, message),
         Some(crate::streams::MANIFEST_KIND) => crate::streams::check_manifest(message, &policy.chain_identifier, &policy.registry.to_string(), &policy.device.to_string()),
         Some(crate::shadows::MANIFEST_KIND) => crate::shadows::check_manifest(message, &policy.chain_identifier, &policy.registry.to_string(), &policy.device.to_string()),
+        Some(crate::clientdevices::CA_BINDING_KIND) => crate::clientdevices::check_ca_binding(message, &policy.chain_identifier,
+            &policy.registry.to_string(), &policy.device.to_string()),
         _ => check_telemetry(policy, message),
     }
 }
@@ -830,6 +835,19 @@ mod tests {
         };
         edit(&mut batch);
         serde_json::to_vec(&batch).unwrap()
+    }
+
+    #[test]
+    fn signs_only_this_devices_client_device_ca_binding() {
+        let binding = |signer: &str, kind: &str| serde_json::to_vec(&crate::clientdevices::CaBinding {
+            schema: 1, kind: kind.into(), chain_identifier: "4c78adac".into(), registry: "0x13".into(), device_id: "0x10".into(),
+            signer: signer.into(), ca_sha256: "ab".repeat(32), created_ms: 1,
+        }).unwrap();
+        let p = policy();
+        check_personal(&p, &binding("0xa0", crate::clientdevices::CA_BINDING_KIND)).unwrap();
+        assert!(check_personal(&p, &binding("0xa1", crate::clientdevices::CA_BINDING_KIND)).is_err(), "another signer");
+        assert!(check_personal(&p, &binding("0xa0", "client-device-ca2")).is_err(), "unknown kind falls to telemetry");
+        assert!(check(&p, &binding("0xa0", crate::clientdevices::CA_BINDING_KIND)).is_err(), "never a transaction");
     }
 
     #[test]
