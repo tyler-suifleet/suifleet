@@ -75,7 +75,9 @@ or pre-create each work directory owned by its function UID with mode 0700 and o
 `CAP_CHOWN`. These capabilities let the manager assume any UID, so the manager,
 its configuration and its code are trusted infrastructure. Use `KillMode=control-group`
 (the default) so stopping or crashing the unit ends every function descendant. Set
-`UMask=0077` and disable core dumps.
+`UMask=0077` and disable core dumps. No `CAP_KILL` is needed: when the manager may not
+signal a function UID directly, a short-lived helper running as that UID sends the
+SIGKILL.
 
 ```sh
 python3 /usr/libexec/suifleet/lambda_manager.py --config /etc/suifleet/functions.json
@@ -136,7 +138,9 @@ milliseconds.
 with exactly `{"version":1,"invocation_id":…,"status":"ok","result":…}` or
 `{"version":1,"invocation_id":…,"status":"error","error":{"type":…,"message":…}}`
 (type 1..128, message ≤1024 characters) on one line of at most 64 KiB; diagnostics go
-to stderr. Payloads are JSON only (`inputPayloadEncodingType` binary is unsupported).
+to stderr. Only strict UTF-8 JSON is accepted: `NaN`/`Infinity`, lone surrogate
+escapes, other encodings and nesting deeper than 64 are `invalid-response`, and a
+message payload that is not strict JSON is acknowledged without invocation. Payloads are JSON only (`inputPayloadEncodingType` binary is unsupported).
 The manager publishes to `result_topic`: `version`, `invocation_id`, `function`,
 `source`, `subject`, `message_id`, `attempt` (0 if never started), `status`,
 `duration_ms`, plus `result`, `error`, `exit_code` or `signal`.
@@ -154,6 +158,12 @@ The manager publishes to `result_topic`: `version`, `invocation_id`, `function`,
 | `result-too-large` | Envelope above the 4096-byte IPC payload limit; result omitted |
 
 Unknown configuration versions (including boolean `true`) are rejected at startup.
+
+**Cleanup failure.** If a function process or escaped descendant has not been killed
+and reaped 5 seconds after SIGKILL, or the helper cannot run, the manager stops with
+exit status 1 instead of continuing beside a live function. The platform unit's
+control-group kill then ends what remains, and the interrupted invocation runs again
+with `attempt` incremented after the restart.
 
 **Isolation (Linux).** Functions start in a new session with a cleared environment
 (`PATH`, `LANG`, `HOME`, `SUIFLEET_FUNCTION`, `SUIFLEET_FUNCTION_MODE` and the
@@ -188,11 +198,13 @@ Build the debug daemon and gRPC simulator shim, then from the host run:
 make test-lambda SUIFLEET_DEV_IMAGE=suifleet-dev:ci
 ```
 
-The network-none root container runs 19 tests of the real manager and function
+The network-none root container runs 23 tests of the real manager and function
 processes against a local durable IPC v1 endpoint: the contract file, SF-064 lambda vectors from this
 runtime's own decisions, configuration rejection, on-demand fresh processes and
 cleared environment, long-lived state, crash, timeout and restart, every error
-status, process-group and escaped-descendant cleanup, concurrency/queue/busy bounds,
+status, strict-JSON rejection (NaN, Infinity, surrogates, invalid UTF-8, nesting)
+without stopping the manager or unrelated functions, prompt failure on denied cleanup,
+signalling as the function user, process-group and escaped-descendant cleanup, concurrency/queue/busy bounds,
 fan-out and unrouted messages, manager SIGKILL reinvocation with `attempt` 2,
 duplicate redelivery, retained results across backpressure and restart, graceful
 stop, exclusive state, memory limit, root `run_as` enforcement and identity/state
@@ -200,7 +212,9 @@ privacy. It then runs [`scripts/test_lambda.py`](../scripts/test_lambda.py) with
 real daemon and distinct component UIDs: a capability-limited manager, function UID
 without capabilities, peer-UID refusal of impersonation, ACL refusal of an
 unauthorized publisher, unrouted authorized source, long-lived state, error/timeout,
-and manager plus daemon SIGKILL recovery without duplicate results. Ordinary CI runs
+on-demand and long-lived functions that would outlive the test killed promptly
+at their deadline together with an escaped descendant (the manager cannot signal
+their UID directly), later invocations after those timeouts, and manager plus daemon SIGKILL recovery without duplicate results. Ordinary CI runs
 the same target. The receipt is [sf069-lambda.json](validation/sf069-lambda.json).
 
 Not covered: AWS Lambda/Greengrass recipe, SDK, IPC or wire compatibility; live AWS
