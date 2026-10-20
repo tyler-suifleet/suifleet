@@ -1,5 +1,7 @@
 # Native component IPC and SDK (v1)
 
+Fleet deployments can supply service configuration and component grants through [recipe services](DEPLOYMENT_SERVICES.md); device-local sections remain explicit overrides.
+
 SF-027 provides an opt-in Unix-stream API (Linux, and macOS since SF-075; see
 [MACOS_RUNTIME.md](MACOS_RUNTIME.md#ipc-authentication)) and a dependency-free Python 3.10+
 SDK/CLI in [`sdk/python/suifleet_ipc.py`](../sdk/python/suifleet_ipc.py). This is a

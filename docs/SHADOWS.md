@@ -1,5 +1,7 @@
 # Device shadows and cloud synchronization (SF-033)
 
+Fleet deployments can supply service configuration and component grants through [recipe services](DEPLOYMENT_SERVICES.md); device-local sections remain explicit overrides.
+
 A shadow is a named JSON document holding the **desired** state of a device or application and the state it **reported**, with a version. Components read and write shadows through the daemon's IPC socket ([COMPONENT_IPC.md](COMPONENT_IPC.md)). Shadows survive crashes and restarts. An optional adapter synchronizes selected shadows with a cloud shadow service, settling conflicting edits by an explicit policy. The document semantics follow AWS IoT Device Shadow and the SF-028 specification ([GREENGRASS_COMPATIBILITY.md](GREENGRASS_COMPATIBILITY.md#shadows-sf-033)). Shadow documents never go on chain or to Walrus.
 
 ## Configuration

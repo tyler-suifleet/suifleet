@@ -1,5 +1,7 @@
 # Local pub/sub and the MQTT bridge (SF-032)
 
+Fleet deployments can supply service configuration and component grants through [recipe services](DEPLOYMENT_SERVICES.md); device-local sections remain explicit overrides.
+
 Components exchange messages through the daemon's IPC socket ([COMPONENT_IPC.md](COMPONENT_IPC.md)). With `[pubsub]`, subscriptions are durable: messages are stored on disk, survive daemon restarts and wait for an acknowledgement. An optional bridge connects this pub/sub to a standard MQTT broker that serves LAN clients. Messages never go on chain or to Walrus. The rules follow the SF-028 specification ([GREENGRASS_COMPATIBILITY.md](GREENGRASS_COMPATIBILITY.md#messaging-sf-032)).
 
 ## Configuration
