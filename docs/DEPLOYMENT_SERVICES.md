@@ -149,7 +149,11 @@ rolling out this daemon, because older indexers reject unknown snapshot fields.
 `make test-services` builds the real daemon and uses a disposable network-none
 root container to exercise real SO_PEERCRED identities, deployment, upgrade,
 failed replacement, quota rejection, restart, interrupted install, revocation,
-retained data and independently verified signed exports. Rust tests additionally
+retained data and independently verified signed exports. The unsealed host
+container must refuse unattended restart after SIGKILL; the harness checks that
+gate, kills its known fixture groups, verifies they are gone and explicitly
+clears its own instance record before testing inspected restart. It does not
+claim sealed-cgroup crash containment. Rust tests additionally
 exercise schema, precedence, conflicting ownership, revocation, bridge loops,
 read-only preflight and both activation crash decisions. This establishes host
 software behavior; no physical Pi, production endpoint or hardware result is

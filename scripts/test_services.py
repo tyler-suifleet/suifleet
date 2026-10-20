@@ -174,14 +174,35 @@ def run():
                 print('PASS: daemon restart restores committed policies, stream declarations and bridge generation', flush=True)
 
                 interrupted = root / 'install-started'
-                deploy('0x805', '5', service('c', 'interrupted'), install=f'touch {interrupted}; sleep 60', run='exec sleep 300')
+                deploy('0x805', '5', service('c', 'interrupted'), install=f'echo $$ > {interrupted}; exec sleep 60', run='exec sleep 300')
                 wait_for(interrupted.exists, 'interrupted install did not start', process)
+                install_pid = int(interrupted.read_text())
+                running_pid = json.loads((state / 'supervised/status.json').read_text())['app']['pid']
                 stop(kill=True)
+                # This plain container has no sealed service cgroup. Preserve
+                # the supervisor's fail-closed gate, then explicitly clear this
+                # fixture's two exec-only process groups before operator clearance.
+                process = subprocess.Popen([str(binary)], env={**os.environ, 'EDGE_CONFIG': str(config)}, stdout=log, stderr=log)
+                assert process.wait(timeout=30) != 0, 'unsealed successor bypassed containment gate'
+                from test_supervisor import alive
+                for pid in (install_pid, running_pid):
+                    if not alive(pid):
+                        continue
+                    try:
+                        command = Path(f'/proc/{pid}/cmdline').read_bytes().split(b'\0')
+                        assert command[:1] == [b'sleep'], command
+                        os.killpg(pid, signal.SIGKILL)
+                    except FileNotFoundError:
+                        pass
+                wait_for(lambda: not alive(install_pid) and not alive(running_pid), 'fixture processes survived clearance')
+                (state / 'supervised/instance.json').unlink()
+                if sock.exists():
+                    sock.unlink()
                 start()
-                wait_for(lambda: ipc('publish', 'new', 6)['ok'], 'old grants after interrupted install', process)
+                wait_for(lambda: ipc('publish', 'new', 6)['ok'], 'old grants after inspected interrupted install', process)
                 assert not ipc('publish', 'interrupted')['ok']
                 assert outcome('0x805') is None and journal()['deployments']['0x805']['indeterminate']
-                print('PASS: SIGKILL during install retains old generation and never replays ambiguous work', flush=True)
+                print('PASS: SIGKILL retains old generation; unsealed successor fails closed, inspected restart never replays work', flush=True)
 
                 deploy('0x806', '6', None)
                 wait_for(lambda: outcome('0x806') == 1, 'remove service requirements', process)
