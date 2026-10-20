@@ -19,9 +19,14 @@ Logs emulator (scripts/cloudwatch_logs_emulator.py), without AWS.
   small spool while the ingress is down -> oldest events dropped and counted; the journal
                                            stays bounded on disk
   missing credentials / bad config      -> the adapter refuses to start
+  log_group_read turned off again       -> every existing log 0600, directories without group
+                                           access, no daemon log written
 With --distinct-uids (root, in a disposable container: make test-cloudwatch-logs-uids)
 only the real-daemon part runs, with the daemon and the adapter under separate
 non-root UIDs and UMask 0077, the adapter reading only through the daemon's group.
+It then takes credentials from the actual SF-057 credential adapter through its
+wrapper: an expired token (401) makes the adapter exit, and a new start through
+the wrapper delivers what was pending.
 Every request's SigV4 signature, shape and PutLogEvents limits are checked by
 the emulator; the run fails on any violation.
 """
@@ -89,8 +94,9 @@ def as_user(uid, groups=()):
 
 
 class Adapter:
-    def __init__(self, binary, config, emulator, log_path, preexec=None):
-        self.args = [str(binary), "--cloudwatch-logs", str(config)]
+    def __init__(self, binary, config, emulator, log_path, preexec=None, wrapper=()):
+        # `wrapper`: the SF-057 wrapper command, which replaces the credential variables.
+        self.args = [*map(str, wrapper), str(binary), "--cloudwatch-logs", str(config)]
         self.env = {**os.environ, "AWS_CONTAINER_CREDENTIALS_FULL_URI": emulator.credentials_uri,
                     "AWS_CONTAINER_AUTHORIZATION_TOKEN": CREDENTIAL_TOKEN, "RUST_LOG": "suifleet=info"}
         for name in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_PROFILE"):
@@ -256,6 +262,16 @@ def daemon_part(binary, emulator, root, distinct_uids=False):
             daemon.wait(timeout=30)
             daemon = None
         retained_before = retained.read_bytes()
+        # A rotated daemon log and an inactive component's log, as an earlier run may leave.
+        extra = (state_dir / "logs/daemon.log.1", state_dir / "supervised/old/component.log")
+        extra[1].parent.mkdir(mode=0o700)
+        for path in extra:
+            path.write_text("earlier line\n")
+            path.chmod(0o600)
+            if distinct_uids:
+                os.chown(path.parent, DAEMON_UID, DAEMON_UID)
+                os.chown(path, DAEMON_UID, DAEMON_UID)
+        shared += ((extra[0], 0o640), (extra[1], 0o640), (extra[1].parent, 0o750))
 
         # Then with it: an existing installation, nothing new to retain.
         configure(True)
@@ -269,8 +285,8 @@ def daemon_part(binary, emulator, root, distinct_uids=False):
             finally:
                 print(f"modes after enabling log_group_read: {shared_modes()}")
             assert json.loads(retained.read_bytes()) == json.loads(retained_before), "only the mode changed"
-            print("PASS: [runtime] log_group_read turned on for an existing installation: component and daemon logs and retained "
-                  "values 0640, their directories 0750")
+            print("PASS: [runtime] log_group_read turned on for an existing installation: component (active and inactive) and "
+                  "daemon logs (with daemon.log.1) and retained values 0640, their directories 0750")
 
             spool = root / "cw-spool"
             cfg = adapter_config(root / "cw.json", state_dir, spool, emulator.url, ["svc"])
@@ -310,9 +326,37 @@ def daemon_part(binary, emulator, root, distinct_uids=False):
                   f"{group('svc')} and stream /{today}/thing/fleet+pi-1; overlay value and api key redacted before the spool; "
                   "DEBUG filtered; a 300,000-byte line split into 262,118 + 37,882 bytes")
             adapter.stop()
+            adapter = None
+            if distinct_uids:
+                broker_part(binary, emulator, root, cfg, component_log, adapter_user)
             daemon.send_signal(signal.SIGTERM)
             daemon.wait(timeout=30)
             daemon = None
+
+        # And off again: everything private, without writing the daemon log.
+        configure(False)
+        logged = (state_dir / "logs/daemon.log").stat().st_size
+        with (root / "daemon.out").open("a") as out:
+            daemon = start_daemon(out)
+            private = {str(path.relative_to(state_dir)): oct(0o600 if path.is_file() else 0o700) for path, _ in shared}
+            def private_modes():
+                return {str(path.relative_to(state_dir)): oct(mode(path)) for path, _ in shared}
+            try:
+                wait_for(lambda: private_modes() == private, "the logs and retained values did not become private again", daemon)
+            finally:
+                print(f"modes after disabling log_group_read: {private_modes()}")
+            time.sleep(2)
+            assert (state_dir / "logs/daemon.log").stat().st_size == logged, "the daemon log is written although nothing reads it"
+            if distinct_uids:
+                for path in (component_log, retained, extra[0]):
+                    denied = subprocess.run(["cat", str(path)], preexec_fn=adapter_user, capture_output=True)
+                    assert denied.returncode != 0, f"the adapter's user can still read {path.name}"
+            daemon.send_signal(signal.SIGTERM)
+            daemon.wait(timeout=30)
+            daemon = None
+        print("PASS: [runtime] log_group_read turned off again: every existing log (rotated and inactive included) and the "
+              "retained values 0600, their directories without group access, and no daemon log written"
+              + (f"; the adapter's UID {ADAPTER_UID} is denied them" if distinct_uids else ""))
         assert not sim.errors, sim.errors
     finally:
         if adapter:
@@ -322,6 +366,118 @@ def daemon_part(binary, emulator, root, distinct_uids=False):
             daemon.wait()
         shim.kill()
         server.shutdown()
+
+
+def broker_part(binary, emulator, root, cfg, component_log, adapter_user):
+    """The adapter's credentials from the actual SF-057 credential adapter
+    (scripts/aws_credentials.py) through its wrapper (sdk/python/suifleet_aws.py),
+    with a short token TTL: once the token expires the endpoint answers 401,
+    and the adapter exits, keeping its spool, so a restart through the wrapper
+    (Restart=on-failure) obtains a new token and delivers what was pending."""
+    import ssl
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    import aws_credentials
+    from cloudwatch_logs_emulator import ACCESS_KEY, SECRET_KEY, SESSION_TOKEN
+
+    ttl = 4
+    private = Path(tempfile.mkdtemp(prefix="sf060-broker-", dir="/run"))
+    upstream = None
+    service = None
+    adapter = None
+    try:
+        def openssl(*args):
+            subprocess.run(["openssl", *map(str, args)], cwd=private, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        openssl("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", "ca.key", "-out", "ca.crt", "-days", "1", "-subj", "/CN=fixture-ca")
+        for name in ("client", "server"):
+            openssl("req", "-newkey", "rsa:2048", "-nodes", "-keyout", f"{name}.key", "-out", f"{name}.csr", "-subj", f"/CN={name}")
+            (private / f"{name}.ext").write_text("subjectAltName=IP:127.0.0.1\nextendedKeyUsage=" + ("serverAuth" if name == "server" else "clientAuth") + "\n")
+            openssl("x509", "-req", "-in", f"{name}.csr", "-CA", "ca.crt", "-CAkey", "ca.key", "-CAcreateserial", "-out", f"{name}.crt",
+                    "-days", "1", "-extfile", f"{name}.ext")
+        for file in private.iterdir():
+            file.chmod(0o600)
+        # Only the adapter's UID may reach the control socket.
+        aws_credentials.allow_principals(private, [ADAPTER_UID], "--x")
+
+        class Upstream(BaseHTTPRequestHandler):
+            """A stand-in for the AWS IoT credentials provider (mutual TLS), issuing the
+            emulator's credentials: valid past the test, but due for refresh (under 5
+            minutes), so the adapter fetches them on every upload."""
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                expiration = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 299))
+                body = json.dumps({"credentials": {"accessKeyId": ACCESS_KEY, "secretAccessKey": SECRET_KEY,
+                                                   "sessionToken": SESSION_TOKEN, "expiration": expiration}}).encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        upstream = HTTPServer(("127.0.0.1", 0), Upstream)
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(private / "server.crt", private / "server.key")
+        context.load_verify_locations(private / "ca.crt")
+        context.verify_mode = ssl.CERT_REQUIRED
+        upstream.socket = context.wrap_socket(upstream.socket, server_side=True)
+        threading.Thread(target=upstream.serve_forever, daemon=True).start()
+        socket_path = private / "credentials.sock"
+        service = aws_credentials.Adapter(dict(
+            socket=str(socket_path), endpoint=f"https://127.0.0.1:{upstream.server_port}/role-aliases/fixture/credentials",
+            ca=str(private / "ca.crt"), certificate=str(private / "client.crt"), key=str(private / "client.key"),
+            daemon_uid=DAEMON_UID, components={"cloudwatch-logs": ADAPTER_UID}, grants=["cloudwatch-logs"], token_ttl_seconds=ttl))
+        service.start()
+
+        wrapper_path = root / "suifleet_aws.py"
+        shutil.copy(ROOT / "sdk/python/suifleet_aws.py", wrapper_path)
+        wrapper_path.chmod(0o755)
+        wrapper = [sys.executable, wrapper_path, "--socket", socket_path, "--component", "cloudwatch-logs", "--"]
+        log_path = root / "adapter-broker.out"
+
+        def start():
+            # Credentials only from the wrapper: none from the emulator are inherited.
+            return Adapter(binary, cfg, emulator, log_path, preexec=adapter_user, wrapper=wrapper).start()
+
+        def append(line):
+            with component_log.open("a") as log:
+                log.write(line + "\n")
+
+        adapter = start()
+        append("granted line")
+        wait_for(lambda: "granted line" in messages(emulator, "svc"), "the line exported with broker credentials did not arrive",
+                 adapter.process, timeout=30)
+        time.sleep(ttl + 1)
+        append("after expiry")
+        try:
+            adapter.process.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            raise AssertionError("the adapter kept running with a refused credential token") from None
+        returncode = adapter.process.returncode
+        adapter.stop()
+        output = log_path.read_text(errors="replace")
+        assert returncode not in (0, None) and "refused the authorization token (401)" in output, (returncode, output[-600:])
+        print(f"PASS: the actual SF-057 credential adapter answered 401 once the {ttl}-second token expired; the CloudWatch Logs "
+              f"adapter exited ({returncode}) for its service manager to restart it")
+        # The service manager's Restart=on-failure: a new start through the wrapper.
+        adapter = start()
+        wait_for(lambda: "after expiry" in messages(emulator, "svc"), "the line pending at the token's expiry did not arrive "
+                 "after the restart", adapter.process, timeout=30)
+        svc = messages(emulator, "svc")
+        assert svc.count("granted line") == 1 and svc.index("granted line") < svc.index("after expiry"), svc[-4:]
+        check_clean(emulator)
+        adapter.stop()
+        adapter = None
+        print("PASS: restarted through the SF-057 wrapper with a new token, the adapter delivered the line pending at the "
+              "expiry, in order, nothing lost; every request signed with the broker's credentials")
+    finally:
+        if adapter:
+            adapter.stop(signal.SIGKILL)
+        if service:
+            service.close()
+        if upstream:
+            upstream.shutdown()
+        shutil.rmtree(private, ignore_errors=True)
 
 
 def file_part(binary, emulator, root):
