@@ -74,6 +74,9 @@ jobs:
       - name: Durable AWS stream exporter protocols
         run: make test-stream-export SUIFLEET_DEV_IMAGE=suifleet-dev:ci
 
+      - name: Firehose exporter with local SDK emulator and durable daemon streams
+        run: make test-firehose SUIFLEET_DEV_IMAGE=suifleet-dev:ci
+
       - name: Component IPC with distinct Unix peer identities
         run: |
           docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 \
