@@ -77,6 +77,9 @@ jobs:
       - name: Firehose exporter with local SDK emulator and durable daemon streams
         run: make test-firehose SUIFLEET_DEV_IMAGE=suifleet-dev:ci
 
+      - name: SNS publisher with local SDK emulator and durable daemon pub/sub
+        run: make test-sns SUIFLEET_DEV_IMAGE=suifleet-dev:ci
+
       - name: Component IPC with distinct Unix peer identities
         run: |
           docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 \
