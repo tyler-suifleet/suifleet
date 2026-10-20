@@ -293,6 +293,42 @@ pub fn redact_text(text: &str) -> String {
     out
 }
 
+/// Redact a log tail line by line, carrying PEM block state across lines so
+/// a block's body lines are redacted with its markers. Fails closed when the
+/// tail starts inside a block: everything before an unmatched END is
+/// redacted, as is any bare base64 line (a body cut from both markers).
+fn redact_log(text: &str) -> Vec<String> {
+    let mut in_block = text.find("-----END").is_some_and(|end| text.find("-----BEGIN").is_none_or(|begin| end < begin));
+    text.lines().map(|line| {
+        let trimmed = line.trim();
+        if !in_block && trimmed.len() >= 40 && trimmed.bytes().all(|b| b.is_ascii_alphanumeric() || b"+/=".contains(&b)) {
+            return REDACTED.to_owned();
+        }
+        let mut out = String::new();
+        let mut rest = line;
+        loop {
+            if in_block {
+                let Some(end) = rest.find("-----END") else {
+                    out.push_str(REDACTED);
+                    break;
+                };
+                let close = rest[end + 8..].find("-----").map(|t| end + 8 + t + 5).unwrap_or(rest.len());
+                out.push_str(REDACTED);
+                rest = &rest[close..];
+                in_block = false;
+            } else if let Some(begin) = rest.find("-----BEGIN") {
+                out.push_str(&redact_text(&rest[..begin]));
+                rest = &rest[begin..];
+                in_block = true;
+            } else {
+                out.push_str(&redact_text(rest));
+                break;
+            }
+        }
+        out
+    }).collect()
+}
+
 fn bounded(text: &str, limit: usize) -> String {
     crate::telemetry::bounded(&redact_text(text), limit)
 }
@@ -844,9 +880,10 @@ async fn operate(shared: &Shared, call: &Call) -> Result<Value, &'static str> {
             }
             let path = state_dir.join("supervised").join(name).join("component.log");
             let text = tail(&path).map_err(|_| "not-found")?;
-            let mut all: Vec<&str> = text.lines().collect();
+            // Redact the whole tail before selecting lines: PEM state spans lines.
+            let mut all = redact_log(&text);
             let skip = all.len().saturating_sub(lines);
-            let lines: Vec<String> = all.drain(skip..).map(|l| crate::telemetry::bounded(&redact_text(l), MAX_LINE)).collect();
+            let lines: Vec<String> = all.drain(skip..).map(|l| crate::telemetry::bounded(&l, MAX_LINE)).collect();
             Ok(json!({"component": name, "lines": lines}))
         }
         "configuration" => {
@@ -1016,6 +1053,34 @@ mod tests {
         assert!(redact_value(&deep, 0).to_string().contains("[truncated]"));
         let fields = json!({"component": "demo", "version": "1.0", "health": "ok", "key": "k", "token": "t", "env": "x"});
         assert_eq!(Value::Object(allow(fields.as_object().unwrap())), json!({"component": "demo", "version": "1.0", "health": "ok"}));
+    }
+
+    #[test]
+    fn log_redaction_spans_pem_blocks_and_cut_tails() {
+        // Synthetic body lines; failure messages never echo them.
+        let body = |tag: &str| format!("{tag}{}", "A".repeat(64 - tag.len()));
+        let (cut, full) = (body("CUTBODY"), body("FULLBODY"));
+        let leaked = |lines: &[String], secret: &str| lines.iter().any(|l| l.contains(secret));
+        let block = format!("before\n-----BEGIN PRIVATE KEY-----\n{full}\n{full}\nQUJD==\n-----END PRIVATE KEY----- tail\nafter");
+        let out = redact_log(&block);
+        assert!(!leaked(&out, &full) && !leaked(&out, "QUJD"), "multiline body leaked");
+        assert_eq!(out.first().unwrap(), "before");
+        assert_eq!(out.last().unwrap(), "after");
+        assert!(out.iter().any(|l| l == "[redacted] tail"));
+        // Tail cut inside a block: the END comes first.
+        let out = redact_log(&format!("{cut}\nQUJD==\n-----END PRIVATE KEY-----\nafter"));
+        assert!(!leaked(&out, &cut) && !leaked(&out, "QUJD"), "cut body leaked");
+        assert_eq!(out.last().unwrap(), "after");
+        // Cut inside a block with neither marker in the tail.
+        let out = redact_log(&format!("{cut}\n{cut}\nnormal line"));
+        assert!(!leaked(&out, &cut), "markerless body leaked");
+        assert_eq!(out.last().unwrap(), "normal line");
+        // Unterminated block runs to the end of the tail.
+        let out = redact_log(&format!("ok\n-----BEGIN EC PRIVATE KEY-----\nshort\nx y"));
+        assert_eq!(out, ["ok", "[redacted]", "[redacted]", "[redacted]"]);
+        // Single-line blocks and ordinary secrets still use redact_text.
+        let out = redact_log("a -----BEGIN X-----MIIE-----END X----- b password=hunter2");
+        assert_eq!(out, ["a [redacted] b password=[redacted]"]);
     }
 
     #[test]

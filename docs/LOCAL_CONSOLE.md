@@ -132,7 +132,10 @@ allowlist (`cargo test console`).
   signature, mnemonic, seed, pin, cert or csrf. Free text is also scrubbed of:
   - `name=value` and `name: value` pairs whose name looks secret
   - `Bearer`/`Basic` credentials
-  - PEM blocks
+  - PEM blocks. Log tails are redacted before lines are selected, and a
+    block's body lines are redacted with its markers. A tail that starts
+    inside a block fails closed: everything before an unmatched END line is
+    redacted, as is any bare base64 line of 40 or more characters.
   - `suiprivkey…` keys, console tokens, AWS access key IDs and JWT-like values
   - bare hex of 64 or more characters (raw key material; `0x` object IDs are kept)
 

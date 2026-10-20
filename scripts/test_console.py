@@ -38,6 +38,9 @@ from test_ota import CAP, DEVICE, PACKAGE, REGISTRY, TYPE_ORIGINS, UPGRADE_CAP, 
 ROOT = Path(__file__).resolve().parents[1]
 BINARY = ROOT / 'suifleet-edge/target/debug/suifleet'
 CANARY = 'hunter2-log-secret'
+# Synthetic 64-character PEM body lines; not key material.
+PEM_CUT = 'CUTBODYCANARY' + 'A' * 51
+PEM_FULL = 'FULLBODYCANARY' + 'A' * 50
 
 
 def free_port():
@@ -227,7 +230,13 @@ def run(browser=False):
                                'exec sleep 300'),
                 configuration=dict(defaults=dict(answer=42, nested=dict(password='recipe-secret', port=8080)))))
 
-            sim.add(test_ota.object_id('0x792'), event=dict(component_name='svc2'), recipe=dict(lifecycle=dict(run='exec sleep 300')))
+            # svc2 logs a synthetic PEM block larger than the 8 KiB tail (so the
+            # tail starts inside it), then a complete multiline block.
+            sim.add(test_ota.object_id('0x792'), event=dict(component_name='svc2'), recipe=dict(lifecycle=dict(
+                run=f'echo "-----BEGIN PRIVATE KEY-----"; i=0; while [ $i -lt 200 ]; do echo {PEM_CUT}; i=$((i+1)); done; '
+                    f'echo "-----END PRIVATE KEY-----"; echo middle; echo "-----BEGIN PRIVATE KEY-----"; '
+                    f'echo {PEM_FULL}; echo {PEM_FULL}; echo QUJD==; echo "-----END PRIVATE KEY-----"; echo after; '
+                    'exec sleep 300')))
 
             def running():
                 body = c.call('inventory', token=ops['token'])
@@ -293,6 +302,19 @@ def run(browser=False):
             for i, secret in enumerate((CANARY, ops['token'], 'suiprivkey1abc', '07' * 32)):
                 assert secret not in text, f'log canary {i} leaked'
             assert 'late password=[redacted]' in text, text
+            # Multiline PEM: redacted across lines, whatever the line limit or
+            # byte-boundary cut (svc2's tail begins inside its first block).
+            wait_for(lambda: 'after' in c.call('logs', token=ops['token'], component='svc2', limit=1)['data']['lines'],
+                     'svc2 log incomplete', process)
+            assert (state / 'supervised/svc2/component.log').stat().st_size > 8 * 1024
+            for limit in (1, 2, 3, 4, 5, 6, 8, 200):
+                lines = c.call('logs', token=ops['token'], component='svc2', limit=limit)['data']['lines']
+                # The 8 KiB tail holds fewer than 200 of svc2's lines.
+                assert len(lines) == limit if limit < 100 else 0 < len(lines) < limit, limit
+                for i, secret in enumerate(('CUTBODYCANARY', 'FULLBODYCANARY', 'QUJD')):
+                    assert not any(secret in line for line in lines), f'PEM fixture {i} leaked at limit {limit}'
+            lines = c.call('logs', token=ops['token'], component='svc2', limit=200)['data']['lines']
+            assert lines[-1] == 'after' and 'middle' in lines and set(lines) == {'[redacted]', 'middle', 'after'}, 'unexpected svc2 view'
             configuration = c.call('configuration', token=ops['token'], component='svc')['data']
             assert configuration['effective']['answer'] == 42 and configuration['effective']['nested']['port'] == 8080
             assert configuration['effective']['nested']['password'] == '[redacted]' and 'recipe-secret' not in json.dumps(configuration)
