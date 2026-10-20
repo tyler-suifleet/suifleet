@@ -125,6 +125,68 @@ fn share_dir_for(dir: &Path, group_read: bool) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Make the logs that already exist follow `[runtime] log_group_read`, on
+/// every daemon start whether or not it writes logs: `logs/`, `supervised/`
+/// and each `supervised/NAME/` (0750, or without group access), the daemon's
+/// and every component's log and its `.1` (0640 or 0600), inactive ones
+/// included. A symbolic link is left alone. (The retained values follow it
+/// under their lock: [`initialize`].)
+pub fn reconcile_modes(state_dir: &Path) -> std::io::Result<()> {
+    reconcile_modes_for(state_dir, group_read())
+}
+
+fn reconcile_modes_for(state_dir: &Path, group_read: bool) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let logs = state_dir.join("logs");
+    let supervised = state_dir.join("supervised");
+    let mut dirs = vec![logs.clone(), supervised.clone()];
+    let mut files = vec![logs.join("daemon.log"), logs.join("daemon.log.1")];
+    match std::fs::read_dir(&supervised) {
+        Ok(entries) => {
+            for entry in entries {
+                let entry = entry?;
+                if entry.file_type()?.is_dir() {
+                    files.push(entry.path().join("component.log"));
+                    files.push(entry.path().join("component.log.1"));
+                    dirs.push(entry.path());
+                }
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    for dir in dirs {
+        if let Some(opened) = open_no_follow(&dir, libc::O_DIRECTORY)? {
+            let mode = opened.metadata()?.mode() & 0o7777;
+            let wanted = if group_read { 0o750 } else { mode & !0o070 };
+            if mode != wanted {
+                opened.set_permissions(std::fs::Permissions::from_mode(wanted))?;
+            }
+        }
+    }
+    for file in files {
+        if let Some(opened) = open_no_follow(&file, 0)? {
+            let meta = opened.metadata()?;
+            if meta.is_file() && meta.mode() & 0o777 != mode_for(group_read) {
+                opened.set_permissions(std::fs::Permissions::from_mode(mode_for(group_read)))?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `path` opened read-only without following a final symbolic link; `None`
+/// when it is missing or is a link.
+fn open_no_follow(path: &Path, flags: i32) -> std::io::Result<Option<std::fs::File>> {
+    match std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK | flags).open(path) {
+        Ok(file) => Ok(Some(file)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound || error.raw_os_error() == Some(libc::ELOOP) => Ok(None),
+        // A directory component that is not one (ENOTDIR) is not ours either.
+        Err(error) if error.raw_os_error() == Some(libc::ENOTDIR) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
 /// A size-rotated log file for `tracing` (`daemon.log`, then `daemon.log.1`).
 #[derive(Clone)]
 pub struct RotatingFile {
@@ -965,6 +1027,47 @@ mod tests {
         retained_for(&state, false, |_| ()).unwrap();
         assert_eq!(mode(&path), 0o600);
         assert_eq!(stored(&state), before);
+    }
+
+    #[test]
+    fn turning_group_read_on_or_off_reconciles_existing_logs_and_directories() {
+        use std::os::unix::fs::PermissionsExt;
+        let state = dir("group-read-logs");
+        let mode = |p: &Path| std::fs::symlink_metadata(p).unwrap().permissions().mode() & 0o777;
+        let set = |p: &Path, m: u32| std::fs::set_permissions(p, std::fs::Permissions::from_mode(m)).unwrap();
+        // A daemon log with its rotation, an active and an inactive component.
+        let files: Vec<PathBuf> = ["logs/daemon.log", "logs/daemon.log.1", "supervised/svc/component.log",
+            "supervised/svc/component.log.1", "supervised/old/component.log"].iter().map(|f| state.join(f)).collect();
+        let dirs: Vec<PathBuf> = ["logs", "supervised", "supervised/svc", "supervised/old"].iter().map(|d| state.join(d)).collect();
+        for file in &files {
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            append(file, "line\n");
+            set(file, 0o600);
+        }
+        for d in &dirs {
+            set(d, 0o700);
+        }
+        // A component pointing its log elsewhere: the target is not touched.
+        let target = state.join("device.key");
+        append(&target, "secret\n");
+        set(&target, 0o600);
+        std::fs::create_dir_all(state.join("supervised/evil")).unwrap();
+        std::os::unix::fs::symlink(&target, state.join("supervised/evil/component.log")).unwrap();
+
+        reconcile_modes_for(&state, true).unwrap();
+        assert!(files.iter().all(|f| mode(f) == 0o640), "every existing log is group-readable");
+        assert!(dirs.iter().all(|d| mode(d) == 0o750));
+        assert_eq!(mode(&target), 0o600, "a link is not followed");
+        reconcile_modes_for(&state, false).unwrap();
+        assert!(files.iter().all(|f| mode(f) == 0o600), "and private again once it is turned off");
+        assert!(dirs.iter().all(|d| mode(d) == 0o700));
+        assert_eq!(mode(&target), 0o600);
+        // Off on an installation that never had it: other bits are kept.
+        set(&state.join("supervised"), 0o755);
+        reconcile_modes_for(&state, false).unwrap();
+        assert_eq!(mode(&state.join("supervised")), 0o705);
+        // Nothing yet: nothing to do.
+        reconcile_modes_for(&dir("group-read-empty"), true).unwrap();
     }
 
     #[test]

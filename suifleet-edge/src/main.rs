@@ -140,6 +140,11 @@ async fn main() -> anyhow::Result<()> {
     };
     let cfg = Config::load(&path)?;
     logs::set_group_read(cfg.runtime.log_group_read);
+    if !check_config {
+        // Also when no log is written any more: turning the option off
+        // makes the existing logs private again.
+        logs::reconcile_modes(&cfg.runtime.state_dir)?;
+    }
     if (cfg.logs.is_some() || cfg.runtime.log_group_read) && !check_config {
         // From here on the daemon's own log is also written for shipping
         // or for a separate log reader.
