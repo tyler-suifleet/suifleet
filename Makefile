@@ -167,6 +167,26 @@ test-ml:
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_ml_components.py --wheels .ci-cache/ml-wheels -v
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_ml_ota.py --wheels .ci-cache/ml-wheels
 
+# Industrial collector (SF-070). Only industrial-deps uses the network: it
+# unpacks the hash-pinned cryptography wheels needed by OPC UA Basic256Sha256.
+INDUSTRIAL_RUNTIME ?= .ci-cache/industrial-runtime
+.PHONY: industrial-deps test-industrial test-industrial-daemon
+industrial-deps:
+	$(RUN) python3 scripts/industrial/deps.py --dest $(INDUSTRIAL_RUNTIME)
+
+test-industrial: industrial-deps
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=$(INDUSTRIAL_RUNTIME)/site python3 scripts/test_industrial.py -v
+
+# The built collector as a separate component UID against the real daemon:
+# root only inside a disposable, network-isolated container.
+test-industrial-daemon: industrial-deps
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+ifdef INSIDE_DEV_CONTAINER
+	python3 scripts/test_industrial_daemon.py $(INDUSTRIAL_RUNTIME)/site $(INDUSTRIAL_EVIDENCE)
+else
+	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" python3 scripts/test_industrial_daemon.py $(INDUSTRIAL_RUNTIME)/site $(INDUSTRIAL_EVIDENCE)
+endif
+
 # Offline regression tests for the drift gate itself (synthetic summaries).
 test-interfaces:
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_check_contract_interfaces.py'
@@ -179,7 +199,7 @@ toolchain-versions:
 # CI entry point (run inside the dev image): each step's output is kept under
 # ci-logs/ for failure diagnostics. No step publishes, spends gas or uses secrets.
 ci: SHELL := /bin/bash
-CI_STEPS := indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat test-ml edge-test test-ota test-component test-edge-acceptance dapp-typecheck dapp-build
+CI_STEPS := indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat test-ml test-industrial edge-test test-ota test-component test-edge-acceptance dapp-typecheck dapp-build
 ci:
 	@mkdir -p ci-logs
 	@$(MAKE) --no-print-directory toolchain-versions | tee ci-logs/toolchain-versions.txt
@@ -200,6 +220,7 @@ check:
 	$(MAKE) check-interfaces
 	$(MAKE) test-compat
 	$(MAKE) test-ml
+	$(MAKE) test-industrial
 	$(MAKE) edge-test
 	$(MAKE) test-ota
 	$(MAKE) test-component

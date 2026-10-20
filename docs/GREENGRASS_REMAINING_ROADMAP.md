@@ -98,6 +98,13 @@ expectations. No AWS upstream behavior is newly asserted by these local contract
 
 ## Evidence and closure
 
+SF-070 adds a [native industrial collector](INDUSTRIAL.md) for Modbus (TCP, TLS,
+RTU) and OPC UA (policy None and Basic256Sha256), with deterministic simulators.
+Collector-to-simulator, real-daemon durable-stream and cross-implementation
+(asyncua, pymodbus) tests are its separate evidence. The `industrial` scope below
+stays a reference model: no AWS Modbus Lambda, SiteWise collector or SiteWise
+publishing compatibility is claimed, and SiteWise processing remains SF-071.
+
 SF-077 adds the [native Firehose exporter](FIREHOSE.md), with actual SDK HTTP
 emulator and durable daemon stream evidence. The pure reference fields below
 remain specification-only; live AWS and physical target acceptance are unrun.
