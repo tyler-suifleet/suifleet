@@ -16,6 +16,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .read(true)
                 .write(true)
                 .access_mode(0x12019b)
+                .security_qos_flags(0x10000)
                 .open(format!(r"\\.\pipe\{}", args[2]))
                 .is_err();
             let file_denied = fs::read(&args[3]).is_err();
@@ -63,6 +64,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .read(true)
                     .write(true)
                     .access_mode(0x12019b)
+                    .security_qos_flags(0x10000)
                     .open(format!(r"\\.\pipe\{pipe}"))
                 {
                     Ok(client) => break client,

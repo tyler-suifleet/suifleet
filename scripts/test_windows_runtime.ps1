@@ -15,19 +15,21 @@ $password = 'Sf!9' + [guid]::NewGuid().ToString('N')
 $otherPassword = 'Sf!8' + [guid]::NewGuid().ToString('N')
 $pipe = 'suifleet-' + [guid]::NewGuid().ToString('N')
 $checks = [Collections.Generic.List[string]]::new()
+$script:lastRequest = 'none'
 function Assert-True($value, [string]$message) { if (-not $value) { throw $message } }
 function Wait-Until([scriptblock]$condition, [string]$message, [int]$seconds = 25) {
     $deadline = [DateTime]::UtcNow.AddSeconds($seconds)
     do { if (& $condition) { return }; Start-Sleep -Milliseconds 150 } while ([DateTime]::UtcNow -lt $deadline)
-    throw "Timeout: $message"
+    throw "Timeout: $message; last request: $script:lastRequest"
 }
 function Request($request, [bool]$success = $true) {
     $request | ConvertTo-Json -Depth 12 -Compress | Set-Content -Encoding utf8NoBOM (Join-Path $root 'request.json')
-    $output = & (Join-Path $root 'suifleet.exe') --request $pipe (Join-Path $root 'request.json') 2>$null
+    $output = & (Join-Path $root 'suifleet.exe') --request $pipe (Join-Path $root 'request.json') 2>&1
     $code = $LASTEXITCODE
+    $script:lastRequest = "exit=$code; $output"
     if ($success -and $code -ne 0) { throw "Request failed: $output" }
     if (-not $success -and $code -eq 0) { throw 'Expected request rejection' }
-    if ($output) { return ($output | ConvertFrom-Json) }
+    if ($output) { return (($output | Where-Object { $_ -is [string] }) -join "`n" | ConvertFrom-Json) }
 }
 function Status { try { return (Request @{operation='status'}).status } catch { return $null } }
 function Work { return Join-Path $root "components/$digest/work" }

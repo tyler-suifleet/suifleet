@@ -309,10 +309,13 @@ impl Process {
     fn exited(&self) -> bool {
         unsafe { WaitForSingleObject(self.process.0, 0) == WAIT_OBJECT_0 }
     }
-    fn wait(&self, timeout: Duration) -> Result<()> {
+    fn wait(&self, timeout: Duration, interruptible: bool) -> Result<()> {
         let deadline = Instant::now() + timeout;
         while !self.exited() {
-            ensure!(!STOP.load(Ordering::SeqCst), "service stopping");
+            ensure!(
+                !interruptible || !STOP.load(Ordering::SeqCst),
+                "service stopping"
+            );
             ensure!(Instant::now() < deadline, "lifecycle timeout");
             thread::sleep(Duration::from_millis(25));
         }
@@ -328,7 +331,27 @@ impl Drop for Process {
     fn drop(&mut self) {
         unsafe {
             TerminateJobObject(self.job.0, 1);
-            WaitForSingleObject(self.process.0, 5000);
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                let mut accounting: JOBOBJECT_BASIC_ACCOUNTING_INFORMATION = zeroed();
+                if QueryInformationJobObject(
+                    self.job.0,
+                    JobObjectBasicAccountingInformation,
+                    (&mut accounting as *mut JOBOBJECT_BASIC_ACCOUNTING_INFORMATION).cast(),
+                    size_of_val(&accounting) as u32,
+                    null_mut(),
+                ) == 0
+                {
+                    std::process::abort();
+                }
+                if accounting.ActiveProcesses == 0 {
+                    break;
+                }
+                if Instant::now() >= deadline {
+                    std::process::abort();
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
         }
     }
 }
@@ -422,14 +445,14 @@ impl Runtime {
         self.state.error = None;
         save(&self.cfg.root, &self.state)
     }
-    fn stop(&mut self, shutdown: bool) -> Result<()> {
+    fn halt(&mut self, shutdown: bool) {
         if self.child.is_some() && shutdown {
             if let Some(m) = &self.state.manifest {
                 if let Some(args) = &m.shutdown {
                     let (exe, work) = self.paths(m);
                     // Failure still closes the supervised job; never leave descendants behind.
                     let result = Process::spawn(self.token.0, &exe, args, &work)
-                        .and_then(|p| p.wait(Duration::from_secs(m.timeout_seconds.into())));
+                        .and_then(|p| p.wait(Duration::from_secs(m.timeout_seconds.into()), false));
                     if let Err(e) = result {
                         self.state.error = Some(format!("shutdown failed: {e:#}"));
                     }
@@ -437,6 +460,9 @@ impl Runtime {
             }
         }
         self.child.take();
+    }
+    fn stop(&mut self, shutdown: bool) -> Result<()> {
+        self.halt(shutdown);
         self.state.phase = "stopped".into();
         save(&self.cfg.root, &self.state)
     }
@@ -469,13 +495,17 @@ impl Runtime {
                 self.cfg.operator_sid, self.cfg.component_sid
             ),
         )?;
-        if !exe.exists() {
-            let mut f = fs::OpenOptions::new()
-                .create_new(true)
-                .write(true)
-                .open(&exe)?;
-            f.write_all(&bytes)?;
-            f.sync_all()?;
+        let staged = exe.with_extension("tmp");
+        let mut f = fs::File::create(&staged)?;
+        f.write_all(&bytes)?;
+        f.sync_all()?;
+        drop(f);
+        unsafe {
+            check(MoveFileExW(
+                wide(&staged).as_ptr(),
+                wide(&exe).as_ptr(),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            ))?;
         }
         ensure!(
             hex::encode(Sha256::digest(fs::read(&exe)?)) == m.sha256,
@@ -496,7 +526,7 @@ impl Runtime {
         save(&self.cfg.root, &self.state)?;
         if let Some(args) = &m.install {
             if let Err(e) = Process::spawn(self.token.0, &exe, args, &work)
-                .and_then(|p| p.wait(Duration::from_secs(m.timeout_seconds.into())))
+                .and_then(|p| p.wait(Duration::from_secs(m.timeout_seconds.into()), true))
             {
                 self.state.phase = "failed".into();
                 self.state.error = Some(format!("install failed: {e:#}"));
@@ -746,7 +776,8 @@ fn serve(path: &Path, service: Option<SERVICE_STATUS_HANDLE>) -> Result<()> {
         thread::sleep(Duration::from_millis(25));
     }
     // Preserve desired running state on normal service stop/restart, but terminate all descendants.
-    runtime.child.take();
+    runtime.halt(true);
+    save(&runtime.cfg.root, &runtime.state)?;
     Ok(())
 }
 unsafe extern "system" fn service_main(_: u32, _: *mut *mut u16) {
@@ -790,7 +821,7 @@ pub fn main() -> Result<()> {
             let path = format!(r"\\.\pipe\{pipe}");
             unsafe { check(WaitNamedPipeW(wide(&path).as_ptr(), 5000))?; }
             use std::os::windows::fs::OpenOptionsExt;
-            let mut client = fs::OpenOptions::new().read(true).write(true).access_mode(0x12019b).open(path)?;
+            let mut client = fs::OpenOptions::new().read(true).write(true).access_mode(0x12019b).security_qos_flags(SECURITY_IDENTIFICATION).open(path)?;
             client.write_all(&bytes)?; client.write_all(b"\n")?;
             let mut response = String::new();
             use std::io::BufRead;
