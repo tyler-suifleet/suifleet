@@ -35,6 +35,9 @@ const MAX_SESSIONS: usize = 32;
 const MAX_CONNECTIONS: usize = 16;
 const MAX_LOG_LINES: usize = 200;
 const MAX_LOG_BYTES: u64 = 8 * 1024;
+/// Log bytes before the tail searched for an open PEM block. Far larger than
+/// any real key block, so a block opened earlier cannot still hold key lines.
+const PEM_LOOKBACK: u64 = 1024 * 1024;
 const MAX_LINE: usize = 512;
 const MAX_PAGE: usize = 100;
 const MAX_REASONS: usize = 32;
@@ -293,12 +296,21 @@ pub fn redact_text(text: &str) -> String {
     out
 }
 
+/// Whether `before` (the log preceding a tail) leaves a PEM block open: its
+/// last marker is a BEGIN.
+fn pem_open(before: &[u8]) -> bool {
+    let last = |marker: &[u8]| before.windows(marker.len()).rposition(|w| w == marker);
+    last(b"-----BEGIN").is_some_and(|begin| last(b"-----END").is_none_or(|end| begin > end))
+}
+
 /// Redact a log tail line by line, carrying PEM block state across lines so
-/// a block's body lines are redacted with its markers. Fails closed when the
-/// tail starts inside a block: everything before an unmatched END is
-/// redacted, as is any bare base64 line (a body cut from both markers).
-fn redact_log(text: &str) -> Vec<String> {
-    let mut in_block = text.find("-----END").is_some_and(|end| text.find("-----BEGIN").is_none_or(|begin| end < begin));
+/// a block's body lines are redacted with its markers. `in_block` says the
+/// tail starts inside a block (a BEGIN precedes it), so every line up to the
+/// END is redacted, whatever its prefix. Also fails closed without that
+/// state: everything before an unmatched END is redacted, as is any bare
+/// base64 line.
+fn redact_log(text: &str, in_block: bool) -> Vec<String> {
+    let mut in_block = in_block || text.find("-----END").is_some_and(|end| text.find("-----BEGIN").is_none_or(|begin| end < begin));
     text.lines().map(|line| {
         let trimmed = line.trim();
         if !in_block && trimmed.len() >= 40 && trimmed.bytes().all(|b| b.is_ascii_alphanumeric() || b"+/=".contains(&b)) {
@@ -879,9 +891,9 @@ async fn operate(shared: &Shared, call: &Call) -> Result<Value, &'static str> {
                 return Err("not-found");
             }
             let path = state_dir.join("supervised").join(name).join("component.log");
-            let text = tail(&path).map_err(|_| "not-found")?;
+            let (text, in_block) = tail(&path).map_err(|_| "not-found")?;
             // Redact the whole tail before selecting lines: PEM state spans lines.
-            let mut all = redact_log(&text);
+            let mut all = redact_log(&text, in_block);
             let skip = all.len().saturating_sub(lines);
             let lines: Vec<String> = all.drain(skip..).map(|l| crate::telemetry::bounded(&l, MAX_LINE)).collect();
             Ok(json!({"component": name, "lines": lines}))
@@ -921,18 +933,22 @@ async fn operate(shared: &Shared, call: &Call) -> Result<Value, &'static str> {
     }
 }
 
-fn tail(path: &Path) -> std::io::Result<String> {
+/// The last `MAX_LOG_BYTES` of a log, from its first whole line, and whether
+/// that starts inside a PEM block opened in the `PEM_LOOKBACK` bytes before.
+fn tail(path: &Path) -> std::io::Result<(String, bool)> {
     let mut file = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW).open(path)?;
     let size = file.metadata()?.len();
-    file.seek(SeekFrom::Start(size.saturating_sub(MAX_LOG_BYTES)))?;
+    let start = size.saturating_sub(MAX_LOG_BYTES + PEM_LOOKBACK);
+    file.seek(SeekFrom::Start(start))?;
     let mut bytes = Vec::new();
-    file.take(MAX_LOG_BYTES).read_to_end(&mut bytes)?;
-    let mut text = String::from_utf8_lossy(&bytes).into_owned();
+    // Bounded by the size read above: a still-growing log adds nothing.
+    file.take(size - start).read_to_end(&mut bytes)?;
+    let mut cut = bytes.len().saturating_sub(MAX_LOG_BYTES as usize);
     if size > MAX_LOG_BYTES {
-        // The first line is cut; drop it.
-        text = text.split_once('\n').map(|(_, rest)| rest.to_owned()).unwrap_or_default();
+        // The first line is cut; drop it (it belongs to the lookback).
+        cut = bytes[cut..].iter().position(|&b| b == b'\n').map_or(bytes.len(), |n| cut + n + 1);
     }
-    Ok(text)
+    Ok((String::from_utf8_lossy(&bytes[cut..]).into_owned(), pem_open(&bytes[..cut])))
 }
 
 fn remove_pointer(value: &mut Value, pointer: &str) {
@@ -1062,25 +1078,60 @@ mod tests {
         let (cut, full) = (body("CUTBODY"), body("FULLBODY"));
         let leaked = |lines: &[String], secret: &str| lines.iter().any(|l| l.contains(secret));
         let block = format!("before\n-----BEGIN PRIVATE KEY-----\n{full}\n{full}\nQUJD==\n-----END PRIVATE KEY----- tail\nafter");
-        let out = redact_log(&block);
+        let out = redact_log(&block, false);
         assert!(!leaked(&out, &full) && !leaked(&out, "QUJD"), "multiline body leaked");
         assert_eq!(out.first().unwrap(), "before");
         assert_eq!(out.last().unwrap(), "after");
         assert!(out.iter().any(|l| l == "[redacted] tail"));
         // Tail cut inside a block: the END comes first.
-        let out = redact_log(&format!("{cut}\nQUJD==\n-----END PRIVATE KEY-----\nafter"));
+        let out = redact_log(&format!("{cut}\nQUJD==\n-----END PRIVATE KEY-----\nafter"), false);
         assert!(!leaked(&out, &cut) && !leaked(&out, "QUJD"), "cut body leaked");
         assert_eq!(out.last().unwrap(), "after");
         // Cut inside a block with neither marker in the tail.
-        let out = redact_log(&format!("{cut}\n{cut}\nnormal line"));
+        let out = redact_log(&format!("{cut}\n{cut}\nnormal line"), false);
         assert!(!leaked(&out, &cut), "markerless body leaked");
         assert_eq!(out.last().unwrap(), "normal line");
         // Unterminated block runs to the end of the tail.
-        let out = redact_log(&format!("ok\n-----BEGIN EC PRIVATE KEY-----\nshort\nx y"));
+        let out = redact_log(&format!("ok\n-----BEGIN EC PRIVATE KEY-----\nshort\nx y"), false);
         assert_eq!(out, ["ok", "[redacted]", "[redacted]", "[redacted]"]);
         // Single-line blocks and ordinary secrets still use redact_text.
-        let out = redact_log("a -----BEGIN X-----MIIE-----END X----- b password=hunter2");
+        let out = redact_log("a -----BEGIN X-----MIIE-----END X----- b password=hunter2", false);
         assert_eq!(out, ["a [redacted] b password=[redacted]"]);
+        // Cut inside a block, both markers outside the tail: the state from
+        // before the tail covers short and prefixed body lines.
+        let out = redact_log(&format!("INFO {cut}\nQUJD==\nINFO {cut}"), true);
+        assert_eq!(out, ["[redacted]"; 3]);
+        let out = redact_log(&format!("INFO {cut}\nQUJD==\n-----END PRIVATE KEY-----\nafter"), true);
+        assert_eq!(out, ["[redacted]", "[redacted]", "[redacted]", "after"]);
+        assert!(pem_open(b"x\n-----BEGIN PRIVATE KEY-----\nAAAA"));
+        assert!(pem_open(b"-----BEGIN A-----\n-----END A-----\n-----BEGIN B-----"));
+        assert!(!pem_open(b"-----BEGIN A-----\nAAAA\n-----END A-----\nok"));
+        assert!(!pem_open(b"-----BEGIN X-----MIIE-----END X-----"));
+        assert!(!pem_open(b"-----END A-----") && !pem_open(b""));
+    }
+
+    #[test]
+    fn log_tail_carries_pem_state_across_the_byte_cut() {
+        let dir = std::env::temp_dir().join(format!("suifleet-console-{}", rand::random::<u128>()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("component.log");
+        let body = format!("INFO {}\n", "B".repeat(64));
+        let open = format!("noise\n-----BEGIN PRIVATE KEY-----\n{}", body.repeat(200));
+        assert!(open.len() as u64 > MAX_LOG_BYTES);
+        std::fs::write(&path, &open).unwrap();
+        let (text, in_block) = tail(&path).unwrap();
+        assert!(in_block && !text.contains("BEGIN") && !text.contains("noise"));
+        assert!(text.len() as u64 <= MAX_LOG_BYTES && text.starts_with("INFO "));
+        assert!(redact_log(&text, in_block).iter().all(|l| l == REDACTED));
+        // Closed before the tail; small logs are read whole.
+        std::fs::write(&path, format!("{open}-----END PRIVATE KEY-----\n{}", "ok\n".repeat(4000))).unwrap();
+        assert!(!tail(&path).unwrap().1);
+        std::fs::write(&path, "-----BEGIN PRIVATE KEY-----\nAAAA\n").unwrap();
+        assert_eq!(tail(&path).unwrap(), ("-----BEGIN PRIVATE KEY-----\nAAAA\n".to_owned(), false));
+        // A BEGIN beyond the lookback is no longer key material.
+        std::fs::write(&path, format!("-----BEGIN X-----\n{}", "ok\n".repeat((PEM_LOOKBACK as usize + 9000) / 3))).unwrap();
+        assert!(!tail(&path).unwrap().1);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

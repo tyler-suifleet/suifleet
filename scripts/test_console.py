@@ -41,6 +41,7 @@ CANARY = 'hunter2-log-secret'
 # Synthetic 64-character PEM body lines; not key material.
 PEM_CUT = 'CUTBODYCANARY' + 'A' * 51
 PEM_FULL = 'FULLBODYCANARY' + 'A' * 50
+PEM_OPEN = 'OPENBODYCANARY' + 'A' * 50
 
 
 def free_port():
@@ -237,11 +238,16 @@ def run(browser=False):
                     f'echo "-----END PRIVATE KEY-----"; echo middle; echo "-----BEGIN PRIVATE KEY-----"; '
                     f'echo {PEM_FULL}; echo {PEM_FULL}; echo QUJD==; echo "-----END PRIVATE KEY-----"; echo after; '
                     'exec sleep 300')))
+            # svc3 is still writing a block: BEGIN long before the 8 KiB tail,
+            # logger-prefixed body lines and a short last line, no END.
+            sim.add(test_ota.object_id('0x793'), event=dict(component_name='svc3'), recipe=dict(lifecycle=dict(
+                run=f'echo "-----BEGIN PRIVATE KEY-----"; i=0; while [ $i -lt 300 ]; do echo "INFO {PEM_OPEN}"; i=$((i+1)); done; '
+                    'echo SHORTQUJD==; exec sleep 300')))
 
             def running():
                 body = c.call('inventory', token=ops['token'])
-                return sum(x['component'] in ('svc', 'svc2') and x['health'] == 'running' for x in body['data']['components']) == 2
-            wait_for(running, 'svc/svc2 did not start', process)
+                return sum(x['component'] in ('svc', 'svc2', 'svc3') and x['health'] == 'running' for x in body['data']['components']) == 3
+            wait_for(running, 'svc/svc2/svc3 did not start', process)
 
             # Static UI: no data, strict headers; Host must be configured (DNS rebinding).
             status, headers, body = raw(port, f'GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n'.encode())
@@ -315,18 +321,31 @@ def run(browser=False):
                     assert not any(secret in line for line in lines), f'PEM fixture {i} leaked at limit {limit}'
             lines = c.call('logs', token=ops['token'], component='svc2', limit=200)['data']['lines']
             assert lines[-1] == 'after' and 'middle' in lines and set(lines) == {'[redacted]', 'middle', 'after'}, 'unexpected svc2 view'
+            # Tail inside a block whose markers are both outside it: the BEGIN
+            # before the tail redacts prefixed and short body lines alike.
+            svc3_log = state / 'supervised/svc3/component.log'
+            wait_for(lambda: svc3_log.exists() and 'SHORTQUJD' in svc3_log.read_text(), 'svc3 log incomplete', process)
+            raw_tail = svc3_log.read_bytes()[-8 * 1024:]
+            assert svc3_log.stat().st_size > 8 * 1024 and b'-----' not in raw_tail and b'INFO ' + PEM_OPEN.encode() in raw_tail
+            for limit in (1, 2, 3, 200):
+                lines = c.call('logs', token=ops['token'], component='svc3', limit=limit)['data']['lines']
+                assert lines and set(lines) == {'[redacted]'}, f'PEM fixture leaked at svc3 limit {limit}'
             configuration = c.call('configuration', token=ops['token'], component='svc')['data']
             assert configuration['effective']['answer'] == 42 and configuration['effective']['nested']['port'] == 8080
             assert configuration['effective']['nested']['password'] == '[redacted]' and 'recipe-secret' not in json.dumps(configuration)
             first = c.call('deployments', token=ops['token'], limit=1)['data']
             assert len(first['deployments']) == 1 and first['deployments'][0]['status'] == 1 and first['next'], first
             second = c.call('deployments', token=ops['token'], limit=1, after=first['next'])['data']
-            assert len(second['deployments']) == 1 and second['next'] is None, second
+            assert len(second['deployments']) == 1 and second['next'], second
             assert first['deployments'][0]['deployment'] != second['deployments'][0]['deployment']
+            third = c.call('deployments', token=ops['token'], limit=1, after=second['next'])['data']
+            assert len(third['deployments']) == 1 and third['next'] is None, third
             page = c.call('inventory', token=ops['token'], limit=1)['data']
             assert [x['component'] for x in page['components']] == ['svc'] and page['next'] == 'svc', page
             page = c.call('inventory', token=ops['token'], limit=1, after='svc')['data']
-            assert [x['component'] for x in page['components']] == ['svc2'] and page['next'] is None, page
+            assert [x['component'] for x in page['components']] == ['svc2'] and page['next'] == 'svc2', page
+            page = c.call('inventory', token=ops['token'], limit=1, after='svc2')['data']
+            assert [x['component'] for x in page['components']] == ['svc3'] and page['next'] is None, page
             print('PASS: allowlisted inventory; redacted logs/configuration; bounded log tail and pages')
 
             # Sessions: Origin, Content-Type, fetch metadata, CSRF and logout.
