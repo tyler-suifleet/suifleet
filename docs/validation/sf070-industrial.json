@@ -1,27 +1,27 @@
 {
   "ticket": "SF-070",
-  "head": "843f2b02c205fb30443d649e53fc0ab9319fdf5e",
+  "head": "7fed9b489a7ec5ff8dadd8b7904875f6e14bb1f1",
   "model": "Claude claude-opus-5-5",
-  "date": "2026-10-19",
+  "date": "2026-10-20",
   "suites": {
     "make test-industrial": {
       "command": "PYTHONPATH=.ci-cache/industrial-runtime/site python3 scripts/test_industrial.py",
       "runner": "suifleet-dev container (Ubuntu 22.04, Python 3.10.12, OpenSSL 3.0.2), --network none, uid 1001",
-      "result": "28 tests OK",
+      "result": "30 tests OK",
       "cryptography": "44.0.3 (interfaces/compat/industrial/crypto-lock.json)",
-      "config_vectors": "interfaces/compat/industrial/config-cases.json (51 cases)"
+      "config_vectors": "interfaces/compat/industrial/config-cases.json (53 cases)"
     },
     "make test-industrial-daemon": {
       "command": "python3 scripts/test_industrial_daemon.py .ci-cache/industrial-runtime/site",
       "runner": "suifleet-dev container as root, --network none; collector as UID 62101; debug daemon built with cargo --locked",
       "checks": [
-        "interoperability through the component boundary: zip application 67da72f3e9bba30e as UID 62101, Modbus TCP and OPC UA Basic256Sha256/SignAndEncrypt + UserName records exported in signed batches",
+        "interoperability through the component boundary: zip application 16d33ffa0d0f0a94 as UID 62101, Modbus TCP and OPC UA Basic256Sha256/SignAndEncrypt + UserName records exported in signed batches",
         "backpressure: the daemon refused appends with 'full'; buffer held 400/400, Modbus polls skipped and OPC UA Publish withheld, then gap records reported the interval",
         "daemon kill -9: the collector buffered and retried; appends and signed export resumed after restart",
         "collector SIGTERM: buffered records flushed (exit 0) and a new boot continued the stream",
-        "no loss: 977 records from 2 collector boots arrived contiguously in 13 verified signed batches (stream lost_before only for the crash numbering gap)"
+        "no loss: 996 records from 2 collector boots arrived contiguously in 13 verified signed batches (stream lost_before only for the crash numbering gap)"
       ],
-      "bundle_sha256": "67da72f3e9bba30e25e284d0edba3cbcb86867a8008f85bf1cda9cd98bdf44eb",
+      "bundle_sha256": "16d33ffa0d0f0a943a5e1d8a87d4794cfa6de11512ab83cb31d3a7a6f45a3e3e",
       "signature_verification": "independent: SHA-256 body binding, BLAKE2b personal-message intent digest, RFC 8032 Ed25519 (Python), signer address (scripts/test_streams.py Receiver)"
     },
     "cross-implementation": {
@@ -40,7 +40,7 @@
         "collector -> pymodbus 3.8.6 TCP server: function codes 1-4, word order, and exception 2 for an unmapped address (exception:2 illegal-data-address)",
         "pymodbus 3.8.6 client -> SuiFleet Modbus simulator: function codes 1-4 and exception 2"
       ],
-      "note": "host-run evidence; not part of CI"
+      "note": "host-run evidence (rerun at this head); not part of CI"
     }
   },
   "limitations": [
