@@ -124,8 +124,12 @@ test-protocol-live:
 test-catalog-live:
 	$(RUN) python3 scripts/test_catalog_localnet.py
 
-# SF-028 Greengrass compatibility matrix, reference-model fixtures and current
-# frontend validator check (docs/GREENGRASS_COMPATIBILITY.md). Offline.
+# Independent media decode, protocol-emulator and process-recovery suite.
+.PHONY: test-video
+test-video:
+	bash scripts/test_kvs_video.sh
+
+# SF-028 Greengrass compatibility matrix and reference-model fixtures. Offline.
 .PHONY: test-compat
 test-compat:
 	$(RUN) python3 scripts/greengrass_compat.py
