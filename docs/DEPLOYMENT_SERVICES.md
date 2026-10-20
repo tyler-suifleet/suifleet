@@ -2,8 +2,13 @@
 
 Recipe schema `1.3` adds an optional `services` section, version `1`. The
 existing on-chain recipe SHA-256 authenticates every byte of this section.
-Only the verified fleet-owner deployment root supplies service configuration;
-dependency recipes must omit it. The root may grant access to itself and the
+Only the verified deployment root authorized by the fleet owner supplies
+service configuration;
+dependency recipes must omit it. The on-chain authority includes the owner and
+accounts holding a delegated `DeployerRole`; it does not require a separate
+owner signature on each recipe. Delegation therefore authorizes service
+destinations and grants, but never authorizes reading arbitrary local files.
+The root may grant access to itself and the
 components actually present in its resolved dependency plan, including reused
 components. Omitted soft dependencies cannot receive grants.
 
@@ -90,11 +95,40 @@ and destinations. Local operator overrides remain independent of deployment
 revocation. Two deployment roots cannot own the same grants or global service
 section: conflicting ownership is rejected rather than using arrival order.
 
-For migration, provision UIDs and credential reference files first, deploy a
-`1.3` recipe, then remove the local service sections and ACL fields that should
+Fleet credential paths are denied by default. The operator must authorize each
+exact absolute path, credential kind and destination in device-local
+`config.toml` (these entries cannot be supplied by a recipe):
+
+```toml
+[[service_credentials]]
+kind = "stream_bearer"
+path = "/etc/suifleet/export.token"
+destination = "https://ingest.example/v1/streams"
+
+[[service_credentials]]
+kind = "mqtt_password"
+path = "/etc/suifleet/mqtt-password"
+destination = "127.0.0.1:1883"
+```
+
+Destinations are matched byte-for-byte against the export URL or broker string;
+there are no globs, redirects or cross-kind reuse. Only intentionally provisioned
+service credentials belong in this allowlist, never device keys, signer PINs,
+configuration or component overlays. Files must be regular, singly linked,
+owned by root or the daemon UID and private (`0600` or `0400`); paths must be
+absolute, normalized and contain no symlinks. Keep their parent directories
+operator-controlled so components cannot replace authorized files. Rejection
+happens before lifecycle commands and also on startup/recovery, including
+references in fleet sections masked by local overrides. Changing or removing a
+local authorization requires a daemon restart; ensure retained rollback
+configurations remain authorized. Device-local service sections retain their
+existing operator-controlled path behavior.
+
+For migration, provision UIDs, private credentials and their allowlist first,
+deploy a `1.3` recipe, then remove the local service sections and ACL fields that should
 be fleet-managed and restart the daemon. Keep UID entries and the socket. Keep
-keys, journals and stream directories. Recipe bytes are public: use paths to
-provisioned private credential files, never passwords or tokens in the recipe.
+keys, journals and stream directories. Recipe bytes are public: reference only
+explicitly authorized credential paths, never passwords or tokens in the recipe.
 
 ## Deployment transaction and recovery
 
