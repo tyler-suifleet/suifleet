@@ -5,7 +5,7 @@
   "runtime_execution": "passed",
   "date": "2026-10-20",
   "command": "make test-lambda SUIFLEET_DEV_IMAGE=suifleet-dev:sf037",
-  "result": "19 manager/function-process tests passed (about 21 s) and 7 real-daemon checks passed; the 18-test suite passed three consecutive times before the contract test was added; the 19 tests also passed as a non-root user with the 2 root-only tests skipped; re-run on 2026-10-20 after merging main cbf1f68 (SF-060/SF-081/SF-074/SF-035/SF-059): 19 tests OK and 7 real-daemon checks PASS, and make test-compat passed (524 fixtures, 76 roadmap checks, 15+39 Python tests, translator/validator checks); re-run again after merging main 6979270 (SF-089 fleet handover): 19 tests OK and 7 real-daemon checks PASS",
+  "result": "19 manager/function-process tests passed (about 21 s) and 7 real-daemon checks passed; the 18-test suite passed three consecutive times before the contract test was added; the 19 tests also passed as a non-root user with the 2 root-only tests skipped; re-run on 2026-10-20 after merging main cbf1f68 (SF-060/SF-081/SF-074/SF-035/SF-059): 19 tests OK and 7 real-daemon checks PASS, and make test-compat passed (524 fixtures, 76 roadmap checks, 15+39 Python tests, translator/validator checks); re-run again after merging main 6979270 (SF-089 fleet handover): 19 tests OK and 7 real-daemon checks PASS; after the PR #175 review fixes (termination as the function UID, fail-stop on denied cleanup, strict response JSON): 23 tests OK (about 25 s) and 7 real-daemon checks PASS, 23 run with 3 root-only skips as a non-root user; against the pre-fix manager the 4 new unit tests fail and the real-daemon deadline check receives no timeout result",
   "environment": "pinned dev image suifleet-dev:sf037 (Ubuntu 22.04, Python 3.10.12, util-linux setpriv 2.37.2); network none, root container creating distinct component UIDs; debug suifleet daemon and gRPC simulator shim built from this branch with cargo --locked",
   "tested": [
     "SF-064 lambda v1 reference vectors computed from the runtime's own version, timeout, admission and routing decisions",
@@ -13,13 +13,15 @@
     "on-demand fresh process per invocation, cleared environment, private work directory, request/result envelope fields",
     "long-lived process started with the manager, state across invocations, restart after crash and after timeout",
     "error, crashed (exit code), invalid-response (malformed and oversized), unsupported-version, result-too-large and timeout envelopes",
+    "strict response JSON: NaN, Infinity, lone surrogates, invalid UTF-8, UTF-16 and nesting beyond 64 are invalid-response while the manager and an unrelated function continue; nesting of 64 accepted",
+    "denied cleanup: the manager fails within the 5 s bound instead of waiting for the function; a denied signal is sent by a helper running as the function UID",
     "timeout kills the process group; escaped setsid descendants killed through the subreaper sweep",
     "max_concurrency bound, FIFO queue and busy without invocation",
     "fan-out to sorted unique targets; unsubscribed source and unrouted messages acknowledged without invocation",
     "manager SIGKILL: function killed by parent-death signal, interrupted invocation re-run once with attempt 2",
     "duplicate redelivery after a failed acknowledgement is not reinvoked; results retained across publish backpressure and manager restart without reinvocation",
     "graceful stop finishes in-flight work; exclusive state lock, binding mismatch and unsupported configuration rejected; RLIMIT_AS MemoryError",
-    "real daemon: durable pub/sub to a capability-limited manager UID (CAP_SETUID/SETGID/CHOWN only), function UID with no groups/capabilities and no_new_privs, peer-UID refusal of manager impersonation, ACL refusal of an unauthorized publisher, unrouted authorized source, long-lived state, error/timeout, manager plus daemon SIGKILL recovery without duplicate results"
+    "real daemon: durable pub/sub to a capability-limited manager UID (CAP_SETUID/SETGID/CHOWN only), function UID with no groups/capabilities and no_new_privs, peer-UID refusal of manager impersonation, ACL refusal of an unauthorized publisher, unrouted authorized source, long-lived state, error/timeout, on-demand and long-lived functions sleeping 600 s killed promptly at a 1.5 s deadline by the capability-limited manager together with an escaped setsid descendant, later invocations after those timeouts, manager plus daemon SIGKILL recovery without duplicate results"
   ],
   "limits": [
     "Clean-room native function manager; no AWS Lambda/Greengrass recipe, SDK, IPC or wire compatibility claim. Live AWS acceptance is unrun and unauthorized, tracked in SF-069/#123 and SF-064/#109.",
