@@ -3,7 +3,7 @@
   "ticket": "SF-060",
   "agent": "Claude",
   "model": "claude-opus-5-5",
-  "date": "2026-10-19",
+  "date": "2026-10-20",
   "adapter": "cloudwatch-logs-export",
   "replaces": {
     "aws.greengrass.LogManager": "2.3.14"
@@ -19,45 +19,46 @@
   },
   "commands": [
     {
-      "command": "docker run --network none ... suifleet-dev:sf037: cd suifleet-edge && cargo test --locked && cargo test --locked --features pkcs11 (after merging origin/main 570ea5b)",
-      "result": "269 passed; 0 failed (default) and 271 passed; 0 failed (pkcs11), including 17 cloudwatch_logs tests and the retained-mode reconcile test"
+      "command": "docker run --network none ... suifleet-dev:sf037: cd suifleet-edge && cargo test --locked && cargo test --locked --features pkcs11 (head merged with origin/main 570ea5b, with the second-review repairs)",
+      "result": "270 passed; 0 failed (default) and 272 passed; 0 failed (pkcs11), including 17 cloudwatch_logs tests and both group-read reconcile tests"
     },
     {
       "command": "cargo test cloudwatch_logs::tests::declared_fixtures_run_against_the_adapter_and_emulator",
       "result": "passed: all 8 sequences / 69 steps of cloudwatch-logs-cases.json against the adapter's spool, batching and SigV4 HTTP uploader; the emulator received exactly the expected PutLogEvents calls with 0 request-check violations; 1 step (non-text message) decided while decoding the fixture into the adapter's text interface"
     },
     {
-      "command": "cargo test cloudwatch_logs::tests::a_failure_after_the_compaction_rename_loses_nothing logs::tests::turning_group_read_on_or_off_reconciles_an_existing_retained_set",
-      "result": "passed: directory sync failing after the compaction rename keeps the triggering line, refuses later lines and a reopen recovers every committed event; an existing retained set becomes 0640 with group read and 0600 without, contents unchanged"
+      "command": "cargo test cloudwatch_logs::tests::a_failure_after_the_compaction_rename_loses_nothing cloudwatch_logs::tests::uploads_create_streams_settle_rejections_and_keep_failures logs::tests::turning_group_read_on_or_off_reconciles_an_existing_retained_set logs::tests::turning_group_read_on_or_off_reconciles_existing_logs_and_directories",
+      "result": "passed: directory sync failing after the compaction rename keeps the triggering line, refuses later lines and a reopen recovers every committed event; a refused credential token (401) marks the uploader for restart, also while unexpired cached credentials are still used, and an unreachable credential endpoint does not; an existing retained set becomes 0640 with group read and 0600 without, contents unchanged; existing daemon.log/.1, active and inactive component.log/.1 become 0640 and logs/, supervised/, supervised/NAME/ 0750, then 0600 and group access removed, without following a symlinked component.log"
     },
     {
       "command": "python3 scripts/test_cloudwatch_logs.py (network none, uid 1001)",
-      "result": "passed (9 PASS): real daemon first without, then with log_group_read: existing component log, daemon log and retained values 0640 (directories 0750) with unchanged retained contents; redaction before the spool, DEBUG filtered, LogManager group/stream names, 300000-byte line split 262118+37882; outage, lost response resent, SIGKILL restart, rotation, symlink/hard-link sibling refusal, 2000-byte spool keeping newest 26 of 400 and counting 376 dropped with a 44076-byte journal, refusal without credentials and with logFileRegex. Against a binary built from the pre-fix head 7106552 + base merge it fails: confidential.json stays 0600"
+      "result": "passed (10 PASS): real daemon without, with, then again without log_group_read: existing component logs (active and inactive), daemon.log and daemon.log.1 and retained values 0640 (directories 0750) with unchanged retained contents, then 0600 (directories 0700) with no daemon log written; redaction before the spool, DEBUG filtered, LogManager group/stream names, 300000-byte line split 262118+37882; outage, lost response resent, SIGKILL restart, rotation, symlink/hard-link sibling refusal, 2000-byte spool keeping newest 26 of 400 and counting 376 dropped with a 44076-byte journal, refusal without credentials and with logFileRegex"
     },
     {
       "command": "python3 scripts/test_cloudwatch_logs.py --distinct-uids (make test-cloudwatch-logs-uids; root, network none)",
-      "result": "passed: daemon UID 61601 and adapter UID 61602 (supplementary group 61601 only), UMask 0077; the adapter exported 55 svc and 3 System events through group read and was denied the device key"
+      "result": "passed (6 PASS): daemon UID 61601 and adapter UID 61602 (supplementary group 61601 only), UMask 0077; the adapter exported 55 svc and 3 System events through group read and was denied the device key. Credentials from the actual SF-057 credential adapter (scripts/aws_credentials.py Adapter, in process as root, token_ttl_seconds 4, mutual-TLS local stand-in for the AWS IoT credentials provider) through sdk/python/suifleet_aws.py as UID 61602: after expiry the credential adapter answered 401 and the CloudWatch Logs adapter exited 1; a new start through the wrapper delivered the pending line in order, once, with 0 emulator violations. Turned off again: all logs 0600, directories 0700, the adapter's UID denied component.log, confidential.json and daemon.log.1. Against binaries built from the pre-fix head 05b9054: with that daemon the run fails the enabling check (daemon.log.1/inactive component log stay 0600); with only that adapter it fails 'the adapter kept running with a refused credential token'"
     },
     {
       "command": "make test-ota INSIDE_DEV_CONTAINER=1 (network none, uid 1001)",
-      "result": "exit 0 on the head merged with origin/main 570ea5b: all 16 test-ota script invocations passed (111 PASS lines), after installing the locked dApp dependencies (pnpm install --frozen-lockfile) that SF-037's translator needs"
+      "result": "exit 0 on the head merged with origin/main 570ea5b with the repairs: all 16 test-ota script invocations passed (112 PASS lines). BrokenPipeError tracebacks printed by the simulator HTTP servers of test_ota.py --firmware-helper, test_firmware_restart.py and test_deployment_control.py (writing to daemons those tests kill) do not fail them"
     },
     {
       "command": "make test-compat INSIDE_DEV_CONTAINER=1",
-      "result": "exit 0: 524 reference-model fixture checks, 76 roadmap checks, roadmap (14) and compat (39) unittest suites OK, translator executed 83 recipe and 47 managed-dependency fixtures"
+      "result": "exit 0: 524 reference-model fixture checks, 76 roadmap checks, roadmap (14) and compat (39) unittest suites OK"
     }
   ],
   "source_sha256": {
-    "suifleet-edge/src/cloudwatch_logs.rs": "942eca926795c4b5a6f176db365bd071f46a1b6e5f7313e821a979e6a6b1c285",
-    "suifleet-edge/src/cloudwatch_logs_tests.rs": "67164edf3056e0298fed9b6621e0d879162872c77c562c475e600de558f1dac0",
-    "suifleet-edge/src/logs.rs": "baa2eb0fff9ea9045a9b34b2291b751916414793d5acc40435531e1102177bca",
+    "suifleet-edge/src/cloudwatch_logs.rs": "154e67eccf6f3a17ff0733cc79760b1b0396a5e97b98de3a8eb93a8e19bc6933",
+    "suifleet-edge/src/cloudwatch_logs_tests.rs": "07605405b8bb7effc12d72e9d1e6f0923b53d36d810e71a64b981c0ed18f22ca",
+    "suifleet-edge/src/logs.rs": "9355ec233bf6fcbb6097d336e773c73ba25741664792b37418abb46edd5cd3af",
     "scripts/cloudwatch_logs_emulator.py": "f13d1978edc03683d3f93fe8cf6ebd421e3f86ebd4bbe228dff8d362a537a286",
-    "scripts/test_cloudwatch_logs.py": "778341bba13245f3ea54f7a3a9767f856d8c3246b891c7809f667ab454882379",
-    "interfaces/compat/cloudwatch-logs-cases.json": "5bd65c83a89c05ccd457430fb4a56a0b6ae17d26a2aa3d7ddc64d0cc97545693"
+    "scripts/test_cloudwatch_logs.py": "56d99d14b799f11669a554b327459c5300cb86a01397bec2214c65aa3927bba0",
+    "interfaces/compat/cloudwatch-logs-cases.json": "5bd65c83a89c05ccd457430fb4a56a0b6ae17d26a2aa3d7ddc64d0cc97545693",
+    "suifleet-edge/src/main.rs": "9c8fde3fb8effdff4812008414017923b9c641335741a43487f0a813abb0bc76"
   },
   "limits": [
     "Local Linux x86_64 execution with a request-checking local CloudWatch Logs emulator; no live AWS account, IAM policy or service call (unauthorized; tracked in SF-060/#105).",
-    "Credentials came from a stand-in for the SF-057 container endpoint speaking the same protocol, not the actual SF-057 adapter process.",
+    "Credentials came from the actual SF-057 credential adapter code and wrapper only in the distinct-UID run (in process, local mutual-TLS stand-in for the AWS IoT credentials provider); the other runs use a stand-in for the SF-057 container endpoint speaking the same protocol. The SF-057 service under systemd with a real provider and IAM policy was not exercised.",
     "The shipped systemd units were not exercised: --distinct-uids drops privileges directly (setgroups/setgid/setuid, umask 0077) rather than through User=/SupplementaryGroups=/StateDirectoryMode=.",
     "System is the daemon's log file; systemd-journal forwarding (SystemLogForwarder), platform-managed component log files, regex selection, deletion after upload and multi-line grouping are not implemented.",
     "Physical Pi/target integration is deferred to SF-031/#32.",
@@ -69,6 +70,8 @@
   ],
   "review_repairs": [
     "PR #146 review (Codex gpt-6.1-sol, head 7106552) P1: compaction kept appending to the unlinked old journal after a post-rename failure; the snapshot descriptor is now adopted at rename, a failed directory sync poisons the spool and the adapter exits for a restart.",
-    "P2: enabling log_group_read on an existing installation left confidential.json 0600; the retained set's mode is reconciled under its lock even when contents are unchanged (both directions); daemon.log follows the option too."
+    "P2: enabling log_group_read on an existing installation left confidential.json 0600; the retained set's mode is reconciled under its lock even when contents are unchanged (both directions); daemon.log follows the option too.",
+    "PR #146 review (Codex gpt-6.1-sol, head 05b9054) P2: an expired or revoked SF-057 token (401) left the adapter running with failing uploads forever; a 401/403 from the credential endpoint now ends the upload cycle and exits the adapter with the spool kept, so Restart=on-failure starts it again through the wrapper for a new token; transient credential failures still fall back to cached credentials without a restart. Covered with the actual SF-057 credential adapter and wrapper.",
+    "P2: turning log_group_read off without [logs] left daemon.log 0640 and logs/ traversable; every daemon start now reconciles existing logs (daemon.log/.1, every supervised component's log/.1) and their directories with the option, without following symlinks and without enabling the daemon log."
   ]
 }
