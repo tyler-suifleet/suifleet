@@ -1,5 +1,8 @@
 mod ipc;
 mod catalog;
+// Linux only (prctl, openat2), like its catalog platforms.
+#[cfg(target_os = "linux")]
+mod cloudwatch_logs;
 mod clientdevices;
 mod client_gateway;
 mod control;
@@ -100,9 +103,10 @@ async fn main() -> anyhow::Result<()> {
     let check_config = args.len() == 3 && args[1] == "--check-config";
     let helper = args.len() == 3 && args[1] == "--firmware-helper";
     let signer_service = args.len() == 3 && args[1] == "--signer-service";
+    let cloudwatch_logs = args.len() == 3 && args[1] == "--cloudwatch-logs";
     anyhow::ensure!(
-        args.len() == 1 || launched || check_config || helper || signer_service,
-        "usage: suifleet [--launch | --provision KEY_PATH | --derive-address KEY_PATH | --enroll ENROLL_TOML | --check-config CONFIG_PATH | --self-check CONFIG_PATH | --firmware-helper CONFIG | --signer-service SIGNER_TOML | --record-main-process PATH | --key-holder CONFIG_PATH | --verify-release BUNDLE_DIR TRUST_FILE [TARGET]]"
+        args.len() == 1 || launched || check_config || helper || signer_service || cloudwatch_logs,
+        "usage: suifleet [--launch | --provision KEY_PATH | --derive-address KEY_PATH | --enroll ENROLL_TOML | --check-config CONFIG_PATH | --self-check CONFIG_PATH | --firmware-helper CONFIG | --signer-service SIGNER_TOML | --cloudwatch-logs CONFIG_JSON | --record-main-process PATH | --key-holder CONFIG_PATH | --verify-release BUNDLE_DIR TRUST_FILE [TARGET]]"
     );
     {
         use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -116,6 +120,13 @@ async fn main() -> anyhow::Result<()> {
     if signer_service {
         // Runs as its own user, holding the device key (SF-053).
         return signer_service::serve(Path::new(&args[2]));
+    }
+    if cloudwatch_logs {
+        // Runs as its own user with scoped AWS credentials (SF-060).
+        #[cfg(target_os = "linux")]
+        return cloudwatch_logs::run(Path::new(&args[2])).await;
+        #[cfg(not(target_os = "linux"))]
+        anyhow::bail!("the CloudWatch Logs adapter runs on Linux only");
     }
     if helper {
         // Root-owned, path-activated: the only privileged operation.
@@ -131,8 +142,15 @@ async fn main() -> anyhow::Result<()> {
             .unwrap_or_else(|_| PathBuf::from("/etc/suifleet/config.toml"))
     };
     let mut cfg = Config::load(&path)?;
-    if cfg.logs.is_some() && !check_config {
-        // From here on the daemon's own log is also written for shipping.
+    logs::set_group_read(cfg.runtime.log_group_read);
+    if !check_config {
+        // Also when no log is written any more: turning the option off
+        // makes the existing logs private again.
+        logs::reconcile_modes(&cfg.runtime.state_dir)?;
+    }
+    if (cfg.logs.is_some() || cfg.runtime.log_group_read) && !check_config {
+        // From here on the daemon's own log is also written for shipping
+        // or for a separate log reader.
         logs::enable_daemon_log(&cfg.runtime.state_dir)?;
     }
     let started_ms = telemetry::now_ms();
@@ -206,6 +224,11 @@ async fn main() -> anyhow::Result<()> {
     }
     // Before any component runs: their log lines are covered from here on.
     logs::initialize(&cfg.runtime.state_dir)?;
+    if cfg.runtime.log_group_read && cfg.logs.is_none() {
+        // The shipper would record these each interval; a separate reader
+        // only has what the daemon records.
+        logs::remember_materialized(&cfg.runtime.state_dir)?;
+    }
     // Committed components start again on every daemon start (bootstrap/reboot).
     let mut supervisor = supervisor::Supervisor::open(
         &cfg.runtime.state_dir,

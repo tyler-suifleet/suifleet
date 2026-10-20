@@ -66,9 +66,11 @@ test-ota:
 	$(RUN) python3 scripts/test_greengrass_runtime.py
 	$(RUN) python3 scripts/test_daemon_update.py
 	$(RUN) python3 scripts/test_desired_state.py
+	$(RUN) python3 scripts/test_handover_ota.py
 	$(RUN) python3 scripts/test_deployment_control.py
 	$(RUN) python3 scripts/test_telemetry.py
 	$(RUN) python3 scripts/test_logs.py
+	$(RUN) python3 scripts/test_cloudwatch_logs.py
 	$(RUN) python3 scripts/test_rollout.py
 
 # Fleet service configuration, root only in a disposable network-none container
@@ -131,6 +133,10 @@ generate-interfaces:
 # Disposable localnet only; run inside a container with no public-network access.
 test-protocol-live:
 	$(RUN) python3 scripts/test_protocol_localnet.py
+
+.PHONY: test-handover-upgrade-localnet
+test-handover-upgrade-localnet:
+	$(RUN) python3 scripts/test_protocol_localnet.py --handover-upgrade
 
 .PHONY: test-catalog-live
 test-catalog-live:
@@ -427,6 +433,17 @@ ifdef INSIDE_DEV_CONTAINER
 	python3 scripts/test_ipc.py
 else
 	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" python3 scripts/test_ipc.py
+endif
+
+# CloudWatch Logs (SF-060) with the daemon and the adapter under separate UIDs;
+# root only inside a disposable, network-isolated container.
+.PHONY: test-cloudwatch-logs-uids
+test-cloudwatch-logs-uids:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+ifdef INSIDE_DEV_CONTAINER
+	python3 scripts/test_cloudwatch_logs.py --distinct-uids
+else
+	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" python3 scripts/test_cloudwatch_logs.py --distinct-uids
 endif
 
 # SF-057: online public SDK preparation, then network-none actual adapter/mTLS tests.

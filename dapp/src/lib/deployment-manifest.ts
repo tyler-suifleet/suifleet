@@ -6,12 +6,12 @@ import { UpgradeCapBcs } from "./move-bcs";
 
 import { REQUIRED_TYPES, PROTOCOL_VERSION, MANIFEST_SCHEMA_VERSION } from "./protocol-version";
 export { REQUIRED_TYPES } from "./protocol-version";
-import { CATALOG_TYPES } from "./protocol-version";
+import { CATALOG_TYPES, HANDOVER_TYPES } from "./protocol-version";
 export { CATALOG_TYPES } from "./protocol-version";
 function manifestTypes(m: DeploymentManifest): string[] {
   const present = CATALOG_TYPES.filter(name => name in m.type_origins);
   if (present.length && present.length !== CATALOG_TYPES.length) fail("partial catalog type origins");
-  return [...REQUIRED_TYPES, ...present];
+  return [...REQUIRED_TYPES, ...present, ...HANDOVER_TYPES.filter(name => name in m.type_origins)];
 }
 export interface DeploymentManifest {
   schema_version: number;
@@ -68,7 +68,7 @@ export const MANIFEST = process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST
 export function requireManifest(): DeploymentManifest {
   return MANIFEST ?? fail("not configured; generate frontend.env from a verified manifest");
 }
-export function moveType(name: typeof REQUIRED_TYPES[number] | typeof CATALOG_TYPES[number]): string {
+export function moveType(name: typeof REQUIRED_TYPES[number] | typeof CATALOG_TYPES[number] | typeof HANDOVER_TYPES[number]): string {
   const m = requireManifest();
   return `${normalizeId(m.type_origins[name])}::${name}`;
 }
