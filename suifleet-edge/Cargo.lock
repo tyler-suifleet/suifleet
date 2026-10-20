@@ -2069,12 +2069,25 @@ dependencies = [
  "sui-rpc",
  "sui-sdk-types",
  "sui-transaction-builder",
+ "suifleet-windows",
  "tokio",
  "tokio-stream",
  "toml",
  "tonic",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "suifleet-windows"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
