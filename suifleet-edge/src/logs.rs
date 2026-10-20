@@ -99,15 +99,27 @@ pub fn set_group_read(on: bool) {
     GROUP_READ.store(on, std::sync::atomic::Ordering::Relaxed);
 }
 
+fn group_read() -> bool {
+    GROUP_READ.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+fn mode_for(group_read: bool) -> u32 {
+    if group_read { 0o640 } else { 0o600 }
+}
+
 /// The mode of a log file or the retained values.
 pub fn private_mode() -> u32 {
-    if GROUP_READ.load(std::sync::atomic::Ordering::Relaxed) { 0o640 } else { 0o600 }
+    mode_for(group_read())
 }
 
 /// With group read, let the group traverse `dir` (0750). Without, leave it.
 pub fn share_dir(dir: &Path) -> std::io::Result<()> {
+    share_dir_for(dir, group_read())
+}
+
+fn share_dir_for(dir: &Path, group_read: bool) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
-    if GROUP_READ.load(std::sync::atomic::Ordering::Relaxed) {
+    if group_read {
         std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o750))?;
     }
     Ok(())
@@ -502,8 +514,8 @@ impl Retained {
         }
     }
 
-    fn save(&self, path: &Path) -> anyhow::Result<()> {
-        crate::configuration::write_with_mode(path, self, private_mode())
+    fn save(&self, path: &Path, mode: u32) -> anyhow::Result<()> {
+        crate::configuration::write_with_mode(path, self, mode)
             .map_err(|error| anyhow::anyhow!("cannot store retained confidential values: {}", error.root_cause()))
     }
 
@@ -549,11 +561,16 @@ impl Retained {
 
 /// Run `change` on the retained set under its lock (the shipper and every
 /// materialization share it), creating it if there is none, and store it
-/// durably if it changed.
+/// durably if it changed or its mode no longer matches `[runtime] log_group_read`
+/// (an existing installation that turned it on or off).
 fn retained<T>(state_dir: &Path, change: impl FnOnce(&mut Retained) -> T) -> anyhow::Result<T> {
+    retained_for(state_dir, group_read(), change)
+}
+
+fn retained_for<T>(state_dir: &Path, group_read: bool, change: impl FnOnce(&mut Retained) -> T) -> anyhow::Result<T> {
     let path = state_dir.join(RETAINED);
     std::fs::create_dir_all(state_dir.join("logs"))?;
-    share_dir(&state_dir.join("logs"))?;
+    share_dir_for(&state_dir.join("logs"), group_read)?;
     let lock = std::fs::OpenOptions::new()
         .create(true)
         .truncate(false)
@@ -566,8 +583,11 @@ fn retained<T>(state_dir: &Path, change: impl FnOnce(&mut Retained) -> T) -> any
         None => (Retained::first(state_dir), None),
     };
     let result = change(&mut set);
-    if before.as_ref() != Some(&set) {
-        set.save(&path)?;
+    let mode = mode_for(group_read);
+    let stale_mode = std::fs::symlink_metadata(&path).is_ok_and(|meta| meta.mode() & 0o777 != mode);
+    if before.as_ref() != Some(&set) || stale_mode {
+        // Rewritten, not chmod-ed: the replacement is created with the mode.
+        set.save(&path, mode)?;
     }
     Ok(result)
 }
@@ -922,6 +942,27 @@ mod tests {
     }
 
     #[test]
+    fn turning_group_read_on_or_off_reconciles_an_existing_retained_set() {
+        // An installation that started before `log_group_read` was set.
+        let state = dir("group-read");
+        retained_for(&state, false, |set| set.values.insert("ExistingValueK7".into(), Known::default())).unwrap();
+        let path = state.join(RETAINED);
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&path), 0o600);
+        let before = stored(&state);
+        // Nothing changes but the option: the start makes it readable anyway.
+        retained_for(&state, true, |_| ()).unwrap();
+        assert_eq!((mode(&path), mode(&state.join("logs"))), (0o640, 0o750));
+        assert_eq!(stored(&state), before, "the values and cursors are kept");
+        retained_for(&state, true, |set| set.values.entry("ExistingValueK7".into()).or_default().clone()).unwrap();
+        assert_eq!(mode(&path), 0o640);
+        // And private again once it is turned off.
+        retained_for(&state, false, |_| ()).unwrap();
+        assert_eq!(mode(&path), 0o600);
+        assert_eq!(stored(&state), before);
+    }
+
+    #[test]
     fn tail_reads_complete_lines_once_and_follows_rotation() {
         let d = dir("tail");
         let log = d.join("component.log");
@@ -1242,7 +1283,7 @@ mod tests {
         let expire = |state: &Path| {
             let mut known = stored(state);
             known.values.values_mut().for_each(|k| k.unused_since_ms = k.unused_since_ms.map(|_| 1));
-            known.save(&state.join(RETAINED)).unwrap();
+            known.save(&state.join(RETAINED), private_mode()).unwrap();
         };
         // The running version still holds it: in use, however long.
         expire(&state);
