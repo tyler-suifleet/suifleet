@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import signal
 import socket
+import socketserver
 import subprocess
 import sys
 import tempfile
@@ -21,6 +22,71 @@ from test_streams import Receiver
 
 ROOT = Path(__file__).resolve().parents[1]
 UID = 63001
+
+
+class Mqtt:
+    """Loopback MQTT protocol peer: CONNACK, QoS1 PUBLISH/PUBACK and ping.
+    Independently observe destination topics across bridge replacement.
+    """
+    def __init__(self):
+        self.messages = []
+        self.lock = threading.Lock()
+        peer = self
+
+        class Handler(socketserver.BaseRequestHandler):
+            def read(self, count):
+                data = b''
+                while len(data) < count:
+                    part = self.request.recv(count - len(data))
+                    if not part:
+                        raise EOFError
+                    data += part
+                return data
+
+            def handle(self):
+                self.request.settimeout(10)
+                try:
+                    while True:
+                        header = self.read(1)[0]
+                        size, multiplier = 0, 1
+                        for _ in range(4):
+                            byte = self.read(1)[0]
+                            size += (byte & 127) * multiplier
+                            if not byte & 128:
+                                break
+                            multiplier *= 128
+                        body = self.read(size)
+                        kind = header >> 4
+                        if kind == 1:
+                            self.request.sendall(b'\x20\x02\x00\x00')
+                        elif kind == 3:
+                            length = int.from_bytes(body[:2], 'big')
+                            topic = body[2:2 + length].decode()
+                            offset = 2 + length
+                            qos = (header >> 1) & 3
+                            packet_id = body[offset:offset + 2] if qos else b''
+                            payload = json.loads(body[offset + (2 if qos else 0):])
+                            with peer.lock:
+                                peer.messages.append((topic, payload))
+                            if qos == 1:
+                                self.request.sendall(b'\x40\x02' + packet_id)
+                        elif kind == 12:
+                            self.request.sendall(b'\xd0\x00')
+                        elif kind == 14:
+                            break
+                        else:
+                            raise AssertionError(f'unexpected MQTT packet {kind}')
+                except (EOFError, ConnectionError, TimeoutError, OSError):
+                    pass
+
+        class Server(socketserver.ThreadingTCPServer):
+            daemon_threads = True
+        self.server = Server(('127.0.0.1', 0), Handler)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def received(self, topic, payload):
+        with self.lock:
+            return (topic, payload) in self.messages
 
 
 def run():
@@ -62,6 +128,7 @@ def run():
     shim, rpc_url = start_grpc(f'http://127.0.0.1:{server.server_port}')
     process = None
     receiver = None
+    mqtt = Mqtt()
     try:
         with tempfile.TemporaryDirectory(prefix='sf081-') as temporary:
             root = Path(temporary)
@@ -118,7 +185,7 @@ def run():
             def service(stream, topic):
                 return dict(version=1, grants={'app': dict(operations=['config', 'publish', 'stream_append', 'stream_read', 'stream_describe'], streams=[stream],
                     pubsub_policies=[dict(operations=['aws.greengrass#PublishToTopic'], resources=[topic])])},
-                    pubsub=dict(bridge=dict(broker='127.0.0.1:9', mappings=[dict(source='Pubsub', target='LocalMqtt', topic=topic)])),
+                    pubsub=dict(bridge=dict(broker=f'127.0.0.1:{mqtt.server.server_address[1]}', mappings=[dict(source='Pubsub', target='LocalMqtt', topic=topic, target_topic_prefix=stream + '/')])),
                     streams=dict(max_streams=8, max_total_bytes=65536, definitions=[dict(name=stream, max_size=4096, strategy_on_full='RejectNewData')]))
 
             def deploy(id, version, services=None, **lifecycle):
@@ -134,6 +201,7 @@ def run():
                 deploy('0x801', '1', first)
                 wait_for(lambda: outcome('0x801') == 1, 'initial services deployment', process)
                 assert ipc('publish', 'old', {'value': 1})['ok']
+                wait_for(lambda: mqtt.received('a/old', {'value': 1}), 'initial bridge forwarding', process)
                 assert ipc('stream_append', 'a', 'retained')['ok']
                 assert not ipc('publish', 'new')['ok']
                 summary = ipc('config')['data']['services']
@@ -147,6 +215,7 @@ def run():
                 deploy('0x802', '2', second)
                 wait_for(lambda: outcome('0x802') == 1, 'upgraded services', process)
                 assert not ipc('publish', 'old')['ok'] and ipc('publish', 'new', 2)['ok']
+                wait_for(lambda: mqtt.received('b/new', 2), 'replacement bridge forwarding', process)
                 assert not ipc('stream_append', 'a', 'denied')['ok']
                 assert ipc('stream_append', 'b', 'export-me')['ok']
                 wait_for(lambda: receiver.received('b'), 'live fleet export', process)
@@ -224,6 +293,8 @@ def run():
         if process and process.poll() is None:
             process.kill()
             process.wait(timeout=10)
+        mqtt.server.shutdown()
+        mqtt.server.server_close()
         if receiver:
             receiver.server.shutdown()
         shim.terminate()
