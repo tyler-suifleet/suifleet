@@ -1,0 +1,66 @@
+{
+  "format_version": 1,
+  "purpose": "Optional runtime dependency for OPC UA security policy Basic256Sha256 and the test suite. Policy None and all Modbus transports need only the standard library. Not redistributed by SuiFleet; operators may supply an equivalent distribution package (for example python3-cryptography).",
+  "python": "3.10",
+  "glibc_min": "2.28",
+  "platforms": {
+    "linux-x86_64-cp310": [
+      {
+        "name": "cryptography",
+        "version": "44.0.3",
+        "filename": "cryptography-44.0.3-cp39-abi3-manylinux_2_28_x86_64.whl",
+        "url": "https://files.pythonhosted.org/packages/68/fb/d61a4defd0d6cee20b1b8a1ea8f5e25007e26aeb413ca53835f0cae2bcd1/cryptography-44.0.3-cp39-abi3-manylinux_2_28_x86_64.whl",
+        "sha256": "cb90f60e03d563ca2445099edf605c16ed1d5b15182d21831f58460c48bffb93",
+        "license": "Apache-2.0 OR BSD-3-Clause",
+        "source": "https://pypi.org/project/cryptography/44.0.3/"
+      },
+      {
+        "name": "cffi",
+        "version": "1.17.1",
+        "filename": "cffi-1.17.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+        "url": "https://files.pythonhosted.org/packages/8d/fb/4da72871d177d63649ac449aec2e8a29efe0274035880c7af59101ca2232/cffi-1.17.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+        "sha256": "2bb1a08b8008b281856e5971307cc386a8e9c5b625ac297e853d36da6efe9c17",
+        "license": "MIT",
+        "source": "https://pypi.org/project/cffi/1.17.1/"
+      },
+      {
+        "name": "pycparser",
+        "version": "2.22",
+        "filename": "pycparser-2.22-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/13/a3/a812df4e2dd5696d1f351d58b8fe16a405b234ad2886a0dab9183fb78109/pycparser-2.22-py3-none-any.whl",
+        "sha256": "c3702b6d3dd8c7abc1afa565d7e63d53a1d0bd86cdc24edd75470f4de499cfcc",
+        "license": "BSD-3-Clause",
+        "source": "https://pypi.org/project/pycparser/2.22/"
+      }
+    ],
+    "linux-aarch64-cp310": [
+      {
+        "name": "cryptography",
+        "version": "44.0.3",
+        "filename": "cryptography-44.0.3-cp39-abi3-manylinux_2_28_aarch64.whl",
+        "url": "https://files.pythonhosted.org/packages/73/96/025cb26fc351d8c7d3a1c44e20cf9a01e9f7cf740353c9c7a17072e4b264/cryptography-44.0.3-cp39-abi3-manylinux_2_28_aarch64.whl",
+        "sha256": "7d5fe7195c27c32a64955740b949070f21cba664604291c298518d2e255931d2",
+        "license": "Apache-2.0 OR BSD-3-Clause",
+        "source": "https://pypi.org/project/cryptography/44.0.3/"
+      },
+      {
+        "name": "cffi",
+        "version": "1.17.1",
+        "filename": "cffi-1.17.1-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl",
+        "url": "https://files.pythonhosted.org/packages/b6/7b/3b2b250f3aab91abe5f8a51ada1b717935fdaec53f790ad4100fe2ec64d1/cffi-1.17.1-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl",
+        "sha256": "45398b671ac6d70e67da8e4224a065cec6a93541bb7aebe1b198a61b58c7b702",
+        "license": "MIT",
+        "source": "https://pypi.org/project/cffi/1.17.1/"
+      },
+      {
+        "name": "pycparser",
+        "version": "2.22",
+        "filename": "pycparser-2.22-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/13/a3/a812df4e2dd5696d1f351d58b8fe16a405b234ad2886a0dab9183fb78109/pycparser-2.22-py3-none-any.whl",
+        "sha256": "c3702b6d3dd8c7abc1afa565d7e63d53a1d0bd86cdc24edd75470f4de499cfcc",
+        "license": "BSD-3-Clause",
+        "source": "https://pypi.org/project/pycparser/2.22/"
+      }
+    ]
+  }
+}
