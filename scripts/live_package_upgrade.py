@@ -165,7 +165,16 @@ def wait_for(condition, message, process=None, timeout=240):
     raise AssertionError(message)
 
 
+def transaction_gas_budget(value):
+    # Operators may lower ordinary PTB budgets to fit separate address/coin
+    # funding pools; this never raises the existing cap or run allowance.
+    if type(value) is not int or not 2_000_000 <= value <= 200_000_000:
+        raise ValueError("transaction gas budget must be 2000000..200000000 MIST")
+    return value
+
+
 def run(args):
+    ptb_budget = transaction_gas_budget(getattr(args, "transaction_gas_budget", 200_000_000))
     os.umask(0o077)
     evidence = {"started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "network": args.network,
                 "transactions": [], "checks": []}
@@ -243,8 +252,8 @@ def run(args):
                             '--lock-token', os.environ['SUIFLEET_TESTNET_LOCK_TOKEN']], check=True, stdout=subprocess.DEVNULL)
         return ledger.execute(client, label, command, **kwargs)
 
-    def transaction(label, *ptb, budget=200_000_000, funding=0):
-        return mutate(label, ['ptb', *ptb], gas=budget, funding=funding)
+    def transaction(label, *ptb, budget=None, funding=0):
+        return mutate(label, ['ptb', *ptb], gas=ptb_budget if budget is None else budget, funding=funding)
 
     def created(result, suffix):
         return [c["objectId"] for c in result["objectChanges"] if c["type"] == "created" and c["objectType"].endswith(suffix)]
@@ -481,6 +490,8 @@ if __name__ == "__main__":
     parser.add_argument("--build-sui", default="sui", help="pinned release compiler (Dockerfile SUI_VERSION)")
     parser.add_argument("--network-sui", default=os.environ.get("SUIFLEET_NETWORK_SUI", toolchain.NETWORK_DEFAULT),
                         help="pinned transaction CLI (Dockerfile SUI_NETWORK_VERSION)")
+    parser.add_argument("--transaction-gas-budget", type=int, default=200_000_000,
+                        help="lower ordinary PTB gas budgets for available gas funding pools (2000000..200000000 MIST); the run ceiling still applies")
     parser.add_argument("--fresh", action="store_true", help="ignore the cache and publish a new fixture")
     parser.add_argument("--walrus", default="local", choices=["local", "testnet"],
                         help="recipe/artifact storage: a local stand-in (default) or real Walrus testnet")
