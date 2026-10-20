@@ -121,6 +121,8 @@ The device key signs it as a Sui personal message, which can never be valid as a
 - **Export targets.** Exports go to HTTP(S) destinations with device-signed manifests. Kinesis Data Streams and S3 are the SF-058 adapter; SiteWise is SF-064. The `export` definitions here are the operator's, not the component's.
 - **Retention options.** `time_to_live_seconds` and `discard_exported` exist; AWS's `flushOnWrite` (sync every append) is always on for `File` streams.
 
+**Fleet visibility.** With `[telemetry]`, every heartbeat also reports each stream's usage, rejected appends, export lag, messages lost before export and export failures, never data, export URLs or tokens, and the indexer alerts on them ([TELEMETRY.md](TELEMETRY.md#service-health-sf-085), SF-085).
+
 ## Evidence
 
 | Command | Covers |
