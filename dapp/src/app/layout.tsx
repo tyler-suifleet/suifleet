@@ -13,6 +13,7 @@ import Link from "next/link";
 const ConnectButton = dynamic(() => import("@mysten/dapp-kit-react/ui").then((ui) => ui.ConnectButton), { ssr: false });
 const queryClient = new QueryClient();
 const NAV = [
+  { href: "/get-started", label: "Get started" },
   { href: "/",            label: "Dashboard" },
   { href: "/devices",     label: "Devices" },
   { href: "/deployments", label: "Deployments" },

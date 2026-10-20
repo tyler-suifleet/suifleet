@@ -22,6 +22,7 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6 max-w-5xl">
       <PageHeader title="Dashboard" />
+      <Link href="/get-started" className="block text-sm text-blue-700 underline">New here? Sign in and register your first device</Link>
 
       {/* Stat cards */}
       <div className="grid grid-cols-4 gap-4">
