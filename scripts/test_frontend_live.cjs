@@ -204,6 +204,8 @@ let stage = "startup";
       assert.deepEqual(await sui.fetchDeploymentEvents(client,operator.toSuiAddress()),[]);
       console.log("PASS: generated SDK catalog registration, immutable/type-authenticated discovery and SemVer sorting, both platform selectors, mixed targets and schema2 cleanup");
     }
+    stage = "fleet handover";
+    await require("./test_handover_live.cjs")({client, execute, operator, faucet});
     console.log("PASS: real gRPC publish/register+activate/borrowed group add and cap reissue/deployment/receipt/deregister/delete, invalid and foreign target history, failed execution effects");
     console.log("PASS: dApp desired-state revision (create+commit in one transaction), removal revision and managed-record deletion on chain");
     console.log(JSON.stringify({ chain: manifest.chain_identifier, package: packageId, registry: registryId }));
