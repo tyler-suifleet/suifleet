@@ -71,6 +71,13 @@ jobs:
 
       - name: Scoped AWS credentials with unmodified SDKs and local mTLS
         run: make test-aws-credentials SUIFLEET_DEV_IMAGE=suifleet-dev:ci
+      - name: Durable AWS stream exporter protocols
+        run: make test-stream-export SUIFLEET_DEV_IMAGE=suifleet-dev:ci
+
+      - name: CloudWatch metrics adapter with local emulator
+        run: make test-cloudwatch-metrics SUIFLEET_DEV_IMAGE=suifleet-dev:ci
+      - name: Firehose exporter with local SDK emulator and durable daemon streams
+        run: make test-firehose SUIFLEET_DEV_IMAGE=suifleet-dev:ci
 
       - name: Component IPC with distinct Unix peer identities
         run: |
@@ -90,6 +97,14 @@ jobs:
           path: ci-logs/
           retention-days: 14
           if-no-files-found: warn
+
+  video:
+    name: Kinesis Video media and recovery (offline)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - run: make test-video
 
   macos:
     # SF-075: the daemon on a hosted macOS runner, a disposable VM. Unit tests,

@@ -29,11 +29,12 @@ ROOT = Path(__file__).resolve().parent.parent
 COMPAT = Path("interfaces/compat")
 
 # ---------------------------------------------------------------------------
-# AWS Greengrass V2 recipe -> native SuiFleet catalog manifests (proposed
-# SF-037 subset) against the merged native recipe contract, including the SF-014
-# supervisor (run/shutdown and {artifact}/{artifacts}/{work} substitutions).
-# Outcomes: translate; defer (expressible only after the named unmerged ticket
-# lands, so it must be rejected until a reviewed change re-specifies it); reject.
+# AWS Greengrass V2 recipe -> native SuiFleet catalog manifests: the SF-037
+# subset against the merged native recipe contract, including the SF-014
+# supervisor, SF-015 configuration defaults and the SF-038 managed-dependency
+# classification. The SF-037 translator (dapp/src/lib/greengrass-recipe.ts)
+# implements the same rules; scripts/test_greengrass_compat.cjs executes these
+# fixtures against it. Outcomes: translate or reject (every reason).
 # ---------------------------------------------------------------------------
 NAME = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 NUM = r"(0|[1-9][0-9]*)"
@@ -50,7 +51,7 @@ TOP_KEYS = {
 }
 STEP_KEYS = {"Script", "RequiresPrivilege", "Skipif", "Timeout", "Setenv", "BootstrapOnRollback"}
 # Native SF-014 lifecycle commands that keep their meaning.
-MAPPED_STEPS = {"install", "run", "shutdown"}
+MAPPED_STEPS = ("install", "run", "shutdown")
 # No native equivalent on the merged base.
 UNSUPPORTED_STEPS = {"bootstrap", "startup", "recover", "uninstall"}
 OS_MAP = {"linux": "linux", "*": "*"}
@@ -59,15 +60,24 @@ ARCH_MAP = {"amd64": "x86_64", "aarch64": "aarch64", "arm": "arm", "*": "*"}
 OMITTED_ARCH = {"x86"}
 VARIABLE = re.compile(r"\{([^{}]*)\}")
 # Literal text the native daemon would substitute (shell-quoted).
-NATIVE_PLACEHOLDERS = ("{artifact}", "{artifacts}", "{work}", "{pid}")
+NATIVE_PLACEHOLDERS = ("{artifact}", "{artifacts}", "{work}", "{pid}", "{configuration}")
+# Environment the Greengrass nucleus sets; the native daemon clears the environment.
+AWS_ENVIRONMENT = re.compile(r"\$\{?(SVCUID|AWS_GG_[A-Z0-9_]*|AWS_IOT_THING_NAME|AWS_REGION|AWS_DEFAULT_REGION|GG_ROOT_CA_PATH"
+                             r"|AWS_CONTAINER_CREDENTIALS_FULL_URI|AWS_CONTAINER_AUTHORIZATION_TOKEN)(?![A-Za-z0-9_])")
 MAX_MANIFESTS = 16
-DEFER_ONLY = {"configuration-variable", "component-configuration", "ipc-access-control"}
+# Native configuration limits (suifleet-edge/src/configuration.rs).
+CONFIG_VALUES, CONFIG_DEPTH = 4096, 32
+PUBLISH, SUBSCRIBE = "aws.greengrass#PublishToTopic", "aws.greengrass#SubscribeToTopic"
+# Reasons decided while parsing JSON/YAML text, before translation.
+PARSE_REASONS = {"invalid-recipe", "invalid-yaml", "duplicate-key", "multiple-documents", "yaml-ambiguous-scalar", "yaml-non-json-value"}
 
 
-def _script(step_name: str, script: str, basename: str, reasons: set, requires: set) -> str:
+def _script(step_name: str, script: str, basename: str, reasons: set) -> str:
     """Rewrite AWS recipe variables to native substitutions where meaning is identical."""
     if any(p in script for p in NATIVE_PLACEHOLDERS):
         reasons.add("native-placeholder-collision")
+    if AWS_ENVIRONMENT.search(script):
+        reasons.add("aws-environment-variable")
     variables = [body for body in VARIABLE.findall(script) if ":" in body]
     if variables and set(script) & {"'", '"', "\\"}:
         # Native substitutions are shell-quoted; inside quotes they change meaning.
@@ -78,7 +88,7 @@ def _script(step_name: str, script: str, basename: str, reasons: set, requires: 
     if step_name != "install":
         script = script.replace("{work:path}", "{work}")
     for body in VARIABLE.findall(script):
-        if body in ("artifact", "artifacts", "work", "pid"):
+        if body in ("artifact", "artifacts", "work", "pid", "configuration"):
             continue
         parts = body.split(":")
         if len(parts) == 3:
@@ -86,7 +96,7 @@ def _script(step_name: str, script: str, basename: str, reasons: set, requires: 
         elif len(parts) != 2:
             continue  # not a recipe variable (for example shell ${VAR} or JSON)
         elif parts[0] == "configuration":
-            reasons.add("configuration-variable"); requires.add("SF-015")
+            reasons.add("configuration-variable")
         elif parts[0] == "artifacts":
             reasons.add("unmappable-artifact-path")
         elif parts[0] == "work":
@@ -98,14 +108,14 @@ def _script(step_name: str, script: str, basename: str, reasons: set, requires: 
     return script
 
 
-def _step(step_name: str, step, basename: str, reasons: set, requires: set):
+def _step(step_name: str, step, basename: str, reasons: set):
     """Return the translated command for one lifecycle step, or None."""
     if isinstance(step, str):
         script = step
     elif isinstance(step, dict):
         if set(step) - STEP_KEYS or "Skipif" in step or "BootstrapOnRollback" in step:
             reasons.add("unsupported-step-key")
-        if step.get("RequiresPrivilege") is True:
+        if "RequiresPrivilege" in step and step["RequiresPrivilege"] is not False:
             reasons.add("privileged-step")
         if "Timeout" in step or "Setenv" in step:
             reasons.add("step-timeout-or-env")
@@ -116,7 +126,11 @@ def _step(step_name: str, step, basename: str, reasons: set, requires: set):
     else:
         reasons.add("invalid-step")
         return None
-    return _script(step_name, script, basename, reasons, requires)
+    # The native validators accept only a nonempty install or run command.
+    if not script.strip(" \t\n\r"):
+        reasons.add("empty-step")
+        return None
+    return _script(step_name, script, basename, reasons)
 
 
 def _platform(platform, reasons: set):
@@ -164,20 +178,74 @@ def _artifact(manifest: dict, bindings: dict, reasons: set):
     if "Digest" in artifact or "Algorithm" in artifact:
         try:
             digest = base64.b64decode(artifact.get("Digest", ""), validate=True).hex()
-        except ValueError:
+        except (ValueError, TypeError):
             digest = None
-        if artifact.get("Algorithm") != "SHA-256" or digest != binding["artifactSha256"]:
+        if artifact.get("Algorithm") != "SHA-256" or digest != binding["artifactSha256"].lower():
             reasons.add("artifact-digest-mismatch")
     return binding, basename
 
 
-def translate_recipe(recipe, bindings: dict) -> dict:
-    """Classify/translate one AWS JSON recipe. YAML is parsed to the same value first."""
+def _within_limits(document) -> bool:
+    count = 0
+
+    def walk(value, depth):
+        nonlocal count
+        count += 1
+        if count > CONFIG_VALUES or depth > CONFIG_DEPTH:
+            return False
+        children = value.values() if isinstance(value, dict) else value if isinstance(value, list) else ()
+        return all(walk(child, depth + 1) for child in children)
+    return walk(document, 1)
+
+
+def _case_collision(value) -> bool:
+    """Greengrass configuration keys are case-insensitive; native keys are not."""
+    if isinstance(value, list):
+        return any(_case_collision(item) for item in value)
+    if not isinstance(value, dict):
+        return False
+    keys = [key.lower() for key in value]
+    return len(set(keys)) != len(keys) or any(_case_collision(child) for child in value.values())
+
+
+def _ipc_acl(policies) -> dict:
+    """Operator IPC ACL equivalent of AWS pub/sub accessControl (never applied by a recipe)."""
+    operations, publish, subscribe, unmapped = {"config", "health"}, set(), set(), set()
+    for service, by_id in (policies.items() if isinstance(policies, dict) else [("accessControl", None)]):
+        for policy_id, policy in (by_id.items() if isinstance(by_id, dict) else [("", None)]):
+            ops = policy.get("operations") if isinstance(policy, dict) else None
+            resources = policy.get("resources") if isinstance(policy, dict) else None
+            if service != "aws.greengrass.ipc.pubsub" or not isinstance(ops, list) or not isinstance(resources, list):
+                unmapped.add(f"{service}/{policy_id}")
+                continue
+            for operation in ops:
+                targets = [publish, subscribe] if operation == "*" else [publish] if operation == PUBLISH else [subscribe] if operation == SUBSCRIBE else []
+                if not targets:
+                    unmapped.add(f"{service}/{policy_id}/{operation}")
+                for resource in resources:
+                    # Native topics are exact strings: an AWS * glob has no equivalent.
+                    if not isinstance(resource, str) or not resource or "*" in resource:
+                        unmapped.add(f"{service}/{policy_id}/{resource}")
+                        continue
+                    for target in targets:
+                        target.add(resource)
+    if publish:
+        operations.add("publish")
+    if subscribe:
+        operations.add("receive")
+    return {"operations": sorted(operations), "publish": sorted(publish), "subscribe": sorted(subscribe), "unmapped": sorted(unmapped)}
+
+
+def translate_recipe(recipe, bindings: dict, catalog: dict) -> dict:
+    """Classify/translate one parsed AWS recipe (JSON or YAML text parses to the same value)."""
     reasons: set = set()
-    requires: set = set()
     informational: list = []
+
+    def note(field):
+        if field not in informational:
+            informational.append(field)
     if not isinstance(recipe, dict):
-        return {"outcome": "reject", "reasons": ["invalid-recipe"], "requires": []}
+        return {"outcome": "reject", "reasons": ["invalid-recipe"]}
     if set(recipe) - TOP_KEYS:
         reasons.add("unknown-field")
     if recipe.get("RecipeFormatVersion") != "2020-01-25":
@@ -189,40 +257,59 @@ def translate_recipe(recipe, bindings: dict) -> dict:
     if "Lifecycle" in recipe:
         reasons.add("global-lifecycle-selections")
     name, version = recipe.get("ComponentName"), recipe.get("ComponentVersion")
-    if not isinstance(name, str) or not NAME.match(name) or "@" in name:
+    if not isinstance(name, str) or not NAME.match(name):
         reasons.add("invalid-component-name")
     if not isinstance(version, str) or not SEMVER.match(version) or len(version) > 128:
         reasons.add("invalid-component-version")
+    if "ComponentDescription" in recipe and not isinstance(recipe["ComponentDescription"], str):
+        reasons.add("invalid-description")
     if "ComponentPublisher" in recipe:
-        informational.append("ComponentPublisher")
+        note("ComponentPublisher")
+    defaults, acl = None, None
     config = recipe.get("ComponentConfiguration", {})
     default = config.get("DefaultConfiguration", {}) if isinstance(config, dict) else None
     if not isinstance(config, dict) or set(config) - {"DefaultConfiguration"} or not isinstance(default, dict):
         reasons.add("invalid-configuration")
     elif "accessControl" in default:
-        reasons.add("ipc-access-control"); requires.add("SF-027")
+        reasons.add("ipc-access-control")
+        acl = _ipc_acl(default["accessControl"])
     elif default:
-        reasons.add("component-configuration"); requires.add("SF-015")
-    dependencies = {}
+        if not _within_limits(default):
+            reasons.add("configuration-limits")
+        if _case_collision(default):
+            reasons.add("configuration-key-case-collision")
+        defaults = default
+        note("ComponentConfiguration.DefaultConfiguration")
+    dependencies, managed_dependencies = {}, {}
     declared = recipe.get("ComponentDependencies", {})
     if not isinstance(declared, dict):
         reasons.add("invalid-dependency"); declared = {}
     for dep, spec in declared.items():
-        if not NAME.match(dep) or not isinstance(spec, dict) or set(spec) - {"VersionRequirement", "DependencyType"}:
+        if not NAME.match(dep) or dep == name:
             reasons.add("invalid-dependency"); continue
-        if dep.startswith("aws.greengrass."):
-            reasons.add("aws-managed-dependency"); continue
-        if dep == name:
+        if dep.startswith(managed.MANAGED_PREFIXES):
+            classification = managed.classify_dependency(catalog, dep, spec)
+            if classification.get("reason") in ("invalid-dependency", "unsupported-version-range"):
+                reasons.add(classification["reason"]); continue
+            managed_dependencies[dep] = classification
+            # A native replacement is the daemon itself: dropped and reported.
+            if classification["outcome"] == "replace":
+                note(f"ComponentDependencies.{dep}")
+            else:
+                reasons.add("aws-managed-dependency")
+            continue
+        if not isinstance(spec, dict) or set(spec) - {"VersionRequirement", "DependencyType"}:
             reasons.add("invalid-dependency"); continue
         requirement = spec.get("VersionRequirement")
         if not isinstance(requirement, str) or not RANGE.match(requirement):
             reasons.add("unsupported-version-range"); continue
-        entry = {"versionRequirement": requirement}
-        if "DependencyType" in spec:
-            if spec["DependencyType"] not in ("HARD", "SOFT"):
-                reasons.add("invalid-dependency"); continue
-            entry["dependencyType"] = spec["DependencyType"]
-        dependencies[dep] = entry
+        if "DependencyType" in spec and spec["DependencyType"] not in ("HARD", "SOFT"):
+            reasons.add("invalid-dependency"); continue
+        # AWS SOFT still requires the dependency at start; native SOFT may omit
+        # it, so every translated dependency is native HARD (the default).
+        dependencies[dep] = {"versionRequirement": requirement}
+    if dependencies:
+        note("ComponentDependencies")
     manifests, omitted, seen = [], [], set()
     raw = recipe.get("Manifests")
     if not isinstance(raw, list) or not raw:
@@ -250,29 +337,32 @@ def translate_recipe(recipe, bindings: dict) -> dict:
             if step_name == "Setenv":
                 reasons.add("step-timeout-or-env")
             elif step_name in MAPPED_STEPS:
-                command = _step(step_name, step, basename, reasons, requires)
+                command = _step(step_name, step, basename, reasons)
                 if command is not None:
                     commands[step_name] = command
             elif step_name in UNSUPPORTED_STEPS:
-                _step(step_name, step, basename, reasons, requires)
+                _step(step_name, step, basename, reasons)
                 reasons.add("unsupported-lifecycle-step")
             else:
                 reasons.add("unknown-lifecycle-step")
         if "shutdown" in commands and "run" not in commands:
             reasons.add("shutdown-without-run")
-        for step_name in ("run", "shutdown"):
-            if step_name in commands and f"Lifecycle.{step_name}" not in informational:
-                informational.append(f"Lifecycle.{step_name}")
+        # Without install or run the daemon hands the artifact to the platform updater.
+        if "install" not in commands and "run" not in commands:
+            reasons.add("configuration-without-command" if defaults else "no-lifecycle-command")
+        for step_name in MAPPED_STEPS:
+            if step_name in commands:
+                note(f"Lifecycle.{step_name}")
         if binding is None:
             continue
         native = {
-            "schemaVersion": "1.1" if dependencies else "1.0",
+            "schemaVersion": "1.2" if defaults else "1.1" if dependencies else "1.0",
             "componentName": name,
             "componentVersion": version,
             "artifactBlobId": binding["artifactBlobId"],
             "artifactSha256": binding["artifactSha256"],
             "lifecycle": commands,
-            "configuration": {},
+            "configuration": {"defaults": defaults} if defaults else {},
         }
         if "ComponentDescription" in recipe:
             native["description"] = recipe["ComponentDescription"]
@@ -283,12 +373,11 @@ def translate_recipe(recipe, bindings: dict) -> dict:
         reasons.add("no-supported-platform")
     if len(manifests) > MAX_MANIFESTS:
         reasons.add("artifact-count")
-    if reasons - DEFER_ONLY:
-        return {"outcome": "reject", "reasons": sorted(reasons), "requires": []}
+    extra = ({"managed_dependencies": managed_dependencies} if managed_dependencies else {}) | ({"ipc_acl": acl} if acl else {})
     if reasons:
-        return {"outcome": "defer", "reasons": sorted(reasons), "requires": sorted(requires)}
-    return {"outcome": "translate", "reasons": [], "requires": [], "manifests": manifests,
-            "omitted_manifests": omitted, "informational": informational}
+        return {"outcome": "reject", "reasons": sorted(reasons)} | extra
+    return {"outcome": "translate", "reasons": [], "manifests": manifests,
+            "omitted_manifests": omitted, "informational": informational} | extra
 
 
 # ---------------------------------------------------------------------------
@@ -810,13 +899,38 @@ def _load(root: Path, name: str):
     return json.loads((root / COMPAT / name).read_text())
 
 
-def check_recipes(cases) -> int:
+def _strict_json(text: str):
+    def pairs(items):
+        keys = [key for key, _ in items]
+        if len(set(keys)) != len(keys):
+            raise ValueError("duplicate-key")
+        return dict(items)
+    return json.loads(text, object_pairs_hook=pairs)
+
+
+def check_recipes(cases, catalog: dict) -> int:
+    ids = set()
     for case in cases:
-        actual = translate_recipe(case["recipe"], case.get("bindings", {}))
+        if case["id"] in ids:
+            raise AssertionError(f"recipe case {case['id']}: duplicate id")
+        ids.add(case["id"])
         expected = case["expected"]
+        if "recipe" not in case:
+            # Text the parser must reject; the translator test executes it.
+            if not isinstance(case.get("recipe_text"), str) or expected.get("outcome") != "reject" \
+                    or len(expected.get("reasons", [])) != 1 or expected["reasons"][0] not in PARSE_REASONS:
+                raise AssertionError(f"recipe case {case['id']}: needs a recipe, or recipe_text with one parse rejection")
+            continue
+        if "recipe_text" in case and case.get("format") == "json":
+            if _strict_json(case["recipe_text"]) != case["recipe"]:
+                raise AssertionError(f"recipe case {case['id']}: recipe_text does not parse to recipe")
+        actual = translate_recipe(case["recipe"], case.get("bindings", {}), catalog)
         for key in expected:
             if actual.get(key) != expected[key]:
                 raise AssertionError(f"recipe case {case['id']}: {key} {actual.get(key)!r} != {expected[key]!r}")
+        for key in ("managed_dependencies", "ipc_acl"):
+            if key in actual and key not in expected:
+                raise AssertionError(f"recipe case {case['id']}: {key} must be pinned")
         if actual["outcome"] == "translate" and "manifests" not in expected:
             raise AssertionError(f"recipe case {case['id']}: translate cases must pin manifests")
     return len(cases)
@@ -871,7 +985,7 @@ def _managed_catalog(root: Path) -> dict:
 
 # Runners take (cases, root); root locates the SF-038 managed catalog.
 SUITE_RUNNERS = {
-    "aws-recipe-cases.json": lambda c, _: check_recipes(c),
+    "aws-recipe-cases.json": lambda c, root: check_recipes(c, _managed_catalog(root)),
     "pubsub-cases.json": lambda c, _: check_pubsub(c),
     "shadow-cases.json": lambda c, _: _run_sequences(c, ShadowStore, "shadow"),
     "stream-cases.json": lambda c, _: _run_sequences(c, StreamStore, "stream"),
