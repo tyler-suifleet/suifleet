@@ -279,6 +279,12 @@ pub fn materialize(record: &Record, overlay: &Map<String, Value>) -> anyhow::Res
 
 /// Write `value` to `path` (mode 0600) atomically.
 pub fn write_private(path: &Path, value: &impl Serialize) -> anyhow::Result<()> {
+    write_with_mode(path, value, 0o600)
+}
+
+/// [`write_private`] with an explicit mode (applied past the umask).
+pub fn write_with_mode(path: &Path, value: &impl Serialize, mode: u32) -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
     let temporary = path.with_extension("tmp");
     let _ = std::fs::remove_file(&temporary);
     let mut file = std::fs::OpenOptions::new()
@@ -286,6 +292,9 @@ pub fn write_private(path: &Path, value: &impl Serialize) -> anyhow::Result<()> 
         .create_new(true)
         .mode(0o600)
         .open(&temporary)?;
+    if mode != 0o600 {
+        file.set_permissions(std::fs::Permissions::from_mode(mode))?;
+    }
     file.write_all(&serde_json::to_vec_pretty(value)?)?;
     file.sync_all()?;
     std::fs::rename(&temporary, path)?;

@@ -1051,8 +1051,15 @@ fn open_log(path: &Path) -> std::io::Result<std::fs::File> {
         let _ = std::fs::rename(path, path.with_extension("log.1"));
     }
     let file = std::fs::OpenOptions::new().create(true).append(true).mode(0o600).open(path)?;
-    // Also tightens a log created before it held configured output.
-    file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    // Also tightens a log created before it held configured output. With
+    // `[runtime] log_group_read`, the daemon's group may read it (SF-060).
+    file.set_permissions(std::fs::Permissions::from_mode(crate::logs::private_mode()))?;
+    if let Some(component) = path.parent() {
+        crate::logs::share_dir(component)?;
+        if let Some(root) = component.parent() {
+            crate::logs::share_dir(root)?;
+        }
+    }
     Ok(file)
 }
 
