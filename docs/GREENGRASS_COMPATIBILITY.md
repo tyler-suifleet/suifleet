@@ -223,7 +223,7 @@ The runtime receipt is [`docs/validation/sf037-recipe-translation.json`](validat
 | `aws-recipe-cases.json` | 83 recipes (18 JSON/YAML texts) | Daemon and frontend validators (passing) | Passed: SF-037 translator, daemon validators and simulator run |
 | `pubsub-cases.json` | 53 filter/topic/match/ACL checks | Daemon pub/sub module (passing) | Passed: SF-032 daemon, IPC UIDs and Mosquitto ([receipt](validation/sf032-messaging.json)) |
 | `shadow-cases.json` | 55 steps across 10 sequences | Daemon shadow store, each step also after a reopen (passing) | Passed: SF-033 daemon, IPC UIDs, restarts and a verifying sync service ([receipt](validation/sf033-shadows.json)) |
-| `aws-iot-cases.json` | 94 connection/topic/mapping/patch/answer/denial checks | Daemon connection, bridge and shadow modules (passing) | Passed: SF-061 daemon against Mosquitto with mutual TLS and an AWS-shaped endpoint ([receipt](validation/sf061-aws-iot.json)) |
+| `aws-iot-cases.json` | 113 connection/topic/mapping/patch/answer/denial checks | Daemon connection, bridge and shadow modules (passing) | Passed: SF-061 daemon against Mosquitto with mutual TLS and an AWS-shaped endpoint ([receipt](validation/sf061-aws-iot.json)) |
 | `stream-cases.json` | 46 steps across 5 sequences | Daemon stream store (passing) | Passed: SF-034 daemon, IPC UIDs, crashes and export ([receipt](validation/sf034-streams.json)) |
 | `client-device-cases.json` | 16 authorization requests | Daemon registry and policy engine (passing) | Passed: SF-035 daemon, Mosquitto and two TLS clients ([receipt](validation/sf035-client-devices.json)) |
 | `managed-dependency-cases.json` | 47 managed-dependency classifications | none | Passed: SF-037 translator classification |

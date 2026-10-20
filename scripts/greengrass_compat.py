@@ -711,7 +711,7 @@ def client_authorized(config: dict, request: dict) -> bool:
 # aws.greengrass.ShadowManager 2.3.15 cloud synchronization).
 # ---------------------------------------------------------------------------
 AWS_IOT_FIELDS = {"endpoint", "port", "alpn", "thing_name", "client_id", "ca_file", "certificate_file", "private_key_file",
-                  "keep_alive_seconds", "credential_check_seconds"}
+                  "keep_alive_seconds", "credential_check_seconds", "reject_denied_publications"}
 AWS_NAME = re.compile(r"^[A-Za-z0-9:_-]{1,128}$")
 AWS_LABEL = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
 
@@ -727,6 +727,7 @@ def aws_connection(config: dict) -> dict:
              and 0 < port < 65536 and (alpn is None or 0 < len(alpn) <= 255)
              and bool(AWS_NAME.match(config["thing_name"])) and bool(AWS_NAME.match(client_id))
              and 30 <= config.get("keep_alive_seconds", 60) <= 1200 and 5 <= config.get("credential_check_seconds", 30) <= 3600
+             and isinstance(config.get("reject_denied_publications", False), bool)
              and all(config[k].startswith("/") for k in ("ca_file", "certificate_file", "private_key_file")))
     if not valid:
         return {"valid": False}
@@ -839,10 +840,12 @@ def aws_shadow_call(case: dict):
     return request, {"stored": version}
 
 
-def aws_denied_publication(events: list) -> list:
+def aws_denied_publication(events: list, reject: bool) -> list:
     """A bridged message the endpoint closes the connection on soon after it
-    was sent in that session, three times in a row, is rejected; a PUBACK
-    resets the count; other closes and transport errors neither count nor reset."""
+    was sent in that session, three times in a row, is held: kept in the
+    spool and retried. With reject_denied_publications it is rejected
+    instead. A PUBACK delivers it and resets the count; other closes and
+    transport errors neither count nor reset."""
     closes, outcomes = 0, []
     for event in events:
         if event == "puback":
@@ -850,11 +853,15 @@ def aws_denied_publication(events: list) -> list:
             outcomes.append("delivered")
         elif event == "closed-soon":
             closes += 1
-            outcomes.append("rejected" if closes >= 3 else "retry")
-            if closes >= 3:
+            if closes < 3:
+                outcomes.append("retry")
+            elif reject:
+                outcomes.append("rejected")
                 closes = 0
+            else:
+                outcomes.append("held")
         elif event in ("closed-late", "closed-before-send", "error"):
-            outcomes.append("retry")
+            outcomes.append("held" if closes >= 3 else "retry")
         else:
             raise ValueError(event)
     return outcomes
@@ -885,7 +892,7 @@ def check_aws_iot(cases) -> int:
             raise AssertionError(f"aws-iot shadow answer case {case['id']}: {request!r} {outcome!r}")
         count += 1
     for case in cases["denied_publication"]:
-        actual = aws_denied_publication([step["event"] for step in case["steps"]])
+        actual = aws_denied_publication([step["event"] for step in case["steps"]], case["reject_denied_publications"])
         if actual != [step["expect"] for step in case["steps"]]:
             raise AssertionError(f"aws-iot denied publication case {case['id']}: {actual!r}")
         count += len(case["steps"])

@@ -18,8 +18,9 @@ stops the broker.
   AWS-shaped endpoint:
     an untrusted server certificate refused; port 443 with ALPN
     x-amzn-mqtt-ca (refused without it); client id bound to the thing;
-    denied subscribe (SUBACK 0x80) and denied publish (disconnect) without
-    stalling other traffic; outage with spooling and the cloud's persistent
+    denied subscribe (SUBACK 0x80) without stalling other traffic; denied
+    publish (disconnect) held in the spool and delivered once the policy
+    allows it, or rejected with reject_denied_publications; outage with spooling and the cloud's persistent
     session; Device Shadow sync with conflicts by owner and a version race;
     deletion both ways; partial and complete rotation, unknown-CA, revoked
     and wrong-thing identities; kill -9 with spooled messages; the Sui key
@@ -164,7 +165,7 @@ def serve():
     install("thing1a", "cert")
     install("thing1a", "key")
 
-    def config(phase, private_key=None):
+    def config(phase, private_key=None, reject=False):
         phase = PHASES[phase]
         state = root / f"state-{phase}"
         port = {"mosquitto": MOSQUITTO_PORT, "aws": 443, "impostor": 9443}[phase]
@@ -198,6 +199,8 @@ def serve():
         text += (f'[aws_iot]\nendpoint = "{HOST}"\nport = {port}\nthing_name = "{THING}"\n'
                  f'ca_file = "{credentials / "ca.pem"}"\ncertificate_file = "{credentials / "cert.pem"}"\n'
                  f'private_key_file = "{private_key or credentials / "key.pem"}"\nkeep_alive_seconds = 30\ncredential_check_seconds = 5\n')
+        if reject:
+            text += 'reject_denied_publications = true\n'
         path = root / f"config-{phase}.toml"
         path.write_text(text)
         return path
@@ -205,8 +208,8 @@ def serve():
     daemon = {"process": None}
     log = (root / "daemon.log").open("a")
 
-    def start(phase):
-        daemon["process"] = subprocess.Popen([binary], env={**os.environ, "EDGE_CONFIG": str(config(phase))}, stdout=log, stderr=log)
+    def start(phase, reject=False):
+        daemon["process"] = subprocess.Popen([binary], env={**os.environ, "EDGE_CONFIG": str(config(phase, reject=reject))}, stdout=log, stderr=log)
         deadline = time.time() + 30
         while not socket.exists() and time.time() < deadline:
             assert daemon["process"].poll() is None, "the daemon exited at startup"
@@ -272,7 +275,7 @@ def serve():
                 if path == "/ipc":
                     result = ipc(body["uid"], body["operation"], body.get("topic", ""), body.get("payload"))
                 elif path == "/start":
-                    start(body["phase"])
+                    start(body["phase"], body.get("reject", False))
                     result = {"ok": True}
                 elif path == "/stop":
                     stop(body.get("kill", False))
@@ -306,6 +309,13 @@ def serve():
                         aws.down = body["down"]
                         if aws.down:
                             aws.kick()
+                        result = {"ok": True}
+                    elif op == "allow":
+                        allowed = aws.policies[THING][body["action"]]
+                        if body["allow"]:
+                            allowed.append(body["pattern"])
+                        else:
+                            allowed.remove(body["pattern"])
                         result = {"ok": True}
                     elif op == "kick":
                         aws.kick()
@@ -557,16 +567,43 @@ def host(args):
         check("AWS-shaped endpoint: component -> dt/thing1/ and cloud -> component at QoS 1; the policy-denied "
               "subscription cmd/forbidden/# gets SUBACK 0x80, is reported, and the other subscriptions work")
 
+        def denied_publishes():
+            return [d for d in aws("snapshot")["denied"] if d[1] == "publish"]
+
         connects = iot()["connects"]
         assert ipc("publish", "forbidden/x", {"bad": 1})["ok"]
         assert ipc("publish", "telemetry/b", {"n": 2})["ok"]
+        wait(lambda: "policy denial" in (mapping("forbidden/#").get("held") or ""), "the denied publication was not held", 120)
+        # Held, not discarded: retried on later connections and still spooled.
+        wait(lambda: len(denied_publishes()) >= 4, "the held publication was not retried", 120)
+        assert denied_publishes() == [[THING, "publish", "forbidden/x"]] * len(denied_publishes()), denied_publishes()
+        assert mapping("forbidden/#")["rejected"] == 0 and iot()["connects"] >= connects + 3, (mapping("forbidden/#"), iot())
+        assert (f"dt/{THING}/telemetry/b", {"n": 2}) not in published(f"dt/{THING}/")
+        # The operator fixes the policy: the original message is delivered, then what queued behind it.
+        aws("allow", action="publish", pattern="forbidden/*", allow=True)
+        wait(lambda: ("forbidden/x", {"bad": 1}) in published("forbidden/"), "the held publication was not delivered", 120)
+        wait(lambda: (f"dt/{THING}/telemetry/b", {"n": 2}) in published(f"dt/{THING}/"), "traffic stalled behind the held publication", 60)
+        assert "held" not in mapping("forbidden/#") and mapping("forbidden/#")["rejected"] == 0
+        aws("allow", action="publish", pattern="forbidden/*", allow=False)
+        check("policy-denied publication: an AWS-style disconnect (TLS truncated, no close_notify) on each attempt holds "
+              "the message in the spool and reports it (never discarded); retried until the policy allows it, then "
+              "delivered with the telemetry queued behind it")
+
+        control("/stop")
+        control("/start", phase="aws", reject=True)
+        wait(lambda: iot()["connected"], "the IoT connection did not come back")
+        denied_before = len(denied_publishes())
+        assert ipc("publish", "forbidden/y", {"bad": 2})["ok"]
+        assert ipc("publish", "telemetry/c", {"n": 3})["ok"]
         wait(lambda: mapping("forbidden/#")["rejected"] == 1, "the denied publication was not rejected", 120)
-        wait(lambda: (f"dt/{THING}/telemetry/b", {"n": 2}) in published(f"dt/{THING}/"), "traffic stalled behind the denied publication", 60)
-        denied = [d for d in aws("snapshot")["denied"] if d[1] == "publish"]
-        assert denied == [[THING, "publish", "forbidden/x"]] * 3, denied
-        assert "policy denial" in mapping("forbidden/#")["last_rejected"] and iot()["connects"] >= connects + 3
-        check("policy-denied publication: AWS-style disconnect on each of 3 attempts, then the message is rejected and "
-              "counted (not retried forever) and the following telemetry is delivered")
+        wait(lambda: (f"dt/{THING}/telemetry/c", {"n": 3}) in published(f"dt/{THING}/"), "traffic stalled behind the rejected publication", 60)
+        assert denied_publishes()[denied_before:] == [[THING, "publish", "forbidden/y"]] * 3, denied_publishes()
+        assert "policy denial" in mapping("forbidden/#")["last_rejected"]
+        control("/stop")
+        control("/start", phase="aws")
+        wait(lambda: iot()["connected"], "the IoT connection did not come back")
+        check("reject_denied_publications = true: after 3 such disconnects the message is rejected and counted, and the "
+              "following telemetry is delivered")
 
         # Device Shadow: local -> cloud, cloud -> local with a delta notification.
         assert ipc("subscribe", f"$aws/things/{THING}/shadow/name/config/update/delta", {"qos": 1})["ok"]

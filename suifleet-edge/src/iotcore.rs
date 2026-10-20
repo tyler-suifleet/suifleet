@@ -80,6 +80,12 @@ pub struct IotConfig {
     /// How often the credential files are checked for rotation.
     #[serde(default = "default_credential_check")]
     pub credential_check_seconds: u64,
+    /// Remove a bridged message from its spool when AWS closes the
+    /// connection soon after each of three sends (a likely policy denial).
+    /// Off by default: a disconnect is not proof of a denial, so the message
+    /// is held and retried instead (docs/AWS_IOT.md).
+    #[serde(default)]
+    pub reject_denied_publications: bool,
 }
 
 pub fn valid_host(host: &str) -> bool {

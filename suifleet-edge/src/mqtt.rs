@@ -162,9 +162,10 @@ pub fn decode(buf: &[u8]) -> anyhow::Result<Option<(Packet, usize)>> {
 pub trait Stream: AsyncRead + AsyncWrite + Unpin + Send {}
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> Stream for T {}
 
-/// The broker ended the connection cleanly (end of stream), as opposed to a
-/// transport error or timeout. AWS IoT Core does this when a client
-/// publishes to a topic its policy denies.
+/// The connection reached end of stream, also a TLS stream truncated without
+/// close_notify, as opposed to a transport error or timeout. AWS IoT Core
+/// ends it this way when a client publishes to a topic its policy denies,
+/// but so can a broken network path.
 #[derive(Debug)]
 pub struct Closed;
 

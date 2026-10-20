@@ -29,7 +29,9 @@
 //! - **IotCore:** one message is in flight at a time, so a refusal can be
 //!   attributed. AWS IoT Core disconnects a client that publishes where its
 //!   policy denies; a message the broker closes the connection on three
-//!   times in a row is rejected (counted) instead of stalling the link.
+//!   times in a row is held in the spool and reported (a truncated
+//!   connection looks the same), or rejected with
+//!   `reject_denied_publications`.
 //!
 //! Payloads: Pubsub → MQTT sends the JSON encoding of the payload. MQTT →
 //! Pubsub takes a JSON payload as that value, other UTF-8 as a string, and
@@ -194,6 +196,10 @@ pub struct MappingStats {
     /// Inbound messages dropped because pub/sub can never accept them.
     pub rejected: u64,
     pub last_rejected: Option<String>,
+    /// The message AWS IoT Core keeps closing the connection on (a likely
+    /// policy denial). It stays in the spool and is retried; cleared on PUBACK.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub held: Option<String>,
 }
 
 /// The AWS IoT Core connection's state. Holds no secret.
@@ -297,7 +303,7 @@ struct IotState {
 }
 
 /// Times in a row the broker may close the connection on one message
-/// before it is rejected.
+/// before it is held (or, with `reject_denied_publications`, rejected).
 const POISON_CLOSES: u32 = 3;
 
 /// Why an IotCore session ended without a transport error.
@@ -528,7 +534,7 @@ impl Bridge {
             let rotated = result.as_ref().err().is_some_and(|e| e.downcast_ref::<Rotated>().is_some());
             if let Err(error) = &result {
                 if error.downcast_ref::<mqtt::Closed>().is_some() {
-                    self.closed_on_inflight(&mut state);
+                    self.closed_on_inflight(&mut state, config.reject_denied_publications);
                 }
                 if !rotated {
                     warn!(%error, "AWS IoT Core connection ended; reconnecting");
@@ -562,7 +568,10 @@ impl Bridge {
     fn delivered(&self, state: &mut IotState) -> anyhow::Result<()> {
         if let Some(IotInFlight::Bridge { index, message, .. }) = state.inflight.take() {
             self.broker.lock().unwrap().ack(&principal(index), &self.config.mappings[index].topic, message.message_id)?;
-            self.stats.lock().unwrap().mappings[index].forwarded += 1;
+            let mut stats = self.stats.lock().unwrap();
+            stats.mappings[index].forwarded += 1;
+            stats.mappings[index].held = None;
+            drop(stats);
             state.suspect = None;
             self.save_stats();
         }
@@ -571,23 +580,33 @@ impl Bridge {
 
     /// The broker closed the connection with a bridged message in flight.
     /// Soon after sending it, that is how AWS IoT Core refuses a publication
-    /// its policy denies; after `POISON_CLOSES` in a row it is rejected.
-    fn closed_on_inflight(&self, state: &mut IotState) {
+    /// its policy denies, but a truncated connection looks the same. After
+    /// `POISON_CLOSES` in a row the message is held: kept in the spool,
+    /// reported and retried. Only with `reject` (the operator's
+    /// `reject_denied_publications`) is it removed and counted as rejected.
+    fn closed_on_inflight(&self, state: &mut IotState, reject: bool) {
         let Some(IotInFlight::Bridge { index, message, sent }) = &state.inflight else { return };
         if !state.sent_in_session || sent.elapsed() > Duration::from_secs(5) {
             return;
         }
         let count = match state.suspect {
-            Some((i, id, n)) if i == *index && id == message.message_id => n + 1,
+            Some((i, id, n)) if i == *index && id == message.message_id => n.saturating_add(1),
             _ => 1,
         };
+        state.suspect = Some((*index, message.message_id, count));
         if count < POISON_CLOSES {
-            state.suspect = Some((*index, message.message_id, count));
             return;
         }
         let (index, id, topic) = (*index, message.message_id, message.topic.clone());
-        let reason = format!("AWS IoT Core closed the connection each of {POISON_CLOSES} times it was sent (policy denial?)");
-        warn!(%topic, mapping = index, %reason, "Rejecting a bridged message");
+        let reason = format!("AWS IoT Core closed the connection each of {count} times it was sent (policy denial?)");
+        if !reject {
+            if count == POISON_CLOSES {
+                warn!(%topic, mapping = index, %reason, "Holding a bridged message; it stays in the spool and is retried");
+            }
+            self.stats.lock().unwrap().mappings[index].held = Some(format!("{topic}: {reason}"));
+            return;
+        }
+        warn!(%topic, mapping = index, %reason, "Rejecting a bridged message (reject_denied_publications)");
         if let Err(error) = self.broker.lock().unwrap().ack(&principal(index), &self.config.mappings[index].topic, id) {
             warn!(%error, "Could not remove the rejected message from the spool");
             return;
@@ -595,6 +614,7 @@ impl Bridge {
         let mut stats = self.stats.lock().unwrap();
         stats.mappings[index].rejected += 1;
         stats.mappings[index].last_rejected = Some(format!("{topic}: {reason}"));
+        stats.mappings[index].held = None;
         state.inflight = None;
         state.suspect = None;
     }
@@ -1019,7 +1039,8 @@ mod tests {
 
     /// interfaces/compat/aws-iot-cases.json: a bridged message AWS IoT Core
     /// closes the connection on soon after it was sent, three times in a
-    /// row, is rejected; other closes, transport errors and PUBACKs.
+    /// row, is held in the spool (rejected only with
+    /// `reject_denied_publications`); other closes, transport errors and PUBACKs.
     #[test]
     fn shared_aws_iot_denied_publication_cases() {
         for case in aws_iot_cases()["denied_publication"].as_array().unwrap() {
@@ -1027,6 +1048,7 @@ mod tests {
             let _ = std::fs::remove_dir_all(&dir);
             let broker = Arc::new(Mutex::new(pubsub::Broker::open(&dir.join("pubsub"), pubsub::Limits::default()).unwrap()));
             let bridge = Bridge::new(config(vec![mapping("t/#", Endpoint::Pubsub, Endpoint::IotCore, "")]), broker.clone(), dir.join("bridge.json")).unwrap();
+            let reject = case["reject_denied_publications"].as_bool().unwrap();
             let mut state = IotState::default();
             let (mut rejected, mut forwarded) = (0, 0);
             for (n, step) in case["steps"].as_array().unwrap().iter().enumerate() {
@@ -1040,26 +1062,27 @@ mod tests {
                 match step["event"].as_str().unwrap() {
                     "closed-soon" => {
                         (*sent, state.sent_in_session) = (Instant::now(), true);
-                        bridge.closed_on_inflight(&mut state);
+                        bridge.closed_on_inflight(&mut state, reject);
                     }
                     "closed-late" => {
                         (*sent, state.sent_in_session) = (Instant::now().checked_sub(Duration::from_secs(6)).unwrap(), true);
-                        bridge.closed_on_inflight(&mut state);
+                        bridge.closed_on_inflight(&mut state, reject);
                     }
                     "closed-before-send" => {
                         state.sent_in_session = false;
-                        bridge.closed_on_inflight(&mut state);
+                        bridge.closed_on_inflight(&mut state, reject);
                     }
                     "error" => {}
                     "puback" => bridge.delivered(&mut state).unwrap(),
                     other => panic!("{other}"),
                 }
                 let stats = bridge.stats.lock().unwrap().mappings[0].clone();
-                let outcome = if stats.rejected > rejected { "rejected" } else if stats.forwarded > forwarded { "delivered" } else { "retry" };
+                let outcome = if stats.rejected > rejected { "rejected" } else if stats.forwarded > forwarded { "delivered" }
+                    else if stats.held.is_some() { "held" } else { "retry" };
                 (rejected, forwarded) = (stats.rejected, stats.forwarded);
                 assert_eq!(outcome, step["expect"].as_str().unwrap(), "{} step {n}", case["id"]);
-                // A rejected or delivered message has left the spool.
-                assert_eq!(state.inflight.is_none(), outcome != "retry", "{} step {n}", case["id"]);
+                // A rejected or delivered message has left the spool; a held one stays.
+                assert_eq!(state.inflight.is_none(), outcome == "rejected" || outcome == "delivered", "{} step {n}", case["id"]);
             }
             let spool = broker.lock().unwrap().stats(Some("@bridge/0"));
             assert_eq!(spool[0]["queued"], json!(state.inflight.is_some() as u64), "{}", case["id"]);

@@ -312,6 +312,36 @@
    }
   },
   {
+   "id": "reject-denied-publications-opt-in",
+   "config": {
+    "endpoint": "abc123-ats.iot.us-east-1.amazonaws.com",
+    "thing_name": "dev1",
+    "ca_file": "/etc/suifleet/aws/AmazonRootCA1.pem",
+    "certificate_file": "/etc/suifleet/aws/device.pem.crt",
+    "private_key_file": "/etc/suifleet/aws/private.pem.key",
+    "reject_denied_publications": true
+   },
+   "expected": {
+    "valid": true,
+    "alpn": null,
+    "client_id": "dev1"
+   }
+  },
+  {
+   "id": "reject-denied-publications-not-boolean",
+   "config": {
+    "endpoint": "abc123-ats.iot.us-east-1.amazonaws.com",
+    "thing_name": "dev1",
+    "ca_file": "/etc/suifleet/aws/AmazonRootCA1.pem",
+    "certificate_file": "/etc/suifleet/aws/device.pem.crt",
+    "private_key_file": "/etc/suifleet/aws/private.pem.key",
+    "reject_denied_publications": "yes"
+   },
+   "expected": {
+    "valid": false
+   }
+  },
+  {
    "id": "unknown-field",
    "config": {
     "endpoint": "abc123-ats.iot.us-east-1.amazonaws.com",
@@ -1251,7 +1281,88 @@
  ],
  "denied_publication": [
   {
+   "id": "held-by-default-until-puback",
+   "reject_denied_publications": false,
+   "steps": [
+    {
+     "event": "closed-soon",
+     "expect": "retry"
+    },
+    {
+     "event": "closed-soon",
+     "expect": "retry"
+    },
+    {
+     "event": "closed-soon",
+     "expect": "held"
+    },
+    {
+     "event": "closed-soon",
+     "expect": "held"
+    },
+    {
+     "event": "error",
+     "expect": "held"
+    },
+    {
+     "event": "closed-late",
+     "expect": "held"
+    },
+    {
+     "event": "closed-soon",
+     "expect": "held"
+    },
+    {
+     "event": "puback",
+     "expect": "delivered"
+    },
+    {
+     "event": "closed-soon",
+     "expect": "retry"
+    },
+    {
+     "event": "closed-soon",
+     "expect": "retry"
+    },
+    {
+     "event": "puback",
+     "expect": "delivered"
+    }
+   ]
+  },
+  {
+   "id": "held-by-default-other-closes-do-not-count",
+   "reject_denied_publications": false,
+   "steps": [
+    {
+     "event": "closed-soon",
+     "expect": "retry"
+    },
+    {
+     "event": "closed-before-send",
+     "expect": "retry"
+    },
+    {
+     "event": "closed-late",
+     "expect": "retry"
+    },
+    {
+     "event": "closed-soon",
+     "expect": "retry"
+    },
+    {
+     "event": "error",
+     "expect": "retry"
+    },
+    {
+     "event": "closed-soon",
+     "expect": "held"
+    }
+   ]
+  },
+  {
    "id": "rejected-after-three-closes",
+   "reject_denied_publications": true,
    "steps": [
     {
      "event": "closed-soon",
@@ -1269,6 +1380,7 @@
   },
   {
    "id": "puback-resets",
+   "reject_denied_publications": true,
    "steps": [
     {
      "event": "closed-soon",
@@ -1298,6 +1410,7 @@
   },
   {
    "id": "late-and-unsent-closes-do-not-count",
+   "reject_denied_publications": true,
    "steps": [
     {
      "event": "closed-soon",
@@ -1323,6 +1436,7 @@
   },
   {
    "id": "transport-errors-do-not-count",
+   "reject_denied_publications": true,
    "steps": [
     {
      "event": "closed-soon",

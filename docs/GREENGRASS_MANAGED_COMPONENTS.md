@@ -215,7 +215,7 @@ The checker validates the catalog's structure and its cross-references to the ba
 | `credential-provider-cases.json` | 65 steps across 7 sequences | Pending SF-057 |
 | `cloudwatch-metrics-cases.json` | 90 steps across 8 sequences | Passed: local adapter/HTTP/SQLite ([receipt](validation/sf059-metrics.json)); AWS delivery pending |
 | `cloudwatch-logs-cases.json` | 69 steps across 8 sequences | Pending SF-060 |
-| `aws-iot-cases.json` | 94 checks | Passed: SF-061 ([receipt](validation/sf061-aws-iot.json)) |
+| `aws-iot-cases.json` | 113 checks | Passed: SF-061 ([receipt](validation/sf061-aws-iot.json)) |
 
 A `complete` adapter specification must pin an exact AWS version and name at least one executable reference suite; the checker enforces both. `stream-export-aws` uses the SF-028 `stream-cases.json` checkpoint suite.
 
