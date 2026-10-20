@@ -52,7 +52,7 @@ def run(args):
         r=live.transaction('create disposable activated device','--move-call',call('device_registry','register_device'),
             f'@{registry}','"handover-test"','@0xcc','"arm"','@0x6','--assign','device',
             '--move-call',call('device_registry','activate_device'),f'@{registry}','device','--assign','cap',
-            '--transfer-objects','[cap]',f'@{live.operator}',budget=10_000_000)
+            '--transfer-objects','[cap]',f'@{live.operator}',budget=20_000_000)
         device=live.created(r,'::device_registry::Device')[0];owner_cap=live.created(r,'::device_registry::DeviceOwnerCap')[0]
         r=live.transaction('create disposable group','--move-call',call('device_group','create_group'),'"handover fleet"','"testnet acceptance"','@0x6',budget=10_000_000)
         group=live.created(r,'::device_group::DeviceGroup')[0]
@@ -64,7 +64,7 @@ def run(args):
             '--move-call',call('desired_state','begin'),f'@{group}','--assign','plan',
             '--move-call',call('desired_state','set_component'),'plan','record',
             '--move-call',call('desired_state','commit'),'plan',f'@{group}','@0x6',
-            '--move-call',call('deployment_manager','share_deployment'),'record',budget=20_000_000)
+            '--move-call',call('deployment_manager','share_deployment'),'record',budget=30_000_000)
         record=live.created(r,'::deployment_manager::DeploymentRecord')[0]
         expiry=int(plain(live.object('0x6')['content'])['timestamp_ms'])+3600000
         r=live.transaction('propose fixed inventory','--move-call',call('fleet_handover','propose'),f'@{child_address}',f'vector[@{owner_cap},@{group},@{record}]','vector[0u64,1u64,2u64]',str(expiry),'@0x6',budget=10_000_000)
