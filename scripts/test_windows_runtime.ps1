@@ -140,12 +140,20 @@ try {
     Start-Service SuiFleet
     Wait-Until { $s=Status; $null -ne $s -and $s.phase -eq 'interrupted' } 'interrupted install quarantined'
     Request @{operation='start'} $false | Out-Null
+    Request @{operation='stop'} | Out-Null
+    Request @{operation='start'} $false | Out-Null
     Assert-True ((Get-Item (Join-Path (Work) 'install-started')).LastWriteTimeUtc -eq $stamp) 'ambiguous install replayed'
     $checks.Add('interrupted install survives SCM restart without replay or implicit start')
     Request @{operation='install';manifest=$manifest;artifact=(Join-Path $root 'component.exe')} | Out-Null
     Wait-Component
     $checks.Add('explicit operator reinstall recovers interrupted lifecycle')
-    [ordered]@{ verdict='passed'; platform=[Environment]::OSVersion.VersionString; architecture=$env:PROCESSOR_ARCHITECTURE; rust=(& rustc --version); head=(& git rev-parse HEAD); checks=$checks; limits=@('No AWS/live-chain/physical/production acceptance', 'Local operator manifest; Linux chain reconciliation and rich IPC APIs explicitly unsupported on Windows') } | ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8NoBOM $Evidence
+    $sourceHead = & git rev-parse HEAD
+    $baseHead = $null
+    if ($env:GITHUB_EVENT_PATH) {
+        $event = Get-Content $env:GITHUB_EVENT_PATH | ConvertFrom-Json
+        if ($event.PSObject.Properties.Name -contains 'pull_request') { $sourceHead = $event.pull_request.head.sha; $baseHead = $event.pull_request.base.sha }
+    }
+    [ordered]@{ verdict='passed'; platform=[Environment]::OSVersion.VersionString; architecture=$env:PROCESSOR_ARCHITECTURE; rust=(& rustc +1.94.0 --version); head=$sourceHead; base=$baseHead; tested_commit=(& git rev-parse HEAD); checks=$checks; limits=@('No AWS/live-chain/physical/production acceptance', 'Local operator manifest; Linux chain reconciliation and rich IPC APIs explicitly unsupported on Windows') } | ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8NoBOM $Evidence
     Write-Host ($checks -join "`n")
 } finally {
     if (Get-Service SuiFleet -ErrorAction SilentlyContinue) { Stop-Service SuiFleet -Force -ErrorAction SilentlyContinue; & sc.exe delete SuiFleet | Out-Null }

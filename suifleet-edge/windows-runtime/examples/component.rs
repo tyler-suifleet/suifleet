@@ -18,8 +18,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .access_mode(0x12019b)
                 .security_qos_flags(0x10000)
                 .open(format!(r"\\.\pipe\{}", args[2]))
-                .is_err();
-            let file_denied = fs::read(&args[3]).is_err();
+                .err()
+                .is_some_and(|e| e.raw_os_error() == Some(5));
+            let file_denied = fs::read(&args[3])
+                .err()
+                .is_some_and(|e| e.kind() == std::io::ErrorKind::PermissionDenied);
             fs::write(
                 &args[4],
                 if pipe_denied && file_denied {
@@ -51,8 +54,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some("run") => {
             let root = std::path::Path::new(&args[2]);
             let pipe = &args[3];
-            let secret_denied = fs::read(root.join("config.json")).is_err();
-            let write_denied = fs::write(root.join("state.json"), b"bad").is_err();
+            let secret_denied = fs::read(root.join("config.json"))
+                .err()
+                .is_some_and(|e| e.kind() == std::io::ErrorKind::PermissionDenied);
+            let write_denied = fs::write(root.join("state.json"), b"bad")
+                .err()
+                .is_some_and(|e| e.kind() == std::io::ErrorKind::PermissionDenied);
             let breakaway_denied = Command::new(std::env::current_exe()?)
                 .arg("child")
                 .creation_flags(0x01000000)

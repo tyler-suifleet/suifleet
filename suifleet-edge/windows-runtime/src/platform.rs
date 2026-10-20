@@ -5,7 +5,7 @@ use sha2::{Digest, Sha256};
 use std::{
     ffi::c_void,
     fs,
-    io::Write,
+    io::{Read, Write},
     mem::{size_of, zeroed},
     os::windows::ffi::OsStrExt,
     path::{Path, PathBuf},
@@ -463,7 +463,13 @@ impl Runtime {
     }
     fn stop(&mut self, shutdown: bool) -> Result<()> {
         self.halt(shutdown);
-        self.state.phase = "stopped".into();
+        // A stop request must not turn an ambiguous/failed install into a startable component.
+        if !matches!(
+            self.state.phase.as_str(),
+            "installing" | "interrupted" | "failed"
+        ) {
+            self.state.phase = "stopped".into();
+        }
         save(&self.cfg.root, &self.state)
     }
     fn install(&mut self, m: Manifest, source: &Path) -> Result<()> {
@@ -478,7 +484,10 @@ impl Runtime {
             fs::metadata(source)?.len() <= 128 * 1024 * 1024,
             "artifact too large"
         );
-        let bytes = fs::read(source)?;
+        let mut bytes = Vec::new();
+        fs::File::open(source)?
+            .take(128 * 1024 * 1024 + 1)
+            .read_to_end(&mut bytes)?;
         ensure!(bytes.len() <= 128 * 1024 * 1024, "artifact too large");
         ensure!(
             hex::encode(Sha256::digest(&bytes)) == m.sha256,
