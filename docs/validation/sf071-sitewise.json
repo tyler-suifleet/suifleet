@@ -1,0 +1,51 @@
+{
+  "ticket": "SF-071",
+  "model": "gpt-6.1-sol",
+  "agent": "Codex",
+  "session": "dispatch-f9e4c04ed0574640af044798c97c9788",
+  "implementation_commit": "af2f241",
+  "date": "2026-10-20",
+  "environment": "WSL Docker suifleet-dev:sf035; rustc 1.94.0; Python 3.10; hash-locked botocore 1.43.114; runtime tests --network none",
+  "tests": [
+    {
+      "command": "docker run --rm --network none -v \"$PWD:/workspace\" -v /home/tyler/.cargo/registry:/home/dev/.cargo/registry:ro -w /workspace suifleet-dev:sf035 cargo build --offline --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples",
+      "result": "PASS; current-source debug daemon and gRPC shim built in 55.75s; copied dependency target cache only as incremental build input"
+    },
+    {
+      "command": "make test-sitewise SUIFLEET_DEV_IMAGE=suifleet-dev:sf035",
+      "result": "PASS; 8 signed SDK HTTP emulator/checkpoint/configuration/failure tests in 7.870s and 9 actual-daemon stream PASS checks including SiteWise external stream retirement and SIGKILL/reopen"
+    },
+    {
+      "command": "PYTHONPATH=.ci-cache/aws-python PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_firehose_export.py -v",
+      "result": "PASS; 9 tests in 10.847s"
+    },
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 python3 scripts/greengrass_compat.py",
+      "result": "PASS; 524 reference-model checks; specification evidence only"
+    },
+    {
+      "command": "git diff --check",
+      "result": "PASS"
+    }
+  ],
+  "resolved_test_setup_failures": [
+    "Initial loopback SiteWise SDK host prefix needed test-only inject_host_prefix=False; production retains service endpoint resolution.",
+    "Initial native fixture expected temperature 20 instead of emitted 0; corrected expected transformed value to 1.",
+    "First network-none build used an empty dependency volume and failed resolution; rerun offline against populated host registry succeeded."
+  ],
+  "limits": [
+    "Independent exact-head specification/source review and current-head CI/testnet remain PR gates; not established by this local receipt.",
+    "Live AWS unrun and unauthorized; separate outstanding acceptance in SF-071/#125 (IAM, alias/property ingestion, time window, refresh/outage and cost).",
+    "Physical Pi integration unrun/deferred to SF-031/#32.",
+    "Native affine TQV subset only; no AWS component execution, asset-model formula/aggregation or full SiteWise Edge parity.",
+    "Retries may duplicate accepted TQVs; source timestamps remain unchanged; rejected/gap records retain the message for explicit operator reconciliation.",
+    "No Sui contracts changed; no machine testnet, AWS, production or hardware mutations."
+  ],
+  "sha256": {
+    "scripts/sitewise_export.py": "0434fb35a10d91a934e02793ef7f63d44114d1ce623f61966341a1d903f98b1c",
+    "scripts/tests/test_sitewise_export.py": "8628b5288f24466001e3e5da2439c18e72b45baa2f4663c623615dfc94c52406",
+    "scripts/test_streams.py": "51cb9be10a8a293b419cc9d0743ffb080e6481ba9f02f81505db6b2693ef8463",
+    "interfaces/compat/sitewise-v1.json": "5c75491bd9f180e0874baaa4d2b34619e6a4ca8c55ae5803220d5c3cb108fa4f",
+    "docs/SITEWISE.md": "f42064ce422d7eb716b390a23422ccca8afb712ca124e0a1b35c2d7ee39a22c0"
+  }
+}

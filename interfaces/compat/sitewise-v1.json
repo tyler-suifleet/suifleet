@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "ticket": "SF-071",
+  "implementation": "scripts/sitewise_export.py",
+  "reference_reviewed": "2026-10-20",
+  "api_version": "2019-12-02",
+  "sdk_version": "botocore 1.43.114",
+  "sdk_lock": "sdk/credentials/requirements.txt",
+  "references": [
+    {
+      "url": "https://docs.aws.amazon.com/iot-sitewise/latest/APIReference/API_BatchPutAssetPropertyValue.html",
+      "scope": "public API semantics; no proprietary component implementation"
+    },
+    {
+      "url": "https://docs.aws.amazon.com/iot-sitewise/latest/APIReference/API_PutAssetPropertyValueEntry.html",
+      "scope": "public API semantics; no proprietary component implementation"
+    },
+    {
+      "url": "https://docs.aws.amazon.com/iot-sitewise/latest/APIReference/API_AssetPropertyValue.html",
+      "scope": "public API semantics; no proprietary component implementation"
+    },
+    {
+      "url": "https://docs.aws.amazon.com/iot-sitewise/latest/APIReference/API_PropertyValueNullValue.html",
+      "scope": "public API semantics; no proprietary component implementation"
+    },
+    {
+      "url": "https://docs.aws.amazon.com/iot-sitewise/latest/APIReference/API_TimeInNanos.html",
+      "scope": "public API semantics; no proprietary component implementation"
+    }
+  ],
+  "source_schema": "SF-070 integer schema 1",
+  "processing": "explicit source/point mapping; numeric affine transformation; TQV quality and source nanoseconds preserved",
+  "checkpoint": "whole source message after every request has no error entries; fsync before local ack",
+  "max_entries_per_request": 10,
+  "max_tqvs_per_entry": 1,
+  "max_records_per_message": 1024,
+  "live_aws": "unrun and unauthorized; separately tracked in SF-071/#125",
+  "physical": "unrun; deferred to SF-031/#32",
+  "license": "clean-room original implementation; no AWS component code copied"
+}
