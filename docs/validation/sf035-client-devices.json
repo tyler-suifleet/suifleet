@@ -1,6 +1,6 @@
 {
   "ticket": "SF-035",
-  "head": "5c85e4615c33d803e84032b0b9aa7b9e2bb240c4",
+  "head": "70c814846fa67292773f433ccaf9d4cd8a2b6ddc",
   "broker": "eclipse-mosquitto:2.0.20@sha256:21421af7b32bf9ce508e9090c8eb13bb81f410ca778dc205506180a6f862d0eb",
   "broker_version": "mosquitto version 2.0.20",
   "network": "internal Docker network, no Internet route",
@@ -19,8 +19,8 @@
     "wills: an authorized will was published by the broker when a LAN client vanished without DISCONNECT",
     "revocation: the live session ended 1.0 s after the revoke without its will being published; reconnect and HTTPS refused (403 revoked)",
     "rotation: a new certificate issued over HTTPS works at once; the old one connected during the 5 s grace, its live session ended after 5.2 s, then it was refused (superseded); rotating again within the minimum interval was refused",
-    "restart: the CA and registry persisted; the rotated certificate connects, the superseded and the revoked ones stay refused. A persistent session resumed under the same policy; after the policy changed it restarted clean, so a subscription the new policy refuses delivered nothing",
-    "offline: with the chain simulator stopped (daemon sync failing) the gateway still authenticated and authorized LAN clients; a 60 s certificate's live session ended -0.0 s from its expiry and it could not reconnect"
+    "restart: the CA and registry persisted; the rotated certificate connects, the superseded and the revoked ones stay refused. A persistent session resumed under the same policy; after the policy changed the broker refused the first clean session (CONNACK 5) and the daemon restarted, yet the next connection still restarted clean, so a subscription the new policy refuses delivered nothing",
+    "offline: with the chain simulator stopped (daemon sync failing) the gateway still authenticated and authorized LAN clients; a 60 s certificate's live session ended +0.7 s from its expiry and it could not reconnect"
   ],
   "denied_since_restart": {
     "expired": 2,
