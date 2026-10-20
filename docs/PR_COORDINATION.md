@@ -186,8 +186,9 @@ If resume changes local ownership but its Project mirror fails, the job retains
 its reservation and retries after five minutes. Recovery reads durable ownership,
 requires matching intent and a clean branch at that head, publishes any pending
 revision, and asserts the claim. It does not repeat resume for an In progress claim.
-A changed snapshot or ownership, dirty checkout, PID or worker receipt stops this
-path for explicit inspection; arbitrary In progress claims never authorize launch.
+Recovery uses fresh base, feedback and checks while retaining the reserved receipt
+directory and updating the job feedback hash. A changed head or ownership, dirty
+checkout, PID or worker receipt stops this path for explicit inspection; arbitrary In progress claims never authorize launch.
 
 Immediately before spawning the worker the coordinator clears recoverable intent.
 An interruption beyond this boundary without a process receipt is uncertain and
