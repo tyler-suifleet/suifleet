@@ -1,8 +1,8 @@
 # AWS-managed component and cloud-service adapter coverage
 
-The [SF-064 remaining functional roadmap](GREENGRASS_REMAINING_ROADMAP.md) defines versioned executable subcontracts and maps every selected remaining scope to published implementation tickets SF-069–SF-079. These remain pending implementations, not runtime or live acceptance.
+The [SF-064 remaining functional roadmap](GREENGRASS_REMAINING_ROADMAP.md) defines versioned executable subcontracts and maps every selected remaining scope to published implementation tickets SF-069–SF-079. Per-scope runtime receipts now include the [SF-072 media adapter](KINESIS_VIDEO.md); remaining scopes without receipts stay pending. No local receipt establishes live AWS acceptance.
 
-SF-038 maps every AWS-provided Greengrass component to one of three things: a SuiFleet native equivalent, a scoped adapter with its own implementation ticket, or a roadmap gap tracked by [SF-064](https://github.com/tyler-suifleet/suifleet/issues/109). For each adapter it records the platforms, AWS service and authentication dependencies, licensing constraints and executable acceptance. This is a specification. It implements no adapter, records no permanent exclusion and makes no parity claim. It extends the [SF-028 compatibility specification](GREENGRASS_COMPATIBILITY.md), whose levels and statuses apply here.
+SF-038 maps every AWS-provided Greengrass component to one of three things: a SuiFleet native equivalent, a scoped adapter with its own implementation ticket, or a roadmap gap tracked by [SF-064](https://github.com/tyler-suifleet/suifleet/issues/109). For each adapter it records the platforms, AWS service and authentication dependencies, licensing constraints and executable acceptance. The catalog is a specification with per-adapter runtime receipts. SF-057 implements the scoped Linux credential adapter; SF-058 implements the [Kinesis/S3 companion](STREAM_EXPORTERS.md) with local SDK/emulator evidence. Other adapters remain pending. It records no permanent exclusion and makes no general parity claim. It extends the [SF-028 compatibility specification](GREENGRASS_COMPATIBILITY.md), whose levels and statuses apply here.
 
 The machine-readable source of truth is [`interfaces/compat/managed-components.json`](../interfaces/compat/managed-components.json). The [compatibility matrix](../interfaces/compat/greengrass-compat.json) cross-references it, and `make test-compat` checks both.
 
@@ -26,7 +26,7 @@ Codex published the scoped implementation tickets below. SF-038 links them; it d
 Three kinds of evidence stay separate:
 
 - **Reference models.** `make test-compat` checks the fixtures against small models. Agreement proves only that the fixtures are consistent.
-- **Adapter execution.** Every adapter has `runtime_execution: pending`. Only its implementation ticket may run the same fixtures and runtime tests against the real adapter and record a `runtime_evidence` receipt. A linked ticket is not runtime evidence.
+- **Adapter execution.** The credential adapter has a [local runtime receipt](validation/sf057-credentials.json) and [provisioning guide](AWS_CREDENTIALS.md); the [SF-058 stream exporter receipt](validation/sf058-stream-export.json) adds actual durable-store and AWS API emulator execution. Other adapters retain `runtime_execution: pending`. Only an implementation ticket may run the same fixtures and runtime tests against the real adapter and record a `runtime_evidence` receipt. A linked ticket is not runtime evidence.
 - **Live AWS acceptance.** No AWS account, credential, purchase or live service mutation is authorized. Every live check stays pending until the user authorizes one. The Sui testnet grant does not cover AWS.
 
 Until SF-037 (open) adopts the dependency classification, recipe dependencies on AWS-managed components stay rejected by the current translation subset.
@@ -112,7 +112,7 @@ The initial prototype phase is the SF-028 Linux rows: `x86_64`, `aarch64` and `a
 | Linux x86_64, aarch64, arm | Initial prototype | Development hosts, Yocto/Raspberry Pi and 32-bit ARM catalog selection |
 | Windows | Roadmap gap (SF-074) | The daemon depends on systemd and cgroups (SF-014) and on Yocto packaging. Translation omits and reports Windows manifests meanwhile |
 | macOS | Roadmap gap (SF-075) | No runtime. AWS lists only Linux and Windows for the catalog components |
-| Linux x86 (32-bit) | Roadmap gap (SF-076) | No Yocto or test target |
+| Linux x86 (32-bit) | Roadmap gap (SF-076) | Native daemon, release bundle and `x86` catalog selection with 32-bit software-runner evidence ([LINUX_X86.md](LINUX_X86.md)). Managed adapters and AWS recipe translation do not target it; no Yocto image |
 
 These gaps are not approved exclusions; they stay tracked unless the user changes the full parity goal. Windows support would need its own supervisor, service packaging, filesystem permissions and the full test suite. It is not an adapter.
 
@@ -132,7 +132,7 @@ AWS credentials are a separate trust domain. The `credential-provider` and `aws-
 | Adapter | Ticket | Specification | Replaces | AWS services | Auth | Depends on |
 |---|---|---|---|---|---|---|
 | `credential-provider` | SF-057 | complete | TokenExchangeService 2.0.3 | AWS IoT credentials provider (role alias) or IAM Roles Anywhere; STS | Separate AWS X.509 identity; per-component bearer token | SF-021, SF-027, SF-053 |
-| `stream-export-aws` | SF-058 | complete | StreamManager 2.3.1 export | Kinesis Data Streams, S3 | credential-provider; `kinesis:PutRecords`, `kinesis:ListShards`, `s3:PutObject` | SF-034, SF-057 |
+| `stream-export-aws` | SF-058 | complete | StreamManager 2.3.1 export | Kinesis Data Streams, S3 | SF-057; `kinesis:PutRecords`; S3 PutObject/GetObject/AbortMultipartUpload + ListBucketMultipartUploads ([scope](STREAM_EXPORTERS.md)) | SF-034, SF-057 |
 | `cloudwatch-metrics-export` | SF-059 | complete | Cloudwatch 4.0.0 | CloudWatch | credential-provider; `cloudwatch:PutMetricData` | SF-019, SF-032, SF-057 |
 | `cloudwatch-logs-export` | SF-060 | complete | LogManager 2.3.14 upload | CloudWatch Logs | credential-provider; `logs:CreateLogGroup`, `logs:CreateLogStream`, `logs:PutLogEvents` | SF-020, SF-057 |
 | `aws-iot-core-connection` | SF-061 | incomplete | Bridge IotCore target, shadow sync | AWS IoT Core | Separate AWS IoT thing certificate and policy | SF-021, SF-032, SF-033 |
@@ -207,7 +207,7 @@ Ranges use the native comparator grammar. x-ranges, hyphen ranges, `||` and non-
 make test-compat
 ```
 
-The checker validates the catalog's structure and its cross-references to the backlog, the SF-028 platforms and the suites. It also evaluates the four SF-038 suites against reference models in `scripts/greengrass_managed.py`. As with SF-028, these models only make the fixtures checkable. Agreement with them proves nothing about an adapter. All four suites and all seven adapters stay `runtime_execution: pending` until the implementation ticket runs the same fixtures and commits a receipt.
+The checker validates the catalog's structure and its cross-references to the backlog, the SF-028 platforms and the suites. It also evaluates the four SF-038 suites against reference models in `scripts/greengrass_managed.py`. As with SF-028, these models only make the fixtures checkable. Agreement with them proves nothing about an adapter. Adapters stay `runtime_execution: pending` until their implementation ticket executes the declared runtime checks and commits a receipt. SF-057 and SF-058 now have scoped local runtime receipts; the other adapters remain pending. Reference models still establish no service/account acceptance.
 
 | Suite | Cases | Runtime execution |
 |---|---|---|

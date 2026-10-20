@@ -67,6 +67,7 @@ test-ota:
 	$(RUN) python3 scripts/test_desired_state.py
 	$(RUN) python3 scripts/test_deployment_control.py
 	$(RUN) python3 scripts/test_telemetry.py
+	$(RUN) python3 scripts/test_logs.py
 	$(RUN) python3 scripts/test_rollout.py
 
 # Supervised components under the shipped systemd units on real systemd and
@@ -123,8 +124,12 @@ test-protocol-live:
 test-catalog-live:
 	$(RUN) python3 scripts/test_catalog_localnet.py
 
-# SF-028 Greengrass compatibility matrix, reference-model fixtures and current
-# frontend validator check (docs/GREENGRASS_COMPATIBILITY.md). Offline.
+# Independent media decode, protocol-emulator and process-recovery suite.
+.PHONY: test-video
+test-video:
+	bash scripts/test_kvs_video.sh
+
+# SF-028 Greengrass compatibility matrix and reference-model fixtures. Offline.
 .PHONY: test-compat
 test-compat:
 	$(RUN) python3 scripts/greengrass_compat.py
@@ -132,6 +137,15 @@ test-compat:
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_greengrass_roadmap.py'
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_greengrass_compat.py'
 	$(RUN) node scripts/test_greengrass_compat.cjs
+
+# Exact wheel hashes are reviewed in interfaces/compat/ml/runtime-lock.json.
+# Only download needs network; inference tests use the verified local cache.
+.PHONY: test-ml
+test-ml:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+	$(RUN) python3 scripts/ml_component.py download --platform linux-x86_64-cp310 --wheels .ci-cache/ml-wheels
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_ml_components.py --wheels .ci-cache/ml-wheels -v
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_ml_ota.py --wheels .ci-cache/ml-wheels
 
 # Offline regression tests for the drift gate itself (synthetic summaries).
 test-interfaces:
@@ -145,7 +159,7 @@ toolchain-versions:
 # CI entry point (run inside the dev image): each step's output is kept under
 # ci-logs/ for failure diagnostics. No step publishes, spends gas or uses secrets.
 ci: SHELL := /bin/bash
-CI_STEPS := indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat edge-test test-ota test-component test-edge-acceptance dapp-typecheck dapp-build
+CI_STEPS := indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat test-ml edge-test test-ota test-component test-edge-acceptance dapp-typecheck dapp-build
 ci:
 	@mkdir -p ci-logs
 	@$(MAKE) --no-print-directory toolchain-versions | tee ci-logs/toolchain-versions.txt
@@ -165,6 +179,7 @@ check:
 	$(MAKE) test-interfaces
 	$(MAKE) check-interfaces
 	$(MAKE) test-compat
+	$(MAKE) test-ml
 	$(MAKE) edge-test
 	$(MAKE) test-ota
 	$(MAKE) test-component
@@ -183,13 +198,39 @@ test-publish:
 .PHONY: release-image release-artifacts release-verify
 RELEASE_IMAGE ?= suifleet-release:local
 RELEASE_OUT ?= dist
+# aarch64-unknown-linux-gnu or i686-unknown-linux-gnu (32-bit x86, docs/LINUX_X86.md).
+RELEASE_TARGET ?= aarch64-unknown-linux-gnu
 
 release-image:
 	docker build -f docker/release.Dockerfile --build-arg USER_UID=$(UID) --build-arg USER_GID=$(GID) -t $(RELEASE_IMAGE) docker/
 
 # Builds the committed HEAD twice and fails unless the bundles are identical.
 release-artifacts: release-image
-	python3 scripts/release.py build --out $(RELEASE_OUT) --image $(RELEASE_IMAGE) --reproduce
+	python3 scripts/release.py build --out $(RELEASE_OUT) --image $(RELEASE_IMAGE) --target $(RELEASE_TARGET) --reproduce
+
+# 32-bit Linux x86 (SF-076, docs/LINUX_X86.md), on the host with Docker: an
+# i686 cross build in the release image, then the real-daemon simulator suites
+# in a 32-bit i386 userland. LINUX_X86_BUNDLE=dir also checks a 32-bit release
+# bundle (make release-artifacts RELEASE_TARGET=i686-unknown-linux-gnu).
+.PHONY: linux-x86-image test-linux-x86
+LINUX_X86_IMAGE ?= suifleet-linux-x86:local
+linux-x86-image:
+	docker build -f docker/linux-x86.Dockerfile --build-arg USER_UID=$(UID) --build-arg USER_GID=$(GID) -t $(LINUX_X86_IMAGE) docker/
+
+test-linux-x86: release-image linux-x86-image
+	PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_linux_x86.py --release-image $(RELEASE_IMAGE) --runner-image $(LINUX_X86_IMAGE) \
+		$(if $(LINUX_X86_BUNDLE),--bundle $(LINUX_X86_BUNDLE)) $(if $(LINUX_X86_EVIDENCE),--evidence $(LINUX_X86_EVIDENCE))
+
+# x86 catalog manifests across a real base-to-current package upgrade, on a
+# disposable network-none localnet (host, needs Docker and a warm Move cache).
+.PHONY: test-x86-catalog-localnet
+X86_CATALOG_BASE ?= origin/main
+test-x86-catalog-localnet:
+	rm -rf .x86-catalog-base && mkdir .x86-catalog-base && git archive $(X86_CATALOG_BASE) contracts | tar -x -C .x86-catalog-base
+	docker run --rm --network none -e PYTHONDONTWRITEBYTECODE=1 -v "$(CURDIR):/workspace" -w /workspace \
+		-v "$${SUIFLEET_MOVE_CACHE:-$(notdir $(CURDIR))_move-cache}:/home/dev/.move" "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" \
+		python3 scripts/test_x86_catalog_localnet.py --base-contracts .x86-catalog-base/contracts; \
+		status=$$?; rm -rf .x86-catalog-base; exit $$status
 
 # make release-verify BUNDLE=dist TRUST=release/trust.toml
 release-verify:
@@ -201,6 +242,11 @@ tracking-plan:
 test-tracking:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_tracking.py'
 
+# Offline: disk audit and cleanup safety (docs/DISK_CLEANUP.md); temp dirs only.
+.PHONY: test-disk-cleanup
+test-disk-cleanup:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_disk_cleanup.py'
+
 .PHONY: test-manifest test-manifest-live
 test-manifest:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_deployment_manifest.py'
@@ -211,6 +257,7 @@ test-manifest:
 	$(RUN) node scripts/test_target_groups.cjs
 	$(RUN) node scripts/test_desired_state.cjs
 	$(RUN) node scripts/test_telemetry.cjs
+	$(RUN) node scripts/test_alerts.cjs
 
 test-manifest-live:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
@@ -253,15 +300,33 @@ test-enrollment-localnet:
 
 # Live gate (spends testnet gas; docs/TESTNET.md): base contracts published,
 # upgraded in place to this tree, real daemon, on-chain receipts.
+# SUIFLEET_WALRUS=testnet stores recipes/artifacts in real Walrus testnet.
 #   make live-gate-package-upgrade SUIFLEET_WALLET=~/.config/suifleet/testnet/agent/client.yaml
-.PHONY: live-gate-package-upgrade
+.PHONY: live-gate-package-upgrade live-gate-upgrade-security live-gate-wallet
 live-gate-package-upgrade:
 	@test -n "$(SUIFLEET_WALLET)" || { echo "set SUIFLEET_WALLET to a funded wallet's client.yaml"; exit 1; }
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/live_package_upgrade.py --wallet "$(SUIFLEET_WALLET)" \
 		--network "$${SUIFLEET_NETWORK:-testnet}" $(if $(BASE_REF),--base-ref "$(BASE_REF)") \
-		$(if $(SUIFLEET_STATE),--state "$(SUIFLEET_STATE)") \
+		$(if $(SUIFLEET_STATE),--state "$(SUIFLEET_STATE)") $(if $(SUIFLEET_WALRUS),--walrus "$(SUIFLEET_WALRUS)") \
 		--evidence "$${SUIFLEET_EVIDENCE:-live-evidence.json}"
+
+# Old-package/legacy-object attacks across a real upgrade. The package pair is
+# cached by contract content (~0.05 SUI reused; FRESH=1 republishes, ~0.22 SUI).
+live-gate-upgrade-security:
+	@test -n "$(SUIFLEET_WALLET)" || { echo "set SUIFLEET_WALLET to a funded wallet's client.yaml"; exit 1; }
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/live_upgrade_security.py --wallet "$(SUIFLEET_WALLET)" \
+		--network "$${SUIFLEET_NETWORK:-testnet}" $(if $(SUIFLEET_STATE),--state "$(SUIFLEET_STATE)") $(if $(FRESH),--fresh) \
+		--evidence "$${SUIFLEET_EVIDENCE:-live-security-evidence.json}"
+
+# The dApp in headless Chromium against testnet (needs dapp deps and Playwright
+# Chromium; reuses the package-upgrade fixture, so run that gate first).
+live-gate-wallet:
+	@test -n "$(SUIFLEET_WALLET)" || { echo "set SUIFLEET_WALLET to a funded wallet's client.yaml"; exit 1; }
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/live_wallet_gate.py --wallet "$(SUIFLEET_WALLET)" \
+		$(if $(SUIFLEET_STATE),--state "$(SUIFLEET_STATE)") --evidence "$${SUIFLEET_EVIDENCE:-live-wallet-evidence.json}"
 
 # Real daemon over gRPC against a disposable localnet (start it first, as for
 # test-manifest-live): direct/group/failure/offline/cursor-migration paths.
@@ -273,12 +338,19 @@ test-daemon-localnet:
 .PHONY: test-testnet
 test-testnet:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_testnet*.py'
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_live_common.py'
 	$(RUN) node scripts/test_testnet_cache.cjs
 
 .PHONY: test-deployment-control-localnet
 test-deployment-control-localnet:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
 	$(RUN) python3 scripts/test_deployment_control_localnet.py
+
+# Real daemon, component UIDs and Eclipse Mosquitto; host Docker, host network.
+.PHONY: test-messaging
+test-messaging:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+	python3 scripts/test_messaging.py --image "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}"
 
 # Start a disposable indexed loopback node/faucet first; network-none Docker only.
 .PHONY: test-rollout-localnet
@@ -303,6 +375,29 @@ edge-acceptance:
 	PYTHONDONTWRITEBYTECODE=1 python3 scripts/edge_acceptance.py run --profile "$(PROFILE)" --evidence "$(EVIDENCE)" \
 		$(if $(HARDWARE),--hardware) $(LOCK_ARGS)
 
+# Streams (SF-034): real daemon, component UIDs and a verifying export
+# receiver; root only inside a disposable, network-isolated container.
+.PHONY: test-streams
+test-streams:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+ifdef INSIDE_DEV_CONTAINER
+	python3 scripts/test_streams.py $(STREAMS_EVIDENCE)
+else
+	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" python3 scripts/test_streams.py $(STREAMS_EVIDENCE)
+endif
+
+# Device shadows (SF-033): real daemon, component UIDs and a verifying
+# reference cloud shadow service; root only inside a disposable,
+# network-isolated container.
+.PHONY: test-shadows
+test-shadows:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+ifdef INSIDE_DEV_CONTAINER
+	python3 scripts/test_shadows.py $(SHADOWS_EVIDENCE)
+else
+	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" python3 scripts/test_shadows.py $(SHADOWS_EVIDENCE)
+endif
+
 # Root only inside a disposable, network-isolated container: real SO_PEERCRED UIDs.
 .PHONY: test-ipc
 test-ipc:
@@ -312,3 +407,22 @@ ifdef INSIDE_DEV_CONTAINER
 else
 	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" python3 scripts/test_ipc.py
 endif
+
+# SF-057: online public SDK preparation, then network-none actual adapter/mTLS tests.
+.PHONY: test-aws-credentials
+test-aws-credentials:
+	bash scripts/test_aws_credentials.sh
+
+# SF-058: actual durable daemon IPC + unmodified SDK against local AWS API emulators.
+.PHONY: test-stream-export
+test-stream-export:
+	bash scripts/test_stream_export.sh
+
+# SDK wheels are prepared by test-aws-credentials (or the command in FIREHOSE.md).
+# All service/IPC traffic stays in a disposable offline container.
+.PHONY: test-firehose
+test-firehose:
+	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 \
+	  -e PYTHONPATH=/workspace/.ci-cache/aws-python \
+	  -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:?set pinned dev image}" \
+	  sh -ec 'python3 -m unittest discover -s scripts/tests -p test_firehose_export.py -v; python3 scripts/test_streams.py --firehose'

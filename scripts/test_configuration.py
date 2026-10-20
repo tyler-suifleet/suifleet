@@ -280,9 +280,12 @@ def run(binary):
                 process = None
 
             # No confidential value in public state, the journal or diagnostics.
+            # The private set of values to redact from logs holds them all.
+            retained = state_dir / "logs" / "confidential.json"
+            assert retained.stat().st_mode & 0o777 == 0o600 and all(v.encode() in retained.read_bytes() for v in VALUES)
             leaks = []
             for path in [root / "daemon.log", *state_dir.rglob("*")]:
-                if path.is_file() and path.name not in ("configuration.json", "component.log", "seen.json"):
+                if path.is_file() and path != retained and path.name not in ("configuration.json", "component.log", "seen.json"):
                     text = path.read_bytes()
                     leaks += [str(path) for value in VALUES if value.encode() in text]
             assert not leaks, leaks
@@ -290,7 +293,7 @@ def run(binary):
                 for path in state_dir.rglob(name):
                     assert path.stat().st_mode & 0o777 == 0o600, path
             assert not sim.errors, sim.errors
-            print("PASS: confidential values only in 0600 materialized files; none in state, journal or logs")
+            print("PASS: confidential values only in 0600 materialized files and the private log-redaction set; none in state, journal or logs")
     finally:
         if process and process.poll() is None:
             process.kill()

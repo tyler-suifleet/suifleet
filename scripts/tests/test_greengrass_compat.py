@@ -18,11 +18,11 @@ class RepositoryTests(unittest.TestCase):
         self.assertEqual(set(counts), set(compat.SUITE_RUNNERS))
         self.assertTrue(all(count > 0 for count in counts.values()))
 
-    def test_every_suite_is_still_pending(self):
-        # Flipping a suite to passed needs a runtime receipt from the owning
-        # implementation; this specification ticket records none.
+    def test_runtime_receipts_are_scoped_to_executed_suites(self):
+        # SF-057, SF-032, SF-033 and SF-034 executed their declared suites; all others remain pending.
         matrix = json.loads((ROOT / compat.COMPAT / "greengrass-compat.json").read_text())
-        self.assertEqual({s["runtime_execution"] for s in matrix["suites"].values()}, {"pending"})
+        self.assertEqual({name for name, s in matrix["suites"].items() if s["runtime_execution"] == "passed"},
+                         {"credential-provider-cases.json", "pubsub-cases.json", "shadow-cases.json", "stream-cases.json"})
 
 
 class MatrixGateTests(unittest.TestCase):
@@ -47,21 +47,21 @@ class MatrixGateTests(unittest.TestCase):
 
     def test_aws_claim_without_passed_runtime_suite_rejected(self):
         def mutate(m):
-            row = self.row(m, "shadows.local")
+            row = self.row(m, "client-devices.auth")
             row["aws_api"] = "implemented"
             row["current_evidence"] = ["docs/GREENGRASS_COMPATIBILITY.md"]
         self.assertTrue(any("passed runtime suite" in e for e in self.errors(mutate)))
 
     def test_passed_suite_needs_existing_receipt(self):
         def mutate(m):
-            m["suites"]["shadow-cases.json"]["runtime_execution"] = "passed"
+            m["suites"]["client-device-cases.json"]["runtime_execution"] = "passed"
         self.assertTrue(any("runtime_evidence" in e for e in self.errors(mutate)))
         def missing(m):
-            m["suites"]["shadow-cases.json"].update(runtime_execution="passed", runtime_evidence="docs/validation/none.json")
+            m["suites"]["client-device-cases.json"].update(runtime_execution="passed", runtime_evidence="docs/validation/none.json")
         self.assertTrue(any("runtime_evidence" in e for e in self.errors(missing)))
 
     def test_pending_suite_needs_owner(self):
-        self.assertTrue(any("pending_on" in e for e in self.errors(lambda m: m["suites"]["stream-cases.json"].pop("pending_on"))))
+        self.assertTrue(any("pending_on" in e for e in self.errors(lambda m: m["suites"]["cloudwatch-logs-cases.json"].pop("pending_on"))))
 
     def test_partial_needs_existing_evidence(self):
         def missing(m):
@@ -208,15 +208,16 @@ class ManagedCatalogGateTests(unittest.TestCase):
     def test_baseline_has_no_errors(self):
         self.assertEqual(self.errors(lambda c: None), [])
 
-    def test_adapters_link_published_tickets_and_stay_unexecuted(self):
+    def test_adapters_link_published_tickets_and_scoped_execution(self):
         # Published scoped implementation tickets (Codex, PR #91 feedback).
-        # Linking a ticket is not runtime evidence: every adapter stays pending.
+        # Only executed credential and stream-export adapters have owning runtime receipts.
         self.assertEqual({a["id"]: a["implementation_ticket"] for a in self.catalog["adapters"]}, {
             "credential-provider": "SF-057", "stream-export-aws": "SF-058",
             "cloudwatch-metrics-export": "SF-059", "cloudwatch-logs-export": "SF-060",
             "aws-iot-core-connection": "SF-061", "device-defender-metrics": "SF-062",
             "secure-tunneling": "SF-063"})
-        self.assertEqual({a["runtime_execution"] for a in self.catalog["adapters"]}, {"pending"})
+        self.assertEqual({a["id"] for a in self.catalog["adapters"] if a["runtime_execution"] == "passed"},
+                         {"credential-provider", "stream-export-aws"})
         self.assertFalse(self.catalog["parity_claim"])
         for entry in self.catalog["components"] + self.catalog["platform_phases"]:
             self.assertNotIn("approval", entry)
@@ -258,7 +259,7 @@ class ManagedCatalogGateTests(unittest.TestCase):
         self.has(lambda c: self.adapter(c, "credential-provider").update(implementation_ticket="SF-999"), "unknown implementation ticket")
         self.has(lambda c: self.adapter(c, "credential-provider").update(implementation_ticket=None), "unknown implementation ticket")
         self.has(lambda c: self.adapter(c, "credential-provider")["depends_on"].append("SF-057"), "its own implementation ticket")
-        self.has(lambda c: self.adapter(c, "credential-provider").update(runtime_execution="passed"), "runtime_evidence")
+        self.has(lambda c: self.adapter(c, "credential-provider").update(runtime_execution="passed", runtime_evidence=None), "runtime_evidence")
         self.has(lambda c: self.adapter(c, "credential-provider").update(runtime_execution="passed", runtime_evidence="docs/NOPE.json"),
                  "runtime_evidence")
         self.has(lambda c: self.adapter(c, "credential-provider").pop("runtime_execution"), "runtime_execution")
@@ -317,6 +318,12 @@ class ModelTests(unittest.TestCase):
         for value in ([deep], [[[[[[[[1]]]]]]]], {"x": [[{"y": [[[[1]]]]}]]}):
             self.assertEqual(store.apply({"op": "update", "request": {"state": {"desired": {"values": value}}}}), {"error": "invalid"})
         self.assertEqual(store.apply({"op": "get"}), {"state": {"desired": {"a": 1}, "delta": {"a": 1}}, "version": 1})
+
+    def test_shadow_null_nested_in_array_is_invalid(self):
+        store = compat.ShadowStore()
+        for value in ([{"x": None}], [[None]], [{"x": [{"y": None}]}]):
+            self.assertEqual(store.apply({"op": "update", "request": {"state": {"reported": {"items": value}}}}), {"error": "invalid"})
+        self.assertEqual(store.apply({"op": "get"}), {"error": "not-found"})
 
     def test_shadow_version_must_be_integer_and_rejection_changes_nothing(self):
         store = compat.ShadowStore()

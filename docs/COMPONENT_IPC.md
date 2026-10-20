@@ -1,6 +1,7 @@
 # Native component IPC and SDK (v1)
 
-SF-027 provides an opt-in Linux Unix-stream API and a dependency-free Python 3.10+
+SF-027 provides an opt-in Unix-stream API (Linux, and macOS since SF-075; see
+[MACOS_RUNTIME.md](MACOS_RUNTIME.md#ipc-authentication)) and a dependency-free Python 3.10+
 SDK/CLI in [`sdk/python/suifleet_ipc.py`](../sdk/python/suifleet_ipc.py). This is a
 native SuiFleet interface, not AWS Greengrass IPC, SDK or CLI compatibility.
 
@@ -74,7 +75,15 @@ no keys, user accounts or enrollment settings are embedded by package builds.
 | `config` | `component` | Public committed configuration record, including version/deployment/effective/defaults. Confidential device-overlay values are never returned. Poll the record to observe configuration changes. |
 | `health` | `component`, `payload` = `healthy`, `degraded` or `broken` | Volatile self-reported health plus server timestamp. Does not assert firmware boot health, change supervisor phase or override signed fleet telemetry. Principal must exist in the configured ACL. |
 | `publish` | `component`, exact `topic`, JSON `payload` | Fanout to configured subscribers, message envelope includes authenticated component name (or `@operator/UID` for administrators). Payload <=4096 serialized bytes. Atomic backpressure if any inbox is full. |
-| `receive` | `component`, exact `topic` | Destructive nonblocking dequeue, or null. Each principal/topic has 32 messages maximum. |
+| `receive` | `component`, exact `topic` | Destructive nonblocking dequeue, or null. Each principal/topic has 32 messages maximum. With a durable subscription to that filter, its oldest message instead ([MESSAGING.md](MESSAGING.md)). |
+| `stream_create`, `stream_delete`, `stream_append`, `stream_read`, `stream_describe` | `component`, stream name as `topic` | Durable streams (SF-034, [STREAMS.md](STREAMS.md)); need `[streams]` and a matching `streams` glob in the component's ACL. |
+| `stream_export_ack` | `component`, stream name as `topic`, `{sequence}` | Trusted [external exporter](STREAM_EXPORTERS.md) only: explicit operation + stream glob, operator-declared `external_export` required. Persists confirmed remote delivery before retirement. |
+| `stream_list` | `component` | Stream names the caller's `streams` globs match. |
+| `subscribe`, `unsubscribe`, `ack` | `component`, filter `topic` | Durable pub/sub (SF-032); need `[pubsub]` and a `SubscribeToTopic` policy. |
+| `shadow_get`, `shadow_update`, `shadow_delete` | `component`, shadow name as `topic` (`""` is classic) | Device shadows (SF-033, [SHADOWS.md](SHADOWS.md)); need `[shadows]` and a matching `shadow_policies` grant. |
+| `shadow_list` | `component` | Named shadows a `ListNamedShadowsForThing` grant matches. |
+| `shadows` | no component needed | Administrator only. Shadow versions, sync and notification counters. |
+| `messaging` | no component needed | Administrator only. Durable subscription and bridge counters. |
 
 Stops are runtime controls: explicit start, replacement deployment or daemon restart
 may start the committed version again. Stop does not uninstall or alter chain desired
@@ -84,9 +93,10 @@ of authoritative configuration or independent second installation journal exists
 Install `ok: true` means the request was processed: inspect `status`/`outcome` for
 Applied (1), Failed (2), pending or deferred admission; a digest is not success.
 
-Messaging is bounded, volatile and non-durable. It has no retention, wildcard,
-MQTT, persistence or offline-delivery guarantee. SF-032/#33 owns those extensions.
-Health and inboxes clear on daemon restart; runtime and installed evidence comes
+The `publish`/`receive` inboxes above are bounded, volatile and non-durable.
+Durable subscriptions with MQTT filters, QoS 1 acknowledgement, AWS-shaped
+`pubsub_policies` and the local MQTT bridge are opt-in with `[pubsub]`: see
+[MESSAGING.md](MESSAGING.md) (SF-032). Health and volatile inboxes clear on daemon restart; runtime and installed evidence comes
 from the existing supervisor/journal. IPC does not reboot the platform.
 
 ## SDK and CLI
@@ -119,7 +129,8 @@ disconnecting does not revoke an accepted request: it may still execute or finis
 One UTF-8 JSON object plus LF per connection, at most 65536 bytes including LF.
 Requests have `version: 1`, `operation`, optional `component`/`topic` (default empty)
 and optional `payload` (default null). No pipelining or streaming. Responses contain
-`version: 1`, `ok` and either `data` or `error: "request_failed"`. Errors deliberately
+`version: 1`, `ok` and either `data` or `error: "request_failed"` (stream and shadow
+operations return their protocol codes instead, such as `full`, `evicted` or `conflict`). Errors deliberately
 do not disclose private command/configuration diagnostics; operators inspect daemon
 logs. A denied/invalid/future-version request has no handler side effects.
 
@@ -153,3 +164,8 @@ remain within the response frame. Run `make test-ipc` as root when already insid
 a disposable container; the host target starts its own root container.
 Physical Pi/target integration remains [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32);
 no physical or public-network result is implied by simulator acceptance.
+
+SF-057 adds a separate [scoped AWS credential adapter](AWS_CREDENTIALS.md) using
+the same distinct-UID provisioning boundary. Native IPC ACLs do not implicitly
+grant AWS credentials; its credential socket has an explicit operator grant list.
+Shared-daemon-UID components remain denied.
