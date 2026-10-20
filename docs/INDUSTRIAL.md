@@ -154,7 +154,7 @@ Each point names a `table` and an `address` (0-65535). The table is one of
 | `keepalive_count` | 1-1000 |
 | `lifetime_count` | at least 3 × `keepalive_count`, up to 30000 |
 | `session_timeout_ms` | 10000-3600000 |
-| `max_notifications_per_publish` | 1-10000; at most `output.max_buffered_records` |
+| `max_notifications_per_publish` | 1-10000; below `output.max_buffered_records` |
 
 Each point names a `node_id` in the standard string form (`ns=2;s=Line1.Flow`,
 `i=2258`, `g=…` or `b=…`).
@@ -162,9 +162,9 @@ Each point names a `node_id` in the standard string form (`ns=2;s=Line1.Flow`,
 - `mode` is `subscribe` (the default) or `poll`.
 - Subscribed points take `sampling_interval_ms` (0-3600000; the default is the
   publishing interval) and `queue_size` (1-100, default 10).
-- Polled points take `poll_interval_ms` (50-86400000, default 1000). A source may
-  have at most `output.max_buffered_records` polled points, so one Read always
-  fits the buffer.
+- Polled points take `poll_interval_ms` (50-86400000, default 1000). A source must
+  have fewer polled points than `output.max_buffered_records`, so one Read and
+  the gap record before it always fit the buffer.
 - An optional expected `type` is one of `boolean`, `sbyte`, `byte`, `int16`,
   `uint16`, `int32`, `uint32`, `int64`, `uint64`, `float`, `double`, `string` or
   `datetime`.
@@ -261,7 +261,9 @@ record counts those in `dropped_records`.
   daemon acknowledges its append.
 - **Failed appends.** `full`, `unavailable`, a missing socket or a timeout are
   retried with backoff from `retry_min_ms` to `retry_max_ms`.
-- **When the buffer cannot take a whole poll.** A Modbus poll is skipped rather
+- **When the buffer cannot take a whole poll.** A poll or Publish waits for
+  room for all its records, plus one for a pending gap record; a Modbus source
+  must therefore have fewer points than the buffer. A Modbus poll is skipped rather
   than queued. An OPC UA source withholds its next Publish request, so the
   server's bounded queues absorb the excess and mark overflow. If the pause
   outlasts the subscription lifetime, the source resubscribes when space
@@ -343,7 +345,7 @@ f80d0d7132fd035104c3f21b01026470e3310ca3d8d493d9a9737d0d32ad2eb1  Modbus_Applica
 
 | Command | Covers |
 |---|---|
-| `make test-industrial` | 30 tests (`scripts/test_industrial.py`) with the pinned `cryptography` 44.0.3. **Vectors:** OPC UA NodeId, DateTime, DataValue and message encodings; bounded decoding of malformed input; the TLS 1.2 P_SHA256 test vector; Modbus CRC and V1.1b3 examples; all 53 configuration cases; secret-file modes; the CLI version check. **Collector against the simulators over real sockets and pseudo-terminals:** all Modbus types and word orders; exception codes once, then recovery; seven malformed or stalled response faults, each closing and reconnecting; non-finite floats; outage with bounded backoff; TLS mutual authentication with untrusted client, untrusted server, wrong host name and plaintext all refused; RTU with a bad CRC. **OPC UA:** subscription and poll interoperability; UNCERTAIN and BAD quality; exact source timestamps; type mismatch, non-finite, too-large and array values; corrupt chunks or bodies reconnect; disconnect; server-side subscription loss resubscribing on the same session; session loss; withheld Publish with overflow and gap records; the notification bound; Read ServiceFaults and timeouts reported BAD while polling resumes on a healthy session, and a malformed Read answer reconnecting; a full-buffer poll group making progress. **OPC UA security:** Basic256Sha256 Sign and SignAndEncrypt with UserName; wrong password, untrusted client certificate and wrong server pin all rejected; refusal to downgrade to policy None or to send a plaintext password |
+| `make test-industrial` | 30 tests (`scripts/test_industrial.py`) with the pinned `cryptography` 44.0.3. **Vectors:** OPC UA NodeId, DateTime, DataValue and message encodings; bounded decoding of malformed input; the TLS 1.2 P_SHA256 test vector; Modbus CRC and V1.1b3 examples; all 53 configuration cases; secret-file modes; the CLI version check. **Collector against the simulators over real sockets and pseudo-terminals:** all Modbus types and word orders; exception codes once, then recovery; seven malformed or stalled response faults, each closing and reconnecting; non-finite floats; outage with bounded backoff; TLS mutual authentication with untrusted client, untrusted server, wrong host name and plaintext all refused; RTU with a bad CRC. **OPC UA:** subscription and poll interoperability; UNCERTAIN and BAD quality; exact source timestamps; type mismatch, non-finite, too-large and array values; corrupt chunks or bodies reconnect; disconnect; server-side subscription loss resubscribing on the same session; session loss; withheld Publish with overflow and gap records; the notification bound; Read ServiceFaults and timeouts reported BAD while polling resumes on a healthy session, and a malformed Read answer reconnecting; a poll group one below the buffer making progress after skipped polls, with its gap record and no drops. **OPC UA security:** Basic256Sha256 Sign and SignAndEncrypt with UserName; wrong password, untrusted client certificate and wrong server pin all rejected; refusal to downgrade to policy None or to send a plaintext password |
 | `make test-industrial-daemon` | **Setup:** the built zip application runs as its own component UID against the real daemon (debug build), with Modbus TCP and OPC UA Basic256Sha256 SignAndEncrypt + UserName simulators. **Export:** records reach the declared File stream and are exported in signed batches, which the SF-034 receiver checks independently. **`full` backpressure:** the buffer stays bounded, polls are skipped and Publish is withheld, then gap records follow. **Daemon kill -9:** nothing is lost. **Collector `SIGTERM`:** the buffer is flushed (exit 0). **No loss:** record identifiers are contiguous for every collector boot. Receipt: [sf070-industrial.json](validation/sf070-industrial.json) |
 | `python3 scripts/test_industrial_interop.py --reference-site DIR` | **Cross-implementation, host-run.** The collector against an asyncua 1.1.5 server (policy None/anonymous, and Basic256Sha256 SignAndEncrypt/UserName, with a wrong password rejected) and a pymodbus 3.8.6 server. An asyncua client against the OPC UA simulator (Read, subscription, DeleteSubscriptions, wrong password), and a pymodbus client against the Modbus simulator. The references are test-only (asyncua LGPL-3.0, pymodbus BSD-3-Clause) |
 
