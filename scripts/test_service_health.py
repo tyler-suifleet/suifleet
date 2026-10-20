@@ -7,6 +7,8 @@ failing stream-export destination and a shadow service; no keys, gas, public
 network or hardware.
 
   healthy baseline     -> schema-2 snapshot, bridge connected, no alerts
+  inbound MQTT into    -> the bridge's refusal names the filter and topic;
+  a full queue            telemetry reports only the error category queue-full
   fill a queue         -> a subscriber stops acknowledging; its QoS 1 queue
                           fills and publications are refused (backpressure)
   stop the broker      -> the bridge disconnects and stays down
@@ -19,7 +21,8 @@ network or hardware.
 
 The alerts are derived from the captured signed envelopes by the real indexer
 (`suifleet-indexer telemetry-alerts`), every envelope is verified by the dApp's
-verifier, and none carries a payload, topic, export URL or credential.
+verifier, and none (nor any derived alert) carries a payload, topic, filter,
+export URL or credential.
 """
 import argparse
 import base64
@@ -38,11 +41,11 @@ import test_ota
 from test_ota import CAP, DEVICE, PACKAGE, REGISTRY, TYPE_ORIGINS, UPGRADE_CAP, Simulator, start_grpc
 
 ROOT = Path(__file__).resolve().parents[1]
-PUBLISHER, SUBSCRIBER = 64001, 64002
+PUBLISHER, SUBSCRIBER, LAN = 64001, 64002, 64003
 INTERVAL = 10  # The shortest heartbeat interval the daemon accepts.
 QUEUE_LIMIT = 5
 # Strings that must never leave the device in telemetry.
-SECRETS = ["plant-7/valves", "SECRET-PAYLOAD", "export-secret", "shadow-secret", "ingest-private-path", "lan-secret-topic",
+SECRETS = ["plant-7/valves", "SECRET-PAYLOAD", "export-secret", "shadow-secret", "ingest-private-path", "lan-secret-topic", "confidential-line",
            "local-mode", "cloud-mode"]
 ALL_KINDS = {"messaging-backpressure", "messaging-loss", "bridge-disconnected", "stream-near-limit", "stream-data-lost",
              "export-failing", "shadow-sync-failing", "shadow-conflict"}
@@ -60,11 +63,31 @@ def wait_for(condition, message, process=None, timeout=25, every=0.05):
 
 
 class Broker:
-    """Minimal MQTT 3.1.1 broker: CONNACK, SUBACK, PUBACK and PINGRESP. Enough
-    for the bridge's connection state; Mosquitto interop is SF-032's test."""
+    """Minimal MQTT 3.1.1 broker: CONNACK, SUBACK, PUBACK and PINGRESP, and
+    QoS 1 delivery of injected messages until acknowledged (redelivered after
+    each SUBSCRIBE). Enough for the bridge's connection state and inbound
+    refusals; Mosquitto interop is SF-032's test."""
 
     def __init__(self):
         self.port, self.connects, self.listener, self.clients, self.lock = None, 0, None, [], threading.Lock()
+        self.pending = {}  # packet id -> (topic, payload), until PUBACK
+
+    @staticmethod
+    def publish(packet_id, topic, payload):
+        body = len(topic).to_bytes(2, "big") + topic.encode() + packet_id.to_bytes(2, "big") + payload
+        return bytes([0x32, len(body)]) + body
+
+    def inject(self, messages):
+        """Deliver `messages` [(topic, payload)] at QoS 1 to connected clients now and after each SUBSCRIBE."""
+        with self.lock:
+            for topic, payload in messages:
+                packet_id = len(self.pending) + 1
+                self.pending[packet_id] = (topic, payload)
+                for client in self.clients:
+                    try:
+                        client.sendall(self.publish(packet_id, topic, payload))
+                    except OSError:
+                        pass
 
     def start(self):
         self.listener = socket.socket()
@@ -132,6 +155,12 @@ class Broker:
                         rest = rest[3 + size:]
                         codes.append(1)
                     client.sendall(bytes([0x90, 2 + len(codes)]) + body[:2] + bytes(codes))
+                    with self.lock:
+                        for packet_id, (topic, payload) in self.pending.items():
+                            client.sendall(self.publish(packet_id, topic, payload))
+                elif kind == 4:  # PUBACK from the bridge
+                    with self.lock:
+                        self.pending.pop(int.from_bytes(body[:2], "big"), None)
                 elif kind == 3 and (first >> 1) & 3:  # PUBLISH at QoS 1
                     size = int.from_bytes(body[:2], "big")
                     client.sendall(bytes([0x40, 2]) + body[2 + size:4 + size])
@@ -254,6 +283,8 @@ def run(evidence=None):
             '[[ipc.components.pub.pubsub_policies]]\noperations = ["aws.greengrass#PublishToTopic"]\nresources = ["plant-7/*"]\n'
             f'[ipc.components.sub]\nuid = {SUBSCRIBER}\noperations = ["subscribe", "receive", "ack"]\n'
             '[[ipc.components.sub.pubsub_policies]]\noperations = ["aws.greengrass#SubscribeToTopic"]\nresources = ["plant-7/*"]\n'
+            f'[ipc.components.lan]\nuid = {LAN}\noperations = ["subscribe", "receive", "ack"]\n'
+            '[[ipc.components.lan.pubsub_policies]]\noperations = ["aws.greengrass#SubscribeToTopic"]\nresources = ["lan-secret-topic/*"]\n'
             f'[pubsub]\nmax_messages_per_subscription = {QUEUE_LIMIT}\n'
             f'[pubsub.bridge]\nbroker = "127.0.0.1:{broker.port}"\nkeep_alive_seconds = 5\n'
             '[[pubsub.bridge.mappings]]\ntopic = "lan-secret-topic/#"\nsource = "LocalMqtt"\ntarget = "Pubsub"\n'
@@ -320,6 +351,23 @@ def run(evidence=None):
             assert base["services"]["streams"]["streams"][0]["export"]["consecutive_failures"] == 0
             print(f"PASS: healthy baseline: signed schema-2 snapshot (seq {base['seq']}), bridge connected, no alerts")
 
+            # Inbound MQTT into a full queue: the bridge's refusal names the
+            # subscriber's filter and the message's topic; telemetry carries
+            # only the error category.
+            inbound_from = latest()["seq"]
+            assert ipc(LAN, "subscribe", "lan-secret-topic/#", {"qos": 1}, "lan")["ok"]
+            broker.inject([("lan-secret-topic/confidential-line", json.dumps({"cmd": "SECRET-PAYLOAD", "i": i}).encode())
+                           for i in range(QUEUE_LIMIT + 1)])
+            inbound = snapshot_after(inbound_from, lambda r: r["services"]["bridge"]["refused"] >= 1
+                                     and r["services"]["bridge"]["last_error"] == "queue-full",
+                                     "the bridge's inbound refusal was not reported as queue-full")
+            lan = next(q for q in inbound["services"]["messaging"]["queues"] if q["principal"] == "lan")
+            assert (lan["queued"], lan["fill_percent"]) == (QUEUE_LIMIT, 100) and lan["refused"] >= 1, lan
+            leaked = [s for s in SECRETS if s in json.dumps(inbound)]
+            assert not leaked, (leaked, inbound)
+            print(f"PASS: inbound MQTT refused by a full queue: bridge refused {inbound['services']['bridge']['refused']}, "
+                  "last_error is the category queue-full; no topic or filter in the signed snapshot, reasons or derived alerts")
+
             started = latest()["seq"]
             # Fill a queue: the subscriber stops acknowledging.
             assert ipc(SUBSCRIBER, "subscribe", "plant-7/valves", {"qos": 1}, "sub")["ok"]
@@ -355,7 +403,7 @@ def run(evidence=None):
             exported = degraded["services"]["streams"]["streams"][0]
             assert exported["export"]["lost"] > 0 and exported["export"]["batches"] == 0, exported
             alerts = {a["kind"]: a for a in degraded["alerts"]}
-            assert alerts["export-failing"]["severity"] == "critical" and "503" in alerts["export-failing"]["message"], alerts
+            assert alerts["export-failing"]["severity"] == "critical" and "http-server-error" in alerts["export-failing"]["message"], alerts
             assert all(a["action"] for a in degraded["alerts"])
             cloud["mode"] = "ok"
             seen = set()
@@ -380,6 +428,11 @@ def run(evidence=None):
                 if not message["ok"] or message["data"] is None:
                     break
                 assert ipc(SUBSCRIBER, "ack", "plant-7/valves", message["data"]["id"], "sub")["ok"]
+            while True:
+                message = ipc(LAN, "receive", "lan-secret-topic/#", None, "lan")
+                if not message["ok"] or message["data"] is None:
+                    break
+                assert ipc(LAN, "ack", "lan-secret-topic/#", message["data"]["id"], "lan")["ok"]
             recovered_from = latest()["seq"]
             # The bridge reconnects within its backoff (at most 60 s).
             healthy = snapshot_after(recovered_from, lambda r: r["health"] == "healthy" and not r["alerts"],
@@ -395,7 +448,11 @@ def run(evidence=None):
                 text = base64.b64decode(envelope["message"]).decode()
                 leaked = [s for s in SECRETS if s in text]
                 assert not leaked, leaked
-            print(f"PASS: none of {len(captured)} signed snapshots contains a payload, topic, export URL path, token or shadow value")
+            for result in explained():
+                leaked = [s for s in SECRETS if s in json.dumps(result)]
+                assert not leaked, (leaked, result)
+            print(f"PASS: none of {len(captured)} signed snapshots or their derived alerts contains a payload, topic, filter, "
+                  "export URL path, token or shadow value")
             node_modules = ROOT / "dapp/node_modules"
             if node_modules.exists():
                 path = root / "envelopes.json"
