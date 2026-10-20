@@ -121,7 +121,10 @@ Failed installations leave the prior generation. Failed service activation
 restores it. A crash before the journal commit restores old metadata and removes
 only the newly staged streams; after the commit, startup projects the new
 generation. The supervisor's explicitly configured application rollback restores
-the prior service generation too. An interrupted lifecycle command remains
+the prior service generation too. On startup, completed supervisor recovery
+receipts settle configuration before stream loading or bridge/export tasks;
+they are not evidence that a component is currently running or the OS booted
+healthily. An interrupted lifecycle command remains
 indeterminate and is never replayed automatically.
 
 Each root replaces its complete section. Dropping a grant revokes it; deploying
