@@ -35,6 +35,7 @@ identity and check membership separately.
 
 | Authority | Treatment |
 |---|---|
+| Package UpgradeCap / infrastructure administration | Separate organization governance, not tenant transfer. If the onboarding wallet also controls package upgrades or shared-service administration, move/revoke that access through the reviewed organization custody procedure before retiring it. Never give a customer the shared multi-tenant UpgradeCap. On a dedicated deployment, explicitly transfer its upgrade authority to the intended governance custody separately. This flow does not defend against a malicious future package upgrade by a retained upgrader. |
 | DeviceOwnerCap | Kind 0: transfer the existing cap. The registry identity still names the same cap, Device and device signer. No enrollment or device secret changes. |
 | DeviceGroup | Kind 1: change the stored admin. Membership, name, ID and dynamic desired-state fields remain. Old package group functions check the same admin field. |
 | Native deployment / rollout / controls | Kind 2: change the stored creator. Targets, payload/digests, receipts, control settings and staged rollout state remain. The new owner explicitly restarts its coordinator; old-owner control/delete/advance attempts fail the creator check. Audit the Handover events alongside historical creation events. |
@@ -46,6 +47,12 @@ identity and check membership separately.
 | Walrus storage and renewal | Public content-addressed artifacts need no rewrite solely for ownership. Audit every blob object's actual renewal owner and expiry. Transfer transferable owned storage objects explicitly using the provider's supported tools, or arrange recipient-funded renewal/republish. Publisher-owned storage is not transferred by this protocol. |
 | Prepaid gas/storage budgets, sponsorship and billing | Wallet coins, provider balances, sponsor credentials and off-chain accounts are separate. Revoke/replace sponsor access, transfer/refund supported balances explicitly, and fund recipient/device operations. No SF-083 budget policy API exists here; do not invent or imply one. |
 | Telemetry/log/indexer/API access and deployed services | Rotate operator credentials and update external ACLs, coordinator wallet selection and service configuration. Chain authority transfer does not revoke an indexer token or an exported log. Device identity remains unchanged. |
+
+Do not claim the old wallet is fully retired while it retains any upgrade,
+provider or service-administration authority. The testnet fixture keeps its
+UpgradeCap with the dedicated testing account: its old-owner negative tests
+establish rejection by the tested package versions, not revocation of that
+account's independent ability to authorize future code upgrades.
 
 Do not put catalog-bound records into a kind-2 inventory. Their replacement is an
 explicit deployment/revision operation by the recipient, not an undocumented
