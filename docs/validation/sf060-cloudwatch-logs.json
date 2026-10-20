@@ -19,8 +19,8 @@
   },
   "commands": [
     {
-      "command": "docker run --network none ... suifleet-dev:sf037: cd suifleet-edge && cargo test --locked && cargo test --locked --features pkcs11 (after merging origin/main 497bf78)",
-      "result": "266 passed; 0 failed (default) and 268 passed; 0 failed (pkcs11), including 17 cloudwatch_logs tests and the retained-mode reconcile test"
+      "command": "docker run --network none ... suifleet-dev:sf037: cd suifleet-edge && cargo test --locked && cargo test --locked --features pkcs11 (after merging origin/main 0939649)",
+      "result": "269 passed; 0 failed (default) and 271 passed; 0 failed (pkcs11), including 17 cloudwatch_logs tests and the retained-mode reconcile test"
     },
     {
       "command": "cargo test cloudwatch_logs::tests::declared_fixtures_run_against_the_adapter_and_emulator",
@@ -40,11 +40,11 @@
     },
     {
       "command": "make test-ota INSIDE_DEV_CONTAINER=1 (network none, uid 1001)",
-      "result": "exit 0: all 16 scripts passed (108 PASS lines); after the final daemon.log mode commit test_logs.py, test_telemetry.py and test_cloudwatch_logs.py (both modes) were rerun and passed"
+      "result": "exit 0 on the head merged with origin/main 0939649: all 16 test-ota script invocations passed (111 PASS lines), after installing the locked dApp dependencies (pnpm install --frozen-lockfile) that SF-037's translator needs"
     },
     {
       "command": "make test-compat INSIDE_DEV_CONTAINER=1",
-      "result": "exit 0: 490 reference-model fixture checks, roadmap checks, roadmap and compat unittest suites (39 tests) OK, frontend validator check"
+      "result": "exit 0: 524 reference-model fixture checks, 76 roadmap checks, roadmap (14) and compat (39) unittest suites OK, translator executed 83 recipe and 47 managed-dependency fixtures"
     }
   ],
   "source_sha256": {
