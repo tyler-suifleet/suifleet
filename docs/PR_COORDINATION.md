@@ -177,3 +177,22 @@ configuration and databases. Back up the previous installed files and record
 hashes/tests before replacement; restore those files and restart parents to roll
 back. Parent restarts preserve existing worker sessions under `KillMode=process`;
 never clear reservations or restart uncertain workers to make capacity appear free.
+
+### Feedback launch publication recovery
+
+Before resuming a Review claim, the coordinator persists launch intent in its
+SQLite job row: claim-token hash, ticket, branch, worktree and exact PR head.
+If resume changes local ownership but its Project mirror fails, the job retains
+its reservation and retries after five minutes. Recovery reads durable ownership,
+requires matching intent and a clean branch at that head, publishes any pending
+revision, and asserts the claim. It does not repeat resume for an In progress claim.
+A changed snapshot or ownership, dirty checkout, PID or worker receipt stops this
+path for explicit inspection; arbitrary In progress claims never authorize launch.
+
+Immediately before spawning the worker the coordinator clears recoverable intent.
+An interruption beyond this boundary without a process receipt is uncertain and
+requires manual recovery; it cannot automatically launch a duplicate worker.
+Existing worker receipts continue through normal process-identity reconciliation.
+This repair changes only coordinator code/database schema, not dispatcher or
+ticket-tool behavior. Use the coordinator-only installation/backup/rollback steps
+above after independent review; this feedback worker does not install services.
