@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "ticket": "SF-069",
+  "model": "claude-opus-5-5",
+  "runtime_execution": "passed",
+  "date": "2026-10-19",
+  "command": "make test-lambda SUIFLEET_DEV_IMAGE=suifleet-dev:sf037",
+  "result": "19 manager/function-process tests passed (about 21 s) and 7 real-daemon checks passed; the 18-test suite passed three consecutive times before the contract test was added; the 19 tests also passed as a non-root user with the 2 root-only tests skipped",
+  "environment": "pinned dev image suifleet-dev:sf037 (Ubuntu 22.04, Python 3.10.12, util-linux setpriv 2.37.2); network none, root container creating distinct component UIDs; debug suifleet daemon and gRPC simulator shim built from this branch with cargo --locked",
+  "tested": [
+    "SF-064 lambda v1 reference vectors computed from the runtime's own version, timeout, admission and routing decisions",
+    "configuration rejection: versions, modes, long-lived concurrency, relative commands, wildcard subjects, unknown targets, manager as source, reserved environment, root run_as, root manager without run_as",
+    "on-demand fresh process per invocation, cleared environment, private work directory, request/result envelope fields",
+    "long-lived process started with the manager, state across invocations, restart after crash and after timeout",
+    "error, crashed (exit code), invalid-response (malformed and oversized), unsupported-version, result-too-large and timeout envelopes",
+    "timeout kills the process group; escaped setsid descendants killed through the subreaper sweep",
+    "max_concurrency bound, FIFO queue and busy without invocation",
+    "fan-out to sorted unique targets; unsubscribed source and unrouted messages acknowledged without invocation",
+    "manager SIGKILL: function killed by parent-death signal, interrupted invocation re-run once with attempt 2",
+    "duplicate redelivery after a failed acknowledgement is not reinvoked; results retained across publish backpressure and manager restart without reinvocation",
+    "graceful stop finishes in-flight work; exclusive state lock, binding mismatch and unsupported configuration rejected; RLIMIT_AS MemoryError",
+    "real daemon: durable pub/sub to a capability-limited manager UID (CAP_SETUID/SETGID/CHOWN only), function UID with no groups/capabilities and no_new_privs, peer-UID refusal of manager impersonation, ACL refusal of an unauthorized publisher, unrouted authorized source, long-lived state, error/timeout, manager plus daemon SIGKILL recovery without duplicate results"
+  ],
+  "limits": [
+    "Clean-room native function manager; no AWS Lambda/Greengrass recipe, SDK, IPC or wire compatibility claim. Live AWS acceptance is unrun and unauthorized, tracked in SF-069/#123 and SF-064/#109.",
+    "Linux only; no container, cgroup, mount, network or device namespace isolation (AWS GreengrassContainer mode); platform unit restrictions apply.",
+    "Delivery to functions is at least once: interrupted invocations re-run with attempt > 1.",
+    "Exact source/subject subscriptions only; no wildcard subjects, cloud targets, ARNs, binary payloads or function chaining in v1.",
+    "Physical Pi operation, reboot and power-loss checks deferred to SF-031/#32. No image or hardware result claimed.",
+    "Current-head ordinary CI and automatic Sui testnet status remain required at PR handoff; local results do not stand in for those checks."
+  ]
+}

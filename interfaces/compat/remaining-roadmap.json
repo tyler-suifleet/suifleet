@@ -20,9 +20,10 @@
         "aws.greengrass.LambdaRuntimes",
         "aws.greengrass.LegacySubscriptionRouter"
       ],
-      "runtime_execution": "pending",
+      "runtime_execution": "passed",
       "live_execution": "pending",
-      "acceptance": "Function invocation, payload/error/timeout, duplicate/subscription, permissions and process-restart fixtures; clean-room licensing boundary."
+      "acceptance": "Function invocation, payload/error/timeout, duplicate/subscription, permissions and process-restart fixtures; clean-room licensing boundary.",
+      "runtime_evidence": "docs/validation/sf069-lambda.json"
     },
     {
       "id": "industrial",

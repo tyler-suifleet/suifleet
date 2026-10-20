@@ -160,7 +160,7 @@ Each translated field below runs with a difference from AWS. The translator repo
 
   The component must run as a separately provisioned Unix user, and the operator adds its ACL.
 - **Not available natively yet.** Wildcard subscriptions, MQTT/IoT Core, shadows, streams, secrets and token exchange are SF-032 to SF-035, SF-022 and SF-057.
-- **Lambda.** Lambda functions and subscriptions are SF-064 roadmap work.
+- **Lambda.** Lambda-type recipes stay rejected. SF-069 adds a clean-room [function manager](LAMBDA.md) (on-demand/long-lived processes and exact source/subject subscriptions over native pub/sub); it is not Lambda recipe, SDK or wire compatibility.
 - **Recipe compatibility is the `aws_recipe` level only.** A translated recipe runs its scripts with the stated differences. It does not make the component's own AWS SDK calls work.
 
 ## Adapter designs
