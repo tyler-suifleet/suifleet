@@ -97,6 +97,10 @@ expectations. No AWS upstream behavior is newly asserted by these local contract
 
 ## Evidence and closure
 
+SF-077 adds the [native Firehose exporter](FIREHOSE.md), with actual SDK HTTP
+emulator and durable daemon stream evidence. The pure reference fields below
+remain specification-only; live AWS and physical target acceptance are unrun.
+
 SF-076 adds the [32-bit Linux x86 runtime](LINUX_X86.md): an i686 build and
 release bundle, `x86` catalog selection and the real-daemon suites run in a
 32-bit userland. Its receipt is separate evidence; the reference vectors below
