@@ -67,5 +67,5 @@
     "Not AWS LocalDebugConsole UI/API compatibility: no configuration editor, pub/sub/MQTT client or stream manager views.",
     "No AWS account, service, production credential or production exposure was used or provisioned."
   ],
-  "tested_tree": "merge of origin/main d8117f0 into 36e926e; console test files unchanged; the --browser and earlier network-none console runs predate this merge (console sources unchanged, main.rs/config.rs merged)"
+  "tested_tree": "merge of origin/main 497bf78 into 0460237 (itself the merge of d8117f0 into 36e926e); all listed source digests unchanged by the 497bf78 merge. On that tree: cargo test 255 passed, pkcs11 257 passed; make test-ota (network none) exit 0 including test_console.py; make test-compat passed (490/76); test_ipc.py passed. The --browser and earlier network-none console runs predate these merges (console sources unchanged)"
 }
