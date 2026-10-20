@@ -352,6 +352,8 @@ class Coordinator:
     def launch(self, project, pr, owner, kind, recovery=None):
         family = ('Claude' if owner['agent'] == 'Codex' else 'Codex') if kind == 'review' else owner['agent']
         directory = self.state / project['id'] / f"pr-{pr['number']}-{kind}-{pr['headRefOid'][:12]}-{feedback(pr)[:12]}"
+        if recovery is not None:
+            directory = Path(recovery['directory'])
         job = recovery['id'] if recovery is not None else self.store.reserve(project['id'], pr, family, kind, directory)
         if job is None: return
         directory.mkdir(parents=True, exist_ok=True)
@@ -407,6 +409,10 @@ class Coordinator:
                 self.ticket(project, 'assert', owner['key'], '--token', owner['token'])
             latest_review = self.store.review(project['id'], pr['number'])
             snapshot = {**pr, 'coordinator_review':latest_review, 'ticket': {k:owner[k] for k in ('key','agent','model','evidence','spec')}}
+            # Keep the original receipt location while handing off fresh feedback.
+            # Merge approval continues to require the complete snapshot hash.
+            if recovery is not None:
+                self.store.db.execute('UPDATE jobs SET feedback=? WHERE id=?', (feedback(pr),job))
             (directory / 'snapshot.json').write_text(json.dumps(snapshot, indent=2))
             result_path = directory / 'result.json'
             prompt = self.prompt(project, pr, owner, kind, family, directory, result_path)
@@ -483,8 +489,8 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                         intent = json.loads(row['launch_intent'])
                         owner = json.loads(self.ticket(project,'show',intent['key']))
                         pr = self.pr(project,row['pr'])
-                        if pr['headRefOid'] != row['head'] or feedback(pr) != row['feedback']:
-                            raise RuntimeError('pending launch snapshot changed; manual recovery required')
+                        if pr['headRefOid'] != row['head']:
+                            raise RuntimeError('pending launch head changed; manual recovery required')
                         self.launch(project,pr,owner,'fix',recovery=row)
                     elif time.time()-row['created'] > 30:
                         self.store.db.execute("UPDATE jobs SET status='failed',error='launch interrupted before worker started' WHERE id=?",(row['id'],))
@@ -515,6 +521,17 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                     self.store.db.execute("UPDATE jobs SET status=?,error=?,retry_after=? WHERE id=?", (status,str(error),time.time()+delay,row['id']))
                     print(f"{project['id']} PR#{row['pr']}: worker needs recovery: {error}", flush=True)
             except Exception as error:
+                # Never persist arbitrary subprocess/remote diagnostics or argv.
+                safe_reasons = {
+                    'pending launch head changed; manual recovery required',
+                    'launch intent no longer matches ownership',
+                    'uncertain worker launch; manual recovery required',
+                    'launch ownership changed', 'launch ownership is not resumable',
+                    'implementation worktree is dirty; manual handoff needed',
+                    'launch branch/head changed', 'claim changed during publication',
+                }
+                reason = str(error) if type(error) is RuntimeError and str(error) in safe_reasons else type(error).__name__
+                self.store.db.execute('UPDATE jobs SET error=? WHERE id=?', (f'collection deferred: {reason}',row['id']))
                 print(f"{project['id']} PR#{row['pr']}: collection deferred ({type(error).__name__}); ownership retained", flush=True)
 
         # Publication failures must never discard a validated worker result.

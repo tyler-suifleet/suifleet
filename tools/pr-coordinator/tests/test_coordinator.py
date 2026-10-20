@@ -254,7 +254,7 @@ class IntegrationRaces(unittest.TestCase):
                     coordinator.merge({'id':'test','root':d},pr,owner,review)
                 self.assertFalse(any('merge' in call.args[0] or 'push' in call.args[0] for call in command.call_args_list))
 
-    def test_failed_resume_mirror_recovers_without_replaying_mutation(self):
+    def check_failed_resume_recovery(self, change=None):
         with tempfile.TemporaryDirectory() as d:
             coordinator=self.coordinator(d)
             coordinator.config={'workers':{'Codex':['worker']}}
@@ -290,15 +290,58 @@ class IntegrationRaces(unittest.TestCase):
                 popen.assert_not_called()
                 # An unrelated reservation cannot overlap the pending launch.
                 self.assertIsNone(coordinator.store.reserve('test',pr,'Claude','review',Path(d)))
+                original_directory=Path(row['directory'])
+                if change == 'base': pr['baseRefOid']='c'*40
+                if change == 'checks': pr['statusCheckRollup'][0]['conclusion']='FAILURE'
+                if change == 'comment': pr['comments'].append(dict(id='new',body='new feedback',updatedAt='now'))
                 coordinator.store.db.execute('UPDATE jobs SET retry_after=0')
                 popen.return_value.pid=123
                 coordinator.collect({'id':'test','github_account':'test'},[])
+                self.assertEqual(json.loads((original_directory/'snapshot.json').read_text())['baseRefOid'],pr['baseRefOid'])
+                recovered=coordinator.store.db.execute('SELECT * FROM jobs').fetchone()
+                self.assertEqual(recovered['directory'],str(original_directory))
+                self.assertEqual(recovered['feedback'],c.feedback(pr))
+                self.assertEqual(json.loads((original_directory/'snapshot.json').read_text())['statusCheckRollup'],pr['statusCheckRollup'])
+                self.assertEqual(json.loads((original_directory/'snapshot.json').read_text())['comments'],pr['comments'])
                 self.assertEqual(calls.count('resume'),1)
                 self.assertEqual(calls.count('publish'),1)
                 popen.assert_called_once()
                 self.assertEqual(coordinator.store.db.execute('SELECT status FROM jobs').fetchone()[0],'running')
                 coordinator.collect({'id':'test','github_account':'test'},[])
                 popen.assert_called_once()
+
+    def test_failed_resume_mirror_recovers_without_replaying_mutation(self):
+        self.check_failed_resume_recovery()
+
+    def test_pending_resume_recovers_with_fresh_base_checks_and_feedback(self):
+        for change in ('base','checks','comment'):
+            with self.subTest(change=change):
+                self.check_failed_resume_recovery(change)
+
+    def test_pending_collection_retains_sanitized_recovery_reason(self):
+        for changed_head in (False,True):
+            with self.subTest(changed_head=changed_head),tempfile.TemporaryDirectory() as d:
+                coordinator=self.coordinator(d)
+                pr,owner,_=fixture()
+                job=coordinator.store.reserve('test',pr,'Codex','fix',Path(d))
+                coordinator.store.db.execute('UPDATE jobs SET launch_intent=? WHERE id=?',
+                                             (json.dumps({'key':'T1'}),job))
+                coordinator.ticket=Mock(return_value=json.dumps(owner))
+                fresh=copy.deepcopy(pr)
+                if changed_head: fresh['headRefOid']='c'*40
+                coordinator.pr=Mock(return_value=fresh)
+                coordinator.launch=Mock(side_effect=RuntimeError('secret remote diagnostic'))
+                coordinator.publish_results=Mock()
+                coordinator.collect({'id':'test'},[])
+                row=coordinator.store.db.execute('SELECT * FROM jobs').fetchone()
+                self.assertEqual(row['status'],'reserved')
+                self.assertNotIn('secret',row['error'])
+                if changed_head:
+                    coordinator.launch.assert_not_called()
+                    self.assertIn('pending launch head changed',row['error'])
+                else:
+                    coordinator.launch.assert_called_once()
+                    self.assertEqual(row['error'],'collection deferred: RuntimeError')
 
     def test_uncertain_spawn_is_never_automatically_repeated(self):
         with tempfile.TemporaryDirectory() as d:
@@ -328,7 +371,8 @@ class IntegrationRaces(unittest.TestCase):
                 pr,owner,_=fixture()
                 owner.update(key='T1',token='private',worktree=d,branch='owner')
                 intent=dict(claim=c.hashlib.sha256(b'private').hexdigest(),key='T1',branch='owner',worktree=d,head=pr['headRefOid'])
-                job=coordinator.store.reserve('test',pr,'Codex','fix',Path(d))
+                directory=coordinator.state/'test'/f"pr-{pr['number']}-fix-{pr['headRefOid'][:12]}-{c.feedback(pr)[:12]}"
+                job=coordinator.store.reserve('test',pr,'Codex','fix',directory)
                 coordinator.store.db.execute('UPDATE jobs SET launch_intent=? WHERE id=?',(json.dumps(intent),job))
                 row=dict(coordinator.store.db.execute('SELECT * FROM jobs').fetchone())
                 # launch derives its private directory from the exact snapshot.
