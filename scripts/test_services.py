@@ -153,7 +153,8 @@ def run():
             config.write_text('[sui]\nmanifest_path="deployment.json"\n'
                 f'[device]\nkeypair_path="{key}"\ndevice_object_id="{DEVICE}"\ndevice_cap_id="{CAP}"\n'
                 f'[walrus]\naggregator_url="{url}"\n[apply]\ncommand="/bin/false"\nallow_recipe_commands=true\ntimeout_seconds=30\n'
-                f'[runtime]\nstate_dir="{state}"\npoll_seconds=1\ncomponent_startup_seconds=1\ncomponent_ready_timeout_seconds=2\ncomponent_stop_timeout_seconds=1\n'
+                f'[runtime]\nstate_dir="{state}"\npoll_seconds=1\ncomponent_startup_seconds=1\ncomponent_ready_timeout_seconds=2\ncomponent_stop_timeout_seconds=1\ncomponent_max_restarts=0\n'
+                '[components.recovery_commands]\napp="true"\n'
                 f'[ipc]\nsocket="{sock}"\nadministrators=[0]\n[ipc.components.app]\nuid={UID}\n')
             log = (root / 'daemon.log').open('a')
 
@@ -222,6 +223,21 @@ def run():
                 public = json.dumps(ipc('config')['data']['services'])
                 assert str(token) not in public and 'export-secret' not in public and '/ingest' not in public
                 print('PASS: upgrade revokes old grants, activates new mapping/export with independent signature verification', flush=True)
+
+                deploy('0x8021', '2.1', service('c', 'temporary'), run='exec sleep 300', restart='on-failure')
+                wait_for(lambda: outcome('0x8021') == 1, 'runtime-recoverable generation did not apply', process)
+                assert ipc('publish', 'temporary', 1)['ok'] and not ipc('publish', 'new')['ok']
+                runtime_pid = json.loads((state / 'supervised/status.json').read_text())['app']['pid']
+                os.kill(runtime_pid, signal.SIGKILL)
+                wait_for(lambda: journal()['components']['app']['deployment_id'] == '0x802' and
+                         journal()['services']['app']['deployment'] == '0x802', 'runtime recovery did not restore service generation', process)
+                assert ipc('publish', 'new', 8)['ok'] and not ipc('publish', 'temporary')['ok']
+                assert not ipc('stream_append', 'c', 'denied')['ok']
+                wait_for(lambda: mqtt.received('b/new', 8), 'restored bridge did not forward after runtime rollback', process)
+                assert ipc('stream_append', 'b', 'after-rollback')['ok']
+                wait_for(lambda: 'after-rollback' in receiver.received('b').values(), 'restored export did not deliver after runtime rollback', process)
+                assert outcome('0x8021') == 1, 'runtime rollback rewrote historical command completion'
+                print('PASS: recovery after an applied generation restores prior grants, stream declarations and live bridge/export configuration', flush=True)
 
                 bad = service('c', 'bad')
                 bad['streams']['max_total_bytes'] = 1024
