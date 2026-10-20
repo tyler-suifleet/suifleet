@@ -26,6 +26,10 @@
     {
       "command": "git diff --check",
       "result": "PASS"
+    },
+    {
+      "command": "PYTHONPATH=.ci-cache/aws-python PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_sitewise_export.py -v",
+      "result": "PASS; 8 tests, including large uint64 with floating scale rejected before conversion"
     }
   ],
   "resolved_test_setup_failures": [
@@ -42,10 +46,10 @@
     "No Sui contracts changed; no machine testnet, AWS, production or hardware mutations."
   ],
   "sha256": {
-    "scripts/sitewise_export.py": "0434fb35a10d91a934e02793ef7f63d44114d1ce623f61966341a1d903f98b1c",
-    "scripts/tests/test_sitewise_export.py": "8628b5288f24466001e3e5da2439c18e72b45baa2f4663c623615dfc94c52406",
+    "scripts/sitewise_export.py": "0b2ad0cd00981d198a01cf48a5cfaf48561c629515cd21af9ccfe041818a19fd",
+    "scripts/tests/test_sitewise_export.py": "06ef71f1e71b05a158b273158c3780f8573dea5be4818b47c1cd1a915f9c2d52",
     "scripts/test_streams.py": "51cb9be10a8a293b419cc9d0743ffb080e6481ba9f02f81505db6b2693ef8463",
     "interfaces/compat/sitewise-v1.json": "5c75491bd9f180e0874baaa4d2b34619e6a4ca8c55ae5803220d5c3cb108fa4f",
-    "docs/SITEWISE.md": "f42064ce422d7eb716b390a23422ccca8afb712ca124e0a1b35c2d7ee39a22c0"
+    "docs/SITEWISE.md": "444ddc63221ba8af9a1c0ae2ed574f0c0b8ea2b4351977301e8541e3b2fe5d1b"
   }
 }

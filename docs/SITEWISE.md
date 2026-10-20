@@ -102,7 +102,7 @@ are not measurements and are never disguised as successful SiteWise ingestion.
 Numeric collector types become `doubleValue`, applying `value * scale + offset`.
 Booleans (Modbus `bool`, OPC UA `boolean`) become `booleanValue`; strings of 1–1024
 characters become `stringValue`. Non-numeric scaling is rejected. Non-finite
-numbers and integer transformation results outside ±2^53 are refused rather than
+numbers and integer inputs/results outside ±2^53 are refused rather than
 silently rounding large integers. Numeric transformations otherwise use Python
 IEEE-754 arithmetic; this is configured affine processing, not arbitrary expressions,
 aggregates, asset-model evaluation or windowed metrics.

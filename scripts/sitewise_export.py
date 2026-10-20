@@ -162,6 +162,8 @@ class Exporter:
             elif typ == 'string' and isinstance(value, str) and 1 <= len(value) <= 1024:
                 variant = {'stringValue': value}
             elif typ in NUMERIC and finite(value):
+                if type(value) is int and abs(value) > 2**53:
+                    raise ExportError('invalid-numeric-value')
                 if typ in INTEGER_BITS:
                     bits, signed = INTEGER_BITS[typ]
                     low, high = (-(2**(bits-1)), 2**(bits-1)-1) if signed else (0, 2**bits-1)

@@ -241,6 +241,10 @@ class SiteWiseTests(unittest.TestCase):
                     e.step()
                 self.assertEqual(e.checkpoint, -1)
             self.assertEqual(state['requests'], [])
+            e.cfg['mappings'][0]['scale'] = 1.0
+            e.ipc = Source([payload(sample(type='uint64', value=2**53+1))])
+            with self.assertRaisesRegex(fe.ExportError, 'invalid-numeric-value'):
+                e.step()
             e.ipc = Source([payload({'kind': 'status', 'state': 'connected'}, sample())])
             self.assertEqual(e.step(), 'exported')
             self.assertEqual(len(state['requests'][0]), 1)
