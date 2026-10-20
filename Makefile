@@ -125,6 +125,11 @@ test-protocol-live:
 test-catalog-live:
 	$(RUN) python3 scripts/test_catalog_localnet.py
 
+# Independent media decode, protocol-emulator and process-recovery suite.
+.PHONY: test-video
+test-video:
+	bash scripts/test_kvs_video.sh
+
 # SF-028 Greengrass compatibility matrix and reference-model fixtures, and the
 # SF-037 translator executing the recipe/managed-dependency fixtures
 # (docs/GREENGRASS_COMPATIBILITY.md). Offline; needs the dApp dependencies.
