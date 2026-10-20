@@ -295,7 +295,8 @@ def validate(raw):
         total += len(source["points"])
         if protocol == "opcua" and source["max_notifications_per_publish"] > out["max_buffered_records"]:
             raise ConfigError(f"{where}.max_notifications_per_publish: above output.max_buffered_records")
-        if protocol == "modbus" and len(source["points"]) > out["max_buffered_records"]:
+        polled = source["points"] if protocol == "modbus" else [p for p in source["points"] if p["mode"] == "poll"]
+        if len(polled) > out["max_buffered_records"]:
             raise ConfigError(f"{where}.points: one poll would not fit output.max_buffered_records")
         sources.append(source)
     if total > MAX_POINTS:

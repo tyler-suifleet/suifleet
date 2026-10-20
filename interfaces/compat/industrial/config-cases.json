@@ -468,6 +468,41 @@
    "error": "max_notifications_per_publish: above output.max_buffered_records"
   },
   {
+   "name": "opcua polled points above buffer",
+   "valid": false,
+   "set": {
+    "output.max_buffered_records": 1,
+    "sources.0.points": [
+     {
+      "name": "t",
+      "table": "coil",
+      "address": 0,
+      "type": "bool"
+     }
+    ],
+    "sources.1.max_notifications_per_publish": 1,
+    "sources.1.points.0.mode": "poll"
+   },
+   "error": "sources[1].points: one poll would not fit output.max_buffered_records"
+  },
+  {
+   "name": "opcua polled points at buffer",
+   "valid": true,
+   "set": {
+    "output.max_buffered_records": 2,
+    "sources.0.points": [
+     {
+      "name": "t",
+      "table": "coil",
+      "address": 0,
+      "type": "bool"
+     }
+    ],
+    "sources.1.max_notifications_per_publish": 2,
+    "sources.1.points.0.mode": "poll"
+   }
+  },
+  {
    "name": "opcua invalid node id",
    "valid": false,
    "set": {

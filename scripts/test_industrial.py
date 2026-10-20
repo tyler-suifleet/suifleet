@@ -673,6 +673,21 @@ class OpcUaTests(Harness):
         wait_until(lambda: self.latest("counter")["value"] == 6, 5, "the new session did not resubscribe")
         self.assertTrue(self.sink.records("status", state="disconnected"))
 
+    def test_polled_points_filling_the_buffer_make_progress(self):
+        sim = self.simulator()
+        def polled(count):
+            return [{"name": f"p{i}", "node_id": f"ns=2;s=V{i}", "type": "int32", "mode": "poll", "poll_interval_ms": 50}
+                    for i in range(count)]
+        for i in range(101):
+            sim.add_variable(f"ns=2;s=V{i}", ua.INT32, i)
+        with self.assertRaisesRegex(col.ConfigError, r"sources\[0\]\.points: one poll would not fit"):
+            col.validate(base_config([self.opc(sim, points=polled(101))], max_buffered_records=100))
+        self.start(base_config([self.opc(sim, points=polled(100))], max_buffered_records=100))
+        wait_until(lambda: len({r["point"] for r in self.sink.records("sample")}) == 100, 5,
+                   "a full-buffer poll group never read")
+        wait_until(lambda: len(self.sink.records("sample", point="p99")) >= 3, 5, "polling did not continue")
+        self.assertEqual(self.collector.buffer.dropped, 0)
+
     def test_plaintext_password_refused_unless_allowed(self):
         sim = self.simulator(users={"op": "pw"}, allow_anonymous=False)
         with tempfile.TemporaryDirectory() as tmp:
