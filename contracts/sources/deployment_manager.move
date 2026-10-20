@@ -485,6 +485,17 @@ module sui_edge::deployment_manager {
         id.delete();
     }
 
+    /// Authority changes in place so every still-callable package checks the
+    /// recipient as creator. Preserve payload, targets, receipts and controls.
+    public(package) fun handover(d: &mut DeploymentRecord, recipient: address, ctx: &TxContext) {
+        assert!(ctx.sender() == d.creator, ENotCreator);
+        // Catalog-bound records resolve dependencies through the original
+        // publisher index. Supersede them under a recipient-owned catalog;
+        // changing only creator would retain the old publisher as an authority.
+        assert!(d.schema_version != 2, EPackageOutdated);
+        d.creator = recipient;
+    }
+
     // ── Read helpers ──────────────────────────────────────────────────────────
 
     public fun target_groups(d: &DeploymentRecord): &vector<ID> {

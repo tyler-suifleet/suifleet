@@ -2,8 +2,10 @@
 /// specific groups on its behalf, revocably.
 ///
 /// A `DeployerRole` is built in one transaction: `new_deployer_role`, then
-/// `allow_group` for each group (the operator must administer it; group
-/// admins never change), then `grant` to the delegate. The role is active
+/// `allow_group` for each group (the operator must currently administer it),
+/// then `grant` to the delegate. Fleet handover explicitly revokes old roles;
+/// retained roles remain attributed to their original operator and cannot
+/// authorize that operator on devices/groups now owned by the recipient. The role is active
 /// while its entry exists on the shared registry, so the operator can
 /// `revoke` it without holding it.
 ///

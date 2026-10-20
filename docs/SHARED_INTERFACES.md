@@ -52,3 +52,10 @@ An additive layout/API change still needs explicit client/catalog review and per
 Both clients apply the same recipe rules: the frontend before upload, the daemon before apply. Configuration fields and `lifecycle.validate` require schema `1.2` and an install or run command; pointers follow RFC 6901; `defaults`/`merge` are bounded to 4096 values and depth 32 (`CONFIGURATION_LIMITS`); and no value may sit at or above a confidential pointer, since recipes are public. Optional fields that the schema does not declare nullable must be absent rather than null, and `lifecycle`/`configuration` must be JSON objects. `interfaces/recipe-cases.json` holds the shared accept/reject cases. Authentication of recipe and artifact digests remains required.
 
 Both clients consume the generated interfaces after integrating SF-003 and SF-004. The Rust transaction builder uses generated module/function names with typed object IDs and u8 statuses, and verifies the simulated transaction before signing. Obsolete JSON-RPC argument encoders were removed. Reference-returning Move helpers have no generated transaction encoders. The full ABI snapshot lives separately in `fleet-abi.ts` and is not imported into application bundles.
+
+The additive SF-089 handover API and `fleet_handover::Handover` BCS layout are in
+the same reviewed ABI. Its optional origin group permits existing deployments
+without handover to keep working. Manifest resolution records the new type's own
+introduction package; the dApp verifies that origin before reading a handover.
+Existing DeviceGroup/DeploymentRecord/DeviceOwnerCap origins and layouts remain
+unchanged. See [fleet authority migration](FLEET_HANDOVER.md).
