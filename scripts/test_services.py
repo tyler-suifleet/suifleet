@@ -151,7 +151,8 @@ def run():
                 walrus={'publisher_url': url, 'aggregator_url': url})))
             state, sock = root / 'state', root / 'ipc.sock'
             config = root / 'config.toml'
-            config.write_text('[sui]\nmanifest_path="deployment.json"\n'
+            config.write_text(f'[[service_credentials]]\nkind="stream_bearer"\npath="{token}"\ndestination="http://127.0.0.1:{receiver.server.server_port}/ingest"\n'
+                '[sui]\nmanifest_path="deployment.json"\n'
                 f'[device]\nkeypair_path="{key}"\ndevice_object_id="{DEVICE}"\ndevice_cap_id="{CAP}"\n'
                 f'[walrus]\naggregator_url="{url}"\n[apply]\ncommand="/bin/false"\nallow_recipe_commands=true\ntimeout_seconds=30\n'
                 f'[runtime]\nstate_dir="{state}"\npoll_seconds=1\ncomponent_startup_seconds=1\ncomponent_ready_timeout_seconds=2\ncomponent_stop_timeout_seconds=1\ncomponent_max_restarts=0\n'
@@ -264,6 +265,31 @@ def run():
                 wait_for(lambda: 'after-rollback' in receiver.received('b').values(), 'restored export did not deliver after runtime rollback', process)
                 assert outcome('0x8021') == 1, 'runtime rollback rewrote historical command completion'
                 print('PASS: recovery after an applied generation restores prior grants, stream declarations and live bridge/export configuration', flush=True)
+
+                marker = root / 'credential-must-not-run'
+                # Authenticated deployments must not turn arbitrary files into
+                # credentials, even when the destination itself is legitimate.
+                for secret_name in ['pin', 'overlay.json']:
+                    (root / secret_name).write_text('private-provisioned-secret')
+                    (root / secret_name).chmod(0o600)
+                forbidden = [key, root / 'pin', root / 'overlay.json', config, token]
+                for index, secret_path in enumerate(forbidden):
+                    for mqtt_credential in [False, True]:
+                        rejected = service('b', 'credential-rejected')
+                        if mqtt_credential:
+                            rejected['pubsub']['bridge']['password_file'] = str(secret_path)
+                        else:
+                            rejected['streams']['definitions'][0]['export'] = dict(
+                                url='http://127.0.0.1:9/attacker' if secret_path == token else f'http://127.0.0.1:{receiver.server.server_port}/ingest',
+                                bearer_token_file=str(secret_path))
+                        rejected_id = hex(0x8100 + index * 2 + int(mqtt_credential))
+                        deploy(rejected_id, f'credential-{index}-{mqtt_credential}', rejected, install=f'touch {marker}')
+                        wait_for(lambda: outcome(rejected_id) == 2, 'credential preflight rejection', process)
+                        assert not marker.exists()
+                        assert 'credential is not authorized' in journal()['deployments'][rejected_id].get('error', '')
+                        assert journal()['services']['app']['deployment'] == '0x802'
+                assert ipc('publish', 'new', 'after-secret-rejection')['ok']
+                print('PASS: device key, PIN, overlay, config and token destination substitution rejected before commands for MQTT and exports', flush=True)
 
                 bad = service('c', 'bad')
                 bad['streams']['max_total_bytes'] = 1024

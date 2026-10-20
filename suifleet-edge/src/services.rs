@@ -6,6 +6,48 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{collections::{BTreeMap, BTreeSet}, sync::{Arc, Mutex}};
 
+/// Local-only allowlist. Recipe fields never deserialize this authority.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CredentialAuthorization {
+    pub kind: CredentialKind,
+    pub path: std::path::PathBuf,
+    pub destination: String,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CredentialKind { StreamBearer, MqttPassword }
+
+fn authorize_credential(base: &Config, kind: CredentialKind, path: &std::path::Path, destination: &str) -> anyhow::Result<()> {
+    // Compare before any filesystem access: untrusted recipes cannot probe files.
+    anyhow::ensure!(base.service_credentials.iter().any(|entry|
+        entry.kind == kind && entry.path.as_os_str() == path.as_os_str() && entry.destination == destination),
+        "fleet service credential is not authorized for this destination");
+    anyhow::ensure!(path.is_absolute() && path.components().all(|c| matches!(c,
+        std::path::Component::RootDir | std::path::Component::Normal(_))), "credential path must be absolute and normalized");
+    anyhow::ensure!(std::fs::canonicalize(path)?.as_os_str() == path.as_os_str(), "credential path must not contain symlinks");
+    let metadata = std::fs::symlink_metadata(path)?;
+    use std::os::unix::fs::MetadataExt;
+    anyhow::ensure!(metadata.is_file() && metadata.nlink() == 1
+        && (metadata.uid() == 0 || metadata.uid() == unsafe { libc::geteuid() })
+        && metadata.mode() & 0o077 == 0, "credential must be an operator-owned private regular file");
+    Ok(())
+}
+
+fn authorize_credentials(base: &Config, services: &Services) -> anyhow::Result<()> {
+    if let Some(bridge) = services.pubsub.as_ref().and_then(|p| p.bridge.as_ref()) {
+        if let Some(path) = &bridge.password_file {
+            authorize_credential(base, CredentialKind::MqttPassword, path, &bridge.broker)?;
+        }
+    }
+    for export in services.streams.iter().flat_map(|s| &s.definitions).filter_map(|d| d.export.as_ref()) {
+        if let Some(path) = &export.bearer_token_file {
+            authorize_credential(base, CredentialKind::StreamBearer, path, &export.url)?;
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Grants {
@@ -123,6 +165,7 @@ pub fn effective(base: &Config, generations: &BTreeMap<String, Generation>) -> a
     let mut grants = BTreeMap::new();
     for generation in generations.values() {
         generation.services.validate()?;
+        authorize_credentials(base, &generation.services)?;
         if let Some(p) = &generation.services.pubsub {
             anyhow::ensure!(pubsub.is_none(), "pubsub configuration owned by another deployment component");
             pubsub = Some(p.clone());
@@ -500,6 +543,49 @@ mod tests {
         assert!(effective(&base, &generations).is_err());
         assert!(serde_json::from_value::<Services>(json!({"version":1,"unknown":true})).is_err());
         assert!(serde_json::from_value::<Services>(json!({"version":1,"grants":{"app":{"uid":123}}})).is_err());
+    }
+    #[test]
+    fn fleet_credentials_require_local_destination_bound_authority() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        let mut base = fixture();
+        base.apply.allow_recipe_commands = false;
+        let dir = std::env::temp_dir().join(format!("sf081-credential-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let dir = std::fs::canonicalize(dir).unwrap();
+        let token = dir.join("export.token");
+        std::fs::write(&token, "operator-token").unwrap();
+        std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let destination = "https://ingest.example/streams";
+        let fleet = |path: &std::path::Path, url: &str, mqtt: bool| -> BTreeMap<String, Generation> {
+            let value = if mqtt { json!({"version":1,"pubsub":{"bridge":{
+                "broker":url,"password_file":path,"mappings":[{"source":"Pubsub","target":"LocalMqtt","topic":"sensors/#"}]}}}) }
+            else { json!({"version":1,"streams":{"definitions":[{"name":"a","max_size":1024,
+                "strategy_on_full":"RejectNewData","export":{"url":url,"bearer_token_file":path}}]}}) };
+            candidate(&BTreeMap::new(), "app", "d1", Some(&serde_json::from_value(value).unwrap()), &BTreeSet::from(["app".into()])).unwrap()
+        };
+        for path in ["/etc/suifleet/device.key", "/etc/suifleet/pin", "/etc/suifleet/config.toml",
+            "/var/lib/suifleet/components/app/overlay.json", "relative", "../device.key"] {
+            assert!(effective(&base, &fleet(path.as_ref(), destination, false)).is_err());
+            assert!(effective(&base, &fleet(path.as_ref(), "127.0.0.1:1883", true)).is_err());
+        }
+        assert!(effective(&base, &fleet(&token, destination, false)).is_err());
+        base.service_credentials.push(CredentialAuthorization { kind: CredentialKind::StreamBearer,
+            path: token.clone(), destination: destination.into() });
+        assert!(effective(&base, &fleet(&token, destination, false)).is_ok());
+        assert!(effective(&base, &fleet(&token, "https://attacker.example/collect", false)).is_err());
+        assert!(effective(&base, &fleet(&token, "127.0.0.1:1883", true)).is_err());
+        base.service_credentials.push(CredentialAuthorization { kind: CredentialKind::MqttPassword,
+            path: token.clone(), destination: "127.0.0.1:1883".into() });
+        assert!(effective(&base, &fleet(&token, "127.0.0.1:1883", true)).is_ok());
+        assert!(effective(&base, &fleet(&token, "attacker.example:1883", true)).is_err());
+        std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(effective(&base, &fleet(&token, destination, false)).is_err());
+        std::fs::remove_file(&token).unwrap();
+        let secret = dir.join("device.key");
+        std::fs::write(&secret, "secret").unwrap();
+        symlink(&secret, &token).unwrap();
+        assert!(effective(&base, &fleet(&token, destination, false)).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
     }
     #[test]
     fn fleet_grants_local_override_revocation_and_conflict() {

@@ -51,6 +51,9 @@ impl PubsubConfig {
 pub struct Config {
     #[serde(skip)]
     pub services: Option<std::sync::Arc<std::sync::Mutex<crate::services::Runtime>>>,
+    /// Operator-only authorization of fleet credential paths and destinations.
+    #[serde(default)]
+    pub service_credentials: Vec<crate::services::CredentialAuthorization>,
     pub sui: SuiConfig,
     #[serde(default)]
     pub ipc: Option<crate::ipc::Settings>,
