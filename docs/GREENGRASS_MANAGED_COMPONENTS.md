@@ -29,7 +29,7 @@ Three kinds of evidence stay separate:
 - **Adapter execution.** The credential adapter has a [local runtime receipt](validation/sf057-credentials.json) and [provisioning guide](AWS_CREDENTIALS.md); the [SF-058 stream exporter receipt](validation/sf058-stream-export.json) adds actual durable-store and AWS API emulator execution, and the [SF-060 CloudWatch Logs receipt](validation/sf060-cloudwatch-logs.json) adds adapter execution against a request-checking emulator. Other adapters retain `runtime_execution: pending`. Only an implementation ticket may run the same fixtures and runtime tests against the real adapter and record a `runtime_evidence` receipt. A linked ticket is not runtime evidence.
 - **Live AWS acceptance.** No AWS account, credential, purchase or live service mutation is authorized. Every live check stays pending until the user authorizes one. The Sui testnet grant does not cover AWS.
 
-Until SF-037 (open) adopts the dependency classification, recipe dependencies on AWS-managed components stay rejected by the current translation subset.
+The SF-037 recipe translator applies the dependency classification below. A `replace` dependency is dropped and reported; every other managed dependency is rejected with its classification.
 
 | Disposition | Meaning |
 |---|---|
@@ -186,7 +186,7 @@ The `cloudwatch-logs-export` adapter is pinned to `aws.greengrass.LogManager` 2.
 
 ## Recipe dependency classification (for SF-037)
 
-`managed-dependency-cases.json` (47 cases) fixes what an AWS recipe's `ComponentDependencies` entry on a managed component will mean. It does not change the current translation subset, which still rejects every `aws.greengrass.*` dependency until the open SF-037 translation ticket adopts this classification.
+`managed-dependency-cases.json` (47 cases) fixes what an AWS recipe's `ComponentDependencies` entry on a managed component means. The SF-037 translator (`classifyManagedDependency` in `dapp/src/lib/greengrass-recipe.ts`) executes these cases against the catalog that `make generate-interfaces` exports to `dapp/src/lib/greengrass-managed.ts`. Only `replace` translates, as a dropped and reported dependency. `defer` and `package-natively` remain rejections until the adapter or the operator's native component exists.
 
 | Catalog state | Outcome |
 |---|---|
@@ -207,11 +207,11 @@ Ranges use the native comparator grammar. x-ranges, hyphen ranges, `||` and non-
 make test-compat
 ```
 
-The checker validates the catalog's structure and its cross-references to the backlog, the SF-028 platforms and the suites. It also evaluates the four SF-038 suites against reference models in `scripts/greengrass_managed.py`. As with SF-028, these models only make the fixtures checkable. Agreement with them proves nothing about an adapter. Adapters stay `runtime_execution: pending` until their implementation ticket executes the declared runtime checks and commits a receipt. SF-057, SF-058 and SF-060 now have scoped local runtime receipts; the other adapters remain pending. Reference models still establish no service/account acceptance.
+The checker validates the catalog's structure and its cross-references to the backlog, the SF-028 platforms and the suites. It also evaluates the four SF-038 suites against reference models in `scripts/greengrass_managed.py`. As with SF-028, these models only make the fixtures checkable. Agreement with them proves nothing about an adapter. The credential-provider suite has passed against the SF-057 adapter and the dependency suite against the SF-037 translator. Adapters stay `runtime_execution: pending` until their implementation ticket executes the declared runtime checks and commits a receipt. SF-057, SF-058 and SF-060 now have scoped local runtime receipts; the other adapters remain pending. Reference models still establish no service/account acceptance.
 
 | Suite | Cases | Runtime execution |
 |---|---|---|
-| `managed-dependency-cases.json` | 47 classifications | Pending SF-037 |
+| `managed-dependency-cases.json` | 47 classifications | Passed: SF-037 translator ([receipt](validation/sf037-recipe-translation.json)) |
 | `credential-provider-cases.json` | 65 steps across 7 sequences | Pending SF-057 |
 | `cloudwatch-metrics-cases.json` | 90 steps across 8 sequences | Pending SF-059 |
 | `cloudwatch-logs-cases.json` | 69 steps across 8 sequences | Passed: SF-060 adapter against a request-checking local emulator ([receipt](validation/sf060-cloudwatch-logs.json)); live AWS unrun |
@@ -224,5 +224,5 @@ SF-038 does not create tickets ([AGENTS.md](../AGENTS.md#ticket-authority--user-
 
 1. SF-057 to SF-063 implement the adapters, complete the `incomplete` specifications and record runtime receipts.
 2. SF-064 splits the remaining Lambda, industrial, ML and platform roadmap into concrete tickets before any of it is implemented.
-3. The open SF-037 translation ticket adopts `managed-dependency-cases.json` for managed dependencies.
+3. SF-037 adopted `managed-dependency-cases.json`. When an adapter is implemented, its `defer` classification must be re-specified before recipes depending on it translate.
 4. Live AWS acceptance for every adapter needs a separate user authorization for an AWS account. None exists, and none of those checks has run.
