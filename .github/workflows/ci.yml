@@ -78,6 +78,12 @@ jobs:
             -v "$PWD:/workspace" -w /workspace suifleet-dev:ci \
             python3 scripts/test_ipc.py
 
+      - name: Deployment service configuration with distinct Unix identities
+        run: |
+          docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 \
+            -v "$PWD:/workspace" -w /workspace suifleet-dev:ci \
+            python3 scripts/test_services.py
+
       - name: First-boot identity and permissions
         shell: bash
         run: sh scripts/test_yocto_first_boot.sh suifleet-dev:ci | tee ci-logs/first-boot.log
