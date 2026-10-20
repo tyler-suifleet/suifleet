@@ -270,6 +270,7 @@ def generate(catalog, recipe):
           f'export const DEPLOYMENT_SCHEMA_VERSION = {catalog["deployment_schema_version"]} as const;',
           f'export const SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS = {json.dumps(catalog["supported_deployment_schema_versions"])} as const;',
           f'export const CATALOG_TYPES = {json.dumps(catalog["optional_type_origins"]["component_catalog"])} as const;',
+          f'export const HANDOVER_TYPES = {json.dumps(catalog["optional_type_origins"]["fleet_handover"])} as const;',
           f'export const SEAL_POLICY_TYPES = {json.dumps(catalog["optional_type_origins"]["seal_policy"])} as const;',
           f'export const STATUS = {json.dumps(catalog["statuses"])} as const;',
           f'export const RECIPE_VERSION = {json.dumps(recipe["properties"]["schemaVersion"]["enum"][0])} as const;',
