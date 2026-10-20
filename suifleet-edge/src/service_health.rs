@@ -9,12 +9,13 @@
 //! The section states facts and never content: no message payloads, no topics
 //! or topic filters (a topic can itself be confidential), no export or sync
 //! URLs, tokens or shadow documents, and no paths of conflicting shadow keys.
-//! Error texts are the daemon's own, redacted with the log rules and bounded.
+//! Errors are reported only as a category from a fixed vocabulary
+//! ([`ERROR_CATEGORIES`]); their texts stay in the device's log.
 //!
 //! Cumulative counters come with their increase since the previous snapshot
 //! (`*_recent`), and conditions that matter only when they last carry the
 //! time they began (`*_since_ms`), so one report suffices to judge them.
-use crate::telemetry::{bounded, MAX_NAME, MAX_TEXT};
+use crate::telemetry::{bounded, MAX_NAME};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -238,10 +239,66 @@ fn percent(used: u64, limit: u64) -> u8 {
     (used.saturating_mul(100) / limit).min(100) as u8
 }
 
-/// A daemon error text as it may leave the device: redacted, single-line, bounded.
-pub fn error_text(text: &str) -> String {
-    let line: String = text.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
-    bounded(&crate::redact::redact(&line, &[]).0, MAX_TEXT)
+/// Every value a `last_error` may take (`interfaces/telemetry-cases.json`).
+pub const ERROR_CATEGORIES: [&str; 20] = [
+    "conflict", "connection-failed", "connection-lost", "connection-refused", "credentials-unreadable", "dns",
+    "document-refused", "http-client-error", "http-redirect", "http-server-error", "invalid-response", "other",
+    "protocol", "queue-full", "signing", "storage", "subscription-refused", "timeout", "tls", "unauthorized",
+];
+
+/// The category of a daemon error, the only form in which it leaves the
+/// device. Error texts can carry what the section must not: a full queue
+/// names its topic filters, an inbound refusal its MQTT topic, a refused
+/// shadow its key paths, a broker or HTTP error its host. Only the fixed
+/// vocabulary of [`ERROR_CATEGORIES`] is reported; the text stays in the log.
+pub fn error_category(text: &str) -> String {
+    let t = text.to_ascii_lowercase();
+    let has = |words: &[&str]| words.iter().any(|w| t.contains(w));
+    let status = t.split("answered ").nth(1).and_then(|rest| rest.get(..3)).and_then(|code| code.parse::<u16>().ok());
+    let category = if has(&["subscriber queue full"]) {
+        "queue-full"
+    } else if has(&["cannot read bearer_token_file", "password_file"]) {
+        "credentials-unreadable"
+    } else if has(&["changed during synchronization", "cannot be merged"]) {
+        "conflict"
+    } else if has(&["merged shadow refused"]) {
+        "document-refused"
+    } else if let Some(code) = status {
+        match code {
+            401 | 403 => "unauthorized",
+            300..=399 => "http-redirect",
+            400..=499 => "http-client-error",
+            500..=599 => "http-server-error",
+            _ => "invalid-response",
+        }
+    } else if has(&["connack 4)", "connack 5)", "not authorized", "unauthorized"]) {
+        "unauthorized"
+    } else if has(&["broker refused a bridge subscription"]) {
+        "subscription-refused"
+    } else if has(&["certificate", "tls", "handshake"]) {
+        "tls"
+    } else if has(&["dns error", "failed to lookup", "name resolution", "name or service not known"]) {
+        "dns"
+    } else if has(&["timed out", "timeout", "silent beyond the keep-alive"]) {
+        "timeout"
+    } else if has(&["connection refused", "broker refused the connection"]) {
+        "connection-refused"
+    } else if has(&["closed the connection", "connection reset", "connection closed", "broken pipe", "unexpected eof", "connection aborted"]) {
+        "connection-lost"
+    } else if has(&["connect"]) {
+        "connection-failed"
+    } else if has(&["shadow service", "cloud shadow refused", "decoding response", "did not advance"]) {
+        "invalid-response"
+    } else if has(&["signing service", "signature", "signer"]) {
+        "signing"
+    } else if has(&["malformed", "truncated", "packet", "mqtt", "qos", "connack", "expected"]) {
+        "protocol"
+    } else if has(&["os error", "no space", "permission denied", "read-only", "shadow file"]) {
+        "storage"
+    } else {
+        "other"
+    };
+    category.to_owned()
 }
 
 fn number(status: &serde_json::Value, key: &str) -> u64 {
@@ -315,7 +372,7 @@ pub fn collect(sources: &Sources, tracker: &mut Tracker, first_ms: u64, now: u64
             refused_recent: tracker.recent("bridge:refused".into(), refused, false),
             rejected,
             rejected_recent: tracker.recent("bridge:rejected".into(), rejected, false),
-            last_error: stats.last_error.as_deref().map(error_text),
+            last_error: stats.last_error.as_deref().map(error_category),
         });
     }
     if let Some(store) = &sources.streams {
@@ -335,7 +392,7 @@ pub fn collect(sources: &Sources, tracker: &mut Tracker, first_ms: u64, now: u64
                         failures: number(&status, "failures"),
                         consecutive_failures: number(&status, "consecutive_failures"),
                         last_success_ms: status["last_success_ms"].as_u64(),
-                        last_error: status["last_error"].as_str().map(error_text),
+                        last_error: status["last_error"].as_str().map(error_category),
                     }),
                     name: bounded(&f.name, MAX_NAME),
                     bytes: f.bytes,
@@ -365,7 +422,7 @@ pub fn collect(sources: &Sources, tracker: &mut Tracker, first_ms: u64, now: u64
                     failures: number(&status, "failures"),
                     consecutive_failures: number(&status, "consecutive_failures"),
                     last_success_ms: status["last_success_ms"].as_u64(),
-                    last_error: status["last_error"].as_str().map(error_text),
+                    last_error: status["last_error"].as_str().map(error_category),
                 }
             })
             .collect();
@@ -432,6 +489,14 @@ pub fn reasons(services: &Services, interval_seconds: u64, now: u64) -> Vec<Stri
 }
 
 impl Services {
+    /// Whether every `last_error` is one of [`ERROR_CATEGORIES`].
+    pub fn errors_are_categories(&self) -> bool {
+        let ok = |e: &Option<String>| e.as_deref().is_none_or(|e| ERROR_CATEGORIES.contains(&e));
+        self.bridge.as_ref().is_none_or(|b| ok(&b.last_error))
+            && self.streams.as_ref().is_none_or(|s| s.streams.iter().all(|s| s.export.as_ref().is_none_or(|e| ok(&e.last_error))))
+            && self.shadows.as_ref().is_none_or(|s| s.sync.iter().all(|s| ok(&s.last_error)))
+    }
+
     /// Entries in all lists.
     #[cfg(test)]
     pub fn entries(&self) -> usize {
@@ -569,8 +634,7 @@ mod tests {
         let mut tracker = Tracker::default();
         let b = collect(&sources, &mut tracker, 10, 1_000).unwrap().bridge.unwrap();
         assert_eq!((b.connected, b.since_ms, b.refused_recent, b.rejected_recent), (false, 10, 2, 1));
-        let error = b.last_error.unwrap();
-        assert!(!error.contains("hunter2") && !error.contains('\n'), "{error}");
+        assert_eq!(b.last_error.as_deref(), Some("connection-failed"), "only the category leaves the device");
         {
             let mut s = stats.lock().unwrap();
             (s.connected, s.connects, s.last_error) = (true, 1, None);
@@ -582,6 +646,49 @@ mod tests {
         assert_eq!(s.bridge.as_ref().unwrap().since_ms, 3_000, "a new disconnected period");
         assert!(reasons(&s, 10, 22_000).is_empty());
         assert_eq!(reasons(&s, 10, 23_000), ["MQTT bridge disconnected for 20 s: not connected yet"]);
+    }
+
+    #[test]
+    fn errors_leave_only_as_categories() {
+        // A full queue refusing an inbound MQTT message, exactly as the bridge
+        // records it: the Backpressure text names the subscriber's filter and
+        // the bridge adds the message's topic (bridge.rs `inbound`).
+        let full = anyhow::Error::from(crate::pubsub::Backpressure("sub confidential/plant-7/#".into()));
+        let inbound = format!("{full}; message on confidential/plant-7/valves left with the broker for redelivery");
+        let stats = Arc::new(Mutex::new(crate::bridge::Stats { last_error: Some(inbound), ..Default::default() }));
+        let sources = Sources { bridge: Some(stats), ..Sources::default() };
+        let s = collect(&sources, &mut Tracker::default(), 10, 1_000).unwrap();
+        assert_eq!(s.bridge.as_ref().unwrap().last_error.as_deref(), Some("queue-full"));
+        let text = format!("{} {:?}", serde_json::to_string(&s).unwrap(), reasons(&s, 10, 100_000));
+        assert!(!text.contains("confidential") && !text.contains("plant-7"), "{text}");
+        for (text, category) in [
+            ("tcp connect error: Connection refused (os error 111)", "connection-refused"),
+            ("broker refused the connection (CONNACK 5)", "unauthorized"),
+            ("broker refused the connection (CONNACK 3)", "connection-refused"),
+            ("broker refused a bridge subscription", "subscription-refused"),
+            ("broker closed the connection", "connection-lost"),
+            ("broker silent beyond the keep-alive", "timeout"),
+            ("expected CONNACK, got Publish { topic: \"secret/x\" }", "protocol"),
+            ("error sending request: operation timed out", "timeout"),
+            ("error sending request: client error (Connect): dns error: failed to lookup address information", "dns"),
+            ("error sending request: invalid peer certificate: UnknownIssuer", "tls"),
+            ("destination answered 503 Service Unavailable", "http-server-error"),
+            ("destination answered 403 Forbidden", "unauthorized"),
+            ("destination answered 302 Found", "http-redirect"),
+            ("shadow service answered 404 Not Found", "http-client-error"),
+            ("cannot read bearer_token_file: NotFound", "credentials-unreadable"),
+            ("the cloud shadow changed during synchronization; retrying", "conflict"),
+            ("merged shadow refused: key secret.path too deep", "document-refused"),
+            ("cloud shadow refused: key secret.path too deep", "invalid-response"),
+            ("shadow service answer has no version", "invalid-response"),
+            ("No space left on device (os error 28)", "storage"),
+            ("something new", "other"),
+        ] {
+            assert_eq!(error_category(text), category, "{text}");
+            assert!(ERROR_CATEGORIES.contains(&category));
+        }
+        let cases: serde_json::Value = serde_json::from_str(include_str!("../../interfaces/telemetry-cases.json")).unwrap();
+        assert_eq!(cases["service_error_categories"], serde_json::json!(ERROR_CATEGORIES), "the indexer and dApp accept the same set");
     }
 
     #[test]

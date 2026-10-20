@@ -328,7 +328,7 @@ mod tests {
         report(&f, |s| {
             (s.schema, s.services) = (2, Some(crate::services::tests::services()));
             s.health = "degraded".into();
-            s.reasons = vec!["MQTT bridge disconnected for 120 s: connection refused".into()];
+            s.reasons = vec!["MQTT bridge disconnected for 120 s: connection-refused".into()];
         }, now);
         let me = store::read_device(&f.index, &crate::chain::normalize("0xd1").unwrap()).unwrap().unwrap();
         let alerts = for_device(&f.index, &f.telemetry, &me, now, DEFAULT_STUCK_AFTER_MS).unwrap();
@@ -338,7 +338,7 @@ mod tests {
         assert_eq!(keys.len(), alerts.len(), "stable, distinct keys");
         let failing = alerts.iter().find(|a| a.kind == "export-failing").unwrap();
         assert_eq!((failing.severity, failing.key.as_str()), ("critical", "export-failing:0x00000000000000000000000000000000000000000000000000000000000000d1:metrics"));
-        assert!(failing.message.contains("500") && failing.action.contains("destination"));
+        assert!(failing.message.contains("http-server-error") && failing.action.contains("destination"));
         // The fleet view puts data loss and failing exports first.
         let all = fleet_alerts(&f, now);
         assert_eq!(all.iter().take(2).map(|a| a.kind).collect::<Vec<_>>(), ["export-failing", "stream-data-lost"]);

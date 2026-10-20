@@ -4,7 +4,7 @@
 //!
 //! The section holds counters and states only: never payloads, topics,
 //! export or sync URLs, credentials or shadow contents.
-use crate::telemetry::{Snapshot, MAX_INTERVAL_SECONDS, MAX_NAME, MAX_TEXT, MIN_INTERVAL_SECONDS};
+use crate::telemetry::{Snapshot, MAX_INTERVAL_SECONDS, MAX_NAME, MIN_INTERVAL_SECONDS};
 use serde::{Deserialize, Serialize};
 
 pub const VERSION: u64 = 1;
@@ -15,6 +15,14 @@ pub const FULL_PERCENT: u8 = 90;
 pub const SUSTAIN_INTERVALS: u64 = 2;
 /// Consecutive failed export or sync attempts that make it failing.
 pub const FAILURE_THRESHOLD: u64 = 3;
+/// The only values a `last_error` may take: daemons report error categories,
+/// never texts, which could name topics, filters, hosts or shadow keys
+/// (`interfaces/telemetry-cases.json`).
+pub const ERROR_CATEGORIES: [&str; 20] = [
+    "conflict", "connection-failed", "connection-lost", "connection-refused", "credentials-unreadable", "dns",
+    "document-refused", "http-client-error", "http-redirect", "http-server-error", "invalid-response", "other",
+    "protocol", "queue-full", "signing", "storage", "subscription-refused", "timeout", "tls", "unauthorized",
+];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -126,7 +134,7 @@ pub fn validate(services: &Services) -> Result<(), String> {
         return Err(format!("unsupported services section version {}", services.version));
     }
     let short = |text: &str, limit| text.len() <= limit;
-    let error = |e: &Option<String>| e.as_deref().is_none_or(|e| short(e, MAX_TEXT));
+    let error = |e: &Option<String>| e.as_deref().is_none_or(|e| ERROR_CATEGORIES.contains(&e));
     let percent = |p: u8| p <= 100;
     if let Some(m) = &services.messaging {
         if m.queues.len() > MAX_ENTRIES || !m.queues.iter().all(|q| short(&q.principal, MAX_NAME) && percent(q.fill_percent)) {
@@ -318,7 +326,7 @@ pub(crate) mod tests {
             }),
             bridge: Some(BridgeHealth {
                 connected: false, since_ms: 1_000_000, connects: 1, refused: 0, refused_recent: 0, rejected: 0, rejected_recent: 0,
-                last_error: Some("connection refused".into()),
+                last_error: Some("connection-refused".into()),
             }),
             streams: Some(StreamsHealth {
                 omitted: 0,
@@ -327,7 +335,7 @@ pub(crate) mod tests {
                     rejected: 0, rejected_recent: 0,
                     export: Some(ExportHealth {
                         lag: 9, lost: 2, lost_recent: 2, batches: 0, failures: 5, consecutive_failures: 5, last_success_ms: None,
-                        last_error: Some("destination answered 500 Internal Server Error".into()),
+                        last_error: Some("http-server-error".into()),
                     }),
                 }],
             }),
@@ -359,7 +367,7 @@ pub(crate) mod tests {
                            "export-failing", "shadow-conflict"]);
         assert!(late.iter().all(|c| KINDS.contains(&c.kind) && !c.action.is_empty()));
         assert_eq!(late[0].since_ms, Some(1_000_000));
-        assert!(late[2].message.contains("connection refused"));
+        assert!(late[2].message.contains("connection-refused"));
         // Quiet facts raise nothing; an overwrite stream without an export may run full.
         let mut quiet = snapshot_at(1_120_000);
         let s = quiet.services.as_mut().unwrap();
@@ -398,6 +406,12 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn error_categories_match_the_shared_cases() {
+        let cases: serde_json::Value = serde_json::from_str(include_str!("../../interfaces/telemetry-cases.json")).unwrap();
+        assert_eq!(cases["service_error_categories"], serde_json::json!(ERROR_CATEGORIES));
+    }
+
+    #[test]
     fn bounds() {
         assert!(validate(&services()).is_ok());
         for change in [
@@ -405,8 +419,10 @@ pub(crate) mod tests {
             |s: &mut Services| s.messaging.as_mut().unwrap().queues[0].principal = "p".repeat(MAX_NAME + 1),
             |s: &mut Services| s.messaging.as_mut().unwrap().queues = vec![s.messaging.as_ref().unwrap().queues[0].clone(); MAX_ENTRIES + 1],
             |s: &mut Services| s.messaging.as_mut().unwrap().queues[0].fill_percent = 101,
-            |s: &mut Services| s.bridge.as_mut().unwrap().last_error = Some("e".repeat(MAX_TEXT + 1)),
-            |s: &mut Services| s.streams.as_mut().unwrap().streams[0].export.as_mut().unwrap().last_error = Some("e".repeat(MAX_TEXT + 1)),
+            // Error texts are refused: only categories may be reported.
+            |s: &mut Services| s.bridge.as_mut().unwrap().last_error = Some("subscriber queue full: sub confidential/#".into()),
+            |s: &mut Services| s.streams.as_mut().unwrap().streams[0].export.as_mut().unwrap().last_error = Some("connection refused".into()),
+            |s: &mut Services| s.shadows.as_mut().unwrap().sync[0].last_error = Some("merged shadow refused: key a.b".into()),
             |s: &mut Services| s.shadows.as_mut().unwrap().sync[0].name = "n".repeat(MAX_NAME + 1),
         ] {
             let mut s = services();

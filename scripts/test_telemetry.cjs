@@ -90,20 +90,22 @@ async function sign(keypair, snapshot) {
     ["a topic smuggled into a queue", (s) => { const v = clone(); v.messaging.queues[0].topic = "plant/valves"; return { ...s, services: v }; }],
     ["an export URL", (s) => { const v = clone(); v.streams.streams[0].export.url = "https://x"; return { ...s, services: v }; }],
     ["missing section key", (s) => { const v = clone(); delete v.bridge; return { ...s, services: v }; }],
-    ["overlong error", (s) => { const v = clone(); v.bridge.last_error = "é".repeat(101); return { ...s, services: v }; }],
+    ["an error text, not a category", (s) => { const v = clone(); v.bridge.last_error = "subscriber queue full: sub confidential/#"; return { ...s, services: v }; }],
+    ["an export error text", (s) => { const v = clone(); v.streams.streams[0].export.last_error = "connection refused"; return { ...s, services: v }; }],
     ["fill above 100", (s) => { const v = clone(); v.streams.streams[0].fill_percent = 101; return { ...s, services: v }; }],
     ["negative count", (s) => { const v = clone(); v.messaging.queued = -1; return { ...s, services: v }; }],
     ["too many queues", (s) => { const v = clone(); v.messaging.queues = Array(33).fill(v.messaging.queues[0]); return { ...s, services: v }; }],
   ]) {
     assert.equal(await telemetry.verifyReport(await sign(ed, edit(withServices.snapshot)), device, signer), expected ?? "invalid services section", label);
   }
+  assert.deepEqual(telemetry.SERVICE_ERROR_CATEGORIES, cases.service_error_categories);
   const quiet = { ...withServices.snapshot, services: { version: 1, messaging: null, bridge: null, streams: null, shadows: null } };
   assert.deepEqual(await telemetry.verifyReport(await sign(ed, quiet), device, signer), quiet);
   const lines = telemetry.describeServices(services);
   assert.ok(lines.some((l) => l.startsWith("  svc: 1000 queued (100% full since ")), lines.join("\n"));
-  assert.ok(lines.some((l) => l.startsWith("MQTT bridge: disconnected since ") && l.includes("Connection refused")), lines.join("\n"));
+  assert.ok(lines.some((l) => l.startsWith("MQTT bridge: disconnected since ") && l.includes("(connection-refused)")), lines.join("\n"));
   assert.ok(lines.some((l) => l.startsWith("Stream metrics: 98% of 1024 bytes") && l.includes("4 lost before export")), lines.join("\n"));
-  console.log("PASS: schema-2 service health verifies; unknown/oversized/missing service fields (topics, URLs) are refused; summary lines");
+  console.log("PASS: schema-2 service health verifies; unknown/oversized/missing service fields (topics, URLs) and error texts are refused; summary lines");
 
   // Status rules shared with the indexer.
   for (const c of cases.status) {

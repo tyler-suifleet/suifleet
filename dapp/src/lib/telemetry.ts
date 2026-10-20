@@ -71,6 +71,17 @@ export interface ServicesHealth {
   shadows: { shadows: number; notifications_refused: number; notifications_refused_recent: number; sync: ShadowSyncHealth[]; omitted: number } | null;
 }
 
+/**
+ * The only values a service `last_error` may take: daemons report error
+ * categories, never texts, which could name topics, filters, hosts or shadow
+ * keys (interfaces/telemetry-cases.json `service_error_categories`).
+ */
+export const SERVICE_ERROR_CATEGORIES: readonly string[] = [
+  "conflict", "connection-failed", "connection-lost", "connection-refused", "credentials-unreadable", "dns",
+  "document-refused", "http-client-error", "http-redirect", "http-server-error", "invalid-response", "other",
+  "protocol", "queue-full", "signing", "storage", "subscription-refused", "timeout", "tls", "unauthorized",
+];
+
 type Field = "count" | "percent" | "bool" | "name" | "error" | "time?" | ((value: unknown) => boolean);
 
 const isCount = (v: unknown) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
@@ -80,7 +91,7 @@ const FIELD: Record<Exclude<Field, (value: unknown) => boolean>, (v: unknown) =>
   percent: (v) => isCount(v) && (v as number) <= 100,
   bool: (v) => typeof v === "boolean",
   name: (v) => typeof v === "string" && utf8Length(v) <= 128,
-  error: (v) => v === null || (typeof v === "string" && utf8Length(v) <= 200),
+  error: (v) => v === null || (typeof v === "string" && SERVICE_ERROR_CATEGORIES.includes(v)),
   "time?": (v) => v === null || isCount(v),
 };
 

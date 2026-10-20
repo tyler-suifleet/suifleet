@@ -806,14 +806,14 @@ mod tests {
         let long = "\u{1}é".repeat(400);
         let queue = QueueHealth { principal: long.clone(), subscriptions: 1, queued: 9, fill_percent: 100,
                                   full_since_ms: Some(now - 200_000), ..QueueHealth::default() };
-        let export = ExportHealth { consecutive_failures: 4, lost: 3, lost_recent: 3, last_error: Some(long.clone()), ..ExportHealth::default() };
+        let export = ExportHealth { consecutive_failures: 4, lost: 3, lost_recent: 3, last_error: Some("credentials-unreadable".into()), ..ExportHealth::default() };
         let stream = StreamHealth { name: long.clone(), export: Some(export), ..StreamHealth::default() };
-        let shadow = ShadowSyncHealth { name: long.clone(), conflicts: 1, conflicts_recent: 1, last_error: Some(long.clone()),
+        let shadow = ShadowSyncHealth { name: long.clone(), conflicts: 1, conflicts_recent: 1, last_error: Some("credentials-unreadable".into()),
                                         ..ShadowSyncHealth::default() };
         let services = Services {
             version: VERSION,
             messaging: Some(Messaging { queues: vec![queue; MAX_ENTRIES], ..Messaging::default() }),
-            bridge: Some(BridgeHealth { connected: false, since_ms: now - 200_000, last_error: Some(long.clone()), ..BridgeHealth::default() }),
+            bridge: Some(BridgeHealth { connected: false, since_ms: now - 200_000, last_error: Some("credentials-unreadable".into()), ..BridgeHealth::default() }),
             streams: Some(StreamsHealth { streams: vec![stream; MAX_ENTRIES], omitted: 0 }),
             shadows: Some(ShadowsHealth { sync: vec![shadow; MAX_ENTRIES], ..ShadowsHealth::default() }),
         };
