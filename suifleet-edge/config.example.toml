@@ -63,6 +63,7 @@ replay_history = false
 # Let the daemon's group read its own and its components' logs and the
 # retained confidential values (0640, directories 0750), for a separate log
 # reader such as the CloudWatch Logs adapter (docs/CLOUDWATCH_LOGS.md).
+# Changing it applies to existing files at the next daemon start.
 # log_group_read = false
 
 # Dependency candidates: "never" (default) uses only the live catalog and

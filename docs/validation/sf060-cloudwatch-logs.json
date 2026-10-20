@@ -3,7 +3,7 @@
   "ticket": "SF-060",
   "agent": "Claude",
   "model": "claude-opus-5-5",
-  "date": "2026-10-17",
+  "date": "2026-10-19",
   "adapter": "cloudwatch-logs-export",
   "replaces": {
     "aws.greengrass.LogManager": "2.3.14"
@@ -19,43 +19,55 @@
   },
   "commands": [
     {
-      "command": "docker run --network none ... suifleet-dev:sf037: cd suifleet-edge && cargo test --locked && cargo test --locked --features pkcs11",
-      "result": "205 passed; 0 failed (default) and 207 passed; 0 failed (pkcs11), including 16 cloudwatch_logs tests"
+      "command": "docker run --network none ... suifleet-dev:sf037: cd suifleet-edge && cargo test --locked && cargo test --locked --features pkcs11 (after merging origin/main 497bf78)",
+      "result": "266 passed; 0 failed (default) and 268 passed; 0 failed (pkcs11), including 17 cloudwatch_logs tests and the retained-mode reconcile test"
     },
     {
       "command": "cargo test cloudwatch_logs::tests::declared_fixtures_run_against_the_adapter_and_emulator",
       "result": "passed: all 8 sequences / 69 steps of cloudwatch-logs-cases.json against the adapter's spool, batching and SigV4 HTTP uploader; the emulator received exactly the expected PutLogEvents calls with 0 request-check violations; 1 step (non-text message) decided while decoding the fixture into the adapter's text interface"
     },
     {
-      "command": "python3 scripts/test_cloudwatch_logs.py (network none)",
-      "result": "passed: real daemon + supervised component with log_group_read (0640/0750), redaction before the spool, DEBUG filtered, LogManager group/stream names, 300000-byte line split 262118+37882; outage, lost response resent, SIGKILL restart, rotation, symlink/hard-link sibling refusal, 2000-byte spool keeping newest 26 of 400 and counting 376 dropped with a 44076-byte journal, refusal without credentials and with logFileRegex"
+      "command": "cargo test cloudwatch_logs::tests::a_failure_after_the_compaction_rename_loses_nothing logs::tests::turning_group_read_on_or_off_reconciles_an_existing_retained_set",
+      "result": "passed: directory sync failing after the compaction rename keeps the triggering line, refuses later lines and a reopen recovers every committed event; an existing retained set becomes 0640 with group read and 0600 without, contents unchanged"
     },
     {
-      "command": "make test-ota sequence (each script run directly, network none)",
-      "result": "all 16 scripts passed (test_telemetry.py and test_logs.py after installing locked dApp dependencies with pnpm install --frozen-lockfile)"
+      "command": "python3 scripts/test_cloudwatch_logs.py (network none, uid 1001)",
+      "result": "passed (9 PASS): real daemon first without, then with log_group_read: existing component log, daemon log and retained values 0640 (directories 0750) with unchanged retained contents; redaction before the spool, DEBUG filtered, LogManager group/stream names, 300000-byte line split 262118+37882; outage, lost response resent, SIGKILL restart, rotation, symlink/hard-link sibling refusal, 2000-byte spool keeping newest 26 of 400 and counting 376 dropped with a 44076-byte journal, refusal without credentials and with logFileRegex. Against a binary built from the pre-fix head 7106552 + base merge it fails: confidential.json stays 0600"
     },
     {
-      "command": "make test-compat (scripts run directly)",
-      "result": "passed: 488 reference-model fixture checks, 76 roadmap checks, roadmap and compat unittest suites OK, frontend validator check; catalog and matrix receipts validated"
+      "command": "python3 scripts/test_cloudwatch_logs.py --distinct-uids (make test-cloudwatch-logs-uids; root, network none)",
+      "result": "passed: daemon UID 61601 and adapter UID 61602 (supplementary group 61601 only), UMask 0077; the adapter exported 55 svc and 3 System events through group read and was denied the device key"
+    },
+    {
+      "command": "make test-ota INSIDE_DEV_CONTAINER=1 (network none, uid 1001)",
+      "result": "exit 0: all 16 scripts passed (108 PASS lines); after the final daemon.log mode commit test_logs.py, test_telemetry.py and test_cloudwatch_logs.py (both modes) were rerun and passed"
+    },
+    {
+      "command": "make test-compat INSIDE_DEV_CONTAINER=1",
+      "result": "exit 0: 490 reference-model fixture checks, roadmap checks, roadmap and compat unittest suites (39 tests) OK, frontend validator check"
     }
   ],
   "source_sha256": {
-    "suifleet-edge/src/cloudwatch_logs.rs": "6d58dd9898994dfdd60cf07b24e9f8bfe4f6eaf6e9902b2d69bea8147ae88fb1",
-    "suifleet-edge/src/cloudwatch_logs_tests.rs": "0a32bdd3e3e3fbaa5072f806c64b6ef0637e4ca9c7512b4e4c9d17cf5e30da51",
-    "suifleet-edge/src/logs.rs": "1489186155a313e618833779317c01dd13c3f3915a5861a5145297c3054b39e0",
+    "suifleet-edge/src/cloudwatch_logs.rs": "942eca926795c4b5a6f176db365bd071f46a1b6e5f7313e821a979e6a6b1c285",
+    "suifleet-edge/src/cloudwatch_logs_tests.rs": "67164edf3056e0298fed9b6621e0d879162872c77c562c475e600de558f1dac0",
+    "suifleet-edge/src/logs.rs": "f72200a5f0c3378293147dc4d0ddd91b7cbdd30ba5b087d2149e6ae4c41619b3",
     "scripts/cloudwatch_logs_emulator.py": "f13d1978edc03683d3f93fe8cf6ebd421e3f86ebd4bbe228dff8d362a537a286",
-    "scripts/test_cloudwatch_logs.py": "15246ff1275dfe3b0455e4f196809c5480b94b6f8f3240985e2dd1636a7f0da6",
+    "scripts/test_cloudwatch_logs.py": "778341bba13245f3ea54f7a3a9767f856d8c3246b891c7809f667ab454882379",
     "interfaces/compat/cloudwatch-logs-cases.json": "5bd65c83a89c05ccd457430fb4a56a0b6ae17d26a2aa3d7ddc64d0cc97545693"
   },
   "limits": [
     "Local Linux x86_64 execution with a request-checking local CloudWatch Logs emulator; no live AWS account, IAM policy or service call (unauthorized; tracked in SF-060/#105).",
     "Credentials came from a stand-in for the SF-057 container endpoint speaking the same protocol, not the actual SF-057 adapter process.",
-    "UID separation and the shipped systemd units were not exercised; the tests run as one user and check file modes.",
+    "The shipped systemd units were not exercised: --distinct-uids drops privileges directly (setgroups/setgid/setuid, umask 0077) rather than through User=/SupplementaryGroups=/StateDirectoryMode=.",
     "System is the daemon's log file; systemd-journal forwarding (SystemLogForwarder), platform-managed component log files, regex selection, deletion after upload and multi-line grouping are not implemented.",
     "Physical Pi/target integration is deferred to SF-031/#32.",
     "Reference-model agreement (make test-compat) is separate from adapter execution; no general Greengrass or LogManager parity claim."
   ],
   "post_ci_repairs": [
     "CodeQL rust/cleartext-logging (HIGH) in a test assertion message that would print a fixture secret on failure: the message now names only the value's index. cargo test cloudwatch: 16 passed."
+  ],
+  "review_repairs": [
+    "PR #146 review (Codex gpt-6.1-sol, head 7106552) P1: compaction kept appending to the unlinked old journal after a post-rename failure; the snapshot descriptor is now adopted at rename, a failed directory sync poisons the spool and the adapter exits for a restart.",
+    "P2: enabling log_group_read on an existing installation left confidential.json 0600; the retained set's mode is reconciled under its lock even when contents are unchanged (both directions); daemon.log follows the option too."
   ]
 }
