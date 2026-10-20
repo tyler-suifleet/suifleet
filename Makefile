@@ -389,6 +389,13 @@ edge-acceptance:
 	PYTHONDONTWRITEBYTECODE=1 python3 scripts/edge_acceptance.py run --profile "$(PROFILE)" --evidence "$(EVIDENCE)" \
 		$(if $(HARDWARE),--hardware) $(LOCK_ARGS)
 
+# LAN client devices (SF-035): real daemon, Mosquitto and two TLS clients on an
+# internal Docker network without an Internet route; host Docker.
+.PHONY: test-client-devices
+test-client-devices:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+	python3 scripts/test_client_devices.py --image "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" $(CLIENT_DEVICES_EVIDENCE)
+
 # Streams (SF-034): real daemon, component UIDs and a verifying export
 # receiver; root only inside a disposable, network-isolated container.
 .PHONY: test-streams

@@ -147,7 +147,9 @@ metadata is staged without retention. A durable activation intent records the
 old stream metadata and any new, not-yet-exposed stream directories. The journal
 atomically commits the service generation with the deployment's Applied outcome.
 IPC uses the effective policy on every request; bridge limits, mappings, exports
-and shadow publication bindings are updated live. A post-commit activation
+and shadow publication bindings are updated live. When the local LAN client-device
+gateway is enabled, its reserved MQTT client ID follows the effective bridge
+on commit and rollback; staging leaves the current reservation in place. A post-commit activation
 failure stops the daemon for recovery; it does not relabel the committed
 transaction Failed or replay installation.
 

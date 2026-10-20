@@ -202,6 +202,7 @@ pub struct Runtime {
     pub streams: Option<StreamStore>,
     pub broker: Option<Broker>,
     pub shadow_store: Option<Arc<Mutex<crate::shadows::Store>>>,
+    pub client_devices: Option<Arc<crate::clientdevices::Authority>>,
     bridge: Option<tokio::task::JoinHandle<()>>,
     exporters: Vec<tokio::task::JoinHandle<()>>,
     signer: Arc<dyn TxSigner>,
@@ -221,7 +222,7 @@ impl Runtime {
             .map(|store| Arc::new(Mutex::new(store)))).transpose()?;
         let broker = cfg.pubsub.as_ref().map(|p| pubsub::Broker::open(&base.runtime.state_dir.join("pubsub"), p.limits())
             .map(|b| Arc::new(Mutex::new(b)))).transpose()?;
-        let mut runtime = Self { base: base.clone(), effective: cfg, streams, broker, shadow_store: None, bridge: None, exporters: vec![], signer, binding };
+        let mut runtime = Self { base: base.clone(), effective: cfg, streams, broker, shadow_store: None, client_devices: None, bridge: None, exporters: vec![], signer, binding };
         runtime.resume()?;
         Ok(runtime)
     }
@@ -247,6 +248,10 @@ impl Runtime {
         for task in self.exporters.drain(..) { task.abort(); }
     }
     fn start_tasks(&mut self) -> anyhow::Result<()> {
+        if let Some(authority) = &self.client_devices {
+            authority.set_bridge_client_id(self.effective.pubsub.as_ref()
+                .and_then(|p| p.bridge.as_ref()).map(|b| b.client_id.as_str()));
+        }
         if let (Some(settings), Some(broker)) = (&self.effective.pubsub, &self.broker) {
             if let Some(bridge) = &settings.bridge {
                 self.bridge = Some(tokio::spawn(bridge::Bridge::new(bridge.clone(), broker.clone(), self.base.runtime.state_dir.join("pubsub/bridge.json"))?.run()));

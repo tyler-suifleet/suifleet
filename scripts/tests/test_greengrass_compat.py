@@ -21,12 +21,14 @@ class RepositoryTests(unittest.TestCase):
     def test_runtime_receipts_are_scoped_to_executed_suites(self):
         # Flipping a suite to passed needs a runtime receipt from the owning
         # implementation: SF-037 (recipes, managed dependencies), SF-057
-        # (credential provider), SF-032 (pub/sub), SF-033 (shadows) and SF-034
-        # (streams) and SF-059 (metrics) executed theirs; all others remain pending.
+        # (credential provider), SF-032 (pub/sub), SF-033 (shadows), SF-034
+        # (streams), SF-035 (client devices) and SF-059 (metrics) executed
+        # theirs; all others remain pending.
         matrix = json.loads((ROOT / compat.COMPAT / "greengrass-compat.json").read_text())
         passed = {name for name, s in matrix["suites"].items() if s["runtime_execution"] == "passed"}
         self.assertEqual(passed, {"aws-recipe-cases.json", "managed-dependency-cases.json", "credential-provider-cases.json", "cloudwatch-metrics-cases.json",
-                                  "pubsub-cases.json", "shadow-cases.json", "stream-cases.json"})
+                                  "pubsub-cases.json", "shadow-cases.json", "stream-cases.json",
+                                  "client-device-cases.json"})
         for name in ("aws-recipe-cases.json", "managed-dependency-cases.json"):
             receipt = json.loads((ROOT / matrix["suites"][name]["runtime_evidence"]).read_text())
             self.assertEqual(receipt["ticket"], "SF-037")
@@ -55,17 +57,17 @@ class MatrixGateTests(unittest.TestCase):
 
     def test_aws_claim_without_passed_runtime_suite_rejected(self):
         def mutate(m):
-            row = self.row(m, "client-devices.auth")
+            row = self.row(m, "cloud.logs")
             row["aws_api"] = "implemented"
             row["current_evidence"] = ["docs/GREENGRASS_COMPATIBILITY.md"]
         self.assertTrue(any("passed runtime suite" in e for e in self.errors(mutate)))
 
     def test_passed_suite_needs_existing_receipt(self):
         def mutate(m):
-            m["suites"]["client-device-cases.json"]["runtime_execution"] = "passed"
+            m["suites"]["cloudwatch-logs-cases.json"]["runtime_execution"] = "passed"
         self.assertTrue(any("runtime_evidence" in e for e in self.errors(mutate)))
         def missing(m):
-            m["suites"]["client-device-cases.json"].update(runtime_execution="passed", runtime_evidence="docs/validation/none.json")
+            m["suites"]["cloudwatch-logs-cases.json"].update(runtime_execution="passed", runtime_evidence="docs/validation/none.json")
         self.assertTrue(any("runtime_evidence" in e for e in self.errors(missing)))
 
     def test_pending_suite_needs_owner(self):
