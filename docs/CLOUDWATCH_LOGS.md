@@ -20,7 +20,7 @@ This is local adapter behaviour tested against a local emulator. It is not end-t
   - Lines below the source's `minimumLogLevel` (default `INFO`) are not uploaded. Empty lines are skipped.
 - **Line length.** A line of up to 1 MiB is read whole and redacted. A longer line becomes a marker line. A line over 256 KiB (262,144 bytes, counting CloudWatch's 26 bytes per event) is split into consecutive events with the same time, cut only at UTF-8 character boundaries, as LogManager 2.2.2 and later do.
 - **Strict reading.** Files are opened with `openat2(RESOLVE_NO_SYMLINKS)`, so no path component may be a symbolic link. A file must be a regular file with exactly one link. A component that replaces its log, its `.1` or its directory with a link to a sibling's log, the device key or anything else is refused. That source is skipped with a warning; the others go on.
-  - This needs Linux 5.6 or later. Without `openat2`, reading fails closed.
+  - This needs Linux 5.6 or later. Without `openat2`, reading fails closed. The adapter is built for Linux only (its catalog platforms); elsewhere `--cloudwatch-logs` refuses to start.
   - `stateDir` must therefore be a symlink-free path.
 - **Rotation.** Per-source cursors (inode, offset and first bytes) follow a rotation into `.1`, as the SF-020 shipper does. Lines lost to two rotations between reads are replaced by a marker event. Reading starts where the daemon's retained `start` cursors say, so component lines written before the daemon recorded confidential values are never read.
 

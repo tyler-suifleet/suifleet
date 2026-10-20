@@ -1,5 +1,7 @@
 mod ipc;
 mod catalog;
+// Linux only (prctl, openat2), like its catalog platforms.
+#[cfg(target_os = "linux")]
 mod cloudwatch_logs;
 mod control;
 mod apply;
@@ -118,7 +120,10 @@ async fn main() -> anyhow::Result<()> {
     }
     if cloudwatch_logs {
         // Runs as its own user with scoped AWS credentials (SF-060).
+        #[cfg(target_os = "linux")]
         return cloudwatch_logs::run(Path::new(&args[2])).await;
+        #[cfg(not(target_os = "linux"))]
+        anyhow::bail!("the CloudWatch Logs adapter runs on Linux only");
     }
     if helper {
         // Root-owned, path-activated: the only privileged operation.

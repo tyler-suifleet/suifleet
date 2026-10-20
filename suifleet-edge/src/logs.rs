@@ -269,6 +269,7 @@ impl Reader {
 
 /// Open read-only, resolving no symbolic link anywhere in `path` (openat2,
 /// Linux 5.6+). Fails closed where the kernel lacks it.
+#[cfg(target_os = "linux")]
 fn open_no_symlinks(path: &Path) -> std::io::Result<std::fs::File> {
     use std::os::unix::ffi::OsStrExt;
     use std::os::fd::FromRawFd;
@@ -285,6 +286,12 @@ fn open_no_symlinks(path: &Path) -> std::io::Result<std::fs::File> {
     }
     // SAFETY: a new descriptor owned by nobody else.
     Ok(unsafe { std::fs::File::from_raw_fd(fd as i32) })
+}
+
+/// Strict reading is only offered on Linux: refuse elsewhere.
+#[cfg(not(target_os = "linux"))]
+fn open_no_symlinks(_path: &Path) -> std::io::Result<std::fs::File> {
+    Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "strict log reading needs Linux openat2"))
 }
 
 fn head(path: &Path, reader: &Reader) -> String {
