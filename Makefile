@@ -63,6 +63,7 @@ test-ota:
 	$(RUN) python3 scripts/test_firmware_restart.py
 	$(RUN) python3 scripts/test_supervisor.py
 	$(RUN) python3 scripts/test_configuration.py
+	$(RUN) python3 scripts/test_greengrass_runtime.py
 	$(RUN) python3 scripts/test_daemon_update.py
 	$(RUN) python3 scripts/test_desired_state.py
 	$(RUN) python3 scripts/test_deployment_control.py
@@ -129,7 +130,9 @@ test-catalog-live:
 test-video:
 	bash scripts/test_kvs_video.sh
 
-# SF-028 Greengrass compatibility matrix and reference-model fixtures. Offline.
+# SF-028 Greengrass compatibility matrix and reference-model fixtures, and the
+# SF-037 translator executing the recipe/managed-dependency fixtures
+# (docs/GREENGRASS_COMPATIBILITY.md). Offline; needs the dApp dependencies.
 .PHONY: test-compat
 test-compat:
 	$(RUN) python3 scripts/greengrass_compat.py

@@ -11,6 +11,7 @@ import { useAccessPolicies } from '@/hooks/useAccessPolicies';
 import { DeliveryFields } from '@/components/DeliveryFields';
 import { PageHeader } from '@/components/ui';
 import { ConfigurationFields } from '@/components/ConfigurationFields';
+import { GreengrassImport } from '@/components/GreengrassImport';
 import { EMPTY_CONFIGURATION,recipeConfiguration } from '@/lib/recipe-configuration';
 import { assertComponentRecipe,type ComponentRecipe } from '@/lib/recipe-schema';
 import Link from 'next/link';
@@ -78,6 +79,7 @@ export default function ComponentsPage() {
       <button disabled={rows.length>=16} onClick={()=>setRows([...rows,{os:'linux',arch:'aarch64',install:''}])}>Add platform</button>{' '}
       <button disabled={busy||isPending||!selected} onClick={publish}>{busy?'Uploading…':'Upload and register immutable version'}</button>
     </div><p className="whitespace-pre-wrap" role="status">{message}</p>
+    <GreengrassImport catalog={selected} owner={account.address} execute={execute} onPublished={()=>{void versions.refetch();}} disabled={isPending||!selected} policies={policies.data??[]} protect={d=>releaseProtection(client,d,policies.data??[])}/>
     {versions.data?.map(v=><div key={v.objectId} className="border p-4"><h2>{v.name} {v.version}</h2>{v.manifests.map((m,i)=><p key={i}>{i+1}. {m.os}/{m.arch} · recipe {m.recipeBlobId}</p>)}<Link href={`/firmware?componentVersion=${v.objectId}`}>Deploy this version</Link></div>)}
   </div>;
 }
