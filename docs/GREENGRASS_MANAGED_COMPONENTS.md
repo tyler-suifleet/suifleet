@@ -2,7 +2,7 @@
 
 The [SF-064 remaining functional roadmap](GREENGRASS_REMAINING_ROADMAP.md) defines versioned executable subcontracts and maps every selected remaining scope to published implementation tickets SF-069–SF-079. Per-scope runtime receipts now include the [SF-072 media adapter](KINESIS_VIDEO.md); remaining scopes without receipts stay pending. No local receipt establishes live AWS acceptance.
 
-SF-038 maps every AWS-provided Greengrass component to one of three things: a SuiFleet native equivalent, a scoped adapter with its own implementation ticket, or a roadmap gap tracked by [SF-064](https://github.com/tyler-suifleet/suifleet/issues/109). For each adapter it records the platforms, AWS service and authentication dependencies, licensing constraints and executable acceptance. The catalog is a specification with per-adapter runtime receipts. SF-057 implements the scoped Linux credential adapter; SF-058 implements the [Kinesis/S3 companion](STREAM_EXPORTERS.md) with local SDK/emulator evidence. Other adapters remain pending. It records no permanent exclusion and makes no general parity claim. It extends the [SF-028 compatibility specification](GREENGRASS_COMPATIBILITY.md), whose levels and statuses apply here.
+SF-038 maps every AWS-provided Greengrass component to one of three things: a SuiFleet native equivalent, a scoped adapter with its own implementation ticket, or a roadmap gap tracked by [SF-064](https://github.com/tyler-suifleet/suifleet/issues/109). For each adapter it records the platforms, AWS service and authentication dependencies, licensing constraints and executable acceptance. The catalog is a specification with per-adapter runtime receipts. SF-057 implements the scoped Linux credential adapter; SF-058 implements the [Kinesis/S3 companion](STREAM_EXPORTERS.md) with local SDK/emulator evidence; SF-060 implements the CloudWatch Logs export adapter ([CLOUDWATCH_LOGS.md](CLOUDWATCH_LOGS.md)). Other adapters remain pending. It records no permanent exclusion and makes no general parity claim. It extends the [SF-028 compatibility specification](GREENGRASS_COMPATIBILITY.md), whose levels and statuses apply here.
 
 The machine-readable source of truth is [`interfaces/compat/managed-components.json`](../interfaces/compat/managed-components.json). The [compatibility matrix](../interfaces/compat/greengrass-compat.json) cross-references it, and `make test-compat` checks both.
 
@@ -26,7 +26,7 @@ Codex published the scoped implementation tickets below. SF-038 links them; it d
 Three kinds of evidence stay separate:
 
 - **Reference models.** `make test-compat` checks the fixtures against small models. Agreement proves only that the fixtures are consistent.
-- **Adapter execution.** The credential adapter has a [local runtime receipt](validation/sf057-credentials.json) and [provisioning guide](AWS_CREDENTIALS.md); the [SF-058 stream exporter receipt](validation/sf058-stream-export.json) adds actual durable-store and AWS API emulator execution. Other adapters retain `runtime_execution: pending`. Only an implementation ticket may run the same fixtures and runtime tests against the real adapter and record a `runtime_evidence` receipt. A linked ticket is not runtime evidence.
+- **Adapter execution.** The credential adapter has a [local runtime receipt](validation/sf057-credentials.json) and [provisioning guide](AWS_CREDENTIALS.md); the [SF-058 stream exporter receipt](validation/sf058-stream-export.json) adds actual durable-store and AWS API emulator execution, and the [SF-060 CloudWatch Logs receipt](validation/sf060-cloudwatch-logs.json) adds adapter execution against a request-checking emulator. Other adapters retain `runtime_execution: pending`. Only an implementation ticket may run the same fixtures and runtime tests against the real adapter and record a `runtime_evidence` receipt. A linked ticket is not runtime evidence.
 - **Live AWS acceptance.** No AWS account, credential, purchase or live service mutation is authorized. Every live check stays pending until the user authorizes one. The Sui testnet grant does not cover AWS.
 
 The SF-037 recipe translator applies the dependency classification below. A `replace` dependency is dropped and reported; every other managed dependency is rejected with its classification.
@@ -207,14 +207,14 @@ Ranges use the native comparator grammar. x-ranges, hyphen ranges, `||` and non-
 make test-compat
 ```
 
-The checker validates the catalog's structure and its cross-references to the backlog, the SF-028 platforms and the suites. It also evaluates the four SF-038 suites against reference models in `scripts/greengrass_managed.py`. As with SF-028, these models only make the fixtures checkable. Agreement with them proves nothing about an adapter. The credential-provider suite has passed against the SF-057 adapter and the dependency suite against the SF-037 translator. Adapters stay `runtime_execution: pending` until their implementation ticket executes the declared runtime checks and commits a receipt. SF-057, SF-058 and SF-059 now have scoped local runtime receipts; the other adapters remain pending. Reference models still establish no service/account acceptance.
+The checker validates the catalog's structure and its cross-references to the backlog, the SF-028 platforms and the suites. It also evaluates the four SF-038 suites against reference models in `scripts/greengrass_managed.py`. As with SF-028, these models only make the fixtures checkable. Agreement with them proves nothing about an adapter. The credential-provider suite has passed against the SF-057 adapter and the dependency suite against the SF-037 translator. Adapters stay `runtime_execution: pending` until their implementation ticket executes the declared runtime checks and commits a receipt. SF-057, SF-058, SF-059 and SF-060 now have scoped local runtime receipts; the other adapters remain pending. Reference models still establish no service/account acceptance.
 
 | Suite | Cases | Runtime execution |
 |---|---|---|
 | `managed-dependency-cases.json` | 47 classifications | Passed: SF-037 translator ([receipt](validation/sf037-recipe-translation.json)) |
 | `credential-provider-cases.json` | 65 steps across 7 sequences | Pending SF-057 |
 | `cloudwatch-metrics-cases.json` | 90 steps across 8 sequences | Passed: local adapter/HTTP/SQLite ([receipt](validation/sf059-metrics.json)); AWS delivery pending |
-| `cloudwatch-logs-cases.json` | 69 steps across 8 sequences | Pending SF-060 |
+| `cloudwatch-logs-cases.json` | 69 steps across 8 sequences | Passed: SF-060 adapter against a request-checking local emulator ([receipt](validation/sf060-cloudwatch-logs.json)); live AWS unrun |
 
 A `complete` adapter specification must pin an exact AWS version and name at least one executable reference suite; the checker enforces both. `stream-export-aws` uses the SF-028 `stream-cases.json` checkpoint suite.
 
