@@ -521,6 +521,56 @@ pub mod enrollment {
     }
     impl PolicyCreated { pub const MOVE_TYPE: &'static str = "enrollment::PolicyCreated"; }
 }
+pub mod fleet_handover {
+    use super::*;
+    pub const MODULE: &str = "fleet_handover";
+    pub const CANCEL: &str = "cancel";
+    pub const CLOSE_ENROLLMENT: &str = "close_enrollment";
+    pub const COMPLETED: &str = "completed";
+    pub const CONFIRM: &str = "confirm";
+    pub const DEPLOYMENT: &str = "deployment";
+    pub const DEVICE: &str = "device";
+    pub const FINISH: &str = "finish";
+    pub const GROUP: &str = "group";
+    pub const PROPOSE: &str = "propose";
+    pub const REVOKE_ROLE: &str = "revoke_role";
+    pub const STATE: &str = "state";
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Handover {
+        pub id: [u8; 32],
+        pub source: [u8; 32],
+        pub recipient: [u8; 32],
+        pub objects: Vec<[u8; 32]>,
+        pub kinds: Vec<u64>,
+        pub completed: Vec<bool>,
+        pub expires_ms: u64,
+        pub state: u8,
+    }
+    impl Handover { pub const MOVE_TYPE: &'static str = "fleet_handover::Handover"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Progress {
+        pub handover_id: [u8; 32],
+        pub object_id: [u8; 32],
+        pub kind: u64,
+    }
+    impl Progress { pub const MOVE_TYPE: &'static str = "fleet_handover::Progress"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Proposed {
+        pub handover_id: [u8; 32],
+        pub source: [u8; 32],
+        pub recipient: [u8; 32],
+        pub objects: Vec<[u8; 32]>,
+        pub kinds: Vec<u64>,
+        pub expires_ms: u64,
+    }
+    impl Proposed { pub const MOVE_TYPE: &'static str = "fleet_handover::Proposed"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct StateChanged {
+        pub handover_id: [u8; 32],
+        pub state: u8,
+    }
+    impl StateChanged { pub const MOVE_TYPE: &'static str = "fleet_handover::StateChanged"; }
+}
 pub mod roles {
     use super::*;
     pub const MODULE: &str = "roles";

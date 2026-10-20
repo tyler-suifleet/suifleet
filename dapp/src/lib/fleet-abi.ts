@@ -2363,6 +2363,251 @@ export const MOVE_ABI = {
       }
     }
   },
+  "fleet_handover": {
+    "functions": {
+      "cancel": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::fleet_handover::Handover",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "close_enrollment": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::fleet_handover::Handover",
+          "&mut sui_edge::enrollment::EnrollmentPolicy",
+          "&sui::clock::Clock",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "completed": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::fleet_handover::Handover"
+        ],
+        "returns": [
+          "vector<bool>"
+        ]
+      },
+      "confirm": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::fleet_handover::Handover",
+          "&sui::clock::Clock",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "deployment": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::fleet_handover::Handover",
+          "&mut sui_edge::deployment_manager::DeploymentRecord",
+          "&sui::clock::Clock",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "device": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::fleet_handover::Handover",
+          "sui_edge::device_registry::DeviceOwnerCap",
+          "&sui::clock::Clock",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "finish": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::fleet_handover::Handover",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "group": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::fleet_handover::Handover",
+          "&mut sui_edge::device_group::DeviceGroup",
+          "&sui::clock::Clock",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "propose": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "address",
+          "vector<sui::object::ID>",
+          "vector<u64>",
+          "u64",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "revoke_role": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::fleet_handover::Handover",
+          "&mut sui_edge::device_registry::DeviceRegistry",
+          "sui::object::ID",
+          "&sui::clock::Clock",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "state": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::fleet_handover::Handover"
+        ],
+        "returns": [
+          "u8"
+        ]
+      }
+    },
+    "structs": {
+      "Handover": {
+        "abilities": [
+          "Key"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "id",
+            "sui::object::UID"
+          ],
+          [
+            "source",
+            "address"
+          ],
+          [
+            "recipient",
+            "address"
+          ],
+          [
+            "objects",
+            "vector<sui::object::ID>"
+          ],
+          [
+            "kinds",
+            "vector<u64>"
+          ],
+          [
+            "completed",
+            "vector<bool>"
+          ],
+          [
+            "expires_ms",
+            "u64"
+          ],
+          [
+            "state",
+            "u8"
+          ]
+        ]
+      },
+      "Progress": {
+        "abilities": [
+          "Copy",
+          "Drop"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "handover_id",
+            "sui::object::ID"
+          ],
+          [
+            "object_id",
+            "sui::object::ID"
+          ],
+          [
+            "kind",
+            "u64"
+          ]
+        ]
+      },
+      "Proposed": {
+        "abilities": [
+          "Copy",
+          "Drop"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "handover_id",
+            "sui::object::ID"
+          ],
+          [
+            "source",
+            "address"
+          ],
+          [
+            "recipient",
+            "address"
+          ],
+          [
+            "objects",
+            "vector<sui::object::ID>"
+          ],
+          [
+            "kinds",
+            "vector<u64>"
+          ],
+          [
+            "expires_ms",
+            "u64"
+          ]
+        ]
+      },
+      "StateChanged": {
+        "abilities": [
+          "Copy",
+          "Drop"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "handover_id",
+            "sui::object::ID"
+          ],
+          [
+            "state",
+            "u8"
+          ]
+        ]
+      }
+    }
+  },
   "roles": {
     "functions": {
       "allow_group": {
