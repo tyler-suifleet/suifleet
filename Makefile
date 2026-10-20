@@ -490,3 +490,11 @@ test-firehose:
 	  -e PYTHONPATH=/workspace/.ci-cache/aws-python \
 	  -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:?set pinned dev image}" \
 	  sh -ec 'python3 -m unittest discover -s scripts/tests -p test_firehose_export.py -v; python3 scripts/test_streams.py --firehose'
+
+# SF-071: signed SiteWise API emulator + real durable IPC/restart evidence.
+.PHONY: test-sitewise
+test-sitewise:
+	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 \
+	  -e PYTHONPATH=/workspace/.ci-cache/aws-python \
+	  -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:?set pinned dev image}" \
+	  sh -ec 'python3 -m unittest discover -s scripts/tests -p test_sitewise_export.py -v; python3 scripts/test_streams.py --sitewise'
