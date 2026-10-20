@@ -19,10 +19,18 @@ class RepositoryTests(unittest.TestCase):
         self.assertTrue(all(count > 0 for count in counts.values()))
 
     def test_runtime_receipts_are_scoped_to_executed_suites(self):
-        # SF-059, SF-057, SF-032, SF-033 and SF-034 executed their declared suites; all others remain pending.
+        # Flipping a suite to passed needs a runtime receipt from the owning
+        # implementation: SF-037 (recipes, managed dependencies), SF-057
+        # (credential provider), SF-032 (pub/sub), SF-033 (shadows) and SF-034
+        # (streams) and SF-059 (metrics) executed theirs; all others remain pending.
         matrix = json.loads((ROOT / compat.COMPAT / "greengrass-compat.json").read_text())
-        self.assertEqual({name for name, s in matrix["suites"].items() if s["runtime_execution"] == "passed"},
-                         {"credential-provider-cases.json", "cloudwatch-metrics-cases.json", "pubsub-cases.json", "shadow-cases.json", "stream-cases.json"})
+        passed = {name for name, s in matrix["suites"].items() if s["runtime_execution"] == "passed"}
+        self.assertEqual(passed, {"aws-recipe-cases.json", "managed-dependency-cases.json", "credential-provider-cases.json", "cloudwatch-metrics-cases.json",
+                                  "pubsub-cases.json", "shadow-cases.json", "stream-cases.json"})
+        for name in ("aws-recipe-cases.json", "managed-dependency-cases.json"):
+            receipt = json.loads((ROOT / matrix["suites"][name]["runtime_evidence"]).read_text())
+            self.assertEqual(receipt["ticket"], "SF-037")
+            self.assertIn(name, receipt["suites"])
 
 
 class MatrixGateTests(unittest.TestCase):
@@ -116,7 +124,16 @@ class FixtureGateTests(unittest.TestCase):
     def test_recipe_outcome_and_translation_pinned(self):
         self.run_mutated("aws-recipe-cases.json", lambda c: c[0]["expected"].update(outcome="reject"))
         self.run_mutated("aws-recipe-cases.json", lambda c: c[0]["expected"]["manifests"][0]["recipe"].update(componentVersion="2.0.0"))
-        self.run_mutated("aws-recipe-cases.json", lambda c: next(x for x in c if x["expected"]["outcome"] == "defer")["expected"].update(requires=[]))
+        acl = lambda c: next(x for x in c if x["id"] == "access-control-rejected")
+        self.run_mutated("aws-recipe-cases.json", lambda c: acl(c)["expected"]["ipc_acl"].update(publish=[]))
+        self.run_mutated("aws-recipe-cases.json", lambda c: acl(c)["expected"].pop("ipc_acl"))
+        managed = lambda c: next(x for x in c if x["id"] == "nucleus-dependency-dropped")
+        self.run_mutated("aws-recipe-cases.json", lambda c: managed(c)["expected"].pop("managed_dependencies"))
+        text = lambda c: next(x for x in c if x["id"] == "json-recipe-translates")
+        self.run_mutated("aws-recipe-cases.json", lambda c: text(c).update(recipe_text=text(c)["recipe_text"].replace("1.0.0", "1.0.1")))
+        parse = lambda c: next(x for x in c if x["id"] == "yaml-yes-boolean-ambiguous")
+        self.run_mutated("aws-recipe-cases.json", lambda c: parse(c)["expected"].update(reasons=["unknown-field"]))
+        self.run_mutated("aws-recipe-cases.json", lambda c: c.append(copy.deepcopy(c[0])))
         self.run_mutated("aws-recipe-cases.json", lambda c: c[0]["expected"].pop("manifests"))
 
     def test_pubsub_expectations_pinned(self):
@@ -343,8 +360,8 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(store.apply({"op": "delete", "version": 1}), {"version": 2})
 
     def test_translation_rejects_non_objects_and_reports_all_reasons(self):
-        self.assertEqual(compat.translate_recipe([], {})["outcome"], "reject")
-        result = compat.translate_recipe({"RecipeFormatVersion": "x", "ComponentType": "aws.greengrass.nucleus"}, {})
+        self.assertEqual(compat.translate_recipe([], {}, {})["outcome"], "reject")
+        result = compat.translate_recipe({"RecipeFormatVersion": "x", "ComponentType": "aws.greengrass.nucleus"}, {}, {})
         self.assertEqual(result["outcome"], "reject")
         self.assertIn("unsupported-format-version", result["reasons"])
         self.assertIn("unsupported-component-type", result["reasons"])
