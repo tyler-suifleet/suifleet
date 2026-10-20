@@ -240,6 +240,57 @@ fn component_token(cfg: &Config) -> Result<Handle> {
     Ok(token)
 }
 
+// usize storage supplies pointer alignment and remains live until process creation returns.
+struct Attributes {
+    storage: Vec<usize>,
+    jobs: Box<[HANDLE; 1]>,
+    initialized: bool,
+}
+impl Attributes {
+    fn ptr(&mut self) -> LPPROC_THREAD_ATTRIBUTE_LIST {
+        self.storage.as_mut_ptr().cast()
+    }
+    fn job(job: HANDLE) -> Result<Self> {
+        let mut size = 0;
+        unsafe {
+            InitializeProcThreadAttributeList(null_mut(), 1, 0, &mut size);
+        }
+        ensure!(size > 0 && size < 65536, "invalid process attribute size");
+        let mut value = Self {
+            storage: vec![0; size.div_ceil(size_of::<usize>())],
+            jobs: Box::new([job]),
+            initialized: false,
+        };
+        unsafe {
+            // On initialization failure the list is not initialized and must not be deleted.
+            if InitializeProcThreadAttributeList(value.ptr(), 1, 0, &mut size) == 0 {
+                let error = std::io::Error::last_os_error();
+                return Err(error.into());
+            }
+            value.initialized = true;
+            check(UpdateProcThreadAttribute(
+                value.ptr(),
+                0,
+                PROC_THREAD_ATTRIBUTE_JOB_LIST as usize,
+                value.jobs.as_ptr().cast(),
+                size_of::<HANDLE>(),
+                null_mut(),
+                null(),
+            ))?;
+        }
+        Ok(value)
+    }
+}
+impl Drop for Attributes {
+    fn drop(&mut self) {
+        unsafe {
+            if self.initialized {
+                DeleteProcThreadAttributeList(self.ptr());
+            }
+        }
+    }
+}
+
 struct Process {
     process: Handle,
     job: Handle,
@@ -257,8 +308,12 @@ impl Process {
                 size_of_val(&limits) as u32,
             ))?;
         }
-        let mut startup: STARTUPINFOW = unsafe { zeroed() };
-        startup.cb = size_of_val(&startup) as u32;
+        // Assign the Job as part of process creation. A service crash cannot leave
+        // a suspended orphan between CreateProcessAsUser and a later assignment.
+        let mut attributes = Attributes::job(job.0)?;
+        let mut startup: STARTUPINFOEXW = unsafe { zeroed() };
+        startup.StartupInfo.cb = size_of_val(&startup) as u32;
+        startup.lpAttributeList = attributes.ptr();
         let mut info: PROCESS_INFORMATION = unsafe { zeroed() };
         let mut cmd = wide(
             std::iter::once(quote(&exe.to_string_lossy()))
@@ -283,22 +338,18 @@ impl Process {
                 null(),
                 null(),
                 0,
-                CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW,
+                CREATE_SUSPENDED
+                    | CREATE_UNICODE_ENVIRONMENT
+                    | CREATE_NO_WINDOW
+                    | EXTENDED_STARTUPINFO_PRESENT,
                 env.as_mut_ptr().cast(),
                 wide(work).as_ptr(),
-                &startup,
+                &startup.StartupInfo,
                 &mut info,
             ))?;
         }
         let process = Handle::new(info.hProcess)?;
         let thread = Handle::new(info.hThread)?;
-        if let Err(e) = unsafe { check(AssignProcessToJobObject(job.0, process.0)) } {
-            unsafe {
-                TerminateProcess(process.0, 1);
-                WaitForSingleObject(process.0, 5000);
-            }
-            return Err(e.context("job assignment; child never resumed"));
-        }
         let child = Self { process, job };
         ensure!(
             unsafe { ResumeThread(thread.0) } != u32::MAX,

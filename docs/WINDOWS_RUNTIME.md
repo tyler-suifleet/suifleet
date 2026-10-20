@@ -24,6 +24,7 @@ The native design follows Microsoft's [Job Objects](https://learn.microsoft.com/
 [CreateProcessAsUserW](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessasuserw),
 [named-pipe security](https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipe-security-and-access-rights)
 and [client impersonation](https://learn.microsoft.com/en-us/windows/win32/ipc/impersonating-a-named-pipe-client)
+and [process creation Job attributes](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-updateprocthreadattribute)
 contracts (accessed 2026-10-19). Jobs contain ordinary process descendants; they
 are not a sandbox for privileged users or a replacement for OS account security.
 
@@ -120,8 +121,10 @@ Executable directories grant the component read/execute access; only its `work`
 directory is writable. Service configuration/state remain private. Components
 inherit neither daemon handles nor environment secrets, and have a minimal
 environment. The runtime checks logon token SID and rejects elevated tokens.
-Processes are created suspended, placed in a non-breakaway kill-on-close Job,
-then resumed. Assignment failure terminates the suspended child.
+Processes are created suspended with the non-breakaway kill-on-close Job attached
+atomically through `PROC_THREAD_ATTRIBUTE_JOB_LIST`, then resumed. A service crash
+cannot leave a suspended child in an assignment gap. Creation/assignment failure
+starts no component. The Job must report zero active processes before replacement.
 
 `{"operation":"status"}`, `{"operation":"stop"}` and
 `{"operation":"start"}` are the other operations. Stop runs the configured
