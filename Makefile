@@ -417,6 +417,11 @@ endif
 test-aws-credentials:
 	bash scripts/test_aws_credentials.sh
 
+# SF-059: actual metrics transport, persistence and peer authorization, offline.
+.PHONY: test-cloudwatch-metrics
+test-cloudwatch-metrics:
+	bash scripts/test_cloudwatch_metrics.sh
+
 # SF-058: actual durable daemon IPC + unmodified SDK against local AWS API emulators.
 .PHONY: test-stream-export
 test-stream-export:
