@@ -76,3 +76,8 @@ strip = true
 [target.'cfg(windows)'.dependencies]
 anyhow = "1"
 suifleet-windows = { path = "windows-runtime" }
+
+# Native backend tests and the shipped daemon must use one dependency resolution.
+[workspace]
+members = ["windows-runtime"]
+resolver = "2"

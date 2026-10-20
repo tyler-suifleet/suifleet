@@ -1,7 +1,7 @@
 # Runs only on an elevated disposable Windows software runner. No cloud/chain writes.
 param(
     [string]$Daemon = "$PSScriptRoot/../suifleet-edge/target/debug/suifleet.exe",
-    [string]$Fixture = "$PSScriptRoot/../suifleet-edge/windows-runtime/target/debug/examples/component.exe",
+    [string]$Fixture = "$PSScriptRoot/../suifleet-edge/target/debug/examples/component.exe",
     [string]$Evidence = "$PSScriptRoot/../windows-evidence.json"
 )
 $ErrorActionPreference = 'Stop'
