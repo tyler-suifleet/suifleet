@@ -20,7 +20,7 @@
     "source_retry": "exact pending fragment or most recent admitted fragment is idempotent; conflicting/older/overlapping input fails; no unbounded historical dedupe table",
     "rejection": "4000,4003,5000,5001 retry; other ERROR ACKs durably pause spool for operator inspection; never skip rejected media",
     "expiry": "SF-057 container credentials fetched afresh before each session; expired or <=10 seconds remaining rejected; active session ends five seconds before expiration",
-    "binding": "state directory bound to version/stream/region/codec/dimensions/emulator/control endpoint; incompatible reuse refused"
+    "binding": "state directory bound to version/stream/region/codec/dimensions/emulator/control endpoint and credential broker UID; incompatible reuse refused"
   },
   "limits": {
     "pending_fragments": "configured 1..10000",
@@ -70,5 +70,12 @@
       "semantics": "streaming signature uses SHA256(empty), not UNSIGNED-PAYLOAD"
     }
   ],
-  "boundary": "Independently authored native functional subset. No proprietary EdgeConnectorForKVS source, Greengrass configuration or producer SDK code incorporated. Not AWS connector drop-in compatibility, RTSP discovery, audio, transcoding, exactly-once delivery or live AWS certification. Reference roadmap fixtures are separate from component execution."
+  "boundary": "Independently authored native functional subset. No proprietary EdgeConnectorForKVS source, Greengrass configuration or producer SDK code incorporated. Not AWS connector drop-in compatibility, RTSP discovery, audio, transcoding, exactly-once delivery or live AWS certification. Reference roadmap fixtures are separate from component execution.",
+  "credentials": {
+    "version": 1,
+    "issuer": "SF-057 container-credential loopback HTTP endpoint",
+    "server_identity": "required credential_provider_uid; match kernel TCP peer socket owner UID before sending Authorization; missing/ambiguous/wrong peer identity fails closed",
+    "caller_identity": "SF-057 authenticates component UID and foreground task token; distinct component UID remains required",
+    "provisioning": "operator pins broker UID explicitly; no automatic detection or static-key/default-chain fallback"
+  }
 }

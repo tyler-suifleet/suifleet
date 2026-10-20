@@ -24,6 +24,8 @@ import threading
 import time
 from urllib.parse import urlsplit
 
+from aws_credentials import tcp_uid
+
 
 class Full(Exception):
     pass
@@ -56,7 +58,7 @@ class Config:
     def __init__(self, value):
         required = {'version', 'stream_name', 'region', 'state_dir', 'width', 'height',
                     'codec_private_hex', 'max_spool_bytes', 'max_fragment_bytes',
-                    'max_fragments', 'session_seconds'}
+                    'max_fragments', 'session_seconds', 'credential_provider_uid'}
         if set(value) - required - {'emulator', 'control_endpoint'} or not required <= value.keys():
             raise ValueError('unknown or missing configuration')
         if type(value['version']) is not int or value['version'] != 1:
@@ -69,7 +71,8 @@ class Config:
         for name, low, high in [('width', 1, 8192), ('height', 1, 8192),
                                 ('max_fragment_bytes', 1024, 8*1024*1024),
                                 ('max_spool_bytes', 2048, 1024*1024*1024),
-                                ('max_fragments', 1, 10000), ('session_seconds', 1, 300)]:
+                                ('max_fragments', 1, 10000), ('session_seconds', 1, 300),
+                                ('credential_provider_uid', 0, 2**32-1)]:
             integer(value[name], low, high)
         if value['max_fragment_bytes'] + 256 > value['max_spool_bytes']:
             raise ValueError('spool must hold one maximum fragment')
@@ -92,7 +95,7 @@ class Config:
         m = int.from_bytes(c[off+1:off+3], 'big')
         if m < 1 or off+3+m != len(c) or c[off+3] & 31 != 8:
             raise ValueError('invalid PPS')
-        binding = {k: value[k] for k in ('version', 'stream_name', 'region', 'width', 'height', 'codec_private_hex')}
+        binding = {k: value[k] for k in ('version', 'stream_name', 'region', 'width', 'height', 'codec_private_hex', 'credential_provider_uid')}
         binding.update(emulator=self.local, control_endpoint=self.control.geturl())
         self.identity = hashlib.sha256(json.dumps(binding, sort_keys=True).encode()).hexdigest()
 
@@ -222,7 +225,7 @@ class Spool:
         self.db.close()
 
 
-def credentials():
+def credentials(config):
     uri = urlsplit(os.environ['AWS_CONTAINER_CREDENTIALS_FULL_URI'])
     if (uri.scheme != 'http' or uri.hostname != '127.0.0.1' or uri.username or uri.password
             or uri.path != '/2016-11-01/credentialprovider/' or uri.query or uri.fragment):
@@ -232,6 +235,10 @@ def credentials():
     try:
         conn.connect()
         active = conn.sock
+        # Authenticate the local issuer before disclosing the grant token. A
+        # different UID must not substitute credentials after broker port reuse.
+        if tcp_uid(active) != config.v['credential_provider_uid']:
+            raise ValueError('unexpected credential broker UID')
         def expire():
             try:
                 active.shutdown(socket.SHUT_RDWR)
@@ -327,7 +334,7 @@ def upload(spool):
     failure = spool.db.execute('SELECT code FROM failure').fetchone()
     if failure:
         raise Rejected('operator inspection required for retained rejected media')
-    c = credentials()  # no static-key/default-chain fallbacks; refresh every session
+    c = credentials(cfg)  # no static-key/default-chain fallbacks; refresh every session
     p = discover(cfg, c)
     duration = min(cfg.v['session_seconds'], c['expires']-time.time()-5)
     if duration <= 0:

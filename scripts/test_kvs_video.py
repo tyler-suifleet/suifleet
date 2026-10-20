@@ -219,7 +219,8 @@ class VideoTest(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.server = Server()
         self.v = dict(BASE, state_dir=str(self.root/'spool'), emulator=True,
-                      control_endpoint=self.server.url, session_seconds=2)
+                      control_endpoint=self.server.url, session_seconds=2,
+                      credential_provider_uid=os.geteuid())
         self.cfg = video.Config(self.v)
         self.spool = video.Spool(self.cfg)
         self.frames = list(records(io.BytesIO((FIX/'test-pattern.h264').read_bytes()), self.cfg, 1700000000000, 5))

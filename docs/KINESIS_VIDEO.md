@@ -28,8 +28,10 @@ with storage retention enabled. Live AWS interoperability remains unrun.
 
 ## Configure and run
 
-Install the reviewed `kvs_video.py` and `kvs_h264_source.py` together under a
-root-owned code directory readable by the component UID. Use an ordinary configured
+Install the reviewed `kvs_video.py` and `kvs_h264_source.py` beside the existing
+SF-057 `aws_credentials.py` module under a root-owned code directory readable by
+the component UID. The video client imports its kernel TCP-UID lookup helper; it
+does not start a broker under the component identity. Use an ordinary configured
 component lifecycle or platform service to supervise two processes: capture/ingest
 and upload. Provision a distinct component UID, an owner-only persistent state
 directory and an operator-controlled JSON configuration. Preserve that directory
@@ -47,7 +49,17 @@ for inspection, never relabeled for another stream. Quota/session limits may cha
 without relabeling media, but lowering quotas below retained use is refused.
 
 Use the [SF-057 provisioning instructions](AWS_CREDENTIALS.md) to grant this component
-an AWS container-credential endpoint/token. Its role needs only
+an AWS container-credential endpoint/token. Set the required
+`credential_provider_uid` to the trusted broker socket-owner UID (the example
+uses 0 for a root broker), not the camera component UID. Before sending its local
+authorization token, the client matches the exact peer TCP tuple in Linux
+`/proc/net/tcp` against that configured UID. Missing, ambiguous or wrong identity
+fails closed. This prevents another Unix UID taking over a stopped broker
+port from receiving the token or substituting role credentials. The client needs
+a visible `/proc/net/tcp` in the same network namespace, as SF-057 already requires.
+Changing this trusted UID changes the spool binding; drain/archive old media
+before provisioning a new binding. No automatic credential-source detection occurs.
+Its role needs only
 `kinesisvideo:GetDataEndpoint` and `kinesisvideo:PutMedia` on the selected existing
 stream. The uploader accepts only the SF-057 literal-loopback credential URI; it
 has no environment/static-key/profile fallback. It resolves fresh credentials and
@@ -151,15 +163,19 @@ make test-video
 ```
 
 The test-only pinned Ubuntu/FFmpeg image is prepared with public package downloads;
-the suite then executes with `--network none`, a read-only checkout, bounded tmpfs,
-no capabilities and no host credentials. The test image does not alter the daemon
+the media suite then executes as a non-root UID with `--network none`, a read-only
+checkout, bounded tmpfs, no capabilities and no host credentials. Two additional
+credential-issuer tests use a second disposable container with only DAC_OVERRIDE,
+SETUID and SETGID capabilities to load the checkout and drop to distinct broker
+and client UIDs. They prove a correct peer UID succeeds and an incorrect one
+receives no authorization token. The test image does not alter the daemon
 image/toolchain. Tests run the real source, ingester and uploader subprocesses,
 check SigV4 independently, parse MKV clusters/timestamps in the emulator, and decode
 the captured multi-fragment MKV with unmodified FFmpeg against ten expected pixel
 hashes. Failure cases cover credential expiry/rotation, partial persistence, lost
 responses/replay, HTTP and ACK rejection, ACK framing, byte/count backpressure,
 source truncation, corrupt media, single-uploader exclusion, session timeout and
-SIGKILL/restart. The normal CI workflow includes this suite.
+SIGKILL/restart, plus the real-UID credential-issuer checks. The normal CI workflow includes this suite.
 
 The [runtime receipt](validation/sf072-video.json) records exact commands/results.
 The SF-064 roadmap models remain specification fixtures, not proof that this code

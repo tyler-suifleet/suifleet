@@ -5,8 +5,8 @@
   "runtime_execution": "passed",
   "date": "2026-10-19",
   "command": "make test-video",
-  "result": "17 subprocess/media/emulator regression tests passed in 20.237s; ten H.264 frames independently decoded with exact pixel hashes",
-  "environment": "pinned Ubuntu 22.04 test image; Python 3.10.12; FFmpeg 4.4.2-0ubuntu0.22.04.1; network none, non-root UID, read-only checkout, 128 MiB tmpfs, capabilities dropped",
+  "result": "19 tests passed: 17 subprocess/media/emulator regressions in 20.090s plus 2 distinct-UID credential-issuer checks in 0.025s; ten H.264 frames independently decoded with exact pixel hashes",
+  "environment": "pinned Ubuntu 22.04 test image; Python 3.10.12; FFmpeg 4.4.2-0ubuntu0.22.04.1; both containers network none, read-only checkout and bounded tmpfs. Media tests run non-root with all capabilities dropped. Separate broker-identity tests use only DAC_OVERRIDE/SETUID/SETGID to load code and drop to broker UID1101 and client UID1102; no host credentials.",
   "tested": [
     "real Annex-B source -> binary ingestion -> durable SQLite -> multi-fragment duplex signed PutMedia -> independent FFmpeg decode",
     "independent SigV4 request verification, endpoint discovery and absolute fragment/frame timestamps",
@@ -15,7 +15,8 @@
     "HTTP denial, permanent and transient fragment rejection, unknown ACK, oversized ACK",
     "byte/count quota, blocking capture backpressure and vacuum reclamation",
     "single-uploader lock, total session deadline and killed uploader recovery",
-    "source truncation, exact source retry, codec/version/time/overlap rejection and corrupt stored media"
+    "source truncation, exact source retry, codec/version/time/overlap rejection and corrupt stored media",
+    "kernel TCP peer UID pinned before local authorization disclosure: expected broker UID succeeds across distinct UIDs; unexpected issuer gets no token and returns no accepted credentials"
   ],
   "limits": [
     "Local independent protocol emulator is not the AWS service. Live AWS region/retention/signing/endpoint interoperability is unrun and unauthorized; the compatibility boundary is recorded in open SF-037/#36 and SF-072/#126. SF-064/#109 is closed planning history, not an open acceptance owner.",
@@ -24,5 +25,6 @@
     "At-least-once remote delivery; unacknowledged/incomplete source GOPs need source-owned persistence/retry. No exactly-once or lossless camera-capture claim.",
     "Current-head ordinary CI and automatic Sui testnet status remain required at PR handoff; local results do not stand in for those checks.",
     "Media-byte quota excludes SQLite page/schema/journal overhead; strict filesystem-byte limits require platform filesystem quotas."
-  ]
+  ],
+  "pre_fix_evidence": "Offline distinct-UID probe before the fix accepted fake credentials from an unexpected issuer UID (UNEXPECTED_UID_CREDENTIALS_ACCEPTED=True). Production client now pins the operator-configured credential_provider_uid through the SF-057 kernel TCP lookup helper."
 }
