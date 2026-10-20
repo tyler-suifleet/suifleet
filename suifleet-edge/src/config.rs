@@ -1,8 +1,8 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 /// `[pubsub]` (docs/MESSAGING.md).
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct PubsubConfig {
     #[serde(default = "default_pubsub_messages")]
@@ -11,7 +11,7 @@ pub struct PubsubConfig {
     pub max_bytes_per_subscription: u64,
     #[serde(default = "default_pubsub_qos0")]
     pub qos0_messages_per_subscription: usize,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bridge: Option<crate::bridge::BridgeConfig>,
 }
 fn default_pubsub_messages() -> usize {
@@ -50,6 +50,11 @@ impl PubsubConfig {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Config {
+    #[serde(skip)]
+    pub services: Option<std::sync::Arc<std::sync::Mutex<crate::services::Runtime>>>,
+    /// Operator-only authorization of fleet credential paths and destinations.
+    #[serde(default)]
+    pub service_credentials: Vec<crate::services::CredentialAuthorization>,
     pub sui: SuiConfig,
     #[serde(default)]
     pub ipc: Option<crate::ipc::Settings>,
@@ -81,6 +86,9 @@ pub struct Config {
     /// The AWS IoT Core connection (SF-061); none when omitted.
     #[serde(default)]
     pub aws_iot: Option<crate::iotcore::IotConfig>,
+    /// LAN client-device authentication and discovery (SF-035); none when omitted.
+    #[serde(default)]
+    pub client_devices: Option<crate::clientdevices::Settings>,
     /// The file this configuration was loaded from (for the update preflight).
     #[serde(skip)]
     pub path: PathBuf,
@@ -89,7 +97,7 @@ pub struct Config {
 /// `[streams]`: durable local streams (docs/STREAMS.md). Streams with an
 /// export are declared here only: components cannot direct device-signed
 /// data to a destination.
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct StreamsConfig {
     #[serde(default = "default_max_streams")]
@@ -710,6 +718,14 @@ impl Config {
             shadows.validate()?;
         }
         validate_aws_iot(&cfg)?;
+        if let Some(client_devices) = &mut cfg.client_devices {
+            if client_devices.device_groups_file.is_relative() {
+                client_devices.device_groups_file = path.parent().unwrap_or(Path::new(".")).join(&client_devices.device_groups_file);
+            }
+            client_devices.validate()?;
+            anyhow::ensure!(cfg.ipc.as_ref().is_some_and(|ipc| !ipc.administrators.is_empty()),
+                "[client_devices] needs [ipc] administrators: enrollment and revocation are operator IPC requests");
+        }
         Ok(cfg)
     }
 }
@@ -720,7 +736,7 @@ fn default_timeout() -> u64 {
 
 /// `[aws_iot]` and what uses it: the connection runs in the pub/sub bridge,
 /// with its own credentials, within AWS IoT Core subscription quotas.
-fn validate_aws_iot(cfg: &Config) -> anyhow::Result<()> {
+pub fn validate_aws_iot(cfg: &Config) -> anyhow::Result<()> {
     let aws_sync = cfg.shadows.as_ref().and_then(|s| s.aws_iot.as_ref().map(|sync| (s, sync)));
     let Some(iot) = &cfg.aws_iot else {
         anyhow::ensure!(aws_sync.is_none(), "[shadows.aws_iot] needs the [aws_iot] connection");

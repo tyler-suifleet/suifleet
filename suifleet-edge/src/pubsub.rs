@@ -298,6 +298,10 @@ impl Broker {
         Ok(())
     }
 
+    /// Changing limits never drops queued data. Existing queues above the new
+    /// bound drain normally and backpressure further publications.
+    pub fn set_limits(&mut self, limits: Limits) { self.limits = limits; }
+
     pub fn subscribe(&mut self, principal: &str, filter: &str, qos: u8) -> anyhow::Result<()> {
         anyhow::ensure!(valid_filter(filter), "invalid topic filter");
         anyhow::ensure!(qos <= 1, "supported QoS are 0 and 1");

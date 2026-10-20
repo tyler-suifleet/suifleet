@@ -3,8 +3,10 @@
 //! PINGREQ/PINGRESP. MQTT 5 brokers accept 3.1.1 clients. The bridge keeps a
 //! persistent session, so it never needs a clean DISCONNECT.
 //! The local broker link is plain TCP to this device or a trusted local
-//! network (TLS for LAN devices is SF-035); the AWS IoT Core link runs the
-//! same session over mutual TLS (SF-061, `iotcore.rs`).
+//! network; the AWS IoT Core link runs the same session over mutual TLS
+//! (SF-061, `iotcore.rs`). The client-device gateway (SF-035) also uses the
+//! framing, CONNECT and SUBSCRIBE codecs here to authorize LAN clients in
+//! front of that broker.
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::TcpStream,
@@ -95,9 +97,9 @@ pub fn pingreq() -> Vec<u8> {
     vec![0xc0, 0]
 }
 
-/// Decode one packet from the front of `buf`: the packet and its length, or
-/// None when more bytes are needed.
-pub fn decode(buf: &[u8]) -> anyhow::Result<Option<(Packet, usize)>> {
+/// The fixed header of the frame at the front of `buf`: its first byte, where
+/// its body starts and its total length, or None when more bytes are needed.
+pub fn frame(buf: &[u8]) -> anyhow::Result<Option<(u8, usize, usize)>> {
     if buf.len() < 2 {
         return Ok(None);
     }
@@ -117,8 +119,14 @@ pub fn decode(buf: &[u8]) -> anyhow::Result<Option<(Packet, usize)>> {
     if buf.len() < total {
         return Ok(None);
     }
+    Ok(Some((buf[0], index, total)))
+}
+
+/// Decode one packet from the front of `buf`: the packet and its length, or
+/// None when more bytes are needed.
+pub fn decode(buf: &[u8]) -> anyhow::Result<Option<(Packet, usize)>> {
+    let Some((first, index, total)) = frame(buf)? else { return Ok(None) };
     let body = &buf[index..total];
-    let first = buf[0];
     let u16_at = |at: usize| -> anyhow::Result<u16> {
         body.get(at..at + 2).map(|b| u16::from_be_bytes([b[0], b[1]])).ok_or_else(|| anyhow::anyhow!("truncated packet"))
     };
@@ -166,6 +174,130 @@ impl std::fmt::Display for Closed {
     }
 }
 impl std::error::Error for Closed {}
+/// A CONNECT packet (MQTT 3.1.1 §3.1) as a client sent it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Connect {
+    pub level: u8,
+    pub clean_session: bool,
+    pub keep_alive: u16,
+    pub client_id: String,
+    /// Topic, payload, QoS and retain of the will message.
+    pub will: Option<(String, Vec<u8>, u8, bool)>,
+    pub username: Option<String>,
+    pub password: Option<Vec<u8>>,
+}
+
+fn take<'a>(body: &'a [u8], at: &mut usize) -> anyhow::Result<&'a [u8]> {
+    let length = body.get(*at..*at + 2).map(|b| u16::from_be_bytes([b[0], b[1]]) as usize)
+        .ok_or_else(|| anyhow::anyhow!("truncated packet"))?;
+    let field = body.get(*at + 2..*at + 2 + length).ok_or_else(|| anyhow::anyhow!("truncated packet"))?;
+    *at += 2 + length;
+    Ok(field)
+}
+
+fn take_string(body: &[u8], at: &mut usize) -> anyhow::Result<String> {
+    let text = std::str::from_utf8(take(body, at)?)?;
+    anyhow::ensure!(!text.contains('\0'), "NUL in an MQTT string");
+    Ok(text.to_owned())
+}
+
+/// Parse a CONNECT body. Only the protocol name and level are read when the
+/// level is not 4 (MQTT 3.1 "MQIsdp", MQTT 5), so the caller can refuse other
+/// versions with CONNACK 1.
+pub fn parse_connect(body: &[u8]) -> anyhow::Result<Connect> {
+    let mut at = 0;
+    let name = take(body, &mut at)?;
+    anyhow::ensure!(name == b"MQTT" || name == b"MQIsdp", "not an MQTT CONNECT");
+    let level = *body.get(at).ok_or_else(|| anyhow::anyhow!("truncated CONNECT"))?;
+    let mut connect = Connect { level, clean_session: true, keep_alive: 0, client_id: String::new(), will: None, username: None, password: None };
+    if level != 4 || name != b"MQTT" {
+        return Ok(connect);
+    }
+    let flags = *body.get(at + 1).ok_or_else(|| anyhow::anyhow!("truncated CONNECT"))?;
+    anyhow::ensure!(flags & 1 == 0, "reserved CONNECT flag set");
+    connect.keep_alive = body.get(at + 2..at + 4).map(|b| u16::from_be_bytes([b[0], b[1]])).ok_or_else(|| anyhow::anyhow!("truncated CONNECT"))?;
+    at += 4;
+    connect.clean_session = flags & 0x02 != 0;
+    connect.client_id = take_string(body, &mut at)?;
+    let (will, will_qos, will_retain) = (flags & 0x04 != 0, (flags >> 3) & 3, flags & 0x20 != 0);
+    anyhow::ensure!(will || (will_qos == 0 && !will_retain), "will flags without a will");
+    anyhow::ensure!(will_qos <= 2, "invalid will QoS");
+    if will {
+        let topic = take_string(body, &mut at)?;
+        connect.will = Some((topic, take(body, &mut at)?.to_vec(), will_qos, will_retain));
+    }
+    anyhow::ensure!(flags & 0x40 == 0 || flags & 0x80 != 0, "password without a username");
+    if flags & 0x80 != 0 {
+        connect.username = Some(take_string(body, &mut at)?);
+    }
+    if flags & 0x40 != 0 {
+        connect.password = Some(take(body, &mut at)?.to_vec());
+    }
+    anyhow::ensure!(at == body.len(), "trailing bytes in CONNECT");
+    Ok(connect)
+}
+
+/// Encode a level-4 CONNECT.
+pub fn encode_connect(connect: &Connect) -> Vec<u8> {
+    let mut body = Vec::new();
+    put_string(&mut body, b"MQTT");
+    body.push(4);
+    let mut flags = if connect.clean_session { 0x02 } else { 0 };
+    if let Some((_, _, qos, retain)) = &connect.will {
+        flags |= 0x04 | (qos << 3) | if *retain { 0x20 } else { 0 };
+    }
+    if connect.username.is_some() {
+        flags |= 0x80;
+    }
+    if connect.password.is_some() {
+        flags |= 0x40;
+    }
+    body.push(flags);
+    body.extend_from_slice(&connect.keep_alive.to_be_bytes());
+    put_string(&mut body, connect.client_id.as_bytes());
+    if let Some((topic, message, _, _)) = &connect.will {
+        put_string(&mut body, topic.as_bytes());
+        put_string(&mut body, message);
+    }
+    if let Some(user) = &connect.username {
+        put_string(&mut body, user.as_bytes());
+    }
+    if let Some(pass) = &connect.password {
+        put_string(&mut body, pass);
+    }
+    packet(0x10, body)
+}
+
+pub fn connack(code: u8) -> Vec<u8> {
+    vec![0x20, 2, 0, code]
+}
+
+/// The topic of a PUBLISH body with the given fixed-header flags.
+pub fn publish_topic(flags: u8, body: &[u8]) -> anyhow::Result<String> {
+    anyhow::ensure!((flags >> 1) & 3 != 3, "invalid PUBLISH QoS");
+    take_string(body, &mut 0)
+}
+
+/// The packet ID and (filter, QoS) pairs of a SUBSCRIBE body.
+pub fn parse_subscribe(body: &[u8]) -> anyhow::Result<(u16, Vec<(String, u8)>)> {
+    let packet_id = body.get(0..2).map(|b| u16::from_be_bytes([b[0], b[1]])).ok_or_else(|| anyhow::anyhow!("truncated SUBSCRIBE"))?;
+    let (mut at, mut filters) = (2, Vec::new());
+    while at < body.len() {
+        let filter = take_string(body, &mut at)?;
+        let qos = *body.get(at).ok_or_else(|| anyhow::anyhow!("truncated SUBSCRIBE"))?;
+        anyhow::ensure!(qos <= 2, "invalid requested QoS");
+        at += 1;
+        filters.push((filter, qos));
+    }
+    anyhow::ensure!(!filters.is_empty(), "SUBSCRIBE without filters");
+    Ok((packet_id, filters))
+}
+
+pub fn suback(packet_id: u16, codes: &[u8]) -> Vec<u8> {
+    let mut body = packet_id.to_be_bytes().to_vec();
+    body.extend_from_slice(codes);
+    packet(0x90, body)
+}
 
 /// A connected session: packets in, bytes out.
 pub struct Session {
@@ -259,5 +391,53 @@ mod tests {
         assert_eq!(decode(&[0xd0, 0]).unwrap().unwrap().0, Packet::PingResp);
         assert!(decode(&[0x34, 3, 0, 1, b'a']).is_err(), "QoS 2 refused");
         assert!(decode(&[0x30, 0xff, 0xff, 0xff, 0xff, 0x01]).is_err(), "malformed length");
+    }
+
+    #[test]
+    fn connect_round_trips_with_will_and_credentials() {
+        let original = Connect { level: 4, clean_session: false, keep_alive: 30, client_id: "sensor-1".into(),
+            will: Some(("sensors/gone".into(), b"bye".to_vec(), 1, true)), username: Some("u".into()), password: Some(b"p".to_vec()) };
+        let bytes = encode_connect(&original);
+        let (first, start, total) = frame(&bytes).unwrap().unwrap();
+        assert_eq!((first, total), (0x10, bytes.len()));
+        assert_eq!(parse_connect(&bytes[start..]).unwrap(), original);
+        // The spec vector from encodes_spec_vectors parses back.
+        let plain = connect("c", None, None, 60, true);
+        let parsed = parse_connect(&plain[2..]).unwrap();
+        assert_eq!((parsed.client_id.as_str(), parsed.clean_session, parsed.keep_alive, parsed.will.clone()), ("c", true, 60, None));
+        assert_eq!(encode_connect(&parsed), plain);
+        // MQTT 5 (level 5) is reported, not parsed further.
+        let mut v5 = plain[2..].to_vec();
+        v5[6] = 5;
+        assert_eq!(parse_connect(&v5).unwrap().level, 5);
+        let mut v31 = vec![0, 6];
+        v31.extend_from_slice(b"MQIsdp");
+        v31.extend_from_slice(&[3, 2, 0, 60, 0, 1, b'c']);
+        assert_eq!(parse_connect(&v31).unwrap().level, 3);
+        assert!(parse_connect(&[0, 4, b'H', b'T', b'T', b'P', 4]).is_err());
+        // Malformed: reserved flag, password without username, will flags without will, trailing bytes.
+        for flags in [0x03u8, 0x42, 0x0a, 0x22] {
+            let mut bad = plain[2..].to_vec();
+            bad[7] = flags;
+            assert!(parse_connect(&bad).is_err(), "{flags:#x}");
+        }
+        let mut trailing = plain[2..].to_vec();
+        trailing.push(0);
+        assert!(parse_connect(&trailing).is_err());
+    }
+
+    #[test]
+    fn subscribe_and_publish_topics_parse() {
+        let bytes = subscribe(7, &[("a/+".into(), 1), ("b/#".into(), 0)]);
+        let (_, start, _) = frame(&bytes).unwrap().unwrap();
+        assert_eq!(parse_subscribe(&bytes[start..]).unwrap(), (7, vec![("a/+".into(), 1), ("b/#".into(), 0)]));
+        assert!(parse_subscribe(&[0, 1]).is_err(), "no filters");
+        assert!(parse_subscribe(&[0, 1, 0, 1, b'a', 3]).is_err(), "QoS 3");
+        assert_eq!(suback(7, &[1, 0x80]), [0x90, 4, 0, 7, 1, 0x80]);
+        let publish = publish("x/y", b"1", 1, Some(3), false);
+        let (first, start, _) = frame(&publish).unwrap().unwrap();
+        assert_eq!(publish_topic(first & 0x0f, &publish[start..]).unwrap(), "x/y");
+        assert!(publish_topic(0x06, &publish[start..]).is_err(), "QoS 3");
+        assert_eq!(connack(5), [0x20, 2, 0, 5]);
     }
 }

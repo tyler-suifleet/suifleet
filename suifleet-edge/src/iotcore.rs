@@ -295,13 +295,41 @@ pub struct ShadowRouter {
     changed: Arc<Notify>,
 }
 
-pub fn shadow_channel(thing: &str, names: &[String]) -> (ShadowClient, ShadowRouter, ShadowRequests) {
+impl Drop for ShadowRouter {
+    // An aborted connection task must not leave the client believing it is connected.
+    fn drop(&mut self) {
+        self.set_connected(false);
+    }
+}
+
+/// Connection side of a shadow channel. It outlives a bridge task: service
+/// reconfiguration (SF-081) restarts the bridge, which attaches again.
+#[derive(Clone)]
+pub struct ShadowEndpoint {
+    requests: Arc<tokio::sync::Mutex<ShadowRequests>>,
+    thing: String,
+    filters: Vec<String>,
+    connected: Arc<AtomicBool>,
+    changed: Arc<Notify>,
+}
+
+impl ShadowEndpoint {
+    /// A fresh router and the request queue. The queue is held exclusively, so
+    /// this waits until an aborted predecessor has released it.
+    pub async fn attach(&self) -> (ShadowRouter, tokio::sync::OwnedMutexGuard<ShadowRequests>) {
+        let requests = self.requests.clone().lock_owned().await;
+        (ShadowRouter { pending: HashMap::new(), thing: self.thing.clone(), filters: self.filters.clone(),
+                        connected: self.connected.clone(), changed: self.changed.clone() }, requests)
+    }
+}
+
+pub fn shadow_channel(thing: &str, names: &[String]) -> (ShadowClient, ShadowEndpoint) {
     let (tx, rx) = mpsc::channel(16);
     let connected = Arc::new(AtomicBool::new(false));
     let changed = Arc::new(Notify::new());
     (ShadowClient { requests: tx, thing: thing.into(), connected: connected.clone(), next: Arc::new(AtomicU64::new(1)), changed: changed.clone() },
-     ShadowRouter { pending: HashMap::new(), thing: thing.into(), filters: shadow_filters(thing, names), connected, changed },
-     ShadowRequests(rx))
+     ShadowEndpoint { requests: Arc::new(tokio::sync::Mutex::new(ShadowRequests(rx))), thing: thing.into(),
+                      filters: shadow_filters(thing, names), connected, changed })
 }
 
 impl ShadowClient {
@@ -516,7 +544,8 @@ mod tests {
     async fn shared_aws_iot_shadow_answer_cases() {
         use crate::shadows::Cloud;
         for case in cases()["shadow_answers"].as_array().unwrap() {
-            let (client, mut router, mut requests) = shadow_channel("dev1", &["config".into()]);
+            let (client, endpoint) = shadow_channel("dev1", &["config".into()]);
+            let (mut router, mut requests) = endpoint.attach().await;
             router.set_connected(true);
             let shadows = AwsShadows(client);
             let doc = |key: &str| case[key].as_object().cloned();
@@ -629,8 +658,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_restarted_connection_reattaches_to_the_same_shadow_channel() {
+        // Service reconfiguration aborts and restarts the bridge task (SF-081).
+        let (client, endpoint) = shadow_channel("dev1", &["cfg".into()]);
+        let first = tokio::spawn({
+            let endpoint = endpoint.clone();
+            async move {
+                let (router, _requests) = endpoint.attach().await;
+                router.set_connected(true);
+                std::future::pending::<()>().await
+            }
+        });
+        while !client.connected.load(Ordering::SeqCst) {
+            tokio::task::yield_now().await;
+        }
+        assert!(tokio::time::timeout(Duration::from_millis(50), endpoint.attach()).await.is_err(), "the queue is held by the running connection");
+        first.abort();
+        let _ = first.await;
+        assert!(client.call("cfg", "get", Map::new()).await.unwrap_err().to_string().contains("not connected"));
+        let (router, mut requests) = endpoint.attach().await;
+        router.set_connected(true);
+        let call = tokio::spawn({
+            let client = client.clone();
+            async move { client.call("cfg", "get", Map::new()).await }
+        });
+        assert_eq!(requests.next().await.unwrap().topic, "$aws/things/dev1/shadow/name/cfg/get");
+        call.abort();
+    }
+
+    #[tokio::test]
     async fn shadow_answers_are_matched_by_client_token_and_topic() {
-        let (client, mut router, mut requests) = shadow_channel("dev1", &["".into(), "cfg".into()]);
+        let (client, endpoint) = shadow_channel("dev1", &["".into(), "cfg".into()]);
+        let (mut router, mut requests) = endpoint.attach().await;
         assert_eq!(router.filters, ["$aws/things/dev1/shadow/get/+", "$aws/things/dev1/shadow/update/+", "$aws/things/dev1/shadow/delete/+",
             "$aws/things/dev1/shadow/name/cfg/get/+", "$aws/things/dev1/shadow/name/cfg/update/+", "$aws/things/dev1/shadow/name/cfg/delete/+"]);
         assert!(client.call("cfg", "get", Map::new()).await.unwrap_err().to_string().contains("not connected"));

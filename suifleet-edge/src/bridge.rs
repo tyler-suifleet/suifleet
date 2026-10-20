@@ -61,7 +61,7 @@ impl Endpoint {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Mapping {
     /// Topic filter at the source.
@@ -80,7 +80,7 @@ fn default_keep_alive() -> u16 {
     30
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct BridgeConfig {
     /// `host:port` of the local MQTT broker; needed by LocalMqtt mappings.
@@ -88,10 +88,10 @@ pub struct BridgeConfig {
     pub broker: Option<String>,
     #[serde(default = "default_client_id")]
     pub client_id: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub username: Option<String>,
     /// File holding the broker password (keep it 0600).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub password_file: Option<PathBuf>,
     #[serde(default = "default_keep_alive")]
     pub keep_alive_seconds: u16,
@@ -231,7 +231,7 @@ pub struct Stats {
 pub struct IotLink {
     pub config: iotcore::IotConfig,
     /// Present when shadows synchronize with AWS IoT Device Shadow.
-    pub shadows: Option<(iotcore::ShadowRouter, iotcore::ShadowRequests)>,
+    pub shadows: Option<iotcore::ShadowEndpoint>,
 }
 
 pub struct Bridge {
@@ -347,8 +347,8 @@ impl Bridge {
         }
     }
 
-    pub async fn run(mut self) {
-        let iot = self.iot.as_mut().map(|link| link.shadows.take());
+    pub async fn run(self) {
+        let iot = self.iot.as_ref().map(|link| link.shadows.clone());
         let this = &self;
         tokio::join!(
             async move {
@@ -479,9 +479,12 @@ impl Bridge {
 
     /// The AWS IoT Core connection: (re)connects with backoff, takes rotated
     /// credentials into use, and keeps the in-flight message across sessions.
-    async fn run_iot(&self, shadows: Option<(iotcore::ShadowRouter, iotcore::ShadowRequests)>) {
+    async fn run_iot(&self, shadows: Option<iotcore::ShadowEndpoint>) {
         let (mut shadows, mut requests) = match shadows {
-            Some((router, requests)) => (Some(router), Some(requests)),
+            Some(endpoint) => {
+                let (router, requests) = endpoint.attach().await;
+                (Some(router), Some(requests))
+            }
             None => (None, None),
         };
         let config = &self.iot.as_ref().expect("IotCore link configured").config;
@@ -512,7 +515,7 @@ impl Bridge {
             }
             let started = Instant::now();
             let result = match &credentials {
-                Some(credentials) => self.iot_session(config, credentials, shadows.as_mut(), requests.as_mut(), &mut state).await,
+                Some(credentials) => self.iot_session(config, credentials, shadows.as_mut(), requests.as_deref_mut(), &mut state).await,
                 None => Err(anyhow::anyhow!("no usable AWS IoT credentials")),
             };
             if let Some(router) = shadows.as_mut() {
@@ -910,7 +913,8 @@ mod tests {
         cfg.validate(true).unwrap();
         let iot: iotcore::IotConfig = serde_json::from_value(json!({"endpoint": "localhost", "thing_name": "dev1", "ca_file": "/a",
             "certificate_file": "/b", "private_key_file": "/c", "keep_alive_seconds": 30})).unwrap();
-        let (client, mut router, mut requests) = iotcore::shadow_channel("dev1", &["cfg".into()]);
+        let (client, endpoint) = iotcore::shadow_channel("dev1", &["cfg".into()]);
+        let (mut router, mut requests) = endpoint.attach().await;
         let bridge = Bridge::new(cfg, broker.clone(), dir.join("bridge.json")).unwrap().with_iot_core(IotLink { config: iot.clone(), shadows: None });
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let accept = async {
@@ -981,7 +985,7 @@ mod tests {
         let mut state = IotState::default();
         tokio::time::timeout(Duration::from_secs(30), async {
             tokio::select! {
-                result = bridge.iot_exchange(&iot, session, None, Some(&mut router), Some(&mut requests), &mut state) => panic!("session ended: {result:?}"),
+                result = bridge.iot_exchange(&iot, session, None, Some(&mut router), Some(&mut *requests), &mut state) => panic!("session ended: {result:?}"),
                 () = script => {}
             }
         }).await.unwrap();

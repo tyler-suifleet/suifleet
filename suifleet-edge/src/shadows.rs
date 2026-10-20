@@ -258,6 +258,8 @@ pub struct Store {
 impl Store {
     /// Open the shadows under `dir`. A file that cannot be read stops the
     /// daemon rather than silently losing a document or its version.
+    pub fn set_broker(&mut self, broker: Option<Arc<Mutex<crate::pubsub::Broker>>>) { self.broker = broker; }
+
     pub fn open(dir: &Path, max_shadows: usize, thing: &str, broker: Option<Arc<Mutex<crate::pubsub::Broker>>>) -> anyhow::Result<Self> {
         std::fs::create_dir_all(dir)?;
         let mut records = BTreeMap::new();
@@ -582,7 +584,7 @@ pub const OPERATIONS: [&str; 4] = [
 pub struct Policy {
     pub operations: Vec<String>,
     pub resources: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sections: Option<Vec<String>>,
 }
 
