@@ -8,6 +8,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[cfg(test)]
+thread_local! {
+    pub static FAIL_DIRECTORY_SYNC: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct State {
     /// Authenticated service generations, committed with deployment success.
@@ -188,6 +193,10 @@ impl Journal {
         file.write_all(&serde_json::to_vec_pretty(&self.state)?)?;
         file.sync_all()?;
         std::fs::rename(temporary, &self.path)?;
+        #[cfg(test)]
+        if FAIL_DIRECTORY_SYNC.with(|fault| fault.replace(false)) {
+            return Err(std::io::Error::other("injected journal directory fsync failure").into());
+        }
         File::open(self.path.parent().unwrap())?.sync_all()?;
         Ok(())
     }

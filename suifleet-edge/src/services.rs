@@ -386,6 +386,29 @@ mod tests {
         serde_json::from_value(json!({"version":1,"grants":{"app":{"operations":["publish"],"pubsub_policies":[{"operations":["aws.greengrass#PublishToTopic"],"resources":["sensors/*"]}]}},"pubsub":{}})).unwrap()
     }
     #[tokio::test]
+    async fn failed_directory_sync_preserves_applied_decision_when_services_are_unchanged() {
+        let mut base = fixture();
+        let dir = std::env::temp_dir().join(format!("sf081-fsync-{}",std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        base.runtime.state_dir = dir.clone();
+        let mut journal = crate::state::Journal::open(&dir,"local".into()).unwrap();
+        journal.state.deployments.insert("d1".into(),crate::state::Outcome::default());
+        journal.save().unwrap();
+        let signer = Arc::new(crate::identity::Ed25519File(ed25519_dalek::SigningKey::from_bytes(&[7;32])));
+        let runtime = Arc::new(Mutex::new(Runtime::open(&base,&BTreeMap::new(),signer,streams::Binding {
+            chain_identifier:"local".into(),registry:"0x1".into(),device_id:"0x2".into() }).unwrap()));
+        base.services = Some(runtime.clone());
+        crate::state::FAIL_DIRECTORY_SYNC.with(|fault| fault.set(true));
+        let error = commit(&base,&mut journal,BTreeMap::new(),Some("d1")).await.unwrap_err();
+        assert!(error.downcast_ref::<RecoveryRequired>().is_some(),"{error:#}");
+        let disk: crate::state::State = serde_json::from_slice(&std::fs::read(dir.join("state.json")).unwrap()).unwrap();
+        assert_eq!(disk.deployments["d1"].status,Some(crate::protocol::STATUS_APPLIED));
+        assert_eq!(journal.state.deployments["d1"].status,Some(crate::protocol::STATUS_APPLIED));
+        recover_activation(&base,&disk.services).unwrap();
+        drop(journal); drop(base); drop(runtime);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[tokio::test]
     async fn staging_does_not_change_limits_seen_by_background_publishers() {
         let mut base = fixture();
         let dir = std::env::temp_dir().join(format!("sf081-limits-{}",std::process::id()));
@@ -507,14 +530,14 @@ mod tests {
     }
 }
 
-/// The durable transaction has committed; retry activation on a clean daemon
-/// start rather than relabeling an applied deployment Failed or running it twice.
+/// Durability or rollback needs a clean daemon start. Never relabel a possibly
+/// committed deployment Failed, replay installation or serve partial undo.
 #[derive(Debug)]
-pub struct Committed(pub String);
-impl std::fmt::Display for Committed {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f,"committed service generation needs restart: {}", self.0) }
+pub struct RecoveryRequired(pub String);
+impl std::fmt::Display for RecoveryRequired {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f,"service generation needs recovery on restart: {}", self.0) }
 }
-impl std::error::Error for Committed {}
+impl std::error::Error for RecoveryRequired {}
 
 /// Transaction used both by deployment completion and supervisor rollback.
 pub async fn commit(cfg: &Config, journal: &mut crate::state::Journal, next: BTreeMap<String, Generation>, deployment: Option<&str>) -> anyhow::Result<()> {
@@ -523,12 +546,12 @@ pub async fn commit(cfg: &Config, journal: &mut crate::state::Journal, next: BTr
     let previous = journal.state.services.clone();
     quiesce(runtime).await;
     if let Err(error) = begin_activation(cfg, &next, &settings) {
-        runtime.lock().unwrap().resume()?;
+        runtime.lock().unwrap().resume().map_err(|e| RecoveryRequired(e.to_string()))?;
         return Err(error);
     }
     let activated = runtime.lock().unwrap().activate(&next);
     if let Err(error) = activated {
-        runtime.lock().unwrap().abort(&previous)?;
+        runtime.lock().unwrap().abort(&previous).map_err(|undo| RecoveryRequired(format!("activation failed: {error:#}; rollback failed: {undo:#}")))?;
         return Err(error.context("service activation"));
     }
     journal.state.services = next;
@@ -541,16 +564,16 @@ pub async fn commit(cfg: &Config, journal: &mut crate::state::Journal, next: BTr
         let disk = std::fs::read(cfg.runtime.state_dir.join("state.json"))
             .ok().and_then(|b| serde_json::from_slice::<crate::state::State>(&b).ok());
         match disk {
-            Some(state) if fingerprint(&state.services)? == fingerprint(&previous)? => {
+            Some(state) if fingerprint(&state.services)? == fingerprint(&previous)? && deployment.is_none_or(|id| state.deployments.get(id).and_then(|o| o.status) != Some(crate::protocol::STATUS_APPLIED)) => {
                 journal.state.services = previous;
                 if let Some(id) = deployment { journal.state.deployments.entry(id.into()).or_default().status = None; }
-                runtime.lock().unwrap().abort(&journal.state.services)?;
+                runtime.lock().unwrap().abort(&journal.state.services).map_err(|e| RecoveryRequired(e.to_string()))?;
                 return Err(error);
             }
-            _ => return Err(Committed(error.to_string()).into()),
+            _ => return Err(RecoveryRequired(error.to_string()).into()),
         }
     }
-    recover_activation(cfg, &journal.state.services).map_err(|e| Committed(e.to_string()))?;
-    runtime.lock().unwrap().resume().map_err(|e| Committed(e.to_string()))?;
+    recover_activation(cfg, &journal.state.services).map_err(|e| RecoveryRequired(e.to_string()))?;
+    runtime.lock().unwrap().resume().map_err(|e| RecoveryRequired(e.to_string()))?;
     Ok(())
 }

@@ -343,8 +343,8 @@ async fn main() -> anyhow::Result<()> {
                         restart_for_handoff = true;
                         break;
                     }
-                    Err(error) if error.downcast_ref::<services::Committed>().is_some() => {
-                        warn!(%error, "Restarting to recover the committed service generation");
+                    Err(error) if error.downcast_ref::<services::RecoveryRequired>().is_some() => {
+                        warn!(%error, "Restarting to recover the service generation");
                         restart_for_services = true;
                         break;
                     }
@@ -374,7 +374,7 @@ async fn main() -> anyhow::Result<()> {
                                 &mut supervisor, &mut journal, &mut ipc_messages, durable.as_deref(), streams.as_deref(), shadow_store.as_deref(), pending.uid, &pending.request) => result,
                             _ = &mut shutdown => { stopped = true; break; }
                         };
-                        if result.as_ref().err().is_some_and(|e| e.downcast_ref::<services::Committed>().is_some()) {
+                        if result.as_ref().err().is_some_and(|e| e.downcast_ref::<services::RecoveryRequired>().is_some()) {
                             let _ = pending.reply.send(ipc::response(result));
                             restart_for_services = true;
                             stopped = true;
@@ -406,7 +406,7 @@ async fn main() -> anyhow::Result<()> {
     supervisor.stop_all().await;
     // process::exit below does not run destructors: close IPC before handoff.
     drop(ipc_server);
-    if restart_for_services { anyhow::bail!("restart required to activate committed services"); }
+    if restart_for_services { anyhow::bail!("restart required to recover service configuration"); }
     if restart_for_handoff {
         std::process::exit(handoff::RESTART_EXIT);
     }
@@ -750,7 +750,7 @@ async fn execute(
         let _ = std::fs::remove_dir_all(&directory);
         return Ok(None);
     }
-    if result.as_ref().err().is_some_and(|e| e.downcast_ref::<services::Committed>().is_some()) { return result.map(|_| None); }
+    if result.as_ref().err().is_some_and(|e| e.downcast_ref::<services::RecoveryRequired>().is_some()) { return result.map(|_| None); }
     let outcome = journal.state.deployments.entry(event.deployment_id.clone()).or_default();
     record_result(outcome, result);
     info!(deployment = event.deployment_id, status = outcome.status, error = ?outcome.error, "Deployment finished");
