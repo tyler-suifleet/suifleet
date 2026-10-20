@@ -519,7 +519,7 @@ impl Stream {
         Ok(Location::Disk { segment: first, offset })
     }
 
-    fn load(dir: &Path, now_ms: u64) -> anyhow::Result<Self> {
+    fn load(dir: &Path, now_ms: u64, recover: bool) -> anyhow::Result<Self> {
         let meta: Meta = serde_json::from_slice(&std::fs::read(dir.join("meta.json"))?)?;
         let mut stream = Stream {
             def: meta.definition,
@@ -569,10 +569,14 @@ impl Stream {
             }
             if at < bytes.len() {
                 if index + 1 == firsts.len() {
-                    warn!(stream = stream.def.name, bytes = bytes.len() - at, "Truncating a torn record at the end of a stream");
-                    let file = std::fs::OpenOptions::new().write(true).open(&path)?;
-                    file.set_len(at as u64)?;
-                    file.sync_all()?;
+                    if recover {
+                        warn!(stream = stream.def.name, bytes = bytes.len() - at, "Truncating a torn record at the end of a stream");
+                        let file = std::fs::OpenOptions::new().write(true).open(&path)?;
+                        file.set_len(at as u64)?;
+                        file.sync_all()?;
+                    } else {
+                        stream.torn = Some((path.clone(), Some(at as u64)));
+                    }
                 } else {
                     warn!(stream = stream.def.name, segment = first, "Corrupt stream segment; the rest of it is skipped");
                     stream.corrupt += 1;
@@ -585,10 +589,10 @@ impl Stream {
         stream.oldest = stream.entries.front().map_or(stream.next, |e| e.sequence).max(meta.oldest.min(stream.next));
         // Re-apply the size bound: the retained set is always the longest
         // suffix that fits, so this reproduces evictions not yet persisted.
-        while stream.bytes > stream.def.max_size {
-            stream.evict_front();
+        if recover {
+            while stream.bytes > stream.def.max_size { stream.evict_front(); }
+            stream.retire(now_ms)?;
         }
-        stream.retire(now_ms)?;
         Ok(stream)
     }
 
@@ -657,6 +661,7 @@ pub struct Store {
     dir: PathBuf,
     quota: Quota,
     streams: BTreeMap<String, Stream>,
+    staged: bool,
 }
 
 impl Store {
@@ -744,7 +749,25 @@ impl Store {
         result
     }
 
+    /// Reversible activation: read segments without truncation or retention,
+    /// and do not persist counters on Drop until the journal has committed.
+    pub fn stage(dir: &Path, quota: Quota, definitions: &[Definition], now_ms: u64) -> anyhow::Result<Self> {
+        preflight_disk(dir, quota, definitions)?;
+        let mut store = Self::open_mode(dir, quota, now_ms, false)?;
+        store.reconfigure(quota, definitions)?;
+        Ok(store)
+    }
+    pub fn is_staged(&self) -> bool { self.staged }
+    pub fn promote(&mut self, now_ms: u64) -> anyhow::Result<()> {
+        if !self.staged { return Ok(()); }
+        self.staged = false;
+        for stream in self.streams.values_mut() { stream.retire(now_ms)?; }
+        Ok(())
+    }
     fn open(dir: &Path, quota: Quota, now_ms: u64) -> anyhow::Result<Self> {
+        Self::open_mode(dir, quota, now_ms, true)
+    }
+    fn open_mode(dir: &Path, quota: Quota, now_ms: u64, recover: bool) -> anyhow::Result<Self> {
         std::fs::create_dir_all(dir)?;
         let mut streams = BTreeMap::new();
         for entry in std::fs::read_dir(dir)? {
@@ -752,14 +775,14 @@ impl Store {
             if !path.join("meta.json").exists() {
                 continue;
             }
-            match Stream::load(&path, now_ms) {
+            match Stream::load(&path, now_ms, recover) {
                 Ok(stream) => {
                     streams.insert(stream.def.name.clone(), stream);
                 }
                 Err(error) => warn!(path = %path.display(), %error, "Stream could not be opened; left untouched"),
             }
         }
-        Ok(Self { dir: dir.to_owned(), quota, streams })
+        Ok(Self { dir: dir.to_owned(), quota, streams, staged: !recover })
     }
 
     fn get(&mut self, name: &str) -> anyhow::Result<&mut Stream> {
@@ -947,7 +970,7 @@ impl Store {
 
 impl Drop for Store {
     fn drop(&mut self) {
-        self.close();
+        if !self.staged { self.close(); }
     }
 }
 
@@ -1154,6 +1177,35 @@ mod tests {
         path
     }
     const QUOTA: Quota = Quota { max_streams: 32, max_total_bytes: 1 << 26 };
+
+    #[test]
+    fn enabling_service_stages_expired_and_torn_streams_without_mutation() {
+        let path = dir("activation-read-only");
+        let mut definition = def("data",4096,Strategy::OverwriteOldestData);
+        definition.time_to_live_seconds = Some(1);
+        let mut store = Store::start(&path,QUOTA,&[definition.clone()],0).unwrap();
+        store.append("data",b"retained",0).unwrap();
+        store.close(); drop(store);
+        let directory = path.join(dir_name("data"));
+        let segment = segment_path(&directory,0);
+        use std::io::Write;
+        std::fs::OpenOptions::new().append(true).open(&segment).unwrap().write_all(b"torn tail").unwrap();
+        let records = std::fs::read(&segment).unwrap();
+        let metadata = std::fs::read(directory.join("meta.json")).unwrap();
+        {
+            let staged = Store::stage(&path,QUOTA,&[definition.clone()],2000).unwrap();
+            assert!(staged.is_staged());
+            assert_eq!(staged.streams["data"].entries.len(),1);
+            assert_eq!(std::fs::read(&segment).unwrap(),records);
+        }
+        assert_eq!(std::fs::read(&segment).unwrap(),records,"aborted stage changed records");
+        assert_eq!(std::fs::read(directory.join("meta.json")).unwrap(),metadata,"staged Drop changed counters");
+        let mut committed = Store::stage(&path,QUOTA,&[definition],2000).unwrap();
+        committed.promote(2000).unwrap();
+        assert!(committed.streams["data"].entries.is_empty(),"committed retention did not activate");
+        drop(committed);
+        std::fs::remove_dir_all(path).unwrap();
+    }
 
     #[test]
     fn deployment_preflight_never_truncates_retires_or_evicts() {

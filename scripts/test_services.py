@@ -279,6 +279,14 @@ def run():
                 summary = ipc('config', admin=True)['data']['services']
                 assert not summary['grants']['app']['operations'] and summary['pubsub'] is None and summary['streams'] is None
                 print('PASS: removing requirements revokes grants and stops exports/bridge while retaining stream files', flush=True)
+                stop()
+                start()
+                deploy('0x807', '7', service('b', 'restored'))
+                wait_for(lambda: outcome('0x807') == 1, 're-enable persisted service', process)
+                assert ipc('stream_read', 'b')['data']['messages'][0]['payload'] == 'export-me'
+                assert ipc('publish', 'restored', 7)['ok']
+                wait_for(lambda: mqtt.received('b/restored', 7), 're-enabled bridge forwarding', process)
+                print('PASS: re-enabling disabled services after restart preserves persisted records and activates the new generation', flush=True)
                 assert not sim.errors, sim.errors
             except Exception:
                 log.flush()

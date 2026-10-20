@@ -218,7 +218,7 @@ impl Runtime {
         self.stop_tasks();
         if let Some(settings) = &next.streams {
             if let Some(store) = &self.streams { store.lock().unwrap().reconfigure(settings.quota(), &settings.definitions)?; }
-            else { self.streams = Some(Arc::new(Mutex::new(streams::Store::start(&self.base.runtime.state_dir.join("streams"), settings.quota(), &settings.definitions, crate::telemetry::now_ms())?))); }
+            else { self.streams = Some(Arc::new(Mutex::new(streams::Store::stage(&self.base.runtime.state_dir.join("streams"), settings.quota(), &settings.definitions, crate::telemetry::now_ms())?))); }
         } else if let Some(store) = &self.streams {
             // Revoke exports without deleting stream records.
             let mut store = store.lock().unwrap();
@@ -232,6 +232,9 @@ impl Runtime {
         Ok(())
     }
     pub fn resume(&mut self) -> anyhow::Result<()> {
+        if self.effective.streams.is_some() {
+            if let Some(store) = &self.streams { store.lock().unwrap().promote(crate::telemetry::now_ms())?; }
+        }
         if let Some(store) = &self.shadow_store { store.lock().unwrap().set_broker(self.effective.pubsub.as_ref().and(self.broker.clone())); }
         if let Some(broker) = &self.broker {
             let mut broker = broker.lock().unwrap();
@@ -258,6 +261,8 @@ impl Runtime {
         let intent: Activation = serde_json::from_slice(&std::fs::read(self.base.runtime.state_dir.join("services-activation.json"))?)?;
         if let Some(store) = &self.streams { store.lock().unwrap().discard_uncommitted(&intent.created)?; }
         recover_activation(&self.base, generations)?;
+        let staged = self.streams.as_ref().is_some_and(|s| s.lock().unwrap().is_staged());
+        if staged { self.streams = None; }
         self.activate(generations)?;
         self.resume()
     }
