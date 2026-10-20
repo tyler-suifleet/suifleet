@@ -28,6 +28,7 @@ mod state;
 mod sui_client;
 mod supervisor;
 mod streams;
+mod service_health;
 mod shadows;
 mod telemetry;
 mod walrus_client;
@@ -222,10 +223,14 @@ async fn main() -> anyhow::Result<()> {
             &cfg.runtime.state_dir.join("shadows"), settings.max_shadows, &settings.thing_name, durable.clone())?))),
         None => None,
     };
+    let mut bridge_stats = None;
     let bridge_task = match (&cfg.pubsub, &durable) {
         (Some(settings), Some(broker)) => match &settings.bridge {
-            Some(bridge) => Some(tokio::spawn(bridge::Bridge::new(bridge.clone(), broker.clone(),
-                cfg.runtime.state_dir.join("pubsub/bridge.json"))?.run())),
+            Some(bridge) => {
+                let bridge = bridge::Bridge::new(bridge.clone(), broker.clone(), cfg.runtime.state_dir.join("pubsub/bridge.json"))?;
+                bridge_stats = Some(bridge.stats.clone());
+                Some(tokio::spawn(bridge.run()))
+            }
             None => None,
         },
         _ => None,
@@ -280,6 +285,12 @@ async fn main() -> anyhow::Result<()> {
                 buffer_max: settings.buffer_max,
                 signer: signer.clone(),
                 sync: sync.clone(),
+                services: service_health::Sources {
+                    broker: durable.clone(),
+                    bridge: bridge_stats.clone(),
+                    streams: streams.clone(),
+                    shadows: shadow_store.clone(),
+                },
             }
             .run(),
         )),

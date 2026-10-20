@@ -276,6 +276,11 @@ struct Stream {
     segments: BTreeMap<u64, u64>,
     corrupt: u64,
     export_status: Value,
+    /// Appends rejected because the stream was full (since daemon start).
+    rejected: u64,
+    /// With an export: messages retired before they were exported (since
+    /// daemon start).
+    lost: u64,
     /// A failed append whose undo also failed: the segment to cut back to
     /// its tracked length (`None`: remove it). Appends fail until it is.
     torn: Option<(PathBuf, Option<u64>)>,
@@ -407,6 +412,9 @@ impl Stream {
     fn evict_front(&mut self) {
         if let Some(entry) = self.entries.pop_front() {
             self.bytes -= entry.cost();
+            if self.def.export.is_some() && entry.sequence as i64 > self.exported {
+                self.lost += 1;
+            }
         }
         self.oldest = self.entries.front().map_or(self.next, |e| e.sequence);
     }
@@ -516,6 +524,8 @@ impl Stream {
             segments: BTreeMap::new(),
             corrupt: 0,
             export_status: Value::Null,
+            rejected: 0,
+            lost: 0,
             torn: None,
         };
         if stream.def.persistence == Persistence::Memory {
@@ -693,7 +703,7 @@ impl Store {
         std::fs::create_dir_all(&dir)?;
         let stream = Stream {
             def: def.clone(), dir, entries: VecDeque::new(), bytes: 0, next: 0, oldest: 0, exported: -1, reserved: 0,
-            segments: BTreeMap::new(), corrupt: 0, export_status: Value::Null, torn: None,
+            segments: BTreeMap::new(), corrupt: 0, export_status: Value::Null, rejected: 0, lost: 0, torn: None,
         };
         stream.save_meta()?;
         std::fs::File::open(&self.dir)?.sync_all()?;
@@ -732,6 +742,7 @@ impl Store {
         stream.retire(now_ms)?;
         while stream.bytes + cost(data.len()) > stream.def.max_size {
             if stream.def.strategy_on_full == Strategy::RejectNewData {
+                stream.rejected += 1;
                 return fail("full", format!("stream {name:?} is full"));
             }
             stream.evict_front();
@@ -815,6 +826,32 @@ impl Store {
             messages.push(Message { sequence: entry.sequence, appended_ms: entry.appended_ms, data: stream.read_data(entry)? });
         }
         Ok(if messages.is_empty() { None } else { Some((lost, messages)) })
+    }
+
+    /// Facts for telemetry (SF-085): usage, rejections, export lag and loss.
+    /// Never data, export URLs or credentials.
+    pub fn health(&mut self, now_ms: u64) -> Vec<crate::service_health::StreamFacts> {
+        self.streams
+            .values_mut()
+            .map(|stream| {
+                if let Err(error) = stream.retire(now_ms) {
+                    warn!(stream = stream.def.name, %error, "Could not retire stream messages");
+                }
+                crate::service_health::StreamFacts {
+                    name: stream.def.name.clone(),
+                    bytes: stream.bytes,
+                    max_size: stream.def.max_size,
+                    messages: stream.entries.len() as u64,
+                    overwrite: stream.def.strategy_on_full == Strategy::OverwriteOldestData,
+                    rejected: stream.rejected,
+                    lost: stream.lost,
+                    export: stream.def.export.as_ref().map(|_| {
+                        let lag = stream.entries.iter().rev().take_while(|e| e.sequence as i64 > stream.exported).count() as u64;
+                        (lag, stream.export_status.clone())
+                    }),
+                }
+            })
+            .collect()
     }
 
     pub fn set_export_status(&mut self, name: &str, status: Value) {
@@ -963,9 +1000,14 @@ impl Exporter {
             Err(error) => return warn!(%error, "Stream export disabled: no HTTP client"),
         };
         let mut backoff = 1u64;
-        let (mut batches, mut failures) = (0u64, 0u64);
+        let (mut batches, mut failures, mut consecutive) = (0u64, 0u64, 0u64);
+        let mut last_success_ms = None;
         loop {
             let result = self.step(&http).await;
+            if result.is_ok() {
+                consecutive = 0;
+                last_success_ms = Some(crate::telemetry::now_ms());
+            }
             let delay = match &result {
                 Ok(true) => {
                     batches += 1;
@@ -975,6 +1017,7 @@ impl Exporter {
                 Ok(false) => self.config.batch_interval_seconds,
                 Err(error) => {
                     failures += 1;
+                    consecutive += 1;
                     warn!(stream = self.stream, %error, retry_seconds = backoff, "Stream export failed; checkpoint unchanged");
                     let delay = backoff;
                     backoff = (backoff * 2).min(self.config.max_backoff_seconds);
@@ -982,7 +1025,7 @@ impl Exporter {
                 }
             };
             self.store.lock().unwrap().set_export_status(&self.stream, json!({
-                "batches": batches, "failures": failures,
+                "batches": batches, "failures": failures, "consecutive_failures": consecutive, "last_success_ms": last_success_ms,
                 "last_error": result.as_ref().err().map(|e| crate::telemetry::bounded(&e.to_string(), 300)),
                 "updated_ms": crate::telemetry::now_ms(),
             }));
@@ -1098,6 +1141,37 @@ mod tests {
     fn def(name: &str, max: u64, strategy: Strategy) -> Definition {
         Definition { name: name.into(), max_size: max, strategy_on_full: strategy, persistence: Persistence::File,
             time_to_live_seconds: None, discard_exported: false, export: None }
+    }
+
+    #[test]
+    fn health_reports_usage_rejections_lag_and_unexported_loss() {
+        let path = dir("health");
+        let mut store = Store::open(&path, QUOTA, 0).unwrap();
+        store.create(def("full", 1024, Strategy::RejectNewData)).unwrap();
+        let mut exported = def("ring", 1024, Strategy::OverwriteOldestData);
+        exported.export = Some(ExportConfig { url: "http://127.0.0.1:9/x?token=SECRET".into(), bearer_token_file: None,
+            batch_max_messages: 2, batch_max_bytes: 1024, batch_interval_seconds: 1, max_backoff_seconds: 5 });
+        store.create(exported).unwrap();
+        for i in 0..4u8 {
+            let _ = store.append("full", &[i; 250], 0);
+            store.append("ring", &[i; 250], 0).unwrap();
+        }
+        // 314 bytes per message: three fit. The fourth is rejected, or
+        // evicts the oldest (unexported) message.
+        store.set_export_status("ring", json!({"batches": 0, "failures": 3, "consecutive_failures": 3, "last_error": "destination answered 500"}));
+        let facts = store.health(0);
+        let (full, ring) = (&facts[0], &facts[1]);
+        assert_eq!((full.name.as_str(), full.messages, full.bytes, full.rejected, full.overwrite, full.export.is_none()),
+                   ("full", 3, 3 * 314, 1, false, true));
+        assert_eq!((ring.name.as_str(), ring.messages, ring.rejected, ring.lost, ring.overwrite), ("ring", 3, 0, 1, true));
+        let (lag, status) = ring.export.clone().unwrap();
+        assert_eq!((lag, status["consecutive_failures"].as_u64()), (3, Some(3)));
+        // Exported messages are no longer lag, and their eviction is no loss.
+        store.export_ack("ring", 2, 0).unwrap();
+        store.append("ring", &[9; 250], 0).unwrap();
+        let ring = store.health(0).remove(1);
+        assert_eq!((ring.lost, ring.export.unwrap().0), (1, 2));
+        std::fs::remove_dir_all(path).unwrap();
     }
 
     #[test]

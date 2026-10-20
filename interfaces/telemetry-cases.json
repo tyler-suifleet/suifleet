@@ -1,5 +1,5 @@
 {
-  "description": "SF-019 telemetry cases shared by suifleet-indexer (src/telemetry.rs) and the dApp (scripts/test_telemetry.cjs); the edge signs the same bytes to the same signature. 'signed' was produced by @mysten/sui Ed25519Keypair (secret key 32 x 0x07) signPersonalMessage over the exact message bytes. Status cases: status and stable codes for a device's newest report from its current signer (docs/TELEMETRY.md).",
+  "description": "SF-019 telemetry cases shared by suifleet-indexer (src/telemetry.rs) and the dApp (scripts/test_telemetry.cjs); the edge signs the same bytes to the same signature. 'signed' (schema 1) and 'signed_services' (schema 2, with the SF-085 services section) were produced by @mysten/sui Ed25519Keypair (secret key 32 x 0x07) signPersonalMessage over the exact message bytes. Status cases: status and stable codes for a device's newest report from its current signer (docs/TELEMETRY.md).",
   "signed": {
     "signer": "0xa0ccc8bcc83f6c628340134f8546a21e0618fd1aaa02432bba454c4a2c2233da",
     "snapshot": {
@@ -53,6 +53,139 @@
     "envelope": {
       "message": "eyJzY2hlbWEiOjEsImNoYWluX2lkZW50aWZpZXIiOiJhYmNkMTIzNCIsInJlZ2lzdHJ5IjoiMHg1IiwiZGV2aWNlX2lkIjoiMHhkMSIsInNpZ25lciI6IjB4YTBjY2M4YmNjODNmNmM2MjgzNDAxMzRmODU0NmEyMWUwNjE4ZmQxYWFhMDI0MzJiYmE0NTRjNGEyYzIyMzNkYSIsInNlcSI6MTc5MjExMzAwMDAwMCwib2JzZXJ2ZWRfbXMiOjE3OTIxMTMwMDAwMDAsImludGVydmFsX3NlY29uZHMiOjYwLCJkYWVtb25fdmVyc2lvbiI6IjAuMi4xIiwiYm9vdF9pZCI6IjhmMGMxYjJlLTU4YTQtNGMzOS05YTUxLTJmNmQwZTdjOWIxMSIsInN0YXJ0ZWRfbXMiOjE3OTIxMTIwMDAwMDAsImRyb3BwZWQiOjIsInN5bmMiOnsibGFzdF9zdWNjZXNzX21zIjoxNzkyMTEyOTk1MDAwLCJjb25zZWN1dGl2ZV9mYWlsdXJlcyI6MCwibGFzdF9lcnJvciI6bnVsbH0sInBlbmRpbmdfcmVjZWlwdHMiOjEsImNvbXBvbmVudHMiOlt7Im5hbWUiOiJmaXJtd2FyZSIsInZlcnNpb24iOiIzLjEuMCIsImRlcGxveW1lbnRfaWQiOiIweGEiLCJpbnN0YWxsZWQiOnRydWUsInN1cGVydmlzZWQiOmZhbHNlLCJwaGFzZSI6bnVsbCwicmVzdGFydHMiOm51bGwsImxhc3RfZXhpdCI6bnVsbCwic2luY2VfbXMiOm51bGx9LHsibmFtZSI6InN2YyIsInZlcnNpb24iOiIxLjAuMCIsImRlcGxveW1lbnRfaWQiOiIweGUiLCJpbnN0YWxsZWQiOnRydWUsInN1cGVydmlzZWQiOnRydWUsInBoYXNlIjoiYmFja29mZiIsInJlc3RhcnRzIjoyLCJsYXN0X2V4aXQiOiJleGl0IHN0YXR1czogMSIsInNpbmNlX21zIjoxNzkyMTEyOTkwMDAwfV0sImhlYWx0aCI6ImRlZ3JhZGVkIiwicmVhc29ucyI6WyJjb21wb25lbnQgc3ZjOiBiYWNrb2ZmIChleGl0IHN0YXR1czogMSkiXX0=",
       "signature": "AHSiX4i/yjM+j4xQcVAOAcUW3Ain3aaKsXrs1eMCSGoqZXI3PdYmBspuDodi/Ari8n57fbIGC7YQR15tF4+B3gjqSmxj4pxSCr71UHsTLsX5lUd2rr6+e5JCHuppFEbSLA=="
+    }
+  },
+  "signed_services": {
+    "signer": "0xa0ccc8bcc83f6c628340134f8546a21e0618fd1aaa02432bba454c4a2c2233da",
+    "snapshot": {
+      "schema": 2,
+      "chain_identifier": "abcd1234",
+      "registry": "0x5",
+      "device_id": "0xd1",
+      "signer": "0xa0ccc8bcc83f6c628340134f8546a21e0618fd1aaa02432bba454c4a2c2233da",
+      "seq": 1792113060000,
+      "observed_ms": 1792113060000,
+      "interval_seconds": 60,
+      "daemon_version": "0.2.1",
+      "boot_id": "8f0c1b2e-58a4-4c39-9a51-2f6d0e7c9b11",
+      "started_ms": 1792112000000,
+      "dropped": 0,
+      "sync": {
+        "last_success_ms": 1792113055000,
+        "consecutive_failures": 0,
+        "last_error": null
+      },
+      "pending_receipts": 0,
+      "components": [
+        {
+          "name": "firmware",
+          "version": "3.1.0",
+          "deployment_id": "0xa",
+          "installed": true,
+          "supervised": false,
+          "phase": null,
+          "restarts": null,
+          "last_exit": null,
+          "since_ms": null
+        }
+      ],
+      "health": "degraded",
+      "reasons": [
+        "pub/sub queue of svc 100% full for 180 s",
+        "MQTT bridge disconnected for 150 s: Connection refused (os error 111)",
+        "stream metrics: 4 messages retired before export",
+        "stream metrics export failing (6 consecutive): destination answered 503 Service Unavailable"
+      ],
+      "services": {
+        "version": 1,
+        "messaging": {
+          "subscriptions": 3,
+          "queued": 1002,
+          "refused": 5,
+          "dropped": 0,
+          "queues": [
+            {
+              "principal": "svc",
+              "subscriptions": 1,
+              "queued": 1000,
+              "fill_percent": 100,
+              "full_since_ms": 1792112880000,
+              "refused": 5,
+              "refused_recent": 2,
+              "dropped": 0,
+              "dropped_recent": 0
+            },
+            {
+              "principal": "@bridge/0",
+              "subscriptions": 1,
+              "queued": 2,
+              "fill_percent": 0,
+              "full_since_ms": null,
+              "refused": 0,
+              "refused_recent": 0,
+              "dropped": 0,
+              "dropped_recent": 0
+            }
+          ],
+          "omitted": 0
+        },
+        "bridge": {
+          "connected": false,
+          "since_ms": 1792112910000,
+          "connects": 1,
+          "refused": 0,
+          "refused_recent": 0,
+          "rejected": 1,
+          "rejected_recent": 0,
+          "last_error": "Connection refused (os error 111)"
+        },
+        "streams": {
+          "streams": [
+            {
+              "name": "metrics",
+              "bytes": 1010,
+              "max_size": 1024,
+              "fill_percent": 98,
+              "messages": 10,
+              "overwrite": true,
+              "rejected": 0,
+              "rejected_recent": 0,
+              "export": {
+                "lag": 10,
+                "lost": 4,
+                "lost_recent": 4,
+                "batches": 2,
+                "failures": 6,
+                "consecutive_failures": 6,
+                "last_success_ms": 1792112700000,
+                "last_error": "destination answered 503 Service Unavailable"
+              }
+            }
+          ],
+          "omitted": 0
+        },
+        "shadows": {
+          "shadows": 1,
+          "notifications_refused": 0,
+          "notifications_refused_recent": 0,
+          "sync": [
+            {
+              "name": "",
+              "conflicts": 1,
+              "conflicts_recent": 1,
+              "failures": 0,
+              "consecutive_failures": 0,
+              "last_success_ms": 1792113050000,
+              "last_error": null
+            }
+          ],
+          "omitted": 0
+        }
+      }
+    },
+    "envelope": {
+      "message": "eyJzY2hlbWEiOjIsImNoYWluX2lkZW50aWZpZXIiOiJhYmNkMTIzNCIsInJlZ2lzdHJ5IjoiMHg1IiwiZGV2aWNlX2lkIjoiMHhkMSIsInNpZ25lciI6IjB4YTBjY2M4YmNjODNmNmM2MjgzNDAxMzRmODU0NmEyMWUwNjE4ZmQxYWFhMDI0MzJiYmE0NTRjNGEyYzIyMzNkYSIsInNlcSI6MTc5MjExMzA2MDAwMCwib2JzZXJ2ZWRfbXMiOjE3OTIxMTMwNjAwMDAsImludGVydmFsX3NlY29uZHMiOjYwLCJkYWVtb25fdmVyc2lvbiI6IjAuMi4xIiwiYm9vdF9pZCI6IjhmMGMxYjJlLTU4YTQtNGMzOS05YTUxLTJmNmQwZTdjOWIxMSIsInN0YXJ0ZWRfbXMiOjE3OTIxMTIwMDAwMDAsImRyb3BwZWQiOjAsInN5bmMiOnsibGFzdF9zdWNjZXNzX21zIjoxNzkyMTEzMDU1MDAwLCJjb25zZWN1dGl2ZV9mYWlsdXJlcyI6MCwibGFzdF9lcnJvciI6bnVsbH0sInBlbmRpbmdfcmVjZWlwdHMiOjAsImNvbXBvbmVudHMiOlt7Im5hbWUiOiJmaXJtd2FyZSIsInZlcnNpb24iOiIzLjEuMCIsImRlcGxveW1lbnRfaWQiOiIweGEiLCJpbnN0YWxsZWQiOnRydWUsInN1cGVydmlzZWQiOmZhbHNlLCJwaGFzZSI6bnVsbCwicmVzdGFydHMiOm51bGwsImxhc3RfZXhpdCI6bnVsbCwic2luY2VfbXMiOm51bGx9XSwiaGVhbHRoIjoiZGVncmFkZWQiLCJyZWFzb25zIjpbInB1Yi9zdWIgcXVldWUgb2Ygc3ZjIDEwMCUgZnVsbCBmb3IgMTgwIHMiLCJNUVRUIGJyaWRnZSBkaXNjb25uZWN0ZWQgZm9yIDE1MCBzOiBDb25uZWN0aW9uIHJlZnVzZWQgKG9zIGVycm9yIDExMSkiLCJzdHJlYW0gbWV0cmljczogNCBtZXNzYWdlcyByZXRpcmVkIGJlZm9yZSBleHBvcnQiLCJzdHJlYW0gbWV0cmljcyBleHBvcnQgZmFpbGluZyAoNiBjb25zZWN1dGl2ZSk6IGRlc3RpbmF0aW9uIGFuc3dlcmVkIDUwMyBTZXJ2aWNlIFVuYXZhaWxhYmxlIl0sInNlcnZpY2VzIjp7InZlcnNpb24iOjEsIm1lc3NhZ2luZyI6eyJzdWJzY3JpcHRpb25zIjozLCJxdWV1ZWQiOjEwMDIsInJlZnVzZWQiOjUsImRyb3BwZWQiOjAsInF1ZXVlcyI6W3sicHJpbmNpcGFsIjoic3ZjIiwic3Vic2NyaXB0aW9ucyI6MSwicXVldWVkIjoxMDAwLCJmaWxsX3BlcmNlbnQiOjEwMCwiZnVsbF9zaW5jZV9tcyI6MTc5MjExMjg4MDAwMCwicmVmdXNlZCI6NSwicmVmdXNlZF9yZWNlbnQiOjIsImRyb3BwZWQiOjAsImRyb3BwZWRfcmVjZW50IjowfSx7InByaW5jaXBhbCI6IkBicmlkZ2UvMCIsInN1YnNjcmlwdGlvbnMiOjEsInF1ZXVlZCI6MiwiZmlsbF9wZXJjZW50IjowLCJmdWxsX3NpbmNlX21zIjpudWxsLCJyZWZ1c2VkIjowLCJyZWZ1c2VkX3JlY2VudCI6MCwiZHJvcHBlZCI6MCwiZHJvcHBlZF9yZWNlbnQiOjB9XSwib21pdHRlZCI6MH0sImJyaWRnZSI6eyJjb25uZWN0ZWQiOmZhbHNlLCJzaW5jZV9tcyI6MTc5MjExMjkxMDAwMCwiY29ubmVjdHMiOjEsInJlZnVzZWQiOjAsInJlZnVzZWRfcmVjZW50IjowLCJyZWplY3RlZCI6MSwicmVqZWN0ZWRfcmVjZW50IjowLCJsYXN0X2Vycm9yIjoiQ29ubmVjdGlvbiByZWZ1c2VkIChvcyBlcnJvciAxMTEpIn0sInN0cmVhbXMiOnsic3RyZWFtcyI6W3sibmFtZSI6Im1ldHJpY3MiLCJieXRlcyI6MTAxMCwibWF4X3NpemUiOjEwMjQsImZpbGxfcGVyY2VudCI6OTgsIm1lc3NhZ2VzIjoxMCwib3ZlcndyaXRlIjp0cnVlLCJyZWplY3RlZCI6MCwicmVqZWN0ZWRfcmVjZW50IjowLCJleHBvcnQiOnsibGFnIjoxMCwibG9zdCI6NCwibG9zdF9yZWNlbnQiOjQsImJhdGNoZXMiOjIsImZhaWx1cmVzIjo2LCJjb25zZWN1dGl2ZV9mYWlsdXJlcyI6NiwibGFzdF9zdWNjZXNzX21zIjoxNzkyMTEyNzAwMDAwLCJsYXN0X2Vycm9yIjoiZGVzdGluYXRpb24gYW5zd2VyZWQgNTAzIFNlcnZpY2UgVW5hdmFpbGFibGUifX1dLCJvbWl0dGVkIjowfSwic2hhZG93cyI6eyJzaGFkb3dzIjoxLCJub3RpZmljYXRpb25zX3JlZnVzZWQiOjAsIm5vdGlmaWNhdGlvbnNfcmVmdXNlZF9yZWNlbnQiOjAsInN5bmMiOlt7Im5hbWUiOiIiLCJjb25mbGljdHMiOjEsImNvbmZsaWN0c19yZWNlbnQiOjEsImZhaWx1cmVzIjowLCJjb25zZWN1dGl2ZV9mYWlsdXJlcyI6MCwibGFzdF9zdWNjZXNzX21zIjoxNzkyMTEzMDUwMDAwLCJsYXN0X2Vycm9yIjpudWxsfV0sIm9taXR0ZWQiOjB9fX0=",
+      "signature": "AJfupzPjCndAoZ8U5Ykr33YyFp3wHlgPuQvgyvIov8NmdRrdMjd9hEc7IUeIPV+CuXaPTh0rnowYEjBpUDuP5AbqSmxj4pxSCr71UHsTLsX5lUd2rr6+e5JCHuppFEbSLA=="
     }
   },
   "status": [
