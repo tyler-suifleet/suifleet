@@ -202,9 +202,29 @@ async fn main() -> anyhow::Result<()> {
             "Removed leftover artifacts from a previous run"
         );
     }
+    // Before any component runs: their log lines are covered from here on.
+    logs::initialize(&cfg.runtime.state_dir)?;
+    // Committed components start again on every daemon start (bootstrap/reboot).
+    let mut supervisor = supervisor::Supervisor::open(
+        &cfg.runtime.state_dir,
+        supervisor::Settings {
+            startup: Duration::from_secs(cfg.runtime.component_startup_seconds),
+            ready_timeout: Duration::from_secs(cfg.runtime.component_ready_timeout_seconds),
+            stop_timeout: Duration::from_secs(cfg.runtime.component_stop_timeout_seconds),
+            max_restarts: cfg.runtime.component_max_restarts,
+            max_memory_bytes: cfg.apply.max_memory_bytes,
+            overlay_dir: cfg.components.configuration_overlay_dir.clone(),
+        },
+    )?;
+    supervisor.configure_recovery(cfg.components.recovery_commands.clone());
+    let configs = configuration::Store::open(&cfg.runtime.state_dir, &cfg.components.configuration_overlay_dir)?;
+    // Resolve completed application recovery before service tasks or stream
+    // loading can observe the superseded generation after a crash.
+    let recovered = supervisor.recoveries_for_start();
+    for name in recovered.keys() { configs.restore(name, supervisor.configuration(name)?.as_ref())?; }
+    services::startup_recovery(&cfg, &mut journal, &recovered)?;
     let mut ipc_server = cfg.ipc.as_ref().map(ipc::bind).transpose()?;
     let mut ipc_messages = ipc::Messages::default();
-    services::recover_activation(&cfg, &journal.state.services)?;
     let service_runtime = std::sync::Arc::new(std::sync::Mutex::new(services::Runtime::open(
         &cfg, &journal.state.services, signer.clone(), streams::Binding {
             chain_identifier: sui.manifest().chain_identifier.clone(),
@@ -223,22 +243,6 @@ async fn main() -> anyhow::Result<()> {
     service_runtime.lock().unwrap().shadow_store = shadow_store.clone();
     let runner = ApplyRunner::new(cfg.apply.clone());
     let store = components::Store::open(&cfg.runtime.state_dir, &cfg.components);
-    // Before any component runs: their log lines are covered from here on.
-    logs::initialize(&cfg.runtime.state_dir)?;
-    // Committed components start again on every daemon start (bootstrap/reboot).
-    let mut supervisor = supervisor::Supervisor::open(
-        &cfg.runtime.state_dir,
-        supervisor::Settings {
-            startup: Duration::from_secs(cfg.runtime.component_startup_seconds),
-            ready_timeout: Duration::from_secs(cfg.runtime.component_ready_timeout_seconds),
-            stop_timeout: Duration::from_secs(cfg.runtime.component_stop_timeout_seconds),
-            max_restarts: cfg.runtime.component_max_restarts,
-            max_memory_bytes: cfg.apply.max_memory_bytes,
-            overlay_dir: cfg.components.configuration_overlay_dir.clone(),
-        },
-    )?;
-    supervisor.configure_recovery(cfg.components.recovery_commands.clone());
-    let configs = configuration::Store::open(&cfg.runtime.state_dir, &cfg.components.configuration_overlay_dir)?;
     // The daemon is ready before its components are: bootstrap waits up to a
     // readiness timeout per component, which would otherwise exceed the
     // unit's start deadline and restart the daemon into the same bootstrap.

@@ -590,3 +590,45 @@ pub async fn commit(cfg: &Config, journal: &mut crate::state::Journal, next: BTr
     runtime.lock().unwrap().resume().map_err(|e| RecoveryRequired(e.to_string()))?;
     Ok(())
 }
+
+/// A supervisor recovery receipt can precede the service journal replacement.
+/// Settle it before opening streams or starting exporters: loading the obsolete
+/// generation first could retire data that the recovered generation retains.
+pub fn startup_recovery(cfg: &Config, journal: &mut crate::state::Journal, recovered: &BTreeMap<String,String>) -> anyhow::Result<()> {
+    recover_activation(cfg,&journal.state.services)?;
+    if recovered.is_empty() && journal.state.services.is_empty() { return Ok(()); }
+    for (name,deployment) in recovered {
+        if let Some(previous) = journal.state.last_known_good.get(name).filter(|c| &c.deployment_id == deployment).cloned() {
+            journal.state.current.insert(name.clone(),deployment.clone());
+            journal.state.components.insert(name.clone(),previous);
+        } else {
+            anyhow::ensure!(journal.state.components.get(name).is_some_and(|c| c.confirmed && &c.deployment_id == deployment),
+                "application recovery receipt has no retained component identity");
+        }
+    }
+    let previous = journal.state.services.clone();
+    if !reconcile(&mut journal.state,recovered) { journal.save()?; return Ok(()); }
+    let next = std::mem::replace(&mut journal.state.services,previous.clone());
+    let old = effective(cfg,&previous)?;
+    let target = effective(cfg,&next)?;
+    let wanted: BTreeSet<_> = target.streams.iter().flat_map(|s| s.definitions.iter().map(|d| d.name.clone())).collect();
+    let retiring: Vec<_> = old.streams.iter().flat_map(|s| s.definitions.iter().map(|d| d.name.clone())).filter(|n| !wanted.contains(n)).collect();
+    journal.require_service_reader()?;
+    begin_activation(cfg,&next,&target)?;
+    let staged = (|| {
+        let settings = target.streams.as_ref().or(old.streams.as_ref());
+        settings.map(|s| streams::Store::stage_projection(&cfg.runtime.state_dir.join("streams"),s.quota(),
+            target.streams.as_ref().map_or(&[][..],|s| s.definitions.as_slice()),crate::telemetry::now_ms(),true,&retiring)).transpose()
+    })();
+    let staged = match staged {
+        Ok(staged) => staged,
+        Err(error) => { recover_activation(cfg,&previous)?; return Err(error); }
+    };
+    journal.state.services = next;
+    // On uncertain durability, leave the intent and read-only staged handle
+    // for the next start to resolve from the actual on-disk journal decision.
+    journal.save()?;
+    recover_activation(cfg,&journal.state.services)?;
+    drop(staged);
+    Ok(())
+}

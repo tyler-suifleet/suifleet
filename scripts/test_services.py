@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import test_ota
@@ -226,10 +227,13 @@ def run():
 
                 temporary_services = service('c', 'temporary')
                 temporary_services['streams'].update(max_streams=3, max_total_bytes=12288)
+                temporary_services['streams']['definitions'][0]['time_to_live_seconds'] = 1
                 deploy('0x8021', '2.1', temporary_services, run='exec sleep 300', restart='on-failure')
                 wait_for(lambda: outcome('0x8021') == 1, 'runtime-recoverable generation did not apply', process)
                 assert ipc('publish', 'temporary', 1)['ok'] and not ipc('publish', 'new')['ok']
                 assert ipc('stream_append', 'c', 'preserve-c')['ok']
+                before_recovery = journal()
+                metadata_before_recovery = {p: p.read_bytes() for p in (state / 'streams').glob('*/meta.json')}
                 runtime_pid = json.loads((state / 'supervised/status.json').read_text())['app']['pid']
                 os.kill(runtime_pid, signal.SIGKILL)
                 wait_for(lambda: journal()['components']['app']['deployment_id'] == '0x802' and
@@ -241,6 +245,21 @@ def run():
                 assert ipc('stream_append', 'c', 'denied', admin=True)['error'] == 'retired'
                 assert ipc('stream_create', 'quota-debt', {'max_size': 1024, 'strategy_on_full': 'RejectNewData'}, admin=True)['error'] == 'quota'
                 wait_for(lambda: mqtt.received('b/new', 8), 'restored bridge did not forward after runtime rollback', process)
+                # Reconstruct a crash cut point from actual durable records:
+                # supervisor recovery completed, but service journal/metadata
+                # still describe the applied newer generation. Its one-second
+                # TTL must not run before startup settles the recovery receipt.
+                stop()
+                (state / 'state.json').write_text(json.dumps(before_recovery))
+                for path, data in metadata_before_recovery.items():
+                    path.write_bytes(data)
+                time.sleep(1.1)
+                start()
+                wait_for(lambda: journal()['services']['app']['deployment'] == '0x802', 'cold-start recovery receipt not settled', process)
+                assert ipc('stream_read', 'c', admin=True)['data']['messages'][0]['payload'] == 'preserve-c'
+                assert ipc('stream_describe', 'c', admin=True)['data']['retired']
+                assert ipc('publish', 'new', 9)['ok'] and not ipc('publish', 'temporary')['ok']
+                print('PASS: cold-start recovery receipt settles before obsolete TTL/export configuration can load', flush=True)
                 assert ipc('stream_append', 'b', 'after-rollback')['ok']
                 wait_for(lambda: 'after-rollback' in receiver.received('b').values(), 'restored export did not deliver after runtime rollback', process)
                 assert outcome('0x8021') == 1, 'runtime rollback rewrote historical command completion'

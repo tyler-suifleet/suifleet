@@ -662,6 +662,9 @@ pub fn preflight_disk(dir: &Path, quota: Quota, definitions: &[Definition]) -> a
     preflight_disk_transition(dir, quota, definitions, false)
 }
 pub fn preflight_disk_transition(dir: &Path, quota: Quota, definitions: &[Definition], recovery: bool) -> anyhow::Result<()> {
+    preflight_disk_projection(dir,quota,definitions,recovery,&[])
+}
+fn preflight_disk_projection(dir: &Path, quota: Quota, definitions: &[Definition], recovery: bool, retiring: &[String]) -> anyhow::Result<()> {
     let mut sizes = BTreeMap::new();
     if dir.exists() {
         for entry in std::fs::read_dir(dir)? {
@@ -679,7 +682,7 @@ pub fn preflight_disk_transition(dir: &Path, quota: Quota, definitions: &[Defini
         def.validate()?;
         anyhow::ensure!(sizes.contains_key(&def.name) || !dir.join(dir_name(&def.name)).exists(), "stream has orphaned state");
     }
-    check_inventory(&sizes,quota,definitions,&[])?;
+    check_inventory(&sizes,quota,definitions,retiring)?;
     Ok(())
 }
 
@@ -778,9 +781,12 @@ impl Store {
         Self::stage_transition(dir,quota,definitions,now_ms,false)
     }
     pub fn stage_transition(dir: &Path, quota: Quota, definitions: &[Definition], now_ms: u64, recovery: bool) -> anyhow::Result<Self> {
-        preflight_disk_transition(dir, quota, definitions, recovery)?;
+        Self::stage_projection(dir,quota,definitions,now_ms,recovery,&[])
+    }
+    pub fn stage_projection(dir: &Path, quota: Quota, definitions: &[Definition], now_ms: u64, recovery: bool, retiring: &[String]) -> anyhow::Result<Self> {
+        preflight_disk_projection(dir, quota, definitions, recovery, retiring)?;
         let mut store = Self::open_mode(dir, quota, now_ms, false)?;
-        store.reconfigure_transition(quota, definitions,&[],recovery)?;
+        store.reconfigure_transition(quota, definitions,retiring,recovery)?;
         Ok(store)
     }
     pub fn restore_metadata(&mut self) -> anyhow::Result<()> {
