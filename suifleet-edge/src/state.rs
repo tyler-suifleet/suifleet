@@ -10,6 +10,9 @@ use std::{
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct State {
+    /// Authenticated service generations, committed with deployment success.
+    #[serde(default)]
+    pub services: std::collections::BTreeMap<String, crate::services::Generation>,
     pub binding: String,
     /// Pre-apply notices/deferrals are not execution intents or status receipts.
     #[serde(default)]

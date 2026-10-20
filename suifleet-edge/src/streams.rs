@@ -82,7 +82,7 @@ pub struct ExportConfig {
     /// http(s) destination; batches are POSTed here.
     pub url: String,
     /// Optional `Authorization: Bearer` token for the destination (file, 0600).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bearer_token_file: Option<PathBuf>,
     #[serde(default = "default_batch_messages")]
     pub batch_max_messages: usize,
@@ -126,11 +126,11 @@ pub struct Definition {
     pub strategy_on_full: Strategy,
     #[serde(default)]
     pub persistence: Persistence,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub time_to_live_seconds: Option<u64>,
     #[serde(default)]
     pub discard_exported: bool,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub export: Option<ExportConfig>,
 }
 
@@ -297,7 +297,7 @@ fn crc32(parts: &[&[u8]]) -> u32 {
 /// A stream's directory name: fixed length, so every valid name (up to 255
 /// bytes) fits the 255-byte file name limit. `Store::open` reads the name from
 /// `meta.json`, never from the directory.
-fn dir_name(name: &str) -> String {
+pub(crate) fn dir_name(name: &str) -> String {
     hex::encode(Sha256::digest(name.as_bytes()))
 }
 
@@ -608,6 +608,33 @@ fn redact_url(url: &str) -> String {
     }).unwrap_or_default()
 }
 
+/// Read metadata only when a previously disabled stream service is enabled.
+/// Conservatively refuse shrinking a persisted reservation without a live
+/// inventory; no segment is loaded, truncated, retired or evicted here.
+pub fn preflight_disk(dir: &Path, quota: Quota, definitions: &[Definition]) -> anyhow::Result<()> {
+    let mut sizes = BTreeMap::new();
+    if dir.exists() {
+        for entry in std::fs::read_dir(dir)? {
+            let path = entry?.path().join("meta.json");
+            if !path.exists() { continue; }
+            let meta: Meta = serde_json::from_slice(&std::fs::read(path)?)?;
+            if let Some(next) = definitions.iter().find(|d| d.name == meta.definition.name) {
+                anyhow::ensure!(next.persistence == meta.definition.persistence && next.max_size >= meta.definition.max_size,
+                    "cannot shrink or change persisted stream while enabling service");
+            }
+            sizes.insert(meta.definition.name, meta.definition.max_size);
+        }
+    }
+    for def in definitions {
+        def.validate()?;
+        anyhow::ensure!(sizes.contains_key(&def.name) || !dir.join(dir_name(&def.name)).exists(), "stream has orphaned state");
+        sizes.insert(def.name.clone(), def.max_size);
+    }
+    let total = sizes.values().try_fold(0u64, |a,b| a.checked_add(*b)).ok_or_else(|| anyhow::anyhow!("quota overflow"))?;
+    anyhow::ensure!(sizes.len() <= quota.max_streams && total <= quota.max_total_bytes, "stored and declared streams exceed quota");
+    Ok(())
+}
+
 pub struct Store {
     dir: PathBuf,
     quota: Quota,
@@ -644,6 +671,60 @@ impl Store {
         Ok(store)
     }
 
+    /// Read-only live preflight: never load/truncate segments or run retention.
+    pub fn preflight(&self, quota: Quota, definitions: &[Definition]) -> anyhow::Result<()> {
+        let mut sizes: BTreeMap<String, u64> = self.streams.iter().map(|(n, s)| (n.clone(), s.def.max_size)).collect();
+        for def in definitions {
+            def.validate()?;
+            if let Some(old) = self.streams.get(&def.name) {
+                anyhow::ensure!(old.def.persistence == def.persistence, "stream persistence cannot change");
+                anyhow::ensure!(old.bytes <= def.max_size, "stream shrink would discard retained data");
+            } else {
+                anyhow::ensure!(!self.dir.join(dir_name(&def.name)).exists(), "stream has unreadable or orphaned state");
+            }
+            sizes.insert(def.name.clone(), def.max_size);
+        }
+        let total = sizes.values().try_fold(0u64, |a, b| a.checked_add(*b)).ok_or_else(|| anyhow::anyhow!("stream quota overflow"))?;
+        anyhow::ensure!(sizes.len() <= quota.max_streams && total <= quota.max_total_bytes, "stored and declared streams exceed quota");
+        Ok(())
+    }
+
+    /// Activate metadata without retention/eviction. Removed declarations keep
+    /// their data but lose exports; data deletion remains an explicit operation.
+    pub fn reconfigure(&mut self, quota: Quota, definitions: &[Definition]) -> anyhow::Result<()> {
+        self.preflight(quota, definitions)?;
+        let previous: Vec<_> = self.streams.values().map(|s| s.def.clone()).collect();
+        let old_quota = self.quota;
+        self.quota = quota;
+        let result = (|| {
+            for stream in self.streams.values_mut() {
+                stream.def.export = None;
+                stream.def.discard_exported = false;
+            }
+            for def in definitions {
+                if let Some(stream) = self.streams.get_mut(&def.name) {
+                    stream.def = def.clone();
+                } else {
+                    self.create(def.clone())?;
+                }
+            }
+            for stream in self.streams.values() { stream.save_meta()?; }
+            Ok(())
+        })();
+        if result.is_err() {
+            self.quota = old_quota;
+            let names: std::collections::BTreeSet<_> = previous.iter().map(|d| d.name.clone()).collect();
+            let added: Vec<_> = self.streams.keys().filter(|n| !names.contains(*n)).cloned().collect();
+            for name in added { self.delete(&name)?; }
+            for def in previous {
+                let stream = self.streams.get_mut(&def.name).unwrap();
+                stream.def = def;
+                stream.save_meta()?;
+            }
+        }
+        result
+    }
+
     fn open(dir: &Path, quota: Quota, now_ms: u64) -> anyhow::Result<Self> {
         std::fs::create_dir_all(dir)?;
         let mut streams = BTreeMap::new();
@@ -667,6 +748,13 @@ impl Store {
             Some(stream) => Ok(stream),
             None => fail("not-found", format!("no stream {name:?}")),
         }
+    }
+
+    pub fn quota(&self) -> Quota { self.quota }
+    pub fn discard_uncommitted(&mut self, directories: &[String]) -> anyhow::Result<()> {
+        let names: Vec<_> = self.streams.keys().filter(|name| directories.contains(&dir_name(name))).cloned().collect();
+        for name in names { self.delete(&name)?; }
+        Ok(())
     }
 
     pub fn names(&self) -> Vec<String> {
@@ -1043,6 +1131,28 @@ mod tests {
         path
     }
     const QUOTA: Quota = Quota { max_streams: 32, max_total_bytes: 1 << 26 };
+
+    #[test]
+    fn deployment_preflight_never_truncates_retires_or_evicts() {
+        let path = dir("deployment-preflight");
+        let definition = def("data", 4096, Strategy::OverwriteOldestData);
+        let mut store = Store::start(&path, QUOTA, &[definition.clone()], 0).unwrap();
+        store.append("data", &vec![1; 2000], 0).unwrap();
+        let meta = std::fs::read(path.join(dir_name("data")).join("meta.json")).unwrap();
+        let segment = path.join(dir_name("data")).join("00000000000000000000.seg");
+        let before = store.streams["data"].bytes;
+        let mut shrink = definition.clone(); shrink.max_size = 1024;
+        assert!(store.preflight(QUOTA, &[shrink]).is_err());
+        assert!(store.preflight(Quota { max_streams: 1, max_total_bytes: 1024 }, &[definition.clone()]).is_err());
+        let mut ttl = definition.clone(); ttl.time_to_live_seconds = Some(1);
+        store.preflight(QUOTA, &[ttl.clone()]).unwrap();
+        assert_eq!(store.streams["data"].bytes, before);
+        assert_eq!(std::fs::read(path.join(dir_name("data")).join("meta.json")).unwrap(),meta);
+        store.reconfigure(QUOTA, &[ttl]).unwrap();
+        assert_eq!(store.streams["data"].bytes, before, "activation never retires data");
+        let _ = segment;
+        std::fs::remove_dir_all(path).unwrap();
+    }
 
     fn code(error: &anyhow::Error) -> &'static str {
         error.downcast_ref::<StreamError>().map_or("other", |e| e.code)

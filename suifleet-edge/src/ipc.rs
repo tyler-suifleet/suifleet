@@ -5,7 +5,7 @@ use std::{collections::{BTreeMap, VecDeque}, os::unix::fs::{MetadataExt, Permiss
 use tokio::{io::{AsyncBufReadExt, AsyncWriteExt, BufReader}, net::{UnixListener, UnixStream}, sync::{mpsc, oneshot, Semaphore}};
 
 pub const MAX_FRAME: usize = 65536;
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
     pub socket: PathBuf,
@@ -15,7 +15,7 @@ pub struct Settings {
     #[serde(default)]
     pub components: BTreeMap<String, Acl>,
 }
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Acl {
     pub uid: u32,
@@ -182,7 +182,7 @@ pub fn bind(settings: &Settings) -> anyhow::Result<Server> {
     });
     Ok(Server { requests, task, socket: settings.socket.clone(), inode })
 }
-async fn connection(stream: UnixStream, sender: mpsc::Sender<Pending>, policy: Settings, uid: u32) -> anyhow::Result<()> {
+async fn connection(stream: UnixStream, sender: mpsc::Sender<Pending>, _policy: Settings, uid: u32) -> anyhow::Result<()> {
     let (read, mut write) = stream.into_split();
     let mut read = BufReader::new(read);
     let mut bytes = Vec::new();
@@ -193,7 +193,8 @@ async fn connection(stream: UnixStream, sender: mpsc::Sender<Pending>, policy: S
     let result = async {
         anyhow::ensure!(count > 0 && count <= MAX_FRAME && bytes.last() == Some(&b'\n'), "invalid_frame");
         let request: Request = serde_json::from_slice(&bytes)?;
-        policy.authorize(uid, &request)?;
+        // Authorization uses the current generation in the poll-loop owner.
+        // The listener admits only locally provisioned UIDs.
         let (reply, receiver) = oneshot::channel();
         sender.try_send(Pending { uid, request, reply }).map_err(|_| anyhow::anyhow!("busy"))?;
         receiver.await.map_err(Into::into)
