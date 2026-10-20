@@ -72,10 +72,9 @@ def satisfies(version: str, requirement: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# AWS recipe ComponentDependencies -> catalog disposition (proposed guidance
-# for the open SF-037 translation ticket). Until SF-037 adopts it,
-# aws.greengrass.* dependencies stay rejected; this model fixes what each
-# one will mean.
+# AWS recipe ComponentDependencies -> catalog disposition. The SF-037
+# translator (dapp/src/lib/greengrass-recipe.ts) implements the same
+# classification and executes managed-dependency-cases.json against it.
 # ---------------------------------------------------------------------------
 def classify_dependency(catalog: dict, name, spec) -> dict:
     if not isinstance(name, str) or not isinstance(spec, dict) or set(spec) - {"VersionRequirement", "DependencyType"}:

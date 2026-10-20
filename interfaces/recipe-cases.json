@@ -1029,5 +1029,338 @@
       },
       "configuration": {}
     }
+  },
+  {
+    "name": "services-v1",
+    "valid": true,
+    "value": {
+      "schemaVersion": "1.3",
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {},
+      "configuration": {},
+      "services": {
+        "version": 1,
+        "grants": {
+          "app": {
+            "operations": [
+              "publish"
+            ],
+            "pubsub_policies": [
+              {
+                "operations": [
+                  "aws.greengrass#PublishToTopic"
+                ],
+                "resources": [
+                  "sensor/*"
+                ]
+              }
+            ]
+          }
+        },
+        "pubsub": {
+          "max_messages_per_subscription": 12
+        },
+        "streams": {
+          "definitions": [
+            {
+              "name": "samples",
+              "max_size": 4096,
+              "strategy_on_full": "RejectNewData"
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "services-unsupported-recipe",
+    "valid": false,
+    "value": {
+      "schemaVersion": "1.2",
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {},
+      "configuration": {},
+      "services": {
+        "version": 1,
+        "grants": {
+          "app": {
+            "operations": [
+              "publish"
+            ],
+            "pubsub_policies": [
+              {
+                "operations": [
+                  "aws.greengrass#PublishToTopic"
+                ],
+                "resources": [
+                  "sensor/*"
+                ]
+              }
+            ]
+          }
+        },
+        "pubsub": {
+          "max_messages_per_subscription": 12
+        },
+        "streams": {
+          "definitions": [
+            {
+              "name": "samples",
+              "max_size": 4096,
+              "strategy_on_full": "RejectNewData"
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "services-unknown-version",
+    "valid": false,
+    "value": {
+      "schemaVersion": "1.3",
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {},
+      "configuration": {},
+      "services": {
+        "version": 2,
+        "grants": {
+          "app": {
+            "operations": [
+              "publish"
+            ],
+            "pubsub_policies": [
+              {
+                "operations": [
+                  "aws.greengrass#PublishToTopic"
+                ],
+                "resources": [
+                  "sensor/*"
+                ]
+              }
+            ]
+          }
+        },
+        "pubsub": {
+          "max_messages_per_subscription": 12
+        },
+        "streams": {
+          "definitions": [
+            {
+              "name": "samples",
+              "max_size": 4096,
+              "strategy_on_full": "RejectNewData"
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "services-unknown-field",
+    "valid": false,
+    "value": {
+      "schemaVersion": "1.3",
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {},
+      "configuration": {},
+      "services": {
+        "version": 1,
+        "grants": {
+          "app": {
+            "operations": [
+              "publish"
+            ],
+            "pubsub_policies": [
+              {
+                "operations": [
+                  "aws.greengrass#PublishToTopic"
+                ],
+                "resources": [
+                  "sensor/*"
+                ]
+              }
+            ]
+          }
+        },
+        "pubsub": {
+          "max_messages_per_subscription": 12
+        },
+        "streams": {
+          "definitions": [
+            {
+              "name": "samples",
+              "max_size": 4096,
+              "strategy_on_full": "RejectNewData"
+            }
+          ]
+        },
+        "reboot": true
+      }
+    }
+  },
+  {
+    "name": "services-no-uid-grants",
+    "valid": false,
+    "value": {
+      "schemaVersion": "1.3",
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {},
+      "configuration": {},
+      "services": {
+        "version": 1,
+        "grants": {
+          "app": {
+            "operations": [
+              "publish"
+            ],
+            "pubsub_policies": [
+              {
+                "operations": [
+                  "aws.greengrass#PublishToTopic"
+                ],
+                "resources": [
+                  "sensor/*"
+                ]
+              }
+            ],
+            "uid": 123
+          }
+        },
+        "pubsub": {
+          "max_messages_per_subscription": 12
+        },
+        "streams": {
+          "definitions": [
+            {
+              "name": "samples",
+              "max_size": 4096,
+              "strategy_on_full": "RejectNewData"
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "services-no-null-section",
+    "valid": false,
+    "value": {
+      "schemaVersion": "1.3",
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {},
+      "configuration": {},
+      "services": {
+        "version": 1,
+        "grants": {
+          "app": {
+            "operations": [
+              "publish"
+            ],
+            "pubsub_policies": [
+              {
+                "operations": [
+                  "aws.greengrass#PublishToTopic"
+                ],
+                "resources": [
+                  "sensor/*"
+                ]
+              }
+            ]
+          }
+        },
+        "pubsub": null,
+        "streams": {
+          "definitions": [
+            {
+              "name": "samples",
+              "max_size": 4096,
+              "strategy_on_full": "RejectNewData"
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "services-no-tuple",
+    "valid": false,
+    "value": {
+      "schemaVersion": "1.3",
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {},
+      "configuration": {},
+      "services": [
+        1,
+        {}
+      ]
+    }
+  },
+  {
+    "name": "services-quota-range",
+    "valid": false,
+    "value": {
+      "schemaVersion": "1.3",
+      "componentName": "app",
+      "componentVersion": "v1",
+      "artifactBlobId": "blob_1",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {},
+      "configuration": {},
+      "services": {
+        "version": 1,
+        "grants": {
+          "app": {
+            "operations": [
+              "publish"
+            ],
+            "pubsub_policies": [
+              {
+                "operations": [
+                  "aws.greengrass#PublishToTopic"
+                ],
+                "resources": [
+                  "sensor/*"
+                ]
+              }
+            ]
+          }
+        },
+        "pubsub": {
+          "max_messages_per_subscription": 12
+        },
+        "streams": {
+          "definitions": [
+            {
+              "name": "samples",
+              "max_size": 4096,
+              "strategy_on_full": "RejectNewData"
+            }
+          ],
+          "max_streams": 0
+        }
+      }
+    }
   }
 ]

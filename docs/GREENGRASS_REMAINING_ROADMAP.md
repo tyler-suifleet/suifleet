@@ -23,13 +23,20 @@ whole-catalog compatibility. Closing SF-064 completes the plan, not its children
 | SNS publication/routing | [SF-078](https://github.com/tyler-suifleet/suifleet/issues/132) | SF-032/057 | Actual messages/attributes, caller/topic grants, throttling, ambiguous responses and bounded retries |
 | Local support debug console | [SF-079](https://github.com/tyler-suifleet/suifleet/issues/133) | SF-019/027/053 | Local authenticated API/UI, scoped operations, origin/CSRF defenses, redaction, bounded queries and audit |
 
-Linux x86_64/aarch64/arm remains the initial prototype phase. Windows and macOS
-remain implementation gaps, not permanent exclusions. SF-076 adds the native
+Linux x86_64/aarch64/arm remains the initial prototype phase. SF-074 adds the
+[Windows local operator runtime](WINDOWS_RUNTIME.md); catalog/chain/rich IPC
+support remains unsupported. Platform gaps are not permanent exclusions. SF-076 adds the native
 32-bit Linux x86 daemon, packaging and catalog selection
 ([LINUX_X86.md](LINUX_X86.md)); managed adapters there remain outside the phase. Each
 platform ticket must declare exact supported OS/ABI versions and exercise its own
 runner; a Linux x86_64 result cannot establish another platform's support.
 Platform scripts retain OS installation, reboot and firmware recovery ownership.
+
+SF-072 now provides a [native H.264/Matroska media adapter](KINESIS_VIDEO.md) with
+[local runtime evidence](validation/sf072-video.json). Its protocol-specific
+configuration and media contract supplement the reference delivery model below.
+Full AWS connector control-plane compatibility and live AWS acceptance remain
+roadmap/unrun; local execution does not establish whole-catalog parity.
 
 ## Executable functional contracts, version 1
 
@@ -90,6 +97,10 @@ expectations. No AWS upstream behavior is newly asserted by these local contract
   queries. A configured origin alone is never authentication.
 
 ## Evidence and closure
+
+SF-077 adds the [native Firehose exporter](FIREHOSE.md), with actual SDK HTTP
+emulator and durable daemon stream evidence. The pure reference fields below
+remain specification-only; live AWS and physical target acceptance are unrun.
 
 SF-076 adds the [32-bit Linux x86 runtime](LINUX_X86.md): an i686 build and
 release bundle, `x86` catalog selection and the real-daemon suites run in a

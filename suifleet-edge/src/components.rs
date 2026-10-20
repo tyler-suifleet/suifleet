@@ -137,6 +137,26 @@ impl Store {
         write_atomic(&self.root.join("recipes").join(sha256), bytes)
     }
 
+    /// Persist recency in mtimes across store reopen/restart. Advancing beyond
+    /// every entry avoids ties for rapid accesses on coarse-resolution filesystems.
+    /// These are logical ordering timestamps and may run ahead of wall time.
+    fn touch_artifact(&self, path: &Path) -> anyhow::Result<()> {
+        let mut latest = std::time::SystemTime::now();
+        for entry in std::fs::read_dir(self.root.join("artifacts"))? {
+            latest = latest.max(entry?.metadata()?.modified()?);
+        }
+        let next = latest
+            .checked_add(std::time::Duration::from_secs(2))
+            .ok_or_else(|| anyhow::anyhow!("cache recency timestamp overflow"))?;
+        let file = std::fs::File::options().append(true).open(path)?;
+        file.set_modified(next)?;
+        anyhow::ensure!(
+            file.metadata()?.modified()? > latest,
+            "filesystem cannot preserve cache recency ordering"
+        );
+        Ok(())
+    }
+
     /// Copy a cached artifact to `dest` if one with this digest verifies.
     /// The copy is held to the download size limit and free-space reserve.
     fn artifact(&self, walrus: &WalrusClient, sha256: &str, dest: &Path) -> anyhow::Result<bool> {
@@ -154,10 +174,7 @@ impl Store {
             return Ok(false);
         }
         // Recently used entries are evicted last.
-        std::fs::File::options()
-            .append(true)
-            .open(&source)?
-            .set_modified(std::time::SystemTime::now())?;
+        self.touch_artifact(&source)?;
         Ok(true)
     }
 
@@ -174,8 +191,8 @@ impl Store {
         let temporary = target.with_extension("tmp");
         copy_or_remove(path, &temporary)?;
         std::fs::File::open(&temporary)?.sync_all()?;
-        std::fs::rename(temporary, target)?;
-        Ok(())
+        std::fs::rename(temporary, &target)?;
+        self.touch_artifact(&target)
     }
 
     /// Evict cached artifacts oldest first beyond `max_bytes`, never those in `keep`.
@@ -363,6 +380,7 @@ impl<'a> Loader<'a> {
         };
         let bytes = recipe(self.walrus, self.store, &value.recipe_blob_ids[i], &value.recipe_sha256s[i]).await?;
         let parsed: Recipe = serde_json::from_slice(&bytes)?;
+        anyhow::ensure!(parsed.services.is_none(), "dependency recipes cannot own deployment services; declare them in the authenticated root recipe");
         let dependencies =
             parsed.validate_component(name, version, &value.artifact_sha256s[i], self.allow_commands)?;
         self.loaded.insert(
@@ -485,8 +503,18 @@ mod tests {
             std::fs::write(&path, content).unwrap();
             let sha = sha256_file(&path).unwrap();
             store.save_artifact(&walrus, &sha, &path).unwrap();
+            // Whole-second, widely spaced mtimes: no scheduling or sub-second
+            // filesystem resolution assumption. The cache hit below must move
+            // the first entry after even these future timestamps.
+            let modified = std::time::UNIX_EPOCH
+                + std::time::Duration::from_secs(2_000_000_000 + i as u64 * 60);
+            std::fs::File::options()
+                .append(true)
+                .open(store.root.join("artifacts").join(&sha))
+                .unwrap()
+                .set_modified(modified)
+                .unwrap();
             digests.push(sha);
-            std::thread::sleep(std::time::Duration::from_millis(20));
         }
         let out = work.join("out");
         assert!(store.artifact(&walrus, &digests[0], &out).unwrap());
@@ -499,6 +527,49 @@ mod tests {
         std::fs::write(store.root.join("artifacts").join(&digests[0]), b"corrupt").unwrap();
         assert!(!store.artifact(&walrus, &digests[0], &out).unwrap(), "corrupt cache entries are discarded");
         assert!(!store.root.join("artifacts").join(&digests[0]).exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn artifact_recency_survives_rapid_writes_and_store_reopen() {
+        let (dir, store) = store("recency", 5);
+        let walrus = limits(1 << 20, 0);
+        let input = dir.join("input");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut entries = Vec::new();
+        for content in [b"12345", b"abcde", b"vwxyz"] {
+            std::fs::write(&input, content).unwrap();
+            let sha = sha256_file(&input).unwrap();
+            store.save_artifact(&walrus, &sha, &input).unwrap();
+            let path = store.root.join("artifacts").join(sha);
+            let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+            if let Some((_, previous)) = entries.last() {
+                assert!(modified > *previous, "rapid writes have distinct recency");
+            }
+            entries.push((path, modified));
+        }
+        // Reopen: recency must not rely on an in-memory counter.
+        let reopened = Store::open(
+            &dir,
+            &ComponentsConfig {
+                offline_candidates: OfflinePolicy::Cached,
+                cache_max_bytes: 5,
+                ..ComponentsConfig::default()
+            },
+        )
+        .unwrap();
+        let sha = entries[0].0.file_name().unwrap().to_str().unwrap();
+        assert!(reopened.artifact(&walrus, sha, &input).unwrap());
+        assert!(
+            std::fs::metadata(&entries[0].0)
+                .unwrap()
+                .modified()
+                .unwrap()
+                > entries[2].1
+        );
+        assert_eq!(reopened.evict(&BTreeSet::new()).unwrap(), 10);
+        assert!(entries[0].0.exists());
+        assert!(!entries[1].0.exists() && !entries[2].0.exists());
         std::fs::remove_dir_all(dir).unwrap();
     }
 

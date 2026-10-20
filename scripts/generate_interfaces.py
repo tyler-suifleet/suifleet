@@ -17,6 +17,18 @@ from check_contract_interfaces import ROOT, summarize, read_summary
 
 CATALOG = ROOT / "interfaces/fleet-v1.json"
 RECIPE = ROOT / "interfaces/recipe.schema.json"
+MANAGED = ROOT / "interfaces/compat/managed-components.json"
+
+
+def managed_ts(header):
+    """The SF-038 managed-component fields the SF-037 recipe translator classifies by."""
+    managed = json.loads(MANAGED.read_text())
+    components = [{key: row[key] for key in ("name", "disposition", "tickets", "adapter", "discontinued") if key in row}
+                  for row in managed["components"]]
+    adapters = [{key: row[key] for key in ("id", "specification", "implementation_ticket", "replaces", "depends_on")}
+                for row in managed["adapters"]]
+    catalog = {"components": components, "adapters": adapters}
+    return header + "export const MANAGED_CATALOG = " + json.dumps(catalog, indent=2) + " as const;\n"
 
 
 def move_type(value):
@@ -128,6 +140,10 @@ def recipe_ts_type(schema):
         return " | ".join(json.dumps(value) for value in schema["enum"])
     if isinstance(schema["type"], list):
         return " | ".join("null" if t == "null" else t for t in schema["type"])
+    if schema["type"] in ("integer", "number"):
+        return "number"
+    if schema["type"] == "boolean":
+        return "boolean"
     if schema["type"] == "string":
         return "string"
     if schema["type"] == "array":
@@ -149,7 +165,9 @@ def recipe_rust_fields(schema, top=False):
         if name == "description":
             rust_name = "_description"
         required = name in schema.get("required", [])
-        if name == "componentDependencies":
+        if name == "services":
+            datatype = "crate::services::Services"
+        elif name == "componentDependencies":
             datatype = "std::collections::BTreeMap<String, ComponentDependency>"
         elif field["type"] == "object" and field.get("additionalProperties") is True:
             datatype = "serde_json::Map<String, serde_json::Value>"
@@ -174,10 +192,13 @@ def recipe_rust_fields(schema, top=False):
 
 
 TS_VALIDATOR = '''
-type Schema = { $schema?: string; $id?: string; type: string | string[]; const?: string | null; enum?: string[]; pattern?: string; maxLength?: number; items?: Schema; maxItems?: number; required?: string[]; properties?: Record<string, Schema>; propertyNames?: Schema; additionalProperties?: boolean | Schema };
+type Schema = { $schema?: string; $id?: string; type: string | string[]; const?: string | number | null; minimum?: number; maximum?: number; enum?: string[]; pattern?: string; maxLength?: number; items?: Schema; maxItems?: number; required?: string[]; properties?: Record<string, Schema>; propertyNames?: Schema; additionalProperties?: boolean | Schema };
 function validate(schema: Schema, value: unknown, path: string): void {
   const type = value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
-  if (!(Array.isArray(schema.type) ? schema.type : [schema.type]).includes(type)) throw new Error(`${path}: invalid type`);
+  if (schema.type === "integer" && (!Number.isSafeInteger(value))) throw new Error(`${path}: expected integer`);
+  if (schema.minimum !== undefined && (value as number) < schema.minimum) throw new Error(`${path}: below minimum`);
+  if (schema.maximum !== undefined && (value as number) > schema.maximum) throw new Error(`${path}: above maximum`);
+  if (!(Array.isArray(schema.type) ? schema.type : [schema.type]).includes(schema.type === "integer" && type === "number" ? "integer" : type)) throw new Error(`${path}: invalid type`);
   if (Object.prototype.hasOwnProperty.call(schema, "const") && value !== schema.const) throw new Error(`${path}: unsupported version`);
   if (schema.enum && !schema.enum.includes(value as string)) throw new Error(`${path}: unsupported value`);
   if (schema.pattern && (typeof value !== "string" || new RegExp(schema.pattern).exec(value)?.[0] !== value)) throw new Error(`${path}: invalid encoding`);
@@ -205,6 +226,7 @@ export function assertComponentRecipe(value: unknown): asserts value is Componen
   // Dependencies were introduced by schema 1.1; a 1.0 consumer would reject the field.
   const recipe = value as ComponentRecipe;
   if (recipe.schemaVersion === "1.0" && recipe.componentDependencies !== undefined) throw new Error("recipe.componentDependencies: requires schemaVersion 1.1");
+  if (recipe.services !== undefined && recipe.schemaVersion !== "1.3") throw new Error("recipe.services: requires schemaVersion 1.3");
   assertRecipeConfiguration(recipe);
 }
 /** Configuration rules shared with the daemon (suifleet-edge/src/configuration.rs). */
@@ -213,7 +235,7 @@ function assertRecipeConfiguration(recipe: ComponentRecipe): void {
   const configuration = recipe.configuration as { defaults?: Record<string, unknown>; merge?: Record<string, unknown>; reset?: string[]; confidential?: string[] };
   const used = Object.keys(configuration).length > 0 || (recipe.lifecycle as { validate?: unknown }).validate !== undefined;
   // Older daemons reject these fields: they need a 1.2 consumer.
-  if (used && recipe.schemaVersion !== "1.2") throw new Error("recipe.configuration: requires schemaVersion 1.2");
+  if (used && !["1.2", "1.3"].includes(recipe.schemaVersion)) throw new Error("recipe.configuration: requires schemaVersion 1.2");
   if (used && !recipe.lifecycle.install && !recipe.lifecycle.run) throw new Error("recipe.configuration: needs an install or run command to receive it");
   for (const name of ["defaults", "merge"] as const) {
     const document = configuration[name];
@@ -360,6 +382,7 @@ def generate(catalog, recipe):
         ROOT / "dapp/src/lib/fleet-protocol.ts": "\n".join(ts) + "\n",
         ROOT / "dapp/src/lib/recipe-schema.ts": "\n".join(recipe_ts).rstrip() + "\n",
         ROOT / "dapp/src/lib/protocol-version.ts": "\n".join(metadata) + "\n",
+        ROOT / "dapp/src/lib/greengrass-managed.ts": managed_ts(header),
         ROOT / "suifleet-edge/src/protocol.rs": "\n".join(rust) + "\n",
         ROOT / "contracts/tests/protocol_value_tests.move": "\n".join(move) + "\n",
     }

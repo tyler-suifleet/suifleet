@@ -157,6 +157,7 @@ export function describeServices(services: ServicesHealth): string[] {
 
 /** The daemon's signed snapshot: schema 1, or schema 2 with a services section. */
 export interface Snapshot {
+  service_configuration_sha256?: string;
   schema: number;
   chain_identifier: string;
   registry: string;

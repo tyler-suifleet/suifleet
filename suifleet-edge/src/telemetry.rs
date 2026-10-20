@@ -93,6 +93,9 @@ pub struct ComponentHealth {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Snapshot {
+    /// Digest of the redacted effective IPC service summary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_configuration_sha256: Option<String>,
     pub schema: u64,
     pub chain_identifier: String,
     pub registry: String,
@@ -157,6 +160,7 @@ pub fn bounded(text: &str, limit: usize) -> String {
 /// What the daemon's own durable state says is installed and running.
 #[derive(Debug, Default)]
 pub struct Inventory {
+    pub service_configuration_sha256: Option<String>,
     pub components: Vec<ComponentHealth>,
     pub reasons: Vec<String>,
     pub pending_receipts: u32,
@@ -167,7 +171,9 @@ pub struct Inventory {
 /// Read the journal and supervisor files (each replaced atomically by its
 /// writer), never the live structures of the poll loop.
 pub fn inventory(state_dir: &Path) -> Inventory {
+    use sha2::Digest;
     let mut inventory = Inventory::default();
+    inventory.service_configuration_sha256 = std::fs::read(state_dir.join("services-effective.json")).ok().map(|b| hex::encode(sha2::Sha256::digest(&b)));
     let journal: Option<crate::state::State> = std::fs::read(state_dir.join("state.json"))
         .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok());
@@ -346,6 +352,7 @@ pub fn snapshot(binding: &Binding, signer: &str, seq: u64, dropped: u64, sync: S
         }
         let health = if listed.is_empty() { Health::Healthy } else { Health::Degraded };
         let snapshot = Snapshot {
+            service_configuration_sha256: inventory.service_configuration_sha256.clone(),
             schema: Snapshot::schema_for(services.is_some()),
             chain_identifier: binding.chain_identifier.clone(),
             registry: binding.registry.clone(),
@@ -551,8 +558,9 @@ pub struct Task {
     pub buffer_max: usize,
     pub signer: Arc<dyn TxSigner>,
     pub sync: SharedSync,
-    /// Pub/sub, bridge, streams and shadows, when enabled (SF-085).
-    pub services: crate::service_health::Sources,
+    /// Pub/sub, bridge, streams and shadows, when enabled (SF-085). Read at
+    /// each heartbeat: deployments can enable, replace or disable them.
+    pub services: Arc<std::sync::Mutex<crate::services::Runtime>>,
 }
 
 impl Task {
@@ -562,7 +570,8 @@ impl Task {
         let seq = spool.next_seq(now)?;
         let sync = self.sync.lock().unwrap().clone();
         let mut inventory = inventory(&self.state_dir);
-        inventory.services = crate::service_health::collect(&self.services, tracker, self.binding.started_ms, now);
+        let sources = self.services.lock().unwrap().health_sources();
+        inventory.services = crate::service_health::collect(&sources, tracker, self.binding.started_ms, now);
         let snapshot = snapshot(&self.binding, &self.signer.address(), seq, spool.dropped(), sync, inventory, now);
         spool.push(seq, &seal(self.signer.as_ref(), &snapshot)?)?;
         if let Err(error) = flush(http, &self.url, spool).await {
@@ -773,6 +782,7 @@ mod tests {
             reasons: (0..100).map(|_| long.clone()).collect(),
             pending_receipts: 0,
             services: None,
+            service_configuration_sha256: None,
         };
         let sync = SyncHealth { last_success_ms: Some(now), consecutive_failures: 1, last_error: Some(long.clone()) };
         let s = snapshot(&binding(), "0xs", 1, 0, sync, inventory, now);
