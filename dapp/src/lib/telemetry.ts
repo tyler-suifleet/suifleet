@@ -17,6 +17,10 @@ import { moveType, requireManifest } from "./deployment-manifest";
 /** Fleet indexer base URL with telemetry enabled; empty when not configured. */
 export const TELEMETRY_URL = process.env.NEXT_PUBLIC_SUIFLEET_TELEMETRY_URL ?? "";
 export const TELEMETRY_SCHEMA = 1;
+/** A snapshot with a services section (SF-085); without one it stays schema 1. */
+export const TELEMETRY_SCHEMA_SERVICES = 2;
+export const SERVICES_VERSION = 1;
+const MAX_SERVICE_ENTRIES = 32;
 export const MIN_INTERVAL_SECONDS = 10;
 export const MAX_INTERVAL_SECONDS = 3600;
 export const OFFLINE_INTERVALS = 3;
@@ -34,7 +38,124 @@ export interface ComponentHealth {
   since_ms: number | null;
 }
 
-/** The daemon's signed snapshot, schema 1. */
+export interface QueueHealth {
+  principal: string; subscriptions: number; queued: number; fill_percent: number; full_since_ms: number | null;
+  refused: number; refused_recent: number; dropped: number; dropped_recent: number;
+}
+export interface BridgeHealth {
+  connected: boolean; since_ms: number; connects: number; refused: number; refused_recent: number;
+  rejected: number; rejected_recent: number; last_error: string | null;
+}
+export interface ExportHealth {
+  lag: number; lost: number; lost_recent: number; batches: number; failures: number; consecutive_failures: number;
+  last_success_ms: number | null; last_error: string | null;
+}
+export interface StreamHealth {
+  name: string; bytes: number; max_size: number; fill_percent: number; messages: number; overwrite: boolean;
+  rejected: number; rejected_recent: number; export: ExportHealth | null;
+}
+export interface ShadowSyncHealth {
+  name: string; conflicts: number; conflicts_recent: number; failures: number; consecutive_failures: number;
+  last_success_ms: number | null; last_error: string | null;
+}
+/**
+ * On-device service health (SF-085): counters and states of durable pub/sub,
+ * its MQTT bridge, streams and shadow sync. Never payloads, topics, URLs or
+ * credentials.
+ */
+export interface ServicesHealth {
+  version: number;
+  messaging: { subscriptions: number; queued: number; refused: number; dropped: number; queues: QueueHealth[]; omitted: number } | null;
+  bridge: BridgeHealth | null;
+  streams: { streams: StreamHealth[]; omitted: number } | null;
+  shadows: { shadows: number; notifications_refused: number; notifications_refused_recent: number; sync: ShadowSyncHealth[]; omitted: number } | null;
+}
+
+type Field = "count" | "percent" | "bool" | "name" | "error" | "time?" | ((value: unknown) => boolean);
+
+const isCount = (v: unknown) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+const utf8Length = (v: string) => new TextEncoder().encode(v).length;
+const FIELD: Record<Exclude<Field, (value: unknown) => boolean>, (v: unknown) => boolean> = {
+  count: isCount,
+  percent: (v) => isCount(v) && (v as number) <= 100,
+  bool: (v) => typeof v === "boolean",
+  name: (v) => typeof v === "string" && utf8Length(v) <= 128,
+  error: (v) => v === null || (typeof v === "string" && utf8Length(v) <= 200),
+  "time?": (v) => v === null || isCount(v),
+};
+
+/** Exactly these keys, each valid (the daemon and indexer refuse unknown fields too). */
+function shaped(value: unknown, fields: Record<string, Field>): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const keys = Object.keys(value);
+  return keys.length === Object.keys(fields).length && keys.every((key) => {
+    const check = fields[key];
+    if (!check) return false;
+    return (typeof check === "function" ? check : FIELD[check])((value as Record<string, unknown>)[key]);
+  });
+}
+const list = (fields: Record<string, Field>) => (v: unknown) => Array.isArray(v) && v.length <= MAX_SERVICE_ENTRIES && v.every((e) => shaped(e, fields));
+const orNull = (fields: Record<string, Field>) => (v: unknown) => v === null || shaped(v, fields);
+
+const SERVICES: Record<string, Field> = {
+  version: (v) => v === SERVICES_VERSION,
+  messaging: orNull({ subscriptions: "count", queued: "count", refused: "count", dropped: "count", omitted: "count",
+    queues: list({ principal: "name", subscriptions: "count", queued: "count", fill_percent: "percent", full_since_ms: "time?",
+      refused: "count", refused_recent: "count", dropped: "count", dropped_recent: "count" }) }),
+  bridge: orNull({ connected: "bool", since_ms: "count", connects: "count", refused: "count", refused_recent: "count",
+    rejected: "count", rejected_recent: "count", last_error: "error" }),
+  streams: orNull({ omitted: "count", streams: list({ name: "name", bytes: "count", max_size: "count", fill_percent: "percent",
+    messages: "count", overwrite: "bool", rejected: "count", rejected_recent: "count",
+    export: orNull({ lag: "count", lost: "count", lost_recent: "count", batches: "count", failures: "count",
+      consecutive_failures: "count", last_success_ms: "time?", last_error: "error" }) }) }),
+  shadows: orNull({ shadows: "count", notifications_refused: "count", notifications_refused_recent: "count", omitted: "count",
+    sync: list({ name: "name", conflicts: "count", conflicts_recent: "count", failures: "count", consecutive_failures: "count",
+      last_success_ms: "time?", last_error: "error" }) }),
+};
+
+/** Whether a signed services section has exactly the version-1 shape and bounds. */
+export function validServices(value: unknown): value is ServicesHealth {
+  return shaped(value, SERVICES);
+}
+
+/** One line per service and per entry, for the device's health details. */
+export function describeServices(services: ServicesHealth): string[] {
+  const lines: string[] = [];
+  const more = (omitted: number) => omitted > 0 ? [`… and ${omitted} more not listed (snapshot size limit)`] : [];
+  if (services.messaging) {
+    const m = services.messaging;
+    lines.push(`Pub/sub: ${m.subscriptions} subscriptions, ${m.queued} queued, ${m.refused} refused, ${m.dropped} dropped`);
+    for (const q of m.queues) {
+      lines.push(`  ${q.principal}: ${q.queued} queued (${q.fill_percent}% full${q.full_since_ms !== null ? ` since ${new Date(q.full_since_ms).toISOString()}` : ""}), `
+        + `${q.refused_recent} refused and ${q.dropped_recent} dropped since the previous report`);
+    }
+    lines.push(...more(m.omitted));
+  }
+  if (services.bridge) {
+    const b = services.bridge;
+    lines.push(`MQTT bridge: ${b.connected ? "connected" : "disconnected"} since ${new Date(b.since_ms).toISOString()}, ${b.connects} connects, `
+      + `${b.refused} refused, ${b.rejected} rejected${b.last_error ? ` (${b.last_error})` : ""}`);
+  }
+  if (services.streams) {
+    for (const st of services.streams.streams) {
+      const e = st.export;
+      lines.push(`Stream ${st.name}: ${st.fill_percent}% of ${st.max_size} bytes, ${st.messages} messages, ${st.rejected} appends rejected`
+        + (e ? `; export ${e.lag} behind, ${e.lost} lost before export, ${e.consecutive_failures} consecutive failures${e.last_error ? ` (${e.last_error})` : ""}` : ""));
+    }
+    lines.push(...more(services.streams.omitted));
+  }
+  if (services.shadows) {
+    const sh = services.shadows;
+    lines.push(`Shadows: ${sh.shadows}, ${sh.notifications_refused} notifications refused`);
+    for (const s of sh.sync) {
+      lines.push(`  sync ${JSON.stringify(s.name)}: ${s.conflicts} conflicts settled, ${s.consecutive_failures} consecutive failures${s.last_error ? ` (${s.last_error})` : ""}`);
+    }
+    lines.push(...more(sh.omitted));
+  }
+  return lines;
+}
+
+/** The daemon's signed snapshot: schema 1, or schema 2 with a services section. */
 export interface Snapshot {
   schema: number;
   chain_identifier: string;
@@ -53,6 +174,7 @@ export interface Snapshot {
   components: ComponentHealth[];
   health: string;
   reasons: string[];
+  services?: ServicesHealth;
 }
 
 /** One stored report as the indexer serves it. */
@@ -82,6 +204,8 @@ export interface DeviceHealth extends Assessment {
   observedMs?: number;
   daemonVersion?: string;
   components: ComponentHealth[];
+  /** From the verified report (SF-085), when the device runs these services. */
+  services?: ServicesHealth;
 }
 
 /**
@@ -162,7 +286,11 @@ export async function verifyReport(report: Pick<Report, "message" | "signature">
     return "undecodable snapshot";
   }
   const manifest = requireManifest();
-  if (snapshot.schema !== TELEMETRY_SCHEMA) return `unsupported telemetry schema ${snapshot.schema}`;
+  if (snapshot.schema === TELEMETRY_SCHEMA_SERVICES) {
+    if (!validServices(snapshot.services)) return "invalid services section";
+  } else if (snapshot.schema !== TELEMETRY_SCHEMA || "services" in snapshot) {
+    return `unsupported telemetry schema ${snapshot.schema}`;
+  }
   if (snapshot.chain_identifier !== manifest.chain_identifier
       || normalizeSuiAddress(snapshot.registry) !== normalizeSuiAddress(manifest.shared_objects.registry.id)) {
     return "report is bound to another deployment";
@@ -193,6 +321,7 @@ export async function deviceHealth(identity: Identity | undefined, indexed: Inde
     ...assess(false, { snapshot, receivedMs: report.received_ms }, serverNowMs),
     lastSeenMs: report.received_ms, lastSeenAgeMs: Math.max(0, serverNowMs - report.received_ms), observedMs: snapshot.observed_ms, daemonVersion: snapshot.daemon_version,
     components: snapshot.components,
+    services: snapshot.services,
   };
 }
 
