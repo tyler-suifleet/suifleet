@@ -17,6 +17,18 @@ from check_contract_interfaces import ROOT, summarize, read_summary
 
 CATALOG = ROOT / "interfaces/fleet-v1.json"
 RECIPE = ROOT / "interfaces/recipe.schema.json"
+MANAGED = ROOT / "interfaces/compat/managed-components.json"
+
+
+def managed_ts(header):
+    """The SF-038 managed-component fields the SF-037 recipe translator classifies by."""
+    managed = json.loads(MANAGED.read_text())
+    components = [{key: row[key] for key in ("name", "disposition", "tickets", "adapter", "discontinued") if key in row}
+                  for row in managed["components"]]
+    adapters = [{key: row[key] for key in ("id", "specification", "implementation_ticket", "replaces", "depends_on")}
+                for row in managed["adapters"]]
+    catalog = {"components": components, "adapters": adapters}
+    return header + "export const MANAGED_CATALOG = " + json.dumps(catalog, indent=2) + " as const;\n"
 
 
 def move_type(value):
@@ -370,6 +382,7 @@ def generate(catalog, recipe):
         ROOT / "dapp/src/lib/fleet-protocol.ts": "\n".join(ts) + "\n",
         ROOT / "dapp/src/lib/recipe-schema.ts": "\n".join(recipe_ts).rstrip() + "\n",
         ROOT / "dapp/src/lib/protocol-version.ts": "\n".join(metadata) + "\n",
+        ROOT / "dapp/src/lib/greengrass-managed.ts": managed_ts(header),
         ROOT / "suifleet-edge/src/protocol.rs": "\n".join(rust) + "\n",
         ROOT / "contracts/tests/protocol_value_tests.move": "\n".join(move) + "\n",
     }

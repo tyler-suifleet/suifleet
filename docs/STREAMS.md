@@ -120,8 +120,12 @@ The device key signs it as a Sui personal message, which can never be valid as a
 
 - **Native API.** Streams are reached through native IPC operations and the Python SDK, not the Stream Manager SDK or its wire protocol.
 - **Eviction and numbering.** Eviction is per message, where AWS evicts whole segments. A crash can skip sequence numbers, but never reuses them.
-- **Export targets.** Exports go to HTTP(S) destinations with device-signed manifests. Kinesis Data Streams and S3 are the SF-058 adapter; SiteWise is SF-064. The `export` definitions here are the operator's, not the component's.
+- **Export targets.** The built-in exporter sends device-signed HTTP(S) batches. The [SF-058 companion](STREAM_EXPORTERS.md) adds Kinesis/S3 through scoped AWS credentials and durable checkpoints; SiteWise remains SF-064. The `export` definitions here are the operator's, not the component's.
 - **Retention options.** `time_to_live_seconds` and `discard_exported` exist; AWS's `flushOnWrite` (sync every append) is always on for `File` streams.
+
+SF-077 adds a separate [Firehose exporter](FIREHOSE.md) over native IPC reads,
+with its own destination-bound checkpoint and scoped credentials. It does not
+change the HTTP export protocol or native stream retention.
 
 ## Evidence
 
@@ -131,7 +135,7 @@ The device key signs it as a Sui personal message, which can never be valid as a
 | `make test-streams` | The real daemon as root with two real component UIDs, the chain simulator and a local export receiver, without network. ACLs, quota, operator-only exports and declared streams. Offline buffering: 25 messages exported in order in signed batches after the destination returns. Interrupted export: a batch stored but answered 500 is retried with the same Idempotency-Key, and the checkpoint advances only after a 2xx. Crash: kill -9 with unexported messages plus a torn tail; everything intact, numbering resumes without reuse, export resumes. Clean restart: numbering exact. `full` from a full stream. Overwrite retention while offline: `evicted` reads, and the export reports the retired count. Lowered quota: a restart with `max_total_bytes` below the stored streams is refused, and with the old limits every message remains. The receiver checks every body hash and verifies every signature independently (BLAKE2b intent digest and RFC 8032 Ed25519 in Python), and rejects forged manifests. Receipt: [sf034-streams.json](validation/sf034-streams.json) |
 
 **Not yet covered:**
-- AWS export targets (SF-058, SF-064);
+- live AWS-account acceptance of Kinesis/S3 (SF-058), and SiteWise implementation (SF-064);
 - a disk-full host filesystem beyond the configured quota;
 - a receiver that verifies against the live registry (#11);
 - physical Pi power loss (#32).

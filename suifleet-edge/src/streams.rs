@@ -130,9 +130,14 @@ pub struct Definition {
     pub time_to_live_seconds: Option<u64>,
     #[serde(default)]
     pub discard_exported: bool,
+    /// Operator-selected external SDK exporter; never component-created.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub external_export: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub export: Option<ExportConfig>,
 }
+
+fn is_false(value: &bool) -> bool { !value }
 
 /// AWS-style resource glob: only `*` is special (any run of characters).
 pub fn glob(pattern: &str, name: &str) -> bool {
@@ -153,7 +158,7 @@ pub fn handle(store: &Mutex<Store>, declared: &[String], operation: &str, name: 
         "stream_create" => {
             let mut def = payload.clone();
             let object = def.as_object_mut().ok_or_else(|| StreamError { code: "invalid", oldest: None, detail: "payload is a stream definition".into() })?;
-            if object.contains_key("export") {
+            if object.contains_key("export") || object.contains_key("external_export") {
                 return fail("invalid", "exports are declared by the operator, not by components");
             }
             if object.get("name").is_some_and(|n| n != name) {
@@ -190,6 +195,14 @@ pub fn handle(store: &Mutex<Store>, declared: &[String], operation: &str, name: 
                 out
             }).collect::<Vec<_>>()}))
         }
+        "stream_export_ack" => {
+            if !store.get(name)?.def.external_export {
+                return fail("invalid", "stream has no operator-selected external exporter");
+            }
+            let sequence = payload.get("sequence").and_then(Value::as_u64)
+                .ok_or_else(|| anyhow::anyhow!("sequence must be a non-negative integer"))?;
+            Ok(json!({"exported": store.export_ack(name, sequence, now)?}))
+        }
         "stream_describe" => store.describe(name, now),
         _ => anyhow::bail!("unknown stream operation"),
     }
@@ -210,7 +223,11 @@ impl Definition {
         if self.time_to_live_seconds.is_some_and(|t| !(1..=31_536_000).contains(&t)) {
             return fail("invalid", "time_to_live_seconds must be 1..=31536000");
         }
-        if self.discard_exported && self.export.is_none() {
+        if self.external_export && (self.export.is_some() || self.persistence != Persistence::File
+            || self.time_to_live_seconds.is_some() || self.strategy_on_full != Strategy::RejectNewData) {
+            return fail("invalid", "external exports require File/RejectNewData without TTL or HTTP export");
+        }
+        if self.discard_exported && self.export.is_none() && !self.external_export {
             return fail("invalid", "discard_exported needs an export");
         }
         if let Some(export) = &self.export {
@@ -592,6 +609,7 @@ impl Stream {
         json!({
             "name": self.def.name, "max_size": self.def.max_size, "strategy_on_full": self.def.strategy_on_full,
             "persistence": self.def.persistence, "time_to_live_seconds": self.def.time_to_live_seconds,
+            "external_export": self.def.external_export, "discard_exported": self.def.discard_exported,
             // The last assigned number (numbering may skip ahead after a crash).
             "oldest": self.oldest, "newest": self.entries.back().map_or(self.next as i64 - 1, |e| e.sequence as i64),
             "exported": self.exported, "bytes": self.bytes,
@@ -699,6 +717,7 @@ impl Store {
         let result = (|| {
             for stream in self.streams.values_mut() {
                 stream.def.export = None;
+                stream.def.external_export = false;
                 stream.def.discard_exported = false;
             }
             for def in definitions {
@@ -879,8 +898,12 @@ impl Store {
             return fail("invalid", "cannot acknowledge beyond the newest message");
         }
         if sequence as i64 > stream.exported {
+            let previous = stream.exported;
             stream.exported = sequence as i64;
-            stream.save_meta()?;
+            if let Err(error) = stream.save_meta() {
+                stream.exported = previous;
+                return Err(error);
+            }
             stream.retire(now_ms)?;
         }
         Ok(stream.exported)
@@ -1207,7 +1230,7 @@ mod tests {
 
     fn def(name: &str, max: u64, strategy: Strategy) -> Definition {
         Definition { name: name.into(), max_size: max, strategy_on_full: strategy, persistence: Persistence::File,
-            time_to_live_seconds: None, discard_exported: false, export: None }
+            time_to_live_seconds: None, discard_exported: false, external_export: false, export: None }
     }
 
     #[test]
@@ -1702,6 +1725,47 @@ mod tests {
         assert!(glob("sensor-*", "sensor-a") && glob("*", "x") && glob("a*b*c", "aXbYc") && !glob("sensor-*", "other") && !glob("a", "ab"));
         drop(store);
         let _ = std::fs::remove_dir_all(&path);
+    }
+
+    #[test]
+    fn external_exports_are_operator_only_lossless_and_acknowledged_durably() {
+        let path = dir("external");
+        let mut d = def("external", 4096, Strategy::RejectNewData);
+        d.external_export = true;
+        d.discard_exported = true;
+        assert!(d.validate().is_ok());
+        assert!(serde_json::to_value(def("legacy", 4096, Strategy::RejectNewData)).unwrap().get("external_export").is_none());
+        for bad in [
+            Definition { persistence: Persistence::Memory, ..d.clone() },
+            Definition { time_to_live_seconds: Some(1), ..d.clone() },
+            Definition { strategy_on_full: Strategy::OverwriteOldestData, ..d.clone() },
+        ] {
+            assert!(bad.validate().is_err());
+        }
+        let mut store = Store::open(&path, QUOTA, 0).unwrap();
+        store.create(d).unwrap();
+        store.append("external", b"remote-confirmed", 0).unwrap();
+        store.append("external", b"pending", 0).unwrap();
+        // A failed metadata write must not leave an in-memory acknowledgement.
+        let temporary = path.join(dir_name("external")).join("meta.tmp");
+        std::fs::create_dir(&temporary).unwrap();
+        assert!(store.export_ack("external", 0, 0).is_err());
+        assert_eq!(store.describe("external", 0).unwrap()["exported"], -1);
+        assert_eq!(store.read("external", 0, 1, 2, 0).unwrap().len(), 2);
+        std::fs::remove_dir(temporary).unwrap();
+        let store = Mutex::new(store);
+        let all = |_: &str| true;
+        let error = handle(&store, &[], "stream_create", "forged",
+            &json!({"max_size": 4096, "strategy_on_full": "RejectNewData", "external_export": true}), &all).unwrap_err();
+        assert_eq!(code(&error), "invalid");
+        assert!(handle(&store, &[], "stream_export_ack", "external", &json!({"sequence": 2}), &all).is_err());
+        handle(&store, &[], "stream_export_ack", "external", &json!({"sequence": 0}), &all).unwrap();
+        drop(store);
+        let mut store = Store::open(&path, QUOTA, 0).unwrap();
+        assert_eq!(store.describe("external", 0).unwrap()["exported"], 0);
+        assert_eq!(store.read("external", 1, 1, 1, 0).unwrap()[0].data, b"pending");
+        drop(store);
+        let _ = std::fs::remove_dir_all(path);
     }
 
     #[test]

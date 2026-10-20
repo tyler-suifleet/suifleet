@@ -127,7 +127,7 @@
    "disposition": "roadmap", "tickets": ["SF-064", "SF-071"], "native_equivalent": "Operator processing component", "notes": "Component identifier not confirmed on a fetched page. AWS states the data processing pack is closed to new customers."},
   {"name": "aws.iot.EdgeConnectorForKVS", "display": "Edge connector for Kinesis Video Streams", "family": "industrial", "aws": {"type": "generic", "os": ["linux"], "open_source": false},
    "reference_version": "1.0.5", "disposition": "roadmap", "tickets": ["SF-064", "SF-072"], "native_equivalent": "Operator video component using the credential-provider adapter",
-   "notes": "Closed-source and Region-limited; an operator component can use the Apache-2.0 KVS producer SDK with credential-provider."},
+   "notes": "SF-072 implements the native H.264/Matroska durable media adapter with SF-057 credentials; local subprocess/emulator/FFmpeg evidence is docs/validation/sf072-video.json. Full connector SiteWise/TwinMaker/Secrets Manager control-plane compatibility stays roadmap; live AWS acceptance is unauthorized/unrun. See docs/KINESIS_VIDEO.md."},
   {"name": "aws.greengrass.StreamManager", "display": "Stream manager", "family": "cloud-export", "aws": {"type": "generic", "os": ["linux", "windows"], "open_source": false},
    "reference_version": "2.3.1", "disposition": "native", "tickets": ["SF-034"], "adapter": "stream-export-aws",
    "native_equivalent": "SF-034 durable streams; AWS destinations through the stream-export-aws adapter"},
@@ -185,18 +185,19 @@
     "environment": "Network-none container with a local mock credentials endpoint and CA",
     "deferred": ["Real AWS account role-alias exchange; needs separate user authorization for an AWS account (unrun)"]
    }},
-  {"id": "stream-export-aws", "specification": "complete", "implementation_ticket": "SF-058", "runtime_execution": "pending", "replaces": {"aws.greengrass.StreamManager": "2.3.1"},
+  {"id": "stream-export-aws", "specification": "complete", "implementation_ticket": "SF-058", "runtime_execution": "passed",
+   "runtime_evidence": "docs/validation/sf058-stream-export.json", "replaces": {"aws.greengrass.StreamManager": "2.3.1"},
    "summary": "SF-034 stream export destinations for Kinesis Data Streams (PutRecords) and Amazon S3 (multipart PutObject), using credential-provider and the SF-034 idempotent checkpoints.",
    "platforms": ["linux-x86_64", "linux-aarch64", "linux-arm"],
    "aws_services": ["Amazon Kinesis Data Streams (kinesis.<region>.amazonaws.com:443)", "Amazon S3 (*.s3.amazonaws.com:443)"],
-   "auth": "credential-provider credentials; the device role needs kinesis:PutRecords and kinesis:ListShards and s3:PutObject on the configured resources only.",
-   "licensing": "Clean-room exporter using the Apache-2.0 AWS SDK for Rust. Stream manager's SDK wire protocol is not reproduced.",
+   "auth": "SF-057 container credentials; Kinesis PutRecords on the selected stream; S3 PutObject/GetObject/AbortMultipartUpload on an exclusive prefix and ListBucketMultipartUploads for exact-key crash cleanup. Provision IAM/KMS separately.",
+   "licensing": "Clean-room Python companion using the existing Apache-2.0 boto3/botocore SDK from SF-057. Stream manager's SDK wire protocol is not reproduced.",
    "out_of_scope_destinations": {"IoTAnalyticsConfig": "AWS IoT Analytics was discontinued on 2025-12-15", "IoTSiteWiseConfig": "SiteWise export is SF-064 roadmap work", "HTTPConfig": "Generic HTTP export is native SF-034 scope"},
    "depends_on": ["SF-034", "SF-057"],
    "acceptance": {
     "reference_suites": ["stream-cases.json"],
     "runtime_tests": [
-     "Export checkpoints from stream-cases.json hold across exporter crash and restart (no gaps, no backwards moves)",
+     "Export checkpoint sequence outcomes from stream-cases.json hold across exporter crash and restart (no unexported records skipped, monotonic checkpoints; crash-reserved sequence gaps explicitly reported)",
      "Unmodified boto3 reads back exactly the exported records from a local Kinesis/S3 emulator (moto server, Apache-2.0)",
      "Throttling, 5xx and expired-credential responses retry with backoff and never advance the checkpoint",
      "Bandwidth limit and multipart minimum part size are enforced"

@@ -418,6 +418,9 @@
                     "required": [
                       "url"
                     ]
+                  },
+                  "external_export": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
