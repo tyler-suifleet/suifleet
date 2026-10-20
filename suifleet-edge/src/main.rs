@@ -2,6 +2,7 @@ mod ipc;
 mod catalog;
 mod control;
 mod apply;
+mod bridge;
 mod components;
 mod config;
 mod configuration;
@@ -10,9 +11,14 @@ mod deps;
 mod firmware;
 mod handoff;
 mod identity;
+mod logs;
+mod mqtt;
+mod platform;
 mod reconcile;
 mod recipe;
+mod redact;
 mod protocol;
+mod pubsub;
 #[cfg(test)]
 mod protocol_tests;
 #[cfg(test)]
@@ -22,6 +28,8 @@ mod signer_service;
 mod state;
 mod sui_client;
 mod supervisor;
+mod streams;
+mod shadows;
 mod telemetry;
 mod walrus_client;
 
@@ -100,12 +108,15 @@ async fn main() -> anyhow::Result<()> {
         args.len() == 1 || launched || check_config || helper || signer_service,
         "usage: suifleet [--launch | --provision KEY_PATH | --derive-address KEY_PATH | --enroll ENROLL_TOML | --check-config CONFIG_PATH | --self-check CONFIG_PATH | --console-token | --firmware-helper CONFIG | --signer-service SIGNER_TOML | --record-main-process PATH | --key-holder CONFIG_PATH | --verify-release BUNDLE_DIR TRUST_FILE [TARGET]]"
     );
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "suifleet=info".into()),
-        )
-        .init();
+    {
+        use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+        // The second layer writes the daemon's own log file once [logs] is on.
+        tracing_subscriber::registry()
+            .with(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "suifleet=info".into()))
+            .with(tracing_subscriber::fmt::layer())
+            .with(tracing_subscriber::fmt::layer().with_ansi(false).with_writer(logs::DaemonLog))
+            .init();
+    }
     if signer_service {
         // Runs as its own user, holding the device key (SF-053).
         return signer_service::serve(Path::new(&args[2]));
@@ -124,14 +135,24 @@ async fn main() -> anyhow::Result<()> {
             .unwrap_or_else(|_| PathBuf::from("/etc/suifleet/config.toml"))
     };
     let cfg = Config::load(&path)?;
+    if cfg.logs.is_some() && !check_config {
+        // From here on the daemon's own log is also written for shipping.
+        logs::enable_daemon_log(&cfg.runtime.state_dir)?;
+    }
     let started_ms = telemetry::now_ms();
     if !check_config && cfg.device.signer.as_ref().is_some_and(|signer| signer.kind == "service") {
         // Component processes run as this user: with the key in the signing
         // service, keep them from ptracing the daemon (and so signing as it)
         // or taking its descriptors. execve restores the default for each
         // component.
+        // (Linux only: configuration loading refuses this signer elsewhere.)
         // SAFETY: plain prctl on this process.
+        #[cfg(target_os = "linux")]
         anyhow::ensure!(unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) } == 0, "cannot make the daemon non-dumpable");
+    }
+    #[cfg(target_os = "macos")]
+    if cfg.device.signer.is_none() {
+        identity::ensure_private(&cfg.device.keypair_path)?;
     }
     // One signer for transactions and telemetry (a PKCS#11 module is
     // initialized once per process).
@@ -201,8 +222,37 @@ async fn main() -> anyhow::Result<()> {
         None => None,
     };
     let mut ipc_messages = ipc::Messages::default();
+    // Durable streams (SF-034): operator definitions are applied at start,
+    // and every stored stream must fit the configured quota.
+    let streams = match &cfg.streams {
+        Some(settings) => Some(std::sync::Arc::new(std::sync::Mutex::new(streams::Store::start(
+            &cfg.runtime.state_dir.join("streams"), settings.quota(), &settings.definitions, telemetry::now_ms())?))),
+        None => None,
+    };
+    // Durable pub/sub and its MQTT bridge (SF-032).
+    let durable = match &cfg.pubsub {
+        Some(settings) => Some(std::sync::Arc::new(std::sync::Mutex::new(
+            pubsub::Broker::open(&cfg.runtime.state_dir.join("pubsub"), settings.limits())?))),
+        None => None,
+    };
+    // Device shadows (SF-033); changes are announced on durable pub/sub.
+    let shadow_store = match &cfg.shadows {
+        Some(settings) => Some(std::sync::Arc::new(std::sync::Mutex::new(shadows::Store::open(
+            &cfg.runtime.state_dir.join("shadows"), settings.max_shadows, &settings.thing_name, durable.clone())?))),
+        None => None,
+    };
+    let bridge_task = match (&cfg.pubsub, &durable) {
+        (Some(settings), Some(broker)) => match &settings.bridge {
+            Some(bridge) => Some(tokio::spawn(bridge::Bridge::new(bridge.clone(), broker.clone(),
+                cfg.runtime.state_dir.join("pubsub/bridge.json"))?.run())),
+            None => None,
+        },
+        _ => None,
+    };
     let runner = ApplyRunner::new(cfg.apply.clone());
     let store = components::Store::open(&cfg.runtime.state_dir, &cfg.components);
+    // Before any component runs: their log lines are covered from here on.
+    logs::initialize(&cfg.runtime.state_dir)?;
     // Committed components start again on every daemon start (bootstrap/reboot).
     let mut supervisor = supervisor::Supervisor::open(
         &cfg.runtime.state_dir,
@@ -256,6 +306,56 @@ async fn main() -> anyhow::Result<()> {
             None
         }
     };
+    // Redacted remote logs beside it (validated to have [telemetry]).
+    let shipper = match (&cfg.logs, &cfg.telemetry) {
+        (Some(settings), Some(telemetry)) => Some(tokio::spawn(
+            logs::Task {
+                binding: logs::Binding {
+                    chain_identifier: sui.manifest().chain_identifier.clone(),
+                    registry: sui.manifest().shared_objects.registry.id.clone(),
+                    device_id: cfg.device.device_object_id.clone(),
+                },
+                url: logs::ingress_url(&telemetry.url)?,
+                state_dir: cfg.runtime.state_dir.clone(),
+                overlay_dir: cfg.components.configuration_overlay_dir.clone(),
+                interval_seconds: settings.interval_seconds,
+                max_lines: settings.max_lines_per_interval,
+                buffer_max: settings.buffer_max,
+                signer: signer.clone(),
+            }
+            .run(),
+        )),
+        _ => None,
+    };
+    let exporters: Vec<_> = match (&cfg.streams, &streams) {
+        (Some(settings), Some(store)) => settings.definitions.iter().filter_map(|def| def.export.clone().map(|export| {
+            tokio::spawn(streams::Exporter {
+                store: store.clone(),
+                stream: def.name.clone(),
+                config: export,
+                binding: streams::Binding {
+                    chain_identifier: sui.manifest().chain_identifier.clone(),
+                    registry: sui.manifest().shared_objects.registry.id.clone(),
+                    device_id: cfg.device.device_object_id.clone(),
+                },
+                signer: signer.clone(),
+            }.run())
+        })).collect(),
+        _ => Vec::new(),
+    };
+    let shadow_sync = match (&cfg.shadows, &shadow_store) {
+        (Some(settings), Some(store)) => settings.sync.clone().map(|config| tokio::spawn(shadows::Syncer {
+            store: store.clone(),
+            config,
+            binding: streams::Binding {
+                chain_identifier: sui.manifest().chain_identifier.clone(),
+                registry: sui.manifest().shared_objects.registry.id.clone(),
+                device_id: cfg.device.device_object_id.clone(),
+            },
+            signer: signer.clone(),
+        }.run())),
+        _ => None,
+    };
     // A new daemon is confirmed only after this complete local startup
     // (configuration, identity, chain validation, journal and supervisor).
     if let Some(update) = confirm_after_startup.take() {
@@ -308,7 +408,7 @@ async fn main() -> anyhow::Result<()> {
                         if pending.reply.is_closed() { continue; }
                         let result = tokio::select! {
                             result = local_request(&cfg, &sui, &walrus, &runner, store.as_ref(), &configs,
-                                &mut supervisor, &mut journal, &mut ipc_messages, pending.uid, &pending.request) => result,
+                                &mut supervisor, &mut journal, &mut ipc_messages, durable.as_deref(), streams.as_deref(), shadow_store.as_deref(), pending.uid, &pending.request) => result,
                             _ = &mut shutdown => { stopped = true; break; }
                         };
                         if let Err(error) = &result { warn!(operation = pending.request.operation, %error, "Local IPC request failed"); }
@@ -335,8 +435,25 @@ async fn main() -> anyhow::Result<()> {
         }
     }
     // Spooled snapshots stay for the next start.
+    if let Some(shipper) = shipper {
+        shipper.abort();
+    }
     if let Some(reporter) = reporter {
         reporter.abort();
+    }
+    // Exports resume from their checkpoints; counters are persisted exactly.
+    for exporter in exporters {
+        exporter.abort();
+    }
+    // Every shadow change is already on disk; sync resumes from its base.
+    if let Some(task) = shadow_sync {
+        task.abort();
+    }
+    if let Some(store) = &streams {
+        store.lock().unwrap().close();
+    }
+    if let Some(task) = bridge_task {
+        task.abort();
     }
     // Components stop with the daemon (shutdown command, then the whole group).
     supervisor.stop_all().await;
@@ -354,7 +471,9 @@ async fn local_request(
     cfg: &Config, sui: &SuiClient, walrus: &WalrusClient, runner: &ApplyRunner,
     store: Option<&components::Store>, configs: &configuration::Store,
     supervisor: &mut supervisor::Supervisor, journal: &mut Journal,
-    messages: &mut ipc::Messages, uid: u32, request: &ipc::Request,
+    messages: &mut ipc::Messages, durable: Option<&std::sync::Mutex<pubsub::Broker>>,
+    streams: Option<&std::sync::Mutex<streams::Store>>, shadow_store: Option<&std::sync::Mutex<shadows::Store>>,
+    uid: u32, request: &ipc::Request,
 ) -> anyhow::Result<serde_json::Value> {
     use serde_json::json;
     let policy = cfg.ipc.as_ref().ok_or_else(|| anyhow::anyhow!("IPC disabled"))?;
@@ -370,7 +489,27 @@ async fn local_request(
         }
         "logs" => Ok(json!({"tail":supervisor.local_logs(name)?})),
         "config" => Ok(json!({"configuration":configs.committed(name)?})),
-        "health" | "publish" | "receive" => messages.handle(policy, request, &principal),
+        "messaging" => {
+            let subscriptions = messages.handle(policy, request, &principal, durable)?;
+            let bridge = std::fs::read(cfg.runtime.state_dir.join("pubsub/bridge.json")).ok()
+                .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok());
+            Ok(json!({"subscriptions":subscriptions["subscriptions"],"bridge":bridge}))
+        }
+        "health" | "publish" | "receive" | "subscribe" | "unsubscribe" | "ack" =>
+            messages.handle(policy, request, &principal, durable),
+        op if op.starts_with("stream_") => {
+            let store = streams.ok_or_else(|| anyhow::anyhow!("streams are not enabled ([streams])"))?;
+            let declared: Vec<String> = cfg.streams.iter().flat_map(|s| s.definitions.iter().map(|d| d.name.clone())).collect();
+            let acl = policy.components.get(&principal);
+            let visible = |name: &str| acl.map_or(true, |a| a.streams.iter().any(|p| streams::glob(p, name)));
+            streams::handle(store, &declared, op, &request.topic, &request.payload, &visible)
+        }
+        "shadow_get" | "shadow_update" | "shadow_delete" | "shadow_list" | "shadows" => {
+            let store = shadow_store.ok_or_else(|| anyhow::anyhow!("shadows are not enabled ([shadows])"))?;
+            // Administrators (no component ACL) may use every shadow.
+            let policies = policy.components.get(&principal).map(|acl| acl.shadow_policies.as_slice());
+            shadows::handle(store, policies, &request.operation, &request.topic, &request.payload)
+        }
         "install" => {
             let id = request.payload.as_str().ok_or_else(|| anyhow::anyhow!("deployment ID required"))?;
             anyhow::ensure!(id.starts_with("0x") && id.len() <= 66 && id.len() > 2
@@ -1171,7 +1310,7 @@ async fn prepare_configurations(
                 effective: configuration::next(previous.as_ref().map(|r| &r.effective), configuration)?,
                 confidential: configuration.confidential.clone().unwrap_or_default(),
             };
-            let overlay = configuration::overlay(&configs.overlay_dir, &install.name)?;
+            let overlay = configs.overlay(&install.name)?;
             let materialized = configuration::materialize(&record, &overlay)?;
             install.record = record;
             let Some(command) = &install.validate else {
@@ -1219,7 +1358,7 @@ fn install_configuration(
     directory: &Path,
     index: usize,
 ) -> anyhow::Result<PathBuf> {
-    let overlay = configuration::overlay(&configs.overlay_dir, &install.name)?;
+    let overlay = configs.overlay(&install.name)?;
     let file = directory.join(format!("configuration-{index}.json"));
     configuration::write_private(&file, &configuration::materialize(&install.record, &overlay)?)?;
     Ok(file)

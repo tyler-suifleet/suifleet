@@ -91,6 +91,71 @@ jobs:
           retention-days: 14
           if-no-files-found: warn
 
+  macos:
+    # SF-075: the daemon on a hosted macOS runner, a disposable VM. Unit tests,
+    # then the shipped LaunchDaemon (installed as root) and kernel-authenticated
+    # IPC across distinct users, against the local simulator. No secrets.
+    name: macOS runtime (launchd)
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Install baseline Rust toolchain
+        run: rustup toolchain install 1.94.0 --profile minimal
+
+      - name: Restore dependency caches
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry
+            suifleet-edge/target
+          key: macos-${{ runner.arch }}-${{ hashFiles('suifleet-edge/Cargo.lock') }}
+          restore-keys: macos-${{ runner.arch }}-
+
+      - name: Toolchain and host versions
+        env:
+          RUSTUP_TOOLCHAIN: 1.94.0
+        run: |
+          mkdir -p ci-logs
+          { sw_vers; uname -a; cargo --version; rustc --version; python3 --version; } | tee ci-logs/macos-versions.txt
+
+      - name: Daemon unit tests
+        timeout-minutes: 15
+        env:
+          RUSTUP_TOOLCHAIN: 1.94.0
+        run: |
+          set -o pipefail
+          cd suifleet-edge && cargo test --locked 2>&1 | tee ../ci-logs/macos-unit.log
+
+      - name: Build daemon and simulator shim
+        env:
+          RUSTUP_TOOLCHAIN: 1.94.0
+        run: cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+
+      - name: LaunchDaemon lifecycle, containment, recovery and secrets
+        timeout-minutes: 15
+        run: |
+          set -o pipefail
+          sudo env PYTHONDONTWRITEBYTECODE=1 "$(command -v python3)" scripts/test_supervisor_launchd.py \
+            --disposable-host --evidence ci-logs/macos-launchd.json | tee ci-logs/macos-launchd.log
+
+      - name: Component IPC with distinct Unix peer identities
+        run: |
+          set -o pipefail
+          sudo env TMPDIR=/private/tmp PYTHONDONTWRITEBYTECODE=1 "$(command -v python3)" scripts/test_ipc.py | tee ci-logs/macos-ipc.log
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: macos-logs
+          path: ci-logs/
+          retention-days: 14
+          if-no-files-found: warn
+
   linux-x86:
     name: 32-bit Linux x86 runtime
     runs-on: ubuntu-22.04

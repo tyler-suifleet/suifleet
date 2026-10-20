@@ -49,7 +49,7 @@
    "notes": "i686 daemon, release bundle and native x86 catalog selection with 32-bit userland software-runner evidence; no 32-bit kernel or hardware. Outside the SF-038 initial Linux prototype phase; translated recipes still omit x86 manifests and report them."},
   {"id": "windows", "aws": {"os": "windows"}, "native": null, "status": "roadmap", "tickets": ["SF-064", "SF-074"],
    "notes": "No Windows runtime; outside the SF-038 initial Linux prototype phase and a tracked gap. Translated recipes omit Windows manifests."},
-  {"id": "darwin", "aws": {"os": "darwin"}, "native": null, "status": "roadmap", "tickets": ["SF-064", "SF-075"], "notes": "No macOS runtime; outside the SF-038 initial Linux prototype phase and a tracked gap."}
+  {"id": "darwin", "aws": {"os": "darwin"}, "native": {"os": "macos", "arch": "aarch64"}, "status": "partial", "current_evidence": ["docs/MACOS_RUNTIME.md"], "tickets": ["SF-064", "SF-075"], "notes": "Native macOS LaunchDaemon runtime and catalog OS `macos` (SF-075), tested on a hosted macOS 15 arm64 runner; not a Greengrass platform. Translated recipes still omit darwin manifests."}
  ],
  "suites": {
   "aws-recipe-cases.json": {
@@ -60,15 +60,18 @@
   },
   "pubsub-cases.json": {
    "description": "MQTT topic name/filter validity and matching, and AWS-compatible local pub/sub ACL resource matching.",
-   "runtime_execution": "pending", "pending_on": ["SF-027", "SF-032"]
+   "runtime_execution": "passed", "runtime_evidence": "docs/validation/sf032-messaging.json",
+   "runtime_scope": "The daemon's pub/sub module executes all 53 cases (make edge-test); scripts/test_messaging.py exercises the same rules through real IPC UIDs and a real Mosquitto broker."
   },
   "shadow-cases.json": {
    "description": "Named shadow update/merge/delta/version/delete semantics.",
-   "runtime_execution": "pending", "pending_on": ["SF-027", "SF-033"]
+   "runtime_execution": "passed", "runtime_evidence": "docs/validation/sf033-shadows.json",
+   "runtime_scope": "The daemon's shadow store executes all 55 steps of the 10 sequences, each also after reopening the store from disk (make edge-test); scripts/test_shadows.py exercises the same semantics through real IPC UIDs, restarts, kill -9 and a verifying reference cloud shadow service."
   },
   "stream-cases.json": {
    "description": "Durable stream append/read/eviction/restart/export-checkpoint semantics.",
-   "runtime_execution": "pending", "pending_on": ["SF-027", "SF-034"]
+   "runtime_execution": "passed", "runtime_evidence": "docs/validation/sf034-streams.json",
+   "runtime_scope": "The daemon's stream store executes all 5 sequences (make edge-test); scripts/test_streams.py exercises the same semantics through real IPC UIDs, crashes and a verifying export receiver."
   },
   "client-device-cases.json": {
    "description": "LAN client identity state and group/policy authorization.",
@@ -125,29 +128,39 @@
    "tickets": ["SF-027", "SF-037"], "suites": ["aws-recipe-cases.json", "pubsub-cases.json"],
    "notes": "Deny by default; * glob resources; recipe accessControl is deferred until SF-027."},
   {"id": "messaging.local-pubsub", "area": "messaging", "aws_reference": "aws.greengrass.ipc.pubsub PublishToTopic/SubscribeToTopic",
-   "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable",
-   "tickets": ["SF-027", "SF-032"], "suites": ["pubsub-cases.json"]},
+   "functional": "implemented", "aws_api": "undecided", "aws_recipe": "not-applicable",
+   "tickets": ["SF-027", "SF-032"], "suites": ["pubsub-cases.json"],
+   "current_evidence": ["docs/MESSAGING.md", "docs/validation/sf032-messaging.json"],
+   "notes": "Native IPC operations with AWS-shaped policies; durable QoS 1 and bounded QoS 0. Not the AWS IPC wire protocol."},
   {"id": "messaging.mqtt-broker", "area": "messaging", "aws_reference": "Moquette/EMQX broker components for client devices",
    "functional": "proposed", "aws_api": "not-applicable", "aws_recipe": "not-applicable",
    "tickets": ["SF-032", "SF-035"], "suites": ["pubsub-cases.json", "client-device-cases.json"],
    "notes": "Standard MQTT 3.1.1/5 protocol conformance, not an AWS API."},
   {"id": "messaging.bridge", "area": "messaging", "aws_reference": "aws.greengrass.clientdevices.mqtt.Bridge mqttTopicMapping LocalMqtt/Pubsub/IotCore",
-   "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable",
+   "functional": "partial", "aws_api": "undecided", "aws_recipe": "not-applicable",
    "tickets": ["SF-032"], "suites": ["pubsub-cases.json"],
-   "notes": "LocalMqtt<->Pubsub routing is native; any cloud target (IotCore or another broker) is a selected adapter needing approval."},
+   "current_evidence": ["docs/MESSAGING.md", "docs/validation/sf032-messaging.json"],
+   "notes": "LocalMqtt<->Pubsub routing is implemented over plain MQTT 3.1.1 to a local broker; TLS and client-device auth are SF-035; any cloud target (IotCore or another broker) is a selected adapter needing approval."},
   {"id": "shadows.local", "area": "shadows", "aws_reference": "aws.greengrass.ShadowManager Get/Update/Delete/ListNamedShadowsForThing",
-   "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable",
-   "tickets": ["SF-027", "SF-033"], "suites": ["shadow-cases.json"]},
+   "functional": "implemented", "aws_api": "undecided", "aws_recipe": "not-applicable",
+   "tickets": ["SF-027", "SF-033"], "suites": ["shadow-cases.json"],
+   "current_evidence": ["docs/SHADOWS.md", "docs/validation/sf033-shadows.json"],
+   "notes": "Native IPC operations with AWS ShadowManager-shaped policies and AWS-shaped local pub/sub notification topics; not the AWS IPC wire protocol. No per-key metadata timestamps; deletion keeps the version sequence."},
   {"id": "shadows.cloud-sync", "area": "shadows", "aws_reference": "Shadow manager synchronization with AWS IoT Device Shadow",
-   "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable", "tickets": ["SF-033"],
-   "notes": "Synchronization target is a selected adapter; on-chain storage of shadow documents is not proposed."},
+   "functional": "partial", "aws_api": "undecided", "aws_recipe": "not-applicable", "tickets": ["SF-033", "SF-061"],
+   "suites": ["shadow-cases.json"],
+   "current_evidence": ["docs/SHADOWS.md", "docs/validation/sf033-shadows.json"],
+   "notes": "SF-033 implements a device-signed HTTP(S) compare-and-swap sync adapter with three-way merge and a per-section conflict owner, tested against a local reference service. AWS IoT Device Shadow synchronization is the aws-iot-core-connection adapter (SF-061). On-chain storage of shadow documents is not proposed."},
   {"id": "streams.local", "area": "streams", "aws_reference": "aws.greengrass.StreamManager MessageStreamDefinition/read/append",
-   "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable",
-   "tickets": ["SF-027", "SF-034"], "suites": ["stream-cases.json"]},
+   "functional": "implemented", "aws_api": "undecided", "aws_recipe": "not-applicable",
+   "tickets": ["SF-027", "SF-034"], "suites": ["stream-cases.json"],
+   "current_evidence": ["docs/STREAMS.md", "docs/validation/sf034-streams.json"],
+   "notes": "Native IPC operations; per-message eviction and crash-skipped (never reused) numbering differ from AWS. Not the Stream Manager SDK wire protocol."},
   {"id": "streams.export", "area": "streams", "aws_reference": "Kinesis/S3/IoT SiteWise/HTTP export definitions",
-   "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable",
+   "functional": "partial", "aws_api": "undecided", "aws_recipe": "not-applicable",
    "tickets": ["SF-034", "SF-038", "SF-058", "SF-064"], "suites": ["stream-cases.json"],
-   "notes": "Export checkpoint semantics are specified. Kinesis Data Streams and S3 export is the stream-export-aws adapter (SF-058). SiteWise export is SF-064 roadmap work; IoT Analytics is discontinued."},
+   "current_evidence": ["docs/STREAMS.md", "docs/validation/sf034-streams.json"],
+   "notes": "SF-034 implements signed, resumable HTTP(S) export with checkpoints. Kinesis Data Streams and S3 export is the stream-export-aws adapter (SF-058). SiteWise export is SF-064 roadmap work; IoT Analytics is discontinued."},
   {"id": "client-devices.auth", "area": "client-devices", "aws_reference": "aws.greengrass.clientdevices.Auth deviceGroups/policies",
    "functional": "proposed", "aws_api": "undecided", "aws_recipe": "not-applicable",
    "tickets": ["SF-021", "SF-035"], "suites": ["client-device-cases.json"]},

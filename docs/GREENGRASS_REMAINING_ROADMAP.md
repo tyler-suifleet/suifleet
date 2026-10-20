@@ -101,6 +101,13 @@ models and actual TensorFlow Lite software-runner inference tests. This separate
 implementation evidence does not turn the AWS-named catalog or the reference
 evaluator below into an AWS-compatible runtime.
 
+SF-075 adds a [native macOS runtime](MACOS_RUNTIME.md): a LaunchDaemon whose
+launchd coalition contains component descendants, peer-UID IPC, private key
+checks and the catalog OS `macos`, exercised by real launchd service, crash,
+interrupted-install and permission tests on a hosted macOS runner. It is not
+Greengrass platform compatibility, and the `macos` scope below stays a reference
+model.
+
 SF-079 adds the [native local support console](LOCAL_CONSOLE.md): an authenticated,
 loopback-only daemon API/UI with per-user grants, origin/CSRF/Host checks,
 redaction, bounded queries and audit. The console reference vectors run against

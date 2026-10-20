@@ -20,6 +20,8 @@
 //! Any process may ask for the device's public address. Everything else is
 //! refused. Component processes run as the daemon user and may reach the
 //! socket, but they are not the unit's main process.
+// Only the client side exists elsewhere: it refuses to connect.
+#![cfg_attr(not(target_os = "linux"), allow(dead_code, unused_imports))]
 use crate::identity::TxSigner;
 use crate::protocol::{deployment_manager as dm, enrollment};
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -212,6 +214,33 @@ pub fn check_telemetry(policy: &Policy, message: &[u8]) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Check a log-batch personal message (SF-020): exactly the canonical JSON of
+/// one bounded schema-1 batch, of this chain and registry, naming this key.
+/// Its lines are the daemon's own redacted log text, like telemetry content.
+pub fn check_logs(policy: &Policy, message: &[u8]) -> anyhow::Result<()> {
+    use crate::logs::{validate, Batch, MAX_MESSAGE_BYTES};
+    anyhow::ensure!(message.len() <= MAX_MESSAGE_BYTES, "log batch exceeds {MAX_MESSAGE_BYTES} bytes");
+    let batch: Batch = serde_json::from_slice(message).map_err(|e| anyhow::anyhow!("not a log batch: {e}"))?;
+    anyhow::ensure!(serde_json::to_vec(&batch)? == message, "log batch is not in canonical form");
+    validate(&batch)?;
+    anyhow::ensure!(batch.chain_identifier == policy.chain_identifier, "log batch is for another chain");
+    anyhow::ensure!(Address::from_str(&batch.registry).ok() == Some(policy.registry), "log batch is not for this fleet's registry");
+    anyhow::ensure!(Address::from_str(&batch.signer).ok() == Some(policy.device), "log batch names another signer");
+    Ok(())
+}
+
+/// A personal message the service signs: a telemetry snapshot, a log batch,
+/// a stream export manifest or a shadow sync manifest.
+pub fn check_personal(policy: &Policy, message: &[u8]) -> anyhow::Result<()> {
+    let kind = serde_json::from_slice::<serde_json::Value>(message).ok().and_then(|v| v.get("kind").and_then(|k| k.as_str()).map(str::to_owned));
+    match kind.as_deref() {
+        Some(crate::logs::KIND) => check_logs(policy, message),
+        Some(crate::streams::MANIFEST_KIND) => crate::streams::check_manifest(message, &policy.chain_identifier, &policy.registry.to_string(), &policy.device.to_string()),
+        Some(crate::shadows::MANIFEST_KIND) => crate::shadows::check_manifest(message, &policy.chain_identifier, &policy.registry.to_string(), &policy.device.to_string()),
+        _ => check_telemetry(policy, message),
+    }
+}
+
 /// Who may ask for what.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Callers {
@@ -273,6 +302,7 @@ fn proc_start(stat: &str) -> Option<u64> {
     stat.rsplit_once(')')?.1.split_whitespace().nth(19)?.parse().ok()
 }
 
+#[cfg(target_os = "linux")]
 fn proc_process(pid: u32) -> Option<Process> {
     let start = proc_start(&std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?)?;
     let cgroup = std::fs::read_to_string(format!("/proc/{pid}/cgroup")).ok()?;
@@ -289,6 +319,7 @@ fn proc_process(pid: u32) -> Option<Process> {
 /// be an executable a component chose. Any other main process (a daemon
 /// update, which the service signer does not allow) leaves no record, so the
 /// signing service trusts nobody; the unit itself keeps running.
+#[cfg(target_os = "linux")]
 pub fn record_main_process(path: &Path) -> anyhow::Result<()> {
     use anyhow::Context;
     let pid: u32 = std::env::var("MAINPID").context("MAINPID is not set (run as the unit's ExecStartPost=)")?.parse()?;
@@ -299,6 +330,7 @@ pub fn record_main_process(path: &Path) -> anyhow::Result<()> {
 }
 
 /// Whether two paths name the same file (device and inode), following links.
+#[cfg(target_os = "linux")]
 fn same_file(a: &Path, b: &Path) -> std::io::Result<bool> {
     use std::os::unix::fs::MetadataExt;
     let (a, b) = (std::fs::metadata(a)?, std::fs::metadata(b)?);
@@ -307,6 +339,7 @@ fn same_file(a: &Path, b: &Path) -> std::io::Result<bool> {
 
 /// Records `pid` if it runs `base`; otherwise removes any earlier record and
 /// returns false.
+#[cfg(target_os = "linux")]
 fn record(path: &Path, pid: u32, base: &Path) -> anyhow::Result<bool> {
     use anyhow::Context;
     use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
@@ -365,6 +398,7 @@ pub fn key_holder(config: &Path) -> anyhow::Result<&'static str> {
 
 /// The peer's process as a pidfd (Linux 6.5+), so a request is never
 /// attributed to a later process reusing the peer's PID.
+#[cfg(target_os = "linux")]
 fn peer_pidfd(stream: &UnixStream) -> Option<std::os::fd::OwnedFd> {
     use std::os::fd::{AsRawFd, FromRawFd};
     let mut fd: libc::c_int = -1;
@@ -378,12 +412,14 @@ fn peer_pidfd(stream: &UnixStream) -> Option<std::os::fd::OwnedFd> {
 }
 
 /// The PID a pidfd refers to, or None once that process has exited.
+#[cfg(target_os = "linux")]
 fn pidfd_pid(pidfd: &std::os::fd::OwnedFd) -> Option<u32> {
     use std::os::fd::AsRawFd;
     let info = std::fs::read_to_string(format!("/proc/self/fdinfo/{}", pidfd.as_raw_fd())).ok()?;
     info.lines().find_map(|line| line.strip_prefix("Pid:"))?.trim().parse().ok()
 }
 
+#[cfg(target_os = "linux")]
 fn peer(stream: &UnixStream) -> std::io::Result<Peer> {
     use std::os::fd::AsRawFd;
     let mut credentials = libc::ucred { pid: 0, uid: 0, gid: 0 };
@@ -439,7 +475,7 @@ pub fn handle(
                     peer.uid
                 );
                 let message = STANDARD.decode(request["message"].as_str().unwrap_or(""))?;
-                check_telemetry(policy, &message)?;
+                check_personal(policy, &message)?;
                 Ok(json!({ "signature": STANDARD.encode(key.sign_personal_message(&message)?) }))
             }
             _ => anyhow::bail!("unknown request"),
@@ -449,6 +485,7 @@ pub fn handle(
 }
 
 /// `suifleet --signer-service CONFIG`: serve until stopped.
+#[cfg(target_os = "linux")]
 pub fn serve(path: &Path) -> anyhow::Result<()> {
     let (config, mut policy) = ServiceConfig::load(path)?;
     let key = config.key()?;
@@ -495,6 +532,7 @@ pub fn serve(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 fn read_request(stream: &UnixStream) -> std::io::Result<Value> {
     let mut line = String::new();
     BufReader::new(stream.take(MAX_REQUEST_BYTES)).read_line(&mut line)?;
@@ -502,6 +540,7 @@ fn read_request(stream: &UnixStream) -> std::io::Result<Value> {
 }
 
 /// The systemd-activated socket (LISTEN_FDS), or the configured path.
+#[cfg(target_os = "linux")]
 fn listener(path: &Path) -> anyhow::Result<UnixListener> {
     use std::os::fd::FromRawFd;
     let ours = std::env::var("LISTEN_PID").ok().and_then(|p| p.parse::<u32>().ok()) == Some(std::process::id());
@@ -513,6 +552,17 @@ fn listener(path: &Path) -> anyhow::Result<UnixListener> {
     Ok(UnixListener::bind(path)?)
 }
 
+/// The signing service trusts the daemon by its systemd unit and cgroup, so
+/// it exists only on Linux.
+#[cfg(not(target_os = "linux"))]
+pub fn serve(_: &Path) -> anyhow::Result<()> {
+    anyhow::bail!("the device signing service is not supported on {}", std::env::consts::OS)
+}
+#[cfg(not(target_os = "linux"))]
+pub fn record_main_process(_: &Path) -> anyhow::Result<()> {
+    anyhow::bail!("recording a systemd main process is not supported on {}", std::env::consts::OS)
+}
+
 /// The daemon side: `[device.signer] kind = "service"`.
 pub struct ServiceSigner {
     socket: PathBuf,
@@ -521,6 +571,7 @@ pub struct ServiceSigner {
 
 impl ServiceSigner {
     pub fn connect(socket: &Path) -> anyhow::Result<Self> {
+        anyhow::ensure!(cfg!(target_os = "linux"), "the device signing service is not supported on {}", std::env::consts::OS);
         let response = request(socket, &json!({ "op": "address" }))?;
         let address = response["address"].as_str().ok_or_else(|| anyhow::anyhow!("signer returned no address"))?.to_owned();
         Ok(Self { socket: socket.to_owned(), address })
@@ -678,6 +729,47 @@ mod tests {
         serde_json::to_vec(&snapshot).unwrap()
     }
 
+    fn log_batch(edit: impl FnOnce(&mut crate::logs::Batch)) -> Vec<u8> {
+        let mut batch = crate::logs::Batch {
+            schema: 1,
+            kind: "logs".into(),
+            chain_identifier: "4c78adac".into(),
+            registry: "0x13".into(),
+            device_id: "0x10".into(),
+            signer: "0xa0".into(),
+            seq: 7,
+            observed_ms: 2,
+            dropped_lines: 0,
+            redactions: 1,
+            records: vec![crate::logs::Record { source: "component:app".into(), line: "started".into() }],
+        };
+        edit(&mut batch);
+        serde_json::to_vec(&batch).unwrap()
+    }
+
+    #[test]
+    fn signs_only_this_devices_canonical_log_batches() {
+        let p = policy();
+        check_personal(&p, &log_batch(|_| {})).unwrap();
+        for (label, bad) in [
+            ("another chain", log_batch(|b| b.chain_identifier = "35834a8a".into())),
+            ("another registry", log_batch(|b| b.registry = "0x14".into())),
+            ("another signer", log_batch(|b| b.signer = "0xa1".into())),
+            ("no records", log_batch(|b| b.records.clear())),
+            ("overlong line", log_batch(|b| b.records[0].line = "x".repeat(crate::logs::MAX_LINE + 1))),
+            ("bad source", log_batch(|b| b.records[0].source = "root".into())),
+            ("schema", log_batch(|b| b.schema = 2)),
+        ] {
+            assert!(check_personal(&p, &bad).is_err(), "{label} was accepted");
+        }
+        let mut spaced = log_batch(|_| {});
+        spaced.insert(1, b' ');
+        assert!(check_personal(&p, &spaced).is_err(), "non-canonical batch was accepted");
+        // A transaction is never signed as a log batch, nor vice versa.
+        assert!(check_personal(&p, &Tx::default().bytes()).is_err());
+        assert!(check(&p, &log_batch(|_| {})).is_err());
+    }
+
     #[test]
     fn signs_only_this_devices_canonical_telemetry() {
         let p = policy();
@@ -799,6 +891,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn records_and_pins_a_live_process() {
         let dir = std::env::temp_dir().join(format!("suifleet-record-{}", std::process::id()));
@@ -843,6 +936,7 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn service_round_trip_over_a_socket() {
         let dir = std::env::temp_dir().join(format!("suifleet-signer-{}", std::process::id()));

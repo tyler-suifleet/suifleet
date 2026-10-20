@@ -96,3 +96,50 @@ replay_history = false
 # url = "https://fleet.example"   # indexer base URL (POST {url}/v1/telemetry)
 # interval_seconds = 60           # 10..=3600
 # buffer_max = 1024               # snapshots kept offline; oldest dropped beyond
+
+# Durable local pub/sub and the local MQTT bridge (SF-032; docs/MESSAGING.md).
+# Components need pubsub_policies under [ipc.components.NAME].
+# [pubsub]
+# max_messages_per_subscription = 1000
+# max_bytes_per_subscription = 4194304
+# qos0_messages_per_subscription = 100
+# [pubsub.bridge]
+# broker = "127.0.0.1:1883"
+# [[pubsub.bridge.mappings]]
+# topic = "sensors/#"
+# source = "Pubsub"
+# target = "LocalMqtt"
+# target_topic_prefix = "device1/"
+
+# Redacted remote logs to the fleet indexer (needs [telemetry]; docs/LOGS.md).
+# [logs]
+# interval_seconds = 60
+# max_lines_per_interval = 512
+# buffer_max = 256
+
+# Durable local streams and export (SF-034; docs/STREAMS.md). Components need
+# stream operations and a `streams` glob under [ipc.components.NAME].
+# [streams]
+# max_streams = 32
+# max_total_bytes = 67108864        # sum of all streams' max_size
+# [[streams.definitions]]
+# name = "telemetry"
+# max_size = 16777216               # each message costs its bytes + 64
+# strategy_on_full = "RejectNewData"  # or "OverwriteOldestData"
+# [streams.definitions.export]
+# url = "https://ingest.example/v1/streams"
+# bearer_token_file = "/etc/suifleet/stream-export.token"
+
+# Local device shadows and cloud sync (SF-033; docs/SHADOWS.md). Components need
+# shadow operations and shadow_policies under [ipc.components.NAME]; change
+# notifications need [pubsub].
+# [shadows]
+# thing_name = "device1"            # in $aws/things/<thing>/shadow resources and topics
+# max_shadows = 64                  # 1..=128 existing shadows
+# [shadows.sync]
+# url = "https://shadows.example/v1/sync"
+# bearer_token_file = "/etc/suifleet/shadow-sync.token"
+# shadows = ["", "config"]          # "" is the classic shadow
+# interval_seconds = 30
+# desired_conflict = "cloud"        # who wins a key both sides changed
+# reported_conflict = "device"
