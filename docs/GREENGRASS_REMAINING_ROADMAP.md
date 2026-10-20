@@ -97,6 +97,10 @@ expectations. No AWS upstream behavior is newly asserted by these local contract
 
 ## Evidence and closure
 
+SF-078 adds the [native SNS publisher](SNS.md), with actual SDK HTTP emulator
+and real-daemon durable pub/sub evidence. The pure reference fields below remain
+specification-only; live AWS and physical target acceptance are unrun.
+
 SF-077 adds the [native Firehose exporter](FIREHOSE.md), with actual SDK HTTP
 emulator and durable daemon stream evidence. The pure reference fields below
 remain specification-only; live AWS and physical target acceptance are unrun.
