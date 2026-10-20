@@ -19,8 +19,8 @@
   },
   "commands": [
     {
-      "command": "docker run --network none ... suifleet-dev:sf037: cd suifleet-edge && cargo test --locked && cargo test --locked --features pkcs11 (head merged with origin/main 570ea5b, with the second-review repairs)",
-      "result": "270 passed; 0 failed (default) and 272 passed; 0 failed (pkcs11), including 17 cloudwatch_logs tests and both group-read reconcile tests"
+      "command": "docker run --network none ... suifleet-dev:sf037: cd suifleet-edge && cargo test --locked && cargo test --locked --features pkcs11 (head merged with origin/main c656b19, with the second-review repairs)",
+      "result": "285 passed; 0 failed (default) and 287 passed; 0 failed (pkcs11), including 17 cloudwatch_logs tests and both group-read reconcile tests. Before that merge (on 570ea5b): 270 and 272"
     },
     {
       "command": "cargo test cloudwatch_logs::tests::declared_fixtures_run_against_the_adapter_and_emulator",
@@ -36,15 +36,15 @@
     },
     {
       "command": "python3 scripts/test_cloudwatch_logs.py --distinct-uids (make test-cloudwatch-logs-uids; root, network none)",
-      "result": "passed (6 PASS): daemon UID 61601 and adapter UID 61602 (supplementary group 61601 only), UMask 0077; the adapter exported 55 svc and 3 System events through group read and was denied the device key. Credentials from the actual SF-057 credential adapter (scripts/aws_credentials.py Adapter, in process as root, token_ttl_seconds 4, mutual-TLS local stand-in for the AWS IoT credentials provider) through sdk/python/suifleet_aws.py as UID 61602: after expiry the credential adapter answered 401 and the CloudWatch Logs adapter exited 1; a new start through the wrapper delivered the pending line in order, once, with 0 emulator violations. Turned off again: all logs 0600, directories 0700, the adapter's UID denied component.log, confidential.json and daemon.log.1. Against binaries built from the pre-fix head 05b9054: with that daemon the run fails the enabling check (daemon.log.1/inactive component log stay 0600); with only that adapter it fails 'the adapter kept running with a refused credential token'"
+      "result": "passed (6 PASS, before and after merging origin/main c656b19): daemon UID 61601 and adapter UID 61602 (supplementary group 61601 only), UMask 0077; the adapter exported 55 svc and 3 System events through group read and was denied the device key. Credentials from the actual SF-057 credential adapter (scripts/aws_credentials.py Adapter, in process as root, token_ttl_seconds 4, mutual-TLS local stand-in for the AWS IoT credentials provider) through sdk/python/suifleet_aws.py as UID 61602: after expiry the credential adapter answered 401 and the CloudWatch Logs adapter exited 1; a new start through the wrapper delivered the pending line in order, once, with 0 emulator violations. Turned off again: all logs 0600, directories 0700, the adapter's UID denied component.log, confidential.json and daemon.log.1. Against binaries built from the pre-fix head 05b9054: with that daemon the run fails the enabling check (daemon.log.1/inactive component log stay 0600); with only that adapter it fails 'the adapter kept running with a refused credential token'"
     },
     {
       "command": "make test-ota INSIDE_DEV_CONTAINER=1 (network none, uid 1001)",
-      "result": "exit 0 on the head merged with origin/main 570ea5b with the repairs: all 16 test-ota script invocations passed (112 PASS lines). BrokenPipeError tracebacks printed by the simulator HTTP servers of test_ota.py --firmware-helper, test_firmware_restart.py and test_deployment_control.py (writing to daemons those tests kill) do not fail them"
+      "result": "exit 0 on the head merged with origin/main c656b19 with the repairs: all 16 test-ota script invocations passed (112 PASS lines; also on 570ea5b). BrokenPipeError tracebacks printed by simulator HTTP servers writing to daemons the tests stop (test_ota.py --firmware-helper, test_firmware_restart.py, test_deployment_control.py, test_supervisor.py) do not fail them"
     },
     {
-      "command": "make test-compat INSIDE_DEV_CONTAINER=1",
-      "result": "exit 0: 524 reference-model fixture checks, 76 roadmap checks, roadmap (14) and compat (39) unittest suites OK"
+      "command": "make test-compat INSIDE_DEV_CONTAINER=1 (merged with c656b19)",
+      "result": "exit 0: 524 reference-model fixture checks, 76 roadmap checks, roadmap (14) and compat (39) unittest suites OK, translator executed 83 recipe fixtures; the matrix-gate tests now return a suite to pending themselves, as none is pending after SF-035 and SF-060"
     }
   ],
   "source_sha256": {
@@ -54,7 +54,7 @@
     "scripts/cloudwatch_logs_emulator.py": "f13d1978edc03683d3f93fe8cf6ebd421e3f86ebd4bbe228dff8d362a537a286",
     "scripts/test_cloudwatch_logs.py": "56d99d14b799f11669a554b327459c5300cb86a01397bec2214c65aa3927bba0",
     "interfaces/compat/cloudwatch-logs-cases.json": "5bd65c83a89c05ccd457430fb4a56a0b6ae17d26a2aa3d7ddc64d0cc97545693",
-    "suifleet-edge/src/main.rs": "9c8fde3fb8effdff4812008414017923b9c641335741a43487f0a813abb0bc76"
+    "suifleet-edge/src/main.rs": "cf9c9cb848cecbd2af6d0d047b7cc96869041fbb93c292eced8796a543fbd785"
   },
   "limits": [
     "Local Linux x86_64 execution with a request-checking local CloudWatch Logs emulator; no live AWS account, IAM policy or service call (unauthorized; tracked in SF-060/#105).",
