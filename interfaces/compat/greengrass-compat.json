@@ -47,8 +47,9 @@
   {"id": "linux-x86", "aws": {"os": "linux", "architecture": "x86"}, "native": {"os": "linux", "arch": "x86"}, "status": "partial",
    "current_evidence": ["docs/LINUX_X86.md", "docs/validation/sf076-linux-x86.json"], "tickets": ["SF-064", "SF-076"],
    "notes": "i686 daemon, release bundle and native x86 catalog selection with 32-bit userland software-runner evidence; no 32-bit kernel or hardware. Outside the SF-038 initial Linux prototype phase; translated recipes still omit x86 manifests and report them."},
-  {"id": "windows", "aws": {"os": "windows"}, "native": null, "status": "roadmap", "tickets": ["SF-064", "SF-074"],
-   "notes": "No Windows runtime; outside the SF-038 initial Linux prototype phase and a tracked gap. Translated recipes omit Windows manifests."},
+  {"id": "windows", "aws": {"os": "windows"}, "native": null, "status": "partial", "tickets": ["SF-064", "SF-074"],
+   "current_evidence": ["docs/WINDOWS_RUNTIME.md", "docs/validation/sf074-windows.json"],
+   "notes": "Native Windows x86_64 local operator runtime: SCM, Job Objects, SID-authenticated IPC, ACLs and interrupted-install recovery. Catalog/Sui reconciliation and rich IPC are unsupported; native catalog mapping remains null. Translation still omits Windows manifests; no full parity claim."},
   {"id": "darwin", "aws": {"os": "darwin"}, "native": {"os": "macos", "arch": "aarch64"}, "status": "partial", "current_evidence": ["docs/MACOS_RUNTIME.md"], "tickets": ["SF-064", "SF-075"], "notes": "Native macOS LaunchDaemon runtime and catalog OS `macos` (SF-075), tested on a hosted macOS 15 arm64 runner; not a Greengrass platform. Translated recipes still omit darwin manifests."}
  ],
  "suites": {

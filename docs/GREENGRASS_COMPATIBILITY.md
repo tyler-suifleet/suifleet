@@ -34,7 +34,7 @@ Statuses: `implemented`/`partial` (merged, with cited local evidence), `proposed
 | Linux aarch64 | `linux`/`aarch64` | `linux`/`aarch64` | Partial: Yocto QEMU; physical Pi pending in SF-031 |
 | Linux 32-bit ARM | `linux`/`arm` | `linux`/`arm` | Proposed: selection vectors only. `architecture.detail` is rejected |
 | Linux x86 (32-bit) | `linux`/`x86` | `linux`/`x86` | Partial: i686 daemon, release bundle and catalog selection with 32-bit software-runner evidence ([LINUX_X86.md](LINUX_X86.md)). Outside the SF-038 initial Linux phase; translation still omits these manifests |
-| Windows | `windows` | none | Roadmap gap (SF-064, SF-074), outside the SF-038 initial Linux phase. Translation omits these manifests |
+| Windows | `windows` | no catalog mapping | Partial local operator runtime: SCM, Job containment, SID/ACL enforcement and interrupted recovery ([WINDOWS_RUNTIME.md](WINDOWS_RUNTIME.md), SF-074). Catalog/chain/rich IPC are unsupported; translation still omits these manifests |
 | macOS | `darwin` | `macos`/`aarch64` | Partial: native LaunchDaemon runtime on a hosted macOS 15 arm64 runner ([MACOS_RUNTIME.md](MACOS_RUNTIME.md), SF-075); not a Greengrass platform. Translation still omits `darwin` manifests |
 
 ## Current APIs versus proposed contracts
