@@ -53,9 +53,9 @@ try {
     # Protect before any credentials are written; root is unique and not a reparse path.
     & icacls.exe $root /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' "*$($identity.User.Value):(OI)(CI)F" | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'initial ACL provisioning failed' }
-    New-LocalUser $user -Password (ConvertTo-SecureString $password -AsPlainText -Force) -AccountNeverExpires | Out-Null
+    New-LocalUser $user -Password (ConvertTo-SecureString $password -AsPlainText -Force) -AccountNeverExpires -PasswordNeverExpires | Out-Null
     $userCreated = $true
-    New-LocalUser $outsider -Password (ConvertTo-SecureString $otherPassword -AsPlainText -Force) -AccountNeverExpires | Out-Null
+    New-LocalUser $outsider -Password (ConvertTo-SecureString $otherPassword -AsPlainText -Force) -AccountNeverExpires -PasswordNeverExpires | Out-Null
     $outsiderCreated = $true
     # Explicitly add Users by SID, independent of host localization.
     $users = Get-LocalGroup -SID 'S-1-5-32-545'
@@ -102,11 +102,14 @@ try {
     Request @{operation='install';manifest=$bad;artifact=(Join-Path $root 'component.exe')} $false | Out-Null
     Assert-True (Status).running 'preflight rejection stopped active component'
     $checks.Add('wrong digest and incompatible platform rejected before lifecycle mutation')
+    Wait-Until { Test-Path (Join-Path (Work) 'pipe-flood-denied') } 'component pipe flood attempted'
+    Assert-True (-not (Test-Path (Join-Path (Work) 'pipe-flood-failed'))) 'component opened operator pipe'
     $ids = Process-Ids
     Request @{operation='stop'} | Out-Null
     Check-Dead $ids
+    Assert-True (-not (Test-Path (Join-Path (Work) 'pipe-flood-failed'))) 'component flood opened operator pipe'
     Assert-True (Test-Path (Join-Path (Work) 'shutdown')) 'shutdown lifecycle missing'
-    $checks.Add('explicit shutdown and complete Job Object descendant termination')
+    $checks.Add('operator stop remains available during component connection flood; complete descendant termination')
     Remove-Item (Join-Path (Work) '*.pid'),(Join-Path (Work) 'denials.json')
     Request @{operation='start'} | Out-Null
     Wait-Component
@@ -127,6 +130,33 @@ try {
     Start-Service SuiFleet
     Wait-Component
     $checks.Add('service crash closes Job Object and restart has no old descendants')
+    # Missing cached executable during restart must leave the recovery channel alive.
+    $cached = Join-Path $root "components/$digest/artifact.exe"
+    $parked = $cached + '.parked'
+    Move-Item $cached $parked
+    $ids = Process-Ids
+    Stop-Process -Id $ids[0] -Force
+    Wait-Until { $s=Status; $null -ne $s -and $s.phase -eq 'failed' -and -not $s.running } 'restart launch failure preserves IPC'
+    Check-Dead $ids
+    Assert-True ((Status).error -like '*start failed*') 'start failure diagnostic missing'
+    Request @{operation='stop'} | Out-Null
+    Request @{operation='start'} $false | Out-Null
+    Remove-Item (Join-Path (Work) '*.pid'),(Join-Path (Work) 'denials.json') -ErrorAction SilentlyContinue
+    Move-Item $parked $cached
+    Request @{operation='install';manifest=$manifest;artifact=(Join-Path $root 'component.exe')} | Out-Null
+    Wait-Component
+    $checks.Add('missing artifact on supervised restart records failure and explicit reinstall recovers over IPC')
+    # The same failure at bootstrap must not prevent the SCM service from serving.
+    Stop-Service SuiFleet
+    Move-Item $cached $parked
+    Start-Service SuiFleet
+    Wait-Until { $s=Status; $null -ne $s -and $s.phase -eq 'failed' } 'bootstrap launch failure preserves IPC'
+    Request @{operation='stop'} | Out-Null
+    Remove-Item (Join-Path (Work) '*.pid'),(Join-Path (Work) 'denials.json') -ErrorAction SilentlyContinue
+    Move-Item $parked $cached
+    Request @{operation='install';manifest=$manifest;artifact=(Join-Path $root 'component.exe')} | Out-Null
+    Wait-Component
+    $checks.Add('missing artifact at SCM bootstrap records failure and explicit reinstall recovers over IPC')
     # Install failure and timeout are durable failures and never start the run phase.
     $failed = $manifest.Clone(); $failed.install = @('fail')
     Request @{operation='install';manifest=$failed;artifact=(Join-Path $root 'component.exe')} $false | Out-Null

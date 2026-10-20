@@ -27,6 +27,8 @@ and [client impersonation](https://learn.microsoft.com/en-us/windows/win32/ipc/i
 and [process creation Job attributes](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-updateprocthreadattribute)
 contracts (accessed 2026-10-19). Jobs contain ordinary process descendants; they
 are not a sandbox for privileged users or a replacement for OS account security.
+Task Scheduler, WMI and COM launches outside the Job are not contained; restrict
+those facilities through OS account policy.
 
 ## Provisioning and service lifecycle
 
@@ -34,7 +36,8 @@ Use a fresh local NTFS directory under `C:\ProgramData`. Before writing any
 configuration, remove inherited ACLs and grant full control only to SYSTEM,
 Administrators and the designated operator SID. Install the daemon there.
 Provision a dedicated **non-administrator** local component account with logon
-permission. Its password belongs only in this protected runtime configuration;
+permission. Configure password rotation and update the protected configuration before
+expiry, or explicitly provision a non-expiring password under local security policy. Its password belongs only in this protected runtime configuration;
 never embed it in packages, images, source, logs or command-line arguments.
 The service runs as LocalSystem so it can obtain the component token and create
 its process. Administrators/SYSTEM and the configured operator are trusted;
@@ -75,7 +78,8 @@ controlled; configure it with normal Windows service management if desired.
 ## Authenticated component selection and installation
 
 Only the configured operator's actual token SID or SYSTEM may install/start/stop.
-The component SID may request sanitized status only. The local-only named pipe
+The component SID has no control-pipe access, including status. A component cannot
+occupy the operator channel by opening or flooding it. The local-only named pipe
 rejects remote clients, uses a protected DACL and reserves the first server
 instance. After reading a request the service impersonates its caller, obtains
 TokenUser, and reverts before executing work. Caller-supplied identity is never
@@ -116,7 +120,9 @@ verified before stopping a running component. Cached executables are verified
 again on start. Arguments go directly to that executable using Windows CRT
 quoting, without a shell. Install/shutdown are optional invocations of the same
 authenticated executable. Both have bounded duration; install cannot synchronously
-call the runtime IPC server. Run is supervised with a bounded restart budget and
+call the runtime IPC server. Lifecycle invocations serialize control requests and
+SCM stop handling for up to the configured timeout (maximum 300 seconds); no
+STOP_PENDING progress checkpoints are emitted during that wait. Run is supervised with a bounded restart budget and
 one-second delay. There is no readiness protocol; running means process launched.
 
 Executable directories grant the component read/execute access; only its `work`
@@ -133,7 +139,9 @@ starts no component. The Job must report zero active processes before replacemen
 shutdown invocation then closes the entire Job even if shutdown fails. State
 writes use flushed temporary files and write-through atomic replacement. An
 interrupted install is quarantined on startup; it is never replayed or started
-automatically. An explicit authenticated reinstall is required. Preserve this
+automatically. Failed starts (including missing/corrupt cached executables at bootstrap
+or supervised restart) persist a failed phase and diagnostic while operator IPC
+remains available. An explicit authenticated reinstall is required. Preserve this
 state across platform-controlled restarts.
 
 ## Explicit unsupported operations and acceptance

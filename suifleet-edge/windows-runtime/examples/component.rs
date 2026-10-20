@@ -3,7 +3,6 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use std::{
         fs,
-        io::{BufRead, Write},
         os::windows::{fs::OpenOptionsExt, process::CommandExt},
         process::Command,
         thread,
@@ -65,28 +64,44 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .creation_flags(0x01000000)
                 .spawn()
                 .is_err();
+            let pipe_path = format!(r"\\.\pipe\{pipe}");
             let deadline = std::time::Instant::now() + Duration::from_secs(8);
-            let mut client = loop {
+            let operator_denied = loop {
                 match fs::OpenOptions::new()
                     .read(true)
                     .write(true)
                     .access_mode(0x12019b)
-                    .security_qos_flags(0x10000)
-                    .open(format!(r"\\.\pipe\{pipe}"))
+                    .open(&pipe_path)
                 {
-                    Ok(client) => break client,
-                    Err(e) if std::time::Instant::now() < deadline => {
-                        let _ = e;
-                        thread::sleep(Duration::from_millis(50));
+                    Err(e) if e.raw_os_error() == Some(5) => break true,
+                    Err(e)
+                        if e.raw_os_error() == Some(231)
+                            && std::time::Instant::now() < deadline =>
+                    {
+                        thread::sleep(Duration::from_millis(10));
                     }
-                    Err(e) => return Err(e.into()),
+                    _ => break false,
                 }
             };
-            client.write_all(b"{\"operation\":\"stop\"}\n")?;
-            let mut response = String::new();
-            std::io::BufReader::new(&mut client).read_line(&mut response)?;
-            client.write_all(b"ack\n")?;
-            let operator_denied = response.contains("operator permission required");
+            // Keep trying to occupy the control channel while the operator
+            // issues stop. None of these opens may succeed.
+            thread::spawn(move || loop {
+                match fs::OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .access_mode(0x12019b)
+                    .open(&pipe_path)
+                {
+                    Ok(_) => {
+                        let _ = fs::write("pipe-flood-failed", b"opened");
+                    }
+                    Err(e) if e.raw_os_error() == Some(5) => {
+                        let _ = fs::write("pipe-flood-denied", b"denied");
+                    }
+                    Err(_) => {}
+                }
+                thread::sleep(Duration::from_millis(1));
+            });
             fs::write("denials.json", format!("{{\"secret\":{secret_denied},\"state_write\":{write_denied},\"breakaway\":{breakaway_denied},\"operator\":{operator_denied}}}"))?;
             let mut child = Command::new(std::env::current_exe()?)
                 .arg("child")

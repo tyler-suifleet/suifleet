@@ -476,7 +476,7 @@ impl Runtime {
             next_restart: Instant::now(),
         };
         if runtime.state.phase == "running" {
-            runtime.start()?;
+            runtime.resume()?;
         }
         Ok(runtime)
     }
@@ -484,7 +484,28 @@ impl Runtime {
         let dir = self.cfg.root.join("components").join(&m.sha256);
         (dir.join("artifact.exe"), dir.join("work"))
     }
+    // Automatic starts must preserve operator access even when the cached
+    // executable disappears, fails verification, or cannot be launched.
+    fn resume(&mut self) -> Result<()> {
+        if let Err(error) = self.launch() {
+            self.child.take();
+            self.state.phase = "failed".into();
+            self.state.error = Some(format!("start failed: {error:#}"));
+            save(&self.cfg.root, &self.state)?;
+        }
+        Ok(())
+    }
     fn start(&mut self) -> Result<()> {
+        ensure!(self.child.is_none(), "component already running");
+        self.resume()?;
+        ensure!(
+            self.child.is_some(),
+            "{}",
+            self.state.error.as_deref().unwrap_or("start failed")
+        );
+        Ok(())
+    }
+    fn launch(&mut self) -> Result<()> {
         ensure!(self.child.is_none(), "component already running");
         ensure!(
             self.state.phase != "interrupted"
@@ -635,17 +656,14 @@ impl Runtime {
                 save(&self.cfg.root, &self.state)?;
             } else {
                 self.restarts += 1;
-                self.start()?;
+                self.resume()?;
             }
         }
         Ok(())
     }
     fn request(&mut self, sid: &str, request: Request) -> Result<serde_json::Value> {
         let operator = sid == self.cfg.operator_sid || sid == "S-1-5-18";
-        ensure!(operator || sid == self.cfg.component_sid, "caller denied");
-        if !matches!(request, Request::Status { .. }) {
-            ensure!(operator, "operator permission required");
-        }
+        ensure!(operator, "caller denied");
         match request {
             Request::Status {} => {}
             Request::Install { manifest, artifact } => {
@@ -698,8 +716,8 @@ impl Pipe {
     fn bind(cfg: &Config) -> Result<Self> {
         // Specific file rights omit FILE_CREATE_PIPE_INSTANCE (0x4). Reject all remote clients.
         let sd = Descriptor::new(&format!(
-            "D:P(A;;FA;;;SY)(A;;0x12019b;;;{})(A;;0x12019b;;;{})",
-            cfg.operator_sid, cfg.component_sid
+            "D:P(A;;FA;;;SY)(A;;0x12019b;;;{})",
+            cfg.operator_sid
         ))?;
         let sa = sd.attrs();
         let handle = Handle::new(unsafe {
