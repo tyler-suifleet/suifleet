@@ -152,13 +152,11 @@ impl Write for RotatingFile {
         }
         if file.is_none() {
             use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-            let opened = std::fs::OpenOptions::new().create(true).append(true).mode(0o640).open(&*path)?;
-            if GROUP_READ.load(std::sync::atomic::Ordering::Relaxed) {
-                // The service's umask would keep the group out.
-                opened.set_permissions(std::fs::Permissions::from_mode(0o640))?;
-                if let Some(parent) = path.parent() {
-                    share_dir(parent)?;
-                }
+            let opened = std::fs::OpenOptions::new().create(true).append(true).mode(private_mode()).open(&*path)?;
+            // Past the service's umask, and private again once group read is turned off.
+            opened.set_permissions(std::fs::Permissions::from_mode(private_mode()))?;
+            if let Some(parent) = path.parent() {
+                share_dir(parent)?;
             }
             *file = Some(opened);
         }
@@ -1065,6 +1063,8 @@ mod tests {
         let old = std::fs::metadata(d.join("logs/daemon.log.1")).unwrap().len();
         assert!(current <= ROTATE_BYTES && old <= ROTATE_BYTES, "{current} {old}");
         assert!(!d.join("logs/daemon.log.1.1").exists());
+        let mode = std::fs::metadata(d.join("logs/daemon.log")).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "private without log_group_read, whatever the umask");
     }
 
     #[test]
