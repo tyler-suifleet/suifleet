@@ -49,14 +49,14 @@
   ],
   "reference_vectors": "cargo test console::tests::decisions_follow_the_v1_reference_contract applies the SF-064 console vectors to the implementation's decision function and field allowlist",
   "source_sha256": {
-    "suifleet-edge/src/console.rs": "ef465ed2aced3f75e8872217fbd5587c5504352e66086e7bb6f04e39ec7afea8",
+    "suifleet-edge/src/console.rs": "0d035974fda6359799862763663234366af445b9cf738769cb10eb6d44ab572f",
     "suifleet-edge/src/console/index.html": "127d9ef2f34416830509f2f91e0990a93869d59b29d8046e649b2f944ca6c7f6",
     "suifleet-edge/src/console/console.js": "8add9140e4fcc658abd5302d8ae71fd3bb7b69ea5a2e1bc8baca06e2cd61387a",
     "suifleet-edge/src/console/console.css": "e4c19b3253b6e14f1673f140e0fc6bb018215c58d36e68cca4de5e12bdbe74dd",
     "suifleet-edge/src/main.rs": "732530d01b65f4744b7f9aa0a541cc1b750b88a33ec6d4cf5d416a8777fa349f",
-    "suifleet-edge/src/linux_main.rs": "5911faa3acb61f43837eb2ba164fe090d58ff6a4844bdb71ad56240b74b9993f",
-    "suifleet-edge/src/config.rs": "214d439aa21a0e061c98f57f0a0066a00c896480b4d8a5d57db9c8ea86695253",
-    "scripts/test_console.py": "66fb72bbc9b4d10369a9a18502c6cdb70e8abaea29ae2cd367ac6568084b8d6f",
+    "suifleet-edge/src/linux_main.rs": "6f840fe96d9ad54daf2c6ac60b2a875ab324c6758c70484070ae3113570eea15",
+    "suifleet-edge/src/config.rs": "4de94600c629c251aaba1355f56fd5e185b2512fd03f660cf402dd2eb5ea4902",
+    "scripts/test_console.py": "35a5b76a7fe4c39b74656435ea1cd2ef5b4bb6f3bc6d8d4e39d253efc99c508b",
     "scripts/test_console_browser.cjs": "655be209b5496347abac83c573acdde84bb1592ac469e01584a80b52a056469a",
     "interfaces/compat/remaining-roadmap-cases.json": "2b3d02d28570af01d5bf58005f7b08d5f67d1991daf3acc792492d2a7e6272b7"
   },
@@ -68,5 +68,5 @@
     "Not AWS LocalDebugConsole UI/API compatibility: no configuration editor, pub/sub/MQTT client or stream manager views.",
     "No AWS account, service, production credential or production exposure was used or provisioned."
   ],
-  "tested_tree": "PEM redaction fix for review feedback on 0298316 (base origin/main de6b6ac already merged). The logs view now redacts the whole 8 KiB tail with PEM state carried across lines before selecting lines, failing closed for tails that start inside a block. On this tree (suifleet-dev:sf037, rust 1.94.0): cargo test 289 passed, pkcs11 291 passed, 0 failed (new console::tests::log_redaction_spans_pem_blocks_and_cut_tails); make test-ota (network none) exit 0 including test_console.py with the new svc2 multiline/byte-cut PEM API regression (135 audit records); test_console.py --browser in suifleet-dev:sf010-chrome passed 13 checks (144 audit records). Negative control: the new API regression fails against the previous per-line logs code (PEM fixture leaked at limit 3). make test-compat, test_ipc.py, test_services.py and dapp-typecheck were not rerun for this console-only change; their last results are on the merge with de6b6ac (0298316)."
+  "tested_tree": "PEM redaction fix for review feedback on d82eaa5, on the merge with origin/main cbf1f68 (SF-060). The logs view now carries PEM state from up to 1 MiB of log before the 8 KiB tail, so a tail that starts inside a block whose BEGIN precedes it and whose END is absent is redacted line by line, including short and logger-prefixed body lines. On this tree (suifleet-dev:sf037, rust 1.94.0): cargo test 309 passed, pkcs11 311 passed, 0 failed (new console::tests::log_tail_carries_pem_state_across_the_byte_cut and extended log_redaction_spans_pem_blocks_and_cut_tails); make test-ota (network none) exit 0 including test_console.py with the new svc3 open-block API regression (192 audit records); test_console.py --browser in suifleet-dev:sf010-chrome passed 13 checks (203 audit records); make test-compat (network none) passed 524 fixture and 76 roadmap checks. Negative control: with PEM_LOOKBACK set to 0 the svc3 API regression fails (PEM fixture leaked at svc3 limit 1). test_ipc.py, test_services.py and dapp-typecheck were not rerun; their last results are on the merge with de6b6ac (0298316)."
 }
