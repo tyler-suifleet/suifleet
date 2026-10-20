@@ -2119,23 +2119,54 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         // A leftover run (no status.json records it) with a setsid-escaped
         // child and one that cleared its environment; and an unrelated process.
-        let script = format!("{SETSID} sleep 300 & echo $! > escaped; env -i sleep 300 & echo $! > cleared; exec sleep 300");
+        let script = format!(
+            "{SETSID} /bin/sh -c 'echo $$ > escaped.ready; exec sleep 300' & echo $! > escaped; \
+             env -i /bin/sh -c 'echo $$ > cleared.ready; exec sleep 300' & echo $! > cleared; exec sleep 300"
+        );
         let mut leftover = tokio::process::Command::new("/bin/sh");
-        leftover.arg("-c").arg(script).current_dir(&f.dir).env(MARKER, marker(&root));
+        leftover
+            .arg("-c")
+            .arg(script)
+            .current_dir(&f.dir)
+            .env(MARKER, marker(&root));
         let mut leftover = spawn_tracked(&mut leftover).unwrap();
         let mut other = tokio::process::Command::new("sleep");
         other.arg("300").env(MARKER, "another-supervisor");
         let mut other = spawn_tracked(&mut other).unwrap();
-        let read = |file: &str| -> u32 { std::fs::read_to_string(f.dir.join(file)).unwrap_or_default().trim().parse().unwrap_or(0) };
-        until("the leftover's children to start", || read("escaped") > 0 && read("cleared") > 0).await;
+        let read = |file: &str| -> u32 {
+            std::fs::read_to_string(f.dir.join(file))
+                .unwrap_or_default()
+                .trim()
+                .parse()
+                .unwrap_or(0)
+        };
+        until("the leftover's children to start", || {
+            read("escaped") > 0 && read("cleared") > 0
+        })
+        .await;
         let (escaped, cleared) = (read("escaped"), read("cleared"));
-        until("the children to exec", || carries(escaped, &marker(&root)) && alive(cleared)).await;
+        // Parent-written PIDs prove fork, not exec. Each child signals only
+        // after setsid/env clearing, so slow CI cannot race the assertion.
+        until("the children to exec", || {
+            read("escaped.ready") == escaped
+                && read("cleared.ready") == cleared
+                && carries(escaped, &marker(&root))
+                && alive(cleared)
+                && !carries(cleared, &marker(&root))
+        })
+        .await;
         assert!(!carries(cleared, &marker(&root)));
 
         assert!(reap_previous_runs(&root, &BTreeMap::new(), None).unwrap() >= 3);
-        assert!(!alive(leftover.pid()) && !alive(escaped) && !alive(cleared), "a leftover survived recovery");
+        assert!(
+            !alive(leftover.pid()) && !alive(escaped) && !alive(cleared),
+            "a leftover survived recovery"
+        );
         let _ = leftover.wait().await;
-        assert!(alive(other.pid()), "recovery killed another supervisor's process");
+        assert!(
+            alive(other.pid()),
+            "recovery killed another supervisor's process"
+        );
         unsafe {
             libc::kill(other.pid() as i32, libc::SIGKILL);
         }
