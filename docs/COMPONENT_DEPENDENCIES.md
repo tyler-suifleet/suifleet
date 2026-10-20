@@ -109,7 +109,11 @@ on-chain object. Recipes and artifacts are re-verified by SHA-256 before use;
 corrupt entries are discarded. A cached listing can be older than the live
 catalog, so offline resolution may choose a lower version than online
 resolution. Cached artifacts beyond `cache_max_bytes` are evicted oldest first,
-except artifacts of installed versions. Copying a cached artifact out, and
+except artifacts of installed versions. Artifact writes and verified cache hits
+advance persistent logical modification times beyond the other entries, with
+whole-second spacing so rapid accesses do not tie on coarse filesystems. These
+ordering timestamps may be ahead of wall time; reopening the store preserves
+their order. Copying a cached artifact out, and
 adding one to the store, obey `[walrus] max_artifact_bytes` and
 `min_free_bytes` like a download. A refused cached copy fails the deployment;
 a refused cache write only skips caching. Protect the store like the journal.
