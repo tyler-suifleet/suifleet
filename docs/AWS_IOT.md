@@ -112,7 +112,7 @@ Mappings connect `Pubsub` with `IotCore`, with the same durable spooling, limits
 
 `[shadows.aws_iot]` runs the SF-033 reconciliation ([SHADOWS.md](SHADOWS.md#cloud-synchronization)) against the AWS Device Shadow service over the connection.
 
-- **Requests.** Each request is a QoS 1 publication to `$aws/things/<thing>/shadow[/name/<n>]/{get,update,delete}` with a unique `clientToken`. The answer is the `accepted`/`rejected` message with that token, or a failure after 30 s.
+- **Requests.** Each request is a QoS 1 publication to `$aws/things/<thing>/shadow[/name/<n>]/{get,update,delete}` with a unique `clientToken`. The answer is the `accepted`/`rejected` message with that token, or a failure after 30 s. A request that timed out is forgotten, so answers that never arrive leave no state; at most 32 requests await an answer at once.
 - **Read.** `get` gives the cloud version and its `desired`/`reported` sections. `delta` and `metadata` are ignored, and 404 means absent.
 - **Write.**
   - The merged document is written as an `update` with the AWS merge patch from the cloud document: removed keys are `null`, objects are patched key by key, and other values are replaced whole.

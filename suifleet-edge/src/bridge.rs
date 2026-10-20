@@ -731,7 +731,9 @@ impl Bridge {
                     let packet_id = take_id();
                     let (topic, payload, token) = (request.topic.clone(), request.payload.clone(), request.token.clone());
                     let router = shadows.as_mut().expect("requests come from the router");
-                    router.sent(request);
+                    if !router.sent(request) {
+                        continue;
+                    }
                     if let Err(error) = session.send(&mqtt::publish(&topic, &payload, 1, Some(packet_id), false)).await {
                         router.fail(&token, "the AWS IoT Core connection failed");
                         return Err(error);

@@ -41,6 +41,8 @@ pub const MAX_SLASHES: usize = 7;
 pub const SUBSCRIBE_BATCH: usize = 8;
 pub const MAX_SUBSCRIPTIONS: usize = 50;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+/// Requests the connection waits on at once; more are failed unsent.
+const MAX_PENDING: usize = 32;
 
 fn default_port() -> u16 {
     8883
@@ -278,6 +280,7 @@ pub struct ShadowClient {
     thing: String,
     connected: Arc<AtomicBool>,
     next: Arc<AtomicU64>,
+    timeout: Duration,
     /// Woken by cloud changes from other writers.
     pub changed: Arc<Notify>,
 }
@@ -333,7 +336,8 @@ pub fn shadow_channel(thing: &str, names: &[String]) -> (ShadowClient, ShadowEnd
     let (tx, rx) = mpsc::channel(16);
     let connected = Arc::new(AtomicBool::new(false));
     let changed = Arc::new(Notify::new());
-    (ShadowClient { requests: tx, thing: thing.into(), connected: connected.clone(), next: Arc::new(AtomicU64::new(1)), changed: changed.clone() },
+    (ShadowClient { requests: tx, thing: thing.into(), connected: connected.clone(), next: Arc::new(AtomicU64::new(1)),
+                   timeout: REQUEST_TIMEOUT, changed: changed.clone() },
      ShadowEndpoint { requests: Arc::new(tokio::sync::Mutex::new(ShadowRequests(rx))), thing: thing.into(),
                       filters: shadow_filters(thing, names), connected, changed })
 }
@@ -348,7 +352,7 @@ impl ShadowClient {
         let (reply, answer) = oneshot::channel();
         let request = ShadowRequest { topic: format!("{}/{op}", shadows::resource(&self.thing, shadow)), payload: serde_json::to_vec(&body)?, token, reply };
         self.requests.send(request).await.map_err(|_| anyhow::anyhow!("the AWS IoT Core connection stopped"))?;
-        tokio::time::timeout(REQUEST_TIMEOUT, answer).await
+        tokio::time::timeout(self.timeout, answer).await
             .map_err(|_| anyhow::anyhow!("AWS IoT shadow {op} timed out"))?
             .map_err(|_| anyhow::anyhow!("the AWS IoT Core connection dropped the request"))?
     }
@@ -359,9 +363,24 @@ impl ShadowRouter {
         self.connected.store(connected, Ordering::SeqCst);
     }
 
-    /// Remember a sent request until its answer arrives.
-    pub fn sent(&mut self, request: ShadowRequest) {
+    /// Remember a request about to be sent until its answer arrives. Requests
+    /// whose caller gave up (timed out) are forgotten first, so answers that
+    /// never come do not accumulate. Returns false, failing the request, when
+    /// too many are still awaited; it must then not be sent.
+    pub fn sent(&mut self, request: ShadowRequest) -> bool {
+        self.pending.retain(|_, (_, reply)| !reply.is_closed());
+        if self.pending.len() >= MAX_PENDING {
+            let _ = request.reply.send(Err(anyhow::anyhow!("too many AWS IoT shadow requests await an answer")));
+            return false;
+        }
         self.pending.insert(request.token, (request.topic, request.reply));
+        true
+    }
+
+    /// Requests awaiting an answer.
+    #[cfg(test)]
+    fn pending(&self) -> usize {
+        self.pending.len()
     }
 
     /// Fail a request that could not be sent or whose connection ended.
@@ -730,5 +749,57 @@ mod tests {
         router.fail_all("connection lost");
         assert!(call.await.unwrap().unwrap_err().to_string().contains("connection lost"));
         assert!(router.owns("$aws/things/dev1/shadow/name/x/get/accepted") && !router.owns("$aws/things/dev2/shadow/get/accepted"));
+    }
+
+    /// Answers that never come (say, a policy that denies receiving them on a
+    /// connection that still acknowledges requests) leave no state behind,
+    /// and the connection keeps a bound on requests awaiting an answer.
+    #[tokio::test]
+    async fn unanswered_shadow_requests_are_reaped_and_bounded() {
+        let (mut client, endpoint) = shadow_channel("dev1", &["cfg".into()]);
+        let (mut router, mut requests) = endpoint.attach().await;
+        router.set_connected(true);
+        client.timeout = Duration::from_millis(10);
+        for _ in 0..200 {
+            let call = tokio::spawn({
+                let client = client.clone();
+                async move { client.call("cfg", "get", Map::new()).await }
+            });
+            assert!(router.sent(requests.next().await.unwrap()));
+            assert!(call.await.unwrap().unwrap_err().to_string().contains("timed out"));
+            assert!(router.pending() <= 1, "{} requests still pending", router.pending());
+        }
+        // Answers flow again: the next request succeeds and nothing is left.
+        let call = tokio::spawn({
+            let client = client.clone();
+            async move { client.call("cfg", "get", Map::new()).await }
+        });
+        let request = requests.next().await.unwrap();
+        let token = request.token.clone();
+        assert!(router.sent(request));
+        router.deliver("$aws/things/dev1/shadow/name/cfg/get/accepted", format!(r#"{{"clientToken":"{token}","version":3}}"#).as_bytes());
+        assert_eq!(call.await.unwrap().unwrap().1["version"], 3);
+        assert_eq!(router.pending(), 0);
+        // Callers still waiting count towards the bound; beyond it a request fails unsent.
+        client.timeout = Duration::from_secs(60);
+        let mut waiting = Vec::new();
+        for _ in 0..=MAX_PENDING {
+            waiting.push(tokio::spawn({
+                let client = client.clone();
+                async move { client.call("cfg", "get", Map::new()).await }
+            }));
+        }
+        let mut refused = 0;
+        for _ in 0..=MAX_PENDING {
+            refused += !router.sent(requests.next().await.unwrap()) as usize;
+        }
+        assert_eq!((refused, router.pending()), (1, MAX_PENDING));
+        router.fail_all("connection lost");
+        let mut errors = Vec::new();
+        for call in waiting {
+            errors.push(call.await.unwrap().unwrap_err().to_string());
+        }
+        assert_eq!(errors.iter().filter(|e| e.contains("too many")).count(), 1, "{errors:?}");
+        assert_eq!(router.pending(), 0);
     }
 }
