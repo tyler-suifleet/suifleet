@@ -49,14 +49,14 @@
   ],
   "reference_vectors": "cargo test console::tests::decisions_follow_the_v1_reference_contract applies the SF-064 console vectors to the implementation's decision function and field allowlist",
   "source_sha256": {
-    "suifleet-edge/src/console.rs": "4fa907886b3da24c5dd7b24a54e8dc852234817e7fddd806cb501b97a8a3e9d5",
+    "suifleet-edge/src/console.rs": "ef465ed2aced3f75e8872217fbd5587c5504352e66086e7bb6f04e39ec7afea8",
     "suifleet-edge/src/console/index.html": "127d9ef2f34416830509f2f91e0990a93869d59b29d8046e649b2f944ca6c7f6",
     "suifleet-edge/src/console/console.js": "8add9140e4fcc658abd5302d8ae71fd3bb7b69ea5a2e1bc8baca06e2cd61387a",
     "suifleet-edge/src/console/console.css": "e4c19b3253b6e14f1673f140e0fc6bb018215c58d36e68cca4de5e12bdbe74dd",
     "suifleet-edge/src/main.rs": "732530d01b65f4744b7f9aa0a541cc1b750b88a33ec6d4cf5d416a8777fa349f",
     "suifleet-edge/src/linux_main.rs": "5911faa3acb61f43837eb2ba164fe090d58ff6a4844bdb71ad56240b74b9993f",
     "suifleet-edge/src/config.rs": "214d439aa21a0e061c98f57f0a0066a00c896480b4d8a5d57db9c8ea86695253",
-    "scripts/test_console.py": "006285687eb15370d87362033b73372b764f375ae734422705b4188cc812da95",
+    "scripts/test_console.py": "66fb72bbc9b4d10369a9a18502c6cdb70e8abaea29ae2cd367ac6568084b8d6f",
     "scripts/test_console_browser.cjs": "655be209b5496347abac83c573acdde84bb1592ac469e01584a80b52a056469a",
     "interfaces/compat/remaining-roadmap-cases.json": "2b3d02d28570af01d5bf58005f7b08d5f67d1991daf3acc792492d2a7e6272b7"
   },
@@ -68,5 +68,5 @@
     "Not AWS LocalDebugConsole UI/API compatibility: no configuration editor, pub/sub/MQTT client or stream manager views.",
     "No AWS account, service, production credential or production exposure was used or provisioned."
   ],
-  "tested_tree": "merge of origin/main de6b6ac (SF-035 client devices, SF-074 Windows runtime, SF-081 service configuration) into 541e1c6. main moved the Linux daemon entry point from main.rs to linux_main.rs, so the console wiring now lives in linux_main.rs (digest added; main.rs/config.rs digests refreshed; console sources unchanged). On that tree plus the macOS supervisor-test race fix: cargo test 288 passed, pkcs11 290 passed; make test-ota (network none) exit 0 including test_console.py (124 audit records, bind-failure and restart/session checks) and test_rollout.py; make test-compat passed (524 fixture checks, 76 roadmap checks); test_ipc.py and test_services.py passed (root, network none). dapp-typecheck was not rerun (no dapp change by this PR). The --browser and earlier network-none console runs predate these merges (console sources unchanged)"
+  "tested_tree": "PEM redaction fix for review feedback on 0298316 (base origin/main de6b6ac already merged). The logs view now redacts the whole 8 KiB tail with PEM state carried across lines before selecting lines, failing closed for tails that start inside a block. On this tree (suifleet-dev:sf037, rust 1.94.0): cargo test 289 passed, pkcs11 291 passed, 0 failed (new console::tests::log_redaction_spans_pem_blocks_and_cut_tails); make test-ota (network none) exit 0 including test_console.py with the new svc2 multiline/byte-cut PEM API regression (135 audit records); test_console.py --browser in suifleet-dev:sf010-chrome passed 13 checks (144 audit records). Negative control: the new API regression fails against the previous per-line logs code (PEM fixture leaked at limit 3). make test-compat, test_ipc.py, test_services.py and dapp-typecheck were not rerun for this console-only change; their last results are on the merge with de6b6ac (0298316)."
 }
