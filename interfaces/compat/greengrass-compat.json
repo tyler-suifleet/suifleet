@@ -104,8 +104,8 @@
   },
   "cloudwatch-logs-cases.json": {
    "description": "SF-038 cloudwatch-logs-export adapter pinned to aws.greengrass.LogManager 2.3.14: levels, redaction, group/stream names, batching, spool and checkpoint.",
-   "runtime_execution": "pending", "pending_on": ["SF-060"],
-   "notes": "Runtime execution belongs to the cloudwatch-logs-export implementation ticket SF-060. Reference-model agreement is not adapter execution."
+   "runtime_execution": "passed", "runtime_evidence": "docs/validation/sf060-cloudwatch-logs.json",
+   "notes": "SF-060 ran all declared fixtures against the actual adapter's spool and SigV4 uploader with a request-checking local CloudWatch Logs emulator. Live AWS acceptance remains unrun; see the scoped runtime receipt."
   }
  },
  "capabilities": [
@@ -203,9 +203,10 @@
    "tickets": ["SF-019", "SF-020", "SF-038", "SF-059", "SF-062"], "suites": ["cloudwatch-metrics-cases.json"],
    "notes": "Native metrics in SF-019/SF-020. CloudWatch export is the cloudwatch-metrics-export adapter (SF-059); Device Defender device-side metrics are SF-062 over aws-iot-core-connection (SF-061)."},
   {"id": "cloud.logs", "area": "cloud", "aws_reference": "aws.greengrass.LogManager 2.3.14, aws.greengrass.SystemLogForwarder",
-   "functional": "proposed", "aws_api": "proposed", "aws_recipe": "not-applicable", "tickets": ["SF-020", "SF-038", "SF-060"],
+   "functional": "partial", "aws_api": "proposed", "aws_recipe": "not-applicable", "tickets": ["SF-020", "SF-038", "SF-060"],
+   "current_evidence": ["docs/LOGS.md", "docs/CLOUDWATCH_LOGS.md", "docs/validation/sf060-cloudwatch-logs.json"],
    "suites": ["cloudwatch-logs-cases.json"],
-   "notes": "Native log collection in SF-020; CloudWatch Logs upload is the cloudwatch-logs-export adapter (SF-060)."},
+   "notes": "Native log collection in SF-020; CloudWatch Logs upload is the cloudwatch-logs-export adapter (SF-060), tested against a local emulator only. Live AWS upload, systemd-journal forwarding (SystemLogForwarder) and physical integration remain pending."},
   {"id": "remote.secure-tunneling", "area": "remote-support", "aws_reference": "aws.greengrass.SecureTunneling 2.0.1, aws.greengrass.SystemsManagerAgent",
    "functional": "not-applicable", "aws_api": "proposed", "aws_recipe": "not-applicable", "tickets": ["SF-038", "SF-063"],
    "notes": "SSH daemon, firewall and service configuration stay platform-owned. The secure-tunneling adapter (SF-063) is an explicitly configured supervised destination proxy that coexists with them; the open-source SSM agent can be packaged as a native component."},
