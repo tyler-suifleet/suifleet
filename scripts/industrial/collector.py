@@ -826,12 +826,26 @@ class OpcUaSource(Source):
                 continue
             try:
                 results = self.client.read([p["node"] for p in due])
-            except (ProtocolError, ServiceError, ua.DecodeError):
-                return                             # the subscription thread reconnects
+            except ServiceError as error:          # the server answered: report it and poll again next time
+                self.poll_failed(due, ua.status_name(error.status))
+                continue
+            except ProtocolError as error:
+                if error.status == ua.STATUS["BadTimeout"] and self.client.broken is None:
+                    self.poll_failed(due, "BadTimeout")
+                    continue
+                self.client.abort(error)           # the session notices and reconnects
+                return
+            except Exception as error:             # noqa: BLE001 - never stop polling silently
+                self.client.abort(ProtocolError(f"Read: {type(error).__name__}: {error}", ua.STATUS["BadDecodingError"]))
+                return
             received = time.time_ns()
             self.report_gap("backpressure")
             for p, datavalue in zip(due, results):
                 self.emit_value(p, datavalue, received)
+
+    def poll_failed(self, points, status):
+        self.stats["poll_failures"] += 1
+        self.fail_points(points, status)
 
     def close(self):
         if self.client is not None:

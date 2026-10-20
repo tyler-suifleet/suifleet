@@ -157,6 +157,10 @@ class Client:
             raise
         return response
 
+    def abort(self, error):
+        """Mark the connection unusable, waking every waiting request so the session reconnects."""
+        self._fail(error)
+
     def _fail(self, error):
         if self.broken is None:
             self.broken = error if isinstance(error, ProtocolError) else ProtocolError(f"decode error: {error}",

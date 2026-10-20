@@ -621,6 +621,58 @@ class OpcUaTests(Harness):
         wait_until(lambda: all(self.latest(f"p{i}") for i in range(30)), 10)
         self.assertGreaterEqual(self.source().stats["publish_responses"], 5, "30 initial values need >= 5 publishes of 7")
 
+    def test_failed_reads_are_reported_and_polling_resumes(self):
+        class FaultyReads(opcua_server.Simulator):
+            """Fails chosen ReadRequests by number: a ServiceFault, no answer, or a short result list."""
+            faults, reads = {}, 0
+
+            def _dispatch(self, conn, request_id, payload):
+                name, request = ua.decode_message(payload)
+                if name == "ReadRequest":
+                    self.reads += 1
+                    fault = self.faults.get(self.reads)
+                    if fault == "fault":
+                        return self._fault(conn, request_id, request, ua.STATUS["BadTimeout"])
+                    if fault == "silent":
+                        return
+                    if fault == "short":            # a protocol violation: the session must reconnect
+                        return self._send(conn, request_id, "ReadResponse", ua.make(
+                            "ReadResponse", response_header=self._response_header(request), results=[]))
+                return super()._dispatch(conn, request_id, payload)
+
+        points = [{"name": "flag", "node_id": "ns=2;i=1001", "mode": "poll", "poll_interval_ms": 50, "type": "boolean"},
+                  {"name": "counter", "node_id": "ns=2;s=Counter", "type": "int32", "sampling_interval_ms": 20}]
+        for fault in ("fault", "silent"):
+            with self.subTest(fault):
+                sim = FaultyReads()
+                sim.faults = {2: fault}
+                populate(sim)
+                self.addCleanup(sim.close)
+                self.start(base_config([self.opc(sim, points=points, keepalive_count=1, lifetime_count=3)]))
+                wait_until(lambda: self.source().stats["poll_failures"] >= 1, 5, "the failed Read was not reported")
+                reads = sim.reads
+                wait_until(lambda: sim.reads >= reads + 3, 5, "polling stopped after a failed Read")
+                wait_until(lambda: self.latest("flag")["quality"] == "GOOD", 5, "polling did not recover")
+                flags = [(r["quality"], r["status"], r["value"]) for r in self.sink.records("sample", point="flag")]
+                failed = flags.index(("BAD", "BadTimeout", None))
+                self.assertIn(("GOOD", "Good", True), flags[failed + 1:], "a GOOD value follows the failure")
+                sim.set_value("ns=2;s=Counter", 5)
+                wait_until(lambda: self.latest("counter")["value"] == 5, 5, "the subscription stopped")
+                self.assertEqual(sim.counters["sessions"], 1, "a transient Read failure keeps the session")
+                self.assertEqual(self.source().state, "subscribed")
+                self.collector.stop(1.0)
+        sim = FaultyReads()
+        sim.faults = {2: "short"}
+        populate(sim)
+        self.addCleanup(sim.close)
+        self.start(base_config([self.opc(sim, points=points, keepalive_count=1, lifetime_count=3)]))
+        wait_until(lambda: sim.counters["sessions"] >= 2, 8, "a malformed Read answer did not reconnect the session")
+        reads = sim.reads
+        wait_until(lambda: sim.reads >= reads + 3, 5, "polling did not resume on the new session")
+        sim.set_value("ns=2;s=Counter", 6)
+        wait_until(lambda: self.latest("counter")["value"] == 6, 5, "the new session did not resubscribe")
+        self.assertTrue(self.sink.records("status", state="disconnected"))
+
     def test_plaintext_password_refused_unless_allowed(self):
         sim = self.simulator(users={"op": "pw"}, allow_anonymous=False)
         with tempfile.TemporaryDirectory() as tmp:
