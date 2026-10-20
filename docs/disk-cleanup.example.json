@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "projects": [
+    {"id": "suifleet", "root": "/home/tyler/dev/codex/src/suifleet"},
+    {"id": "vortech", "root": "/home/tyler/dev/codex/src/vortech"}
+  ],
+  "retain_days": 3,
+  "max_bytes_per_run": 53687091200,
+  "uninspectable_uids_accepted": [],
+  "uninspectable_helpers_accepted": [{"comm": "(sd-pam)", "parent_exe": "/usr/lib/systemd/systemd",
+                                     "cgroup": "/user.slice/user-*.slice/user@*.service/init.scope"}],
+  "budget": {
+    "warn_used_fraction": 0.85,
+    "critical_used_fraction": 0.95,
+    "warn_free_bytes": 107374182400,
+    "critical_free_bytes": 32212254720
+  },
+  "worktree_outputs": [
+    "suifleet-edge/target",
+    "suifleet-indexer/target",
+    "dapp/node_modules",
+    "dapp/.next",
+    "contracts/build"
+  ],
+  "yocto": [],
+  "yocto_report_only": [
+    "/home/tyler/dev/codex/yocto-sf025/build",
+    "/home/tyler/dev/codex/yocto-sf029/build",
+    "/home/tyler/dev/codex/yocto-sf053/build",
+    "/home/tyler/dev/suifleet-yocto/build"
+  ],
+  "report_paths": []
+}
