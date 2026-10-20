@@ -185,7 +185,7 @@ class Store:
         ''')
 
         columns = {row[1] for row in self.db.execute('PRAGMA table_info(jobs)')}
-        for name, declaration in [('retry_after','REAL'),('attempts','INTEGER DEFAULT 0'),('comment_id','TEXT'),('review_id','TEXT'),('publication_done','INTEGER DEFAULT 0'),('publication_attempts','INTEGER DEFAULT 0')]:
+        for name, declaration in [('retry_after','REAL'),('attempts','INTEGER DEFAULT 0'),('comment_id','TEXT'),('review_id','TEXT'),('publication_done','INTEGER DEFAULT 0'),('publication_attempts','INTEGER DEFAULT 0'),('launch_intent','TEXT')]:
             if name not in columns:
                 self.db.execute(f'ALTER TABLE jobs ADD COLUMN {name} {declaration}')
                 if name == 'publication_done':
@@ -349,12 +349,13 @@ class Coordinator:
     def ticket(self, project, *args):
         return run(['ticket', '--project', project['id'], *args])
 
-    def launch(self, project, pr, owner, kind):
+    def launch(self, project, pr, owner, kind, recovery=None):
         family = ('Claude' if owner['agent'] == 'Codex' else 'Codex') if kind == 'review' else owner['agent']
         directory = self.state / project['id'] / f"pr-{pr['number']}-{kind}-{pr['headRefOid'][:12]}-{feedback(pr)[:12]}"
-        job = self.store.reserve(project['id'], pr, family, kind, directory)
+        job = recovery['id'] if recovery is not None else self.store.reserve(project['id'], pr, family, kind, directory)
         if job is None: return
         directory.mkdir(parents=True, exist_ok=True)
+        spawning = False
         try:
             if kind == 'review':
                 run(['git','fetch','origin',pr['baseRefName']],cwd=project['root'])
@@ -370,12 +371,40 @@ class Coordinator:
                 run(['git', 'worktree', 'add', '--detach', str(worktree), actual], cwd=project['root'])
             else:
                 current = json.loads(self.ticket(project, 'show', owner['key']))
-                if current['status'] != 'review' or current['token'] != owner['token']:
+                intent = {'claim': hashlib.sha256(owner['token'].encode()).hexdigest(),
+                          'key': owner['key'], 'branch': owner['branch'],
+                          'worktree': owner['worktree'], 'head': pr['headRefOid']}
+                if recovery is not None:
+                    if json.loads(recovery['launch_intent']) != intent:
+                        raise RuntimeError('launch intent no longer matches ownership')
+                    if recovery['pid'] or recovery['started'] or any(
+                            (directory/name).exists() for name in ('process.json','exit.json','result.json')):
+                        raise RuntimeError('uncertain worker launch; manual recovery required')
+                elif current['status'] != 'review':
                     raise RuntimeError('owner became active; no second implementation worker')
+                if current['token'] != owner['token'] or current['branch'] != owner['branch'] or current['worktree'] != owner['worktree']:
+                    raise RuntimeError('launch ownership changed')
+                if current['status'] not in ('review','in_progress'):
+                    raise RuntimeError('launch ownership is not resumable')
                 worktree = Path(owner['worktree'])
                 if run(['git', 'status', '--porcelain'], cwd=worktree).strip():
                     raise RuntimeError('implementation worktree is dirty; manual handoff needed')
-                self.ticket(project, 'resume', owner['key'], '--token', owner['token'])
+                if run(['git','branch','--show-current'], cwd=worktree).strip() != owner['branch'] or run(['git','rev-parse','HEAD'], cwd=worktree).strip() != pr['headRefOid']:
+                    raise RuntimeError('launch branch/head changed')
+                # Persist before the mutation: a failed mirror can still leave a
+                # durable In progress claim. Recovery publishes that state rather
+                # than replaying resume.
+                self.store.db.execute("UPDATE jobs SET launch_intent=? WHERE id=?", (json.dumps(intent),job))
+                if current.get('publish_pending'):
+                    self.ticket(project, 'publish', owner['key'])
+                    current = json.loads(self.ticket(project, 'show', owner['key']))
+                    if current['token'] != owner['token']:
+                        raise RuntimeError('claim changed during publication')
+                if current['status'] == 'review':
+                    self.ticket(project, 'resume', owner['key'], '--token', owner['token'])
+                if recovery is not None:
+                    self.ticket(project, 'heartbeat', owner['key'], '--token', owner['token'])
+                self.ticket(project, 'assert', owner['key'], '--token', owner['token'])
             latest_review = self.store.review(project['id'], pr['number'])
             snapshot = {**pr, 'coordinator_review':latest_review, 'ticket': {k:owner[k] for k in ('key','agent','model','evidence','spec')}}
             (directory / 'snapshot.json').write_text(json.dumps(snapshot, indent=2))
@@ -390,12 +419,17 @@ class Coordinator:
             (directory/'prompt.txt').write_text(prompt)
             for name in ('result.json','exit.json','process.json'):
                 (directory/name).unlink(missing_ok=True)
+            # Crossing this boundary makes an absent receipt ambiguous. Never
+            # automatically repeat Popen after an interrupted launch.
+            self.store.db.execute("UPDATE jobs SET launch_intent=NULL WHERE id=?", (job,))
+            spawning = True
             child = subprocess.Popen(['/usr/bin/python3',str(Path(__file__).with_name('worker.py')),str(directory)], cwd=worktree, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
             self.children[job] = child
             self.store.db.execute("UPDATE jobs SET status='running',pid=?,started=? WHERE id=?", (child.pid, process_identity(child.pid), job))
             print(f"{project['id']} PR#{pr['number']}: started {family} {kind}", flush=True)
         except BaseException as error:
-            status = 'retry' if kind == 'review' else 'failed'
+            pending = self.store.db.execute('SELECT launch_intent FROM jobs WHERE id=?',(job,)).fetchone()[0]
+            status = 'retry' if kind == 'review' else ('reserved' if pending else ('orphaned' if spawning else 'failed'))
             self.store.db.execute("UPDATE jobs SET status=?,error=?,retry_after=? WHERE id=?", (status,str(error),time.time()+300,job))
             raise
 
@@ -444,6 +478,14 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                     if process.exists():
                         identity = json.loads(process.read_text())
                         self.store.db.execute("UPDATE jobs SET status='running',pid=?,started=? WHERE id=?",(identity['pid'],identity['started'],row['id']))
+                    elif row['kind'] == 'fix' and row['launch_intent']:
+                        if row['retry_after'] and row['retry_after'] > time.time(): continue
+                        intent = json.loads(row['launch_intent'])
+                        owner = json.loads(self.ticket(project,'show',intent['key']))
+                        pr = self.pr(project,row['pr'])
+                        if pr['headRefOid'] != row['head'] or feedback(pr) != row['feedback']:
+                            raise RuntimeError('pending launch snapshot changed; manual recovery required')
+                        self.launch(project,pr,owner,'fix',recovery=row)
                     elif time.time()-row['created'] > 30:
                         self.store.db.execute("UPDATE jobs SET status='failed',error='launch interrupted before worker started' WHERE id=?",(row['id'],))
                     continue
