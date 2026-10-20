@@ -8,6 +8,10 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 if (-not ([Security.Principal.WindowsPrincipal]$identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Elevated disposable runner required' }
+if (Get-Service SuiFleet -ErrorAction SilentlyContinue) { throw 'Runner already has SuiFleet installed; refusing existing service' }
+$serviceCreated = $false
+$userCreated = $false
+$outsiderCreated = $false
 $root = Join-Path $env:ProgramData ('SuiFleet-Test-' + [guid]::NewGuid().ToString('N'))
 $user = 'sf' + [guid]::NewGuid().ToString('N').Substring(0,12)
 $outsider = 'sf' + [guid]::NewGuid().ToString('N').Substring(0,12)
@@ -50,7 +54,9 @@ try {
     & icacls.exe $root /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' "*$($identity.User.Value):(OI)(CI)F" | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'initial ACL provisioning failed' }
     New-LocalUser $user -Password (ConvertTo-SecureString $password -AsPlainText -Force) -AccountNeverExpires | Out-Null
+    $userCreated = $true
     New-LocalUser $outsider -Password (ConvertTo-SecureString $otherPassword -AsPlainText -Force) -AccountNeverExpires | Out-Null
+    $outsiderCreated = $true
     # Explicitly add Users by SID, independent of host localization.
     $users = Get-LocalGroup -SID 'S-1-5-32-545'
     Add-LocalGroupMember -Group $users -Member $user,$outsider
@@ -61,6 +67,7 @@ try {
     $binaryPath = '"' + (Join-Path $root 'suifleet.exe') + '" --service "' + (Join-Path $root 'config.json') + '"'
     Assert-True (-not (Get-Service SuiFleet -ErrorAction SilentlyContinue)) 'runner already has SuiFleet installed'
     New-Service -Name SuiFleet -BinaryPathName $binaryPath -StartupType Manual | Out-Null
+    $serviceCreated = $true
     Start-Service SuiFleet
     Wait-Until { $s = Status; $null -ne $s } 'SCM service ready'
     $checks.Add('SCM start and authenticated operator status')
@@ -156,9 +163,9 @@ try {
     [ordered]@{ verdict='passed'; platform=[Environment]::OSVersion.VersionString; architecture=$env:PROCESSOR_ARCHITECTURE; rust=(& rustc +1.94.0 --version); head=$sourceHead; base=$baseHead; tested_commit=(& git rev-parse HEAD); checks=$checks; limits=@('No AWS/live-chain/physical/production acceptance', 'Local operator manifest; Linux chain reconciliation and rich IPC APIs explicitly unsupported on Windows') } | ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8NoBOM $Evidence
     Write-Host ($checks -join "`n")
 } finally {
-    if (Get-Service SuiFleet -ErrorAction SilentlyContinue) { Stop-Service SuiFleet -Force -ErrorAction SilentlyContinue; & sc.exe delete SuiFleet | Out-Null }
-    Remove-LocalUser $user -ErrorAction SilentlyContinue
-    Remove-LocalUser $outsider -ErrorAction SilentlyContinue
+    if ($serviceCreated) { Stop-Service SuiFleet -Force -ErrorAction SilentlyContinue; & sc.exe delete SuiFleet | Out-Null }
+    if ($userCreated) { Remove-LocalUser $user -ErrorAction SilentlyContinue }
+    if ($outsiderCreated) { Remove-LocalUser $outsider -ErrorAction SilentlyContinue }
     if (Test-Path $root) { Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue }
     if (Get-Variable probe -ErrorAction SilentlyContinue) { Remove-Item $probe -Recurse -Force -ErrorAction SilentlyContinue }
 }
