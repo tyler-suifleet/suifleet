@@ -226,8 +226,7 @@ impl Runtime {
             store.reconfigure(quota, &[])?;
         }
         if let Some(settings) = &next.pubsub {
-            if let Some(broker) = &self.broker { broker.lock().unwrap().set_limits(settings.limits()); }
-            else { self.broker = Some(Arc::new(Mutex::new(pubsub::Broker::open(&self.base.runtime.state_dir.join("pubsub"), settings.limits())?))); }
+            if self.broker.is_none() { self.broker = Some(Arc::new(Mutex::new(pubsub::Broker::open(&self.base.runtime.state_dir.join("pubsub"), settings.limits())?))); }
         }
         self.effective = next;
         Ok(())
@@ -236,6 +235,9 @@ impl Runtime {
         if let Some(store) = &self.shadow_store { store.lock().unwrap().set_broker(self.effective.pubsub.as_ref().and(self.broker.clone())); }
         if let Some(broker) = &self.broker {
             let mut broker = broker.lock().unwrap();
+            // Background shadow sync also publishes here. Its limits must
+            // change only after the journal commit, never during staging.
+            if let Some(settings) = &self.effective.pubsub { broker.set_limits(settings.limits()); }
             for subscription in broker.stats(None) {
                 let principal = subscription["principal"].as_str().unwrap();
                 let filter = subscription["filter"].as_str().unwrap();
@@ -377,6 +379,34 @@ mod tests {
     }
     fn services() -> Services {
         serde_json::from_value(json!({"version":1,"grants":{"app":{"operations":["publish"],"pubsub_policies":[{"operations":["aws.greengrass#PublishToTopic"],"resources":["sensors/*"]}]}},"pubsub":{}})).unwrap()
+    }
+    #[tokio::test]
+    async fn staging_does_not_change_limits_seen_by_background_publishers() {
+        let mut base = fixture();
+        let dir = std::env::temp_dir().join(format!("sf081-limits-{}",std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        base.runtime.state_dir = dir.clone();
+        let mut services = services();
+        let grant = services.grants.get_mut("app").unwrap();
+        grant.operations = vec!["subscribe".into(),"publish".into(),"receive".into()];
+        grant.pubsub_policies = vec![pubsub::Policy { operations: vec!["*".into()],resources: vec!["*".into()] }];
+        services.pubsub.as_mut().unwrap().max_messages_per_subscription = 3;
+        let current = candidate(&BTreeMap::new(),"app","d1",Some(&services),&BTreeSet::from(["app".into()])).unwrap();
+        let signer = Arc::new(crate::identity::Ed25519File(ed25519_dalek::SigningKey::from_bytes(&[7;32])));
+        let mut runtime = Runtime::open(&base,&current,signer,streams::Binding { chain_identifier:"local".into(),registry:"0x1".into(),device_id:"0x2".into() }).unwrap();
+        let broker = runtime.broker.clone().unwrap();
+        broker.lock().unwrap().subscribe("app","topic",1).unwrap();
+        broker.lock().unwrap().publish("background","topic",&json!(1),None).unwrap();
+        services.pubsub.as_mut().unwrap().max_messages_per_subscription = 1;
+        let next = candidate(&current,"app","d2",Some(&services),&BTreeSet::from(["app".into()])).unwrap();
+        runtime.activate(&next).unwrap();
+        broker.lock().unwrap().publish("background","topic",&json!(2),None).unwrap();
+        runtime.resume().unwrap();
+        assert!(broker.lock().unwrap().publish("background","topic",&json!(3),None).is_err());
+        assert_eq!(broker.lock().unwrap().stats(Some("app"))[0]["queued"],2);
+        drop(runtime); drop(broker);
+        std::fs::remove_dir_all(dir).unwrap();
     }
     #[test]
     fn activation_crash_uses_journal_commit_decision_and_preserves_records() {
