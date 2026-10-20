@@ -105,7 +105,17 @@ async function sign(keypair, snapshot) {
   assert.ok(lines.some((l) => l.startsWith("  svc: 1000 queued (100% full since ")), lines.join("\n"));
   assert.ok(lines.some((l) => l.startsWith("MQTT bridge: disconnected since ") && l.includes("(connection-refused)")), lines.join("\n"));
   assert.ok(lines.some((l) => l.startsWith("Stream metrics: 98% of 1024 bytes") && l.includes("4 lost before export")), lines.join("\n"));
-  console.log("PASS: schema-2 service health verifies; unknown/oversized/missing service fields (topics, URLs) and error texts are refused; summary lines");
+  // Device times are any safe integer; one beyond the Date range must not break the health view.
+  const farFuture = clone();
+  farFuture.bridge.since_ms = Number.MAX_SAFE_INTEGER;
+  farFuture.messaging.queues[0].full_since_ms = Number.MAX_SAFE_INTEGER;
+  const far = { ...withServices.snapshot, services: farFuture };
+  assert.deepEqual(await telemetry.verifyReport(await sign(ed, far), device, signer), far);
+  const farLines = telemetry.describeServices(farFuture);
+  const raw = `UTC milliseconds ${Number.MAX_SAFE_INTEGER} (out of range)`;
+  assert.ok(farLines.some((l) => l.startsWith(`MQTT bridge: disconnected since ${raw},`)), farLines.join("\n"));
+  assert.ok(farLines.some((l) => l.startsWith(`  svc: 1000 queued (100% full since ${raw})`)), farLines.join("\n"));
+  console.log("PASS: schema-2 service health verifies; unknown/oversized/missing service fields (topics, URLs) and error texts are refused; summary lines, including out-of-range device times");
 
   // Status rules shared with the indexer.
   for (const c of cases.status) {

@@ -129,6 +129,12 @@ export function validServices(value: unknown): value is ServicesHealth {
   return shaped(value, SERVICES);
 }
 
+/** A device-reported UTC time; out-of-range values are shown raw, never thrown on. */
+function utcTime(ms: number): string {
+  const time = new Date(ms);
+  return Number.isNaN(time.getTime()) ? `UTC milliseconds ${ms} (out of range)` : time.toISOString();
+}
+
 /** One line per service and per entry, for the device's health details. */
 export function describeServices(services: ServicesHealth): string[] {
   const lines: string[] = [];
@@ -137,14 +143,14 @@ export function describeServices(services: ServicesHealth): string[] {
     const m = services.messaging;
     lines.push(`Pub/sub: ${m.subscriptions} subscriptions, ${m.queued} queued, ${m.refused} refused, ${m.dropped} dropped`);
     for (const q of m.queues) {
-      lines.push(`  ${q.principal}: ${q.queued} queued (${q.fill_percent}% full${q.full_since_ms !== null ? ` since ${new Date(q.full_since_ms).toISOString()}` : ""}), `
+      lines.push(`  ${q.principal}: ${q.queued} queued (${q.fill_percent}% full${q.full_since_ms !== null ? ` since ${utcTime(q.full_since_ms)}` : ""}), `
         + `${q.refused_recent} refused and ${q.dropped_recent} dropped since the previous report`);
     }
     lines.push(...more(m.omitted));
   }
   if (services.bridge) {
     const b = services.bridge;
-    lines.push(`MQTT bridge: ${b.connected ? "connected" : "disconnected"} since ${new Date(b.since_ms).toISOString()}, ${b.connects} connects, `
+    lines.push(`MQTT bridge: ${b.connected ? "connected" : "disconnected"} since ${utcTime(b.since_ms)}, ${b.connects} connects, `
       + `${b.refused} refused, ${b.rejected} rejected${b.last_error ? ` (${b.last_error})` : ""}`);
   }
   if (services.streams) {
