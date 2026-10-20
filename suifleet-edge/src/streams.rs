@@ -653,7 +653,8 @@ pub fn preflight_disk(dir: &Path, quota: Quota, definitions: &[Definition]) -> a
         sizes.insert(def.name.clone(), def.max_size);
     }
     let total = sizes.values().try_fold(0u64, |a,b| a.checked_add(*b)).ok_or_else(|| anyhow::anyhow!("quota overflow"))?;
-    anyhow::ensure!(sizes.len() <= quota.max_streams && total <= quota.max_total_bytes, "stored and declared streams exceed quota");
+    anyhow::ensure!(sizes.len() <= quota.max_streams && total <= quota.max_total_bytes, "stored and declared streams need {} streams and {total} bytes, over [streams] max_streams = {} / max_total_bytes = {}; raise the limits, or delete streams under the old limits first (stream data left untouched)",
+        sizes.len(), quota.max_streams, quota.max_total_bytes);
     Ok(())
 }
 
@@ -708,7 +709,8 @@ impl Store {
             sizes.insert(def.name.clone(), def.max_size);
         }
         let total = sizes.values().try_fold(0u64, |a, b| a.checked_add(*b)).ok_or_else(|| anyhow::anyhow!("stream quota overflow"))?;
-        anyhow::ensure!(sizes.len() <= quota.max_streams && total <= quota.max_total_bytes, "stored and declared streams exceed quota");
+        anyhow::ensure!(sizes.len() <= quota.max_streams && total <= quota.max_total_bytes, "stored and declared streams need {} streams and {total} bytes, over [streams] max_streams = {} / max_total_bytes = {}; raise the limits, or delete streams under the old limits first (stream data left untouched)",
+        sizes.len(), quota.max_streams, quota.max_total_bytes);
         Ok(())
     }
 
