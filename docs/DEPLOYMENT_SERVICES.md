@@ -102,8 +102,9 @@ Before lifecycle validation, install or run commands, the daemon validates the
 section, plan membership, ACLs, bridge loop rules, aggregate stream reservations,
 persistence compatibility and the existing live stream inventory. Preflight
 never opens/truncates stream segments, runs retention or evicts records. A
-shrink that would discard retained data is rejected. Enabling a previously
-disabled stream service checks metadata only and conservatively rejects a
+normal deployment shrink that would discard retained data is rejected. During explicit application
+recovery, restored size/retention bounds take effect only after the journal
+commits the recovered generation. Enabling a previously disabled stream service checks metadata only and conservatively rejects a
 persisted reservation shrink.
 
 The old generation stays active while component installation runs. After all
@@ -126,14 +127,26 @@ indeterminate and is never replayed automatically.
 Each root replaces its complete section. Dropping a grant revokes it; deploying
 that root without `services` revokes all its fleet grants and service sections.
 Removing an installed component revokes its fleet grants. Removing a stream
-declaration stops its export and retains the stream records; deleting data is
-an explicit operator action. Local sections can still keep services enabled.
+declaration stops its export and marks it read-only (`stream_describe.retired`),
+retaining records without TTL retirement. Deletion is explicit. A rollback can
+restore a smaller active budget while retaining streams introduced by the newer
+generation. Retained reservations still count against all new allocations:
+existing overage may neither increase its stream count nor its reserved bytes.
+Re-declaring an existing retained stream reactivates it only when active bounds
+fit. Delete retained streams or explicitly raise the budget to allocate new ones. Local sections can still keep services enabled.
 
 As with existing component configuration, lifecycle commands must not wait for
 owner-loop IPC while the deployment is applying. Service permissions become
 available after successful installation. Asynchronous firmware-helper-only and
 daemon self-update recipes cannot change component services; use an ordinary
 component deployment. Platform reboot and firmware recovery remain platform-owned.
+
+Before staging service metadata, the journal binding gains a required-reader
+`/services-v1` suffix. It retains the original chain/package/device/signer
+identity. This reader accepts legacy journals and preserves the suffix on
+restart; older daemons refuse the binding instead of ignoring retirement and
+mutating retained records. Do not strip the marker to force a downgrade: older
+binaries require an explicit supported state migration.
 
 ## Inspection and validation
 

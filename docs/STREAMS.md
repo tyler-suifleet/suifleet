@@ -35,6 +35,15 @@ max_backoff_seconds = 300                 # retry backoff cap, 1..=3600
 
 `suifleet --check-config` and daemon startup reject invalid definitions, duplicate names, and definitions that exceed the quota. Declared streams are created at startup, or updated to match the configuration. Their persistence cannot change; delete and recreate the stream to change it. **Exports are operator configuration only:** a component can create local streams that its globs allow, but it cannot attach an export or delete a declared stream.
 
+Fleet removal/rollback can mark an operator declaration **retained read-only**.
+`stream_describe` exposes `retired`; reads/deletion remain available to authorized
+callers, while append/export/TTL retirement stop. Restoring a smaller active
+budget can retain prior overage without discarding these records. It never
+creates new capacity: all retained reservations still block new allocations,
+and overage cannot grow in count or reserved bytes. Re-declare an existing stream
+within active bounds to reactivate it, or explicitly delete retained data / raise
+the budget. See [deployment transaction recovery](DEPLOYMENT_SERVICES.md).
+
 ## Semantics
 
 - **Numbering.** Sequence numbers start at 0 and increase by one per append. A number is never reused, even after eviction, a restart or a crash.
