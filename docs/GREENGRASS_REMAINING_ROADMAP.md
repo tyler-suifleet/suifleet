@@ -158,3 +158,5 @@ power-loss and device-specific results remain separately tracked in
 [SF-031](https://github.com/tyler-suifleet/suifleet/issues/32); no refreshed image or
 physical result is claimed. Software correctness, source/security review,
 meaningful local/emulator tests and normal authorized automatic CI remain gates.
+
+SF-071 adds the native [SiteWise TQV processing/publisher](SITEWISE.md) over SF-070 records and SF-034 lossless external streams with SF-057 credentials. Its local request/checkpoint tests establish the documented native subset; live AWS and physical acceptance remain unrun. Historical reference fixtures above remain specification-only.

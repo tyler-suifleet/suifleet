@@ -150,3 +150,5 @@ change the HTTP export protocol or native stream retention.
 - a disk-full host filesystem beyond the configured quota;
 - a receiver that verifies against the live registry (#11);
 - physical Pi power loss (#32).
+
+SF-071 adds the native [SiteWise TQV processing/publisher](SITEWISE.md) over SF-070 records and SF-034 lossless external streams with SF-057 credentials. Its local request/checkpoint tests establish the documented native subset; live AWS and physical acceptance remain unrun. Historical reference fixtures above remain specification-only.
