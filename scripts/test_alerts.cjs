@@ -40,5 +40,8 @@ respond.calls = [];
   assert.equal(alerts.currentAlerts(ok, 1000, false, 1000 + alerts.ALERTS_STALE_MS - 1).status, "ok");
   assert.equal(alerts.currentAlerts(ok, 1000, false, 1000 + alerts.ALERTS_STALE_MS + 1).status, "unavailable");
   assert.equal(alerts.currentAlerts(ok, 1000, true, 1000).status, "unavailable");
-  console.log("PASS: dApp alerts: strict parsing (service-health kinds included), owner-scoped authenticated fetch, unavailable instead of stale or partial lists");
+  // Historical failed results (SF-098) count every failed device receipt, recovered or not.
+  assert.equal(alerts.historicalFailures([]), 0);
+  assert.equal(alerts.historicalFailures([{ statuses: { "0xd1": 2, "0xd2": 1 } }, { statuses: { "0xd1": 1 } }, { statuses: { "0xd1": 2, "0xd3": 2 } }]), 3);
+  console.log("PASS: dApp alerts: strict parsing (service-health kinds included), owner-scoped authenticated fetch, unavailable instead of stale or partial lists, historical failures counted apart");
 })().catch((error) => { console.error(error); process.exit(1); });
