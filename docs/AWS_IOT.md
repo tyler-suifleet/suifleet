@@ -3,7 +3,8 @@
 With `[aws_iot]`, the daemon keeps one MQTT 3.1.1 connection over mutual TLS to AWS IoT Core, as an AWS IoT thing. The connection carries:
 
 - the pub/sub bridge's `IotCore` mappings ([MESSAGING.md](MESSAGING.md));
-- AWS IoT Device Shadow synchronization ([SHADOWS.md](SHADOWS.md)).
+- AWS IoT Device Shadow synchronization ([SHADOWS.md](SHADOWS.md));
+- opt-in Device Defender device metrics ([DEVICE_DEFENDER.md](DEVICE_DEFENDER.md)).
 
 It is the `aws-iot-core-connection` adapter of the managed-component catalog ([GREENGRASS_MANAGED_COMPONENTS.md](GREENGRASS_MANAGED_COMPONENTS.md)). It matches `aws.greengrass.clientdevices.mqtt.Bridge` 2.3.3 IotCore routes and `aws.greengrass.ShadowManager` 2.3.15 synchronization, with the differences listed below. The implementation is clean-room, from AWS documentation; it uses rustls for TLS and contains no AWS component code. It is supported on Linux first; macOS refuses `[aws_iot]` until it is validated there.
 
@@ -55,7 +56,7 @@ reported_conflict = "device"
 - a certificate and key that do not belong together;
 - `[aws_iot]` without `[pubsub]`;
 - `[shadows.aws_iot]` without `[aws_iot]`, together with `[shadows.sync]`, or with a different thing name;
-- more than the 50 subscriptions AWS IoT Core allows per connection. Each inbound IotCore mapping takes one, and each synchronized shadow takes three.
+- more than the 50 subscriptions AWS IoT Core allows per connection. Each inbound IotCore mapping takes one, each synchronized shadow takes three, and Device Defender takes two.
 
 ## Credentials and trust domains
 
@@ -99,6 +100,7 @@ Mappings connect `Pubsub` with `IotCore`, with the same durable spooling, limits
   - The mapping's `held` status names the topic and the reason, and a warning is logged.
   - A PUBACK delivers it, clears `held` and resets the count, for example once the policy is fixed. Transport errors, timeouts and closes before the message was resent do not count.
   - Only with `reject_denied_publications = true` is the message removed from the spool after the third such close, counted in `rejected` with `last_rejected`, so traffic behind it continues. That trades possible loss of a message that was not denied for availability; it is off by default.
+- **Defender topics.** `$aws/things/<thing>/defender/...` is reserved for the device metrics adapter; bridge mappings cannot publish or subscribe there.
 - **Shadow topics.** `$aws/things/<thing>/shadow/...` belongs to shadow synchronization. A mapping that could publish there, subscribe there, or inject cloud messages into the local shadow notification topics is refused.
 - **Loops.** Messages the bridge received from a broker are never sent back to that broker. They may continue to the other one: a LocalMqtt → Pubsub mapping and a Pubsub → IotCore mapping forward LAN messages to AWS. Outbound topics that could re-enter an inbound mapping of the same broker are refused.
 

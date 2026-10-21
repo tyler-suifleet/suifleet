@@ -90,6 +90,9 @@ pub struct Config {
     /// The AWS IoT Core connection (SF-061); none when omitted.
     #[serde(default)]
     pub aws_iot: Option<crate::iotcore::IotConfig>,
+    /// Operator-only Device Defender device metrics (SF-062).
+    #[serde(default)]
+    pub device_defender: Option<crate::defender::Settings>,
     /// LAN client-device authentication and discovery (SF-035); none when omitted.
     #[serde(default)]
     pub client_devices: Option<crate::clientdevices::Settings>,
@@ -870,6 +873,10 @@ fn default_timeout() -> u64 {
 /// `[aws_iot]` and what uses it: the connection runs in the pub/sub bridge,
 /// with its own credentials, within AWS IoT Core subscription quotas.
 pub fn validate_aws_iot(cfg: &Config) -> anyhow::Result<()> {
+    if let Some(settings) = &cfg.device_defender {
+        settings.validate()?;
+        anyhow::ensure!(cfg.aws_iot.is_some(), "[device_defender] needs [aws_iot]");
+    }
     let aws_sync = cfg.shadows.as_ref().and_then(|s| s.aws_iot.as_ref().map(|sync| (s, sync)));
     let Some(iot) = &cfg.aws_iot else {
         anyhow::ensure!(aws_sync.is_none(), "[shadows.aws_iot] needs the [aws_iot] connection");
@@ -878,7 +885,8 @@ pub fn validate_aws_iot(cfg: &Config) -> anyhow::Result<()> {
     iot.validate()?;
     iot.check_separate(&cfg.device.keypair_path)?;
     anyhow::ensure!(cfg.pubsub.is_some(), "[aws_iot] runs in the pub/sub bridge: add [pubsub]");
-    let mut subscriptions = cfg.pubsub.as_ref().and_then(|p| p.bridge.as_ref())
+    let mut subscriptions = if cfg.device_defender.is_some() { 2 } else { 0 };
+    subscriptions += cfg.pubsub.as_ref().and_then(|p| p.bridge.as_ref())
         .map_or(0, |b| b.mappings.iter().filter(|m| m.source == crate::bridge::Endpoint::IotCore).count());
     if let Some((shadows, sync)) = aws_sync {
         anyhow::ensure!(shadows.thing_name == iot.thing_name, "shadows.thing_name must equal aws_iot.thing_name to synchronize with AWS IoT Device Shadow");
@@ -1038,6 +1046,10 @@ mod tests {
         let names = |n: usize| (0..n).map(|i| format!("'s{i}'")).collect::<Vec<_>>().join(",");
         let check = |text: String| validate_aws_iot(&toml::from_str::<Config>(&text).unwrap()).map_err(|e| e.to_string());
         check(format!("{base}[pubsub]\n{iot}")).unwrap();
+        check(format!("{base}[device_defender]\n[pubsub]\n{iot}")).unwrap();
+        assert!(check(format!("{base}[device_defender]\n[pubsub]\n")).unwrap_err().contains("needs [aws_iot]"));
+        assert!(check(format!("{base}[device_defender]\n[pubsub]\n[shadows]\nthing_name='dev1'\nmax_shadows=32\n[shadows.aws_iot]\nshadows=[{}]\n{iot}", names(16))).is_ok());
+        assert!(check(format!("{base}[device_defender]\n[pubsub]\n[shadows]\nthing_name='dev1'\nmax_shadows=32\n[shadows.aws_iot]\nshadows=[{}]\n{iot}", names(17))).is_err());
         check(format!("{base}[pubsub]\n[shadows]\nthing_name='dev1'\nmax_shadows=32\n[shadows.aws_iot]\nshadows=[{}]\n{iot}", names(16))).unwrap();
         for (text, error) in [
             (format!("{base}{iot}"), "add [pubsub]"),
