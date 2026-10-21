@@ -77,6 +77,10 @@ pub struct Config {
     pub logs: Option<LogsConfig>,
     #[serde(default)]
     pub daemon_update: DaemonUpdateConfig,
+    /// Confidential delivery (SF-022); without it, Seal-encrypted recipes and
+    /// artifacts are refused and public ones applied as before.
+    #[serde(default)]
+    pub seal: Option<SealConfig>,
     /// Durable local streams and exports (SF-034); none when omitted.
     #[serde(default)]
     pub streams: Option<StreamsConfig>,
@@ -408,9 +412,11 @@ impl DeploymentManifest {
             crate::sui_client::same_id(&self.call_package_id, &self.call_package_id),
             "invalid call package ID"
         );
-        let catalog_count = crate::catalog::TYPES.iter().filter(|name| self.type_origins.contains_key(**name)).count();
-        anyhow::ensure!(catalog_count == 0 || catalog_count == crate::catalog::TYPES.len(), "partial catalog type origins");
-        for name in REQUIRED_TYPES.iter().chain(crate::catalog::TYPES.iter().filter(|name| self.type_origins.contains_key(**name))) {
+        for (label, group) in [("catalog", crate::catalog::TYPES), ("seal policy", crate::protocol::SEAL_POLICY_TYPES)] {
+            let count = group.iter().filter(|name| self.type_origins.contains_key(**name)).count();
+            anyhow::ensure!(count == 0 || count == group.len(), "partial {label} type origins");
+        }
+        for name in REQUIRED_TYPES.iter().chain(self.optional_types()) {
             let origin = self
                 .type_origins
                 .get(*name)
@@ -440,6 +446,13 @@ impl DeploymentManifest {
             "unsupported edge client version"
         );
         Ok(())
+    }
+    /// Optional type-origin groups present in this manifest (all or none of each).
+    pub fn optional_types(&self) -> impl Iterator<Item = &&'static str> {
+        crate::catalog::TYPES
+            .iter()
+            .chain(crate::protocol::SEAL_POLICY_TYPES)
+            .filter(|name| self.type_origins.contains_key(**name))
     }
     pub fn move_type(&self, name: &str) -> String {
         // Called only after validating every required type; no first-package fallback.
@@ -528,6 +541,119 @@ pub struct SignerConfig {
     /// pkcs11: file holding the user PIN (readable only by the key's user).
     #[serde(default)]
     pub pin_file: PathBuf,
+}
+
+/// Whether unencrypted recipes and artifacts may still be applied.
+#[derive(Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum SealMode {
+    /// Decrypt confidential blobs; also apply explicitly public ones.
+    #[default]
+    Optional,
+    /// Refuse any recipe or artifact that is not Seal-encrypted.
+    Required,
+}
+
+/// `[seal]`: Seal key servers and limits for confidential delivery (SF-022,
+/// docs/CONFIDENTIAL_DELIVERY.md).
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct SealConfig {
+    #[serde(default)]
+    pub mode: SealMode,
+    /// The Seal package whose `key_server::KeyServer` objects are trusted.
+    pub key_server_package: String,
+    pub key_servers: Vec<KeyServerConfig>,
+    /// Ciphertexts needing fewer key servers are refused.
+    #[serde(default = "default_min_threshold")]
+    pub min_threshold: u8,
+    /// Require each key server's proof of possession (`/v1/service`).
+    #[serde(default = "default_true")]
+    pub verify_key_servers: bool,
+    /// Session certificate lifetime (Seal allows 1 to 30 minutes).
+    #[serde(default = "default_session_ttl_minutes")]
+    pub session_ttl_minutes: u16,
+    /// Certificates are dated this far back for key servers' clocks.
+    #[serde(default = "default_clock_skew_seconds")]
+    pub clock_skew_seconds: u64,
+    /// Fetched decryption keys stay in memory (never on disk) this long; 0
+    /// fetches for every blob.
+    #[serde(default = "default_key_cache_seconds")]
+    pub key_cache_seconds: u64,
+    #[serde(default = "default_seal_timeout_seconds")]
+    pub request_timeout_seconds: u64,
+    /// Confidential blobs are decrypted in memory, so this bounds memory use.
+    #[serde(default = "default_max_plaintext_bytes")]
+    pub max_plaintext_bytes: u64,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct KeyServerConfig {
+    pub object_id: String,
+    #[serde(default = "default_weight")]
+    pub weight: u8,
+    /// Provider API credential header (e.g. "X-API-Key") and the file holding
+    /// it. A provider credential is not device identity or decryption authority.
+    #[serde(default)]
+    pub api_key_name: Option<String>,
+    #[serde(default)]
+    pub api_key_file: Option<PathBuf>,
+}
+
+fn default_true() -> bool {
+    true
+}
+fn default_min_threshold() -> u8 {
+    1
+}
+fn default_weight() -> u8 {
+    1
+}
+fn default_session_ttl_minutes() -> u16 {
+    10
+}
+fn default_clock_skew_seconds() -> u64 {
+    60
+}
+fn default_key_cache_seconds() -> u64 {
+    120
+}
+fn default_seal_timeout_seconds() -> u64 {
+    10
+}
+fn default_max_plaintext_bytes() -> u64 {
+    128 * 1024 * 1024
+}
+
+impl SealConfig {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(crate::sui_client::same_id(&self.key_server_package, &self.key_server_package), "invalid key_server_package");
+        anyhow::ensure!(!self.key_servers.is_empty(), "[seal] needs at least one key server");
+        let mut seen = std::collections::BTreeSet::new();
+        for server in &self.key_servers {
+            anyhow::ensure!(crate::sui_client::same_id(&server.object_id, &server.object_id), "invalid key server object ID");
+            anyhow::ensure!(seen.insert(server.object_id.to_ascii_lowercase()), "duplicate key server {}", server.object_id);
+            anyhow::ensure!(server.weight > 0, "key server weight must be positive");
+        }
+        let total: u32 = self.key_servers.iter().map(|s| u32::from(s.weight)).sum();
+        anyhow::ensure!(self.min_threshold >= 1 && u32::from(self.min_threshold) <= total, "min_threshold must be between 1 and the total key server weight");
+        anyhow::ensure!((1..=crate::seal_client::MAX_SESSION_MINUTES).contains(&self.session_ttl_minutes), "session_ttl_minutes must be 1 to 30");
+        anyhow::ensure!(self.clock_skew_seconds * 2 < u64::from(self.session_ttl_minutes) * 60, "clock_skew_seconds must be under half the session lifetime");
+        anyhow::ensure!(self.request_timeout_seconds > 0 && self.max_plaintext_bytes > 0, "request_timeout_seconds and max_plaintext_bytes must be positive");
+        Ok(())
+    }
+}
+
+/// A secret from a file that other users cannot read.
+pub fn read_secret(path: &Path) -> anyhow::Result<String> {
+    use anyhow::Context;
+    use std::os::unix::fs::PermissionsExt;
+    let mode = std::fs::metadata(path).with_context(|| format!("reading {}", path.display()))?.permissions().mode();
+    anyhow::ensure!(mode & 0o007 == 0, "{} must not be accessible to other users", path.display());
+    let value = std::fs::read_to_string(path)?.trim().to_owned();
+    anyhow::ensure!(!value.is_empty(), "{} is empty", path.display());
+    Ok(value)
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -672,6 +798,13 @@ impl Config {
         );
         anyhow::ensure!(cfg.components.recovery_commands.is_empty() || cfg.apply.allow_recipe_commands,
             "application recovery commands require apply.allow_recipe_commands");
+        if let Some(seal) = &cfg.seal {
+            seal.validate()?;
+            anyhow::ensure!(
+                seal.max_plaintext_bytes <= cfg.walrus.max_artifact_bytes,
+                "seal.max_plaintext_bytes cannot exceed walrus.max_artifact_bytes"
+            );
+        }
         let manifest_path = if cfg.sui.manifest_path.is_absolute() {
             cfg.sui.manifest_path.clone()
         } else {

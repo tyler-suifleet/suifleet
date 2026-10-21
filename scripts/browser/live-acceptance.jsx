@@ -22,6 +22,7 @@ const chain = `sui:${m.network}`;
 const client = new SuiGrpcClient({ network: m.network, baseUrl: m.rpc_url });
 let reject = false;
 let lastDigest = null; // Last transaction this wallet executed (success or abort).
+const PUBLIC = { kind: "public" }; // SF-022 requires an explicit delivery choice per upload.
 const listeners = new Set();
 const account = { address: keypair.getPublicKey().toSuiAddress(), publicKey: keypair.getPublicKey().toSuiBytes(), chains: [chain],
   features: ["sui:signTransaction", "sui:signAndExecuteTransaction"] };
@@ -60,10 +61,11 @@ window.live = {
   groups: () => sui.fetchGroups(client, account.address),
   deployments: () => sui.fetchDeploymentEvents(client, account.address),
   storage: (recipeBlobId) => walrus.probeDeploymentStorage(recipeBlobId),
+  // An explicitly public test component: the gate's daemon has no Seal access.
   async upload(name, version, script) {
-    const artifact = await walrus.uploadArtifact(new File([script], `${name}-${version}`), account.address);
+    const artifact = await walrus.uploadArtifact(new File([script], `${name}-${version}`), account.address, PUBLIC);
     const recipe = await walrus.uploadRecipe({ schemaVersion: "1.0", componentName: name, componentVersion: version,
-      artifactBlobId: artifact.blobId, artifactSha256: artifact.sha256, lifecycle: {}, configuration: {} }, account.address);
+      artifactBlobId: artifact.blobId, artifactSha256: artifact.sha256, lifecycle: {}, configuration: {} }, account.address, PUBLIC);
     return { artifact, recipe };
   },
   // Sweep everything left back to the funder, directly with the test key.

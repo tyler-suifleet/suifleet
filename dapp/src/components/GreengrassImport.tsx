@@ -2,21 +2,26 @@
 // SF-037: publish an AWS Greengrass recipe as an immutable catalog version.
 // Every rejection and reported difference is shown with its guidance; nothing
 // is uploaded until the translation succeeds and the operator acknowledges
-// the reported differences.
+// the reported differences. Uploads use the chosen delivery: confidential
+// (Seal-encrypted before upload, SF-022) by default, never plaintext fallback.
 import { useState } from 'react';
 import { artifactUris,parseGreengrassRecipe,translateGreengrassRecipe,GUIDANCE,ipcAclToml,type ArtifactBinding,type Translation } from '@/lib/greengrass-recipe';
 import { assertComponentRecipe } from '@/lib/recipe-schema';
-import { uploadArtifact,uploadRecipe,storageWarnings,renewalCommand } from '@/lib/walrus';
+import { uploadArtifact,uploadRecipe,storageWarnings,renewalCommand,type Protection } from '@/lib/walrus';
+import { DEFAULT_DELIVERY,type Delivery } from '@/lib/delivery';
+import type { AccessPolicy } from '@/lib/access-policy';
+import { DeliveryFields } from '@/components/DeliveryFields';
 import { buildPublishVersionTx } from '@/lib/catalog';
 import type { Transaction } from '@mysten/sui/transactions';
 
 async function sha256(file:File){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await file.arrayBuffer())),b=>b.toString(16).padStart(2,'0')).join('');}
 const guidance=(code:string)=>GUIDANCE[code.startsWith('ComponentDependencies.')?'aws-managed-dependency':code];
 
-export function GreengrassImport({catalog,owner,execute,onPublished,disabled}:{catalog:string;owner:string;execute:(a:{transaction:Transaction})=>Promise<unknown>;onPublished:()=>void;disabled:boolean}) {
+export function GreengrassImport({catalog,owner,execute,onPublished,disabled,policies,protect}:{catalog:string;owner:string;execute:(a:{transaction:Transaction})=>Promise<unknown>;onPublished:()=>void;disabled:boolean;policies:AccessPolicy[];protect:(delivery:Delivery)=>Protection}) {
   const [text,setText]=useState(''),[files,setFiles]=useState<Record<string,File>>({});
   const [result,setResult]=useState<Translation|null>(null),[acknowledged,setAcknowledged]=useState(false);
   const [busy,setBusy]=useState(false),[message,setMessage]=useState('');
+  const [delivery,setDelivery]=useState(DEFAULT_DELIVERY);
   const parsed=text.trim()?parseGreengrassRecipe(text):null;
   const uris=parsed&&'recipe' in parsed?artifactUris(parsed.recipe):[];
   // Placeholder blob IDs mark which uploads the translated manifests use.
@@ -36,11 +41,13 @@ export function GreengrassImport({catalog,owner,execute,onPublished,disabled}:{c
       // Reject an unusable native recipe before any artifact upload.
       for(const m of preview.manifests) assertComponentRecipe(m.recipe);
       if(!catalog) throw new Error('Choose a catalog');
+      // One release identity for every artifact and recipe; no plaintext fallback.
+      const protection=protect(delivery);
       const used=new Set(preview.manifests.map(m=>m.recipe.artifactBlobId));
       const uploaded:Record<string,{blobId:string;sha256:string}>={},warnings:string[]=[];
       for(const [i,uri] of uris.entries()){
         if(!used.has(`pending-${i}`)) continue;
-        const artifact=await uploadArtifact(files[uri],owner);
+        const artifact=await uploadArtifact(files[uri],owner,protection);
         uploaded[uri]=artifact;warnings.push(`Artifact ${uri}: storage expires at epoch ${artifact.storage.endEpoch??'unknown'}`,...storageWarnings(artifact.storage));
       }
       // Translate again with the real uploads; the digests were already checked locally.
@@ -49,14 +56,14 @@ export function GreengrassImport({catalog,owner,execute,onPublished,disabled}:{c
       for(const m of final.manifests) assertComponentRecipe(m.recipe);
       const manifests=[];
       for(const m of final.manifests){
-        const recipe=await uploadRecipe(m.recipe,owner);
+        const recipe=await uploadRecipe(m.recipe,owner,protection);
         warnings.push(`Recipe ${m.os}/${m.arch}: storage expires at epoch ${recipe.storage.endEpoch??'unknown'}`,...storageWarnings(recipe.storage));
         const renew=renewalCommand(recipe.storage);if(renew) warnings.push(renew);
         manifests.push({os:m.os,arch:m.arch,recipeBlobId:recipe.blobId,recipeSha256:recipe.sha256,artifactSha256:m.recipe.artifactSha256});
       }
       const {componentName,componentVersion}=final.manifests[0].recipe;
       await execute({transaction:buildPublishVersionTx(catalog,componentName,componentVersion,manifests)});
-      setMessage('Translated version registered. '+warnings.join('\n'));onPublished();
+      setMessage(`Translated version registered (${protection.kind==='confidential'?'confidential, Seal-encrypted':'public, unencrypted'}). `+warnings.join('\n'));onPublished();
     }catch(e){setMessage(String(e));}finally{setBusy(false);}
   }
   const name=parsed&&'recipe' in parsed&&typeof (parsed.recipe as {ComponentName?:unknown})?.ComponentName==='string'?(parsed.recipe as {ComponentName:string}).ComponentName:'component';
@@ -75,6 +82,7 @@ export function GreengrassImport({catalog,owner,execute,onPublished,disabled}:{c
       {differences.length>0&&<div><p>Reported differences from AWS behaviour:</p><ul>{differences.map(d=><li key={d}><code>{d}</code>: {guidance(d)}</li>)}</ul>
         <label><input type="checkbox" checked={acknowledged} onChange={e=>setAcknowledged(e.target.checked)}/> I reviewed these differences</label></div>}
     </div>}
+    <DeliveryFields value={delivery} onChange={setDelivery} policies={policies} disabled={busy}/>
     <button disabled={disabled||busy||result?.outcome!=='translate'||(differences.length>0&&!acknowledged)} onClick={publish}>{busy?'Uploading…':'Upload and register translated version'}</button>
     {message&&<p className="whitespace-pre-wrap" role="status">{message}</p>}
   </div>;

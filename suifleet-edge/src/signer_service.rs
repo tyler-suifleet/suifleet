@@ -26,6 +26,7 @@
 #![cfg_attr(not(target_os = "linux"), allow(dead_code, unused_imports))]
 use crate::identity::TxSigner;
 use crate::protocol::{deployment_manager as dm, enrollment};
+use crate::seal_client::{check_approval, Authority, Certificate, SessionPolicy, Sessions};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -81,6 +82,26 @@ pub struct ServiceConfig {
     pub caller_uid: Option<u32>,
     #[serde(default = "default_budget")]
     pub max_gas_budget: u64,
+    /// Seal sessions for confidential delivery (SF-022). Absent: refused.
+    #[serde(default)]
+    pub seal: Option<SealSessions>,
+}
+
+/// `[seal]` in `signer.toml`: the service certifies session keys with the
+/// device key and signs key requests; the session key never leaves it.
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct SealSessions {
+    #[serde(default = "default_session_minutes")]
+    pub session_ttl_minutes: u16,
+    #[serde(default = "default_skew")]
+    pub clock_skew_seconds: u64,
+}
+fn default_session_minutes() -> u16 {
+    10
+}
+fn default_skew() -> u64 {
+    60
 }
 
 impl ServiceConfig {
@@ -103,12 +124,27 @@ impl ServiceConfig {
         let policy = Policy {
             device: Address::ZERO,
             package: Address::from_str(&manifest.call_package_id)?,
+            namespace: Address::from_str(&manifest.type_origins["device_registry::DeviceRegistry"])?,
             registry: Address::from_str(&manifest.shared_objects.registry.id)?,
             cap: Address::from_str(&config.device_cap_id)?,
             max_budget: config.max_gas_budget,
             chain_identifier: manifest.chain_identifier.clone(),
         };
         Ok((config, policy))
+    }
+
+    /// Seal sessions certified by `key` for this fleet's package, if enabled.
+    pub fn sessions(&self, key: Arc<dyn TxSigner>, policy: &Policy) -> anyhow::Result<Option<Sessions>> {
+        self.seal
+            .as_ref()
+            .map(|seal| {
+                Sessions::new(key, SessionPolicy {
+                    package: policy.namespace,
+                    ttl_min: seal.session_ttl_minutes,
+                    clock_skew_ms: seal.clock_skew_seconds * 1000,
+                })
+            })
+            .transpose()
     }
 
     fn key(&self) -> anyhow::Result<Arc<dyn TxSigner>> {
@@ -134,6 +170,8 @@ pub enum Intent {
 pub struct Policy {
     pub device: Address,
     pub package: Address,
+    /// The package's original ID: the Seal key namespace.
+    pub namespace: Address,
     pub registry: Address,
     pub cap: Address,
     pub max_budget: u64,
@@ -448,17 +486,38 @@ fn peer(stream: &UnixStream) -> std::io::Result<Peer> {
     Ok(Peer { pid: credentials.pid as u32, uid: credentials.uid })
 }
 
+/// A Seal key request: an approval transaction on this fleet's package and
+/// a well-formed ElGamal response key, signed by the current session.
+fn seal_request(request: &Value, policy: &Policy, sessions: &Sessions) -> anyhow::Result<Value> {
+    let field = |name: &str| STANDARD.decode(request[name].as_str().unwrap_or(""));
+    let ptb = field("ptb")?;
+    let decoded: sui_sdk_types::ProgrammableTransaction =
+        bcs::from_bytes(&ptb).map_err(|e| anyhow::anyhow!("not a programmable transaction: {e}"))?;
+    check_approval(&decoded, &policy.package)?;
+    let enc_key = field("enc_key")?;
+    let enc_verification_key = field("enc_verification_key")?;
+    anyhow::ensure!(crate::seal::elgamal_pair_valid(&enc_key, &enc_verification_key), "invalid response encryption key");
+    let (certificate, signature) = sessions.authorize(&ptb, &enc_key, &enc_verification_key)?;
+    Ok(json!({ "certificate": certificate.to_json(), "signature": STANDARD.encode(signature) }))
+}
+
 /// One request: authorize the caller, then the transaction, then sign.
 pub fn handle(
     request: &Value,
     peer: Peer,
     key: &dyn TxSigner,
     policy: &Policy,
+    sessions: Option<&Sessions>,
     daemon: impl FnOnce() -> bool,
 ) -> Value {
     let result = (|| -> anyhow::Result<Value> {
         match request["op"].as_str() {
             Some("address") => Ok(json!({ "address": key.address() })),
+            Some("seal") => {
+                let sessions = sessions.ok_or_else(|| anyhow::anyhow!("Seal sessions are not enabled in signer.toml"))?;
+                anyhow::ensure!(daemon(), "caller pid {} uid {} may not use Seal sessions (only the daemon's main process)", peer.pid, peer.uid);
+                seal_request(request, policy, sessions)
+            }
             Some("sign") => {
                 let daemon = daemon();
                 let root = peer.uid == 0;
@@ -498,6 +557,7 @@ pub fn serve(path: &Path) -> anyhow::Result<()> {
     let (config, mut policy) = ServiceConfig::load(path)?;
     let key = config.key()?;
     policy.device = Address::from_str(&key.address())?;
+    let sessions = config.sessions(key.clone(), &policy)?;
     let callers = match (&config.caller_unit, config.caller_uid) {
         (Some(unit), _) => Callers::Unit { unit: unit.clone(), record: config.caller_record.clone() },
         (None, Some(uid)) => Callers::Uid(uid),
@@ -527,7 +587,7 @@ pub fn serve(path: &Path) -> anyhow::Result<()> {
                         }
                     })
                 };
-                let response = handle(&request, peer, key.as_ref(), &policy, daemon);
+                let response = handle(&request, peer, key.as_ref(), &policy, sessions.as_ref(), daemon);
                 if let Some(error) = response["error"].as_str() {
                     tracing::warn!(pid = peer.pid, uid = peer.uid, error, "Signing request refused");
                 }
@@ -603,6 +663,30 @@ impl TxSigner for ServiceSigner {
     }
 }
 
+/// The daemon side of Seal sessions with `kind = "service"`: the service
+/// holds the session key and certifies it with the device key.
+pub struct ServiceSessions {
+    socket: PathBuf,
+}
+
+impl ServiceSessions {
+    pub fn new(socket: &Path) -> Self {
+        Self { socket: socket.to_owned() }
+    }
+}
+
+impl Authority for ServiceSessions {
+    fn authorize(&self, ptb: &[u8], enc_key: &[u8], enc_verification_key: &[u8]) -> anyhow::Result<(Certificate, Vec<u8>)> {
+        let response = request(
+            &self.socket,
+            &json!({ "op": "seal", "ptb": STANDARD.encode(ptb), "enc_key": STANDARD.encode(enc_key),
+                     "enc_verification_key": STANDARD.encode(enc_verification_key) }),
+        )?;
+        let certificate = Certificate::from_json(&response["certificate"])?;
+        Ok((certificate, STANDARD.decode(response["signature"].as_str().unwrap_or(""))?))
+    }
+}
+
 fn request(socket: &Path, body: &Value) -> anyhow::Result<Value> {
     let mut stream = UnixStream::connect(socket)
         .map_err(|e| anyhow::anyhow!("signing service {} unavailable: {e}", socket.display()))?;
@@ -628,6 +712,7 @@ mod tests {
         Policy {
             device: Address::from_str("0xa0").unwrap(),
             package: Address::from_str("0x3").unwrap(),
+            namespace: Address::from_str("0x2a").unwrap(),
             registry: Address::from_str("0x13").unwrap(),
             cap: Address::from_str("0x11").unwrap(),
             max_budget: 50_000_000,
@@ -844,18 +929,18 @@ mod tests {
         let p = policy();
         let sign = json!({ "op": "sign_telemetry", "message": STANDARD.encode(telemetry(|_| {})) });
         let daemon = Peer { pid: 100, uid: 990 };
-        assert_eq!(handle(&sign, daemon, &Key, &p, || true)["signature"], STANDARD.encode([8]));
-        let refused = handle(&sign, Peer { pid: 101, uid: 990 }, &Key, &p, || false);
+        assert_eq!(handle(&sign, daemon, &Key, &p, None, || true)["signature"], STANDARD.encode([8]));
+        let refused = handle(&sign, Peer { pid: 101, uid: 990 }, &Key, &p, None, || false);
         assert!(refused["error"].as_str().unwrap().contains("only the daemon's main process"), "{refused}");
         // Root (provisioning) gets no telemetry signatures either.
-        assert!(handle(&sign, Peer { pid: 1, uid: 0 }, &Key, &p, || false)["error"].is_string());
+        assert!(handle(&sign, Peer { pid: 1, uid: 0 }, &Key, &p, None, || false)["error"].is_string());
         let forged = json!({ "op": "sign_telemetry", "message": STANDARD.encode(telemetry(|s| s.registry = "0x14".into())) });
-        assert!(handle(&forged, daemon, &Key, &p, || true)["error"].as_str().unwrap().contains("registry"));
+        assert!(handle(&forged, daemon, &Key, &p, None, || true)["error"].as_str().unwrap().contains("registry"));
         // A transaction is never signed as a personal message, nor telemetry as a transaction.
         let tx = json!({ "op": "sign_telemetry", "message": STANDARD.encode(Tx::default().bytes()) });
-        assert!(handle(&tx, daemon, &Key, &p, || true)["error"].is_string());
+        assert!(handle(&tx, daemon, &Key, &p, None, || true)["error"].is_string());
         let swapped = json!({ "op": "sign", "tx": STANDARD.encode(telemetry(|_| {})) });
-        assert!(handle(&swapped, daemon, &Key, &p, || true)["error"].is_string());
+        assert!(handle(&swapped, daemon, &Key, &p, None, || true)["error"].is_string());
     }
 
     #[test]
@@ -895,14 +980,68 @@ mod tests {
         let sign = json!({ "op": "sign", "tx": STANDARD.encode(Tx::default().bytes()) });
         let daemon = Peer { pid: 100, uid: 990 };
         let component = Peer { pid: 101, uid: 990 };
-        assert_eq!(handle(&sign, daemon, &Key, &p, || true)["signature"], STANDARD.encode([7]));
-        let refused = handle(&sign, component, &Key, &p, || false);
+        assert_eq!(handle(&sign, daemon, &Key, &p, None, || true)["signature"], STANDARD.encode([7]));
+        let refused = handle(&sign, component, &Key, &p, None, || false);
         assert!(refused["error"].as_str().unwrap().contains("may not request signatures"), "{refused}");
         // Root is not the daemon: no report signatures, only enrollment.
-        assert!(handle(&sign, Peer { pid: 1, uid: 0 }, &Key, &p, || false)["error"].as_str().unwrap().contains("only for the daemon"));
+        assert!(handle(&sign, Peer { pid: 1, uid: 0 }, &Key, &p, None, || false)["error"].as_str().unwrap().contains("only for the daemon"));
         // The public address is not a secret.
-        assert_eq!(handle(&json!({ "op": "address" }), component, &Key, &p, || false)["address"], "0xa0");
-        assert!(handle(&json!({ "op": "export" }), daemon, &Key, &p, || true)["error"].is_string());
+        assert_eq!(handle(&json!({ "op": "address" }), component, &Key, &p, None, || false)["address"], "0xa0");
+        assert!(handle(&json!({ "op": "export" }), daemon, &Key, &p, None, || true)["error"].is_string());
+    }
+
+    #[test]
+    fn seal_sessions_sign_only_fleet_approvals_for_the_daemon() {
+        use ed25519_dalek::Verifier;
+        use sui_sdk_types::{Identifier, MoveCall, ProgrammableTransaction, SharedInput};
+        let p = policy();
+        let device = ed25519_dalek::SigningKey::from_bytes(&[5; 32]);
+        let sessions = Sessions::new(
+            Arc::new(crate::identity::Ed25519File(device.clone())),
+            SessionPolicy { package: p.namespace, ttl_min: 10, clock_skew_ms: 60_000 },
+        )
+        .unwrap();
+        let approval = |package: &str, function: &str| {
+            let inputs = vec![
+                Input::Pure(bcs::to_bytes(&vec![7u8; 56]).unwrap()),
+                Input::Shared(SharedInput::new(Address::from_str("0x40").unwrap(), 3, false)),
+            ];
+            let call = MoveCall {
+                package: Address::from_str(package).unwrap(),
+                module: Identifier::from_str("seal_policy").unwrap(),
+                function: Identifier::from_str(function).unwrap(),
+                type_arguments: vec![],
+                arguments: vec![Argument::Input(0), Argument::Input(1)],
+            };
+            STANDARD.encode(bcs::to_bytes(&ProgrammableTransaction { inputs, commands: vec![Command::MoveCall(call)] }).unwrap())
+        };
+        let (enc_key, enc_vk) = crate::seal::elgamal_keys(&crate::seal::random_scalar());
+        let request = |ptb: String, vk: &[u8]| json!({ "op": "seal", "ptb": ptb, "enc_key": STANDARD.encode(enc_key), "enc_verification_key": STANDARD.encode(vk) });
+        let good = request(approval("0x3", "seal_approve_device"), &enc_vk);
+        let daemon = Peer { pid: 100, uid: 990 };
+        let response = handle(&good, daemon, &Key, &p, Some(&sessions), || true);
+        let certificate = Certificate::from_json(&response["certificate"]).unwrap();
+        // Certified by the device's own key, for the fleet package's namespace.
+        assert_eq!(certificate.user, crate::identity::address(&device));
+        let message = crate::seal_client::session_message(&p.namespace, 10, certificate.creation_ms, &certificate.session_key);
+        assert_eq!(certificate.signature, crate::identity::personal_message_signature(&device, message.as_bytes()));
+        let ptb = STANDARD.decode(good["ptb"].as_str().unwrap()).unwrap();
+        let signature = ed25519_dalek::Signature::from_slice(&STANDARD.decode(response["signature"].as_str().unwrap()).unwrap()).unwrap();
+        ed25519_dalek::VerifyingKey::from_bytes(&certificate.session_key)
+            .unwrap()
+            .verify(&crate::seal_client::request_message(&ptb, &enc_key, &enc_vk), &signature)
+            .unwrap();
+        assert!(response.get("session_key").is_none() && !response.to_string().contains(&hex::encode(device.to_bytes())));
+        let refused = |request: &Value, daemon: bool, sessions: Option<&Sessions>| {
+            handle(request, Peer { pid: 101, uid: 990 }, &Key, &p, sessions, || daemon)["error"].as_str().unwrap_or("").to_owned()
+        };
+        assert!(refused(&good, false, Some(&sessions)).contains("only the daemon"));
+        assert!(refused(&good, true, None).contains("not enabled"));
+        assert!(refused(&request(approval("0x4", "seal_approve_device"), &enc_vk), true, Some(&sessions)).contains("not a SuiFleet Seal approval"));
+        assert!(refused(&request(approval("0x3", "grant_account"), &enc_vk), true, Some(&sessions)).contains("not a SuiFleet Seal approval"));
+        let other_vk = crate::seal::elgamal_keys(&crate::seal::random_scalar()).1;
+        assert!(refused(&request(approval("0x3", "seal_approve_device"), &other_vk), true, Some(&sessions)).contains("response encryption key"));
+        assert!(refused(&request(STANDARD.encode(Tx::default().bytes()), &enc_vk), true, Some(&sessions)).contains("not a programmable transaction"));
     }
 
     #[test]
@@ -988,7 +1127,7 @@ mod tests {
                 let mut stream = stream.unwrap();
                 let request = read_request(&stream).unwrap();
                 let peer = peer(&stream).unwrap();
-                let response = handle(&request, peer, &Key, &p, || is_daemon(&Callers::Uid(uid), peer, None, |_| None));
+                let response = handle(&request, peer, &Key, &p, None, || is_daemon(&Callers::Uid(uid), peer, None, |_| None));
                 writeln!(stream, "{response}").unwrap();
             }
         });

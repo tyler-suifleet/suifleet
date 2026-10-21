@@ -18,12 +18,24 @@ export interface StorageInfo {
 
 export interface UploadResult {
   blobId: string;
+  /** SHA-256 of the plaintext, which deployments record and devices verify. */
   sha256: string;
   storage: StorageInfo;
+  /** True when the stored blob is a Seal-encrypted envelope. */
+  confidential: boolean;
 }
 
 export type { ComponentRecipe } from "./recipe-schema";
 import { ComponentRecipe, assertComponentRecipe } from "./recipe-schema";
+import { isEnvelope, type BlobKind, type Sealer } from "./seal";
+
+/**
+ * How a blob is stored (SF-022). Confidential is the customer path: the bytes
+ * are Seal-encrypted in this browser before any upload. Public stores the
+ * plaintext and is only for deliberately public or open-source content.
+ * There is no default and no fallback from one to the other.
+ */
+export type Protection = { kind: "confidential"; seal: Sealer } | { kind: "public" };
 
 type PublisherResponse = {
   newlyCreated?: {
@@ -84,14 +96,24 @@ export function renewalCommand(storage: StorageInfo): string | null {
   return storage.blobObjectId ? `walrus extend --blob-obj-id ${storage.blobObjectId} --epochs-extended ${WALRUS_EPOCHS}` : null;
 }
 
-async function uploadBlob(body: ArrayBuffer | string, contentType: string, owner: string | null): Promise<StorageInfo> {
+/** The bytes to upload: an encrypted envelope, or the plaintext when explicitly public. */
+export async function protect(plaintext: Uint8Array, kind: BlobKind, sha256: string, protection: Protection): Promise<Uint8Array> {
+  if (protection.kind === "public") return plaintext;
+  if (protection.kind !== "confidential") throw new Error("Choose confidential or explicitly public delivery");
+  // Any failure here aborts the upload: never retry or fall back as plaintext.
+  const sealed = await protection.seal(plaintext, kind, sha256);
+  if (!isEnvelope(sealed) || sealed.length <= plaintext.length) throw new Error("Encryption did not produce a Seal envelope; nothing was uploaded");
+  return sealed;
+}
+
+async function uploadBlob(body: Uint8Array, contentType: string, owner: string | null): Promise<StorageInfo> {
   const params = new URLSearchParams({ epochs: String(WALRUS_EPOCHS) });
   // Send the Blob object to the operator so they, not the publisher, can extend it.
   if (owner) params.set("send_object_to", owner);
   const res = await fetch(`${WALRUS_PUBLISHER}/v1/blobs?${params}`, {
     method: "PUT",
     headers: { "Content-Type": contentType },
-    body,
+    body: new Blob([body as BlobPart]),
   });
 
   if (!res.ok) {
@@ -100,24 +122,26 @@ async function uploadBlob(body: ArrayBuffer | string, contentType: string, owner
   return parseStorage(await res.json(), owner);
 }
 
-async function sha256Hex(bytes: BufferSource): Promise<string> {
-  const hash = await crypto.subtle.digest("SHA-256", bytes);
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const hash = await crypto.subtle.digest("SHA-256", bytes as BufferSource);
   return Array.from(new Uint8Array(hash)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export async function uploadArtifact(file: File, owner: string | null): Promise<UploadResult> {
-  const buffer = await file.arrayBuffer();
-  const sha256 = await sha256Hex(buffer);
-  const storage = await uploadBlob(buffer, "application/octet-stream", owner);
-  return { blobId: storage.blobId, sha256, storage };
+export async function uploadArtifact(file: File, owner: string | null, protection: Protection): Promise<UploadResult> {
+  const plaintext = new Uint8Array(await file.arrayBuffer());
+  const sha256 = await sha256Hex(plaintext);
+  const body = await protect(plaintext, "artifact", sha256, protection);
+  const storage = await uploadBlob(body, "application/octet-stream", owner);
+  return { blobId: storage.blobId, sha256, storage, confidential: protection.kind === "confidential" };
 }
 
-export async function uploadRecipe(recipe: ComponentRecipe, owner: string | null): Promise<UploadResult> {
+export async function uploadRecipe(recipe: ComponentRecipe, owner: string | null, protection: Protection): Promise<UploadResult> {
   assertComponentRecipe(recipe);
-  const text = JSON.stringify(recipe, null, 2);
-  const sha256 = await sha256Hex(new TextEncoder().encode(text));
-  const storage = await uploadBlob(text, "application/json", owner);
-  return { blobId: storage.blobId, sha256, storage };
+  const plaintext = new TextEncoder().encode(JSON.stringify(recipe, null, 2));
+  const sha256 = await sha256Hex(plaintext);
+  const body = await protect(plaintext, "recipe", sha256, protection);
+  const storage = await uploadBlob(body, protection.kind === "public" ? "application/json" : "application/octet-stream", owner);
+  return { blobId: storage.blobId, sha256, storage, confidential: protection.kind === "confidential" };
 }
 
 export function blobDownloadUrl(blobId: string): string {
@@ -141,6 +165,8 @@ export async function probeBlob(blobId: string): Promise<Availability> {
 export interface DeploymentStorage {
   recipe: Availability;
   artifact: Availability;
+  /** The recipe is Seal-encrypted, so the artifact it names is not visible here. */
+  confidential?: boolean;
 }
 
 /** Whether devices can still fetch a deployment's recipe and the artifact it names. */
@@ -149,7 +175,9 @@ export async function probeDeploymentStorage(recipeBlobId: string): Promise<Depl
     const res = await fetch(blobDownloadUrl(recipeBlobId));
     if (res.status === 404 || res.status === 410) return { recipe: "unavailable", artifact: "unknown" };
     if (!res.ok) return { recipe: "unknown", artifact: "unknown" };
-    const recipe = (await res.json()) as Partial<ComponentRecipe>;
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    if (isEnvelope(bytes)) return { recipe: "available", artifact: "unknown", confidential: true };
+    const recipe = JSON.parse(new TextDecoder().decode(bytes)) as Partial<ComponentRecipe>;
     if (!recipe.artifactBlobId) return { recipe: "available", artifact: "unknown" };
     return { recipe: "available", artifact: await probeBlob(recipe.artifactBlobId) };
   } catch {

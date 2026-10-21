@@ -298,6 +298,7 @@ test-manifest:
 	$(RUN) node scripts/test_frontend_queries.cjs
 	$(RUN) node scripts/test_target_groups.cjs
 	$(RUN) node scripts/test_desired_state.cjs
+	$(RUN) node scripts/test_seal_frontend.cjs
 	$(RUN) node scripts/test_telemetry.cjs
 	$(RUN) node scripts/test_alerts.cjs
 
@@ -376,6 +377,23 @@ live-gate-wallet:
 test-daemon-localnet:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_daemon_localnet.py
+
+# SF-022 confidential delivery against a disposable localnet (start it first):
+# dapp encryption, test Seal key servers, signing-service sessions, daemon apply.
+.PHONY: test-seal-localnet
+test-seal-localnet:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example seal_key_server
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_seal_localnet.py
+
+# Live gate (spends testnet gas; docs/CONFIDENTIAL_DELIVERY.md): Seal delivery with
+# Mysten's testnet key servers on this head's package-upgrade fixture.
+#   make live-seal-delivery SUIFLEET_WALLET=~/.config/suifleet/testnet/agent/client.yaml
+.PHONY: live-seal-delivery
+live-seal-delivery:
+	@test -n "$(SUIFLEET_WALLET)" || { echo "set SUIFLEET_WALLET to a funded wallet's client.yaml"; exit 1; }
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/live_seal_delivery.py --wallet "$(SUIFLEET_WALLET)" \
+		$(if $(SUIFLEET_STATE),--state "$(SUIFLEET_STATE)") --evidence "$${SUIFLEET_EVIDENCE:-live-seal-evidence.json}"
 
 .PHONY: test-testnet
 test-testnet:

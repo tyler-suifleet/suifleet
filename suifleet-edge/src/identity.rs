@@ -105,6 +105,11 @@ pub fn personal_message_digest(message: &[u8]) -> Vec<u8> {
     hash(&intent)
 }
 
+#[cfg(test)]
+pub fn personal_message_signature(key: &SigningKey, message: &[u8]) -> Vec<u8> {
+    digest_signature(key, &personal_message_digest(message))
+}
+
 /// Whatever signs this device's transactions (SF-021): a key file, or a
 /// key held in a PKCS#11 token (HSM, TPM via a PKCS#11 provider).
 pub trait TxSigner: Send + Sync {

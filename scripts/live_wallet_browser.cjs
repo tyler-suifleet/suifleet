@@ -17,7 +17,7 @@ const component = (version, run) => `#!/bin/sh\n# suifleet live browser acceptan
     await build({ entryPoints: [path.resolve(__dirname, "browser/live-acceptance.jsx")], bundle: true, platform: "browser", outfile: bundle,
       jsx: "automatic", nodePaths: [path.resolve(__dirname, "../dapp/node_modules")], alias: { "@": path.resolve(__dirname, "../dapp/src") },
       define: { "process.env.NODE_ENV": '"development"', "process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST": JSON.stringify(JSON.stringify(manifest)),
-        "process.env.NEXT_PUBLIC_WALRUS_EPOCHS": '"1"', "process.env.NEXT_PUBLIC_WALRUS_MAX_COST_FROST": "undefined", LIVE_MANIFEST: JSON.stringify(manifest), LIVE_SEED: JSON.stringify(process.env.LIVE_SEED) },
+        "process.env.NEXT_PUBLIC_WALRUS_EPOCHS": '"1"', "process.env.NEXT_PUBLIC_WALRUS_MAX_COST_FROST": "undefined", "process.env.NEXT_PUBLIC_SEAL_KEY_SERVERS": "undefined", "process.env.NEXT_PUBLIC_SEAL_THRESHOLD": "undefined", LIVE_MANIFEST: JSON.stringify(manifest), LIVE_SEED: JSON.stringify(process.env.LIVE_SEED) },
       logLevel: "warning" });
     server = http.createServer(async (req, res) => {
       res.setHeader("Content-Type", req.url === "/app.js" ? "text/javascript" : "text/html");

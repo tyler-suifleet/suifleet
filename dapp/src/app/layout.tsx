@@ -18,6 +18,7 @@ const NAV = [
   { href: "/deployments", label: "Deployments" },
   { href: "/components", label: "Components" },
   { href: "/firmware",    label: "Deploy component" },
+  { href: "/access",      label: "Access policies" },
   { href: "/handover",    label: "Fleet handover" },
 ];
 
