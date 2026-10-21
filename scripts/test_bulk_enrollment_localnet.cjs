@@ -255,7 +255,9 @@ const credentialsOf = (files) => [...files.keys()].filter((n) => n.endsWith("/cl
         res.setHeader("Content-Type", req.url === "/app.js" ? "text/javascript" : "text/html");
         return res.end(req.url === "/app.js" ? await fs.readFile(bundle) : '<!doctype html><html><head><title>Enrollment acceptance</title></head><body><div id="root"></div><script src="/app.js"></script></body></html>');
       }
-      const upstream = http.request(new URL(req.url, rpc), { method: req.method, headers: { ...req.headers, host: new URL(rpc).host } }, (up) => { res.writeHead(up.statusCode, up.headers); up.pipe(res); });
+      // Only forward origin-relative gRPC-Web paths, always to the loopback node.
+      if (!/^\/[A-Za-z0-9._~\/-]*$/.test(req.url) || req.url.startsWith("//")) { res.statusCode = 400; return res.end(); }
+      const upstream = http.request(`${new URL(rpc).origin}/${req.url.slice(1)}`, { method: req.method, headers: { ...req.headers, host: new URL(rpc).host } }, (up) => { res.writeHead(up.statusCode, up.headers); up.pipe(res); });
       upstream.on("error", () => { res.statusCode = 502; res.end(); });
       req.pipe(upstream);
     });

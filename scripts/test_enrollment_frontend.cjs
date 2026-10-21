@@ -98,7 +98,7 @@ const commands = (tx) => tx.getData().commands;
   assert.deepEqual(e.parseJob(exported, { operator, policyId }).entries, entries);
   for (const [text, pattern] of [
     [JSON.stringify({ ...job, entries: [{ ...entries[0], seed: credentials[0].seedHex }] }), /key material/],
-    [exported.replace("}", ',"x":"suiprivkey1abc"}'), /key material/],
+    [`${exported.slice(0, -1)},"x":"suiprivkey1abc"}`, /key material/],
     [JSON.stringify({ ...job, operator: stranger }), /another operator/],
     [JSON.stringify({ ...job, policyId: id("0x9002") }), /another enrollment policy/],
     [JSON.stringify({ ...job, registry: id("0x77") }), /another fleet registry/],
