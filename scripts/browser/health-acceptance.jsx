@@ -31,6 +31,8 @@ const client = new SuiGrpcClient({ network: m.network, baseUrl: "http://127.0.0.
 const responses = manifestClient(m);
 client.ledgerService.getServiceInfo = responses.ledgerService.getServiceInfo;
 client.getObject = responses.getObject;
+// Device detail history uses these hooks too; this health-only fixture has no deployments/groups.
+client.listEvents = async () => ({ events: [], hasNextPage: false, endCursor: null });
 const device = (d) => ({ objectId: d.id, type: type("device_registry::Device"), content: DeviceBcs.serialize({
   id: d.id, name: d.name, device_address: fixture.signer, arch: "aarch64", meta: { contents: [] }, registered_at: 1, schema_version: 1 }).toBytes() });
 client.listOwnedObjects = async ({ type: wanted }) => {
