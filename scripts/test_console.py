@@ -38,6 +38,8 @@ from test_ota import CAP, DEVICE, PACKAGE, REGISTRY, TYPE_ORIGINS, UPGRADE_CAP, 
 ROOT = Path(__file__).resolve().parents[1]
 BINARY = ROOT / 'suifleet-edge/target/debug/suifleet'
 CANARY = 'hunter2-log-secret'
+# Synthetic credential values with punctuation and spaces after their first word.
+PUNCT_CANARIES = ('PUNCTSUFFIXCANARY', 'QUOTEDSUFFIXCANARY', 'LEADINGCANARY', 'CONFIGSUFFIXCANARY')
 # Synthetic 64-character PEM body lines; not key material.
 PEM_CUT = 'CUTBODYCANARY' + 'A' * 51
 PEM_FULL = 'FULLBODYCANARY' + 'A' * 50
@@ -227,9 +229,11 @@ def run(browser=False):
                 # Every run ends its output with canary credentials, so they are
                 # always in the bounded tail the console serves.
                 lifecycle=dict(run=f'echo hello; i=0; while [ $i -lt 300 ]; do echo line $i; i=$((i+1)); done; '
-                               f'echo "late password={CANARY} Authorization: Bearer {ops["token"]} suiprivkey1abc {"07" * 32}"; '
+                               f'echo "late password={CANARY} Authorization: Bearer {ops["token"]} suiprivkey1abc {"07" * 32} '
+                               f'api_password=alpha!{PUNCT_CANARIES[0]} passphrase=\\"beta {PUNCT_CANARIES[1]}\\" secret=!!{PUNCT_CANARIES[2]} end"; '
                                'exec sleep 300'),
-                configuration=dict(defaults=dict(answer=42, nested=dict(password='recipe-secret', port=8080)))))
+                configuration=dict(defaults=dict(answer=42, nested=dict(password='recipe-secret', port=8080,
+                                                                             note=f'passphrase="gamma {PUNCT_CANARIES[3]}" ok')))))
 
             # svc2 logs a synthetic PEM block larger than the 8 KiB tail (so the
             # tail starts inside it), then a complete multiline block.
@@ -299,13 +303,13 @@ def run(browser=False):
                      'component log incomplete', process)
             # Raw log holds the canaries; the console view does not.
             raw_log = (state / 'supervised/svc/component.log').read_text()
-            assert CANARY in raw_log and ops['token'] in raw_log
+            assert CANARY in raw_log and ops['token'] in raw_log and all(c in raw_log for c in PUNCT_CANARIES[:3])
             two = c.call('logs', token=ops['token'], component='svc', limit=2)['data']['lines']
             assert two[0] == 'line 299' and two[1].startswith('late password=[redacted]'), two
             full = c.call('logs', token=ops['token'], component='svc', limit=200)['data']['lines']
             assert len(full) == 200
             text = json.dumps(full)
-            for i, secret in enumerate((CANARY, ops['token'], 'suiprivkey1abc', '07' * 32)):
+            for i, secret in enumerate((CANARY, ops['token'], 'suiprivkey1abc', '07' * 32) + PUNCT_CANARIES[:3]):
                 assert secret not in text, f'log canary {i} leaked'
             assert 'late password=[redacted]' in text, text
             # Multiline PEM: redacted across lines, whatever the line limit or
@@ -333,6 +337,7 @@ def run(browser=False):
             configuration = c.call('configuration', token=ops['token'], component='svc')['data']
             assert configuration['effective']['answer'] == 42 and configuration['effective']['nested']['port'] == 8080
             assert configuration['effective']['nested']['password'] == '[redacted]' and 'recipe-secret' not in json.dumps(configuration)
+            assert configuration['effective']['nested']['note'] == 'passphrase="[redacted]" ok', 'configuration note not redacted whole'
             first = c.call('deployments', token=ops['token'], limit=1)['data']
             assert len(first['deployments']) == 1 and first['deployments'][0]['status'] == 1 and first['next'], first
             second = c.call('deployments', token=ops['token'], limit=1, after=first['next'])['data']
@@ -464,7 +469,9 @@ def run(browser=False):
             assert c.call('health', cookie=cookie, csrf=csrf)['status'] == 'unauthenticated'
             assert c.call('inventory', token=ops['token'])['status'] == 'ok'
             assert len(audit_path.read_text().splitlines()) == count + 2
-            wait_for(lambda: runtime()['phase'] == 'running', 'svc did not restart with the daemon', process)
+            # The restarted daemon may write status.json before it re-adopts svc.
+            wait_for(lambda: json.loads((state / 'supervised/status.json').read_text()).get('svc', {}).get('phase') == 'running',
+                     'svc did not restart with the daemon', process)
             print('PASS: daemon restart ends sessions, keeps the audit and serves the console again')
             process.terminate()
             process.wait(timeout=15)

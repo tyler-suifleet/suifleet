@@ -144,6 +144,11 @@ allowlist (`cargo test console`).
   - `suiprivkey…` keys, console tokens, AWS access key IDs and JWT-like values
   - bare hex of 64 or more characters (raw key material; `0x` object IDs are kept)
 
+  A secret pair's or credential's whole value is replaced. A quoted value runs
+  to its closing unescaped quote, spaces included, or to the end of the text
+  when unterminated. An unquoted value runs to the next whitespace,
+  punctuation included. An authorization scheme before the value is kept.
+
   Over-redaction is preferred to a leak. Redaction is defense in depth:
   components must still not log secrets.
 - **Audit.** Each API decision appends a JSON line to

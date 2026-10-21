@@ -247,8 +247,58 @@ fn secret_value(word: &str) -> bool {
         || (word.len() >= 64 && word.bytes().all(|b| b.is_ascii_hexdigit()))
 }
 
-/// Scrub PEM blocks, known secret formats and `name=value`/`name: value`
-/// pairs whose name looks secret. Over-redaction is preferred to leaks.
+/// Bytes from the start of `rest` (just after a secret-looking name) to its
+/// value, when they form an assignment: an optional closing quote, `=`, `:`
+/// or `:=`, and blanks. `name=value`, `name: value`, `"name": "value"`.
+fn assignment(rest: &str) -> Option<usize> {
+    let b = rest.as_bytes();
+    let mut i = usize::from(matches!(b.first(), Some(b'"' | b'\'')));
+    while matches!(b.get(i), Some(b' ' | b'\t')) { i += 1; }
+    let separator = i;
+    while i < separator + 2 && matches!(b.get(i), Some(b'=' | b':')) { i += 1; }
+    if i == separator {
+        return None;
+    }
+    while matches!(b.get(i), Some(b' ' | b'\t')) { i += 1; }
+    Some(i)
+}
+
+/// Redact the complete value at the start of `text`, returning the
+/// replacement and the bytes consumed: a quoted string through its closing
+/// (unescaped) quote, to the end when unterminated, or else everything up to
+/// whitespace, punctuation included.
+fn redact_credential(text: &str) -> (String, usize) {
+    if let Some(quote) = text.chars().next().filter(|c| *c == '"' || *c == '\'') {
+        let mut escaped = false;
+        for (i, c) in text.char_indices().skip(1) {
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == quote {
+                return (format!("{quote}{REDACTED}{quote}"), i + 1);
+            }
+        }
+        return (format!("{quote}{REDACTED}"), text.len());
+    }
+    let end = text.find(char::is_whitespace).unwrap_or(text.len());
+    (if end == 0 { String::new() } else { REDACTED.to_owned() }, end)
+}
+
+/// Bytes of blanks after an authorization scheme, when a value follows.
+fn scheme_gap(rest: &str) -> Option<usize> {
+    let gap = rest.find(|c| c != ' ' && c != '\t')?;
+    (gap > 0 && !rest[gap..].starts_with(['\r', '\n'])).then_some(gap)
+}
+
+fn is_scheme(word: &str) -> bool {
+    SCHEMES.contains(&word.to_ascii_lowercase().as_str())
+}
+
+/// Scrub PEM blocks, known secret formats, values after an authorization
+/// scheme and `name=value`/`name: value` pairs whose name looks secret. A
+/// value is redacted whole (quoted strings with their spaces, unquoted
+/// values to the next whitespace). Over-redaction is preferred to leaks.
 pub fn redact_text(text: &str) -> String {
     let mut text = text.to_owned();
     while let Some(start) = text.find("-----BEGIN") {
@@ -258,40 +308,39 @@ pub fn redact_text(text: &str) -> String {
         text.replace_range(start..end, REDACTED);
     }
     let mut out = String::with_capacity(text.len());
-    let mut redact_next = false;
-    let mut pending_name = false;
-    let mut chars = text.char_indices().peekable();
-    while let Some(&(start, c)) = chars.peek() {
-        let is_word = word_char(c);
-        let mut end = start;
-        while let Some(&(i, c)) = chars.peek() {
-            if word_char(c) != is_word { break; }
-            end = i + c.len_utf8();
-            chars.next();
-        }
-        let segment = &text[start..end];
-        if is_word {
-            let scheme = SCHEMES.contains(&segment.to_ascii_lowercase().as_str());
-            if redact_next && scheme {
-                out.push_str(segment);
-            } else if redact_next || secret_value(segment) {
-                out.push_str(REDACTED);
-                redact_next = false;
-            } else {
-                out.push_str(segment);
-                if scheme { redact_next = true; }
-            }
-            pending_name = !redact_next && secret_name(segment);
-        } else {
+    let mut i = 0;
+    while let Some(first) = text[i..].chars().next() {
+        let is_word = word_char(first);
+        let len = text[i..].find(|c| word_char(c) != is_word).unwrap_or(text.len() - i);
+        let segment = &text[i..i + len];
+        i += len;
+        if !is_word {
             out.push_str(segment);
-            // `name=value`, `name: value`, `"name": "value"`.
-            if pending_name && segment.len() <= 4 && (segment.contains('=') || segment.contains(':')) {
-                redact_next = true;
-            } else if redact_next && !segment.chars().all(|c| c == ' ' || c == '"' || c == '\'') {
-                redact_next = false;
-            }
-            pending_name = false;
+            continue;
         }
+        if secret_value(segment) {
+            out.push_str(REDACTED);
+            continue;
+        }
+        out.push_str(segment);
+        let rest = &text[i..];
+        let (gap, value) = if let Some(gap) = assignment(rest).filter(|_| secret_name(segment)) {
+            // `Authorization: Bearer value` keeps the scheme.
+            let after = &rest[gap..];
+            let word = after.find(|c| !word_char(c)).unwrap_or(after.len());
+            match scheme_gap(&after[word..]).filter(|_| is_scheme(&after[..word])) {
+                Some(blanks) => (gap + word + blanks, &after[word + blanks..]),
+                None => (gap, after),
+            }
+        } else if let Some(gap) = scheme_gap(rest).filter(|_| is_scheme(segment)) {
+            (gap, &rest[gap..])
+        } else {
+            continue;
+        };
+        out.push_str(&rest[..gap]);
+        let (redacted, used) = redact_credential(value);
+        out.push_str(&redacted);
+        i += gap + used;
     }
     out
 }
@@ -1069,6 +1118,36 @@ mod tests {
         assert!(redact_value(&deep, 0).to_string().contains("[truncated]"));
         let fields = json!({"component": "demo", "version": "1.0", "health": "ok", "key": "k", "token": "t", "env": "x"});
         assert_eq!(Value::Object(allow(fields.as_object().unwrap())), json!({"component": "demo", "version": "1.0", "health": "ok"}));
+    }
+
+    #[test]
+    fn redaction_consumes_whole_credential_values() {
+        // Synthetic values; CANARY marks the part that must not survive.
+        let cases = [
+            ("password=alpha!CANARY after", "password=[redacted] after"),
+            ("password=!!CANARY after", "password=[redacted] after"),
+            ("password=a%b$c@CANARY#x,y;z after", "password=[redacted] after"),
+            ("passphrase=\"alpha CANARY\" after", "passphrase=\"[redacted]\" after"),
+            ("secret='it\\'s CANARY' after", "secret='[redacted]' after"),
+            ("\"api_key\": \"a \\\" CANARY\", \"port\": 80", "\"api_key\": \"[redacted]\", \"port\": 80"),
+            ("token := CANARY! after", "token := [redacted] after"),
+            ("pin = \"CANARY", "pin = \"[redacted]"),
+            ("Authorization: Bearer abc!CANARY after", "Authorization: Bearer [redacted] after"),
+            ("Authorization: Basic \"a CANARY\" after", "Authorization: Basic \"[redacted]\" after"),
+            ("auth: \"Bearer a CANARY\" after", "auth: \"[redacted]\" after"),
+            ("bearer !CANARY after", "bearer [redacted] after"),
+            ("password=\n", "password=\n"),
+            ("password = é!CANARY ü", "password = [redacted] ü"),
+        ];
+        for (i, (text, expected)) in cases.iter().enumerate() {
+            let out = redact_text(text);
+            assert!(!out.contains("CANARY"), "credential fixture {i} leaked");
+            assert_eq!(&out, expected, "credential fixture {i}");
+        }
+        // Values after non-secret names and the text around them stay.
+        assert_eq!(redact_text("url=https://x/a?b=c user: bob"), "url=https://x/a?b=c user: bob");
+        let out = redact_log("x password=alpha!CANARY\npassphrase=\"b CANARY\" y", false);
+        assert_eq!(out, ["x password=[redacted]", "passphrase=\"[redacted]\" y"]);
     }
 
     #[test]
