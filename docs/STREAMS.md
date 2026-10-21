@@ -136,6 +136,8 @@ SF-077 adds a separate [Firehose exporter](FIREHOSE.md) over native IPC reads,
 with its own destination-bound checkpoint and scoped credentials. It does not
 change the HTTP export protocol or native stream retention.
 
+**Fleet visibility.** With `[telemetry]`, every heartbeat also reports each stream's usage, rejected appends, export lag, messages lost before export and export failures, never data, export URLs or tokens, and the indexer alerts on them ([TELEMETRY.md](TELEMETRY.md#service-health-sf-085), SF-085).
+
 ## Evidence
 
 | Command | Covers |
@@ -148,3 +150,5 @@ change the HTTP export protocol or native stream retention.
 - a disk-full host filesystem beyond the configured quota;
 - a receiver that verifies against the live registry (#11);
 - physical Pi power loss (#32).
+
+SF-071 adds the native [SiteWise TQV processing/publisher](SITEWISE.md) over SF-070 records and SF-034 lossless external streams with SF-057 credentials. Its local request/checkpoint tests establish the documented native subset; live AWS and physical acceptance remain unrun. Historical reference fixtures above remain specification-only.

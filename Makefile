@@ -66,10 +66,12 @@ test-ota:
 	$(RUN) python3 scripts/test_greengrass_runtime.py
 	$(RUN) python3 scripts/test_daemon_update.py
 	$(RUN) python3 scripts/test_desired_state.py
+	$(RUN) python3 scripts/test_handover_ota.py
 	$(RUN) python3 scripts/test_deployment_control.py
 	$(RUN) python3 scripts/test_telemetry.py
 	$(RUN) python3 scripts/test_logs.py
 	$(RUN) python3 scripts/test_cloudwatch_logs.py
+	$(RUN) python3 scripts/test_console.py
 	$(RUN) python3 scripts/test_rollout.py
 
 # Fleet service configuration, root only in a disposable network-none container
@@ -133,6 +135,10 @@ generate-interfaces:
 test-protocol-live:
 	$(RUN) python3 scripts/test_protocol_localnet.py
 
+.PHONY: test-handover-upgrade-localnet
+test-handover-upgrade-localnet:
+	$(RUN) python3 scripts/test_protocol_localnet.py --handover-upgrade
+
 .PHONY: test-catalog-live
 test-catalog-live:
 	$(RUN) python3 scripts/test_catalog_localnet.py
@@ -162,6 +168,26 @@ test-ml:
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_ml_components.py --wheels .ci-cache/ml-wheels -v
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_ml_ota.py --wheels .ci-cache/ml-wheels
 
+# Industrial collector (SF-070). Only industrial-deps uses the network: it
+# unpacks the hash-pinned cryptography wheels needed by OPC UA Basic256Sha256.
+INDUSTRIAL_RUNTIME ?= .ci-cache/industrial-runtime
+.PHONY: industrial-deps test-industrial test-industrial-daemon
+industrial-deps:
+	$(RUN) python3 scripts/industrial/deps.py --dest $(INDUSTRIAL_RUNTIME)
+
+test-industrial: industrial-deps
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=$(INDUSTRIAL_RUNTIME)/site python3 scripts/test_industrial.py -v
+
+# The built collector as a separate component UID against the real daemon:
+# root only inside a disposable, network-isolated container.
+test-industrial-daemon: industrial-deps
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+ifdef INSIDE_DEV_CONTAINER
+	python3 scripts/test_industrial_daemon.py $(INDUSTRIAL_RUNTIME)/site $(INDUSTRIAL_EVIDENCE)
+else
+	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" python3 scripts/test_industrial_daemon.py $(INDUSTRIAL_RUNTIME)/site $(INDUSTRIAL_EVIDENCE)
+endif
+
 # Offline regression tests for the drift gate itself (synthetic summaries).
 test-interfaces:
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_check_contract_interfaces.py'
@@ -174,7 +200,7 @@ toolchain-versions:
 # CI entry point (run inside the dev image): each step's output is kept under
 # ci-logs/ for failure diagnostics. No step publishes, spends gas or uses secrets.
 ci: SHELL := /bin/bash
-CI_STEPS := indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat test-ml edge-test test-ota test-component test-edge-acceptance dapp-typecheck dapp-build
+CI_STEPS := indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat test-ml test-industrial edge-test test-ota test-component test-edge-acceptance dapp-typecheck dapp-build
 ci:
 	@mkdir -p ci-logs
 	@$(MAKE) --no-print-directory toolchain-versions | tee ci-logs/toolchain-versions.txt
@@ -195,6 +221,7 @@ check:
 	$(MAKE) check-interfaces
 	$(MAKE) test-compat
 	$(MAKE) test-ml
+	$(MAKE) test-industrial
 	$(MAKE) edge-test
 	$(MAKE) test-ota
 	$(MAKE) test-component
@@ -272,6 +299,7 @@ test-manifest:
 	$(RUN) node scripts/test_frontend_queries.cjs
 	$(RUN) node scripts/test_target_groups.cjs
 	$(RUN) node scripts/test_desired_state.cjs
+	$(RUN) node scripts/test_seal_frontend.cjs
 	$(RUN) node scripts/test_telemetry.cjs
 	$(RUN) node scripts/test_alerts.cjs
 
@@ -351,6 +379,23 @@ test-daemon-localnet:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_daemon_localnet.py
 
+# SF-022 confidential delivery against a disposable localnet (start it first):
+# dapp encryption, test Seal key servers, signing-service sessions, daemon apply.
+.PHONY: test-seal-localnet
+test-seal-localnet:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example seal_key_server
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_seal_localnet.py
+
+# Live gate (spends testnet gas; docs/CONFIDENTIAL_DELIVERY.md): Seal delivery with
+# Mysten's testnet key servers on this head's package-upgrade fixture.
+#   make live-seal-delivery SUIFLEET_WALLET=~/.config/suifleet/testnet/agent/client.yaml
+.PHONY: live-seal-delivery
+live-seal-delivery:
+	@test -n "$(SUIFLEET_WALLET)" || { echo "set SUIFLEET_WALLET to a funded wallet's client.yaml"; exit 1; }
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/live_seal_delivery.py --wallet "$(SUIFLEET_WALLET)" \
+		$(if $(SUIFLEET_STATE),--state "$(SUIFLEET_STATE)") --evidence "$${SUIFLEET_EVIDENCE:-live-seal-evidence.json}"
+
 .PHONY: test-testnet
 test-testnet:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_testnet*.py'
@@ -367,6 +412,14 @@ test-deployment-control-localnet:
 test-messaging:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
 	python3 scripts/test_messaging.py --image "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}"
+
+# AWS IoT Core connection (SF-061): the real daemon against Mosquitto with mutual
+# TLS and an AWS-shaped endpoint, in network-none containers. Runs on the host
+# (needs Docker); pass AWS_IOT_EVIDENCE="--evidence FILE" for a receipt.
+.PHONY: test-aws-iot
+test-aws-iot:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+	python3 scripts/test_aws_iot.py --image "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" $(AWS_IOT_EVIDENCE)
 
 # Start a disposable indexed loopback node/faucet first; network-none Docker only.
 .PHONY: test-rollout-localnet
@@ -421,6 +474,20 @@ else
 	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" python3 scripts/test_shadows.py $(SHADOWS_EVIDENCE)
 endif
 
+# Service health in telemetry and alerts (SF-085): the real daemon fills a
+# queue, loses its MQTT broker and fails an export; the real indexer derives
+# the alerts from its signed reports. Root only inside a disposable,
+# network-isolated container (component UIDs).
+.PHONY: test-service-health
+test-service-health:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+	$(RUN) cargo build --locked --manifest-path suifleet-indexer/Cargo.toml
+ifdef INSIDE_DEV_CONTAINER
+	python3 scripts/test_service_health.py $(SERVICE_HEALTH_EVIDENCE)
+else
+	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" python3 scripts/test_service_health.py $(SERVICE_HEALTH_EVIDENCE)
+endif
+
 # Root only inside a disposable, network-isolated container: real SO_PEERCRED UIDs.
 .PHONY: test-ipc
 test-ipc:
@@ -465,3 +532,35 @@ test-firehose:
 	  -e PYTHONPATH=/workspace/.ci-cache/aws-python \
 	  -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:?set pinned dev image}" \
 	  sh -ec 'python3 -m unittest discover -s scripts/tests -p test_firehose_export.py -v; python3 scripts/test_streams.py --firehose'
+
+# SF-071: signed SiteWise API emulator + real durable IPC/restart evidence.
+.PHONY: test-sitewise
+test-sitewise:
+	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 \
+	  -e PYTHONPATH=/workspace/.ci-cache/aws-python \
+	  -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:?set pinned dev image}" \
+	  sh -ec 'python3 -m unittest discover -s scripts/tests -p test_sitewise_export.py -v; python3 scripts/test_streams.py --sitewise'
+
+# SF-078: SDK wheels prepared as for test-firehose. Actual daemon pub/sub and
+# signed SNS SDK requests to a local emulator, in a disposable offline container.
+.PHONY: test-sns
+test-sns:
+	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 \
+	  -e PYTHONPATH=/workspace/.ci-cache/aws-python \
+	  -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:?set pinned dev image}" \
+	  sh -ec 'python3 -m unittest discover -s scripts/tests -p test_sns_publish.py -v; python3 scripts/test_sns.py'
+
+# SF-069 function manager (docs/LAMBDA.md): real function processes against a
+# local IPC endpoint, then the real daemon with distinct component UIDs. Needs
+# the debug daemon/shim build; offline, disposable root container.
+.PHONY: test-lambda
+test-lambda:
+	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 \
+	  -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:?set pinned dev image}" \
+	  sh -ec 'python3 -m unittest discover -s scripts/tests -p test_lambda_manager.py -v; python3 scripts/test_lambda.py $(LAMBDA_EVIDENCE)'
+
+# SF-062: real Linux metrics and shared TLS IoT adapter, no live AWS resources.
+.PHONY: test-device-defender
+test-device-defender:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+	python3 scripts/test_device_defender.py --image "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" $(DEVICE_DEFENDER_EVIDENCE)

@@ -227,7 +227,7 @@ export function buildDeleteDeploymentTx(deploymentObjectId: string, schemaVersio
 
 // ── Queries ───────────────────────────────────────────────────────────────────
 
-async function allOwned(client: SuiGrpcClient, owner: string, type: string) {
+export async function allOwned(client: SuiGrpcClient, owner: string, type: string) {
   let page = await client.listOwnedObjects({ owner, type, include: { content: true }, limit: 50 });
   const data = [...page.objects];
   while (page.hasNextPage) {
@@ -260,14 +260,14 @@ export async function fetchGroups(client: SuiGrpcClient, owner: string): Promise
   await verifyDeployment(client);
   const events = await allEvents(client, moveType("device_group::GroupCreated"));
   const ids = events.map((event) => GroupCreatedBcs.parse(event.bcs))
-    .filter((event) => event.admin === owner).map((event) => event.group_id);
+    .map((event) => event.group_id);
   const objects = await objectsInBatches(client, [...new Set(ids)]);
   return objects.map((object) => {
     const fields = GroupBcs.parse(object.content);
     if (fields.schema_version !== "1") throw new Error("Unsupported DeviceGroup schema");
     return { objectId: object.objectId, name: fields.name, description: fields.description,
       admin: fields.admin, deviceIds: fields.device_ids };
-  });
+  }).filter((group) => group.admin === owner);
 }
 
 export async function allEvents(client: SuiGrpcClient, type: string) {
@@ -311,11 +311,13 @@ function supportedTargetGroup(group: { type: string; content: Uint8Array }) {
 
 export async function fetchDeploymentEvents(client: SuiGrpcClient, owner?: string): Promise<DeploymentEvent[]> {
   await verifyDeployment(client);
-  const events = (await allEvents(client, DEPLOYMENT_CREATED_EVENT)).map((event) => DeploymentCreatedBcs.parse(event.bcs))
-    .filter((event) => !owner || event.creator === owner);
+  const events = (await allEvents(client, DEPLOYMENT_CREATED_EVENT)).map((event) => DeploymentCreatedBcs.parse(event.bcs));
   const objects = await objectsInBatches(client, [...new Set(events.map((event) => event.deployment_id))]);
   const live = new Map(objects.map((object) => [object.objectId, DeploymentBcs.parse(object.content)]));
-  const liveEvents = events.filter((event) => live.has(event.deployment_id));
+  const liveEvents = events.filter((event) => {
+    const record = live.get(event.deployment_id);
+    return record && (!owner || record.creator === owner);
+  });
   const groups = await objectsInBatches(client, [...new Set(liveEvents.flatMap((event) => event.target_groups))]);
   const groupsById = new Map(groups.map((group) => [group.objectId, supportedTargetGroup(group)]));
   return Promise.all(liveEvents.map(async (event) => {

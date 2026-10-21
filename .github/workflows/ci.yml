@@ -76,14 +76,28 @@ jobs:
 
       - name: CloudWatch metrics adapter with local emulator
         run: make test-cloudwatch-metrics SUIFLEET_DEV_IMAGE=suifleet-dev:ci
+      - name: SiteWise publisher with local signed API emulator and durable daemon streams
+        run: make test-sitewise SUIFLEET_DEV_IMAGE=suifleet-dev:ci
       - name: Firehose exporter with local SDK emulator and durable daemon streams
         run: make test-firehose SUIFLEET_DEV_IMAGE=suifleet-dev:ci
+
+      - name: SNS publisher with local SDK emulator and durable daemon pub/sub
+        run: make test-sns SUIFLEET_DEV_IMAGE=suifleet-dev:ci
+
+      - name: Function manager processes, subscriptions and daemon restart
+        run: make test-lambda SUIFLEET_DEV_IMAGE=suifleet-dev:ci
 
       - name: Component IPC with distinct Unix peer identities
         run: |
           docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 \
             -v "$PWD:/workspace" -w /workspace suifleet-dev:ci \
             python3 scripts/test_ipc.py
+
+      - name: Industrial collector into the real daemon's durable stream
+        run: |
+          docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 \
+            -v "$PWD:/workspace" -w /workspace suifleet-dev:ci \
+            python3 scripts/test_industrial_daemon.py .ci-cache/industrial-runtime/site
 
       - name: Deployment service configuration with distinct Unix identities
         run: |
@@ -94,6 +108,9 @@ jobs:
       - name: First-boot identity and permissions
         shell: bash
         run: sh scripts/test_yocto_first_boot.sh suifleet-dev:ci | tee ci-logs/first-boot.log
+
+      - name: Device Defender metrics over the shared mutual TLS IoT adapter
+        run: python3 scripts/test_device_defender.py --image suifleet-dev:ci
 
       - name: Upload diagnostics
         if: always()

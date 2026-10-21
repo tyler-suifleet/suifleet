@@ -66,7 +66,8 @@ async function sign(keypair, snapshot) {
   for (const [change, expected] of [
     [{ chain_identifier: "4c78adac" }, "report is bound to another deployment"],
     [{ registry: "0x6" }, "report is bound to another deployment"],
-    [{ schema: 2 }, "unsupported telemetry schema 2"],
+    [{ schema: 2 }, "invalid services section"],
+    [{ schema: 3 }, "unsupported telemetry schema 3"],
     [{ signer: id("0x99") }, "report names another signer"],
   ]) {
     assert.equal(await telemetry.verifyReport(await sign(ed, { ...snapshot, ...change }), device, signer), expected);
@@ -76,6 +77,45 @@ async function sign(keypair, snapshot) {
   const p256Snapshot = { ...snapshot, signer: p256.toSuiAddress() };
   assert.deepEqual(await telemetry.verifyReport(await sign(p256, p256Snapshot), device, p256.toSuiAddress()), p256Snapshot);
   console.log("PASS: chain/registry/schema/signer binding enforced; P-256 device signatures verify");
+
+  // Service health (SF-085): the schema-2 vector, signed by Mysten's SDK and
+  // reproduced byte for byte by the daemon, verifies with its services section.
+  const withServices = cases.signed_services;
+  assert.deepEqual(await telemetry.verifyReport(withServices.envelope, device, signer), withServices.snapshot);
+  const services = withServices.snapshot.services;
+  const clone = () => JSON.parse(JSON.stringify(services));
+  for (const [label, edit, expected] of [
+    ["services in schema 1", (s) => ({ ...s, schema: 1 }), "unsupported telemetry schema 1"],
+    ["section version", (s) => ({ ...s, services: { ...clone(), version: 2 } })],
+    ["a topic smuggled into a queue", (s) => { const v = clone(); v.messaging.queues[0].topic = "plant/valves"; return { ...s, services: v }; }],
+    ["an export URL", (s) => { const v = clone(); v.streams.streams[0].export.url = "https://x"; return { ...s, services: v }; }],
+    ["missing section key", (s) => { const v = clone(); delete v.bridge; return { ...s, services: v }; }],
+    ["an error text, not a category", (s) => { const v = clone(); v.bridge.last_error = "subscriber queue full: sub confidential/#"; return { ...s, services: v }; }],
+    ["an export error text", (s) => { const v = clone(); v.streams.streams[0].export.last_error = "connection refused"; return { ...s, services: v }; }],
+    ["fill above 100", (s) => { const v = clone(); v.streams.streams[0].fill_percent = 101; return { ...s, services: v }; }],
+    ["negative count", (s) => { const v = clone(); v.messaging.queued = -1; return { ...s, services: v }; }],
+    ["too many queues", (s) => { const v = clone(); v.messaging.queues = Array(33).fill(v.messaging.queues[0]); return { ...s, services: v }; }],
+  ]) {
+    assert.equal(await telemetry.verifyReport(await sign(ed, edit(withServices.snapshot)), device, signer), expected ?? "invalid services section", label);
+  }
+  assert.deepEqual(telemetry.SERVICE_ERROR_CATEGORIES, cases.service_error_categories);
+  const quiet = { ...withServices.snapshot, services: { version: 1, messaging: null, bridge: null, streams: null, shadows: null } };
+  assert.deepEqual(await telemetry.verifyReport(await sign(ed, quiet), device, signer), quiet);
+  const lines = telemetry.describeServices(services);
+  assert.ok(lines.some((l) => l.startsWith("  svc: 1000 queued (100% full since ")), lines.join("\n"));
+  assert.ok(lines.some((l) => l.startsWith("MQTT bridge: disconnected since ") && l.includes("(connection-refused)")), lines.join("\n"));
+  assert.ok(lines.some((l) => l.startsWith("Stream metrics: 98% of 1024 bytes") && l.includes("4 lost before export")), lines.join("\n"));
+  // Device times are any safe integer; one beyond the Date range must not break the health view.
+  const farFuture = clone();
+  farFuture.bridge.since_ms = Number.MAX_SAFE_INTEGER;
+  farFuture.messaging.queues[0].full_since_ms = Number.MAX_SAFE_INTEGER;
+  const far = { ...withServices.snapshot, services: farFuture };
+  assert.deepEqual(await telemetry.verifyReport(await sign(ed, far), device, signer), far);
+  const farLines = telemetry.describeServices(farFuture);
+  const raw = `UTC milliseconds ${Number.MAX_SAFE_INTEGER} (out of range)`;
+  assert.ok(farLines.some((l) => l.startsWith(`MQTT bridge: disconnected since ${raw},`)), farLines.join("\n"));
+  assert.ok(farLines.some((l) => l.startsWith(`  svc: 1000 queued (100% full since ${raw})`)), farLines.join("\n"));
+  console.log("PASS: schema-2 service health verifies; unknown/oversized/missing service fields (topics, URLs) and error texts are refused; summary lines, including out-of-range device times");
 
   // Status rules shared with the indexer.
   for (const c of cases.status) {
@@ -135,6 +175,7 @@ async function sign(keypair, snapshot) {
   assert.equal(health[device].status, "healthy");
   assert.equal(health[device].lastSeenAgeMs, 1000);
   assert.equal(health[device].components[0].name, "firmware");
+  assert.equal(health[device].services, undefined, "schema 1 reports no services");
   assert.equal(telemetry.lastSeenLabel(health[device]), "1 s ago");
   assert.deepEqual([health["0xd2"].status, health["0xd2"].codes], ["unverified", ["unverified"]]);
   assert.deepEqual([health["0xd3"].status, health["0xd3"].codes], ["unreported", ["revoked"]]);

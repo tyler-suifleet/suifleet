@@ -24,6 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import greengrass_managed as managed  # noqa: E402
+import device_defender_schema  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 COMPAT = Path("interfaces/compat")
@@ -706,6 +707,200 @@ def client_authorized(config: dict, request: dict) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# AWS IoT Core connection (SF-061 aws-iot-core-connection, matching
+# aws.greengrass.clientdevices.mqtt.Bridge 2.3.3 IotCore routes and
+# aws.greengrass.ShadowManager 2.3.15 cloud synchronization).
+# ---------------------------------------------------------------------------
+AWS_IOT_FIELDS = {"endpoint", "port", "alpn", "thing_name", "client_id", "ca_file", "certificate_file", "private_key_file",
+                  "keep_alive_seconds", "credential_check_seconds", "reject_denied_publications"}
+AWS_NAME = re.compile(r"^[A-Za-z0-9:_-]{1,128}$")
+AWS_LABEL = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
+
+
+def aws_connection(config: dict) -> dict:
+    """The connection settings: valid, and the ALPN and client id used."""
+    if set(config) - AWS_IOT_FIELDS or not {"endpoint", "thing_name", "ca_file", "certificate_file", "private_key_file"} <= set(config):
+        return {"valid": False}
+    port, alpn = config.get("port", 8883), config.get("alpn")
+    client_id = config.get("client_id", config["thing_name"])
+    endpoint = config["endpoint"]
+    valid = (0 < len(endpoint) <= 253 and all(AWS_LABEL.match(label) for label in endpoint.split("."))
+             and 0 < port < 65536 and (alpn is None or 0 < len(alpn) <= 255)
+             and bool(AWS_NAME.match(config["thing_name"])) and bool(AWS_NAME.match(client_id))
+             and 30 <= config.get("keep_alive_seconds", 60) <= 1200 and 5 <= config.get("credential_check_seconds", 30) <= 3600
+             and isinstance(config.get("reject_denied_publications", False), bool)
+             and all(config[k].startswith("/") for k in ("ca_file", "certificate_file", "private_key_file")))
+    if not valid:
+        return {"valid": False}
+    return {"valid": True, "alpn": alpn if alpn is not None else ("x-amzn-mqtt-ca" if port == 443 else None), "client_id": client_id}
+
+
+def aws_within_limits(topic: str) -> bool:
+    """AWS IoT Core: 256 bytes and 7 slashes, without a $aws/rules/<rule>/ prefix."""
+    if topic.startswith("$aws/rules/") and "/" in topic[len("$aws/rules/"):]:
+        topic = topic[len("$aws/rules/"):].split("/", 1)[1]
+    return len(topic.encode()) <= 256 and topic.count("/") <= 7
+
+
+def filters_overlap(a: str, b: str) -> bool:
+    x, y = a.split("/"), b.split("/")
+    for index in range(max(len(x), len(y))):
+        p, q = (x[index] if index < len(x) else None), (y[index] if index < len(y) else None)
+        if p == "#" or q == "#":
+            return True
+        if p is None or q is None:
+            return False
+        if not (p == "+" or q == "+" or p == q):
+            return False
+    return True
+
+
+def reaches_aws_shadows(topic_filter: str) -> bool:
+    return topic_filter.startswith("$") and filters_overlap(topic_filter, "$aws/things/+/shadow/#")
+
+
+def aws_mapping_error(aws_iot: bool, broker, mappings: list):
+    """None when the bridge mappings are acceptable, else the refusal."""
+    uses = lambda link: any(link in (m["source"], m["target"]) for m in mappings)
+    if broker is None and uses("LocalMqtt"):
+        return "need bridge.broker"
+    if not (aws_iot or mappings) or len(mappings) > 64:
+        return "1-64 mappings"
+    if not aws_iot and uses("IotCore"):
+        return "need the [aws_iot] connection"
+    for m in mappings:
+        prefix = m.get("target_topic_prefix", "")
+        if m["source"] == m["target"]:
+            return "must differ"
+        if "Pubsub" not in (m["source"], m["target"]):
+            return "through Pubsub"
+        if not valid_filter(m["topic"]) or len(m["topic"].encode()) > 256:
+            return "invalid bridge mapping topic filter"
+        if "IotCore" in (m["source"], m["target"]):
+            produced = prefix + m["topic"]
+            cloud_side = m["topic"] if m["source"] == "IotCore" else produced
+            if reaches_aws_shadows(cloud_side) or reaches_aws_shadows(produced):
+                return "reaches AWS shadow topics"
+            if not aws_within_limits(cloud_side):
+                return "exceeds AWS IoT Core topic limits"
+    for out in (m for m in mappings if m["source"] == "Pubsub"):
+        produced = out.get("target_topic_prefix", "") + out["topic"]
+        for inbound in (m for m in mappings if m["source"] == out["target"]):
+            if valid_filter(produced) and filters_overlap(produced, inbound["topic"]):
+                return "bridge loop"
+    return None
+
+
+def aws_patch(old: dict, new: dict) -> dict:
+    """The AWS shadow update state turning `old` into `new` (merge semantics)."""
+    out = {key: None for key in old if key not in new}
+    for key, value in new.items():
+        if isinstance(old.get(key), dict) and isinstance(value, dict):
+            inner = aws_patch(old[key], value)
+            if inner:
+                out[key] = inner
+        elif key not in old or not json_equal(old[key], value):
+            out[key] = value
+    return out
+
+
+def aws_shadow_call(case: dict):
+    """(request, outcome) of one synchronizer call against an AWS answer."""
+    answer, body = case["answer"], case["answer"]["body"]
+    code = body.get("code")
+    if case["call"] == "fetch":
+        request = {"op": "get", "body": {}}
+        if not answer["accepted"]:
+            return request, ({"version": 0, "document": None} if code == 404 else {"error": f"rejected: {code}"})
+        version = body.get("version")
+        if not isinstance(version, int) or isinstance(version, bool) or version < 1:
+            return request, {"error": "no version"}
+        document = {}
+        for section in ("desired", "reported"):
+            value = body.get("state", {}).get(section)
+            if value is None:
+                continue
+            if not isinstance(value, dict):
+                return request, {"error": "not an object"}
+            document[section] = value
+        return request, {"version": version, "document": document}
+    expected = case["expected_version"]
+    if case["document"] is None:
+        request = {"op": "delete", "body": {}}
+        if answer["accepted"]:
+            return request, {"stored": 0}
+        return request, ({"conflict": True} if code == 404 else {"error": f"rejected: {code}"})
+    request = {"op": "update", "body": {"state": aws_patch(case["cloud"] or {}, case["document"])}}
+    if expected > 0:
+        request["body"]["version"] = expected
+    if not answer["accepted"]:
+        return request, ({"conflict": True} if code == 409 else {"error": f"rejected: {code}"})
+    version = body.get("version")
+    if not isinstance(version, int) or version <= expected:
+        return request, {"error": "did not advance"}
+    return request, {"stored": version}
+
+
+def aws_denied_publication(events: list, reject: bool) -> list:
+    """A bridged message the endpoint closes the connection on soon after it
+    was sent in that session, three times in a row, is held: kept in the
+    spool and retried. With reject_denied_publications it is rejected
+    instead. A PUBACK delivers it and resets the count; other closes and
+    transport errors neither count nor reset."""
+    closes, outcomes = 0, []
+    for event in events:
+        if event == "puback":
+            closes = 0
+            outcomes.append("delivered")
+        elif event == "closed-soon":
+            closes += 1
+            if closes < 3:
+                outcomes.append("retry")
+            elif reject:
+                outcomes.append("rejected")
+                closes = 0
+            else:
+                outcomes.append("held")
+        elif event in ("closed-late", "closed-before-send", "error"):
+            outcomes.append("held" if closes >= 3 else "retry")
+        else:
+            raise ValueError(event)
+    return outcomes
+
+
+def check_aws_iot(cases) -> int:
+    count = 0
+    for case in cases["connection"]:
+        if aws_connection(case["config"]) != case["expected"]:
+            raise AssertionError(f"aws-iot connection case {case['id']}: {aws_connection(case['config'])!r}")
+        count += 1
+    for case in cases["topics"]:
+        if aws_within_limits(case["topic"]) != case["within_limits"]:
+            raise AssertionError(f"aws-iot topic case {case['id']}")
+        count += 1
+    for case in cases["mappings"]:
+        error = aws_mapping_error(case["aws_iot"], case.get("broker"), case["mappings"])
+        if (error is None) != ("ok" in case["expected"]) or (error is not None and error != case["expected"]["error"]):
+            raise AssertionError(f"aws-iot mapping case {case['id']}: {error!r}")
+        count += 1
+    for case in cases["shadow_patches"]:
+        if not json_equal(aws_patch(case["from"], case["to"]), case["patch"]):
+            raise AssertionError(f"aws-iot patch case {case['id']}: {aws_patch(case['from'], case['to'])!r}")
+        count += 1
+    for case in cases["shadow_answers"]:
+        request, outcome = aws_shadow_call(case)
+        if not json_equal(request, case["request"]) or not json_equal(outcome, case["expected"]):
+            raise AssertionError(f"aws-iot shadow answer case {case['id']}: {request!r} {outcome!r}")
+        count += 1
+    for case in cases["denied_publication"]:
+        actual = aws_denied_publication([step["event"] for step in case["steps"]], case["reject_denied_publications"])
+        if actual != [step["expect"] for step in case["steps"]]:
+            raise AssertionError(f"aws-iot denied publication case {case['id']}: {actual!r}")
+        count += len(case["steps"])
+    return count
+
+
+# ---------------------------------------------------------------------------
 # Fixture evaluation and matrix checks.
 # ---------------------------------------------------------------------------
 def _load(root: Path, name: str):
@@ -798,6 +993,7 @@ def _managed_catalog(root: Path) -> dict:
 
 # Runners take (cases, root); root locates the SF-038 managed catalog.
 SUITE_RUNNERS = {
+    "device-defender-cases.json": lambda c, _: device_defender_schema.check_fixture(c),
     "aws-recipe-cases.json": lambda c, root: check_recipes(c, _managed_catalog(root)),
     "pubsub-cases.json": lambda c, _: check_pubsub(c),
     "shadow-cases.json": lambda c, _: _run_sequences(c, ShadowStore, "shadow"),
@@ -807,6 +1003,7 @@ SUITE_RUNNERS = {
     "credential-provider-cases.json": lambda c, _: _run_sequences(c, managed.CredentialProvider, "credential-provider"),
     "cloudwatch-metrics-cases.json": lambda c, _: _run_sequences(c, managed.MetricsExport, "cloudwatch-metrics"),
     "cloudwatch-logs-cases.json": lambda c, _: _run_sequences(c, managed.LogsExport, "cloudwatch-logs"),
+    "aws-iot-cases.json": lambda c, _: check_aws_iot(c),
 }
 LEVELS = ("functional", "aws_api", "aws_recipe")
 STATUSES = {"implemented", "partial", "proposed", "excluded", "undecided", "roadmap", "not-applicable"}

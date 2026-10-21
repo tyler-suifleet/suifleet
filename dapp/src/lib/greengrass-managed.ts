@@ -421,11 +421,11 @@ export const MANAGED_CATALOG = {
     },
     {
       "id": "aws-iot-core-connection",
-      "specification": "incomplete",
+      "specification": "complete",
       "implementation_ticket": "SF-061",
       "replaces": {
-        "aws.greengrass.clientdevices.mqtt.Bridge": "unpinned",
-        "aws.greengrass.ShadowManager": "unpinned"
+        "aws.greengrass.clientdevices.mqtt.Bridge": "2.3.3",
+        "aws.greengrass.ShadowManager": "2.3.15"
       },
       "depends_on": [
         "SF-021",
@@ -435,7 +435,7 @@ export const MANAGED_CATALOG = {
     },
     {
       "id": "device-defender-metrics",
-      "specification": "incomplete",
+      "specification": "complete",
       "implementation_ticket": "SF-062",
       "replaces": {
         "aws.greengrass.DeviceDefender": "4.0.0"

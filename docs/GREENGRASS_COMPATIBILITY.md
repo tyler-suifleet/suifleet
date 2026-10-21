@@ -52,7 +52,7 @@ There is no AWS IPC wire compatibility or embedded MQTT broker; LAN client devic
 
 The translator is [`dapp/src/lib/greengrass-recipe.ts`](../dapp/src/lib/greengrass-recipe.ts). Operators use it in two places:
 
-- the **Import AWS Greengrass recipe** panel on the dApp's Components page, which uploads the bound artifacts and translated recipes and registers an immutable catalog version (accepted with the Slush extension on Sui and Walrus testnet: [receipt](validation/sf037-recipe-translation.json), `extension_wallet_testnet`);
+- the **Import AWS Greengrass recipe** panel on the dApp's Components page, which uploads the bound artifacts and translated recipes and registers an immutable catalog version. Uploads follow the panel's delivery choice: Seal-encrypted under a chosen access policy by default, or explicitly acknowledged public delivery ([CONFIDENTIAL_DELIVERY.md](CONFIDENTIAL_DELIVERY.md)). Its Slush extension-wallet acceptance on Sui and Walrus testnet ([receipt](validation/sf037-recipe-translation.json), `extension_wallet_testnet`) predates SF-022 and used unencrypted uploads;
 - the offline CLI:
 
   ```bash
@@ -160,7 +160,7 @@ Each translated field below runs with a difference from AWS. The translator repo
 
   The component must run as a separately provisioned Unix user, and the operator adds its ACL.
 - **Not available natively yet.** Wildcard subscriptions, MQTT/IoT Core, shadows, streams, secrets and token exchange are SF-032 to SF-035, SF-022 and SF-057.
-- **Lambda.** Lambda functions and subscriptions are SF-064 roadmap work.
+- **Lambda.** Lambda-type recipes stay rejected. SF-069 adds a clean-room [function manager](LAMBDA.md) (on-demand/long-lived processes and exact source/subject subscriptions over native pub/sub); it is not Lambda recipe, SDK or wire compatibility.
 - **Recipe compatibility is the `aws_recipe` level only.** A translated recipe runs its scripts with the stated differences. It does not make the component's own AWS SDK calls work.
 
 ## Adapter designs
@@ -184,7 +184,7 @@ Implemented for local shadows and an HTTP(S) sync adapter: see [SHADOWS.md](SHAD
 - **Limits.** Depth may not exceed 8 in either section. The section object is level 1, and every nested object or array adds a level, including objects inside arrays and arrays inside arrays; this array rule is the proposed SuiFleet convention. A rejected request leaves the document and version unchanged. `clientToken` may not exceed 64 bytes, and the serialized state may not exceed 8 KiB (`too-large`). Shadow names are 1–64 characters of `[A-Za-z0-9:_-]`, and `""` is the classic shadow.
 - **Proposed differences from AWS.**
   - Deleting a shadow increments the version, and a recreated shadow continues the sequence. There is no 48-hour reset.
-  - Cloud synchronization is a selected adapter with an explicit conflict policy (SF-033: a device-signed HTTP(S) adapter; AWS IoT Device Shadow sync is SF-061).
+  - Cloud synchronization is a selected adapter with an explicit conflict policy: a device-signed HTTP(S) adapter (SF-033) or AWS IoT Device Shadow over the AWS IoT Core connection (SF-061, [AWS_IOT.md](AWS_IOT.md)).
 
 ### Streams (SF-034)
 
@@ -223,6 +223,8 @@ The runtime receipt is [`docs/validation/sf037-recipe-translation.json`](validat
 | `aws-recipe-cases.json` | 83 recipes (18 JSON/YAML texts) | Daemon and frontend validators (passing) | Passed: SF-037 translator, daemon validators and simulator run |
 | `pubsub-cases.json` | 53 filter/topic/match/ACL checks | Daemon pub/sub module (passing) | Passed: SF-032 daemon, IPC UIDs and Mosquitto ([receipt](validation/sf032-messaging.json)) |
 | `shadow-cases.json` | 55 steps across 10 sequences | Daemon shadow store, each step also after a reopen (passing) | Passed: SF-033 daemon, IPC UIDs, restarts and a verifying sync service ([receipt](validation/sf033-shadows.json)) |
+| `device-defender-cases.json` | 16 schema/topic/response checks | Actual sampler/router fixtures and real-daemon TLS harness | Passed locally ([receipt](validation/sf062-device-defender.json)); live AWS unrun |
+| `aws-iot-cases.json` | 113 connection/topic/mapping/patch/answer/denial checks | Daemon connection, bridge and shadow modules (passing) | Passed: SF-061 daemon against Mosquitto with mutual TLS and an AWS-shaped endpoint ([receipt](validation/sf061-aws-iot.json)) |
 | `stream-cases.json` | 46 steps across 5 sequences | Daemon stream store (passing) | Passed: SF-034 daemon, IPC UIDs, crashes and export ([receipt](validation/sf034-streams.json)) |
 | `client-device-cases.json` | 16 authorization requests | Daemon registry and policy engine (passing) | Passed: SF-035 daemon, Mosquitto and two TLS clients ([receipt](validation/sf035-client-devices.json)) |
 | `managed-dependency-cases.json` | 47 managed-dependency classifications | none | Passed: SF-037 translator classification |

@@ -11,14 +11,19 @@ mod bridge;
 mod components;
 mod config;
 mod configuration;
+mod console;
 mod deps;
 mod firmware;
 mod handoff;
 mod identity;
+mod iotcore;
+mod defender;
 mod logs;
 mod mqtt;
 mod platform;
 mod reconcile;
+mod seal;
+mod seal_client;
 mod recipe;
 mod redact;
 mod protocol;
@@ -34,6 +39,7 @@ mod sui_client;
 mod supervisor;
 mod streams;
 mod services;
+mod service_health;
 mod shadows;
 mod telemetry;
 mod walrus_client;
@@ -87,6 +93,12 @@ async fn main() -> anyhow::Result<()> {
         // Root ExecStartPost= of the daemon unit, for the signing service (SF-053).
         return signer_service::record_main_process(Path::new(&args[2]));
     }
+    if args.len() == 2 && args[1] == "--console-token" {
+        // A new local console token; configure only its hash (SF-079).
+        let (token, hash) = console::new_token();
+        println!("{}", serde_json::json!({"token": token, "token_sha256": hash}));
+        return Ok(());
+    }
     if args.len() == 3 && args[1] == "--self-check" {
         return self_check(Path::new(&args[2]));
     }
@@ -106,7 +118,7 @@ async fn main() -> anyhow::Result<()> {
     let cloudwatch_logs = args.len() == 3 && args[1] == "--cloudwatch-logs";
     anyhow::ensure!(
         args.len() == 1 || launched || check_config || helper || signer_service || cloudwatch_logs,
-        "usage: suifleet [--launch | --provision KEY_PATH | --derive-address KEY_PATH | --enroll ENROLL_TOML | --check-config CONFIG_PATH | --self-check CONFIG_PATH | --firmware-helper CONFIG | --signer-service SIGNER_TOML | --cloudwatch-logs CONFIG_JSON | --record-main-process PATH | --key-holder CONFIG_PATH | --verify-release BUNDLE_DIR TRUST_FILE [TARGET]]"
+        "usage: suifleet [--launch | --provision KEY_PATH | --derive-address KEY_PATH | --enroll ENROLL_TOML | --check-config CONFIG_PATH | --self-check CONFIG_PATH | --console-token | --firmware-helper CONFIG | --signer-service SIGNER_TOML | --cloudwatch-logs CONFIG_JSON | --record-main-process PATH | --key-holder CONFIG_PATH | --verify-release BUNDLE_DIR TRUST_FILE [TARGET]]"
     );
     {
         use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -142,6 +154,10 @@ async fn main() -> anyhow::Result<()> {
             .unwrap_or_else(|_| PathBuf::from("/etc/suifleet/config.toml"))
     };
     let mut cfg = Config::load(&path)?;
+    if let Some(iot) = &cfg.aws_iot {
+        // Unusable AWS IoT credentials stop startup; rotation is checked while running.
+        iotcore::Credentials::load(iot)?;
+    }
     logs::set_group_read(cfg.runtime.log_group_read);
     if !check_config {
         // Also when no log is written any more: turning the option off
@@ -212,7 +228,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     }
-    let walrus = WalrusClient::new(&cfg.walrus);
+    let walrus = WalrusClient::new(&cfg.walrus).with_seal(confidential_delivery(&cfg, &sui, signer.clone())?);
     // The artifact cache holds at most the in-flight artifact; anything left
     // by an earlier run (e.g. a crash mid-download) is unused.
     let freed = walrus_client::collect_garbage(&cfg.runtime.state_dir.join("artifacts"))?;
@@ -249,6 +265,18 @@ async fn main() -> anyhow::Result<()> {
     for name in recovered.keys() { configs.restore(name, supervisor.configuration(name)?.as_ref())?; }
     services::startup_recovery(&cfg, &mut journal, &recovered)?;
     let mut ipc_server = cfg.ipc.as_ref().map(ipc::bind).transpose()?;
+    let sync = telemetry::SharedSync::default();
+    // Read-only views come from state files, so the console answers during a
+    // long apply; a console that cannot bind leaves the daemon running.
+    let mut console_server = match &cfg.console {
+        Some(settings) => match console::bind(settings, console::Context {
+            state_dir: cfg.runtime.state_dir.clone(), sync: sync.clone(), started_ms, poll_seconds: cfg.runtime.poll_seconds,
+        }).await {
+            Ok(server) => Some(server),
+            Err(error) => { warn!(%error, "Local support console unavailable"); None }
+        },
+        None => None,
+    };
     let mut ipc_messages = ipc::Messages::default();
     let service_runtime = std::sync::Arc::new(std::sync::Mutex::new(services::Runtime::open(
         &cfg, &journal.state.services, signer.clone(), streams::Binding {
@@ -303,7 +331,6 @@ async fn main() -> anyhow::Result<()> {
     sd_notify::notify(false, &[sd_notify::NotifyState::Ready]).ok();
     // Telemetry runs beside the poll loop, so a long apply or bootstrap does
     // not silence the heartbeat; it reads only the state files on disk.
-    let sync = telemetry::SharedSync::default();
     let reporter = match &cfg.telemetry {
         Some(settings) => Some(tokio::spawn(
             telemetry::Task {
@@ -321,6 +348,7 @@ async fn main() -> anyhow::Result<()> {
                 buffer_max: settings.buffer_max,
                 signer: signer.clone(),
                 sync: sync.clone(),
+                services: service_runtime.clone(),
             }
             .run(),
         )),
@@ -350,8 +378,29 @@ async fn main() -> anyhow::Result<()> {
         )),
         _ => None,
     };
-    let shadow_sync = match (&cfg.shadows, &shadow_store) {
-        (Some(settings), Some(store)) => settings.sync.clone().map(|config| tokio::spawn(shadows::Syncer {
+    // AWS IoT Device Shadow sync (SF-061) runs over the bridge's [aws_iot]
+    // connection; the service runtime owns that connection side.
+    let _defender_task = match (&cfg.device_defender, &service_runtime.lock().unwrap().aws_shadow_client) {
+        (Some(settings), Some(client)) => {
+            let exporter = defender::Exporter::open(settings.clone(),
+                cfg.runtime.state_dir.join("device-defender"),
+                &cfg.aws_iot.as_ref().expect("validated AWS connection").thing_name)?;
+            Some(tokio::spawn(exporter.run(client.clone())))
+        }
+        _ => None,
+    };
+    let aws_shadow_sync = cfg.shadows.as_ref().and_then(|s| s.aws_iot.clone())
+        .zip(service_runtime.lock().unwrap().aws_shadow_client.take());
+    let shadow_sync = match (&cfg.shadows, &shadow_store, aws_shadow_sync) {
+        (Some(_), Some(store), Some((sync, client))) => {
+            let store = store.clone();
+            Some(tokio::spawn(async move {
+                let changed = client.changed.clone();
+                shadows::run_sync(store, &sync.shadows, sync.interval_seconds, sync.max_backoff_seconds, sync.owners(),
+                                  &iotcore::AwsShadows(client), Some(changed)).await
+            }))
+        }
+        (Some(settings), Some(store), None) => settings.sync.clone().map(|config| tokio::spawn(shadows::Syncer {
             store: store.clone(),
             config,
             binding: streams::Binding {
@@ -434,6 +483,21 @@ async fn main() -> anyhow::Result<()> {
                         if let Err(error) = &result { warn!(operation = pending.request.operation, %error, "Local IPC request failed"); }
                         let _ = pending.reply.send(ipc::response(result));
                     }
+                    Some(control) = async {
+                        match console_server.as_mut() {
+                            Some(server) => server.controls.recv().await,
+                            None => std::future::pending().await,
+                        }
+                    } => {
+                        // The console gave up waiting: never run it late.
+                        if control.reply.is_closed() { continue; }
+                        let result = tokio::select! {
+                            result = supervisor.local_control(&control.component, &control.operation) => result,
+                            _ = &mut shutdown => { stopped = true; break; }
+                        };
+                        let result = result.map(|()| serde_json::to_value(supervisor.status().get(&control.component)).unwrap_or_default());
+                        let _ = control.reply.send(result);
+                    }
                 }
             }
             if stopped { break; }
@@ -460,11 +524,36 @@ async fn main() -> anyhow::Result<()> {
     supervisor.stop_all().await;
     // process::exit below does not run destructors: close IPC before handoff.
     drop(ipc_server);
+    drop(console_server);
     if restart_for_services { anyhow::bail!("restart required to recover service configuration"); }
     if restart_for_handoff {
         std::process::exit(handoff::RESTART_EXIT);
     }
     Ok(())
+}
+
+/// Confidential delivery (SF-022): Seal sessions certified by this device's
+/// own identity, held by the signing service when the daemon has no key.
+fn confidential_delivery(
+    cfg: &Config,
+    sui: &SuiClient,
+    signer: std::sync::Arc<dyn identity::TxSigner>,
+) -> anyhow::Result<Option<std::sync::Arc<seal_client::Seal>>> {
+    let Some(config) = &cfg.seal else { return Ok(None) };
+    let authority: std::sync::Arc<dyn seal_client::Authority> = match &cfg.device.signer {
+        Some(service) if service.kind == "service" => std::sync::Arc::new(signer_service::ServiceSessions::new(&service.socket)),
+        _ => std::sync::Arc::new(seal_client::Sessions::new(
+            signer,
+            seal_client::SessionPolicy {
+                package: std::str::FromStr::from_str(sui.origin())?,
+                ttl_min: config.session_ttl_minutes,
+                clock_skew_ms: config.clock_skew_seconds * 1000,
+            },
+        )?),
+    };
+    let seal = seal_client::Seal::new(config.clone(), sui.clone(), authority, &cfg.device.device_object_id)?;
+    info!(mode = ?config.mode, key_servers = config.key_servers.len(), "Confidential delivery enabled");
+    Ok(Some(std::sync::Arc::new(seal)))
 }
 
 /// Executed by the poll-loop owner: IPC never races a deployment or a journal save.
@@ -837,14 +926,17 @@ async fn stage_daemon_update(
     let directory = cfg.runtime.state_dir.join("artifacts").join(hex::encode(identity::hash(event.deployment_id.as_bytes())));
     std::fs::create_dir_all(&directory)?;
     let staged = async {
-        let bytes = components::recipe(walrus, store, &event.recipe_blob_id, &resolved.recipe_sha256).await?;
-        let recipe: recipe::Recipe = serde_json::from_slice(&bytes)?;
-        let dependencies = recipe.validate(event, false)?;
-        let lifecycle = &recipe.lifecycle;
-        anyhow::ensure!(
-            recipe.services.is_none() && dependencies.is_empty() && lifecycle.install.is_none() && lifecycle.run.is_none() && lifecycle.shutdown.is_none(),
-            "a daemon update recipe carries only the daemon binary (no lifecycle commands or dependencies)"
-        );
+        let authentic = components::recipe(walrus, store, &event.recipe_blob_id, &resolved.recipe_sha256).await?;
+        authentic.check("validation", |recipe| {
+            let dependencies = recipe.validate(event, false)?;
+            let lifecycle = &recipe.lifecycle;
+            anyhow::ensure!(
+                recipe.services.is_none() && dependencies.is_empty() && lifecycle.install.is_none() && lifecycle.run.is_none() && lifecycle.shutdown.is_none(),
+                "a daemon update recipe carries only the daemon binary (no lifecycle commands or dependencies)"
+            );
+            Ok(())
+        })?;
+        let recipe = &authentic.recipe;
         let artifact = directory.join("artifact");
         components::artifact(walrus, store, &recipe.artifact_blob_id, &event.artifact_sha256, &artifact).await?;
         // As in handle_deployment: re-read after downloads, before the
@@ -1060,6 +1152,8 @@ struct Install {
     root: bool,
     configuration: protocol::Configuration,
     validate: Option<String>,
+    /// Its recipe was Seal-encrypted: configuration errors are withheld.
+    confidential: bool,
     /// Its next configuration, computed and validated before any install.
     record: configuration::Record,
 }
@@ -1097,12 +1191,14 @@ async fn handle_deployment(
             warn!(%error, "Cannot cache component version");
         }
     }
-    let bytes =
-        components::recipe(walrus, store, &event.recipe_blob_id, &resolved.recipe_sha256).await?;
-    let recipe: recipe::Recipe = serde_json::from_slice(&bytes)?;
-    let dependencies = recipe.validate(event, config.allow_recipe_commands)?;
-    anyhow::ensure!(recipe.services.is_none() || config.mode == config::ApplyMode::Direct || recipe.lifecycle.install.is_some() || recipe.lifecycle.run.is_some(),
-        "asynchronous firmware-only updates cannot change component services; use a component deployment");
+    let authentic = components::recipe(walrus, store, &event.recipe_blob_id, &resolved.recipe_sha256).await?;
+    let (dependencies, root_supervised) = authentic.check("validation", |recipe| {
+        let dependencies = recipe.validate(event, config.allow_recipe_commands)?;
+        anyhow::ensure!(recipe.services.is_none() || config.mode == config::ApplyMode::Direct || recipe.lifecycle.install.is_some() || recipe.lifecycle.run.is_some(),
+            "asynchronous firmware-only updates cannot change component services; use a component deployment");
+        Ok((dependencies, supervisor::Lifecycle::of(&recipe.lifecycle)?))
+    })?;
+    let recipe = &authentic.recipe;
     let root = deps::Root {
         name: event.component_name.clone(),
         version: event.version.clone(),
@@ -1116,15 +1212,20 @@ async fn handle_deployment(
         config.allow_recipe_commands,
     );
     let installed = components::installed(&journal.state.components);
-    let plan = components::plan(&mut loader, &root, &installed).await?;
+    let plan = components::plan(&mut loader, &root, &installed).await;
+    let plan = components::withhold(authentic.confidential || loader.confidential, "dependency resolution", plan)?;
     if !plan.omitted.is_empty() {
         info!(deployment = event.deployment_id, omitted = ?plan.omitted, "Unavailable soft dependencies omitted");
     }
     let plan_components = plan.order.iter().map(|p| p.name.clone()).collect();
-    let service_next = services::candidate(&journal.state.services, &event.component_name, &event.deployment_id,
-        recipe.services.as_ref(), &plan_components)?;
     let runtime = cfg.services.as_ref().ok_or_else(|| anyhow::anyhow!("service runtime missing"))?;
-    runtime.lock().unwrap().prepare(&service_next)?;
+    // Service names, topics and streams come from the recipe: withheld when confidential.
+    let service_next = components::withhold(authentic.confidential || loader.confidential, "service validation", (|| {
+        let next = services::candidate(&journal.state.services, &event.component_name, &event.deployment_id,
+            recipe.services.as_ref(), &plan_components)?;
+        runtime.lock().unwrap().prepare(&next)?;
+        Ok(next)
+    })())?;
     let mut installs = Vec::new();
     for (index, planned) in plan.order.iter().filter(|p| p.install()).enumerate() {
         let root = planned.source == deps::Source::Root;
@@ -1138,7 +1239,7 @@ async fn handle_deployment(
             dependencies: planned.dependencies.clone(),
             confirmed: false,
         };
-        let (component, blob, install, supervised, configuration, validate) = if root {
+        let (component, blob, install, supervised, configuration, validate, confidential) = if root {
             (
                 component(
                     resolved.catalog.as_ref().map(|c| c.version_id.clone()),
@@ -1147,9 +1248,10 @@ async fn handle_deployment(
                 ),
                 recipe.artifact_blob_id.clone(),
                 recipe.lifecycle.install.clone(),
-                supervisor::Lifecycle::of(&recipe.lifecycle)?,
+                root_supervised.clone(),
                 recipe.configuration.clone(),
                 recipe.lifecycle.validate.clone(),
+                authentic.confidential,
             )
         } else {
             let loaded = &loader.loaded[&(planned.name.clone(), planned.version.clone())];
@@ -1168,6 +1270,7 @@ async fn handle_deployment(
                 loaded.supervised.clone(),
                 loaded.configuration.clone(),
                 loaded.validate.clone(),
+                loaded.confidential,
             )
         };
         installs.push(Install {
@@ -1184,6 +1287,7 @@ async fn handle_deployment(
             root,
             configuration,
             validate,
+            confidential,
             record: configuration::Record::default(),
         });
     }
@@ -1332,16 +1436,23 @@ async fn prepare_configurations(
     for (index, install) in installs.iter_mut().enumerate() {
         let checked = async {
             let previous = configs.committed(&install.name)?;
-            let configuration = &install.configuration;
-            let record = configuration::Record {
-                deployment: deployment.to_owned(),
-                version: install.component.version.clone(),
-                defaults: configuration.defaults.clone().unwrap_or_default(),
-                effective: configuration::next(previous.as_ref().map(|r| &r.effective), configuration)?,
-                confidential: configuration.confidential.clone().unwrap_or_default(),
-            };
             let overlay = configs.overlay(&install.name)?;
-            let materialized = configuration::materialize(&record, &overlay)?;
+            let configuration = &install.configuration;
+            // Values of an earlier encrypted recipe can survive a public update.
+            let sealed = configuration::sealed(previous.as_ref(), configuration, install.confidential);
+            let computed = (|| {
+                let record = configuration::Record {
+                    deployment: deployment.to_owned(),
+                    version: install.component.version.clone(),
+                    defaults: configuration.defaults.clone().unwrap_or_default(),
+                    effective: configuration::next(previous.as_ref().map(|r| &r.effective), configuration)?,
+                    confidential: configuration.confidential.clone().unwrap_or_default(),
+                    sealed,
+                };
+                let materialized = configuration::materialize(&record, &overlay)?;
+                Ok((record, materialized))
+            })();
+            let (record, materialized) = components::withhold(sealed, "configuration merge", computed)?;
             install.record = record;
             let Some(command) = &install.validate else {
                 return Ok(true);
@@ -1390,7 +1501,8 @@ fn install_configuration(
 ) -> anyhow::Result<PathBuf> {
     let overlay = configs.overlay(&install.name)?;
     let file = directory.join(format!("configuration-{index}.json"));
-    configuration::write_private(&file, &configuration::materialize(&install.record, &overlay)?)?;
+    let materialized = components::withhold(install.record.sealed, "configuration merge", configuration::materialize(&install.record, &overlay))?;
+    configuration::write_private(&file, &materialized)?;
     Ok(file)
 }
 

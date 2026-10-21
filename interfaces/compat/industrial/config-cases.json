@@ -1,0 +1,546 @@
+{
+ "format_version": 1,
+ "config_version": 1,
+ "description": "SF-070 collector configuration vectors. 'set' maps dotted paths (list indices are numbers) to replacement values, '$delete' removes a field. Invalid cases name a substring of the expected error. Executed by scripts/test_industrial.py.",
+ "base": {
+  "version": 1,
+  "collector_id": "line1-collector",
+  "output": {
+   "socket": "/run/suifleet/ipc.sock",
+   "component": "industrial",
+   "stream": "industrial"
+  },
+  "sources": [
+   {
+    "name": "plc1",
+    "protocol": "modbus",
+    "transport": "tcp",
+    "host": "192.0.2.10",
+    "unit_id": 1,
+    "poll_interval_ms": 1000,
+    "points": [
+     {
+      "name": "temperature",
+      "table": "holding_register",
+      "address": 0,
+      "type": "float32"
+     },
+     {
+      "name": "running",
+      "table": "coil",
+      "address": 0,
+      "type": "bool"
+     }
+    ]
+   },
+   {
+    "name": "opc1",
+    "protocol": "opcua",
+    "endpoint_url": "opc.tcp://192.0.2.20:4840",
+    "points": [
+     {
+      "name": "flow",
+      "node_id": "ns=2;s=Line1.Flow",
+      "type": "double"
+     },
+     {
+      "name": "mode",
+      "node_id": "ns=2;i=1001",
+      "mode": "poll",
+      "poll_interval_ms": 5000
+     }
+    ]
+   }
+  ]
+ },
+ "cases": [
+  {
+   "name": "base configuration",
+   "valid": true,
+   "set": {}
+  },
+  {
+   "name": "version 2 is unsupported",
+   "valid": false,
+   "set": {
+    "version": 2
+   },
+   "error": "unsupported-version"
+  },
+  {
+   "name": "boolean version is unsupported",
+   "valid": false,
+   "set": {
+    "version": true
+   },
+   "error": "unsupported-version"
+  },
+  {
+   "name": "string version is unsupported",
+   "valid": false,
+   "set": {
+    "version": "1"
+   },
+   "error": "unsupported-version"
+  },
+  {
+   "name": "missing version is unsupported",
+   "valid": false,
+   "set": {
+    "version": "$delete"
+   },
+   "error": "unsupported-version"
+  },
+  {
+   "name": "unknown top-level field",
+   "valid": false,
+   "set": {
+    "extra": 1
+   },
+   "error": "unknown field(s) extra"
+  },
+  {
+   "name": "unknown source field",
+   "valid": false,
+   "set": {
+    "sources.0.retries": 3
+   },
+   "error": "unknown field(s) retries"
+  },
+  {
+   "name": "invalid collector id",
+   "valid": false,
+   "set": {
+    "collector_id": "bad id"
+   },
+   "error": "collector_id: invalid value"
+  },
+  {
+   "name": "relative socket path",
+   "valid": false,
+   "set": {
+    "output.socket": "ipc.sock"
+   },
+   "error": "output.socket: expected an absolute path"
+  },
+  {
+   "name": "invalid stream name",
+   "valid": false,
+   "set": {
+    "output.stream": "a/b"
+   },
+   "error": "output.stream: invalid value"
+  },
+  {
+   "name": "buffer above limit",
+   "valid": false,
+   "set": {
+    "output.max_buffered_records": 100001
+   },
+   "error": "output.max_buffered_records: expected an integer 1..100000"
+  },
+  {
+   "name": "retry max below min",
+   "valid": false,
+   "set": {
+    "output.retry_min_ms": 500,
+    "output.retry_max_ms": 100
+   },
+   "error": "output.retry_max_ms"
+  },
+  {
+   "name": "pub/sub topic copy",
+   "valid": true,
+   "set": {
+    "output.topic": "industrial/samples"
+   }
+  },
+  {
+   "name": "wildcard topic rejected",
+   "valid": false,
+   "set": {
+    "output.topic": "industrial/#"
+   },
+   "error": "output.topic: invalid value"
+  },
+  {
+   "name": "no sources",
+   "valid": false,
+   "set": {
+    "sources": []
+   },
+   "error": "sources: expected 1..64 sources"
+  },
+  {
+   "name": "duplicate source names",
+   "valid": false,
+   "set": {
+    "sources.1.name": "plc1"
+   },
+   "error": "duplicate source"
+  },
+  {
+   "name": "unknown protocol",
+   "valid": false,
+   "set": {
+    "sources.0.protocol": "bacnet"
+   },
+   "error": "expected one of modbus, opcua"
+  },
+  {
+   "name": "modbus poll interval below 50 ms",
+   "valid": false,
+   "set": {
+    "sources.0.poll_interval_ms": 49
+   },
+   "error": "poll_interval_ms: expected an integer 50..86400000"
+  },
+  {
+   "name": "modbus boolean poll interval",
+   "valid": false,
+   "set": {
+    "sources.0.poll_interval_ms": true
+   },
+   "error": "poll_interval_ms: expected an integer"
+  },
+  {
+   "name": "modbus register type on a coil",
+   "valid": false,
+   "set": {
+    "sources.0.points.1.type": "uint16"
+   },
+   "error": "type: expected one of bool"
+  },
+  {
+   "name": "modbus bool on a register",
+   "valid": false,
+   "set": {
+    "sources.0.points.0.type": "bool"
+   },
+   "error": "type: expected one of"
+  },
+  {
+   "name": "modbus address past the table",
+   "valid": false,
+   "set": {
+    "sources.0.points.0.address": 65535
+   },
+   "error": "address: expected an integer 0..65534"
+  },
+  {
+   "name": "modbus duplicate point",
+   "valid": false,
+   "set": {
+    "sources.0.points.1.name": "temperature"
+   },
+   "error": "duplicate point"
+  },
+  {
+   "name": "modbus request limit above 125",
+   "valid": false,
+   "set": {
+    "sources.0.max_registers_per_request": 126
+   },
+   "error": "max_registers_per_request: expected an integer 1..125"
+  },
+  {
+   "name": "modbus 64-bit point above request limit",
+   "valid": false,
+   "set": {
+    "sources.0.points.0.type": "float64",
+    "sources.0.max_registers_per_request": 2
+   },
+   "error": "above max_registers_per_request"
+  },
+  {
+   "name": "modbus tls without tls settings",
+   "valid": false,
+   "set": {
+    "sources.0.transport": "tls"
+   },
+   "error": "tls: expected an object"
+  },
+  {
+   "name": "modbus tls settings on tcp",
+   "valid": false,
+   "set": {
+    "sources.0.tls": {
+     "ca_file": "/a",
+     "certificate_file": "/b",
+     "private_key_file": "/c"
+    }
+   },
+   "error": "tls settings need transport tls"
+  },
+  {
+   "name": "modbus tls",
+   "valid": true,
+   "set": {
+    "sources.0.transport": "tls",
+    "sources.0.tls": {
+     "ca_file": "/etc/suifleet/plc-ca.pem",
+     "certificate_file": "/etc/suifleet/collector.pem",
+     "private_key_file": "/etc/suifleet/collector.key"
+    }
+   }
+  },
+  {
+   "name": "modbus rtu",
+   "valid": true,
+   "set": {
+    "sources.0.transport": "rtu",
+    "sources.0.host": "$delete",
+    "sources.0.serial": {
+     "device": "/dev/ttyUSB0",
+     "baud_rate": 19200,
+     "parity": "E"
+    }
+   }
+  },
+  {
+   "name": "modbus rtu with host",
+   "valid": false,
+   "set": {
+    "sources.0.transport": "rtu",
+    "sources.0.serial": {
+     "device": "/dev/ttyUSB0"
+    }
+   },
+   "error": "rtu takes serial"
+  },
+  {
+   "name": "modbus rtu broadcast unit",
+   "valid": false,
+   "set": {
+    "sources.0.transport": "rtu",
+    "sources.0.host": "$delete",
+    "sources.0.serial": {
+     "device": "/dev/ttyUSB0"
+    },
+    "sources.0.unit_id": 0
+   },
+   "error": "unit_id: expected an integer 1..247"
+  },
+  {
+   "name": "modbus rtu unsupported baud",
+   "valid": false,
+   "set": {
+    "sources.0.transport": "rtu",
+    "sources.0.host": "$delete",
+    "sources.0.serial": {
+     "device": "/dev/ttyUSB0",
+     "baud_rate": 12345
+    }
+   },
+   "error": "baud_rate: expected one of"
+  },
+  {
+   "name": "reconnect max below min",
+   "valid": false,
+   "set": {
+    "sources.0.reconnect_min_ms": 5000,
+    "sources.0.reconnect_max_ms": 1000
+   },
+   "error": "reconnect_max_ms"
+  },
+  {
+   "name": "opcua http endpoint",
+   "valid": false,
+   "set": {
+    "sources.1.endpoint_url": "https://192.0.2.20/"
+   },
+   "error": "endpoint_url: expected opc.tcp://"
+  },
+  {
+   "name": "opcua policy None with mode Sign",
+   "valid": false,
+   "set": {
+    "sources.1.security_mode": "Sign"
+   },
+   "error": "security_policy None requires security_mode None"
+  },
+  {
+   "name": "opcua Basic256Sha256 with mode None",
+   "valid": false,
+   "set": {
+    "sources.1.security_policy": "Basic256Sha256"
+   },
+   "error": "security_policy None requires security_mode None"
+  },
+  {
+   "name": "opcua Basic256Sha256 without certificates",
+   "valid": false,
+   "set": {
+    "sources.1.security_policy": "Basic256Sha256",
+    "sources.1.security_mode": "SignAndEncrypt"
+   },
+   "error": "certificate_file: required for security_policy Basic256Sha256"
+  },
+  {
+   "name": "opcua deprecated policy",
+   "valid": false,
+   "set": {
+    "sources.1.security_policy": "Basic128Rsa15"
+   },
+   "error": "security_policy: expected one of"
+  },
+  {
+   "name": "opcua Basic256Sha256",
+   "valid": true,
+   "set": {
+    "sources.1.security_policy": "Basic256Sha256",
+    "sources.1.security_mode": "SignAndEncrypt",
+    "sources.1.certificate_file": "/etc/suifleet/opcua.der",
+    "sources.1.private_key_file": "/etc/suifleet/opcua.key",
+    "sources.1.server_certificate_file": "/etc/suifleet/server.der",
+    "sources.1.identity": {
+     "type": "username",
+     "username": "collector",
+     "password_file": "/etc/suifleet/opcua.password"
+    }
+   }
+  },
+  {
+   "name": "opcua client certificate on policy None",
+   "valid": false,
+   "set": {
+    "sources.1.certificate_file": "/etc/suifleet/opcua.der"
+   },
+   "error": "client certificates need a security policy"
+  },
+  {
+   "name": "opcua username without password file",
+   "valid": false,
+   "set": {
+    "sources.1.identity": {
+     "type": "username",
+     "username": "op"
+    }
+   },
+   "error": "missing field(s) password_file"
+  },
+  {
+   "name": "opcua inline password rejected",
+   "valid": false,
+   "set": {
+    "sources.1.identity": {
+     "type": "username",
+     "username": "op",
+     "password_file": "/p",
+     "password": "pw"
+    }
+   },
+   "error": "unknown field(s) password"
+  },
+  {
+   "name": "opcua unknown identity",
+   "valid": false,
+   "set": {
+    "sources.1.identity": {
+     "type": "certificate"
+    }
+   },
+   "error": "identity.type: expected anonymous or username"
+  },
+  {
+   "name": "opcua lifetime below three keep-alives",
+   "valid": false,
+   "set": {
+    "sources.1.keepalive_count": 10,
+    "sources.1.lifetime_count": 29
+   },
+   "error": "lifetime_count: expected an integer 30..30000"
+  },
+  {
+   "name": "opcua unlimited notifications rejected",
+   "valid": false,
+   "set": {
+    "sources.1.max_notifications_per_publish": 0
+   },
+   "error": "max_notifications_per_publish: expected an integer 1..10000"
+  },
+  {
+   "name": "opcua notifications not below buffer",
+   "valid": false,
+   "set": {
+    "output.max_buffered_records": 100
+   },
+   "error": "max_notifications_per_publish: not below output.max_buffered_records"
+  },
+  {
+   "name": "opcua polled points not below buffer",
+   "valid": false,
+   "set": {
+    "output.max_buffered_records": 2,
+    "sources.0.points": [
+     {
+      "name": "t",
+      "table": "coil",
+      "address": 0,
+      "type": "bool"
+     }
+    ],
+    "sources.1.max_notifications_per_publish": 1,
+    "sources.1.points.0.mode": "poll"
+   },
+   "error": "sources[1].points: one poll and its gap record would not fit output.max_buffered_records"
+  },
+  {
+   "name": "opcua polled points one below buffer",
+   "valid": true,
+   "set": {
+    "output.max_buffered_records": 3,
+    "sources.0.points": [
+     {
+      "name": "t",
+      "table": "coil",
+      "address": 0,
+      "type": "bool"
+     }
+    ],
+    "sources.1.max_notifications_per_publish": 2,
+    "sources.1.points.0.mode": "poll"
+   }
+  },
+  {
+   "name": "opcua invalid node id",
+   "valid": false,
+   "set": {
+    "sources.1.points.0.node_id": "Line1.Flow"
+   },
+   "error": "node_id: invalid NodeId"
+  },
+  {
+   "name": "opcua unknown expected type",
+   "valid": false,
+   "set": {
+    "sources.1.points.0.type": "decimal"
+   },
+   "error": "type: expected one of"
+  },
+  {
+   "name": "opcua poll interval on subscription",
+   "valid": false,
+   "set": {
+    "sources.1.points.0.poll_interval_ms": 100
+   },
+   "error": "poll_interval_ms: only for mode poll"
+  },
+  {
+   "name": "opcua sampling interval on poll",
+   "valid": false,
+   "set": {
+    "sources.1.points.1.sampling_interval_ms": 100
+   },
+   "error": "sampling_interval_ms: only for mode subscribe"
+  },
+  {
+   "name": "opcua queue size above 100",
+   "valid": false,
+   "set": {
+    "sources.1.points.0.queue_size": 101
+   },
+   "error": "queue_size: expected an integer 1..100"
+  }
+ ]
+}

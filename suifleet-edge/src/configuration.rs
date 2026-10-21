@@ -15,8 +15,11 @@
 //! 4. Confidential pointers are removed: their values never come from a
 //!    (public) recipe, only from the device's overlay file.
 //!
-//! The committed record is public data: it holds no confidential values and
-//! may be shown in diagnostics. What a component receives is materialized
+//! The committed record holds no confidential values and may be shown in
+//! diagnostics, unless it is `sealed`: then its recipe was Seal-encrypted
+//! (SF-022) and the whole record stays private to the device. Values it held
+//! survive later updates, so its successors stay sealed too until a public
+//! recipe resets everything (`""`). What a component receives is materialized
 //! from it plus the overlay, into a 0600 file. Errors name pointers, never
 //! values.
 //!
@@ -203,8 +206,8 @@ pub fn validate_recipe(configuration: &Configuration) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// A component's configuration as committed or staged. Public: confidential
-/// values are never part of it.
+/// A component's configuration as committed or staged. Confidential values
+/// are never part of it; the rest is public unless `sealed`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Record {
     pub deployment: String,
@@ -213,6 +216,10 @@ pub struct Record {
     pub effective: Map<String, Value>,
     #[serde(default)]
     pub confidential: Vec<String>,
+    /// Its recipe was Seal-encrypted (SF-022): the defaults and effective
+    /// configuration are confidential plaintext, never shown in diagnostics.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub sealed: bool,
 }
 
 /// The next effective configuration after `previous` (none for a first
@@ -232,6 +239,14 @@ pub fn next(previous: Option<&Map<String, Value>>, recipe: &Configuration) -> an
     }
     check_limits(&effective, "effective configuration")?;
     Ok(effective)
+}
+
+/// Whether the record a recipe produces from `previous` is sealed: its own
+/// recipe was Seal-encrypted, or values of a sealed predecessor may survive
+/// into it. Only a reset of everything (`""`) leaves none of them behind.
+pub fn sealed(previous: Option<&Record>, recipe: &Configuration, encrypted: bool) -> bool {
+    let resets_all = recipe.reset.as_deref().unwrap_or_default().iter().any(|pointer| pointer.is_empty());
+    encrypted || previous.is_some_and(|record| record.sealed) && !resets_all
 }
 
 /// The device-local values of `name`: `<dir>/<name>.json`, an object of
@@ -602,6 +617,36 @@ mod tests {
         create_dir_durable(&dir, &nested).unwrap();
         assert!(create_dir_durable(&dir, &dir).is_err());
         assert!(create_dir_durable(&nested, &dir).is_err());
+    }
+
+    #[test]
+    fn sealed_flag_is_kept_and_absent_from_public_records() {
+        let public = Record { deployment: "0x1".into(), ..Record::default() };
+        let text = serde_json::to_string(&public).unwrap();
+        assert!(!text.contains("sealed"), "{text}");
+        assert!(!serde_json::from_str::<Record>(&text).unwrap().sealed);
+        let sealed = Record { sealed: true, ..public };
+        assert!(serde_json::from_str::<Record>(&serde_json::to_string(&sealed).unwrap()).unwrap().sealed);
+    }
+
+    #[test]
+    fn sealed_values_keep_their_successors_sealed_until_reset_entirely() {
+        let previous = Record { effective: object(json!({"plant": "CUSTOMER_MARKER"})), sealed: true, ..Record::default() };
+        let public = Record { sealed: false, ..previous.clone() };
+        let empty = configuration(json!({}));
+        assert!(sealed(None, &empty, true));
+        assert!(!sealed(None, &empty, false));
+        assert!(!sealed(Some(&public), &empty, false));
+        // A public update keeps the encrypted predecessor's values: still sealed.
+        assert_eq!(next(Some(&previous.effective), &empty).unwrap(), previous.effective);
+        assert!(sealed(Some(&previous), &empty, false));
+        let partial = configuration(json!({"reset": ["/plant"], "merge": {"site": "x"}}));
+        assert!(sealed(Some(&previous), &partial, false));
+        // Only resetting everything to the public recipe's defaults clears it.
+        let all = configuration(json!({"defaults": {"site": "public"}, "reset": [""]}));
+        assert_eq!(next(Some(&previous.effective), &all).unwrap(), object(json!({"site": "public"})));
+        assert!(!sealed(Some(&previous), &all, false));
+        assert!(sealed(Some(&previous), &all, true));
     }
 
     #[test]

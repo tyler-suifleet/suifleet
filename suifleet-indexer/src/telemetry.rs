@@ -19,6 +19,8 @@ use std::path::{Path, PathBuf};
 use sui_crypto::SuiVerifier;
 
 pub const SCHEMA: u64 = 1;
+/// A snapshot with a services section (SF-085, `crate::services`).
+pub const SCHEMA_SERVICES: u64 = 2;
 pub const MAX_MESSAGE_BYTES: usize = 64 * 1024;
 pub const MAX_COMPONENTS: usize = 64;
 pub const MAX_REASONS: usize = 16;
@@ -79,7 +81,8 @@ pub struct ComponentHealth {
     pub since_ms: Option<u64>,
 }
 
-/// The daemon's snapshot (suifleet-edge/src/telemetry.rs), schema 1.
+/// The daemon's snapshot (suifleet-edge/src/telemetry.rs): schema 1, or
+/// schema 2 with a services section.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Snapshot {
@@ -103,6 +106,8 @@ pub struct Snapshot {
     pub components: Vec<ComponentHealth>,
     pub health: String,
     pub reasons: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub services: Option<crate::services::Services>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -245,10 +250,13 @@ pub fn verify_bytes(envelope: &Envelope) -> Result<(Vec<u8>, String), String> {
     Ok((bytes, chain::normalize(&address.to_string()).unwrap_or_default()))
 }
 
-/// Bounds a schema-1 snapshot must keep.
+/// Bounds a snapshot must keep.
 pub fn validate(snapshot: &Snapshot) -> Result<(), String> {
-    if snapshot.schema != SCHEMA {
-        return Err(format!("unsupported telemetry schema {}", snapshot.schema));
+    match (snapshot.schema, &snapshot.services) {
+        (SCHEMA, None) => {}
+        (SCHEMA_SERVICES, Some(services)) => crate::services::validate(services)?,
+        (SCHEMA | SCHEMA_SERVICES, _) => return Err("schema 2, and only schema 2, has a services section".into()),
+        (schema, _) => return Err(format!("unsupported telemetry schema {schema}")),
     }
     if !(MIN_INTERVAL_SECONDS..=MAX_INTERVAL_SECONDS).contains(&snapshot.interval_seconds) {
         return Err("interval_seconds out of range".into());
@@ -543,7 +551,7 @@ pub(crate) mod tests {
                 name: "fw".into(), version: "1.0.0".into(), deployment_id: "0xa".into(), installed: true,
                 supervised: true, phase: Some("running".into()), restarts: Some(0), last_exit: None, since_ms: Some(1),
             }],
-            health: "healthy".into(), reasons: vec![],
+            health: "healthy".into(), reasons: vec![], services: None,
         }
     }
 
@@ -564,24 +572,26 @@ pub(crate) mod tests {
     #[test]
     fn shared_vector_verifies_and_is_ingested() {
         let cases = cases();
-        let vector: Envelope = serde_json::from_value(cases["signed"]["envelope"].clone()).unwrap();
-        let (snapshot, signer) = verify(&vector).unwrap();
-        assert_eq!(signer, chain::normalize(cases["signed"]["signer"].as_str().unwrap()).unwrap());
-        assert_eq!(snapshot, serde_json::from_value::<Snapshot>(cases["signed"]["snapshot"].clone()).unwrap());
-        // The edge signs the same bytes to the same signature (ed25519 is deterministic).
-        assert_eq!(sign(&snapshot, &KEY).signature, vector.signature);
-        let (_dir, telemetry) = db();
-        let bound = Binding { chain_identifier: snapshot.chain_identifier.clone(), registry: chain::normalize(&snapshot.registry).unwrap() };
-        let mut found = device(&signer);
-        found.id = chain::normalize(&snapshot.device_id).unwrap();
-        let verdict = ingest(&telemetry, &bound, 10, |_| Ok(Some(found.clone())), &vector, snapshot.observed_ms).unwrap();
-        assert_eq!(verdict.status, "accepted", "{verdict:?}");
-        // Any changed byte breaks the signature.
-        let mut tampered = vector.clone();
-        let mut bytes = STANDARD.decode(&tampered.message).unwrap();
-        *bytes.last_mut().unwrap() ^= 1;
-        tampered.message = STANDARD.encode(bytes);
-        assert_eq!(verify(&tampered).unwrap_err(), "signature does not verify");
+        for case in ["signed", "signed_services"] {
+            let vector: Envelope = serde_json::from_value(cases[case]["envelope"].clone()).unwrap();
+            let (snapshot, signer) = verify(&vector).unwrap();
+            assert_eq!(signer, chain::normalize(cases[case]["signer"].as_str().unwrap()).unwrap());
+            assert_eq!(snapshot, serde_json::from_value::<Snapshot>(cases[case]["snapshot"].clone()).unwrap());
+            // The edge signs the same bytes to the same signature (ed25519 is deterministic).
+            assert_eq!(sign(&snapshot, &KEY).signature, vector.signature, "{case}");
+            let (_dir, telemetry) = db();
+            let bound = Binding { chain_identifier: snapshot.chain_identifier.clone(), registry: chain::normalize(&snapshot.registry).unwrap() };
+            let mut found = device(&signer);
+            found.id = chain::normalize(&snapshot.device_id).unwrap();
+            let verdict = ingest(&telemetry, &bound, 10, |_| Ok(Some(found.clone())), &vector, snapshot.observed_ms).unwrap();
+            assert_eq!(verdict.status, "accepted", "{case}: {verdict:?}");
+            // Any changed byte breaks the signature.
+            let mut tampered = vector.clone();
+            let mut bytes = STANDARD.decode(&tampered.message).unwrap();
+            *bytes.last_mut().unwrap() ^= 1;
+            tampered.message = STANDARD.encode(bytes);
+            assert_eq!(verify(&tampered).unwrap_err(), "signature does not verify");
+        }
     }
 
     #[test]
@@ -638,6 +648,23 @@ pub(crate) mod tests {
             change(&mut s);
             assert_eq!(run(&sign(&s, &KEY), Some(device(&me))).status, "rejected", "{s:?}");
         }
+        // Schema 2 carries a valid services section (SF-085), and only it does.
+        let mut with = snapshot(17, now);
+        with.services = Some(crate::services::tests::services());
+        assert_eq!(run(&sign(&with, &KEY), Some(device(&me))).error.unwrap(), "schema 2, and only schema 2, has a services section");
+        with.services.as_mut().unwrap().version = 2;
+        with.schema = SCHEMA_SERVICES;
+        assert_eq!(run(&sign(&with, &KEY), Some(device(&me))).error.unwrap(), "unsupported services section version 2");
+        with.services.as_mut().unwrap().version = 1;
+        assert_eq!(run(&sign(&with, &KEY), Some(device(&me))).status, "accepted");
+        let mut unknown = serde_json::to_value(snapshot(17, now)).unwrap();
+        (unknown["schema"], unknown["services"]) = (2.into(), serde_json::to_value(crate::services::tests::services()).unwrap());
+        unknown["services"]["messaging"]["queues"][0]["topic"] = "plant/valves".into();
+        let bytes = serde_json::to_vec(&unknown).unwrap();
+        let key = sui_crypto::ed25519::Ed25519PrivateKey::new(KEY);
+        let signature = sui_crypto::SuiSigner::sign_personal_message(&key, &sui_sdk_types::PersonalMessage(bytes.as_slice().into())).unwrap();
+        let envelope = Envelope { message: STANDARD.encode(&bytes), signature: STANDARD.encode(signature.to_bytes()) };
+        assert!(run(&envelope, Some(device(&me))).error.unwrap().starts_with("invalid snapshot"), "unknown service fields are refused");
         // Unknown fields and oversize messages are refused.
         let mut extended = serde_json::to_value(snapshot(18, now)).unwrap();
         extended["extra"] = true.into();

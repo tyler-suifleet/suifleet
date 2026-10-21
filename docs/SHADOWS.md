@@ -91,7 +91,7 @@ Changes pulled from the cloud are announced the same way, so a component follows
 
 ## Cloud synchronization
 
-The adapter keeps each listed shadow equal to a document held by a cloud shadow service, through a small HTTP(S) protocol. It is a SuiFleet protocol; AWS IoT Device Shadow synchronization is the `aws-iot-core-connection` adapter (SF-061).
+The adapter keeps each listed shadow equal to a document held by a cloud shadow service, through a small HTTP(S) protocol. It is a SuiFleet protocol. `[shadows.aws_iot]` instead synchronizes with AWS IoT Device Shadow over the AWS IoT Core connection, with the same reconciliation ([AWS_IOT.md](AWS_IOT.md), SF-061); a configuration uses one or the other.
 
 **Requests.** Each is a `POST` to `url` with a JSON body and the same device-signed headers as stream exports ([STREAMS.md](STREAMS.md#export)):
 
@@ -131,8 +131,10 @@ If the merge differs from the cloud document, the adapter puts it with `expected
 - **Native API.** Native IPC operations and the Python SDK, not the ShadowManager IPC wire protocol. Policies and topics are AWS-shaped.
 - **No metadata.** Responses carry no per-key `metadata` timestamps; notifications carry a whole-second `timestamp`.
 - **Deletion** keeps the version sequence, with no 48-hour reset.
-- **Sync.** The SuiFleet HTTP(S) adapter with three-way merge and per-section owners, instead of AWS IoT Device Shadow; AWS sync is SF-061.
+- **Sync.** Three-way merge with per-section owners, against the SuiFleet HTTP(S) service or AWS IoT Device Shadow ([AWS_IOT.md](AWS_IOT.md)).
 - **Rate limits.** No per-shadow request rate limit; the IPC socket's own bounds apply.
+
+**Fleet visibility.** With `[telemetry]`, every heartbeat also reports each synchronized shadow's settled conflicts and sync failures, never documents or conflicting key paths, and the indexer alerts on them ([TELEMETRY.md](TELEMETRY.md#service-health-sf-085), SF-085).
 
 ## Evidence
 
@@ -142,7 +144,7 @@ If the merge differs from the cloud document, the adapter puts it with `expected
 | `make test-shadows` | The real daemon as root with three real component UIDs, durable pub/sub, the chain simulator and a local reference shadow service, without network. ACLs: operation, resource and reported-only section scope; a write-only updater receives its request, not the stored state. Delta notification received and acknowledged. Stale and invalid versions, oversize and null-in-array (including nested in an array object) requests refused without a version change. Cloud desired change pulled and announced. Offline edits on both sides reconciled after reconnect with two conflicts settled by owner and one-sided keys kept. A put losing a compare-and-swap to a concurrent cloud writer re-read and merged. Clean stop and `kill -9`: documents, versions and sync base intact, no redundant pushes. An offline edit made before `kill -9` pushed after reconnect. Local deletion propagated, recreation continuing the version, cloud deletion pulled, modify-versus-delete keeping the change, tombstones across restart. The service verifies every body hash and signature independently (BLAKE2b intent digest and RFC 8032 Ed25519 in Python). Receipt: [sf033-shadows.json](validation/sf033-shadows.json) |
 
 **Not yet covered:**
-- AWS IoT Device Shadow synchronization (SF-061) and a hosted SuiFleet shadow service;
+- a real AWS IoT Device Shadow service (the AWS adapter is tested against an AWS-shaped endpoint; [AWS_IOT.md](AWS_IOT.md)) and a hosted SuiFleet shadow service;
 - a service that verifies the signer against the live registry (#11);
 - the AWS IPC wire protocol (`aws_api` remains undecided);
 - a disk-full host filesystem beyond the configured quota;

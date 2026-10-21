@@ -38,6 +38,12 @@ configuration and media contract supplement the reference delivery model below.
 Full AWS connector control-plane compatibility and live AWS acceptance remain
 roadmap/unrun; local execution does not establish whole-catalog parity.
 
+SF-069 now provides a [clean-room function manager](LAMBDA.md) executing real
+on-demand and long-lived function processes routed by exact source/subject
+subscriptions, with [local manager and daemon evidence](validation/sf069-lambda.json).
+It is not AWS Lambda or Greengrass Lambda compatibility; live AWS acceptance remains
+unrun and unauthorized.
+
 ## Executable functional contracts, version 1
 
 [remaining-roadmap-cases.json](../interfaces/compat/remaining-roadmap-cases.json)
@@ -62,7 +68,9 @@ expectations. No AWS upstream behavior is newly asserted by these local contract
   bound return `busy`. Exact source/subject subscription matches produce sorted,
   unique targets and preserve the JSON payload. No match produces no targets.
   Process creation/reuse, handler failure envelopes and child termination require
-  SF-069 runtime tests; a routing decision is not an invocation.
+  SF-069 runtime tests; a routing decision is not an invocation. The
+  [SF-069 manager](LAMBDA.md) computes these vectors from its own decisions with
+  a queue of zero; its configurable queue is a v1 runtime extension.
 - **Industrial/SiteWise.** A measurement carries a numeric non-boolean value,
   nonnegative integer nanosecond timestamp and `GOOD`, `BAD` or `UNCERTAIN` quality.
   Preserve quality and time. Unknown quality or invalid measurement is rejected.
@@ -98,6 +106,17 @@ expectations. No AWS upstream behavior is newly asserted by these local contract
 
 ## Evidence and closure
 
+SF-078 adds the [native SNS publisher](SNS.md), with actual SDK HTTP emulator
+and real-daemon durable pub/sub evidence. The pure reference fields below remain
+specification-only; live AWS and physical target acceptance are unrun.
+
+SF-070 adds a [native industrial collector](INDUSTRIAL.md) for Modbus (TCP, TLS,
+RTU) and OPC UA (policy None and Basic256Sha256), with deterministic simulators.
+Collector-to-simulator, real-daemon durable-stream and cross-implementation
+(asyncua, pymodbus) tests are its separate evidence. The `industrial` scope below
+stays a reference model: no AWS Modbus Lambda, SiteWise collector or SiteWise
+publishing compatibility is claimed, and SiteWise processing remains SF-071.
+
 SF-077 adds the [native Firehose exporter](FIREHOSE.md), with actual SDK HTTP
 emulator and durable daemon stream evidence. The pure reference fields below
 remain specification-only; live AWS and physical target acceptance are unrun.
@@ -119,6 +138,12 @@ interrupted-install and permission tests on a hosted macOS runner. It is not
 Greengrass platform compatibility, and the `macos` scope below stays a reference
 model.
 
+SF-079 adds the [native local support console](LOCAL_CONSOLE.md): an authenticated,
+loopback-only daemon API/UI with per-user grants, origin/CSRF/Host checks,
+redaction, bounded queries and audit. The console reference vectors run against
+its decision function, and its [runtime receipt](validation/sf079-console.json)
+records the real-daemon tests. It is not AWS LocalDebugConsole UI/API compatibility.
+
 Run `make test-compat`. It checks the existing catalog and reference suites plus
 76 remaining-roadmap vectors and negative ownership/publication/evidence guards.
 `python3 scripts/greengrass_roadmap.py` runs just the new roadmap checks. The
@@ -139,3 +164,5 @@ power-loss and device-specific results remain separately tracked in
 [SF-031](https://github.com/tyler-suifleet/suifleet/issues/32); no refreshed image or
 physical result is claimed. Software correctness, source/security review,
 meaningful local/emulator tests and normal authorized automatic CI remain gates.
+
+SF-071 adds the native [SiteWise TQV processing/publisher](SITEWISE.md) over SF-070 records and SF-034 lossless external streams with SF-057 credentials. Its local request/checkpoint tests establish the documented native subset; live AWS and physical acceptance remain unrun. Historical reference fixtures above remain specification-only.

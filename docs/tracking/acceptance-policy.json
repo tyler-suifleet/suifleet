@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "authorization": "User explicitly permits reviewed implementation merges before Pi/Sui-network integration; external acceptance remains separately tracked. No code/test/CI/review gate is waived. The direct SF043 task also authorizes one-time reviewed main-only controller bootstrap and its narrowly necessary SF045 repair before the first full automatic Actions execution; that execution remains mandatory to complete the overall request. Latest user instruction: physical Pi/target work must not block software delivery; target issues may be resolved later. Apply physical-only deferral to current/future software tickets. SF-031 and unfinished SF-066 stay open/on hold; normal automatic testnet, source/security and local regression gates remain required.",
+  "authorization": "User explicitly permits reviewed implementation merges before Pi/Sui-network integration; external acceptance remains separately tracked. No code/test/CI/review gate is waived. The direct SF043 task also authorizes one-time reviewed main-only controller bootstrap and its narrowly necessary SF045 repair before the first full automatic Actions execution; that execution remains mandatory to complete the overall request. Latest user instruction: physical Pi/target work must not block software delivery; target issues may be resolved later. Apply physical-only deferral to current/future software tickets. SF-031 and unfinished SF-066 stay open/on hold; normal automatic testnet, source/security and local regression gates remain required. Standing user instruction (2026-10-20): continue eligible development, review and repair without repeated prompts. Physical hardware and actual mainnet testing may be deferred until all software development is complete; preserve their acceptance tickets and all software/security/testnet gates.",
   "tickets": {
     "SF-006": {
       "deferred_checks": [
@@ -306,11 +306,11 @@
       ]
     },
     "SF-017": {
-      "deferred_checks": [
-        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
-      ],
       "acceptance_issues": [
         "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "deferred_checks": [
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
       ],
       "retained_gates": [
         "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
@@ -547,16 +547,39 @@
         "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
       ]
     },
-    "SF-017": {
-      "acceptance_issues": [
-        "https://github.com/tyler-suifleet/suifleet/issues/32"
-      ],
+    "SF-069": {
       "deferred_checks": [
         "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
       ],
       "retained_gates": [
         "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
       ]
     }
+  },
+  "development_defaults": {
+    "authorization": "User explicitly authorizes continuous software development and reviewed implementation merges before physical-hardware and actual-mainnet acceptance, which wait until development is complete. This is not mainnet or physical programming authorization.",
+    "acceptance_only_tickets": [
+      "SF-031",
+      "SF-042",
+      "SF-066",
+      "SF-087"
+    ],
+    "deferred_checks": [
+      "Physical device flashing, boot, hardware signer, reboot, power-loss and target-specific acceptance; retain SF-031 and applicable target-image/release acceptance evidence.",
+      "Actual mainnet transactions, publication, upgrade and mainnet end-to-end acceptance; retain SF-087 and obtain explicit authorization before any future mainnet writes."
+    ],
+    "acceptance_issues": [
+      "https://github.com/tyler-suifleet/suifleet/issues/32",
+      "https://github.com/tyler-suifleet/suifleet/issues/159"
+    ],
+    "retained_gates": [
+      "All actionable source/security findings and meaningful local, simulator, isolated-chain compatibility and regression checks.",
+      "Applicable normal automatic public-testnet validation, spending controls and exact-head/current-base CI.",
+      "Fresh independent review and genuine software/API dependencies; no guessed unmerged interfaces or relabeled approvals.",
+      "Real wallet/provider/credential acceptance is deferred only when separately authorized; report genuine missing inputs and keep other eligible work progressing."
+    ]
   }
 }

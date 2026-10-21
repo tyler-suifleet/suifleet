@@ -115,6 +115,12 @@ module sui_edge::device_group {
         id.delete();
     }
 
+    /// Called only by the recipient-confirmed fleet handover protocol.
+    public(package) fun handover(group: &mut DeviceGroup, recipient: address, ctx: &TxContext) {
+        assert!(ctx.sender() == group.admin, ENotAdmin);
+        group.admin = recipient;
+    }
+
     // ── Read helpers ──────────────────────────────────────────────────────────
 
     public fun contains_device(group: &DeviceGroup, device_id: ID): bool {

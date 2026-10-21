@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "ticket": "SF-069",
+  "implementation": "scripts/lambda_manager.py",
+  "handler_runtime": "sdk/python/suifleet_function.py",
+  "reference_reviewed": "2026-10-19",
+  "references": [
+    {"url": "https://docs.aws.amazon.com/greengrass/v2/developerguide/lambda-manager-component.html", "version": "aws.greengrass.LambdaManager 2.3.9", "scope": "functional reference only: queued work, result timeout, local pub/sub event sources"},
+    {"url": "https://docs.aws.amazon.com/greengrass/v2/developerguide/legacy-subscription-router-component.html", "version": "aws.greengrass.LegacySubscriptionRouter 2.1.17", "scope": "functional reference only: source/subject/target subscriptions"},
+    {"url": "https://docs.aws.amazon.com/greengrass/v2/developerguide/lambda-launcher-component.html", "version": "aws.greengrass.LambdaLauncher 2.0.13", "scope": "functional reference only: process start/stop"},
+    {"url": "https://docs.aws.amazon.com/greengrass/v2/developerguide/lambda-runtimes-component.html", "version": "aws.greengrass.LambdaRuntimes 2.0.9", "scope": "functional reference only: language runtime packaging"},
+    {"url": "https://docs.aws.amazon.com/greengrass/v2/developerguide/import-lambda-function-cli.html", "version": "componentLambdaParameters as published on 2026-10-19", "scope": "functional reference only: pinned/on-demand, timeoutInSeconds, maxInstancesCount, maxQueueSize, eventSources, isolation"}
+  ],
+  "roadmap_contract": "interfaces/compat/remaining-roadmap-cases.json scope lambda, contract_version 1 (queue 0)",
+  "modes": {
+    "on-demand": "one new process per invocation; up to max_concurrency (1..64) at once; process group and escaped descendants killed after the response",
+    "long-lived": "one process started with the manager; serial invocations; restarted with backoff after exit, timeout or protocol violation"
+  },
+  "admission": "FIFO per function: invoke below max_concurrency, else queue up to max_queue (default 1000), else busy; max_pending (default 256) bounds accepted outstanding work",
+  "timeout": "elapsed milliseconds from dispatch at or above timeout_ms is timeout; the process group is killed",
+  "routing": "exact authenticated sender == source and exact topic == subject; sorted unique function targets; no match acknowledges without invocation",
+  "invocation_request": ["version", "invocation_id", "function", "mode", "source", "subject", "message_id", "attempt", "timeout_ms", "payload"],
+  "function_response": {"ok": ["version", "invocation_id", "status", "result"], "error": ["version", "invocation_id", "status", "error{type<=128,message<=1024}"]},
+  "result_envelope": ["version", "invocation_id", "function", "source", "subject", "message_id", "attempt", "status", "duration_ms", "result|error|exit_code|signal"],
+  "statuses": ["ok", "error", "timeout", "busy", "crashed", "invalid-response", "unsupported-version", "spawn-failed", "unknown-function", "result-too-large"],
+  "limits": {"response_line_bytes": 65536, "response_nesting_depth": 64, "result_envelope_bytes": 4096, "timeout_ms": [1, 900000], "log_bytes_per_function": 2097152, "cleanup_wait_ms": 5000},
+  "response_encoding": "strict UTF-8 JSON: NaN/Infinity, lone surrogates, other encodings and deeper nesting are invalid-response",
+  "delivery": "message journaled (SQLite FULL) before acknowledgement; duplicate redelivery acknowledged without invocation; interrupted invocations re-run with attempt+1 (at least once); completed results republished without reinvocation",
+  "isolation": "Linux: optional run_as uid/gid without supplementary groups, cleared environment, private work directory, no ambient capabilities, no_new_privs, no core files, optional RLIMIT_AS, parent-death SIGKILL, manager subreaper sweep; signals the manager may not send are sent by a helper as the function UID; a process not killed and reaped within cleanup_wait_ms stops the manager (exit 1)",
+  "payload_encoding": "JSON only",
+  "live_aws": "unrun; no AWS account, Lambda service, recipe or SDK compatibility; separate authorization required; tracked in SF-069/#123",
+  "physical_target": "unrun; deferred to SF-031/#32",
+  "license": "clean-room original implementation from public documentation; no AWS component code, binaries or runtime images copied or executed"
+}

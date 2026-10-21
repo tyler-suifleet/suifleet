@@ -31,17 +31,18 @@ impl PubsubConfig {
             qos0_messages: self.qos0_messages_per_subscription,
         }
     }
-    pub fn validate(&self) -> anyhow::Result<()> {
+    /// `aws_iot`: whether the `[aws_iot]` connection is configured.
+    pub fn validate(&self, aws_iot: bool) -> anyhow::Result<()> {
         anyhow::ensure!((1..=100_000).contains(&self.max_messages_per_subscription), "pubsub.max_messages_per_subscription must be 1..=100000");
         anyhow::ensure!((4096..=1 << 30).contains(&self.max_bytes_per_subscription), "pubsub.max_bytes_per_subscription must be 4 KiB..=1 GiB");
         anyhow::ensure!((1..=10_000).contains(&self.qos0_messages_per_subscription), "pubsub.qos0_messages_per_subscription must be 1..=10000");
         if let Some(bridge) = &self.bridge {
-            bridge.validate()?;
+            bridge.validate(aws_iot)?;
             // Inbound copies of one MQTT message are stored together, so a
             // queue must hold them all or the message could never be accepted.
             let copies = bridge.max_inbound_copies();
             anyhow::ensure!(copies <= self.max_messages_per_subscription,
-                "pubsub.max_messages_per_subscription must be at least {copies}, the most overlapping LocalMqtt→Pubsub mappings");
+                "pubsub.max_messages_per_subscription must be at least {copies}, the most overlapping inbound mappings from one broker");
         }
         Ok(())
     }
@@ -76,12 +77,25 @@ pub struct Config {
     pub logs: Option<LogsConfig>,
     #[serde(default)]
     pub daemon_update: DaemonUpdateConfig,
+    /// Confidential delivery (SF-022); without it, Seal-encrypted recipes and
+    /// artifacts are refused and public ones applied as before.
+    #[serde(default)]
+    pub seal: Option<SealConfig>,
     /// Durable local streams and exports (SF-034); none when omitted.
     #[serde(default)]
     pub streams: Option<StreamsConfig>,
     /// Local device shadows and cloud sync (SF-033); none when omitted.
     #[serde(default)]
     pub shadows: Option<ShadowsConfig>,
+    /// Local support console (SF-079, docs/LOCAL_CONSOLE.md); none when omitted.
+    #[serde(default)]
+    pub console: Option<crate::console::Settings>,
+    /// The AWS IoT Core connection (SF-061); none when omitted.
+    #[serde(default)]
+    pub aws_iot: Option<crate::iotcore::IotConfig>,
+    /// Operator-only Device Defender device metrics (SF-062).
+    #[serde(default)]
+    pub device_defender: Option<crate::defender::Settings>,
     /// LAN client-device authentication and discovery (SF-035); none when omitted.
     #[serde(default)]
     pub client_devices: Option<crate::clientdevices::Settings>,
@@ -140,6 +154,9 @@ pub struct ShadowsConfig {
     /// The cloud sync adapter; none when omitted.
     #[serde(default)]
     pub sync: Option<crate::shadows::SyncConfig>,
+    /// Synchronization with AWS IoT Device Shadow over `[aws_iot]`.
+    #[serde(default)]
+    pub aws_iot: Option<crate::shadows::AwsSyncConfig>,
 }
 fn default_max_shadows() -> usize {
     64
@@ -149,6 +166,10 @@ impl ShadowsConfig {
         anyhow::ensure!(crate::shadows::valid_thing(&self.thing_name), "shadows.thing_name must be 1-128 of [A-Za-z0-9:_-]");
         anyhow::ensure!((1..=crate::shadows::MAX_SHADOWS).contains(&self.max_shadows), "shadows.max_shadows must be 1..=256");
         if let Some(sync) = &self.sync {
+            sync.validate(self.max_shadows)?;
+        }
+        if let Some(sync) = &self.aws_iot {
+            anyhow::ensure!(self.sync.is_none(), "a shadow synchronizes with one cloud: configure [shadows.sync] or [shadows.aws_iot], not both");
             sync.validate(self.max_shadows)?;
         }
         Ok(())
@@ -391,9 +412,11 @@ impl DeploymentManifest {
             crate::sui_client::same_id(&self.call_package_id, &self.call_package_id),
             "invalid call package ID"
         );
-        let catalog_count = crate::catalog::TYPES.iter().filter(|name| self.type_origins.contains_key(**name)).count();
-        anyhow::ensure!(catalog_count == 0 || catalog_count == crate::catalog::TYPES.len(), "partial catalog type origins");
-        for name in REQUIRED_TYPES.iter().chain(crate::catalog::TYPES.iter().filter(|name| self.type_origins.contains_key(**name))) {
+        for (label, group) in [("catalog", crate::catalog::TYPES), ("seal policy", crate::protocol::SEAL_POLICY_TYPES)] {
+            let count = group.iter().filter(|name| self.type_origins.contains_key(**name)).count();
+            anyhow::ensure!(count == 0 || count == group.len(), "partial {label} type origins");
+        }
+        for name in REQUIRED_TYPES.iter().chain(self.optional_types()) {
             let origin = self
                 .type_origins
                 .get(*name)
@@ -423,6 +446,13 @@ impl DeploymentManifest {
             "unsupported edge client version"
         );
         Ok(())
+    }
+    /// Optional type-origin groups present in this manifest (all or none of each).
+    pub fn optional_types(&self) -> impl Iterator<Item = &&'static str> {
+        crate::catalog::TYPES
+            .iter()
+            .chain(crate::protocol::SEAL_POLICY_TYPES)
+            .filter(|name| self.type_origins.contains_key(**name))
     }
     pub fn move_type(&self, name: &str) -> String {
         // Called only after validating every required type; no first-package fallback.
@@ -511,6 +541,119 @@ pub struct SignerConfig {
     /// pkcs11: file holding the user PIN (readable only by the key's user).
     #[serde(default)]
     pub pin_file: PathBuf,
+}
+
+/// Whether unencrypted recipes and artifacts may still be applied.
+#[derive(Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum SealMode {
+    /// Decrypt confidential blobs; also apply explicitly public ones.
+    #[default]
+    Optional,
+    /// Refuse any recipe or artifact that is not Seal-encrypted.
+    Required,
+}
+
+/// `[seal]`: Seal key servers and limits for confidential delivery (SF-022,
+/// docs/CONFIDENTIAL_DELIVERY.md).
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct SealConfig {
+    #[serde(default)]
+    pub mode: SealMode,
+    /// The Seal package whose `key_server::KeyServer` objects are trusted.
+    pub key_server_package: String,
+    pub key_servers: Vec<KeyServerConfig>,
+    /// Ciphertexts needing fewer key servers are refused.
+    #[serde(default = "default_min_threshold")]
+    pub min_threshold: u8,
+    /// Require each key server's proof of possession (`/v1/service`).
+    #[serde(default = "default_true")]
+    pub verify_key_servers: bool,
+    /// Session certificate lifetime (Seal allows 1 to 30 minutes).
+    #[serde(default = "default_session_ttl_minutes")]
+    pub session_ttl_minutes: u16,
+    /// Certificates are dated this far back for key servers' clocks.
+    #[serde(default = "default_clock_skew_seconds")]
+    pub clock_skew_seconds: u64,
+    /// Fetched decryption keys stay in memory (never on disk) this long; 0
+    /// fetches for every blob.
+    #[serde(default = "default_key_cache_seconds")]
+    pub key_cache_seconds: u64,
+    #[serde(default = "default_seal_timeout_seconds")]
+    pub request_timeout_seconds: u64,
+    /// Confidential blobs are decrypted in memory, so this bounds memory use.
+    #[serde(default = "default_max_plaintext_bytes")]
+    pub max_plaintext_bytes: u64,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct KeyServerConfig {
+    pub object_id: String,
+    #[serde(default = "default_weight")]
+    pub weight: u8,
+    /// Provider API credential header (e.g. "X-API-Key") and the file holding
+    /// it. A provider credential is not device identity or decryption authority.
+    #[serde(default)]
+    pub api_key_name: Option<String>,
+    #[serde(default)]
+    pub api_key_file: Option<PathBuf>,
+}
+
+fn default_true() -> bool {
+    true
+}
+fn default_min_threshold() -> u8 {
+    1
+}
+fn default_weight() -> u8 {
+    1
+}
+fn default_session_ttl_minutes() -> u16 {
+    10
+}
+fn default_clock_skew_seconds() -> u64 {
+    60
+}
+fn default_key_cache_seconds() -> u64 {
+    120
+}
+fn default_seal_timeout_seconds() -> u64 {
+    10
+}
+fn default_max_plaintext_bytes() -> u64 {
+    128 * 1024 * 1024
+}
+
+impl SealConfig {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(crate::sui_client::same_id(&self.key_server_package, &self.key_server_package), "invalid key_server_package");
+        anyhow::ensure!(!self.key_servers.is_empty(), "[seal] needs at least one key server");
+        let mut seen = std::collections::BTreeSet::new();
+        for server in &self.key_servers {
+            anyhow::ensure!(crate::sui_client::same_id(&server.object_id, &server.object_id), "invalid key server object ID");
+            anyhow::ensure!(seen.insert(server.object_id.to_ascii_lowercase()), "duplicate key server {}", server.object_id);
+            anyhow::ensure!(server.weight > 0, "key server weight must be positive");
+        }
+        let total: u32 = self.key_servers.iter().map(|s| u32::from(s.weight)).sum();
+        anyhow::ensure!(self.min_threshold >= 1 && u32::from(self.min_threshold) <= total, "min_threshold must be between 1 and the total key server weight");
+        anyhow::ensure!((1..=crate::seal_client::MAX_SESSION_MINUTES).contains(&self.session_ttl_minutes), "session_ttl_minutes must be 1 to 30");
+        anyhow::ensure!(self.clock_skew_seconds * 2 < u64::from(self.session_ttl_minutes) * 60, "clock_skew_seconds must be under half the session lifetime");
+        anyhow::ensure!(self.request_timeout_seconds > 0 && self.max_plaintext_bytes > 0, "request_timeout_seconds and max_plaintext_bytes must be positive");
+        Ok(())
+    }
+}
+
+/// A secret from a file that other users cannot read.
+pub fn read_secret(path: &Path) -> anyhow::Result<String> {
+    use anyhow::Context;
+    use std::os::unix::fs::PermissionsExt;
+    let mode = std::fs::metadata(path).with_context(|| format!("reading {}", path.display()))?.permissions().mode();
+    anyhow::ensure!(mode & 0o007 == 0, "{} must not be accessible to other users", path.display());
+    let value = std::fs::read_to_string(path)?.trim().to_owned();
+    anyhow::ensure!(!value.is_empty(), "{} is empty", path.display());
+    Ok(value)
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -627,7 +770,8 @@ impl Config {
         let raw = std::fs::read_to_string(path)?;
         let mut cfg: Self = toml::from_str(&raw)?;
         if let Some(ipc) = &cfg.ipc { ipc.validate()?; }
-        if let Some(pubsub) = &cfg.pubsub { pubsub.validate()?; }
+        if let Some(pubsub) = &cfg.pubsub { pubsub.validate(cfg.aws_iot.is_some())?; }
+        if let Some(console) = &cfg.console { console.validate()?; }
         cfg.path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
         anyhow::ensure!(
             !cfg.daemon_update.enabled
@@ -654,6 +798,13 @@ impl Config {
         );
         anyhow::ensure!(cfg.components.recovery_commands.is_empty() || cfg.apply.allow_recipe_commands,
             "application recovery commands require apply.allow_recipe_commands");
+        if let Some(seal) = &cfg.seal {
+            seal.validate()?;
+            anyhow::ensure!(
+                seal.max_plaintext_bytes <= cfg.walrus.max_artifact_bytes,
+                "seal.max_plaintext_bytes cannot exceed walrus.max_artifact_bytes"
+            );
+        }
         let manifest_path = if cfg.sui.manifest_path.is_absolute() {
             cfg.sui.manifest_path.clone()
         } else {
@@ -706,6 +857,7 @@ impl Config {
         if let Some(shadows) = &cfg.shadows {
             shadows.validate()?;
         }
+        validate_aws_iot(&cfg)?;
         if let Some(client_devices) = &mut cfg.client_devices {
             if client_devices.device_groups_file.is_relative() {
                 client_devices.device_groups_file = path.parent().unwrap_or(Path::new(".")).join(&client_devices.device_groups_file);
@@ -720,6 +872,34 @@ impl Config {
 
 fn default_timeout() -> u64 {
     600
+}
+
+/// `[aws_iot]` and what uses it: the connection runs in the pub/sub bridge,
+/// with its own credentials, within AWS IoT Core subscription quotas.
+pub fn validate_aws_iot(cfg: &Config) -> anyhow::Result<()> {
+    if let Some(settings) = &cfg.device_defender {
+        settings.validate()?;
+        anyhow::ensure!(cfg.aws_iot.is_some(), "[device_defender] needs [aws_iot]");
+    }
+    let aws_sync = cfg.shadows.as_ref().and_then(|s| s.aws_iot.as_ref().map(|sync| (s, sync)));
+    let Some(iot) = &cfg.aws_iot else {
+        anyhow::ensure!(aws_sync.is_none(), "[shadows.aws_iot] needs the [aws_iot] connection");
+        return Ok(());
+    };
+    iot.validate()?;
+    iot.check_separate(&cfg.device.keypair_path)?;
+    anyhow::ensure!(cfg.pubsub.is_some(), "[aws_iot] runs in the pub/sub bridge: add [pubsub]");
+    let mut subscriptions = if cfg.device_defender.is_some() { 2 } else { 0 };
+    subscriptions += cfg.pubsub.as_ref().and_then(|p| p.bridge.as_ref())
+        .map_or(0, |b| b.mappings.iter().filter(|m| m.source == crate::bridge::Endpoint::IotCore).count());
+    if let Some((shadows, sync)) = aws_sync {
+        anyhow::ensure!(shadows.thing_name == iot.thing_name, "shadows.thing_name must equal aws_iot.thing_name to synchronize with AWS IoT Device Shadow");
+        subscriptions += crate::iotcore::shadow_filters(&iot.thing_name, &sync.shadows).len();
+    }
+    anyhow::ensure!(subscriptions <= crate::iotcore::MAX_SUBSCRIPTIONS,
+        "AWS IoT Core allows {} subscriptions per connection; IotCore mappings plus 3 per synchronized shadow need {subscriptions}",
+        crate::iotcore::MAX_SUBSCRIPTIONS);
+    Ok(())
 }
 
 /// A configured feature this platform cannot provide as specified. On macOS
@@ -740,6 +920,9 @@ pub fn unsupported_on(os: &str, cfg: &Config) -> Option<&'static str> {
     }
     if cfg.daemon_update.enabled {
         return Some("daemon self-update has not been validated under launchd; it is not supported on macOS");
+    }
+    if cfg.aws_iot.is_some() {
+        return Some("the AWS IoT Core connection is validated on Linux first (SF-061); it is not yet supported on macOS");
     }
     None
 }
@@ -855,8 +1038,38 @@ mod tests {
             [[bridge.mappings]]\ntopic='lan/+'\nsource='LocalMqtt'\ntarget='Pubsub'\ntarget_topic_prefix='b/'\n";
         for (messages, valid) in [(1, false), (2, true)] {
             let pubsub: PubsubConfig = toml::from_str(&format!("max_messages_per_subscription={messages}\n{bridge}")).unwrap();
-            assert_eq!(pubsub.validate().is_ok(), valid, "{messages}");
+            assert_eq!(pubsub.validate(false).is_ok(), valid, "{messages}");
         }
+    }
+    #[test]
+    fn aws_iot_needs_pubsub_its_own_key_and_fits_aws_quotas() {
+        let base = "[sui]\nmanifest_path='deployment.json'\n[device]\nkeypair_path='/etc/suifleet/device.key'\n\
+            device_object_id='0x1'\ndevice_cap_id='0x2'\n[apply]\ncommand='true'\n";
+        let iot = "[aws_iot]\nendpoint='abc-ats.iot.us-east-1.amazonaws.com'\nthing_name='dev1'\nca_file='/etc/aws/ca.pem'\n\
+            certificate_file='/etc/aws/cert.pem'\nprivate_key_file='/etc/aws/key.pem'\n";
+        let names = |n: usize| (0..n).map(|i| format!("'s{i}'")).collect::<Vec<_>>().join(",");
+        let check = |text: String| validate_aws_iot(&toml::from_str::<Config>(&text).unwrap()).map_err(|e| e.to_string());
+        check(format!("{base}[pubsub]\n{iot}")).unwrap();
+        check(format!("{base}[device_defender]\n[pubsub]\n{iot}")).unwrap();
+        assert!(check(format!("{base}[device_defender]\n[pubsub]\n")).unwrap_err().contains("needs [aws_iot]"));
+        assert!(check(format!("{base}[device_defender]\n[pubsub]\n[shadows]\nthing_name='dev1'\nmax_shadows=32\n[shadows.aws_iot]\nshadows=[{}]\n{iot}", names(16))).is_ok());
+        assert!(check(format!("{base}[device_defender]\n[pubsub]\n[shadows]\nthing_name='dev1'\nmax_shadows=32\n[shadows.aws_iot]\nshadows=[{}]\n{iot}", names(17))).is_err());
+        check(format!("{base}[pubsub]\n[shadows]\nthing_name='dev1'\nmax_shadows=32\n[shadows.aws_iot]\nshadows=[{}]\n{iot}", names(16))).unwrap();
+        for (text, error) in [
+            (format!("{base}{iot}"), "add [pubsub]"),
+            (format!("{base}[pubsub]\n[shadows]\nthing_name='dev1'\n[shadows.aws_iot]\nshadows=['']\n"), "needs the [aws_iot] connection"),
+            (format!("{base}[pubsub]\n[shadows]\nthing_name='other'\n[shadows.aws_iot]\nshadows=['']\n{iot}"), "must equal aws_iot.thing_name"),
+            (format!("{base}[pubsub]\n[shadows]\nthing_name='dev1'\nmax_shadows=32\n[shadows.aws_iot]\nshadows=[{}]\n{iot}", names(17)), "subscriptions per connection"),
+            (format!("{base}[pubsub]\n{}", iot.replace("/etc/aws/key.pem", "/etc/suifleet/device.key")), "Sui device key"),
+        ] {
+            let message = check(text.clone()).err().unwrap_or_else(|| panic!("accepted: {text}"));
+            assert!(message.contains(error), "{message}");
+        }
+        let both: ShadowsConfig = toml::from_str("thing_name='dev1'\n[sync]\nurl='https://x'\nshadows=['']\n[aws_iot]\nshadows=['']\n").unwrap();
+        assert!(both.validate().unwrap_err().to_string().contains("not both"));
+        let cfg: Config = toml::from_str(&format!("{base}[pubsub]\n{iot}")).unwrap();
+        assert!(unsupported_on("macos", &cfg).is_some_and(|r| r.contains("AWS IoT Core")));
+        assert!(unsupported_on("linux", &cfg).is_none());
     }
     #[test]
     fn walrus_limits_default_when_omitted_or_partial() {

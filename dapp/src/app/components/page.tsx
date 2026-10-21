@@ -6,6 +6,9 @@ import { useFleetTransaction } from '@/hooks/useFleetTransaction';
 import { fetchCatalogs,discoverVersions,buildCreateCatalogTx,buildPublishVersionTx } from '@/lib/catalog';
 import { parseVersion } from '@/lib/component-selector';
 import { uploadArtifact,uploadRecipe,storageWarnings,renewalCommand } from '@/lib/walrus';
+import { DEFAULT_DELIVERY,releaseProtection } from '@/lib/delivery';
+import { useAccessPolicies } from '@/hooks/useAccessPolicies';
+import { DeliveryFields } from '@/components/DeliveryFields';
 import { PageHeader } from '@/components/ui';
 import { ConfigurationFields } from '@/components/ConfigurationFields';
 import { GreengrassImport } from '@/components/GreengrassImport';
@@ -20,6 +23,8 @@ export default function ComponentsPage() {
   const [rows,setRows]=useState<Row[]>([{os:'linux',arch:'x86_64',install:''}]);
   const [busy,setBusy]=useState(false),[message,setMessage]=useState('');
   const [configuration,setConfiguration]=useState(EMPTY_CONFIGURATION);
+  const [delivery,setDelivery]=useState(DEFAULT_DELIVERY);
+  const policies=useAccessPolicies();
   const catalogs=useQuery({queryKey:['catalogs',account?.address],enabled:!!account,queryFn:()=>fetchCatalogs(client,account!.address)});
   const selected=catalog || catalogs.data?.[0]?.objectId || '';
   const versions=useQuery({queryKey:['component-versions',selected],enabled:!!selected,queryFn:()=>discoverVersions(client,selected)});
@@ -37,11 +42,13 @@ export default function ComponentsPage() {
         lifecycle:{...(row.install?{install:row.install}:{}),...(configured.validate?{validate:configured.validate}:{})},configuration:configured.configuration});
       // Every recipe is checked before the first upload.
       for(const row of rows) assertComponentRecipe(recipeFor(row,'pending','0'.repeat(64)));
+      // One release identity for every platform's artifact and recipe; no plaintext fallback.
+      const protection=releaseProtection(client,delivery,policies.data??[]);
       const warnings:string[]=[];
       const manifests=[];
       for(const row of rows){
-        const artifact=await uploadArtifact(row.file!,account!.address);
-        const recipe=await uploadRecipe(recipeFor(row,artifact.blobId,artifact.sha256),account!.address);
+        const artifact=await uploadArtifact(row.file!,account!.address,protection);
+        const recipe=await uploadRecipe(recipeFor(row,artifact.blobId,artifact.sha256),account!.address,protection);
         for(const [label,s] of [['Artifact',artifact.storage],['Recipe',recipe.storage]] as const){
           warnings.push(`${label} storage expires at epoch ${s.endEpoch??'unknown'}`, ...storageWarnings(s));
           const renew=renewalCommand(s);if(renew) warnings.push(renew);
@@ -49,7 +56,7 @@ export default function ComponentsPage() {
         manifests.push({os:row.os,arch:row.arch,recipeBlobId:recipe.blobId,recipeSha256:recipe.sha256,artifactSha256:artifact.sha256});
       }
       await execute({transaction:buildPublishVersionTx(selected,name,version,manifests)});
-      setMessage('Immutable version registered. '+warnings.join('\n'));await versions.refetch();
+      setMessage(`Immutable version registered (${protection.kind==='confidential'?'confidential, Seal-encrypted':'public, unencrypted'}). `+warnings.join('\n'));await versions.refetch();
     }catch(e){setMessage(String(e));}finally{setBusy(false);}
   }
   if(!account)return <p>Connect your wallet to manage component versions.</p>;
@@ -68,10 +75,11 @@ export default function ComponentsPage() {
         {i>0&&<button onClick={()=>{const copy=[...rows];[copy[i-1],copy[i]]=[copy[i],copy[i-1]];setRows(copy);}}>Move earlier</button>}
       </div>)}
       <ConfigurationFields value={configuration} onChange={setConfiguration} disabled={busy}/>
+      <DeliveryFields value={delivery} onChange={setDelivery} policies={policies.data??[]} disabled={busy}/>
       <button disabled={rows.length>=16} onClick={()=>setRows([...rows,{os:'linux',arch:'aarch64',install:''}])}>Add platform</button>{' '}
       <button disabled={busy||isPending||!selected} onClick={publish}>{busy?'Uploading…':'Upload and register immutable version'}</button>
     </div><p className="whitespace-pre-wrap" role="status">{message}</p>
-    <GreengrassImport catalog={selected} owner={account.address} execute={execute} onPublished={()=>{void versions.refetch();}} disabled={isPending||!selected}/>
+    <GreengrassImport catalog={selected} owner={account.address} execute={execute} onPublished={()=>{void versions.refetch();}} disabled={isPending||!selected} policies={policies.data??[]} protect={d=>releaseProtection(client,d,policies.data??[])}/>
     {versions.data?.map(v=><div key={v.objectId} className="border p-4"><h2>{v.name} {v.version}</h2>{v.manifests.map((m,i)=><p key={i}>{i+1}. {m.os}/{m.arch} · recipe {m.recipeBlobId}</p>)}<Link href={`/firmware?componentVersion=${v.objectId}`}>Deploy this version</Link></div>)}
   </div>;
 }

@@ -1,6 +1,6 @@
 # AWS-managed component and cloud-service adapter coverage
 
-The [SF-064 remaining functional roadmap](GREENGRASS_REMAINING_ROADMAP.md) defines versioned executable subcontracts and maps every selected remaining scope to published implementation tickets SF-069–SF-079. Per-scope runtime receipts now include the [SF-072 media adapter](KINESIS_VIDEO.md); remaining scopes without receipts stay pending. No local receipt establishes live AWS acceptance.
+The [SF-064 remaining functional roadmap](GREENGRASS_REMAINING_ROADMAP.md) defines versioned executable subcontracts and maps every selected remaining scope to published implementation tickets SF-069–SF-079. Per-scope runtime receipts now include the [SF-072 media adapter](KINESIS_VIDEO.md) and the [SF-069 function manager](LAMBDA.md); remaining scopes without receipts stay pending. No local receipt establishes live AWS acceptance.
 
 SF-038 maps every AWS-provided Greengrass component to one of three things: a SuiFleet native equivalent, a scoped adapter with its own implementation ticket, or a roadmap gap tracked by [SF-064](https://github.com/tyler-suifleet/suifleet/issues/109). For each adapter it records the platforms, AWS service and authentication dependencies, licensing constraints and executable acceptance. The catalog is a specification with per-adapter runtime receipts. SF-057 implements the scoped Linux credential adapter; SF-058 implements the [Kinesis/S3 companion](STREAM_EXPORTERS.md) with local SDK/emulator evidence; SF-060 implements the CloudWatch Logs export adapter ([CLOUDWATCH_LOGS.md](CLOUDWATCH_LOGS.md)). Other adapters remain pending. It records no permanent exclusion and makes no general parity claim. It extends the [SF-028 compatibility specification](GREENGRASS_COMPATIBILITY.md), whose levels and statuses apply here.
 
@@ -26,7 +26,7 @@ Codex published the scoped implementation tickets below. SF-038 links them; it d
 Three kinds of evidence stay separate:
 
 - **Reference models.** `make test-compat` checks the fixtures against small models. Agreement proves only that the fixtures are consistent.
-- **Adapter execution.** The credential adapter has a [local runtime receipt](validation/sf057-credentials.json) and [provisioning guide](AWS_CREDENTIALS.md); the [SF-058 stream exporter receipt](validation/sf058-stream-export.json) adds actual durable-store and AWS API emulator execution, and the [SF-060 CloudWatch Logs receipt](validation/sf060-cloudwatch-logs.json) adds adapter execution against a request-checking emulator. Other adapters retain `runtime_execution: pending`. Only an implementation ticket may run the same fixtures and runtime tests against the real adapter and record a `runtime_evidence` receipt. A linked ticket is not runtime evidence.
+- **Adapter execution.** The credential adapter has a [local runtime receipt](validation/sf057-credentials.json) and [provisioning guide](AWS_CREDENTIALS.md); the [SF-058 stream exporter receipt](validation/sf058-stream-export.json) adds actual durable-store and AWS API emulator execution, and the [SF-060 CloudWatch Logs receipt](validation/sf060-cloudwatch-logs.json) adds adapter execution against a request-checking emulator. The [SF-062 Device Defender receipt](validation/sf062-device-defender.json) adds real device-side sampling and shared TLS MQTT adapter execution ([configuration and limits](DEVICE_DEFENDER.md)). Other adapters retain `runtime_execution: pending`. Only an implementation ticket may run the same fixtures and runtime tests against the real adapter and record a `runtime_evidence` receipt. A linked ticket is not runtime evidence.
 - **Live AWS acceptance.** No AWS account, credential, purchase or live service mutation is authorized. Every live check stays pending until the user authorizes one. The Sui testnet grant does not cover AWS.
 
 The SF-037 recipe translator applies the dependency classification below. A `replace` dependency is dropped and reported; every other managed dependency is rejected with its classification.
@@ -94,11 +94,11 @@ The SF-037 recipe translator applies the dependency classification below. A `rep
 | `aws.greengrass.SNS` | lambda; Linux | roadmap | Interim: SF-020 alerts | SF-064 |
 | `aws.greengrass.clientdevices.Auth` | plugin; Linux, Windows | native | SF-035 | SF-035 |
 | `aws.greengrass.clientdevices.IPDetector` | plugin; Linux, Windows | native | SF-035 discovery | SF-035 |
-| `aws.greengrass.clientdevices.mqtt.Bridge` | plugin; Linux, Windows | native | SF-032 bridge; IotCore target via `aws-iot-core-connection` | SF-032 |
+| `aws.greengrass.clientdevices.mqtt.Bridge` | plugin; Linux, Windows | native | SF-032 bridge; Pubsub/IotCore mappings via `aws-iot-core-connection` | SF-032 |
 | `aws.greengrass.clientdevices.mqtt.Moquette` | plugin; Linux, Windows | native | SF-032 broker | SF-032 |
 | `aws.greengrass.clientdevices.mqtt.EMQX` | generic; Linux, Windows | native | SF-032 broker | SF-032 |
 | `aws.greengrass.DiskSpooler` | plugin; Linux, Windows | native | SF-032 spool | SF-032 |
-| `aws.greengrass.ShadowManager` | plugin; Linux, Windows | native | SF-033 shadows; sync via `aws-iot-core-connection` | SF-033 |
+| `aws.greengrass.ShadowManager` | plugin; Linux, Windows | native | SF-033 shadows; AWS IoT Device Shadow sync via `aws-iot-core-connection` | SF-033 |
 | `aws.greengrass.SecretManager` | plugin; Linux, Windows | native | SF-022 secrets (not AWS Secrets Manager) | SF-022 |
 | `aws.greengrass.crypto.Pkcs11Provider` | plugin; Linux | native | SF-021 hardware signer | SF-021 |
 | `aws.greengrass.DockerApplicationManager` | generic; Linux, Windows | native | SF-036 OCI components | SF-036 |
@@ -135,8 +135,8 @@ AWS credentials are a separate trust domain. The `credential-provider` and `aws-
 | `stream-export-aws` | SF-058 | complete | StreamManager 2.3.1 export | Kinesis Data Streams, S3 | SF-057; `kinesis:PutRecords`; S3 PutObject/GetObject/AbortMultipartUpload + ListBucketMultipartUploads ([scope](STREAM_EXPORTERS.md)) | SF-034, SF-057 |
 | `cloudwatch-metrics-export` | SF-059 | complete | Cloudwatch 4.0.0 | CloudWatch | credential-provider; `cloudwatch:PutMetricData` | SF-019, SF-032, SF-057 |
 | `cloudwatch-logs-export` | SF-060 | complete | LogManager 2.3.14 upload | CloudWatch Logs | credential-provider; `logs:CreateLogGroup`, `logs:CreateLogStream`, `logs:PutLogEvents` | SF-020, SF-057 |
-| `aws-iot-core-connection` | SF-061 | incomplete | Bridge IotCore target, shadow sync | AWS IoT Core | Separate AWS IoT thing certificate and policy | SF-021, SF-032, SF-033 |
-| `device-defender-metrics` | SF-062 | incomplete | DeviceDefender 4.0.0 | Device Defender (device-side metrics), IoT Core | `aws-iot-core-connection` | SF-019, SF-061 |
+| `aws-iot-core-connection` | SF-061 | complete | Bridge 2.3.3 IotCore routes, ShadowManager 2.3.15 sync | AWS IoT Core, Device Shadow | Separate AWS IoT thing certificate and policy | SF-021, SF-032, SF-033 |
+| `device-defender-metrics` | SF-062 | complete | DeviceDefender 4.0.0 | Device Defender (device-side metrics), IoT Core | `aws-iot-core-connection` | SF-019, SF-061 |
 | `secure-tunneling` | SF-063 | incomplete | SecureTunneling 2.0.1 | IoT secure tunneling, IoT Core | `aws-iot-core-connection`; ephemeral per-tunnel token | SF-014, SF-025, SF-027, SF-061 |
 
 The `stream-export-aws` adapter leaves out three destinations:
@@ -145,7 +145,7 @@ The `stream-export-aws` adapter leaves out three destinations:
 - `IoTSiteWiseConfig`, which is SF-064 roadmap work;
 - `HTTPConfig`, because generic HTTP export is native SF-034 scope.
 
-An `incomplete` specification names its `specification_gap`. SF-061 must pin the Bridge and ShadowManager versions it matches and add a reference suite. SF-062 and SF-063 must add executable schema/topic and notification/destination suites.
+An `incomplete` specification names its `specification_gap`. SF-062 added the executable `device-defender-cases.json` schema/topic/response suite ([DEVICE_DEFENDER.md](DEVICE_DEFENDER.md)); SF-063 must add its notification/destination suite. SF-061 pinned Bridge 2.3.3 and ShadowManager 2.3.15 and added `aws-iot-cases.json` ([AWS_IOT.md](AWS_IOT.md)).
 
 The `secure-tunneling` adapter is explicitly enabled and starts the local proxy only for allow-listed local services. SSH daemon, firewall and service configuration stay with platform scripts and administrators. The adapter neither manages nor replaces them, runs no arbitrary remote commands and never triggers a platform reboot.
 
@@ -215,6 +215,7 @@ The checker validates the catalog's structure and its cross-references to the ba
 | `credential-provider-cases.json` | 65 steps across 7 sequences | Pending SF-057 |
 | `cloudwatch-metrics-cases.json` | 90 steps across 8 sequences | Passed: local adapter/HTTP/SQLite ([receipt](validation/sf059-metrics.json)); AWS delivery pending |
 | `cloudwatch-logs-cases.json` | 69 steps across 8 sequences | Passed: SF-060 adapter against a request-checking local emulator ([receipt](validation/sf060-cloudwatch-logs.json)); live AWS unrun |
+| `aws-iot-cases.json` | 113 checks | Passed: SF-061 ([receipt](validation/sf061-aws-iot.json)) |
 
 A `complete` adapter specification must pin an exact AWS version and name at least one executable reference suite; the checker enforces both. `stream-export-aws` uses the SF-028 `stream-cases.json` checkpoint suite.
 
