@@ -93,7 +93,7 @@ class Tunnel:
     def __init__(self, directory):
         self.directory = directory
         self.clients, self.errors = [], []
-        self.bad_certificate = False
+        self.certificate = "server"
         self.listener = socket.socket()
         self.listener.bind(("127.0.0.1", 443))
         self.listener.listen()
@@ -107,7 +107,8 @@ class Tunnel:
     def handle(self, raw):
         try:
             ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-            cert = "rogue" if self.bad_certificate else "server"
+            ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+            cert = self.certificate
             ctx.load_cert_chain(str(self.directory / f"{cert}.pem"), str(self.directory / f"{cert}.key"))
             raw.settimeout(10)
             try:
@@ -163,11 +164,11 @@ def inside():
     for ca in ("ca", "rogue-ca"):
         sh("openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "2", "-subj", f"/CN={ca}",
            "-keyout", str(pki / f"{ca}.key"), "-out", str(pki / f"{ca}.pem"), "-addext", "basicConstraints=critical,CA:TRUE")
-    for name, cn, ca, usage in (("server", HOST, "ca", "serverAuth"), ("rogue", HOST, "rogue-ca", "serverAuth"), ("client", "thing1", "ca", "clientAuth")):
+    for name, cn, ca, usage in (("server", HOST, "ca", "serverAuth"), ("rogue", HOST, "rogue-ca", "serverAuth"), ("wronghost", "other.invalid", "ca", "serverAuth"), ("client", "thing1", "ca", "clientAuth")):
         sh("openssl", "req", "-new", "-newkey", "rsa:2048", "-nodes", "-subj", f"/CN={cn}",
            "-keyout", str(pki / f"{name}.key"), "-out", str(pki / f"{name}.csr"))
         ext = pki / "ext"
-        ext.write_text(f"basicConstraints=CA:FALSE\nextendedKeyUsage={usage}\nsubjectAltName=DNS:{HOST},DNS:localhost\n")
+        ext.write_text(f"basicConstraints=CA:FALSE\nextendedKeyUsage={usage}\nsubjectAltName=DNS:{cn},DNS:localhost\n")
         sh("openssl", "x509", "-req", "-in", str(pki / f"{name}.csr"), "-CA", str(pki / f"{ca}.pem"), "-CAkey", str(pki / f"{ca}.key"),
            "-set_serial", str(100 + len(list(pki.iterdir()))), "-days", "2", "-extfile", str(ext), "-out", str(pki / f"{name}.pem"))
     sh("useradd", "--uid", str(UID), "--no-create-home", "--shell", "/usr/sbin/nologin", "suifleet-tunnel")
@@ -331,15 +332,16 @@ def inside():
     closed(c)
     assert len(connections) == 1
     check("adapter SIGKILL cleans descendants; failed local destination never falls back or restarts CAT")
-    tunnel.bad_certificate = True
-    started = sh("journalctl", "-u", UNIT, "--no-pager").count("Tunnel destination proxy started")
-    notify("untrusted-tunnel")
-    wait_for(lambda: sh("journalctl", "-u", UNIT, "--no-pager").count("Tunnel destination proxy started") > started, "untrusted endpoint proxy launched")
-    wait_for(lambda: not proxy_pids(), "untrusted endpoint proxy exit")
-    time.sleep(.5)
-    assert len(tunnel.clients) == count + 1
-    tunnel.bad_certificate = False
-    check("actual proxy refuses untrusted tunnel TLS server")
+    for certificate in ("rogue", "wronghost"):
+        tunnel.certificate = certificate
+        started = sh("journalctl", "-u", UNIT, "--no-pager").count("Tunnel destination proxy started")
+        notify("untrusted-tunnel-" + certificate)
+        wait_for(lambda: sh("journalctl", "-u", UNIT, "--no-pager").count("Tunnel destination proxy started") > started, "untrusted endpoint proxy launched")
+        wait_for(lambda: not proxy_pids(), "untrusted endpoint proxy exit")
+        time.sleep(.2)
+        assert len(tunnel.clients) == count + 1
+    tunnel.certificate = "server"
+    check("actual proxy refuses unknown-CA and trusted-CA/wrong-hostname TLS servers")
     c = client(notify("credential-revocation"))
     key.unlink()
     closed(c)
@@ -354,7 +356,11 @@ def inside():
     check("no CAT in journal, durable spool or application MQTT publications")
     print("EVIDENCE " + json.dumps({"checks": checks, "proxy_sha256": config["proxy_sha256"],
           "localproxy_source": Path("/opt/source-revision.txt").read_text().strip(),
-          "systemd": sh("systemctl", "--version").splitlines()[0], "external_acceptance": "unrun: AWS account/service, physical target, mainnet"}))
+          "systemd": sh("systemctl", "--version").splitlines()[0],
+          "adapter_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+          "harness_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+          "unit_sha256": hashlib.sha256(Path("/opt/suifleet-tunnel.service").read_bytes()).hexdigest(),
+          "external_acceptance": "unrun: AWS account/service, physical target, mainnet"}))
 
 
 def host(args):

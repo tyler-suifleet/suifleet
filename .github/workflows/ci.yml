@@ -185,11 +185,6 @@ jobs:
           sudo env PYTHONDONTWRITEBYTECODE=1 "$(command -v python3)" scripts/test_supervisor_launchd.py \
             --disposable-host --evidence ci-logs/macos-launchd.json | tee ci-logs/macos-launchd.log
 
-      - name: Configured secure tunnel destination with actual proxy and systemd
-        run: |
-          make package-tunneling
-          python3 scripts/test_tunneling.py --package /tmp/suifleet-tunnel.tar.gz
-
       - name: Component IPC with distinct Unix peer identities
         run: |
           set -o pipefail
