@@ -281,7 +281,7 @@ impl Runtime {
                 if let Some(iot) = &self.base.aws_iot {
                     task = task.with_iot_core(bridge::IotLink { config: iot.clone(), shadows: self.aws_shadows.clone() });
                 }
-                self.bridge_stats = Some(task.stats.clone());
+                self.bridge_stats = task.local_stats();
                 self.bridge = Some(tokio::spawn(task.run()));
             }
         }

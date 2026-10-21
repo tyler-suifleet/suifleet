@@ -54,7 +54,7 @@ Durable pub/sub ([MESSAGING.md](MESSAGING.md)), its MQTT bridge, streams with th
 | Section | Contents |
 |---|---|
 | `messaging` | Subscriptions, messages queued, refused publications and dropped QoS 0 messages in total. Per subscriber principal (a component, `@bridge/<n>` or `@operator/<uid>`), fullest first: subscriptions, queued, `fill_percent` (of its fullest subscription, by messages or bytes), `full_since_ms`, refused and dropped |
-| `bridge` | `connected`, `since_ms` (when the current state began), connects, inbound messages refused (queue full) and rejected (never acceptable), the last error |
+| `bridge` | The local MQTT broker bridge, when a mapping uses the local broker (an AWS IoT Core-only bridge, [AWS_IOT.md](AWS_IOT.md), is not reported here): `connected`, `since_ms` (when the current state began), connects, inbound messages refused (queue full) and rejected (never acceptable), the last error |
 | `streams` | Per stream, most loss first: bytes, `max_size`, `fill_percent`, messages, `overwrite`, appends rejected when full. With an export: `lag` (retained messages not exported yet), `lost` (retired before they were exported), batches, failures, `consecutive_failures`, `last_success_ms` and the last error |
 | `shadows` | Live shadows and refused notifications. Per synchronized shadow: conflicts settled, failures, `consecutive_failures`, `last_success_ms` and the last error |
 
