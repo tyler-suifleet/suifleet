@@ -349,6 +349,10 @@ pub struct ShadowEndpoint {
 }
 
 impl ShadowEndpoint {
+    pub fn enable_defender(&mut self) {
+        self.filters.extend(crate::defender::filters(&self.thing));
+    }
+
     /// A fresh router and the request queue. The queue is held exclusively, so
     /// this waits until an aborted predecessor has released it.
     pub async fn attach(&self) -> (ShadowRouter, tokio::sync::OwnedMutexGuard<ShadowRequests>) {
@@ -369,8 +373,24 @@ pub fn shadow_channel(thing: &str, names: &[String]) -> (ShadowClient, ShadowEnd
 }
 
 impl ShadowClient {
-    /// Publish `body` (plus a clientToken) to `<shadow>/<op>` and wait for
-    /// the answer: (accepted, document).
+    pub fn is_connected(&self) -> bool { self.connected.load(Ordering::SeqCst) }
+
+    /// Device Defender shares the authenticated connection, but does not use
+    /// shadow clientToken envelopes. Only the local sampler owns this handle.
+    pub async fn defender(&self, report: &Value) -> anyhow::Result<(bool, Value)> {
+        anyhow::ensure!(self.connected.load(Ordering::SeqCst), "AWS IoT Core is not connected");
+        let id = report["header"]["report_id"].as_u64().ok_or_else(|| anyhow::anyhow!("missing report_id"))?;
+        let (reply, answer) = oneshot::channel();
+        self.requests.try_send(ShadowRequest {
+            topic: crate::defender::topic(&self.thing), payload: serde_json::to_vec(report)?,
+            token: format!("defender-{id}"), reply,
+        }).map_err(|_| anyhow::anyhow!("AWS IoT service queue is full or stopped"))?;
+        tokio::time::timeout(self.timeout, answer).await
+            .map_err(|_| anyhow::anyhow!("Device Defender response timed out"))?
+            .map_err(|_| anyhow::anyhow!("AWS IoT connection dropped the report"))?
+    }
+
+    /// Publish a shadow request with clientToken and await its service outcome.
     pub async fn call(&self, shadow: &str, op: &str, mut body: Map<String, Value>) -> anyhow::Result<(bool, Value)> {
         anyhow::ensure!(self.connected.load(Ordering::SeqCst), "AWS IoT Core is not connected");
         let token = format!("sf-{}-{}", std::process::id(), self.next.fetch_add(1, Ordering::SeqCst));
@@ -394,6 +414,7 @@ impl ShadowRouter {
     /// never come do not accumulate. Returns false, failing the request, when
     /// too many are still awaited; it must then not be sent.
     pub fn sent(&mut self, request: ShadowRequest) -> bool {
+        if request.reply.is_closed() { return false; }
         self.pending.retain(|_, (_, reply)| !reply.is_closed());
         if self.pending.len() >= MAX_PENDING {
             let _ = request.reply.send(Err(anyhow::anyhow!("too many AWS IoT shadow requests await an answer")));
@@ -426,11 +447,29 @@ impl ShadowRouter {
     pub fn owns(&self, topic: &str) -> bool {
         let prefix = format!("$aws/things/{}/shadow", self.thing);
         topic.strip_prefix(&prefix).is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+            || topic.starts_with(&format!("{}/", crate::defender::topic(&self.thing)))
     }
 
     /// An incoming message on a shadow topic.
     pub fn deliver(&mut self, topic: &str, payload: &[u8]) {
         let value: Value = serde_json::from_slice(payload).unwrap_or(Value::Null);
+        if topic.starts_with(&format!("{}/", crate::defender::topic(&self.thing))) {
+            // Never mistake PUBACK or another thing/report's response for acceptance.
+            // Missing reportId (possible on malformed-payload rejections) is
+            // deliberately ambiguous: let the bounded report retry time out.
+            if value["thingName"].as_str() != Some(&self.thing) { return; }
+            if let Some(id) = value["reportId"].as_u64() {
+                let token = format!("defender-{id}");
+                let base = crate::defender::topic(&self.thing);
+                let accepted = topic == format!("{base}/accepted") && value["status"] == "ACCEPTED";
+                let rejected = topic == format!("{base}/rejected") && value["status"] == "REJECTED";
+                if (accepted || rejected) && self.pending.get(&token).is_some_and(|(sent, _)| sent == &base) {
+                    let (_, reply) = self.pending.remove(&token).unwrap();
+                    let _ = reply.send(Ok((accepted, value)));
+                }
+            }
+            return;
+        }
         let token = value.get("clientToken").and_then(Value::as_str);
         let answer = topic.rsplit_once('/').and_then(|(request, outcome)| match outcome {
             "accepted" => Some((request, true)),
@@ -873,5 +912,56 @@ mod tests {
         }
         assert_eq!(errors.iter().filter(|e| e.contains("too many")).count(), 1, "{errors:?}");
         assert_eq!(router.pending(), 0);
+    }
+}
+
+#[cfg(test)]
+mod defender_tests {
+    use super::*;
+    #[tokio::test]
+    async fn defender_response_fixtures_use_real_router() {
+        let fixture: Value = serde_json::from_str(include_str!("../../interfaces/compat/device-defender-cases.json")).unwrap();
+        for case in fixture["responses"].as_array().unwrap() {
+            let (client, mut endpoint) = shadow_channel("thing1", &[]);
+            endpoint.enable_defender();
+            let (mut router, mut requests) = endpoint.attach().await;
+            assert_eq!(router.filters, crate::defender::filters("thing1"));
+            router.set_connected(true);
+            let report = fixture["report"].clone();
+            let task = tokio::spawn(async move { client.defender(&report).await });
+            let request = requests.next().await.unwrap();
+            assert_eq!(request.topic, fixture["topic"]);
+            assert_eq!(serde_json::from_slice::<Value>(&request.payload).unwrap(), fixture["report"]);
+            assert!(router.sent(request));
+            let topic = format!("{}/{}", fixture["topic"].as_str().unwrap(), case["suffix"].as_str().unwrap());
+            assert!(router.owns(&topic));
+            router.deliver(&topic, &serde_json::to_vec(&case["body"]).unwrap());
+            match case["outcome"].as_str().unwrap() {
+                "pending" => { assert_eq!(router.pending(), 1); router.fail_all("disconnected"); assert!(task.await.unwrap().is_err()); }
+                outcome => { assert_eq!(task.await.unwrap().unwrap().0, outcome == "accepted"); assert_eq!(router.pending(), 0); }
+            }
+        }
+    }
+    #[tokio::test]
+    async fn defender_does_not_block_sampling_when_the_service_queue_is_full() {
+        let (client, endpoint) = shadow_channel("thing1", &[]);
+        let (router, _requests) = endpoint.attach().await;
+        router.set_connected(true);
+        let mut answers = Vec::new();
+        for _ in 0..16 {
+            let (reply, answer) = oneshot::channel(); answers.push(answer);
+            assert!(client.requests.try_send(ShadowRequest { topic: String::new(), token: String::new(), payload: vec![], reply }).is_ok());
+        }
+        let report = json!({"header":{"report_id":1}});
+        let result = tokio::time::timeout(Duration::from_secs(1), client.defender(&report)).await.unwrap();
+        assert!(result.unwrap_err().to_string().contains("queue is full"));
+    }
+
+    #[tokio::test]
+    async fn timed_out_requests_are_not_published_later() {
+        let (reply, answer) = oneshot::channel(); drop(answer);
+        let (_, endpoint) = shadow_channel("thing1", &[]);
+        let (mut router, _requests) = endpoint.attach().await;
+        assert!(!router.sent(ShadowRequest { topic: crate::defender::topic("thing1"), token:"defender-1".into(), payload: vec![], reply }));
     }
 }
