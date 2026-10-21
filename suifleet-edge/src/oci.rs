@@ -192,30 +192,41 @@ async fn output(config: &Path, args: &[String], seconds: u64) -> anyhow::Result<
     }
     let mut c = command(config);
     c.args(args).stdout(Stdio::piped()).stderr(Stdio::null());
-    use tokio::io::AsyncReadExt;
-    let mut child = crate::supervisor::spawn_tracked(&mut c)?;
-    let mut stdout = child
-        .take_stdout()
-        .context("missing OCI engine output")?
-        .take(1024 * 1024 + 1);
-    let result = tokio::time::timeout(Duration::from_secs(seconds), async {
-        let mut bytes = Vec::new();
-        stdout.read_to_end(&mut bytes).await?;
-        ensure!(
-            bytes.len() <= 1024 * 1024,
-            "OCI engine response exceeds limit"
-        );
-        ensure!(
-            child.wait().await?.success(),
-            "OCI engine operation failed (credentials and engine diagnostics withheld)"
-        );
-        Ok(bytes)
+    // A readiness/select cancellation must not abandon a registered helper.
+    // The bounded task completes/reaps independently if its caller goes away.
+    tokio::spawn(async move {
+        use tokio::io::AsyncReadExt;
+        let mut child = crate::supervisor::spawn_tracked(&mut c)?;
+        let mut stdout = child
+            .take_stdout()
+            .context("missing OCI engine output")?
+            .take(1024 * 1024 + 1);
+        let mut reaped = false;
+        let result = tokio::time::timeout(Duration::from_secs(seconds), async {
+            let mut bytes = Vec::new();
+            stdout.read_to_end(&mut bytes).await?;
+            ensure!(
+                bytes.len() <= 1024 * 1024,
+                "OCI engine response exceeds limit"
+            );
+            let status = child.wait().await?;
+            reaped = true;
+            ensure!(
+                status.success(),
+                "OCI engine operation failed (credentials and engine diagnostics withheld)"
+            );
+            Ok(bytes)
+        })
+        .await
+        .unwrap_or_else(|_| Err(anyhow::anyhow!("OCI engine timed out")));
+        if !reaped {
+            crate::apply::kill_group(child.pid() as i32);
+            let _ = child.wait().await;
+        }
+        result
     })
     .await
-    .context("OCI engine timed out")?;
-    // Engine clients do not spawn children. On cancellation kill_on_drop
-    // closes the client; engine-side reconciliation is always required.
-    result
+    .context("OCI engine helper task failed")?
 }
 
 fn args(values: &[&str]) -> Vec<String> {
@@ -675,5 +686,30 @@ mod tests {
             error.contains("diagnostics withheld"),
             "credential failure was not sanitized"
         );
+    }
+    #[tokio::test]
+    #[ignore = "requires local Docker Engine"]
+    async fn oci_real_engine_reaps_timed_out_and_cancelled_helpers() {
+        let filter = format!("label=io.suifleet.cancel-test={}", std::process::id());
+        let command = args(&["events", "--filter", &filter]);
+        assert!(output(public(), &command, 1)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("timed out"));
+        let cancelled = tokio::spawn(async move { output(public(), &command, 1).await });
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        cancelled.abort();
+        let _ = cancelled.await;
+        tokio::time::sleep(Duration::from_millis(1300)).await;
+        // Check actual live client processes, rather than mock a cleanup result.
+        for entry in std::fs::read_dir("/proc").unwrap().flatten() {
+            if let Ok(bytes) = std::fs::read(entry.path().join("cmdline")) {
+                assert!(
+                    !bytes.windows(filter.len()).any(|w| w == filter.as_bytes()),
+                    "cancelled engine helper survived its deadline"
+                );
+            }
+        }
     }
 }
