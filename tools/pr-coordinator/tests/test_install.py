@@ -1,0 +1,22 @@
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import unittest
+
+
+class ScopedInstall(unittest.TestCase):
+    def test_coordinator_only_preserves_running_dependencies_and_config(self):
+        source=Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as directory:
+            home=Path(directory)
+            binary=home/'bin';binary.mkdir()
+            command=binary/'systemctl';command.write_text('#!/bin/sh\nexit 0\n');command.chmod(0o755)
+            sentinels=['.local/lib/pr-coordinator/worker.py','.local/lib/pr-coordinator/dispatcher.py','.config/pr-coordinator/config.json','.config/systemd/user/pr-coordinator.service','.config/systemd/user/ticket-dispatcher.service']
+            for name in sentinels:
+                path=home/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text('preserved '+name)
+            result=subprocess.run([sys.executable,str(source/'install.py'),'--coordinator-only'],env={**os.environ,'HOME':directory,'PATH':str(binary)+os.pathsep+os.environ['PATH']},capture_output=True,text=True)
+            self.assertEqual(result.returncode,0,result.stderr)
+            for name in sentinels:self.assertEqual((home/name).read_text(),'preserved '+name)
+            self.assertEqual((home/'.local/lib/pr-coordinator/coordinator.py').read_bytes(),(source/'coordinator.py').read_bytes())
