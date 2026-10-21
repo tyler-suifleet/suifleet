@@ -1,0 +1,233 @@
+{
+  "complete_mainnet_bill": false,
+  "missing_or_excluded": [
+    "current-package device enrollment/rotation not measured; historical base fixture differs",
+    "policy/grant/group batches depend on selected scopes; historical samples retained separately",
+    "Mainnet reserve/register/certify gas and object deposits not simulated or executed",
+    "no renewal in base case; future extension gas, subsidy and owner access unquoted",
+    "base case has zero retries; additional failure/unknown-outcome exposure must be supplied",
+    "production independent key providers, threshold, quotas and availability unselected",
+    "app uses HTTP publisher; relay is an optional alternative, never automatically added",
+    "production publisher/aggregator delivery and bandwidth SLA unquoted",
+    "production reads/submissions/rate limits and SLA unquoted",
+    "production receipt history retention/availability unquoted"
+  ],
+  "accounting_basis": "Net token cashflows include refundable object deposits. Budgets/funding are not fees; future rebates are not booked until executed.",
+  "subtotals": {
+    "mainnet:estimated:FROST": "113764040",
+    "testnet:estimated:MIST": "12040316576"
+  },
+  "exposure_not_cost": {
+    "mainnet:budget_MIST": 0,
+    "mainnet:unknown_MIST": 0,
+    "mainnet:unknown_FROST": 0,
+    "testnet:budget_MIST": 0,
+    "testnet:unknown_MIST": 0,
+    "testnet:unknown_FROST": 0
+  },
+  "lines": [
+    {
+      "name": "artifact gross storage",
+      "kind": "estimated",
+      "total": "30724056",
+      "unit": "FROST",
+      "effects": null,
+      "per_release": "7681014",
+      "per_device": "30724.056"
+    },
+    {
+      "name": "artifact gross write",
+      "kind": "estimated",
+      "total": "27908180",
+      "unit": "FROST",
+      "effects": null,
+      "per_release": "6977045",
+      "per_device": "27908.18"
+    },
+    {
+      "name": "recipe gross storage",
+      "kind": "estimated",
+      "total": "28889784",
+      "unit": "FROST",
+      "effects": null,
+      "per_release": "7222446",
+      "per_device": "28889.784"
+    },
+    {
+      "name": "recipe gross write",
+      "kind": "estimated",
+      "total": "26242020",
+      "unit": "FROST",
+      "effects": null,
+      "per_release": "6560505",
+      "per_device": "26242.02"
+    },
+    {
+      "name": "historical Testnet extrapolation: create confidential deployment",
+      "kind": "estimated",
+      "total": "54008000000",
+      "unit": "MIST",
+      "effects": {
+        "computationCost": 1000000,
+        "storageCost": 12502000,
+        "storageRebate": 0,
+        "nonRefundableStorageFee": 0
+      },
+      "per_release": "13502000000",
+      "per_device": "54008000"
+    },
+    {
+      "name": "historical Testnet extrapolation: device receipt",
+      "kind": "estimated",
+      "total": "5006272000",
+      "unit": "MIST",
+      "effects": {
+        "computationCost": 1000000,
+        "storageCost": 7926800,
+        "storageRebate": 7675232,
+        "nonRefundableStorageFee": 768
+      },
+      "per_release": "1251568000",
+      "per_device": "5006272"
+    },
+    {
+      "name": "historical Testnet extrapolation: delete confidential deployment",
+      "kind": "estimated",
+      "total": "-47006100000",
+      "unit": "MIST",
+      "effects": {
+        "computationCost": 1000000,
+        "storageCost": 0,
+        "storageRebate": 12751525,
+        "nonRefundableStorageFee": 1275
+      },
+      "per_release": "-11751525000",
+      "per_device": "-47006100"
+    },
+    {
+      "name": "artifact sponsored Testnet Walrus operation",
+      "kind": "estimated",
+      "total": "11949504",
+      "unit": "MIST",
+      "effects": {
+        "computationCost": 1000000,
+        "storageCost": 115732800,
+        "storageRebate": 113745424,
+        "nonRefundableStorageFee": 11376
+      },
+      "per_release": "2987376",
+      "per_device": "11949.504"
+    },
+    {
+      "name": "artifact sponsored Testnet Walrus operation",
+      "kind": "estimated",
+      "total": "4122784",
+      "unit": "MIST",
+      "effects": {
+        "computationCost": 1000000,
+        "storageCost": 2994400,
+        "storageRebate": 2963704,
+        "nonRefundableStorageFee": 296
+      },
+      "per_release": "1030696",
+      "per_device": "4122.784"
+    },
+    {
+      "name": "recipe sponsored Testnet Walrus operation",
+      "kind": "estimated",
+      "total": "11949504",
+      "unit": "MIST",
+      "effects": {
+        "computationCost": 1000000,
+        "storageCost": 115732800,
+        "storageRebate": 113745424,
+        "nonRefundableStorageFee": 11376
+      },
+      "per_release": "2987376",
+      "per_device": "11949.504"
+    },
+    {
+      "name": "recipe sponsored Testnet Walrus operation",
+      "kind": "estimated",
+      "total": "4122784",
+      "unit": "MIST",
+      "effects": {
+        "computationCost": 1000000,
+        "storageCost": 2994400,
+        "storageRebate": 2963704,
+        "nonRefundableStorageFee": 296
+      },
+      "per_release": "1030696",
+      "per_device": "4122.784"
+    },
+    {
+      "name": "current-package device enrollment/rotation not measured; historical base fixture differs",
+      "kind": "unquoted",
+      "total": null,
+      "unit": "USD"
+    },
+    {
+      "name": "policy/grant/group batches depend on selected scopes; historical samples retained separately",
+      "kind": "unquoted",
+      "total": null,
+      "unit": "USD"
+    },
+    {
+      "name": "Mainnet reserve/register/certify gas and object deposits not simulated or executed",
+      "kind": "unquoted",
+      "total": null,
+      "unit": "USD"
+    },
+    {
+      "name": "no renewal in base case; future extension gas, subsidy and owner access unquoted",
+      "kind": "unquoted",
+      "total": null,
+      "unit": "USD"
+    },
+    {
+      "name": "base case has zero retries; additional failure/unknown-outcome exposure must be supplied",
+      "kind": "unquoted",
+      "total": null,
+      "unit": "USD"
+    },
+    {
+      "name": "production independent key providers, threshold, quotas and availability unselected",
+      "kind": "unquoted",
+      "total": null,
+      "unit": "USD"
+    },
+    {
+      "name": "app uses HTTP publisher; relay is an optional alternative, never automatically added",
+      "kind": "unquoted",
+      "total": null,
+      "unit": "USD"
+    },
+    {
+      "name": "production publisher/aggregator delivery and bandwidth SLA unquoted",
+      "kind": "unquoted",
+      "total": null,
+      "unit": "USD"
+    },
+    {
+      "name": "production reads/submissions/rate limits and SLA unquoted",
+      "kind": "unquoted",
+      "total": null,
+      "unit": "USD"
+    },
+    {
+      "name": "production receipt history retention/availability unquoted",
+      "kind": "unquoted",
+      "total": null,
+      "unit": "USD"
+    }
+  ],
+  "blob_quotes": [],
+  "token_reconciliation_residuals": {},
+  "mainnet_usd_subtotals_not_bill": {
+    "mainnet:estimated:FROST": "0.0045775532561304"
+  },
+  "comparison": {
+    "status": "unquoted",
+    "break_even_devices": null
+  }
+}

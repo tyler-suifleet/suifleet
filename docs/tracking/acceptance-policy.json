@@ -435,14 +435,18 @@
     },
     "SF-054": {
       "deferred_checks": [
-        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge.",
+        "Final production Seal/key-provider, publisher/relay/gateway/RPC/indexer account/credential and manual real-wallet acceptance. Keep all unquoted costs explicit; this is not a full measured production invoice."
       ],
       "acceptance_issues": [
-        "https://github.com/tyler-suifleet/suifleet/issues/32"
+        "https://github.com/tyler-suifleet/suifleet/issues/32",
+        "https://github.com/tyler-suifleet/suifleet/issues/159"
       ],
       "retained_gates": [
-        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
-      ]
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver.",
+        "Read-only Mainnet rate verification, exact client encoding, authorized Testnet effects and token accounting, meaningful offline arithmetic/failure-path tests and fresh independent review. No actionable software/security findings or failing CI are waived."
+      ],
+      "authorization": "User instruction 2026-10-21: implement and review SF-054 before final production provider/account/credential and manual real-wallet acceptance. These checks, physical hardware and actual Mainnet acceptance remain required in SF-031/#32 and SF-087/#159; no production credentials, Mainnet writes, paid purchases or physical programming are authorized."
     },
     "SF-057": {
       "deferred_checks": [
