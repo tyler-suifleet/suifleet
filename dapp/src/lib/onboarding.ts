@@ -9,13 +9,6 @@ export function onboardingConfig(network: string, apiKey?: string, googleClientI
     : "Google sign-in is not configured for this build. Use Slush web or an extension wallet." };
 }
 
-export function validateRecipient(recipient: string, sender: string): string {
-  if (!isValidSuiAddress(recipient)) throw new Error("Enter the full destination Sui address.");
-  const normalized = normalizeSuiAddress(recipient);
-  if (normalized === normalizeSuiAddress(sender)) throw new Error("Choose a different owner address.");
-  return normalized;
-}
-
 export function registrationInput(name: string, deviceAddress: string, arch: string) {
   if (!name.trim()) throw new Error("Enter a device name.");
   if (!isValidSuiAddress(deviceAddress)) throw new Error("Enter the full device address from the daemon, not your owner wallet address.");

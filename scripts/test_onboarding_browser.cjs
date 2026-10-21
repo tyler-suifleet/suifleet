@@ -33,6 +33,13 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     await page.getByRole("button", { name: "SuiFleet Acceptance Wallet", exact: false }).click();
     await page.getByText("Fund this address before registering.", { exact: false }).waitFor();
     assert.equal(await register.isDisabled(), true);
+    const handover = page.getByRole("link", { name: "Open fleet handover", exact: true });
+    assert.equal(await handover.getAttribute("href"), "/handover");
+    await page.getByText("The recipient must confirm control", { exact: false }).waitFor();
+    await page.getByText("Handover is resumable, not fleet-wide atomic", { exact: false }).waitFor();
+    assert.equal(await page.getByRole("button", { name: "Transfer owner capability" }).count(), 0);
+    assert.equal(await page.getByRole("textbox", { name: "New owner address" }).count(), 0);
+
     await page.evaluate(() => window.acceptance.fund());
     await page.getByRole("button", { name: "Refresh account and inventory" }).click();
     await page.waitForFunction(() => !document.querySelector('button.bg-blue-600').disabled);
@@ -60,7 +67,7 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     await page.evaluate(() => window.acceptance.disconnect());
     await page.getByText("Not connected", { exact: true }).waitFor();
     assert.deepEqual(errors, []);
-    console.log(`PASS: browser onboarding ${manifest.network} connect, zero-gas gate, registration, rejection, wall-clock/epoch expiry, network mismatch and disconnect; fixture wallet/network only`);
+    console.log(`PASS: browser onboarding ${manifest.network} connect, recipient-confirmed handover guidance, zero-gas gate, registration, rejection, wall-clock/epoch expiry, network mismatch and disconnect; fixture wallet/network only`);
   } finally {
     if (browser) await browser.close();
     if (server) await new Promise((resolve) => server.close(resolve));

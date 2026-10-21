@@ -116,15 +116,6 @@ export function buildRegisterDeviceTx(
   return tx;
 }
 
-/** Transfer existing activated-device authority without touching legacy objects or registry identity. */
-export function buildTransferDeviceOwnershipTx(device: DeviceRef, recipient: string): Transaction {
-  requireManifest();
-  if (!device.ownerCapId) throw new Error("Select an activated device you own.");
-  const tx = new Transaction();
-  tx.transferObjects([tx.object(device.ownerCapId)], tx.pure.address(recipient));
-  return tx;
-}
-
 /** Take an owned (unactivated) Device into registry custody so it is trusted. */
 export function buildActivateDeviceTx(deviceObjectId: string, sender: string): Transaction {
   requireManifest();

@@ -6,8 +6,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Transaction } from "@mysten/sui/transactions";
 import { NETWORK } from "@/lib/constants";
 import { verifyDeployment } from "@/lib/deployment-manifest";
-import { onboardingConfig, registrationInput, validateRecipient } from "@/lib/onboarding";
-import { buildRegisterDeviceTx, buildTransferDeviceOwnershipTx } from "@/lib/sui";
+import { onboardingConfig, registrationInput } from "@/lib/onboarding";
+import { buildRegisterDeviceTx } from "@/lib/sui";
 import { useDevices } from "@/hooks/useDevices";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 
@@ -90,22 +90,11 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
       {error?.address === account.address && <p role="alert">{error.text}</p>}
     </section>}
     {account && <section className="bg-white p-5 rounded border space-y-3">
-      <h2 className="font-semibold">Move device ownership</h2>
-      <p>Connect the destination wallet separately and verify its full address, or use an initialized Sui multisig address. Transferring an owner capability gives that address device lifecycle authority and removes yours. This cannot be undone by this account. Existing group administration and deployment history stay with their original creator; recreate groups and desired deployments under the new owner.</p>
-      <form key={account.address} onSubmit={(event) => {
-        event.preventDefault(); const data = new FormData(event.currentTarget);
-        try {
-          const recipient = validateRecipient(String(data.get("recipient")), account.address);
-          const device = devices.data?.find((d) => d.objectId === data.get("device"));
-          if (!device?.ownerCapId) throw new Error("Select an activated device you own.");
-          if (!window.confirm(`Transfer ${device.name} to ${recipient}? You will lose owner authority.`)) return;
-          void submit(buildTransferDeviceOwnershipTx(device, recipient));
-        } catch (cause) { setError({ address: account.address, text: (cause as Error).message }); }
-      }} className="space-y-3">
-        <label className="block">Device <select name="device" required className="border p-2 ml-2"><option value="">Select device</option>{devices.data?.filter((d) => d.ownerCapId).map((d) => <option key={d.objectId} value={d.objectId}>{d.name} ({d.objectId})</option>)}</select></label>
-        <label className="block">New owner address <input name="recipient" required className="border p-2 block w-full" /></label>
-        <button disabled={!ready || !devices.isSuccess || mutation.isPending} className="border rounded p-2 disabled:opacity-40">Transfer owner capability</button>
-      </form>
+      <h2 className="font-semibold">Move fleet ownership</h2>
+      <p>While this account can still sign, use recipient-confirmed fleet handover to move to an extension wallet or multisig. The recipient must confirm control before you execute any transfer; verify its signing and recovery procedure first.</p>
+      <p>Inventory device owner capabilities, group administration and retained native deployment records together. Pause rollouts and admission before starting. Handover is resumable, not fleet-wide atomic: incomplete transfers can stop existing deployments from applying. Cancellation or expiry does not undo completed steps.</p>
+      <p>Catalog-bound deployments need replacement; credentials, provider access and funds need separate cutover. Follow the handover inventory and verify the recipient’s authority before retiring this account.</p>
+      <a className="text-blue-700 underline" href="/handover">Open fleet handover</a>
     </section>}
   </div>;
 }

@@ -1,7 +1,7 @@
 # Wallet onboarding (SF-088)
 
 `/get-started` guides connection, deployment/network verification, gas funding,
-registration and device custody transfer. The header wallet menu still supports
+registration and recipient-confirmed fleet handover. The header wallet menu still supports
 installed Wallet Standard extensions. dApp Kit now also registers Slush web
 (default origin `https://my.slush.app`, metadata at
 `https://api.slush.app/api/wallet/metadata`). An installed Slush extension takes
@@ -64,12 +64,18 @@ The address depends on the Google account, OAuth audience and Enoki app salt.
 Keep account recovery and MFA current. Losing the account or access to its salt
 service can prevent recovery; creating a different app/client/salt can produce a
 different address. SuiFleet cannot reset ownership. While access remains, use the
-get-started transfer form to transfer each activated device’s DeviceOwnerCap to a
-verified extension address or initialized multisig. This preserves the existing
-contract authority/revocation and old-package isolation boundary. It does not
-transfer group administrator fields, historical deployment creators, gas coins or
-other assets. Recreate groups and desired deployments under the new owner and
-review old deployment/role permissions separately. Recommend hardware-backed or
+Fleet handover (`/handover`) flow described in [FLEET_HANDOVER.md](FLEET_HANDOVER.md)
+to move to an extension wallet or native multisig. The recipient must sign its
+confirmation before the source executes any transfer; a typed address alone does
+not establish control. Verify signing and recovery first. Inventory device owner
+capabilities, group administration and retained native deployment creators together;
+pause rollouts/admission and follow the documented cutover order. Handover is
+resumable, not fleet-wide atomic: partial cutovers can prevent existing deployments
+from applying, and cancellation/expiry does not reverse completed steps.
+Catalog-bound deployments require replacement. Credentials, provider access, gas
+coins and other funds require separate cutover. Verify recipient authority and
+old-owner rejection before retiring the source. Existing contract revocation and
+old-package isolation protections remain unchanged. Recommend hardware-backed or
 multisig custody for business fleets before large deposits.
 
 ## First run and SF-083 extension

@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const { loader } = require('./frontend_test_utils.cjs');
-const { onboardingConfig, registrationInput, validateRecipient } = loader()('lib/onboarding.ts');
+const { onboardingConfig, registrationInput } = loader()('lib/onboarding.ts');
 const key = 'enoki_public_fixture', id = 'fixture.apps.googleusercontent.com';
 for (const network of ['localnet', 'devnet', 'unknown']) assert.equal(onboardingConfig(network, key, id).enabled, false);
 for (const network of ['testnet', 'mainnet']) {
@@ -9,26 +9,18 @@ for (const network of ['testnet', 'mainnet']) {
   assert.equal(onboardingConfig(network, key, '').enabled, false);
 }
 const sender = '0x' + '1'.repeat(64), recipient = '0x' + '2'.repeat(64);
-assert.equal(validateRecipient(recipient, sender), recipient);
-assert.throws(() => validateRecipient(sender, sender), /different owner/);
-assert.throws(() => validateRecipient('0xb', sender), /full destination/);
 assert.throws(() => registrationInput('', recipient, 'aarch64'), /device name/);
 assert.throws(() => registrationInput('Pi', '0xb', 'aarch64'), /full device address/);
 assert.throws(() => registrationInput('Pi', recipient, 'mips'), /architecture/);
 assert.deepEqual(registrationInput(' Pi ', recipient, 'aarch64'), { name: 'Pi', deviceAddress: recipient, arch: 'aarch64' });
-console.log('PASS: onboarding network/provider configuration, private-key exclusion, registration inputs and custody destination validation');
+console.log('PASS: onboarding network/provider configuration, private-key exclusion, registration inputs');
 
 process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST = require('node:fs').readFileSync(require('node:path').join(__dirname, '../manifests/fixture.localnet.json'), 'utf8');
-const { buildTransferDeviceOwnershipTx, buildRegisterDeviceTx } = loader()('lib/sui.ts');
-assert.throws(() => buildTransferDeviceOwnershipTx({ objectId: sender }, recipient), /activated device/);
-const transfer = buildTransferDeviceOwnershipTx({ objectId: sender, ownerCapId: recipient }, sender).getData();
-assert.equal(transfer.commands.length, 1);
-assert.equal(transfer.commands[0].$kind, 'TransferObjects');
-assert.equal(transfer.inputs[0].UnresolvedObject.objectId, recipient);
+const { buildRegisterDeviceTx } = loader()('lib/sui.ts');
 const register = buildRegisterDeviceTx('Pi', recipient, 'aarch64', sender).getData();
 assert.deepEqual(register.commands.map((command) => command.$kind), ['MoveCall', 'MoveCall', 'MoveCall', 'TransferObjects']);
 assert.deepEqual(register.commands.slice(0, 3).map((command) => command.MoveCall.function), ['register_device', 'issue_cap', 'activate_device']);
-console.log('PASS: registration stays one atomic PTB; ownership transfer sends only the activated owner cap; legacy devices rejected');
+console.log('PASS: registration stays one atomic PTB');
 
 const privateKeyCheck = require('node:child_process').spawnSync(process.execPath, ['--input-type=module', '-e', 'await import("./dapp/next.config.mjs")'], { cwd: require('node:path').resolve(__dirname, '..'), env: { ...process.env, NEXT_PUBLIC_ENOKI_API_KEY: 'enoki_private_fixture' }, encoding: 'utf8' });
 assert.notEqual(privateKeyCheck.status, 0);
