@@ -18,5 +18,7 @@ RUN cmake -S . -B /build -DBUILD_TESTS=OFF -DLOCALPROXY_RELEASE=ON \
     && dpkg-query -W > /package/build-versions.txt \
     && echo 8a71618acf536923e882387e8d9eca9dbc7fdbe2 > /package/source-revision.txt \
     && cd /package && sha256sum localproxy > localproxy.sha256
+USER 65534:65534
 FROM scratch AS artifact
+USER 65534:65534
 COPY --from=build /package/ /
