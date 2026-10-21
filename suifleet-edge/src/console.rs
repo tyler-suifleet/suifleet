@@ -1030,6 +1030,11 @@ async fn operate(shared: &Shared, call: &Call) -> Result<Value, &'static str> {
         "configuration" => {
             let name = component_name(call)?;
             let record = shared.configs.committed(name).map_err(|_| "unavailable")?.ok_or("not-found")?;
+            if record.sealed {
+                // Decrypted from a Seal-encrypted recipe (SF-022): not for support users.
+                return Ok(json!({"component": name, "version": bounded(&record.version, 128),
+                    "deployment": bounded(&record.deployment, 128), "withheld": "confidential recipe"}));
+            }
             let mut effective = Value::Object(record.effective);
             for pointer in &record.confidential {
                 remove_pointer(&mut effective, pointer);
@@ -1398,6 +1403,35 @@ mod tests {
         remove_pointer(&mut value, "/list/1");
         remove_pointer(&mut value, "/missing/x");
         assert_eq!(value, json!({"a": {"d": 2}, "list": [1, REDACTED]}));
+    }
+
+    #[tokio::test]
+    async fn sealed_configuration_is_withheld() {
+        let dir = std::env::temp_dir().join(format!("suifleet-console-{}", rand::random::<u128>()));
+        let configs = crate::configuration::Store::open(&dir, Path::new("/nonexistent")).unwrap();
+        let effective = |value: &str| json!({"plant": value}).as_object().unwrap().clone();
+        for (name, sealed) in [("public", false), ("sealed", true)] {
+            let record = crate::configuration::Record {
+                deployment: "0x1".into(), version: "1.0.0".into(), defaults: effective("CUSTOMER_MARKER"),
+                effective: effective("CUSTOMER_MARKER"), sealed, ..Default::default()
+            };
+            configs.stage(name, &record).unwrap();
+            configs.commit(name, "0x1").unwrap();
+        }
+        let (controls, _receiver) = mpsc::channel(1);
+        let shared = Shared {
+            settings: settings(), origins: vec![], authorities: vec![],
+            context: Context { state_dir: dir.clone(), sync: Default::default(), started_ms: 0, poll_seconds: 60 },
+            audit: Audit::open(&dir, 64 * 1024).unwrap(), configs,
+            sessions: Mutex::new(BTreeMap::new()), controls,
+        };
+        let call = |name: &str| Call { version: 1, operation: "configuration".into(), component: Some(name.into()), limit: None, after: None };
+        let public = operate(&shared, &call("public")).await.unwrap();
+        assert_eq!(public["effective"]["plant"], "CUSTOMER_MARKER");
+        let sealed = operate(&shared, &call("sealed")).await.unwrap();
+        assert_eq!(sealed["withheld"], "confidential recipe");
+        assert!(!sealed.to_string().contains("CUSTOMER_MARKER"), "{sealed}");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

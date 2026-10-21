@@ -197,8 +197,9 @@ def run(binary):
                 assert process.wait(timeout=20) == 0
                 assert spooled() == before, (spooled(), before)
                 process = start()
-                wait_for(lambda: spooled() and spooled()[-1] > before[-1], "no snapshot after the restart", process,
-                         timeout=2 * INTERVAL)
+                # The oldest file is removed before state.json counts it: wait for both.
+                wait_for(lambda: spooled() and spooled()[-1] > before[-1] and spool_state().get("dropped", 0) >= 2,
+                         "no snapshot after the restart", process, timeout=2 * INTERVAL)
                 assert len(spooled()) == 2 and spool_state()["dropped"] >= 2, (spooled(), spool_state())
                 print("PASS: daemon restart kept the spool; sequence continued above it")
 

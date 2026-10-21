@@ -12,6 +12,8 @@ use tracing::{info, warn};
 const MAX_RECIPE_BYTES: usize = 1024 * 1024;
 
 pub struct WalrusClient {
+    /// Seal decryption for confidential blobs (SF-022), when configured.
+    seal: Option<std::sync::Arc<crate::seal_client::Seal>>,
     aggregator_url: String,
     http: reqwest::Client,
     max_artifact_bytes: u64,
@@ -32,6 +34,7 @@ enum Failure {
 impl WalrusClient {
     pub fn new(config: &WalrusConfig) -> Self {
         Self {
+            seal: None,
             aggregator_url: config.aggregator_url.trim_end_matches('/').to_owned(),
             http: reqwest::Client::builder()
                 .connect_timeout(Duration::from_secs(30))
@@ -44,6 +47,47 @@ impl WalrusClient {
             backoff: Duration::from_secs(1),
             deadline: Duration::from_secs(config.download_timeout_seconds),
         }
+    }
+
+    pub fn with_seal(mut self, seal: Option<std::sync::Arc<crate::seal_client::Seal>>) -> Self {
+        self.seal = seal;
+        self
+    }
+
+    /// Whether only Seal-encrypted recipes and artifacts may be applied.
+    pub fn confidential_only(&self) -> bool {
+        self.seal.as_ref().is_some_and(|seal| seal.required())
+    }
+
+    /// Decrypt a confidential blob (`MAGIC || EncryptedObject`) in memory and
+    /// check its plaintext digest; returns the plaintext. Nothing is written.
+    pub async fn open(&self, mut blob: Vec<u8>, kind: crate::seal::Kind, sha256: &str) -> anyhow::Result<zeroize::Zeroizing<Vec<u8>>> {
+        let seal = self.seal.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("this {} is Seal-encrypted, but confidential delivery is not configured ([seal])", kind.as_str())
+        })?;
+        anyhow::ensure!(
+            blob.len() as u64 <= seal.max_plaintext_bytes() + 64 * 1024,
+            "confidential {} exceeds the {} byte decryption limit",
+            kind.as_str(),
+            seal.max_plaintext_bytes()
+        );
+        let range = seal.decrypt(&mut blob, kind, sha256).await;
+        let range = match range {
+            Ok(range) => range,
+            Err(error) => {
+                zeroize::Zeroize::zeroize(&mut blob);
+                return Err(error);
+            }
+        };
+        let mut blob = zeroize::Zeroizing::new(blob);
+        blob.copy_within(range.clone(), 0);
+        blob.truncate(range.len());
+        anyhow::ensure!(
+            hex::encode(Sha256::digest(blob.as_slice())) == sha256.to_ascii_lowercase(),
+            "decrypted {} SHA-256 differs from the on-chain digest",
+            kind.as_str()
+        );
+        Ok(blob)
     }
 
     fn url(&self, blob_id: &str) -> String {

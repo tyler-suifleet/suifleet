@@ -1,0 +1,9 @@
+[package]
+name = "seal_test_key_server"
+version = "0.0.1"
+edition = "2024.beta"
+
+# Test fixture for disposable localnets only (scripts/test_seal_localnet.py):
+# the on-chain layout of Seal key server objects, which public networks get
+# from Mysten's Seal package.
+[environments]

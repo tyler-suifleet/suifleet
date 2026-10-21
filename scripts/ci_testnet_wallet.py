@@ -8,10 +8,10 @@ import sys
 
 ADDRESS = '0x99894c1ae83e8179dd05f3f419f3967c24508159fc5ddaf232af67fdf0c2dcac'
 # SF-010 suites after the package-upgrade gate, each with its own strict
-# allowance (run ceiling: 0.6 + 0.4 + 0.15 SUI). They spend real gas, so
+# allowance (run ceiling: 0.6 + 0.5 + 0.15 SUI). They spend real gas, so
 # they run only when the head changes what they test, or on a manual
 # dispatch (the `wallet` live gate); scheduled main runs skip them.
-SUITES = (('upgrade-security', 'scripts/live_upgrade_security.py', 400_000_000),
+SUITES = (('upgrade-security', 'scripts/live_upgrade_security.py', 500_000_000),
           ('wallet', 'scripts/live_wallet_gate.py', 150_000_000))
 SUITE_PATHS = ('contracts/', 'dapp/', 'interfaces/', 'suifleet-edge/', 'scripts/browser/', 'scripts/live_',
                'scripts/ci_testnet', 'scripts/deployment_manifest.py', 'scripts/testnet_budget.py',

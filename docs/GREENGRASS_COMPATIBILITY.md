@@ -52,7 +52,7 @@ There is no AWS IPC wire compatibility or embedded MQTT broker; LAN client devic
 
 The translator is [`dapp/src/lib/greengrass-recipe.ts`](../dapp/src/lib/greengrass-recipe.ts). Operators use it in two places:
 
-- the **Import AWS Greengrass recipe** panel on the dApp's Components page, which uploads the bound artifacts and translated recipes and registers an immutable catalog version (accepted with the Slush extension on Sui and Walrus testnet: [receipt](validation/sf037-recipe-translation.json), `extension_wallet_testnet`);
+- the **Import AWS Greengrass recipe** panel on the dApp's Components page, which uploads the bound artifacts and translated recipes and registers an immutable catalog version. Uploads follow the panel's delivery choice: Seal-encrypted under a chosen access policy by default, or explicitly acknowledged public delivery ([CONFIDENTIAL_DELIVERY.md](CONFIDENTIAL_DELIVERY.md)). Its Slush extension-wallet acceptance on Sui and Walrus testnet ([receipt](validation/sf037-recipe-translation.json), `extension_wallet_testnet`) predates SF-022 and used unencrypted uploads;
 - the offline CLI:
 
   ```bash
