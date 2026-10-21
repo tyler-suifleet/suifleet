@@ -106,6 +106,10 @@ expectations. No AWS upstream behavior is newly asserted by these local contract
 
 ## Evidence and closure
 
+SF-078 adds the [native SNS publisher](SNS.md), with actual SDK HTTP emulator
+and real-daemon durable pub/sub evidence. The pure reference fields below remain
+specification-only; live AWS and physical target acceptance are unrun.
+
 SF-070 adds a [native industrial collector](INDUSTRIAL.md) for Modbus (TCP, TLS,
 RTU) and OPC UA (policy None and Basic256Sha256), with deterministic simulators.
 Collector-to-simulator, real-daemon durable-stream and cross-implementation

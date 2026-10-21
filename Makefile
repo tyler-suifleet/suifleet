@@ -499,6 +499,15 @@ test-sitewise:
 	  -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:?set pinned dev image}" \
 	  sh -ec 'python3 -m unittest discover -s scripts/tests -p test_sitewise_export.py -v; python3 scripts/test_streams.py --sitewise'
 
+# SF-078: SDK wheels prepared as for test-firehose. Actual daemon pub/sub and
+# signed SNS SDK requests to a local emulator, in a disposable offline container.
+.PHONY: test-sns
+test-sns:
+	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 \
+	  -e PYTHONPATH=/workspace/.ci-cache/aws-python \
+	  -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:?set pinned dev image}" \
+	  sh -ec 'python3 -m unittest discover -s scripts/tests -p test_sns_publish.py -v; python3 scripts/test_sns.py'
+
 # SF-069 function manager (docs/LAMBDA.md): real function processes against a
 # local IPC endpoint, then the real daemon with distinct component UIDs. Needs
 # the debug daemon/shim build; offline, disposable root container.

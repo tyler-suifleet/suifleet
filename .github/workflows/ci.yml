@@ -81,6 +81,9 @@ jobs:
       - name: Firehose exporter with local SDK emulator and durable daemon streams
         run: make test-firehose SUIFLEET_DEV_IMAGE=suifleet-dev:ci
 
+      - name: SNS publisher with local SDK emulator and durable daemon pub/sub
+        run: make test-sns SUIFLEET_DEV_IMAGE=suifleet-dev:ci
+
       - name: Function manager processes, subscriptions and daemon restart
         run: make test-lambda SUIFLEET_DEV_IMAGE=suifleet-dev:ci
 
