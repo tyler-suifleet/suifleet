@@ -44,9 +44,14 @@ PUNCT_CANARIES = ('PUNCTSUFFIXCANARY', 'QUOTEDSUFFIXCANARY', 'LEADINGCANARY', 'C
 PEM_CUT = 'CUTBODYCANARY' + 'A' * 51
 PEM_FULL = 'FULLBODYCANARY' + 'A' * 50
 PEM_OPEN = 'OPENBODYCANARY' + 'A' * 50
-# Synthetic quoted credential values spanning log lines, with escaped quotes,
-# and the redacted view of each line; the last value is never closed.
+# Synthetic quoted credential values spanning log lines, with escaped quotes
+# and a backslash escaping an LF or CRLF line break, and the redacted view of
+# each line; the last value is never closed.
 MULTILINE_LOG = (
+    ('bs password="alpha\\', 'bs password="[redacted]'),
+    ('\\"BSLFSUFFIXCANARY" kept', '[redacted]" kept'),
+    ('crlf pin="beta\\\r', 'crlf pin="[redacted]'),
+    ('\\"CRLFSUFFIXCANARY" done', '[redacted]" done'),
     ('multi passphrase="alpha', 'multi passphrase="[redacted]'),
     ('MULTISUFFIXCANARY" kept', '[redacted]" kept'),
     ('esc token="a\\"ESCFIRSTCANARY', 'esc token="[redacted]'),
@@ -328,9 +333,9 @@ def run(browser=False):
             # byte-boundary cut (svc2's tail begins inside its first block).
             wait_for(lambda: c.call('logs', token=ops['token'], component='svc2', limit=1)['data']['lines'] == ['[redacted]'] and
                      'OPENSUFFIXCANARY' in (state / 'supervised/svc2/component.log').read_text(), 'svc2 log incomplete', process)
-            assert (state / 'supervised/svc2/component.log').read_text().endswith('\n'.join(line for line, _ in MULTILINE_LOG) + '\n')
+            assert (state / 'supervised/svc2/component.log').read_bytes().endswith(('\n'.join(line for line, _ in MULTILINE_LOG) + '\n').encode())
             assert (state / 'supervised/svc2/component.log').stat().st_size > 8 * 1024
-            for limit in (1, 2, 3, 4, 5, 6, 8, 200):
+            for limit in (*range(1, len(MULTILINE_LOG) + 3), 200):
                 lines = c.call('logs', token=ops['token'], component='svc2', limit=limit)['data']['lines']
                 # The 8 KiB tail holds fewer than 200 of svc2's lines.
                 assert len(lines) == limit if limit < 100 else 0 < len(lines) < limit, limit

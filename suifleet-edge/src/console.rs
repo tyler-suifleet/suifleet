@@ -400,58 +400,73 @@ struct LogState {
 /// the lines and the state at the end.
 fn redact_log(text: &str, mut state: LogState) -> (Vec<String>, LogState) {
     state.in_block |= text.find("-----END").is_some_and(|end| text.find("-----BEGIN").is_none_or(|begin| end < begin));
-    let lines = text.lines().map(|line| {
-        let trimmed = line.trim();
-        if state == LogState::default() && trimmed.len() >= 40 && trimmed.bytes().all(|b| b.is_ascii_alphanumeric() || b"+/=".contains(&b)) {
-            return REDACTED.to_owned();
-        }
-        let mut out = String::new();
-        let mut rest = line;
-        loop {
-            if let Some(open) = state.quote {
-                // Markers inside the value still count, failing closed.
-                match quoted_end(rest, open) {
-                    Ok(end) => {
-                        out.push_str(REDACTED);
-                        out.push(open.0);
-                        state.in_block = pem_after(rest[..end].as_bytes(), state.in_block);
-                        rest = &rest[end..];
-                        state.quote = None;
-                    }
-                    Err(open) => {
-                        out.push_str(REDACTED);
-                        state.in_block = pem_after(rest.as_bytes(), state.in_block);
-                        state.quote = Some(open);
-                        break;
-                    }
-                }
-            } else if state.in_block {
-                let Some(end) = rest.find("-----END") else {
-                    out.push_str(REDACTED);
-                    break;
-                };
-                let close = rest[end + 8..].find("-----").map(|t| end + 8 + t + 5).unwrap_or(rest.len());
-                out.push_str(REDACTED);
-                rest = &rest[close..];
-                state.in_block = false;
-            } else {
-                let begin = rest.find("-----BEGIN");
-                let (redacted, open) = redact_words(&rest[..begin.unwrap_or(rest.len())]);
-                out.push_str(&redacted);
-                state.quote = open;
-                match begin {
-                    // A BEGIN inside an open value is handled with the value.
-                    Some(begin) => {
-                        rest = &rest[begin..];
-                        state.in_block |= open.is_none();
-                    }
-                    None => break,
-                }
-            }
+    let lines = text.split_inclusive('\n').map(|line| {
+        // The separator is part of an open value (it consumes a pending
+        // escape, as in `redact_text`); only the last line may lack one.
+        let (line, separated) = match line.strip_suffix('\n') {
+            Some(line) => (line.strip_suffix('\r').unwrap_or(line), true),
+            None => (line, false),
+        };
+        let out = redact_line(line, &mut state);
+        if let (true, Some((quote, _))) = (separated, state.quote) {
+            state.quote = Some((quote, false));
         }
         out
     }).collect();
     (lines, state)
+}
+
+/// One line of `redact_log`, without its separator.
+fn redact_line(line: &str, state: &mut LogState) -> String {
+    let trimmed = line.trim();
+    if *state == LogState::default() && trimmed.len() >= 40 && trimmed.bytes().all(|b| b.is_ascii_alphanumeric() || b"+/=".contains(&b)) {
+        return REDACTED.to_owned();
+    }
+    let mut out = String::new();
+    let mut rest = line;
+    loop {
+        if let Some(open) = state.quote {
+            // Markers inside the value still count, failing closed.
+            match quoted_end(rest, open) {
+                Ok(end) => {
+                    out.push_str(REDACTED);
+                    out.push(open.0);
+                    state.in_block = pem_after(rest[..end].as_bytes(), state.in_block);
+                    rest = &rest[end..];
+                    state.quote = None;
+                }
+                Err(open) => {
+                    out.push_str(REDACTED);
+                    state.in_block = pem_after(rest.as_bytes(), state.in_block);
+                    state.quote = Some(open);
+                    break;
+                }
+            }
+        } else if state.in_block {
+            let Some(end) = rest.find("-----END") else {
+                out.push_str(REDACTED);
+                break;
+            };
+            let close = rest[end + 8..].find("-----").map(|t| end + 8 + t + 5).unwrap_or(rest.len());
+            out.push_str(REDACTED);
+            rest = &rest[close..];
+            state.in_block = false;
+        } else {
+            let begin = rest.find("-----BEGIN");
+            let (redacted, open) = redact_words(&rest[..begin.unwrap_or(rest.len())]);
+            out.push_str(&redacted);
+            state.quote = open;
+            match begin {
+                // A BEGIN inside an open value is handled with the value.
+                Some(begin) => {
+                    rest = &rest[begin..];
+                    state.in_block |= open.is_none();
+                }
+                None => break,
+            }
+        }
+    }
+    out
 }
 
 fn bounded(text: &str, limit: usize) -> String {
@@ -1315,6 +1330,19 @@ mod tests {
         assert!(!leaked(&out), "PEM inside value leaked");
         assert_eq!(out.last().unwrap(), "after");
         assert_eq!(state, LogState::default());
+        // A backslash ending a line escapes the line break, as in
+        // `redact_text`, not the next line's first character (LF and CRLF).
+        for text in ["password=\"alpha\\\n\\\"CANARY_SUFFIX\" after", "password=\"alpha\\\r\n\\\"CANARY_SUFFIX\" after"] {
+            assert!(!redact_text(text).contains("CANARY"));
+            let (out, state) = redact_log(text, LogState::default());
+            assert!(!leaked(&out), "escaped line break leaked");
+            assert_eq!(out, ["password=\"[redacted]", "[redacted]\" after"]);
+            assert_eq!(state, LogState::default());
+        }
+        // Only the final line of a tail may end with a pending escape.
+        assert_eq!(redact_log("pin=\"a\\", LogState::default()).1, LogState { in_block: false, quote: Some(('"', true)) });
+        assert_eq!(redact_log("pin=\"a\\\n", LogState::default()).1, open('"'));
+        assert_eq!(redact_log("pin=\"a\\\r\n", LogState::default()).1, open('"'));
     }
 
     #[test]
@@ -1331,6 +1359,19 @@ mod tests {
         let (out, end) = redact_log(&text, state);
         assert!(!out.iter().any(|l| l.contains("SECRETPART")), "cut value leaked");
         assert_eq!(out[out.len() - 2..], ["[redacted]\" kept", "ok"]);
+        assert_eq!(end, LogState::default());
+        // The line before the cut ends with a backslash: the break consumes
+        // it, so the tail (exactly the continuation line and a filler line)
+        // opens with an escaped quote.
+        let continuation = "\\\"CANARY_CUT\" kept\n";
+        let filler = ".".repeat(MAX_LOG_BYTES as usize - 2 - continuation.len());
+        std::fs::write(&path, format!("noise passphrase=\"start\\\n{continuation}{filler}\n")).unwrap();
+        let (text, state) = tail(&path).unwrap();
+        assert!(text.starts_with("\\\"CANARY_CUT"));
+        assert_eq!(state, LogState { in_block: false, quote: Some(('"', false)) });
+        let (out, end) = redact_log(&text, state);
+        assert!(!out.iter().any(|l| l.contains("CANARY")), "escaped cut leaked");
+        assert_eq!(out, ["[redacted]\" kept".to_owned(), filler]);
         assert_eq!(end, LogState::default());
         // Closed before the tail: nothing carried.
         std::fs::write(&path, format!("passphrase=\"a\nb\" c\n{}", "ok line\n".repeat(2000))).unwrap();
