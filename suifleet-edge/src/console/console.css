@@ -1,0 +1,9 @@
+body { font-family: system-ui, sans-serif; margin: 1.5rem; max-width: 70rem; }
+header { display: flex; justify-content: space-between; align-items: baseline; }
+nav, #component { display: flex; gap: .5rem; flex-wrap: wrap; margin: 1rem 0; }
+button { padding: .3rem .8rem; }
+button[disabled] { opacity: .4; }
+pre { background: #f4f4f4; padding: 1rem; overflow: auto; white-space: pre-wrap; }
+table { border-collapse: collapse; }
+td, th { border: 1px solid #ccc; padding: .2rem .5rem; text-align: left; }
+.link { cursor: pointer; text-decoration: underline; }

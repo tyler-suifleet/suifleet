@@ -71,6 +71,7 @@ test-ota:
 	$(RUN) python3 scripts/test_telemetry.py
 	$(RUN) python3 scripts/test_logs.py
 	$(RUN) python3 scripts/test_cloudwatch_logs.py
+	$(RUN) python3 scripts/test_console.py
 	$(RUN) python3 scripts/test_rollout.py
 
 # Fleet service configuration, root only in a disposable network-none container

@@ -513,6 +513,15 @@ and revocation behavior, and `make test-aws-credentials`. This opt-in companion
 does not use the Sui/Seal identity or grant shared-UID supervised processes access.
 Live AWS account/service acceptance remains unauthorized and unrun.
 
+## Local support console (SF-079)
+
+See [LOCAL_CONSOLE.md](LOCAL_CONSOLE.md). The optional `[console]` serves an
+authenticated, audited diagnostic API/UI on a loopback address only; reach it
+remotely with `ssh -L 1441:127.0.0.1:1441`. Generate tokens with
+`suifleet --console-token` and configure only their hashes. Support operations
+are limited to the enabled `start`/`stop`/`restart` set. The audit log is
+`<state_dir>/console/audit.jsonl`; preserve it with the journal.
+
 ## Staged rollouts (SF-017)
 
 See [staged rollout operation and recovery](STAGED_ROLLOUTS.md) for immutable cohorts,

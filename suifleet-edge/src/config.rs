@@ -83,6 +83,9 @@ pub struct Config {
     /// Local device shadows and cloud sync (SF-033); none when omitted.
     #[serde(default)]
     pub shadows: Option<ShadowsConfig>,
+    /// Local support console (SF-079, docs/LOCAL_CONSOLE.md); none when omitted.
+    #[serde(default)]
+    pub console: Option<crate::console::Settings>,
     /// The AWS IoT Core connection (SF-061); none when omitted.
     #[serde(default)]
     pub aws_iot: Option<crate::iotcore::IotConfig>,
@@ -642,6 +645,7 @@ impl Config {
         let mut cfg: Self = toml::from_str(&raw)?;
         if let Some(ipc) = &cfg.ipc { ipc.validate()?; }
         if let Some(pubsub) = &cfg.pubsub { pubsub.validate(cfg.aws_iot.is_some())?; }
+        if let Some(console) = &cfg.console { console.validate()?; }
         cfg.path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
         anyhow::ensure!(
             !cfg.daemon_update.enabled
