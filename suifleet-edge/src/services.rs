@@ -37,7 +37,8 @@ fn authorize_credential(base: &Config, kind: CredentialKind, path: &std::path::P
 fn authorize_credentials(base: &Config, services: &Services) -> anyhow::Result<()> {
     if let Some(bridge) = services.pubsub.as_ref().and_then(|p| p.bridge.as_ref()) {
         if let Some(path) = &bridge.password_file {
-            authorize_credential(base, CredentialKind::MqttPassword, path, &bridge.broker)?;
+            let broker = bridge.broker.as_deref().ok_or_else(|| anyhow::anyhow!("a bridge password_file needs a broker"))?;
+            authorize_credential(base, CredentialKind::MqttPassword, path, broker)?;
         }
     }
     for export in services.streams.iter().flat_map(|s| &s.definitions).filter_map(|d| d.export.as_ref()) {
@@ -128,7 +129,8 @@ impl Services {
     pub fn validate(&self) -> anyhow::Result<()> {
         anyhow::ensure!(self.version == 1, "unsupported services version");
         anyhow::ensure!(self.grants.len() <= 64, "too many service principals");
-        if let Some(p) = &self.pubsub { p.validate()?; }
+        // The reviewed recipe schema admits no fleet IotCore mappings (SF-061).
+        if let Some(p) = &self.pubsub { p.validate(false)?; }
         if let Some(s) = &self.streams { s.validate()?; }
         // Validate ACLs using synthetic distinct UIDs; actual UIDs are always
         // provisioned locally and validated again in effective().
@@ -189,8 +191,10 @@ pub fn effective(base: &Config, generations: &BTreeMap<String, Generation>) -> a
     } else {
         anyhow::ensure!(grants.is_empty(), "service grants require a provisioned IPC socket and UIDs");
     }
-    if let Some(p) = &cfg.pubsub { p.validate()?; }
+    if let Some(p) = &cfg.pubsub { p.validate(cfg.aws_iot.is_some())?; }
     if let Some(s) = &cfg.streams { s.validate()?; }
+    // Fleet IotCore mappings count against the local connection's AWS limits.
+    crate::config::validate_aws_iot(&cfg)?;
     Ok(cfg)
 }
 
@@ -204,6 +208,10 @@ pub struct Runtime {
     pub shadow_store: Option<Arc<Mutex<crate::shadows::Store>>>,
     pub client_devices: Option<Arc<crate::clientdevices::Authority>>,
     bridge: Option<tokio::task::JoinHandle<()>>,
+    /// AWS IoT Device Shadow sync (SF-061): the synchronizer's client, taken
+    /// at startup, and the connection side every bridge task attaches to.
+    pub aws_shadow_client: Option<crate::iotcore::ShadowClient>,
+    aws_shadows: Option<crate::iotcore::ShadowEndpoint>,
     exporters: Vec<tokio::task::JoinHandle<()>>,
     signer: Arc<dyn TxSigner>,
     binding: streams::Binding,
@@ -222,7 +230,15 @@ impl Runtime {
             .map(|store| Arc::new(Mutex::new(store)))).transpose()?;
         let broker = cfg.pubsub.as_ref().map(|p| pubsub::Broker::open(&base.runtime.state_dir.join("pubsub"), p.limits())
             .map(|b| Arc::new(Mutex::new(b)))).transpose()?;
-        let mut runtime = Self { base: base.clone(), effective: cfg, streams, broker, shadow_store: None, client_devices: None, bridge: None, exporters: vec![], signer, binding };
+        let (aws_shadow_client, aws_shadows) = match (&base.aws_iot, base.shadows.as_ref().and_then(|s| s.aws_iot.as_ref())) {
+            (Some(iot), Some(sync)) => {
+                let (client, endpoint) = crate::iotcore::shadow_channel(&iot.thing_name, &sync.shadows);
+                (Some(client), Some(endpoint))
+            }
+            _ => (None, None),
+        };
+        let mut runtime = Self { base: base.clone(), effective: cfg, streams, broker, shadow_store: None, client_devices: None, bridge: None,
+            aws_shadow_client, aws_shadows, exporters: vec![], signer, binding };
         runtime.resume()?;
         Ok(runtime)
     }
@@ -253,8 +269,17 @@ impl Runtime {
                 .and_then(|p| p.bridge.as_ref()).map(|b| b.client_id.as_str()));
         }
         if let (Some(settings), Some(broker)) = (&self.effective.pubsub, &self.broker) {
-            if let Some(bridge) = &settings.bridge {
-                self.bridge = Some(tokio::spawn(bridge::Bridge::new(bridge.clone(), broker.clone(), self.base.runtime.state_dir.join("pubsub/bridge.json"))?.run()));
+            // The bridge also carries the local [aws_iot] connection (SF-061),
+            // with or without mappings.
+            if settings.bridge.is_some() || self.base.aws_iot.is_some() {
+                let config = settings.bridge.clone().unwrap_or(bridge::BridgeConfig {
+                    broker: None, client_id: "suifleet-bridge".into(), username: None, password_file: None, keep_alive_seconds: 30, mappings: Vec::new(),
+                });
+                let mut task = bridge::Bridge::new(config, broker.clone(), self.base.runtime.state_dir.join("pubsub/bridge.json"))?;
+                if let Some(iot) = &self.base.aws_iot {
+                    task = task.with_iot_core(bridge::IotLink { config: iot.clone(), shadows: self.aws_shadows.clone() });
+                }
+                self.bridge = Some(tokio::spawn(task.run()));
             }
         }
         if let (Some(settings), Some(store)) = (&self.effective.streams, &self.streams) {
@@ -616,6 +641,20 @@ mod tests {
             "definitions":[{"name":"a","max_size":2048,"strategy_on_full":"RejectNewData"}]}})).unwrap().validate().is_err());
         assert!(serde_json::from_value::<Services>(json!({"version":1,"pubsub":{"bridge":{"broker":"127.0.0.1:1883","mappings":[
             {"source":"Pubsub","target":"LocalMqtt","topic":"#"},{"source":"LocalMqtt","target":"Pubsub","topic":"#"}]}}})).unwrap().validate().is_err());
+    }
+    #[test]
+    fn fleet_bridges_cannot_reach_the_local_aws_iot_connection() {
+        // [aws_iot] is device-local (SF-061): the reviewed recipe schema
+        // refuses fleet IotCore mappings and a fleet bridge without a broker.
+        let bridge = |bridge: serde_json::Value| serde_json::from_value::<Services>(json!({"version":1,"pubsub":{"bridge":bridge}}));
+        let error = bridge(json!({"broker":"127.0.0.1:1883","mappings":[{"source":"Pubsub","target":"IotCore","topic":"dt/#"}]})).unwrap_err().to_string();
+        assert!(error.contains("unsupported services value"), "{error}");
+        assert!(bridge(json!({"mappings":[{"source":"Pubsub","target":"LocalMqtt","topic":"dt/#"}]})).is_err());
+        let local = bridge(json!({"broker":"127.0.0.1:1883","mappings":[{"source":"Pubsub","target":"LocalMqtt","topic":"dt/#"}]})).unwrap();
+        local.validate().unwrap();
+        // A fleet LocalMqtt bridge is still accepted.
+        let generation = candidate(&BTreeMap::new(),"app","d1",Some(&local),&BTreeSet::from(["app".into()])).unwrap();
+        assert!(effective(&fixture(), &generation).unwrap().pubsub.unwrap().bridge.is_some());
     }
     #[test]
     fn root_rollback_and_removal_restore_or_revoke_grants() {

@@ -31,17 +31,18 @@ impl PubsubConfig {
             qos0_messages: self.qos0_messages_per_subscription,
         }
     }
-    pub fn validate(&self) -> anyhow::Result<()> {
+    /// `aws_iot`: whether the `[aws_iot]` connection is configured.
+    pub fn validate(&self, aws_iot: bool) -> anyhow::Result<()> {
         anyhow::ensure!((1..=100_000).contains(&self.max_messages_per_subscription), "pubsub.max_messages_per_subscription must be 1..=100000");
         anyhow::ensure!((4096..=1 << 30).contains(&self.max_bytes_per_subscription), "pubsub.max_bytes_per_subscription must be 4 KiB..=1 GiB");
         anyhow::ensure!((1..=10_000).contains(&self.qos0_messages_per_subscription), "pubsub.qos0_messages_per_subscription must be 1..=10000");
         if let Some(bridge) = &self.bridge {
-            bridge.validate()?;
+            bridge.validate(aws_iot)?;
             // Inbound copies of one MQTT message are stored together, so a
             // queue must hold them all or the message could never be accepted.
             let copies = bridge.max_inbound_copies();
             anyhow::ensure!(copies <= self.max_messages_per_subscription,
-                "pubsub.max_messages_per_subscription must be at least {copies}, the most overlapping LocalMqtt→Pubsub mappings");
+                "pubsub.max_messages_per_subscription must be at least {copies}, the most overlapping inbound mappings from one broker");
         }
         Ok(())
     }
@@ -85,6 +86,9 @@ pub struct Config {
     /// Local support console (SF-079, docs/LOCAL_CONSOLE.md); none when omitted.
     #[serde(default)]
     pub console: Option<crate::console::Settings>,
+    /// The AWS IoT Core connection (SF-061); none when omitted.
+    #[serde(default)]
+    pub aws_iot: Option<crate::iotcore::IotConfig>,
     /// LAN client-device authentication and discovery (SF-035); none when omitted.
     #[serde(default)]
     pub client_devices: Option<crate::clientdevices::Settings>,
@@ -143,6 +147,9 @@ pub struct ShadowsConfig {
     /// The cloud sync adapter; none when omitted.
     #[serde(default)]
     pub sync: Option<crate::shadows::SyncConfig>,
+    /// Synchronization with AWS IoT Device Shadow over `[aws_iot]`.
+    #[serde(default)]
+    pub aws_iot: Option<crate::shadows::AwsSyncConfig>,
 }
 fn default_max_shadows() -> usize {
     64
@@ -152,6 +159,10 @@ impl ShadowsConfig {
         anyhow::ensure!(crate::shadows::valid_thing(&self.thing_name), "shadows.thing_name must be 1-128 of [A-Za-z0-9:_-]");
         anyhow::ensure!((1..=crate::shadows::MAX_SHADOWS).contains(&self.max_shadows), "shadows.max_shadows must be 1..=256");
         if let Some(sync) = &self.sync {
+            sync.validate(self.max_shadows)?;
+        }
+        if let Some(sync) = &self.aws_iot {
+            anyhow::ensure!(self.sync.is_none(), "a shadow synchronizes with one cloud: configure [shadows.sync] or [shadows.aws_iot], not both");
             sync.validate(self.max_shadows)?;
         }
         Ok(())
@@ -630,7 +641,7 @@ impl Config {
         let raw = std::fs::read_to_string(path)?;
         let mut cfg: Self = toml::from_str(&raw)?;
         if let Some(ipc) = &cfg.ipc { ipc.validate()?; }
-        if let Some(pubsub) = &cfg.pubsub { pubsub.validate()?; }
+        if let Some(pubsub) = &cfg.pubsub { pubsub.validate(cfg.aws_iot.is_some())?; }
         if let Some(console) = &cfg.console { console.validate()?; }
         cfg.path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
         anyhow::ensure!(
@@ -710,6 +721,7 @@ impl Config {
         if let Some(shadows) = &cfg.shadows {
             shadows.validate()?;
         }
+        validate_aws_iot(&cfg)?;
         if let Some(client_devices) = &mut cfg.client_devices {
             if client_devices.device_groups_file.is_relative() {
                 client_devices.device_groups_file = path.parent().unwrap_or(Path::new(".")).join(&client_devices.device_groups_file);
@@ -724,6 +736,29 @@ impl Config {
 
 fn default_timeout() -> u64 {
     600
+}
+
+/// `[aws_iot]` and what uses it: the connection runs in the pub/sub bridge,
+/// with its own credentials, within AWS IoT Core subscription quotas.
+pub fn validate_aws_iot(cfg: &Config) -> anyhow::Result<()> {
+    let aws_sync = cfg.shadows.as_ref().and_then(|s| s.aws_iot.as_ref().map(|sync| (s, sync)));
+    let Some(iot) = &cfg.aws_iot else {
+        anyhow::ensure!(aws_sync.is_none(), "[shadows.aws_iot] needs the [aws_iot] connection");
+        return Ok(());
+    };
+    iot.validate()?;
+    iot.check_separate(&cfg.device.keypair_path)?;
+    anyhow::ensure!(cfg.pubsub.is_some(), "[aws_iot] runs in the pub/sub bridge: add [pubsub]");
+    let mut subscriptions = cfg.pubsub.as_ref().and_then(|p| p.bridge.as_ref())
+        .map_or(0, |b| b.mappings.iter().filter(|m| m.source == crate::bridge::Endpoint::IotCore).count());
+    if let Some((shadows, sync)) = aws_sync {
+        anyhow::ensure!(shadows.thing_name == iot.thing_name, "shadows.thing_name must equal aws_iot.thing_name to synchronize with AWS IoT Device Shadow");
+        subscriptions += crate::iotcore::shadow_filters(&iot.thing_name, &sync.shadows).len();
+    }
+    anyhow::ensure!(subscriptions <= crate::iotcore::MAX_SUBSCRIPTIONS,
+        "AWS IoT Core allows {} subscriptions per connection; IotCore mappings plus 3 per synchronized shadow need {subscriptions}",
+        crate::iotcore::MAX_SUBSCRIPTIONS);
+    Ok(())
 }
 
 /// A configured feature this platform cannot provide as specified. On macOS
@@ -744,6 +779,9 @@ pub fn unsupported_on(os: &str, cfg: &Config) -> Option<&'static str> {
     }
     if cfg.daemon_update.enabled {
         return Some("daemon self-update has not been validated under launchd; it is not supported on macOS");
+    }
+    if cfg.aws_iot.is_some() {
+        return Some("the AWS IoT Core connection is validated on Linux first (SF-061); it is not yet supported on macOS");
     }
     None
 }
@@ -859,8 +897,34 @@ mod tests {
             [[bridge.mappings]]\ntopic='lan/+'\nsource='LocalMqtt'\ntarget='Pubsub'\ntarget_topic_prefix='b/'\n";
         for (messages, valid) in [(1, false), (2, true)] {
             let pubsub: PubsubConfig = toml::from_str(&format!("max_messages_per_subscription={messages}\n{bridge}")).unwrap();
-            assert_eq!(pubsub.validate().is_ok(), valid, "{messages}");
+            assert_eq!(pubsub.validate(false).is_ok(), valid, "{messages}");
         }
+    }
+    #[test]
+    fn aws_iot_needs_pubsub_its_own_key_and_fits_aws_quotas() {
+        let base = "[sui]\nmanifest_path='deployment.json'\n[device]\nkeypair_path='/etc/suifleet/device.key'\n\
+            device_object_id='0x1'\ndevice_cap_id='0x2'\n[apply]\ncommand='true'\n";
+        let iot = "[aws_iot]\nendpoint='abc-ats.iot.us-east-1.amazonaws.com'\nthing_name='dev1'\nca_file='/etc/aws/ca.pem'\n\
+            certificate_file='/etc/aws/cert.pem'\nprivate_key_file='/etc/aws/key.pem'\n";
+        let names = |n: usize| (0..n).map(|i| format!("'s{i}'")).collect::<Vec<_>>().join(",");
+        let check = |text: String| validate_aws_iot(&toml::from_str::<Config>(&text).unwrap()).map_err(|e| e.to_string());
+        check(format!("{base}[pubsub]\n{iot}")).unwrap();
+        check(format!("{base}[pubsub]\n[shadows]\nthing_name='dev1'\nmax_shadows=32\n[shadows.aws_iot]\nshadows=[{}]\n{iot}", names(16))).unwrap();
+        for (text, error) in [
+            (format!("{base}{iot}"), "add [pubsub]"),
+            (format!("{base}[pubsub]\n[shadows]\nthing_name='dev1'\n[shadows.aws_iot]\nshadows=['']\n"), "needs the [aws_iot] connection"),
+            (format!("{base}[pubsub]\n[shadows]\nthing_name='other'\n[shadows.aws_iot]\nshadows=['']\n{iot}"), "must equal aws_iot.thing_name"),
+            (format!("{base}[pubsub]\n[shadows]\nthing_name='dev1'\nmax_shadows=32\n[shadows.aws_iot]\nshadows=[{}]\n{iot}", names(17)), "subscriptions per connection"),
+            (format!("{base}[pubsub]\n{}", iot.replace("/etc/aws/key.pem", "/etc/suifleet/device.key")), "Sui device key"),
+        ] {
+            let message = check(text.clone()).err().unwrap_or_else(|| panic!("accepted: {text}"));
+            assert!(message.contains(error), "{message}");
+        }
+        let both: ShadowsConfig = toml::from_str("thing_name='dev1'\n[sync]\nurl='https://x'\nshadows=['']\n[aws_iot]\nshadows=['']\n").unwrap();
+        assert!(both.validate().unwrap_err().to_string().contains("not both"));
+        let cfg: Config = toml::from_str(&format!("{base}[pubsub]\n{iot}")).unwrap();
+        assert!(unsupported_on("macos", &cfg).is_some_and(|r| r.contains("AWS IoT Core")));
+        assert!(unsupported_on("linux", &cfg).is_none());
     }
     #[test]
     fn walrus_limits_default_when_omitted_or_partial() {
