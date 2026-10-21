@@ -18,7 +18,7 @@ export function ConfigurationFields({ value, onChange, disabled }: {
   return (
     <div className="space-y-3">
       <p className="text-xs text-gray-500">
-        Optional component configuration. Recipes are public: never put a secret here. Mark it confidential instead and provision
+        Optional component configuration. Never embed a secret in a recipe, whether public or encrypted. Mark the configuration pointer confidential and provision
         its value on each device (configuration overlay). The component receives the result as {"{configuration}"} and
         $SUIFLEET_CONFIGURATION; it needs an install or run command.
       </p>
