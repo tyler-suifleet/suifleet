@@ -347,20 +347,13 @@ pub async fn start(root: &Path, workspace: &Path) -> anyhow::Result<tokio::proce
         .parent()
         .and_then(Path::parent)
         .context("invalid OCI workspace")?;
-    let filter = format!("label=io.suifleet.component={}", scope(component));
-    let bytes = output(
-        public(),
-        &args(&["container", "ls", "-aq", "--filter", &filter]),
-        20,
-    )
-    .await?;
-    for id in String::from_utf8(bytes)?.split_whitespace() {
-        ensure!(
-            id.bytes().all(|b| b.is_ascii_hexdigit()),
-            "invalid OCI container ID"
-        );
-        output(public(), &args(&["container", "rm", "--force", id]), 20).await?;
+    if !component.join("oci-engine").exists() {
+        crate::configuration::write_private(
+            &component.join("oci-engine"),
+            &serde_json::json!({"version":1}),
+        )?;
     }
+    clean_component(component).await?;
     let mut a = args(&[
         "container",
         "create",
@@ -414,6 +407,29 @@ pub async fn start(root: &Path, workspace: &Path) -> anyhow::Result<tokio::proce
     c.args(["container", "start", "--attach", &container]);
     Ok(c)
 }
+pub async fn clean_component(component: &Path) -> anyhow::Result<()> {
+    #[cfg(test)]
+    ensure!(
+        !component.join("test-engine-unavailable").exists(),
+        "injected OCI engine mutation outage"
+    );
+    let filter = format!("label=io.suifleet.component={}", scope(component));
+    let bytes = output(
+        public(),
+        &args(&["container", "ls", "-aq", "--filter", &filter]),
+        20,
+    )
+    .await?;
+    for id in String::from_utf8(bytes)?.split_whitespace() {
+        ensure!(
+            id.bytes().all(|b| b.is_ascii_hexdigit()),
+            "invalid OCI container ID"
+        );
+        output(public(), &args(&["container", "rm", "--force", id]), 20).await?;
+    }
+    Ok(())
+}
+
 pub async fn remove(workspace: &Path) -> anyhow::Result<()> {
     let container = name(workspace);
     let root = workspace
@@ -468,6 +484,16 @@ pub async fn ready(workspace: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 pub async fn stop(workspace: &Path, seconds: u64) -> anyhow::Result<()> {
+    #[cfg(test)]
+    ensure!(
+        !workspace
+            .parent()
+            .and_then(Path::parent)
+            .context("invalid OCI workspace")?
+            .join("test-engine-unavailable")
+            .exists(),
+        "injected OCI engine mutation outage"
+    );
     output(
         public(),
         &args(&[

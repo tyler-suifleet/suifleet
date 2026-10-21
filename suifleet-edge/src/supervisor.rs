@@ -359,7 +359,7 @@ impl Supervisor {
         // application state requiring inspection instead of a silent bootstrap.
         let intent = self.root.join("recovery-intent.json");
         atomic_write(&intent, &serde_json::to_vec(&serde_json::json!({"previous": previous, "command": command}))?)?;
-        self.stop(&previous.name).await;
+        self.stop(&previous.name).await?;
         let workspace = self.workspace(previous);
         let expected = std::fs::read_to_string(workspace.join("artifact.sha256"))?;
         anyhow::ensure!(crate::walrus_client::sha256_file(&workspace.join("artifact"))? == expected,
@@ -455,7 +455,7 @@ impl Supervisor {
                 return Err(error.context("install failed; previous application retained"));
             }
         }
-        self.stop(&spec.name).await;
+        self.stop(&spec.name).await?;
         self.start(spec.clone());
         match self.wait_ready(&spec.name).await {
             Ok(()) => {
@@ -474,7 +474,7 @@ impl Supervisor {
                 Ok(())
             }
             Err(error) => {
-                self.stop(&spec.name).await;
+                self.stop(&spec.name).await?;
                 let _ = std::fs::remove_dir_all(&workspace);
                 let Some(previous) = previous else {
                     return Err(error);
@@ -576,7 +576,10 @@ impl Supervisor {
     /// command): stop it with its descendants and uncommit it, so no later
     /// daemon start brings it back. Its work directory and log are kept.
     pub async fn retire(&mut self, name: &str) -> anyhow::Result<()> {
-        self.stop(name).await;
+        self.stop(name).await?;
+        if self.root.join(name).join("oci-engine").exists() {
+            std::fs::remove_file(self.root.join(name).join("oci-engine"))?;
+        }
         if self.active.remove(name).is_some() {
             self.save_active()?;
         }
@@ -599,13 +602,19 @@ impl Supervisor {
         let mut names: Vec<String> = start_order(&self.active).into_iter().rev().map(|spec| spec.name).collect();
         names.extend(self.running.keys().filter(|name| !self.active.contains_key(*name)).cloned());
         for name in names {
-            self.stop(&name).await;
+            if let Err(error) = self.stop(&name).await {
+                warn!(component = name, %error, "Component stop not confirmed");
+            }
         }
         // The sweeper thread ends with the daemon: collect descendants that
         // were orphaned by these stops now.
         for _ in 0..3 {
             sweep_orphans();
             tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        if let Err(error) = crate::oci::clean(&self.root).await {
+            warn!(%error, "Engine cleanup not confirmed; retaining daemon instance receipt");
+            return;
         }
         // Everything stopped: the next daemon start needs no proof of that.
         if let Err(error) = std::fs::remove_file(self.root.join(INSTANCE)) {
@@ -628,7 +637,7 @@ impl Supervisor {
             anyhow::ensure!(!self.active.values().any(|s| s.name != name &&
                 s.after.iter().any(|d| d == name) && self.running.contains_key(&s.name)),
                 "stop dependents first");
-            self.stop(name).await;
+            self.stop(name).await?;
             // An already-finished Broken/Exited task cannot observe the stop
             // signal. Record explicit intent so the next poll does not recover
             // and restart a component the operator just stopped.
@@ -646,7 +655,7 @@ impl Supervisor {
             anyhow::ensure!(spec.after.iter().all(|d| status.get(d)
                 .is_some_and(|s| s.phase == Phase::Running)), "dependency is not ready");
             if self.running.get(name).is_some_and(|h| h.task.is_finished()) {
-                self.stop(name).await;
+                self.stop(name).await?;
             }
             if !self.running.contains_key(name) { self.start(spec); }
             self.wait_ready(name).await?;
@@ -692,11 +701,24 @@ impl Supervisor {
         self.running.insert(spec.name, Handle { stop, phase, task });
     }
 
-    async fn stop(&mut self, name: &str) {
+    async fn stop(&mut self, name: &str) -> anyhow::Result<()> {
         if let Some(handle) = self.running.remove(name) {
             let _ = handle.stop.send(true);
-            let _ = handle.task.await;
+            handle.task.await?;
         }
+        let component = self.root.join(name);
+        if component.join("oci-engine").exists() {
+            // Confirmation is required even if the attached client/task ended:
+            // the engine can retain its container independently.
+            crate::oci::clean_component(&component).await?;
+            if let Some(status) = self.status.lock().unwrap().get_mut(name) {
+                status.phase = Phase::Stopped;
+                status.pid = None;
+                status.pid_start = None;
+            }
+            write_status(&self.root, &self.status)?;
+        }
+        Ok(())
     }
 
     /// Ready once the run reaches Running; any earlier end is a failure.
@@ -905,12 +927,14 @@ impl Context {
 
     /// Graceful stop: the shutdown command, then SIGTERM, then SIGKILL, always
     /// ending with the whole process group killed and the run reaped.
-    async fn terminate(&self, child: &mut Tracked) {
+    async fn terminate(&self, child: &mut Tracked) -> anyhow::Result<()> {
         let pid = child.pid();
         let wait = self.settings.stop_timeout;
+        let mut engine_result = Ok(());
         if self.spec.run == crate::oci::RUN {
             if let Err(error) = crate::oci::stop(&self.workspace, wait.as_secs()).await {
                 warn!(component = self.spec.name, %error, "OCI stop failed; next start requires engine cleanup");
+                engine_result = Err(error);
             }
         } else if let Some(shutdown) = &self.spec.shutdown {
             if let Err(error) = self.helper(shutdown, pid, wait).await {
@@ -928,6 +952,7 @@ impl Context {
         // Descendants that left the group were orphaned into this process by
         // the run's exit: remove them now, not on the sweeper's next pass.
         sweep_orphans();
+        engine_result
     }
 }
 
@@ -974,8 +999,10 @@ async fn supervise(context: Context, mut stop: watch::Receiver<bool>) {
         let (failed, reason) = match end {
             End::Stop => {
                 context.set(Phase::Stopping, Some(pid), restarts, None);
-                context.terminate(&mut child).await;
-                context.set(Phase::Stopped, None, restarts, Some("stopped by the supervisor".into()));
+                match context.terminate(&mut child).await {
+                    Ok(()) => context.set(Phase::Stopped, None, restarts, Some("stopped by the supervisor".into())),
+                    Err(error) => context.set(Phase::Broken, None, restarts, Some(format!("OCI stop not confirmed: {error:#}"))),
+                }
                 return;
             }
             End::NotReady(reason) => (true, reason),
@@ -2592,6 +2619,18 @@ mod tests {
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
         }).await.unwrap();
+        // Mutation-outage injection keeps a real engine container alive. An
+        // unconfirmed stop must stay Broken and must not uncommit ownership.
+        let outage = f.dir.join("supervised/app/test-engine-unavailable");
+        std::fs::write(&outage, b"test-only mutation failure").unwrap();
+        assert!(s.local_control("app", "stop").await.is_err());
+        assert_eq!(phase(&s), Phase::Broken);
+        assert!(crate::oci::ready(&workspace).await.is_ok());
+        assert!(s.retire("app").await.is_err());
+        assert!(s.active.contains_key("app"));
+        std::fs::remove_file(outage).unwrap();
+        s.local_control("app", "restart").await.unwrap();
+        assert_eq!(phase(&s), Phase::Running);
         // Registry rejection and missing credential profiles fail preparation
         // while the known-good container is still running.
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
