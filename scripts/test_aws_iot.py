@@ -137,6 +137,13 @@ def serve():
 
     root = Path(tempfile.mkdtemp(prefix="suifleet-awsiot-"))
     root.chmod(0o755)
+    # A coordinator worktree can be mode 0700. Stage only the public SDK
+    # inside this disposable runner so the distinct test UID can import it.
+    ipc_sdk = root / "ipc-sdk"
+    ipc_sdk.mkdir(mode=0o755)
+    sdk_file = ipc_sdk / "suifleet_ipc.py"
+    sdk_file.write_bytes(Path("/workspace/sdk/python/suifleet_ipc.py").read_bytes())
+    sdk_file.chmod(0o644)
     key = root / "device.key"
     key.write_text("07" * 32)
     key.chmod(0o600)
@@ -165,9 +172,9 @@ def serve():
     install("thing1a", "cert")
     install("thing1a", "key")
 
-    def config(phase, private_key=None, reject=False):
+    def config(phase, private_key=None, reject=False, defender=None):
         phase = PHASES[phase]
-        state = root / f"state-{phase}"
+        state = root / (f"state-{phase}" + (f"-defender-{defender}" if defender else ""))
         port = {"mosquitto": MOSQUITTO_PORT, "aws": 443, "impostor": 9443}[phase]
         text = ('[sui]\nmanifest_path = "deployment.json"\n'
             f'[device]\nkeypair_path = "{key}"\ndevice_object_id = "{DEVICE}"\ndevice_cap_id = "{CAP}"\n'
@@ -201,6 +208,9 @@ def serve():
                  f'private_key_file = "{private_key or credentials / "key.pem"}"\nkeep_alive_seconds = 30\ncredential_check_seconds = 5\n')
         if reject:
             text += 'reject_denied_publications = true\n'
+        if defender:
+            assert defender in ("accept", "reject", "retry")
+            text += '[device_defender]\nsample_interval_seconds = 300\npublish_retry_count = 2\nbuffer_max = 2\n'
         path = root / f"config-{phase}.toml"
         path.write_text(text)
         return path
@@ -208,8 +218,8 @@ def serve():
     daemon = {"process": None}
     log = (root / "daemon.log").open("a")
 
-    def start(phase, reject=False):
-        daemon["process"] = subprocess.Popen([binary], env={**os.environ, "EDGE_CONFIG": str(config(phase, reject=reject))}, stdout=log, stderr=log)
+    def start(phase, reject=False, defender=None):
+        daemon["process"] = subprocess.Popen([binary], env={**os.environ, "EDGE_CONFIG": str(config(phase, reject=reject, defender=defender))}, stdout=log, stderr=log)
         deadline = time.time() + 30
         while not socket.exists() and time.time() < deadline:
             assert daemon["process"].poll() is None, "the daemon exited at startup"
@@ -229,7 +239,7 @@ def serve():
         component = {APP: "app", 0: ""}[uid]
         code = ("import os,sys,json; uid=int(sys.argv[1]); "
                 "uid and (os.setgid(uid), os.setuid(uid)); "
-                "sys.path.insert(0,'/workspace/sdk/python'); from suifleet_ipc import Client, IpcError\n"
+                f"sys.path.insert(0,{str(ipc_sdk)!r}); from suifleet_ipc import Client, IpcError\n"
                 "try: print(json.dumps({'ok': True, 'data': Client(sys.argv[2], component=sys.argv[3]).request(sys.argv[4], topic=sys.argv[5], payload=json.loads(sys.argv[6]))}))\n"
                 "except IpcError as e: print(json.dumps({'ok': False, 'error': str(e)}))")
         out = subprocess.run([sys.executable, "-c", code, str(uid), str(socket), component, operation, topic, json.dumps(payload)],
@@ -275,11 +285,16 @@ def serve():
                 if path == "/ipc":
                     result = ipc(body["uid"], body["operation"], body.get("topic", ""), body.get("payload"))
                 elif path == "/start":
-                    start(body["phase"], body.get("reject", False))
+                    start(body["phase"], body.get("reject", False), body.get("defender"))
                     result = {"ok": True}
                 elif path == "/stop":
                     stop(body.get("kill", False))
                     result = {"ok": True}
+                elif path == "/defender-state":
+                    label = body["label"]
+                    assert label in ("accept", "reject", "retry")
+                    file = root / f"state-aws-defender-{label}/device-defender/state.json"
+                    result = json.loads(file.read_text()) if file.exists() else {}
                 elif path == "/check-config":
                     private_key = key if body.get("sui_key") else None
                     out = subprocess.run([binary, "--check-config", str(config(body["phase"], private_key))], text=True, capture_output=True)
@@ -476,7 +491,8 @@ def host(args):
         # --- Mosquitto: real broker, mutual TLS ------------------------------------
         control("/start", phase="mosquitto")
         wait(lambda: iot()["connected"], "the IoT connection to Mosquitto did not come up")
-        assert ipc("subscribe", f"cmd/{THING}/#", {"qos": 1})["ok"]
+        subscription = ipc("subscribe", f"cmd/{THING}/#", {"qos": 1})
+        assert subscription["ok"], subscription
         assert not cloud_sub("dt/#", None, timeout=1)  # create the persistent cloud-side session
         assert ipc("publish", "telemetry/temp", {"t": 21})["ok"]
         got = cloud_sub(f"dt/#", 1)

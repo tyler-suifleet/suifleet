@@ -435,7 +435,7 @@ export const MANAGED_CATALOG = {
     },
     {
       "id": "device-defender-metrics",
-      "specification": "incomplete",
+      "specification": "complete",
       "implementation_ticket": "SF-062",
       "replaces": {
         "aws.greengrass.DeviceDefender": "4.0.0"

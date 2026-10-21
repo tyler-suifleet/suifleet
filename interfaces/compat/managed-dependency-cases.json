@@ -213,14 +213,14 @@
   }
  },
  {
-  "id": "device-defender-adapter-specification-incomplete",
+  "id": "device-defender-adapter",
   "dependency": "aws.greengrass.DeviceDefender",
   "spec": {
    "VersionRequirement": "^4.0.0"
   },
   "expected": {
-   "outcome": "reject",
-   "reason": "adapter-specification-incomplete",
+   "outcome": "defer",
+   "requires": ["SF-019", "SF-061"],
    "adapter": "device-defender-metrics",
    "implementation_ticket": "SF-062"
   }
