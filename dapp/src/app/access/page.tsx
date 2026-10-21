@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { isValidSuiAddress, normalizeSuiAddress } from "@mysten/sui/utils";
 import { useState } from "react";
 import { useCurrentAccount } from "@mysten/dapp-kit-react";
 import type { Transaction } from "@mysten/sui/transactions";
@@ -25,29 +27,69 @@ export default function AccessPage() {
       const result = await execute({ transaction: build() });
       setMessage(`${done} (${result.digest})`);
       await policies.refetch();
+      return true;
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
+      return false;
     }
   }
 
-  if (!account) return <p className="text-sm text-gray-500">Connect your wallet to manage access policies.</p>;
-  if (!POLICIES_ENABLED) return <p role="alert">This deployment&apos;s package does not include Seal access policies.</p>;
   return (
-    <div className="max-w-3xl space-y-4">
+    <div className="max-w-3xl space-y-6">
       <PageHeader title="Access policies" subtitle="Who may decrypt confidential releases. Decryption grants no publish, deploy or admin authority." />
       <p className="text-xs text-gray-600">
         Grants and revocations are signed transactions; recipients use their own keys. Revocation stops future key
-        release once key servers observe it, but cannot recall keys or plaintext already obtained. Rotating the key
+        release once key servers observe it, but cannot recall keys or plaintext already obtained, clear cached keys, or uninstall delivered software. Rotating the key
         epoch retires every earlier release: re-encrypt and redeploy what devices still need.
       </p>
-      {!SEAL_SETTINGS && <p role="alert" className="text-xs text-red-600">Seal key servers are not configured for this frontend: policies can be managed, but uploads cannot be encrypted.</p>}
-      <div className="flex gap-2 items-end">
-        <label className="text-sm">New policy name <input value={name} onChange={e => setName(e.target.value)} placeholder="production releases" /></label>
-        <button disabled={isPending || !name.trim()} onClick={() => run(() => buildCreatePolicyTx(name, account.address), "Policy created").then(() => setName(""))}>Create policy</button>
-      </div>
-      {policies.error && <p role="alert">{String(policies.error)}</p>}
-      <p role="status" className="text-xs whitespace-pre-wrap">{message}</p>
-      {policies.data?.map(policy => <PolicyCard key={policy.objectId} policy={policy} pending={isPending} run={run} />)}
+      <ol className="list-decimal pl-5 text-sm space-y-1">
+        <li>Name a policy for the releases you want to protect.</li>
+        <li>Grant decryption to activated devices, groups you administer, or an account.</li>
+        <li>Choose this policy when uploading a confidential release in <Link className="text-blue-700 underline" href="/firmware">Deploy component</Link>.</li>
+      </ol>
+      {!POLICIES_ENABLED && <section role="status" className="border rounded p-4 space-y-2">
+        <h2 className="font-semibold">Access policies unavailable on this deployment</h2>
+        <p className="text-sm">This fleet deployment predates Seal access policies. Connecting a wallet will not add support.
+          Existing public OTA releases remain public; creating a policy cannot encrypt them retroactively.</p>
+        <p className="text-sm">Ask your fleet administrator for the separate verified Seal testnet profile.
+          Do not replace this fleet registry or use public delivery for confidential content.</p>
+        <Link className="text-blue-700 underline text-sm" href="/devices">View this fleet’s devices</Link>
+      </section>}
+      {!account && <p role="status" className="text-sm">Connect your wallet using the wallet control to view policies you administer.
+        Decryption recipients do not need to hold the policy admin capability.</p>}
+      {POLICIES_ENABLED && !SEAL_SETTINGS && <section role="status" className="border rounded p-4 text-sm">
+        <h2 className="font-semibold">Encryption key servers are not configured</h2>
+        <p>You can manage policies, but confidential uploads are unavailable. Ask your administrator to configure
+          public Seal key server IDs and a threshold for this frontend, then rebuild. Never put provider credentials in the frontend.</p>
+      </section>}
+      {account && POLICIES_ENABLED && <>
+        <form className="border rounded p-4 space-y-3" onSubmit={event => {
+          event.preventDefault();
+          if (isPending || !name.trim()) return;
+          void run(() => buildCreatePolicyTx(name, account.address), "Policy created").then(ok => { if (ok) setName(""); });
+        }}>
+          <h2 className="font-semibold">1. Create a named policy</h2>
+          <p className="text-sm">Your wallet will hold its admin capability. Creating a policy grants no recipients access yet.</p>
+          <div className="flex flex-wrap gap-3 items-end">
+            <label className="text-sm min-w-0">Policy name
+              <input className="block border rounded px-3 py-2 w-full" required maxLength={128} value={name}
+                onChange={e => setName(e.target.value)} placeholder="Production sensor releases" />
+            </label>
+            <button className="border rounded px-3 py-2" disabled={isPending || !name.trim()}>Create policy</button>
+          </div>
+        </form>
+        {policies.isPending && <p role="status">Loading policies you administer…</p>}
+        {policies.error && <div role="alert" className="text-sm space-y-2">
+          <p>Could not refresh access policies. Previously loaded results may be out of date. {String(policies.error)}</p>
+          <button className="border rounded px-3 py-2" disabled={policies.isFetching} onClick={() => void policies.refetch()}>Retry policies</button>
+        </div>}
+        {!policies.isPending && !policies.error && policies.data?.length === 0 && <p role="status" className="text-sm">
+          No policies administered by this wallet. Create your first named policy above, or connect the wallet holding an existing policy’s admin capability.
+        </p>}
+        <p role="status" className="text-sm break-words whitespace-pre-wrap">{isPending ? "Waiting for wallet approval and verified transaction effects…" : message}</p>
+        {policies.data?.map(policy => <PolicyCard key={`${account.address}:${policy.objectId}`} policy={policy} pending={isPending} run={run} />)}
+      </>}
+
     </div>
   );
 }
@@ -55,54 +97,80 @@ export default function AccessPage() {
 function PolicyCard({ policy, pending, run }: {
   policy: AccessPolicy;
   pending: boolean;
-  run: (build: () => Transaction, done: string) => Promise<void>;
+  run: (build: () => Transaction, done: string) => Promise<boolean>;
 }) {
-  const { data: devices = [] } = useDevices();
-  const { data: groups = [] } = useGroups();
+  const deviceQuery = useDevices();
+  const groupQuery = useGroups();
+  const devices = deviceQuery.data ?? [];
+  const groups = groupQuery.data ?? [];
   const [scope, setScope] = useState<Scope>("device");
   const [subject, setSubject] = useState("");
+  const recipients = scope === "device" ? devices.filter(d => d.ownerCapId) : groups;
+  const recipientQuery = scope === "device" ? deviceQuery : groupQuery;
+  const validSubject = scope === "account" ? isValidSuiAddress(subject) :
+    !recipientQuery.isPending && !recipientQuery.error && recipients.some(r => r.objectId === subject);
+  const duplicate = (scope === "device" ? policy.devices : scope === "group" ? policy.groups : policy.accounts).includes(isValidSuiAddress(subject) ? normalizeSuiAddress(subject) : subject);
   const label = (s: Scope, id: string) =>
     s === "device" ? devices.find(d => d.objectId === id)?.name ?? id
       : s === "group" ? groups.find(g => g.objectId === id)?.name ?? id : id;
   const entries: [Scope, string[]][] = [["device", policy.devices], ["group", policy.groups], ["account", policy.accounts]];
   return (
-    <div className="border border-gray-200 rounded p-4 space-y-2 text-sm">
+    <section aria-label={`Policy ${policy.name}`} className="border border-gray-200 rounded p-4 space-y-4 text-sm min-w-0">
       <h2 className="font-semibold">{policy.name}</h2>
-      <p className="text-xs font-mono text-gray-500">{policy.objectId} · key epoch {policy.keyEpoch} · code version {policy.version}</p>
+      <details className="text-xs text-gray-600 break-all"><summary>Policy technical details</summary><p>Object ID: {policy.objectId}</p><p>Key epoch {policy.keyEpoch} · code version {policy.version}</p></details>
+      <h3 className="font-semibold">2. Manage decryption recipients</h3>
+      <p>Device grants require an activated registry key. Group grants follow current membership and delegate recipient selection to the group administrator. Account grants let that address request keys directly.</p>
       {entries.map(([s, ids]) => (
         <div key={s}>
           <p className="text-xs text-gray-500 capitalize">{s}s</p>
           {ids.length === 0 && <p className="text-xs text-gray-400">none</p>}
           {ids.map(id => (
-            <div key={id} className="flex items-center gap-2">
-              <span className="font-mono text-xs">{label(s, id)}</span>
-              <button disabled={pending} className="text-xs text-red-600" onClick={() => run(() => buildRevokeTx(policy, s, id), `Revoked ${s}`)}>Revoke</button>
+            <div key={id} className="flex flex-wrap items-center gap-2 break-all">
+              <span className="text-sm">{label(s, id)}</span>
+              <button disabled={pending} aria-label={`Revoke ${s} ${label(s, id)}`} className="border rounded px-3 py-2 text-red-700" onClick={() => run(() => buildRevokeTx(policy, s, id), `Revoked ${s}`)}>Revoke</button>
             </div>
           ))}
         </div>
       ))}
-      <div className="flex gap-2 items-end">
-        <select value={scope} onChange={e => { setScope(e.target.value as Scope); setSubject(""); }}>
-          <option value="device">Device</option>
-          <option value="group">Group (you administer)</option>
-          <option value="account">Account address</option>
-        </select>
-        {scope === "device" && <select value={subject} onChange={e => setSubject(e.target.value)}>
-          <option value="">Choose an activated device…</option>
-          {devices.filter(d => d.ownerCapId).map(d => <option key={d.objectId} value={d.objectId}>{d.name}</option>)}
-        </select>}
-        {scope === "group" && <select value={subject} onChange={e => setSubject(e.target.value)}>
-          <option value="">Choose a group…</option>
-          {groups.map(g => <option key={g.objectId} value={g.objectId}>{g.name}</option>)}
-        </select>}
-        {scope === "account" && <input value={subject} onChange={e => setSubject(e.target.value)} placeholder="0x…" />}
-        <button disabled={pending || !subject} onClick={() => run(() => buildGrantTx(policy, scope, subject), `Granted ${scope}`).then(() => setSubject(""))}>Grant</button>
-      </div>
-      <button disabled={pending} className="text-xs text-amber-700" onClick={() => {
+      <form className="space-y-3" onSubmit={event => {
+        event.preventDefault();
+        if (!validSubject || duplicate || pending) return;
+        void run(() => buildGrantTx(policy, scope, subject), `Granted ${scope}`).then(ok => { if (ok) setSubject(""); });
+      }}>
+        <div className="flex flex-wrap gap-3 items-end">
+          <label>Recipient type
+            <select className="block border rounded px-3 py-2" value={scope} onChange={e => { setScope(e.target.value as Scope); setSubject(""); }}>
+              <option value="device">Device</option>
+              <option value="group">Group (you administer)</option>
+              <option value="account">Account address</option>
+            </select>
+          </label>
+          {scope !== "account" ? <label className="min-w-0">{scope === "device" ? "Activated device" : "Group"}
+            <select aria-label={scope === "device" ? "Activated device" : "Group"} className="block border rounded px-3 py-2 max-w-full" value={subject} onChange={e => setSubject(e.target.value)} disabled={recipientQuery.isPending || !!recipientQuery.error}>
+              <option value="">Choose a {scope}…</option>
+              {recipients.map(r => <option key={r.objectId} value={r.objectId}>{r.name} ({r.objectId.slice(0, 8)}…)</option>)}
+            </select>
+          </label> : <label className="min-w-0">Account address
+            <input className="block border rounded px-3 py-2 w-full" value={subject} onChange={e => setSubject(e.target.value.trim())} placeholder="0x…" spellCheck={false} />
+          </label>}
+          <button className="border rounded px-3 py-2" disabled={pending || !validSubject || duplicate}>Grant decryption</button>
+        </div>
+        {scope === "account" && subject && !validSubject && <p role="status">Enter a complete Sui account address (0x followed by 64 hexadecimal characters).</p>}
+        {duplicate && <p role="status">This recipient already has a grant.</p>}
+        {scope !== "account" && <>
+          {recipientQuery.isPending && <p role="status">Loading {scope} choices…</p>}
+          {recipientQuery.error && <div role="alert">Could not load {scope} choices. <button type="button" className="underline" onClick={() => void recipientQuery.refetch()}>Retry recipients</button></div>}
+          {!recipientQuery.isPending && !recipientQuery.error && recipients.length === 0 && <p role="status">
+            {scope === "device" ? "No activated devices available. Enroll and activate a device in " : "No administered groups available. Create a group and add devices in "}
+            <Link className="text-blue-700 underline" href="/devices">{scope === "device" ? "Devices" : "Devices → Device groups"}</Link> first.
+          </p>}
+        </>}
+      </form>
+      <button disabled={pending} className="border rounded px-3 py-2 text-amber-800" onClick={() => {
         if (confirm("Rotate the key epoch? Every release encrypted under this policy so far becomes undecryptable for new requests.")) {
           void run(() => buildRotateTx(policy), "Key epoch rotated");
         }
       }}>Rotate key epoch</button>
-    </div>
+    </section>
   );
 }
