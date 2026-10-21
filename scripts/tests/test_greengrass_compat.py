@@ -29,7 +29,7 @@ class RepositoryTests(unittest.TestCase):
         passed = {name for name, s in matrix["suites"].items() if s["runtime_execution"] == "passed"}
         self.assertEqual(passed, {"aws-recipe-cases.json", "managed-dependency-cases.json", "credential-provider-cases.json", "cloudwatch-metrics-cases.json",
                                   "cloudwatch-logs-cases.json", "pubsub-cases.json", "shadow-cases.json", "stream-cases.json",
-                                  "client-device-cases.json", "aws-iot-cases.json", "device-defender-cases.json"})
+                                  "client-device-cases.json", "aws-iot-cases.json", "device-defender-cases.json", "tunnel-cases.json"})
         for name in ("aws-recipe-cases.json", "managed-dependency-cases.json"):
             receipt = json.loads((ROOT / matrix["suites"][name]["runtime_evidence"]).read_text())
             self.assertEqual(receipt["ticket"], "SF-037")
@@ -267,7 +267,7 @@ class ManagedCatalogGateTests(unittest.TestCase):
             "secure-tunneling": "SF-063"})
         self.assertEqual({a["id"] for a in self.catalog["adapters"] if a["runtime_execution"] == "passed"},
                          {"credential-provider", "cloudwatch-metrics-export", "cloudwatch-logs-export", "stream-export-aws",
-                          "aws-iot-core-connection", "device-defender-metrics"})
+                          "aws-iot-core-connection", "device-defender-metrics", "secure-tunneling"})
         self.assertFalse(self.catalog["parity_claim"])
         for entry in self.catalog["components"] + self.catalog["platform_phases"]:
             self.assertNotIn("approval", entry)
@@ -321,7 +321,7 @@ class ManagedCatalogGateTests(unittest.TestCase):
         self.has(lambda c: self.adapter(c, "credential-provider").update(licensing=""), "needs licensing")
         self.has(lambda c: self.adapter(c, "cloudwatch-logs-export")["replaces"].update({"aws.greengrass.LogManager": "unpinned"}), "pin an exact")
         self.has(lambda c: self.adapter(c, "cloudwatch-metrics-export")["acceptance"].update(reference_suites=[]), "executable reference suite")
-        self.has(lambda c: self.adapter(c, "secure-tunneling").pop("specification_gap"), "specification_gap")
+        self.has(lambda c: self.adapter(c, "secure-tunneling")["acceptance"].update(reference_suites=[]), "executable reference suite")
         self.has(lambda c: self.adapter(c, "secure-tunneling").update(specification="deferred"), "specification")
         self.has(lambda c: self.adapter(c, "aws-iot-core-connection")["replaces"].update({"aws.greengrass.ShadowManager": "unpinned"}), "pin an exact")
         self.has(lambda c: self.adapter(c, "aws-iot-core-connection")["replaces"].update({"aws.greengrass.ShadowManager": "2.3.14"}), "!= reference")

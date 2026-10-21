@@ -276,20 +276,19 @@
     "environment": "Network-none container with the real daemon/procfs/shared TLS MQTT adapter and an AWS-shaped IoT endpoint",
     "deferred": ["Real AWS IoT Device Defender account; needs separate user authorization (unrun)"]
    }},
-  {"id": "secure-tunneling", "specification": "incomplete", "implementation_ticket": "SF-063", "runtime_execution": "pending", "replaces": {"aws.greengrass.SecureTunneling": "2.0.1"},
+  {"id": "secure-tunneling", "specification": "complete", "implementation_ticket": "SF-063", "runtime_execution": "passed", "runtime_evidence": "docs/validation/sf063-tunneling.json", "replaces": {"aws.greengrass.SecureTunneling": "2.0.1"},
    "summary": "An explicitly enabled, supervised component that starts the Apache-2.0 AWS IoT secure tunneling local proxy in destination mode on $aws/things/+/tunnels/notify, only for allow-listed local services. It coexists with platform-owned SSH daemon, firewall and service configuration, which it neither manages nor replaces; it runs no arbitrary remote commands and triggers no platform reboot.",
    "platforms": ["linux-x86_64", "linux-aarch64", "linux-arm"],
    "aws_services": ["AWS IoT secure tunneling (data.tunneling.iot.<region>.amazonaws.com:443)", "AWS IoT Core"],
-   "auth": "aws-iot-core-connection thing identity; the ephemeral per-tunnel client access token arrives in the notification and is never logged or journaled.",
+   "auth": "Separate scoped AWS IoT thing certificate/policy and exclusive service UID; ephemeral per-tunnel CAT in child environment, never argv, logs or disk. AWS IAM restricts remote operators; local services authenticate sessions.",
    "licensing": "AWS IoT Secure Tunneling Local Proxy is Apache-2.0; it needs OpenSSL 3 and glibc 2.35 or later in the image.",
    "depends_on": ["SF-014", "SF-025", "SF-027", "SF-061"],
    "acceptance": {
-    "reference_suites": [],
-    "runtime_tests": ["Tunnel notifications start at most maxConcurrentTunnels proxies, only for allow-listed services, and stop at tunnelTimeoutSeconds", "Denied destinations and callers are refused, tokens never leak to logs or other processes, and proxies are cleaned up after connection failures or component replacement"],
+    "reference_suites": ["tunnel-cases.json"],
+    "runtime_tests": ["Tunnel notifications start at most maxConcurrentTunnels proxies, only for allow-listed services, and stop at tunnelTimeoutSeconds", "Denied destinations and untrusted notification/server identities are refused; CATs are absent from argv/logs/durable state and inaccessible cross-UID (same UID/root trusted); proxies are cleaned up on failure/replacement. Live remote caller IAM enforcement remains deferred."],
     "environment": "Network-none container with a local TLS MQTT broker and a stub tunnel endpoint",
     "deferred": ["Real AWS IoT secure tunnel; needs separate user authorization (unrun)"]
-   },
-   "specification_gap": "SF-063 must add an executable notification/destination reference suite."}
+   }}
  ],
  "platform_phases": [
   {"platform": "linux-x86_64", "phase": "initial-prototype", "tickets": [], "reason": "Initial prototype phase; development host target."},
