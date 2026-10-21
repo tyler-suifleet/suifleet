@@ -148,6 +148,10 @@ allowlist (`cargo test console`).
   to its closing unescaped quote, spaces included, or to the end of the text
   when unterminated. An unquoted value runs to the next whitespace,
   punctuation included. An authorization scheme before the value is kept.
+  In a log tail a quoted value may span lines: every line up to its closing
+  quote is redacted, and an unterminated value redacts the rest of the tail.
+  A value opened in the up to 1 MiB of log before the tail carries into it,
+  so its continuation lines are redacted whatever line limit is requested.
 
   Over-redaction is preferred to a leak. Redaction is defense in depth:
   components must still not log secrets.
