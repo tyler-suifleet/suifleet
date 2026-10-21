@@ -25,6 +25,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import greengrass_managed as managed  # noqa: E402
 import device_defender_schema  # noqa: E402
+import tunnel_reference  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 COMPAT = Path("interfaces/compat")
@@ -993,6 +994,7 @@ def _managed_catalog(root: Path) -> dict:
 
 # Runners take (cases, root); root locates the SF-038 managed catalog.
 SUITE_RUNNERS = {
+    "tunnel-cases.json": lambda c, _: tunnel_reference.check_fixture(c),
     "device-defender-cases.json": lambda c, _: device_defender_schema.check_fixture(c),
     "aws-recipe-cases.json": lambda c, root: check_recipes(c, _managed_catalog(root)),
     "pubsub-cases.json": lambda c, _: check_pubsub(c),
