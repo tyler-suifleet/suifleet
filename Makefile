@@ -302,6 +302,8 @@ test-manifest:
 	$(RUN) node scripts/test_upload_progress.cjs
 	$(RUN) node scripts/test_telemetry.cjs
 	$(RUN) node scripts/test_alerts.cjs
+	$(RUN) node scripts/test_enrollment_frontend.cjs
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_claims.py'
 
 test-manifest-live:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
@@ -341,6 +343,19 @@ test-publish-localnet:
 test-enrollment-localnet:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts --features pkcs11
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_enrollment_localnet.py
+
+# SF-100 bulk enrollment (host, needs Docker, a warm Move cache and dapp deps):
+# chain limits/authority through the dApp builders and the real Enrollment and
+# Devices pages in headless Chromium, on a disposable network-none localnet.
+.PHONY: test-bulk-enrollment-localnet
+test-bulk-enrollment-localnet:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins
+	docker run --rm --network none -v "$(CURDIR):/workspace" -w /workspace \
+		-v "$${SUIFLEET_MOVE_CACHE:-$(notdir $(CURDIR))_move-cache}:/home/dev/.move" "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" \
+		bash -c 'SUI_CONFIG_DIR=/tmp/sui-config sui start --with-faucet --force-regenesis >/tmp/node.log 2>&1 & \
+		for i in $$(seq 180); do curl -s -o /dev/null http://127.0.0.1:9123 && curl -s -o /dev/null http://127.0.0.1:9000 && break; sleep 1; done; \
+		CHROME_EXECUTABLE=/opt/chrome-headless-shell/chrome-headless-shell node scripts/test_bulk_enrollment_localnet.cjs \
+		$(if $(SUIFLEET_EVIDENCE),--evidence $(SUIFLEET_EVIDENCE))'
 
 # Live gate (spends testnet gas; docs/TESTNET.md): base contracts published,
 # upgraded in place to this tree, real daemon, on-chain receipts.
