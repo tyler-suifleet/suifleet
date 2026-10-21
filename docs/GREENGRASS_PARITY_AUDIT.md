@@ -154,3 +154,5 @@ For each feature, completion requires contract/API semantics, daemon behavior, o
 ## Validation evidence
 
 See [validation results and limits](VALIDATION.md) for the exact checks run, tested failure paths and enrollment/upgrade requirements.
+
+SF-071 adds the native [SiteWise TQV processing/publisher](SITEWISE.md) over SF-070 records and SF-034 lossless external streams with SF-057 credentials. Its local request/checkpoint tests establish the documented native subset; live AWS and physical acceptance remain unrun. Historical reference fixtures above remain specification-only.
