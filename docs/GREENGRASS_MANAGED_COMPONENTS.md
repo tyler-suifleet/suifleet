@@ -137,7 +137,7 @@ AWS credentials are a separate trust domain. The `credential-provider` and `aws-
 | `cloudwatch-logs-export` | SF-060 | complete | LogManager 2.3.14 upload | CloudWatch Logs | credential-provider; `logs:CreateLogGroup`, `logs:CreateLogStream`, `logs:PutLogEvents` | SF-020, SF-057 |
 | `aws-iot-core-connection` | SF-061 | complete | Bridge 2.3.3 IotCore routes, ShadowManager 2.3.15 sync | AWS IoT Core, Device Shadow | Separate AWS IoT thing certificate and policy | SF-021, SF-032, SF-033 |
 | `device-defender-metrics` | SF-062 | incomplete | DeviceDefender 4.0.0 | Device Defender (device-side metrics), IoT Core | `aws-iot-core-connection` | SF-019, SF-061 |
-| `secure-tunneling` | SF-063 | incomplete | SecureTunneling 2.0.1 | IoT secure tunneling, IoT Core | `aws-iot-core-connection`; ephemeral per-tunnel token | SF-014, SF-025, SF-027, SF-061 |
+| `secure-tunneling` | SF-063 | [configured Linux destination](SECURE_TUNNELING.md); AWS acceptance unrun | SecureTunneling 2.0.1 | IoT secure tunneling, IoT Core | `aws-iot-core-connection`; ephemeral per-tunnel token | SF-014, SF-025, SF-027, SF-061 |
 
 The `stream-export-aws` adapter leaves out three destinations:
 

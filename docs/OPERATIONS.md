@@ -518,3 +518,8 @@ Live AWS account/service acceptance remains unauthorized and unrun.
 See [staged rollout operation and recovery](STAGED_ROLLOUTS.md) for immutable cohorts,
 creator-signed admission/health ticks, rate/concurrency/bake limits, offline slots,
 audited pause/abort and schema-3 manifest/upgrade requirements.
+
+The opt-in secure tunnel destination companion, its separate service identity,
+installation, revocation controls and offline real-proxy tests are documented in
+[SECURE_TUNNELING.md](SECURE_TUNNELING.md). AWS account/service and physical
+acceptance remain unrun in SF-031/#32 and SF-087/#159.
