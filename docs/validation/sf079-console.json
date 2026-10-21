@@ -3,7 +3,7 @@
   "ticket": "SF-079",
   "agent": "Claude",
   "model": "claude-opus-5-5",
-  "date": "2026-10-17",
+  "date": "2026-10-21",
   "upstream_reference": {
     "component": "aws.greengrass.LocalDebugConsole",
     "version": "2.4.8",
@@ -49,14 +49,14 @@
   ],
   "reference_vectors": "cargo test console::tests::decisions_follow_the_v1_reference_contract applies the SF-064 console vectors to the implementation's decision function and field allowlist",
   "source_sha256": {
-    "suifleet-edge/src/console.rs": "0d035974fda6359799862763663234366af445b9cf738769cb10eb6d44ab572f",
+    "suifleet-edge/src/console.rs": "a15d6dacf41da5643012ea5aee52e28d95d940b687d43ae92302002785e7566d",
     "suifleet-edge/src/console/index.html": "127d9ef2f34416830509f2f91e0990a93869d59b29d8046e649b2f944ca6c7f6",
     "suifleet-edge/src/console/console.js": "8add9140e4fcc658abd5302d8ae71fd3bb7b69ea5a2e1bc8baca06e2cd61387a",
     "suifleet-edge/src/console/console.css": "e4c19b3253b6e14f1673f140e0fc6bb018215c58d36e68cca4de5e12bdbe74dd",
     "suifleet-edge/src/main.rs": "732530d01b65f4744b7f9aa0a541cc1b750b88a33ec6d4cf5d416a8777fa349f",
     "suifleet-edge/src/linux_main.rs": "6f840fe96d9ad54daf2c6ac60b2a875ab324c6758c70484070ae3113570eea15",
     "suifleet-edge/src/config.rs": "4de94600c629c251aaba1355f56fd5e185b2512fd03f660cf402dd2eb5ea4902",
-    "scripts/test_console.py": "35a5b76a7fe4c39b74656435ea1cd2ef5b4bb6f3bc6d8d4e39d253efc99c508b",
+    "scripts/test_console.py": "91ece9c2d7b4df662d3a2a3b0aa7a9c2e60984eb174195b7a064810c24fa8c9a",
     "scripts/test_console_browser.cjs": "655be209b5496347abac83c573acdde84bb1592ac469e01584a80b52a056469a",
     "interfaces/compat/remaining-roadmap-cases.json": "2b3d02d28570af01d5bf58005f7b08d5f67d1991daf3acc792492d2a7e6272b7"
   },
@@ -68,5 +68,5 @@
     "Not AWS LocalDebugConsole UI/API compatibility: no configuration editor, pub/sub/MQTT client or stream manager views.",
     "No AWS account, service, production credential or production exposure was used or provisioned."
   ],
-  "tested_tree": "Merge of origin/main dba7958 (PR #182 SF-093 coordinator transient-network resilience) into the SF-079 branch at 43ce2ff; clean automatic merge changing only docs/PR_COORDINATION.md and tools/pr-coordinator, with no suifleet-edge, console source, test or digested file changed. The logs view carries PEM state from up to 1 MiB of log before the 8 KiB tail, so a tail that starts inside a block whose BEGIN precedes it and whose END is absent is redacted line by line, including short and logger-prefixed body lines. On this tree (suifleet-dev:sf037, rust 1.94.0, network none): cargo test 309 passed, 0 failed; scripts/test_console.py passed including the svc3 open-block API regression (199 audit records), bind-failure, restart and session checks; make test-compat passed; tools/pr-coordinator unittest 107 passed (host). On the e5a7852 merge (43ce2ff) and bff6afc merge (5c317a9), identical suifleet-edge and console files: pkcs11 cargo test 311 passed and the CI Trivy scan configuration reported 0 blocking findings on 5c317a9. On the 4acd9c9 merge (48c4da5, identical suifleet-edge and console files): make test-ota (network none, as uid 1001) exit 0; not rerun here. Earlier: make test-industrial passed 32 tests on the c39ab48 merge; test_console.py --browser in suifleet-dev:sf010-chrome passed 13 checks on the cbf1f68 merge, and the PEM_LOOKBACK=0 negative control failed the svc3 regression as expected. test_ipc.py, test_services.py, test-sns and dapp-typecheck were not rerun; their last results are on the merge with de6b6ac (0298316) or, for test-sns, in main's own CI."
+  "tested_tree": "SF-079 branch at fe3fc87 (already containing origin/main dba7958) plus the credential-value redaction fix: a secret pair's or authorization scheme's whole value is redacted (quoted strings through the closing unescaped quote, unquoted values to the next whitespace, punctuation included). On this tree (suifleet-dev:sf037, rust 1.94.0, network none): cargo test 310 passed, 0 failed, including console::tests::redaction_consumes_whole_credential_values; cargo test --features pkcs11 312 passed, 0 failed; scripts/test_console.py passed 3 consecutive runs with the new punctuation/quoted/leading-punctuation log canaries and a quoted configuration note, and failed ('log canary 4 leaked') as a negative control against the previous console.rs; make test-compat passed. The restart check now tolerates status.json written before svc is re-adopted (it intermittently raised KeyError, 2 of 3 runs before the change). Not rerun on this tree: make test-ota (last on 48c4da5), test_console.py --browser (last on cbf1f68), test_ipc.py, test_services.py, test-sns, dapp-typecheck and Trivy; none of their inputs other than console redaction changed."
 }
