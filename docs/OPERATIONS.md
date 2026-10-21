@@ -530,3 +530,8 @@ creator-signed admission/health ticks, rate/concurrency/bake limits, offline slo
 audited pause/abort and schema-3 manifest/upgrade requirements.
 
 OCI container components use the existing component supervisor with a pinned-image descriptor; see [OCI_COMPONENTS.md](OCI_COMPONENTS.md) for engine provisioning, boundaries and offline recovery.
+
+The opt-in secure tunnel destination companion, its separate service identity,
+installation, revocation controls and offline real-proxy tests are documented in
+[SECURE_TUNNELING.md](SECURE_TUNNELING.md). AWS account/service and physical
+acceptance remain unrun in SF-031/#32 and SF-087/#159.
