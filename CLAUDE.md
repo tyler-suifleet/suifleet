@@ -26,3 +26,10 @@ services dispatch that work; do not spawn recursive workers. For current and fut
 software tickets, physical-hardware and actual-mainnet acceptance may wait until
 development is complete under the shared policy. Preserve those acceptance records,
 all local/security/testnet/review gates and the Codex-only ticket-creation rule.
+
+Latest user direction (2026-10-21): finish implementation before final external
+acceptance. Production Seal-provider validation and manual real-wallet/IdP/prover
+acceptance no longer block implementation merges; preserve them explicitly in
+SF-087/#159 and SF-031/#32 under the shared policy. Do not waive actionable code or
+security findings, software tests, applicable automated testnet or independent
+review. Do not provision production credentials or claim deferred checks passed.
