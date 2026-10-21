@@ -258,7 +258,7 @@ class DispatchTests(unittest.TestCase):
         self.worker.ticket.assert_not_called()
 
     def test_occupied_slots_do_not_spend_remote_refresh_calls(self):
-        self.worker.ticket=Mock(return_value=[dict(agent='Codex',status='in_progress')])
+        self.worker.ticket=Mock(return_value=[dict(key='SF-099',agent='Codex',status='in_progress')])
         self.worker.tick(True)
         self.worker.ticket.assert_called_once_with(self.project,'list')
 
