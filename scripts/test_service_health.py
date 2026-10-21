@@ -389,15 +389,17 @@ def run(evidence=None):
             cloud["shadows"]["cfg"] = [version + 1, {**document, "desired": {"mode": "cloud-mode"}}]
             print("PASS: queue filled (publication refused), broker stopped, export failing, stream overwriting unexported data, shadow service down")
 
-            # Sustained conditions are judged at two heartbeat intervals.
+            # Sustained conditions are judged at two heartbeat intervals. The
+            # lan queue and the bridge are already sustained from the inbound
+            # step, so wait for the sub queue's own reason rather than the kind.
+            expected_reasons = ("pub/sub queue of sub 100% full", "MQTT bridge disconnected", "stream metrics export failing",
+                                'shadow "cfg" sync failing')
             degraded = snapshot_after(started, lambda r: {"messaging-backpressure", "bridge-disconnected", "export-failing",
-                                                          "shadow-sync-failing"} <= kinds(r),
+                                                          "shadow-sync-failing"} <= kinds(r)
+                                      and all(e in " | ".join(r["reasons"]) for e in expected_reasons),
                                       "sustained queue, bridge, export and sync alerts not observed")
             reasons = " | ".join(degraded["reasons"])
             assert degraded["health"] == "degraded", degraded
-            for expected in ("pub/sub queue of sub 100% full", "MQTT bridge disconnected", "stream metrics export failing",
-                             'shadow "cfg" sync failing'):
-                assert expected in reasons, reasons
             queue = next(q for q in degraded["services"]["messaging"]["queues"] if q["principal"] == "sub")
             assert (queue["queued"], queue["fill_percent"], queue["refused"]) == (QUEUE_LIMIT, 100, 1), queue
             exported = degraded["services"]["streams"]["streams"][0]
