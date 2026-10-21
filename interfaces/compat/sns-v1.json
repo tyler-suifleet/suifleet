@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "ticket": "SF-078",
+  "implementation": "scripts/sns_publish.py",
+  "reference_reviewed": "2026-10-19",
+  "references": [
+    {"url": "https://docs.aws.amazon.com/greengrass/v2/developerguide/sns-component.html", "version": "aws.greengrass.SNS 2.1.10", "scope": "functional reference only: request/status shape (id, request.message/subject/sns_topic_arn/message_structure); no Lambda, IoT Core status routing or recipe compatibility"},
+    {"url": "https://docs.aws.amazon.com/sns/latest/api/API_Publish.html", "version": "SNS API 2010-03-31 Publish", "scope": "Subject under 100 characters, json MessageStructure with string default, MessageAttributes, FIFO MessageGroupId/MessageDeduplicationId, 256 KiB default size, MessageId/SequenceNumber, documented errors"},
+    {"url": "https://docs.aws.amazon.com/sns/latest/dg/SNSMessageAttributes.html", "version": "SNS Developer Guide, retrieved 2026-10-19", "scope": "attribute names, String/Number/String.Array/Binary types, attributes only with string structure"}
+  ],
+  "sdk_lock": "sdk/credentials/requirements.txt",
+  "source": "durable QoS 1 SF-032 pub/sub subscription; sender is the SO_PEERCRED-authenticated component",
+  "status": "local pub/sub status_topic, at least once, correlated by request id",
+  "max_ipc_payload_bytes": 4096,
+  "max_message_bytes": 262144,
+  "max_attributes": 10,
+  "attribute_types": ["String", "Number", "String.Array", "Binary"],
+  "grants": "exact sender component to exact same-Region topic ARN; checked before any other request processing or network I/O",
+  "retry": "per-request durable attempt bound 1..100; foreground backoff 1..60 s; local token bucket rate limit",
+  "duplicates": "standard topics at least once after ambiguous responses; FIFO topics get a stable derived MessageDeduplicationId",
+  "live_aws": "unrun; separate authorization required; tracked in SF-078/#132",
+  "physical_target": "unrun; deferred to SF-031/#32",
+  "license": "clean-room original implementation; no AWS component code copied"
+}
