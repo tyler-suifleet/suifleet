@@ -12,6 +12,8 @@ use std::{
 
 pub const RUN: &str = "suifleet:oci";
 const LABEL: &str = "io.suifleet.supervisor";
+// @ is forbidden in component path segments, so this cannot hide a component.
+const ENGINE_MARKER: &str = "@oci-engine";
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -294,7 +296,7 @@ async fn verify(d: &Descriptor) -> anyhow::Result<()> {
 }
 
 pub async fn clean(root: &Path) -> anyhow::Result<()> {
-    if !root.join("oci-engine").exists() {
+    if !root.join(ENGINE_MARKER).exists() {
         return Ok(());
     }
     let bytes = output(
@@ -323,7 +325,7 @@ pub async fn clean(root: &Path) -> anyhow::Result<()> {
 /// Before native-process recovery, remove engine-owned processes left by a
 /// dead daemon. Preserve all existing native containment/proof requirements.
 pub fn clean_at_open(root: &Path) -> anyhow::Result<()> {
-    if !root.join("oci-engine").exists() {
+    if !root.join(ENGINE_MARKER).exists() {
         return Ok(());
     }
     let root = root.to_owned();
@@ -347,9 +349,9 @@ pub async fn start(root: &Path, workspace: &Path) -> anyhow::Result<tokio::proce
     verify(&d).await?;
     let container = name(workspace);
     // The marker is durable before any create can reach the engine.
-    if !root.join("oci-engine").exists() {
+    if !root.join(ENGINE_MARKER).exists() {
         crate::configuration::write_private(
-            &root.join("oci-engine"),
+            &root.join(ENGINE_MARKER),
             &serde_json::json!({"version":1}),
         )?;
     }
@@ -711,5 +713,13 @@ mod tests {
                 );
             }
         }
+    }
+    #[test]
+    fn native_component_directory_does_not_enable_engine_recovery() {
+        let root = std::env::temp_dir().join(format!("sf036-marker-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("oci-engine")).unwrap();
+        assert!(!crate::deps::valid_name(ENGINE_MARKER));
+        clean_at_open(&root).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
