@@ -38,7 +38,9 @@ class RoadmapTests(unittest.TestCase):
         self.reject('interfaces/compat/remaining-roadmap.json', lambda d: d['scopes'][0].update(depends_on=[]))
 
     def test_no_runtime_promotion(self):
-        self.reject('interfaces/compat/remaining-roadmap.json', lambda d: d['scopes'][0].update(runtime_execution='passed'))
+        def mutate(d):
+            next(s for s in d['scopes'] if s['runtime_execution'] == 'pending').update(runtime_execution='passed')
+        self.reject('interfaces/compat/remaining-roadmap.json', mutate)
 
     def test_missing_runtime_receipt(self):
         def mutate(d):
@@ -47,6 +49,9 @@ class RoadmapTests(unittest.TestCase):
 
     def test_wrong_runtime_receipt_owner(self):
         self.reject('docs/validation/sf072-video.json', lambda d: d.update(ticket='SF-069'))
+
+    def test_wrong_lambda_runtime_receipt_owner(self):
+        self.reject('docs/validation/sf069-lambda.json', lambda d: d.update(ticket='SF-072'))
 
     def test_runtime_receipt_requires_limits(self):
         self.reject('docs/validation/sf072-video.json', lambda d: d.update(limits=[]))
