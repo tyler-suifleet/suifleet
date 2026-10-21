@@ -205,11 +205,14 @@ pub fn check(policy: &Policy, bytes: &[u8]) -> anyhow::Result<Intent> {
 /// bounded snapshot, of this chain and registry, naming this key as signer.
 /// Its content is otherwise the daemon's own report, like a status report's.
 pub fn check_telemetry(policy: &Policy, message: &[u8]) -> anyhow::Result<()> {
-    use crate::telemetry::{Snapshot, MAX_MESSAGE_BYTES, SCHEMA};
+    use crate::telemetry::{Snapshot, MAX_MESSAGE_BYTES};
     anyhow::ensure!(message.len() <= MAX_MESSAGE_BYTES, "telemetry snapshot exceeds {MAX_MESSAGE_BYTES} bytes");
     let snapshot: Snapshot = serde_json::from_slice(message).map_err(|e| anyhow::anyhow!("not a telemetry snapshot: {e}"))?;
     anyhow::ensure!(serde_json::to_vec(&snapshot)? == message, "telemetry snapshot is not in canonical form");
-    anyhow::ensure!(snapshot.schema == SCHEMA, "unsupported telemetry schema {}", snapshot.schema);
+    // Schema 2 exactly when a services section (SF-085) is present.
+    anyhow::ensure!(snapshot.schema == Snapshot::schema_for(snapshot.services.is_some()), "unsupported telemetry schema {}", snapshot.schema);
+    // Service errors leave the device only as categories, never as texts.
+    anyhow::ensure!(snapshot.services.as_ref().is_none_or(|s| s.errors_are_categories()), "telemetry service error is not a category");
     anyhow::ensure!(snapshot.chain_identifier == policy.chain_identifier, "telemetry snapshot is for another chain");
     anyhow::ensure!(Address::from_str(&snapshot.registry).ok() == Some(policy.registry), "telemetry snapshot is not for this fleet's registry");
     anyhow::ensure!(Address::from_str(&snapshot.signer).ok() == Some(policy.device), "telemetry snapshot names another signer");
@@ -794,7 +797,23 @@ mod tests {
         check_telemetry(&p, &telemetry(|_| {})).unwrap();
         // The registry may be written in any address form.
         check_telemetry(&p, &telemetry(|s| s.registry = format!("0x{}", "0".repeat(62) + "13"))).unwrap();
+        // Schema 2 carries a services section (SF-085), and only it does.
+        let services = || Some(crate::service_health::Services { version: 1, ..Default::default() });
+        check_telemetry(&p, &telemetry(|s| (s.schema, s.services) = (2, services()))).unwrap();
+        let mut null_services: serde_json::Value = serde_json::from_slice(&telemetry(|_| {})).unwrap();
+        null_services["services"] = json!(null);
         for (label, bad) in [
+            ("services without schema 2", telemetry(|s| s.services = services())),
+            ("services: null (not canonical)", serde_json::to_vec(&null_services).unwrap()),
+            ("unknown services field", {
+                let mut v: serde_json::Value = serde_json::from_slice(&telemetry(|s| (s.schema, s.services) = (2, services()))).unwrap();
+                v["services"]["payloads"] = json!([]);
+                serde_json::to_vec(&v).unwrap()
+            }),
+            ("a service error text", telemetry(|s| {
+                let bridge = crate::service_health::BridgeHealth { last_error: Some("subscriber queue full: sub confidential/#".into()), ..Default::default() };
+                (s.schema, s.services) = (2, Some(crate::service_health::Services { version: 1, bridge: Some(bridge), ..Default::default() }));
+            })),
             ("another chain", telemetry(|s| s.chain_identifier = "35834a8a".into())),
             ("another registry", telemetry(|s| s.registry = "0x14".into())),
             ("another signer", telemetry(|s| s.signer = "0xa1".into())),

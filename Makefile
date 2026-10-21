@@ -455,6 +455,20 @@ else
 	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" python3 scripts/test_shadows.py $(SHADOWS_EVIDENCE)
 endif
 
+# Service health in telemetry and alerts (SF-085): the real daemon fills a
+# queue, loses its MQTT broker and fails an export; the real indexer derives
+# the alerts from its signed reports. Root only inside a disposable,
+# network-isolated container (component UIDs).
+.PHONY: test-service-health
+test-service-health:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+	$(RUN) cargo build --locked --manifest-path suifleet-indexer/Cargo.toml
+ifdef INSIDE_DEV_CONTAINER
+	python3 scripts/test_service_health.py $(SERVICE_HEALTH_EVIDENCE)
+else
+	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" python3 scripts/test_service_health.py $(SERVICE_HEALTH_EVIDENCE)
+endif
+
 # Root only inside a disposable, network-isolated container: real SO_PEERCRED UIDs.
 .PHONY: test-ipc
 test-ipc:
