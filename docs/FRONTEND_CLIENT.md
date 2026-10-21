@@ -24,6 +24,12 @@ Inventory uses `listOwnedObjects`; groups and deployment history use `listEvents
 
 On-chain deployment group targets are arbitrary IDs. History resolves only supported `DeviceGroup` objects administered by that deployment's creator; wrong types, malformed layouts, unsupported group schemas and deleted groups do not hide other deployments. Transport errors remain visible. Each unique group is read once per history query, and administrator checks apply separately per deployment. Package, UpgradeCap and registry proofs run concurrently after fresh chain verification. Wallet guards compare snapshots of the signer address and supported chain set, accepting equivalent rebuilt account objects while rejecting actual changes before signing.
 
+## Component publishing
+
+The [component software library](COMPONENT_LIBRARY.md) separates browsing and
+guided immutable version publishing from target selection/deployment. It retains
+the wallet/network/effects boundary described above.
+
 ## Verification
 
 ```bash
