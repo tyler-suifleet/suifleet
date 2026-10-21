@@ -55,7 +55,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
       {connect}
       <p>A Google zkLogin address is controlled by your Google account and Enoki’s app-specific salt service. Keep access to that account and its recovery methods. Losing it can mean losing your fleet and funds. Enoki availability is also required to sign in and generate proofs.</p>
       <p>Sessions expire at the current Sui epoch boundary; sign in again when prompted. Disconnect on shared computers. Never share a seed phrase, login token or device key with SuiFleet.</p>
-      <p>For a business fleet, use stronger custody such as a hardware-backed extension wallet or multisig before making large deposits. You can transfer each device’s owner capability below while you still have account access.</p>
+      <p>For a business fleet, use stronger custody such as a hardware-backed extension wallet or multisig before making large deposits. Use the recipient-confirmed fleet handover linked below while you still have account access.</p>
     </section>
     <section className="bg-white p-5 rounded border space-y-3">
       <h2 className="font-semibold">2. Check network and gas</h2>
