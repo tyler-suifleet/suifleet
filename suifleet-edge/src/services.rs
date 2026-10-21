@@ -232,8 +232,10 @@ impl Runtime {
         let broker = cfg.pubsub.as_ref().map(|p| pubsub::Broker::open(&base.runtime.state_dir.join("pubsub"), p.limits())
             .map(|b| Arc::new(Mutex::new(b)))).transpose()?;
         let (aws_shadow_client, aws_shadows) = match (&base.aws_iot, base.shadows.as_ref().and_then(|s| s.aws_iot.as_ref())) {
-            (Some(iot), Some(sync)) => {
-                let (client, endpoint) = crate::iotcore::shadow_channel(&iot.thing_name, &sync.shadows);
+            (Some(iot), sync) if sync.is_some() || base.device_defender.is_some() => {
+                let names = sync.map(|s| s.shadows.as_slice()).unwrap_or(&[]);
+                let (client, mut endpoint) = crate::iotcore::shadow_channel(&iot.thing_name, names);
+                if base.device_defender.is_some() { endpoint.enable_defender(); }
                 (Some(client), Some(endpoint))
             }
             _ => (None, None),

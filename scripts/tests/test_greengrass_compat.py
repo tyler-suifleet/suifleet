@@ -23,13 +23,13 @@ class RepositoryTests(unittest.TestCase):
         # implementation: SF-037 (recipes, managed dependencies), SF-057
         # (credential provider), SF-032 (pub/sub), SF-033 (shadows), SF-034
         # (streams), SF-035 (client devices), SF-059 (metrics), SF-060
-        # (CloudWatch Logs) and SF-061 (AWS IoT Core) executed theirs; all
+        # (CloudWatch Logs), SF-061 (AWS IoT Core) and SF-062 (Defender) executed theirs; all
         # others remain pending.
         matrix = json.loads((ROOT / compat.COMPAT / "greengrass-compat.json").read_text())
         passed = {name for name, s in matrix["suites"].items() if s["runtime_execution"] == "passed"}
         self.assertEqual(passed, {"aws-recipe-cases.json", "managed-dependency-cases.json", "credential-provider-cases.json", "cloudwatch-metrics-cases.json",
                                   "cloudwatch-logs-cases.json", "pubsub-cases.json", "shadow-cases.json", "stream-cases.json",
-                                  "client-device-cases.json", "aws-iot-cases.json"})
+                                  "client-device-cases.json", "aws-iot-cases.json", "device-defender-cases.json"})
         for name in ("aws-recipe-cases.json", "managed-dependency-cases.json"):
             receipt = json.loads((ROOT / matrix["suites"][name]["runtime_evidence"]).read_text())
             self.assertEqual(receipt["ticket"], "SF-037")
@@ -267,7 +267,7 @@ class ManagedCatalogGateTests(unittest.TestCase):
             "secure-tunneling": "SF-063"})
         self.assertEqual({a["id"] for a in self.catalog["adapters"] if a["runtime_execution"] == "passed"},
                          {"credential-provider", "cloudwatch-metrics-export", "cloudwatch-logs-export", "stream-export-aws",
-                          "aws-iot-core-connection"})
+                          "aws-iot-core-connection", "device-defender-metrics"})
         self.assertFalse(self.catalog["parity_claim"])
         for entry in self.catalog["components"] + self.catalog["platform_phases"]:
             self.assertNotIn("approval", entry)

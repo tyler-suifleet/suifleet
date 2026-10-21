@@ -17,6 +17,7 @@ mod firmware;
 mod handoff;
 mod identity;
 mod iotcore;
+mod defender;
 mod logs;
 mod mqtt;
 mod platform;
@@ -377,6 +378,15 @@ async fn main() -> anyhow::Result<()> {
     };
     // AWS IoT Device Shadow sync (SF-061) runs over the bridge's [aws_iot]
     // connection; the service runtime owns that connection side.
+    let _defender_task = match (&cfg.device_defender, &service_runtime.lock().unwrap().aws_shadow_client) {
+        (Some(settings), Some(client)) => {
+            let exporter = defender::Exporter::open(settings.clone(),
+                cfg.runtime.state_dir.join("device-defender"),
+                &cfg.aws_iot.as_ref().expect("validated AWS connection").thing_name)?;
+            Some(tokio::spawn(exporter.run(client.clone())))
+        }
+        _ => None,
+    };
     let aws_shadow_sync = cfg.shadows.as_ref().and_then(|s| s.aws_iot.clone())
         .zip(service_runtime.lock().unwrap().aws_shadow_client.take());
     let shadow_sync = match (&cfg.shadows, &shadow_store, aws_shadow_sync) {

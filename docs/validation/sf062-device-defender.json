@@ -1,0 +1,30 @@
+{
+  "ticket": "SF-062",
+  "adapter": "device-defender-metrics",
+  "reference_version": "4.0.0",
+  "schema": "1.0",
+  "environment": "network-none container; real daemon/procfs/shared TLS MQTT adapter; AWS-shaped endpoint",
+  "checks": [
+    "offline report persists across daemon SIGKILL; disconnected time consumes no retries",
+    "thing policy denies Defender publication; queue remains unaccepted",
+    "real procfs JSON 1.0 and reserved topic traverse shared mTLS/ALPN connection; PUBACK/wrong thing/wrong id do not accept; correlated service response does",
+    "accepted report not replayed or resampled on restart inside configured 300-second interval",
+    "correlated rejected response counted separately and removed without falsely accepting or retrying invalid payload",
+    "missing service outcomes retry identical reports after restart, then exhaust the configured persistent allowance; never counted accepted",
+    "no private key material in daemon logs or persisted state"
+  ],
+  "unrun": [
+    "Live AWS account/policy/Device Defender Detect (unauthorized, no credentials)",
+    "Physical Pi acceptance (#32)",
+    "Actual mainnet acceptance (#159)"
+  ],
+  "recorded_utc": "2026-10-21T08:32:10.746247+00:00",
+  "command": "python3 scripts/test_device_defender.py --image suifleet-dev:sf037 --evidence docs/validation/sf062-device-defender.json",
+  "unit_tests": {
+    "command": "cargo test --offline --locked --manifest-path suifleet-edge/Cargo.toml; cargo test --offline --locked --manifest-path suifleet-edge/Cargo.toml --features pkcs11",
+    "default_passed": 326,
+    "pkcs11_passed": 328,
+    "failed": 0,
+    "toolchain": "Rust/Cargo 1.94.0"
+  }
+}
