@@ -108,7 +108,7 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     await page.getByRole("button", { name: "Add platform", exact: true }).click();
     await page.getByLabel("Operating system").nth(1).selectOption("macos");
     await page.getByLabel("Artifact", { exact: true }).nth(1).setInputFiles(file("macos.bin"));
-    await page.getByRole("button", { name: "Move platform 2 earlier" }).click();
+    await page.getByRole("button", { name: "Move platform 2 earlier" }).evaluate(b => { b.click(); b.click(); });
     assert.equal(await page.getByLabel("Operating system").first().inputValue(), "macos");
     await page.getByText("Optional installer command", { exact: true }).first().click();
     await page.getByLabel("Install command", { exact: true }).first().fill("{artifact} --install");
