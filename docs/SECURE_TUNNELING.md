@@ -17,7 +17,7 @@ configure those services, run notification-supplied commands or trigger reboot.
 python3 scripts/package_tunneling.py --output /tmp/suifleet-tunnel.tar.gz
 ```
 
-The optional archive contains `localproxy`, its license, source revision, binary
+The optional archive contains `localproxy`, its license/NOTICE/third-party notices, source revision, binary
 SHA-256, build package versions, manifest, disabled example configuration,
 connection settings and systemd unit. The build pins upstream revision
 `8a71618acf536923e882387e8d9eca9dbc7fdbe2` (3.3.1), verifies the downloaded
