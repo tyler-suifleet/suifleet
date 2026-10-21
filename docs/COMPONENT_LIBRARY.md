@@ -41,7 +41,7 @@ device; deployment does not establish installed/running state without device
 reports. Platform tools own OS installation, reboot and firmware recovery; no
 systemd, Yocto or partition layout is assumed.
 
-Raw catalog selection, manifest IDs/digests and Greengrass import remain secondary
+Additional catalog creation/selection, manifest IDs/digests and Greengrass import remain secondary
 under advanced tools/details. Catalog selection changes the destination for new
 publications, while browsing continues to show all the publisher’s catalogs.
 

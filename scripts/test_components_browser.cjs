@@ -73,6 +73,12 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     await imported.evaluate(() => window.componentsAcceptance.reject());
     await imported.getByRole("status").filter({ hasText: "User rejected signing" }).waitFor();
     assert.equal(await imported.getByRole("button", { name: "Back to library" }).isDisabled(), false);
+    await imported.getByRole("button", { name: "Back to library" }).click();
+    await imported.getByText("Advanced publishing tools", { exact: true }).click();
+    await imported.getByRole("button", { name: "Create another publisher catalog", exact: true }).evaluate(b => { b.click(); b.click(); });
+    await imported.waitForFunction(() => window.componentsAcceptance.calls().length === 2);
+    await imported.evaluate(() => window.componentsAcceptance.reject());
+    await imported.getByRole("alert").filter({ hasText: "User rejected signing" }).waitFor();
     await imported.close();
     const disconnected = await browser.newPage();
     await disconnected.goto(`${origin}/?disconnected`);
