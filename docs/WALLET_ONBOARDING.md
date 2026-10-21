@@ -106,13 +106,17 @@ Slush registration, zero-gas gating, registration confirmation/rejection, sessio
 wall-clock and epoch expiry, network mismatch and disconnect. They do not log
 into Google/Slush, operate an extension or submit to a chain.
 
-SF-088/#171 still requires provisioned Google/Enoki, real Slush web and extension
-acceptance on the appropriate networks, including rejection, expiry, mismatch,
-registration effects/inventory and owner transfer to the destination wallet or
-multisig. Record browser/wallet versions, origins, public network/package IDs and
-transaction digests without credentials. SF-088 is not in the ticket-specific
-external acceptance deferral map: fixture evidence alone is insufficient for
-Review. Track missing setup/results in the existing issue; do not claim them run.
+The user-authorized implementation/acceptance split now covers SF-088; see
+[the acceptance policy](IMPLEMENTATION_ACCEPTANCE.md). Final provisioned
+Google/Enoki, real Slush web and extension acceptance remains unrun and tracked
+in [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
+[SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159). This includes
+rejection, expiry, mismatch, registration effects/inventory and owner transfer to
+the destination wallet or multisig. Record browser/wallet versions, origins,
+public network/package IDs and transaction digests without credentials in the
+final test phase. Source/security review, local failure-path/browser fixtures,
+normal automatic public-testnet validation and current CI remain implementation
+gates. Fixture evidence does not establish real provider or wallet acceptance.
 
 References: [Enoki registration](https://docs.enoki.mystenlabs.com/ts-sdk/register),
 [Enoki sign-in](https://docs.enoki.mystenlabs.com/ts-sdk/sign-in),
