@@ -409,10 +409,9 @@ class Coordinator:
                 self.ticket(project, 'assert', owner['key'], '--token', owner['token'])
             latest_review = self.store.review(project['id'], pr['number'])
             snapshot = {**pr, 'coordinator_review':latest_review, 'ticket': {k:owner[k] for k in ('key','agent','model','evidence','spec')}}
-            # Keep the original receipt location while handing off fresh feedback.
-            # Merge approval continues to require the complete snapshot hash.
-            if recovery is not None:
-                self.store.db.execute('UPDATE jobs SET feedback=? WHERE id=?', (feedback(pr),job))
+            # Keep the original reservation key and receipt location: another
+            # terminal job may already own the fresh feedback key. The worker
+            # receives fresh evidence below; approval still binds to feedback(pr).
             (directory / 'snapshot.json').write_text(json.dumps(snapshot, indent=2))
             result_path = directory / 'result.json'
             prompt = self.prompt(project, pr, owner, kind, family, directory, result_path)

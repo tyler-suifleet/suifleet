@@ -291,22 +291,26 @@ class IntegrationRaces(unittest.TestCase):
                 # An unrelated reservation cannot overlap the pending launch.
                 self.assertIsNone(coordinator.store.reserve('test',pr,'Claude','review',Path(d)))
                 original_directory=Path(row['directory'])
+                original_feedback=row['feedback']
                 if change == 'base': pr['baseRefOid']='c'*40
                 if change == 'checks': pr['statusCheckRollup'][0]['conclusion']='FAILURE'
-                if change == 'comment': pr['comments'].append(dict(id='new',body='new feedback',updatedAt='now'))
+                if change in ('comment','collision'): pr['comments'].append(dict(id='new',body='new feedback',updatedAt='now'))
+                if change == 'collision':
+                    coordinator.store.db.execute("INSERT INTO jobs(project,pr,family,kind,head,feedback,status,directory,created) VALUES(?,?,?,?,?,?,'done',?,0)",('test',pr['number'],'Codex','fix',pr['headRefOid'],c.feedback(pr),str(Path(d)/'terminal')))
+
                 coordinator.store.db.execute('UPDATE jobs SET retry_after=0')
                 popen.return_value.pid=123
                 coordinator.collect({'id':'test','github_account':'test'},[])
                 self.assertEqual(json.loads((original_directory/'snapshot.json').read_text())['baseRefOid'],pr['baseRefOid'])
                 recovered=coordinator.store.db.execute('SELECT * FROM jobs').fetchone()
                 self.assertEqual(recovered['directory'],str(original_directory))
-                self.assertEqual(recovered['feedback'],c.feedback(pr))
+                self.assertEqual(recovered['feedback'],original_feedback)
                 self.assertEqual(json.loads((original_directory/'snapshot.json').read_text())['statusCheckRollup'],pr['statusCheckRollup'])
                 self.assertEqual(json.loads((original_directory/'snapshot.json').read_text())['comments'],pr['comments'])
                 self.assertEqual(calls.count('resume'),1)
                 self.assertEqual(calls.count('publish'),1)
                 popen.assert_called_once()
-                self.assertEqual(coordinator.store.db.execute('SELECT status FROM jobs').fetchone()[0],'running')
+                self.assertEqual(coordinator.store.db.execute('SELECT status FROM jobs WHERE id=?',(row['id'],)).fetchone()[0],'running')
                 coordinator.collect({'id':'test','github_account':'test'},[])
                 popen.assert_called_once()
 
@@ -314,7 +318,7 @@ class IntegrationRaces(unittest.TestCase):
         self.check_failed_resume_recovery()
 
     def test_pending_resume_recovers_with_fresh_base_checks_and_feedback(self):
-        for change in ('base','checks','comment'):
+        for change in ('base','checks','comment','collision'):
             with self.subTest(change=change):
                 self.check_failed_resume_recovery(change)
 
