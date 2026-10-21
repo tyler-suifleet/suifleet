@@ -25,6 +25,9 @@ use std::{
 use tracing::{info, warn};
 
 pub const SCHEMA: u64 = 1;
+/// A snapshot with a `services` section (SF-085). Without one a snapshot
+/// stays schema 1, byte for byte as before.
+pub const SCHEMA_SERVICES: u64 = 2;
 pub const MAX_MESSAGE_BYTES: usize = 64 * 1024;
 pub const MAX_COMPONENTS: usize = 64;
 pub const MAX_REASONS: usize = 16;
@@ -115,6 +118,16 @@ pub struct Snapshot {
     pub components: Vec<ComponentHealth>,
     pub health: Health,
     pub reasons: Vec<String>,
+    /// Pub/sub, bridge, stream and shadow health (schema 2 only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub services: Option<crate::service_health::Services>,
+}
+
+impl Snapshot {
+    /// The schema a snapshot with (or without) a services section has.
+    pub fn schema_for(services: bool) -> u64 {
+        if services { SCHEMA_SERVICES } else { SCHEMA }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -151,6 +164,8 @@ pub struct Inventory {
     pub components: Vec<ComponentHealth>,
     pub reasons: Vec<String>,
     pub pending_receipts: u32,
+    /// The enabled services' health (SF-085), when any is enabled.
+    pub services: Option<crate::service_health::Services>,
 }
 
 /// Read the journal and supervisor files (each replaced atomically by its
@@ -306,6 +321,10 @@ pub struct Binding {
 pub fn snapshot(binding: &Binding, signer: &str, seq: u64, dropped: u64, sync: SyncHealth, inventory: Inventory, now: u64) -> Snapshot {
     let mut reasons = sync_reasons(&sync, binding.poll_seconds, now);
     reasons.extend(inventory.reasons);
+    let mut services = inventory.services;
+    if let Some(services) = &services {
+        reasons.extend(crate::service_health::reasons(services, binding.interval_seconds, now));
+    }
     let mut components: Vec<ComponentHealth> = inventory
         .components
         .into_iter()
@@ -334,7 +353,7 @@ pub fn snapshot(binding: &Binding, signer: &str, seq: u64, dropped: u64, sync: S
         let health = if listed.is_empty() { Health::Healthy } else { Health::Degraded };
         let snapshot = Snapshot {
             service_configuration_sha256: inventory.service_configuration_sha256.clone(),
-            schema: SCHEMA,
+            schema: Snapshot::schema_for(services.is_some()),
             chain_identifier: binding.chain_identifier.clone(),
             registry: binding.registry.clone(),
             device_id: binding.device_id.clone(),
@@ -351,13 +370,18 @@ pub fn snapshot(binding: &Binding, signer: &str, seq: u64, dropped: u64, sync: S
             components: components.clone(),
             health,
             reasons: listed,
+            services: services.clone(),
         };
-        // JSON escaping can still outgrow the byte limit: list fewer.
-        if components.is_empty() || serde_json::to_vec(&snapshot).map(|b| b.len()).unwrap_or(usize::MAX) <= MAX_MESSAGE_BYTES {
+        // JSON escaping can still outgrow the byte limit: list fewer
+        // components, then fewer service entries (each list counts them).
+        if serde_json::to_vec(&snapshot).map(|b| b.len()).unwrap_or(usize::MAX) <= MAX_MESSAGE_BYTES {
             return snapshot;
         }
-        components.pop();
-        omitted += 1;
+        if components.pop().is_some() {
+            omitted += 1;
+        } else if !services.as_mut().is_some_and(|s| s.shed()) {
+            return snapshot;
+        }
     }
 }
 
@@ -534,15 +558,21 @@ pub struct Task {
     pub buffer_max: usize,
     pub signer: Arc<dyn TxSigner>,
     pub sync: SharedSync,
+    /// Pub/sub, bridge, streams and shadows, when enabled (SF-085). Read at
+    /// each heartbeat: deployments can enable, replace or disable them.
+    pub services: Arc<std::sync::Mutex<crate::services::Runtime>>,
 }
 
 impl Task {
     /// One heartbeat: spool a fresh snapshot, then upload what is spooled.
-    pub async fn beat(&self, spool: &mut Spool, http: &reqwest::Client) -> anyhow::Result<()> {
+    pub async fn beat(&self, spool: &mut Spool, http: &reqwest::Client, tracker: &mut crate::service_health::Tracker) -> anyhow::Result<()> {
         let now = now_ms();
         let seq = spool.next_seq(now)?;
         let sync = self.sync.lock().unwrap().clone();
-        let snapshot = snapshot(&self.binding, &self.signer.address(), seq, spool.dropped(), sync, inventory(&self.state_dir), now);
+        let mut inventory = inventory(&self.state_dir);
+        let sources = self.services.lock().unwrap().health_sources();
+        inventory.services = crate::service_health::collect(&sources, tracker, self.binding.started_ms, now);
+        let snapshot = snapshot(&self.binding, &self.signer.address(), seq, spool.dropped(), sync, inventory, now);
         spool.push(seq, &seal(self.signer.as_ref(), &snapshot)?)?;
         if let Err(error) = flush(http, &self.url, spool).await {
             info!(%error, spooled = spool.pending()?.len(), "Telemetry ingress unreachable; snapshots stay spooled");
@@ -560,8 +590,9 @@ impl Task {
             Err(error) => return warn!(%error, "Telemetry disabled: spool unavailable"),
         };
         info!(url = %self.url, interval = self.binding.interval_seconds, "Reporting telemetry");
+        let mut tracker = crate::service_health::Tracker::default();
         loop {
-            if let Err(error) = self.beat(&mut spool, &http).await {
+            if let Err(error) = self.beat(&mut spool, &http, &mut tracker).await {
                 warn!(%error, "Telemetry snapshot failed");
             }
             tokio::time::sleep(Duration::from_secs(self.binding.interval_seconds)).await;
@@ -750,6 +781,7 @@ mod tests {
             components: vec![component; 500],
             reasons: (0..100).map(|_| long.clone()).collect(),
             pending_receipts: 0,
+            services: None,
             service_configuration_sha256: None,
         };
         let sync = SyncHealth { last_success_ms: Some(now), consecutive_failures: 1, last_error: Some(long.clone()) };
@@ -765,6 +797,57 @@ mod tests {
         assert_eq!(s.health, Health::Degraded);
         assert_eq!(bounded("abc", 3), "abc");
         assert_eq!(bounded("abcdef", 5), "ab...");
+    }
+
+    #[test]
+    fn services_section_is_versioned_bounded_and_judged() {
+        use crate::service_health::*;
+        let now = 10_000_000;
+        let long = "\u{1}é".repeat(400);
+        let queue = QueueHealth { principal: long.clone(), subscriptions: 1, queued: 9, fill_percent: 100,
+                                  full_since_ms: Some(now - 200_000), ..QueueHealth::default() };
+        let export = ExportHealth { consecutive_failures: 4, lost: 3, lost_recent: 3, last_error: Some("credentials-unreadable".into()), ..ExportHealth::default() };
+        let stream = StreamHealth { name: long.clone(), export: Some(export), ..StreamHealth::default() };
+        let shadow = ShadowSyncHealth { name: long.clone(), conflicts: 1, conflicts_recent: 1, last_error: Some("credentials-unreadable".into()),
+                                        ..ShadowSyncHealth::default() };
+        let services = Services {
+            version: VERSION,
+            messaging: Some(Messaging { queues: vec![queue; MAX_ENTRIES], ..Messaging::default() }),
+            bridge: Some(BridgeHealth { connected: false, since_ms: now - 200_000, last_error: Some("credentials-unreadable".into()), ..BridgeHealth::default() }),
+            streams: Some(StreamsHealth { streams: vec![stream; MAX_ENTRIES], omitted: 0 }),
+            shadows: Some(ShadowsHealth { sync: vec![shadow; MAX_ENTRIES], ..ShadowsHealth::default() }),
+        };
+        let component = ComponentHealth {
+            name: "c".repeat(MAX_NAME), version: "1".into(), deployment_id: "0xa".into(), installed: true, supervised: false,
+            phase: None, restarts: None, last_exit: None, since_ms: None,
+        };
+        let inventory = Inventory { components: vec![component; MAX_COMPONENTS], services: Some(services), ..Inventory::default() };
+        let s = snapshot(&binding(), "0xs", 1, 0, synced(now), inventory, now);
+        let bytes = serde_json::to_vec(&s).unwrap();
+        assert!(bytes.len() <= MAX_MESSAGE_BYTES, "{}", bytes.len());
+        assert_eq!(s.schema, SCHEMA_SERVICES);
+        assert_eq!(s.health, Health::Degraded);
+        // Sustained conditions degrade the device; one-off events only alert.
+        assert!(s.reasons.iter().any(|r| r.starts_with("pub/sub queue of ")), "{:?}", s.reasons);
+        assert!(s.reasons.last().unwrap().ends_with("more problems"));
+        assert!(s.reasons.iter().all(|r| r.len() <= MAX_TEXT));
+        // Components gave way first; the remaining service lists keep their omitted counts.
+        let kept = s.services.as_ref().unwrap();
+        let listed = kept.entries() as u64;
+        let omitted = kept.messaging.as_ref().unwrap().omitted + kept.streams.as_ref().unwrap().omitted + kept.shadows.as_ref().unwrap().omitted;
+        assert_eq!(listed + omitted, 3 * MAX_ENTRIES as u64);
+        assert!(s.components.len() < MAX_COMPONENTS);
+        // Round-trips exactly (the signing service and indexer re-serialize).
+        assert_eq!(serde_json::to_vec(&serde_json::from_slice::<Snapshot>(&bytes).unwrap()).unwrap(), bytes);
+
+        // Without services: schema 1 and no `services` key at all.
+        let plain = snapshot(&binding(), "0xs", 1, 0, synced(now), Inventory::default(), now);
+        assert_eq!(plain.schema, SCHEMA);
+        assert!(!String::from_utf8(serde_json::to_vec(&plain).unwrap()).unwrap().contains("services"));
+        // Enabled services with nothing wrong keep a device healthy.
+        let quiet = Inventory { services: Some(Services { version: VERSION, ..Services::default() }), ..Inventory::default() };
+        let quiet = snapshot(&binding(), "0xs", 1, 0, synced(now), quiet, now);
+        assert_eq!((quiet.schema, quiet.health), (SCHEMA_SERVICES, Health::Healthy));
     }
 
     #[test]
@@ -814,12 +897,16 @@ mod tests {
     fn signs_the_shared_vector_exactly() {
         // interfaces/telemetry-cases.json: signed independently with Mysten's
         // TypeScript SDK; the indexer and the dApp verify the same envelope.
+        // `signed_services` (schema 2) fixes the services section's field order.
         let cases: serde_json::Value = serde_json::from_str(include_str!("../../interfaces/telemetry-cases.json")).unwrap();
-        let snapshot: Snapshot = serde_json::from_value(cases["signed"]["snapshot"].clone()).unwrap();
-        let expected: Envelope = serde_json::from_value(cases["signed"]["envelope"].clone()).unwrap();
-        let signer = Ed25519File(SigningKey::from_bytes(&[7; 32]));
-        assert_eq!(signer.address(), cases["signed"]["signer"].as_str().unwrap());
-        assert_eq!(seal(&signer, &snapshot).unwrap(), expected);
+        for case in ["signed", "signed_services"] {
+            let snapshot: Snapshot = serde_json::from_value(cases[case]["snapshot"].clone()).unwrap();
+            assert_eq!(snapshot.schema, Snapshot::schema_for(snapshot.services.is_some()), "{case}");
+            let expected: Envelope = serde_json::from_value(cases[case]["envelope"].clone()).unwrap();
+            let signer = Ed25519File(SigningKey::from_bytes(&[7; 32]));
+            assert_eq!(signer.address(), cases[case]["signer"].as_str().unwrap());
+            assert_eq!(seal(&signer, &snapshot).unwrap(), expected, "{case}");
+        }
     }
 
     #[test]
