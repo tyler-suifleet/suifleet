@@ -9,6 +9,7 @@ import { uploadArtifact, uploadRecipe, renewalCommand, storageWarnings, type Com
 import { DEFAULT_DELIVERY, releaseProtection } from "@/lib/delivery";
 import { useAccessPolicies } from "@/hooks/useAccessPolicies";
 import { UploadProgress } from "@/components/UploadProgress";
+import { DeploymentProgress, type DeploymentPhase } from "@/components/DeploymentProgress";
 import { DeliveryFields } from "@/components/DeliveryFields";
 import { buildCreateDeploymentTx } from "@/lib/sui";
 import { buildDesiredRevisionTx } from "@/lib/desired-state";
@@ -52,7 +53,8 @@ export default function FirmwarePage() {
   const uploadInFlight = useRef(false);
   const deploymentInFlight = useRef(false);
   const [uploadProgress, setUploadProgress] = useState<Progress | null>(null);
-  const [deployPhase, setDeployPhase] = useState<"uploading" | "wallet" | null>(null);
+  const [deployPhase, setDeployPhase] = useState<DeploymentPhase | null>(null);
+  const [deploymentStartedAt, setDeploymentStartedAt] = useState(0);
   const [recipeProgress, setRecipeProgress] = useState<Progress | null>(null);
   const [artifact, setArtifact] = useState<ArtifactResult | null>(null);
   const [componentName, setComponentName] = useState("");
@@ -110,6 +112,8 @@ export default function FirmwarePage() {
       return;
     }
     deploymentInFlight.current = true;
+    setDeploymentStartedAt(Date.now());
+    setDeployPhase("preparing");
     setRecipeProgress(null);
     let succeeded = false;
     try {
@@ -129,8 +133,7 @@ export default function FirmwarePage() {
           : buildCreateDeploymentTx(componentName, version, recipeUpload.blobId,
               artifact!.sha256, recipeUpload.sha256, [...selectedGroups], [...selectedDevices], initiallyPaused);
       }
-      setDeployPhase("wallet");
-      const result = await signAndExecute({ transaction });
+      const result = await signAndExecute({ transaction, onProgress: setDeployPhase });
       succeeded = true;
       setTxDigest(result.digest);
       setStep("done");
@@ -358,8 +361,7 @@ export default function FirmwarePage() {
         )}
       </Card>
 
-      {deployPhase === "uploading" && <UploadProgress progress={recipeProgress} label="Uploading recipe to Walrus…" />}
-      {deployPhase === "wallet" && <p role="status" className="text-sm text-blue-800">Awaiting wallet approval and network confirmation…</p>}
+      {deployPhase && <DeploymentProgress phase={deployPhase} progress={recipeProgress} startedAt={deploymentStartedAt} catalog={!!catalogVersion} />}
       {/* Step 3 — Targets */}
       <Card disabled={step !== "deploy"} title="3. Select targets">
         <label className="flex gap-2 text-sm mb-3"><input type="checkbox" checked={initiallyPaused} onChange={e => setInitiallyPaused(e.target.checked)} />
@@ -433,7 +435,7 @@ export default function FirmwarePage() {
           disabled={deployPhase !== null || txPending || (selectedGroups.size === 0 && selectedDevices.size === 0) || (!artifact && !catalogVersion) || step !== "deploy"}
           className="mt-2 bg-[#4DA2FF] hover:bg-[#2e8ed4] text-white px-5 py-2 rounded text-sm disabled:opacity-40"
         >
-          {deployPhase === "uploading" ? "Uploading recipe…" : deployPhase === "wallet" || txPending ? "Awaiting confirmation…" : `Deploy to ${selectedGroups.size + selectedDevices.size} target${selectedGroups.size + selectedDevices.size !== 1 ? "s" : ""}`}
+          {deployPhase === "uploading" ? "Uploading recipe…" : deployPhase !== null || txPending ? "Deploying…" : `Deploy to ${selectedGroups.size + selectedDevices.size} target${selectedGroups.size + selectedDevices.size !== 1 ? "s" : ""}`}
         </button>
       </Card>
     </div>

@@ -5,11 +5,14 @@ import { useCurrentClient, useDAppKit } from "@mysten/dapp-kit-react";
 import type { Transaction } from "@mysten/sui/transactions";
 import { requireManifest, verifyDeployment } from "@/lib/deployment-manifest";
 
+export type TransactionPhase = "validating" | "wallet" | "confirming";
+
 export function useFleetTransaction() {
   const client = useCurrentClient();
   const wallet = useDAppKit();
   return useMutation({
-    mutationFn: async ({ transaction }: { transaction: Transaction }) => {
+    mutationFn: async ({ transaction, onProgress }: { transaction: Transaction; onProgress?: (phase: TransactionPhase) => void }) => {
+      onProgress?.("validating");
       const manifest = requireManifest();
       const account = wallet.stores.$connection.get().account;
       if (!account) throw new Error("Connect a wallet before submitting a transaction");
@@ -23,11 +26,13 @@ export function useFleetTransaction() {
       const currentAccount = wallet.stores.$connection.get().account;
       if (!currentAccount || currentAccount.address !== address || JSON.stringify([...new Set(currentAccount.chains)].sort()) !== chains) throw new Error("Wallet account changed; retry the transaction");
       if (wallet.stores.$currentNetwork.get() !== manifest.network) throw new Error("Wallet network changed; retry the transaction");
+      onProgress?.("wallet");
       const result = await wallet.signAndExecuteTransaction({ transaction, account: currentAccount, network: manifest.network });
       if (result.FailedTransaction || !result.Transaction.status.success) {
         throw new Error(result.FailedTransaction?.status.error?.message ?? "Transaction execution was not successful");
       }
       // Confirm against the verified fleet node, independently of wallet effects.
+      onProgress?.("confirming");
       const confirmed = await client.waitForTransaction({ digest: result.Transaction.digest, include: { effects: true } });
       if (confirmed.FailedTransaction || !confirmed.Transaction.status.success) {
         throw new Error(confirmed.FailedTransaction?.status.error?.message ?? "Transaction execution was not successful");

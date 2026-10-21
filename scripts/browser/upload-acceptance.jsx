@@ -9,7 +9,9 @@ export const useDevices = () => ({ data: [device] });
 export const useGroups = () => ({ data: [] });
 export const useAccessPolicies = () => ({ data: [] });
 const state = { requests: [], walletCalls: 0, resolve: null, reject: null, alerts: [] };
-export const useFleetTransaction = () => ({ isPending: false, mutateAsync: () => {
+export const useFleetTransaction = () => ({ isPending: false, mutateAsync: ({ onProgress }) => {
+  onProgress?.("validating");
+  state.onProgress = onProgress;
   state.walletCalls++;
   return new Promise((resolve, reject) => { state.resolve = resolve; state.reject = reject; });
 } });
@@ -37,6 +39,7 @@ window.uploadAcceptance = {
     request.responseText = JSON.stringify({ newlyCreated: { blobObject: { blobId: `blob-${index}`, storage: { endEpoch: 42 } } } });
     request.onload();
   },
+  phase(phase) { state.onProgress(phase); },
   reject() { state.reject(new Error('User rejected signing')); },
   succeed() { state.resolve({ digest: 'confirmed-fixture' }); },
 };
