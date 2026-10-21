@@ -12,6 +12,7 @@ import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import { manifestClient } from "../fixtures/manifest-client.ts";
 
 const m = ACCEPTANCE_MANIFEST, address = normalizeSuiAddress("0xa"), digest = toBase58(new Uint8Array(32));
+let phases = [];
 let reject = false, failEffects = false, chain = m.chain_identifier, signCalls = 0;
 const account = { address, publicKey: new Uint8Array(32), chains: [`sui:${m.network}`], features: ["sui:signTransaction", "sui:signAndExecuteTransaction"] };
 const listeners = new Set();
@@ -52,15 +53,16 @@ Object.assign(window, { acceptance: {
   reject: () => { reject = true; }, effectsFail: () => { reject = false; failEffects = true; },
   reset: () => { reject = false; failEffects = false; chain = m.chain_identifier; }, wrongChain: () => { chain = "deadbeef"; },
   unsupportedChain: () => { account.chains = ["sui:mainnet"]; listeners.forEach((fn) => fn({ accounts: [account] })); },
+  phases: () => phases,
   wallets: () => kit.stores.$wallets.get().map((w) => w.name), signCalls: () => signCalls, disconnect: () => kit.disconnectWallet(),
 } });
 function App() {
   const connected = useCurrentAccount(), mutation = useFleetTransaction();
   const [outcome, setOutcome] = React.useState("idle");
   return <><ConnectButton /><div id="account">{connected?.address ?? "disconnected"}</div><button id="sign" onClick={async () => {
-    setOutcome("pending");
+    setOutcome("pending"); phases = [];
     const tx = new Transaction(); tx.setGasPayment([{ objectId: "0x1", version: "1", digest }]); tx.setGasPrice(1); tx.setGasBudget(1000000); tx.transferObjects([tx.gas], "0xb");
-    try { await mutation.mutateAsync({ transaction: tx }); setOutcome("success"); } catch (error) { setOutcome(`error: ${String(error)}`); }
+    try { await mutation.mutateAsync({ transaction: tx, onProgress: phase => phases.push(phase) }); setOutcome("success"); } catch (error) { setOutcome(`error: ${String(error)}`); }
   }}>Sign test transaction</button><div id="outcome">{outcome}</div></>;
 }
 createRoot(document.getElementById("root")).render(<QueryClientProvider client={new QueryClient()}><DAppKitProvider dAppKit={kit}><App /></DAppKitProvider></QueryClientProvider>);
