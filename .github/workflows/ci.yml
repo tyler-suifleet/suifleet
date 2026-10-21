@@ -107,6 +107,9 @@ jobs:
         shell: bash
         run: sh scripts/test_yocto_first_boot.sh suifleet-dev:ci | tee ci-logs/first-boot.log
 
+      - name: Device Defender metrics over the shared mutual TLS IoT adapter
+        run: python3 scripts/test_device_defender.py --image suifleet-dev:ci
+
       - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
