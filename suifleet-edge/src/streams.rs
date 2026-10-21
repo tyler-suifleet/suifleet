@@ -456,6 +456,15 @@ impl Stream {
         self.drop_segments()
     }
 
+    /// How many front messages `retire` would evict now, without evicting.
+    fn retirable(&self, now_ms: u64) -> usize {
+        if self.retired { return 0; }
+        self.entries.iter().take_while(|e| {
+            self.def.time_to_live_seconds.is_some_and(|ttl| e.appended_ms.saturating_add(ttl * 1000) <= now_ms)
+                || (self.def.discard_exported && (e.sequence as i64) <= self.exported)
+        }).count()
+    }
+
     fn drop_segments(&mut self) -> anyhow::Result<()> {
         let firsts: Vec<u64> = self.segments.keys().copied().collect();
         let dead: Vec<u64> = firsts
@@ -1010,24 +1019,26 @@ impl Store {
     }
 
     /// Facts for telemetry (SF-085): usage, rejections, export lag and loss.
-    /// Never data, export URLs or credentials.
-    pub fn health(&mut self, now_ms: u64) -> Vec<crate::service_health::StreamFacts> {
+    /// Never data, export URLs or credentials. Read-only: telemetry may run
+    /// while a reconfiguration awaits its journal commit (or against a staged
+    /// store), so retention is only projected here, never applied. Usage and
+    /// lag leave out messages retention would retire now; `lost` counts only
+    /// messages actually retired.
+    pub fn health(&self, now_ms: u64) -> Vec<crate::service_health::StreamFacts> {
         self.streams
-            .values_mut()
+            .values()
             .map(|stream| {
-                if let Err(error) = stream.retire(now_ms) {
-                    warn!(stream = stream.def.name, %error, "Could not retire stream messages");
-                }
+                let live: Vec<&Entry> = stream.entries.iter().skip(stream.retirable(now_ms)).collect();
                 crate::service_health::StreamFacts {
                     name: stream.def.name.clone(),
-                    bytes: stream.bytes,
+                    bytes: live.iter().map(|e| e.cost()).sum(),
                     max_size: stream.def.max_size,
-                    messages: stream.entries.len() as u64,
+                    messages: live.len() as u64,
                     overwrite: stream.def.strategy_on_full == Strategy::OverwriteOldestData,
                     rejected: stream.rejected,
                     lost: stream.lost,
                     export: stream.def.export.as_ref().map(|_| {
-                        let lag = stream.entries.iter().rev().take_while(|e| e.sequence as i64 > stream.exported).count() as u64;
+                        let lag = live.iter().rev().take_while(|e| e.sequence as i64 > stream.exported).count() as u64;
                         (lag, stream.export_status.clone())
                     }),
                 }
@@ -1451,6 +1462,49 @@ mod tests {
         store.append("ring", &[9; 250], 0).unwrap();
         let ring = store.health(0).remove(1);
         assert_eq!((ring.lost, ring.export.unwrap().0), (1, 2));
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn health_never_applies_uncommitted_retention() {
+        let path = dir("health-read-only");
+        let mut exported = def("data", 4096, Strategy::OverwriteOldestData);
+        exported.export = Some(ExportConfig { url: "http://127.0.0.1:9/x".into(), bearer_token_file: None,
+            batch_max_messages: 2, batch_max_bytes: 1024, batch_interval_seconds: 1, max_backoff_seconds: 5 });
+        let mut store = Store::start(&path, QUOTA, &[exported.clone()], 0).unwrap();
+        store.append("data", b"first", 0).unwrap();
+        store.append("data", b"second", 0).unwrap();
+        let directory = path.join(dir_name("data"));
+        let segment = segment_path(&directory, 0);
+        let records = std::fs::read(&segment).unwrap();
+        // A deployment shortens the time to live; telemetry runs before the
+        // journal commit, which then fails and restores the old definition.
+        let mut shorter = exported.clone(); shorter.time_to_live_seconds = Some(1);
+        store.reconfigure_transition(QUOTA, &[shorter], &[], false).unwrap();
+        let metadata = std::fs::read(directory.join("meta.json")).unwrap();
+        let facts = store.health(2000);
+        assert_eq!((facts[0].messages, facts[0].bytes, facts[0].lost, facts[0].export.clone().unwrap().0), (0, 0, 0, 0),
+            "health projects retention");
+        assert_eq!(std::fs::read(&segment).unwrap(), records, "health deleted or changed records");
+        assert_eq!(std::fs::read(directory.join("meta.json")).unwrap(), metadata, "health changed metadata");
+        store.reconfigure_transition(QUOTA, &[exported.clone()], &[], false).unwrap();
+        let kept = store.read("data", 0, 2, 2, 2000).unwrap();
+        assert_eq!(kept.iter().map(|m| m.data.as_slice()).collect::<Vec<_>>(), [&b"first"[..], b"second"]);
+        assert_eq!(store.health(2000)[0].lost, 0);
+        store.close(); drop(store);
+        // A staged store (service being enabled) is equally untouched.
+        let mut expiring = exported; expiring.time_to_live_seconds = Some(1);
+        let records = std::fs::read(&segment).unwrap();
+        let metadata;
+        {
+            let staged = Store::stage(&path, QUOTA, &[expiring], 5000).unwrap();
+            assert!(staged.is_staged());
+            metadata = std::fs::read(directory.join("meta.json")).unwrap();
+            assert_eq!(staged.health(5000)[0].messages, 0);
+            assert_eq!(staged.streams["data"].entries.len(), 2, "health evicted staged messages");
+        }
+        assert_eq!(std::fs::read(&segment).unwrap(), records, "health on a staged store changed records");
+        assert_eq!(std::fs::read(directory.join("meta.json")).unwrap(), metadata, "health on a staged store changed metadata");
         std::fs::remove_dir_all(path).unwrap();
     }
 
