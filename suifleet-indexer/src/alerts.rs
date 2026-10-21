@@ -5,7 +5,7 @@
 //! | kind | severity | when |
 //! |---|---|---|
 //! | `component-broken` | critical | a supervised component exhausted its restart budget |
-//! | `deployment-failed` | critical | the device's on-chain receipt for a deployment is Failed |
+//! | `deployment-failed` | critical | the device's on-chain receipt for a deployment is Failed, and its fresh report does not show that component recovered by a later applied deployment |
 //! | `device-offline` | warning | the device stopped reporting |
 //! | `device-degraded` | warning | the device reports problems, or its report is delayed or inconsistent |
 //! | `deployment-pending` | warning | an online device has not reported a deployment older than the threshold |
@@ -13,7 +13,7 @@
 //! An online device's newest report also raises the service-health alerts of
 //! its services section (SF-085, `crate::services::conditions`).
 use crate::store::{self, Device, Filter};
-use crate::telemetry::{self, Status};
+use crate::telemetry::{self, ComponentHealth, Status};
 use rusqlite::{params, Connection};
 use serde::Serialize;
 
@@ -102,47 +102,84 @@ pub fn for_device(index: &Connection, telemetry: &Connection, device: &Device, n
             alerts.push(alert(c.kind, c.severity, &c.subject, c.message, &c.action, c.since_ms));
         }
     }
-    let filter = Filter { device: Some(device.id.clone()), ..Filter::default() };
+    let history = device_deployments(index, &device.id)?;
+    // Recovery is judged only from a fresh, trusted report (SF-098).
+    let evidence = (online && !health.assessment.codes.contains(&"delayed")).then_some(health.components.as_slice());
+    for (deployment, receipt) in history.iter().filter(|(d, _)| !d.deleted) {
+        let subject = deployment.id.as_str();
+        match receipt {
+            Some(2) if !recovered(deployment, &history, evidence) => {
+                let mut a = alert(
+                    "deployment-failed", "critical", subject,
+                    format!("{} {} failed on {}", deployment.component_name, deployment.version, device.name),
+                    "Search the device's logs for the deployment; fix the recipe or artifact and redeploy.",
+                    Some(deployment.created_at),
+                );
+                a.deployment_id = Some(deployment.id.clone());
+                a.component = Some(deployment.component_name.clone());
+                alerts.push(a);
+            }
+            None if online && now.saturating_sub(deployment.created_at) > stuck_after_ms => {
+                let mut a = alert(
+                    "deployment-pending", "warning", subject,
+                    format!("{} {} has no receipt from online device {} after {} min",
+                            deployment.component_name, deployment.version, device.name,
+                            now.saturating_sub(deployment.created_at) / 60_000),
+                    "Check whether the deployment is paused or scheduled (deployment control), then the device's logs for apply or report errors.",
+                    Some(deployment.created_at),
+                );
+                a.deployment_id = Some(deployment.id.clone());
+                a.component = Some(deployment.component_name.clone());
+                alerts.push(a);
+            }
+            _ => {}
+        }
+    }
+    Ok(alerts)
+}
+
+/// Every deployment that targets the device, deleted ones included, with the
+/// device's receipt status for it.
+fn device_deployments(index: &Connection, device: &str) -> anyhow::Result<Vec<(store::Deployment, Option<u8>)>> {
+    let filter = Filter { device: Some(device.to_owned()), include_deleted: true, ..Filter::default() };
+    let mut history = Vec::new();
     let mut cursor = None;
     loop {
         let page = store::list_deployments(index, &filter, cursor.as_deref(), Some(store::MAX_LIMIT))?;
-        for deployment in &page.items {
-            let receipt = store::read_receipts(index, &deployment.id)?.into_iter().find(|(id, _)| id == &device.id).map(|(_, s)| s);
-            let subject = deployment.id.as_str();
-            match receipt {
-                Some(2) => {
-                    let mut a = alert(
-                        "deployment-failed", "critical", subject,
-                        format!("{} {} failed on {}", deployment.component_name, deployment.version, device.name),
-                        "Search the device's logs for the deployment; fix the recipe or artifact and redeploy.",
-                        Some(deployment.created_at),
-                    );
-                    a.deployment_id = Some(deployment.id.clone());
-                    a.component = Some(deployment.component_name.clone());
-                    alerts.push(a);
-                }
-                None if online && now.saturating_sub(deployment.created_at) > stuck_after_ms => {
-                    let mut a = alert(
-                        "deployment-pending", "warning", subject,
-                        format!("{} {} has no receipt from online device {} after {} min",
-                                deployment.component_name, deployment.version, device.name,
-                                now.saturating_sub(deployment.created_at) / 60_000),
-                        "Check whether the deployment is paused or scheduled (deployment control), then the device's logs for apply or report errors.",
-                        Some(deployment.created_at),
-                    );
-                    a.deployment_id = Some(deployment.id.clone());
-                    a.component = Some(deployment.component_name.clone());
-                    alerts.push(a);
-                }
-                _ => {}
-            }
+        for deployment in page.items {
+            let receipt = store::read_receipts(index, &deployment.id)?.into_iter().find(|(id, _)| id == device).map(|(_, s)| s);
+            history.push((deployment, receipt));
         }
         match page.next {
             Some(next) => cursor = Some(next),
             None => break,
         }
     }
-    Ok(alerts)
+    Ok(history)
+}
+
+/// Whether the device demonstrably recovered the failed deployment's component
+/// (SF-098): its fresh, trusted report shows that component installed (and
+/// running, if supervised) from a deployment the device applied on chain and
+/// that was created after the failure. Version strings are not compared, and a
+/// newer request, an unconfirmed install or another component never counts.
+/// Without such a report (offline, delayed, revoked, unreported) the failure
+/// stays active; its receipt and deployment history are untouched.
+fn recovered(failed: &store::Deployment, history: &[(store::Deployment, Option<u8>)], evidence: Option<&[ComponentHealth]>) -> bool {
+    let Some(components) = evidence else { return false };
+    let mut reported = components.iter().filter(|c| c.name == failed.component_name).peekable();
+    if reported.peek().is_none() {
+        return false;
+    }
+    // Every entry for the component must agree, so duplicates cannot mask a broken one.
+    reported.all(|c| {
+        let running = c.installed && c.phase.as_deref() != Some("broken") && (!c.supervised || c.phase.as_deref() == Some("running"));
+        let current = crate::chain::normalize(&c.deployment_id);
+        running && history.iter().any(|(d, receipt)| {
+            Some(&d.id) == current.as_ref() && *receipt == Some(1)
+                && d.component_name == failed.component_name && d.created_at > failed.created_at
+        })
+    })
 }
 
 /// Alerts for every device the filter selects, most severe first.
@@ -269,6 +306,29 @@ mod tests {
         tx.commit().unwrap();
     }
 
+    fn deploy_to(f: &mut Fleet, id: &str, device: &str, component: &str, version: &str, created_at: u64, receipt: Option<u8>) {
+        let (id, device) = (crate::chain::normalize(id).unwrap(), crate::chain::normalize(device).unwrap());
+        let tx = f.index.transaction().unwrap();
+        store::put_deployment(&tx, &Deployment {
+            id: id.clone(), creator: crate::chain::normalize("0x0a").unwrap(), component_name: component.into(),
+            version: version.into(), recipe_blob_id: "r".into(), artifact_sha256: "a".repeat(64), recipe_sha256: None,
+            created_at, schema_version: 1, catalog_version: None, deleted: false, target_groups: vec![], target_devices: vec![device.clone()],
+        }, None).unwrap();
+        if let Some(status) = receipt {
+            store::put_receipts(&tx, &id, &[(device, status)], None).unwrap();
+        }
+        tx.commit().unwrap();
+    }
+
+    /// A signed report whose `fw` component runs `deployment`.
+    fn running(f: &Fleet, deployment: &str, received: u64) {
+        report(f, |s| s.components[0].deployment_id = deployment.into(), received);
+    }
+
+    fn failed_keys(alerts: &[Alert]) -> Vec<String> {
+        alerts.iter().filter(|a| a.kind == "deployment-failed").map(|a| a.deployment_id.clone().unwrap()).collect()
+    }
+
     fn report(f: &Fleet, edit: impl FnOnce(&mut telemetry::Snapshot), received: u64) {
         let mut s = snapshot(received, received);
         edit(&mut s);
@@ -319,6 +379,138 @@ mod tests {
         // Fleet view: critical first.
         let all = fleet_alerts(&f, later);
         assert_eq!(all[0].severity, "critical");
+    }
+
+    #[test]
+    fn verified_recovery_resolves_an_obsolete_deployment_failure() {
+        let mut f = setup();
+        let n = |id: &str| crate::chain::normalize(id).unwrap();
+        let me = store::read_device(&f.index, &n("0xd1")).unwrap().unwrap();
+        let mut now = 10_000_000;
+        let failed = |f: &Fleet, now| failed_keys(&for_device(&f.index, &f.telemetry, &me, now, DEFAULT_STUCK_AFTER_MS).unwrap());
+        // 1.0.0 is installed; 1.0.1 fails and the device keeps 1.0.0.
+        deploy_to(&mut f, "0xa", "0xd1", "fw", "1.0.0", 100, Some(1));
+        deploy_to(&mut f, "0xf1", "0xd1", "fw", "1.0.1", 200, Some(2));
+        running(&f, "0xa", now);
+        assert_eq!(failed(&f, now), [n("0xf1")]);
+        // A newer request alone, or a report of it without an Applied receipt, is not recovery.
+        deploy_to(&mut f, "0xb2", "0xd1", "fw", "1.0.2", 300, None);
+        assert_eq!(failed(&f, now), [n("0xf1")]);
+        now += 1;
+        running(&f, "0xb2", now);
+        assert_eq!(failed(&f, now), [n("0xf1")], "installed but not confirmed on chain");
+        // Applied on chain while the device still reports the old deployment: unconfirmed.
+        deploy_to(&mut f, "0xb2", "0xd1", "fw", "1.0.2", 300, Some(1));
+        now += 1;
+        running(&f, "0xa", now);
+        assert_eq!(failed(&f, now), [n("0xf1")], "the earlier deployment is not a recovery");
+        // Applied and reported running: recovered. History and the receipt keep the failure.
+        now += 1;
+        running(&f, "0xb2", now);
+        assert!(failed(&f, now).is_empty());
+        assert_eq!(store::read_receipts(&f.index, &n("0xf1")).unwrap(), [(n("0xd1"), 2)]);
+        assert_eq!(store::read_deployment(&f.index, &n("0xf1")).unwrap().unwrap().version, "1.0.1");
+        // A broken recovery is not one.
+        now += 1;
+        report(&f, |s| {
+            s.components[0].deployment_id = "0xb2".into();
+            s.components[0].phase = Some("broken".into());
+            s.health = "degraded".into();
+            s.reasons = vec!["fw is broken".into()];
+        }, now);
+        assert_eq!(failed(&f, now), [n("0xf1")]);
+        // Duplicate entries for the component must all show the recovery.
+        now += 1;
+        report(&f, |s| {
+            s.components[0].deployment_id = "0xb2".into();
+            let mut stale = s.components[0].clone();
+            stale.deployment_id = "0xa".into();
+            s.components.push(stale);
+        }, now);
+        assert_eq!(failed(&f, now), [n("0xf1")]);
+        // Stale evidence: an offline device, or a delayed report, cannot confirm recovery.
+        now += 1;
+        running(&f, "0xb2", now);
+        assert!(failed(&f, now).is_empty());
+        assert_eq!(failed(&f, now + 4 * 60_000), [n("0xf1")], "offline");
+        now += 1;
+        report(&f, |s| {
+            s.components[0].deployment_id = "0xb2".into();
+            s.observed_ms = now - 3 * 60_000;
+        }, now);
+        assert_eq!(failed(&f, now), [n("0xf1")], "delayed");
+        // An unrelated component's failure, and another device's, stay active.
+        deploy_to(&mut f, "0xc1", "0xd1", "other", "9.9.9", 400, Some(2));
+        let mut other = me.clone();
+        (other.id, other.name) = (n("0xd2"), "pi2".into());
+        let tx = f.index.transaction().unwrap();
+        store::put_device(&tx, &other, None).unwrap();
+        tx.commit().unwrap();
+        deploy_to(&mut f, "0xc2", "0xd2", "fw", "1.0.1", 200, Some(2));
+        deploy_to(&mut f, "0xc3", "0xd2", "fw", "1.0.2", 300, Some(1));
+        now += 1;
+        running(&f, "0xb2", now);
+        assert_eq!(failed(&f, now), [n("0xc1")]);
+        let other = store::read_device(&f.index, &n("0xd2")).unwrap().unwrap();
+        assert_eq!(failed_keys(&for_device(&f.index, &f.telemetry, &other, now, DEFAULT_STUCK_AFTER_MS).unwrap()), [n("0xc2")],
+                   "another device's report is not this device's evidence");
+        // A newer failure after the recovery stays active; the older one stays resolved.
+        deploy_to(&mut f, "0xf3", "0xd1", "fw", "1.0.3", 500, Some(2));
+        assert_eq!(failed(&f, now), [n("0xc1"), n("0xf3")]);
+        // A later recovery to a lower version string resolves both failures: creation order, not versions.
+        deploy_to(&mut f, "0x09", "0xd1", "fw", "0.9.0", 600, Some(1));
+        now += 1;
+        running(&f, "0x09", now);
+        assert_eq!(failed(&f, now), [n("0xc1")]);
+        // Revoked identities raise nothing, as before.
+        let mut revoked = me.clone();
+        revoked.revoked = true;
+        assert!(for_device(&f.index, &f.telemetry, &revoked, now, DEFAULT_STUCK_AFTER_MS).unwrap().is_empty());
+    }
+
+    #[test]
+    fn recovery_evidence_spans_deployment_pages() {
+        let mut f = setup();
+        let n = |id: &str| crate::chain::normalize(id).unwrap();
+        let me = store::read_device(&f.index, &n("0xd1")).unwrap().unwrap();
+        let now = 10_000_000;
+        // The failure sorts last and the recovery first, with more than a page between them.
+        deploy_to(&mut f, "0xffffff", "0xd1", "fw", "1.0.1", 200, Some(2));
+        deploy_to(&mut f, "0x0001", "0xd1", "fw", "1.0.2", 300, Some(1));
+        let tx = f.index.transaction().unwrap();
+        for i in 0..store::MAX_LIMIT {
+            store::put_deployment(&tx, &Deployment {
+                id: n(&format!("0x1{i:04x}")), creator: n("0x0a"), component_name: "filler".into(), version: "1".into(),
+                recipe_blob_id: "r".into(), artifact_sha256: "a".repeat(64), recipe_sha256: None, created_at: 50, schema_version: 1,
+                catalog_version: None, deleted: false, target_groups: vec![], target_devices: vec![n("0xd1")],
+            }, None).unwrap();
+        }
+        tx.commit().unwrap();
+        running(&f, "0x0a", now);
+        assert_eq!(failed_keys(&for_device(&f.index, &f.telemetry, &me, now, DEFAULT_STUCK_AFTER_MS).unwrap()), [n("0xffffff")]);
+        running(&f, "0x1", now + 1);
+        assert!(failed_keys(&for_device(&f.index, &f.telemetry, &me, now + 1, DEFAULT_STUCK_AFTER_MS).unwrap()).is_empty());
+    }
+
+    #[test]
+    fn webhook_reports_a_recovered_failure_resolved_under_its_stable_key() {
+        let mut f = setup();
+        let now = 10_000_000;
+        deploy_to(&mut f, "0xf1", "0xd1", "fw", "1.0.1", 200, Some(2));
+        report(&f, |_| {}, now);
+        let current = fleet_alerts(&f, now);
+        let (new, resolved) = changes(&f.telemetry, &current).unwrap();
+        let key = format!("deployment-failed:{}:{}", crate::chain::normalize("0xd1").unwrap(), crate::chain::normalize("0xf1").unwrap());
+        assert_eq!(new.iter().map(|a| &a.key).collect::<Vec<_>>(), [&key]);
+        commit(&f.telemetry, &new, &resolved, now).unwrap();
+        // Recovery: the same key is reported resolved, once.
+        deploy_to(&mut f, "0xb2", "0xd1", "fw", "1.0.2", 300, Some(1));
+        running(&f, "0xb2", now + 1);
+        let current = fleet_alerts(&f, now + 1);
+        let (new, resolved) = changes(&f.telemetry, &current).unwrap();
+        assert_eq!((new.len(), resolved.clone()), (0, vec![key.clone()]));
+        commit(&f.telemetry, &new, &resolved, now + 1).unwrap();
+        assert_eq!(changes(&f.telemetry, &fleet_alerts(&f, now + 1)).unwrap(), (vec![], vec![]));
     }
 
     #[test]
