@@ -11,7 +11,7 @@ import { useFleetHealth, useTelemetryToken, setTelemetryToken } from "@/hooks/us
 import { describeServices, lastSeenLabel, TELEMETRY_URL, type DeviceHealth } from "@/lib/telemetry";
 import { buildDesiredRevisionTx, desiredConflicts } from "@/lib/desired-state";
 import {
-  buildRegisterDeviceTx, buildActivateDeviceTx, buildIssueCapTx, buildDeregisterDeviceTx,
+  buildRegisterDeviceTx, buildActivateDeviceTx, buildDeregisterDeviceTx,
   buildCreateGroupTx, buildAddDeviceToGroupTx, buildRemoveDeviceFromGroupTx, buildDeleteGroupTx,
 } from "@/lib/sui";
 import Link from "next/link";
@@ -156,21 +156,6 @@ function DevicesTab() {
                         Activate
                       </button>
                     )}
-                    <button
-                      disabled={isPending}
-                      onClick={() => {
-                        signAndExecute(
-                          { transaction: buildIssueCapTx(d) },
-                          {
-                            onSuccess: () => alert(`DeviceCap issued to ${d.deviceAddress}`),
-                            onError: (err) => alert(`Failed: ${err.message}`),
-                          }
-                        );
-                      }}
-                      className="text-xs text-[#4DA2FF] hover:underline disabled:opacity-40"
-                    >
-                      Issue cap
-                    </button>
                     <button
                       disabled={isPending}
                       onClick={() => {
