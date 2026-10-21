@@ -15,8 +15,9 @@
 //! 4. Confidential pointers are removed: their values never come from a
 //!    (public) recipe, only from the device's overlay file.
 //!
-//! The committed record is public data: it holds no confidential values and
-//! may be shown in diagnostics. What a component receives is materialized
+//! The committed record holds no confidential values and may be shown in
+//! diagnostics, unless it is `sealed`: then its recipe was Seal-encrypted
+//! (SF-022) and the whole record stays private to the device. What a component receives is materialized
 //! from it plus the overlay, into a 0600 file. Errors name pointers, never
 //! values.
 //!
@@ -203,8 +204,8 @@ pub fn validate_recipe(configuration: &Configuration) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// A component's configuration as committed or staged. Public: confidential
-/// values are never part of it.
+/// A component's configuration as committed or staged. Confidential values
+/// are never part of it; the rest is public unless `sealed`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Record {
     pub deployment: String,
@@ -213,6 +214,10 @@ pub struct Record {
     pub effective: Map<String, Value>,
     #[serde(default)]
     pub confidential: Vec<String>,
+    /// Its recipe was Seal-encrypted (SF-022): the defaults and effective
+    /// configuration are confidential plaintext, never shown in diagnostics.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub sealed: bool,
 }
 
 /// The next effective configuration after `previous` (none for a first
@@ -602,6 +607,16 @@ mod tests {
         create_dir_durable(&dir, &nested).unwrap();
         assert!(create_dir_durable(&dir, &dir).is_err());
         assert!(create_dir_durable(&nested, &dir).is_err());
+    }
+
+    #[test]
+    fn sealed_flag_is_kept_and_absent_from_public_records() {
+        let public = Record { deployment: "0x1".into(), ..Record::default() };
+        let text = serde_json::to_string(&public).unwrap();
+        assert!(!text.contains("sealed"), "{text}");
+        assert!(!serde_json::from_str::<Record>(&text).unwrap().sealed);
+        let sealed = Record { sealed: true, ..public };
+        assert!(serde_json::from_str::<Record>(&serde_json::to_string(&sealed).unwrap()).unwrap().sealed);
     }
 
     #[test]

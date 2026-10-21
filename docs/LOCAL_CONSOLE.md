@@ -120,7 +120,7 @@ allowlist (`cargo test console`).
   | `health` | `healthy`/`degraded`, reasons, sync state and pending receipts | 32 reasons |
   | `deployments` | Journal outcomes: status, reported, indeterminate and error | `limit` ≤ 100, default 20; paged like `inventory` |
   | `logs` | Last lines of a supervised component's log | 8 KiB tail, `limit` ≤ 200 lines, 512 bytes per line |
-  | `configuration` | Committed public configuration; confidential pointers removed | Response size |
+  | `configuration` | Committed public configuration; confidential pointers removed. Withheld entirely (`withheld`) when the recipe was Seal-encrypted ([CONFIDENTIAL_DELIVERY.md](CONFIDENTIAL_DELIVERY.md)) | Response size |
   | `audit` | Recent audit records | `limit` ≤ 100 |
   | `start`, `stop`, `restart` | Run by the poll-loop owner through the existing local-control path, including dependency checks | Not replayed if the console stopped waiting |
 

@@ -25,6 +25,8 @@ Judged from on-chain receipts and the daemon's journal:
   - malformed encrypted recipes (parse and validation errors) -> Failed with
     the details withheld: their content never reaches the log or journal
   - no confidential plaintext in the offline component cache
+  - a confidential recipe's configuration -> committed as sealed, withheld
+    by the local support console
 
 With --upgrade-from REF, the contracts at REF (without seal_policy) are
 published first and its registry is reused after a compatible upgrade to this
@@ -326,6 +328,26 @@ def run(rpc_url, faucet_url, upgrade_from=None):
             config = bundle / "config.toml"
             # The offline candidate cache is enabled so its contents can be checked.
             config.write_text(config.read_text() + '[components]\noffline_candidates = "cached"\n')
+            # The local support console (SF-079) must not show a sealed configuration.
+            console_port = free_port()
+            console_token = json.loads(subprocess.run([str(DAEMON), "--console-token"], capture_output=True, text=True,
+                                                      check=True).stdout)
+            config.write_text(config.read_text().replace("[apply]\n", "[apply]\nallow_recipe_commands = true\n", 1)
+                              + f'[console]\nlisten = "127.0.0.1:{console_port}"\n[console.users.ops]\n'
+                              f'token_sha256 = "{console_token["token_sha256"]}"\ngrants = ["configuration"]\n')
+            assert "allow_recipe_commands = true" in config.read_text()
+
+            def console(operation, name):
+                payload = json.dumps({"version": 1, "operation": operation, "component": name}).encode()
+                with socket.create_connection(("127.0.0.1", console_port), timeout=10) as connection:
+                    connection.sendall((f"POST /api/v1/request HTTP/1.1\r\nHost: 127.0.0.1:{console_port}\r\n"
+                                        f"Origin: http://127.0.0.1:{console_port}\r\nContent-Type: application/json\r\n"
+                                        f"Authorization: Bearer {console_token['token']}\r\n"
+                                        f"Content-Length: {len(payload)}\r\nConnection: close\r\n\r\n").encode() + payload)
+                    response = b""
+                    while chunk := connection.recv(65536):
+                        response += chunk
+                return json.loads(response.split(b"\r\n\r\n", 1)[1])
             journal_path = root / "state" / "state.json"
 
             def journal():
@@ -461,6 +483,25 @@ def run(rpc_url, faucet_url, upgrade_from=None):
                 daemon_log = (root / "daemon.log").read_text()
                 assert key.read_text().strip() not in daemon_log, "device key in the log"
                 print("PASS: no confidential recipe or artifact in the offline cache, no key material in the log")
+
+                # The configuration a confidential recipe sets is decrypted
+                # plaintext: committed for the component, withheld by the console.
+                secret_value = "CUSTOMER_CONFIGURATION_MARKER"
+                def configured(document):
+                    document["schemaVersion"] = "1.2"
+                    document["lifecycle"] = {"install": "true"}
+                    document["configuration"] = {"defaults": {"plant": secret_value}}
+                configured_release, _, _ = release("4.5.0", edit_recipe=configured)
+                settles(configured_release, 1)
+                committed = root / "state" / "configuration" / component.DEFAULT_COMPONENT / "committed.json"
+                assert json.loads(committed.read_text())["sealed"] is True, "sealed configuration not marked"
+                viewed = console("configuration", component.DEFAULT_COMPONENT)
+                assert viewed["status"] == "ok" and viewed["data"]["withheld"] == "confidential recipe", viewed
+                assert secret_value not in json.dumps(viewed), viewed
+                log.flush()
+                assert secret_value not in (root / "daemon.log").read_text(), "sealed configuration in the log"
+                print("PASS: a confidential recipe's configuration is committed as sealed and withheld by the local "
+                      "support console")
 
                 # Accounts decrypt with their own keys through the official SDK.
                 _, _, recipe_blob = release("5.0.0")

@@ -1445,6 +1445,7 @@ async fn prepare_configurations(
                     defaults: configuration.defaults.clone().unwrap_or_default(),
                     effective: configuration::next(previous.as_ref().map(|r| &r.effective), configuration)?,
                     confidential: configuration.confidential.clone().unwrap_or_default(),
+                    sealed: install.confidential,
                 };
                 let materialized = configuration::materialize(&record, &overlay)?;
                 Ok((record, materialized))
