@@ -2628,9 +2628,13 @@ mod tests {
             let name = { use sha2::Digest; format!("suifleet-{}", hex::encode(sha2::Sha256::digest(workspace.as_os_str().as_encoded_bytes()))) };
             let outage = f.dir.join("supervised/app/test-engine-unavailable");
             std::fs::write(&outage, b"test-only mutation failure").unwrap();
-            let result = std::process::Command::new("/usr/bin/docker")
-                .args(["--host", "unix:///var/run/docker.sock", "exec", &name, "touch", "/tmp/exit"])
-                .output().unwrap();
+            let mut command = std::process::Command::new("/usr/bin/docker");
+            command.args(["--host", "unix:///var/run/docker.sock", "exec", &name, "touch", "/tmp/exit"])
+                .stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
+            let child = spawn_std_tracked(&mut command).unwrap();
+            let pid = child.id();
+            let result = child.wait_with_output().unwrap();
+            forget_std_tracked(pid);
             assert!(result.status.success(), "{result:?}");
             tokio::time::timeout(Duration::from_secs(10), async {
                 while phase(&s) != Phase::Backoff { tokio::time::sleep(Duration::from_millis(50)).await; }
