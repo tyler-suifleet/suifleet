@@ -338,6 +338,13 @@ impl Bridge {
         self.config.mappings.iter().any(|m| m.source == link || m.target == link)
     }
 
+    /// The counters telemetry reports as the local MQTT bridge (SF-085), only
+    /// when this task runs a local broker session. A task serving only AWS IoT
+    /// Core never connects locally; reporting it would look disconnected.
+    pub fn local_stats(&self) -> Option<Arc<Mutex<Stats>>> {
+        self.uses(Endpoint::LocalMqtt).then(|| self.stats.clone())
+    }
+
     fn iot_stats(&self, update: impl FnOnce(&mut IotStats)) {
         if let Some(stats) = self.stats.lock().unwrap().iot_core.as_mut() {
             update(stats);
@@ -1134,6 +1141,21 @@ mod tests {
         assert_eq!(to_value(br#"{"v":1}"#), json!({ "v": 1 }));
         assert_eq!(to_value(b"plain text"), json!("plain text"));
         assert_eq!(to_value(&[0xff, 0x00]), json!({ "base64": "/wA=" }));
+    }
+
+    /// SF-085: only a task with a local broker session reports bridge health;
+    /// an AWS IoT Core-only task would otherwise read as a disconnected bridge.
+    #[test]
+    fn local_stats_only_with_a_local_broker_session() {
+        let dir = std::env::temp_dir().join(format!("suifleet-bridge-local-stats-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let broker = Arc::new(Mutex::new(pubsub::Broker::open(&dir.join("pubsub"), pubsub::Limits::default()).unwrap()));
+        let task = |mappings| Bridge::new(config(mappings), broker.clone(), dir.join("bridge.json")).unwrap();
+        assert!(task(vec![]).local_stats().is_none());
+        assert!(task(vec![mapping("t/#", Endpoint::Pubsub, Endpoint::IotCore, "")]).local_stats().is_none());
+        let local = task(vec![mapping("t/#", Endpoint::Pubsub, Endpoint::IotCore, ""), mapping("lan/#", Endpoint::LocalMqtt, Endpoint::Pubsub, "")]);
+        assert!(Arc::ptr_eq(&local.local_stats().unwrap(), &local.stats));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -542,6 +542,12 @@ impl Store {
         Ok(true)
     }
 
+    /// Facts for telemetry (SF-085): live shadows, refused notifications and
+    /// each synchronized shadow's status. Never documents or conflict paths.
+    pub fn health(&self) -> (u64, u64, Vec<(String, Value)>) {
+        (self.live() as u64, self.refused, self.sync_status.iter().map(|(name, status)| (name.clone(), status.clone())).collect())
+    }
+
     pub fn set_sync_status(&mut self, name: &str, status: Value) {
         self.sync_status.insert(name.into(), status);
     }
@@ -909,12 +915,19 @@ pub(crate) async fn run_sync<C: Cloud>(store: Arc<Mutex<Store>>, shadows: &[Stri
     let changed = store.lock().unwrap().changed.clone();
     let cloud_changed = cloud_changed.unwrap_or_default();
     let mut counters: BTreeMap<String, (u64, u64, u64, u64)> = BTreeMap::new();
+    // Consecutive failures and the last success, per shadow.
+    let mut streaks: BTreeMap<String, (u64, Option<u64>)> = BTreeMap::new();
     let mut backoff = 1u64;
     loop {
         let mut failed = false;
         for shadow in shadows {
             let result = sync_one(&store, owners, cloud, shadow).await;
             let (pushes, pulls, conflicts, failures) = counters.entry(shadow.clone()).or_default();
+            let (consecutive, last_success_ms) = streaks.entry(shadow.clone()).or_default();
+            match &result {
+                Ok(_) => (*consecutive, *last_success_ms) = (0, Some(crate::telemetry::now_ms())),
+                Err(_) => *consecutive += 1,
+            }
             match &result {
                 Ok(outcome) => {
                     *pushes += outcome["pushed"].as_bool().unwrap_or(false) as u64;
@@ -933,6 +946,7 @@ pub(crate) async fn run_sync<C: Cloud>(store: Arc<Mutex<Store>>, shadows: &[Stri
             }
             store.lock().unwrap().set_sync_status(shadow, json!({
                 "pushes": *pushes, "pulls": *pulls, "conflicts": *conflicts, "failures": *failures,
+                "consecutive_failures": *consecutive, "last_success_ms": *last_success_ms,
                 "last_error": result.as_ref().err().map(|e| crate::telemetry::bounded(&e.to_string(), 300)),
                 // At most 16 paths: the status must fit an IPC frame.
                 "last_conflicts": result.as_ref().ok().map(|o| o["conflicts"].as_array().map_or(&[][..], Vec::as_slice)

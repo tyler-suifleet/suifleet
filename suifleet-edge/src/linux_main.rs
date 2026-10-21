@@ -36,6 +36,7 @@ mod sui_client;
 mod supervisor;
 mod streams;
 mod services;
+mod service_health;
 mod shadows;
 mod telemetry;
 mod walrus_client;
@@ -327,6 +328,7 @@ async fn main() -> anyhow::Result<()> {
                 buffer_max: settings.buffer_max,
                 signer: signer.clone(),
                 sync: sync.clone(),
+                services: service_runtime.clone(),
             }
             .run(),
         )),

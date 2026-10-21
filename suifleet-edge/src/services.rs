@@ -208,6 +208,7 @@ pub struct Runtime {
     pub shadow_store: Option<Arc<Mutex<crate::shadows::Store>>>,
     pub client_devices: Option<Arc<crate::clientdevices::Authority>>,
     bridge: Option<tokio::task::JoinHandle<()>>,
+    bridge_stats: Option<Arc<Mutex<bridge::Stats>>>,
     /// AWS IoT Device Shadow sync (SF-061): the synchronizer's client, taken
     /// at startup, and the connection side every bridge task attaches to.
     pub aws_shadow_client: Option<crate::iotcore::ShadowClient>,
@@ -239,7 +240,7 @@ impl Runtime {
             }
             _ => (None, None),
         };
-        let mut runtime = Self { base: base.clone(), effective: cfg, streams, broker, shadow_store: None, client_devices: None, bridge: None,
+        let mut runtime = Self { base: base.clone(), effective: cfg, streams, broker, shadow_store: None, client_devices: None, bridge: None, bridge_stats: None,
             aws_shadow_client, aws_shadows, exporters: vec![], signer, binding };
         runtime.resume()?;
         Ok(runtime)
@@ -263,6 +264,7 @@ impl Runtime {
     }
     fn stop_tasks(&mut self) {
         if let Some(task) = self.bridge.take() { task.abort(); }
+        self.bridge_stats = None;
         for task in self.exporters.drain(..) { task.abort(); }
     }
     fn start_tasks(&mut self) -> anyhow::Result<()> {
@@ -281,6 +283,7 @@ impl Runtime {
                 if let Some(iot) = &self.base.aws_iot {
                     task = task.with_iot_core(bridge::IotLink { config: iot.clone(), shadows: self.aws_shadows.clone() });
                 }
+                self.bridge_stats = task.local_stats();
                 self.bridge = Some(tokio::spawn(task.run()));
             }
         }
@@ -353,6 +356,15 @@ impl Runtime {
         self.activate(generations)?;
         self.resume()
     }
+    /// What telemetry summarizes (SF-085): only the services in effect.
+    pub fn health_sources(&self) -> crate::service_health::Sources {
+        crate::service_health::Sources {
+            broker: self.effective.pubsub.as_ref().and(self.broker.clone()),
+            bridge: self.bridge_stats.clone(),
+            streams: self.effective.streams.as_ref().and(self.streams.clone()),
+            shadows: self.shadow_store.clone(),
+        }
+    }
     pub fn summary(&self) -> serde_json::Value {
         // Do not expose endpoints, paths, credentials, or recipe commands.
         serde_json::json!({"version":1,"grants":self.effective.ipc.as_ref().map(|p| p.components.iter().map(|(n,a)| (n, serde_json::json!({
@@ -397,6 +409,7 @@ pub async fn quiesce(runtime: &Arc<Mutex<Runtime>>) {
         let mut runtime = runtime.lock().unwrap();
         let mut tasks = std::mem::take(&mut runtime.exporters);
         tasks.extend(runtime.bridge.take());
+        runtime.bridge_stats = None;
         for task in &tasks { task.abort(); }
         tasks
     };

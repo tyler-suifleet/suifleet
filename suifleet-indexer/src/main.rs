@@ -8,6 +8,8 @@
 //!   suifleet-indexer index --manifest deployment.json --db fleet.db [--reconcile-batch 500]
 //!                          [--reset] [--rebuild-from-objects]
 //!   suifleet-indexer ctl ...   (see `suifleet-indexer ctl help`)
+//!   suifleet-indexer telemetry-alerts ENVELOPES.json   (offline: service-health alerts
+//!                          of signed telemetry; docs/TELEMETRY.md)
 //!
 //! docs/INDEXER.md covers deployment, auth, storage, retention and recovery.
 mod alerts;
@@ -21,6 +23,7 @@ mod manifest;
 // The daemon's own redaction rules (one implementation for both sides).
 #[path = "../../suifleet-edge/src/redact.rs"]
 mod redact;
+mod services;
 mod store;
 mod telemetry;
 mod txbuild;
@@ -30,7 +33,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::info;
 
-const USAGE: &str = "usage: suifleet-indexer serve|index|ctl ... (see the header of src/main.rs or docs/INDEXER.md)";
+const USAGE: &str = "usage: suifleet-indexer serve|index|ctl|telemetry-alerts ... (see the header of src/main.rs or docs/INDEXER.md)";
 
 fn options(args: &[String]) -> anyhow::Result<(BTreeMap<String, String>, Vec<String>)> {
     let switches = ["--reset", "--public-read", "--rebuild-from-objects"];
@@ -67,6 +70,10 @@ async fn main() -> anyhow::Result<()> {
     };
     if command == "ctl" {
         return ctl::main(rest).await;
+    }
+    if command == "telemetry-alerts" {
+        let [file] = rest else { anyhow::bail!("usage: suifleet-indexer telemetry-alerts ENVELOPES.json") };
+        return services::explain_file(std::path::Path::new(file));
     }
     let (values, flags) = options(rest)?;
     let required = |name: &str| {

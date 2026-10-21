@@ -519,6 +519,10 @@ impl Broker {
         Ok(true)
     }
 
+    pub fn limits(&self) -> Limits {
+        self.limits
+    }
+
     /// Counters per subscription (all, or one principal's).
     pub fn stats(&self, principal: Option<&str>) -> Vec<Value> {
         self.subs
