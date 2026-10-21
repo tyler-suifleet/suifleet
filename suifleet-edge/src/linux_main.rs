@@ -1438,6 +1438,8 @@ async fn prepare_configurations(
             let previous = configs.committed(&install.name)?;
             let overlay = configs.overlay(&install.name)?;
             let configuration = &install.configuration;
+            // Values of an earlier encrypted recipe can survive a public update.
+            let sealed = configuration::sealed(previous.as_ref(), configuration, install.confidential);
             let computed = (|| {
                 let record = configuration::Record {
                     deployment: deployment.to_owned(),
@@ -1445,12 +1447,12 @@ async fn prepare_configurations(
                     defaults: configuration.defaults.clone().unwrap_or_default(),
                     effective: configuration::next(previous.as_ref().map(|r| &r.effective), configuration)?,
                     confidential: configuration.confidential.clone().unwrap_or_default(),
-                    sealed: install.confidential,
+                    sealed,
                 };
                 let materialized = configuration::materialize(&record, &overlay)?;
                 Ok((record, materialized))
             })();
-            let (record, materialized) = components::withhold(install.confidential, "configuration merge", computed)?;
+            let (record, materialized) = components::withhold(sealed, "configuration merge", computed)?;
             install.record = record;
             let Some(command) = &install.validate else {
                 return Ok(true);
@@ -1499,7 +1501,7 @@ fn install_configuration(
 ) -> anyhow::Result<PathBuf> {
     let overlay = configs.overlay(&install.name)?;
     let file = directory.join(format!("configuration-{index}.json"));
-    let materialized = components::withhold(install.confidential, "configuration merge", configuration::materialize(&install.record, &overlay))?;
+    let materialized = components::withhold(install.record.sealed, "configuration merge", configuration::materialize(&install.record, &overlay))?;
     configuration::write_private(&file, &materialized)?;
     Ok(file)
 }

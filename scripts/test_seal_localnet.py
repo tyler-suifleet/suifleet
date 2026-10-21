@@ -26,7 +26,9 @@ Judged from on-chain receipts and the daemon's journal:
     the details withheld: their content never reaches the log or journal
   - no confidential plaintext in the offline component cache
   - a confidential recipe's configuration -> committed as sealed, withheld
-    by the local support console
+    by the local support console; a later public update (mode=optional) that
+    keeps its values stays sealed, also after a restart, until a public
+    recipe resets the whole configuration
 
 With --upgrade-from REF, the contracts at REF (without seal_policy) are
 published first and its registry is reused after a compatible upgrade to this
@@ -502,6 +504,53 @@ def run(rpc_url, faucet_url, upgrade_from=None):
                 assert secret_value not in (root / "daemon.log").read_text(), "sealed configuration in the log"
                 print("PASS: a confidential recipe's configuration is committed as sealed and withheld by the local "
                       "support console")
+
+                # Its values survive a public update: still sealed, also after a
+                # restart. Only resetting everything to public defaults clears it.
+                def restart(edit):
+                    daemon = processes.pop("daemon")
+                    daemon.send_signal(signal.SIGINT)
+                    daemon.wait(timeout=30)
+                    config.write_text(edit(config.read_text()))
+                    processes["daemon"] = subprocess.Popen([str(DAEMON)], env={**os.environ, "EDGE_CONFIG": str(config)},
+                                                           stdout=log, stderr=log)
+                    def listening():
+                        try:
+                            socket.create_connection(("127.0.0.1", console_port), timeout=1).close()
+                            return True
+                        except OSError:
+                            return False
+                    wait_for(listening, "console did not restart", processes["daemon"])
+                restart(lambda text: text.replace('mode = "required"', 'mode = "optional"', 1))
+                assert 'mode = "optional"' in config.read_text()
+                def public_update(document):
+                    document["schemaVersion"] = "1.2"
+                    document["lifecycle"] = {"install": "true"}
+                    document["configuration"] = {"merge": {"site": "public"}}
+                kept, _, _ = release("4.6.0", confidential=False, edit_recipe=public_update)
+                settles(kept, 1)
+                record = json.loads(committed.read_text())
+                assert record["effective"].get("plant") == secret_value and record.get("sealed") is True, \
+                    "public update unsealed retained confidential configuration"
+                for _ in range(2):
+                    viewed = console("configuration", component.DEFAULT_COMPONENT)
+                    assert viewed["status"] == "ok" and viewed["data"]["withheld"] == "confidential recipe", viewed
+                    assert secret_value not in json.dumps(viewed), viewed
+                    restart(lambda text: text)
+                def reset_everything(document):
+                    document["schemaVersion"] = "1.2"
+                    document["lifecycle"] = {"install": "true"}
+                    document["configuration"] = {"defaults": {"site": "public"}, "reset": [""]}
+                cleared, _, _ = release("4.7.0", confidential=False, edit_recipe=reset_everything)
+                settles(cleared, 1)
+                record = json.loads(committed.read_text())
+                assert record["effective"] == {"site": "public"} and "sealed" not in record, record
+                viewed = console("configuration", component.DEFAULT_COMPONENT)
+                assert viewed["status"] == "ok" and viewed["data"]["effective"] == {"site": "public"}, viewed
+                log.flush()
+                assert secret_value not in (root / "daemon.log").read_text(), "sealed configuration in the log"
+                print("PASS: a public update keeping an encrypted recipe's configuration stays sealed and withheld, "
+                      "also after a restart; a public reset of everything unseals only public values")
 
                 # Accounts decrypt with their own keys through the official SDK.
                 _, _, recipe_blob = release("5.0.0")
