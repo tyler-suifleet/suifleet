@@ -1,0 +1,290 @@
+{
+  "schema_version": 1,
+  "workload": {
+    "devices": 1000,
+    "shared_releases": 4,
+    "targets_per_release": 1000,
+    "target_mode": "one device-target deployment per device (group alternatives require separate measurement)",
+    "reports_per_device_per_release": 1,
+    "retries": 0,
+    "retention_epochs": 2,
+    "renewals": 0,
+    "artifact_plaintext_bytes": 1048576,
+    "recipe_plaintext_bytes": 317,
+    "limits": "Sui per-deployment rows must scale with device targets, not shared blob count. Historical sample is one target."
+  },
+  "token_prices": {
+    "SUI": {
+      "usd": "1.048",
+      "observed_at": 1792604183,
+      "source": "https://api.coingecko.com/api/v3/simple/price?ids=sui,walrus-2&vs_currencies=usd&include_last_updated_at=true"
+    },
+    "WAL": {
+      "usd": "0.04023726",
+      "observed_at": 1792604183,
+      "source": "https://api.coingecko.com/api/v3/simple/price?ids=sui,walrus-2&vs_currencies=usd&include_last_updated_at=true"
+    }
+  },
+  "blob_quotes": [],
+  "lines": [
+    {
+      "name": "artifact gross storage",
+      "category": "walrus_storage",
+      "kind": "estimated",
+      "network": "mainnet",
+      "unit": "FROST",
+      "count": 4,
+      "amount": "7681014",
+      "source": "docs/business/sf054/blob-rate-calculations.json; gross rate arithmetic, subsidy unquoted"
+    },
+    {
+      "name": "artifact gross write",
+      "category": "walrus_write",
+      "kind": "estimated",
+      "network": "mainnet",
+      "unit": "FROST",
+      "count": 4,
+      "amount": "6977045",
+      "source": "docs/business/sf054/blob-rate-calculations.json; gross rate arithmetic, subsidy unquoted"
+    },
+    {
+      "name": "recipe gross storage",
+      "category": "recipe_storage",
+      "kind": "estimated",
+      "network": "mainnet",
+      "unit": "FROST",
+      "count": 4,
+      "amount": "7222446",
+      "source": "docs/business/sf054/blob-rate-calculations.json; gross rate arithmetic, subsidy unquoted"
+    },
+    {
+      "name": "recipe gross write",
+      "category": "walrus_write",
+      "kind": "estimated",
+      "network": "mainnet",
+      "unit": "FROST",
+      "count": 4,
+      "amount": "6560505",
+      "source": "docs/business/sf054/blob-rate-calculations.json; gross rate arithmetic, subsidy unquoted"
+    },
+    {
+      "name": "historical Testnet extrapolation: create confidential deployment",
+      "category": "deployment_targets",
+      "kind": "estimated",
+      "network": "testnet",
+      "unit": "MIST",
+      "count": 4000,
+      "effects": {
+        "computationCost": 1000000,
+        "storageCost": 12502000,
+        "storageRebate": 0,
+        "nonRefundableStorageFee": 0
+      },
+      "status": "success",
+      "source": "docs/business/sf054/network-quotes.json#Gr1L1HSdPH9PnXSNLWrUwzcLYZFotFZ26LEArs8mdauq"
+    },
+    {
+      "name": "historical Testnet extrapolation: device receipt",
+      "category": "receipts",
+      "kind": "estimated",
+      "network": "testnet",
+      "unit": "MIST",
+      "count": 4000,
+      "effects": {
+        "computationCost": 1000000,
+        "storageCost": 7926800,
+        "storageRebate": 7675232,
+        "nonRefundableStorageFee": 768
+      },
+      "status": "success",
+      "source": "docs/business/sf054/network-quotes.json#5sSF3GovFFNf76vF1WpKRdtag5p95Ft6ahPHXWNTGVyV"
+    },
+    {
+      "name": "historical Testnet extrapolation: delete confidential deployment",
+      "category": "cleanup",
+      "kind": "estimated",
+      "network": "testnet",
+      "unit": "MIST",
+      "count": 4000,
+      "effects": {
+        "computationCost": 1000000,
+        "storageCost": 0,
+        "storageRebate": 12751525,
+        "nonRefundableStorageFee": 1275
+      },
+      "status": "success",
+      "source": "docs/business/sf054/network-quotes.json#8TzCZE7jezULePUFK2Q34LGuxtm3pjGjrbDXK2PSPztU"
+    },
+    {
+      "name": "artifact sponsored Testnet Walrus operation",
+      "category": "walrus_sui",
+      "kind": "estimated",
+      "network": "testnet",
+      "unit": "MIST",
+      "count": 4,
+      "status": "success",
+      "effects": {
+        "computationCost": 1000000,
+        "storageCost": 115732800,
+        "storageRebate": 113745424,
+        "nonRefundableStorageFee": 11376
+      },
+      "source": "docs/business/sf054/walrus-testnet.json#ChUMr5TK2DHXQNDumzrQkTkpkoj9zHGth6Ae7wv9nebN"
+    },
+    {
+      "name": "artifact sponsored Testnet Walrus operation",
+      "category": "walrus_sui",
+      "kind": "estimated",
+      "network": "testnet",
+      "unit": "MIST",
+      "count": 4,
+      "status": "success",
+      "effects": {
+        "computationCost": 1000000,
+        "storageCost": 2994400,
+        "storageRebate": 2963704,
+        "nonRefundableStorageFee": 296
+      },
+      "source": "docs/business/sf054/walrus-testnet.json#Gf8MP9AU16goo33LMGjUsqSaBs5bLRZfz3eTLnPVZnSm"
+    },
+    {
+      "name": "recipe sponsored Testnet Walrus operation",
+      "category": "walrus_sui",
+      "kind": "estimated",
+      "network": "testnet",
+      "unit": "MIST",
+      "count": 4,
+      "status": "success",
+      "effects": {
+        "computationCost": 1000000,
+        "storageCost": 115732800,
+        "storageRebate": 113745424,
+        "nonRefundableStorageFee": 11376
+      },
+      "source": "docs/business/sf054/walrus-testnet.json#6NYyKrmVRr8xN3PbU85ri28spB31bdKnFJ8VHdkAWzc6"
+    },
+    {
+      "name": "recipe sponsored Testnet Walrus operation",
+      "category": "walrus_sui",
+      "kind": "estimated",
+      "network": "testnet",
+      "unit": "MIST",
+      "count": 4,
+      "status": "success",
+      "effects": {
+        "computationCost": 1000000,
+        "storageCost": 2994400,
+        "storageRebate": 2963704,
+        "nonRefundableStorageFee": 296
+      },
+      "source": "docs/business/sf054/walrus-testnet.json#DqXYvk9KM4qBXAK5yu4MVjmPMj4tqFHLcRSQZJSTo2Wf"
+    },
+    {
+      "name": "current-package device enrollment/rotation not measured; historical base fixture differs",
+      "category": "onboarding",
+      "kind": "unquoted",
+      "network": "mainnet",
+      "unit": "USD",
+      "count": 1,
+      "amount": null,
+      "source": "docs/business/FLEET_COST_MODEL.md"
+    },
+    {
+      "name": "policy/grant/group batches depend on selected scopes; historical samples retained separately",
+      "category": "policy",
+      "kind": "unquoted",
+      "network": "mainnet",
+      "unit": "USD",
+      "count": 1,
+      "amount": null,
+      "source": "docs/business/FLEET_COST_MODEL.md"
+    },
+    {
+      "name": "Mainnet reserve/register/certify gas and object deposits not simulated or executed",
+      "category": "walrus_sui",
+      "kind": "unquoted",
+      "network": "mainnet",
+      "unit": "USD",
+      "count": 1,
+      "amount": null,
+      "source": "docs/business/FLEET_COST_MODEL.md"
+    },
+    {
+      "name": "no renewal in base case; future extension gas, subsidy and owner access unquoted",
+      "category": "renewal",
+      "kind": "unquoted",
+      "network": "mainnet",
+      "unit": "USD",
+      "count": 1,
+      "amount": null,
+      "source": "docs/business/FLEET_COST_MODEL.md"
+    },
+    {
+      "name": "base case has zero retries; additional failure/unknown-outcome exposure must be supplied",
+      "category": "retries",
+      "kind": "unquoted",
+      "network": "mainnet",
+      "unit": "USD",
+      "count": 1,
+      "amount": null,
+      "source": "docs/business/FLEET_COST_MODEL.md"
+    },
+    {
+      "name": "production independent key providers, threshold, quotas and availability unselected",
+      "category": "seal_provider",
+      "kind": "unquoted",
+      "network": "mainnet",
+      "unit": "USD",
+      "count": 1,
+      "amount": null,
+      "source": "docs/business/FLEET_COST_MODEL.md"
+    },
+    {
+      "name": "app uses HTTP publisher; relay is an optional alternative, never automatically added",
+      "category": "relay",
+      "kind": "unquoted",
+      "network": "mainnet",
+      "unit": "USD",
+      "count": 1,
+      "amount": null,
+      "source": "docs/business/FLEET_COST_MODEL.md"
+    },
+    {
+      "name": "production publisher/aggregator delivery and bandwidth SLA unquoted",
+      "category": "gateway",
+      "kind": "unquoted",
+      "network": "mainnet",
+      "unit": "USD",
+      "count": 1,
+      "amount": null,
+      "source": "docs/business/FLEET_COST_MODEL.md"
+    },
+    {
+      "name": "production reads/submissions/rate limits and SLA unquoted",
+      "category": "rpc",
+      "kind": "unquoted",
+      "network": "mainnet",
+      "unit": "USD",
+      "count": 1,
+      "amount": null,
+      "source": "docs/business/FLEET_COST_MODEL.md"
+    },
+    {
+      "name": "production receipt history retention/availability unquoted",
+      "category": "indexer",
+      "kind": "unquoted",
+      "network": "mainnet",
+      "unit": "USD",
+      "count": 1,
+      "amount": null,
+      "source": "docs/business/FLEET_COST_MODEL.md"
+    }
+  ],
+  "comparison": {
+    "matched_scope": null,
+    "fixed_usd": null,
+    "fleet_per_device_usd": null,
+    "aws_per_device_usd": null,
+    "reason": "Production availability, delivery, retention and key-provider costs unquoted on both matched paths."
+  }
+}
