@@ -576,4 +576,78 @@ mod tests {
         assert!(d.config_at(&base).is_err());
         std::fs::remove_dir_all(base).unwrap();
     }
+    #[tokio::test]
+    #[ignore = "requires local Docker Engine"]
+    async fn oci_real_engine_forwards_private_registry_profile_and_rejects_bad_auth() {
+        use base64::Engine;
+        use std::{
+            io::{Read, Write},
+            sync::{
+                atomic::{AtomicBool, Ordering},
+                Arc,
+            },
+        };
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let registry = format!("127.0.0.1:{}", listener.local_addr().unwrap().port());
+        // Deliberately invalid fixture credentials; no provider account exists.
+        let encoded =
+            base64::engine::general_purpose::STANDARD.encode("sf036-fixture:invalid-fixture-value");
+        let seen = Arc::new(AtomicBool::new(false));
+        let done = Arc::new(AtomicBool::new(false));
+        let (saw_auth, stop) = (seen.clone(), done.clone());
+        let expected = format!("authorization: basic {}", encoded).to_ascii_lowercase();
+        let server = std::thread::spawn(move || {
+            while !stop.load(Ordering::SeqCst) {
+                if let Ok((mut stream, _)) = listener.accept() {
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(1)))
+                        .unwrap();
+                    let mut buffer = [0u8; 8192];
+                    if let Ok(n) = stream.read(&mut buffer) {
+                        if String::from_utf8_lossy(&buffer[..n])
+                            .to_ascii_lowercase()
+                            .contains(&expected)
+                        {
+                            saw_auth.store(true, Ordering::SeqCst);
+                        }
+                    }
+                    let _ = stream.write_all(b"HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"test\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                } else {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            }
+        });
+        let base = std::env::temp_dir().join(format!("sf036-auth-engine-{}", std::process::id()));
+        let profile = base.join("fixture");
+        std::fs::create_dir_all(&profile).unwrap();
+        crate::configuration::write_private(
+            &profile.join("config.json"),
+            &serde_json::json!({"auths":{(registry.clone()):{"auth":encoded}}}),
+        )
+        .unwrap();
+        let mut d = descriptor();
+        d.registry_auth = Some("fixture".into());
+        let config = d.config_at(&base).unwrap();
+        let image = format!("{registry}/test/app@sha256:{}", "a".repeat(64));
+        let result = output(
+            &config,
+            &args(&["image", "pull", "--platform", host_platform(), &image]),
+            30,
+        )
+        .await;
+        done.store(true, Ordering::SeqCst);
+        server.join().unwrap();
+        std::fs::remove_dir_all(base).unwrap();
+        assert!(result.is_err(), "bad registry credentials were accepted");
+        assert!(
+            seen.load(Ordering::SeqCst),
+            "configured fixture credentials never reached the registry"
+        );
+        let error = result.unwrap_err().to_string();
+        assert!(
+            error.contains("diagnostics withheld"),
+            "credential failure was not sanitized"
+        );
+    }
 }
