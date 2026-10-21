@@ -319,6 +319,25 @@ pub async fn clean(root: &Path) -> anyhow::Result<()> {
         );
         output(public(), &args(&["container", "rm", "--force", id]), 20).await?;
     }
+    // Only a confirmed global cleanup can discharge the durable engine
+    // obligation. Retained versions alone do not require a running engine.
+    if !has_components(root)? {
+        std::fs::remove_file(root.join(ENGINE_MARKER))?;
+    }
+    Ok(())
+}
+
+fn has_components(root: &Path) -> anyhow::Result<bool> {
+    Ok(std::fs::read_dir(root)?.any(|entry| {
+        entry.map(|entry| entry.path().join("oci-engine").exists()).unwrap_or(true)
+    }))
+}
+
+/// Retirement must never clean containers belonging to another active component.
+pub async fn release_if_unused(root: &Path) -> anyhow::Result<()> {
+    if !has_components(root)? {
+        clean(root).await?;
+    }
     Ok(())
 }
 
@@ -444,6 +463,12 @@ pub async fn clean_component(component: &Path) -> anyhow::Result<()> {
 }
 
 pub async fn remove(workspace: &Path) -> anyhow::Result<()> {
+    #[cfg(test)]
+    ensure!(
+        !workspace.parent().and_then(Path::parent).context("invalid OCI workspace")?
+            .join("test-engine-unavailable").exists(),
+        "injected OCI engine mutation outage"
+    );
     let container = name(workspace);
     let root = workspace
         .parent()

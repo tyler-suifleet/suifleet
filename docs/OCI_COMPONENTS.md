@@ -41,7 +41,8 @@ manifest/index digest and upload/hash the descriptor bytes as the artifact:
 
 Unknown fields fail. Images require an explicit repository and immutable SHA-256;
 tags alone fail. Platforms must match the daemon: `linux/amd64`, `linux/arm64` or
-`linux/arm/v7`. There is no automatic emulation or architecture fallback. The
+`linux/arm/v7` (ARMv7 only; ARMv6 daemon targets are unsupported). There is no
+automatic emulation or architecture fallback. The
 engine's cached image platform and repository digest are checked before use.
 Images declaring implicit `VOLUME`s fail. Choose images compatible with a non-root
 numeric UID[:GID], read-only root filesystem, all capabilities dropped and
@@ -83,7 +84,11 @@ registry or credentials. SuiFleet never prunes engine images. Retain active and
 previous digests when performing external engine GC; missing/corrupt cache fails
 closed and is not an offline-success result.
 
-The supervisor owns restart budgets/backoff and readiness. Engine restart is
+The supervisor owns restart budgets/backoff and readiness. Transient engine
+cleanup/start failures consume that same budget and retry after backoff; a new
+container cannot be created until component cleanup succeeds. After the last OCI
+component is retired, confirmed cleanup releases the durable engine requirement,
+so later daemon startup does not require Docker. Engine restart is
 always disabled. Descriptor readiness is an argv command executed as the container
 user; without one, the container must survive the configured startup interval.
 A failed replacement restores the previous descriptor/image and confirms it only

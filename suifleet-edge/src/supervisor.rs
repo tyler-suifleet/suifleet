@@ -577,11 +577,12 @@ impl Supervisor {
     /// daemon start brings it back. Its work directory and log are kept.
     pub async fn retire(&mut self, name: &str) -> anyhow::Result<()> {
         self.stop(name).await?;
-        if self.root.join(name).join("oci-engine").exists() {
-            std::fs::remove_file(self.root.join(name).join("oci-engine"))?;
-        }
         if self.active.remove(name).is_some() {
             self.save_active()?;
+        }
+        if self.root.join(name).join("oci-engine").exists() {
+            std::fs::remove_file(self.root.join(name).join("oci-engine"))?;
+            crate::oci::release_if_unused(&self.root).await?;
         }
         self.previous.remove(name);
         self.recovered.remove(name);
@@ -962,6 +963,54 @@ enum End {
     Stop,
 }
 
+// Failed engine mutations consume the same bounded restart policy as runs.
+// A retry reaches oci::start only through its mandatory component cleanup.
+async fn restart_after(
+    context: &Context,
+    stop: &mut watch::Receiver<bool>,
+    failed: bool,
+    reason: String,
+    restarts: u32,
+    recent: &mut VecDeque<Instant>,
+    backoff: &mut Duration,
+) -> bool {
+    let restart = match context.spec.restart {
+        Restart::Never => false,
+        Restart::OnFailure => failed,
+        Restart::Always => true,
+    };
+    if !restart {
+        context.set(if failed && context.spec.run == crate::oci::RUN { Phase::Broken } else { Phase::Exited }, None, restarts, Some(reason));
+        return false;
+    }
+    let now = Instant::now();
+    recent.push_back(now);
+    while recent.front().is_some_and(|at| now.duration_since(*at) > RESTART_WINDOW) {
+        recent.pop_front();
+    }
+    if recent.len() as u32 > context.settings.max_restarts {
+        context.set(Phase::Broken, None, restarts, Some(format!("{reason}; restart budget exhausted")));
+        return false;
+    }
+    context.set(Phase::Backoff, None, restarts, Some(reason));
+    let stopped = tokio::select! {
+        _ = tokio::time::sleep(*backoff) => false,
+        _ = stop.wait_for(|stop| *stop) => true,
+    };
+    if stopped {
+        let cleanup = if context.spec.run == crate::oci::RUN {
+            crate::oci::clean_component(context.workspace.parent().and_then(Path::parent).expect("component workspace")).await
+        } else { Ok(()) };
+        match cleanup {
+            Ok(()) => context.set(Phase::Stopped, None, restarts, None),
+            Err(error) => context.set(Phase::Broken, None, restarts, Some(format!("OCI stop not confirmed: {error:#}"))),
+        }
+        return false;
+    }
+    *backoff = (*backoff * 2).min(MAX_BACKOFF);
+    true
+}
+
 async fn supervise(context: Context, mut stop: watch::Receiver<bool>) {
     let name = context.spec.name.clone();
     let mut restarts = 0u32;
@@ -972,7 +1021,13 @@ async fn supervise(context: Context, mut stop: watch::Receiver<bool>) {
         let mut child = match context.spawn().await {
             Ok(child) => child,
             Err(error) => {
-                context.set(Phase::Broken, None, restarts, Some(format!("cannot start: {error:#}")));
+                if context.spec.run == crate::oci::RUN && restart_after(&context, &mut stop, true, format!("cannot start: {error:#}"), restarts, &mut recent, &mut backoff).await {
+                    restarts += 1;
+                    continue;
+                }
+                if context.spec.run != crate::oci::RUN {
+                    context.set(Phase::Broken, None, restarts, Some(format!("cannot start: {error:#}")));
+                }
                 return;
             }
         };
@@ -1017,41 +1072,24 @@ async fn supervise(context: Context, mut stop: watch::Receiver<bool>) {
         sweep_orphans();
         if context.spec.run == crate::oci::RUN {
             if let Err(error) = crate::oci::remove(&context.workspace).await {
-                context.set(Phase::Broken, None, restarts, Some(format!("OCI cleanup failed: {error:#}")));
+                if restart_after(&context, &mut stop, true, format!("OCI cleanup failed: {error:#}"), restarts, &mut recent, &mut backoff).await {
+                    restarts += 1;
+                    continue;
+                }
                 return;
             }
         }
         warn!(component = name, %reason, "Component run ended");
-        let restart = match context.spec.restart {
-            Restart::Never => false,
-            Restart::OnFailure => failed,
-            Restart::Always => true,
-        };
-        if !restart {
+        if matches!(context.spec.restart, Restart::Never) || (matches!(context.spec.restart, Restart::OnFailure) && !failed) {
             context.set(Phase::Exited, None, restarts, Some(reason));
             return;
         }
         if started.elapsed() >= STABLE_RUN {
             backoff = Duration::from_secs(1);
         }
-        let now = Instant::now();
-        recent.push_back(now);
-        while recent.front().is_some_and(|at| now.duration_since(*at) > RESTART_WINDOW) {
-            recent.pop_front();
-        }
-        if recent.len() as u32 > context.settings.max_restarts {
-            context.set(Phase::Broken, None, restarts, Some(format!("{reason}; restart budget exhausted")));
+        if !restart_after(&context, &mut stop, failed, reason, restarts, &mut recent, &mut backoff).await {
             return;
         }
-        context.set(Phase::Backoff, None, restarts, Some(reason));
-        tokio::select! {
-            _ = tokio::time::sleep(backoff) => {}
-            _ = stop.wait_for(|stop| *stop) => {
-                context.set(Phase::Stopped, None, restarts, None);
-                return;
-            }
-        }
-        backoff = (backoff * 2).min(MAX_BACKOFF);
         restarts += 1;
     }
 }
@@ -2579,6 +2617,8 @@ mod tests {
         s.deploy(spec.clone(), &artifact, None, &f.runner, "oci", &record).await.unwrap();
         assert_eq!(phase(&s), Phase::Running);
         let workspace = s.workspace(&spec);
+        crate::oci::release_if_unused(&f.dir.join("supervised")).await.unwrap();
+        assert!(crate::oci::ready(&workspace).await.is_ok(), "another component's retirement must preserve this run");
         let engine = |args: &[&str]| {
             let mut c = std::process::Command::new("/usr/bin/docker");
             c.args(["--host", "unix:///var/run/docker.sock"]).args(args)
@@ -2618,6 +2658,29 @@ mod tests {
                 if s.status()["app"].restarts > 0 && phase(&s) == Phase::Running { break; }
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
+        }).await.unwrap();
+        // A transient cleanup failure and subsequent start failure must
+        // consume backoff, without creating a second container or recovery intent.
+        let outage = f.dir.join("supervised/app/test-engine-unavailable");
+        std::fs::write(&outage, b"test-only mutation failure").unwrap();
+        let current = engine(&["ps", "-q", "--filter", &format!("label=io.suifleet.component={}", {
+            use sha2::Digest; hex::encode(sha2::Sha256::digest(f.dir.join("supervised/app").as_os_str().as_encoded_bytes()))
+        })]);
+        let current = String::from_utf8(current.stdout).unwrap().trim().to_owned();
+        engine(&["kill", &current]);
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let status = s.status();
+                if status["app"].phase == Phase::Backoff && status["app"].restarts >= 2 { break; }
+                assert_ne!(status["app"].phase, Phase::Broken);
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        }).await.unwrap();
+        assert!(!f.dir.join("supervised/recovery-intent.json").exists());
+        assert!(engine(&["ps", "-q", "--filter", &format!("id={current}")]).stdout.is_empty());
+        std::fs::remove_file(&outage).unwrap();
+        tokio::time::timeout(Duration::from_secs(15), async {
+            while phase(&s) != Phase::Running { tokio::time::sleep(Duration::from_millis(100)).await; }
         }).await.unwrap();
         // Mutation-outage injection keeps a real engine container alive. An
         // unconfirmed stop must stay Broken and must not uncommit ownership.
@@ -2687,6 +2750,13 @@ mod tests {
         assert_eq!(phase(&s), Phase::Running);
         s.stop_all().await;
         crate::oci::clean(&f.dir.join("supervised")).await.unwrap();
+        assert!(f.dir.join("supervised/@oci-engine").exists());
+        s.retire("app").await.unwrap();
+        assert!(!f.dir.join("supervised/app/oci-engine").exists());
+        assert!(!f.dir.join("supervised/@oci-engine").exists());
+        // With no engine obligation left, open is engine-independent.
+        let _s = f.open();
+
     }
 
 }
