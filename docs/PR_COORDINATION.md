@@ -187,7 +187,9 @@ its reservation and retries after five minutes. Recovery reads durable ownership
 requires matching intent and a clean branch at that head, publishes any pending
 revision, and asserts the claim. It does not repeat resume for an In progress claim.
 Recovery uses fresh base, feedback and checks while retaining the reserved receipt
-directory and updating the job feedback hash. A changed head or ownership, dirty
+directory and its original feedback reservation key. Fresh snapshot feedback is
+used by the worker without rewriting that key, avoiding collisions with another
+reserved or completed job. A changed head or ownership, dirty
 checkout, PID or worker receipt stops this path for explicit inspection; arbitrary In progress claims never authorize launch.
 
 Immediately before spawning the worker the coordinator clears recoverable intent.
