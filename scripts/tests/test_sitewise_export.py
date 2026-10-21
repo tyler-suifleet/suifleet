@@ -235,13 +235,15 @@ class SiteWiseTests(unittest.TestCase):
                 self.assertEqual(state['requests'][-1][0]['propertyValues'][0]['value'], expected)
             for destination in ('D', 'I', 'B', 'S'):
                 mapping['valueType'] = destination
-                for quality in ('BAD', 'UNCERTAIN'):
+                for quality in ('GOOD', 'BAD', 'UNCERTAIN'):
                     # Real collector disconnect/missing-value shape for an untyped OPC UA point.
                     e.ipc = Source([payload(sample(type=None, value=None, quality=quality))])
                     e.checkpoint = -1
                     self.assertEqual(e.step(), 'exported')
                     self.assertEqual(state['requests'][-1][0]['propertyValues'][0]['value'],
                                      {'nullValue': {'valueType': destination}})
+                    self.assertEqual(state['requests'][-1][0]['propertyValues'][0]['quality'],
+                                     'BAD' if quality == 'GOOD' else quality)
             for destination, typ, value in [('S', 'string', 'line1\nline2'),
                     ('S', 'string', '\x00'), ('S', 'string', '\x7f'), ('S', 'string', 'x' * 1025),
                     ('D', 'double', 2e10), ('D', 'double', -1e10-1),
@@ -259,6 +261,37 @@ class SiteWiseTests(unittest.TestCase):
             mapping.update(valueType='D', scale=2)
             with self.assertRaisesRegex(fe.ExportError, 'invalid-numeric-value'):
                 e.entries(payload(sample(value=6e9)))
+
+    def test_collector_good_nulls_publish_and_advance(self):
+        from industrial.collector import opcua_value
+        from industrial import opcua_codec as ua
+
+        with emulator() as (state, url):
+            records = []
+            for variant in (ua.Variant(ua.STRING, None), ua.Variant(ua.DATETIME, 0),
+                            ua.Variant(ua.DATETIME, 2**63-1)):
+                typ, value, quality, _ = opcua_value({}, ua.DataValue(value=variant))
+                self.assertIsNone(value)
+                self.assertEqual(quality, 'GOOD')
+                records.append(sample(type=typ, value=value, quality=quality))
+            source = Source([payload(*records), payload(sample(type='string', value='next'))])
+            e = self.exporter(source, url)
+            mapping = e.cfg['mappings'][0]
+            mapping.pop('scale'); mapping.pop('offset')
+            mapping['valueType'] = 'S'
+            self.assertEqual(e.step(), 'exported')
+            self.assertEqual(source.exported, 0)
+            for entry in state['requests'][0]:
+                tqv = entry['propertyValues'][0]
+                self.assertEqual(tqv['value'], {'nullValue': {'valueType': 'S'}})
+                self.assertEqual(tqv['quality'], 'BAD')
+                self.assertEqual(tqv['timestamp'], dict(timeInSeconds=1700000000,
+                                                       offsetInNanos=123456789))
+            self.assertEqual(e.step(), 'exported')
+            self.assertEqual(e.checkpoint, 1)
+            self.assertEqual(source.exported, 1)
+            self.assertEqual(state['requests'][1][0]['propertyValues'][0]['value'],
+                             {'stringValue': 'next'})
 
     def test_partial_rejection_reopen_retains_whole_message(self):
         with emulator() as (state, url):
@@ -294,7 +327,7 @@ class SiteWiseTests(unittest.TestCase):
     def test_invalid_records_never_sent(self):
         records = [sample(value=True), sample(value=float('nan')), sample(value=2**54),
                    sample(timestamp_ns=True), sample(timestamp_ns=0), sample(quality='UNKNOWN'),
-                   sample(source='other'), sample(type='int16', value=1.5), sample(type='uint16', value=-1), sample(value=None), {'kind': 'gap'}, sample(type='unknown')]
+                   sample(source='other'), sample(type='int16', value=1.5), sample(type='uint16', value=-1), {'kind': 'gap'}, sample(type='unknown')]
         with emulator() as (state, url):
             e = self.exporter(Source([]), url)
             for record in records:

@@ -117,9 +117,12 @@ or U+007F controls. No implicit string/numeric/boolean conversion is performed;
 non-null source/destination mismatches are refused. Scale/offset are only valid
 for D/I mappings.
 
-GOOD/BAD/UNCERTAIN quality is preserved. A null BAD/UNCERTAIN sample uses SiteWise
+Non-null GOOD/BAD/UNCERTAIN quality is preserved. Any null sample uses SiteWise
 `nullValue` with the mapping's declared D/I/B/S type, including untyped OPC UA
-points during disconnect or missing-value events. GOOD nulls are refused. An
+points during disconnect or missing-value events. GOOD nulls (including OPC UA
+null String and unset DateTime scalars) are downgraded to BAD: absent values
+never claim good measurement quality and do not stall delivery. Existing BAD or
+UNCERTAIN quality and source timestamps are preserved. An
 untyped point's subsequent non-null values must have a supported collector type
 matching the mapping; unsupported non-null types block the message. Original integer `timestamp_ns`
 is split into seconds/nanoseconds without floating-point conversion. API timestamp

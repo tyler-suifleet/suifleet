@@ -4,7 +4,7 @@
   "agent": "Codex",
   "session": "dispatch-f9e4c04ed0574640af044798c97c9788",
   "implementation_commit": "af2f241",
-  "date": "2026-10-20",
+  "date": "2026-10-21",
   "environment": "WSL Docker suifleet-dev:sf035; rustc 1.94.0; Python 3.10; hash-locked botocore 1.43.114; runtime tests --network none",
   "tests": [
     {
@@ -38,12 +38,21 @@
     {
       "command": "PYTHONPATH=.ci-cache/aws-python PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_firehose_export.py -v; PYTHONDONTWRITEBYTECODE=1 python3 scripts/greengrass_compat.py; git diff --check",
       "result": "PASS feedback repair: 9 Firehose tests; 524 specification-only reference checks; whitespace check"
+    },
+    {
+      "command": "make test-sitewise SUIFLEET_DEV_IMAGE=suifleet-dev:sf035",
+      "result": "PASS; 10 tests in 9.065s and 9 real-daemon stream PASS checks. Regression uses real opcua_value for null String and DateTime 0/Int64.Max; signed request nullValue S/BAD, unchanged time, checkpoint/ack and following-message delivery. D/I/B/S null quality matrix also passes."
+    },
+    {
+      "command": "PYTHONPATH=.ci-cache/aws-python PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_firehose_export.py -v; PYTHONDONTWRITEBYTECODE=1 python3 scripts/greengrass_compat.py; git diff --check",
+      "result": "PASS; 9 Firehose tests in 10.761s; 524 specification-only reference checks; whitespace check"
     }
   ],
   "resolved_test_setup_failures": [
     "Initial loopback SiteWise SDK host prefix needed test-only inject_host_prefix=False; production retains service endpoint resolution.",
     "Initial native fixture expected temperature 20 instead of emitted 0; corrected expected transformed value to 1.",
-    "First network-none build used an empty dependency volume and failed resolution; rerun offline against populated host registry succeeded."
+    "First network-none build used an empty dependency volume and failed resolution; rerun offline against populated host registry succeeded.",
+    "GOOD-null repair initially retained an obsolete negative expectation for sample(value=None); replaced with explicit GOOD/BAD/UNCERTAIN null request assertions for all declared destination types; final full suite passes."
   ],
   "limits": [
     "Independent exact-head specification/source review and current-head CI/testnet remain PR gates; not established by this local receipt.",
@@ -54,11 +63,11 @@
     "No Sui contracts changed; no machine testnet, AWS, production or hardware mutations."
   ],
   "sha256": {
-    "scripts/sitewise_export.py": "38c4b916af18e28a1c1078e74616eff4f277876d36c5db1a1f68fb31b9c7ec21",
-    "scripts/tests/test_sitewise_export.py": "6bfe6ff1d9c45275e86a390e21ff3e08e333f04a0af5b60b68709d402abf7154",
+    "scripts/sitewise_export.py": "1efb40ae48201a9548799dc5b6bc2222dfa9003cdd807936c21f05af70f898fb",
+    "scripts/tests/test_sitewise_export.py": "3bf58bf829476702d135a9f81a55d02c26e41b3ebb8af2177986265690c1df24",
     "scripts/test_streams.py": "7346b8e419e3f3f888644c3c507591ba57d697cb39c9bf78592f64c9baceda98",
-    "interfaces/compat/sitewise-v1.json": "6a8be166e4549f2cdf27f1c796984353b3a9f95b65006fd1a914017f10669719",
-    "docs/SITEWISE.md": "4883efeebd6508b398fd342a7cbace654376faee315b044f24d2d5c798404293"
+    "interfaces/compat/sitewise-v1.json": "7c0e1e064099424d40e035a0066b87fb1a426d378306a920a8060685b04d7750",
+    "docs/SITEWISE.md": "158cea8332b6398a2316984f1971782265a4069877bf1b2cef0a881da88c13a0"
   },
-  "feedback_revision": "PR #184 review of 9b338b0abf1c: empty/control strings, API double bounds and declared destination/null types repaired; independent re-review pending"
+  "feedback_revision": "PR #184 review of 30c4c1d2681f: real collector GOOD null String and unset DateTime publish as declared nullValue with BAD quality; timestamps preserved and subsequent messages advance; fresh review/CI/testnet pending"
 }

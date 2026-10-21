@@ -159,9 +159,13 @@ class Exporter:
             # retain the record; never retimestamp an outage backlog to make it pass.
             typ = record.get('type')
             destination = mapping['valueType']
-            if value is None and quality in ('BAD', 'UNCERTAIN'):
+            if value is None:
                 # OPC UA disconnects can lack a source type; the operator's
                 # destination declaration remains authoritative for nulls.
+                # A GOOD source status does not make an absent scalar valid.
+                # Real OPC UA null String/unset DateTime samples reach here.
+                if quality == 'GOOD':
+                    quality = 'BAD'
                 variant = {'nullValue': {'valueType': destination}}
             elif destination == 'B' and typ in ('bool', 'boolean') and type(value) is bool:
                 variant = {'booleanValue': value}

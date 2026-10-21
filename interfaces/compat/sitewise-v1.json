@@ -29,7 +29,7 @@
     }
   ],
   "source_schema": "SF-070 integer schema 1",
-  "processing": "explicit source/point mapping with required destination valueType D/I/B/S; numeric affine transformation; TQV quality and source nanoseconds preserved",
+  "processing": "explicit source/point mapping with required destination valueType D/I/B/S; numeric affine transformation; source nanoseconds preserved; quality preserved except GOOD null downgraded to BAD",
   "checkpoint": "whole source message after every request has no error entries; fsync before local ack",
   "max_entries_per_request": 10,
   "max_tqvs_per_entry": 1,
@@ -42,7 +42,7 @@
     "I": "integral affine result within signed int32",
     "S": "string or datetime integer Unix nanoseconds as exact decimal text, 0..1024 characters, no U+0000..001F or U+007F",
     "B": "bool/boolean only",
-    "null": "BAD/UNCERTAIN uses mapping valueType, even when source type is absent",
+    "null": "uses mapping valueType even when source type is absent; GOOD downgraded to BAD, BAD/UNCERTAIN preserved; timestamp preserved",
     "integer_source": "within declared source width and \u00b12^53 before conversion"
   }
 }
