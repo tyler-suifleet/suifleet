@@ -11,6 +11,7 @@ mod bridge;
 mod components;
 mod config;
 mod configuration;
+mod console;
 mod deps;
 mod firmware;
 mod handoff;
@@ -92,6 +93,12 @@ async fn main() -> anyhow::Result<()> {
         // Root ExecStartPost= of the daemon unit, for the signing service (SF-053).
         return signer_service::record_main_process(Path::new(&args[2]));
     }
+    if args.len() == 2 && args[1] == "--console-token" {
+        // A new local console token; configure only its hash (SF-079).
+        let (token, hash) = console::new_token();
+        println!("{}", serde_json::json!({"token": token, "token_sha256": hash}));
+        return Ok(());
+    }
     if args.len() == 3 && args[1] == "--self-check" {
         return self_check(Path::new(&args[2]));
     }
@@ -111,7 +118,7 @@ async fn main() -> anyhow::Result<()> {
     let cloudwatch_logs = args.len() == 3 && args[1] == "--cloudwatch-logs";
     anyhow::ensure!(
         args.len() == 1 || launched || check_config || helper || signer_service || cloudwatch_logs,
-        "usage: suifleet [--launch | --provision KEY_PATH | --derive-address KEY_PATH | --enroll ENROLL_TOML | --check-config CONFIG_PATH | --self-check CONFIG_PATH | --firmware-helper CONFIG | --signer-service SIGNER_TOML | --cloudwatch-logs CONFIG_JSON | --record-main-process PATH | --key-holder CONFIG_PATH | --verify-release BUNDLE_DIR TRUST_FILE [TARGET]]"
+        "usage: suifleet [--launch | --provision KEY_PATH | --derive-address KEY_PATH | --enroll ENROLL_TOML | --check-config CONFIG_PATH | --self-check CONFIG_PATH | --console-token | --firmware-helper CONFIG | --signer-service SIGNER_TOML | --cloudwatch-logs CONFIG_JSON | --record-main-process PATH | --key-holder CONFIG_PATH | --verify-release BUNDLE_DIR TRUST_FILE [TARGET]]"
     );
     {
         use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -258,6 +265,18 @@ async fn main() -> anyhow::Result<()> {
     for name in recovered.keys() { configs.restore(name, supervisor.configuration(name)?.as_ref())?; }
     services::startup_recovery(&cfg, &mut journal, &recovered)?;
     let mut ipc_server = cfg.ipc.as_ref().map(ipc::bind).transpose()?;
+    let sync = telemetry::SharedSync::default();
+    // Read-only views come from state files, so the console answers during a
+    // long apply; a console that cannot bind leaves the daemon running.
+    let mut console_server = match &cfg.console {
+        Some(settings) => match console::bind(settings, console::Context {
+            state_dir: cfg.runtime.state_dir.clone(), sync: sync.clone(), started_ms, poll_seconds: cfg.runtime.poll_seconds,
+        }).await {
+            Ok(server) => Some(server),
+            Err(error) => { warn!(%error, "Local support console unavailable"); None }
+        },
+        None => None,
+    };
     let mut ipc_messages = ipc::Messages::default();
     let service_runtime = std::sync::Arc::new(std::sync::Mutex::new(services::Runtime::open(
         &cfg, &journal.state.services, signer.clone(), streams::Binding {
@@ -312,7 +331,6 @@ async fn main() -> anyhow::Result<()> {
     sd_notify::notify(false, &[sd_notify::NotifyState::Ready]).ok();
     // Telemetry runs beside the poll loop, so a long apply or bootstrap does
     // not silence the heartbeat; it reads only the state files on disk.
-    let sync = telemetry::SharedSync::default();
     let reporter = match &cfg.telemetry {
         Some(settings) => Some(tokio::spawn(
             telemetry::Task {
@@ -465,6 +483,21 @@ async fn main() -> anyhow::Result<()> {
                         if let Err(error) = &result { warn!(operation = pending.request.operation, %error, "Local IPC request failed"); }
                         let _ = pending.reply.send(ipc::response(result));
                     }
+                    Some(control) = async {
+                        match console_server.as_mut() {
+                            Some(server) => server.controls.recv().await,
+                            None => std::future::pending().await,
+                        }
+                    } => {
+                        // The console gave up waiting: never run it late.
+                        if control.reply.is_closed() { continue; }
+                        let result = tokio::select! {
+                            result = supervisor.local_control(&control.component, &control.operation) => result,
+                            _ = &mut shutdown => { stopped = true; break; }
+                        };
+                        let result = result.map(|()| serde_json::to_value(supervisor.status().get(&control.component)).unwrap_or_default());
+                        let _ = control.reply.send(result);
+                    }
                 }
             }
             if stopped { break; }
@@ -491,6 +524,7 @@ async fn main() -> anyhow::Result<()> {
     supervisor.stop_all().await;
     // process::exit below does not run destructors: close IPC before handoff.
     drop(ipc_server);
+    drop(console_server);
     if restart_for_services { anyhow::bail!("restart required to recover service configuration"); }
     if restart_for_handoff {
         std::process::exit(handoff::RESTART_EXIT);

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SuiFleet local support console</title>
+<link rel="stylesheet" href="/console.css">
+<script src="/console.js" defer></script>
+</head>
+<body>
+<header><h1>SuiFleet local support console</h1><span id="who"></span></header>
+<form id="login">
+  <label>Console token <input id="token" type="password" autocomplete="off" spellcheck="false" required></label>
+  <button type="submit">Sign in</button>
+</form>
+<main id="console" hidden>
+  <nav>
+    <button data-op="health">Health</button>
+    <button data-op="inventory">Inventory</button>
+    <button data-op="deployments">Deployments</button>
+    <button data-op="audit">Audit</button>
+    <button id="logout">Sign out</button>
+  </nav>
+  <section id="component" hidden>
+    <h2 id="component-name"></h2>
+    <button data-component-op="logs">Logs</button>
+    <button data-component-op="configuration">Configuration</button>
+    <button data-component-op="start">Start</button>
+    <button data-component-op="stop">Stop</button>
+    <button data-component-op="restart">Restart</button>
+  </section>
+</main>
+<p id="status" role="status"></p>
+<pre id="output"></pre>
+</body>
+</html>

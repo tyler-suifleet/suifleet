@@ -89,6 +89,15 @@ replay_history = false
 # Heartbeat, installed inventory and health (SF-019; docs/TELEMETRY.md):
 # signed snapshots to the fleet indexer, spooled under state_dir/telemetry
 # while it is unreachable. Off-chain; on-chain receipts are unchanged.
+# Local support console (docs/LOCAL_CONSOLE.md): loopback only, authenticated,
+# audited. Tokens come from `suifleet --console-token`; store only the hash.
+# [console]
+# listen = "127.0.0.1:1441"
+# support_operations = ["restart"]   # subset of start, stop, restart
+# [console.users.support]
+# token_sha256 = "<token_sha256>"
+# grants = ["inventory", "health", "deployments", "logs", "configuration", "audit", "restart"]
+
 # [telemetry]
 # url = "https://fleet.example"   # indexer base URL (POST {url}/v1/telemetry)
 # interval_seconds = 60           # 10..=3600
