@@ -1,0 +1,402 @@
+{
+  "schema_version": 1,
+  "observed_at_utc": "2026-10-21T17:36:30.337084+00:00",
+  "read_only": true,
+  "transactions_submitted": 0,
+  "sources": {
+    "mainnet": "https://graphql.mainnet.sui.io/graphql",
+    "testnet": "https://graphql.testnet.sui.io/graphql",
+    "walrus_object": "0x2134d52768ea07e8c43570ef975eb3e4c27a39fa6396bef985b5abc58d03ddd2",
+    "relay": "https://upload-relay.mainnet.walrus.space/v1/tip-config",
+    "token_market_quotes": "https://api.coingecko.com/api/v3/simple/price?ids=sui,walrus-2&vs_currencies=usd&include_last_updated_at=true"
+  },
+  "queries": {
+    "facts": "{ chainIdentifier epoch { epochId referenceGasPrice } protocolConfigs { protocolVersion } }",
+    "walrus": "{ object(address:\"0x2134d52768ea07e8c43570ef975eb3e4c27a39fa6396bef985b5abc58d03ddd2\") { dynamicFields(first:10) { nodes { name { json } value { __typename ... on MoveValue { json } ... on MoveObject { contents { json } } } } pageInfo { hasNextPage } } } }"
+  },
+  "mainnet": {
+    "chainIdentifier": "4btiuiMPvEENsttpZC7CZ53DruC3MAgfznDbASZ7DR6S",
+    "epoch": {
+      "epochId": 1287,
+      "referenceGasPrice": "100"
+    },
+    "protocolConfigs": {
+      "protocolVersion": 138
+    }
+  },
+  "testnet": {
+    "chainIdentifier": "69WiPg3DAQiwdxfncX6wYQ2siKwAe6L9BZthQea3JNMD",
+    "epoch": {
+      "epochId": 1259,
+      "referenceGasPrice": "1000"
+    },
+    "protocolConfigs": {
+      "protocolVersion": 139
+    }
+  },
+  "walrus": {
+    "epoch": 42,
+    "n_shards": 1000,
+    "storage_price_per_unit_size": "57321",
+    "write_price_per_unit_size": "104135"
+  },
+  "relay": {
+    "send_tip": {
+      "address": "0x765a6ff2c13b47e2603416d0b5a156df498a5c51bc8085be3838e43e06086256",
+      "kind": {
+        "linear": {
+          "base": 0,
+          "encoded_size_mul_per_kib": 40
+        }
+      }
+    }
+  },
+  "token_market_quotes": {
+    "sui": {
+      "usd": "1.048",
+      "last_updated_at": 1792604183
+    },
+    "walrus-2": {
+      "usd": "0.04023726",
+      "last_updated_at": 1792604183
+    }
+  },
+  "historical_testnet_transactions": [
+    {
+      "digest": "Gr1L1HSdPH9PnXSNLWrUwzcLYZFotFZ26LEArs8mdauq",
+      "label": "create confidential deployment",
+      "source": "sf022-seal-testnet-26f6529.json",
+      "effects": {
+        "status": "SUCCESS",
+        "gasEffects": {
+          "gasSummary": {
+            "computationCost": 1000000,
+            "storageCost": 12502000,
+            "storageRebate": 0,
+            "nonRefundableStorageFee": 0
+          }
+        }
+      }
+    },
+    {
+      "digest": "8TzCZE7jezULePUFK2Q34LGuxtm3pjGjrbDXK2PSPztU",
+      "label": "delete confidential deployment",
+      "source": "sf022-seal-testnet-26f6529.json",
+      "effects": {
+        "status": "SUCCESS",
+        "gasEffects": {
+          "gasSummary": {
+            "computationCost": 1000000,
+            "storageCost": 0,
+            "storageRebate": 12751525,
+            "nonRefundableStorageFee": 1275
+          }
+        }
+      }
+    },
+    {
+      "digest": "5sSF3GovFFNf76vF1WpKRdtag5p95Ft6ahPHXWNTGVyV",
+      "label": "device receipt",
+      "source": "sf022-seal-testnet-26f6529.json",
+      "effects": {
+        "status": "SUCCESS",
+        "gasEffects": {
+          "gasSummary": {
+            "computationCost": 1000000,
+            "storageCost": 7926800,
+            "storageRebate": 7675232,
+            "nonRefundableStorageFee": 768
+          }
+        }
+      }
+    },
+    {
+      "digest": "368pTtzSLcGhNf2cAnBWi7gXAFoQexq5kf6h4WMi6LpQ",
+      "label": "create access policy",
+      "source": "sf022-seal-testnet.json",
+      "effects": {
+        "status": "SUCCESS",
+        "gasEffects": {
+          "gasSummary": {
+            "computationCost": 1000000,
+            "storageCost": 3245200,
+            "storageRebate": 0,
+            "nonRefundableStorageFee": 0
+          }
+        }
+      }
+    },
+    {
+      "digest": "4JxQWG2g6XzJ7E7ZfeoJAvc6TpB4dcwkWce6F6QKQx2T",
+      "label": "grant the device",
+      "source": "sf022-seal-testnet.json",
+      "effects": {
+        "status": "SUCCESS",
+        "gasEffects": {
+          "gasSummary": {
+            "computationCost": 1000000,
+            "storageCost": 3488400,
+            "storageRebate": 3244875,
+            "nonRefundableStorageFee": 325
+          }
+        }
+      }
+    },
+    {
+      "digest": "Fbu4fUJzXeh5w8MVXVatjN7PxKnLvBaBLiCFPfjtRn6T",
+      "label": "create confidential deployment",
+      "source": "sf022-seal-testnet.json",
+      "effects": {
+        "status": "SUCCESS",
+        "gasEffects": {
+          "gasSummary": {
+            "computationCost": 1000000,
+            "storageCost": 12502000,
+            "storageRebate": 0,
+            "nonRefundableStorageFee": 0
+          }
+        }
+      }
+    },
+    {
+      "digest": "FZUTG38JTrVuM6LjB3tTq4SRw7Spw1atLDCuyujYAxuu",
+      "label": "delete confidential deployment",
+      "source": "sf022-seal-testnet.json",
+      "effects": {
+        "status": "SUCCESS",
+        "gasEffects": {
+          "gasSummary": {
+            "computationCost": 1000000,
+            "storageCost": 0,
+            "storageRebate": 12751525,
+            "nonRefundableStorageFee": 1275
+          }
+        }
+      }
+    },
+    {
+      "digest": "9bvmwuhsHYJeMvpAMx37vBuMugow7HPsVnemDqEUiF5y",
+      "label": "device receipt",
+      "source": "sf022-seal-testnet.json",
+      "effects": {
+        "status": "SUCCESS",
+        "gasEffects": {
+          "gasSummary": {
+            "computationCost": 1000000,
+            "storageCost": 7926800,
+            "storageRebate": 7675232,
+            "nonRefundableStorageFee": 768
+          }
+        }
+      }
+    },
+    {
+      "digest": "4Zfy9iJhS27CL2kSvuUg2ioNZ1jpF4grVuNpEBetswKP",
+      "label": "publish base",
+      "source": "sf022-package-upgrade-testnet.json",
+      "effects": {
+        "status": "SUCCESS",
+        "gasEffects": {
+          "gasSummary": {
+            "computationCost": 1630000,
+            "storageCost": 183479200,
+            "storageRebate": 0,
+            "nonRefundableStorageFee": 0
+          }
+        }
+      }
+    },
+    {
+      "digest": "DdfgBj3WfEUwCHBfkLoBXw6BV3RjmuVjn8KVp4AHfSEs",
+      "label": "register device + issue cap (base)",
+      "source": "sf022-package-upgrade-testnet.json",
+      "effects": {
+        "status": "SUCCESS",
+        "gasEffects": {
+          "gasSummary": {
+            "computationCost": 1000000,
+            "storageCost": 9203600,
+            "storageRebate": 1778222,
+            "nonRefundableStorageFee": 178
+          }
+        }
+      }
+    },
+    {
+      "digest": "3RfEhgHmPzV4yEzhMC7TJn49PRxMpdDrGULdijsEh5sw",
+      "label": "add device to group (base)",
+      "source": "sf022-package-upgrade-testnet.json",
+      "effects": {
+        "status": "SUCCESS",
+        "gasEffects": {
+          "gasSummary": {
+            "computationCost": 1000000,
+            "storageCost": 4028000,
+            "storageRebate": 3784422,
+            "nonRefundableStorageFee": 378
+          }
+        }
+      }
+    },
+    {
+      "digest": "5JXigpjsT5KxZkZjUxbPkKuxrCmYaVkVKnRpcAhAkzXh",
+      "label": "upgrade to head",
+      "source": "sf022-package-upgrade-testnet.json",
+      "effects": {
+        "status": "SUCCESS",
+        "gasEffects": {
+          "gasSummary": {
+            "computationCost": 1870000,
+            "storageCost": 207138000,
+            "storageRebate": 1633837,
+            "nonRefundableStorageFee": 163
+          }
+        }
+      }
+    },
+    {
+      "digest": "G1pUqgh6ev9VLbqoCyQYwsijUopC99iRNh6WMgP3Ap6x",
+      "label": "activate identity in registry custody",
+      "source": "sf022-package-upgrade-testnet.json",
+      "effects": {
+        "status": "SUCCESS",
+        "gasEffects": {
+          "gasSummary": {
+            "computationCost": 1000000,
+            "storageCost": 11362000,
+            "storageRebate": 3624837,
+            "nonRefundableStorageFee": 363
+          }
+        }
+      }
+    },
+    {
+      "digest": "2g66v7aNMPxwfv7Fjn9GJ98TwzqbazeLtk9ZxrpF1PX4",
+      "label": "top up device gas",
+      "source": "sf022-package-upgrade-testnet.json",
+      "effects": {
+        "status": "SUCCESS",
+        "gasEffects": {
+          "gasSummary": {
+            "computationCost": 1000000,
+            "storageCost": 988000,
+            "storageRebate": 0,
+            "nonRefundableStorageFee": 0
+          }
+        }
+      }
+    },
+    {
+      "digest": "8DBZxqVTP3oM16UtcMvsqufUevUWYuh8sKsiNbWyxeTV",
+      "label": "create 3 deployments via head",
+      "source": "sf022-package-upgrade-testnet.json",
+      "effects": {
+        "status": "SUCCESS",
+        "gasEffects": {
+          "gasSummary": {
+            "computationCost": 1000000,
+            "storageCost": 37072800,
+            "storageRebate": 0,
+            "nonRefundableStorageFee": 0
+          }
+        }
+      }
+    },
+    {
+      "digest": "8ozAubtA6kFbDEKy5YmTHGgUXQF9AjTYcpoTW2HFKrEi",
+      "label": "create 1 deployment via base",
+      "source": "sf022-package-upgrade-testnet.json",
+      "effects": {
+        "status": "SUCCESS",
+        "gasEffects": {
+          "gasSummary": {
+            "computationCost": 1000000,
+            "storageCost": 12357600,
+            "storageRebate": 0,
+            "nonRefundableStorageFee": 0
+          }
+        }
+      }
+    },
+    {
+      "digest": "2riLJADkj6DzSjdjnEUQeA2AESEQJDzAt9hyAJ7BmhwF",
+      "label": "delete 4 deployments",
+      "source": "sf022-package-upgrade-testnet.json",
+      "effects": {
+        "status": "SUCCESS",
+        "gasEffects": {
+          "gasSummary": {
+            "computationCost": 1000000,
+            "storageCost": 0,
+            "storageRebate": 50428557,
+            "nonRefundableStorageFee": 5043
+          }
+        }
+      }
+    },
+    {
+      "digest": "F5mFCGwKeTE65hxAobaeNwNsvEWtD1x7DTUcUsnMCcDz",
+      "label": "device receipt",
+      "source": "sf022-package-upgrade-testnet.json",
+      "effects": {
+        "status": "SUCCESS",
+        "gasEffects": {
+          "gasSummary": {
+            "computationCost": 1000000,
+            "storageCost": 7782400,
+            "storageRebate": 7530847,
+            "nonRefundableStorageFee": 753
+          }
+        }
+      }
+    },
+    {
+      "digest": "9jNZYyTsEmnvDsNVVgjysbFyNUXJ1hoW4JMFro84CXdf",
+      "label": "device receipt",
+      "source": "sf022-package-upgrade-testnet.json",
+      "effects": {
+        "status": "SUCCESS",
+        "gasEffects": {
+          "gasSummary": {
+            "computationCost": 1000000,
+            "storageCost": 7782400,
+            "storageRebate": 7530847,
+            "nonRefundableStorageFee": 753
+          }
+        }
+      }
+    },
+    {
+      "digest": "CnsQBmBcFvqDoCXHBZY7AjvothJHmyVU79jG2aAWv9Gx",
+      "label": "device receipt",
+      "source": "sf022-package-upgrade-testnet.json",
+      "effects": {
+        "status": "SUCCESS",
+        "gasEffects": {
+          "gasSummary": {
+            "computationCost": 1000000,
+            "storageCost": 7782400,
+            "storageRebate": 7530847,
+            "nonRefundableStorageFee": 753
+          }
+        }
+      }
+    },
+    {
+      "digest": "3H5TsLfyDRfELDHxfmaDJfgmhennbBnTbWgHWtWjjpXt",
+      "label": "device receipt",
+      "source": "sf022-package-upgrade-testnet.json",
+      "effects": {
+        "status": "SUCCESS",
+        "gasEffects": {
+          "gasSummary": {
+            "computationCost": 1000000,
+            "storageCost": 7782400,
+            "storageRebate": 7530847,
+            "nonRefundableStorageFee": 753
+          }
+        }
+      }
+    }
+  ]
+}
