@@ -263,26 +263,38 @@ fn assignment(rest: &str) -> Option<usize> {
     Some(i)
 }
 
-/// Redact the complete value at the start of `text`, returning the
-/// replacement and the bytes consumed: a quoted string through its closing
-/// (unescaped) quote, to the end when unterminated, or else everything up to
-/// whitespace, punctuation included.
-fn redact_credential(text: &str) -> (String, usize) {
-    if let Some(quote) = text.chars().next().filter(|c| *c == '"' || *c == '\'') {
-        let mut escaped = false;
-        for (i, c) in text.char_indices().skip(1) {
-            if escaped {
-                escaped = false;
-            } else if c == '\\' {
-                escaped = true;
-            } else if c == quote {
-                return (format!("{quote}{REDACTED}{quote}"), i + 1);
-            }
+/// An open quoted credential value: its quote character and whether the next
+/// character is escaped.
+type Quote = (char, bool);
+
+/// Bytes through the closing unescaped `quote` in `text`, or the state still
+/// open at its end.
+fn quoted_end(text: &str, (quote, mut escaped): Quote) -> Result<usize, Quote> {
+    for (i, c) in text.char_indices() {
+        if escaped {
+            escaped = false;
+        } else if c == '\\' {
+            escaped = true;
+        } else if c == quote {
+            return Ok(i + c.len_utf8());
         }
-        return (format!("{quote}{REDACTED}"), text.len());
+    }
+    Err((quote, escaped))
+}
+
+/// Redact the complete value at the start of `text`, returning the
+/// replacement, the bytes consumed and any quote left open: a quoted string
+/// through its closing (unescaped) quote, to the end when unterminated, or
+/// else everything up to whitespace, punctuation included.
+fn redact_credential(text: &str) -> (String, usize, Option<Quote>) {
+    if let Some(quote) = text.chars().next().filter(|c| *c == '"' || *c == '\'') {
+        return match quoted_end(&text[1..], (quote, false)) {
+            Ok(end) => (format!("{quote}{REDACTED}{quote}"), 1 + end, None),
+            Err(open) => (format!("{quote}{REDACTED}"), text.len(), Some(open)),
+        };
     }
     let end = text.find(char::is_whitespace).unwrap_or(text.len());
-    (if end == 0 { String::new() } else { REDACTED.to_owned() }, end)
+    (if end == 0 { String::new() } else { REDACTED.to_owned() }, end, None)
 }
 
 /// Bytes of blanks after an authorization scheme, when a value follows.
@@ -307,6 +319,12 @@ pub fn redact_text(text: &str) -> String {
             .unwrap_or(text.len());
         text.replace_range(start..end, REDACTED);
     }
+    redact_words(&text).0
+}
+
+/// `redact_text` without PEM handling, also returning a quoted credential
+/// value left open at the end of `text`.
+fn redact_words(text: &str) -> (String, Option<Quote>) {
     let mut out = String::with_capacity(text.len());
     let mut i = 0;
     while let Some(first) = text[i..].chars().next() {
@@ -338,37 +356,76 @@ pub fn redact_text(text: &str) -> String {
             continue;
         };
         out.push_str(&rest[..gap]);
-        let (redacted, used) = redact_credential(value);
+        let (redacted, used, open) = redact_credential(value);
         out.push_str(&redacted);
         i += gap + used;
+        if open.is_some() {
+            return (out, open);
+        }
     }
-    out
+    (out, None)
+}
+
+/// Whether a PEM block is open after `text`, starting with `open`: its last
+/// marker is a BEGIN, or it has no marker and one was already open.
+fn pem_after(text: &[u8], open: bool) -> bool {
+    let last = |marker: &[u8]| text.windows(marker.len()).rposition(|w| w == marker);
+    match (last(b"-----BEGIN"), last(b"-----END")) {
+        (Some(begin), end) => end.is_none_or(|end| begin > end),
+        (None, Some(_)) => false,
+        (None, None) => open,
+    }
 }
 
 /// Whether `before` (the log preceding a tail) leaves a PEM block open: its
 /// last marker is a BEGIN.
 fn pem_open(before: &[u8]) -> bool {
-    let last = |marker: &[u8]| before.windows(marker.len()).rposition(|w| w == marker);
-    last(b"-----BEGIN").is_some_and(|begin| last(b"-----END").is_none_or(|end| begin > end))
+    pem_after(before, false)
 }
 
-/// Redact a log tail line by line, carrying PEM block state across lines so
-/// a block's body lines are redacted with its markers. `in_block` says the
-/// tail starts inside a block (a BEGIN precedes it), so every line up to the
-/// END is redacted, whatever its prefix. Also fails closed without that
-/// state: everything before an unmatched END is redacted, as is any bare
-/// base64 line.
-fn redact_log(text: &str, in_block: bool) -> Vec<String> {
-    let mut in_block = in_block || text.find("-----END").is_some_and(|end| text.find("-----BEGIN").is_none_or(|begin| end < begin));
-    text.lines().map(|line| {
+/// Redaction state carried across log lines: inside a PEM block, or inside
+/// a quoted credential value.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct LogState {
+    in_block: bool,
+    quote: Option<Quote>,
+}
+
+/// Redact a log tail line by line, carrying PEM block and quoted credential
+/// state across lines so a block's body lines are redacted with its markers
+/// and a quoted value spanning lines is redacted to its closing quote (to the
+/// end of the tail when unterminated). `state` is that state where the tail
+/// starts (from the log before it). Also fails closed without it: everything
+/// before an unmatched END is redacted, as is any bare base64 line. Returns
+/// the lines and the state at the end.
+fn redact_log(text: &str, mut state: LogState) -> (Vec<String>, LogState) {
+    state.in_block |= text.find("-----END").is_some_and(|end| text.find("-----BEGIN").is_none_or(|begin| end < begin));
+    let lines = text.lines().map(|line| {
         let trimmed = line.trim();
-        if !in_block && trimmed.len() >= 40 && trimmed.bytes().all(|b| b.is_ascii_alphanumeric() || b"+/=".contains(&b)) {
+        if state == LogState::default() && trimmed.len() >= 40 && trimmed.bytes().all(|b| b.is_ascii_alphanumeric() || b"+/=".contains(&b)) {
             return REDACTED.to_owned();
         }
         let mut out = String::new();
         let mut rest = line;
         loop {
-            if in_block {
+            if let Some(open) = state.quote {
+                // Markers inside the value still count, failing closed.
+                match quoted_end(rest, open) {
+                    Ok(end) => {
+                        out.push_str(REDACTED);
+                        out.push(open.0);
+                        state.in_block = pem_after(rest[..end].as_bytes(), state.in_block);
+                        rest = &rest[end..];
+                        state.quote = None;
+                    }
+                    Err(open) => {
+                        out.push_str(REDACTED);
+                        state.in_block = pem_after(rest.as_bytes(), state.in_block);
+                        state.quote = Some(open);
+                        break;
+                    }
+                }
+            } else if state.in_block {
                 let Some(end) = rest.find("-----END") else {
                     out.push_str(REDACTED);
                     break;
@@ -376,18 +433,25 @@ fn redact_log(text: &str, in_block: bool) -> Vec<String> {
                 let close = rest[end + 8..].find("-----").map(|t| end + 8 + t + 5).unwrap_or(rest.len());
                 out.push_str(REDACTED);
                 rest = &rest[close..];
-                in_block = false;
-            } else if let Some(begin) = rest.find("-----BEGIN") {
-                out.push_str(&redact_text(&rest[..begin]));
-                rest = &rest[begin..];
-                in_block = true;
+                state.in_block = false;
             } else {
-                out.push_str(&redact_text(rest));
-                break;
+                let begin = rest.find("-----BEGIN");
+                let (redacted, open) = redact_words(&rest[..begin.unwrap_or(rest.len())]);
+                out.push_str(&redacted);
+                state.quote = open;
+                match begin {
+                    // A BEGIN inside an open value is handled with the value.
+                    Some(begin) => {
+                        rest = &rest[begin..];
+                        state.in_block |= open.is_none();
+                    }
+                    None => break,
+                }
             }
         }
         out
-    }).collect()
+    }).collect();
+    (lines, state)
 }
 
 fn bounded(text: &str, limit: usize) -> String {
@@ -940,9 +1004,10 @@ async fn operate(shared: &Shared, call: &Call) -> Result<Value, &'static str> {
                 return Err("not-found");
             }
             let path = state_dir.join("supervised").join(name).join("component.log");
-            let (text, in_block) = tail(&path).map_err(|_| "not-found")?;
-            // Redact the whole tail before selecting lines: PEM state spans lines.
-            let mut all = redact_log(&text, in_block);
+            let (text, state) = tail(&path).map_err(|_| "not-found")?;
+            // Redact the whole tail before selecting lines: PEM and quoted
+            // credential state spans lines.
+            let (mut all, _) = redact_log(&text, state);
             let skip = all.len().saturating_sub(lines);
             let lines: Vec<String> = all.drain(skip..).map(|l| crate::telemetry::bounded(&l, MAX_LINE)).collect();
             Ok(json!({"component": name, "lines": lines}))
@@ -982,9 +1047,10 @@ async fn operate(shared: &Shared, call: &Call) -> Result<Value, &'static str> {
     }
 }
 
-/// The last `MAX_LOG_BYTES` of a log, from its first whole line, and whether
-/// that starts inside a PEM block opened in the `PEM_LOOKBACK` bytes before.
-fn tail(path: &Path) -> std::io::Result<(String, bool)> {
+/// The last `MAX_LOG_BYTES` of a log, from its first whole line, and the
+/// redaction state where that starts: inside a PEM block or a quoted
+/// credential value opened in the `PEM_LOOKBACK` bytes before.
+fn tail(path: &Path) -> std::io::Result<(String, LogState)> {
     let mut file = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW).open(path)?;
     let size = file.metadata()?.len();
     let start = size.saturating_sub(MAX_LOG_BYTES + PEM_LOOKBACK);
@@ -997,7 +1063,10 @@ fn tail(path: &Path) -> std::io::Result<(String, bool)> {
         // The first line is cut; drop it (it belongs to the lookback).
         cut = bytes[cut..].iter().position(|&b| b == b'\n').map_or(bytes.len(), |n| cut + n + 1);
     }
-    Ok((String::from_utf8_lossy(&bytes[cut..]).into_owned(), pem_open(&bytes[..cut])))
+    let before = String::from_utf8_lossy(&bytes[..cut]);
+    let mut state = redact_log(&before, LogState::default()).1;
+    state.in_block |= pem_open(before.as_bytes());
+    Ok((String::from_utf8_lossy(&bytes[cut..]).into_owned(), state))
 }
 
 fn remove_pointer(value: &mut Value, pointer: &str) {
@@ -1015,6 +1084,8 @@ fn remove_pointer(value: &mut Value, pointer: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const BLOCK: LogState = LogState { in_block: true, quote: None };
 
     fn settings() -> Settings {
         let (_, hash) = new_token();
@@ -1146,7 +1217,7 @@ mod tests {
         }
         // Values after non-secret names and the text around them stay.
         assert_eq!(redact_text("url=https://x/a?b=c user: bob"), "url=https://x/a?b=c user: bob");
-        let out = redact_log("x password=alpha!CANARY\npassphrase=\"b CANARY\" y", false);
+        let out = redact_log("x password=alpha!CANARY\npassphrase=\"b CANARY\" y", LogState::default()).0;
         assert_eq!(out, ["x password=[redacted]", "passphrase=\"[redacted]\" y"]);
     }
 
@@ -1157,30 +1228,30 @@ mod tests {
         let (cut, full) = (body("CUTBODY"), body("FULLBODY"));
         let leaked = |lines: &[String], secret: &str| lines.iter().any(|l| l.contains(secret));
         let block = format!("before\n-----BEGIN PRIVATE KEY-----\n{full}\n{full}\nQUJD==\n-----END PRIVATE KEY----- tail\nafter");
-        let out = redact_log(&block, false);
+        let out = redact_log(&block, LogState::default()).0;
         assert!(!leaked(&out, &full) && !leaked(&out, "QUJD"), "multiline body leaked");
         assert_eq!(out.first().unwrap(), "before");
         assert_eq!(out.last().unwrap(), "after");
         assert!(out.iter().any(|l| l == "[redacted] tail"));
         // Tail cut inside a block: the END comes first.
-        let out = redact_log(&format!("{cut}\nQUJD==\n-----END PRIVATE KEY-----\nafter"), false);
+        let out = redact_log(&format!("{cut}\nQUJD==\n-----END PRIVATE KEY-----\nafter"), LogState::default()).0;
         assert!(!leaked(&out, &cut) && !leaked(&out, "QUJD"), "cut body leaked");
         assert_eq!(out.last().unwrap(), "after");
         // Cut inside a block with neither marker in the tail.
-        let out = redact_log(&format!("{cut}\n{cut}\nnormal line"), false);
+        let out = redact_log(&format!("{cut}\n{cut}\nnormal line"), LogState::default()).0;
         assert!(!leaked(&out, &cut), "markerless body leaked");
         assert_eq!(out.last().unwrap(), "normal line");
         // Unterminated block runs to the end of the tail.
-        let out = redact_log(&format!("ok\n-----BEGIN EC PRIVATE KEY-----\nshort\nx y"), false);
+        let out = redact_log(&format!("ok\n-----BEGIN EC PRIVATE KEY-----\nshort\nx y"), LogState::default()).0;
         assert_eq!(out, ["ok", "[redacted]", "[redacted]", "[redacted]"]);
         // Single-line blocks and ordinary secrets still use redact_text.
-        let out = redact_log("a -----BEGIN X-----MIIE-----END X----- b password=hunter2", false);
+        let out = redact_log("a -----BEGIN X-----MIIE-----END X----- b password=hunter2", LogState::default()).0;
         assert_eq!(out, ["a [redacted] b password=[redacted]"]);
         // Cut inside a block, both markers outside the tail: the state from
         // before the tail covers short and prefixed body lines.
-        let out = redact_log(&format!("INFO {cut}\nQUJD==\nINFO {cut}"), true);
+        let out = redact_log(&format!("INFO {cut}\nQUJD==\nINFO {cut}"), BLOCK).0;
         assert_eq!(out, ["[redacted]"; 3]);
-        let out = redact_log(&format!("INFO {cut}\nQUJD==\n-----END PRIVATE KEY-----\nafter"), true);
+        let out = redact_log(&format!("INFO {cut}\nQUJD==\n-----END PRIVATE KEY-----\nafter"), BLOCK).0;
         assert_eq!(out, ["[redacted]", "[redacted]", "[redacted]", "after"]);
         assert!(pem_open(b"x\n-----BEGIN PRIVATE KEY-----\nAAAA"));
         assert!(pem_open(b"-----BEGIN A-----\n-----END A-----\n-----BEGIN B-----"));
@@ -1199,17 +1270,71 @@ mod tests {
         assert!(open.len() as u64 > MAX_LOG_BYTES);
         std::fs::write(&path, &open).unwrap();
         let (text, in_block) = tail(&path).unwrap();
-        assert!(in_block && !text.contains("BEGIN") && !text.contains("noise"));
+        assert!(in_block == BLOCK && !text.contains("BEGIN") && !text.contains("noise"));
         assert!(text.len() as u64 <= MAX_LOG_BYTES && text.starts_with("INFO "));
-        assert!(redact_log(&text, in_block).iter().all(|l| l == REDACTED));
+        assert!(redact_log(&text, in_block).0.iter().all(|l| l == REDACTED));
         // Closed before the tail; small logs are read whole.
         std::fs::write(&path, format!("{open}-----END PRIVATE KEY-----\n{}", "ok\n".repeat(4000))).unwrap();
-        assert!(!tail(&path).unwrap().1);
+        assert_eq!(tail(&path).unwrap().1, LogState::default());
         std::fs::write(&path, "-----BEGIN PRIVATE KEY-----\nAAAA\n").unwrap();
-        assert_eq!(tail(&path).unwrap(), ("-----BEGIN PRIVATE KEY-----\nAAAA\n".to_owned(), false));
+        assert_eq!(tail(&path).unwrap(), ("-----BEGIN PRIVATE KEY-----\nAAAA\n".to_owned(), LogState::default()));
         // A BEGIN beyond the lookback is no longer key material.
         std::fs::write(&path, format!("-----BEGIN X-----\n{}", "ok\n".repeat((PEM_LOOKBACK as usize + 9000) / 3))).unwrap();
-        assert!(!tail(&path).unwrap().1);
+        assert_eq!(tail(&path).unwrap().1, LogState::default());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn log_redaction_carries_quoted_credentials_across_lines() {
+        // Synthetic canaries; failure messages never echo them.
+        let leaked = |lines: &[String]| lines.iter().any(|l| l.contains("CANARY"));
+        let open = |quote| LogState { in_block: false, quote: Some((quote, false)) };
+        // Spanning lines: redacted to the closing quote, text after it kept.
+        let (out, state) = redact_log("a passphrase=\"alpha\nCANARY_SUFFIX\" after\nok", LogState::default());
+        assert!(!leaked(&out), "multiline value leaked");
+        assert_eq!(out, ["a passphrase=\"[redacted]", "[redacted]\" after", "ok"]);
+        assert_eq!(state, LogState::default());
+        // Escaped quotes, on either line and before the newline, do not close it.
+        let (out, _) = redact_log("token='a\\'CANARY1\nCAN\\'ARY2' b\npin: \"x\\\nCANARY3\" c", LogState::default());
+        assert!(!leaked(&out) && !out.iter().any(|l| l.contains("ARY2")), "escaped value leaked");
+        assert_eq!(out, ["token='[redacted]", "[redacted]' b", "pin: \"[redacted]", "[redacted]\" c"]);
+        // Unterminated: everything to the end of the tail, and the state says so.
+        let (out, state) = redact_log("ok\nsecret=\"open\nCANARY_A\nCANARY_B", LogState::default());
+        assert_eq!(out, ["ok", "secret=\"[redacted]", "[redacted]", "[redacted]"]);
+        assert_eq!(state, open('"'));
+        // A tail that starts inside a value opened before it.
+        let (out, state) = redact_log("CANARY_CONT\" kept\nnext password=x", open('"'));
+        assert_eq!(out, ["[redacted]\" kept", "next password=[redacted]"]);
+        assert_eq!(state, LogState::default());
+        let (out, _) = redact_log("CANARY \\' still\nCANARY' kept", open('\''));
+        assert_eq!(out, ["[redacted]", "[redacted]' kept"]);
+        // Values closing on one line, and other quotes inside a value.
+        assert_eq!(redact_log("a password=\"x 'y\" b 'c'", LogState::default()).0, ["a password=\"[redacted]\" b 'c'"]);
+        // PEM markers inside an open value fail closed after it closes.
+        let (out, state) = redact_log("key=\"-----BEGIN X-----\nCANARYBODY\" tail\nCANARYBODY\n-----END X-----\nafter", LogState::default());
+        assert!(!leaked(&out), "PEM inside value leaked");
+        assert_eq!(out.last().unwrap(), "after");
+        assert_eq!(state, LogState::default());
+    }
+
+    #[test]
+    fn log_tail_carries_quoted_credentials_across_the_byte_cut() {
+        let dir = std::env::temp_dir().join(format!("suifleet-console-{}", rand::random::<u128>()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("component.log");
+        // A quoted value opened before the tail and closed inside it.
+        let filler = "SECRETPART more words\n".repeat(600);
+        std::fs::write(&path, format!("noise passphrase=\"start\n{filler}end\" kept\nok\n")).unwrap();
+        let (text, state) = tail(&path).unwrap();
+        assert!(text.len() as u64 <= MAX_LOG_BYTES && text.starts_with("SECRETPART"));
+        assert_eq!(state, LogState { in_block: false, quote: Some(('"', false)) });
+        let (out, end) = redact_log(&text, state);
+        assert!(!out.iter().any(|l| l.contains("SECRETPART")), "cut value leaked");
+        assert_eq!(out[out.len() - 2..], ["[redacted]\" kept", "ok"]);
+        assert_eq!(end, LogState::default());
+        // Closed before the tail: nothing carried.
+        std::fs::write(&path, format!("passphrase=\"a\nb\" c\n{}", "ok line\n".repeat(2000))).unwrap();
+        assert_eq!(tail(&path).unwrap().1, LogState::default());
         std::fs::remove_dir_all(dir).unwrap();
     }
 

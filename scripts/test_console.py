@@ -44,6 +44,16 @@ PUNCT_CANARIES = ('PUNCTSUFFIXCANARY', 'QUOTEDSUFFIXCANARY', 'LEADINGCANARY', 'C
 PEM_CUT = 'CUTBODYCANARY' + 'A' * 51
 PEM_FULL = 'FULLBODYCANARY' + 'A' * 50
 PEM_OPEN = 'OPENBODYCANARY' + 'A' * 50
+# Synthetic quoted credential values spanning log lines, with escaped quotes,
+# and the redacted view of each line; the last value is never closed.
+MULTILINE_LOG = (
+    ('multi passphrase="alpha', 'multi passphrase="[redacted]'),
+    ('MULTISUFFIXCANARY" kept', '[redacted]" kept'),
+    ('esc token="a\\"ESCFIRSTCANARY', 'esc token="[redacted]'),
+    ('ESC\\"SUFFIXCANARY" done', '[redacted]" done'),
+    ("open secret='gamma", "open secret='[redacted]"),
+    ('OPENSUFFIXCANARY', '[redacted]'),
+)
 
 
 def free_port():
@@ -236,11 +246,13 @@ def run(browser=False):
                                                                              note=f'passphrase="gamma {PUNCT_CANARIES[3]}" ok')))))
 
             # svc2 logs a synthetic PEM block larger than the 8 KiB tail (so the
-            # tail starts inside it), then a complete multiline block.
+            # tail starts inside it), a complete multiline block, then quoted
+            # credentials spanning lines (shell single quotes keep backslashes).
             sim.add(test_ota.object_id('0x792'), event=dict(component_name='svc2'), recipe=dict(lifecycle=dict(
                 run=f'echo "-----BEGIN PRIVATE KEY-----"; i=0; while [ $i -lt 200 ]; do echo {PEM_CUT}; i=$((i+1)); done; '
                     f'echo "-----END PRIVATE KEY-----"; echo middle; echo "-----BEGIN PRIVATE KEY-----"; '
                     f'echo {PEM_FULL}; echo {PEM_FULL}; echo QUJD==; echo "-----END PRIVATE KEY-----"; echo after; '
+                    'printf "%s\\n" ' + ' '.join("'" + line.replace("'", "'\\''") + "'" for line, _ in MULTILINE_LOG) + '; '
                     'exec sleep 300')))
             # svc3 is still writing a block: BEGIN long before the 8 KiB tail,
             # logger-prefixed body lines and a short last line, no END.
@@ -314,17 +326,21 @@ def run(browser=False):
             assert 'late password=[redacted]' in text, text
             # Multiline PEM: redacted across lines, whatever the line limit or
             # byte-boundary cut (svc2's tail begins inside its first block).
-            wait_for(lambda: 'after' in c.call('logs', token=ops['token'], component='svc2', limit=1)['data']['lines'],
-                     'svc2 log incomplete', process)
+            wait_for(lambda: c.call('logs', token=ops['token'], component='svc2', limit=1)['data']['lines'] == ['[redacted]'] and
+                     'OPENSUFFIXCANARY' in (state / 'supervised/svc2/component.log').read_text(), 'svc2 log incomplete', process)
+            assert (state / 'supervised/svc2/component.log').read_text().endswith('\n'.join(line for line, _ in MULTILINE_LOG) + '\n')
             assert (state / 'supervised/svc2/component.log').stat().st_size > 8 * 1024
             for limit in (1, 2, 3, 4, 5, 6, 8, 200):
                 lines = c.call('logs', token=ops['token'], component='svc2', limit=limit)['data']['lines']
                 # The 8 KiB tail holds fewer than 200 of svc2's lines.
                 assert len(lines) == limit if limit < 100 else 0 < len(lines) < limit, limit
-                for i, secret in enumerate(('CUTBODYCANARY', 'FULLBODYCANARY', 'QUJD')):
-                    assert not any(secret in line for line in lines), f'PEM fixture {i} leaked at limit {limit}'
+                for i, secret in enumerate(('CUTBODYCANARY', 'FULLBODYCANARY', 'QUJD', 'CANARY')):
+                    assert not any(secret in line for line in lines), f'PEM/quoted fixture {i} leaked at limit {limit}'
+                # Each continuation line alone is redacted as in the whole view.
+                assert lines[-min(limit, len(MULTILINE_LOG)):] == [view for _, view in MULTILINE_LOG][-limit:], f'svc2 view at limit {limit}'
             lines = c.call('logs', token=ops['token'], component='svc2', limit=200)['data']['lines']
-            assert lines[-1] == 'after' and 'middle' in lines and set(lines) == {'[redacted]', 'middle', 'after'}, 'unexpected svc2 view'
+            assert lines[-len(MULTILINE_LOG) - 1] == 'after' and 'middle' in lines, 'unexpected svc2 view'
+            assert set(lines[:-len(MULTILINE_LOG)]) == {'[redacted]', 'middle', 'after'}, 'unexpected svc2 view'
             # Tail inside a block whose markers are both outside it: the BEGIN
             # before the tail redacts prefixed and short body lines alike.
             svc3_log = state / 'supervised/svc3/component.log'
