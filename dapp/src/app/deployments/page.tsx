@@ -2,6 +2,10 @@
 
 import { useState } from "react";
 import { buildDeploymentControlTx, controlReason, type DeploymentControl } from "@/lib/deployment-control";
+import { useDevices } from "@/hooks/useDevices";
+import { useGroups } from "@/hooks/useGroups";
+import { DeviceUpdateHistory } from "@/components/DeviceUpdateHistory";
+import type { DeviceObject, DeviceGroup } from "@/lib/sui";
 import { useDeployments } from "@/hooks/useDeployments";
 import { useDeploymentStorage } from "@/hooks/useDeploymentStorage";
 import { useCurrentAccount } from "@mysten/dapp-kit-react";
@@ -13,13 +17,15 @@ import Link from "next/link";
 
 export default function DeploymentsPage() {
   const { data: deployments = [], isLoading, error, refetch } = useDeployments();
+  const devices = useDevices(), groups = useGroups();
+  const [view, setView] = useState<"devices" | "deployments">("devices");
   const account = useCurrentAccount();
   const { mutate: signAndExecute, isPending } = useFleetTransaction();
 
   return (
     <div className="space-y-4 max-w-5xl">
       <div className="flex items-center justify-between">
-        <PageHeader title="Deployments" subtitle="Firmware deployments to core device groups" />
+        <PageHeader title="Deployments" subtitle="Device update history, outcomes and deployment controls" />
         <Link href="/rollouts" className="text-sm text-blue-600">Staged rollouts</Link>
         <Link
           href="/firmware"
@@ -29,6 +35,16 @@ export default function DeploymentsPage() {
         </Link>
       </div>
 
+      <nav aria-label="Deployment views" className="flex gap-2">
+        <button aria-pressed={view === "devices"} onClick={() => setView("devices")} className="rounded border px-3 py-2 text-sm">By device</button>
+        <button aria-pressed={view === "deployments"} onClick={() => setView("deployments")} className="rounded border px-3 py-2 text-sm">All deployments</button>
+      </nav>
+      {view === "devices" && <>
+        {groups.error && <p role="alert">Group membership unavailable: {groups.error.message}</p>}
+        <DeviceUpdateHistory deployments={deployments} devices={devices.data ?? []} groups={groups.error ? undefined : groups.data}
+          loading={isLoading || devices.isLoading || groups.isLoading} error={error?.message ?? devices.error?.message} />
+      </>}
+      {view === "deployments" && <>
       {error && <p role="alert" className="text-sm text-red-600">Failed to load deployments: {error.message}</p>}
       <div className="bg-white border border-gray-200 rounded">
         {isLoading ? (
@@ -44,7 +60,7 @@ export default function DeploymentsPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-200 text-left text-xs text-gray-500 bg-gray-50">
-                <Th>Deployment ID</Th>
+                <Th>Update</Th>
                 <Th>Component</Th>
                 <Th>Version</Th>
                 <Th>Targets</Th>
@@ -57,6 +73,8 @@ export default function DeploymentsPage() {
                 <DeploymentRow
                   key={d.deploymentId}
                   d={d}
+                  devices={devices.data ?? []}
+                  groups={groups.data ?? []}
                   canDelete={account?.address === d.creator}
                   isPending={isPending}
                   onControl={(control) => signAndExecute(
@@ -79,18 +97,23 @@ export default function DeploymentsPage() {
           </table>
         )}
       </div>
+      </>}
     </div>
   );
 }
 
 function DeploymentRow({
   d,
+  devices,
+  groups,
   canDelete,
   isPending,
   onDelete,
   onControl,
 }: {
   d: ReturnType<typeof useDeployments>["data"] extends (infer T)[] | undefined ? T : never;
+  devices: DeviceObject[];
+  groups: DeviceGroup[];
   canDelete: boolean;
   isPending: boolean;
   onDelete: () => void;
@@ -100,7 +123,7 @@ function DeploymentRow({
     <>
       <tr className="hover:bg-gray-50 align-top">
         <td className="py-3 px-4 font-mono text-xs text-gray-400 max-w-[140px]">
-          <span title={d.deploymentId}>{d.deploymentId.slice(0, 16)}…</span>
+          <details><summary className="cursor-pointer text-blue-700">Technical details</summary><span className="break-all">{d.deploymentId}</span></details>
         </td>
         <td className="py-3 pr-4 font-medium">{d.componentName}</td>
         <td className="py-3 pr-4 text-gray-500">{d.version}</td>
@@ -109,13 +132,13 @@ function DeploymentRow({
             {d.targetGroups.map((id) => (
               <div key={id} className="flex items-center gap-2">
                 <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">group</span>
-                <span className="text-xs text-gray-500 font-mono">{id.slice(0, 12)}…</span>
+                <a href={`/deployments?group=${encodeURIComponent(id)}`} className="text-xs text-blue-700 underline">{groups.find(group => group.objectId === id)?.name ?? "Unavailable group"}</a>
               </div>
             ))}
             {d.targetDevices.map((id) => (
               <div key={id} className="flex items-center gap-2">
                 <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">device</span>
-                <span className="text-xs text-gray-500 font-mono">{id.slice(0, 12)}…</span>
+                <Link href={`/devices?device=${encodeURIComponent(id)}`} className="text-xs text-blue-700 underline">{devices.find(device => device.objectId === id)?.name ?? "Unavailable device"}</Link>
               </div>
             ))}
           </div>
@@ -141,7 +164,7 @@ function DeploymentRow({
           <div className="text-xs text-gray-400 space-x-4">
             {d.receiptsVerified ? d.resolvedDeviceIds.map((id) => (
               <span key={id} className={`inline-flex px-2 py-1 rounded ${STATUS_COLORS[d.statuses[id] ?? 0]}`} title={id}>
-                {id.slice(0, 10)}…: {STATUS_LABELS[d.statuses[id] ?? 0]}
+                {devices.find(device => device.objectId === id)?.name ?? "Unavailable device"}: {STATUS_LABELS[d.statuses[id] ?? 0]}
               </span>
             )) : (
               <span

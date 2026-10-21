@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { useCurrentAccount } from "@mysten/dapp-kit-react";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import { useDevices } from "@/hooks/useDevices";
@@ -14,6 +14,8 @@ import {
   buildRegisterDeviceTx, buildActivateDeviceTx, buildIssueCapTx, buildDeregisterDeviceTx,
   buildCreateGroupTx, buildAddDeviceToGroupTx, buildRemoveDeviceFromGroupTx, buildDeleteGroupTx,
 } from "@/lib/sui";
+import Link from "next/link";
+import { DeviceUpdateHistory } from "@/components/DeviceUpdateHistory";
 import { PageHeader, HealthBadge } from "@/components/ui";
 import type { DeviceRef } from "@/lib/sui";
 
@@ -50,6 +52,13 @@ function DevicesTab() {
   const { mutate: signAndExecute, isPending } = useFleetTransaction();
   const [showModal, setShowModal] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const groups = useGroups(), deployments = useDeployments();
+  const [linkedDevice, setLinkedDevice] = useState<string | null>(null);
+  useEffect(() => {
+    const select = () => { const id = new URLSearchParams(window.location.search).get("device"); setLinkedDevice(id); setExpanded(id); };
+    select(); window.addEventListener("popstate", select);
+    return () => window.removeEventListener("popstate", select);
+  }, []);
   const { data: health = {} } = useFleetHealth(devices.filter((d) => d.ownerCapId).map((d) => d.objectId));
 
   function handleRegister(e: React.FormEvent<HTMLFormElement>) {
@@ -81,6 +90,7 @@ function DevicesTab() {
         </button>
       </div>
 
+      {linkedDevice && !isLoading && !devices.some(device => device.objectId === linkedDevice) && <p role="alert">This device is unavailable in your fleet. Its history may still be visible on Deployments.</p>}
       <div className="bg-white border border-gray-200 rounded">
         {isLoading ? (
           <div className="p-8 text-center text-sm text-gray-400">Loading…</div>
@@ -113,7 +123,17 @@ function DevicesTab() {
                       </span>
                     )}
                   </td>
-                  <td className="py-3 pr-4 font-medium">{d.name}</td>
+                  <td className="py-3 pr-4">
+                    <a href={`/devices?device=${encodeURIComponent(d.objectId)}`} onClick={event => {
+                      if (event.button || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+                      event.preventDefault(); setExpanded(d.objectId); setLinkedDevice(d.objectId);
+                      window.history.pushState(null, "", `?device=${encodeURIComponent(d.objectId)}`);
+                    }} className="font-medium text-blue-700 underline">{d.name}</a>
+                    <p className="mt-1 text-xs text-gray-500">{health[d.objectId]?.components.length
+                      ? `Last reported: ${health[d.objectId].components.map(component => `${component.name} ${component.version} (${component.installed ? "installed" : "not confirmed"})${component.supervised ? ` (${component.phase ?? "not started"})` : " (one-shot)"}`).join(", ")}`
+                      : "Installed versions not reported"}</p>
+                    <p className="mt-1 text-xs text-gray-500">Groups: {groups.error || !groups.data ? "Membership unavailable" : groups.data.filter(group => group.deviceIds.includes(d.objectId)).map(group => group.name).join(", ") || "No group"}</p>
+                  </td>
                   <td className="py-3 pr-4 text-gray-500">{d.arch}</td>
                   <td className="py-3 pr-4 text-xs text-gray-500">{d.ownerCapId ? lastSeenLabel(health[d.objectId]) : "—"}</td>
                   <td className="py-3 pr-4 font-mono text-xs text-gray-400 max-w-[160px] truncate">{d.deviceAddress}</td>
@@ -171,7 +191,15 @@ function DevicesTab() {
                 </tr>
                 {expanded === d.objectId && (
                   <tr className="bg-gray-50" data-testid="health-details">
-                    <td colSpan={7} className="px-4 py-3"><HealthDetails health={health[d.objectId]} /></td>
+                    <td colSpan={7} className="px-4 py-3 space-y-4">
+                      <h2 className="font-semibold">{d.name} — device details</h2>
+                      <p className="text-sm">Current groups: {groups.error || !groups.data ? "Membership unavailable" : groups.data.filter(group => group.deviceIds.includes(d.objectId)).map(group => group.name).join(", ") || "No group"}</p>
+                      <HealthDetails health={health[d.objectId]} />
+                      <h3 className="font-semibold">Update history</h3>
+                      <DeviceUpdateHistory deviceId={d.objectId} devices={devices} groups={groups.error ? undefined : groups.data}
+                        deployments={deployments.data ?? []} loading={deployments.isLoading} error={deployments.error?.message} />
+                      <Link href={`/deployments?device=${encodeURIComponent(d.objectId)}`} className="inline-block text-sm text-blue-700 underline">View all updates for {d.name}</Link>
+                    </td>
                   </tr>
                 )}
                 </Fragment>
