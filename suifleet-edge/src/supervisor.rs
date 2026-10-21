@@ -963,8 +963,7 @@ enum End {
     Stop,
 }
 
-// Failed engine mutations consume the same bounded restart policy as runs.
-// A retry reaches oci::start only through its mandatory component cleanup.
+// Apply the run policy only to its outcome, never to cleanup failures.
 async fn restart_after(
     context: &Context,
     stop: &mut watch::Receiver<bool>,
@@ -983,6 +982,19 @@ async fn restart_after(
         context.set(if failed && context.spec.run == crate::oci::RUN { Phase::Broken } else { Phase::Exited }, None, restarts, Some(reason));
         return false;
     }
+    retry_after(context, stop, reason, restarts, recent, backoff).await
+}
+
+// Cleanup retries share the bounded budget and stop handling, but cannot
+// authorize another run or change the outcome of the completed run.
+async fn retry_after(
+    context: &Context,
+    stop: &mut watch::Receiver<bool>,
+    reason: String,
+    restarts: u32,
+    recent: &mut VecDeque<Instant>,
+    backoff: &mut Duration,
+) -> bool {
     let now = Instant::now();
     recent.push_back(now);
     while recent.front().is_some_and(|at| now.duration_since(*at) > RESTART_WINDOW) {
@@ -1071,12 +1083,10 @@ async fn supervise(context: Context, mut stop: watch::Receiver<bool>) {
         let _ = child.wait().await;
         sweep_orphans();
         if context.spec.run == crate::oci::RUN {
-            if let Err(error) = crate::oci::remove(&context.workspace).await {
-                if restart_after(&context, &mut stop, true, format!("OCI cleanup failed: {error:#}"), restarts, &mut recent, &mut backoff).await {
-                    restarts += 1;
-                    continue;
+            while let Err(error) = crate::oci::remove(&context.workspace).await {
+                if !retry_after(&context, &mut stop, format!("OCI cleanup failed: {error:#}"), restarts, &mut recent, &mut backoff).await {
+                    return;
                 }
-                return;
             }
         }
         warn!(component = name, %reason, "Component run ended");
@@ -2597,6 +2607,50 @@ mod tests {
         assert!(s.validate("../x", "1", "true", &artifact, &candidate, Duration::from_secs(1)).await.is_err());
         assert!(s.active.is_empty(), "nothing was installed or committed");
     }
+    #[tokio::test]
+    #[ignore = "requires local Docker Engine and SF_OCI_TEST_IMAGE"]
+    async fn oci_real_engine_successful_exit_retries_cleanup_without_rerun() {
+        let image = std::env::var("SF_OCI_TEST_IMAGE").unwrap();
+        for restart in [Restart::OnFailure, Restart::Never] {
+            let mut f = Fixture::new("oci-cleanup-success");
+            let mut s = f.open();
+            let mut spec = f.spec("1", crate::oci::RUN);
+            spec.restart = restart;
+            let artifact = f.dir.join("oci-artifact");
+            let descriptor = serde_json::json!({
+                "version":1, "image":image, "platform":crate::oci::host_platform(), "user":"1000:1000",
+                "memoryBytes":67108864u64, "cpus":1, "pidsLimit":32, "network":"none", "tmpfsBytes":1048576,
+                "command":["sh","-c","while ! test -f /tmp/exit; do sleep 0.1; done; exit 0"]
+            });
+            std::fs::write(&artifact, serde_json::to_vec(&descriptor).unwrap()).unwrap();
+            s.deploy(spec.clone(), &artifact, None, &f.runner, "oci", &configuration::Record::default()).await.unwrap();
+            let workspace = s.workspace(&spec);
+            let name = { use sha2::Digest; format!("suifleet-{}", hex::encode(sha2::Sha256::digest(workspace.as_os_str().as_encoded_bytes()))) };
+            let outage = f.dir.join("supervised/app/test-engine-unavailable");
+            std::fs::write(&outage, b"test-only mutation failure").unwrap();
+            let result = std::process::Command::new("/usr/bin/docker")
+                .args(["--host", "unix:///var/run/docker.sock", "exec", &name, "touch", "/tmp/exit"])
+                .output().unwrap();
+            assert!(result.status.success(), "{result:?}");
+            tokio::time::timeout(Duration::from_secs(10), async {
+                while phase(&s) != Phase::Backoff { tokio::time::sleep(Duration::from_millis(50)).await; }
+            }).await.unwrap();
+            // Keep cleanup unavailable through at least one retry.
+            tokio::time::sleep(Duration::from_millis(1500)).await;
+            assert_eq!(phase(&s), Phase::Backoff);
+            assert_eq!(s.status()["app"].restarts, 0);
+            std::fs::remove_file(outage).unwrap();
+            tokio::time::timeout(Duration::from_secs(10), async {
+                while phase(&s) != Phase::Exited { tokio::time::sleep(Duration::from_millis(50)).await; }
+            }).await.unwrap();
+            assert_eq!(s.status()["app"].restarts, 0);
+            assert_eq!(s.status()["app"].last_exit.as_deref(), Some("exited with code 0"));
+            assert!(!f.dir.join("supervised/recovery-intent.json").exists());
+            assert!(crate::oci::ready(&workspace).await.is_err());
+            s.stop_all().await;
+        }
+    }
+
     /// Requires a local Linux Docker Engine and a pre-cached immutable Alpine
     /// image; does not pull, build, contact a registry or use chain credentials.
     #[tokio::test]
@@ -2659,8 +2713,8 @@ mod tests {
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
         }).await.unwrap();
-        // A transient cleanup failure and subsequent start failure must
-        // consume backoff, without creating a second container or recovery intent.
+        // A transient cleanup failure must consume backoff without creating
+        // a second container or recovery intent before cleanup is confirmed.
         let outage = f.dir.join("supervised/app/test-engine-unavailable");
         std::fs::write(&outage, b"test-only mutation failure").unwrap();
         let current = engine(&["ps", "-q", "--filter", &format!("label=io.suifleet.component={}", {
@@ -2671,7 +2725,7 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(10), async {
             loop {
                 let status = s.status();
-                if status["app"].phase == Phase::Backoff && status["app"].restarts >= 2 { break; }
+                if status["app"].phase == Phase::Backoff { break; }
                 assert_ne!(status["app"].phase, Phase::Broken);
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
