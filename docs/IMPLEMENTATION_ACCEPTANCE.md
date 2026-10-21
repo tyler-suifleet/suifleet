@@ -102,7 +102,7 @@ Add new acceptance-only tickets to that list rather than treating them as comple
 This separates software merge readiness from physical/mainnet acceptance; it does
 not waive security findings, genuine API dependencies, local regression/upgrade
 tests, relevant automatic testnet validation, current CI or independent review.
-Real wallet/provider acceptance retains its existing scope. No mainnet spending or
+The 2026-10-21 update below moves final provider/manual-wallet acceptance to the final test phase. No mainnet spending or
 physical programming is authorized by this deferral. Use isolated networks/testnet
 for software rehearsals and preserve required later acceptance in its own ticket.
 
@@ -112,3 +112,32 @@ no existing approval is relabeled. Install the same trusted policy in the privat
 project configuration without replacing worker limits, wallets or other projects.
 Keep genuine blockers visible locally and continue other eligible work rather than
 stopping all dispatch or inventing successful evidence.
+
+
+## Final external acceptance after implementation (2026-10-21)
+
+The user explicitly reiterates completing implementation before final external
+testing. The earlier physical/mainnet-only scope was too narrow: production
+provider credentials were blocking SF-022 and therefore encrypted delivery's
+entire downstream implementation chain. This update changes acceptance ordering;
+it does not establish a successful production test or waive a source defect.
+
+| Implementation | Final acceptance retained |
+|---|---|
+| SF-022 encrypted delivery | SF-087/#159: choose/validate production Seal providers, authentication, fees, quotas, availability and recovery. Local/testnet providers do not establish production suitability. |
+| SF-088 wallet onboarding | SF-031/#32 and SF-087/#159: real Google/Enoki/OAuth/prover, Slush and extension-wallet sessions with provisioned configuration, recovery, expiry, sign/network/error and ownership handover. Local fixtures do not establish this acceptance. |
+
+Code-level provider configuration, verified server identities, threshold/integrity,
+authority, session expiry, credential handling, redaction and failure paths remain
+implementation gates. Retain meaningful local/browser fixtures, simulator and
+isolated-chain tests, applicable normal public-testnet validation, exact-head CI
+and independent review. Do not ignore vulnerabilities, fall back to plaintext,
+remove genuine software dependencies or relabel existing blocked reviews.
+
+Update the live trusted policy and request fresh review. Implementation issue
+closure after a verified merge leaves the final acceptance checklists open in the
+linked tickets. SF-054 may implement and measure its supported path while marking
+unquoted production-provider charges explicitly; a partial bill remains partial.
+No paid provider purchase, production credentials, mainnet or physical programming
+is authorized. A missing final-test account must not idle unrelated implementation
+workers. A genuine unresolved software/API defect still blocks its own work.
