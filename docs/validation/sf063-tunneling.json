@@ -1,0 +1,31 @@
+{
+  "checks": [
+    "opt-in/digest/local-target/trusted-path/empty-directory/root-user preflight negatives",
+    "denied destinations/mode/region/notification commands launch no proxy",
+    "actual proxy forwards bytes; CAT absent from argv/cross-UID proc; concurrency/timeout/replay enforced",
+    "notification connection loss revokes all local proxy processes",
+    "service/component replacement removes prior proxy and token without replay",
+    "adapter SIGKILL cleans descendants; failed local destination never falls back or restarts CAT",
+    "actual proxy refuses untrusted tunnel TLS server",
+    "credential removal revokes active sessions; explicit stop leaves no proxies",
+    "no CAT in journal, durable spool or application MQTT publications"
+  ],
+  "proxy_sha256": "ed80dfa44c574183ce57fb6b4333836429efc176a8cf4cda0b19667f6bad91f2",
+  "localproxy_source": "8a71618acf536923e882387e8d9eca9dbc7fdbe2",
+  "systemd": "systemd 249 (249.11-0ubuntu3.23)",
+  "external_acceptance": "unrun: AWS account/service, physical target, mainnet",
+  "head": "788ffdd4dae1ecab372a6246729b9ae3f09d7319",
+  "dirty": true,
+  "package_sha256": "956d2dff9a1fadba2668d99f75d0e2c22a34e3915dfdb80add2440ab54173361",
+  "ticket": "SF-063",
+  "adapter": "secure-tunneling",
+  "reference_version": "2.0.1",
+  "recorded_utc": "2026-10-21T17:29:31.117955+00:00",
+  "command": "python3 scripts/test_tunneling.py --binary /tmp/sf063-target/debug/suifleet --package /tmp/sf063-package.tar.gz --evidence /tmp/sf063-tunnel-evidence.json",
+  "environment": "Privileged disposable Docker systemd 249/cgroup v2 container, network none; actual pinned AWS localproxy, mTLS MQTT notifications, independent TLS/WebSocket/protobuf endpoint and TCP echo service",
+  "unrun": [
+    "AWS service/IAM/operator/production credential acceptance: SF-031/#32 and SF-087/#159",
+    "Physical Pi/ARM packaging, boot/network/power-loss acceptance: SF-031/#32",
+    "Mainnet: SF-087/#159 (unauthorized)"
+  ]
+}

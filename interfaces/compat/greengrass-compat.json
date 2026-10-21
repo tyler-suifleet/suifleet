@@ -53,6 +53,7 @@
   {"id": "darwin", "aws": {"os": "darwin"}, "native": {"os": "macos", "arch": "aarch64"}, "status": "partial", "current_evidence": ["docs/MACOS_RUNTIME.md"], "tickets": ["SF-064", "SF-075"], "notes": "Native macOS LaunchDaemon runtime and catalog OS `macos` (SF-075), tested on a hosted macOS 15 arm64 runner; not a Greengrass platform. Translated recipes still omit darwin manifests."}
  ],
  "suites": {
+  "tunnel-cases.json": {"runtime_execution": "passed", "runtime_evidence": "docs/validation/sf063-tunneling.json", "runtime_scope": "Rust executes notification/destination fixtures; shipped systemd unit with actual pinned AWS localproxy passes offline forwarding, token isolation, bounds, failure and cleanup tests. Real AWS/IAM/target acceptance unrun."},
   "device-defender-cases.json": {
    "description": "DeviceDefender 4.0.0 JSON 1.0 reports, reserved topics, service response correlation and invalid schema cases.",
    "runtime_execution": "passed", "runtime_evidence": "docs/validation/sf062-device-defender.json",
@@ -212,9 +213,7 @@
    "current_evidence": ["docs/LOGS.md", "docs/CLOUDWATCH_LOGS.md", "docs/validation/sf060-cloudwatch-logs.json"],
    "suites": ["cloudwatch-logs-cases.json"],
    "notes": "Native log collection in SF-020; CloudWatch Logs upload is the cloudwatch-logs-export adapter (SF-060), tested against a local emulator only. Live AWS upload, systemd-journal forwarding (SystemLogForwarder) and physical integration remain pending."},
-  {"id": "remote.secure-tunneling", "area": "remote-support", "aws_reference": "aws.greengrass.SecureTunneling 2.0.1, aws.greengrass.SystemsManagerAgent",
-   "functional": "not-applicable", "aws_api": "proposed", "aws_recipe": "not-applicable", "tickets": ["SF-038", "SF-063"],
-   "notes": "SSH daemon, firewall and service configuration stay platform-owned. The secure-tunneling adapter (SF-063) is an explicitly configured supervised destination proxy that coexists with them; the open-source SSM agent can be packaged as a native component."},
+  {"id": "remote.secure-tunneling", "area": "remote-support", "aws_reference": "aws.greengrass.SecureTunneling 2.0.1, aws.greengrass.SystemsManagerAgent", "functional": "partial", "aws_api": "partial", "aws_recipe": "not-applicable", "tickets": ["SF-038", "SF-063"], "notes": "Configured opt-in Linux destination adapter with ephemeral MQTT notifications and pinned AWS localproxy. Real AWS service/IAM and target acceptance remain unrun in SF-031/#32 and SF-087/#159; platform SSH/firewall/service authentication remains administrator-owned.", "suites": ["tunnel-cases.json"], "current_evidence": ["docs/SECURE_TUNNELING.md", "docs/validation/sf063-tunneling.json"]},
   {"id": "industrial.protocols", "area": "industrial", "aws_reference": "aws.greengrass.Modbus 2.1.11, IoT SiteWise OPC UA collector/publisher/processor, EdgeConnectorForKVS 1.0.5",
    "functional": "proposed", "aws_api": "roadmap", "aws_recipe": "partial",
    "tickets": ["SF-011", "SF-032", "SF-034", "SF-038", "SF-064", "SF-070", "SF-071", "SF-072"], "suites": ["managed-dependency-cases.json"], "current_evidence": ["docs/GREENGRASS_MANAGED_COMPONENTS.md", "dapp/src/lib/greengrass-recipe.ts", "scripts/test_greengrass_compat.cjs"],

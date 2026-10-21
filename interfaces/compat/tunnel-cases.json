@@ -8,7 +8,8 @@
     "proxy_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
     "working_directory": "/usr/share/suifleet-tunnel/empty",
     "destinations": {
-      "SSH": "127.0.0.1:22"
+      "SSH": "127.0.0.1:22",
+      "HTTP": "127.0.0.1:8080"
     },
     "max_concurrent_tunnels": 1,
     "tunnel_timeout_seconds": 60,

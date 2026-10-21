@@ -217,6 +217,25 @@ def inside():
                              ca_file=str(pki / "ca.pem"), certificate_file=str(pki / "client.pem"), private_key_file=str(key), credential_check_seconds=5)
     path = directory / "config.json"
     path.write_text(json.dumps(config))
+    def reject_config(label, patch=None, mutate=None, undo=None):
+        path.write_text(json.dumps({**config, **(patch or {})}))
+        if mutate:
+            mutate()
+        try:
+            result = subprocess.run(["setpriv", f"--reuid={UID}", f"--regid={UID}", "--clear-groups",
+                                     str(binary), "--secure-tunneling", str(path)], capture_output=True, timeout=5)
+            assert result.returncode != 0, label
+        finally:
+            if undo:
+                undo()
+            path.write_text(json.dumps(config))
+    reject_config("disabled", {"enabled": False})
+    reject_config("digest", {"proxy_sha256": "00" * 32})
+    reject_config("remote destination", {"destinations": {"SSH": "192.0.2.1:22"}})
+    reject_config("writable config", mutate=lambda: path.chmod(0o666), undo=lambda: path.chmod(0o644))
+    reject_config("nonempty working directory", mutate=lambda: (empty / "config").write_text("untrusted"), undo=lambda: (empty / "config").unlink())
+    assert subprocess.run([str(binary), "--secure-tunneling", str(path)], capture_output=True, timeout=5).returncode != 0
+    check("opt-in/digest/local-target/trusted-path/empty-directory/root-user preflight negatives")
     broker = AwsIot(str(pki / "ca.pem"), str(pki / "server.pem"), str(pki / "server.key"))
     broker.register("client", str(pki / "client.pem"), "thing1")
     broker.policies["thing1"] = {"subscribe": [TOPIC], "publish": []}
@@ -298,7 +317,7 @@ def inside():
     time.sleep(.3)
     c = client(notify("adapter-crash"))
     generation = len([e for e in broker.events if e["event"] == "connected"])
-    sh("systemctl", "kill", "--kill-whom=main", "--signal=KILL", UNIT)
+    sh("systemctl", "kill", "--kill-who=main", "--signal=KILL", UNIT)
     closed(c)
     wait_for(lambda: not proxy_pids(), "systemd crash descendant cleanup")
     wait_for(lambda: sh("systemctl", "is-active", UNIT, check=False) == "active", "service crash restart")
@@ -313,7 +332,9 @@ def inside():
     assert len(connections) == 1
     check("adapter SIGKILL cleans descendants; failed local destination never falls back or restarts CAT")
     tunnel.bad_certificate = True
+    started = sh("journalctl", "-u", UNIT, "--no-pager").count("Tunnel destination proxy started")
     notify("untrusted-tunnel")
+    wait_for(lambda: sh("journalctl", "-u", UNIT, "--no-pager").count("Tunnel destination proxy started") > started, "untrusted endpoint proxy launched")
     wait_for(lambda: not proxy_pids(), "untrusted endpoint proxy exit")
     time.sleep(.5)
     assert len(tunnel.clients) == count + 1
@@ -328,6 +349,7 @@ def inside():
     logs = sh("journalctl", "-u", UNIT, "--no-pager")
     assert all(token not in logs for token in tokens)
     assert not broker.published and not tunnel.errors, tunnel.errors
+    assert all(not e["session_present"] for e in broker.events if e["event"] == "connected")
     assert not list(Path("/var/lib").glob("suifleet-tunnel*"))
     check("no CAT in journal, durable spool or application MQTT publications")
     print("EVIDENCE " + json.dumps({"checks": checks, "proxy_sha256": config["proxy_sha256"],
@@ -339,6 +361,7 @@ def host(args):
     # Separate tag/name and private mounts: no developer container or shared ports.
     image = "suifleet-tunnel-systemd:sf063"
     dockerfile = """FROM suifleet-tunnel-package:8a71618acf53
+USER 0:0
 RUN apt-get update && apt-get install -y --no-install-recommends systemd systemd-sysv python3 procps util-linux && rm -rf /var/lib/apt/lists/* && systemctl mask systemd-logind.service getty.target console-getty.service systemd-udevd.service
 STOPSIGNAL SIGRTMIN+3
 CMD ["/sbin/init"]

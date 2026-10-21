@@ -111,3 +111,5 @@ no existing approval is relabeled. Install the same trusted policy in the privat
 project configuration without replacing worker limits, wallets or other projects.
 Keep genuine blockers visible locally and continue other eligible work rather than
 stopping all dispatch or inventing successful evidence.
+
+SF-063 secure tunneling retains actual proxy/process, source authentication, CAT isolation, ACL/limit/failure and systemd cleanup tests as implementation gates. Final AWS service/IAM/operator/account and physical target acceptance is deferred and unrun in [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32) and [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159); the offline receipt is [sf063-tunneling.json](validation/sf063-tunneling.json). This grants no AWS account mutation or production credential provisioning.
