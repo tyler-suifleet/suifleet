@@ -30,6 +30,14 @@
     {
       "command": "PYTHONPATH=.ci-cache/aws-python PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_sitewise_export.py -v",
       "result": "PASS; 8 tests, including large uint64 with floating scale rejected before conversion"
+    },
+    {
+      "command": "make test-sitewise SUIFLEET_DEV_IMAGE=suifleet-dev:sf035",
+      "result": "PASS feedback repair: 9 tests in 8.481s and 9 actual-daemon PASS checks; empty/control/1024-character strings, double \u00b11e10, int32/fractional destinations, untyped OPC UA BAD/UNCERTAIN nulls, DateTime nanosecond text, no-send/no-ack negatives; separate publisher UID with producer-ack/publisher-append denied"
+    },
+    {
+      "command": "PYTHONPATH=.ci-cache/aws-python PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_firehose_export.py -v; PYTHONDONTWRITEBYTECODE=1 python3 scripts/greengrass_compat.py; git diff --check",
+      "result": "PASS feedback repair: 9 Firehose tests; 524 specification-only reference checks; whitespace check"
     }
   ],
   "resolved_test_setup_failures": [
@@ -46,10 +54,11 @@
     "No Sui contracts changed; no machine testnet, AWS, production or hardware mutations."
   ],
   "sha256": {
-    "scripts/sitewise_export.py": "0b2ad0cd00981d198a01cf48a5cfaf48561c629515cd21af9ccfe041818a19fd",
-    "scripts/tests/test_sitewise_export.py": "06ef71f1e71b05a158b273158c3780f8573dea5be4818b47c1cd1a915f9c2d52",
-    "scripts/test_streams.py": "51cb9be10a8a293b419cc9d0743ffb080e6481ba9f02f81505db6b2693ef8463",
-    "interfaces/compat/sitewise-v1.json": "5c75491bd9f180e0874baaa4d2b34619e6a4ca8c55ae5803220d5c3cb108fa4f",
-    "docs/SITEWISE.md": "444ddc63221ba8af9a1c0ae2ed574f0c0b8ea2b4351977301e8541e3b2fe5d1b"
-  }
+    "scripts/sitewise_export.py": "38c4b916af18e28a1c1078e74616eff4f277876d36c5db1a1f68fb31b9c7ec21",
+    "scripts/tests/test_sitewise_export.py": "6bfe6ff1d9c45275e86a390e21ff3e08e333f04a0af5b60b68709d402abf7154",
+    "scripts/test_streams.py": "7346b8e419e3f3f888644c3c507591ba57d697cb39c9bf78592f64c9baceda98",
+    "interfaces/compat/sitewise-v1.json": "6a8be166e4549f2cdf27f1c796984353b3a9f95b65006fd1a914017f10669719",
+    "docs/SITEWISE.md": "4883efeebd6508b398fd342a7cbace654376faee315b044f24d2d5c798404293"
+  },
+  "feedback_revision": "PR #184 review of 9b338b0abf1c: empty/control strings, API double bounds and declared destination/null types repaired; independent re-review pending"
 }

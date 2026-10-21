@@ -1,4 +1,4 @@
-"""Actual signed SDK HTTP requests to a local Firehose/credential emulator."""
+"""Actual signed SDK HTTP requests to a local SiteWise/credential emulator."""
 import base64
 import hashlib
 import hmac
@@ -74,6 +74,21 @@ def emulator():
                 assert tqv['quality'] in ('GOOD', 'BAD', 'UNCERTAIN')
                 assert 0 <= tqv['timestamp']['offsetInNanos'] < 1000000000
                 assert len(tqv['value']) == 1
+                variant = tqv['value']
+                if 'stringValue' in variant:
+                    value = variant['stringValue']
+                    assert len(value) <= 1024
+                    assert all(ord(c) >= 32 and ord(c) != 127 for c in value)
+                elif 'doubleValue' in variant:
+                    assert -10**10 <= variant['doubleValue'] <= 10**10
+                elif 'integerValue' in variant:
+                    assert type(variant['integerValue']) is int
+                    assert -(2**31) <= variant['integerValue'] <= 2**31-1
+                elif 'nullValue' in variant:
+                    assert variant['nullValue']['valueType'] in ('D', 'I', 'B', 'S')
+                    assert tqv['quality'] in ('BAD', 'UNCERTAIN')
+                else:
+                    assert type(variant['booleanValue']) is bool
             state['requests'].append(entries)
             if state['responses']:
                 code, value = state['responses'].pop(0)
@@ -115,7 +130,7 @@ class Source:
 def configuration(directory):
     return dict(version=1, socket='/run/suifleet/ipc.sock', component='exporter', stream='telemetry',
                 region='us-east-1', state_dir=str(directory / 'export'),
-                mappings=[dict(source='plc', point='temperature', propertyAlias='/plant/temperature', scale=2, offset=1)])
+                mappings=[dict(source='plc', point='temperature', propertyAlias='/plant/temperature', valueType='D', scale=2, offset=1)])
 
 
 def client(cfg, url):
@@ -190,13 +205,60 @@ class SiteWiseTests(unittest.TestCase):
                                          ('float', None, {'nullValue': {'valueType': 'D'}})]:
                 m = e.cfg['mappings'][0]
                 m.pop('scale', None); m.pop('offset', None)
+                m['valueType'] = 'B' if typ in ('bool', 'boolean') else ('S' if typ == 'string' else 'D')
                 record = sample(type=typ, value=value, quality='BAD')
                 self.assertEqual(e.entries(payload(record))[0]['propertyValues'][0]['value'], expected)
+            m['valueType'] = 'D'
             m.pop('propertyAlias')
             m.update(assetId='12345678-1234-1234-1234-123456789abc', propertyId='12345678-1234-1234-1234-123456789abd')
             entry = e.entries(payload())[0]
             self.assertIn('assetId', entry)
             self.assertNotIn('propertyAlias', entry)
+
+    def test_destination_types_and_model_limits(self):
+        with emulator() as (state, url):
+            e = self.exporter(Source([]), url)
+            mapping = e.cfg['mappings'][0]
+            mapping.pop('scale'); mapping.pop('offset')
+            cases = [('S', 'string', '', {'stringValue': ''}),
+                     ('S', 'string', 'x' * 1024, {'stringValue': 'x' * 1024}),
+                     ('S', 'datetime', 1792454400000000000, {'stringValue': '1792454400000000000'}),
+                     ('D', 'double', 10**10, {'doubleValue': 1e10}),
+                     ('D', 'double', -10**10, {'doubleValue': -1e10}),
+                     ('I', 'int32', 2**31-1, {'integerValue': 2**31-1}),
+                     ('I', 'int32', -(2**31), {'integerValue': -(2**31)})]
+            for destination, typ, value, expected in cases:
+                mapping['valueType'] = destination
+                e.ipc = Source([payload(sample(type=typ, value=value))])
+                e.checkpoint = -1
+                self.assertEqual(e.step(), 'exported')
+                self.assertEqual(state['requests'][-1][0]['propertyValues'][0]['value'], expected)
+            for destination in ('D', 'I', 'B', 'S'):
+                mapping['valueType'] = destination
+                for quality in ('BAD', 'UNCERTAIN'):
+                    # Real collector disconnect/missing-value shape for an untyped OPC UA point.
+                    e.ipc = Source([payload(sample(type=None, value=None, quality=quality))])
+                    e.checkpoint = -1
+                    self.assertEqual(e.step(), 'exported')
+                    self.assertEqual(state['requests'][-1][0]['propertyValues'][0]['value'],
+                                     {'nullValue': {'valueType': destination}})
+            for destination, typ, value in [('S', 'string', 'line1\nline2'),
+                    ('S', 'string', '\x00'), ('S', 'string', '\x7f'), ('S', 'string', 'x' * 1025),
+                    ('D', 'double', 2e10), ('D', 'double', -1e10-1),
+                    ('I', 'double', 1.5), ('I', 'int64', 2**31), ('I', 'int64', -2**31-1),
+                    ('B', 'string', 'true'), ('S', 'double', 1)]:
+                mapping['valueType'] = destination
+                e.ipc = Source([payload(sample(type=typ, value=value))])
+                e.checkpoint = -1
+                count = len(state['requests'])
+                with self.assertRaises(fe.ExportError):
+                    e.step()
+                self.assertEqual(len(state['requests']), count)
+                self.assertEqual(e.checkpoint, -1)
+                self.assertEqual(e.ipc.exported, -1)
+            mapping.update(valueType='D', scale=2)
+            with self.assertRaisesRegex(fe.ExportError, 'invalid-numeric-value'):
+                e.entries(payload(sample(value=6e9)))
 
     def test_partial_rejection_reopen_retains_whole_message(self):
         with emulator() as (state, url):
@@ -293,7 +355,7 @@ class SiteWiseTests(unittest.TestCase):
         for field, value in [('version', True), ('version', 2), ('mappings', []), ('socket', 'relative')]:
             with self.assertRaises(ValueError):
                 fe.config(dict(self.cfg, **{field: value}))
-        for change in [dict(propertyAlias='bad\x00'), dict(scale=True), dict(assetId='bad'), dict(offset=float('inf'))]:
+        for change in [dict(propertyAlias='bad\x00'), dict(scale=True), dict(assetId='bad'), dict(offset=float('inf')), dict(valueType=None), dict(valueType='X'), dict(valueType='S')]:
             bad = copy.deepcopy(self.cfg)
             bad['mappings'][0].update(change)
             with self.assertRaises(ValueError):

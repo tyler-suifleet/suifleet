@@ -43,10 +43,14 @@ def config(value):
         raise ValueError('invalid mappings')
     seen = set()
     for m in value['mappings']:
-        if not isinstance(m, dict) or set(m) - {'source', 'point', 'propertyAlias', 'assetId', 'propertyId', 'scale', 'offset'}:
+        if not isinstance(m, dict) or set(m) - {'source', 'point', 'propertyAlias', 'assetId', 'propertyId', 'valueType', 'scale', 'offset'}:
             raise ValueError('invalid mapping')
         if any(not isinstance(m.get(k), str) or not m[k] for k in ('source', 'point')):
             raise ValueError('invalid source/point')
+        if m.get('valueType') not in ('D', 'I', 'B', 'S'):
+            raise ValueError('invalid mapping valueType')
+        if ('scale' in m or 'offset' in m) and m['valueType'] not in ('D', 'I'):
+            raise ValueError('non-numeric transformation')
         key = (m['source'], m['point'])
         if key in seen:
             raise ValueError('duplicate mapping')
@@ -154,14 +158,23 @@ class Exporter:
             # Preserve source timestamps, including expired data: let service refusal
             # retain the record; never retimestamp an outage backlog to make it pass.
             typ = record.get('type')
-            if value is None and quality in ('BAD', 'UNCERTAIN') and typ in NUMERIC | {'bool', 'boolean', 'string'}:
-                code = 'D' if typ in NUMERIC else ('S' if typ == 'string' else 'B')
-                variant = {'nullValue': {'valueType': code}}
-            elif typ in ('bool', 'boolean') and type(value) is bool:
+            destination = mapping['valueType']
+            if value is None and quality in ('BAD', 'UNCERTAIN'):
+                # OPC UA disconnects can lack a source type; the operator's
+                # destination declaration remains authoritative for nulls.
+                variant = {'nullValue': {'valueType': destination}}
+            elif destination == 'B' and typ in ('bool', 'boolean') and type(value) is bool:
                 variant = {'booleanValue': value}
-            elif typ == 'string' and isinstance(value, str) and 1 <= len(value) <= 1024:
+            elif destination == 'S' and (
+                    (typ == 'string' and isinstance(value, str))
+                    or (typ == 'datetime' and type(value) is int)):
+                # SF-070 emits datetime as integer Unix nanoseconds. Preserve
+                # them exactly as decimal text instead of rounding to double.
+                value = str(value)
+                if len(value) > 1024 or any(ord(c) < 32 or ord(c) == 127 for c in value):
+                    raise ExportError('invalid-string-value')
                 variant = {'stringValue': value}
-            elif typ in NUMERIC and finite(value):
+            elif destination in ('D', 'I') and typ in NUMERIC and finite(value):
                 if type(value) is int and abs(value) > 2**53:
                     raise ExportError('invalid-numeric-value')
                 if typ in INTEGER_BITS:
@@ -171,15 +184,20 @@ class Exporter:
                         raise ExportError('invalid-integer-value')
                 try:
                     result = value * mapping.get('scale', 1) + mapping.get('offset', 0)
-                    if not finite(result) or (type(result) is int and abs(result) > 2**53):
+                    if not finite(result):
                         raise ValueError()
-                    variant = {'doubleValue': float(result)}
+                    if destination == 'I':
+                        if not -(2**31) <= result <= 2**31-1 or int(result) != result:
+                            raise ValueError()
+                        variant = {'integerValue': int(result)}
+                    else:
+                        if not -10**10 <= result <= 10**10:
+                            raise ValueError()
+                        variant = {'doubleValue': float(result)}
                 except (OverflowError, ValueError):
                     raise ExportError('invalid-numeric-value') from None
             else:
                 raise ExportError('invalid-value-type')
-            if ('scale' in mapping or 'offset' in mapping) and typ not in NUMERIC:
-                raise ExportError('non-numeric-transformation')
             entry = {k: mapping[k] for k in ('propertyAlias', 'assetId', 'propertyId') if k in mapping}
             entry.update(entryId=str(len(entries)), propertyValues=[dict(value=variant, quality=quality,
                          timestamp=dict(timeInSeconds=ns // 1000000000, offsetInNanos=ns % 1000000000))])

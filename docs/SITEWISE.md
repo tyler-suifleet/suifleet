@@ -62,7 +62,7 @@ Example immutable configuration:
   "region": "us-east-1",
   "state_dir": "/var/lib/suifleet-sitewise/industrial",
   "mappings": [
-    {"source": "plc1", "point": "temperature", "propertyAlias": "/factory/temperature", "scale": 0.1, "offset": 0}
+    {"source": "plc1", "point": "temperature", "valueType": "D", "propertyAlias": "/factory/temperature", "scale": 0.1, "offset": 0}
   ]
 }
 ```
@@ -99,17 +99,29 @@ excluded from publishing; a status-only message is checkpointed without a reques
 A `gap` or unknown record blocks the message for operator reconciliation; gaps
 are not measurements and are never disguised as successful SiteWise ingestion.
 
-Numeric collector types become `doubleValue`, applying `value * scale + offset`.
-Booleans (Modbus `bool`, OPC UA `boolean`) become `booleanValue`; strings of 1–1024
-characters become `stringValue`. Non-numeric scaling is rejected. Non-finite
-numbers and integer inputs/results outside ±2^53 are refused rather than
-silently rounding large integers. Numeric transformations otherwise use Python
-IEEE-754 arithmetic; this is configured affine processing, not arbitrary expressions,
-aggregates, asset-model evaluation or windowed metrics.
+Every mapping requires `valueType`: `D` (SiteWise DOUBLE), `I` (INTEGER),
+`B` (BOOLEAN) or `S` (STRING), matching the destination property. Numeric collector
+types support D/I and apply `value * scale + offset`. D results must be within
+±10^10, the pinned API model's doubleValue range. I results must be integral and
+within signed int32; fractional values are refused, never truncated. Integer
+source values outside ±2^53 are refused before affine conversion to avoid silent
+rounding. Non-finite inputs/results are refused. Numeric transformations use
+Python IEEE-754 arithmetic; this is configured affine processing, not arbitrary
+expressions, aggregates, asset-model evaluation or windowed metrics.
+
+B accepts Modbus `bool` and OPC UA `boolean`. S accepts collector `string` and
+OPC UA `datetime` (the collector's integer Unix nanoseconds become exact decimal
+text, without date arithmetic or floating-point conversion).
+Strings may be empty, have at most 1024 characters, and must contain no U+0000–001F
+or U+007F controls. No implicit string/numeric/boolean conversion is performed;
+non-null source/destination mismatches are refused. Scale/offset are only valid
+for D/I mappings.
 
 GOOD/BAD/UNCERTAIN quality is preserved. A null BAD/UNCERTAIN sample uses SiteWise
-`nullValue` with D/B/S type inferred from its declared collector type. GOOD nulls,
-untyped nulls and unsupported types are refused. Original integer `timestamp_ns`
+`nullValue` with the mapping's declared D/I/B/S type, including untyped OPC UA
+points during disconnect or missing-value events. GOOD nulls are refused. An
+untyped point's subsequent non-null values must have a supported collector type
+matching the mapping; unsupported non-null types block the message. Original integer `timestamp_ns`
 is split into seconds/nanoseconds without floating-point conversion. API timestamp
 bounds are checked; timestamps are never replaced with ingestion time. SiteWise's
 [-7 days, +10 minutes] window can permanently reject an outage backlog; those
