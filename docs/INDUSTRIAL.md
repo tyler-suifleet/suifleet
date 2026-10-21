@@ -368,3 +368,5 @@ f80d0d7132fd035104c3f21b01026470e3310ca3d8d493d9a9737d0d32ad2eb1  Modbus_Applica
   chains and revocation, browse and node filters, events and alarms, deadbands;
 - Modbus writes and MODBUS/TCP Security role authorization;
 - throughput and performance limits on target hardware.
+
+SF-071 adds the native [SiteWise TQV processing/publisher](SITEWISE.md) over SF-070 records and SF-034 lossless external streams with SF-057 credentials. Its local request/checkpoint tests establish the documented native subset; live AWS and physical acceptance remain unrun. Historical reference fixtures above remain specification-only.

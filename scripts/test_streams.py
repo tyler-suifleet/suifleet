@@ -25,7 +25,7 @@ import test_ota
 from test_ota import CAP, DEVICE, PACKAGE, REGISTRY, TYPE_ORIGINS, UPGRADE_CAP, Simulator, start_grpc, wait_for
 
 ROOT = Path(__file__).resolve().parents[1]
-PRODUCER, OTHER = 62001, 62002
+PRODUCER, OTHER, SITEWISE = 62001, 62002, 62003
 
 # --- RFC 8032 Ed25519 verification (reference arithmetic; test use only) ------
 P = 2**255 - 19
@@ -152,7 +152,7 @@ class Receiver:
             return out
 
 
-def run(evidence=None, firehose=False):
+def run(evidence=None, firehose=False, sitewise=False):
     assert os.geteuid() == 0, "run in a disposable root container (make test-streams)"
     passed = []
     import builtins
@@ -220,7 +220,7 @@ def run(evidence=None, firehose=False):
             f'[runtime]\nstate_dir = "{state}"\npoll_seconds = 1\n'
             f'[ipc]\nsocket = "{socket_path}"\nadministrators = [0]\n'
             f'[ipc.components.producer]\nuid = {PRODUCER}\n'
-            'operations = ["stream_create", "stream_delete", "stream_append", "stream_read", "stream_describe", "stream_list"]\n'
+            'operations = ["stream_create", "stream_delete", "stream_append", "stream_read", "stream_describe", "stream_list", "stream_export_ack"]\n'
             'streams = ["telemetry", "ring", "local-*"]\n'
             f'[ipc.components.other]\nuid = {OTHER}\noperations = ["stream_append", "stream_read"]\nstreams = ["other-*"]\n'
             '[streams]\nmax_streams = 4\nmax_total_bytes = 262144\n'
@@ -242,7 +242,7 @@ def run(evidence=None, firehose=False):
                 socket_path.unlink()
 
         def ipc(uid, operation, topic="", payload=None, component=None):
-            component = component or {PRODUCER: "producer", OTHER: "other", 0: ""}[uid]
+            component = component or {PRODUCER: "producer", OTHER: "other", SITEWISE: "sitewise", 0: ""}[uid]
             code = ("import os,sys,json; uid=int(sys.argv[1]); "
                     "uid and (os.setgid(uid), os.setuid(uid)); "
                     "sys.path.insert(0, sys.argv[7]); from suifleet_ipc import Client, IpcError\n"
@@ -298,6 +298,50 @@ def run(evidence=None, firehose=False):
                 exercise_native(NativeSource(), root, restart_firehose)
                 assert ipc(PRODUCER, "stream_delete", "local-firehose")["ok"]
                 print("PASS: Firehose actual daemon durable stream / peer-UID IPC to signed SDK HTTP request; exporter checkpoint survives reopen and daemon SIGKILL reservation gap")
+            if sitewise:
+                sys.path.insert(0, str(ROOT / 'scripts/tests'))
+                from test_sitewise_export import exercise_native, payload, sample
+                stop(kill=False)
+                old_config = config.read_text()
+                config.write_text(old_config.replace(', "stream_export_ack"', '') +
+                    f'\n[ipc.components.sitewise]\nuid = {SITEWISE}\noperations = ["stream_describe", "stream_read", "stream_export_ack"]\nstreams = ["local-sitewise"]\n' + '\n[[streams.definitions]]\nname = "local-sitewise"\nmax_size = 4096\nstrategy_on_full = "RejectNewData"\nexternal_export = true\ndiscard_exported = true\n')
+                start()
+                for n in range(3):
+                    assert ipc(PRODUCER, "stream_append", "local-sitewise", payload(sample(value=n)))["ok"]
+
+                assert not ipc(PRODUCER, "stream_export_ack", "local-sitewise", {"sequence": 0})["ok"]
+                assert not ipc(SITEWISE, "stream_append", "local-sitewise", payload())["ok"]
+
+                class NativeSource:
+                    def stream_describe(self, name):
+                        result = ipc(SITEWISE, "stream_describe", name)
+                        assert result["ok"], result
+                        return result["data"]
+
+                    def stream_read(self, name, start):
+                        from suifleet_ipc import IpcError
+                        result = ipc(SITEWISE, "stream_read", name, {"start": start})
+                        if not result["ok"]:
+                            raise IpcError(result["error"])
+                        return result["data"]["messages"]
+
+                    def stream_export_ack(self, name, sequence):
+                        result = ipc(SITEWISE, "stream_export_ack", name, {"sequence": sequence})
+                        assert result["ok"], result
+
+                def restart_sitewise():
+                    stop(kill=True)
+                    start()
+                    result = ipc(PRODUCER, "stream_append", "local-sitewise", payload(sample(value=3)))
+                    assert result["ok"] and result["data"]["sequence"] >= 1024, result
+
+                exercise_native(NativeSource(), root, restart_sitewise)
+                stop(kill=False)
+                config.write_text(old_config)
+                start()
+                # Restored streams remain operator-owned; explicit administrator cleanup.
+                assert ipc(0, "stream_delete", "local-sitewise")["ok"]
+                print("PASS: SiteWise actual daemon durable stream / peer-UID IPC to signed SDK HTTP request; exporter checkpoint survives reopen and daemon SIGKILL reservation gap")
 
 
             # Offline buffering: the destination is down; messages wait on disk.
@@ -415,4 +459,4 @@ def run(evidence=None, firehose=False):
 
 
 if __name__ == "__main__":
-    run(None if "--firehose" in sys.argv else (sys.argv[1] if len(sys.argv) > 1 else None), firehose="--firehose" in sys.argv)
+    run(None if any(flag in sys.argv for flag in ("--firehose", "--sitewise")) else (sys.argv[1] if len(sys.argv) > 1 else None), firehose="--firehose" in sys.argv, sitewise="--sitewise" in sys.argv)
