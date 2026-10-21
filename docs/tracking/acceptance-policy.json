@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "authorization": "User explicitly permits reviewed implementation merges before Pi/Sui-network integration; external acceptance remains separately tracked. No code/test/CI/review gate is waived. The direct SF043 task also authorizes one-time reviewed main-only controller bootstrap and its narrowly necessary SF045 repair before the first full automatic Actions execution; that execution remains mandatory to complete the overall request. Latest user instruction: physical Pi/target work must not block software delivery; target issues may be resolved later. Apply physical-only deferral to current/future software tickets. SF-031 and unfinished SF-066 stay open/on hold; normal automatic testnet, source/security and local regression gates remain required. Standing user instruction (2026-10-20): continue eligible development, review and repair without repeated prompts. Physical hardware and actual mainnet testing may be deferred until all software development is complete; preserve their acceptance tickets and all software/security/testnet gates.",
+  "authorization": "User explicitly permits reviewed implementation merges before Pi/Sui-network integration; external acceptance remains separately tracked. No code/test/CI/review gate is waived. The direct SF043 task also authorizes one-time reviewed main-only controller bootstrap and its narrowly necessary SF045 repair before the first full automatic Actions execution; that execution remains mandatory to complete the overall request. Latest user instruction: physical Pi/target work must not block software delivery; target issues may be resolved later. Apply physical-only deferral to current/future software tickets. SF-031 and unfinished SF-066 stay open/on hold; normal automatic testnet, source/security and local regression gates remain required. Standing user instruction (2026-10-20): continue eligible development, review and repair without repeated prompts. Physical hardware and actual mainnet testing may be deferred until all software development is complete; preserve their acceptance tickets and all software/security/testnet gates. User instruction 2026-10-21: finish software implementation before final external acceptance. Production provider/account/credential validation and manual real-wallet acceptance are deferred to the final test phase, alongside physical/mainnet acceptance. This authorizes an implementation/acceptance split, not production credentials, mainnet writes, physical programming or bypassing software/security checks.",
   "tickets": {
     "SF-006": {
       "deferred_checks": [
@@ -318,14 +318,18 @@
     },
     "SF-022": {
       "deferred_checks": [
-        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge.",
+        "Acceptance criterion 7 production key-provider selection/authentication/fees/availability/recovery validation with production accounts. Keep provider configuration parsing, server identity verification, threshold/encryption integrity, policy authorization and failure paths as implementation gates."
       ],
       "acceptance_issues": [
-        "https://github.com/tyler-suifleet/suifleet/issues/32"
+        "https://github.com/tyler-suifleet/suifleet/issues/32",
+        "https://github.com/tyler-suifleet/suifleet/issues/159"
       ],
       "retained_gates": [
-        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
-      ]
+        "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver.",
+        "No actionable software/security findings; meaningful local tests, applicable normal public-testnet CI and fresh independent exact-head/base/policy review."
+      ],
+      "authorization": "User instruction 2026-10-21: finish software implementation before final external acceptance. Production provider/account/credential validation and manual real-wallet acceptance are deferred to the final test phase, alongside physical/mainnet acceptance. This authorizes an implementation/acceptance split, not production credentials, mainnet writes, physical programming or bypassing software/security checks."
     },
     "SF-027": {
       "acceptance_issues": [
@@ -557,10 +561,23 @@
       "retained_gates": [
         "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
       ]
+    },
+    "SF-088": {
+      "authorization": "User instruction 2026-10-21: finish software implementation before final external acceptance. Production provider/account/credential validation and manual real-wallet acceptance are deferred to the final test phase, alongside physical/mainnet acceptance. This authorizes an implementation/acceptance split, not production credentials, mainnet writes, physical programming or bypassing software/security checks.",
+      "deferred_checks": [
+        "Real Google/Enoki/OAuth/prover, Slush web and extension-wallet acceptance requiring provisioned accounts/configuration and human wallet interaction. Keep the implemented address/session/expiry/network/error and authority checks, local browser fixtures and software tests."
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32",
+        "https://github.com/tyler-suifleet/suifleet/issues/159"
+      ],
+      "retained_gates": [
+        "No actionable software/security findings; meaningful local tests, applicable normal public-testnet CI and fresh independent exact-head/base/policy review."
+      ]
     }
   },
   "development_defaults": {
-    "authorization": "User explicitly authorizes continuous software development and reviewed implementation merges before physical-hardware and actual-mainnet acceptance, which wait until development is complete. This is not mainnet or physical programming authorization.",
+    "authorization": "User explicitly authorizes continuous software development and reviewed implementation merges before physical-hardware and actual-mainnet acceptance, which wait until development is complete. This is not mainnet or physical programming authorization. User instruction 2026-10-21: finish software implementation before final external acceptance. Production provider/account/credential validation and manual real-wallet acceptance are deferred to the final test phase, alongside physical/mainnet acceptance. This authorizes an implementation/acceptance split, not production credentials, mainnet writes, physical programming or bypassing software/security checks.",
     "acceptance_only_tickets": [
       "SF-031",
       "SF-042",
@@ -569,7 +586,8 @@
     ],
     "deferred_checks": [
       "Physical device flashing, boot, hardware signer, reboot, power-loss and target-specific acceptance; retain SF-031 and applicable target-image/release acceptance evidence.",
-      "Actual mainnet transactions, publication, upgrade and mainnet end-to-end acceptance; retain SF-087 and obtain explicit authorization before any future mainnet writes."
+      "Actual mainnet transactions, publication, upgrade and mainnet end-to-end acceptance; retain SF-087 and obtain explicit authorization before any future mainnet writes.",
+      "Final external acceptance requiring production Seal/key-provider accounts, actual IdP/prover/Slush/extension-wallet sessions, paid provider services or manually provisioned production credentials; track in SF-031/#32 and SF-087/#159. Retain implemented authentication/security behavior and automated fixtures/testnet evidence."
     ],
     "acceptance_issues": [
       "https://github.com/tyler-suifleet/suifleet/issues/32",
@@ -579,7 +597,7 @@
       "All actionable source/security findings and meaningful local, simulator, isolated-chain compatibility and regression checks.",
       "Applicable normal automatic public-testnet validation, spending controls and exact-head/current-base CI.",
       "Fresh independent review and genuine software/API dependencies; no guessed unmerged interfaces or relabeled approvals.",
-      "Real wallet/provider/credential acceptance is deferred only when separately authorized; report genuine missing inputs and keep other eligible work progressing."
+      "Final provider/real-wallet acceptance remains explicitly unrun until the final test phase; source authentication, credential isolation, signed-session validation, software tests and applicable automatic testnet remain implementation gates."
     ]
   }
 }
