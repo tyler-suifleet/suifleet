@@ -263,7 +263,7 @@
     "environment": "Network-none containers: Eclipse Mosquitto with mutual TLS, ACL and CRL, and an AWS-shaped IoT Core endpoint with the Device Shadow service",
     "deferred": ["Real AWS IoT Core endpoint, account policy and Device Shadow service; needs separate user authorization (unrun)"]
    }},
-  {"id": "device-defender-metrics", "specification": "incomplete", "implementation_ticket": "SF-062", "runtime_execution": "pending", "replaces": {"aws.greengrass.DeviceDefender": "4.0.0"},
+  {"id": "device-defender-metrics", "specification": "complete", "implementation_ticket": "SF-062", "runtime_execution": "passed", "runtime_evidence": "docs/validation/sf062-device-defender.json", "replaces": {"aws.greengrass.DeviceDefender": "4.0.0"},
    "summary": "Publishes Device Defender device-side metrics to $aws/things/{thing}/defender/metrics/json at the AWS minimum 300-second interval through aws-iot-core-connection. The AWS server-side Detect service is not replicated locally.",
    "platforms": ["linux-x86_64", "linux-aarch64", "linux-arm"],
    "aws_services": ["AWS IoT Device Defender Detect", "AWS IoT Core"],
@@ -271,12 +271,11 @@
    "licensing": "Clean-room implementation; the AWS component is under the Greengrass Core Software License Agreement.",
    "depends_on": ["SF-019", "SF-061"],
    "acceptance": {
-    "reference_suites": [],
+    "reference_suites": ["device-defender-cases.json"],
     "runtime_tests": ["Published metric reports validate against the AWS Device Defender device-side metrics JSON schema; sample interval and retry count limits are enforced", "Accepted and rejected responses are handled; reports are buffered and retried while disconnected"],
-    "environment": "Network-none container with a local TLS MQTT broker",
+    "environment": "Network-none container with the real daemon/procfs/shared TLS MQTT adapter and an AWS-shaped IoT endpoint",
     "deferred": ["Real AWS IoT Device Defender account; needs separate user authorization (unrun)"]
-   },
-   "specification_gap": "SF-062 must add an executable schema/topic reference suite pinned to the Device Defender device-side metrics schema."},
+   }},
   {"id": "secure-tunneling", "specification": "incomplete", "implementation_ticket": "SF-063", "runtime_execution": "pending", "replaces": {"aws.greengrass.SecureTunneling": "2.0.1"},
    "summary": "An explicitly enabled, supervised component that starts the Apache-2.0 AWS IoT secure tunneling local proxy in destination mode on $aws/things/+/tunnels/notify, only for allow-listed local services. It coexists with platform-owned SSH daemon, firewall and service configuration, which it neither manages nor replaces; it runs no arbitrary remote commands and triggers no platform reboot.",
    "platforms": ["linux-x86_64", "linux-aarch64", "linux-arm"],

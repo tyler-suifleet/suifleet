@@ -118,7 +118,8 @@ pub fn overlap(a: &str, b: &str) -> bool {
 /// Whether `filter` could match a topic of some thing's AWS shadow service.
 /// Filters starting with a wildcard never match `$` topics (MQTT §4.7.2).
 pub fn reaches_aws_shadows(filter: &str) -> bool {
-    filter.starts_with('$') && overlap(filter, "$aws/things/+/shadow/#")
+    filter.starts_with('$') && (overlap(filter, "$aws/things/+/shadow/#")
+        || overlap(filter, "$aws/things/+/defender/#"))
 }
 
 impl BridgeConfig {
@@ -148,7 +149,7 @@ impl BridgeConfig {
                 let produced = format!("{}{}", m.target_topic_prefix, m.topic);
                 let cloud_side = if m.source == Endpoint::IotCore { &m.topic } else { &produced };
                 anyhow::ensure!(!reaches_aws_shadows(cloud_side) && !reaches_aws_shadows(&produced),
-                    "IotCore mapping {:?} reaches AWS shadow topics, which belong to shadow synchronization ([shadows.aws_iot])", m.topic);
+                    "IotCore mapping {:?} reaches AWS shadow topics or Defender topics, which belong to shadow synchronization ([shadows.aws_iot])", m.topic);
                 anyhow::ensure!(iotcore::within_aws_limits(cloud_side), "IotCore mapping topic {cloud_side:?} exceeds AWS IoT Core topic limits (256 bytes, 7 slashes)");
             }
         }
@@ -1022,6 +1023,19 @@ mod tests {
         assert_eq!(stats.iot_core.unwrap().refused_subscriptions, ["denied/#"]);
         assert_eq!(stats.mappings.iter().map(|m| m.forwarded).collect::<Vec<_>>(), [2, 2, 1, 0, 0]);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn defender_topics_are_reserved_from_component_bridges() {
+        for (source, target, topic, prefix) in [
+            (Endpoint::Pubsub, Endpoint::IotCore, "$aws/things/dev1/defender/metrics/json", ""),
+            (Endpoint::IotCore, Endpoint::Pubsub, "$aws/things/+/defender/#", ""),
+            (Endpoint::IotCore, Endpoint::Pubsub, "$aws/#", ""),
+            (Endpoint::Pubsub, Endpoint::IotCore, "#", "$aws/things/dev1/defender/"),
+        ] {
+            let cfg = config(vec![mapping(topic, source, target, prefix)]);
+            assert!(cfg.validate(true).is_err(), "accepted Defender bridge {topic}");
+        }
     }
 
     fn aws_iot_cases() -> Value {

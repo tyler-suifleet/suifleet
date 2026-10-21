@@ -26,7 +26,7 @@ Codex published the scoped implementation tickets below. SF-038 links them; it d
 Three kinds of evidence stay separate:
 
 - **Reference models.** `make test-compat` checks the fixtures against small models. Agreement proves only that the fixtures are consistent.
-- **Adapter execution.** The credential adapter has a [local runtime receipt](validation/sf057-credentials.json) and [provisioning guide](AWS_CREDENTIALS.md); the [SF-058 stream exporter receipt](validation/sf058-stream-export.json) adds actual durable-store and AWS API emulator execution, and the [SF-060 CloudWatch Logs receipt](validation/sf060-cloudwatch-logs.json) adds adapter execution against a request-checking emulator. Other adapters retain `runtime_execution: pending`. Only an implementation ticket may run the same fixtures and runtime tests against the real adapter and record a `runtime_evidence` receipt. A linked ticket is not runtime evidence.
+- **Adapter execution.** The credential adapter has a [local runtime receipt](validation/sf057-credentials.json) and [provisioning guide](AWS_CREDENTIALS.md); the [SF-058 stream exporter receipt](validation/sf058-stream-export.json) adds actual durable-store and AWS API emulator execution, and the [SF-060 CloudWatch Logs receipt](validation/sf060-cloudwatch-logs.json) adds adapter execution against a request-checking emulator. The [SF-062 Device Defender receipt](validation/sf062-device-defender.json) adds real device-side sampling and shared TLS MQTT adapter execution ([configuration and limits](DEVICE_DEFENDER.md)). Other adapters retain `runtime_execution: pending`. Only an implementation ticket may run the same fixtures and runtime tests against the real adapter and record a `runtime_evidence` receipt. A linked ticket is not runtime evidence.
 - **Live AWS acceptance.** No AWS account, credential, purchase or live service mutation is authorized. Every live check stays pending until the user authorizes one. The Sui testnet grant does not cover AWS.
 
 The SF-037 recipe translator applies the dependency classification below. A `replace` dependency is dropped and reported; every other managed dependency is rejected with its classification.
@@ -136,7 +136,7 @@ AWS credentials are a separate trust domain. The `credential-provider` and `aws-
 | `cloudwatch-metrics-export` | SF-059 | complete | Cloudwatch 4.0.0 | CloudWatch | credential-provider; `cloudwatch:PutMetricData` | SF-019, SF-032, SF-057 |
 | `cloudwatch-logs-export` | SF-060 | complete | LogManager 2.3.14 upload | CloudWatch Logs | credential-provider; `logs:CreateLogGroup`, `logs:CreateLogStream`, `logs:PutLogEvents` | SF-020, SF-057 |
 | `aws-iot-core-connection` | SF-061 | complete | Bridge 2.3.3 IotCore routes, ShadowManager 2.3.15 sync | AWS IoT Core, Device Shadow | Separate AWS IoT thing certificate and policy | SF-021, SF-032, SF-033 |
-| `device-defender-metrics` | SF-062 | incomplete | DeviceDefender 4.0.0 | Device Defender (device-side metrics), IoT Core | `aws-iot-core-connection` | SF-019, SF-061 |
+| `device-defender-metrics` | SF-062 | complete | DeviceDefender 4.0.0 | Device Defender (device-side metrics), IoT Core | `aws-iot-core-connection` | SF-019, SF-061 |
 | `secure-tunneling` | SF-063 | incomplete | SecureTunneling 2.0.1 | IoT secure tunneling, IoT Core | `aws-iot-core-connection`; ephemeral per-tunnel token | SF-014, SF-025, SF-027, SF-061 |
 
 The `stream-export-aws` adapter leaves out three destinations:
@@ -145,7 +145,7 @@ The `stream-export-aws` adapter leaves out three destinations:
 - `IoTSiteWiseConfig`, which is SF-064 roadmap work;
 - `HTTPConfig`, because generic HTTP export is native SF-034 scope.
 
-An `incomplete` specification names its `specification_gap`. SF-062 and SF-063 must add executable schema/topic and notification/destination suites. SF-061 pinned Bridge 2.3.3 and ShadowManager 2.3.15 and added `aws-iot-cases.json` ([AWS_IOT.md](AWS_IOT.md)).
+An `incomplete` specification names its `specification_gap`. SF-062 added the executable `device-defender-cases.json` schema/topic/response suite ([DEVICE_DEFENDER.md](DEVICE_DEFENDER.md)); SF-063 must add its notification/destination suite. SF-061 pinned Bridge 2.3.3 and ShadowManager 2.3.15 and added `aws-iot-cases.json` ([AWS_IOT.md](AWS_IOT.md)).
 
 The `secure-tunneling` adapter is explicitly enabled and starts the local proxy only for allow-listed local services. SSH daemon, firewall and service configuration stay with platform scripts and administrators. The adapter neither manages nor replaces them, runs no arbitrary remote commands and never triggers a platform reboot.
 

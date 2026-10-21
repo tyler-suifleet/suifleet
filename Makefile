@@ -538,3 +538,9 @@ test-lambda:
 	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 \
 	  -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:?set pinned dev image}" \
 	  sh -ec 'python3 -m unittest discover -s scripts/tests -p test_lambda_manager.py -v; python3 scripts/test_lambda.py $(LAMBDA_EVIDENCE)'
+
+# SF-062: real Linux metrics and shared TLS IoT adapter, no live AWS resources.
+.PHONY: test-device-defender
+test-device-defender:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+	python3 scripts/test_device_defender.py --image "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" $(DEVICE_DEFENDER_EVIDENCE)
