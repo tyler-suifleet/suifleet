@@ -1,0 +1,23 @@
+{
+  "kind": "offline_encryption_specimen",
+  "seal": "@mysten/seal 1.5.0",
+  "key_servers": 3,
+  "threshold": 2,
+  "blobs": [
+    {
+      "kind": "artifact",
+      "plaintext_bytes": 1048576,
+      "plaintext_sha256": "4e29ad18ab9f42d7c233500771a39d7c852b200baf328fd00fbbe3fecea1eb56",
+      "ciphertext_bytes": 1049122,
+      "ciphertext_sha256": "f084b5579443c915a786f442738831e306b6f38d0097c93ab7e8a204cdf71e2c"
+    },
+    {
+      "kind": "recipe",
+      "plaintext_bytes": 317,
+      "plaintext_sha256": "9aa4c1552f894f5bd097e7a12d08a167f92341feea99d2ce6e3f9eee267230bf",
+      "ciphertext_bytes": 860,
+      "ciphertext_sha256": "accf39c4b60bc35b6812ddf1372507cb8cac60a78cb7126fb749cb46b4a7ae6c"
+    }
+  ],
+  "limits": "Synthetic content, test public keys; no upload, purchase, real expiry or end-to-end deployment measured."
+}

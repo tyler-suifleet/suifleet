@@ -1,0 +1,26 @@
+{
+  "network": "mainnet",
+  "read_only": true,
+  "transactions_submitted": 0,
+  "reader": "@mysten/walrus 1.2.36 / @mysten/sui 2.37.0 gRPC; audit-only dependencies",
+  "epoch": 42,
+  "storage_price_per_unit_size": "57321",
+  "write_price_per_unit_size": "104135",
+  "quotes": [
+    {
+      "ciphertext_bytes": 1049122,
+      "epochs": 2,
+      "storageCost": "7681014",
+      "writeCost": "6977045",
+      "totalCost": "14658059"
+    },
+    {
+      "ciphertext_bytes": 860,
+      "epochs": 2,
+      "storageCost": "7222446",
+      "writeCost": "6560505",
+      "totalCost": "13782951"
+    }
+  ],
+  "limits": "SDK gross storage/write cost; no subsidy, transaction gas, provider invoice or purchase expiry."
+}
