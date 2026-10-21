@@ -19,7 +19,7 @@ use crate::telemetry::{bounded, MAX_NAME};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, Weak},
 };
 
 /// Version of the `services` section.
@@ -197,6 +197,9 @@ pub struct Tracker {
     since: BTreeMap<String, u64>,
     seen: BTreeSet<String>,
     collected: bool,
+    /// The bridge instance the `bridge:` keys describe. A weak handle keeps
+    /// its allocation, so a replacement can never share the address.
+    bridge: Option<Weak<Mutex<crate::bridge::Stats>>>,
 }
 
 impl Tracker {
@@ -222,6 +225,22 @@ impl Tracker {
         }
         self.seen.insert(key.clone());
         Some(*self.since.entry(key).or_insert(now))
+    }
+
+    /// Forget what a replaced bridge reported: its successor's counters and
+    /// connection periods start afresh, even when it replaced the old one
+    /// between two snapshots.
+    fn bridge(&mut self, stats: Option<&Arc<Mutex<crate::bridge::Stats>>>) {
+        let same = match (&self.bridge, stats) {
+            (Some(old), Some(new)) => Weak::ptr_eq(old, &Arc::downgrade(new)),
+            (None, None) => true,
+            _ => false,
+        };
+        if !same {
+            self.totals.retain(|key, _| !key.starts_with("bridge:"));
+            self.since.retain(|key, _| !key.starts_with("since:bridge:"));
+            self.bridge = stats.map(Arc::downgrade);
+        }
     }
 
     fn finish(&mut self) {
@@ -309,7 +328,10 @@ fn number(status: &serde_json::Value, key: &str) -> u64 {
 /// is when a condition already present at the first collection is dated
 /// (the daemon's start).
 pub fn collect(sources: &Sources, tracker: &mut Tracker, first_ms: u64, now: u64) -> Option<Services> {
+    tracker.bridge(sources.bridge.as_ref());
     if sources.is_empty() {
+        // Nothing is seen: services enabled again later start afresh.
+        tracker.finish();
         return None;
     }
     let start = if tracker.collected { now } else { first_ms };
@@ -689,6 +711,44 @@ mod tests {
         }
         let cases: serde_json::Value = serde_json::from_str(include_str!("../../interfaces/telemetry-cases.json")).unwrap();
         assert_eq!(cases["service_error_categories"], serde_json::json!(ERROR_CATEGORIES), "the indexer and dApp accept the same set");
+    }
+
+    #[test]
+    fn disabled_or_replaced_services_start_afresh() {
+        let disconnected = |refused| crate::bridge::Stats {
+            mappings: vec![crate::bridge::MappingStats { refused, ..Default::default() }],
+            ..Default::default()
+        };
+        let dir = temp("lifecycle");
+        let limits = crate::pubsub::Limits { max_messages: 1, max_bytes: 1 << 20, qos0_messages: 1 };
+        let broker = Arc::new(Mutex::new(crate::pubsub::Broker::open(&dir, limits).unwrap()));
+        {
+            let mut b = broker.lock().unwrap();
+            b.subscribe("slow", "plant/valves", 1).unwrap();
+            b.publish("pub", "plant/valves", &json!(1), None).unwrap();
+        }
+        let mut tracker = Tracker::default();
+        let old = Arc::new(Mutex::new(disconnected(5)));
+        let enabled = |bridge: &Arc<Mutex<crate::bridge::Stats>>| Sources { broker: Some(broker.clone()), bridge: Some(bridge.clone()), ..Sources::default() };
+        let s = collect(&enabled(&old), &mut tracker, 1_000, 1_000).unwrap();
+        assert_eq!((s.bridge.unwrap().since_ms, s.messaging.unwrap().queues[0].full_since_ms), (1_000, Some(1_000)));
+        // All services disabled for a heartbeat, then enabled again.
+        assert!(collect(&Sources::default(), &mut tracker, 1_000, 100_000).is_none());
+        let replacement = Arc::new(Mutex::new(disconnected(7)));
+        let s = collect(&enabled(&replacement), &mut tracker, 1_000, 200_000).unwrap();
+        let bridge = s.bridge.as_ref().unwrap();
+        assert_eq!((bridge.since_ms, bridge.refused_recent), (200_000, 7), "a fresh period and counter baseline");
+        assert_eq!(s.messaging.as_ref().unwrap().queues[0].full_since_ms, Some(200_000), "the queue's condition restarts");
+        assert!(reasons(&s, 10, 200_000).is_empty(), "nothing sustained yet");
+        // The same bridge carries on.
+        replacement.lock().unwrap().mappings[0].refused = 9;
+        let bridge = collect(&enabled(&replacement), &mut tracker, 1_000, 210_000).unwrap().bridge.unwrap();
+        assert_eq!((bridge.since_ms, bridge.refused_recent), (200_000, 2));
+        // A bridge replaced between two heartbeats, with more refusals than its predecessor.
+        let successor = Arc::new(Mutex::new(disconnected(12)));
+        let bridge = collect(&enabled(&successor), &mut tracker, 1_000, 220_000).unwrap().bridge.unwrap();
+        assert_eq!((bridge.since_ms, bridge.refused_recent), (220_000, 12));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
