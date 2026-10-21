@@ -54,8 +54,8 @@
     "suifleet-edge/src/console/console.js": "8add9140e4fcc658abd5302d8ae71fd3bb7b69ea5a2e1bc8baca06e2cd61387a",
     "suifleet-edge/src/console/console.css": "e4c19b3253b6e14f1673f140e0fc6bb018215c58d36e68cca4de5e12bdbe74dd",
     "suifleet-edge/src/main.rs": "732530d01b65f4744b7f9aa0a541cc1b750b88a33ec6d4cf5d416a8777fa349f",
-    "suifleet-edge/src/linux_main.rs": "6f840fe96d9ad54daf2c6ac60b2a875ab324c6758c70484070ae3113570eea15",
-    "suifleet-edge/src/config.rs": "4de94600c629c251aaba1355f56fd5e185b2512fd03f660cf402dd2eb5ea4902",
+    "suifleet-edge/src/linux_main.rs": "33a93af29d7de33089e48d237cb82f9dc2ceda770dcce7bedae2532e27bd1878",
+    "suifleet-edge/src/config.rs": "388d1894cb042a14150ea7e57ad5d0634940e5a3e91785bfb09491055b37eeee",
     "scripts/test_console.py": "91ece9c2d7b4df662d3a2a3b0aa7a9c2e60984eb174195b7a064810c24fa8c9a",
     "scripts/test_console_browser.cjs": "655be209b5496347abac83c573acdde84bb1592ac469e01584a80b52a056469a",
     "interfaces/compat/remaining-roadmap-cases.json": "2b3d02d28570af01d5bf58005f7b08d5f67d1991daf3acc792492d2a7e6272b7"
@@ -68,5 +68,5 @@
     "Not AWS LocalDebugConsole UI/API compatibility: no configuration editor, pub/sub/MQTT client or stream manager views.",
     "No AWS account, service, production credential or production exposure was used or provisioned."
   ],
-  "tested_tree": "SF-079 branch at fe3fc87 (already containing origin/main dba7958) plus the credential-value redaction fix: a secret pair's or authorization scheme's whole value is redacted (quoted strings through the closing unescaped quote, unquoted values to the next whitespace, punctuation included). On this tree (suifleet-dev:sf037, rust 1.94.0, network none): cargo test 310 passed, 0 failed, including console::tests::redaction_consumes_whole_credential_values; cargo test --features pkcs11 312 passed, 0 failed; scripts/test_console.py passed 3 consecutive runs with the new punctuation/quoted/leading-punctuation log canaries and a quoted configuration note, and failed ('log canary 4 leaked') as a negative control against the previous console.rs; make test-compat passed. The restart check now tolerates status.json written before svc is re-adopted (it intermittently raised KeyError, 2 of 3 runs before the change). Not rerun on this tree: make test-ota (last on 48c4da5), test_console.py --browser (last on cbf1f68), test_ipc.py, test_services.py, test-sns, dapp-typecheck and Trivy; none of their inputs other than console redaction changed."
+  "tested_tree": "SF-079 branch at e2bc10f (credential-value redaction fix) merged with origin/main 14a8d9b (SF-061 AWS IoT Core bridge) in 7834c87; config.rs conflict resolved by keeping both the console and aws_iot settings, console sources unchanged. On this tree (suifleet-dev:sf037, rust 1.94.0, network none): cargo test --locked 326 passed, 0 failed; cargo test --features pkcs11 328 passed, 0 failed; scripts/test_console.py passed (193 audit records, bind-failure and restart/session checks); make test-ota exit 0 (full simulator suite including test_console.py and test_rollout.py); make test-compat passed. Not rerun on this tree: test_console.py --browser (last on cbf1f68), test_ipc.py, test_services.py, test-sns, test-aws-iot, dapp-typecheck and Trivy."
 }
