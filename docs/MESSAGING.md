@@ -87,6 +87,10 @@ The bridge is an MQTT 3.1.1 client (MQTT 5 brokers accept it) with a persistent 
 - **Transport.** Plain TCP to a broker on this device or a trusted network. LAN client devices reach the broker through the SF-035 gateway (mutual TLS, per-thing policies; [CLIENT_DEVICES.md](CLIENT_DEVICES.md)), which requires the broker to listen on loopback.
 - **AWS IoT Core.** Mappings may also connect `Pubsub` with `IotCore`, over the mutual-TLS `[aws_iot]` connection ([AWS_IOT.md](AWS_IOT.md), SF-061). The spool, limits and delivery rules are the same. Messages bridged in from one broker are never sent back to that broker, but may continue to the other: route LAN messages to AWS with a LocalMqtt → Pubsub and a Pubsub → IotCore mapping. `broker` is then needed only for LocalMqtt mappings.
 
+SF-078 adds a separate [SNS publisher](SNS.md) that consumes requests from a
+durable subscription, authorizes each authenticated sender per topic ARN and
+publishes to SNS with scoped credentials. It does not change pub/sub or the bridge.
+
 ## SDK
 
 ```python
