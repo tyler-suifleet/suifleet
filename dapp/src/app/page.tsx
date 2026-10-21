@@ -5,6 +5,7 @@ import { useDeployments } from "@/hooks/useDeployments";
 import { useGroups } from "@/hooks/useGroups";
 import { useFleetHealth } from "@/hooks/useFleetHealth";
 import { useFleetAlerts } from "@/hooks/useFleetAlerts";
+import { historicalFailures } from "@/lib/alerts";
 import Link from "next/link";
 import { PageHeader, Section, StatusDot } from "@/components/ui";
 
@@ -18,6 +19,7 @@ export default function DashboardPage() {
 
   const pending = deployments.filter((d) => d.resolvedDeviceIds.some((id) => (d.statuses[id] ?? 0) === 0));
   const alerts = useFleetAlerts();
+  const failedResults = historicalFailures(deployments);
 
   return (
     <div className="space-y-6 max-w-5xl">
@@ -32,12 +34,13 @@ export default function DashboardPage() {
         <StatCard label="Active deployments" value={depl ? "—" : pending.length} href="/deployments" />
       </div>
 
-      {/* Alerts (SF-020): derived by the fleet indexer from verified telemetry and receipts */}
-      <Section title="Alerts">
+      {/* Active incidents (SF-020): derived by the fleet indexer from verified telemetry and receipts.
+          Device health above is current; failed results recovered later (SF-098) remain only in deployment history. */}
+      <Section title="Active incidents">
         {alerts.status === "unavailable" ? (
           <p className="text-sm text-gray-400">Alerts unavailable: {alerts.reason}. Enter the indexer read token on the Devices page.</p>
         ) : alerts.items.length === 0 ? (
-          <p className="text-sm text-gray-500">No alerts for your devices.</p>
+          <p className="text-sm text-gray-500">No active incidents for your devices.</p>
         ) : (
           <ul className="divide-y divide-gray-100 text-sm">
             {alerts.items.slice(0, 20).map((a) => (
@@ -53,7 +56,12 @@ export default function DashboardPage() {
             {alerts.items.length > 20 && <li className="py-2 text-xs text-gray-400">{alerts.items.length - 20} more (suifleet-indexer ctl alerts)</li>}
           </ul>
         )}
-        <p className="mt-2 text-xs text-gray-400">Reported by the fleet indexer.</p>
+        <p className="mt-2 text-xs text-gray-400">
+          Reported by the fleet indexer. A failed deployment stays an incident until the device reports that component running from a later applied deployment.
+          {!depl && failedResults > 0 && (
+            <> Deployment history keeps {failedResults} failed device result{failedResults === 1 ? "" : "s"}: <Link href="/deployments" className="hover:underline">view deployments</Link>.</>
+          )}
+        </p>
       </Section>
 
       {/* Recent deployments */}
