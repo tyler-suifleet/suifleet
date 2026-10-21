@@ -384,14 +384,17 @@
     },
     "SF-036": {
       "deferred_checks": [
-        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge."
+        "Physical Pi/target boot, networking, reboot/power-loss and device-specific integration; explicitly deferred by user until target testing later. No refreshed Pi image required for software merge.",
+        "Production registry/provider/account acceptance requiring manually provisioned production credentials; retain runtime authentication checks and isolated registry-failure fixtures as implementation gates."
       ],
       "acceptance_issues": [
-        "https://github.com/tyler-suifleet/suifleet/issues/32"
+        "https://github.com/tyler-suifleet/suifleet/issues/32",
+        "https://github.com/tyler-suifleet/suifleet/issues/159"
       ],
       "retained_gates": [
         "Preserve source/security review, meaningful local/simulator/host integration checks and normal authorized automatic testnet CI; physical deferral is not a test waiver."
-      ]
+      ],
+      "authorization": "User instruction 2026-10-21: finish software implementation before final external acceptance. Production registry/provider/account/credential validation may wait alongside physical/mainnet checks; software/security, local engine regressions, normal automatic testnet CI and independent review remain required."
     },
     "SF-037": {
       "deferred_checks": [

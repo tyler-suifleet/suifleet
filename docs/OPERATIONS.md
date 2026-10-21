@@ -528,3 +528,5 @@ are limited to the enabled `start`/`stop`/`restart` set. The audit log is
 See [staged rollout operation and recovery](STAGED_ROLLOUTS.md) for immutable cohorts,
 creator-signed admission/health ticks, rate/concurrency/bake limits, offline slots,
 audited pause/abort and schema-3 manifest/upgrade requirements.
+
+OCI container components use the existing component supervisor with a pinned-image descriptor; see [OCI_COMPONENTS.md](OCI_COMPONENTS.md) for engine provisioning, boundaries and offline recovery.
