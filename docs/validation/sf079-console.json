@@ -49,14 +49,14 @@
   ],
   "reference_vectors": "cargo test console::tests::decisions_follow_the_v1_reference_contract applies the SF-064 console vectors to the implementation's decision function and field allowlist",
   "source_sha256": {
-    "suifleet-edge/src/console.rs": "a15d6dacf41da5643012ea5aee52e28d95d940b687d43ae92302002785e7566d",
+    "suifleet-edge/src/console.rs": "0151f4ff05df8cd272adb560dc7aa29524a41248b0a2e3b7cf3c18789e088987",
     "suifleet-edge/src/console/index.html": "127d9ef2f34416830509f2f91e0990a93869d59b29d8046e649b2f944ca6c7f6",
     "suifleet-edge/src/console/console.js": "8add9140e4fcc658abd5302d8ae71fd3bb7b69ea5a2e1bc8baca06e2cd61387a",
     "suifleet-edge/src/console/console.css": "e4c19b3253b6e14f1673f140e0fc6bb018215c58d36e68cca4de5e12bdbe74dd",
     "suifleet-edge/src/main.rs": "732530d01b65f4744b7f9aa0a541cc1b750b88a33ec6d4cf5d416a8777fa349f",
     "suifleet-edge/src/linux_main.rs": "33a93af29d7de33089e48d237cb82f9dc2ceda770dcce7bedae2532e27bd1878",
     "suifleet-edge/src/config.rs": "388d1894cb042a14150ea7e57ad5d0634940e5a3e91785bfb09491055b37eeee",
-    "scripts/test_console.py": "91ece9c2d7b4df662d3a2a3b0aa7a9c2e60984eb174195b7a064810c24fa8c9a",
+    "scripts/test_console.py": "f3abc95042da84d427e873c6c001a5c0c0f4b50f5dce361497d6dcabe21a4068",
     "scripts/test_console_browser.cjs": "655be209b5496347abac83c573acdde84bb1592ac469e01584a80b52a056469a",
     "interfaces/compat/remaining-roadmap-cases.json": "2b3d02d28570af01d5bf58005f7b08d5f67d1991daf3acc792492d2a7e6272b7"
   },
@@ -68,5 +68,5 @@
     "Not AWS LocalDebugConsole UI/API compatibility: no configuration editor, pub/sub/MQTT client or stream manager views.",
     "No AWS account, service, production credential or production exposure was used or provisioned."
   ],
-  "tested_tree": "SF-079 branch at e2bc10f (credential-value redaction fix) merged with origin/main 14a8d9b (SF-061 AWS IoT Core bridge) in 7834c87; config.rs conflict resolved by keeping both the console and aws_iot settings, console sources unchanged. On this tree (suifleet-dev:sf037, rust 1.94.0, network none): cargo test --locked 326 passed, 0 failed; cargo test --features pkcs11 328 passed, 0 failed; scripts/test_console.py passed (193 audit records, bind-failure and restart/session checks); make test-ota exit 0 (full simulator suite including test_console.py and test_rollout.py); make test-compat passed. Not rerun on this tree: test_console.py --browser (last on cbf1f68), test_ipc.py, test_services.py, test-sns, test-aws-iot, dapp-typecheck and Trivy."
+  "tested_tree": "SF-079 branch at 4ee94ff (multiline quoted-credential log redaction fix from the review of 1b89dd1), which already contains origin/main 0359c76. On this tree (suifleet-dev:sf037, rust 1.94.0, network none): cargo test --locked 328 passed, 0 failed; cargo test --features pkcs11 330 passed, 0 failed; scripts/test_console.py passed (198 audit records; svc2 multiline quoted-credential fixtures checked at log limits 1-8 and 200); scripts/test_console.py --browser (suifleet-dev:sf010-chrome) passed (208 audit records); make test-ota exit 0 (full simulator suite including test_console.py); make test-compat passed. Not rerun on this tree: test_ipc.py, test_services.py, test-sns, test-aws-iot, dapp-typecheck and Trivy (no changes outside console.rs, test_console.py and docs)."
 }
