@@ -300,6 +300,7 @@ test-manifest:
 	$(RUN) node scripts/test_target_groups.cjs
 	$(RUN) node scripts/test_desired_state.cjs
 	$(RUN) node scripts/test_seal_frontend.cjs
+	$(RUN) node scripts/test_upload_progress.cjs
 	$(RUN) node scripts/test_telemetry.cjs
 	$(RUN) node scripts/test_alerts.cjs
 

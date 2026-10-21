@@ -1,13 +1,15 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { Fragment, useState, useCallback, useEffect, useRef } from "react";
 import { useCurrentAccount } from "@mysten/dapp-kit-react";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import { useGroups } from "@/hooks/useGroups";
 import { useDevices } from "@/hooks/useDevices";
-import { uploadArtifact, uploadRecipe, renewalCommand, storageWarnings, type ComponentRecipe, type Protection, type StorageInfo } from "@/lib/walrus";
+import { uploadArtifact, uploadRecipe, renewalCommand, storageWarnings, type ComponentRecipe, type Protection, type StorageInfo, type UploadProgress as Progress } from "@/lib/walrus";
 import { DEFAULT_DELIVERY, releaseProtection } from "@/lib/delivery";
 import { useAccessPolicies } from "@/hooks/useAccessPolicies";
+import { UploadProgress } from "@/components/UploadProgress";
+import { DeploymentProgress, type DeploymentPhase } from "@/components/DeploymentProgress";
 import { DeliveryFields } from "@/components/DeliveryFields";
 import { buildCreateDeploymentTx } from "@/lib/sui";
 import { buildDesiredRevisionTx } from "@/lib/desired-state";
@@ -44,10 +46,16 @@ export default function FirmwarePage() {
   const [delivery, setDelivery] = useState(DEFAULT_DELIVERY);
   // One release identity: the recipe reuses the artifact's protection.
   const [protection, setProtection] = useState<Protection | null>(null);
-  const { mutate: signAndExecute, isPending: txPending } = useFleetTransaction();
+  const { mutateAsync: signAndExecute, isPending: txPending } = useFleetTransaction();
 
   const [step, setStep] = useState<Step>("artifact");
   const [uploading, setUploading] = useState(false);
+  const uploadInFlight = useRef(false);
+  const deploymentInFlight = useRef(false);
+  const [uploadProgress, setUploadProgress] = useState<Progress | null>(null);
+  const [deployPhase, setDeployPhase] = useState<DeploymentPhase | null>(null);
+  const [deploymentStartedAt, setDeploymentStartedAt] = useState(0);
+  const [recipeProgress, setRecipeProgress] = useState<Progress | null>(null);
   const [artifact, setArtifact] = useState<ArtifactResult | null>(null);
   const [componentName, setComponentName] = useState("");
   const [version, setVersion] = useState("");
@@ -68,79 +76,74 @@ export default function FirmwarePage() {
   const [dragOver, setDragOver] = useState(false);
 
   const handleFile = useCallback(async (file: File) => {
+    if (uploadInFlight.current || step !== "artifact") return;
     if (!componentName || !version) {
       alert("Enter component name and version before uploading.");
       return;
     }
+    uploadInFlight.current = true;
     setUploading(true);
+    setUploadProgress(null);
     try {
       const release = releaseProtection(client, delivery, policies);
-      const result = await uploadArtifact(file, account?.address ?? null, release);
+      const result = await uploadArtifact(file, account?.address ?? null, release, setUploadProgress);
       setProtection(release);
       setArtifact({ ...result, fileName: file.name });
       setStep("recipe");
     } catch (err) {
       alert(`Upload failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
+      uploadInFlight.current = false;
       setUploading(false);
     }
-  }, [componentName, version, account?.address, client, delivery, policies]);
+  }, [componentName, version, account?.address, client, delivery, policies, step]);
 
   const desiredTargets = desired && selectedDevices.size === 0 && selectedGroups.size > 0;
 
   const [initiallyPaused, setInitiallyPaused] = useState(false);
 
   async function handleDeploy() {
-    if (selectedGroups.size === 0 && selectedDevices.size === 0) return;
-    // Catalog versions carry no recipe digest on the record, so desired state
-    // cannot select them yet: they deploy one-shot.
-    if (catalogVersion) {
-      signAndExecute({transaction:buildCatalogDeploymentTx(catalogVersion.objectId,[...selectedGroups],[...selectedDevices],initiallyPaused)}, {
-        onSuccess:res=>{setTxDigest(res.digest);setStep("done");},onError:err=>alert(err.message),
-      }); return;
-    }
-    if (!artifact || !protection) return;
-    if (desired && selectedDevices.size > 0) {
+    // A ref closes the gap before React renders busy state, including the
+    // entire recipe upload; mutation.isPending starts too late for that.
+    if (deploymentInFlight.current || step !== "deploy" || (selectedGroups.size === 0 && selectedDevices.size === 0)) return;
+    if (!catalogVersion && (!artifact || !protection)) return;
+    if (!catalogVersion && desired && selectedDevices.size > 0) {
       alert("Desired state targets groups only. Clear the individual devices, or untick desired state for a one-shot deployment.");
       return;
     }
-
-    let recipe: ComponentRecipe;
+    deploymentInFlight.current = true;
+    setDeploymentStartedAt(Date.now());
+    setDeployPhase("preparing");
+    setRecipeProgress(null);
+    let succeeded = false;
     try {
-      recipe = buildRecipe(artifact);
-    } catch (err) {
-      alert(err instanceof Error ? err.message : String(err));
-      return;
-    }
-
-    let recipeUpload: Awaited<ReturnType<typeof uploadRecipe>>;
-    try {
-      recipeUpload = await uploadRecipe(recipe, account?.address ?? null, protection);
-      setRecipeStorage(recipeUpload.storage);
-    } catch (err) {
-      alert(`Recipe upload failed: ${err instanceof Error ? err.message : String(err)}`);
-      return;
-    }
-
-    const tx = desiredTargets
-      ? buildDesiredRevisionTx(Array.from(selectedGroups), {
-          componentName, version, initiallyPaused, recipeBlobId: recipeUpload.blobId,
-          artifactSha256: artifact.sha256, recipeSha256: recipeUpload.sha256,
-        })
-      : buildCreateDeploymentTx(
-          componentName, version,
-          recipeUpload.blobId, artifact.sha256, recipeUpload.sha256,
-          Array.from(selectedGroups),
-          Array.from(selectedDevices),
-          initiallyPaused,
-        );
-    signAndExecute(
-      { transaction: tx },
-      {
-        onSuccess: (res) => { setTxDigest(res.digest); setStep("done"); },
-        onError: (err) => alert(`Deployment failed: ${err.message}`),
+      let transaction;
+      if (catalogVersion) {
+        transaction = buildCatalogDeploymentTx(catalogVersion.objectId, [...selectedGroups], [...selectedDevices], initiallyPaused);
+      } else {
+        const recipe = buildRecipe(artifact!);
+        setDeployPhase("uploading");
+        const recipeUpload = await uploadRecipe(recipe, account?.address ?? null, protection!, setRecipeProgress);
+        setRecipeStorage(recipeUpload.storage);
+        transaction = desiredTargets
+          ? buildDesiredRevisionTx(Array.from(selectedGroups), {
+              componentName, version, initiallyPaused, recipeBlobId: recipeUpload.blobId,
+              artifactSha256: artifact!.sha256, recipeSha256: recipeUpload.sha256,
+            })
+          : buildCreateDeploymentTx(componentName, version, recipeUpload.blobId,
+              artifact!.sha256, recipeUpload.sha256, [...selectedGroups], [...selectedDevices], initiallyPaused);
       }
-    );
+      const result = await signAndExecute({ transaction, onProgress: setDeployPhase });
+      succeeded = true;
+      setTxDigest(result.digest);
+      setStep("done");
+    } catch (error) {
+      alert(`Deployment failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      // A successful operation stays guarded until explicit "Deploy another".
+      if (!succeeded) deploymentInFlight.current = false;
+      setDeployPhase(null);
+    }
   }
 
   /** The recipe as entered; throws with the field at fault. */
@@ -200,6 +203,7 @@ export default function FirmwarePage() {
             <Link href="/deployments" className="text-sm text-[#4DA2FF] hover:underline">View deployments</Link>
             <button
               onClick={() => {
+                deploymentInFlight.current = false; setRecipeProgress(null); setUploadProgress(null);
                 setStep("artifact"); setArtifact(null); setRecipeStorage(null); setProtection(null); setDelivery(DEFAULT_DELIVERY);
                 setComponentName(""); setVersion(""); setDescription("");
                 setInstallCmd(""); setRunCmd(""); setShutdownCmd(""); setReadinessCmd(""); setRestartPolicy("on-failure");
@@ -231,7 +235,7 @@ export default function FirmwarePage() {
       {/* Step indicators */}
       <div className="flex items-center gap-2 text-sm">
         {steps.map((s, i) => (
-          <>
+          <Fragment key={s.key}>
             <StepPip
               key={s.key}
               n={i + 1}
@@ -240,17 +244,17 @@ export default function FirmwarePage() {
               label={s.label}
             />
             {i < steps.length - 1 && <div key={`div-${i}`} className="flex-1 h-px bg-gray-200" />}
-          </>
+          </Fragment>
         ))}
       </div>
 
       {/* Step 1 — Artifact */}
-      <Card disabled={step !== "artifact"} title="1. Component details & artifact">
+      <Card disabled={step !== "artifact" || uploading} title="1. Component details & artifact">
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Component name" value={componentName} onChange={setComponentName} placeholder="my-app" disabled={step !== "artifact"} />
-          <Field label="Version" value={version} onChange={setVersion} placeholder="1.0.0" disabled={step !== "artifact"} />
+          <Field label="Component name" value={componentName} onChange={setComponentName} placeholder="my-app" disabled={step !== "artifact" || uploading} />
+          <Field label="Version" value={version} onChange={setVersion} placeholder="1.0.0" disabled={step !== "artifact" || uploading} />
         </div>
-        <DeliveryFields value={delivery} onChange={setDelivery} policies={policies} disabled={step !== "artifact"} />
+        <DeliveryFields value={delivery} onChange={setDelivery} policies={policies} disabled={step !== "artifact" || uploading} />
         <div
           onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
           onDragLeave={() => setDragOver(false)}
@@ -262,7 +266,7 @@ export default function FirmwarePage() {
           }`}
         >
           {uploading ? (
-            <p className="text-sm text-gray-500">Uploading to Walrus…</p>
+            <UploadProgress progress={uploadProgress} />
           ) : artifact ? (
             <p className="text-sm text-gray-600 font-medium">{artifact.fileName} <span className="text-gray-400 font-normal">— uploaded</span></p>
           ) : (
@@ -271,7 +275,7 @@ export default function FirmwarePage() {
               <p className="text-xs text-gray-400 mt-1">Binaries, scripts, archives, .swu — anything</p>
               <label className="mt-2 inline-block text-sm text-[#4DA2FF] cursor-pointer hover:underline">
                 or browse
-                <input type="file" className="hidden" disabled={step !== "artifact"} onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+                <input type="file" className="hidden" disabled={step !== "artifact" || uploading} onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
               </label>
             </>
           )}
@@ -357,6 +361,7 @@ export default function FirmwarePage() {
         )}
       </Card>
 
+      {deployPhase && <DeploymentProgress phase={deployPhase} progress={recipeProgress} startedAt={deploymentStartedAt} catalog={!!catalogVersion} />}
       {/* Step 3 — Targets */}
       <Card disabled={step !== "deploy"} title="3. Select targets">
         <label className="flex gap-2 text-sm mb-3"><input type="checkbox" checked={initiallyPaused} onChange={e => setInitiallyPaused(e.target.checked)} />
@@ -427,10 +432,10 @@ export default function FirmwarePage() {
 
         <button
           onClick={handleDeploy}
-          disabled={txPending || (selectedGroups.size === 0 && selectedDevices.size === 0) || (!artifact && !catalogVersion) || step !== "deploy"}
+          disabled={deployPhase !== null || txPending || (selectedGroups.size === 0 && selectedDevices.size === 0) || (!artifact && !catalogVersion) || step !== "deploy"}
           className="mt-2 bg-[#4DA2FF] hover:bg-[#2e8ed4] text-white px-5 py-2 rounded text-sm disabled:opacity-40"
         >
-          {txPending ? "Submitting…" : `Deploy to ${selectedGroups.size + selectedDevices.size} target${selectedGroups.size + selectedDevices.size !== 1 ? "s" : ""}`}
+          {deployPhase === "uploading" ? "Uploading recipe…" : deployPhase !== null || txPending ? "Deploying…" : `Deploy to ${selectedGroups.size + selectedDevices.size} target${selectedGroups.size + selectedDevices.size !== 1 ? "s" : ""}`}
         </button>
       </Card>
     </div>
