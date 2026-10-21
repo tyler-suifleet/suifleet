@@ -226,6 +226,31 @@ class DashboardTests(unittest.TestCase):
         fix = next(c for c in model['capacity'] if c['family'] == 'Codex' and c['category'] == 'repair')
         self.assertEqual((fix['active'], fix['retained'], fix['limit']), (1, 1, 1))
 
+    def test_resumed_repair_claim_is_not_a_manual_claim(self):
+        f = self.f
+        f.ticket('SF-001', session='original-dispatch')  # Review claim resumed in_progress by a repair job
+        f.job(3, kind='fix', status='reserved', ticket='SF-001')
+        states = self.states(f.collect())
+        self.assertIn(('SF-001', 'repair', 'waiting'), states)
+        self.assertNotIn(('SF-001', 'implementation', 'manual'), states)
+
+    def test_relative_receipt_directory_is_never_read_from_cwd(self):
+        f = self.f
+        f.ticket('SF-001')
+        f.process(101)
+        with sqlite3.connect(f.paths['dispatch']) as db:
+            db.execute("INSERT INTO runs VALUES('sess-impl','suifleet','Claude','running','',?,NULL,NULL,NULL)",
+                       (json.dumps({'key': 'SF-001'}),))
+        cwd = os.getcwd()
+        os.chdir(f.base)
+        try:
+            (f.base/'process.json').write_text(json.dumps({'pid': 101, 'started': '500'}))
+            model = f.collect()
+        finally:
+            os.chdir(cwd)
+        self.assertEqual(model['workers'], [])
+        self.assertIn(('SF-001', 'implementation', 'unverified'), self.states(model))
+
     def test_waiting_retry_and_ci_states_are_distinct(self):
         f = self.f
         f.ticket('SF-001', status='review'); f.job(1, ticket='SF-001', status='done', checks=('SUCCESS', 'FAILURE'))

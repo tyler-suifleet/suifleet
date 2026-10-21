@@ -125,6 +125,11 @@ def read_json(path):
         return None
 
 
+def receipt(directory, name):
+    # A missing directory must never fall back to a relative path in the cwd.
+    return Path(directory)/name if isinstance(directory, str) and os.path.isabs(directory) else None
+
+
 def short_key(key):
     return str(key).split('::', 1)[-1] if key else None
 
@@ -136,10 +141,10 @@ class SnapshotCache:
         self.entries = {}
 
     def get(self, directory):
-        path = Path(directory or '')/'snapshot.json'
+        path = receipt(directory, 'snapshot.json')
         try:
             info = path.stat()
-        except OSError:
+        except (OSError, AttributeError):
             return None
         stamp = (info.st_mtime_ns, info.st_size)
         cached = self.entries.get(path)
@@ -326,7 +331,10 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
         key = short_key(claim.get('key'))
         if claim.get('session'):
             managed.add(claim['session'])
-        identity = read_json(Path(run['directory'] or '')/'process.json') or {}
+        process_file = receipt(run['directory'], 'process.json')
+        identity = (read_json(process_file) if process_file else None) or {}
+        if not isinstance(identity, dict):
+            identity = {}
         pid, started = identity.get('pid') or run['pid'], identity.get('started') or run['started']
         process = processes.state(pid, started)
         owner = by_ticket.get((run['project'], key)) or {}
@@ -338,8 +346,7 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
         if key:
             seen_keys.setdefault((run['project'], key), []).append(base['id'])
         started_at = processes.started_at(started) if process == 'alive' else None
-        receipt = Path(run['directory'] or '')/'process.json'
-        since = started_at or (receipt.stat().st_mtime if receipt.exists() else None)
+        since = started_at or (process_file.stat().st_mtime if process_file and process_file.exists() else None)
         if run['status'] in ACTIVE_RUN and process == 'alive':
             count['active'] += 1
             item('worker', **base, state='active', since=since,
@@ -380,6 +387,9 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
         if job['status'] in ('reserved', 'running', 'orphaned', 'quarantined'):
             open_by_pr.setdefault((job['project'], job['pr']), []).append(job['id'])
         process = processes.state(job['pid'], job['started']) if job['status'] == 'running' else None
+        if role == 'repair' and key and job['status'] in ('reserved', 'running'):
+            # Same rule as the dispatcher: a resumed Review claim is repair work.
+            repairing.add((job['project'], key))
         base = dict(id=f"job:{job['project']}:{job['id']}", project=job['project'], family=job['family'],
                     model=slot_model.get((job['project'], job['family'])), role=role, ticket=key, pr=job['pr'],
                     head=str(job['head'] or '')[:12],
@@ -392,8 +402,6 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
         since = job['created']
         if job['status'] == 'running' and process == 'alive':
             count['active'] += 1
-            if role == 'repair' and key:
-                repairing.add((job['project'], key))
             item('worker', **base, state='active', since=processes.started_at(job['started']) or since, summary=task)
         elif job['status'] == 'running':
             count['held'] += 1
@@ -645,14 +653,19 @@ def public(model, delta=None):
 def live(args, paths):
     import curses
     cache, previous, delta = SnapshotCache(), None, []
-    state = dict(model=None, offset=0, due=0.0)
+    state = dict(model=None, offset=0, due=0.0, error=None)
 
     def refresh():
         nonlocal previous, delta
-        current = collect(paths, args.project, cache=cache)
+        state['due'] = time.monotonic() + args.interval
+        try:
+            current = collect(paths, args.project, cache=cache)
+        except Exception as error:  # keep the last good view rather than crash the terminal
+            state['error'] = f'refresh failed ({type(error).__name__}); showing previous data'
+            return
+        state['error'] = None
         delta = changes(previous, current) if previous else delta
         previous, state['model'] = current, current
-        state['due'] = time.monotonic() + args.interval
 
     def loop(screen):
         try:
@@ -664,7 +677,9 @@ def live(args, paths):
             if time.monotonic() >= state['due']:
                 refresh()
             height, width = screen.getmaxyx()
-            lines = render(state['model'], width - 1, delta, args.interval)
+            lines = render(state['model'], width - 1, delta, args.interval) if state['model'] else []
+            if state['error']:
+                lines.insert(0, '! ' + state['error'])
             body = max(1, height - 1)
             state['offset'] = max(0, min(state['offset'], len(lines) - body))
             screen.erase()
