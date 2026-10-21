@@ -8,7 +8,7 @@ import { useGroups } from "@/hooks/useGroups";
 import { useDeployments } from "@/hooks/useDeployments";
 import { useDesiredStates } from "@/hooks/useDesiredStates";
 import { useFleetHealth, useTelemetryToken, setTelemetryToken } from "@/hooks/useFleetHealth";
-import { lastSeenLabel, TELEMETRY_URL, type DeviceHealth } from "@/lib/telemetry";
+import { describeServices, lastSeenLabel, TELEMETRY_URL, type DeviceHealth } from "@/lib/telemetry";
 import { buildDesiredRevisionTx, desiredConflicts } from "@/lib/desired-state";
 import {
   buildRegisterDeviceTx, buildActivateDeviceTx, buildIssueCapTx, buildDeregisterDeviceTx,
@@ -480,6 +480,14 @@ function HealthDetails({ health }: { health?: DeviceHealth }) {
           Last report {new Date(health.lastSeenMs).toLocaleString()} (taken {new Date(health.observedMs!).toLocaleString()} by the device clock),
           daemon {health.daemonVersion}. Reports are signed by the device and verified against its on-chain identity.
         </p>
+      )}
+      {health.services && (
+        <div>
+          <p className="font-medium text-gray-600">Services</p>
+          <ul className="text-gray-600 whitespace-pre-wrap">
+            {describeServices(health.services).map((line, i) => <li key={i}>{line}</li>)}
+          </ul>
+        </div>
       )}
       {health.components.length === 0 ? (
         <p className="text-gray-400">No installed components reported.</p>

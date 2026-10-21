@@ -53,6 +53,11 @@
   {"id": "darwin", "aws": {"os": "darwin"}, "native": {"os": "macos", "arch": "aarch64"}, "status": "partial", "current_evidence": ["docs/MACOS_RUNTIME.md"], "tickets": ["SF-064", "SF-075"], "notes": "Native macOS LaunchDaemon runtime and catalog OS `macos` (SF-075), tested on a hosted macOS 15 arm64 runner; not a Greengrass platform. Translated recipes still omit darwin manifests."}
  ],
  "suites": {
+  "device-defender-cases.json": {
+   "description": "DeviceDefender 4.0.0 JSON 1.0 reports, reserved topics, service response correlation and invalid schema cases.",
+   "runtime_execution": "passed", "runtime_evidence": "docs/validation/sf062-device-defender.json",
+   "runtime_scope": "Actual procfs sampler and shared request router execute the golden schema/topic/response fixtures; test_device_defender.py exercises the real daemon and TLS adapter, offline restart, policy denial, accepted/rejected replies and retry exhaustion. Live AWS Detect is unrun."
+  },
   "aws-recipe-cases.json": {
    "description": "AWS recipe subset classification and expected native catalog manifests.",
    "runtime_execution": "passed",

@@ -43,6 +43,12 @@ class DriftCheckTest(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertEqual(checked, 1)
 
+    def test_reviewed_external_types_only(self):
+        # Seal's key server type is another package's, verified at runtime.
+        errors, _ = self.run_check('same_type(&t, &format!("{package}::key_server::KeyServer"));\n"key_server::KeyServer";', ".rs")
+        self.assertEqual(errors, [])
+        self.assert_drift('format!("{package}::key_server::KeyServerV9")', "no module key_server", ".rs")
+
     def test_misspelled_project_module_in_move_call_fails(self):
         self.assert_drift(
             "tx.moveCall({ target: `${PACKAGE_ID}::device_registrx::register_device`, arguments: [a, b] });",

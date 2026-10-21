@@ -138,6 +138,12 @@ interrupted-install and permission tests on a hosted macOS runner. It is not
 Greengrass platform compatibility, and the `macos` scope below stays a reference
 model.
 
+SF-079 adds the [native local support console](LOCAL_CONSOLE.md): an authenticated,
+loopback-only daemon API/UI with per-user grants, origin/CSRF/Host checks,
+redaction, bounded queries and audit. The console reference vectors run against
+its decision function, and its [runtime receipt](validation/sf079-console.json)
+records the real-daemon tests. It is not AWS LocalDebugConsole UI/API compatibility.
+
 Run `make test-compat`. It checks the existing catalog and reference suites plus
 76 remaining-roadmap vectors and negative ownership/publication/evidence guards.
 `python3 scripts/greengrass_roadmap.py` runs just the new roadmap checks. The
@@ -158,3 +164,5 @@ power-loss and device-specific results remain separately tracked in
 [SF-031](https://github.com/tyler-suifleet/suifleet/issues/32); no refreshed image or
 physical result is claimed. Software correctness, source/security review,
 meaningful local/emulator tests and normal authorized automatic CI remain gates.
+
+SF-071 adds the native [SiteWise TQV processing/publisher](SITEWISE.md) over SF-070 records and SF-034 lossless external streams with SF-057 credentials. Its local request/checkpoint tests establish the documented native subset; live AWS and physical acceptance remain unrun. Historical reference fixtures above remain specification-only.

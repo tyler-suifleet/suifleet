@@ -118,7 +118,8 @@ pub fn overlap(a: &str, b: &str) -> bool {
 /// Whether `filter` could match a topic of some thing's AWS shadow service.
 /// Filters starting with a wildcard never match `$` topics (MQTT §4.7.2).
 pub fn reaches_aws_shadows(filter: &str) -> bool {
-    filter.starts_with('$') && overlap(filter, "$aws/things/+/shadow/#")
+    filter.starts_with('$') && (overlap(filter, "$aws/things/+/shadow/#")
+        || overlap(filter, "$aws/things/+/defender/#"))
 }
 
 impl BridgeConfig {
@@ -151,7 +152,7 @@ impl BridgeConfig {
                 let produced = format!("{}{}", m.target_topic_prefix, m.topic);
                 let cloud_side = if m.source == Endpoint::IotCore { &m.topic } else { &produced };
                 anyhow::ensure!(!reaches_aws_shadows(cloud_side) && !reaches_aws_shadows(&produced),
-                    "IotCore mapping {:?} reaches AWS shadow topics, which belong to shadow synchronization ([shadows.aws_iot])", m.topic);
+                    "IotCore mapping {:?} reaches AWS shadow topics or Defender topics, which belong to shadow synchronization ([shadows.aws_iot])", m.topic);
                 anyhow::ensure!(iotcore::within_aws_limits(cloud_side), "IotCore mapping topic {cloud_side:?} exceeds AWS IoT Core topic limits (256 bytes, 7 slashes)");
             }
         }
@@ -338,6 +339,13 @@ impl Bridge {
 
     fn uses(&self, link: Endpoint) -> bool {
         self.config.mappings.iter().any(|m| m.source == link || m.target == link)
+    }
+
+    /// The counters telemetry reports as the local MQTT bridge (SF-085), only
+    /// when this task runs a local broker session. A task serving only AWS IoT
+    /// Core never connects locally; reporting it would look disconnected.
+    pub fn local_stats(&self) -> Option<Arc<Mutex<Stats>>> {
+        self.uses(Endpoint::LocalMqtt).then(|| self.stats.clone())
     }
 
     fn iot_stats(&self, update: impl FnOnce(&mut IotStats)) {
@@ -1020,6 +1028,19 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[test]
+    fn defender_topics_are_reserved_from_component_bridges() {
+        for (source, target, topic, prefix) in [
+            (Endpoint::Pubsub, Endpoint::IotCore, "$aws/things/dev1/defender/metrics/json", ""),
+            (Endpoint::IotCore, Endpoint::Pubsub, "$aws/things/+/defender/#", ""),
+            (Endpoint::IotCore, Endpoint::Pubsub, "$aws/#", ""),
+            (Endpoint::Pubsub, Endpoint::IotCore, "#", "$aws/things/dev1/defender/"),
+        ] {
+            let cfg = config(vec![mapping(topic, source, target, prefix)]);
+            assert!(cfg.validate(true).is_err(), "accepted Defender bridge {topic}");
+        }
+    }
+
     fn aws_iot_cases() -> Value {
         serde_json::from_str(include_str!("../../interfaces/compat/aws-iot-cases.json")).unwrap()
     }
@@ -1123,6 +1144,21 @@ mod tests {
         assert_eq!(to_value(br#"{"v":1}"#), json!({ "v": 1 }));
         assert_eq!(to_value(b"plain text"), json!("plain text"));
         assert_eq!(to_value(&[0xff, 0x00]), json!({ "base64": "/wA=" }));
+    }
+
+    /// SF-085: only a task with a local broker session reports bridge health;
+    /// an AWS IoT Core-only task would otherwise read as a disconnected bridge.
+    #[test]
+    fn local_stats_only_with_a_local_broker_session() {
+        let dir = std::env::temp_dir().join(format!("suifleet-bridge-local-stats-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let broker = Arc::new(Mutex::new(pubsub::Broker::open(&dir.join("pubsub"), pubsub::Limits::default()).unwrap()));
+        let task = |mappings| Bridge::new(config(mappings), broker.clone(), dir.join("bridge.json")).unwrap();
+        assert!(task(vec![]).local_stats().is_none());
+        assert!(task(vec![mapping("t/#", Endpoint::Pubsub, Endpoint::IotCore, "")]).local_stats().is_none());
+        let local = task(vec![mapping("t/#", Endpoint::Pubsub, Endpoint::IotCore, ""), mapping("lan/#", Endpoint::LocalMqtt, Endpoint::Pubsub, "")]);
+        assert!(Arc::ptr_eq(&local.local_stats().unwrap(), &local.stats));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

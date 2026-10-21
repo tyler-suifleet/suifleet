@@ -28,10 +28,14 @@ The service is not a signing oracle. It decodes every request itself, independen
   - Until the record is written, just after the daemon is ready, a report is refused and stays queued for the next poll.
 - **Enrollment** (SF-021): exactly `enrollment::enroll` with the manifest's registry, sponsored by another address within the enrollment gas ceiling. Signed only for root, the provisioning operator.
 - **Telemetry** (SF-019, [TELEMETRY.md](TELEMETRY.md)): a Sui personal message, never valid as a transaction, that is exactly the canonical JSON of one telemetry snapshot: known schema and fields only, at most 64 KiB, the manifest's chain identifier and registry, and this key as signer. Signed only for the daemon's main process, by the same rule as status reports. Its health content is the daemon's own report: a compromised daemon could misreport its own device's health, as it could misreport a deployment status, but cannot sign for another chain, registry or key.
+- **Seal key requests** (SF-022, only when `signer.toml` has `[seal]`): only for the daemon's main process.
+  - The service creates an ephemeral session key, certifies it with the device key as a Sui personal message for the fleet package's Seal namespace, and keeps it in memory.
+  - It signs a key request only when its transaction is solely `seal_policy::seal_approve*` calls on the fleet package, with the identity first and read-only shared objects, and the response key pair is consistent.
+  - The daemon receives the public certificate and the request signature, never the session or device key. See [CONFIDENTIAL_DELIVERY.md](CONFIDENTIAL_DELIVERY.md).
 
 - **Client-device CA binding** (SF-035, [CLIENT_DEVICES.md](CLIENT_DEVICES.md#discovery)): a Sui personal message that is exactly the canonical JSON `{schema: 1, kind: "client-device-ca", ...}` naming the manifest's chain and registry, this key as signer, a device ID and a SHA-256 CA fingerprint; at most 1 KiB. Signed only for the daemon's main process, by the same rule as telemetry. A compromised daemon could bind its own device to another CA, as it already controls that device's gateway, but cannot sign for another chain, registry or key.
 
-Any process may read the device's public address. There is no export, arbitrary-bytes, arbitrary personal-message or session operation.
+Any process may read the device's public address. There is no export, arbitrary-bytes or arbitrary personal-message operation; the only personal messages signed are telemetry snapshots, client-device CA bindings and the Seal session certificate above.
 
 ## Migration
 
@@ -69,7 +73,7 @@ Not protected:
 - **A compromised daemon:** it can request status reports, which are bounded to this device's reports, but not arbitrary signatures, and it cannot read the key.
 - **Components influencing the daemon:** components still run as the daemon's user and can interfere with it, for example by killing it or writing its state directory. Killing it gains no signature. Writing the daemon-update launcher state gains none either: the launcher ignores it with the service signer, and the recorder would not record another executable (see above). Component-level user separation, which would let self-update and the service signer coexist, is future work.
 
-Reusable session credentials, such as Seal sessions for SF-022, must get their own explicit intent and validation in this service. They must not be handed to the daemon.
+Seal sessions (SF-022) have their own intent and validation in this service, and are not handed to the daemon. Any further reusable credential needs the same treatment.
 
 ## Evidence
 

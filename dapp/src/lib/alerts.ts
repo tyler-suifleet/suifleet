@@ -5,8 +5,13 @@ import { TELEMETRY_URL } from "@/lib/telemetry";
  * and indexed receipts. Unlike device health, the dApp cannot re-derive these
  * from the chain alone, so they are shown as reported by the indexer.
  */
-export type AlertKind = "component-broken" | "deployment-failed" | "device-offline" | "device-degraded" | "deployment-pending";
-export const ALERT_KINDS: readonly AlertKind[] = ["component-broken", "deployment-failed", "device-offline", "device-degraded", "deployment-pending"];
+export type AlertKind = "component-broken" | "deployment-failed" | "device-offline" | "device-degraded" | "deployment-pending"
+  // Service health (SF-085): pub/sub, MQTT bridge, streams and shadow sync.
+  | "messaging-backpressure" | "messaging-loss" | "bridge-disconnected" | "stream-near-limit" | "stream-data-lost"
+  | "export-failing" | "shadow-sync-failing" | "shadow-conflict";
+export const ALERT_KINDS: readonly AlertKind[] = ["component-broken", "deployment-failed", "device-offline", "device-degraded", "deployment-pending",
+  "messaging-backpressure", "messaging-loss", "bridge-disconnected", "stream-near-limit", "stream-data-lost",
+  "export-failing", "shadow-sync-failing", "shadow-conflict"];
 
 export interface FleetAlert {
   key: string;

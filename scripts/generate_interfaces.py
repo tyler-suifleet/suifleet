@@ -271,6 +271,7 @@ def generate(catalog, recipe):
           f'export const SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS = {json.dumps(catalog["supported_deployment_schema_versions"])} as const;',
           f'export const CATALOG_TYPES = {json.dumps(catalog["optional_type_origins"]["component_catalog"])} as const;',
           f'export const HANDOVER_TYPES = {json.dumps(catalog["optional_type_origins"]["fleet_handover"])} as const;',
+          f'export const SEAL_POLICY_TYPES = {json.dumps(catalog["optional_type_origins"]["seal_policy"])} as const;',
           f'export const STATUS = {json.dumps(catalog["statuses"])} as const;',
           f'export const RECIPE_VERSION = {json.dumps(recipe["properties"]["schemaVersion"]["enum"][0])} as const;',
           f'export const RECIPE_VERSIONS = {json.dumps(recipe["properties"]["schemaVersion"]["enum"])} as const;',
@@ -284,6 +285,7 @@ def generate(catalog, recipe):
             f'pub const DEPLOYMENT_SCHEMA_VERSION: u64 = {catalog["deployment_schema_version"]};',
             f'pub const SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS: &[u64] = &{json.dumps(catalog["supported_deployment_schema_versions"])};',
             'pub const CATALOG_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["component_catalog"]) + '];',
+            'pub const SEAL_POLICY_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["seal_policy"]) + '];',
             f'pub const RECIPE_VERSION: &str = {json.dumps(recipe["properties"]["schemaVersion"]["enum"][0])};',
             'pub const RECIPE_VERSIONS: &[&str] = &[' + ', '.join(json.dumps(v) for v in recipe["properties"]["schemaVersion"]["enum"]) + '];',
             *[f"pub const STATUS_{name.upper()}: u8 = {value};" for name, value in catalog["statuses"].items()],
@@ -319,6 +321,8 @@ def generate(catalog, recipe):
                     types += [f"{arg}: (number | bigint | string)[]"]; arguments += [f"tx.pure(bcs.vector(bcs.u64()).serialize({arg}))"]
                 elif base == "u8":
                     types += [f"{arg}: number"]; arguments += [f"tx.pure.u8({arg})"]
+                elif base == "vector<u8>":
+                    types += [f"{arg}: Uint8Array | number[]"]; arguments += [f'tx.pure.vector("u8", {arg})']
                 elif base == "u64":
                     types += [f"{arg}: number | bigint | string"]; arguments += [f"tx.pure.u64({arg})"]
                 else:

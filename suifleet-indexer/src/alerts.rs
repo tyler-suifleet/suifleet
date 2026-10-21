@@ -9,6 +9,9 @@
 //! | `device-offline` | warning | the device stopped reporting |
 //! | `device-degraded` | warning | the device reports problems, or its report is delayed or inconsistent |
 //! | `deployment-pending` | warning | an online device has not reported a deployment older than the threshold |
+//!
+//! An online device's newest report also raises the service-health alerts of
+//! its services section (SF-085, `crate::services::conditions`).
 use crate::store::{self, Device, Filter};
 use crate::telemetry::{self, Status};
 use rusqlite::{params, Connection};
@@ -59,7 +62,7 @@ pub fn for_device(index: &Connection, telemetry: &Connection, device: &Device, n
         deployment_id: None,
         component: None,
         message: bounded(&message),
-        action: action.into(),
+        action: bounded(action),
         since_ms: since,
     };
     let online = matches!(health.assessment.status, Status::Healthy | Status::Degraded);
@@ -93,6 +96,11 @@ pub fn for_device(index: &Connection, telemetry: &Connection, device: &Device, n
             ));
         }
         _ => {}
+    }
+    if online {
+        for c in health.report.as_ref().map(|r| crate::services::conditions(&r.snapshot)).unwrap_or_default() {
+            alerts.push(alert(c.kind, c.severity, &c.subject, c.message, &c.action, c.since_ms));
+        }
     }
     let filter = Filter { device: Some(device.id.clone()), ..Filter::default() };
     let mut cursor = None;
@@ -311,6 +319,32 @@ mod tests {
         // Fleet view: critical first.
         let all = fleet_alerts(&f, later);
         assert_eq!(all[0].severity, "critical");
+    }
+
+    #[test]
+    fn service_health_raises_actionable_alerts_while_online() {
+        let f = setup();
+        let now = 1_120_000;
+        report(&f, |s| {
+            (s.schema, s.services) = (2, Some(crate::services::tests::services()));
+            s.health = "degraded".into();
+            s.reasons = vec!["MQTT bridge disconnected for 120 s: connection-refused".into()];
+        }, now);
+        let me = store::read_device(&f.index, &crate::chain::normalize("0xd1").unwrap()).unwrap().unwrap();
+        let alerts = for_device(&f.index, &f.telemetry, &me, now, DEFAULT_STUCK_AFTER_MS).unwrap();
+        assert_eq!(kinds(&alerts), ["device-degraded", "messaging-backpressure", "messaging-loss", "bridge-disconnected", "stream-near-limit",
+                                    "stream-data-lost", "export-failing", "shadow-conflict"]);
+        let keys: std::collections::BTreeSet<_> = alerts.iter().map(|a| a.key.as_str()).collect();
+        assert_eq!(keys.len(), alerts.len(), "stable, distinct keys");
+        let failing = alerts.iter().find(|a| a.kind == "export-failing").unwrap();
+        assert_eq!((failing.severity, failing.key.as_str()), ("critical", "export-failing:0x00000000000000000000000000000000000000000000000000000000000000d1:metrics"));
+        assert!(failing.message.contains("http-server-error") && failing.action.contains("destination"));
+        // The fleet view puts data loss and failing exports first.
+        let all = fleet_alerts(&f, now);
+        assert_eq!(all.iter().take(2).map(|a| a.kind).collect::<Vec<_>>(), ["export-failing", "stream-data-lost"]);
+        // An offline device's last report raises no service alerts.
+        let later = now + 4 * 60_000;
+        assert_eq!(kinds(&for_device(&f.index, &f.telemetry, &me, later, DEFAULT_STUCK_AFTER_MS).unwrap()), ["device-offline"]);
     }
 
     fn fleet_alerts(f: &Fleet, now: u64) -> Vec<Alert> {

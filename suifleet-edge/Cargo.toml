@@ -21,7 +21,8 @@ bcs = "0.1"
 # and no OpenSSL to cross-compile for release artifacts.
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "http2", "charset", "rustls-tls-native-roots"] }
 tokio = { version = "1", features = ["full"] }
-# AWS IoT Core key material is wiped after loading (SF-061).
+# AWS IoT Core key material (SF-061) and Seal plaintext/keys (SF-022) are
+# wiped after use.
 zeroize = "1"
 futures-util = "0.3"
 # Mutual TLS for LAN client devices (SF-035) and AWS IoT Core (SF-061) on the
@@ -46,6 +47,16 @@ fs2 = "0.4"
 libc = "0.2"
 shell-words = "1"
 digest = "0.10"
+
+# Seal threshold decryption (SF-022): BLS12-381 IBE, ElGamal and the DEMs
+# (AES-256-GCM, HMAC-SHA3-256 CTR), in pure Rust for every target.
+ark-bls12-381 = "0.5"
+ark-ec = "0.5"
+ark-ff = "0.5"
+ark-serialize = "0.5"
+aes-gcm = "0.10"
+hmac = "0.12"
+sha3 = "0.10"
 
 # Config + serialisation
 serde = { version = "1", features = ["derive"] }

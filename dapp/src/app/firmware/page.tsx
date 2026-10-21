@@ -5,7 +5,10 @@ import { useCurrentAccount } from "@mysten/dapp-kit-react";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import { useGroups } from "@/hooks/useGroups";
 import { useDevices } from "@/hooks/useDevices";
-import { uploadArtifact, uploadRecipe, renewalCommand, storageWarnings, type ComponentRecipe, type StorageInfo } from "@/lib/walrus";
+import { uploadArtifact, uploadRecipe, renewalCommand, storageWarnings, type ComponentRecipe, type Protection, type StorageInfo } from "@/lib/walrus";
+import { DEFAULT_DELIVERY, releaseProtection } from "@/lib/delivery";
+import { useAccessPolicies } from "@/hooks/useAccessPolicies";
+import { DeliveryFields } from "@/components/DeliveryFields";
 import { buildCreateDeploymentTx } from "@/lib/sui";
 import { buildDesiredRevisionTx } from "@/lib/desired-state";
 import { fetchVersion, buildCatalogDeploymentTx, type ComponentVersion } from "@/lib/catalog";
@@ -23,6 +26,7 @@ interface ArtifactResult {
   sha256: string;
   fileName: string;
   storage: StorageInfo;
+  confidential: boolean;
 }
 
 export default function FirmwarePage() {
@@ -36,6 +40,10 @@ export default function FirmwarePage() {
   }, [client]);
   const { data: groups = [] } = useGroups();
   const { data: devices = [] } = useDevices();
+  const { data: policies = [] } = useAccessPolicies();
+  const [delivery, setDelivery] = useState(DEFAULT_DELIVERY);
+  // One release identity: the recipe reuses the artifact's protection.
+  const [protection, setProtection] = useState<Protection | null>(null);
   const { mutate: signAndExecute, isPending: txPending } = useFleetTransaction();
 
   const [step, setStep] = useState<Step>("artifact");
@@ -66,7 +74,9 @@ export default function FirmwarePage() {
     }
     setUploading(true);
     try {
-      const result = await uploadArtifact(file, account?.address ?? null);
+      const release = releaseProtection(client, delivery, policies);
+      const result = await uploadArtifact(file, account?.address ?? null, release);
+      setProtection(release);
       setArtifact({ ...result, fileName: file.name });
       setStep("recipe");
     } catch (err) {
@@ -74,7 +84,7 @@ export default function FirmwarePage() {
     } finally {
       setUploading(false);
     }
-  }, [componentName, version, account?.address]);
+  }, [componentName, version, account?.address, client, delivery, policies]);
 
   const desiredTargets = desired && selectedDevices.size === 0 && selectedGroups.size > 0;
 
@@ -89,7 +99,7 @@ export default function FirmwarePage() {
         onSuccess:res=>{setTxDigest(res.digest);setStep("done");},onError:err=>alert(err.message),
       }); return;
     }
-    if (!artifact) return;
+    if (!artifact || !protection) return;
     if (desired && selectedDevices.size > 0) {
       alert("Desired state targets groups only. Clear the individual devices, or untick desired state for a one-shot deployment.");
       return;
@@ -105,7 +115,7 @@ export default function FirmwarePage() {
 
     let recipeUpload: Awaited<ReturnType<typeof uploadRecipe>>;
     try {
-      recipeUpload = await uploadRecipe(recipe, account?.address ?? null);
+      recipeUpload = await uploadRecipe(recipe, account?.address ?? null, protection);
       setRecipeStorage(recipeUpload.storage);
     } catch (err) {
       alert(`Recipe upload failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -182,6 +192,7 @@ export default function FirmwarePage() {
           <p className="font-semibold text-gray-800">Deployment created</p>
           <p className="text-xs font-mono text-gray-400">{txDigest}</p>
           <div className="text-left space-y-2">
+            {artifact && <p className="text-xs text-gray-600">{artifact.confidential ? "Confidential: artifact and recipe were Seal-encrypted before upload." : "Public: artifact and recipe are readable by anyone."}</p>}
             {artifact && <StorageSummary label="Artifact storage" storage={artifact.storage} />}
             {recipeStorage && <StorageSummary label="Recipe storage" storage={recipeStorage} />}
           </div>
@@ -189,7 +200,7 @@ export default function FirmwarePage() {
             <Link href="/deployments" className="text-sm text-[#4DA2FF] hover:underline">View deployments</Link>
             <button
               onClick={() => {
-                setStep("artifact"); setArtifact(null); setRecipeStorage(null);
+                setStep("artifact"); setArtifact(null); setRecipeStorage(null); setProtection(null); setDelivery(DEFAULT_DELIVERY);
                 setComponentName(""); setVersion(""); setDescription("");
                 setInstallCmd(""); setRunCmd(""); setShutdownCmd(""); setReadinessCmd(""); setRestartPolicy("on-failure");
                 setConfiguration(EMPTY_CONFIGURATION);
@@ -239,6 +250,7 @@ export default function FirmwarePage() {
           <Field label="Component name" value={componentName} onChange={setComponentName} placeholder="my-app" disabled={step !== "artifact"} />
           <Field label="Version" value={version} onChange={setVersion} placeholder="1.0.0" disabled={step !== "artifact"} />
         </div>
+        <DeliveryFields value={delivery} onChange={setDelivery} policies={policies} disabled={step !== "artifact"} />
         <div
           onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
           onDragLeave={() => setDragOver(false)}
