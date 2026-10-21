@@ -1,0 +1,48 @@
+[Unit]
+Description=SuiFleet explicitly configured secure tunnel destination adapter
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/suifleet-tunnel/config.json
+
+[Service]
+Type=simple
+User=suifleet-tunnel
+Group=suifleet-tunnel
+ExecStart=/usr/bin/suifleet --secure-tunneling /etc/suifleet-tunnel/config.json
+Restart=on-failure
+RestartSec=5
+# Session shutdown, component replacement and adapter crash leave no descendants.
+KillMode=control-group
+TimeoutStopSec=5
+UMask=0077
+WorkingDirectory=/usr/share/suifleet-tunnel/empty
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectProc=invisible
+ProcSubset=pid
+# This service has no device identity, chain permissions or component IPC socket.
+InaccessiblePaths=-/etc/suifleet -/var/lib/suifleet -/run/suifleet -/run/suifleet-signer
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+LimitCORE=0
+LimitNOFILE=256
+TasksMax=64
+MemoryMax=128M
+
+[Install]
+WantedBy=multi-user.target
