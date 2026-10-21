@@ -142,6 +142,9 @@ impl BridgeConfig {
             anyhow::ensure!(pubsub::valid_filter(&m.topic), "invalid bridge mapping topic filter {:?}", m.topic);
             anyhow::ensure!(!m.target_topic_prefix.contains(['+', '#', '\0']) && m.target_topic_prefix.len() <= 128, "invalid target_topic_prefix");
             if m.source == Endpoint::IotCore || m.target == Endpoint::IotCore {
+                let produced = format!("{}{}", m.target_topic_prefix, m.topic);
+                anyhow::ensure!(![m.topic.as_str(), produced.as_str()].iter().any(|f| f.starts_with('$') && overlap(f, "$aws/things/+/tunnels/#")),
+                    "tunnel topics belong exclusively to the isolated secure-tunneling adapter");
                 // The thing's shadow topics belong to shadow synchronization:
                 // the bridge neither publishes there nor injects cloud
                 // messages as local shadow notifications.

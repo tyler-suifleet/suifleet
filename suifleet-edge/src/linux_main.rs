@@ -3,6 +3,8 @@ mod catalog;
 // Linux only (prctl, openat2), like its catalog platforms.
 #[cfg(target_os = "linux")]
 mod cloudwatch_logs;
+#[cfg(target_os = "linux")]
+mod tunneling;
 mod clientdevices;
 mod client_gateway;
 mod control;
@@ -104,10 +106,11 @@ async fn main() -> anyhow::Result<()> {
     let check_config = args.len() == 3 && args[1] == "--check-config";
     let helper = args.len() == 3 && args[1] == "--firmware-helper";
     let signer_service = args.len() == 3 && args[1] == "--signer-service";
+    let tunneling = args.len() == 3 && args[1] == "--secure-tunneling";
     let cloudwatch_logs = args.len() == 3 && args[1] == "--cloudwatch-logs";
     anyhow::ensure!(
-        args.len() == 1 || launched || check_config || helper || signer_service || cloudwatch_logs,
-        "usage: suifleet [--launch | --provision KEY_PATH | --derive-address KEY_PATH | --enroll ENROLL_TOML | --check-config CONFIG_PATH | --self-check CONFIG_PATH | --firmware-helper CONFIG | --signer-service SIGNER_TOML | --cloudwatch-logs CONFIG_JSON | --record-main-process PATH | --key-holder CONFIG_PATH | --verify-release BUNDLE_DIR TRUST_FILE [TARGET]]"
+        args.len() == 1 || launched || check_config || helper || signer_service || cloudwatch_logs || tunneling,
+        "usage: suifleet [--launch | --provision KEY_PATH | --derive-address KEY_PATH | --enroll ENROLL_TOML | --check-config CONFIG_PATH | --self-check CONFIG_PATH | --firmware-helper CONFIG | --signer-service SIGNER_TOML | --cloudwatch-logs CONFIG_JSON | --secure-tunneling CONFIG_JSON | --record-main-process PATH | --key-holder CONFIG_PATH | --verify-release BUNDLE_DIR TRUST_FILE [TARGET]]"
     );
     {
         use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -121,6 +124,12 @@ async fn main() -> anyhow::Result<()> {
     if signer_service {
         // Runs as its own user, holding the device key (SF-053).
         return signer_service::serve(Path::new(&args[2]));
+    }
+    if tunneling {
+        #[cfg(target_os = "linux")]
+        return tunneling::run(Path::new(&args[2])).await;
+        #[cfg(not(target_os = "linux"))]
+        anyhow::bail!("the secure tunneling adapter runs on Linux only");
     }
     if cloudwatch_logs {
         // Runs as its own user with scoped AWS credentials (SF-060).
