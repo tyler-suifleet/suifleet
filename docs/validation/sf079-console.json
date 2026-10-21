@@ -54,8 +54,8 @@
     "suifleet-edge/src/console/console.js": "8add9140e4fcc658abd5302d8ae71fd3bb7b69ea5a2e1bc8baca06e2cd61387a",
     "suifleet-edge/src/console/console.css": "e4c19b3253b6e14f1673f140e0fc6bb018215c58d36e68cca4de5e12bdbe74dd",
     "suifleet-edge/src/main.rs": "732530d01b65f4744b7f9aa0a541cc1b750b88a33ec6d4cf5d416a8777fa349f",
-    "suifleet-edge/src/linux_main.rs": "4cf78e3b956a0c273b78d7798743c94193ed5f4b31abc9bdf2c353d0d7e79848",
-    "suifleet-edge/src/config.rs": "388d1894cb042a14150ea7e57ad5d0634940e5a3e91785bfb09491055b37eeee",
+    "suifleet-edge/src/linux_main.rs": "46ce73049644a1ca41b2353c7576b45f49463927014e1855eb06ff6256947170",
+    "suifleet-edge/src/config.rs": "c9d10bdf635f394b90f5e5fcc62e5e340fe092bab264dde69f255c3789afa226",
     "scripts/test_console.py": "f3abc95042da84d427e873c6c001a5c0c0f4b50f5dce361497d6dcabe21a4068",
     "scripts/test_console_browser.cjs": "655be209b5496347abac83c573acdde84bb1592ac469e01584a80b52a056469a",
     "interfaces/compat/remaining-roadmap-cases.json": "2b3d02d28570af01d5bf58005f7b08d5f67d1991daf3acc792492d2a7e6272b7"
@@ -68,5 +68,5 @@
     "Not AWS LocalDebugConsole UI/API compatibility: no configuration editor, pub/sub/MQTT client or stream manager views.",
     "No AWS account, service, production credential or production exposure was used or provisioned."
   ],
-  "tested_tree": "SF-079 branch at 4ee94ff (multiline quoted-credential log redaction fix from the review of 1b89dd1) merged with origin/main 64d8d1c (SF-085 service health) in b28bb2d; clean merge, console sources unchanged by it. On this tree (suifleet-dev:sf037, rust 1.94.0, network none): cargo test --locked 338 passed, 0 failed; cargo test --features pkcs11 340 passed, 0 failed; make test-ota exit 0 (full simulator suite including test_console.py: 191 audit records, svc2 multiline quoted-credential fixtures checked at log limits 1-8 and 200); make test-compat passed. On 4ee94ff before that merge: scripts/test_console.py --browser (suifleet-dev:sf010-chrome) passed (208 audit records). Not rerun on this tree: test_console.py --browser, test_ipc.py, test_services.py, test-sns, test-aws-iot, dapp-typecheck and Trivy."
+  "tested_tree": "SF-079 branch at 4ee94ff (multiline quoted-credential log redaction fix from the review of 1b89dd1) merged with origin/main 64d8d1c (SF-085) in b28bb2d and origin/main 2a30a73 (SF-062 Device Defender) in a4c7ea2; clean merges, console sources unchanged by them. On a4c7ea2 (suifleet-dev:sf037, rust 1.94.0, network none): cargo test --locked 348 passed, 0 failed; cargo test --features pkcs11 350 passed, 0 failed; make test-ota exit 0 (full simulator suite including test_console.py: 192 audit records, svc2 multiline quoted-credential fixtures checked at log limits 1-8 and 200); make test-compat passed. On 4ee94ff before those merges: scripts/test_console.py --browser (suifleet-dev:sf010-chrome) passed (208 audit records). Not rerun on this tree: test_console.py --browser, test_ipc.py, test_services.py, test-sns, test-aws-iot, dapp-typecheck and Trivy."
 }
