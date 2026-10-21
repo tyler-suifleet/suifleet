@@ -180,22 +180,39 @@ pub struct Credentials {
     digest: [u8; 32],
 }
 
+/// The digest of a CA, certificate and key, in that order.
+fn digest(files: [&[u8]; 3]) -> [u8; 32] {
+    let mut hash = Sha256::new();
+    for bytes in files {
+        hash.update((bytes.len() as u64).to_be_bytes());
+        hash.update(bytes);
+    }
+    hash.finalize().into()
+}
+
 /// The files' current digest, or None when one cannot be read.
 fn files_digest(config: &IotConfig) -> Option<[u8; 32]> {
-    let mut hash = Sha256::new();
-    for path in [&config.ca_file, &config.certificate_file, &config.private_key_file] {
-        let bytes = zeroize::Zeroizing::new(std::fs::read(path).ok()?);
-        hash.update((bytes.len() as u64).to_be_bytes());
-        hash.update(&*bytes);
-    }
-    Some(hash.finalize().into())
+    let ca = std::fs::read(&config.ca_file).ok()?;
+    let chain = std::fs::read(&config.certificate_file).ok()?;
+    let key = zeroize::Zeroizing::new(std::fs::read(&config.private_key_file).ok()?);
+    Some(digest([&ca, &chain, &key]))
+}
+
+/// The credential files as read once; everything loaded derives from these bytes.
+struct Files {
+    ca: Vec<u8>,
+    chain: Vec<u8>,
+    key: zeroize::Zeroizing<Vec<u8>>,
 }
 
 impl Credentials {
     /// Read and check the CA, certificate and key. Errors name the file and
     /// problem, never key material.
     pub fn load(config: &IotConfig) -> anyhow::Result<Self> {
-        use rustls::pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
+        Self::from_files(config, Self::read(config)?)
+    }
+
+    fn read(config: &IotConfig) -> anyhow::Result<Files> {
         let read = |name: &str, path: &Path| std::fs::read(path).map_err(|e| anyhow::anyhow!("cannot read aws_iot.{name} {}: {}", path.display(), e.kind()));
         #[cfg(unix)]
         {
@@ -205,9 +222,19 @@ impl Credentials {
                 .permissions().mode();
             anyhow::ensure!(mode & 0o077 == 0, "aws_iot.private_key_file {} must be readable by its owner only (mode 0600)", config.private_key_file.display());
         }
-        let ca = read("ca_file", &config.ca_file)?;
-        let chain = read("certificate_file", &config.certificate_file)?;
-        let key = zeroize::Zeroizing::new(read("private_key_file", &config.private_key_file)?);
+        Ok(Files {
+            ca: read("ca_file", &config.ca_file)?,
+            chain: read("certificate_file", &config.certificate_file)?,
+            key: zeroize::Zeroizing::new(read("private_key_file", &config.private_key_file)?),
+        })
+    }
+
+    /// Build the TLS identity from `files`. The rotation digest covers these
+    /// exact bytes, so a replacement made after they were read is noticed.
+    fn from_files(config: &IotConfig, files: Files) -> anyhow::Result<Self> {
+        use rustls::pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
+        let digest = digest([&files.ca, &files.chain, &files.key]);
+        let Files { ca, chain, key } = files;
         let mut roots = rustls::RootCertStore::empty();
         for cert in CertificateDer::pem_slice_iter(&ca) {
             roots.add(cert.map_err(|_| anyhow::anyhow!("aws_iot.ca_file holds an invalid PEM certificate"))?)
@@ -227,7 +254,6 @@ impl Credentials {
             .with_client_auth_cert(chain, key)
             .map_err(|e| anyhow::anyhow!("aws_iot certificate and private key are unusable together: {e}"))?;
         tls.alpn_protocols = config.alpn().map(|a| vec![a.as_bytes().to_vec()]).unwrap_or_default();
-        let digest = files_digest(config).ok_or_else(|| anyhow::anyhow!("aws_iot credential files changed while loading"))?;
         Ok(Self { tls: Arc::new(tls), certificate_sha256, digest })
     }
 
@@ -656,6 +682,52 @@ mod tests {
         std::fs::remove_file(&c.private_key_file).unwrap();
         assert!(Credentials::load(&c).err().unwrap().to_string().contains("private_key_file"));
         assert!(files_digest(&c).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A self-signed CA, a thing certificate it issued and the thing key, as PEM.
+    fn identity_set() -> [String; 3] {
+        let ca_key = rcgen::KeyPair::generate().unwrap();
+        let mut ca_params = rcgen::CertificateParams::new(vec![]).unwrap();
+        ca_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+        let ca = ca_params.self_signed(&ca_key).unwrap();
+        let thing_key = rcgen::KeyPair::generate().unwrap();
+        let thing = rcgen::CertificateParams::new(vec!["dev1".into()]).unwrap()
+            .signed_by(&thing_key, &rcgen::Issuer::from_params(&ca_params, &ca_key)).unwrap();
+        [ca.pem(), thing.pem(), thing_key.serialize_pem()]
+    }
+
+    fn install(c: &IotConfig, [ca, cert, key]: &[String; 3]) {
+        std::fs::write(&c.ca_file, ca).unwrap();
+        std::fs::write(&c.certificate_file, cert).unwrap();
+        std::fs::write(&c.private_key_file, key).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&c.private_key_file, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+
+    #[test]
+    fn a_rotation_completed_while_loading_is_noticed() {
+        let dir = std::env::temp_dir().join(format!("suifleet-iot-rotate-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut c = config();
+        c.ca_file = dir.join("ca.pem");
+        c.certificate_file = dir.join("cert.pem");
+        c.private_key_file = dir.join("key.pem");
+        let (old, new) = (identity_set(), identity_set());
+        install(&c, &old);
+        let unchanged = Credentials::load(&c).unwrap();
+        assert!(!unchanged.rotated(&c), "an unchanged set is not a rotation");
+        // The operator finishes installing the new set after the old files
+        // were read but before the TLS identity is built from them.
+        let read = Credentials::read(&c).unwrap();
+        install(&c, &new);
+        let loaded = Credentials::from_files(&c, read).unwrap();
+        assert_eq!(loaded.certificate_sha256, unchanged.certificate_sha256, "the identity is the old set's");
+        assert!(loaded.rotated(&c), "the new set on disk differs from the loaded identity");
+        let reloaded = Credentials::load(&c).unwrap();
+        assert_ne!(reloaded.certificate_sha256, loaded.certificate_sha256);
+        assert!(!reloaded.rotated(&c));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
