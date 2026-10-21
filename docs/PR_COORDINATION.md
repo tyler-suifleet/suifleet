@@ -154,3 +154,48 @@ Public Sui testnet testing is user-authorized for this project through explicit 
 ```
 
 This grant is absent by default and validated before claiming/launching. Worker prompts permit planned testnet publication/upgrades and test-gas funding, require chain/account/authority verification and coordinated machine mutation locks, and retain the mainnet/production/hardware boundaries. Account setup and the live runner are supplied by [PR #63](https://github.com/tyler-suifleet/suifleet/pull/63), tracked in [SF-010](https://github.com/tyler-suifleet/suifleet/issues/11). Do not duplicate Claude's active testnet run or expose wallet contents. CI still follows its configured environment controls; this does not provision CI secrets or production signing credentials.
+
+### Transient transport failures and scoped repairs (SF-093)
+
+Known read-only GitHub operations, `git fetch`/`ls-remote`, and idempotent ticket
+refresh have at most three attempts with bounded backoff and read timeouts.
+Authentication/permission failures remain actionable; unknown mutation outcomes
+are reconciled rather than blindly replayed. A missing PR snapshot never becomes
+an approval or empty feedback. Failed snapshots, worker collection and merged-PR
+discovery items are deferred independently so healthy PRs keep progressing.
+
+The standalone ticket engine also retries individual GitHub snapshot reads;
+install its reviewed `ticket_transport.py` version alongside the coordinator
+repair. Refresh still imports only a complete snapshot and preserves reservations
+on failure. A successful refresh is required before dispatching new work.
+
+For a coordinator repair while the installed dispatcher has a newer independent
+fix, use `python3 tools/pr-coordinator/install.py --coordinator-only`, then restart
+`pr-coordinator.service` and `ticket-dispatcher.service` so both import the updated
+shared read helper. This preserves worker/dispatcher code, service units, private
+configuration and databases. Back up the previous installed files and record
+hashes/tests before replacement; restore those files and restart parents to roll
+back. Parent restarts preserve existing worker sessions under `KillMode=process`;
+never clear reservations or restart uncertain workers to make capacity appear free.
+
+### Feedback launch publication recovery
+
+Before resuming a Review claim, the coordinator persists launch intent in its
+SQLite job row: claim-token hash, ticket, branch, worktree and exact PR head.
+If resume changes local ownership but its Project mirror fails, the job retains
+its reservation and retries after five minutes. Recovery reads durable ownership,
+requires matching intent and a clean branch at that head, publishes any pending
+revision, and asserts the claim. It does not repeat resume for an In progress claim.
+Recovery uses fresh base, feedback and checks while retaining the reserved receipt
+directory and its original feedback reservation key. Fresh snapshot feedback is
+used by the worker without rewriting that key, avoiding collisions with another
+reserved or completed job. A changed head or ownership, dirty
+checkout, PID or worker receipt stops this path for explicit inspection; arbitrary In progress claims never authorize launch.
+
+Immediately before spawning the worker the coordinator clears recoverable intent.
+An interruption beyond this boundary without a process receipt is uncertain and
+requires manual recovery; it cannot automatically launch a duplicate worker.
+Existing worker receipts continue through normal process-identity reconciliation.
+This repair changes only coordinator code/database schema, not dispatcher or
+ticket-tool behavior. Use the coordinator-only installation/backup/rollback steps
+above after independent review; this feedback worker does not install services.
