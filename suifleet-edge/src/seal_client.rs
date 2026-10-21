@@ -366,6 +366,19 @@ async fn body(response: reqwest::Response) -> anyhow::Result<Vec<u8>> {
     Ok(out)
 }
 
+/// The key-server HTTP client. Redirects are refused: only the URL read from
+/// the on-chain key-server object is checked by `transport`, and a followed
+/// redirect would carry the configured provider credential (for example an
+/// `X-API-Key` header, which reqwest keeps across origins) to an unchecked
+/// origin or over plain HTTP.
+fn http_client(timeout: Duration) -> reqwest::Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .connect_timeout(timeout)
+        .timeout(timeout)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+}
+
 impl KeyServer {
     fn request(&self, http: &reqwest::Client, method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
         let mut request = http
@@ -450,10 +463,7 @@ impl Seal {
             crate::protocol::SEAL_POLICY_TYPES.iter().all(|name| sui.manifest().type_origins.contains_key(*name)),
             "[seal] needs a deployment manifest whose package includes seal_policy"
         );
-        let http = reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(config.request_timeout_seconds))
-            .timeout(Duration::from_secs(config.request_timeout_seconds))
-            .build()?;
+        let http = http_client(Duration::from_secs(config.request_timeout_seconds))?;
         Ok(Self {
             config,
             sui,
@@ -791,5 +801,66 @@ mod tests {
         assert!(transport("http://seal.example").is_err(), "plain HTTP off-host");
         assert!(transport("https://user:pass@seal.example").is_err());
         assert!(transport("ftp://seal.example").is_err());
+    }
+
+    /// A provider redirect is refused on both the proof-of-possession and the
+    /// key-fetch paths, before the credential reaches the redirect target.
+    #[tokio::test]
+    async fn key_server_redirects_are_not_followed() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        // One request: its header block (lower-cased), after reading any body.
+        async fn read_request(stream: &mut tokio::net::TcpStream) -> String {
+            let mut data = Vec::new();
+            let mut chunk = [0u8; 4096];
+            loop {
+                if let Some(end) = data.windows(4).position(|w| w == b"\r\n\r\n") {
+                    let head = String::from_utf8_lossy(&data[..end]).to_lowercase();
+                    let length = head.lines().find_map(|l| l.strip_prefix("content-length:")).map_or(0, |n| n.trim().parse::<usize>().unwrap());
+                    if data.len() >= end + 4 + length {
+                        return head;
+                    }
+                }
+                let read = stream.read(&mut chunk).await.unwrap();
+                assert!(read > 0, "request truncated");
+                data.extend_from_slice(&chunk[..read]);
+            }
+        }
+        // Another origin (a different port) that must never be contacted.
+        let elsewhere = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let target = format!("http://127.0.0.1:{}", elsewhere.local_addr().unwrap().port());
+        let contacted = tokio::spawn(async move { elsewhere.accept().await.is_ok() });
+        let provider = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://127.0.0.1:{}", provider.local_addr().unwrap().port());
+        let served = tokio::spawn(async move {
+            let mut heads = Vec::new();
+            for _ in 0..2 {
+                let (mut stream, _) = provider.accept().await.unwrap();
+                let head = read_request(&mut stream).await;
+                let path = head.lines().next().unwrap().split(' ').nth(1).unwrap().to_owned();
+                let reply = format!("HTTP/1.1 307 Temporary Redirect\r\nLocation: {target}{path}\r\nX-KeyServer-Version: 0.4.0\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                stream.write_all(reply.as_bytes()).await.unwrap();
+                heads.push(head);
+            }
+            heads
+        });
+        let server = KeyServer {
+            object_id: [3; 32],
+            name: "redirecting".into(),
+            url,
+            public_key: <G2Affine as ark_ec::AffineRepr>::generator(),
+            api_key: Some(("X-API-Key".into(), "provider-secret".into())),
+        };
+        let http = http_client(Duration::from_secs(10)).unwrap();
+        let error = server.verify(&http).await.unwrap_err().to_string();
+        assert!(error.contains("307"), "{error}");
+        let error = server.fetch(&http, &json!({}), &ark_bls12_381::Fr::from(1u64)).await.unwrap_err().to_string();
+        assert!(error.contains("307"), "{error}");
+        // The credential went only to the configured origin.
+        for head in served.await.unwrap() {
+            assert!(head.contains("x-api-key: provider-secret"), "{head}");
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(!contacted.is_finished(), "the redirect target was contacted");
+        contacted.abort();
     }
 }
