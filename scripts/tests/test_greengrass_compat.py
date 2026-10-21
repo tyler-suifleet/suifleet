@@ -22,13 +22,14 @@ class RepositoryTests(unittest.TestCase):
         # Flipping a suite to passed needs a runtime receipt from the owning
         # implementation: SF-037 (recipes, managed dependencies), SF-057
         # (credential provider), SF-032 (pub/sub), SF-033 (shadows), SF-034
-        # (streams), SF-035 (client devices), SF-059 (metrics) and SF-060
-        # (CloudWatch Logs) executed theirs; all others remain pending.
+        # (streams), SF-035 (client devices), SF-059 (metrics), SF-060
+        # (CloudWatch Logs) and SF-061 (AWS IoT Core) executed theirs; all
+        # others remain pending.
         matrix = json.loads((ROOT / compat.COMPAT / "greengrass-compat.json").read_text())
         passed = {name for name, s in matrix["suites"].items() if s["runtime_execution"] == "passed"}
         self.assertEqual(passed, {"aws-recipe-cases.json", "managed-dependency-cases.json", "credential-provider-cases.json", "cloudwatch-metrics-cases.json",
                                   "cloudwatch-logs-cases.json", "pubsub-cases.json", "shadow-cases.json", "stream-cases.json",
-                                  "client-device-cases.json"})
+                                  "client-device-cases.json", "aws-iot-cases.json"})
         for name in ("aws-recipe-cases.json", "managed-dependency-cases.json"):
             receipt = json.loads((ROOT / matrix["suites"][name]["runtime_evidence"]).read_text())
             self.assertEqual(receipt["ticket"], "SF-037")
@@ -164,6 +165,19 @@ class FixtureGateTests(unittest.TestCase):
         self.run_mutated("stream-cases.json", lambda c: c[1]["steps"][5]["expect"].update(oldest=0))
         self.run_mutated("client-device-cases.json", lambda c: c[0]["requests"][9].update(allowed=True))
 
+    def test_aws_iot_expectations_pinned(self):
+        case = lambda c, section, cid: next(x for x in c[section] if x["id"] == cid)
+        self.run_mutated("aws-iot-cases.json", lambda c: case(c, "connection", "port-443-alpn-default")["expected"].update(alpn=None))
+        self.run_mutated("aws-iot-cases.json", lambda c: case(c, "connection", "keep-alive-29")["expected"].update(valid=True, alpn=None, client_id="dev1"))
+        self.run_mutated("aws-iot-cases.json", lambda c: case(c, "topics", "eight-slashes").update(within_limits=True))
+        self.run_mutated("aws-iot-cases.json", lambda c: case(c, "mappings", "same-broker-loop").update(expected={"ok": True}))
+        self.run_mutated("aws-iot-cases.json", lambda c: case(c, "mappings", "wildcard-first-level-never-matches-dollar").update(
+            expected={"error": "reaches AWS shadow topics"}))
+        self.run_mutated("aws-iot-cases.json", lambda c: case(c, "shadow_patches", "remove-section")["patch"].update(reported={}))
+        self.run_mutated("aws-iot-cases.json", lambda c: case(c, "shadow_answers", "create-has-no-version")["request"]["body"].update(version=0))
+        self.run_mutated("aws-iot-cases.json", lambda c: case(c, "shadow_answers", "delete-already-absent").update(expected={"stored": 0}))
+        self.run_mutated("aws-iot-cases.json", lambda c: case(c, "denied_publication", "puback-resets")["steps"][3].update(expect="rejected"))
+
     def test_managed_expectations_pinned(self):
         tes = lambda c: next(x for x in c if x["id"] == "tes-defers-to-adapter")
         self.run_mutated("managed-dependency-cases.json", lambda c: tes(c)["expected"].update(outcome="replace"))
@@ -245,14 +259,15 @@ class ManagedCatalogGateTests(unittest.TestCase):
 
     def test_adapters_link_published_tickets_and_scoped_execution(self):
         # Published scoped implementation tickets (Codex, PR #91 feedback).
-        # Only executed credential and stream-export adapters have owning runtime receipts.
+        # Only executed credential, stream-export, metrics and IoT Core adapters have owning runtime receipts.
         self.assertEqual({a["id"]: a["implementation_ticket"] for a in self.catalog["adapters"]}, {
             "credential-provider": "SF-057", "stream-export-aws": "SF-058",
             "cloudwatch-metrics-export": "SF-059", "cloudwatch-logs-export": "SF-060",
             "aws-iot-core-connection": "SF-061", "device-defender-metrics": "SF-062",
             "secure-tunneling": "SF-063"})
         self.assertEqual({a["id"] for a in self.catalog["adapters"] if a["runtime_execution"] == "passed"},
-                         {"credential-provider", "cloudwatch-metrics-export", "cloudwatch-logs-export", "stream-export-aws"})
+                         {"credential-provider", "cloudwatch-metrics-export", "cloudwatch-logs-export", "stream-export-aws",
+                          "aws-iot-core-connection"})
         self.assertFalse(self.catalog["parity_claim"])
         for entry in self.catalog["components"] + self.catalog["platform_phases"]:
             self.assertNotIn("approval", entry)
@@ -308,7 +323,8 @@ class ManagedCatalogGateTests(unittest.TestCase):
         self.has(lambda c: self.adapter(c, "cloudwatch-metrics-export")["acceptance"].update(reference_suites=[]), "executable reference suite")
         self.has(lambda c: self.adapter(c, "secure-tunneling").pop("specification_gap"), "specification_gap")
         self.has(lambda c: self.adapter(c, "secure-tunneling").update(specification="deferred"), "specification")
-        self.has(lambda c: self.adapter(c, "aws-iot-core-connection").update(specification="complete"), "pin an exact")
+        self.has(lambda c: self.adapter(c, "aws-iot-core-connection")["replaces"].update({"aws.greengrass.ShadowManager": "unpinned"}), "pin an exact")
+        self.has(lambda c: self.adapter(c, "aws-iot-core-connection")["replaces"].update({"aws.greengrass.ShadowManager": "2.3.14"}), "!= reference")
         self.has(lambda c: c["adapters"].append(copy.deepcopy(c["adapters"][0])), "duplicate adapter")
 
     def test_document_lists_every_component_and_suite_size(self):

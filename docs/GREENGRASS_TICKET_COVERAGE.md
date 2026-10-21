@@ -60,6 +60,7 @@ P2 means broader compatibility, not optional for a full-parity claim. Each row n
 | Component IPC and SDK | [SF-027](https://github.com/tyler-suifleet/suifleet/issues/27) |
 | Local pub/sub and MQTT bridge | [SF-032](https://github.com/tyler-suifleet/suifleet/issues/33) |
 | Device shadows | [SF-033](https://github.com/tyler-suifleet/suifleet/issues/37) |
+| AWS IoT Core bridge and shadow connection | [SF-061](https://github.com/tyler-suifleet/suifleet/issues/106) |
 | Stream manager/store-and-forward | [SF-034](https://github.com/tyler-suifleet/suifleet/issues/34) |
 | Client-device discovery/authentication | [SF-035](https://github.com/tyler-suifleet/suifleet/issues/38) |
 | Token exchange/cloud credentials | [SF-022](https://github.com/tyler-suifleet/suifleet/issues/25), [SF-038](https://github.com/tyler-suifleet/suifleet/issues/39), [SF-057](https://github.com/tyler-suifleet/suifleet/issues/102) |

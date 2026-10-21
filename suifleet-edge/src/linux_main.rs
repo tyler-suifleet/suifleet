@@ -15,6 +15,7 @@ mod deps;
 mod firmware;
 mod handoff;
 mod identity;
+mod iotcore;
 mod logs;
 mod mqtt;
 mod platform;
@@ -144,6 +145,10 @@ async fn main() -> anyhow::Result<()> {
             .unwrap_or_else(|_| PathBuf::from("/etc/suifleet/config.toml"))
     };
     let mut cfg = Config::load(&path)?;
+    if let Some(iot) = &cfg.aws_iot {
+        // Unusable AWS IoT credentials stop startup; rotation is checked while running.
+        iotcore::Credentials::load(iot)?;
+    }
     logs::set_group_read(cfg.runtime.log_group_read);
     if !check_config {
         // Also when no log is written any more: turning the option off
@@ -352,8 +357,20 @@ async fn main() -> anyhow::Result<()> {
         )),
         _ => None,
     };
-    let shadow_sync = match (&cfg.shadows, &shadow_store) {
-        (Some(settings), Some(store)) => settings.sync.clone().map(|config| tokio::spawn(shadows::Syncer {
+    // AWS IoT Device Shadow sync (SF-061) runs over the bridge's [aws_iot]
+    // connection; the service runtime owns that connection side.
+    let aws_shadow_sync = cfg.shadows.as_ref().and_then(|s| s.aws_iot.clone())
+        .zip(service_runtime.lock().unwrap().aws_shadow_client.take());
+    let shadow_sync = match (&cfg.shadows, &shadow_store, aws_shadow_sync) {
+        (Some(_), Some(store), Some((sync, client))) => {
+            let store = store.clone();
+            Some(tokio::spawn(async move {
+                let changed = client.changed.clone();
+                shadows::run_sync(store, &sync.shadows, sync.interval_seconds, sync.max_backoff_seconds, sync.owners(),
+                                  &iotcore::AwsShadows(client), Some(changed)).await
+            }))
+        }
+        (Some(settings), Some(store), None) => settings.sync.clone().map(|config| tokio::spawn(shadows::Syncer {
             store: store.clone(),
             config,
             binding: streams::Binding {

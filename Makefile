@@ -411,6 +411,14 @@ test-messaging:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
 	python3 scripts/test_messaging.py --image "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}"
 
+# AWS IoT Core connection (SF-061): the real daemon against Mosquitto with mutual
+# TLS and an AWS-shaped endpoint, in network-none containers. Runs on the host
+# (needs Docker); pass AWS_IOT_EVIDENCE="--evidence FILE" for a receipt.
+.PHONY: test-aws-iot
+test-aws-iot:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+	python3 scripts/test_aws_iot.py --image "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" $(AWS_IOT_EVIDENCE)
+
 # Start a disposable indexed loopback node/faucet first; network-none Docker only.
 .PHONY: test-rollout-localnet
 test-rollout-localnet:
