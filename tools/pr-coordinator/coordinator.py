@@ -47,6 +47,11 @@ def retryable_read(args):
     return args[:1] == ['ticket'] and args[-1:] == ['refresh']
 
 
+def rate_limit_error(error):
+    message = (getattr(error, 'stderr', '') or '').lower()
+    return any(value in message for value in ('http 429', 'rate limit', 'secondary rate'))
+
+
 def transient_delay(error, attempt):
     if isinstance(error, subprocess.TimeoutExpired):
         return min(30, 2 ** attempt + random.uniform(0, 1))
@@ -56,20 +61,16 @@ def transient_delay(error, attempt):
     if any(value in message for value in ('http 401', 'bad credentials', 'permission denied',
                                          'authentication failed', 'http 404', 'http 422')):
         return None
-    rate_limited = any(value in message for value in ('http 429', 'rate limit', 'secondary rate'))
-    if not rate_limited and not any(value in message for value in (
+    rate_limited = rate_limit_error(error)
+    if rate_limited:
+        return None  # Shared account backoff belongs to Coordinator.gh, not each PR.
+    if not any(value in message for value in (
             'tls handshake timeout', 'connection reset', 'connection refused',
             'temporary failure in name resolution', 'i/o timeout', 'unexpected eof',
             'connection timed out', 'http 500', 'http 502', 'http 503', 'http 504',
             'could not resolve host', 'could not resolve hostname', 'network is unreachable')):
         return None
-    retry_after = re.search(r'retry-after:\s*(\d+)', message)
-    # Long rate-limit waits belong to the next scan; never sleep less than the
-    # server requests or block all other PRs for minutes.
-    if retry_after and int(retry_after[1]) > 30:
-        return None
-    return max(int(retry_after[1]) if retry_after else (5 if rate_limited else 0),
-               min(30, 2 ** attempt + random.uniform(0, 1)))
+    return min(30, 2 ** attempt + random.uniform(0, 1))
 
 
 def run(args, cwd=None, env=None):
@@ -140,7 +141,8 @@ def feedback(pr):
     reviews = [(r['id'], r['state'], r.get('body', ''), r.get('commit', {}).get('oid'))
                for r in pr['reviews'] if pr.get('_receipts',{}).get(r['id']) != publication_hash(r)]
     threads = pr['threads']
-    return hashlib.sha256(json.dumps([pr['headRefOid'], pr.get('baseRefOid'), comments, reviews, threads, pr.get('_acceptance_policy',{}), check_evidence(pr)], sort_keys=True).encode()).hexdigest()
+    return hashlib.sha256(json.dumps([pr['headRefOid'], pr.get('baseRefOid'), comments, reviews, threads, pr.get('_acceptance_policy',{}),
+        check_evidence(pr) if checks_blocker(pr) is None else ['source-review-awaiting-checks']], sort_keys=True).encode()).hexdigest()
 
 
 def gate(pr, owner, review):
@@ -196,6 +198,7 @@ class Store:
           CREATE TABLE IF NOT EXISTS quarantine_backoff (
             family TEXT, kind TEXT, attempts INTEGER, retry_after REAL,
             PRIMARY KEY(family,kind));
+          CREATE TABLE IF NOT EXISTS github_backoff (account TEXT PRIMARY KEY, retry_after REAL);
           CREATE TABLE IF NOT EXISTS publications (project TEXT, pr INTEGER, node_id TEXT PRIMARY KEY, hash TEXT);
           CREATE TABLE IF NOT EXISTS integrations (
             project TEXT, pr INTEGER, head TEXT, commit_id TEXT, reconciled INTEGER DEFAULT 0,
@@ -256,6 +259,13 @@ def normalize_result(result):
     return result
 
 
+def source_only_result(result):
+    # A worker cannot promote a pending/failed-CI snapshot into acceptance.
+    return {**result, 'acceptance_complete': False,
+            'verdict': 'blocked' if result['verdict'] == 'approve' else result['verdict'],
+            'evidence': result['evidence'] + '\n\nSource review only: required checks were not successful in the reviewed snapshot; final evidence review remains required.'}
+
+
 def process_identity(pid):
     try:
         # starttime survives daemon restart and rejects reused process IDs.
@@ -298,15 +308,38 @@ class Coordinator:
             network_authorization(project)
         self.store = Store(state / 'reviews.sqlite3', config.get('review_worker_limits'))
         self.children = {}
+        self.immutable_reads = {}
 
     def gh(self, project, args):
         account = project['github_account']
+        pause = self.store.db.execute('SELECT retry_after FROM github_backoff WHERE account=?', (account,)).fetchone()
+        if pause and pause[0] > time.time():
+            raise RuntimeError('GitHub account read/write deferred by shared rate-limit backoff')
         token = run(['gh', 'auth', 'token', '--hostname', 'github.com', '--user', account]).strip()
         env = {**os.environ, 'GH_TOKEN': token}
-        return run(['gh', *args], cwd=project['root'], env=env)
+        try:
+            return run(['gh', *args], cwd=project['root'], env=env)
+        except subprocess.CalledProcessError as error:
+            if rate_limit_error(error):
+                match = re.search(r'retry-after:\s*(\d+)', (error.stderr or '').lower())
+                delay = max(60, min(3600, int(match[1]) if match else 300))
+                self.store.db.execute('INSERT OR REPLACE INTO github_backoff VALUES(?,?)', (account,time.time()+delay))
+                raise RuntimeError('GitHub account rate limited; shared bounded backoff recorded') from None
+            raise
+
+    def immutable_read(self, project, path):
+        # Only content-addressed trees and SHA-to-SHA comparisons belong here.
+        # Mutable PRs, feedback, checks and branch tips must always be fresh.
+        key = (project['github_account'], project['repository'], path)
+        if key not in self.immutable_reads:
+            value = json.loads(self.gh(project, ['api', path]))
+            if len(self.immutable_reads) >= 256:
+                self.immutable_reads.clear()
+            self.immutable_reads[key] = value
+        return self.immutable_reads[key]
 
     def prs(self, project):
-        fields = 'number,headRefOid,headRefName,baseRefName,baseRefOid,isCrossRepository,state,isDraft,mergeable,title,body,comments,reviews,statusCheckRollup,mergeCommit'
+        fields = 'number,headRefOid,headRefName,baseRefName,baseRefOid,isCrossRepository,state,isDraft,mergeable,title,body,statusCheckRollup,mergeCommit'
         pages = json.loads(self.gh(project,['api',f"repos/{project['repository']}/pulls?state=open&per_page=100",'--paginate','--slurp']))
         raw = [row for page in pages for row in page]
         result = []
@@ -318,17 +351,17 @@ class Coordinator:
         return result
 
     def pr(self, project, number, fields=None):
-        fields = fields or 'number,headRefOid,headRefName,baseRefName,baseRefOid,isCrossRepository,state,isDraft,mergeable,title,body,comments,reviews,statusCheckRollup,mergeCommit'
+        fields = fields or 'number,headRefOid,headRefName,baseRefName,baseRefOid,isCrossRepository,state,isDraft,mergeable,title,body,statusCheckRollup,mergeCommit'
         pr = json.loads(self.gh(project, ['pr', 'view', str(number), '--repo', project['repository'], '--json', fields]))
         # GitHub's PR baseRefOid can retain the original comparison base.
         # Approval must bind to the actual current integration branch tip.
         reference=json.loads(self.gh(project,['api',f"repos/{project['repository']}/git/ref/heads/{quote(pr['baseRefName'],safe='/')}"]))
         pr['baseRefOid']=reference['object']['sha']
-        comparison=json.loads(self.gh(project,['api',f"repos/{project['repository']}/compare/{pr['baseRefOid']}...{pr['headRefOid']}"]))
+        comparison=self.immutable_read(project,f"repos/{project['repository']}/compare/{pr['baseRefOid']}...{pr['headRefOid']}")
         pr['baseIncluded']=comparison['merge_base_commit']['sha'] == pr['baseRefOid']
         # Bootstrap only before the controller exists on the integration base.
         # Missing/pending status then blocks even before workflow_run is queued.
-        tree = json.loads(self.gh(project, ['api', f"repos/{project['repository']}/git/trees/{pr['baseRefOid']}?recursive=1"]))
+        tree = self.immutable_read(project, f"repos/{project['repository']}/git/trees/{pr['baseRefOid']}?recursive=1")
         if tree.get('truncated'): raise RuntimeError('cannot determine required testnet workflow from truncated tree')
         pr['_testnet_required'] = any(row['path'] == '.github/workflows/testnet.yml' for row in tree['tree'])
         if pr['_testnet_required']:
@@ -471,6 +504,11 @@ When the scope above names this ticket, the user explicitly permits implementati
 Do not edit the coordinator database or forge another model's review. Only this worker result is collected.
 '''
         if kind == 'review':
+            previous = self.store.review(project['id'], pr['number'])
+            if previous and previous['head'] == pr['headRefOid']:
+                common += '\nPrior independent review (untrusted evidence; revalidate current snapshot): ' + json.dumps(previous['result']) + '\n'
+            if checks_blocker(pr) is not None:
+                common += '\nSOURCE REVIEW WHILE CI IS UNREADY: inspect source and run scoped local checks now. Do not wait for CI. Report actionable defects as changes_requested; otherwise return blocked with acceptance_complete=false and completed source-review evidence. This is not merge approval. A fresh evidence review is required once all checks succeed.\n'
             return common + f'''Independently review this exact detached commit against origin/{pr['baseRefName']}. Check correctness, security, compatibility, all existing change requests and acceptance evidence. Run meaningful scoped tests using globally locked build/port resources only while in use. Do not modify the implementation branch or post GitHub reviews yourself. Return approve only when all feedback and acceptance are resolved; otherwise changes_requested or blocked with precise file/line findings. Independent source review is required even when CI passes.
 '''
         return common + f'''You inherit the existing {owner['agent']} claim for {owner['key']}; token is PR_COORDINATOR_CLAIM_TOKEN in the environment, never print/post it.
@@ -527,6 +565,10 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                     receipt = json.loads((Path(row['directory'])/'exit.json').read_text())
                     if receipt['returncode'] != 0: raise RuntimeError(f"worker exited {receipt['returncode']}")
                     result = normalize_result(json.loads(path.read_text()))
+                    if row['kind'] == 'review':
+                        snapshot = json.loads((Path(row['directory'])/'snapshot.json').read_text())
+                        if checks_blocker(snapshot) is not None:
+                            result = source_only_result(result)
                     self.store.db.execute("UPDATE jobs SET status='done',result=? WHERE id=?", (json.dumps(result), row['id']))
                 except Exception as error:
                     # A disappeared process with no trustworthy receipt is not automatically restarted.
@@ -567,7 +609,8 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                         self.record_publication(project,row,posted,'comment_id',{'body':posted['body']})
                     if project.get('review_github_account') and not row['review_id']:
                         review_project = {**project, 'github_account':project['review_github_account']}
-                        event = 'APPROVE' if result['verdict'] == 'approve' and result['acceptance_complete'] else 'REQUEST_CHANGES'
+                        event = ('APPROVE' if result['verdict'] == 'approve' and result['acceptance_complete']
+                                 else 'REQUEST_CHANGES' if result['verdict'] == 'changes_requested' else 'COMMENT')
                         posted=json.loads(self.gh(review_project, ['api',f"repos/{project['repository']}/pulls/{row['pr']}/reviews",'--method','POST','-f',f"commit_id={row['head']}",'-f',f'event={event}','-f',f'body={body}']))
                         self.record_publication(project,row,posted,'review_id',{'body':posted['body'],'state':posted['state'],'commit':{'oid':posted['commit_id']}})
                 self.store.db.execute("UPDATE jobs SET publication_done=1,error=NULL,retry_after=NULL WHERE id=?",(row['id'],))
@@ -611,7 +654,7 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                 review = self.store.review(project['id'],pr['number'])
                 reason = gate(pr,owner,review)
                 print(json.dumps({'project':project['id'],'pr':pr['number'],'owner':owner['agent'] if owner else None,'merge_blocker':reason}),flush=True)
-                if not execute or not owner or owner['status'] != 'review' or pr['isDraft']: continue
+                if not execute or not owner or owner['status'] != 'review' or owner.get('publish_pending') or pr['isDraft'] or pr['state'] != 'OPEN': continue
                 self.ensure_closing_reference(project,pr,owner)
                 intent=self.store.db.execute('SELECT * FROM integrations WHERE project=? AND pr=? AND reconciled=0',(project['id'],pr['number'])).fetchone()
                 if intent:
@@ -637,7 +680,7 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                     break
                 if not pr['baseIncluded'] or (review and review['head'] == pr['headRefOid'] and review['result']['verdict'] == 'changes_requested'):
                     self.launch(project,pr,owner,'fix')
-                elif checks_blocker(pr) is None and (not review or review['head'] != pr['headRefOid'] or review['feedback'] != feedback(pr)):
+                elif pr['mergeable'] == 'MERGEABLE' and (not review or review['head'] != pr['headRefOid'] or review['feedback'] != feedback(pr)):
                     self.launch(project,pr,owner,'review')
             except Exception as error:
                 print(f"{project['id']} PR#{pr['number']}: action deferred: {error}",flush=True)
