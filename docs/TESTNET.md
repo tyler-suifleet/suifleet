@@ -1,5 +1,12 @@
 # Testnet accounts and live gates
 
+For exact encrypted artifact/recipe sizes, historical and current transaction
+effects, signed cleanup rebates, token reconciliation and explicit unquoted
+production costs, see the [SF-054 fleet cost model](business/FLEET_COST_MODEL.md).
+Its Mainnet reads and sponsored Testnet storage observations are separate;
+neither is a complete production invoice. Gas allowances below are spending
+controls and must not be reported as consumed fees.
+
 ## Accounts
 
 The user created two dedicated **testnet-only** accounts on 2026-10-14 and authorized agents to spend their testnet SUI on acceptance runs: publishing and upgrading test packages, and the transactions those runs need.
