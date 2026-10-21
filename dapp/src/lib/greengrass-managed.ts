@@ -447,7 +447,7 @@ export const MANAGED_CATALOG = {
     },
     {
       "id": "secure-tunneling",
-      "specification": "incomplete",
+      "specification": "complete",
       "implementation_ticket": "SF-063",
       "replaces": {
         "aws.greengrass.SecureTunneling": "2.0.1"
