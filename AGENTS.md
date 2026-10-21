@@ -186,3 +186,30 @@ The user explicitly authorizes automatic public Sui testnet acceptance using the
 Physical Pi work must not block software implementation, review or merge. The user explicitly permits resolving target issues later. Apply this rule to future tickets too: physical boot/networking, target reboot/power-loss, hardware-only isolation/performance and device-specific integration stay in SF-031/#32. The unfinished refreshed SD image SF-066/#111 is on hold; do not require that image for an offline software harness or unrelated feature. Do not claim a new image or physical result exists.
 
 Preserve real software/API dependencies, source/security review, meaningful unit/simulator/host integration checks and normal authorized automatic testnet CI. This deferral grants no hardware programming authority and does not waive failing software tests. Packaging/image work must still produce actual artifacts before its own completion; an on-hold target ticket is not Done. Platform scripts remain responsible for reboot and firmware recovery.
+
+## Standing authorization for continuous development
+
+Keep eligible implementation, reciprocal review, feedback repair and gated integration
+moving without asking the user to say "continue" or restart workers. The installed
+services own successor dispatch and serial merges; individual workers finish their
+assigned task and exit. Recover verified transient failures within the existing
+claim, reconcile uncertain remote outcomes and preserve reservations when a worker
+might still be alive. A real blocker pauses only its affected ticket: record the
+reason and next action in the tracker/local status report, then use other eligible
+capacity. Never manufacture work, tests or approvals to fill slots.
+
+The user explicitly permits **physical-hardware and actual-mainnet testing to wait
+until software development is complete**. Apply the shared development defaults in
+`docs/tracking/acceptance-policy.json` to current and future software tickets, even
+when an older issue or review bundles implementation with those checks. Keep
+SF-031, SF-042, SF-066 and SF-087 open for their own acceptance; add future
+acceptance-only tickets to the explicit exclusion list. Do not mark deferred checks
+passed or delete genuine software dependencies. Mainnet writes and physical
+programming remain unauthorized unless the user later explicitly authorizes them.
+
+Local/simulator/isolated-chain tests, relevant automatic public-testnet validation,
+security findings, exact-head CI and independent review remain required. This
+instruction does not newly defer real wallet/provider acceptance or credential
+provisioning. Maintain the existing periodic local status report with feature
+progress, verified active workers and honest blockers. Services continue while WSL
+is running; a stopped host is not evidence that unattended work is still executing.
