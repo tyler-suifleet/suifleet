@@ -2011,6 +2011,33 @@
         "Track authorized live AWS acceptance separately. No AWS account mutations, paid services, production credentials, physical programming or unsupported full-parity claims are authorized."
       ],
       "validation": "Actual console/API auth, CSRF/origin where applicable, role/caller denial, redaction, bounded queries and audit tests; no production exposure or credentials provisioned."
+    },
+    {
+      "key": "SF-099",
+      "title": "Make deployment history searchable by device and group with named drill-downs",
+      "priority": "P1",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "area": "frontend",
+      "resources": [],
+      "depends_on": [],
+      "paths": [
+        "dapp/src/app/deployments",
+        "dapp/src/app/devices",
+        "dapp/src/lib",
+        "scripts"
+      ],
+      "description": "Replace address-first deployment presentation with device-oriented history. Users search/sort by device name or group name, see group membership and successful/failed component updates for each device, then click its name for deeper details. Keep raw object IDs as secondary support metadata.",
+      "evidence": "Human physical Pi acceptance #32: deployments screen leads with meaningless long addresses. User explicitly requests device-name sorting/search, searchable group filter, group membership display and clickable device detail with update outcomes. Existing chain-backed device/group/deployment hooks provide the required facts; this presentation work does not depend on SF-082 hosting/payments. SF-084 remains broader services/logs/rollout views.",
+      "acceptance": [
+        "Deployment history prominently shows meaningful device and group names, component/version/date and per-device verified Applied/Failed/pending-or-unverified outcomes. Do not label transaction creation or absent/unverified receipts as successful installation.",
+        "Support case-insensitive device-name search, searchable group-name filtering and deterministic device-name sorting. Show clear no-match/loading/unavailable states; do not hide failed updates from the history.",
+        "Display current device group memberships, including devices in multiple/no groups. Distinguish current membership from historical deployment targets; do not infer historical success from current group membership.",
+        "Device names link to a stable detail view exposing installed component versions from verified signed telemetry, supervised running state when present, current groups and update history. Historical receipt-only data must not masquerade as live installed/running version.",
+        "Retain deployment control/storage/permission behavior and expose IDs as secondary details. Missing, revoked or renamed targets and duplicate names must not crash, misattribute receipts or merge distinct devices.",
+        "Verify search/filter/sort/drill-down and mixed success/failure/unknown data in a real browser, plus typecheck/production build and applicable parsing/receipt regressions. Stage tested changes in the local acceptance dApp without making mainnet/hardware mutations."
+      ],
+      "validation": "Offline receipt/history derivation tests and real browser UI regression for device/group search, sorting and detail navigation, pinned frontend typecheck/build; validate read-only against existing real testnet+Pi acceptance records. Preserve independent review/CI. No artificial SF-082 or physical-hardware blocker."
     }
   ]
 }
