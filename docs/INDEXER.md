@@ -108,6 +108,8 @@ suifleet-indexer ctl --token-file operate.token add-devices --sender 0xOPERATOR 
 
 `SUIFLEET_API_TOKEN` can replace `--token-file`.
 
+`suifleet-indexer telemetry-alerts ENVELOPES.json` needs no API or database: it verifies signed telemetry envelopes (a JSON array, or the ingress body `{"messages": [...]}`) and prints each report's judgement, services section and the service-health alerts it raises ([TELEMETRY.md](TELEMETRY.md#service-health-sf-085)). It does not check the signer's registry identity.
+
 **The API is not trusted with the operator's intent.** With `--manifest`, which `--key` requires, the CLI verifies the manifest against the chain, reads the requested devices itself (custody and owner caps), rebuilds the exact calls from its own command line and checks the returned transaction against them before signing (or before writing `--out`). It refuses unless all of these hold:
 - the key is the `--sender`'s key, and the transaction's sender;
 - gas is paid by the sender and stays within budget;

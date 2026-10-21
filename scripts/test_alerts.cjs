@@ -21,6 +21,11 @@ respond.calls = [];
     ["long message", { ...good, message: "x".repeat(401) }], ["missing device", { ...good, device_id: undefined }], ["since", { ...good, since_ms: -1 }]]) {
     assert.throws(() => alerts.parseAlert(bad), undefined, label);
   }
+  // Service-health alerts (SF-085) are known kinds.
+  for (const kind of ["messaging-backpressure", "messaging-loss", "bridge-disconnected", "stream-near-limit", "stream-data-lost",
+    "export-failing", "shadow-sync-failing", "shadow-conflict"]) {
+    assert.equal(alerts.parseAlert({ ...good, kind, key: `${kind}:0xd1:metrics`, deployment_id: undefined, component: undefined }).kind, kind);
+  }
   const ok = await alerts.fetchAlerts("0xowner", "https://fleet.example/api/", "tok", respond(200, { items: [good], server_time_ms: 9 }));
   assert.equal(ok.status, "ok");
   assert.equal(ok.items.length, 1);
@@ -35,5 +40,5 @@ respond.calls = [];
   assert.equal(alerts.currentAlerts(ok, 1000, false, 1000 + alerts.ALERTS_STALE_MS - 1).status, "ok");
   assert.equal(alerts.currentAlerts(ok, 1000, false, 1000 + alerts.ALERTS_STALE_MS + 1).status, "unavailable");
   assert.equal(alerts.currentAlerts(ok, 1000, true, 1000).status, "unavailable");
-  console.log("PASS: dApp alerts: strict parsing, owner-scoped authenticated fetch, unavailable instead of stale or partial lists");
+  console.log("PASS: dApp alerts: strict parsing (service-health kinds included), owner-scoped authenticated fetch, unavailable instead of stale or partial lists");
 })().catch((error) => { console.error(error); process.exit(1); });

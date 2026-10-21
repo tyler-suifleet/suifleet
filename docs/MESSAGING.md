@@ -104,6 +104,8 @@ if message:
 Client(component='sensor').publish('sensors/a/temp', {'t': 21})
 ```
 
+**Fleet visibility.** With `[telemetry]`, every heartbeat also reports queue fill, refusals, drops and the bridge's connection state, never topics or payloads, and the indexer alerts on backpressure, losses and a disconnected bridge ([TELEMETRY.md](TELEMETRY.md#service-health-sf-085), SF-085).
+
 ## Evidence
 
 | Command | Covers |
