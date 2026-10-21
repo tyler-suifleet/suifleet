@@ -208,8 +208,12 @@ passed or delete genuine software dependencies. Mainnet writes and physical
 programming remain unauthorized unless the user later explicitly authorizes them.
 
 Local/simulator/isolated-chain tests, relevant automatic public-testnet validation,
-security findings, exact-head CI and independent review remain required. This
-instruction does not newly defer real wallet/provider acceptance or credential
-provisioning. Maintain the existing periodic local status report with feature
+security findings, exact-head CI and independent review remain required. The latest user direction (2026-10-21) also defers final production-provider and
+manual real-wallet acceptance until implementation is complete. Keep production
+Seal provider selection/authentication/fees/availability/recovery validation in
+SF-087/#159, and real IdP/prover/Slush/extension-wallet acceptance in SF-031/#32
+and SF-087/#159. Software-facing authentication, encryption, authority, session,
+network-mismatch and failure-path checks remain implementation gates. This grants
+no production credential provisioning, service purchases or mainnet writes. Maintain the existing periodic local status report with feature
 progress, verified active workers and honest blockers. Services continue while WSL
 is running; a stopped host is not evidence that unattended work is still executing.
