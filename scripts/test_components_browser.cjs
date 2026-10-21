@@ -1,0 +1,206 @@
+// Actual Components and deployment pages in Chrome; fixture wallet/chain/Walrus,
+// real recipe validation, digest calculation, transaction builders and upload events.
+const fs = require("node:fs/promises"), path = require("node:path"), os = require("node:os"), http = require("node:http");
+const assert = require("node:assert/strict");
+const { appRequire, loader } = require("./frontend_test_utils.cjs");
+const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright");
+(async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "suifleet-components-browser-"));
+  let server, browser;
+  try {
+    const manifest = JSON.parse(await fs.readFile(path.join(__dirname, "../manifests/fixture.localnet.json"), "utf8"));
+    for (const type of loader()("lib/protocol-version.ts").CATALOG_TYPES) manifest.type_origins[type] = manifest.call_package_id;
+    const fixture = JSON.stringify(manifest);
+    const entry = path.join(__dirname, "browser/components-acceptance.jsx");
+    await build({ entryPoints: [entry], outfile: path.join(directory, "app.js"), bundle: true, platform: "browser", jsx: "automatic",
+      alias: { "@": path.resolve(__dirname, "../dapp/src") }, nodePaths: [path.resolve(__dirname, "../dapp/node_modules")],
+      plugins: [{ name: "acceptance-hooks", setup(builder) {
+        builder.onResolve({ filter: /^(@mysten\/dapp-kit-react|@\/hooks\/(useFleetTransaction|useDevices|useGroups|useAccessPolicies|useDeploymentStorage)|@\/lib\/catalog)$/ }, () => ({ path: entry }));
+      } }],
+      define: { "process.env": "{}", "process.env.NODE_ENV": '"development"', "process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST": JSON.stringify(fixture), "process.env.NEXT_PUBLIC_SEAL_KEY_SERVERS": "undefined", "process.env.NEXT_PUBLIC_SEAL_THRESHOLD": "undefined", "process.env.NEXT_PUBLIC_WALRUS_EPOCHS": '"5"', "process.env.NEXT_PUBLIC_WALRUS_MAX_COST_FROST": "undefined" }, logLevel: "warning" });
+    // Use compiled application Tailwind styles, so mobile overflow checks cover
+    // the shipped layout, not an unstyled DOM.
+    const cssRoot = path.join(__dirname, "../dapp/.next/static");
+    async function styles(dir) {
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+      return (await Promise.all(entries.map(e => e.isDirectory() ? styles(path.join(dir, e.name)) : e.name.endsWith(".css") ? fs.readFile(path.join(dir, e.name), "utf8") : ""))).join("\n");
+    }
+    const css = await styles(cssRoot);
+    server = http.createServer(async (req, res) => {
+      res.setHeader("Content-Type", req.url === "/app.js" ? "text/javascript" : req.url === "/app.css" ? "text/css" : "text/html");
+      res.end(req.url === "/app.js" ? await fs.readFile(path.join(directory, "app.js")) : req.url === "/app.css" ? css : '<!doctype html><html lang="en"><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/app.css"></head><body><main class="p-4"><div id="root"></div></main><script src="/app.js"></script></body></html>');
+    });
+    await new Promise(r => server.listen(0, "127.0.0.1", r));
+    browser = await chromium.launch({ executablePath: process.env.CHROME_EXECUTABLE || undefined, headless: true, args: ["--no-sandbox"] });
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    const loading = await browser.newPage();
+    await loading.goto(`${origin}/?loading`);
+    await loading.getByRole("status").filter({ hasText: "Loading software library" }).waitFor();
+    await loading.evaluate(() => window.componentsAcceptance.loaded());
+    await loading.getByRole("heading", { name: "No component versions yet" }).waitFor();
+    await loading.close();
+    const setup = await browser.newPage();
+    await setup.goto(`${origin}/?noCatalog`);
+    await setup.getByRole("button", { name: "Publish version", exact: true }).click();
+    await setup.getByRole("button", { name: "Set up publishing", exact: true }).evaluate(b => { b.click(); b.click(); });
+    await setup.waitForFunction(() => window.componentsAcceptance.calls().length === 1);
+    await setup.evaluate(() => window.componentsAcceptance.phase("wallet"));
+    await setup.getByRole("status").filter({ hasText: "Confirm publishing setup" }).waitFor();
+    await setup.evaluate(() => window.componentsAcceptance.reject());
+    await setup.getByRole("alert").filter({ hasText: "User rejected signing" }).waitFor();
+    await setup.close();
+    const imported = await browser.newPage();
+    await imported.goto(origin);
+    await imported.getByText("Advanced publishing tools", { exact: true }).click();
+    await imported.getByRole("button", { name: "Import Greengrass recipe", exact: true }).click();
+    const cases = JSON.parse(await fs.readFile(path.join(__dirname, "../interfaces/compat/aws-recipe-cases.json"), "utf8"));
+    const example = cases.find(c => c.expected.outcome === "translate" && c.recipe?.Manifests[0].Artifacts);
+    await imported.getByLabel("Recipe (JSON or YAML)", { exact: true }).fill(JSON.stringify(example.recipe));
+    await imported.locator("input[type=file]").setInputFiles({ name: "hello.tar", mimeType: "application/octet-stream", buffer: Buffer.from("fixture import") });
+    await imported.getByRole("button", { name: "Check translation", exact: true }).click();
+    await imported.getByText("Translates to 1 native manifest(s)", { exact: true }).waitFor();
+    const acknowledge = imported.getByRole("checkbox", { name: "I reviewed these differences" });
+    if (await acknowledge.count()) await acknowledge.check();
+    await imported.getByRole("radio").nth(1).check();
+    await imported.getByRole("checkbox", { name: /I confirm this artifact/ }).check();
+    await imported.getByRole("button", { name: "Upload and register translated version", exact: true }).evaluate(b => { b.click(); b.click(); b.click(); });
+    await imported.waitForFunction(() => window.componentsAcceptance.count() === 1);
+    assert.equal(await imported.getByRole("button", { name: "Back to library" }).isDisabled(), true);
+    await imported.evaluate(() => window.componentsAcceptance.finish(0));
+    await imported.waitForFunction(() => window.componentsAcceptance.count() === 2);
+    await imported.evaluate(() => window.componentsAcceptance.finish(1));
+    await imported.waitForFunction(() => window.componentsAcceptance.calls().length === 1);
+    await imported.evaluate(() => window.componentsAcceptance.reject());
+    await imported.getByRole("status").filter({ hasText: "User rejected signing" }).waitFor();
+    assert.equal(await imported.getByRole("button", { name: "Back to library" }).isDisabled(), false);
+    await imported.close();
+    const disconnected = await browser.newPage();
+    await disconnected.goto(`${origin}/?disconnected`);
+    await disconnected.getByRole("status").filter({ hasText: "Connect your wallet" }).waitFor();
+    assert.equal(await disconnected.getByRole("button", { name: "Publish version", exact: true }).count(), 0);
+    await disconnected.close();
+    const page = await browser.newPage(), errors = []; page.setDefaultTimeout(10000);
+    page.on("pageerror", e => errors.push(e.message));
+    page.on("console", m => { if (m.type() === "error") errors.push(m.text()); });
+    await page.goto(`http://127.0.0.1:${server.address().port}`);
+    await page.getByRole("heading", { name: "No component versions yet" }).waitFor();
+    assert.equal(await page.getByLabel("Component name", { exact: true }).count(), 0);
+    await page.evaluate(() => { void window.componentsAcceptance.library("error"); });
+    await page.getByRole("alert").filter({ hasText: "Library network unavailable" }).waitFor();
+    await page.evaluate(() => { void window.componentsAcceptance.library("loading"); });
+    await page.evaluate(() => window.componentsAcceptance.loaded());
+    await page.getByRole("heading", { name: "No component versions yet" }).waitFor();
+    await page.getByRole("button", { name: "Publish version", exact: true }).click();
+    await page.getByLabel("Component name", { exact: true }).fill("camera");
+    await page.getByLabel("Semantic version").fill("bad");
+    await page.getByRole("button", { name: "Continue to platform artifacts" }).click();
+    await page.getByRole("alert").filter({ hasText: "Invalid semantic version" }).waitFor();
+    await page.getByLabel("Semantic version").fill("1.2.0");
+    await page.getByRole("button", { name: "Continue to platform artifacts" }).click();
+    const file = (name) => ({ name, mimeType: "application/octet-stream", buffer: Buffer.from(`artifact ${name}`) });
+    await page.getByLabel("Artifact", { exact: true }).setInputFiles(file("linux.bin"));
+    await page.getByRole("button", { name: "Add platform", exact: true }).click();
+    await page.getByLabel("Operating system").nth(1).selectOption("macos");
+    await page.getByLabel("Artifact", { exact: true }).nth(1).setInputFiles(file("macos.bin"));
+    await page.getByRole("button", { name: "Move platform 2 earlier" }).click();
+    assert.equal(await page.getByLabel("Operating system").first().inputValue(), "macos");
+    await page.getByText("Optional installer command", { exact: true }).first().click();
+    await page.getByLabel("Install command", { exact: true }).first().fill("{artifact} --install");
+    await page.getByRole("button", { name: "Review version", exact: true }).click();
+    const publish = page.getByRole("button", { name: "Upload and publish version", exact: true });
+    await publish.click();
+    await page.getByRole("alert").filter({ hasText: "Confidential delivery needs Seal" }).waitFor();
+    assert.equal(await page.evaluate(() => window.componentsAcceptance.count()), 0, "confidential must never fall back to public");
+    await page.getByRole("button", { name: "Edit platform artifacts" }).click();
+    await page.getByRole("radio").nth(1).check();
+    await page.getByRole("checkbox").first().check();
+    await page.getByRole("button", { name: "Review version", exact: true }).click();
+    await publish.evaluate(b => { b.click(); b.click(); b.click(); });
+    await page.waitForFunction(() => window.componentsAcceptance.count() === 1);
+    assert.equal(await page.getByRole("button", { name: "Publishing…", exact: true }).isDisabled(), true);
+    await page.evaluate(() => window.componentsAcceptance.progress(0, 5, 10));
+    await page.waitForFunction(() => document.querySelector("[role=progressbar]").getAttribute("aria-valuenow") === "50");
+    await page.evaluate(() => window.componentsAcceptance.finish(0, 503));
+    await page.getByRole("alert").filter({ hasText: "503" }).waitFor();
+    // Explicit retry uploads two ordered platform artifacts/recipes, then awaits wallet.
+    async function finishUpload(index) {
+      await page.waitForFunction(i => window.componentsAcceptance.count() === i + 1, index);
+      await page.evaluate(i => window.componentsAcceptance.finish(i), index);
+    }
+    await publish.click();
+    for (let i = 1; i <= 4; i++) await finishUpload(i);
+    await page.getByRole("status").filter({ hasText: "Verifying fleet network" }).waitFor();
+    await page.evaluate(() => window.componentsAcceptance.phase("wallet"));
+    await page.getByRole("status").filter({ hasText: "Confirm version publication in your wallet" }).waitFor();
+    await page.evaluate(() => window.componentsAcceptance.reject());
+    await page.getByRole("alert").filter({ hasText: "User rejected signing" }).waitFor();
+    await publish.click();
+    for (let i = 5; i <= 8; i++) await finishUpload(i);
+    const recipes = await page.evaluate(() => Promise.all([window.componentsAcceptance.recipe(6), window.componentsAcceptance.recipe(8)]));
+    assert.equal(recipes[0].lifecycle.install, "{artifact} --install");
+    assert.equal(recipes[0].artifactBlobId, "blob-5");
+    assert.equal(recipes[1].artifactBlobId, "blob-7");
+    assert.match(recipes[0].artifactSha256, /^[a-f0-9]{64}$/);
+    const calls = await page.evaluate(() => window.componentsAcceptance.calls());
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].commands[0].MoveCall.function, "publish_version");
+    await page.evaluate(() => window.componentsAcceptance.phase("confirming"));
+    await page.getByRole("status").filter({ hasText: "Confirming transaction effects" }).waitFor();
+    assert.equal(await page.getByText("Version published", { exact: true }).count(), 0);
+    await page.evaluate(() => window.componentsAcceptance.succeed());
+    await page.getByText("Version published", { exact: true }).waitFor();
+    assert.equal(await publish.count(), 0, "confirmed version cannot be resubmitted");
+    await page.getByRole("button", { name: "Back to library" }).click();
+    await page.getByRole("heading", { name: "camera", exact: true }).waitFor();
+    await page.getByText("Public · unencrypted recipe").first().waitFor();
+    await page.getByLabel("Search components and versions").fill("no-match");
+    await page.getByRole("status").filter({ hasText: "No versions match" }).waitFor();
+    await page.getByLabel("Search components and versions").fill("macos");
+    await page.getByRole("link", { name: "Deploy this version" }).waitFor();
+    if (process.env.SUIFLEET_BROWSER_EVIDENCE) {
+      await fs.mkdir(process.env.SUIFLEET_BROWSER_EVIDENCE, { recursive: true });
+      await page.screenshot({ path: path.join(process.env.SUIFLEET_BROWSER_EVIDENCE, "library-desktop.png"), fullPage: true });
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "mobile library overflow");
+    await page.getByRole("button", { name: "Publish version", exact: true }).click();
+    await page.getByLabel("Component name", { exact: true }).fill("camera");
+    await page.getByLabel("Semantic version").fill("1.2.0");
+    await page.getByRole("button", { name: "Continue to platform artifacts" }).click();
+    await page.getByRole("alert").filter({ hasText: "already exists" }).waitFor();
+    await page.getByLabel("Semantic version").fill("1.3.0");
+    await page.getByRole("button", { name: "Continue to platform artifacts" }).click();
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "mobile publisher overflow");
+    await page.setViewportSize({ width: 320, height: 740 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "320px publisher overflow");
+    if (process.env.SUIFLEET_BROWSER_EVIDENCE) await page.screenshot({ path: path.join(process.env.SUIFLEET_BROWSER_EVIDENCE, "publisher-mobile.png"), fullPage: true });
+    const unnamed = await page.locator("input,select,textarea").evaluateAll(elements => elements.filter(e => !e.labels?.length && !e.getAttribute("aria-label")).length);
+    assert.equal(unnamed, 0, "form controls need accessible names");
+    await page.getByLabel("Artifact", { exact: true }).setInputFiles(file("next.bin"));
+    await page.getByRole("radio").nth(1).check();
+    await page.getByRole("checkbox").first().check();
+    await page.getByRole("button", { name: "Review version", exact: true }).click();
+    await publish.click();
+    await page.waitForFunction(() => window.componentsAcceptance.count() === 10);
+    await page.evaluate(() => window.componentsAcceptance.account("0xb"));
+    await page.getByLabel("Component name", { exact: true }).waitFor();
+    await page.evaluate(() => window.componentsAcceptance.finish(9));
+    await finishUpload(10);
+    await page.waitForTimeout(100);
+    assert.equal(await page.evaluate(() => window.componentsAcceptance.calls().length), 2, "removed publisher must not register using the successor wallet");
+    await page.getByRole("button", { name: "Back to library" }).click();
+    await page.getByRole("link", { name: "Deploy this version" }).click();
+    await page.waitForURL("**/firmware?componentVersion=0x111");
+    await page.getByText("camera 1.2.0 · immutable catalog version. Each device selects its own platform.", { exact: true }).waitFor();
+    await page.getByRole("checkbox", { name: /Acceptance device/ }).waitFor();
+    assert.equal(await page.getByText("Drop any file here", { exact: true }).count(), 0);
+    assert.equal(await page.getByRole("region", { name: "Published version review" }).isVisible(), true);
+    assert.equal(await page.evaluate(() => window.componentsAcceptance.calls().length), 0, "navigation must not deploy");
+    assert.deepEqual(errors, []);
+    console.log("PASS: Chrome library/search/errors, guided ordered multi-platform publishing, real upload progress, confidential fail-closed, duplicate suppression, upload/wallet rejection retry, confirmed success, immutable duplicate prevention, accessible form names, mobile layout and deploy-to-target navigation. Chain/wallet/storage are fixtures.");
+  } finally {
+    if (browser) await browser.close();
+    if (server) await new Promise(r => server.close(r));
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+})().catch(e => { console.error(e); process.exitCode = 1; });
