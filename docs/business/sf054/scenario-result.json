@@ -20,8 +20,10 @@
   "exposure_not_cost": {
     "mainnet:budget_MIST": 0,
     "mainnet:unknown_MIST": 0,
+    "mainnet:unknown_FROST": 0,
     "testnet:budget_MIST": 0,
-    "testnet:unknown_MIST": 0
+    "testnet:unknown_MIST": 0,
+    "testnet:unknown_FROST": 0
   },
   "lines": [
     {

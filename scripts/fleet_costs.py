@@ -84,6 +84,7 @@ def calculate(model):
             raise ValueError("unknown network")
         exposure[f'{row["network"]}:budget_MIST'] += integer(row.get("budget_mist", 0)) * count
         exposure[f'{row["network"]}:unknown_MIST'] += integer(row.get("unknown_reserved_mist", 0)) * count
+        exposure[f'{row["network"]}:unknown_FROST'] += integer(row.get("unknown_reserved_frost", 0)) * count
         if kind in {"unquoted", "excluded"}:
             if row.get("amount") is not None:
                 raise ValueError("unquoted/excluded line cannot carry an amount")
@@ -119,7 +120,7 @@ def calculate(model):
     # no omitted categories. Estimates/simulations are useful, but not invoices.
     complete = (not missing and bool(quotes) and
                 all(q['network'] == 'mainnet' for q in model.get('blob_quotes', [])) and
-                not any(value for key, value in exposure.items() if key.endswith(':unknown_MIST')) and
+                not any(value for key, value in exposure.items() if ':unknown_' in key) and
                 all(r["kind"] == "measured" and r["network"] == "mainnet" for r in model["lines"]))
     reconciliations = {f['name']: reconcile(f) for f in model.get('token_flows', [])}
     if not reconciliations or any(reconciliations.values()):

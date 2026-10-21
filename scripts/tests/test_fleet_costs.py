@@ -38,10 +38,11 @@ class CostTests(unittest.TestCase):
     def test_unknown_exposure_is_not_zero_cost(self):
         model = self.model()
         row = model['lines'][0]
-        row.update(kind='unquoted', amount=None, unknown_reserved_mist=50000000)
+        row.update(kind='unquoted', amount=None, unknown_reserved_mist=50000000, unknown_reserved_frost=699480)
         row.pop('effects')
         result = calculate(model)
         self.assertEqual(result['exposure_not_cost']['testnet:unknown_MIST'], 50000000)
+        self.assertEqual(result['exposure_not_cost']['testnet:unknown_FROST'], 699480)
         self.assertFalse(result['complete_mainnet_bill'])
 
     def test_duplicate_digest_or_scaled_measurement_rejected(self):
