@@ -86,6 +86,10 @@ The bridge is an MQTT 3.1.1 client (MQTT 5 brokers accept it) with a persistent 
 - **Reconnect** backs off from 1 s to 60 s. Stats are written to `<state_dir>/pubsub/bridge.json` and served by `messaging`.
 - **Transport.** Plain TCP to a broker on this device or a trusted network. LAN client devices reach the broker through the SF-035 gateway (mutual TLS, per-thing policies; [CLIENT_DEVICES.md](CLIENT_DEVICES.md)), which requires the broker to listen on loopback. Cloud targets (AWS IoT Core or another remote broker) are a separately approved adapter (SF-061).
 
+SF-078 adds a separate [SNS publisher](SNS.md) that consumes requests from a
+durable subscription, authorizes each authenticated sender per topic ARN and
+publishes to SNS with scoped credentials. It does not change pub/sub or the bridge.
+
 ## SDK
 
 ```python
