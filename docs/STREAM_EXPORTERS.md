@@ -237,3 +237,5 @@ Physical Pi integration remains [SF-031/#32](https://github.com/tyler-suifleet/s
 SiteWise/other service exporters remain [SF-064/#109](https://github.com/tyler-suifleet/suifleet/issues/109).
 No complete Stream Manager, AWS account, production, hardware-token or firmware
 safety acceptance is claimed.
+
+SF-071 adds the native [SiteWise TQV processing/publisher](SITEWISE.md) over SF-070 records and SF-034 lossless external streams with SF-057 credentials. Its local request/checkpoint tests establish the documented native subset; live AWS and physical acceptance remain unrun. Historical reference fixtures above remain specification-only.
