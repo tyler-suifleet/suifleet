@@ -2011,6 +2011,32 @@
         "Track authorized live AWS acceptance separately. No AWS account mutations, paid services, production credentials, physical programming or unsupported full-parity claims are authorized."
       ],
       "validation": "Actual console/API auth, CSRF/origin where applicable, role/caller denial, redaction, bounded queries and audit tests; no production exposure or credentials provisioned."
+    },
+    {
+      "key": "SF-097",
+      "title": "Show real Walrus upload progress and prevent duplicate deployment submissions",
+      "priority": "P1",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "area": "frontend",
+      "resources": [],
+      "depends_on": [],
+      "paths": [
+        "dapp/src/lib/walrus.ts",
+        "dapp/src/app/firmware/page.tsx",
+        "dapp/src/components",
+        "scripts"
+      ],
+      "description": "The user explicitly requests a progress bar overlaying Uploading to Walrus so artifact uploads show observable progress. Live Chrome/Slush acceptance also exposed an idle-looking Deploy button during recipe upload that allows duplicate wallet requests. Provide truthful upload progress and single-flight deployment preparation without fake percent completion.",
+      "evidence": "Live acceptance in #32: real Walrus uploads work, but long recipe upload appears unresponsive and repeated invocations queue additional Slush transaction requests. FirmwarePage lacks busy state until the wallet mutation begins. The artifact upload currently renders only Uploading to Walrus text. React also reports an unkeyed mapped step fragment.",
+      "acceptance": [
+        "Render an accessible progress bar with the Uploading to Walrus label for artifact and recipe uploads. Show actual byte transfer progress when available, distinguish awaiting Walrus certification/response from completed upload, and use indeterminate progress when total is unknown; never report processing as fully complete before a successful response.",
+        "Preserve the upload request body, content types, storage metadata parsing, explicit public/confidential protection, encrypted-before-upload behavior and error propagation. Upload failures retain retryable form state and cannot submit a transaction.",
+        "Acquire a synchronous single-flight guard before asynchronous deployment preparation; show upload/awaiting-wallet/confirmation states and disable duplicate submissions throughout. Release on cancellation/failure and retain success gating without automatically retrying wallet mutations.",
+        "Fix the mapped step fragment key as a contained correction to this same upload/deployment UI.",
+        "Add meaningful transport/UI regressions for measured and unknown-total progress, slow response, failure and duplicate clicks. Run frontend typecheck/production build and relevant existing upload/encryption/browser tests; keep physical Pi/mainnet external acceptance separate."
+      ],
+      "validation": "Pinned-toolchain frontend typecheck/build, targeted upload transport and browser regressions with delayed response and repeated clicks; preserve existing Walrus/Seal tests. Public testnet only if transaction behavior changes; no production/hardware operations."
     }
   ]
 }
