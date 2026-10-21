@@ -71,6 +71,11 @@
    "runtime_execution": "passed", "runtime_evidence": "docs/validation/sf033-shadows.json",
    "runtime_scope": "The daemon's shadow store executes all 55 steps of the 10 sequences, each also after reopening the store from disk (make edge-test); scripts/test_shadows.py exercises the same semantics through real IPC UIDs, restarts, kill -9 and a verifying reference cloud shadow service."
   },
+  "aws-iot-cases.json": {
+   "description": "SF-061 aws-iot-core-connection: [aws_iot] connection settings, AWS IoT Core topic limits, IotCore mapping rules, AWS Device Shadow update patches and answers, and the policy-denied publication rule.",
+   "runtime_execution": "passed", "runtime_evidence": "docs/validation/sf061-aws-iot.json",
+   "runtime_scope": "The daemon's connection, bridge and shadow modules execute all 94 checks (make edge-test); scripts/test_aws_iot.py exercises the connection, mappings, rotation and shadow synchronization end to end against Mosquitto with mutual TLS and an AWS-shaped endpoint."
+  },
   "stream-cases.json": {
    "description": "Durable stream append/read/eviction/restart/export-checkpoint semantics.",
    "runtime_execution": "passed", "runtime_evidence": "docs/validation/sf034-streams.json",
@@ -144,9 +149,9 @@
    "notes": "A standard broker (Eclipse Mosquitto) on loopback serves LAN clients through the SF-035 mutual-TLS gateway, which speaks MQTT 3.1.1; MQTT 5 LAN clients are refused. Not an AWS API."},
   {"id": "messaging.bridge", "area": "messaging", "aws_reference": "aws.greengrass.clientdevices.mqtt.Bridge mqttTopicMapping LocalMqtt/Pubsub/IotCore",
    "functional": "partial", "aws_api": "undecided", "aws_recipe": "not-applicable",
-   "tickets": ["SF-032"], "suites": ["pubsub-cases.json"],
-   "current_evidence": ["docs/MESSAGING.md", "docs/validation/sf032-messaging.json"],
-   "notes": "LocalMqtt<->Pubsub routing is implemented over plain MQTT 3.1.1 to a loopback broker; LAN clients reach it through the SF-035 mutual-TLS gateway; any cloud target (IotCore or another broker) is a selected adapter needing approval."},
+   "tickets": ["SF-032", "SF-061"], "suites": ["pubsub-cases.json", "aws-iot-cases.json"],
+   "current_evidence": ["docs/MESSAGING.md", "docs/validation/sf032-messaging.json", "docs/AWS_IOT.md", "docs/validation/sf061-aws-iot.json"],
+   "notes": "LocalMqtt<->Pubsub routing over plain MQTT 3.1.1 to a loopback broker (SF-032); LAN clients reach it through the SF-035 mutual-TLS gateway. Pubsub<->IotCore over the mutual-TLS aws-iot-core-connection adapter (SF-061), tested against Mosquitto and an AWS-shaped endpoint; direct LocalMqtt<->IotCore mappings route through Pubsub. Real AWS IoT Core is unrun."},
   {"id": "shadows.local", "area": "shadows", "aws_reference": "aws.greengrass.ShadowManager Get/Update/Delete/ListNamedShadowsForThing",
    "functional": "implemented", "aws_api": "undecided", "aws_recipe": "not-applicable",
    "tickets": ["SF-027", "SF-033"], "suites": ["shadow-cases.json"],
@@ -154,9 +159,9 @@
    "notes": "Native IPC operations with AWS ShadowManager-shaped policies and AWS-shaped local pub/sub notification topics; not the AWS IPC wire protocol. No per-key metadata timestamps; deletion keeps the version sequence."},
   {"id": "shadows.cloud-sync", "area": "shadows", "aws_reference": "Shadow manager synchronization with AWS IoT Device Shadow",
    "functional": "partial", "aws_api": "undecided", "aws_recipe": "not-applicable", "tickets": ["SF-033", "SF-061"],
-   "suites": ["shadow-cases.json"],
-   "current_evidence": ["docs/SHADOWS.md", "docs/validation/sf033-shadows.json"],
-   "notes": "SF-033 implements a device-signed HTTP(S) compare-and-swap sync adapter with three-way merge and a per-section conflict owner, tested against a local reference service. AWS IoT Device Shadow synchronization is the aws-iot-core-connection adapter (SF-061). On-chain storage of shadow documents is not proposed."},
+   "suites": ["shadow-cases.json", "aws-iot-cases.json"],
+   "current_evidence": ["docs/SHADOWS.md", "docs/validation/sf033-shadows.json", "docs/AWS_IOT.md", "docs/validation/sf061-aws-iot.json"],
+   "notes": "Three-way merge with a per-section conflict owner over compare-and-swap: a device-signed HTTP(S) service (SF-033) or AWS IoT Device Shadow over the aws-iot-core-connection adapter (SF-061), tested against a local reference service and an AWS-shaped endpoint. AWS deletion and creation carry no version, so they are not compare-and-swap. Real AWS IoT Device Shadow is unrun. On-chain storage of shadow documents is not proposed."},
   {"id": "streams.local", "area": "streams", "aws_reference": "aws.greengrass.StreamManager MessageStreamDefinition/read/append",
    "functional": "implemented", "aws_api": "undecided", "aws_recipe": "not-applicable",
    "tickets": ["SF-027", "SF-034"], "suites": ["stream-cases.json"],

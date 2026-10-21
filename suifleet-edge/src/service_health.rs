@@ -651,6 +651,7 @@ mod tests {
             connected: false, connects: 0,
             last_error: Some("connect 127.0.0.1:1883: refused; password=hunter2\nnext".into()),
             mappings: vec![crate::bridge::MappingStats { refused: 2, rejected: 1, ..Default::default() }],
+            ..Default::default()
         }));
         let sources = Sources { bridge: Some(stats.clone()), ..Sources::default() };
         let mut tracker = Tracker::default();

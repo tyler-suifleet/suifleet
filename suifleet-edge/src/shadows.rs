@@ -16,7 +16,8 @@
 //! `[pubsub]` is enabled.
 //!
 //! An optional sync adapter reconciles selected shadows with an HTTP(S)
-//! service through compare-and-swap on the cloud version. Each side's
+//! service, or with AWS IoT Device Shadow over the AWS IoT Core connection
+//! (`iotcore.rs`, SF-061), through compare-and-swap on the cloud version. Each side's
 //! changes since the last agreed document (the base) are merged three ways;
 //! a key both sides changed differently is a conflict, settled per section
 //! by the configured owner (by default the cloud owns `desired` and the
@@ -774,22 +775,57 @@ fn device_side() -> Side {
     Side::Device
 }
 
+/// The settings both sync adapters share.
+fn validate_sync(table: &str, shadows: &[String], interval: u64, backoff: u64, max_shadows: usize) -> anyhow::Result<()> {
+    anyhow::ensure!(!shadows.is_empty() && shadows.len() <= max_shadows, "{table}.shadows needs 1..=max_shadows names");
+    let mut names = BTreeSet::new();
+    for name in shadows {
+        anyhow::ensure!(valid_name(name), "invalid shadow name {name:?} in {table}.shadows");
+        anyhow::ensure!(names.insert(name), "shadow {name:?} is listed twice in {table}.shadows");
+    }
+    anyhow::ensure!((1..=3600).contains(&interval), "{table}.interval_seconds must be 1..=3600");
+    anyhow::ensure!((1..=3600).contains(&backoff), "{table}.max_backoff_seconds must be 1..=3600");
+    Ok(())
+}
+
 impl SyncConfig {
     pub fn validate(&self, max_shadows: usize) -> anyhow::Result<()> {
         let url = reqwest::Url::parse(&self.url)?;
         anyhow::ensure!(matches!(url.scheme(), "http" | "https") && url.host().is_some(), "shadows.sync.url must be http(s)");
         anyhow::ensure!(url.username().is_empty() && url.password().is_none(), "shadows.sync.url must not embed credentials; use bearer_token_file");
-        anyhow::ensure!(!self.shadows.is_empty() && self.shadows.len() <= max_shadows, "shadows.sync.shadows needs 1..=max_shadows names");
-        let mut names = BTreeSet::new();
-        for name in &self.shadows {
-            anyhow::ensure!(valid_name(name), "invalid shadow name {name:?} in shadows.sync.shadows");
-            anyhow::ensure!(names.insert(name), "shadow {name:?} is listed twice in shadows.sync.shadows");
-        }
-        anyhow::ensure!((1..=3600).contains(&self.interval_seconds), "shadows.sync.interval_seconds must be 1..=3600");
-        anyhow::ensure!((1..=3600).contains(&self.max_backoff_seconds), "shadows.sync.max_backoff_seconds must be 1..=3600");
-        Ok(())
+        validate_sync("shadows.sync", &self.shadows, self.interval_seconds, self.max_backoff_seconds, max_shadows)
     }
     fn owners(&self) -> Owners {
+        Owners { desired: self.desired_conflict, reported: self.reported_conflict }
+    }
+}
+
+/// `[shadows.aws_iot]`: synchronization with AWS IoT Device Shadow over
+/// the `[aws_iot]` connection (SF-061).
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AwsSyncConfig {
+    /// Names of the shadows to synchronize (`""` is the classic shadow).
+    pub shadows: Vec<String>,
+    /// Cloud poll; changes from other writers also arrive as notifications.
+    #[serde(default = "default_aws_interval")]
+    pub interval_seconds: u64,
+    #[serde(default = "default_sync_backoff")]
+    pub max_backoff_seconds: u64,
+    #[serde(default = "cloud_side")]
+    pub desired_conflict: Side,
+    #[serde(default = "device_side")]
+    pub reported_conflict: Side,
+}
+fn default_aws_interval() -> u64 {
+    300
+}
+
+impl AwsSyncConfig {
+    pub fn validate(&self, max_shadows: usize) -> anyhow::Result<()> {
+        validate_sync("shadows.aws_iot", &self.shadows, self.interval_seconds, self.max_backoff_seconds, max_shadows)
+    }
+    pub fn owners(&self) -> Owners {
         Owners { desired: self.desired_conflict, reported: self.reported_conflict }
     }
 }
@@ -835,9 +871,117 @@ pub struct Syncer {
 }
 
 /// The cloud's answer to a put.
-enum Put {
+pub(crate) enum Put {
     Stored(u64),
     Conflict,
+}
+
+/// A cloud shadow service the synchronizer reconciles with.
+pub(crate) trait Cloud {
+    /// The cloud's version and document (None when absent there).
+    async fn fetch(&self, shadow: &str) -> anyhow::Result<(u64, Option<Map<String, Value>>)>;
+    /// Store `document` (None deletes) if the cloud is still at `expected`,
+    /// whose document was `cloud`.
+    async fn put(&self, shadow: &str, expected: u64, cloud: Option<&Map<String, Value>>, document: Option<&Map<String, Value>>) -> anyhow::Result<Put>;
+}
+
+/// One reconciliation of `shadow`: fetch, merge, compare-and-swap, apply.
+pub(crate) async fn sync_one<C: Cloud>(store: &Mutex<Store>, owners: Owners, cloud: &C, shadow: &str) -> anyhow::Result<Value> {
+    let (local, state) = store.lock().unwrap().sync_snapshot(shadow);
+    let (cloud_version, remote) = cloud.fetch(shadow).await?;
+    let mut conflicts = Vec::new();
+    let merged = merge3(state.base.as_ref(), local.as_ref(), remote.as_ref(), owners, &mut conflicts);
+    if let Some(document) = &merged {
+        check_document(document).map_err(|e| anyhow::anyhow!("merged shadow refused: {e}"))?;
+    }
+    let pushed = !same_document(merged.as_ref(), remote.as_ref());
+    let agreed_version = if pushed {
+        match cloud.put(shadow, cloud_version, remote.as_ref(), merged.as_ref()).await? {
+            Put::Stored(version) => version,
+            // Another writer got there first: merge again from a fresh read.
+            Put::Conflict => anyhow::bail!("the cloud shadow changed during synchronization; retrying"),
+        }
+    } else {
+        cloud_version
+    };
+    let pulled = store.lock().unwrap().sync_apply(shadow, local.as_ref(), merged, agreed_version, crate::telemetry::now_ms())?;
+    Ok(json!({"pushed": pushed, "pulled": pulled, "conflicts": conflicts, "cloud_version": agreed_version}))
+}
+
+/// Synchronize `shadows` until aborted. Local changes and `cloud_changed`
+/// wake a cycle at once; otherwise the cloud is polled every `interval`.
+pub(crate) async fn run_sync<C: Cloud>(store: Arc<Mutex<Store>>, shadows: &[String], interval: u64, max_backoff: u64, owners: Owners,
+                                       cloud: &C, cloud_changed: Option<Arc<tokio::sync::Notify>>) {
+    let changed = store.lock().unwrap().changed.clone();
+    let cloud_changed = cloud_changed.unwrap_or_default();
+    let mut counters: BTreeMap<String, (u64, u64, u64, u64)> = BTreeMap::new();
+    // Consecutive failures and the last success, per shadow.
+    let mut streaks: BTreeMap<String, (u64, Option<u64>)> = BTreeMap::new();
+    let mut backoff = 1u64;
+    loop {
+        let mut failed = false;
+        for shadow in shadows {
+            let result = sync_one(&store, owners, cloud, shadow).await;
+            let (pushes, pulls, conflicts, failures) = counters.entry(shadow.clone()).or_default();
+            let (consecutive, last_success_ms) = streaks.entry(shadow.clone()).or_default();
+            match &result {
+                Ok(_) => (*consecutive, *last_success_ms) = (0, Some(crate::telemetry::now_ms())),
+                Err(_) => *consecutive += 1,
+            }
+            match &result {
+                Ok(outcome) => {
+                    *pushes += outcome["pushed"].as_bool().unwrap_or(false) as u64;
+                    *pulls += outcome["pulled"].as_bool().unwrap_or(false) as u64;
+                    let found = outcome["conflicts"].as_array().map_or(0, Vec::len) as u64;
+                    *conflicts += found;
+                    if found > 0 {
+                        info!(%shadow, conflicts = %outcome["conflicts"], "Shadow sync settled conflicts by the configured owner");
+                    }
+                }
+                Err(error) => {
+                    failed = true;
+                    *failures += 1;
+                    warn!(%shadow, %error, "Shadow sync failed; local shadow unchanged");
+                }
+            }
+            store.lock().unwrap().set_sync_status(shadow, json!({
+                "pushes": *pushes, "pulls": *pulls, "conflicts": *conflicts, "failures": *failures,
+                "consecutive_failures": *consecutive, "last_success_ms": *last_success_ms,
+                "last_error": result.as_ref().err().map(|e| crate::telemetry::bounded(&e.to_string(), 300)),
+                // At most 16 paths: the status must fit an IPC frame.
+                "last_conflicts": result.as_ref().ok().map(|o| o["conflicts"].as_array().map_or(&[][..], Vec::as_slice)
+                    .iter().take(16).cloned().collect::<Vec<_>>()),
+                "updated_ms": crate::telemetry::now_ms(),
+            }));
+        }
+        if failed {
+            tokio::time::sleep(Duration::from_secs(backoff)).await;
+            backoff = (backoff * 2).min(max_backoff);
+        } else {
+            backoff = 1;
+            // A local change syncs at once; cloud changes are polled or notified.
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(interval)) => {}
+                _ = changed.notified() => {}
+                _ = cloud_changed.notified() => {}
+            }
+        }
+    }
+}
+
+/// The HTTP(S) service, through one client.
+struct Http<'a> {
+    syncer: &'a Syncer,
+    client: reqwest::Client,
+}
+
+impl Cloud for Http<'_> {
+    async fn fetch(&self, shadow: &str) -> anyhow::Result<(u64, Option<Map<String, Value>>)> {
+        self.syncer.fetch(&self.client, shadow).await
+    }
+    async fn put(&self, shadow: &str, expected: u64, _: Option<&Map<String, Value>>, document: Option<&Map<String, Value>>) -> anyhow::Result<Put> {
+        self.syncer.put(&self.client, shadow, expected, document).await
+    }
 }
 
 impl Syncer {
@@ -920,87 +1064,14 @@ impl Syncer {
         Ok(Put::Stored(version))
     }
 
-    /// One reconciliation of `shadow`: fetch, merge, compare-and-swap, apply.
-    pub async fn sync_one(&self, http: &reqwest::Client, shadow: &str) -> anyhow::Result<Value> {
-        let (local, state) = self.store.lock().unwrap().sync_snapshot(shadow);
-        let (cloud_version, cloud) = self.fetch(http, shadow).await?;
-        let mut conflicts = Vec::new();
-        let merged = merge3(state.base.as_ref(), local.as_ref(), cloud.as_ref(), self.config.owners(), &mut conflicts);
-        if let Some(document) = &merged {
-            check_document(document).map_err(|e| anyhow::anyhow!("merged shadow refused: {e}"))?;
-        }
-        let pushed = !same_document(merged.as_ref(), cloud.as_ref());
-        let agreed_version = if pushed {
-            match self.put(http, shadow, cloud_version, merged.as_ref()).await? {
-                Put::Stored(version) => version,
-                // Another writer got there first: merge again from a fresh read.
-                Put::Conflict => anyhow::bail!("the cloud shadow changed during synchronization; retrying"),
-            }
-        } else {
-            cloud_version
-        };
-        let pulled = self.store.lock().unwrap().sync_apply(shadow, local.as_ref(), merged, agreed_version, crate::telemetry::now_ms())?;
-        Ok(json!({"pushed": pushed, "pulled": pulled, "conflicts": conflicts, "cloud_version": agreed_version}))
-    }
-
     pub async fn run(self) {
-        let http = match crate::streams::Exporter::http_client() {
-            Ok(http) => http,
+        let client = match crate::streams::Exporter::http_client() {
+            Ok(client) => client,
             Err(error) => return warn!(%error, "Shadow sync disabled: no HTTP client"),
         };
-        let changed = self.store.lock().unwrap().changed.clone();
-        let mut counters: BTreeMap<String, (u64, u64, u64, u64)> = BTreeMap::new();
-        // Consecutive failures and the last success, per shadow.
-        let mut streaks: BTreeMap<String, (u64, Option<u64>)> = BTreeMap::new();
-        let mut backoff = 1u64;
-        loop {
-            let mut failed = false;
-            for shadow in &self.config.shadows {
-                let result = self.sync_one(&http, shadow).await;
-                let (pushes, pulls, conflicts, failures) = counters.entry(shadow.clone()).or_default();
-                let (consecutive, last_success_ms) = streaks.entry(shadow.clone()).or_default();
-                match &result {
-                    Ok(_) => (*consecutive, *last_success_ms) = (0, Some(crate::telemetry::now_ms())),
-                    Err(_) => *consecutive += 1,
-                }
-                match &result {
-                    Ok(outcome) => {
-                        *pushes += outcome["pushed"].as_bool().unwrap_or(false) as u64;
-                        *pulls += outcome["pulled"].as_bool().unwrap_or(false) as u64;
-                        let found = outcome["conflicts"].as_array().map_or(0, Vec::len) as u64;
-                        *conflicts += found;
-                        if found > 0 {
-                            info!(%shadow, conflicts = %outcome["conflicts"], "Shadow sync settled conflicts by the configured owner");
-                        }
-                    }
-                    Err(error) => {
-                        failed = true;
-                        *failures += 1;
-                        warn!(%shadow, %error, "Shadow sync failed; local shadow unchanged");
-                    }
-                }
-                self.store.lock().unwrap().set_sync_status(shadow, json!({
-                    "pushes": *pushes, "pulls": *pulls, "conflicts": *conflicts, "failures": *failures,
-                    "consecutive_failures": *consecutive, "last_success_ms": *last_success_ms,
-                    "last_error": result.as_ref().err().map(|e| crate::telemetry::bounded(&e.to_string(), 300)),
-                    // At most 16 paths: the status must fit an IPC frame.
-                    "last_conflicts": result.as_ref().ok().map(|o| o["conflicts"].as_array().map_or(&[][..], Vec::as_slice)
-                        .iter().take(16).cloned().collect::<Vec<_>>()),
-                    "updated_ms": crate::telemetry::now_ms(),
-                }));
-            }
-            if failed {
-                tokio::time::sleep(Duration::from_secs(backoff)).await;
-                backoff = (backoff * 2).min(self.config.max_backoff_seconds);
-            } else {
-                backoff = 1;
-                // A local change syncs at once; cloud changes are polled.
-                tokio::select! {
-                    _ = tokio::time::sleep(Duration::from_secs(self.config.interval_seconds)) => {}
-                    _ = changed.notified() => {}
-                }
-            }
-        }
+        let cloud = Http { syncer: &self, client };
+        run_sync(self.store.clone(), &self.config.shadows, self.config.interval_seconds, self.config.max_backoff_seconds,
+                 self.config.owners(), &cloud, None).await
     }
 }
 
