@@ -87,3 +87,27 @@ SF-038's adapter implementations are now published as [SF-057 through SF-063](ht
 The user's latest instruction is that Pi work must not block anything; target issues can be resolved later. Physical target-only acceptance is therefore deferred for all current and future software tickets to SF-031/#32. This includes physical boot, networking, reboot/power-loss and device-specific integration. Retain host-executable compatibility/security evidence, source review, regression checks and normal automatic testnet CI.
 
 SF-031 physical acceptance and SF-066/#111 refreshed image build are on hold. Their incomplete target/build evidence remains incomplete; no new image or physical pass is claimed. SF-065's offline harness depends on its test component (SF-030), not the bootable Pi image. Software may use local Linux stand-ins and simulators without silently claiming target equivalence. Real API dependencies remain required; production signing remains held separately.
+
+## Standing development defaults (2026-10-20)
+
+The user requests continuous progress without repeated prompts and explicitly
+permits physical-hardware and actual-mainnet acceptance after software development.
+The shared policy's `development_defaults` resolves into each current or future
+software ticket's effective scope in both implementation and review/repair prompts.
+Specific scopes remain additive. Dedicated acceptance tickets SF-031, SF-042,
+SF-066 and SF-087 are excluded: they remain open until their own evidence exists.
+Add new acceptance-only tickets to that list rather than treating them as complete.
+
+This separates software merge readiness from physical/mainnet acceptance; it does
+not waive security findings, genuine API dependencies, local regression/upgrade
+tests, relevant automatic testnet validation, current CI or independent review.
+Real wallet/provider acceptance retains its existing scope. No mainnet spending or
+physical programming is authorized by this deferral. Use isolated networks/testnet
+for software rehearsals and preserve required later acceptance in its own ticket.
+
+The coordinator fingerprints the complete raw policy, including defaults, before
+resolving a worker's scope. Updating defaults invalidates earlier review snapshots;
+no existing approval is relabeled. Install the same trusted policy in the private
+project configuration without replacing worker limits, wallets or other projects.
+Keep genuine blockers visible locally and continue other eligible work rather than
+stopping all dispatch or inventing successful evidence.

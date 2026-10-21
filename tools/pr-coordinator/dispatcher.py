@@ -2,6 +2,7 @@
 """Dispatch authorized implementation slots; the ticket database owns tickets."""
 import argparse
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -10,7 +11,7 @@ import subprocess
 import time
 import uuid
 
-from coordinator import network_authorization, process_identity, worker_stopped, run
+from coordinator import network_authorization, process_identity, worker_stopped, run, effective_policy
 
 
 class Dispatcher:
@@ -29,6 +30,7 @@ class Dispatcher:
         self.db.execute('''CREATE TABLE IF NOT EXISTS backoff (
             project TEXT, family TEXT, attempts INTEGER, retry_after REAL, reason TEXT,
             PRIMARY KEY(project,family))''')
+        self.db.execute('CREATE TABLE IF NOT EXISTS eligibility (project TEXT PRIMARY KEY, fingerprint TEXT)')
         for slot in config.get('implementation_slots', []):
             if slot['family'] not in ('Codex', 'Claude') or not slot['model'].strip():
                 raise ValueError('Each slot needs a known family and actual model')
@@ -128,6 +130,17 @@ class Dispatcher:
                 # unrelated slots. Keep its existing capacity/ownership intact.
                 print(f"{project['id']}: reconciliation deferred for {row['session']} ({type(error).__name__})", flush=True)
 
+    def wake_on_change(self, project, owners):
+        # Completion/new-ticket changes wake idle slots without remote polling or
+        # resetting transport/quarantine safeguards. Heartbeats are not new work.
+        relevant = sorted((row['key'], row['status'], row.get('agent')) for row in owners)
+        fingerprint = hashlib.sha256(json.dumps(relevant).encode()).hexdigest()
+        old = self.db.execute('SELECT fingerprint FROM eligibility WHERE project=?', (project['id'],)).fetchone()
+        if not old or old[0] != fingerprint:
+            with self.db:
+                self.db.execute('INSERT OR REPLACE INTO eligibility VALUES(?,?)', (project['id'], fingerprint))
+                self.db.execute("UPDATE backoff SET attempts=0,retry_after=0 WHERE project=? AND reason='idle: no eligible ticket'", (project['id'],))
+
     def available(self, slot, owners):
         pause = self.db.execute('SELECT retry_after FROM backoff WHERE project=? AND family=?', (slot['project'],slot['family'])).fetchone()
         if pause and pause[0] > time.time():
@@ -203,7 +216,7 @@ Claim token is PR_COORDINATOR_CLAIM_TOKEN in the environment; never print/post s
 Immediately heartbeat/assert; heartbeat at least every five minutes and assert after long commands and before edits/commits/push.
 Read ticket show for the full specification/dependencies/notes; coordinate shared APIs in existing notes/issues.
 Implement, run required meaningful tests, record exact results and remaining acceptance gaps. Do not fake acceptance or ignore failures.
-User-authorized implementation acceptance scope: {json.dumps(project.get('acceptance_policy',{}),sort_keys=True)}
+User-authorized implementation acceptance scope: {json.dumps(effective_policy(project.get('acceptance_policy',{}),claim['key']),sort_keys=True)}
 Only when that scope names your ticket, defer its listed external integration checks to the linked acceptance issues. The user permits code-reviewed implementation merge before those checks; local tests, isolated-chain upgrade/compatibility and source correctness remain required. Record limits and links without claiming external tests passed. This newer user scope overrides blanket live/hardware requirements for those listed checks only.
 Use small scoped itemized commits with Tyler Bush <tyler.jonathan.bush@gmail.com> as BOTH author and committer; verify metadata.
 No model authorship/coauthor/signoff attribution. Push your branch and create a PR with Closes followed by this ticket's existing issue URL.
@@ -229,6 +242,7 @@ Specification snapshot: {json.dumps(claim['spec'])}
             if not slots:
                 continue
             owners = self.ticket(project, 'list')
+            self.wake_on_change(project, owners)
             if not any(self.available(slot, owners) for slot in slots):
                 continue
             try:
