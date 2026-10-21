@@ -320,10 +320,22 @@ impl Session {
 
     /// CONNECT over an established stream and wait for the CONNACK.
     pub async fn start(stream: Box<dyn Stream>, client_id: &str, username: Option<&str>, password: Option<&[u8]>, keep_alive: u16) -> anyhow::Result<(Self, bool)> {
+        Self::start_policy(stream, client_id, username, password, keep_alive, false).await
+    }
+
+    /// Ephemeral control channels must not queue stale access tokens offline.
+    #[cfg(target_os = "linux")]
+    pub async fn start_ephemeral(stream: Box<dyn Stream>, client_id: &str, keep_alive: u16) -> anyhow::Result<(Self, bool)> {
+        let (session, present) = Self::start_policy(stream, client_id, None, None, keep_alive, true).await?;
+        anyhow::ensure!(!present, "broker returned a persistent session on an ephemeral connection");
+        Ok((session, false))
+    }
+
+    async fn start_policy(stream: Box<dyn Stream>, client_id: &str, username: Option<&str>, password: Option<&[u8]>, keep_alive: u16, clean: bool) -> anyhow::Result<(Self, bool)> {
         let mut session = Self { stream, buffer: Vec::new() };
         // A persistent session: the broker keeps our subscriptions and the QoS 1
         // messages that arrive while the bridge is away.
-        session.send(&connect(client_id, username, password, keep_alive, false)).await?;
+        session.send(&connect(client_id, username, password, keep_alive, clean)).await?;
         let reply = tokio::time::timeout(std::time::Duration::from_secs(10), session.next()).await
             .map_err(|_| anyhow::anyhow!("no CONNACK within 10 s"))?;
         match reply? {
@@ -363,6 +375,24 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn ephemeral_connect_is_clean_and_rejects_a_stale_session() {
+        for present in [false, true] {
+            let (stream, mut peer) = tokio::io::duplex(128);
+            let broker = tokio::spawn(async move {
+                let expected = connect("tunnel", None, None, 60, true);
+                let mut actual = vec![0; expected.len()];
+                peer.read_exact(&mut actual).await.unwrap();
+                assert_eq!(actual, expected);
+                peer.write_all(&[0x20, 2, u8::from(present), 0]).await.unwrap();
+            });
+            let result = Session::start_ephemeral(Box::new(stream), "tunnel", 60).await;
+            assert_eq!(result.is_ok(), !present);
+            broker.await.unwrap();
+        }
+    }
 
     #[test]
     fn encodes_spec_vectors() {

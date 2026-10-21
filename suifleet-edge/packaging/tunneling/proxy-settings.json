@@ -1,0 +1,1 @@
+{"tunneling":{"proxy":{"tcp":{"max_active_connections":4,"connection_retry_count":0,"connection_retry_delay_ms":100},"websocket":{"connect_retry_count":0,"reconnect_on_data_error":false}}}}

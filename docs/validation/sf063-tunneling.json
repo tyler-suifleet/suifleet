@@ -1,0 +1,53 @@
+{
+  "checks": [
+    "opt-in/digest/local-target/trusted-path/empty-directory/root-user preflight negatives",
+    "denied destinations/mode/region/notification commands launch no proxy",
+    "actual proxy forwards bytes; CAT absent from argv/cross-UID proc; concurrency/timeout/replay enforced",
+    "notification connection loss revokes all local proxy processes",
+    "service/component replacement removes prior proxy and token without replay",
+    "adapter SIGKILL cleans descendants; failed local destination never falls back or restarts CAT",
+    "actual proxy refuses unknown-CA and trusted-CA/wrong-hostname TLS servers",
+    "credential removal revokes active sessions; explicit stop leaves no proxies",
+    "no CAT in journal, durable spool or application MQTT publications"
+  ],
+  "proxy_sha256": "ed80dfa44c574183ce57fb6b4333836429efc176a8cf4cda0b19667f6bad91f2",
+  "localproxy_source": "8a71618acf536923e882387e8d9eca9dbc7fdbe2",
+  "systemd": "systemd 249 (249.11-0ubuntu3.23)",
+  "external_acceptance": "unrun: AWS account/service, physical target, mainnet",
+  "head": "c019a4b580c94291fff66f10cc4974e9120963ea",
+  "dirty": true,
+  "package_sha256": "78e259bc8519d2693836e9a56e70682ad249e2efba1b2152ee3bb70339aadbf7",
+  "ticket": "SF-063",
+  "adapter": "secure-tunneling",
+  "reference_version": "2.0.1",
+  "recorded_utc": "2026-10-21T17:39:20.712020+00:00",
+  "command": "python3 scripts/test_tunneling.py --binary suifleet-edge/target/debug/suifleet --package /tmp/sf063-package.tar.gz --evidence /tmp/sf063-tunnel-evidence.json",
+  "environment": "Privileged disposable Docker systemd 249/cgroup v2 container, network none; actual pinned AWS localproxy, mTLS MQTT notifications, independent TLS/WebSocket/protobuf endpoint and TCP echo service",
+  "unrun": [
+    "AWS service/IAM/operator/production credential acceptance: SF-031/#32 and SF-087/#159",
+    "Physical Pi/ARM packaging, boot/network/power-loss acceptance: SF-031/#32",
+    "Mainnet: SF-087/#159 (unauthorized)"
+  ],
+  "adapter_sha256": "67d19a95474daf542ec4f652ae7664ffccab5d9880f82a3e379d60d7a84ca2cc",
+  "harness_sha256": "ab04e40e6a2a18296632f829ac17d3f2cb7b1690757ebd76442276b5c1efdd58",
+  "unit_sha256": "6602cad0cfb64877b2b1e79fd739e31364af77a3ccb625a190d75d0469556dc5",
+  "source_commit": "71134097fc1244707f6fe4c08109bacdb37a420e",
+  "provenance": "Run before committing the final harness repair; head/dirty retain the actual run metadata. Harness/unit/binary digests bind the tested source and artifact; source_commit contains the identical committed harness.",
+  "unit_tests": {
+    "command": "RUSTUP_TOOLCHAIN=1.94.0 CARGO_TARGET_DIR=/tmp/sf063-target make edge-test INSIDE_DEV_CONTAINER=1",
+    "default_passed": 369,
+    "pkcs11_passed": 371,
+    "failed": 0,
+    "toolchain": "Rust/Cargo 1.94.0"
+  },
+  "compatibility": {
+    "reference_checks": 689,
+    "tunnel_vectors": 36,
+    "gate_tests": 40,
+    "failed": 0
+  },
+  "security_gate_tests": {
+    "passed": 23,
+    "failed": 0
+  }
+}
