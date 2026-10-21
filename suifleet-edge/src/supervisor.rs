@@ -2554,7 +2554,8 @@ mod tests {
         let workspace = s.workspace(&spec);
         let engine = |args: &[&str]| {
             let mut c = std::process::Command::new("/usr/bin/docker");
-            c.args(args).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
+            c.args(["--host", "unix:///var/run/docker.sock"]).args(args)
+                .stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
             let child = spawn_std_tracked(&mut c).unwrap();
             let pid = child.id();
             let result = child.wait_with_output().unwrap();
@@ -2575,6 +2576,15 @@ mod tests {
         assert_eq!(host["NetworkMode"], "none");
         assert_eq!(host["RestartPolicy"]["Name"], "no");
         assert!(engine(&["exec", &id, "sh", "-c", "! touch /forbidden && grep -Eq '^CapEff:[[:space:]]+0+$' /proc/self/status"]).status.success());
+        assert!(engine(&["exec", &id, "sh", "-c", "test $(cat /sys/fs/cgroup/memory.max) = 67108864 && test $(cat /sys/fs/cgroup/pids.max) = 32"]).status.success());
+        assert!(engine(&["exec", &id, "sh", "-c", "if dd if=/dev/zero of=/tmp/full bs=1048576 count=2 2>/dev/null; then exit 1; fi; rm /tmp/full"]).status.success());
+        // A tampered retained descriptor must fail before a new engine run.
+        let saved = std::fs::read(workspace.join("artifact")).unwrap();
+        let mut tampered = descriptor(&[]);
+        tampered["memoryBytes"] = serde_json::json!(33554432u64);
+        std::fs::write(workspace.join("artifact"), serde_json::to_vec(&tampered).unwrap()).unwrap();
+        assert!(crate::oci::start(&f.dir.join("supervised"), &workspace).await.err().unwrap().to_string().contains("descriptor digest mismatch"));
+        std::fs::write(workspace.join("artifact"), saved).unwrap();
         assert!(engine(&["kill", &id]).status.success());
         tokio::time::timeout(Duration::from_secs(15), async {
             loop {
