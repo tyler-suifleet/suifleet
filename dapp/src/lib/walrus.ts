@@ -1,7 +1,11 @@
 import { WALRUS_AGGREGATOR, WALRUS_EPOCHS, WALRUS_MAX_COST_FROST, WALRUS_PUBLISHER } from "./constants";
 
-/** Who can renew the stored blob: only the owner of its Sui `Blob` object can extend it. */
-export type StorageOwner = "you" | "publisher" | "unknown";
+/**
+ * Who can renew the stored blob: only the owner of its Sui `Blob` object can
+ * extend it. "fleet": held by the fleet's prepaid storage (SF-083), renewable
+ * only with the fleet budget's owner capability.
+ */
+export type StorageOwner = "you" | "fleet" | "publisher" | "unknown";
 
 export interface StorageInfo {
   blobId: string;
@@ -31,6 +35,13 @@ export interface UploadProgress {
   total?: number;
 }
 export type UploadObserver = (progress: UploadProgress) => void;
+
+/**
+ * Stores already protected bytes somewhere other than the publisher: the
+ * fleet's prepaid storage (lib/fleet-upload.ts). Never a fallback: when
+ * given, it is the only path.
+ */
+export type BlobStore = (body: Uint8Array, progress?: UploadObserver) => Promise<StorageInfo>;
 
 export type { ComponentRecipe } from "./recipe-schema";
 import { ComponentRecipe, assertComponentRecipe } from "./recipe-schema";
@@ -89,7 +100,7 @@ export function storageWarnings(storage: StorageInfo): string[] {
       "These bytes were already stored by another upload. You do not own that Blob object, so you cannot renew it; " +
         "devices fail once its storage period ends.",
     );
-  } else if (storage.owner !== "you") {
+  } else if (storage.owner !== "you" && storage.owner !== "fleet") {
     warnings.push("The Blob object was kept by the publisher, so you cannot renew it. Connect a wallet before uploading.");
   }
   if (WALRUS_MAX_COST_FROST !== null && storage.costFrost !== undefined && storage.costFrost > WALRUS_MAX_COST_FROST) {
@@ -100,6 +111,8 @@ export function storageWarnings(storage: StorageInfo): string[] {
 
 /** Command an owner runs to keep a blob available beyond its end epoch. */
 export function renewalCommand(storage: StorageInfo): string | null {
+  // Fleet blobs are wrapped in fleet storage: extend them with fleet_storage::extend_blob.
+  if (storage.owner === "fleet") return null;
   return storage.blobObjectId ? `walrus extend --blob-obj-id ${storage.blobObjectId} --epochs-extended ${WALRUS_EPOCHS}` : null;
 }
 
@@ -164,22 +177,23 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return Array.from(new Uint8Array(hash)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export async function uploadArtifact(file: File, owner: string | null, protection: Protection, progress?: UploadObserver): Promise<UploadResult> {
+export async function uploadArtifact(file: File, owner: string | null, protection: Protection, progress?: UploadObserver, store?: BlobStore): Promise<UploadResult> {
   progress?.({ phase: "preparing", loaded: 0 });
   const plaintext = new Uint8Array(await file.arrayBuffer());
   const sha256 = await sha256Hex(plaintext);
   const body = await protect(plaintext, "artifact", sha256, protection);
-  const storage = await uploadBlob(body, "application/octet-stream", owner, progress);
+  const storage = store ? await store(body, progress) : await uploadBlob(body, "application/octet-stream", owner, progress);
   return { blobId: storage.blobId, sha256, storage, confidential: protection.kind === "confidential" };
 }
 
-export async function uploadRecipe(recipe: ComponentRecipe, owner: string | null, protection: Protection, progress?: UploadObserver): Promise<UploadResult> {
+export async function uploadRecipe(recipe: ComponentRecipe, owner: string | null, protection: Protection, progress?: UploadObserver, store?: BlobStore): Promise<UploadResult> {
   progress?.({ phase: "preparing", loaded: 0 });
   assertComponentRecipe(recipe);
   const plaintext = new TextEncoder().encode(JSON.stringify(recipe, null, 2));
   const sha256 = await sha256Hex(plaintext);
   const body = await protect(plaintext, "recipe", sha256, protection);
-  const storage = await uploadBlob(body, protection.kind === "public" ? "application/json" : "application/octet-stream", owner, progress);
+  const storage = store ? await store(body, progress)
+    : await uploadBlob(body, protection.kind === "public" ? "application/json" : "application/octet-stream", owner, progress);
   return { blobId: storage.blobId, sha256, storage, confidential: protection.kind === "confidential" };
 }
 

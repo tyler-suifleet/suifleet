@@ -53,5 +53,7 @@ def main(script="scripts/test_protocol_live.cjs"):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--handover-upgrade", action="store_true")
+    parser.add_argument("--budget-upgrade", action="store_true", help="SF-083 fleet budget upgrade, attacks and daemon draws")
     args = parser.parse_args()
-    main("scripts/test_handover_upgrade.cjs" if args.handover_upgrade else "scripts/test_protocol_live.cjs")
+    main("scripts/test_handover_upgrade.cjs" if args.handover_upgrade
+         else "scripts/test_budget_upgrade.cjs" if args.budget_upgrade else "scripts/test_protocol_live.cjs")

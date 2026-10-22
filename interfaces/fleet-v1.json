@@ -2370,6 +2370,1112 @@
         }
       }
     },
+    "fleet_budget": {
+      "functions": {
+        "account_budget_id": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::GasAccount"
+          ],
+          "returns": [
+            "sui::object::ID"
+          ]
+        },
+        "account_closed": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::GasAccount"
+          ],
+          "returns": [
+            "bool"
+          ]
+        },
+        "account_device_id": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::GasAccount"
+          ],
+          "returns": [
+            "sui::object::ID"
+          ]
+        },
+        "account_drawn_in_period": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::GasAccount"
+          ],
+          "returns": [
+            "u64"
+          ]
+        },
+        "account_draws_in_period": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::GasAccount"
+          ],
+          "returns": [
+            "u64"
+          ]
+        },
+        "account_enrolled_at_ms": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::GasAccount"
+          ],
+          "returns": [
+            "u64"
+          ]
+        },
+        "account_id": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::FleetBudget",
+            "sui::object::ID"
+          ],
+          "returns": [
+            "std::option::Option<sui::object::ID>"
+          ]
+        },
+        "account_last_draw_ms": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::GasAccount"
+          ],
+          "returns": [
+            "u64"
+          ]
+        },
+        "account_limits": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::GasAccount"
+          ],
+          "returns": [
+            "sui_edge::fleet_budget::Limits"
+          ]
+        },
+        "account_owner_cap_id": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::GasAccount"
+          ],
+          "returns": [
+            "sui::object::ID"
+          ]
+        },
+        "account_period_start_ms": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::GasAccount"
+          ],
+          "returns": [
+            "u64"
+          ]
+        },
+        "account_reserve": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::GasAccount"
+          ],
+          "returns": [
+            "u64"
+          ]
+        },
+        "account_suspended": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::GasAccount"
+          ],
+          "returns": [
+            "bool"
+          ]
+        },
+        "account_total_drawn": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::GasAccount"
+          ],
+          "returns": [
+            "u64"
+          ]
+        },
+        "assert_may_draw": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::FleetBudget",
+            "&sui_edge::fleet_budget::GasAccount",
+            "&sui_edge::device_registry::DeviceRegistry",
+            "&sui_edge::device_cap::DeviceCap",
+            "&sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "assert_owner": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::FleetBudget",
+            "&sui_edge::fleet_budget::BudgetOwnerCap"
+          ],
+          "returns": []
+        },
+        "balance": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::FleetBudget"
+          ],
+          "returns": [
+            "u64"
+          ]
+        },
+        "budget_id": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::BudgetOwnerCap"
+          ],
+          "returns": [
+            "sui::object::ID"
+          ]
+        },
+        "configure": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::fleet_budget::FleetBudget",
+            "&sui_edge::fleet_budget::BudgetOwnerCap",
+            "sui_edge::fleet_budget::Limits",
+            "u64"
+          ],
+          "returns": []
+        },
+        "create": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::device_registry::DeviceRegistry",
+            "sui::coin::Coin<sui::sui::SUI>",
+            "sui_edge::fleet_budget::Limits",
+            "u64",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": [
+            "sui_edge::fleet_budget::BudgetOwnerCap"
+          ]
+        },
+        "default_limits": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::FleetBudget"
+          ],
+          "returns": [
+            "sui_edge::fleet_budget::Limits"
+          ]
+        },
+        "deposit": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::fleet_budget::FleetBudget",
+            "&sui_edge::fleet_budget::BudgetOwnerCap",
+            "sui::coin::Coin<sui::sui::SUI>"
+          ],
+          "returns": []
+        },
+        "device_count": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::FleetBudget"
+          ],
+          "returns": [
+            "u64"
+          ]
+        },
+        "draw_gas": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::FleetBudget",
+            "&mut sui_edge::fleet_budget::GasAccount",
+            "&sui_edge::device_registry::DeviceRegistry",
+            "&sui_edge::device_cap::DeviceCap",
+            "u64",
+            "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "enroll_device": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::fleet_budget::FleetBudget",
+            "&sui_edge::fleet_budget::BudgetOwnerCap",
+            "&sui_edge::device_registry::DeviceRegistry",
+            "&sui_edge::device_registry::DeviceOwnerCap",
+            "u64",
+            "u64",
+            "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": [
+            "sui::object::ID"
+          ]
+        },
+        "fund_device": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::fleet_budget::FleetBudget",
+            "&sui_edge::fleet_budget::BudgetOwnerCap",
+            "&sui_edge::device_registry::DeviceRegistry",
+            "&mut sui_edge::fleet_budget::GasAccount",
+            "u64",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "fund_reserve": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::fleet_budget::FleetBudget",
+            "&sui_edge::fleet_budget::BudgetOwnerCap",
+            "&mut sui_edge::fleet_budget::GasAccount",
+            "u64"
+          ],
+          "returns": []
+        },
+        "interface_version": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [],
+          "returns": [
+            "u64"
+          ]
+        },
+        "is_enrolled": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::FleetBudget",
+            "sui::object::ID"
+          ],
+          "returns": [
+            "bool"
+          ]
+        },
+        "limits_float_cap": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::Limits"
+          ],
+          "returns": [
+            "u64"
+          ]
+        },
+        "limits_max_draws_per_period": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::Limits"
+          ],
+          "returns": [
+            "u64"
+          ]
+        },
+        "limits_min_draw_interval_ms": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::Limits"
+          ],
+          "returns": [
+            "u64"
+          ]
+        },
+        "limits_period_allowance": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::Limits"
+          ],
+          "returns": [
+            "u64"
+          ]
+        },
+        "limits_period_ms": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::Limits"
+          ],
+          "returns": [
+            "u64"
+          ]
+        },
+        "low_balance_threshold": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::FleetBudget"
+          ],
+          "returns": [
+            "u64"
+          ]
+        },
+        "migrate": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::fleet_budget::FleetBudget",
+            "&sui_edge::fleet_budget::BudgetOwnerCap"
+          ],
+          "returns": []
+        },
+        "new_limits": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "u64",
+            "u64",
+            "u64",
+            "u64",
+            "u64"
+          ],
+          "returns": [
+            "sui_edge::fleet_budget::Limits"
+          ]
+        },
+        "owner_cap_id": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::FleetBudget"
+          ],
+          "returns": [
+            "sui::object::ID"
+          ]
+        },
+        "package_version": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [],
+          "returns": [
+            "u64"
+          ]
+        },
+        "paused": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::FleetBudget"
+          ],
+          "returns": [
+            "bool"
+          ]
+        },
+        "reclaim_reserve": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::fleet_budget::FleetBudget",
+            "&sui_edge::fleet_budget::BudgetOwnerCap",
+            "&mut sui_edge::fleet_budget::GasAccount",
+            "u64"
+          ],
+          "returns": []
+        },
+        "registry_id": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::FleetBudget"
+          ],
+          "returns": [
+            "sui::object::ID"
+          ]
+        },
+        "remove_device": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::fleet_budget::FleetBudget",
+            "&sui_edge::fleet_budget::BudgetOwnerCap",
+            "&mut sui_edge::fleet_budget::GasAccount"
+          ],
+          "returns": []
+        },
+        "reserved": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::FleetBudget"
+          ],
+          "returns": [
+            "u64"
+          ]
+        },
+        "set_device_limits": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::FleetBudget",
+            "&sui_edge::fleet_budget::BudgetOwnerCap",
+            "&mut sui_edge::fleet_budget::GasAccount",
+            "sui_edge::fleet_budget::Limits"
+          ],
+          "returns": []
+        },
+        "set_device_suspended": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::FleetBudget",
+            "&sui_edge::fleet_budget::BudgetOwnerCap",
+            "&mut sui_edge::fleet_budget::GasAccount",
+            "bool"
+          ],
+          "returns": []
+        },
+        "set_paused": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::fleet_budget::FleetBudget",
+            "&sui_edge::fleet_budget::BudgetOwnerCap",
+            "bool"
+          ],
+          "returns": []
+        },
+        "spendable": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::FleetBudget"
+          ],
+          "returns": [
+            "u64"
+          ]
+        },
+        "total_allocated": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::FleetBudget"
+          ],
+          "returns": [
+            "u64"
+          ]
+        },
+        "total_deposited": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::FleetBudget"
+          ],
+          "returns": [
+            "u64"
+          ]
+        },
+        "total_paid": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::FleetBudget"
+          ],
+          "returns": [
+            "u64"
+          ]
+        },
+        "total_reclaimed": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::FleetBudget"
+          ],
+          "returns": [
+            "u64"
+          ]
+        },
+        "total_withdrawn": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::FleetBudget"
+          ],
+          "returns": [
+            "u64"
+          ]
+        },
+        "version": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::fleet_budget::FleetBudget"
+          ],
+          "returns": [
+            "u64"
+          ]
+        },
+        "withdraw": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::fleet_budget::FleetBudget",
+            "&sui_edge::fleet_budget::BudgetOwnerCap",
+            "u64",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": [
+            "sui::coin::Coin<sui::sui::SUI>"
+          ]
+        }
+      },
+      "structs": {
+        "BudgetConfigured": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "budget_id",
+              "sui::object::ID"
+            ],
+            [
+              "default_limits",
+              "sui_edge::fleet_budget::Limits"
+            ],
+            [
+              "low_balance_threshold",
+              "u64"
+            ]
+          ]
+        },
+        "BudgetCreated": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "budget_id",
+              "sui::object::ID"
+            ],
+            [
+              "registry_id",
+              "sui::object::ID"
+            ],
+            [
+              "owner_cap_id",
+              "sui::object::ID"
+            ],
+            [
+              "owner",
+              "address"
+            ]
+          ]
+        },
+        "BudgetLow": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "budget_id",
+              "sui::object::ID"
+            ],
+            [
+              "balance",
+              "u64"
+            ],
+            [
+              "threshold",
+              "u64"
+            ]
+          ]
+        },
+        "BudgetOwnerCap": {
+          "abilities": [
+            "Key",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "id",
+              "sui::object::UID"
+            ],
+            [
+              "budget_id",
+              "sui::object::ID"
+            ]
+          ]
+        },
+        "BudgetPaused": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "budget_id",
+              "sui::object::ID"
+            ],
+            [
+              "paused",
+              "bool"
+            ]
+          ]
+        },
+        "Deposited": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "budget_id",
+              "sui::object::ID"
+            ],
+            [
+              "amount",
+              "u64"
+            ],
+            [
+              "balance",
+              "u64"
+            ]
+          ]
+        },
+        "DeviceFunded": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "budget_id",
+              "sui::object::ID"
+            ],
+            [
+              "device_id",
+              "sui::object::ID"
+            ],
+            [
+              "device_address",
+              "address"
+            ],
+            [
+              "amount",
+              "u64"
+            ],
+            [
+              "balance",
+              "u64"
+            ]
+          ]
+        },
+        "DeviceKey": {
+          "abilities": [
+            "Copy",
+            "Drop",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "device_id",
+              "sui::object::ID"
+            ]
+          ]
+        },
+        "DeviceStateChanged": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "budget_id",
+              "sui::object::ID"
+            ],
+            [
+              "device_id",
+              "sui::object::ID"
+            ],
+            [
+              "account_id",
+              "sui::object::ID"
+            ],
+            [
+              "enrolled",
+              "bool"
+            ],
+            [
+              "suspended",
+              "bool"
+            ],
+            [
+              "limits",
+              "sui_edge::fleet_budget::Limits"
+            ]
+          ]
+        },
+        "FleetBudget": {
+          "abilities": [
+            "Key"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "id",
+              "sui::object::UID"
+            ],
+            [
+              "version",
+              "u64"
+            ],
+            [
+              "registry_id",
+              "sui::object::ID"
+            ],
+            [
+              "owner_cap_id",
+              "sui::object::ID"
+            ],
+            [
+              "balance",
+              "sui::balance::Balance<sui::sui::SUI>"
+            ],
+            [
+              "paused",
+              "bool"
+            ],
+            [
+              "default_limits",
+              "sui_edge::fleet_budget::Limits"
+            ],
+            [
+              "low_balance_threshold",
+              "u64"
+            ],
+            [
+              "device_count",
+              "u64"
+            ],
+            [
+              "total_deposited",
+              "u64"
+            ],
+            [
+              "total_withdrawn",
+              "u64"
+            ],
+            [
+              "total_paid",
+              "u64"
+            ],
+            [
+              "total_allocated",
+              "u64"
+            ],
+            [
+              "total_reclaimed",
+              "u64"
+            ]
+          ]
+        },
+        "GasAccount": {
+          "abilities": [
+            "Key"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "id",
+              "sui::object::UID"
+            ],
+            [
+              "budget_id",
+              "sui::object::ID"
+            ],
+            [
+              "device_id",
+              "sui::object::ID"
+            ],
+            [
+              "owner_cap_id",
+              "sui::object::ID"
+            ],
+            [
+              "reserve",
+              "sui::balance::Balance<sui::sui::SUI>"
+            ],
+            [
+              "limits",
+              "sui_edge::fleet_budget::Limits"
+            ],
+            [
+              "suspended",
+              "bool"
+            ],
+            [
+              "closed",
+              "bool"
+            ],
+            [
+              "period_start_ms",
+              "u64"
+            ],
+            [
+              "drawn_in_period",
+              "u64"
+            ],
+            [
+              "draws_in_period",
+              "u64"
+            ],
+            [
+              "last_draw_ms",
+              "u64"
+            ],
+            [
+              "total_drawn",
+              "u64"
+            ],
+            [
+              "enrolled_at_ms",
+              "u64"
+            ]
+          ]
+        },
+        "GasDrawn": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "budget_id",
+              "sui::object::ID"
+            ],
+            [
+              "device_id",
+              "sui::object::ID"
+            ],
+            [
+              "account_id",
+              "sui::object::ID"
+            ],
+            [
+              "device_address",
+              "address"
+            ],
+            [
+              "amount",
+              "u64"
+            ],
+            [
+              "drawn_in_period",
+              "u64"
+            ],
+            [
+              "period_allowance",
+              "u64"
+            ],
+            [
+              "draws_in_period",
+              "u64"
+            ],
+            [
+              "max_draws_per_period",
+              "u64"
+            ],
+            [
+              "reserve",
+              "u64"
+            ],
+            [
+              "at_limit",
+              "bool"
+            ]
+          ]
+        },
+        "Limits": {
+          "abilities": [
+            "Copy",
+            "Drop",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "float_cap",
+              "u64"
+            ],
+            [
+              "period_ms",
+              "u64"
+            ],
+            [
+              "period_allowance",
+              "u64"
+            ],
+            [
+              "max_draws_per_period",
+              "u64"
+            ],
+            [
+              "min_draw_interval_ms",
+              "u64"
+            ]
+          ]
+        },
+        "ReserveChanged": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "budget_id",
+              "sui::object::ID"
+            ],
+            [
+              "device_id",
+              "sui::object::ID"
+            ],
+            [
+              "account_id",
+              "sui::object::ID"
+            ],
+            [
+              "allocated",
+              "bool"
+            ],
+            [
+              "amount",
+              "u64"
+            ],
+            [
+              "reserve",
+              "u64"
+            ],
+            [
+              "balance",
+              "u64"
+            ]
+          ]
+        },
+        "Withdrawn": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "budget_id",
+              "sui::object::ID"
+            ],
+            [
+              "amount",
+              "u64"
+            ],
+            [
+              "balance",
+              "u64"
+            ]
+          ]
+        }
+      }
+    },
     "fleet_handover": {
       "functions": {
         "cancel": {
@@ -3328,6 +4434,23 @@
       "seal_policy::AccessChanged",
       "seal_policy::KeyEpochRotated",
       "seal_policy::PolicyMigrated"
+    ],
+    "fleet_budget": [
+      "fleet_budget::FleetBudget",
+      "fleet_budget::BudgetOwnerCap",
+      "fleet_budget::Limits",
+      "fleet_budget::DeviceKey",
+      "fleet_budget::GasAccount",
+      "fleet_budget::BudgetCreated",
+      "fleet_budget::Deposited",
+      "fleet_budget::Withdrawn",
+      "fleet_budget::DeviceFunded",
+      "fleet_budget::ReserveChanged",
+      "fleet_budget::GasDrawn",
+      "fleet_budget::BudgetLow",
+      "fleet_budget::DeviceStateChanged",
+      "fleet_budget::BudgetPaused",
+      "fleet_budget::BudgetConfigured"
     ]
   },
   "supported_deployment_schema_versions": [

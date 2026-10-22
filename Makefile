@@ -27,6 +27,7 @@ build-contracts:
 
 test-contracts:
 	$(RUN) sui move test --path contracts
+	$(RUN) sui move test --path contracts/fleet_storage
 
 # Spends gas: PUBLISH_ARGS="--expect-address 0x... [--dry-run]" (docs/DEPLOYMENT_MANIFEST.md).
 publish-contracts:
@@ -73,6 +74,7 @@ test-ota:
 	$(RUN) python3 scripts/test_cloudwatch_logs.py
 	$(RUN) python3 scripts/test_console.py
 	$(RUN) python3 scripts/test_rollout.py
+	$(RUN) python3 scripts/test_budget_ota.py
 
 # Fleet service configuration, root only in a disposable network-none container
 # for real SO_PEERCRED principals (no host credentials or public network).
@@ -138,6 +140,13 @@ test-protocol-live:
 .PHONY: test-handover-upgrade-localnet
 test-handover-upgrade-localnet:
 	$(RUN) python3 scripts/test_protocol_localnet.py --handover-upgrade
+
+# SF-083 on a disposable localnet (network none): budget upgrade over existing
+# objects, real on-chain draw refusals, version gate and real daemon draws.
+.PHONY: test-budget-localnet
+test-budget-localnet:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
+	$(RUN) python3 scripts/test_protocol_localnet.py --budget-upgrade
 
 .PHONY: test-catalog-live
 test-catalog-live:
@@ -296,6 +305,7 @@ test-manifest:
 	$(RUN) node scripts/test_deployment_manifest.cjs
 	$(RUN) node scripts/test_wallet_manifest.cjs
 	$(RUN) node scripts/test_onboarding.cjs
+	$(RUN) node scripts/test_fleet_budget.cjs
 	$(RUN) node scripts/test_deployment_receipts.cjs
 	$(RUN) node scripts/test_frontend_queries.cjs
 	$(RUN) node scripts/test_device_history.cjs
@@ -364,6 +374,15 @@ test-bulk-enrollment-localnet:
 # upgraded in place to this tree, real daemon, on-chain receipts.
 # SUIFLEET_WALRUS=testnet stores recipes/artifacts in real Walrus testnet.
 #   make live-gate-package-upgrade SUIFLEET_WALLET=~/.config/suifleet/testnet/agent/client.yaml
+# SF-083 on public testnet (docs/FLEET_BUDGET.md): hold network:suifleet-testnet and pass
+# its token in SUIFLEET_TESTNET_LOCK_TOKEN; install the pinned Walrus SDK privately first.
+.PHONY: test-budget-testnet
+test-budget-testnet:
+	@test -n "$(SUIFLEET_WALLET)" || { echo "set SUIFLEET_WALLET to the dedicated agent wallet's client.yaml"; exit 1; }
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/live_fleet_budget.py --wallet "$(SUIFLEET_WALLET)" \
+		$(if $(WALRUS_SDK),--walrus-sdk "$(WALRUS_SDK)") --evidence "$${SUIFLEET_EVIDENCE:-sf083-testnet-evidence.json}"
+
 .PHONY: live-gate-package-upgrade live-gate-upgrade-security live-gate-wallet
 live-gate-package-upgrade:
 	@test -n "$(SUIFLEET_WALLET)" || { echo "set SUIFLEET_WALLET to a funded wallet's client.yaml"; exit 1; }

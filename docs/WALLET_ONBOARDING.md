@@ -102,12 +102,17 @@ recipient/authority/partial-cutover warning beside the `/handover` link.
 
 A nonzero gas balance enables registration; it does not promise sufficient gas.
 The wallet estimates the actual cost. Fund using a same-network SUI transfer or a
-disposable localnet/testnet faucet. No card checkout or prepaid budget exists here.
-SF-083 inserts its estimate/card-funding/budget-deposit steps at the marked
-extension point in the gas step of `FirstRun.tsx`; it must retain network/account
-checks and distinguish gas from a fleet budget. SF-100 address-free naming and
-bulk enrollment integrate at the marked point in the registration step once its
-API is merged; this page does not anticipate that API.
+disposable localnet/testnet faucet.
+
+When the deployment's package has the fleet budget, SF-083 fills the extension
+point in the gas step of `FirstRun.tsx`: the up-front estimate with its fees
+listed separately, optional card funding through a provider's hosted checkout, and
+the budget deposit. Registration then enrolls the device in the budget, with its
+own gas account and reserve, and sends its float in the same PTB. Network and
+account checks stay as above, and the page explains that wallet gas and the fleet
+budget differ. See [FLEET_BUDGET.md](FLEET_BUDGET.md). SF-100 address-free naming
+and bulk enrollment integrate at the marked point in the registration step once
+its API is merged; this page does not anticipate that API.
 
 Registration uses the existing single PTB to register, issue the device cap and
 activate custody. Progress shows verification, wallet approval and network

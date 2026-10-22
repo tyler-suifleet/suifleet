@@ -8,6 +8,9 @@ import { useDevices } from "@/hooks/useDevices";
 import { uploadArtifact, uploadRecipe, renewalCommand, storageWarnings, type ComponentRecipe, type Protection, type StorageInfo, type UploadProgress as Progress } from "@/lib/walrus";
 import { DEFAULT_DELIVERY, releaseProtection } from "@/lib/delivery";
 import { useAccessPolicies } from "@/hooks/useAccessPolicies";
+import { useFleetBlobStore } from "@/hooks/useFleetStorage";
+import { FleetStorageChoice } from "@/components/FleetStorageChoice";
+import type { BlobStore } from "@/lib/walrus";
 import { UploadProgress } from "@/components/UploadProgress";
 import { DeploymentProgress, type DeploymentPhase } from "@/components/DeploymentProgress";
 import { DeliveryFields } from "@/components/DeliveryFields";
@@ -46,6 +49,10 @@ export default function FirmwarePage() {
   const [delivery, setDelivery] = useState(DEFAULT_DELIVERY);
   // One release identity: the recipe reuses the artifact's protection.
   const [protection, setProtection] = useState<Protection | null>(null);
+  // Fleet-paid storage (SF-083), chosen once for the artifact and its recipe.
+  const fleet = useFleetBlobStore();
+  const [fleetPaid, setFleetPaid] = useState(false);
+  const [store, setStore] = useState<BlobStore | undefined>(undefined);
   const { mutateAsync: signAndExecute, isPending: txPending } = useFleetTransaction();
 
   const [step, setStep] = useState<Step>("artifact");
@@ -86,8 +93,12 @@ export default function FirmwarePage() {
     setUploadProgress(null);
     try {
       const release = releaseProtection(client, delivery, policies);
-      const result = await uploadArtifact(file, account?.address ?? null, release, setUploadProgress);
+      // Fleet-paid storage is never silently replaced by the publisher.
+      if (fleetPaid && !fleet.store) throw new Error(`Fleet storage is unavailable: ${fleet.reason ?? "unknown reason"}`);
+      const chosen = fleetPaid ? fleet.store : undefined;
+      const result = await uploadArtifact(file, account?.address ?? null, release, setUploadProgress, chosen);
       setProtection(release);
+      setStore(() => chosen);
       setArtifact({ ...result, fileName: file.name });
       setStep("recipe");
     } catch (err) {
@@ -96,7 +107,7 @@ export default function FirmwarePage() {
       uploadInFlight.current = false;
       setUploading(false);
     }
-  }, [componentName, version, account?.address, client, delivery, policies, step]);
+  }, [componentName, version, account?.address, client, delivery, policies, step, fleetPaid, fleet.store, fleet.reason]);
 
   const desiredTargets = desired && selectedDevices.size === 0 && selectedGroups.size > 0;
 
@@ -123,7 +134,7 @@ export default function FirmwarePage() {
       } else {
         const recipe = buildRecipe(artifact!);
         setDeployPhase("uploading");
-        const recipeUpload = await uploadRecipe(recipe, account?.address ?? null, protection!, setRecipeProgress);
+        const recipeUpload = await uploadRecipe(recipe, account?.address ?? null, protection!, setRecipeProgress, store);
         setRecipeStorage(recipeUpload.storage);
         transaction = desiredTargets
           ? buildDesiredRevisionTx(Array.from(selectedGroups), {
@@ -256,6 +267,7 @@ export default function FirmwarePage() {
           <Field label="Version" value={version} onChange={setVersion} placeholder="1.0.0" disabled={step !== "artifact" || uploading} />
         </div>
         <DeliveryFields value={delivery} onChange={setDelivery} policies={policies} disabled={step !== "artifact" || uploading} />
+        <FleetStorageChoice checked={fleetPaid} onChange={setFleetPaid} available={!!fleet.store} storage={fleet.storage} reason={fleet.reason} disabled={step !== "artifact" || uploading} />
         <div
           onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
           onDragLeave={() => setDragOver(false)}
@@ -501,7 +513,7 @@ function StorageSummary({ label, storage }: { label: string; storage: StorageInf
       <p className="font-medium text-gray-600">{label}</p>
       <p className="text-gray-500">
         Stored until Walrus epoch {storage.endEpoch ?? "unknown"} · renewable by{" "}
-        {storage.owner === "you" ? "your wallet" : storage.owner === "publisher" ? "the publisher only" : "another owner"}
+        {storage.owner === "you" ? "your wallet" : storage.owner === "fleet" ? "your fleet budget (fleet storage)" : storage.owner === "publisher" ? "the publisher only" : "another owner"}
         {storage.costFrost !== undefined && <> · cost {storage.costFrost.toString()} FROST</>}
       </p>
       {renew && storage.owner === "you" && (

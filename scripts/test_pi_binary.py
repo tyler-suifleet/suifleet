@@ -35,6 +35,36 @@ def main():
         assert run('--provision', keys[0]).stdout.strip() == addresses[0]
         assert keys[0].read_bytes() == original, 'existing identity changed'
         assert run('--derive-address', keys[0]).stdout.strip() == addresses[0]
+        # Exercise the packaged binary, not a host build, against the reviewed
+        # mixed-origin fixture. All checks are offline in this temporary tree.
+        manifest = json.loads((Path(__file__).parents[1]/'manifests/fixture.localnet.json').read_text())
+        manifest_path = root/'deployment.json'
+        manifest_path.write_text(json.dumps(manifest))
+        config = root/'config.toml'
+        legacy = (f'[sui]\nmanifest_path = "{manifest_path}"\n'
+                  f'[device]\nkeypair_path = "{keys[0]}"\n'
+                  'device_object_id = "0x1"\ndevice_cap_id = "0x2"\n'
+                  '[apply]\ncommand = "/usr/bin/false"\n'
+                  f'[runtime]\nstate_dir = "{root / "state"}"\n')
+        config.write_text(legacy)
+        assert '0.2.1 accepts' in run('--self-check', config).stdout
+        assert run('--key-holder', config).stdout.strip() == 'suifleet'
+        service = legacy.replace(f'keypair_path = "{keys[0]}"\n', '')
+        service += '\n[device.signer]\nkind = "service"\nsocket = "/run/suifleet-signer/sign.sock"\n'
+        config.write_text(service)
+        assert run('--key-holder', config).stdout.strip() == 'suifleet-signer'
+        config.write_text(service+'\n[daemon_update]\nenabled = true\n')
+        refused = run('--self-check', config, check=False)
+        assert refused.returncode != 0 and 'daemon_update cannot be enabled with the service signer' in refused.stderr
+        config.write_text(legacy)
+        for field, replacement, error in [
+                ('protocol_version', 999, 'unsupported manifest schema/protocol'),
+                ('supported_clients', {'edge': {'min': '99.0.0', 'max_exclusive': '100.0.0'}}, 'unsupported edge client version')]:
+            bad = dict(manifest)
+            bad[field] = replacement
+            manifest_path.write_text(json.dumps(bad))
+            refused = run('--self-check', config, check=False)
+            assert refused.returncode != 0 and error in refused.stderr, refused.stderr
         corrupt = root/'corrupt.key'
         corrupt.write_text('invalid')
         result = run('--provision', corrupt, check=False)
@@ -44,7 +74,8 @@ def main():
     result = dict(binary_sha256=before, fresh_identities_unique=True,
                   existing_identity_preserved=True, derived_address_matches=True,
                   corrupt_identity_refused=True, private_keys_discarded=True,
-                  physical_boot_tested=False)
+                  offline_manifest_client_compatibility=True, service_signer_key_holder=True,
+                  service_signer_self_update_refused=True, physical_boot_tested=False)
     args.output.write_text(json.dumps(result, indent=2)+'\n')
     print(json.dumps(result, indent=2))
 
