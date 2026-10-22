@@ -1,0 +1,478 @@
+{
+ "ticket": "SF-083",
+ "network": "testnet",
+ "chain": "4c78adac",
+ "operator": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+ "recorded_by": "Claude, claude-opus-5-5 (session dispatch-6a5df21a39b64534b67f2fbf98221784)",
+ "command": "scripts/live_fleet_budget.py (make test-budget-testnet) with the dedicated agent wallet, network:suifleet-testnet lock held",
+ "note": "Run 1 published the head sui_edge package (verified before signing) and stopped before fleet_storage (a pubfile cannot name git dependencies); run 2 adopted that verified publication after on-chain checks, published fleet_storage and ran every flow. Nothing was republished.",
+ "runs": [
+  {
+   "started": "2026-10-22T03:15:47Z",
+   "finished": "2026-10-22T03:15:57Z",
+   "head": "ada17bc38ee7ea4cce5386f7861432aeeabd477a",
+   "toolchain": {
+    "build": {
+     "role": "build",
+     "release": "testnet-v1.81.1",
+     "version": "sui 1.81.1-e04cf9aa915c",
+     "max_protocol": 138,
+     "path": "/usr/local/bin/sui"
+    },
+    "network": {
+     "role": "network",
+     "release": "testnet-v1.82.1",
+     "version": "sui 1.82.1-987123842623",
+     "max_protocol": 139,
+     "archive_sha256": "112bf204fab6927b135edfb316cddac07bdba754434b5f12d021ca7e8a72858c",
+     "binary_sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b",
+     "path": "/opt/sui-network/sui",
+     "sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b"
+    },
+    "compatibility": {
+     "chain": "4c78adac",
+     "epoch": 1260,
+     "protocol_version": 139,
+     "network_cli_max_protocol": 139,
+     "build_cli_max_protocol": 138,
+     "build_cli_offline": true
+    }
+   },
+   "sui": {
+    "build": "sui 1.81.1-e04cf9aa915c",
+    "network": "sui 1.82.1-987123842623"
+   },
+   "transactions": [
+    {
+     "label": "publish sui_edge head",
+     "gas_budget_mist": 400000000,
+     "funding_mist": 0,
+     "status": "success",
+     "digest": "C8rTW1V4KjW94adEiEfGMXwfM97p5fcNJH3XNCm9xbKh",
+     "gas_mist": 319721200,
+     "allowance_used_mist": 319721200
+    },
+    {
+     "label": "publish fleet_storage",
+     "gas_budget_mist": 280278800,
+     "funding_mist": 0,
+     "status": "not_submitted",
+     "allowance_used_mist": 319721200
+    }
+   ],
+   "verified_package_transactions": {
+    "publish sui_edge head": {
+     "kind": "publish",
+     "modules": 11,
+     "digest": "21622182d6648aaa63be9c0d5c3a3880b708b25395facc043e5902296d467db8"
+    },
+    "publish fleet_storage": {}
+   },
+   "spent_mist": 319721200,
+   "allowance_used_mist": 319721200,
+   "max_spend_mist": 600000000
+  },
+  {
+   "started": "2026-10-22T03:19:44Z",
+   "transactions": [
+    {
+     "label": "publish fleet_storage",
+     "gas_budget_mist": 300000000,
+     "funding_mist": 0,
+     "status": "success",
+     "digest": "3PcqLfg5oAFePvMdfG8StgDrkAzyLNjK2Qcu8YL1hf3g",
+     "gas_mist": 62225600,
+     "allowance_used_mist": 62225600
+    },
+    {
+     "label": "register and activate the test device",
+     "gas_budget_mist": 40000000,
+     "funding_mist": 0,
+     "status": "success",
+     "digest": "BkbzU78k55xAsm8yiim5AQeQbYdgQD92rc3VVdwauYoz",
+     "gas_mist": 14262178,
+     "allowance_used_mist": 76487778
+    },
+    {
+     "label": "create the fleet budget with a deposit",
+     "gas_budget_mist": 30000000,
+     "funding_mist": 60000000,
+     "status": "success",
+     "digest": "55PJmEtGEkc2F1omcYXysVZ91nLT74BsxrxdC7RuF5DA",
+     "gas_mist": 5225600,
+     "allowance_used_mist": 141713378
+    },
+    {
+     "label": "enroll the device and send its float",
+     "gas_budget_mist": 20000000,
+     "funding_mist": 0,
+     "status": "success",
+     "digest": "5uNvKjDcXhPnxuvyTAg2bRF72v9CWG56rrChu8W8copW",
+     "gas_mist": 5378188,
+     "allowance_used_mist": 147091566
+    },
+    {
+     "label": "device draws from the budget",
+     "gas_budget_mist": 10000000,
+     "funding_mist": 0,
+     "status": "success",
+     "digest": "4uJChMMcRKwod5cSWvgaWAEhAtaL8dtC6xvTpor2fYu5",
+     "gas_mist": 1988855,
+     "allowance_used_mist": 1988855
+    },
+    {
+     "label": "draw above the float cap",
+     "gas_budget_mist": 10000000,
+     "funding_mist": 0,
+     "status": "failure",
+     "digest": "8ptYTnck25zLMaGGx8biGcKj8DEjPoLJUh6YYGHw6DEL",
+     "gas_mist": 12615,
+     "allowance_used_mist": 2001470,
+     "abort": [
+      "fleet_budget",
+      "draw_gas",
+      "8"
+     ]
+    },
+    {
+     "label": "owner revokes the device",
+     "gas_budget_mist": 10000000,
+     "funding_mist": 0,
+     "status": "success",
+     "digest": "GCfFv6yqD3JhxJxT3G9Y3cQAjXodjQGkguDGBqPMVwwU",
+     "gas_mist": 1000642,
+     "allowance_used_mist": 148092208
+    },
+    {
+     "label": "draw after revocation",
+     "gas_budget_mist": 10000000,
+     "funding_mist": 0,
+     "status": "failure",
+     "digest": "AESEfBot7s2vTMFPMVkajX4rKLXGik4ZDZoufBJzY7ue",
+     "gas_mist": 1000516,
+     "allowance_used_mist": 3001986,
+     "abort": [
+      "device_cap",
+      "assert_active",
+      "2"
+     ]
+    },
+    {
+     "label": "owner reinstates the device",
+     "gas_budget_mist": 10000000,
+     "funding_mist": 0,
+     "status": "success",
+     "digest": "FMe3VW7YoVdyBhEVXeoYSeLkZupgdCq83Quy3MxMMoip",
+     "gas_mist": 1000642,
+     "allowance_used_mist": 149092850
+    },
+    {
+     "label": "owner pauses the fleet",
+     "gas_budget_mist": 10000000,
+     "funding_mist": 0,
+     "status": "success",
+     "digest": "3cKRfTxf5t8RJUAgKXVNcqSg9q9ufoXiYnZiW2mpBs4t",
+     "gas_mist": 1000423,
+     "allowance_used_mist": 150093273
+    },
+    {
+     "label": "draw while paused",
+     "gas_budget_mist": 10000000,
+     "funding_mist": 0,
+     "status": "failure",
+     "digest": "4hAg5aNEkJ9Kr1P1z8ZqfRvJdWW9xivM1K3436GTndhF",
+     "gas_mist": 1000516,
+     "allowance_used_mist": 4002502,
+     "abort": [
+      "fleet_budget",
+      "assert_may_draw",
+      "3"
+     ]
+    },
+    {
+     "label": "owner resumes the fleet",
+     "gas_budget_mist": 10000000,
+     "funding_mist": 0,
+     "status": "success",
+     "digest": "4bxZaVKvxwTid46JaF5QB9iZfVxWUtBJZoU4DPDWAuLr",
+     "gas_mist": 1000423,
+     "allowance_used_mist": 151093696
+    },
+    {
+     "label": "create fleet storage",
+     "gas_budget_mist": 20000000,
+     "funding_mist": 0,
+     "status": "success",
+     "digest": "D8UeKQFijM683CB6yQ52H6hMuRfJVuLfyrKTkTz2MiQQ",
+     "gas_mist": 3242163,
+     "allowance_used_mist": 154335859
+    },
+    {
+     "label": "swap below its slippage limit",
+     "gas_budget_mist": 20000000,
+     "funding_mist": 0,
+     "status": "failure",
+     "digest": "jMokK3o8V2FAzsVgoXUaXaMV74goHfUYVThMMrxSXPW",
+     "gas_mist": 1000571,
+     "allowance_used_mist": 155336430,
+     "abort": [
+      "fleet_storage",
+      "deposit_wal_at_least",
+      "12"
+     ]
+    },
+    {
+     "label": "swap SUI for WAL into fleet storage",
+     "gas_budget_mist": 20000000,
+     "funding_mist": 10000000,
+     "status": "success",
+     "digest": "6bKfcCpx4scNuVmKARCL7F8psoAMioiVeks4wYefghAm",
+     "gas_mist": 1000571,
+     "allowance_used_mist": 166337001
+    },
+    {
+     "label": "buy storage with the prepaid WAL",
+     "gas_budget_mist": 30000000,
+     "funding_mist": 0,
+     "status": "success",
+     "digest": "3vwE7u9bzvvDHuhixBdYtj9SRRShgjpwoTAUkye9b1ip",
+     "gas_mist": 1376334,
+     "allowance_used_mist": 167713335
+    },
+    {
+     "label": "device registers a fleet-paid blob",
+     "gas_budget_mist": 15997498,
+     "funding_mist": 0,
+     "status": "success",
+     "digest": "71U7GZPPkskBhhtePD98LDqKas2tW684z2HTPzDF3yZF",
+     "gas_mist": 11302163,
+     "allowance_used_mist": 15304665
+    },
+    {
+     "label": "device certifies the fleet blob",
+     "gas_budget_mist": 4695335,
+     "funding_mist": 0,
+     "status": "success",
+     "digest": "Fq67kLtLkyVVmqj9duJKMXDE9Lnyvemz4ZDEKvGPps3h",
+     "gas_mist": 1030957,
+     "allowance_used_mist": 16335622
+    },
+    {
+     "label": "second upload above the period quota",
+     "gas_budget_mist": 3664378,
+     "funding_mist": 0,
+     "status": "failure",
+     "digest": "F7wJsTqcnHHj3VeWfbee2mygK8ucD6BwkitQjtSdyAPZ",
+     "gas_mist": 1000677,
+     "allowance_used_mist": 17336299,
+     "abort": [
+      "fleet_storage",
+      "register_blob",
+      "6"
+     ]
+    },
+    {
+     "label": "withdraw the unused deposit and remove the device",
+     "gas_budget_mist": 20000000,
+     "funding_mist": 0,
+     "status": "success",
+     "digest": "2yLneqp77aZAKEZfKC6GrvCGAw7iQzChNaYLAzWG32N5",
+     "gas_mist": 0,
+     "allowance_used_mist": 167713335
+    },
+    {
+     "label": "sweep the test key",
+     "gas_budget_mist": 2663701,
+     "funding_mist": 0,
+     "status": "success",
+     "digest": "542G3AGBe6Pn22FTmKVt113tgRTuAbgVjwJ5Tt3SxSTe",
+     "gas_mist": 1000099,
+     "allowance_used_mist": 18336398
+    }
+   ],
+   "checks": [
+    "reused the fixture 39fbfbd65ef12be18d456649@1.81.1-e04cf9aa915c: package 0xbdfb4e40eaa44af7ad72bfac9e83a4514eae28ba9a57712114ec2eaa6d908d89, UpgradeCap at version 1 held by the wallet",
+    "published fleet_storage 0xb7364dca4138ee61ae4b8e279d72a079ceeaec299e9aa96f1006998099977dbe linked to it and the live Walrus package, bytecode verified",
+    "manifest resolved over gRPC with every fleet budget type origin at the package",
+    "budget 0x1fcab755650fb8abdd320dec454d71fcce05e98e7fa9ac8bf80bf2821f1f5718 created with a 60000000 MIST deposit; the device address received exactly its 20000000 MIST float",
+    "the device drew 5000000 MIST; GasDrawn recorded it (net gas 1988855 MIST)",
+    "on-chain refusals: above the float cap (8), after revocation (device_cap 2), while paused (3)",
+    "the real daemon drew 2 time(s) over gRPC (last 3LA7pLekSnJZjZ4P9QCwJdoi5RNenTXTdQtBgpr5EqSa), then journaled: draw limit for this period reached; the period ends at 1792642807610 ms",
+    "SUI-only deposit: 10000000 MIST swapped through the pinned exchange for 10000000 FROST in one PTB; a higher minimum aborted (12)",
+    "the device registered and certified blob BDxNSpv4tb5zg9gBF1g9FBEmduclbpo7vPhXmuDUzCc from fleet storage: exactly its encoded size, non-deletable, owned by the fleet object, read back from 68 confirming nodes",
+    "the device's second upload in the period aborted on its quota (6)",
+    "withdrew 27000000 MIST unused deposit and swept 12673892 MIST from the device key"
+   ],
+   "toolchain": {
+    "build": {
+     "role": "build",
+     "release": "testnet-v1.81.1",
+     "version": "sui 1.81.1-e04cf9aa915c",
+     "max_protocol": 138,
+     "path": "/usr/local/bin/sui"
+    },
+    "network": {
+     "role": "network",
+     "release": "testnet-v1.82.1",
+     "version": "sui 1.82.1-987123842623",
+     "max_protocol": 139,
+     "archive_sha256": "112bf204fab6927b135edfb316cddac07bdba754434b5f12d021ca7e8a72858c",
+     "binary_sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b",
+     "path": "/opt/sui-network/sui",
+     "sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b"
+    },
+    "compatibility": {
+     "chain": "4c78adac",
+     "epoch": 1260,
+     "protocol_version": 139,
+     "network_cli_max_protocol": 139,
+     "build_cli_max_protocol": 138,
+     "build_cli_offline": true
+    }
+   },
+   "start_balance_mist": 416208416,
+   "max_spend_mist": 400000000,
+   "sui": {
+    "build": "sui 1.81.1-e04cf9aa915c",
+    "network": "sui 1.82.1-987123842623"
+   },
+   "head": "ada17bc38ee7ea4cce5386f7861432aeeabd477a",
+   "measured": {
+    "create_budget_net_gas_mist": 5225600,
+    "draw_gas": {
+     "computationCost": "1000000",
+     "storageCost": "9538000",
+     "storageRebate": "8549145",
+     "nonRefundableStorageFee": "855",
+     "net_mist": 1988855,
+     "digest": "4uJChMMcRKwod5cSWvgaWAEhAtaL8dtC6xvTpor2fYu5"
+    },
+    "register_blob": {
+     "computationCost": "1000000",
+     "storageCost": "127915600",
+     "storageRebate": "117613437",
+     "nonRefundableStorageFee": "11763",
+     "net_mist": 11302163,
+     "write_fee_frost": 328860
+    },
+    "certify_blob": {
+     "computationCost": "1000000",
+     "storageCost": "5601200",
+     "storageRebate": "5570243",
+     "nonRefundableStorageFee": "557",
+     "net_mist": 1030957
+    }
+   },
+   "verified_package_transactions": {
+    "publish fleet_storage": {
+     "kind": "publish",
+     "modules": 1,
+     "digest": "1851e0fcf17b216f383e97da674eaf7b39102a4f38412b2aab577e9ff98b5152",
+     "dependencies": [
+      "0x0000000000000000000000000000000000000000000000000000000000000001",
+      "0x0000000000000000000000000000000000000000000000000000000000000002",
+      "0xbdfb4e40eaa44af7ad72bfac9e83a4514eae28ba9a57712114ec2eaa6d908d89",
+      "0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a",
+      "0x7d3b2086808a62bbc44d18c6b1d407973d77dd26946735873092c2f5650b4611"
+     ]
+    }
+   },
+   "fixture": {
+    "package": "0xbdfb4e40eaa44af7ad72bfac9e83a4514eae28ba9a57712114ec2eaa6d908d89",
+    "registry": "0x3b8d09f2c3704668fc0b0b1574ebe1ec21c7cd4aa795bc516141233523998e32",
+    "upgrade_cap": "0xed3fc5ab55f5a4b2cdcbaecf1bd679cf8949d536cb82967b20b37e4bb56ea9bd",
+    "adopted": true,
+    "storage_package": "0xb7364dca4138ee61ae4b8e279d72a079ceeaec299e9aa96f1006998099977dbe",
+    "storage_upgrade_cap": "0xbe10befd107cd0368165c07e175292b82511a6dbb75a2a57e32ac95425cdbbc9"
+   },
+   "fixture_key": "39fbfbd65ef12be18d456649@1.81.1-e04cf9aa915c",
+   "device": "0x96fd4c829011b08bb26eb65ddab2ee8d073eae6e7efb690239cb5cdff84ac153",
+   "device_cap": "0xd10ae367b6e1631b5d29e7098c08e828a3b4dedd3e0fc694ce0448f54f29dd85",
+   "owner_cap": "0x131e118055858d248d82bf62606d714221d4dfde176e72c8658fb4fdbfab6db5",
+   "device_address": "0x08b2258185269e4db5f16c561525bcfe98c7fb0c613d7994bd1f3a6133923448",
+   "budget": "0x1fcab755650fb8abdd320dec454d71fcce05e98e7fa9ac8bf80bf2821f1f5718",
+   "budget_cap": "0xbe9a18746179a8b17ba61eee75fab0430f84d4a0ce332168a9efa9c59a60d3f1",
+   "daemon": {
+    "blocked": "draw limit for this period reached; the period ends at 1792642807610 ms",
+    "blocked_since_ms": 1792639242003,
+    "balance_mist": 26007689,
+    "last_draw_digest": "3LA7pLekSnJZjZ4P9QCwJdoi5RNenTXTdQtBgpr5EqSa",
+    "last_draw_mist": 4000000,
+    "last_draw_ms": 1792639237507,
+    "draws": 2,
+    "last_draw_effects": {
+     "computationCost": "1000000",
+     "storageCost": "9538000",
+     "storageRebate": "9537046",
+     "nonRefundableStorageFee": "954"
+    }
+   },
+   "storage": {
+    "storage": "0x307e91e6622f78c3cb7929309c3fb6869462503510ee48b4c9963385ad151e06",
+    "pool": {
+     "end_epoch": 561.0,
+     "pool_size": "132068000",
+     "size": "132068000",
+     "start_epoch": 558.0,
+     "storage_id": "0x307e91e6622f78c3cb7929309c3fb6869462503510ee48b4c9963385ad151e06"
+    }
+   },
+   "upload": {
+    "blob_object": "0x727c29cb46a9c356a9de7bbf8a17f172732af6ad16349b9ad51dda638be42837",
+    "blob_id": "BDxNSpv4tb5zg9gBF1g9FBEmduclbpo7vPhXmuDUzCc",
+    "encoded": {
+     "blob_id": "BDxNSpv4tb5zg9gBF1g9FBEmduclbpo7vPhXmuDUzCc",
+     "blob_id_u256": "18002107121470034934331997847844913665870643131091446278972488823191290854404",
+     "root_hash_u256": "106324005044824243412425745398052140611104035631812464207754798584463023430906",
+     "size": 2048,
+     "n_shards": 1000,
+     "epoch": 558,
+     "walrus_package": "0x7d3b2086808a62bbc44d18c6b1d407973d77dd26946735873092c2f5650b4611"
+    },
+    "registered": {
+     "at_limit": true,
+     "blob_id": "18002107121470034934331997847844913665870643131091446278972488823191290854404",
+     "blob_object_id": "0x727c29cb46a9c356a9de7bbf8a17f172732af6ad16349b9ad51dda638be42837",
+     "device_id": "0x96fd4c829011b08bb26eb65ddab2ee8d073eae6e7efb690239cb5cdff84ac153",
+     "encoded_bytes_in_period": "66034000",
+     "encoded_size": "66034000",
+     "end_epoch": 561.0,
+     "pool_size": "66034000",
+     "size": "2048",
+     "storage_id": "0x307e91e6622f78c3cb7929309c3fb6869462503510ee48b4c9963385ad151e06",
+     "uploads_in_period": "1",
+     "wal_balance": "8684560",
+     "write_fee": "328860"
+    },
+    "confirmations": 68,
+    "nodes": 99,
+    "owner": {
+     "ObjectOwner": "0x5c3749cb47d152875f678f22faf1bf481616af3d0889cde275353a5f92e718f5"
+    },
+    "certified_epoch": 558.0,
+    "end_epoch": 561.0
+   },
+   "withdrawn_mist": 27000000,
+   "device_swept_mist": 12673892,
+   "end_balance_mist": 288569712,
+   "spent_mist": 127638704,
+   "allowance_used_mist": 167713335,
+   "finished": "2026-10-22T03:21:59Z"
+  }
+ ],
+ "checks": [
+  "reused the fixture 39fbfbd65ef12be18d456649@1.81.1-e04cf9aa915c: package 0xbdfb4e40eaa44af7ad72bfac9e83a4514eae28ba9a57712114ec2eaa6d908d89, UpgradeCap at version 1 held by the wallet",
+  "published fleet_storage 0xb7364dca4138ee61ae4b8e279d72a079ceeaec299e9aa96f1006998099977dbe linked to it and the live Walrus package, bytecode verified",
+  "manifest resolved over gRPC with every fleet budget type origin at the package",
+  "budget 0x1fcab755650fb8abdd320dec454d71fcce05e98e7fa9ac8bf80bf2821f1f5718 created with a 60000000 MIST deposit; the device address received exactly its 20000000 MIST float",
+  "the device drew 5000000 MIST; GasDrawn recorded it (net gas 1988855 MIST)",
+  "on-chain refusals: above the float cap (8), after revocation (device_cap 2), while paused (3)",
+  "the real daemon drew 2 time(s) over gRPC (last 3LA7pLekSnJZjZ4P9QCwJdoi5RNenTXTdQtBgpr5EqSa), then journaled: draw limit for this period reached; the period ends at 1792642807610 ms",
+  "SUI-only deposit: 10000000 MIST swapped through the pinned exchange for 10000000 FROST in one PTB; a higher minimum aborted (12)",
+  "the device registered and certified blob BDxNSpv4tb5zg9gBF1g9FBEmduclbpo7vPhXmuDUzCc from fleet storage: exactly its encoded size, non-deletable, owned by the fleet object, read back from 68 confirming nodes",
+  "the device's second upload in the period aborted on its quota (6)",
+  "withdrew 27000000 MIST unused deposit and swept 12673892 MIST from the device key"
+ ],
+ "total_spent_mist": 447359904,
+ "source_note": "Both runs executed scripts/live_fleet_budget.py from the working tree on top of the recorded head commit; the contracts were unchanged from that commit, and the script is committed with this evidence."
+}

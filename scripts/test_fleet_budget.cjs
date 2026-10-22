@@ -24,8 +24,8 @@ const { fleet_budget_DeviceAccountBcs } = load("lib/fleet-protocol.ts");
 // ── The estimate's inputs are the SF-054 measurements ──
 const receipt = quotes.historical_testnet_transactions.find((t) => t.label === "device receipt").effects.gasEffects.gasSummary;
 assert.equal(costs.MEASURED.receiptNetMist, BigInt(receipt.computationCost + receipt.storageCost - receipt.storageRebate));
-const topUp = quotes.historical_testnet_transactions.find((t) => t.label === "top up device gas").effects.gasEffects.gasSummary;
-assert.ok(costs.MEASURED.drawNetMist >= BigInt(topUp.computationCost), "a draw costs at least one computation fee");
+const sf083 = JSON.parse(fs.readFileSync(path.join(root, "docs/validation/sf083-testnet.json"), "utf8"));
+assert.equal(costs.MEASURED.drawNetMist, BigInt(sf083.runs[1].measured.draw_gas.net_mist), "draw cost measured on testnet");
 assert.equal(costs.MEASURED.minComputationMist, BigInt(receipt.computationCost));
 assert.equal(costs.MEASURED.walrus.nShards, quotes.walrus.n_shards);
 assert.equal(costs.MEASURED.walrus.storagePricePerUnit, BigInt(quotes.walrus.storage_price_per_unit_size));
@@ -41,7 +41,7 @@ for (const rate of rates) {
   assert.equal(cost.storage, BigInt(rate.storage_frost));
   assert.equal(cost.write, BigInt(rate.write_frost));
 }
-console.log("PASS: estimate inputs equal the SF-054 measured receipt, Walrus rates, exact RS2 sizes and spot quotes");
+console.log("PASS: estimate inputs equal the SF-054 measured receipt, Walrus rates, exact RS2 sizes and spot quotes, and the SF-083 testnet draw");
 
 // The SF-054 scenario: 1000 devices, 4 shared releases, one report each per release.
 const base = { devices: 1000, months: 1, receiptsPerDeviceMonth: 4, anchorsPerDeviceMonth: 0, releasesPerMonth: 4,

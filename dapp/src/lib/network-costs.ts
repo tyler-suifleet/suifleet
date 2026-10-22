@@ -9,8 +9,8 @@ export const MEASURED = {
   receiptNetMist: BigInt(1_251_568),
   /** Every Sui transaction pays at least this computation fee (MIST, at the measured reference price). */
   minComputationMist: BigInt(1_000_000),
-  /** One fleet_budget::draw_gas: computation plus the new coin's storage (net MIST). Updated from the SF-083 testnet run. */
-  drawNetMist: BigInt(1_988_000),
+  /** One fleet_budget::draw_gas, net MIST, measured on testnet (docs/validation/sf083-testnet.json). */
+  drawNetMist: BigInt(1_988_855),
   walrus: {
     nShards: 1000,
     /** FROST per encoded MiB per epoch (Mainnet epoch 42). */
