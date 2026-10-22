@@ -30,6 +30,9 @@ def main():
             subprocess.run(['docker', 'rm', container], check=True, stdout=subprocess.DEVNULL)
         for name in ('suifleet-tunnel.service', 'config.example.json', 'proxy-settings.json'):
             (path / name).write_bytes((SOURCE / name).read_bytes())
+            # These public installer files must be readable by the service UID,
+            # regardless of the caller's umask or checkout file permissions.
+            (path / name).chmod(0o644)
         (path / 'manifest.json').write_text(json.dumps({
             'schema_version': 1, 'localproxy_version': '3.3.1',
             'source_revision': '8a71618acf536923e882387e8d9eca9dbc7fdbe2',
@@ -37,6 +40,7 @@ def main():
             'architecture': subprocess.check_output(['docker', 'image', 'inspect', image, '--format', '{{.Architecture}}'], text=True).strip(),
             'enabled_by_default': False,
         }, indent=2) + '\n')
+        (path / 'manifest.json').chmod(0o644)
         with tarfile.open(args.output, 'w:gz') as archive:
             for item in sorted(path.iterdir()):
                 archive.add(item, arcname=item.name)
