@@ -733,8 +733,135 @@ module fleet_storage::fleet_storage_tests {
         assert!(fleet_storage::pool_epochs(&fs).destroy_some() == vector[0, 5], 0);
         let usage = fleet_storage::usage(&fs, device_id).destroy_some();
         assert!(fleet_storage::usage_encoded_bytes_in_period(&usage) == needed && fleet_storage::usage_total_uploads(&usage) == 1, 1);
-        assert!(fleet_storage::interface_version() == 1, 2);
+        assert!(fleet_storage::interface_version() == 2, 2);
         ts::return_shared(fs);
         finish(scenario, system);
     }
+    #[test]
+    fun reserves_are_isolated_and_alternate_funding_grants_no_authority() {
+        let (mut scenario, system) = setup(quota(POOL, 10));
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        fleet_storage::configure_retention(&mut fs, &budget, &cap, DEVICE_2, 2, 100, 10, 5);
+        owner_end(fs, budget, cap);
+        ts::next_tx(&mut scenario, STRANGER);
+        let mut fs = ts::take_shared<FleetStorage>(&scenario);
+        let ctx = ts::ctx(&mut scenario);
+        fleet_storage::fund_retention(&mut fs, coin::mint_for_testing<WAL>(100, ctx), coin::mint_for_testing<SUI>(10, ctx));
+        let (wal, gas) = fleet_storage::retention_balances(&fs);
+        assert!(wal == 100 && gas == 10);
+        assert!(fleet_storage::wal_balance(&fs) == WAL_DEPOSIT);
+        ts::return_shared(fs);
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        let ctx = ts::ctx(&mut scenario);
+        destroy(fleet_storage::withdraw_wal(&mut fs, &budget, &cap, WAL_DEPOSIT, ctx));
+        let (wal, gas) = fleet_storage::retention_balances(&fs);
+        assert!(wal == 100 && gas == 10);
+        let (wal, gas) = fleet_storage::withdraw_retention(&mut fs, &budget, &cap, 100, 10, ctx);
+        destroy(wal);
+        destroy(gas);
+        let (wal, gas) = fleet_storage::retention_balances(&fs);
+        assert!(wal == 0 && gas == 0);
+        assert!(event::events_by_type<fleet_storage::RetentionRisk>().length() == 1);
+        owner_end(fs, budget, cap);
+        finish(scenario, system);
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 0, location = fleet_storage)]
+    fun retention_rejects_stale_object_version() {
+        let (mut scenario, system) = setup(quota(POOL, 10));
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        fleet_storage::set_version_for_testing(&mut fs, 1);
+        fleet_storage::configure_retention(&mut fs, &budget, &cap, DEVICE_2, 2, 100, 10, 5);
+        owner_end(fs, budget, cap);
+        finish(scenario, system);
+    }
+
+    fun renewal_fixture(): (ts::Scenario, System, ID) {
+        let (mut scenario, mut system) = setup(quota(POOL, 10));
+        let id = upload(&mut scenario, &mut system, BLOB, 10);
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        fleet_storage::certify_for_testing(&mut fs, &system, id);
+        fleet_storage::configure_retention(&mut fs, &budget, &cap, DEVICE_2, 5, 1_000_000, 10, 5);
+        fleet_storage::authorize_renewal(&mut fs, &budget, &cap, id, 7, 1_000_000);
+        let ctx = ts::ctx(&mut scenario);
+        fleet_storage::fund_retention(&mut fs, coin::mint_for_testing<WAL>(1_000_000, ctx), coin::mint_for_testing<SUI>(10, ctx));
+        owner_end(fs, budget, cap);
+        (scenario, system, id)
+    }
+
+    #[test]
+    fun restricted_executor_extends_and_accounts_real_walrus_cost() {
+        let (mut scenario, mut system, id) = renewal_fixture();
+        ts::next_tx(&mut scenario, DEVICE_2);
+        let mut fs = ts::take_shared<FleetStorage>(&scenario);
+        fleet_storage::execute_renewal(&mut fs, &mut system, id, 5, 1, ts::ctx(&mut scenario));
+        assert!(fleet_storage::blob(&fs, id).end_epoch() == 7);
+        let (wal, gas) = fleet_storage::retention_balances(&fs);
+        assert!(wal < 1_000_000 && gas == 5);
+        assert!(fleet_storage::wal_balance(&fs) < WAL_DEPOSIT);
+        assert!(event::events_by_type<fleet_storage::RenewalCompleted>().length() == 1);
+        ts::return_shared(fs);
+        finish(scenario, system);
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 1, location = fleet_storage)]
+    fun stranger_cannot_execute() {
+        let (mut scenario, mut system, id) = renewal_fixture();
+        ts::next_tx(&mut scenario, STRANGER);
+        let mut fs = ts::take_shared<FleetStorage>(&scenario);
+        fleet_storage::execute_renewal(&mut fs, &mut system, id, 5, 1, ts::ctx(&mut scenario));
+        ts::return_shared(fs);
+        finish(scenario, system);
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 13, location = fleet_storage)]
+    fun duplicate_cannot_spend_again() {
+        let (mut scenario, mut system, id) = renewal_fixture();
+        ts::next_tx(&mut scenario, DEVICE_2);
+        let mut fs = ts::take_shared<FleetStorage>(&scenario);
+        fleet_storage::execute_renewal(&mut fs, &mut system, id, 5, 1, ts::ctx(&mut scenario));
+        fleet_storage::execute_renewal(&mut fs, &mut system, id, 5, 1, ts::ctx(&mut scenario));
+        ts::return_shared(fs);
+        finish(scenario, system);
+    }
+
+    #[test]
+    fun retained_owner_registration_reserves_complete_closure_atomically() {
+        let (mut scenario, mut system, _) = renewal_fixture();
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        let ctx = ts::ctx(&mut scenario);
+        fleet_storage::fund_retention(&mut fs, coin::mint_for_testing<WAL>(1_000_000, ctx), coin::mint_for_testing<SUI>(0, ctx));
+        let clock = clock_at(&mut scenario, 20);
+        let id = fleet_storage::register_retained_fleet_blob(&mut fs, &budget, &cap, &mut system,
+            blob_id(BLOB + 1), ROOT, BLOB + 1, RS2, &clock, 7, 1_000_000, ts::ctx(&mut scenario));
+        assert!(fleet_storage::has_blob(&fs, id));
+        assert!(fleet_storage::renewal(&fs, id).is_some());
+        clock::destroy_for_testing(clock);
+        owner_end(fs, budget, cap);
+        finish(scenario, system);
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 7, location = fleet_storage)]
+    fun legacy_upload_cannot_create_unreserved_blob() {
+        let (mut scenario, mut system, _) = renewal_fixture();
+        upload(&mut scenario, &mut system, BLOB + 1, 20);
+        finish(scenario, system);
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 7, location = fleet_storage)]
+    fun owner_withdrawal_pauses_discretionary_spending() {
+        let (mut scenario, mut system, _) = renewal_fixture();
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        let (wal, gas) = fleet_storage::withdraw_retention(&mut fs, &budget, &cap, 1, 0, ts::ctx(&mut scenario));
+        destroy(wal); destroy(gas);
+        fleet_storage::buy_storage(&mut fs, &budget, &cap, &mut system, 1, 5, ts::ctx(&mut scenario));
+        owner_end(fs, budget, cap);
+        finish(scenario, system);
+    }
+
 }
