@@ -184,7 +184,7 @@ export default function FirmwarePage() {
 
   if (step === "done" && txDigest) {
     return (
-      <div className="max-w-2xl space-y-4">
+      <div className="max-w-2xl space-y-4 [overflow-wrap:anywhere]">
         <PageHeader title="Deploy component" />
         <div className="bg-white border border-gray-200 rounded p-8 text-center space-y-3">
           <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto">
@@ -227,7 +227,7 @@ export default function FirmwarePage() {
   ];
 
   return (
-    <div className="max-w-2xl space-y-4">
+    <div className="max-w-2xl space-y-4 [overflow-wrap:anywhere]">
       <PageHeader title="Deploy component" subtitle={catalogVersion ? "Review this published version and select deployment targets" : "Upload an artifact, define its lifecycle recipe, and deploy to device groups"} />
 
       {catalogError && <p role="alert">{catalogError}</p>}

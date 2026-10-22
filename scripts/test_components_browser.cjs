@@ -85,6 +85,7 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     await disconnected.getByRole("status").filter({ hasText: "Connect your wallet" }).waitFor();
     assert.equal(await disconnected.getByRole("button", { name: "Publish version", exact: true }).count(), 0);
     await disconnected.close();
+    const componentName = "c".repeat(128), componentVersion = "1.2.0-" + "r".repeat(122);
     const page = await browser.newPage(), errors = []; page.setDefaultTimeout(10000);
     page.on("pageerror", e => errors.push(e.message));
     page.on("console", m => { if (m.type() === "error") errors.push(m.text()); });
@@ -97,11 +98,11 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     await page.evaluate(() => window.componentsAcceptance.loaded());
     await page.getByRole("heading", { name: "No component versions yet" }).waitFor();
     await page.getByRole("button", { name: "Publish version", exact: true }).click();
-    await page.getByLabel("Component name", { exact: true }).fill("camera");
+    await page.getByLabel("Component name", { exact: true }).fill(componentName);
     await page.getByLabel("Semantic version").fill("bad");
     await page.getByRole("button", { name: "Continue to platform artifacts" }).click();
     await page.getByRole("alert").filter({ hasText: "Invalid semantic version" }).waitFor();
-    await page.getByLabel("Semantic version").fill("1.2.0");
+    await page.getByLabel("Semantic version").fill(componentVersion);
     await page.getByRole("button", { name: "Continue to platform artifacts" }).click();
     const file = (name) => ({ name, mimeType: "application/octet-stream", buffer: Buffer.from(`artifact ${name}`) });
     await page.getByLabel("Artifact", { exact: true }).setInputFiles(file("linux.bin"));
@@ -157,7 +158,7 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     await page.getByText("Version published", { exact: true }).waitFor();
     assert.equal(await publish.count(), 0, "confirmed version cannot be resubmitted");
     await page.getByRole("button", { name: "Back to library" }).click();
-    await page.getByRole("heading", { name: "camera", exact: true }).waitFor();
+    await page.getByRole("heading", { name: componentName, exact: true }).waitFor();
     await page.getByText("Public · unencrypted recipe").first().waitFor();
     await page.getByLabel("Search components and versions").fill("no-match");
     await page.getByRole("status").filter({ hasText: "No versions match" }).waitFor();
@@ -168,10 +169,11 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
       await page.screenshot({ path: path.join(process.env.SUIFLEET_BROWSER_EVIDENCE, "library-desktop.png"), fullPage: true });
     }
     await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await page.getByRole("heading", { name: `Version ${componentVersion}`, exact: true }).evaluate(el => el.getBoundingClientRect().right <= innerWidth), true, "version identity clipped on mobile");
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "mobile library overflow");
     await page.getByRole("button", { name: "Publish version", exact: true }).click();
-    await page.getByLabel("Component name", { exact: true }).fill("camera");
-    await page.getByLabel("Semantic version").fill("1.2.0");
+    await page.getByLabel("Component name", { exact: true }).fill(componentName);
+    await page.getByLabel("Semantic version").fill(componentVersion);
     await page.getByRole("button", { name: "Continue to platform artifacts" }).click();
     await page.getByRole("alert").filter({ hasText: "already exists" }).waitFor();
     await page.getByLabel("Semantic version").fill("1.3.0");
@@ -186,6 +188,7 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     await page.getByRole("radio").nth(1).check();
     await page.getByRole("checkbox").first().check();
     await page.getByRole("button", { name: "Review version", exact: true }).click();
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "mobile publication review overflow");
     await publish.click();
     await page.waitForFunction(() => window.componentsAcceptance.count() === 10);
     await page.evaluate(() => window.componentsAcceptance.account("0xb"));
@@ -197,10 +200,11 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     await page.getByRole("button", { name: "Back to library" }).click();
     await page.getByRole("link", { name: "Deploy this version" }).click();
     await page.waitForURL("**/firmware?componentVersion=0x111");
-    await page.getByText("camera 1.2.0 · immutable catalog version. Each device selects its own platform.", { exact: true }).waitFor();
+    await page.getByText(`${componentName} ${componentVersion} · immutable catalog version. Each device selects its own platform.`, { exact: true }).waitFor();
     await page.getByRole("checkbox", { name: /Acceptance device/ }).waitFor();
     assert.equal(await page.getByText("Drop any file here", { exact: true }).count(), 0);
     assert.equal(await page.getByRole("region", { name: "Published version review" }).isVisible(), true);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "mobile deployment review overflow");
     assert.equal(await page.evaluate(() => window.componentsAcceptance.calls().length), 0, "navigation must not deploy");
     assert.deepEqual(errors, []);
     console.log("PASS: Chrome library/search/errors, guided ordered multi-platform publishing, real upload progress, confidential fail-closed, duplicate suppression, upload/wallet rejection retry, confirmed success, immutable duplicate prevention, accessible form names, mobile layout and deploy-to-target navigation. Chain/wallet/storage are fixtures.");
