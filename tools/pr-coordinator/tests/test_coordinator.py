@@ -637,6 +637,7 @@ class PublicationTests(unittest.TestCase):
                 coordinator.store.db.execute("UPDATE jobs SET status='running',pid=999999,started='old' WHERE id=?",(job,))
                 (directory/'exit.json').write_text('{"returncode":0}')
                 (directory/'result.json').write_text(json.dumps(review['result']))
+                (directory/'snapshot.json').write_text(json.dumps(pr))
                 comments=[];reviews=[]
                 def gh(project,args):
                     body=next(a[5:] for a in args if a.startswith('body='))
@@ -645,7 +646,7 @@ class PublicationTests(unittest.TestCase):
                     reviews.append(body)
                     if len(reviews)<=failures:raise RuntimeError('formal review unavailable')
                     return json.dumps({'node_id':'review','body':body,'state':'APPROVED','commit_id':pr['headRefOid']})
-                with patch.object(coordinator,'pr',return_value=pr),patch.object(coordinator,'gh',side_effect=gh),patch.object(c,'process_identity',return_value=None):
+                with patch.object(coordinator,'pr',return_value=pr),patch.object(coordinator,'gh',side_effect=gh),patch.object(c,'process_identity',return_value=None),patch.object(c,'worker_stopped',return_value=True):
                     coordinator.collect(project,[])
                     for attempt in range(failures):
                         row=coordinator.store.db.execute('SELECT * FROM jobs').fetchone()
@@ -690,7 +691,7 @@ class PublicationTests(unittest.TestCase):
             job=coordinator.store.reserve('test',fixture()[0],'Claude','review',directory)
             coordinator.store.db.execute("UPDATE jobs SET status='running',pid=123,started='old' WHERE id=?",(job,))
             (directory/'exit.json').write_text('{"returncode":1}')
-            with patch.object(c,'process_identity',return_value='reused'):coordinator.collect({'id':'test'},[])
+            with patch.object(c,'process_identity',return_value='reused'),patch.object(c,'worker_stopped',return_value=True):coordinator.collect({'id':'test'},[])
             self.assertEqual(coordinator.store.db.execute('SELECT status FROM jobs').fetchone()[0],'retry')
 
     def test_external_old_merge_does_not_complete_reused_branch(self):
@@ -775,7 +776,7 @@ class CheckFreshnessTests(unittest.TestCase):
             self.assertEqual(len(launched),1)
             self.assertEqual(engine.store.db.execute('SELECT COUNT(*) FROM jobs').fetchone()[0],2)
 
-    def test_unready_checks_wait_but_actionable_repairs_still_run(self):
+    def test_unready_checks_start_source_review_and_actionable_repairs(self):
         cases=[
             [],[{'__typename':'CheckRun','status':'IN_PROGRESS','conclusion':None}],
             [{'__typename':'CheckRun','status':'COMPLETED','conclusion':'FAILURE'}],
@@ -787,10 +788,10 @@ class CheckFreshnessTests(unittest.TestCase):
             with self.subTest(checks=checks),tempfile.TemporaryDirectory() as directory:
                 pr=fixture()[0];pr['statusCheckRollup']=checks
                 engine,project,owner=self.setup_scan(directory,pr)
-                # Force stale feedback: no expensive review until checks succeed.
+                # Source feedback changes require independent review even while CI is unready.
                 pr['comments'].append({'id':'request','body':'recheck','updatedAt':'now'})
                 with patch.object(engine,'launch') as launch:
-                    engine.tick(True);launch.assert_not_called()
+                    engine.tick(True);self.assertEqual(launch.call_args.args[-1],'review')
                     pr['baseIncluded']=False
                     engine.tick(True);self.assertEqual(launch.call_args.args[-1],'fix')
                 pr['baseIncluded']=True
