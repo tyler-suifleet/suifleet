@@ -10,11 +10,13 @@ backend. The checklist below is deliberately not an acceptance receipt.
 
 SF-082/#160 consumes SF-083/#161, PR #218's published interface v1 at exact
 commit `57cd3bc1aec364d302b7192c8c19eb550c10aa23`. This branch contains that
-pin through an explicit merge for development. SF-083 was open/unmerged when
-this work was verified. Its later PR head is not a silent change to this pin.
-Keep the consumer PR draft until SF-083 is Done, integrate its actual merged
-implementation and current main, and repeat funding/storage compatibility,
-adversarial and end-to-end tests. The unmerged pin is not integrated acceptance.
+pin through an explicit merge for development. Recovery on 2026-10-22 integrated
+current main, including the actual reviewed SF-083 merge
+`3e796f7c2a91e88734970b0d3956469e3a86c7ed`, without conflicts. SF-083 is Done;
+the dependency blocker is resolved. All 13 fleet-data Move tests pass against
+that integration. This is unit evidence, not isolated-chain compatibility or
+end-to-end acceptance. Keep the consumer PR draft until the remaining software
+and its normal integration/CI/review gates are complete.
 
 `contracts/fleet_data` is a separate package depending on the core and storage
 packages. It adds no functions or fields to SF-083. It consumes:
@@ -127,16 +129,52 @@ origin and all bindings; resolves the indexed writer, checks its type/version
 and device/fleet binding; independently reads the current registry identity;
 verifies the device personal-message signature with the existing SDK verifier;
 validates health fields and requires its sequence to equal the anchored sequence.
-It derives the existing health rules using chain inclusion time and the browser
-clock, refusing future timestamps. Revoked devices are unreported; verification
+It derives the existing health rules using chain inclusion time, the enforced
+fleet health cadence and the browser clock, refusing future timestamps. The
+local sampling interval does not make an hourly on-chain summary prematurely
+offline; the HTTP reader retains its existing sampling-interval behavior. Revoked devices are unreported; verification
 failures and chain outages are unavailable. Existing stale-refresh expiry still
 applies. A configured chain path never falls back to an indexer on error.
 As with existing contract reads, this trusts the selected fullnode's canonical
 chain/object response; it is not a new fullnode proof verifier.
 
-Bulk anchor discovery/fetch/decrypt, signer-at-upload history across key rotation,
-log/diagnostic UI and browser alert derivation are not implemented. The existing
-alert/log UI still needs the HTTP indexer. No serverless-equivalence claim is made.
+`dapp/src/lib/fleet-bulk.ts` now provides a bounded chain-index reader and
+`fetchVerifiedArchive`. It checks fleet/device/type bindings, anchor sequence,
+current registry revocation, the fleet key epoch and the current **Walrus** epoch
+before and after a download/decryption. It verifies SHA-256 of ciphertext before
+requesting keys, requires the fleet-data original Seal namespace, fleet ID,
+key epoch and exact AAD, and verifies the personal-message signature against the
+signer recorded by the authorized anchor transaction. Key rotation therefore
+does not discard authenticated history, while current device revocation refuses
+reads. The Move owner/support policy remains the confidentiality boundary.
+Streaming responses have a 4 MiB limit and a 60-second deadline; archives contain
+at most 4096 records, with SF-020 line/source bounds. Returned plaintext buffers
+are wiped after parsing. This does not erase parsed JavaScript strings.
+
+`archiveDecryptor` builds the owner/support approval transaction kind for Seal
+without submitting it, uses a signed unexpired namespace-bound session, verifies
+provider public keys and requires the configured provider set and threshold.
+Its full provider/session flow is not yet covered by an end-to-end test.
+
+The proposed archive plaintext is the exact JSON envelope `{message, signature}`;
+`message` is base64 of signed schema-1 JSON with `kind: "fleet-data"`,
+`chain_identifier`, `registry`, `fleet_id`, `device_id`, `signer`, `seq`,
+`observed_ms`, `reason` (`logs`, `diagnostics`, `crash`), `dropped_lines` and
+`records` (`source`, `line`). It is **not yet produced by the daemon or allowed
+by its signing service**. AAD is UTF-8
+`suifleet/fleet-data/v1/<chain>/<fleet-id>/<seq>/<kind-number>`; the Seal identity
+uses the existing fleet-ID/epoch/nonce layout. This changes no SF-083 API/layout.
+
+Offline tests use real device signatures, actual Seal SDK encryption and
+independent AES-GCM decryption with test-only DEM keys; public key objects and
+chain responses are fixtures. They cover signature/binding/replay/tampering,
+stream/record bounds, pre-key policy rejection, expiry/revocation/key rotation
+and revocation during download. They do not establish provider availability,
+actual chain anchoring, storage certification or a daemon/browser round trip.
+
+The log/diagnostic UI and browser alert derivation remain unimplemented. The
+existing alert/log UI still needs the HTTP indexer. No serverless-equivalence
+claim is made.
 
 ## Static Walrus Site build and future publication
 
@@ -187,15 +225,15 @@ A local export is not evidence that either update or rollback works on chain.
 
 ## Remaining implementation and acceptance
 
-1. Integrate SF-083's actual merged code/current main and test the new package
+1. With actual SF-083/current-main integration now complete, test the new package
    on an isolated supported Sui chain, including existing objects, old-package
    attacks, authority changes, foreign accounts and storage compatibility.
 2. Implement daemon RS2 encoding/prepaid registration/certification, bounded
    on-chain health summaries, safe signing-service intents and verify-before-sign,
    durable batching/retry/exhaustion/restart behavior and diagnostic/crash paths.
-3. Implement fleet-policy Seal encryption, authenticated bulk envelopes, direct
-   browser discovery/fetch/signature/history verification/decryption, and all
-   SF-020 alert rules from verified chain/data. Test tampered, replayed,
+3. Complete fleet-policy Seal encryption and authenticated bulk production,
+   connect the verified archive reader/decryptor to log/diagnostic UI, and derive
+   all SF-020 alert rules from verified chain/data. Test tampered, replayed,
    foreign-chain, rotated/revoked-device and quota/funding failures end to end.
 4. Measure Walrus overhead and compare batching/quilts, update budget costs and
    establish retention/expiry/readback evidence; do not use guessed numbers.
