@@ -42,7 +42,7 @@ def run(args):
     prior=json.loads(args.resume_evidence.read_text()) if args.resume_evidence else None
     if prior:assert prior['chain']==live.chain and prior['operator']==live.operator
     root=Path(prior['runtime']) if prior else Path(tempfile.mkdtemp(prefix='sf082-live-',dir=args.runtime_dir))
-    daemon=None;watch_stop=threading.Event();health_receipts={}
+    daemon=None;watch_stop=threading.Event();health_receipts={};funding_receipts={}
     state_path=live.wallet.parent/'sf082-state.json';cache=json.loads(state_path.read_text()) if state_path.exists() else {'chain':live.chain,'packages':{}}
     assert cache['chain']==live.chain
     save=lambda:state_path.write_text(json.dumps(cache,indent=2)+'\n')
@@ -130,38 +130,62 @@ def run(args):
             full=template.read_text();base,extensions=full.split('[components]',1);template.write_text(base)
             release=root/'release';dm.generate(manifest,release,template)
             with (release/'config.toml').open('a') as out:out.write('[components]'+extensions)
-        before={id:str(live.object(id)['version']) for id in [budget,account,fleet]}
+        # Gas draws mutate only this device's account; archive/health calls
+        # keep fleet policy/budget read-only. Reserve all remaining draw funds.
+        reserve=plain(live.object(account)['content'])['reserve']
+        reserve=int(reserve['value'] if isinstance(reserve,dict) else reserve)
+        live.ledger.grant(reserve);live.evidence['precharged_reserve_mist']=reserve
+        config_file=release/'config.toml'
+        if '[budget]' not in config_file.read_text():
+            with config_file.open('a') as out:out.write(f'\n[budget]\nbudget_id="{budget}"\nlow_water_mist=15000000\ndraw_mist=10000000\n')
+        completed_file=state_dir/'fleet-data/completed.json'
+        periodic_file=root/'periodic-receipt.json'
+        prior_completed=json.loads(completed_file.read_text()) if completed_file.exists() else {}
+        if prior_completed.get('seq')==1 and not periodic_file.exists():periodic_file.write_text(json.dumps(prior_completed))
+        pending_file=state_dir/'fleet-data/pending.json'
+        prior_pending=json.loads(pending_file.read_text()) if pending_file.exists() else {}
+        has_request=max(prior_completed.get('request_seq',0),prior_pending.get('request_seq',0))>0
+        live.evidence['resumed_diagnostic_request']=has_request
+        before={id:str(live.object(id)['version']) for id in [budget,fleet]}
         def watch_health():
             while not watch_stop.wait(1):
                 try:
                     r=json.loads((state_dir/'fleet-data/health.json').read_text());health_receipts[int(r['seq'])]=r
                 except FileNotFoundError:pass
+                try:
+                    funding=json.loads((state_dir/'state.json').read_text()).get('funding') or {}
+                    if funding.get('last_draw_digest'):funding_receipts[funding['last_draw_digest']]=funding.get('last_draw_mist')
+                except FileNotFoundError:pass
         threading.Thread(target=watch_health,daemon=True).start()
         log=(root/'daemon.log').open('w');live.assert_lock();daemon=subprocess.Popen([str(DAEMON)],env={**os.environ,'EDGE_CONFIG':str(release/'config.toml')},stdout=log,stderr=log)
         completed=lambda:json.loads((state_dir/'fleet-data/completed.json').read_text()) if (state_dir/'fleet-data/completed.json').exists() else {}
         health=lambda:json.loads((state_dir/'fleet-data/health.json').read_text()) if (state_dir/'fleet-data/health.json').exists() else {}
-        wait_for(lambda:completed().get('seq')==1,'native periodic archive did not certify/anchor',daemon,timeout=300)
-        periodic=completed();health_first=health();health_receipts[int(health_first['seq'])]=health_first
+        wait_for(lambda:completed().get('seq',0)>=1,'native periodic archive did not certify/anchor',daemon,timeout=300)
+        if not periodic_file.exists():
+            assert completed().get('seq')==1,'missing periodic receipt for resumed fixture'
+            periodic_file.write_text(json.dumps(completed()))
+        periodic=json.loads(periodic_file.read_text());health_first=health();health_receipts[int(health_first['seq'])]=health_first
         daemon.terminate();daemon.wait(timeout=30);daemon=None
         live.assert_lock();daemon=subprocess.Popen([str(DAEMON)],env={**os.environ,'EDGE_CONFIG':str(release/'config.toml')},stdout=log,stderr=log)
-        time.sleep(5);assert completed()['seq']==1
-        live.transaction('request native diagnostics','--move-call',call('fleet_data','request_diagnostics',data_pkg),f'@{fleet}',f'@{writer}',f'@{budget}',f'@{budget_cap}',CLOCK,budget=15_000_000)
+        time.sleep(5)
+        if not has_request:assert completed()['seq']==1
+        if not has_request:live.transaction('request native diagnostics','--move-call',call('fleet_data','request_diagnostics',data_pkg),f'@{fleet}',f'@{writer}',f'@{budget}',f'@{budget_cap}',CLOCK,budget=15_000_000)
         wait_for(lambda:completed().get('seq')==2,'native diagnostic archive did not certify/anchor',daemon,timeout=300)
         diagnostic=completed();wait_for(lambda:health().get('seq',0)>int(health_first['seq']),'second direct health summary missing',daemon,timeout=120);health_second=health()
         daemon.terminate();daemon.wait(timeout=30);daemon=None
-        assert before=={id:str(live.object(id)['version']) for id in before},'device writes must not mutate fleet budget, account or policy'
+        assert before=={id:str(live.object(id)['version']) for id in before},'device writes must not mutate fleet budget or policy'
         health_receipts[int(health_second['seq'])]=health_second;watch_stop.set()
         assert sorted(health_receipts)==list(range(min(health_receipts),int(health_second['seq'])+1)),'missed a native health transaction receipt'
         receipts=[]
-        for label,digest in [*[(f'health-{seq}',r['digest']) for seq,r in sorted(health_receipts.items())],*[(f'periodic-{k}',periodic[k]) for k in ['registration','certification','anchor']],*[(f'diagnostic-{k}',diagnostic[k]) for k in ['registration','certification','anchor']]]:
+        for label,digest in [*[(f'funding-{i}',digest) for i,digest in enumerate(funding_receipts)],*[(f'health-{seq}',r['digest']) for seq,r in sorted(health_receipts.items())],*[(f'periodic-{k}',periodic[k]) for k in ['registration','certification','anchor']],*[(f'diagnostic-{k}',diagnostic[k]) for k in ['registration','certification','anchor']]]:
             r=live.executed(digest);assert r['effects']['status']['status']=='success'
             receipts.append(dict(label=label,digest=digest,net_gas_mist=net_gas(r),gas=r['effects']['gasUsed']))
-        total=sum(max(0,r['net_gas_mist']) for r in receipts);device[1].grant(total)
+        total=sum(max(0,r['net_gas_mist']) for r in receipts);live.ledger.grant(total)
         live.evidence['native_transactions']=receipts;live.evidence['precharged_device_allowance_mist']=FLOAT
         live.check('native hourly-cadence health path and prepaid encrypted logs/diagnostics certified and anchored; restart made no duplicate upload')
         # Native bridge signs only a bounded owner Seal personal-message
         # session from the explicit profile; no key bytes reach Node.
-        request=root/'browser.json';request.write_text(json.dumps(dict(manifest=manifest,config=config,device=device_id,budgetCap=budget_cap,servers=SERVERS,codec=args.codec)))
+        request=root/'browser.json';request.write_text(json.dumps(dict(manifest=manifest,config=config,device=device_id,budgetCap=budget_cap,servers=SERVERS,codec=str(args.codec))))
         run_browser(live,request,root)
         live.transaction('remove test device account','--move-call',call('fleet_budget','remove_device'),f'@{budget}',f'@{budget_cap}',f'@{account}',budget=20_000_000)
         value=plain(live.object(budget)['content'])['balance'];remaining=int(value['value'] if isinstance(value,dict) else value)
@@ -174,16 +198,19 @@ def run(args):
         live.finish(args.evidence)
 
 def run_browser(live,request,root):
-    import base64,yaml
+    import base64,re
     node=subprocess.Popen(['node','scripts/live_fleet_data.cjs',str(request)],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=(root/'browser.log').open('w'),text=True,bufsize=1)
     try:
         for line in node.stdout:
             r=json.loads(line)
             if 'personal_message' in r:
                 message=base64.b64decode(r['personal_message'],validate=True);assert 0<len(message)<8192
-                profile=yaml.safe_load(live.wallet.read_text())
+                paths=re.findall(r'^\s+File:\s*(\S.*?)\s*$',live.wallet.read_text(),re.MULTILINE)
+                assert len(paths)==1,'explicit wallet must have one file keystore'
+                keystore=json.loads(paths[0]) if paths[0].startswith(chr(34)) else paths[0]
+                assert Path(keystore).is_absolute(),'explicit absolute file keystore required'
                 signed=subprocess.run([str(ROOT/'suifleet-edge/target/debug/examples/sign_seal_session')],
-                    input=json.dumps(dict(wallet=str(live.wallet),keystore=profile['keystore']['File'],expected_address=live.operator,
+                    input=json.dumps(dict(wallet=str(live.wallet),keystore=keystore,expected_address=live.operator,
                                           namespace=json.loads(request.read_text())['config']['typeOrigin'],message=r['personal_message'])),
                     capture_output=True,text=True,timeout=60)
                 assert signed.returncode==0,'native bridge refused selected owner Seal session'

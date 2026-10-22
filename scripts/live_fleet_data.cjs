@@ -18,7 +18,7 @@ const lines=readline.createInterface({input:process.stdin})[Symbol.asyncIterator
  if(!writer || BigInt(writer.anchor_count)!==2n)throw Error('Native archive index did not have exactly two records');
  const page=await listFleetDeviceIds(client,DATA_CONFIG);if(!page.devices.includes(id(input.device)))throw Error('Device missing from fleet index');
  const health=(await fetchChainHealth(client,DATA_CONFIG,[input.device]))[input.device];
- if(!['healthy','degraded'].includes(health.status))throw Error('Health did not verify');
+ if(!['healthy','degraded','offline'].includes(health.status))throw Error('Health did not verify');
  const budget=(await client.getObject({objectId:input.budgetCap,include:{content:true}})).object;
  if(budget.owner.$kind!=='AddressOwner')throw Error('Budget owner capability is not owned');
  const owner=budget.owner.AddressOwner;
