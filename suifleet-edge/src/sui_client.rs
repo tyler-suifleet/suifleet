@@ -1146,7 +1146,13 @@ impl SuiClient {
         self.durable_call(&data.package_id,&call,path).await
     }
     pub async fn requested_diagnostics(&self, data: &crate::fleet_data::Config) -> anyhow::Result<u64> {
-        let key: TypeTag = format!("{}::fleet_data::DiagnosticKey",data.type_origin).parse()?;
+        // DiagnosticKey was added after the original data objects. Resolve
+        // its own introduction package, never reuse FleetData's origin.
+        let package = self.package(&data.package_id).await?;
+        let entries: Vec<_> = package.type_origin_table.iter().filter(|o|
+            o.module_name.as_str() == "fleet_data" && o.struct_name.as_str() == "DiagnosticKey").collect();
+        anyhow::ensure!(entries.len() == 1, "call package has no unique DiagnosticKey origin");
+        let key: TypeTag = format!("{}::fleet_data::DiagnosticKey",entries[0].package).parse()?;
         let id = Address::from_str(&data.writer_id)?.derive_dynamic_child_id(&key,&[0]);
         let Some(field) = self.optional_object(&id.to_string()).await? else { return Ok(0); };
         number(&field.fields["value"]["seq"]).ok_or_else(|| anyhow::anyhow!("invalid diagnostic request"))

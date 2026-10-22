@@ -38,6 +38,7 @@ class Simulator(budget.BudgetSimulator):
         return dict(id=object_id(WRITER),version='1',fleet_id=object_id(FLEET),device_id=object_id(ota.DEVICE),account_id=object_id(budget.ACCOUNT),
             health_seq=str(self.seq),health_at_ms=str(self.at),message=list(self.message),signature=list(self.signature),batch_seq=str(self.batchseq),batch_at_ms=None if self.batch_at is None else str(self.batch_at),emergency_at_ms=None if self.emergency_at is None else str(self.emergency_at),anchor_count=str(len(self.anchors)))
     def obj(self,id):
+        if id==PACKAGE:return {'data':{'version':'2','bcs':{'dataType':'package','typeOriginTable':[{'module_name':'fleet_data','datatype_name':'DiagnosticKey','package':'0xf8'}]}}}
         if id==FLEET:
             b=addr(id)+u64(1)+addr(budget.BUDGET)+addr(STORAGE)+addr(ota.REGISTRY)+vec(self.chain.encode())+u64(0)+b'\0'+u64(60000)+u64(86400000)+u64(60000)+u64(1)
             return raw(id,f'{PACKAGE}::fleet_data::FleetData',self.fleet(),b)
@@ -50,7 +51,7 @@ class Simulator(budget.BudgetSimulator):
     def rpc(self,method,params):
         if method=='shim_height':return {'height':1 if self.history_pruned else 0,'lowest':1 if self.history_pruned else 0}
         if method=='shim_fields':return super().rpc(method,params)+[[FLEET,f'{PACKAGE}::fleet_data::DeviceKey',addr(ota.DEVICE).hex()],
-            [WRITER,f'{PACKAGE}::fleet_data::DiagnosticKey','00']]+[[WRITER,f'{PACKAGE}::fleet_data::AnchorKey',u64(i).hex()] for i in range(len(self.anchors))]
+            [WRITER,'0xf8::fleet_data::DiagnosticKey','00']]+[[WRITER,f'{PACKAGE}::fleet_data::AnchorKey',u64(i).hex()] for i in range(len(self.anchors))]
         if method=='suix_getDynamicFieldObject' and params[0]==WRITER:
             value=({'seq':str(self.request_seq),'at_ms':str(self.clock)} if self.request_seq else None) if params[1]['type'].endswith('::DiagnosticKey') else self.anchors[struct.unpack('<Q',bytes.fromhex(params[1]['value']))[0]]
             return {'data':{'content':{'fields':{'value':value}}}}
