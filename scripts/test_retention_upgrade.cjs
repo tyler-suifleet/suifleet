@@ -43,6 +43,31 @@ const root = path.resolve(__dirname, '..');
         (_, directory) => `{ local = "${framework}/${directory}" }`);
       await fs.writeFile(file, text);
     }
+    // Local fixture initialization only: real upstream System/Storage/Blob
+    // layouts and mutation code, with a deterministic one-member committee.
+    // Never publish this instrumented Walrus package outside network-none.
+    const innerPath = path.join(tmp, 'walrus/sources/system/system_state_inner.move');
+    await fs.appendFile(innerPath, `
+public(package) fun retention_fixture(ctx: &mut TxContext): SystemStateInnerV1 {
+    let mut state = create_empty(104, ctx);
+    let member = bls_aggregate::new_bls_committee_member(
+        sui::bls12381::g1_to_uncompressed_g1(&sui::bls12381::g1_generator()),
+        100, object::id_from_address(@0xabc));
+    state.committee = bls_aggregate::new_bls_committee(0, vector[member]);
+    state.total_capacity_size = 1_000_000_000;
+    state.storage_price_per_unit_size = 5;
+    state.write_price_per_unit_size = 1;
+    state
+}
+`);
+    await fs.appendFile(path.join(tmp, 'walrus/sources/system.move'), `
+public fun retention_fixture(ctx: &mut TxContext) {
+    let mut system = System { id: object::new(ctx), version: VERSION,
+        package_id: object::id_from_address(@0xabc), new_package_id: option::none() };
+    dynamic_field::add(&mut system.id, VERSION, system_state_inner::retention_fixture(ctx));
+    transfer::share_object(system);
+}
+`);
     const storage = path.join(core, 'fleet_storage');
     await fs.writeFile(path.join(storage, 'Move.toml'), (await fs.readFile(path.join(storage, 'Move.toml'), 'utf8'))
       .replace(/wal = \{[^\n]+\}/, `wal = { local = "${tmp}/wal" }`)
@@ -72,8 +97,11 @@ const root = path.resolve(__dirname, '..');
       await fs.writeFile(path.join(directory, 'Published.toml'), `[published.testnet]\nchain-id = "${chain}"\npublished-at = "${pkg}"\noriginal-id = "${pkg}"\nversion = 1\ntoolchain-version = "1.81.1"\nbuild-config = { flavor = "sui", edition = "2024" }\nupgrade-capability = "${upgrade}"\n`);
       return { pkg, upgrade, result: r };
     }
-    await publish(path.join(tmp, 'wal'));
-    await publish(path.join(tmp, 'walrus'));
+    const walPub = await publish(path.join(tmp, 'wal'));
+    const walrusPub = await publish(path.join(tmp, 'walrus'));
+    let fixtureTx = new Transaction();
+    fixtureTx.moveCall({ target: `${walrusPub.pkg}::system::retention_fixture` });
+    const system = created(await execute('initialize isolated Walrus fixture', fixtureTx), '::system::System');
     const corePub = await publish(core);
     const registry = created(corePub.result, '::device_registry::DeviceRegistry');
     // Exact merged SF083 source, not a rewritten pseudo-v1.
@@ -90,6 +118,17 @@ const root = path.resolve(__dirname, '..');
     const [quota] = tx.moveCall({ target: `${base.pkg}::fleet_storage::new_quota`, arguments: [tx.pure.u64(1000), tx.pure.u64(100), tx.pure.u64(10), tx.pure.u64(10), tx.pure.u64(100)] });
     tx.moveCall({ target: `${base.pkg}::fleet_storage::create`, arguments: [tx.object(budget), tx.object(ownerCap), quota] });
     const oldStorage = created(await execute('create v1 storage', tx), '::fleet_storage::FleetStorage');
+    tx = new Transaction();
+    const walCoin = created(walPub.result, '::coin::Coin<' + walPub.pkg + '::wal::WAL>');
+    const [walDeposit] = tx.splitCoins(tx.object(walCoin), [tx.pure.u64(1000000)]);
+    tx.moveCall({ target: `${base.pkg}::fleet_storage::deposit_wal`, arguments: [tx.object(oldStorage), tx.object(budget), tx.object(ownerCap), walDeposit] });
+    tx.moveCall({ target: `${base.pkg}::fleet_storage::buy_storage`, arguments: [tx.object(oldStorage), tx.object(budget), tx.object(ownerCap), tx.object(system), tx.pure.u64(1000000), tx.pure.u32(5)] });
+    const [blobId] = tx.moveCall({ target: `${walrusPub.pkg}::blob::derive_blob_id`, arguments: [tx.pure.u256(123), tx.pure.u8(1), tx.pure.u64(10)] });
+    tx.moveCall({ target: `${base.pkg}::fleet_storage::register_fleet_blob`, arguments: [tx.object(oldStorage), tx.object(budget), tx.object(ownerCap), tx.object(system), blobId, tx.pure.u256(123), tx.pure.u64(10), tx.pure.u8(1), tx.object('0x6')] });
+    await execute('populate v1 pool and wrapped blob with real registration', tx);
+    const before = (await client.getObject({ objectId: oldStorage, include: { content: true } })).object.content;
+    const fieldsBefore = await client.listDynamicFields({ parentId: oldStorage, include: { value: true } });
+    assert.ok(fieldsBefore.dynamicFields.some((f) => f.name.type.endsWith('::fleet_storage::RecordKey')));
     await fs.copyFile(path.join(root, 'contracts/fleet_storage/sources/fleet_storage.move'), path.join(storage, 'sources/fleet_storage.move'));
     const built = compile(storage);
     tx = new Transaction();
@@ -101,6 +140,9 @@ const root = path.resolve(__dirname, '..');
     await execute('migrate existing storage', tx);
     const content = (await client.getObject({ objectId: oldStorage, include: { content: true } })).object.content;
     assert.equal(bcs.u64().parse(content.slice(32, 40)), '2');
+    assert.deepEqual(content.slice(40), before.slice(40), 'pool, WAL, counters and budget binding survive migration');
+    const fieldsAfter = await client.listDynamicFields({ parentId: oldStorage, include: { value: true } });
+    assert.deepEqual(fieldsAfter.dynamicFields, fieldsBefore.dynamicFields, 'wrapped blob and record origins/content survive');
     tx = new Transaction(); tx.moveCall({ target: `${head}::fleet_storage::configure_retention`, arguments: [tx.object(oldStorage), tx.object(budget), tx.object(ownerCap), tx.pure.address(signer.toSuiAddress()), tx.pure.u32(2), tx.pure.u64(100), tx.pure.u64(10), tx.pure.u64(1)] });
     await execute('configure on existing object', tx);
     // Resolve explicit refs to force an on-chain failure rather than dry-run refusal.
@@ -120,6 +162,6 @@ const root = path.resolve(__dirname, '..');
     assert.equal(failed.$kind, 'FailedTransaction');
     assert.match(JSON.stringify(failed.FailedTransaction.status), /abort code: 0/);
     receipts.push({ label: 'old-package withdrawal rejected after migration', digest: failed.FailedTransaction.digest });
-    console.log(JSON.stringify({ check: 'existing-object compatible storage upgrade and old-package retirement', receipts }));
+    console.log(JSON.stringify({ check: 'populated-object compatible storage upgrade and old-package retirement', receipts }));
   } finally { await fs.rm(tmp, { recursive: true, force: true }); }
 })().catch((error) => { console.error(error); process.exitCode = 1; });
