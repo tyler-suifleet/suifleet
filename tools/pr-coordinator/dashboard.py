@@ -3,7 +3,7 @@
 
 Reads the atomic-ticketing and PR-coordinator SQLite stores, the private
 coordinator configuration and existing job snapshot receipts. It opens every
-database read-only, never contacts GitHub or a model, and never outputs claim
+database read-only, contacts GitHub only with explicit --refresh-github, and never outputs claim
 tokens, claim blobs, prompts, PR bodies/comments or worker logs.
 """
 import argparse
@@ -14,6 +14,7 @@ import re
 import sqlite3
 import sys
 import time
+import textwrap
 from urllib.parse import quote
 
 ACTIVE_RUN = ('claiming', 'launching', 'running')
@@ -32,7 +33,8 @@ def default_paths():
     return dict(tickets=state/'atomic-ticketing/coordination.sqlite3',
                 dispatch=state/'pr-coordinator/dispatch.sqlite3',
                 reviews=state/'pr-coordinator/reviews.sqlite3',
-                config=config/'pr-coordinator/config.json')
+                config=config/'pr-coordinator/config.json',
+                inventory=state/'pr-coordinator/github-inventory')
 
 
 def safe_text(value, limit=160):
@@ -205,6 +207,165 @@ def project_snapshot(data, mtime):
                 mtime=mtime)
 
 
+def inventory_path(directory, project):
+    return Path(directory)/(quote(project, safe='') + '.json')
+
+
+def inventory_items(items):
+    if not isinstance(items, list):
+        raise ValueError('invalid inventory')
+    result = []
+    seen = set()
+    for row in items:
+        number = row.get('number') if isinstance(row, dict) else None
+        if type(number) is not int or number <= 0 or number in seen:
+            raise ValueError('invalid or duplicate issue number')
+        seen.add(number)
+        title = safe_text(row.get('title'), 120)
+        match = re.search(r'\b[A-Z][A-Z0-9]*-\d+\b', title)
+        result.append(dict(number=number, title=title, ticket=match.group() if match else None,
+                           draft=bool(row.get('draft', row.get('isDraft', False)))))
+    return sorted(result, key=lambda r: r['number'])
+
+
+def refresh_github(paths, project=None):
+    """Explicit opt-in REST inventory read. Never used by the live refresh loop.
+
+    Fetch both complete lists before atomically replacing a project's cache.
+    Use its configured account; do not fall back to another logged-in identity.
+    """
+    import subprocess
+    import tempfile
+    config = read_json(paths['config'])
+    if not isinstance(config, dict) or not isinstance(config.get('projects'), list):
+        raise Unavailable('configuration unavailable')
+    projects = [p for p in config['projects'] if isinstance(p, dict) and (project is None or p.get('id') == project)]
+    if not projects:
+        raise Unavailable('no matching configured project')
+    completed = []
+    for p in projects:
+        name, repository, account = p.get('id'), p.get('repository'), p.get('github_account')
+        if not all(isinstance(v, str) and v for v in (name, repository, account)) or not re.fullmatch(r'[\w.-]+/[\w.-]+', repository):
+            raise Unavailable('project repository/account missing or invalid')
+        def run(args, env=None):
+            return subprocess.run(['gh', *args], env=env, capture_output=True, text=True, check=True, timeout=60).stdout
+        try:
+            token = run(['auth', 'token', '--hostname', 'github.com', '--user', account]).strip()
+            if not token:
+                raise ValueError('missing authentication')
+            env = {**os.environ, 'GH_TOKEN': token, 'GH_HOST': 'github.com'}
+            def listing(endpoint):
+                pages = json.loads(run(['api', f'repos/{repository}/{endpoint}?state=open&per_page=100', '--paginate', '--slurp'], env))
+                if not isinstance(pages, list) or not all(isinstance(page, list) for page in pages):
+                    raise ValueError('incomplete inventory')
+                rows = [r for page in pages for r in page]
+                if not all(isinstance(r, dict) and r.get('state') == 'open' for r in rows):
+                    raise ValueError('invalid inventory')
+                return rows
+            issues = inventory_items([r for r in listing('issues') if 'pull_request' not in r])
+            prs = inventory_items(listing('pulls'))
+            data = dict(schema=1, project=name, repository=repository, fetched_at=time.time(), issues=issues, prs=prs)
+            path = inventory_path(paths['inventory'], name)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = None
+            try:
+                with tempfile.NamedTemporaryFile(mode='w', dir=path.parent, delete=False) as handle:
+                    temporary = Path(handle.name)
+                    json.dump(data, handle)
+                temporary.replace(path)
+            finally:
+                if temporary is not None:
+                    temporary.unlink(missing_ok=True)
+            completed.append(name)
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
+            # gh stderr can contain credentials: report only the exception type.
+            raise Unavailable(f'{safe_text(name)} refresh failed ({type(error).__name__}); previous snapshot retained') from error
+    return completed
+
+
+def reconcile_inventory(paths, config, by_ticket, now, project, ticket_pr=None):
+    result = {}
+    configured = {p['id']: p for p in config.get('projects', []) if isinstance(p, dict) and isinstance(p.get('id'), str)}
+    projects = set(configured) | {p for p, _ in by_ticket}
+    if project:
+        projects = {project}
+    for name in sorted(projects):
+        local = {key: row for (p, key), row in by_ticket.items() if p == name and row['status'] != 'done'}
+        counts = {}
+        for row in local.values():
+            counts[row['status']] = counts.get(row['status'], 0) + 1
+        entry = dict(state='unavailable', tracked_open=len(local), breakdown=counts,
+                     github_open_issues=None, github_open_prs=None)
+        result[name] = entry
+        raw = read_json(inventory_path(paths['inventory'], name))
+        try:
+            if not isinstance(raw, dict) or raw.get('schema') != 1 or raw.get('project') != name:
+                continue
+            repository = configured.get(name, {}).get('repository')
+            if not repository or raw.get('repository') != repository:
+                continue
+            stamp = raw['fetched_at']
+            if type(stamp) not in (float, int) or not 0 < stamp <= now + 300:
+                continue
+            issues, prs = inventory_items(raw['issues']), inventory_items(raw['prs'])
+            # Compare GitHub issue numbers, not title guesses or PR job counts.
+            tracked_numbers = {}
+            for key, row in local.items():
+                url = row['remote'].get('url', '')
+                match = re.fullmatch(r'https://github\.com/' + re.escape(repository) + r'/issues/(\d+)', str(url))
+                if match:
+                    tracked_numbers[int(match[1])] = key
+            remote_numbers = {r['number'] for r in issues}
+            active_keys = set(local)
+            receipt_prs = {number for (p, key), number in (ticket_pr or {}).items() if p == name and key in active_keys}
+            linked = [r for r in prs if any(re.search(r'\b' + re.escape(key) + r'\b', r['title']) for key in active_keys)
+                      or r['number'] in receipt_prs]
+            entry.update(state='stale' if now - stamp > 1800 else 'ok', fetched_at=stamp, repository=repository,
+                         github_open_issues=len(issues), github_open_prs=len(prs),
+                         linked_prs=len(linked), other_prs=[r['number'] for r in prs if r not in linked],
+                         untracked_issues=sorted(remote_numbers - set(tracked_numbers)),
+                         absent_from_github=[tracked_numbers[n] for n in sorted(set(tracked_numbers) - remote_numbers)],
+                         unpublished_tickets=sorted(set(local) - set(tracked_numbers.values())))
+        except (KeyError, ValueError, TypeError, AttributeError, OverflowError):
+            entry['state'] = 'unavailable'
+    return result
+
+
+def render_inventory(model, width):
+    lines = ['', 'GITHUB ISSUES / PULL REQUESTS']
+    ticket_ok = model['sources'].get('tickets', {}).get('state') == 'ok'
+    for project, entry in model.get('inventory', {}).items():
+        counts = entry['breakdown']
+        if entry['state'] == 'unavailable':
+            lines.append(f'  {project}: GitHub open issues ? · open PRs ? (no usable snapshot)')
+        else:
+            lines.append(f"  {project}: {entry['github_open_issues']} open issues · {entry['github_open_prs']} open PRs")
+            lines.append(f"  GitHub REST snapshot: {fmt_age(model['generated_at'] - entry['fetched_at'])} ago"
+                         + (' · STALE' if entry['state'] == 'stale' else '') + ' · not a live query')
+            lines.append(f"  PRs: {entry['linked_prs']} linked to open tickets · {len(entry['other_prs'])} other")
+            if entry['other_prs']:
+                lines.append('  Other PRs: ' + ', '.join(f'#{n}' for n in entry['other_prs']))
+        if ticket_ok:
+            lines.append(f"  Tracked open tickets: {entry['tracked_open']} = " + ' + '.join(
+                f"{counts.get(s, 0)} {s.replace('_', ' ')}" for s in ('backlog', 'in_progress', 'review', 'blocked')))
+            extra = {k: v for k, v in counts.items() if k not in ('backlog', 'in_progress', 'review', 'blocked')}
+            if extra:
+                lines[-1] += ' + ' + ' + '.join(f'{v} {k}' for k, v in sorted(extra.items()))
+            for field, label in [('untracked_issues', 'GitHub issues outside open local tracking'),
+                                 ('absent_from_github', 'Local tickets absent from GitHub open snapshot'),
+                                 ('unpublished_tickets', 'Local tickets without matching GitHub issue URL')]:
+                if entry.get(field):
+                    values = [f'#{v}' if isinstance(v, int) else v for v in entry[field]]
+                    lines.append('  ! ' + label + ': ' + ', '.join(values))
+        else:
+            lines.append('  Tracked open tickets: unknown (ticket store unavailable)')
+    if not model.get('inventory'):
+        lines.append('  No configured projects or tickets.')
+    lines.append(f"  Running workers: {len(model['workers'])} verified · activity on these tickets/PRs; do not add to issue totals")
+    lines.append('  Update GitHub counts: fleet-status --refresh-github --once (normal refresh stays offline)')
+    return [part for line in lines for part in (textwrap.wrap(line, width, subsequent_indent='    ') or [''])]
+
+
 def ci_state(snapshot):
     if not snapshot or snapshot.get('corrupt'):
         return None
@@ -247,6 +408,9 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
         data = json.loads(path.read_text())
         if not isinstance(data, dict):
             raise ValueError('config is not an object')
+        projects = data.get('projects', [])
+        if not isinstance(projects, list) or not all(isinstance(p, dict) for p in projects):
+            raise ValueError('malformed projects')
         slots = data.get('implementation_slots', [])
         limits = data.get('review_worker_limits', {})
         if not isinstance(slots, list) or not all(isinstance(s, dict) and isinstance(s.get('family'), str) for s in slots):
@@ -546,6 +710,7 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
                                           limit=(limits.get(family) or {}).get(kind, 1), **count,
                                           backoff_until=pause['retry_after'] if pause else None,
                                           backoff_reason='quarantine backoff' if pause else None))
+    model['inventory'] = reconcile_inventory(paths, config, by_ticket, now, project, ticket_pr)
     model['queue'] = queue
     order = {s: i for i, s in enumerate(['ci-failed', 'retry', 'stale', 'lingering', 'unverified', 'orphaned', 'manual',
                                           'waiting', 'ci-pending', 'awaiting-review', 'review', 'blocked', 'failed',
@@ -638,6 +803,7 @@ def render(model, width=100, delta=None, interval=None):
     for warning in model['warnings']:
         lines.append(fit('! ' + warning, width))
 
+    lines += render_inventory(model, width)
     lines += ['', 'CAPACITY (active = PID+start-time verified; held = unverified/waiting; retained = parked/quarantined)']
     if not model['capacity']:
         lines.append('  ' + ('No configured slots.' if model['sources'].get('config', {}).get('state') == 'ok' else 'Configuration unavailable.'))
@@ -667,7 +833,7 @@ def render(model, width=100, delta=None, interval=None):
         lines += table(rows, width)
 
     attention = model['attention']
-    lines += ['', f'WAITING / BLOCKED / CI / RETRY ({len(attention)})']
+    lines += ['', f'WORKER / JOB NOTICES ({len(attention)} items; not additional issues)']
     if not attention:
         lines.append('  Nothing waiting.' if model['sources'].get('tickets', {}).get('state') == 'ok' else '  Unknown: ticket store unavailable.')
     for a in attention:
@@ -679,7 +845,7 @@ def render(model, width=100, delta=None, interval=None):
                                     f"PR #{a['pr']}" if a.get('pr') else '') if x)
         lines.append(fit(f"  {head}{when}: " + ' — '.join(x for x in (a.get('title'), a['summary']) if x), width))
 
-    lines += ['', 'TICKET QUEUE']
+    lines += ['', 'LOCAL TICKET HISTORY (completed tickets excluded from open totals above)']
     if model['sources'].get('tickets', {}).get('state') != 'ok':
         lines.append('  Unknown: ticket store unavailable (not an empty queue).')
     elif not model['queue']:
@@ -783,14 +949,21 @@ def main(argv=None):
     mode.add_argument('--once', action='store_true', help='Print one readable snapshot and exit')
     mode.add_argument('--json', action='store_true', help='Print one machine-readable snapshot and exit')
     mode.add_argument('--live', action='store_true', help='Live terminal view (default on a terminal)')
+    parser.add_argument('--refresh-github', action='store_true', help='Explicitly update cached GitHub issue/PR counts once before viewing; never polls in live mode')
     parser.add_argument('--project', help='Only show this project (for example suifleet)')
     parser.add_argument('--interval', type=float, default=5.0, help='Live refresh seconds (minimum 1)')
     parser.add_argument('--width', type=int, help='Text width for --once (default: terminal width)')
-    for name in ('tickets', 'dispatch', 'reviews', 'config'):
+    for name in ('tickets', 'dispatch', 'reviews', 'config', 'inventory'):
         parser.add_argument(f'--{name}-path', dest=name, type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     args.interval = max(1.0, args.interval)
-    paths = {k: getattr(args, k) for k in ('tickets', 'dispatch', 'reviews', 'config') if getattr(args, k)}
+    paths = {k: getattr(args, k) for k in ('tickets', 'dispatch', 'reviews', 'config', 'inventory') if getattr(args, k)}
+    if args.refresh_github:
+        try:
+            refresh_github({**default_paths(), **paths}, args.project)
+        except Unavailable as error:
+            print(str(error), file=sys.stderr)
+            return 3
     interactive = sys.stdout.isatty() and sys.stdin.isatty()
     if args.live and not interactive:
         print('Live mode needs an interactive terminal; use --once or --json.', file=sys.stderr)
