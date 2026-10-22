@@ -21,6 +21,10 @@ ACTIVE_RUN = ('claiming', 'launching', 'running')
 RETAINED = ('orphaned', 'quarantined', 'parked')
 JOB_OPEN = ('reserved', 'running', 'retry', 'orphaned', 'quarantined')
 ROLE = {'review': 'review', 'fix': 'repair'}
+# Dispatcher CI repair-first redirects (SF-116) that pause a live implementation.
+REDIRECT_PAUSING = ('guarding', 'interrupting', 'releasing')
+REDIRECT_PAUSED = ('stopped', 'integrating', 'resuming')
+REDIRECT_REPAIRING = ('repairing', 'repair_stopping')
 # Free-text fields (handoff evidence, job errors) are redacted before display.
 # Claim and lock tokens are 32-hex; commit IDs are shown separately, shortened.
 SECRET = re.compile(r'(?i)(gh[opsru]_[A-Za-z0-9]{16,}|github_pat_\w+|suiprivkey\w+|bearer\s+\S+'
@@ -436,7 +440,12 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
         try:
             runs = [dict(r) for r in db.execute("SELECT session,project,family,status,directory,claim,pid,started,message FROM runs WHERE status!='finished'")]
             backoff = [dict(r) for r in db.execute('SELECT project,family,attempts,retry_after,reason FROM backoff')]
-            return runs, backoff
+            redirects = []
+            if db.execute("SELECT 1 FROM sqlite_master WHERE name='ci_redirects'").fetchone():
+                # Explicit columns: the claim digest and guard lease tokens are never selected.
+                redirects = [dict(r) for r in db.execute('SELECT id,source,project,family,ticket,pr,head,fingerprint,failures,state,'
+                                                         'reason,repair_dir,resumed_as,updated FROM ci_redirects ORDER BY id')]
+            return runs, backoff, redirects
         finally:
             db.close()
 
@@ -452,7 +461,11 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
             pauses = []
             if db.execute("SELECT 1 FROM sqlite_master WHERE name='quarantine_backoff'").fetchone():
                 pauses = [dict(r) for r in db.execute('SELECT family,kind,attempts,retry_after FROM quarantine_backoff')]
-            return jobs, merged, pauses
+            observations = []
+            if db.execute("SELECT 1 FROM sqlite_master WHERE name='ci_observations'").fetchone():
+                observations = [dict(r) for r in db.execute('SELECT project,pr,ticket,owner_status,head,draft,failures,fingerprint,'
+                                                            'responsibility,observed FROM ci_observations ORDER BY project,pr')]
+            return jobs, merged, pauses, observations
         finally:
             db.close()
 
@@ -462,8 +475,8 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
     reviews_data = source('reviews', load_reviews)
 
     tickets, refresh, locks = tickets_data or ([], {}, [])
-    runs, backoff = dispatch_data or ([], [])
-    jobs, merged, pauses = reviews_data or ([], set(), [])
+    runs, backoff, redirects = dispatch_data or ([], [], [])
+    jobs, merged, pauses, observations = reviews_data or ([], set(), [], [])
     by_ticket = {}
     for row in tickets:
         if not wanted(row['project']):
@@ -512,6 +525,59 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
         fields.setdefault('since', None)
         target = model['workers'] if kind == 'worker' else model['attention']
         target.append(fields)
+
+    # Latest redirect per paused/redirected source run; current coordinator CI receipts per PR.
+    redirect_for = {r['source']: r for r in redirects if wanted(r['project'])}
+    resumed_from = {r['resumed_as']: r for r in redirects if wanted(r['project']) and r['state'] == 'resumed' and r.get('resumed_as')}
+    observed = {(o['project'], o['pr']): o for o in observations if wanted(o['project'])}
+    redirect_shown = set()
+
+    def failed_names(row):
+        try:
+            names = [str(f.get('name') or '?') for f in json.loads(row.get('failures') or '[]') if isinstance(f, dict)]
+        except (ValueError, TypeError, AttributeError):
+            names = []
+        return safe_text(', '.join(names) or 'checks', 80)
+
+    def redirect_items(run, base, count, redirect):
+        """One capacity count for the claim: either the live CI repair or the paused owner."""
+        state, pr = redirect['state'], redirect.get('pr') or base['pr']
+        head = str(redirect.get('head') or '')[:12] or 'unknown head'
+        reason = safe_text(redirect.get('reason'), 110)
+        redirect_shown.add((run['project'], pr))
+        paused = dict(base, pr=pr)
+        if state in REDIRECT_REPAIRING:
+            process_file = receipt(redirect.get('repair_dir'), 'process.json')
+            identity = read_json(process_file) if process_file else None
+            identity = identity if isinstance(identity, dict) else {}
+            process = processes.state(identity.get('pid'), identity.get('started')) if identity else 'unknown'
+            repair = dict(base, id=f"cirepair:{run['session']}:{redirect['id']}", role='ci-repair', pr=pr, process=process)
+            task = f"CI repair-first: fixing failed {failed_names(redirect)} at {head} (same claim; implementation paused)"
+            if state == 'repair_stopping':
+                task += ' — overdue, stopping under guard leases'
+            if process == 'alive':
+                count['active'] += 1
+                item('worker', **repair, state='active', since=processes.started_at(identity.get('started')), summary=task)
+            else:
+                count['held'] += 1
+                waiting = not identity
+                item('attention', **repair, state='waiting' if waiting else {'lingering': 'lingering'}.get(process, 'stale'),
+                     since=redirect.get('updated'),
+                     summary=f"{task}: " + ('repair launch awaiting its process receipt' if waiting else f'repair worker {process}; {reason}'))
+            item('attention', **paused, state='paused', since=redirect.get('updated'),
+                 summary=f'implementation paused for CI repair-first on PR #{pr}; resumes automatically after the repair')
+            return
+        count['held'] += 1
+        if state in REDIRECT_PAUSING:
+            item('attention', **paused, state='pausing', since=redirect.get('updated'),
+                 summary=f'guarded CI repair-first interruption ({state}) for failed {failed_names(redirect)} at {head}: {reason}')
+        elif state in REDIRECT_PAUSED:
+            item('attention', **paused, state='paused', since=redirect.get('updated'),
+                 summary=f'paused for CI repair-first ({state}) for failed {failed_names(redirect)} at {head}: {reason}')
+        else:
+            # A terminal state while the run is still reserved (e.g. an uncertain stop).
+            item('attention', **paused, state=state if state in ('uncertain', 'orphaned') else 'unverified', since=redirect.get('updated'),
+                 summary=f'CI repair-first {safe_text(state, 20)}: {reason}')
 
     impl_counts, managed = {}, set()
     seen_keys = {}
@@ -564,10 +630,34 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
             since = started_at or (process_file.stat().st_mtime if process_file else None)
         except OSError:
             since = None
+        redirect = redirect_for.get(run['session'])
+        if run['status'] == 'redirected':
+            if redirect:
+                redirect_items(run, base, count, redirect)
+            else:
+                count['held'] += 1
+                item('attention', **base, state='unverified', since=since, summary='redirected run without a CI redirect record')
+            continue
+        if redirect and redirect['state'] == 'pending' and run['status'] in ACTIVE_RUN:
+            current = observed.get((run['project'], redirect['pr']))
+            # Only a still-current failure: closed, green or newer snapshots never alert.
+            if current and current.get('fingerprint') == redirect.get('fingerprint'):
+                redirect_shown.add((run['project'], redirect['pr']))
+                item('attention', **dict(base, id=f"ciredirect:{run['project']}:{redirect['id']}", pr=redirect['pr']),
+                     state='ci-repair-requested', since=redirect.get('updated'),
+                     summary=f"failed {failed_names(redirect)} at {str(redirect.get('head') or '')[:12]}: "
+                             f"{safe_text(redirect.get('reason'), 110)}")
+        elif redirect and redirect['state'] == 'guarding' and run['status'] in ACTIVE_RUN:
+            redirect_shown.add((run['project'], redirect['pr']))
+            item('attention', **dict(base, id=f"ciredirect:{run['project']}:{redirect['id']}", pr=redirect['pr']),
+                 state='pausing', since=redirect.get('updated'),
+                 summary=f"acquiring guard leases before a CI repair-first interruption for failed {failed_names(redirect)}")
         if run['status'] in ACTIVE_RUN and process == 'alive':
             count['active'] += 1
+            resumed = resumed_from.get(run['session'])
             item('worker', **base, state='active', since=since,
-                 summary=f"Implementing {key or 'unknown ticket'}" + (f" (ticket now {owner['status']})" if owner.get('status') not in (None, 'in_progress') else ''))
+                 summary=f"Implementing {key or 'unknown ticket'}" + (f" (ticket now {owner['status']})" if owner.get('status') not in (None, 'in_progress') else '')
+                 + (f" (resumed after CI repair-first on PR #{resumed['pr']})" if resumed else ''))
         elif run['status'] in ACTIVE_RUN:
             # Dispatcher counts these until it reconciles them; they are never active.
             count['held'] += 1
@@ -679,6 +769,17 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
                 detail = 'no local PR snapshot yet' if not pr else 'PR snapshot unreadable'
             item('attention', **base, state=state, since=snapshot.get('mtime') if snapshot else None, summary=detail)
 
+    for (project_id, pr), row in sorted(observed.items()):
+        if (project_id, pr) in redirect_shown or row.get('owner_status') == 'review':
+            continue  # Shown above, or covered by the Review ticket's CI state.
+        key = short_key(row.get('ticket'))
+        owner = by_ticket.get((project_id, key)) or {}
+        item('attention', id=f'ciobs:{project_id}:{pr}', project=project_id, family=owner.get('agent'), model=owner.get('model'),
+             role='implementation', ticket=key, pr=pr, title=ticket_title(project_id, key), ticket_status=row.get('owner_status'),
+             state='ci-failed', since=row.get('observed'),
+             summary=f"failed {failed_names(row)} at {str(row.get('head') or '')[:12]}" + (' (draft)' if row.get('draft') else '')
+                     + f"; repair: {safe_text(row.get('responsibility'), 110) or 'unassigned'}")
+
     for lock in locks:
         if wanted(lock['project']):
             model['locks'].append(dict(resource=lock['resource'], family=lock['agent'], model=lock['model'],
@@ -712,9 +813,9 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
                                           backoff_reason='quarantine backoff' if pause else None))
     model['inventory'] = reconcile_inventory(paths, config, by_ticket, now, project, ticket_pr)
     model['queue'] = queue
-    order = {s: i for i, s in enumerate(['ci-failed', 'retry', 'stale', 'lingering', 'unverified', 'orphaned', 'manual',
-                                          'waiting', 'ci-pending', 'awaiting-review', 'review', 'blocked', 'failed',
-                                          'quarantined', 'parked'])}
+    order = {s: i for i, s in enumerate(['ci-failed', 'ci-repair-requested', 'uncertain', 'retry', 'stale', 'lingering',
+                                          'unverified', 'orphaned', 'manual', 'pausing', 'paused', 'waiting', 'ci-pending',
+                                          'awaiting-review', 'review', 'blocked', 'failed', 'quarantined', 'parked'])}
     model['attention'].sort(key=lambda x: (order.get(x['state'], 99), x['project'], str(x.get('ticket') or ''), x.get('pr') or 0))
     model['workers'].sort(key=lambda x: (x['project'], x['family'], x['role'], x.get('since') or 0))
     return model
