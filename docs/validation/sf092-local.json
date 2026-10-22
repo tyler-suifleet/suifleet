@@ -1,0 +1,155 @@
+{
+  "schema_version": 1,
+  "ticket": "SF-092",
+  "status": "blocked_not_review_ready",
+  "implementation_head": "bc5368c8c244d975525b3347e59e0ebca261a04d",
+  "recorded_at": "2026-10-22T21:31:17.832566+00:00",
+  "dependency": {
+    "original_pin": "57cd3bc1aec364d302b7192c8c19eb550c10aa23",
+    "merged_sf083": "3e796f7c2a91e88734970b0d3956469e3a86c7ed",
+    "main_integration": "6db2ee90eb05605e445034097903f0680e30898a"
+  },
+  "environment": {
+    "image": "suifleet-dev:sf035",
+    "image_id": "31f727258ccd",
+    "rust": "1.94.0",
+    "sui_build": "1.81.1-e04cf9aa915c",
+    "sui_network": "1.82.1-987123842623",
+    "network_binary_sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b"
+  },
+  "verification": [
+    {
+      "command": "make test-contracts",
+      "result": "passed",
+      "core_move_tests": 168,
+      "storage_move_tests": 47
+    },
+    {
+      "command": "cargo test --locked --manifest-path suifleet-edge/Cargo.toml",
+      "result": "passed",
+      "passed": 384,
+      "ignored": 4
+    },
+    {
+      "command": "cargo test --locked --manifest-path suifleet-edge/Cargo.toml --features pkcs11",
+      "result": "passed",
+      "passed": 386,
+      "ignored": 4
+    },
+    {
+      "command": "cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples",
+      "result": "passed"
+    },
+    {
+      "command": "make test-ota",
+      "result": "passed",
+      "scope": "all Makefile simulator commands, including updated funding pause/restart and expired-copy restoration"
+    },
+    {
+      "command": "python3 -m unittest discover -s scripts/tests -p test_retention_worker.py -v",
+      "result": "passed",
+      "tests": 7,
+      "scope": "rerun after explicit TLS 1.2 fixture repair; actual HTTPS/HMAC/acknowledgment/dedup"
+    },
+    {
+      "command": "node scripts/test_retention.cjs",
+      "result": "passed",
+      "scope": "real SDK builders and runtime/frontend/generated core BCS compatibility"
+    },
+    {
+      "command": "make check-interfaces",
+      "result": "passed"
+    },
+    {
+      "command": "make dapp-typecheck && make dapp-build",
+      "result": "passed"
+    },
+    {
+      "command": "python3 scripts/test_protocol_localnet.py --retention-upgrade",
+      "result": "passed",
+      "environment": "disposable Docker network none with warm Move cache and Git history",
+      "scope": "empty v1 storage compatibility/migration and actual old-package withdrawal abort",
+      "receipt": {
+        "check": "existing-object compatible storage upgrade and old-package retirement",
+        "receipts": [
+          {
+            "label": "publish wal",
+            "digest": "DzJkEbyBpPpHP6TAontts6C4pFesZRCFKAZmZV2LsGD3"
+          },
+          {
+            "label": "publish walrus",
+            "digest": "C38GB94ogNeF3M3TChxXJNhKhbSj4HxC2Anx5JDWotN9"
+          },
+          {
+            "label": "publish contracts",
+            "digest": "2qVFrrAN8ptbfYJPvRbzRt6Hu8K7BqnDB9V3jM275T4e"
+          },
+          {
+            "label": "publish fleet_storage",
+            "digest": "EkoC7CVzvptimeKHEkDZcL6Qr5DBd3WE33M1Dai53fRH"
+          },
+          {
+            "label": "create budget",
+            "digest": "9EbKX1BU2f7MSzZpcH6SPMYTBD9kEhoaLLYFxm2W7FQ"
+          },
+          {
+            "label": "create v1 storage",
+            "digest": "4bddRcfjRirVxnnM7twxnkUq1Dh14Qfo8cucEkzv7CgS"
+          },
+          {
+            "label": "compatible storage upgrade",
+            "digest": "33tc92p34ijLtzujsrRFi81gGhZYw2KcHtYSHDH22DTQ"
+          },
+          {
+            "label": "migrate existing storage",
+            "digest": "HyFit52GYhPhMzm6MfhnkMPGk9pH5wqwNS7whgUFA89v"
+          },
+          {
+            "label": "configure on existing object",
+            "digest": "HNVAxLqJDpJkGvoqkZoJG4nFHZ6njYKGYVKnhSy7f6r9"
+          },
+          {
+            "label": "old-package withdrawal rejected after migration",
+            "digest": "7Tv5HX1NK32AoMhV6gKxP3iraXVLYP53hzDd4zgTyX6u"
+          }
+        ]
+      }
+    },
+    {
+      "command": "cargo +1.94.0 fmt --manifest-path suifleet-edge/Cargo.toml",
+      "result": "passed",
+      "scope": "retained formatted new/changed regions, restored unrelated baseline formatting"
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    }
+  ],
+  "ci": {
+    "observed_head": "114167a",
+    "run": "https://github.com/tyler-suifleet/suifleet/actions/runs/39857503835",
+    "status": "in progress at observation; Python CodeQL failed on fixture missing explicit TLS minimum",
+    "repair": "bc5368c sets TLS 1.2; seven worker tests rerun; fresh remote security result still required"
+  },
+  "public_testnet": {
+    "status": "unrun",
+    "preflight": "checksum-verified transaction CLI: active-address None; addresses: No managed addresses",
+    "writes": 0,
+    "faucet_requests": 0,
+    "mutation_locks_acquired": 0,
+    "net_cost_mist": 0,
+    "scope": "read-only wallet/preflight commands only; no live renewal effects claimed"
+  },
+  "remaining_gates": [
+    "Restore the authorized dedicated agent wallet or execute the bounded retention feature harness with the protected CI wallet; verify fresh effects, actual expiry and net costs.",
+    "Complete source/acceptance design for discretionary admission when fresh quotes exceed owner-selected ceilings; isolated reserve balances alone are not a promise of current/future quote adequacy.",
+    "Extend actual-chain existing-object coverage to populated wrapped blobs and pool resources; current fixture uses empty storage.",
+    "Exercise the authored live transport, real renewal/notifier restart and real Walrus restore/certification path; offline fixtures do not establish public-provider behavior.",
+    "Fresh current-head CI/security and ordinary automatic testnet, then independent review before Ready/Review."
+  ],
+  "deferred_unrun": [
+    "SF-031/#32 physical/manual-wallet acceptance",
+    "SF-087/#159 production provider/credentials/manual-wallet/mainnet acceptance"
+  ],
+  "limitations": "Feature is not acceptance-complete; draft PR232, claim retained. Local commands ran against implementation files during the turn; this receipt does not relabel every command as an exact-final-head CI run."
+}

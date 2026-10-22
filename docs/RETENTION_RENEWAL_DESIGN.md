@@ -1,15 +1,17 @@
 # Protected prepaid retention: SF-092 implementation design
 
-Status: proposal, not an implemented retention service. SF-092 remains incomplete.
-This document does not establish reserve protection, scheduled renewals or alerts.
+Status: original design, retained as acceptance intent. Implementation is in progress;
+see [operator guide and explicit remaining gaps](RETENTION_RENEWAL.md). SF-092 is
+not Review-ready; this design is not test evidence.
 
 ## Pinned prerequisite and integration gate
 
 The published SF-083 interface is version 1 at
 `57cd3bc1aec364d302b7192c8c19eb550c10aa23`, in
 [PR #218](https://github.com/tyler-suifleet/suifleet/pull/218).
-Its `docs/FLEET_BUDGET.md` is absent from this branch until the prerequisite is
-integrated. Read it at that exact commit rather than substituting another head.
+SF-083 merged at `3e796f7c2a91e88734970b0d3956469e3a86c7ed`; actual current main
+was integrated in `6db2ee90eb05605e445034097903f0680e30898a`. The original pin
+and consumed v1 boundary remain recorded below; the dependency blocker is resolved.
 The implementation and merge prerequisite is
 [SF-083/#161](https://github.com/tyler-suifleet/suifleet/issues/161).
 Implementation against the published pin is allowed; this is not integrated

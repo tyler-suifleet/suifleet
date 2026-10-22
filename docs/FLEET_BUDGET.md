@@ -477,3 +477,11 @@ acceptance in [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/15
 and [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32). So
 are Mainnet deposits, swaps and uploads, and physical devices. None of them
 has run.
+
+## SF-092 retention extension
+
+Storage mutation/read interface v2 and the still-incomplete SF-092 implementation
+are documented in [RETENTION_RENEWAL.md](RETENTION_RENEWAL.md). The v1 read table
+above records the original SF-083 boundary. Core budget interface v1 is unchanged;
+renewal WAL/SUI reserves are separate from discretionary WAL and device accounts.
+No new public-testnet renewal or completed SF-092 acceptance is claimed here.
