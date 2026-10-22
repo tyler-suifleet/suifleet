@@ -180,7 +180,22 @@ class RetentionTests(unittest.TestCase):
                 self.assertEqual(len(payloads), 1)
                 self.assertEqual(set(payloads[0]), {'schema', 'id', 'code', 'epoch', 'timestamp'})
                 self.assertEqual(worker.state['alerts']['retention_low:4']['status'], 'acknowledged')
+                worker.save()
+                config = worker.config
                 worker.lock.close()
+                # Same durable configuration still suppresses duplicates after restart.
+                worker = module.Worker(config, root / 'state', Chain())
+                worker.notify('retention_low', 4, 300)
+                self.assertEqual(len(payloads), 1)
+                worker.lock.close()
+                # A second fleet may share this authenticated endpoint and secret.
+                # Its condition must not collide with the first fleet's message ID.
+                other = module.Worker({**config, 'storage': 'another-fleet'}, root / 'other-state', Chain())
+                other.notify('retention_low', 4, 300)
+                self.assertEqual(len(payloads), 2)
+                self.assertNotEqual(payloads[0]['id'], payloads[1]['id'])
+                self.assertEqual(set(payloads[1]), {'schema', 'id', 'code', 'epoch', 'timestamp'})
+                other.lock.close()
             finally:
                 server.shutdown()
                 thread.join(timeout=5)

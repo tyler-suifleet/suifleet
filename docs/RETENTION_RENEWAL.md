@@ -149,7 +149,8 @@ Use at least 32 random secret bytes in a 0600 file. No keys belong in git, issue
 public artifacts. The receiver must authenticate `X-SuiFleet-Signature` as HMAC
 SHA-256 over the exact JSON body, validate timestamp/schema and persist the message
 ID to reject replay. It must return 2xx only after durable acknowledgment. Payloads
-contain only schema, opaque deduplication ID, code, epoch and timestamp; no blob IDs,
+contain only schema, an opaque ID scoped to the immutable worker configuration,
+code, epoch and timestamp; no blob IDs,
 private content or full fleet metadata. HTTPS validates server identity; redirects
 are refused. An acknowledgment proves endpoint acceptance, not a human reading it.
 

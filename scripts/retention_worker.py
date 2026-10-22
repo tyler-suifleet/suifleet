@@ -101,7 +101,7 @@ class Worker:
             os.close(descriptor)
         if len(secret) < 32:
             raise ValueError('notifier secret must contain at least 32 bytes')
-        payload = json.dumps({'schema': 1, 'id': hashlib.sha256(key.encode()).hexdigest(),
+        payload = json.dumps({'schema': 1, 'id': hashlib.sha256(f'{self.state["binding"]}:{key}'.encode()).hexdigest(),
                               'code': code, 'epoch': epoch, 'timestamp': int(now)}, separators=(',', ':')).encode()
         item.update(attempts=item['attempts'] + 1, status='attempted', next=now + 60 * 2 ** item['attempts'])
         self.save()
