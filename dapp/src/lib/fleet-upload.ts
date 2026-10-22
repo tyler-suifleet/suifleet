@@ -21,6 +21,7 @@ export interface FleetStorageTarget {
   storageId: string;
   budgetId: string;
   capId: string;
+  retention?: { target: number; maxFee: bigint };
 }
 
 export interface ExecutedEvent {
@@ -44,8 +45,10 @@ export function signersToBitmap(signers: number[], committeeSize: number): Uint8
 export function buildRegisterFleetBlobTx(target: FleetStorageTarget, blobId: bigint, rootHash: bigint, size: number): Transaction {
   if (!Number.isSafeInteger(size) || size <= 0) throw new Error("Upload a nonempty blob");
   const tx = new Transaction();
-  tx.moveCall({ target: `${target.config.packageId}::fleet_storage::register_fleet_blob`, arguments: [tx.object(target.storageId), tx.object(target.budgetId),
-    tx.object(target.capId), tx.object(target.config.walrus.system), tx.pure.u256(blobId), tx.pure.u256(rootHash), tx.pure.u64(size), tx.pure.u8(RS2), tx.object(CLOCK)] });
+  if (target.retention && (!Number.isInteger(target.retention.target) || target.retention.target <= 0 || target.retention.maxFee <= BigInt(0))) throw new Error("Choose a finite renewal target and positive maximum WAL quote before uploading");
+  tx.moveCall({ target: `${target.config.packageId}::fleet_storage::${target.retention ? 'register_retained_fleet_blob' : 'register_fleet_blob'}`, arguments: [tx.object(target.storageId), tx.object(target.budgetId),
+    tx.object(target.capId), tx.object(target.config.walrus.system), tx.pure.u256(blobId), tx.pure.u256(rootHash), tx.pure.u64(size), tx.pure.u8(RS2), tx.object(CLOCK),
+    ...(target.retention ? [tx.pure.u32(target.retention.target), tx.pure.u64(target.retention.maxFee)] : [])] });
   return tx;
 }
 

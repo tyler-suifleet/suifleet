@@ -1,6 +1,9 @@
 "use client";
 
 import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
+import { useState } from "react";
+import { fetchRetention, retentionOrigin } from "@/lib/retention";
+import { parseToken } from "@/lib/network-costs";
 import { useQuery } from "@tanstack/react-query";
 import { NETWORK } from "@/lib/constants";
 import { budgetSupported, fetchBudgets, fetchStorage, storageConfig, type BudgetView, type StorageView } from "@/lib/fleet-budget";
@@ -42,12 +45,20 @@ export function useFleetStorage() {
 }
 
 /** A BlobStore that pays uploads from the fleet's prepaid storage, when the owner has one. */
-export function useFleetBlobStore(): { store?: BlobStore; storage?: StorageView; reason?: string } {
+export function useFleetBlobStore() {
   const client = useCurrentClient();
   const mutation = useFleetTransaction();
   const { target, storage, reason } = useFleetStorage();
-  if (!target) return { reason };
-  const store: BlobStore = (body, progress) => uploadToFleetStorage(client, target, body,
+  const [renewalTarget, setRenewalTarget] = useState(0), [maxFee, setMaxFee] = useState('');
+  const origin = retentionOrigin();
+  const policy = useQuery({ queryKey: ['retention-upload', target?.storageId, origin], enabled: !!target && !!origin,
+    refetchInterval: 15000,
+    queryFn: () => fetchRetention(client, target!.storageId, origin!, target!.config.storageOrigin ?? target!.config.packageId) });
+  const retention = policy.data?.policy ? { target: renewalTarget, maxFee, setTarget: setRenewalTarget, setMaxFee } : undefined;
+  if (!target) return { reason, retention };
+  if (policy.error) return { reason: `Retention unavailable: ${policy.error.message}`, retention };
+  const store: BlobStore = (body, progress) => uploadToFleetStorage(client, { ...target,
+    retention: retention ? { target: renewalTarget, maxFee: parseToken(maxFee) } : undefined }, body,
     (transaction) => mutation.mutateAsync({ transaction }), progress);
-  return { store, storage };
+  return { store, storage, retention };
 }

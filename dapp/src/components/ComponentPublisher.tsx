@@ -115,7 +115,7 @@ export function ComponentPublisher({ catalog, versions, onPublished, onClose }: 
           <button className={button} disabled={rows.length >= 16} onClick={() => setRows(rs => [...rs, { id: nextId.current++, os: "linux", arch: "aarch64", install: "" }])}>Add platform</button>
           <details><summary className="cursor-pointer text-sm">Optional configuration and validation</summary><ConfigurationFields value={configuration} onChange={setConfiguration} disabled={busy} /></details>
           <DeliveryFields value={delivery} onChange={setDelivery} policies={policies.data ?? []} disabled={busy} />
-          <FleetStorageChoice checked={fleetPaid} onChange={setFleetPaid} available={!!fleet.store} storage={fleet.storage} reason={fleet.reason} disabled={busy} />
+          <FleetStorageChoice checked={fleetPaid} onChange={setFleetPaid} available={!!fleet.store} storage={fleet.storage} reason={fleet.reason} retention={fleet.retention} disabled={busy} />
           {policies.error && <p role="alert">Access policies could not be loaded: {String(policies.error)}</p>}
           <div className="flex gap-2"><button className={button} onClick={() => setStep(1)}>Back to name & version</button><button className={button} onClick={() => continueTo(3)}>Review version</button></div>
         </>}
