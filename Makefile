@@ -316,6 +316,7 @@ test-manifest:
 	$(RUN) node scripts/test_upload_progress.cjs
 	$(RUN) node scripts/test_telemetry.cjs
 	$(RUN) node scripts/test_fleet_data.cjs
+	$(RUN) node scripts/test_fleet_bulk.cjs
 	$(RUN) node scripts/test_alerts.cjs
 	$(RUN) node scripts/test_enrollment_frontend.cjs
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_claims.py'
