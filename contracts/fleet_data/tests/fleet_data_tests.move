@@ -200,4 +200,34 @@ module fleet_data::fleet_data_tests {
     fun revoked_support() { let (mut s, system) = setup(); admin(&mut s, 1); let id = identity(&mut s); admin(&mut s, 2); approve(&mut s, id, SUPPORT); finish(s, system); }
     #[test, expected_failure(abort_code = fleet_data::EAccess)]
     fun retired_key_epoch() { let (mut s, system) = setup(); admin(&mut s, 1); let id = identity(&mut s); admin(&mut s, 3); approve(&mut s, id, SUPPORT); finish(s, system); }
+    #[test]
+    fun diagnostics_are_durable_and_requested_by_owner() {
+        let (mut s, system) = setup();
+        ts::next_tx(&mut s, OWNER);
+        let fleet = ts::take_shared<FleetData>(&s);
+        let mut writer = ts::take_shared<DeviceData>(&s);
+        let budget = ts::take_shared<FleetBudget>(&s);
+        let cap = ts::take_from_address<BudgetOwnerCap>(&s, OWNER);
+        let clock = clock_at(&mut s, 10);
+        fleet_data::request_diagnostics(&fleet, &mut writer, &budget, &cap, &clock);
+        assert!(fleet_data::diagnostic_seq(&fleet_data::diagnostic_request(&writer).destroy_some()) == 1);
+        clock::destroy_for_testing(clock);
+        ts::return_shared(fleet); ts::return_shared(writer); ts::return_shared(budget); ts::return_to_address(OWNER, cap);
+        ts::next_tx(&mut s, DEVICE);
+        let writer = ts::take_shared<DeviceData>(&s);
+        assert!(fleet_data::diagnostic_seq(&fleet_data::diagnostic_request(&writer).destroy_some()) == 1);
+        ts::return_shared(writer); destroy(system); ts::end(s);
+    }
+    #[test, expected_failure(abort_code = fleet_data::EAccess)]
+    fun device_cannot_request_diagnostics_as_support() {
+        let (mut s, system) = setup();
+        ts::next_tx(&mut s, DEVICE);
+        let fleet = ts::take_shared<FleetData>(&s);
+        let mut writer = ts::take_shared<DeviceData>(&s);
+        let clock = clock_at(&mut s, 10);
+        fleet_data::request_diagnostics_support(&fleet, &mut writer, &clock, ts::ctx(&mut s));
+        clock::destroy_for_testing(clock); ts::return_shared(fleet); ts::return_shared(writer);
+        destroy(system); ts::end(s);
+    }
+
 }

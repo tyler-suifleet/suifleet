@@ -119,6 +119,37 @@ module fleet_data::fleet_data {
         fleet.emergency_interval_ms = emergency_interval_ms;
     }
 
+    public struct DiagnosticKey has copy, drop, store {}
+    public struct DiagnosticRequest has copy, drop, store { seq: u64, at_ms: u64 }
+
+    /// Owner/support requests are chain records; the writer observes them and
+    /// uploads a bounded encrypted diagnostic batch under the emergency quota.
+    public fun request_diagnostics(fleet: &FleetData, writer: &mut DeviceData,
+        budget: &FleetBudget, cap: &BudgetOwnerCap, clock: &Clock) {
+        owner(fleet, budget, cap);
+        request(fleet, writer, clock);
+    }
+    public fun request_diagnostics_support(fleet: &FleetData, writer: &mut DeviceData,
+        clock: &Clock, ctx: &TxContext) {
+        assert!(fleet.version == VERSION && fleet.support.contains(&ctx.sender()), EAccess);
+        request(fleet, writer, clock);
+    }
+    fun request(fleet: &FleetData, writer: &mut DeviceData, clock: &Clock) {
+        assert!(writer.version == VERSION && writer.fleet_id == object::id(fleet), EBinding);
+        assert!(*df::borrow<DeviceKey, ID>(&fleet.id, DeviceKey { device_id: writer.device_id }) == object::id(writer), EBinding);
+        let now = clock.timestamp_ms();
+        if (df::exists(&writer.id, DiagnosticKey {})) {
+            let current: &mut DiagnosticRequest = df::borrow_mut(&mut writer.id, DiagnosticKey {});
+            assert!(now >= current.at_ms + fleet.emergency_interval_ms, ECadence);
+            current.seq = current.seq + 1;
+            current.at_ms = now;
+        } else { df::add(&mut writer.id, DiagnosticKey {}, DiagnosticRequest { seq: 1, at_ms: now }); };
+    }
+    public fun diagnostic_request(writer: &DeviceData): Option<DiagnosticRequest> {
+        if (df::exists(&writer.id, DiagnosticKey {})) option::some(*df::borrow(&writer.id, DiagnosticKey {})) else option::none()
+    }
+    public fun diagnostic_seq(request: &DiagnosticRequest): u64 { request.seq }
+
     public fun set_support(fleet: &mut FleetData, budget: &FleetBudget,
         cap: &BudgetOwnerCap, account: address, allowed: bool) {
         owner(fleet, budget, cap);
