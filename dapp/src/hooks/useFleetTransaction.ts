@@ -1,5 +1,6 @@
 "use client";
 
+import { getSession, isEnokiWallet } from "@mysten/enoki";
 import { useMutation } from "@tanstack/react-query";
 import { useCurrentClient, useDAppKit } from "@mysten/dapp-kit-react";
 import type { Transaction } from "@mysten/sui/transactions";
@@ -21,6 +22,15 @@ export function useFleetTransaction() {
       if (!account.chains.includes(`sui:${manifest.network}`)) throw new Error(`Wallet account does not support sui:${manifest.network}`);
       if (wallet.stores.$currentNetwork.get() !== manifest.network) throw new Error("Wallet network does not match the deployment manifest");
       await verifyDeployment(client);
+      const connectedWallet = wallet.stores.$connection.get().wallet;
+      if (connectedWallet && isEnokiWallet(connectedWallet)) {
+        const session = await getSession(connectedWallet);
+        const { response: info } = await client.ledgerService.getServiceInfo({});
+        if (!session || !session.jwt || !Number.isFinite(session.expiresAt) || Date.now() >= session.expiresAt ||
+            !Number.isSafeInteger(session.maxEpoch) || info.epoch === undefined || info.epoch > BigInt(session.maxEpoch)) {
+          throw new Error("Google sign-in session expired or could not be verified. Disconnect and sign in again before retrying.");
+        }
+      }
       // Pass the selected account explicitly; never silently sign with an
       // account selected while the asynchronous network proof was in flight.
       const currentAccount = wallet.stores.$connection.get().account;

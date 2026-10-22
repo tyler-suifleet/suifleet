@@ -1,3 +1,7 @@
 # Only the pinned test bundler needs an install script.
 allowBuilds:
   esbuild: true
+# Keep Enoki's compatible ranges on the reviewed Sui 2.36.0 SDK boundary.
+overrides:
+  '@mysten/enoki>@mysten/wallet-standard': 0.21.34
+  '@mysten/enoki>@mysten/webcrypto-signer': 0.2.34
