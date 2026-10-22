@@ -19,13 +19,21 @@
 //!   batches, stream-export manifests and the client-device CA binding are
 //!   checked the same way (canonical, this chain, registry and key).
 //!
+//! - gas draws (SF-083, only with `[budget]`): exactly one
+//!   `fleet_budget::draw_gas` call on the manifest's package with the
+//!   configured budget, the manifest's registry, this device's cap and the
+//!   Clock, for at most `max_draw_mist`, paid by the device within the gas
+//!   ceiling; only from the daemon's main process. The chain bounds draws
+//!   again, so a compromised daemon is still limited to its device's float
+//!   and period allowance.
+//!
 //! Any process may ask for the device's public address. Everything else is
 //! refused. Component processes run as the daemon user and may reach the
 //! socket, but they are not the unit's main process.
 // Only the client side exists elsewhere: it refuses to connect.
 #![cfg_attr(not(target_os = "linux"), allow(dead_code, unused_imports))]
 use crate::identity::TxSigner;
-use crate::protocol::{deployment_manager as dm, enrollment};
+use crate::protocol::{deployment_manager as dm, enrollment, fleet_budget};
 use crate::seal_client::{check_approval, Authority, Certificate, SessionPolicy, Sessions};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::Deserialize;
@@ -85,6 +93,18 @@ pub struct ServiceConfig {
     /// Seal sessions for confidential delivery (SF-022). Absent: refused.
     #[serde(default)]
     pub seal: Option<SealSessions>,
+    /// Gas draws from the fleet budget (SF-083). Absent: refused.
+    #[serde(default)]
+    pub budget: Option<BudgetDraws>,
+}
+
+/// `[budget]` in `signer.toml`: the one budget draws may name, and the most
+/// one draw may ask for (the contract's own limits apply as well).
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct BudgetDraws {
+    pub budget_id: String,
+    pub max_draw_mist: u64,
 }
 
 /// `[seal]` in `signer.toml`: the service certifies session keys with the
@@ -129,6 +149,14 @@ impl ServiceConfig {
             cap: Address::from_str(&config.device_cap_id)?,
             max_budget: config.max_gas_budget,
             chain_identifier: manifest.chain_identifier.clone(),
+            budget: config
+                .budget
+                .as_ref()
+                .map(|budget| {
+                    anyhow::ensure!(budget.max_draw_mist > 0, "budget.max_draw_mist must be positive");
+                    Ok((Address::from_str(&budget.budget_id)?, budget.max_draw_mist))
+                })
+                .transpose()?,
         };
         Ok((config, policy))
     }
@@ -164,6 +192,7 @@ impl ServiceConfig {
 pub enum Intent {
     Report,
     Enroll,
+    Draw,
 }
 
 #[derive(Debug, Clone)]
@@ -177,6 +206,8 @@ pub struct Policy {
     pub max_budget: u64,
     /// The manifest's chain; telemetry snapshots must name it.
     pub chain_identifier: String,
+    /// The fleet budget gas draws may name and the most one draw may take.
+    pub budget: Option<(Address, u64)>,
 }
 
 fn input<'a>(inputs: &'a [Input], argument: &Argument) -> anyhow::Result<&'a Input> {
@@ -226,6 +257,28 @@ pub fn check(policy: &Policy, bytes: &[u8]) -> anyhow::Result<Intent> {
                 "status must be Applied or Failed"
             );
             Ok(Intent::Report)
+        }
+        (fleet_budget::MODULE, fleet_budget::DRAW_GAS) => {
+            let Some((budget, max_draw)) = policy.budget else {
+                anyhow::bail!("gas draws are not enabled in signer.toml");
+            };
+            anyhow::ensure!(tx.gas_payment.owner == policy.device, "a gas draw must be paid by the device");
+            anyhow::ensure!(tx.gas_payment.budget <= policy.max_budget, "gas budget {} exceeds {}", tx.gas_payment.budget, policy.max_budget);
+            anyhow::ensure!(args.len() == 5, "unexpected argument count");
+            anyhow::ensure!(shared(args[0])? == budget, "not this fleet's budget");
+            anyhow::ensure!(shared(args[1])? == policy.registry, "not this fleet's registry");
+            anyhow::ensure!(
+                matches!(args[2], Input::ImmutableOrOwned(reference) if *reference.object_id() == policy.cap),
+                "not this device's cap"
+            );
+            let Input::Pure(amount) = args[3] else {
+                anyhow::bail!("draw amount is not a pure value");
+            };
+            let amount: [u8; 8] = amount.as_slice().try_into().map_err(|_| anyhow::anyhow!("draw amount is not a u64"))?;
+            let amount = u64::from_le_bytes(amount);
+            anyhow::ensure!(amount > 0 && amount <= max_draw, "draw of {amount} MIST exceeds {max_draw}");
+            anyhow::ensure!(shared(args[4])? == Address::from_str("0x6")?, "not the Clock");
+            Ok(Intent::Draw)
         }
         (enrollment::MODULE, enrollment::ENROLL) => {
             anyhow::ensure!(tx.gas_payment.owner != policy.device, "enrollment must be sponsored by the claim key");
@@ -530,6 +583,7 @@ pub fn handle(
                 let bytes = STANDARD.decode(request["tx"].as_str().unwrap_or(""))?;
                 match check(policy, &bytes)? {
                     Intent::Report => anyhow::ensure!(daemon, "status reports are signed only for the daemon's main process"),
+                    Intent::Draw => anyhow::ensure!(daemon, "gas draws are signed only for the daemon's main process"),
                     Intent::Enroll => anyhow::ensure!(root, "enrollment is signed only for root at provisioning"),
                 }
                 Ok(json!({ "signature": STANDARD.encode(key.sign(&bytes)?) }))
@@ -717,7 +771,86 @@ mod tests {
             cap: Address::from_str("0x11").unwrap(),
             max_budget: 50_000_000,
             chain_identifier: "4c78adac".into(),
+            budget: Some((Address::from_str("0xb0").unwrap(), 100_000_000)),
         }
+    }
+
+    struct Draw {
+        package: &'static str,
+        budget: &'static str,
+        registry: &'static str,
+        cap: &'static str,
+        clock: &'static str,
+        amount: Vec<u8>,
+        sender: &'static str,
+        gas_owner: &'static str,
+        gas_budget: u64,
+        extra_command: bool,
+    }
+    impl Default for Draw {
+        fn default() -> Self {
+            Draw { package: "0x3", budget: "0xb0", registry: "0x13", cap: "0x11", clock: "0x6", amount: 50_000_000u64.to_le_bytes().to_vec(),
+                   sender: "0xa0", gas_owner: "0xa0", gas_budget: 10_000_000, extra_command: false }
+        }
+    }
+    impl Draw {
+        fn bytes(&self) -> Vec<u8> {
+            let a = |s: &str| Address::from_str(s).unwrap();
+            let mut b = TransactionBuilder::new();
+            let args = vec![
+                b.object(ObjectInput::shared(a(self.budget), 1, true)),
+                b.object(ObjectInput::shared(a(self.registry), 1, false)),
+                b.object(ObjectInput::owned(a(self.cap), 2, Digest::ZERO)),
+                b.pure_bytes(self.amount.clone()),
+                b.object(ObjectInput::shared(a(self.clock), 1, false)),
+            ];
+            let function = || Function::new(a(self.package), fleet_budget::MODULE.parse().unwrap(), fleet_budget::DRAW_GAS.parse().unwrap());
+            b.move_call(function(), args.clone());
+            if self.extra_command {
+                b.move_call(function(), args);
+            }
+            b.set_sender(a(self.sender));
+            b.set_sponsor(a(self.gas_owner));
+            b.set_gas_budget(self.gas_budget);
+            b.set_gas_price(1000);
+            b.add_gas_objects([ObjectInput::owned(a("0x12"), 3, Digest::ZERO)]);
+            bcs::to_bytes(&b.try_build().unwrap()).unwrap()
+        }
+    }
+
+    #[test]
+    fn signs_only_bounded_draws_from_this_fleets_budget() {
+        let p = policy();
+        assert_eq!(check(&p, &Draw::default().bytes()).unwrap(), Intent::Draw);
+        assert_eq!(check(&p, &Draw { amount: 100_000_000u64.to_le_bytes().to_vec(), ..Draw::default() }.bytes()).unwrap(), Intent::Draw);
+        for (label, bad) in [
+            ("over the configured amount", Draw { amount: 100_000_001u64.to_le_bytes().to_vec(), ..Draw::default() }),
+            ("zero", Draw { amount: 0u64.to_le_bytes().to_vec(), ..Draw::default() }),
+            ("not a u64", Draw { amount: vec![1, 2, 3], ..Draw::default() }),
+            ("other budget", Draw { budget: "0xb1", ..Draw::default() }),
+            ("other registry", Draw { registry: "0x99", ..Draw::default() }),
+            ("other cap", Draw { cap: "0x98", ..Draw::default() }),
+            ("not the clock", Draw { clock: "0x7", ..Draw::default() }),
+            ("other package", Draw { package: "0x4", ..Draw::default() }),
+            ("other sender", Draw { sender: "0xbad", gas_owner: "0xbad", ..Draw::default() }),
+            ("sponsored", Draw { gas_owner: "0xbad", ..Draw::default() }),
+            ("gas budget", Draw { gas_budget: 50_000_001, ..Draw::default() }),
+            ("two commands", Draw { extra_command: true, ..Draw::default() }),
+        ] {
+            assert!(check(&p, &bad.bytes()).is_err(), "{label} was accepted");
+        }
+        let disabled = Policy { budget: None, ..policy() };
+        assert!(check(&disabled, &Draw::default().bytes()).unwrap_err().to_string().contains("not enabled"));
+    }
+
+    #[test]
+    fn draw_signatures_only_for_the_daemon() {
+        let p = policy();
+        let sign = json!({ "op": "sign", "tx": STANDARD.encode(Draw::default().bytes()) });
+        assert_eq!(handle(&sign, Peer { pid: 100, uid: 990 }, &Key, &p, None, || true)["signature"], STANDARD.encode([7]));
+        // A component (same UID, not the main process) and root get nothing.
+        assert!(handle(&sign, Peer { pid: 101, uid: 990 }, &Key, &p, None, || false)["error"].as_str().unwrap().contains("may not request signatures"));
+        assert!(handle(&sign, Peer { pid: 1, uid: 0 }, &Key, &p, None, || false)["error"].as_str().unwrap().contains("only for the daemon"));
     }
 
     struct Tx {
