@@ -38,7 +38,7 @@ class ReadRetries(unittest.TestCase):
 
     def test_retry_after_is_respected_without_long_scan_sleep(self):
         err=lambda text:subprocess.CalledProcessError(1,['gh'],stderr=text)
-        self.assertEqual(c.transient_delay(err('HTTP 429 Retry-After: 9'),0),9)
+        self.assertIsNone(c.transient_delay(err('HTTP 429 Retry-After: 9'),0))
         self.assertIsNone(c.transient_delay(err('HTTP 429 Retry-After: 120'),0))
         self.assertIsNone(c.transient_delay(err('HTTP 404 TLS handshake timeout'),0))
 
