@@ -2064,6 +2064,29 @@
         "Add meaningful transport/UI regressions for measured and unknown-total progress, slow response, failure and duplicate clicks. Run frontend typecheck/production build and relevant existing upload/encryption/browser tests; keep physical Pi/mainnet external acceptance separate."
       ],
       "validation": "Pinned-toolchain frontend typecheck/build, targeted upload transport and browser regressions with delayed response and repeated clicks; preserve existing Walrus/Seal tests. Public testnet only if transaction behavior changes; no production/hardware operations."
+    },
+    {
+      "key": "SF-107",
+      "title": "Reconcile fleet-status counts with GitHub issues and pull requests",
+      "priority": "P1",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "area": "infra",
+      "resources": [],
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator",
+        "docs"
+      ],
+      "description": "The installed fleet-status prototype mixes worker activity with ticket status and omits open PR totals, making matching GitHub difficult. Install the reviewed dashboard under the expected command and clearly label counts and freshness.",
+      "evidence": "User observed GitHub 17 open issues and 10 PRs versus dashboard 4 running and a status breakdown totaling 17; installed fleet-status is an obsolete prototype.",
+      "acceptance": [
+        "Show open tracked issue total with an additive status breakdown; show running workers separately and explain overlap. Completed tickets are separate from open issues.",
+        "Show cached GitHub open issues and PR counts with source timestamp and unavailable/stale states; distinguish PRs from issues and identify inventory discrepancies without treating missing data as zero.",
+        "Normal live refresh must remain local and read-only without consuming GitHub quota. Provide an explicit bounded GitHub snapshot refresh for matching the remote inventory.",
+        "Install fleet-status as the supported dashboard alias without restarting services or workers; verify counting, project filtering, stale/missing snapshots, secret redaction and existing dashboard tests."
+      ],
+      "validation": "Dashboard and installer regression tests; compare local output with an explicit GitHub snapshot; no service restarts."
     }
   ]
 }
