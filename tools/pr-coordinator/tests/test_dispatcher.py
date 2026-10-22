@@ -24,6 +24,9 @@ class DispatchTests(unittest.TestCase):
         self.slot = dict(project='suifleet', family='Codex', model='actual-test-model', enabled=True)
         self.config = dict(projects=[self.project], implementation_slots=[self.slot], workers={'Codex':['test-cli']})
         self.worker = d.Dispatcher(self.config, self.state)
+        helpers = patch.object(d.Dispatcher, 'claim_helpers', return_value=[])
+        helpers.start()
+        self.addCleanup(helpers.stop)
         with sqlite3.connect(self.state/'reviews.sqlite3') as db:
             db.execute('CREATE TABLE jobs(family TEXT,status TEXT)')
         self.claim = dict(key='SF-099', token='private-token', session='session', status='in_progress',
@@ -568,3 +571,126 @@ class ObsoleteReceiptTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class HandoffAuditTests(unittest.TestCase):
+    setUp = DispatchTests.setUp
+    receipt = DispatchTests.receipt
+    authority = ObsoleteReceiptTests.authority
+    def setup_audit(self):
+        folder = self.receipt(status='quarantined', owner_status='in_progress')
+        (folder/'result.json').unlink()
+        (folder/'process.json').write_text(json.dumps(dict(pid=99999999, started='start')))
+        self.authority({'status':'in_progress'})
+        self.identity = patch.object(d, 'process_identity', return_value=None)
+        self.stopped = patch.object(d, 'worker_stopped', return_value=True)
+        self.helpers = patch.object(self.worker, 'claim_helpers', return_value=[])
+        self.command = patch.object(d, 'run', side_effect=lambda args, **kw: 'branch' if args[:2] == ['git','branch'] else '')
+        self.spawn = patch.object(d.subprocess, 'Popen', return_value=Mock(pid=12345))
+        for patcher in (self.identity,self.stopped,self.helpers,self.command,self.spawn):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        return folder
+
+    def attempts(self):
+        return self.worker.db.execute('SELECT count(*) FROM handoff_audits').fetchone()[0]
+
+    def test_single_durable_same_claim_attempt_and_restart(self):
+        folder = self.setup_audit()
+        self.worker.audit_missing_handoff(self.project)
+        self.assertEqual(self.attempts(),1)
+        audit = self.worker.db.execute("SELECT * FROM runs WHERE session LIKE '%audit'").fetchone()
+        self.assertEqual(json.loads(audit['claim']),self.claim)
+        self.assertTrue((folder/'exit.json').exists())
+        self.assertIn('do not implement or rebuild', (folder/'handoff-audit/prompt.txt').read_text())
+        self.worker.audit_missing_handoff(self.project)
+        restarted = d.Dispatcher(self.config,self.state)
+        restarted.audit_missing_handoff(self.project)
+        self.assertEqual(self.attempts(),1)
+        self.assertEqual(self.worker.db.execute('SELECT count(*) FROM runs').fetchone()[0],2)
+
+    def test_unsafe_conditions_never_attempt(self):
+        folder = self.setup_audit()
+        original = (folder/'process.json').read_text()
+        for kind in ('result','nonzero','unknown_exit','missing_identity','live','children','helpers','token','branch','dirty','mirror','authority_race'):
+            with self.subTest(kind=kind):
+                (folder/'exit.json').write_text('{"returncode":0}')
+                (folder/'process.json').write_text(original)
+                self.worker.ticket.return_value = self.owner
+                patches = []
+                if kind == 'result': (folder/'result.json').write_text('{}')
+                if kind == 'nonzero': (folder/'exit.json').write_text('{"returncode":1}')
+                if kind == 'unknown_exit': (folder/'exit.json').unlink()
+                if kind == 'missing_identity': (folder/'process.json').unlink()
+                if kind == 'live': patches.append(patch.object(d,'process_identity',return_value='reused'))
+                if kind == 'children': patches.append(patch.object(d,'worker_stopped',return_value=False))
+                if kind == 'helpers': patches.append(patch.object(self.worker,'claim_helpers',return_value=[{'pid':1,'started':'old'}]))
+                if kind == 'token': self.worker.ticket.return_value = {**self.owner,'token':'changed'}
+                if kind == 'branch': patches.append(patch.object(d,'run',return_value='different'))
+                if kind == 'dirty': patches.append(patch.object(d,'run',side_effect=['branch',' M dirty']))
+                if kind == 'mirror': self.worker.ticket.return_value = {**self.owner,'publish_pending':True}
+                if kind == 'authority_race': self.worker.ticket.return_value = {**self.owner,'revision':9}
+                for p in patches: p.start()
+                try:
+                    self.worker.audit_missing_handoff(self.project)
+                    self.assertEqual(self.attempts(),0)
+                finally:
+                    for p in reversed(patches): p.stop()
+                    (folder/'result.json').unlink(missing_ok=True)
+
+    def test_launch_failure_is_not_retried(self):
+        self.setup_audit()
+        with patch.object(d.subprocess,'Popen',side_effect=OSError('unavailable')) as spawn:
+            self.worker.audit_missing_handoff(self.project)
+            self.worker.audit_missing_handoff(self.project)
+        self.assertEqual(spawn.call_count,1)
+        self.assertEqual(self.attempts(),1)
+
+    def test_incomplete_audit_is_quarantined_without_recursive_audit(self):
+        folder = self.setup_audit()
+        self.worker.audit_missing_handoff(self.project)
+        audit = folder/'handoff-audit'
+        (audit/'process.json').write_text(json.dumps(dict(pid=12345,started='audit-start')))
+        (audit/'exit.json').write_text('{"returncode":0}')
+        self.worker.reconcile(self.project)
+        self.worker.audit_missing_handoff(self.project)
+        self.assertEqual(self.attempts(),1)
+        self.assertEqual(self.worker.db.execute("SELECT count(*) FROM runs WHERE status='quarantined'").fetchone()[0],2)
+
+    def test_completed_audit_uses_normal_review_handoff(self):
+        folder = self.setup_audit()
+        self.worker.audit_missing_handoff(self.project)
+        audit = folder/'handoff-audit'
+        (audit/'process.json').write_text(json.dumps(dict(pid=12345,started='audit-start')))
+        (audit/'exit.json').write_text('{"returncode":0}')
+        (audit/'result.json').write_text(json.dumps({'verdict':'review_ready','evidence':'PR/head/CI verified'}))
+        self.worker.ticket.return_value = {**self.owner,'status':'review'}
+        self.worker.reconcile(self.project)
+        self.assertEqual(self.worker.db.execute("SELECT status FROM runs WHERE session LIKE '%audit'").fetchone()[0], 'finished')
+
+
+class HelperProcessTests(unittest.TestCase):
+    def test_detached_heartbeat_detected_and_stale_helper_not_reused(self):
+        token = d.uuid.uuid4().hex
+        child = subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)', 'ticket heartbeat'],
+                                 env={**d.os.environ,'PR_COORDINATOR_CLAIM_TOKEN':token}, start_new_session=True)
+        try:
+            matches = d.Dispatcher.claim_helpers(None, {'token':token})
+            self.assertIn(child.pid, [r['pid'] for r in matches])
+            self.assertTrue(all(r['started'] for r in matches))
+            self.assertEqual(d.Dispatcher.claim_helpers(None, {'token':'changed-claim'}), [])
+        finally:
+            child.terminate()
+            child.wait()
+        self.assertEqual(d.Dispatcher.claim_helpers(None, {'token':token}), [])
+
+    def test_audit_wrapper_deadline_persists_actual_timeout(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            (folder/'command.json').write_text(json.dumps([sys.executable,'-c','import time; time.sleep(60)']))
+            (folder/'prompt.txt').write_text('offline timeout test')
+            (folder/'limits.json').write_text('{"timeout_seconds":0.05}')
+            result = subprocess.run([sys.executable,str(ROOT/'worker.py'),str(folder)], timeout=5)
+            self.assertEqual(result.returncode,124)
+            self.assertEqual(json.loads((folder/'exit.json').read_text()), {'returncode':124})
+            self.assertTrue((folder/'process.json').exists())

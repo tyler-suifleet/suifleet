@@ -33,6 +33,7 @@ class Dispatcher:
         self.db.execute('''CREATE TABLE IF NOT EXISTS retired_runs (
             session TEXT PRIMARY KEY, original_status TEXT, original_message TEXT,
             reason TEXT NOT NULL, retired_at REAL NOT NULL)''')
+        self.db.execute('CREATE TABLE IF NOT EXISTS handoff_audits (source TEXT PRIMARY KEY, session TEXT UNIQUE, state TEXT, reason TEXT)')
         self.db.execute('CREATE TABLE IF NOT EXISTS eligibility (project TEXT PRIMARY KEY, fingerprint TEXT)')
         for slot in config.get('implementation_slots', []):
             if slot['family'] not in ('Codex', 'Claude') or not slot['model'].strip():
@@ -78,6 +79,11 @@ class Dispatcher:
         # A reused PID is deliberately retained too: inspect it explicitly.
         if not pid or not started or process_identity(pid) is not None or not worker_stopped(pid, started):
             return None
+        if row['claim']:
+            helpers = self.claim_helpers(json.loads(row['claim']))
+            (Path(row['directory'])/'helpers.json').write_text(json.dumps(helpers))
+            if helpers:
+                return None
         return identity
 
     def replacement_repair(self, project, claim, identity):
@@ -178,6 +184,110 @@ class Dispatcher:
                 if authority is not None:
                     authority.close()
 
+    def claim_helpers(self, claim):
+        """Record detached claim-bearing processes; never signal an uncertain PID."""
+        helpers = []
+        for entry in Path('/proc').iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                fields = (entry/'stat').read_text().rsplit(')', 1)[1].split()
+                if fields[0] == 'Z':
+                    continue
+                if entry.stat().st_uid != os.getuid():
+                    continue
+                command = (entry/'cmdline').read_bytes()
+                if b'heartbeat' not in command or b'ticket' not in command:
+                    continue
+                environment = (entry/'environ').read_bytes().split(b'\0')
+                marker = ('PR_COORDINATOR_CLAIM_TOKEN='+claim['token']).encode()
+                if marker in environment or claim['token'].encode() in command:
+                    helpers.append(dict(pid=int(entry.name), started=fields[19]))
+            except (FileNotFoundError, ProcessLookupError):
+                continue
+        return helpers
+
+    def audit_missing_handoff(self, project):
+        rows = self.db.execute("SELECT * FROM runs WHERE project=? AND status='quarantined'",
+                               (project['id'],)).fetchall()
+        for row in rows:
+            authority = None
+            try:
+                if self.db.execute('SELECT 1 FROM handoff_audits WHERE source=? OR session=?',
+                                   (row['session'], row['session'])).fetchone():
+                    continue
+                directory = Path(row['directory'])
+                # Require durable wrapper identity and actual clean exit, not a guessed PID.
+                if not (directory/'process.json').exists() or (directory/'result.json').exists():
+                    continue
+                if json.loads((directory/'exit.json').read_text()) != {'returncode': 0}:
+                    continue
+                identity = self.stopped_identity(row)
+                if identity is None:
+                    continue
+                claim = json.loads(row['claim'])
+                if claim.get('agent') != row['family']:
+                    continue
+                helpers = self.claim_helpers(claim)
+                (directory/'helpers.json').write_text(json.dumps(helpers))
+                if helpers:
+                    continue  # Includes detached heartbeat helpers; retain ownership and capacity.
+                owner = self.ticket(project, 'assert', claim['key'], '--token', claim['token'])
+                fields = ('token', 'session', 'branch', 'worktree')
+                if (owner.get('publish_pending') or owner.get('status') != 'in_progress'
+                        or any(owner.get(k) != claim.get(k) for k in (*fields, 'agent', 'model'))):
+                    continue
+                if run(['git','branch','--show-current'], cwd=claim['worktree']).strip() != claim['branch']:
+                    continue
+                if run(['git','status','--porcelain'], cwd=claim['worktree']).strip():
+                    continue
+                path = Path(os.environ.get('XDG_STATE_HOME', str(Path.home()/'.local/state')))/'atomic-ticketing/coordination.sqlite3'
+                authority = sqlite3.connect(f'{path.as_uri()}?mode=rw', uri=True, isolation_level=None, timeout=1)
+                authority.row_factory = sqlite3.Row
+                authority.execute('BEGIN IMMEDIATE')
+                current = authority.execute('SELECT * FROM tickets WHERE key=? AND project=?',
+                                            (project['id']+'::'+claim['key'], project['id'])).fetchone()
+                if (not current or any(current[k] != owner.get(k) for k in (*fields, 'status', 'revision', 'published_revision'))
+                        or current['revision'] != current['published_revision']):
+                    continue
+                if self.stopped_identity(row) != identity or self.claim_helpers(claim):
+                    continue
+                session = row['session']+'-handoff-audit'
+                audit = directory/'handoff-audit'
+                # Persist intent BEFORE any launch. Interrupted/failed launches never retry.
+                self.db.execute('INSERT INTO handoff_audits VALUES(?,?,?,?)',
+                                (row['session'], session, 'attempted', 'one same-claim evidence audit'))
+                audit.mkdir(mode=0o700)
+                command = self.config['workers'][row['family']]
+                (audit/'command.json').write_text(json.dumps(command))
+                (audit/'limits.json').write_text(json.dumps({'timeout_seconds': 900}))
+                instructions = f"""Audit the existing stopped implementation only. Original evidence/logs: {directory}.
+This is the single bounded same-family, same-claim handoff audit, not a new implementation.
+Inspect existing commits, clean branch, PR/head, actual test receipts and current-head CI.
+Do not rebuild blindly, restart workers, claim/recover/release tickets, change branches or fabricate evidence.
+If evidence is incomplete or writes are uncertain, record a concrete blocker and retain the claim.
+Hand off completed work only after verifying all implementation gates. Preserve original receipts.
+"""
+                (audit/'prompt.txt').write_text(instructions+self.prompt(project, claim, audit).replace('Implement existing ticket', 'Audit existing ticket').replace('Implement, run required meaningful tests, record exact results and remaining acceptance gaps.', 'Inspect existing implementation and exact test results; do not implement or rebuild in this audit.'))
+                token = run(['gh','auth','token','--hostname','github.com','--user',project['github_account']]).strip()
+                env = {**os.environ, 'GH_TOKEN': token, 'PR_COORDINATOR_ACTIVE':'1',
+                       'PR_COORDINATOR_CLAIM_TOKEN':claim['token']}
+                self.db.execute('INSERT INTO runs VALUES(?,?,?,?,?,?,?,?,?)',
+                                (session, project['id'], row['family'], 'launching', str(audit), row['claim'], None, None,
+                                 'Bounded evidence audit; original receipts retained'))
+                child = subprocess.Popen(['/usr/bin/python3', str(Path(__file__).with_name('worker.py')), str(audit)],
+                                         cwd=claim['worktree'], env=env, stdin=subprocess.DEVNULL,
+                                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+                self.children[session] = child
+                self.db.execute("UPDATE runs SET status='running',pid=?,started=? WHERE session=?",
+                                (child.pid, process_identity(child.pid), session))
+            except (OSError, ValueError, KeyError, TypeError, sqlite3.Error, subprocess.CalledProcessError):
+                # Failed mirrors, ownership races, uncertain launches remain reserved.
+                continue
+            finally:
+                if authority is not None:
+                    authority.close()
+
     def reconcile(self, project):
         self.retire_obsolete(project)
         rows = self.db.execute("SELECT * FROM runs WHERE project=? AND status IN ('claiming','launching','running','orphaned')", (project['id'],)).fetchall()
@@ -197,7 +307,7 @@ class Dispatcher:
                 owner = self.ticket(project, 'show', claim['key'])
                 completed = (owner['status'] == 'done' and owner.get('token') is None
                              and owner.get('session') == claim['session'] and owner.get('branch') == claim['branch'])
-                ownership_changed = owner.get('token') != claim['token'] and not completed
+                ownership_changed = (any(owner.get(k) != claim.get(k) for k in ('token','session','branch','worktree')) and not completed)
                 if ownership_changed and row['status'] != 'orphaned':
                     self.update(row['session'], 'orphaned', 'Ownership changed; inspect and stop old worker')
                     continue
@@ -218,6 +328,8 @@ class Dispatcher:
                 if ownership_changed:
                     self.update(row['session'], 'quarantined', 'Stopped worker; ownership changed; original claim never resumed')
                     self.defer(project, row['family'], 'stopped worker quarantined')
+                    continue
+                if self.claim_helpers(claim):
                     continue
                 result = {}
                 # Exit receipt alone is insufficient: the wrapper can write it just before exiting.
@@ -332,6 +444,7 @@ class Dispatcher:
 You are {claim['agent']}, configured model {claim['model']}; record your actual running model/version in ticket evidence.
 Your existing session is {claim['session']}; branch {claim['branch']}, worktree {claim['worktree']}.
 Claim token is PR_COORDINATOR_CLAIM_TOKEN in the environment; never print/post secrets. Do not claim another ticket.
+Do not detach heartbeat helpers or other subprocesses; the dispatcher renews live workers.
 Immediately heartbeat/assert; heartbeat at least every five minutes and assert after long commands and before edits/commits/push.
 Read ticket show for the full specification/dependencies/notes; coordinate shared APIs in existing notes/issues.
 Implement, run required meaningful tests, record exact results and remaining acceptance gaps. Do not fake acceptance or ignore failures.
@@ -356,6 +469,7 @@ Specification snapshot: {json.dumps(claim['spec'])}
             return
         for project in self.config['projects']:
             self.reconcile(project)
+            self.audit_missing_handoff(project)
             slots = [s for s in self.config.get('implementation_slots', [])
                      if s['project'] == project['id'] and s.get('enabled', False)]
             if not slots:
