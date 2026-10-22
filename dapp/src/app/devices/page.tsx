@@ -52,6 +52,7 @@ function DevicesTab() {
   const { mutate: signAndExecute, isPending } = useFleetTransaction();
   const [showModal, setShowModal] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [technical, setTechnical] = useState(false);
   const groups = useGroups(), deployments = useDeployments();
   const [linkedDevice, setLinkedDevice] = useState<string | null>(null);
   useEffect(() => {
@@ -85,9 +86,13 @@ function DevicesTab() {
     <>
       <div className="flex items-start justify-between gap-4">
         <TelemetrySettings />
-        <button onClick={() => setShowModal(true)} className="bg-[#4DA2FF] hover:bg-[#2e8ed4] text-white text-sm px-4 py-2 rounded shrink-0">
-          Register device
-        </button>
+        <div className="flex items-center gap-3 shrink-0">
+          <label className="flex items-center gap-1 text-xs text-gray-500">
+            <input type="checkbox" checked={technical} onChange={(e) => setTechnical(e.target.checked)} /> Technical details
+          </label>
+          <button onClick={() => setShowModal(true)} className="text-xs text-gray-500 hover:underline">Register by address</button>
+          <Link href="/enrollment" className="bg-[#4DA2FF] hover:bg-[#2e8ed4] text-white text-sm px-4 py-2 rounded">Add devices</Link>
+        </div>
       </div>
 
       {linkedDevice && !isLoading && !devices.some(device => device.objectId === linkedDevice) && <p role="alert">This device is unavailable in your fleet. Its history may still be visible on Deployments.</p>}
@@ -97,13 +102,13 @@ function DevicesTab() {
         ) : devices.length === 0 ? (
           <div className="p-12 text-center">
             <p className="text-sm text-gray-500">No core devices registered.</p>
-            <button onClick={() => setShowModal(true)} className="mt-2 text-xs text-[#4DA2FF] hover:underline">Register your first device</button>
+            <Link href="/enrollment" className="mt-2 inline-block text-xs text-[#4DA2FF] hover:underline">Enroll your first devices</Link>
           </div>
         ) : (
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-200 text-left text-xs text-gray-500 bg-gray-50">
-                {["Status", "Name", "Architecture", "Last seen", "Device address", "Object ID", "Actions"].map((h) => (
+                {["Status", "Name", "Serial", "Architecture", "Last seen", ...(technical ? ["Device address", "Object ID"] : []), "Actions"].map((h) => (
                   <th key={h} className="py-2 px-4 font-medium">{h}</th>
                 ))}
               </tr>
@@ -128,16 +133,19 @@ function DevicesTab() {
                       if (event.button || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
                       event.preventDefault(); setExpanded(d.objectId); setLinkedDevice(d.objectId);
                       window.history.pushState(null, "", `?device=${encodeURIComponent(d.objectId)}`);
-                    }} className="font-medium text-blue-700 underline">{d.name}</a>
+                    }} className="font-medium text-blue-700 underline" title={d.chainName !== d.name ? `Registered as ${d.chainName}` : undefined}>{d.name}</a>
                     <p className="mt-1 text-xs text-gray-500">{health[d.objectId]?.components.length
                       ? `Last reported: ${health[d.objectId].components.map(component => `${component.name} ${component.version} (${component.installed ? "installed" : "not confirmed"})${component.supervised ? ` (${component.phase ?? "not started"})` : " (one-shot)"}`).join(", ")}`
                       : "Installed versions not reported"}</p>
                     <p className="mt-1 text-xs text-gray-500">Groups: {groups.error || !groups.data ? "Membership unavailable" : groups.data.filter(group => group.deviceIds.includes(d.objectId)).map(group => group.name).join(", ") || "No group"}</p>
                   </td>
+                  <td className="py-3 pr-4 text-gray-500">{d.serial ?? "—"}</td>
                   <td className="py-3 pr-4 text-gray-500">{d.arch}</td>
                   <td className="py-3 pr-4 text-xs text-gray-500">{d.ownerCapId ? lastSeenLabel(health[d.objectId]) : "—"}</td>
-                  <td className="py-3 pr-4 font-mono text-xs text-gray-400 max-w-[160px] truncate">{d.deviceAddress}</td>
-                  <td className="py-3 pr-4 font-mono text-xs text-gray-400">{d.objectId.slice(0, 14)}…</td>
+                  {technical && <>
+                    <td className="py-3 pr-4 font-mono text-xs text-gray-400 max-w-[160px] truncate">{d.deviceAddress}</td>
+                    <td className="py-3 pr-4 font-mono text-xs text-gray-400">{d.objectId.slice(0, 14)}…</td>
+                  </>}
                   <td className="py-3 flex items-center gap-3">
                     {!d.ownerCapId && (
                       <button
@@ -176,7 +184,7 @@ function DevicesTab() {
                 </tr>
                 {expanded === d.objectId && (
                   <tr className="bg-gray-50" data-testid="health-details">
-                    <td colSpan={7} className="px-4 py-3 space-y-4">
+                    <td colSpan={technical ? 8 : 6} className="px-4 py-3 space-y-4">
                       <h2 className="font-semibold">{d.name} — device details</h2>
                       <p className="text-sm">Current groups: {groups.error || !groups.data ? "Membership unavailable" : groups.data.filter(group => group.deviceIds.includes(d.objectId)).map(group => group.name).join(", ") || "No group"}</p>
                       <HealthDetails health={health[d.objectId]} />
@@ -195,8 +203,12 @@ function DevicesTab() {
       </div>
 
       {showModal && (
-        <Modal title="Register core device" onClose={() => setShowModal(false)}>
+        <Modal title="Register core device by address" onClose={() => setShowModal(false)}>
           <form onSubmit={handleRegister} className="space-y-4">
+            <p className="text-xs text-gray-500">
+              Advanced. To add devices without copying addresses, use <Link href="/enrollment" className="text-[#4DA2FF] hover:underline">Enrollment</Link>:
+              reserve names and serials, and each device enrolls with its own key.
+            </p>
             <FormField label="Device name" name="name" placeholder="rpi-001" required />
             <FormField label="Device SUI address" name="deviceAddress" placeholder="0x…" required />
             <div>
