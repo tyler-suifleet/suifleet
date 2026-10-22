@@ -373,9 +373,18 @@ const unavailableHealth = (reason: string): DeviceHealth => ({ status: "unavaila
  * cannot be checked, is `unavailable` on its own; this never rejects, so a
  * failed refresh cannot leave an earlier result on screen.
  */
-export async function fetchFleetHealth(client: Pick<SuiGrpcClient, "getDynamicField">, deviceIds: string[], owner: string,
+export async function fetchFleetHealth(client: Pick<SuiGrpcClient, "getDynamicField"> & Partial<Pick<SuiGrpcClient, "getObject" | "ledgerService">>, deviceIds: string[], owner: string,
   url = TELEMETRY_URL, token = "", fetcher: typeof fetch = fetch): Promise<Record<string, DeviceHealth>> {
   const unavailable = (reason: string): Record<string, DeviceHealth> => Object.fromEntries(deviceIds.map((id) => [id, unavailableHealth(reason)]));
+  if (process.env.NEXT_PUBLIC_FLEET_DATA) {
+    try {
+      const { DATA_CONFIG, fetchChainHealth } = await import("./fleet-data");
+      const getObject = client.getObject?.bind(client);
+      const ledgerService = client.ledgerService;
+      if (!DATA_CONFIG || !getObject || !ledgerService) return unavailable("fleet data chain reads unavailable");
+      return await fetchChainHealth({ getObject, getDynamicField: client.getDynamicField.bind(client), ledgerService }, DATA_CONFIG, deviceIds);
+    } catch (error) { return unavailable(`fleet data unavailable: ${message(error)}`); }
+  }
   if (!url) return unavailable("no telemetry service configured (NEXT_PUBLIC_SUIFLEET_TELEMETRY_URL)");
   let indexed;
   try {

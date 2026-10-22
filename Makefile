@@ -28,6 +28,7 @@ build-contracts:
 test-contracts:
 	$(RUN) sui move test --path contracts
 	$(RUN) sui move test --path contracts/fleet_storage
+	$(RUN) sui move test --path contracts/fleet_data --build-env testnet
 
 # Spends gas: PUBLISH_ARGS="--expect-address 0x... [--dry-run]" (docs/DEPLOYMENT_MANIFEST.md).
 publish-contracts:
@@ -314,6 +315,7 @@ test-manifest:
 	$(RUN) node scripts/test_seal_frontend.cjs
 	$(RUN) node scripts/test_upload_progress.cjs
 	$(RUN) node scripts/test_telemetry.cjs
+	$(RUN) node scripts/test_fleet_data.cjs
 	$(RUN) node scripts/test_alerts.cjs
 	$(RUN) node scripts/test_enrollment_frontend.cjs
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_claims.py'
