@@ -8,6 +8,7 @@ pub const DEPLOYMENT_SCHEMA_VERSION: u64 = 1;
 pub const SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS: &[u64] = &[1, 2, 3];
 pub const CATALOG_TYPES: &[&str] = &["component_catalog::ComponentCatalog", "component_catalog::ComponentVersion", "component_catalog::CatalogCreated", "component_catalog::VersionPublished", "component_catalog::CatalogBindingKey", "component_catalog::CatalogBinding"];
 pub const SEAL_POLICY_TYPES: &[&str] = &["seal_policy::AccessPolicy", "seal_policy::AccessAdminCap", "seal_policy::PolicyCreated", "seal_policy::AccessChanged", "seal_policy::KeyEpochRotated", "seal_policy::PolicyMigrated"];
+pub const BUDGET_TYPES: &[&str] = &["fleet_budget::FleetBudget", "fleet_budget::BudgetOwnerCap", "fleet_budget::Limits", "fleet_budget::DeviceKey", "fleet_budget::GasAccount", "fleet_budget::BudgetCreated", "fleet_budget::Deposited", "fleet_budget::Withdrawn", "fleet_budget::DeviceFunded", "fleet_budget::ReserveChanged", "fleet_budget::GasDrawn", "fleet_budget::BudgetLow", "fleet_budget::DeviceStateChanged", "fleet_budget::BudgetPaused", "fleet_budget::BudgetConfigured"];
 pub const RECIPE_VERSION: &str = "1.0";
 pub const RECIPE_VERSIONS: &[&str] = &["1.0", "1.1", "1.2", "1.3"];
 pub const STATUS_APPLIED: u8 = 1;
@@ -21,6 +22,9 @@ pub struct VecMap<K, V> { pub contents: Vec<Entry<K, V>> }
 /// sui::table::Table: entries are dynamic fields; the struct is its UID and size.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Table { pub id: [u8; 32], pub size: u64 }
+/// sui::balance::Balance<T>: its value.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Balance { pub value: u64 }
 pub mod component_catalog {
     use super::*;
     pub const MODULE: &str = "component_catalog";
@@ -521,6 +525,208 @@ pub mod enrollment {
         pub registry: [u8; 32],
     }
     impl PolicyCreated { pub const MOVE_TYPE: &'static str = "enrollment::PolicyCreated"; }
+}
+pub mod fleet_budget {
+    use super::*;
+    pub const MODULE: &str = "fleet_budget";
+    pub const ACCOUNT_BUDGET_ID: &str = "account_budget_id";
+    pub const ACCOUNT_CLOSED: &str = "account_closed";
+    pub const ACCOUNT_DEVICE_ID: &str = "account_device_id";
+    pub const ACCOUNT_DRAWN_IN_PERIOD: &str = "account_drawn_in_period";
+    pub const ACCOUNT_DRAWS_IN_PERIOD: &str = "account_draws_in_period";
+    pub const ACCOUNT_ENROLLED_AT_MS: &str = "account_enrolled_at_ms";
+    pub const ACCOUNT_ID: &str = "account_id";
+    pub const ACCOUNT_LAST_DRAW_MS: &str = "account_last_draw_ms";
+    pub const ACCOUNT_LIMITS: &str = "account_limits";
+    pub const ACCOUNT_OWNER_CAP_ID: &str = "account_owner_cap_id";
+    pub const ACCOUNT_PERIOD_START_MS: &str = "account_period_start_ms";
+    pub const ACCOUNT_RESERVE: &str = "account_reserve";
+    pub const ACCOUNT_SUSPENDED: &str = "account_suspended";
+    pub const ACCOUNT_TOTAL_DRAWN: &str = "account_total_drawn";
+    pub const ASSERT_MAY_DRAW: &str = "assert_may_draw";
+    pub const ASSERT_OWNER: &str = "assert_owner";
+    pub const BALANCE: &str = "balance";
+    pub const BUDGET_ID: &str = "budget_id";
+    pub const CONFIGURE: &str = "configure";
+    pub const CREATE: &str = "create";
+    pub const DEFAULT_LIMITS: &str = "default_limits";
+    pub const DEPOSIT: &str = "deposit";
+    pub const DEVICE_COUNT: &str = "device_count";
+    pub const DRAW_GAS: &str = "draw_gas";
+    pub const ENROLL_DEVICE: &str = "enroll_device";
+    pub const FUND_DEVICE: &str = "fund_device";
+    pub const FUND_RESERVE: &str = "fund_reserve";
+    pub const INTERFACE_VERSION: &str = "interface_version";
+    pub const IS_ENROLLED: &str = "is_enrolled";
+    pub const LIMITS_FLOAT_CAP: &str = "limits_float_cap";
+    pub const LIMITS_MAX_DRAWS_PER_PERIOD: &str = "limits_max_draws_per_period";
+    pub const LIMITS_MIN_DRAW_INTERVAL_MS: &str = "limits_min_draw_interval_ms";
+    pub const LIMITS_PERIOD_ALLOWANCE: &str = "limits_period_allowance";
+    pub const LIMITS_PERIOD_MS: &str = "limits_period_ms";
+    pub const LOW_BALANCE_THRESHOLD: &str = "low_balance_threshold";
+    pub const MIGRATE: &str = "migrate";
+    pub const NEW_LIMITS: &str = "new_limits";
+    pub const OWNER_CAP_ID: &str = "owner_cap_id";
+    pub const PACKAGE_VERSION: &str = "package_version";
+    pub const PAUSED: &str = "paused";
+    pub const RECLAIM_RESERVE: &str = "reclaim_reserve";
+    pub const REGISTRY_ID: &str = "registry_id";
+    pub const REMOVE_DEVICE: &str = "remove_device";
+    pub const RESERVED: &str = "reserved";
+    pub const SET_DEVICE_LIMITS: &str = "set_device_limits";
+    pub const SET_DEVICE_SUSPENDED: &str = "set_device_suspended";
+    pub const SET_PAUSED: &str = "set_paused";
+    pub const SPENDABLE: &str = "spendable";
+    pub const TOTAL_ALLOCATED: &str = "total_allocated";
+    pub const TOTAL_DEPOSITED: &str = "total_deposited";
+    pub const TOTAL_PAID: &str = "total_paid";
+    pub const TOTAL_RECLAIMED: &str = "total_reclaimed";
+    pub const TOTAL_WITHDRAWN: &str = "total_withdrawn";
+    pub const VERSION: &str = "version";
+    pub const WITHDRAW: &str = "withdraw";
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Limits {
+        pub float_cap: u64,
+        pub period_ms: u64,
+        pub period_allowance: u64,
+        pub max_draws_per_period: u64,
+        pub min_draw_interval_ms: u64,
+    }
+    impl Limits { pub const MOVE_TYPE: &'static str = "fleet_budget::Limits"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct BudgetConfigured {
+        pub budget_id: [u8; 32],
+        pub default_limits: super::fleet_budget::Limits,
+        pub low_balance_threshold: u64,
+    }
+    impl BudgetConfigured { pub const MOVE_TYPE: &'static str = "fleet_budget::BudgetConfigured"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct BudgetCreated {
+        pub budget_id: [u8; 32],
+        pub registry_id: [u8; 32],
+        pub owner_cap_id: [u8; 32],
+        pub owner: [u8; 32],
+    }
+    impl BudgetCreated { pub const MOVE_TYPE: &'static str = "fleet_budget::BudgetCreated"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct BudgetLow {
+        pub budget_id: [u8; 32],
+        pub balance: u64,
+        pub threshold: u64,
+    }
+    impl BudgetLow { pub const MOVE_TYPE: &'static str = "fleet_budget::BudgetLow"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct BudgetOwnerCap {
+        pub id: [u8; 32],
+        pub budget_id: [u8; 32],
+    }
+    impl BudgetOwnerCap { pub const MOVE_TYPE: &'static str = "fleet_budget::BudgetOwnerCap"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct BudgetPaused {
+        pub budget_id: [u8; 32],
+        pub paused: bool,
+    }
+    impl BudgetPaused { pub const MOVE_TYPE: &'static str = "fleet_budget::BudgetPaused"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Deposited {
+        pub budget_id: [u8; 32],
+        pub amount: u64,
+        pub balance: u64,
+    }
+    impl Deposited { pub const MOVE_TYPE: &'static str = "fleet_budget::Deposited"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DeviceFunded {
+        pub budget_id: [u8; 32],
+        pub device_id: [u8; 32],
+        pub device_address: [u8; 32],
+        pub amount: u64,
+        pub balance: u64,
+    }
+    impl DeviceFunded { pub const MOVE_TYPE: &'static str = "fleet_budget::DeviceFunded"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DeviceKey {
+        pub device_id: [u8; 32],
+    }
+    impl DeviceKey { pub const MOVE_TYPE: &'static str = "fleet_budget::DeviceKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DeviceStateChanged {
+        pub budget_id: [u8; 32],
+        pub device_id: [u8; 32],
+        pub account_id: [u8; 32],
+        pub enrolled: bool,
+        pub suspended: bool,
+        pub limits: super::fleet_budget::Limits,
+    }
+    impl DeviceStateChanged { pub const MOVE_TYPE: &'static str = "fleet_budget::DeviceStateChanged"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct FleetBudget {
+        pub id: [u8; 32],
+        pub version: u64,
+        pub registry_id: [u8; 32],
+        pub owner_cap_id: [u8; 32],
+        pub balance: super::Balance,
+        pub paused: bool,
+        pub default_limits: super::fleet_budget::Limits,
+        pub low_balance_threshold: u64,
+        pub device_count: u64,
+        pub total_deposited: u64,
+        pub total_withdrawn: u64,
+        pub total_paid: u64,
+        pub total_allocated: u64,
+        pub total_reclaimed: u64,
+    }
+    impl FleetBudget { pub const MOVE_TYPE: &'static str = "fleet_budget::FleetBudget"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct GasAccount {
+        pub id: [u8; 32],
+        pub budget_id: [u8; 32],
+        pub device_id: [u8; 32],
+        pub owner_cap_id: [u8; 32],
+        pub reserve: super::Balance,
+        pub limits: super::fleet_budget::Limits,
+        pub suspended: bool,
+        pub closed: bool,
+        pub period_start_ms: u64,
+        pub drawn_in_period: u64,
+        pub draws_in_period: u64,
+        pub last_draw_ms: u64,
+        pub total_drawn: u64,
+        pub enrolled_at_ms: u64,
+    }
+    impl GasAccount { pub const MOVE_TYPE: &'static str = "fleet_budget::GasAccount"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct GasDrawn {
+        pub budget_id: [u8; 32],
+        pub device_id: [u8; 32],
+        pub account_id: [u8; 32],
+        pub device_address: [u8; 32],
+        pub amount: u64,
+        pub drawn_in_period: u64,
+        pub period_allowance: u64,
+        pub draws_in_period: u64,
+        pub max_draws_per_period: u64,
+        pub reserve: u64,
+        pub at_limit: bool,
+    }
+    impl GasDrawn { pub const MOVE_TYPE: &'static str = "fleet_budget::GasDrawn"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct ReserveChanged {
+        pub budget_id: [u8; 32],
+        pub device_id: [u8; 32],
+        pub account_id: [u8; 32],
+        pub allocated: bool,
+        pub amount: u64,
+        pub reserve: u64,
+        pub balance: u64,
+    }
+    impl ReserveChanged { pub const MOVE_TYPE: &'static str = "fleet_budget::ReserveChanged"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Withdrawn {
+        pub budget_id: [u8; 32],
+        pub amount: u64,
+        pub balance: u64,
+    }
+    impl Withdrawn { pub const MOVE_TYPE: &'static str = "fleet_budget::Withdrawn"; }
 }
 pub mod fleet_handover {
     use super::*;

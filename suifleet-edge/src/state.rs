@@ -59,6 +59,10 @@ pub struct State {
     /// deferred its configuration update; bounds how long it may defer.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub configuration_deferrals: BTreeMap<String, u64>,
+    /// Gas top-ups from the fleet budget (SF-083): why the device cannot top
+    /// up now, and its last draw. Absent without `[budget]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub funding: Option<crate::funding::Funding>,
 }
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Step {
