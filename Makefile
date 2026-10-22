@@ -294,6 +294,7 @@ test-manifest:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_deployment_manifest.py'
 	$(RUN) node scripts/test_deployment_manifest.cjs
 	$(RUN) node scripts/test_wallet_manifest.cjs
+	$(RUN) node scripts/test_onboarding.cjs
 	$(RUN) node scripts/test_deployment_receipts.cjs
 	$(RUN) node scripts/test_frontend_queries.cjs
 	$(RUN) node scripts/test_device_history.cjs
