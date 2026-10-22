@@ -232,7 +232,7 @@ Manual active or blocked claims without durable worker identity still consume im
 
 A worker starts only after refresh, fetch, atomic claim, published ownership and assert. It inherits the configured project's account token and claim, heartbeats, pushes scoped user-authored commits, and opens a linked PR. A successful stopped `review_ready` worker with published Review/Done ownership frees its implementation slot. Reconciliation revisits orphaned records after restart, so a delayed valid handoff is not permanently stranded.
 
-Verified stopped blocked workers are **parked**. Verified stopped jobs without a valid handoff are **quarantined**. Both retain ticket ownership, branch, logs and evidence, but no longer consume execution capacity for unrelated tickets. Quarantined review/repair jobs retain exclusion on their original PR. Neither state authorizes automatic claim release, duplicate implementation or retry of an uncertain mutation. Explicit recovery still requires inspection and the atomic ticket workflow. Implementation slots stop claiming when their combined parked/quarantined count reaches `max_quarantined` (default 3, integer 1–16). Quarantine also applies persistent project/family exponential backoff (60–900 seconds), reset only by a valid completed handoff, never merely by starting a process. Review/repair reservations stop after three quarantined jobs per family/category across projects; each quarantine adds durable exponential backoff (300–3600 seconds). These retention caps require explicit operator recovery; they bound a systemic fast-failure cascade while allowing limited unrelated progress. The diagnostics are visible in dispatcher `--status`, the private review-job database and service journal.
+Verified stopped blocked workers are **parked**. Verified stopped jobs without a valid handoff are **quarantined**. Both retain ticket ownership, branch, logs and evidence, but no longer consume execution capacity for unrelated tickets. Quarantined review/repair jobs retain exclusion on their original PR. Neither state authorizes automatic claim release, duplicate implementation or retry of an uncertain mutation. Explicit recovery still requires inspection and the atomic ticket workflow. Implementation slots stop claiming when their combined count of distinct parked/quarantined claims reaches `max_quarantined` (default 3, integer 1–16). Quarantine also applies persistent project/family exponential backoff (60–900 seconds), reset only by a valid completed handoff, never merely by starting a process. Review/repair reservations stop after three quarantined jobs per family/category across projects; each quarantine adds durable exponential backoff (300–3600 seconds). These retention caps require explicit operator recovery; they bound a systemic fast-failure cascade while allowing limited unrelated progress. The diagnostics are visible in dispatcher `--status`, the private review-job database and service journal.
 
 Stopped means the recorded PID/start-time wrapper has exited **and** a Linux `/proc` scan finds no non-zombie process in its worker session. A surviving model subprocess in that session keeps the slot occupied. A subprocess that deliberately daemonizes or uses `setsid` can escape this session scan; workers must not detach subprocesses. This is cooperative process tracking, not cgroup containment. Missing process identity, unreadable process state, interrupted claims and ambiguous launches fail closed. A malformed dispatcher receipt is isolated to its own job rather than aborting all reconciliation. Capacity counts running, launching and uncertain jobs against configured limits; it does not count verified parked/quarantined jobs. An idle slot can still indicate no dependency-eligible ticket, a retry backoff, or an unverified manual reservation; it is not permission to bypass dependencies or fabricate work.
 
@@ -417,3 +417,40 @@ stores fail closed. Install coordinator and dispatcher together after review so
 new repair proof can be recorded. Existing unknown receipts require explicit
 operator inspection, not database deletion or threshold increases. No services
 are installed or restarted by the implementation tests.
+
+### Clean exit without handoff (SF-112)
+
+A quarantined implementation with a durable process receipt, actual exit code
+zero and no result file is eligible for one handoff audit. The dispatcher checks
+that the wrapper PID is absent (a reused PID fails closed), its session has no
+surviving processes, ownership is published and unchanged, and the original
+worktree is clean on the original branch. Under the atomic database write lock
+it compares the ownership/publication revisions and rechecks stopped identity.
+Only then may it renew an expired same-owner lease through the ticket CLI. It
+asserts the live claim (including remote-open and dependency gates), reacquires
+the authority lock and rechecks ownership and stopped identity before launch.
+The source and audit receipts count as one retained claim against the retention
+limit; their process identities remain individually checked for active capacity.
+Nonzero/unknown exits, malformed results, dirty trees, pending mirrors, changed
+claims and uncertain launches remain reserved for explicit recovery.
+
+`handoff_audits` persists a unique source/attempt before launch. The audit uses
+the same family, token, session, branch and worktree, with separate logs/process/
+exit/result files under the original directory's `handoff-audit/`. It has a
+15-minute CLI deadline and cannot audit itself or retry after restart. It must
+inspect existing commits, PR/head, real test receipts and current CI; it may
+publish a verified Review handoff or record a concrete blocker. It must not
+blindly rebuild, create another implementation, manufacture evidence or bypass
+review/CI. A timeout does not prove descendants stopped: the normal session
+scan continues to hold capacity. Original logs and actual exit receipts remain.
+
+Workers must not detach heartbeat helpers. The dispatcher already renews live
+workers. It scans same-user ticket heartbeat command lines and verifies their
+claim environment/token, recording matching PID/start identities in
+`helpers.json`. Matching helpers prevent audit, retirement and capacity release;
+no uncertain PID is signalled. An unreadable candidate helper fails closed.
+A stale PID alone never authorizes termination. Operator recovery must verify
+and stop such helpers before the audit becomes eligible. As with the existing
+session scan this is cooperative process accounting, not containment of an
+arbitrary subprocess deliberately escaping its session and hiding its command.
+No services are installed/restarted by tests; rollout follows reviewed integration.
