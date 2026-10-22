@@ -104,7 +104,38 @@ assert.deepEqual(onramp.purchaseStatus(pending, BigInt(160), 2_000), { state: "a
 assert.deepEqual(onramp.purchaseStatus(pending, BigInt(90), 2_000), { state: "waiting" });
 assert.deepEqual(onramp.purchaseStatus(pending, BigInt(100), 1_000 + onramp.PURCHASE_TIMEOUT_MS + 1), { state: "unconfirmed" });
 assert.match(onramp.FEE_NOTES.service, /no service fee/);
-console.log("PASS: hosted checkout URL with public app ID only; purchases count only on arrival and fail separately");
+// The SUI (/ and /budget) and WAL (storage panel) checkouts persist separately: a
+// reload restores each panel's own record only, and starting or dismissing one
+// never touches the other (a WAL record is never judged against SUI).
+const store = new Map();
+const browser = { getItem: (k) => store.has(k) ? store.get(k) : null, setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
+const walPurchase = { address: wallet, asset: "WAL", amount: "5", startBalance: "0", startedAt: 1_000 };
+onramp.savePurchase(browser, "testnet", walPurchase);
+assert.equal(onramp.loadPurchase(browser, "testnet", wallet, "SUI"), null);
+assert.deepEqual(onramp.loadPurchase(browser, "testnet", wallet, "WAL"), walPurchase);
+assert.equal(onramp.loadPurchase(browser, "mainnet", wallet, "WAL"), null);
+assert.equal(onramp.loadPurchase(browser, "testnet", "0x" + "f".repeat(64), "WAL"), null);
+// Cancelled WAL checkout, SUI balance already positive: the WAL panel still sees no WAL, timing out as unconfirmed.
+assert.deepEqual(onramp.purchaseStatus(onramp.loadPurchase(browser, "testnet", wallet, "WAL"), BigInt(0), 1_000 + onramp.PURCHASE_TIMEOUT_MS + 1), { state: "unconfirmed" });
+onramp.savePurchase(browser, "testnet", pending);
+assert.deepEqual(onramp.loadPurchase(browser, "testnet", wallet, "WAL"), walPurchase);
+assert.deepEqual(onramp.loadPurchase(browser, "testnet", wallet, "SUI"), pending);
+onramp.clearPurchase(browser, "testnet", wallet, "SUI");
+assert.equal(onramp.loadPurchase(browser, "testnet", wallet, "SUI"), null);
+assert.deepEqual(onramp.loadPurchase(browser, "testnet", wallet, "WAL"), walPurchase);
+onramp.clearPurchase(browser, "testnet", wallet, "WAL");
+assert.equal(store.size, 0);
+// A record under the wrong key or malformed is ignored rather than misreported.
+store.set(onramp.purchaseKey("testnet", wallet, "SUI"), JSON.stringify(walPurchase));
+assert.equal(onramp.loadPurchase(browser, "testnet", wallet, "SUI"), null);
+for (const bad of ["{", JSON.stringify({ ...pending, startBalance: "-1" }), JSON.stringify({ ...pending, startedAt: "x" })]) {
+  store.set(onramp.purchaseKey("testnet", wallet, "SUI"), bad);
+  assert.equal(onramp.loadPurchase(browser, "testnet", wallet, "SUI"), null);
+}
+const cardFunding = fs.readFileSync(path.join(root, "dapp/src/components/FleetBudget.tsx"), "utf8");
+assert.doesNotMatch(cardFunding, /localStorage\.(getItem|setItem|removeItem)/);
+assert.match(cardFunding, /coinType\(pending!\.asset\)/);
+console.log("PASS: hosted checkout URL with public app ID only; purchases count only on arrival, fail separately and are tracked per asset");
 
 // ── Transactions ──
 const sender = "0x" + "1".repeat(64), budgetId = "0x" + "b".repeat(64), capId = "0x" + "c".repeat(64), deviceId = "0x" + "d".repeat(64);

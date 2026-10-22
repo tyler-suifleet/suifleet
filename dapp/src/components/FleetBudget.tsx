@@ -15,7 +15,9 @@ import {
   minWalOut, periodUsage, planRefill, readExchange, storageAlerts, storageConfig, swapRoute, type AccountView, type StorageConfig,
 } from "@/lib/fleet-budget";
 import { MEASURED, encodedBlobLength, estimate, formatToken, parseToken, runwayDays, type Estimate, type EstimateInput } from "@/lib/network-costs";
-import { FEE_NOTES, checkoutUrl, onrampProvider, purchaseStatus, type OnrampAsset, type PendingPurchase } from "@/lib/onramp";
+import {
+  FEE_NOTES, checkoutUrl, clearPurchase, loadPurchase, onrampProvider, purchaseStatus, savePurchase, type OnrampAsset, type PendingPurchase,
+} from "@/lib/onramp";
 
 const sui = (mist: bigint) => `${formatToken(mist)} SUI`;
 const wal = (frost: bigint) => `${formatToken(frost)} WAL`;
@@ -70,10 +72,6 @@ export function EstimatePanel({ onEstimate }: { onEstimate?: (estimate: Estimate
   </div>;
 }
 
-function purchaseKey(address: string) {
-  return `suifleet:onramp:${NETWORK}:${address}`;
-}
-
 /**
  * Open the provider's hosted checkout; then watch the wallet. Funds count only
  * when they arrive, and the budget only after the deposit confirms. A failed
@@ -86,14 +84,14 @@ export function CardFunding({ asset, amount }: { asset: OnrampAsset; amount: str
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     if (!account) { setPending(null); return; }
-    const saved = localStorage.getItem(purchaseKey(account.address));
-    setPending(saved ? JSON.parse(saved) as PendingPurchase : null);
-  }, [account]);
+    setPending(loadPurchase(localStorage, NETWORK, account.address, asset));
+  }, [account, asset]);
+  const coinType = (of: OnrampAsset) => of === "SUI" ? "0x2::sui::SUI" : storageConfig().config?.walrus.walType;
   const balance = useQuery({
-    queryKey: ["onramp-balance", NETWORK, account?.address, asset],
+    queryKey: ["onramp-balance", NETWORK, account?.address, pending?.asset],
     enabled: !!account && !!pending,
     refetchInterval: 15_000,
-    queryFn: async () => BigInt((await client.getBalance({ owner: account!.address, coinType: asset === "SUI" ? "0x2::sui::SUI" : storageConfig().config?.walrus.walType })).balance.balance),
+    queryFn: async () => BigInt((await client.getBalance({ owner: account!.address, coinType: coinType(pending!.asset) })).balance.balance),
   });
   if (!account) return null;
   if (!provider) return <p className="text-xs">{reason}</p>;
@@ -101,14 +99,14 @@ export function CardFunding({ asset, amount }: { asset: OnrampAsset; amount: str
     setError(null);
     try {
       const url = checkoutUrl(provider!, account!.address, asset, amount);
-      const start = (await client.getBalance({ owner: account!.address, coinType: asset === "SUI" ? "0x2::sui::SUI" : storageConfig().config?.walrus.walType })).balance.balance;
+      const start = (await client.getBalance({ owner: account!.address, coinType: coinType(asset) })).balance.balance;
       const record: PendingPurchase = { address: account!.address, asset, amount, startBalance: String(start), startedAt: Date.now() };
-      localStorage.setItem(purchaseKey(account!.address), JSON.stringify(record));
+      savePurchase(localStorage, NETWORK, record);
       setPending(record);
       window.open(url, "_blank", "noopener,noreferrer");
     } catch (cause) { setError((cause as Error).message); }
   }
-  function dismiss() { localStorage.removeItem(purchaseKey(account!.address)); setPending(null); }
+  function dismiss() { clearPurchase(localStorage, NETWORK, account!.address, asset); setPending(null); }
   const status = pending && balance.isSuccess ? purchaseStatus(pending, balance.data, Date.now()) : undefined;
   return <div className="space-y-2 text-xs">
     <button type="button" className="bg-gray-800 text-white rounded px-2 py-1" onClick={() => void open()}>Buy {amount} {asset} by card with {provider.name}</button>

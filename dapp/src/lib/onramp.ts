@@ -49,6 +49,39 @@ export interface PendingPurchase {
   startedAt: number;
 }
 
+/** The browser storage the pending-purchase record lives in (localStorage in the app). */
+export type PurchaseStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+
+/**
+ * One record per network, wallet and asset: the SUI and WAL checkouts are
+ * tracked separately, so neither is ever compared against the other's balance
+ * or overwritten or dismissed by the other.
+ */
+export function purchaseKey(network: string, address: string, asset: OnrampAsset): string {
+  return `suifleet:onramp:${network}:${address}:${asset}`;
+}
+
+/** The saved purchase of this asset, or null if none or it does not match exactly. */
+export function loadPurchase(storage: PurchaseStorage, network: string, address: string, asset: OnrampAsset): PendingPurchase | null {
+  const saved = storage.getItem(purchaseKey(network, address, asset));
+  if (!saved) return null;
+  try {
+    const record = JSON.parse(saved) as Partial<PendingPurchase>;
+    if (record.address === address && record.asset === asset && typeof record.amount === "string"
+      && typeof record.startBalance === "string" && /^\d+$/.test(record.startBalance)
+      && typeof record.startedAt === "number" && Number.isFinite(record.startedAt)) return record as PendingPurchase;
+  } catch { /* unreadable: treated as no record */ }
+  return null;
+}
+
+export function savePurchase(storage: PurchaseStorage, network: string, record: PendingPurchase): void {
+  storage.setItem(purchaseKey(network, record.address, record.asset), JSON.stringify(record));
+}
+
+export function clearPurchase(storage: PurchaseStorage, network: string, address: string, asset: OnrampAsset): void {
+  storage.removeItem(purchaseKey(network, address, asset));
+}
+
 export type PurchaseState =
   | { state: "arrived"; received: bigint }
   | { state: "waiting" }
