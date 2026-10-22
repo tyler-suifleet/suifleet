@@ -411,6 +411,26 @@ module fleet_storage::fleet_storage_tests {
         finish(scenario, system);
     }
 
+    #[test, expected_failure(abort_code = fleet_storage::ESlippage)]
+    fun a_swap_below_its_slippage_limit_deposits_nothing() {
+        let (mut scenario, system) = setup(quota(POOL, 10));
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        let swapped = coin::mint_for_testing<WAL>(99, ts::ctx(&mut scenario));
+        fleet_storage::deposit_wal_at_least(&mut fs, &budget, &cap, swapped, 100);
+        owner_end(fs, budget, cap);
+        finish(scenario, system);
+    }
+
+    #[test]
+    fun a_swap_meeting_its_slippage_limit_is_deposited() {
+        let (mut scenario, system) = setup(quota(POOL, 10));
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        fleet_storage::deposit_wal_at_least(&mut fs, &budget, &cap, coin::mint_for_testing<WAL>(100, ts::ctx(&mut scenario)), 100);
+        assert!(fleet_storage::wal_balance(&fs) == WAL_DEPOSIT + 100, 0);
+        owner_end(fs, budget, cap);
+        finish(scenario, system);
+    }
+
     #[test]
     fun the_owner_withdraws_unused_wal() {
         let (mut scenario, mut system) = setup(quota(POOL, 10));

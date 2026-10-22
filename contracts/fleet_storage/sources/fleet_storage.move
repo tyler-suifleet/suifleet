@@ -55,6 +55,7 @@ module fleet_storage::fleet_storage {
     const EInvalidQuota: u64 = 9;
     const ENotUpgrade: u64 = 10;
     const EZeroAmount: u64 = 11;
+    const ESlippage: u64 = 12;
 
     // ── State ─────────────────────────────────────────────────────────────────
 
@@ -210,6 +211,14 @@ module fleet_storage::fleet_storage {
         assert!(amount > 0, EZeroAmount);
         fs.wal.join(coin.into_balance());
         event::emit(WalDeposited { storage_id: object::id(fs), amount, balance: fs.wal.value() });
+    }
+
+    /// Deposit WAL bought earlier in the same transaction (for example a
+    /// SUI→WAL swap), aborting the whole transaction unless at least
+    /// `min_amount` arrived: the slippage limit of an in-PTB swap.
+    public fun deposit_wal_at_least(fs: &mut FleetStorage, budget: &FleetBudget, cap: &BudgetOwnerCap, coin: Coin<WAL>, min_amount: u64) {
+        assert!(coin.value() >= min_amount, ESlippage);
+        deposit_wal(fs, budget, cap, coin);
     }
 
     public fun withdraw_wal(fs: &mut FleetStorage, budget: &FleetBudget, cap: &BudgetOwnerCap, amount: u64, ctx: &mut TxContext): Coin<WAL> {
