@@ -9,6 +9,7 @@ mod clientdevices;
 mod client_gateway;
 mod control;
 mod apply;
+mod oci;
 mod bridge;
 mod components;
 mod config;
