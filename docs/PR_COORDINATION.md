@@ -199,3 +199,34 @@ Existing worker receipts continue through normal process-identity reconciliation
 This repair changes only coordinator code/database schema, not dispatcher or
 ticket-tool behavior. Use the coordinator-only installation/backup/rollback steps
 above after independent review; this feedback worker does not install services.
+
+### Reviewing while CI runs
+
+The coordinator starts independent source review for an owned, published Review
+PR as soon as its current base is integrated and GitHub reports it mergeable.
+Drafts, unknown mergeability, unpublished ownership and pending integration
+intents do not bypass their existing gates. Required CI/testnet checks can run
+in parallel with source review.
+
+A snapshot with missing, pending or unsuccessful checks is **source review
+only**. Workers report concrete code defects immediately, or return blocked
+with their completed source-review evidence. Collection enforces incomplete
+acceptance even if a worker mistakenly approves that snapshot. Pending/failed
+check transitions share a source-review key to avoid duplicate reviews. Changes
+to head, current base, comments, reviews, threads or acceptance scope still
+invalidate it. When all checks succeed, the full check evidence changes the
+fingerprint and dispatches a final independent evidence review, with the prior
+review available as evidence to revalidate. No review is automatically promoted.
+Only a complete, published, current-snapshot approval can pass the unchanged
+mandatory CI and exact-base testnet merge gates. Blocked reviews publish a
+GitHub comment, not a code change request; genuine code findings still request
+changes.
+
+PR reads no longer request comments/reviews twice: complete paginated REST
+collections and complete GraphQL review threads remain authoritative. Only
+content-addressed Git trees and SHA-to-SHA ancestry comparisons are cached;
+branch tips, PR state, feedback and CI are freshly read at integration gates.
+An actual account rate limit records a persistent, account-specific shared
+backoff (60–3600 seconds, default 300) rather than retrying each PR. No API
+account switching is used to evade limits. Failed/incomplete snapshots fail
+closed and remain visible in the coordinator's per-PR triage output.
