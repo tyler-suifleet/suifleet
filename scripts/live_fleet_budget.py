@@ -6,18 +6,25 @@ upload, every effect checked.
 - Publishes the head contracts and the fleet_storage package against them
   (verify-before-sign), cached by content hash beside the wallet.
 - Registers a throwaway device, creates a budget with a deposit, enrolls the
-  device (float), and the device draws; then on-chain refusals: above the
-  float cap, after revocation, while paused.
+  device (float, and a reserve in its own shared GasAccount), and the device
+  draws from that account while the budget object stays at its version;
+  then on-chain refusals: above the float cap, after revocation, while
+  paused.
 - The real daemon tops itself up over the public fullnode, then journals the
   period's draw limit.
 - Swaps SUI for WAL through Walrus's pinned Testnet exchange into the fleet
-  storage (and a slippage refusal), buys storage with the prepaid WAL, and
-  the device registers, uploads and certifies a blob held by the fleet,
-  read back from the storage nodes; its second upload exceeds its quota.
-- Withdraws the unused deposit and sweeps the device key.
+  storage (and a slippage refusal), buys storage and extends the pool with
+  the fleet's own WAL (fleet_storage::buy_storage, extend_pool); the device
+  registers, uploads and certifies a blob held by the fleet, read back from
+  the storage nodes, and its second upload exceeds its quota; the owner
+  uploads a blob with the dApp's own fleet-paid upload code
+  (scripts/live_fleet_upload.cjs), each transaction verified before signing.
+- Removes the device (its reserve returns), withdraws the unused deposit and
+  sweeps the device key.
 
-Requires the machine-session lock (SUIFLEET_TESTNET_LOCK_TOKEN) and the
-pinned Walrus SDK installed privately (scripts/live_walrus_upload.mjs).
+Requires the machine-session lock (SUIFLEET_TESTNET_LOCK_TOKEN), the pinned
+Walrus SDK installed privately for the device side
+(scripts/live_walrus_upload.mjs) and dapp/node_modules for the owner side.
 """
 import argparse
 import hashlib
@@ -37,9 +44,12 @@ WALRUS_PACKAGE = "0x7d3b2086808a62bbc44d18c6b1d407973d77dd26946735873092c2f5650b
 SYSTEM = "0x6c2547cbbc38025cf3adac45f63cb0a8d12ecf777cdc75a4971612bf97fdf6af"
 EXCHANGE_PACKAGE = "0x82593828ed3fcb8c6a235eac9abd0adbe9c5f9bbffa9b1e7a45cdd884481ef9f"
 EXCHANGE = "0xf4d164ea2def5fe07dc573992a029e010dba09b1a8dcbc44c5c2e79567f39073"
-DEPOSIT, FLOAT, DRAW, ALLOWANCE = 60_000_000, 20_000_000, 5_000_000, 30_000_000
-SWAP = 10_000_000
+DEPOSIT, FLOAT, DRAW, ALLOWANCE, RESERVE = 60_000_000, 20_000_000, 5_000_000, 30_000_000, 25_000_000
+SWAP = 20_000_000
 BLOB_BYTES = 2048
+ENCODED = 66_034_000  # One RS2-encoded 2 KiB blob at 1000 shards (scripts/test_fleet_budget.cjs).
+UPLOAD_GAS = 60_000_000
+DAEMON_DRAW = 4_000_000
 
 
 def fixture_key(tools):
@@ -106,6 +116,38 @@ def net_gas(result):
 
 def u8_vector(hex_text):
     return "vector[" + ",".join(f"{b}u8" for b in bytes.fromhex(hex_text)) + "]"
+
+
+def owner_upload(live, root, manifest, storage_package, storage, budget, budget_cap):
+    """The dApp's fleet-paid upload, run by scripts/live_fleet_upload.cjs.
+    Each transaction it builds is decoded and must be exactly one expected
+    fleet_storage call from the wallet within the reserved gas before the
+    wallet signs it."""
+    path = root / "owner-blob.bin"
+    path.write_bytes(b"suifleet sf083 owner upload\n" + secrets.token_bytes(BLOB_BYTES - 28))
+    env = {**os.environ, "NEXT_PUBLIC_DEPLOYMENT_MANIFEST": json.dumps(manifest)}
+    node = subprocess.Popen(["node", str(ROOT / "scripts/live_fleet_upload.cjs"), live.rpc_url, live.operator, storage_package, storage,
+                             budget, budget_cap, str(path), str(UPLOAD_GAS)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, env=env)
+    digests = []
+    try:
+        for step in ("register_fleet_blob", "certify_blob"):
+            line = json.loads(node.stdout.readline())
+            data = toolchain.decode(line["tx"])
+            calls = [(dm.object_id(c["package"]), c["module"], c["function"]) for c in data["commands"]]
+            assert dm.object_id(data["sender"]) == live.operator and dm.object_id(data["gas_owner"]) == live.operator, data["sender"]
+            assert int(data["gas_budget"]) == UPLOAD_GAS, data["gas_budget"]
+            assert calls == [(dm.object_id(storage_package), "fleet_storage", step)], calls
+            r = live.execute(f"owner {step.replace('_', ' ')} (dApp upload)", ["serialized-tx", line["tx"]], gas=UPLOAD_GAS)
+            digests.append(r["digest"])
+            node.stdin.write(json.dumps({"digest": r["digest"]}) + "\n")
+            node.stdin.flush()
+        result = json.loads(node.stdout.readline())
+        assert node.wait(timeout=120) == 0
+    finally:
+        if node.poll() is None:
+            node.kill()
+            node.wait()
+    return result, digests
 
 
 def run(args):
@@ -189,20 +231,33 @@ def run(args):
         budget_cap = live.created(r, "::fleet_budget::BudgetOwnerCap")[0]
         assert int(event(r, "::fleet_budget::Deposited")["amount"]) == DEPOSIT
         measured["create_budget_net_gas_mist"] = net_gas(r)
-        r = live.transaction("enroll the device and send its float", "--move-call", call("fleet_budget", "enroll_device"), f"@{budget}", f"@{budget_cap}",
-                             f"@{registry}", f"@{owner_cap}", f"{FLOAT}u64", CLOCK, budget=20_000_000)
+        r = live.transaction("enroll the device with its float and reserve", "--move-call", call("fleet_budget", "enroll_device"), f"@{budget}", f"@{budget_cap}",
+                             f"@{registry}", f"@{owner_cap}", f"{FLOAT}u64", f"{RESERVE}u64", CLOCK, budget=20_000_000)
         assert balance_change(r, device_address) == FLOAT, r.get("balanceChanges")
-        live.evidence.update(device=device_id, device_cap=device_cap, owner_cap=owner_cap, device_address=device_address, budget=budget, budget_cap=budget_cap)
-        live.check(f"budget {budget} created with a {DEPOSIT} MIST deposit; the device address received exactly its {FLOAT} MIST float")
+        account = live.created(r, "::fleet_budget::GasAccount")[0]
+        assert "Shared" in json.dumps(live.owner(account)), live.owner(account)
+        assert int(event(r, "::fleet_budget::ReserveChanged")["reserve"]) == RESERVE
+        live.evidence.update(device=device_id, device_cap=device_cap, owner_cap=owner_cap, device_address=device_address, budget=budget,
+                             budget_cap=budget_cap, account=account)
+        live.check(f"budget {budget} created with a {DEPOSIT} MIST deposit; the device address received exactly its {FLOAT} MIST float "
+                   f"and its own shared GasAccount {account} holds a {RESERVE} MIST reserve")
         # The float came from the charged deposit; the device's own gas is bounded by it.
         device = live.child(device_config, FLOAT)
-        r = live.transaction("device draws from the budget", "--move-call", call("fleet_budget", "draw_gas"), f"@{budget}", f"@{registry}",
-                             f"@{device_cap}", f"{DRAW}u64", CLOCK, budget=10_000_000, sender=device)
+        version = lambda object_id: str(live.object(object_id)["version"])
+        before = version(budget)
+        r = live.transaction("device draws from its account", "--move-call", call("fleet_budget", "draw_gas"), f"@{budget}", f"@{account}",
+                             f"@{registry}", f"@{device_cap}", f"{DRAW}u64", CLOCK, budget=10_000_000, sender=device)
         drawn = event(r, "::fleet_budget::GasDrawn")
         assert int(drawn["amount"]) == DRAW and dm.object_id(drawn["device_address"]) == dm.object_id(device_address)
-        measured["draw_gas"] = dict(r["effects"]["gasUsed"], net_mist=net_gas(r), digest=r["digest"])
-        live.check(f"the device drew {DRAW} MIST; GasDrawn recorded it (net gas {net_gas(r)} MIST)")
-        draw_args = lambda amount: ("--move-call", call("fleet_budget", "draw_gas"), f"@{budget}", f"@{registry}", f"@{device_cap}", f"{amount}u64", CLOCK)
+        assert int(drawn["reserve"]) == RESERVE - DRAW, drawn
+        # Draws only read the fleet budget: its version is unchanged.
+        assert version(budget) == before, (version(budget), before)
+        assert not any(dm.object_id(o["objectId"]) == dm.object_id(budget) for o in r["effects"].get("mutated", [])), r["effects"].get("mutated")
+        measured["draw_gas"] = dict(r["effects"]["gasUsed"], net_mist=net_gas(r), digest=r["digest"], budget_version=before)
+        live.check(f"the device drew {DRAW} MIST from its own account; GasDrawn recorded it; the fleet budget stayed at version {before} "
+                   f"(net gas {net_gas(r)} MIST)")
+        draw_args = lambda amount: ("--move-call", call("fleet_budget", "draw_gas"), f"@{budget}", f"@{account}", f"@{registry}", f"@{device_cap}",
+                                    f"{amount}u64", CLOCK)
         live.attack("draw above the float cap", *draw_args(FLOAT + 1), module="fleet_budget", function="draw_gas", code=8, sender=device, budget=10_000_000)
         live.transaction("owner revokes the device", "--move-call", call("device_registry", "revoke_device"), f"@{registry}", f"@{owner_cap}", budget=10_000_000)
         live.attack("draw after revocation", *draw_args(1), module="device_cap", function="assert_active", code=2, sender=device, budget=10_000_000)
@@ -218,7 +273,7 @@ def run(args):
         template.write_text(f'[device]\nkeypair_path = {json.dumps(str(root / "device/test.key"))}\ndevice_object_id = "{device_id}"\n'
                             f'device_cap_id = "{device_cap}"\n[apply]\ncommand = "/bin/false"\ntimeout_seconds = 5\n'
                             f'[runtime]\nstate_dir = {json.dumps(str(state_dir))}\npoll_seconds = 3\n'
-                            f'[budget]\nbudget_id = "{budget}"\nlow_water_mist = 1000000000000\ndraw_mist = 4000000\n')
+                            f'[budget]\nbudget_id = "{budget}"\nlow_water_mist = 1000000000000\ndraw_mist = {DAEMON_DRAW}\n')
         release = root / "release"
         dm.generate(manifest, release, template)
         log = (root / "daemon.log").open("w")
@@ -258,22 +313,27 @@ def run(args):
         upload = subprocess.Popen(["node", str(ROOT / "scripts/live_walrus_upload.mjs"), str(sdk), live.rpc_url, str(root / "blob.bin"), WALRUS_PACKAGE],
                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
         encoded = json.loads(upload.stdout.readline())
-        size = 2 * 66_034_000  # Two RS2-encoded 2 KiB blobs at 1000 shards (scripts/test_fleet_budget.cjs).
-        r = live.transaction("buy storage with the prepaid WAL", "--move-call", call("fleet_storage", "withdraw_wal", storage_package), f"@{storage}",
-                             f"@{budget}", f"@{budget_cap}", f"{expected_wal // 2}u64", "--assign", "pay",
-                             "--move-call", f"{WALRUS_PACKAGE}::system::reserve_space", f"@{SYSTEM}", f"{size}u64", "3u32", "pay", "--assign", "reserved",
-                             "--move-call", call("fleet_storage", "deposit_storage", storage_package), f"@{storage}", f"@{budget}", f"@{budget_cap}", "reserved",
-                             "--move-call", call("fleet_storage", "deposit_wal", storage_package), f"@{storage}", f"@{budget}", f"@{budget_cap}", "pay",
-                             budget=30_000_000)
-        deposited = event(r, "::fleet_storage::StorageDeposited")
-        assert int(deposited["pool_size"]) == size
-        live.evidence["storage"] = dict(storage=storage, pool=deposited)
+        size = 2 * ENCODED  # The device's blob and the owner's.
+        r = live.transaction("buy storage with the fleet's WAL", "--move-call", call("fleet_storage", "buy_storage", storage_package), f"@{storage}",
+                             f"@{budget}", f"@{budget_cap}", f"@{SYSTEM}", f"{size}u64", "3u32", budget=30_000_000)
+        purchased, deposited = event(r, "::fleet_storage::StoragePurchased"), event(r, "::fleet_storage::StorageDeposited")
+        assert int(deposited["pool_size"]) == size and int(purchased["cost"]) > 0, (purchased, deposited)
+        assert int(purchased["wal_balance"]) == expected_wal - int(purchased["cost"]), purchased
+        start_epoch, end_epoch = int(deposited["start_epoch"]), int(deposited["end_epoch"])
+        r = live.transaction("extend the pool with the fleet's WAL", "--move-call", call("fleet_storage", "extend_pool", storage_package), f"@{storage}",
+                             f"@{budget}", f"@{budget_cap}", f"@{SYSTEM}", "1u32", budget=30_000_000)
+        extended = event(r, "::fleet_storage::StorageDeposited")
+        assert int(extended["pool_size"]) == size and int(extended["end_epoch"]) == end_epoch + 1 and int(extended["start_epoch"]) == start_epoch, extended
+        live.evidence["storage"] = dict(storage=storage, purchased=purchased, pool=extended, extension=event(r, "::fleet_storage::StoragePurchased"))
+        live.check(f"bought {size} encoded bytes for epochs {start_epoch}-{end_epoch} with {purchased['cost']} FROST of the fleet's own WAL, "
+                   f"then extended the pool to epoch {end_epoch + 1}; no WAL left the fleet object")
         r = live.transaction("device registers a fleet-paid blob", "--move-call", call("fleet_storage", "register_blob", storage_package), f"@{storage}",
-                             f"@{budget}", f"@{registry}", f"@{device_cap}", f"@{SYSTEM}", f"{encoded['blob_id_u256']}u256", f"{encoded['root_hash_u256']}u256",
-                             f"{encoded['size']}u64", "1u8", CLOCK, budget=50_000_000, sender=device)
+                             f"@{budget}", f"@{account}", f"@{registry}", f"@{device_cap}", f"@{SYSTEM}", f"{encoded['blob_id_u256']}u256",
+                             f"{encoded['root_hash_u256']}u256", f"{encoded['size']}u64", "1u8", CLOCK, budget=50_000_000, sender=device)
         registered = event(r, "::fleet_storage::UploadRegistered")
         blob = registered["blob_object_id"]
-        assert int(registered["encoded_size"]) == size // 2 and int(registered["pool_size"]) == size // 2, registered
+        assert int(registered["encoded_size"]) == ENCODED and int(registered["pool_size"]) == size - ENCODED, registered
+        assert int(registered["end_epoch"]) == end_epoch + 1, registered
         measured["register_blob"] = dict(r["effects"]["gasUsed"], net_mist=net_gas(r), write_fee_frost=int(registered["write_fee"]))
         upload.stdin.write(blob + "\n")
         upload.stdin.flush()
@@ -297,16 +357,31 @@ def run(args):
         live.check(f"the device registered and certified blob {encoded['blob_id']} from fleet storage: exactly its encoded size, "
                    f"non-deletable, owned by the fleet object, read back from {certificate['confirmations']} confirming nodes")
         live.attack("second upload above the period quota", "--move-call", call("fleet_storage", "register_blob", storage_package), f"@{storage}",
-                    f"@{budget}", f"@{registry}", f"@{device_cap}", f"@{SYSTEM}", "1u256", "1u256", "16u64", "1u8", CLOCK,
+                    f"@{budget}", f"@{account}", f"@{registry}", f"@{device_cap}", f"@{SYSTEM}", "1u256", "1u256", "16u64", "1u8", CLOCK,
                     module="fleet_storage", function="register_blob", code=6, sender=device, budget=20_000_000)
         live.check("the device's second upload in the period aborted on its quota (6)")
 
-        # ── Cleanup: unused deposit back, device swept ──
+        # ── The owner's release upload, through the dApp's own code ──
+        result, digests = owner_upload(live, root, manifest, storage_package, storage, budget, budget_cap)
+        info = result["result"]
+        assert info["owner"] == "fleet" and result["read_matches"], result
+        stored = live.object(info["blobObjectId"])
+        content = plain(stored["content"])
+        assert content["certified_epoch"] is not None and content["deletable"] is False and "ObjectOwner" in json.dumps(stored.get("owner"))
+        assert int(content["storage"]["end_epoch"]) == end_epoch + 1 and int(content["storage"]["storage_size"]) == ENCODED, content["storage"]
+        assert not plain(live.object(storage)["content"]).get("pool"), "the owner's upload used the pool's last space"
+        live.evidence["owner_upload"] = dict(result, digests=digests, owner=stored.get("owner"), certified_epoch=content["certified_epoch"])
+        live.check(f"the dApp's fleet-paid upload registered and certified owner blob {info['blobId']} from fleet storage (write fee "
+                   f"{info['costFrost']} FROST), each transaction verified before signing: fleet-owned, non-deletable, read back")
+
+        # ── Cleanup: device removed (its reserve returns), unused deposit back, device swept ──
+        r = live.transaction("remove the device; its reserve returns", "--move-call", call("fleet_budget", "remove_device"), f"@{budget}",
+                             f"@{budget_cap}", f"@{account}", budget=20_000_000)
+        assert int(event(r, "::fleet_budget::ReserveChanged")["amount"]) == RESERVE - DRAW - DAEMON_DRAW * funding["draws"]
         balance = plain(live.object(budget)["content"])["balance"]
         remaining = int(balance["value"] if isinstance(balance, dict) else balance)
-        r = live.transaction("withdraw the unused deposit and remove the device", "--move-call", call("fleet_budget", "withdraw"), f"@{budget}",
+        r = live.transaction("withdraw the unused deposit", "--move-call", call("fleet_budget", "withdraw"), f"@{budget}",
                              f"@{budget_cap}", f"{remaining}u64", "--assign", "back",
-                             "--move-call", call("fleet_budget", "remove_device"), f"@{budget}", f"@{budget_cap}", f"@{device_id}",
                              "--transfer-objects", "[back]", f"@{live.operator}", budget=20_000_000)
         assert int(event(r, "::fleet_budget::Withdrawn")["amount"]) == remaining
         live.evidence["withdrawn_mist"] = remaining
