@@ -267,13 +267,15 @@ def refresh_github(paths, project=None):
             data = dict(schema=1, project=name, repository=repository, fetched_at=time.time(), issues=issues, prs=prs)
             path = inventory_path(paths['inventory'], name)
             path.parent.mkdir(parents=True, exist_ok=True)
-            with tempfile.NamedTemporaryFile(mode='w', dir=path.parent, delete=False) as handle:
-                temporary = Path(handle.name)
-                json.dump(data, handle)
+            temporary = None
             try:
+                with tempfile.NamedTemporaryFile(mode='w', dir=path.parent, delete=False) as handle:
+                    temporary = Path(handle.name)
+                    json.dump(data, handle)
                 temporary.replace(path)
             finally:
-                temporary.unlink(missing_ok=True)
+                if temporary is not None:
+                    temporary.unlink(missing_ok=True)
             completed.append(name)
         except (OSError, ValueError, subprocess.SubprocessError) as error:
             # gh stderr can contain credentials: report only the exception type.
@@ -316,7 +318,8 @@ def reconcile_inventory(paths, config, by_ticket, now, project, ticket_pr=None):
             remote_numbers = {r['number'] for r in issues}
             active_keys = set(local)
             receipt_prs = {number for (p, key), number in (ticket_pr or {}).items() if p == name and key in active_keys}
-            linked = [r for r in prs if r['ticket'] in active_keys or r['number'] in receipt_prs]
+            linked = [r for r in prs if any(re.search(r'\b' + re.escape(key) + r'\b', r['title']) for key in active_keys)
+                      or r['number'] in receipt_prs]
             entry.update(state='stale' if now - stamp > 1800 else 'ok', fetched_at=stamp, repository=repository,
                          github_open_issues=len(issues), github_open_prs=len(prs),
                          linked_prs=len(linked), other_prs=[r['number'] for r in prs if r not in linked],
@@ -405,6 +408,9 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
         data = json.loads(path.read_text())
         if not isinstance(data, dict):
             raise ValueError('config is not an object')
+        projects = data.get('projects', [])
+        if not isinstance(projects, list) or not all(isinstance(p, dict) for p in projects):
+            raise ValueError('malformed projects')
         slots = data.get('implementation_slots', [])
         limits = data.get('review_worker_limits', {})
         if not isinstance(slots, list) or not all(isinstance(s, dict) and isinstance(s.get('family'), str) for s in slots):

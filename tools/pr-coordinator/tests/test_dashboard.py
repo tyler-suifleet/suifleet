@@ -239,6 +239,15 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(out.returncode, 3, out.stderr)
         self.assertEqual(json.loads(out.stdout)['sources']['config']['state'], 'unavailable')
 
+    def test_malformed_projects_are_unavailable_without_traceback(self):
+        for projects in (5, None, {}, 'suifleet', [None], [5]):
+            with self.subTest(projects=projects):
+                self.f.paths['config'].write_text(json.dumps({'projects': projects}))
+                out = self.cli('--json')
+                self.assertEqual(out.returncode, 3, out.stderr)
+                self.assertNotIn('Traceback', out.stderr)
+                self.assertEqual(json.loads(out.stdout)['sources']['config']['state'], 'unavailable')
+
     def test_malformed_nested_records_are_isolated(self):
         f = self.f
         f.ticket('SF-001'); f.run('sess-impl', 'SF-001', pid=101); f.process(101)
@@ -540,6 +549,14 @@ class GitHubInventory(unittest.TestCase):
         self.assertEqual(entry['absent_from_github'], ['SF-002'])
         self.assertIn('STALE', '\n'.join(dash.render(model, 160)))
 
+    def test_title_links_ticket_after_unrelated_numbered_tokens(self):
+        self.ticket(1)
+        self.snapshot(prs=[dict(number=99, title='Fix UTF-8 and CVE-2024 in SF-001'),
+                           dict(number=100, title='SF-0010 is a different ticket')])
+        entry = self.f.collect()['inventory']['suifleet']
+        self.assertEqual(entry['linked_prs'], 1)
+        self.assertEqual(entry['other_prs'], [100])
+
     def test_missing_corrupt_and_wrong_repository_are_unknown_not_zero(self):
         self.ticket(1)
         self.assertIsNone(self.f.collect()['inventory']['suifleet']['github_open_prs'])
@@ -588,6 +605,16 @@ class GitHubInventory(unittest.TestCase):
                 dash.refresh_github(self.f.paths, 'suifleet')
         self.assertNotIn(TOKEN, str(error.exception))
         self.assertEqual(path.read_bytes(), before)
+
+    def test_failed_serialization_removes_temporary_file(self):
+        path = self.snapshot(issues=[dict(number=1, title='old')])
+        before = path.read_bytes()
+        response = subprocess.CompletedProcess(['gh'], 0, stdout='[[{"number":1,"title":"one","state":"open"}]]')
+        with patch.object(subprocess, 'run', return_value=response), patch.object(dash.json, 'dump', side_effect=OSError('disk full')):
+            with self.assertRaises(dash.Unavailable):
+                dash.refresh_github(self.f.paths, 'suifleet')
+        self.assertEqual(path.read_bytes(), before)
+        self.assertEqual(list(path.parent.iterdir()), [path])
 
 
 if __name__ == '__main__':
