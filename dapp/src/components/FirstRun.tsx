@@ -7,7 +7,9 @@ import type { Transaction } from "@mysten/sui/transactions";
 import { NETWORK } from "@/lib/constants";
 import { verifyDeployment } from "@/lib/deployment-manifest";
 import { onboardingConfig, registrationInput } from "@/lib/onboarding";
-import { buildRegisterDeviceTx } from "@/lib/sui";
+import { budgetSupported, buildRegisterAndEnrollTx } from "@/lib/fleet-budget";
+import { formatToken, type Estimate } from "@/lib/network-costs";
+import { CardFunding, DepositForm, EstimatePanel, useFleetBudget } from "@/components/FleetBudget";
 import { useDevices } from "@/hooks/useDevices";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 
@@ -17,6 +19,9 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
   const devices = useDevices(), mutation = useFleetTransaction();
   const [message, setMessage] = useState<{ address: string; text: string } | null>(null);
   const [error, setError] = useState<{ address: string; text: string } | null>(null);
+  const [estimate, setEstimate] = useState<Estimate | undefined>();
+  const { budget } = useFleetBudget();
+  const [fromBudget, setFromBudget] = useState(true);
   const config = onboardingConfig(NETWORK, process.env.NEXT_PUBLIC_ENOKI_API_KEY, process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID);
   const state = useQuery({
     queryKey: ["first-run-account", NETWORK, account?.address],
@@ -64,11 +69,20 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
       {state.error && <p role="alert">{state.error.message}</p>}
       {state.isSuccess && <p>Gas balance: {state.data} MIST (1 SUI = 1,000,000,000 MIST). {BigInt(state.data) === BigInt(0) ? "Fund this address before registering." : "Registration requires gas; the wallet shows the actual transaction cost before approval."}</p>}
       <p>Today, send SUI on this network to the address above from a wallet. For localnet use your disposable node’s faucet; for testnet use the Sui testnet faucet. Test tokens have no monetary value. Do not send mainnet funds to a test network.</p>
-      {/* SF-083 inserts estimate, card funding and budget deposit here. A nonzero gas balance is not a budget deposit. */}
       <button type="button" disabled={!account || state.isFetching} onClick={() => { void state.refetch(); void devices.refetch(); }} className="text-blue-700 underline">Refresh account and inventory</button>
     </section>
+    {account && budgetSupported() && <section className="bg-white p-5 rounded border space-y-3">
+      <h2 className="font-semibold">3. Prepay network costs</h2>
+      <p>Your wallet&apos;s gas above pays for your own transactions. The fleet budget is separate: you deposit network costs up front, each device gets a small float at registration and tops up only through the contract, within limits you set.</p>
+      <EstimatePanel onEstimate={setEstimate} />
+      <h3 className="font-semibold">Fund by card (optional)</h3>
+      <CardFunding asset="SUI" amount={estimate ? formatToken(estimate.suiDepositMist) : "1"} />
+      <h3 className="font-semibold">Deposit</h3>
+      <DepositForm suggestedMist={estimate?.suiDepositMist} />
+      <p>Manage the balance, per-device usage and limits on the <a className="underline" href="/budget">Network budget page</a>.</p>
+    </section>}
     {account && <section className="bg-white p-5 rounded border space-y-3">
-      <h2 className="font-semibold">3. Register your first device</h2>
+      <h2 className="font-semibold">{budgetSupported() ? "4" : "3"}. Register your first device</h2>
       <p>Start the daemon with its own identity and copy its public Sui address here. Registration creates the device, issues its device capability and activates it atomically. It does not install software or prove the device is online.</p>
       {devices.error && <p role="alert">Inventory unavailable: {devices.error.message}. Refresh before retrying a registration.</p>}
       {devices.isLoading && <p>Loading inventory…</p>}
@@ -78,12 +92,14 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
         const data = new FormData(event.currentTarget);
         try {
           const input = registrationInput(String(data.get("name")), String(data.get("deviceAddress")), String(data.get("arch")));
-          void submit(buildRegisterDeviceTx(input.name, input.deviceAddress, input.arch, account.address));
+          const funding = budget && fromBudget ? { budgetId: budget.id, capId: budget.capId, floatMist: budget.defaultLimits.floatCap } : undefined;
+          void submit(buildRegisterAndEnrollTx(input.name, input.deviceAddress, input.arch, account.address, funding));
         } catch (cause) { setError({ address: account.address, text: (cause as Error).message }); }
       }}>
         <label className="block">Device name <input className="border p-2 block w-full" name="name" required /></label>
         <label className="block">Device public address <input className="border p-2 block w-full" name="deviceAddress" required placeholder="0x…" /></label>
         <label className="block">Architecture <select className="border p-2 ml-2" name="arch"><option>aarch64</option><option>armv7</option><option>x86_64</option></select></label>
+        {budget && <label className="block"><input type="checkbox" checked={fromBudget} onChange={(e) => setFromBudget(e.target.checked)} /> Enroll in my fleet budget and send the device a {formatToken(budget.defaultLimits.floatCap)} SUI float</label>}
         <button className="bg-blue-600 text-white rounded p-2 disabled:opacity-40" disabled={!ready || !devices.isSuccess || mutation.isPending}>Register device</button>
       </form>
       {message?.address === account.address && <p role="status" className="break-all">{message.text}</p>}
