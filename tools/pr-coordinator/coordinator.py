@@ -230,7 +230,7 @@ class Store:
         ''')
 
         columns = {row[1] for row in self.db.execute('PRAGMA table_info(jobs)')}
-        for name, declaration in [('retry_after','REAL'),('attempts','INTEGER DEFAULT 0'),('comment_id','TEXT'),('review_id','TEXT'),('publication_done','INTEGER DEFAULT 0'),('publication_attempts','INTEGER DEFAULT 0'),('launch_intent','TEXT')]:
+        for name, declaration in [('retry_after','REAL'),('attempts','INTEGER DEFAULT 0'),('comment_id','TEXT'),('review_id','TEXT'),('publication_done','INTEGER DEFAULT 0'),('publication_attempts','INTEGER DEFAULT 0'),('launch_intent','TEXT'),('repair_claim','TEXT')]:
             if name not in columns:
                 self.db.execute(f'ALTER TABLE jobs ADD COLUMN {name} {declaration}')
                 if name == 'publication_done':
@@ -552,7 +552,8 @@ class Coordinator:
                 (directory/name).unlink(missing_ok=True)
             # Crossing this boundary makes an absent receipt ambiguous. Never
             # automatically repeat Popen after an interrupted launch.
-            self.store.db.execute("UPDATE jobs SET launch_intent=NULL WHERE id=?", (job,))
+            self.store.db.execute("UPDATE jobs SET launch_intent=NULL,repair_claim=? WHERE id=?",
+                                  (json.dumps(intent) if kind == 'fix' else None, job))
             spawning = True
             child = subprocess.Popen(['/usr/bin/python3',str(Path(__file__).with_name('worker.py')),str(directory)], cwd=worktree, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
             self.children[job] = child

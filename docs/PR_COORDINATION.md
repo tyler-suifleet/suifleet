@@ -341,3 +341,37 @@ An actual account rate limit records a persistent, account-specific shared
 backoff (60–3600 seconds, default 300) rather than retrying each PR. No API
 account switching is used to evade limits. Failed/incomplete snapshots fail
 closed and remain visible in the coordinator's per-PR triage output.
+
+### Obsolete implementation receipts (SF-110)
+
+Before checking implementation capacity, the dispatcher revisits parked and
+quarantined receipts. It archives only a verified stopped wrapper with no
+surviving session members and no reused PID, after reading current ownership.
+Missing or unreadable identity, pending Project publication, unknown ownership
+and unresolved current quarantines remain reserved. These checks also apply
+when retained receipts are counted against execution capacity.
+
+Retirement requires published Done, an explicit release/recovery event after
+the exact historical claim generation, a same-claim published Review handoff,
+or a verified newer same-claim feedback repair. New repair launches preserve a
+hashed claim/branch/worktree/head proof in `jobs.repair_claim`; historical jobs
+without this proof cannot establish replacement. A repair must have a matching
+process receipt and either be running under its recorded identity or have a
+successful collected `fixed` result.
+
+The dispatcher locks the central atomic-ticketing database with `BEGIN IMMEDIATE`,
+compares the fresh ownership revision and publication revision to its observation,
+then compares the original dispatch row and rechecks stopped process identity
+inside a dispatch transaction. It writes only dispatcher receipts: original
+status/message and a sanitized reason go into `retired_runs`, while the retained
+run becomes `finished`. Original claim, directory and process records remain.
+It never changes ownership tokens, branches, worktrees or GitHub state. Each
+failed reconciliation is isolated and retried on a later scan; quarantine limits
+and retry safeguards are unchanged. A crash before receipt commit leaves the
+reservation; a crash after commit leaves a durable retirement record.
+
+This requires the existing central ticket database schema; missing/incompatible
+stores fail closed. Install coordinator and dispatcher together after review so
+new repair proof can be recorded. Existing unknown receipts require explicit
+operator inspection, not database deletion or threshold increases. No services
+are installed or restarted by the implementation tests.

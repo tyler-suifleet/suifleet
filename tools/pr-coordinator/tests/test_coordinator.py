@@ -365,6 +365,10 @@ class IntegrationRaces(unittest.TestCase):
                 row=coordinator.store.db.execute('SELECT * FROM jobs').fetchone()
                 self.assertEqual(row['status'],'orphaned')
                 self.assertIsNone(row['launch_intent'])
+                proof = json.loads(row['repair_claim'])
+                self.assertEqual(proof['claim'],c.hashlib.sha256(b'private').hexdigest())
+                self.assertEqual(proof['head'],pr['headRefOid'])
+                self.assertNotIn('private',row['repair_claim'])
                 coordinator.launch({'id':'test','github_account':'test'},pr,owner,'fix')
                 popen.assert_called_once()
 
