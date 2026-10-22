@@ -246,6 +246,7 @@ class Activation(unittest.TestCase):
         with patch.dict(sys.modules, {'activation':a}), patch.object(Path, 'home', return_value=home), \
              patch.object(sys, 'argv', ['install.py', '--activation-project', 'p']), \
              patch.object(a.Activator, 'tip', return_value='0'*40), \
+             patch.object(subprocess, 'check_output', return_value='f'*40), \
              self.assertRaisesRegex(SystemExit, 'fetched main'):
             runpy.run_path(str(SOURCE/'install.py'), run_name='__main__')
         self.assertEqual(sentinel.read_text(), 'preserved')
