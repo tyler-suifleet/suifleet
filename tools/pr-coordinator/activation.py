@@ -125,9 +125,10 @@ class Activator:
         url = 'https://github.com/' + self.settings['repository'] + '.git'
         token = run(['gh', 'auth', 'token', '--hostname', 'github.com', '--user', self.settings['github_account']])
         run(['git', '-c', 'credential.helper=', '-c', 'credential.helper=!gh auth git-credential',
-             'fetch', '--no-tags', url, 'refs/heads/main'], cwd=self.root,
+             'fetch', '--no-tags', '--no-write-fetch-head', url,
+             '+refs/heads/main:refs/pr-coordinator/activation-main'], cwd=self.root,
             env={**os.environ, 'GH_TOKEN': token, 'GIT_TERMINAL_PROMPT': '0'})
-        sha = self.git('rev-parse', 'FETCH_HEAD^{commit}')
+        sha = self.git('rev-parse', 'refs/pr-coordinator/activation-main^{commit}')
         return sha
 
     def gh(self, endpoint):
@@ -140,7 +141,7 @@ class Activator:
         with sqlite3.connect(f'file:{self.state / "reviews.sqlite3"}?mode=ro', uri=True) as db:
             for commit in changed:
                 paths = self.git('diff-tree', '--no-commit-id', '--name-only', '-r', commit + '^1', commit).splitlines()
-                if not set(paths).intersection(PREFIX + name for name in (*FILES, 'runtime-compatibility.json')):
+                if not any(path.startswith(PREFIX) for path in paths):
                     continue
                 row = db.execute('SELECT pr,head,base,review_id FROM activation_merges WHERE project=? AND commit_id=?',
                                  (self.settings['project'], commit)).fetchone()

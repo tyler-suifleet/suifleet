@@ -280,3 +280,23 @@ class Activation(unittest.TestCase):
                                                'ActiveState=active\nKillMode=process']):
             with self.assertRaisesRegex(RuntimeError, 'dependency'):
                 a.Systemd(self.state).active()
+
+    def test_fetch_uses_private_ref_without_clobbering_shared_fetch_head(self):
+        with patch.object(a, 'run', side_effect=['fixture-token', '', 'a'*40]) as execute:
+            self.assertEqual(a.Activator.tip(self.engine), 'a'*40)
+        fetch = execute.call_args_list[1]
+        self.assertIn('--no-write-fetch-head', fetch.args[0])
+        self.assertIn('+refs/heads/main:refs/pr-coordinator/activation-main', fetch.args[0])
+        self.assertNotIn('fixture-token', fetch.args[0])
+        self.assertEqual(fetch.kwargs['env']['GH_TOKEN'], 'fixture-token')
+        self.assertIn('refs/pr-coordinator/activation-main^{commit}', execute.call_args_list[2].args[0])
+
+    def test_unreviewed_validation_source_cannot_execute(self):
+        self.update()
+        (self.repo/a.PREFIX/'tests').mkdir()
+        (self.repo/a.PREFIX/'tests/test_unreviewed.py').write_text('raise RuntimeError("must not execute")')
+        self.commit('direct unreviewed validation change')
+        with self.assertRaisesRegex(RuntimeError, 'receipt'):
+            self.engine.activate()
+        self.engine.validate.assert_not_called()
+        self.service.stop.assert_not_called()

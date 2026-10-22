@@ -400,9 +400,11 @@ The existing full/scoped engine-copy installer refuses to bypass an enabled
 activation installation. Dashboard-only installation remains separate.
 
 The fixed bootstrap supervisor serializes activation with `activation.lock`.
-It fetches main directly from the configured GitHub repository, checks installed
-ancestry and examines every first-parent runtime change since the installed
-revision. Its allowlist is exactly `coordinator.py`, `dispatcher.py`, `worker.py`.
+It fetches main directly from the configured GitHub repository into a dedicated
+`refs/pr-coordinator/activation-main` ref without writing shared `FETCH_HEAD`,
+checks installed
+ancestry and examines every first-parent change under `tools/pr-coordinator/` since the installed
+revision (including validation source that will be executed). Its allowlist is exactly `coordinator.py`, `dispatcher.py`, `worker.py`.
 For each change it requires the coordinator's durable `activation_merges` receipt,
 matching two-parent merge ancestry, a published completed independent approval,
 and a fresh GitHub merged PR with the same repository, head and merge commit.
