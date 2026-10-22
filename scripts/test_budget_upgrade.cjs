@@ -19,7 +19,7 @@ const SUI = 1_000_000_000n;
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "sf083-budget-"));
   let daemon;
   try {
-    const base = execFileSync("git", ["merge-base", "HEAD", "main"], { encoding: "utf8" }).trim();
+    const base = execFileSync("git", ["merge-base", "HEAD", "origin/main"], { encoding: "utf8" }).trim();
     const oldTree = path.join(tmp, "base"); await fs.mkdir(oldTree);
     execFileSync("tar", ["-x", "-C", oldTree], { input: execFileSync("git", ["archive", base, "contracts"], { maxBuffer: 20 * 1024 * 1024 }) });
     assert.ok(!(await fs.readdir(path.join(oldTree, "contracts/sources"))).includes("fleet_budget.move"), "base already has the budget");
