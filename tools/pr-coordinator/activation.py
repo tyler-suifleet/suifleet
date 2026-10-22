@@ -73,6 +73,8 @@ class Systemd:
                 result.append(unit)
             elif properties.get('ActiveState') not in ('inactive', 'failed'):
                 raise RuntimeError('parent service is transitioning; retry later')
+        if SERVICES[1] in result and SERVICES[0] not in result:
+            raise RuntimeError('dispatcher is active without its coordinator dependency; repair parent state first')
         return result
 
     def stop(self, units):
@@ -218,7 +220,9 @@ class Activator:
             # use it, not silently remove readiness or change persistent store rules.
             (staging / 'activation.py').write_bytes(Path(__file__).read_bytes())
             for name in ('coordinator.py', 'dispatcher.py'):
-                run([sys.executable, str(staging / name), '--help'])
+                run([sys.executable, str(staging / name), '--help'],
+                    env={'PATH': os.environ.get('PATH', '/usr/bin:/bin'),
+                         'HOME': str(staging), 'PYTHONDONTWRITEBYTECODE': '1'})
             atomic(staging / 'installed.json', dict(revision=target, hashes=hashes, protocol=1))
             for path in staging.iterdir():
                 if path.is_file():
@@ -253,7 +257,8 @@ class Activator:
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 destination.write_bytes(content)
             run([sys.executable, '-m', 'unittest', 'discover', '-s', PREFIX + 'tests'], cwd=root,
-                env={**os.environ, 'PYTHONDONTWRITEBYTECODE': '1'})
+                env={'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(root/'home'),
+                     'LANG': 'C.UTF-8', 'PYTHONDONTWRITEBYTECODE': '1'})
 
     def status(self):
         installed = json.loads((self.link / 'installed.json').read_text())

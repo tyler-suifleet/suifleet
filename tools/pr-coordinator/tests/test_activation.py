@@ -265,3 +265,18 @@ class Activation(unittest.TestCase):
         self.db.execute("UPDATE jobs SET family='Codex'"); self.db.commit()
         with self.assertRaisesRegex(RuntimeError, 'independent'):
             self.engine.verify_bootstrap(target)
+
+    def test_validation_does_not_inherit_credentials_or_private_home(self):
+        with patch.dict(os.environ, {'GH_TOKEN':'fixture-secret', 'PR_COORDINATOR_CLAIM_TOKEN':'fixture-claim'}), \
+             patch.object(a, 'run') as execute:
+            a.Activator.validate(self.engine, self.base)
+        environment = execute.call_args.kwargs['env']
+        self.assertNotIn('GH_TOKEN', environment)
+        self.assertNotIn('PR_COORDINATOR_CLAIM_TOKEN', environment)
+        self.assertNotEqual(environment['HOME'], str(Path.home()))
+
+    def test_dependency_start_cannot_enable_an_inactive_parent(self):
+        with patch.object(a, 'run', side_effect=['ActiveState=inactive\nKillMode=process',
+                                               'ActiveState=active\nKillMode=process']):
+            with self.assertRaisesRegex(RuntimeError, 'dependency'):
+                a.Systemd(self.state).active()
