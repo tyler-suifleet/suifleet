@@ -915,4 +915,38 @@ module fleet_storage::fleet_storage_tests {
         finish(scenario, system);
     }
 
+    #[test]
+    #[expected_failure(abort_code = 4, location = fleet_storage)]
+    fun actual_prepayment_obeys_period_wal_limit() {
+        let (mut scenario, mut system, id) = renewal_fixture();
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        fleet_storage::configure_retention(&mut fs, &budget, &cap, DEVICE_2, 5, 0, 10, 5);
+        fleet_storage::authorize_renewal(&mut fs, &budget, &cap, id, 8, 1);
+        fleet_storage::prepay_renewal(&mut fs, &budget, &cap, &mut system, id, ts::ctx(&mut scenario));
+        owner_end(fs, budget, cap);
+        finish(scenario, system);
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 4, location = fleet_storage)]
+    fun sequential_renewals_cannot_race_past_period_gas_limit() {
+        let (mut scenario, mut system, id) = renewal_fixture();
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        fleet_storage::configure_retention(&mut fs, &budget, &cap, DEVICE_2, 5, 3_000_000, 5, 5);
+        let clock = clock_at(&mut scenario, 20);
+        let ctx = ts::ctx(&mut scenario);
+        fleet_storage::fund_retention(&mut fs, coin::mint_for_testing<WAL>(1_000_000, ctx), coin::mint_for_testing<SUI>(0, ctx));
+        let other = fleet_storage::register_retained_fleet_blob(&mut fs, &budget, &cap, &mut system,
+            blob_id(BLOB + 1), ROOT, BLOB + 1, RS2, &clock, 7, 1_000_000, ctx);
+        fleet_storage::certify_for_testing(&mut fs, &system, other);
+        clock::destroy_for_testing(clock);
+        owner_end(fs, budget, cap);
+        ts::next_tx(&mut scenario, DEVICE_2);
+        let mut fs = ts::take_shared<FleetStorage>(&scenario);
+        fleet_storage::execute_renewal(&mut fs, &mut system, id, 5, 2, ts::ctx(&mut scenario));
+        fleet_storage::execute_renewal(&mut fs, &mut system, other, 5, 2, ts::ctx(&mut scenario));
+        ts::return_shared(fs);
+        finish(scenario, system);
+    }
+
 }
