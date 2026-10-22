@@ -78,17 +78,16 @@ async function run({ config: c, action, value }) {
         const ceiling = BigInt(p.max_fee);
         const prepaid = p.last_success_epoch === null && ceiling === 0n;
         const quoted = ((BigInt(record.encoded_size) + 1048575n) / 1048576n) * BigInt(ws.storage_price_per_unit_size) * BigInt(Math.max(0, p.target - record.end_epoch));
-        const spent = r.epoch === epoch ? BigInt(r.wal_spent) : 0n;
         const gasSpent = r.epoch === epoch ? BigInt(r.gas_spent) : 0n;
         blobs.push({ id: blob, end: record.end_epoch, target: p.target,
-          quote: quoted.toString(), last_success_epoch: p.last_success_epoch,
-          affordable: (prepaid || quoted <= ceiling && BigInt(r.wal.value) >= ceiling) &&
-            BigInt(r.gas.value) >= BigInt(r.reward) && ceiling + spent <= BigInt(r.wal_per_epoch) &&
+          quote: quoted.toString(), prepaid, last_success_epoch: p.last_success_epoch,
+          affordable: prepaid && BigInt(r.gas.value) >= BigInt(r.reward) &&
             BigInt(r.reward) + gasSpent <= BigInt(r.gas_per_epoch) });
       }
       cursor = page.hasNextPage ? page.cursor : undefined;
     } while (cursor);
     const warnings = [];
+    if (blobs.some((blob) => blob.end < blob.target && !blob.prepaid)) warnings.push('prepayment_required');
     if (BigInt(r.wal.value) < BigInt(r.pending_wal) || BigInt(r.gas.value) < BigInt(r.pending_count) * BigInt(r.reward)) warnings.push('retention_low');
     // FleetStorage WAL offset follows variable Option<Storage>; read via exact layout.
     const Storage = bcs.struct('Storage', { id: bcs.Address, start: bcs.u32(), end: bcs.u32(), size: bcs.u64() });

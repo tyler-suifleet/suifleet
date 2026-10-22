@@ -52,6 +52,7 @@ export function retentionFacts(policy: RetentionView | undefined, blobs: Retaine
   const facts: string[] = [];
   if (BigInt(policy.wal.value) < BigInt(policy.pending_wal) || BigInt(policy.gas.value) < BigInt(policy.pending_count) * BigInt(policy.reward)) facts.push('Protected reserve is underfunded; discretionary writes pause.');
   if (blobs.some((b) => !b.policy)) facts.push('Fleet blob closure is incomplete; discretionary writes pause until every fleet blob has a finite target.');
+  if (blobs.some((b) => b.policy && b.policy.last_success_epoch === null && b.policy.max_fee !== '0')) facts.push('Renewal capacity is not prepaid; discretionary writes pause until actual Walrus capacity is purchased.');
   if (epoch !== undefined && blobs.some((b) => b.end <= epoch)) facts.push('Blob expired: restore verified customer bytes and authorize an updated reference. Sui cannot reconstruct binaries.');
   if (epoch !== undefined && blobs.some((b) => b.end > epoch && b.end - epoch <= policy.margin)) facts.push('Renewal deadline approaching; check the owner-run worker and its persistent failure/delivery status.');
   facts.push('Targets and reserves are finite. Quote increases, executor outages and withdrawals can put retention at risk.');
