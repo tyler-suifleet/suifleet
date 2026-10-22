@@ -562,6 +562,126 @@ module fleet_storage::fleet_storage_tests {
         finish(scenario, system);
     }
 
+    /// WAL Walrus charges for `size` bytes over [start, end), from a separate purchase.
+    fun price(scenario: &mut ts::Scenario, system: &mut System, size: u64, start: u32, end: u32): u64 {
+        let mut payment = coin::mint_for_testing<WAL>(1_000_000_000, ts::ctx(scenario));
+        let storage = system.reserve_space_for_epochs(size, start, end, &mut payment, ts::ctx(scenario));
+        let cost = 1_000_000_000 - payment.value();
+        destroy(storage);
+        destroy(payment);
+        cost
+    }
+
+    /// A partly used pool is topped up and kept longer in one call, in its
+    /// first epoch; uploads then end with the refilled pool.
+    #[test]
+    fun a_partly_used_pool_is_refilled_and_extended() {
+        let (mut scenario, mut system) = setup(quota(POOL, 10));
+        fund_wal(&mut scenario, 1_000_000_000);
+        let needed = encoded(&system, BLOB);
+        upload(&mut scenario, &mut system, BLOB, 10);
+        let expected = price(&mut scenario, &mut system, POOL - needed, 5, 8) + price(&mut scenario, &mut system, POOL, 0, 8);
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        let before = fleet_storage::wal_balance(&fs);
+        let cost = fleet_storage::refill_pool(&mut fs, &budget, &cap, &mut system, POOL, 8, ts::ctx(&mut scenario));
+        assert!(cost == expected && fleet_storage::wal_balance(&fs) == before - cost, 0);
+        assert!(fleet_storage::pool_size(&fs) == 2 * POOL - needed && fleet_storage::pool_epochs(&fs).destroy_some() == vector[0, 8], 1);
+        owner_end(fs, budget, cap);
+        let refilled = event::events_by_type<fleet_storage::PoolRefilled>();
+        assert!(refilled.length() == 1, 2);
+        let id = upload(&mut scenario, &mut system, BLOB, DAY + 10);
+        ts::next_tx(&mut scenario, OWNER);
+        let fs = ts::take_shared<FleetStorage>(&scenario);
+        assert!(fleet_storage::blob(&fs, id).end_epoch() == 8 && fleet_storage::pool_size(&fs) == 2 * POOL - 2 * needed, 3);
+        ts::return_shared(fs);
+        finish(scenario, system);
+    }
+
+    /// After the pool's first epoch, Walrus cannot join new storage to it
+    /// directly; a refill drops the elapsed epochs, keeps the unused bytes
+    /// and adds the new ones over the remaining range.
+    #[test]
+    fun a_partly_used_pool_is_refilled_after_its_first_epoch() {
+        let (mut scenario, mut system) = setup(quota(POOL, 10));
+        fund_wal(&mut scenario, 1_000_000_000);
+        let needed = encoded(&system, BLOB);
+        upload(&mut scenario, &mut system, BLOB, 10);
+        let expected = price(&mut scenario, &mut system, POOL, 2, 5);
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        let cost = fleet_storage::refill_pool_at_epoch_for_testing(&mut fs, &budget, &cap, &mut system, 2, POOL, 5, ts::ctx(&mut scenario));
+        assert!(cost == expected, 0);
+        assert!(fleet_storage::pool_size(&fs) == 2 * POOL - needed && fleet_storage::pool_epochs(&fs).destroy_some() == vector[2, 5], 1);
+        // Extending later keeps the size and only buys the added epochs.
+        let expected = price(&mut scenario, &mut system, 2 * POOL - needed, 5, 9);
+        let cost = fleet_storage::refill_pool_at_epoch_for_testing(&mut fs, &budget, &cap, &mut system, 3, 0, 9, ts::ctx(&mut scenario));
+        assert!(cost == expected, 2);
+        assert!(fleet_storage::pool_size(&fs) == 2 * POOL - needed && fleet_storage::pool_epochs(&fs).destroy_some() == vector[3, 9], 3);
+        owner_end(fs, budget, cap);
+        finish(scenario, system);
+    }
+
+    /// An expired pool, with unused bytes left, is replaced by fresh storage.
+    #[test]
+    fun an_expired_pool_is_replaced_by_a_refill() {
+        let (mut scenario, mut system) = setup(quota(POOL, 10));
+        fund_wal(&mut scenario, 1_000_000_000);
+        upload(&mut scenario, &mut system, BLOB, 10);
+        let expected = price(&mut scenario, &mut system, POOL, 6, 9);
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        let cost = fleet_storage::refill_pool_at_epoch_for_testing(&mut fs, &budget, &cap, &mut system, 6, POOL, 9, ts::ctx(&mut scenario));
+        assert!(cost == expected, 0);
+        assert!(fleet_storage::pool_size(&fs) == POOL && fleet_storage::pool_epochs(&fs).destroy_some() == vector[6, 9], 1);
+        owner_end(fs, budget, cap);
+        finish(scenario, system);
+    }
+
+    #[test, expected_failure(abort_code = fleet_storage::EInvalidEpochs)]
+    fun a_refill_cannot_shorten_the_pool() {
+        let (mut scenario, mut system) = setup(quota(POOL, 10));
+        fund_wal(&mut scenario, 1_000_000_000);
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        fleet_storage::refill_pool(&mut fs, &budget, &cap, &mut system, POOL, 3, ts::ctx(&mut scenario));
+        owner_end(fs, budget, cap);
+        finish(scenario, system);
+    }
+
+    #[test, expected_failure(abort_code = fleet_storage::EInvalidEpochs)]
+    fun a_refill_must_end_after_the_current_epoch() {
+        let (mut scenario, mut system) = setup(quota(POOL, 10));
+        fund_wal(&mut scenario, 1_000_000_000);
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        fleet_storage::refill_pool_at_epoch_for_testing(&mut fs, &budget, &cap, &mut system, 6, POOL, 6, ts::ctx(&mut scenario));
+        owner_end(fs, budget, cap);
+        finish(scenario, system);
+    }
+
+    /// Refilling an expired pool with nothing to add would leave no storage.
+    #[test, expected_failure(abort_code = fleet_storage::EZeroAmount)]
+    fun an_expired_pool_needs_new_storage() {
+        let (mut scenario, mut system) = setup(quota(POOL, 10));
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        fleet_storage::refill_pool_at_epoch_for_testing(&mut fs, &budget, &cap, &mut system, 6, 0, 9, ts::ctx(&mut scenario));
+        owner_end(fs, budget, cap);
+        finish(scenario, system);
+    }
+
+    #[test, expected_failure(abort_code = sui_edge::fleet_budget::ENotOwner)]
+    fun only_the_owner_refills_the_pool() {
+        let (mut scenario, mut system) = setup(quota(POOL, 10));
+        ts::next_tx(&mut scenario, STRANGER);
+        let registry = ts::take_shared<DeviceRegistry>(&scenario);
+        let forged = fleet_budget::create(&registry, coin::zero<SUI>(ts::ctx(&mut scenario)), fleet_budget::new_limits(1, 1, 1, 1, 0), 0, ts::ctx(&mut scenario));
+        ts::return_shared(registry);
+        ts::next_tx(&mut scenario, STRANGER);
+        let mut fs = ts::take_shared<FleetStorage>(&scenario);
+        let budget = ts::take_shared_by_id<FleetBudget>(&scenario, fleet_storage::budget_id(&fs));
+        fleet_storage::refill_pool(&mut fs, &budget, &forged, &mut system, 1, 9, ts::ctx(&mut scenario));
+        transfer::public_transfer(forged, STRANGER);
+        ts::return_shared(budget);
+        ts::return_shared(fs);
+        finish(scenario, system);
+    }
+
     /// Without enough fleet WAL, Walrus refuses the purchase and nothing changes.
     #[test, expected_failure]
     fun buying_storage_needs_enough_fleet_wal() {

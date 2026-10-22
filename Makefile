@@ -27,6 +27,7 @@ build-contracts:
 
 test-contracts:
 	$(RUN) sui move test --path contracts
+	$(RUN) sui move test --path contracts/fleet_storage
 
 # Spends gas: PUBLISH_ARGS="--expect-address 0x... [--dry-run]" (docs/DEPLOYMENT_MANIFEST.md).
 publish-contracts:

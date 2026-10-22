@@ -58,6 +58,7 @@ module fleet_storage::fleet_storage {
     const ENotUpgrade: u64 = 10;
     const EZeroAmount: u64 = 11;
     const ESlippage: u64 = 12;
+    const EInvalidEpochs: u64 = 13;
 
     // ── State ─────────────────────────────────────────────────────────────────
 
@@ -77,6 +78,7 @@ module fleet_storage::fleet_storage {
         budget_id: ID,
         /// Prepaid storage: all deposits are fused into one resource, so they
         /// must share an epoch range or be adjacent with the same size.
+        /// `refill_pool` realigns it to the current epoch to top it up.
         pool: Option<Storage>,
         wal: Balance<WAL>,
         default_quota: Quota,
@@ -132,6 +134,19 @@ module fleet_storage::fleet_storage {
     public struct StoragePurchased has copy, drop {
         storage_id: ID,
         size: u64,
+        start_epoch: u32,
+        end_epoch: u32,
+        cost: u64,
+        wal_balance: u64,
+    }
+
+    /// The pool after `refill_pool`: it covers [start_epoch, end_epoch).
+    /// `dropped_size` is the unused size of a pool that had already expired.
+    public struct PoolRefilled has copy, drop {
+        storage_id: ID,
+        added_size: u64,
+        dropped_size: u64,
+        pool_size: u64,
         start_epoch: u32,
         end_epoch: u32,
         cost: u64,
@@ -256,6 +271,34 @@ module fleet_storage::fleet_storage {
         let before = payment.value();
         let storage = system.reserve_space_for_epochs(size, end, end + epochs, &mut payment, ctx);
         purchased(fs, storage, before - payment.value(), payment)
+    }
+
+    /// Top up the pool and keep it until `end_epoch`, buying from Walrus with
+    /// the fleet's WAL; this works at any epoch, including after the pool
+    /// expired. Walrus joins storage only over the same epoch range (or
+    /// adjacent ranges of the same size), so storage bought after the pool's
+    /// first epoch cannot join it directly. This call therefore:
+    ///
+    /// - drops the pool's elapsed epochs, which no new blob can use, and an
+    ///   expired pool entirely (its Sui storage rebate goes to the sender);
+    /// - extends what is left, at its size, to `end_epoch`;
+    /// - buys `add_size` more bytes for the same range.
+    ///
+    /// The pool then covers [current epoch, `end_epoch`). `end_epoch` cannot
+    /// shorten an unexpired pool. Registered blobs keep their own storage and
+    /// end epochs (see `extend_blob`). Returns the WAL cost.
+    public fun refill_pool(
+        fs: &mut FleetStorage,
+        budget: &FleetBudget,
+        cap: &BudgetOwnerCap,
+        system: &mut System,
+        add_size: u64,
+        end_epoch: u32,
+        ctx: &mut TxContext,
+    ): u64 {
+        assert_owner(fs, budget, cap);
+        let now = system.epoch();
+        refill(fs, system, now, add_size, end_epoch, ctx)
     }
 
     /// Take `size` bytes of unused storage back out of the pool.
@@ -502,6 +545,55 @@ module fleet_storage::fleet_storage {
         });
     }
 
+    /// `refill_pool` at Walrus epoch `now`.
+    fun refill(fs: &mut FleetStorage, system: &mut System, now: u32, add_size: u64, end_epoch: u32, ctx: &mut TxContext): u64 {
+        assert!(end_epoch > now, EInvalidEpochs);
+        let mut payment = coin::from_balance(fs.wal.withdraw_all(), ctx);
+        let before = payment.value();
+        let mut live = if (fs.pool.is_some()) option::some(fs.pool.extract()) else option::none();
+        let mut dropped_size = 0;
+        if (live.is_some() && live.borrow().end_epoch() <= now) {
+            let expired = live.extract();
+            dropped_size = expired.size();
+            expired.destroy();
+        };
+        if (live.is_some() && live.borrow().start_epoch() < now) {
+            // split_by_epoch keeps the elapsed epochs in place and returns the rest.
+            let rest = live.borrow_mut().split_by_epoch(now, ctx);
+            live.swap(rest).destroy();
+        };
+        let mut start = now;
+        if (live.is_some()) {
+            let (size, live_start, live_end) = (live.borrow().size(), live.borrow().start_epoch(), live.borrow().end_epoch());
+            assert!(end_epoch >= live_end, EInvalidEpochs);
+            start = live_start;
+            if (end_epoch > live_end) {
+                let extension = system.reserve_space_for_epochs(size, live_end, end_epoch, &mut payment, ctx);
+                live.borrow_mut().fuse_periods(extension);
+            };
+        };
+        if (add_size > 0) {
+            let added = system.reserve_space_for_epochs(add_size, start, end_epoch, &mut payment, ctx);
+            if (live.is_some()) live.borrow_mut().fuse_amount(added) else live.fill(added);
+        };
+        assert!(live.is_some(), EZeroAmount);
+        fs.pool.fill(live.destroy_some());
+        let cost = before - payment.value();
+        fs.wal.join(payment.into_balance());
+        let pool = fs.pool.borrow();
+        event::emit(PoolRefilled {
+            storage_id: object::id(fs),
+            added_size: add_size,
+            dropped_size,
+            pool_size: pool.size(),
+            start_epoch: pool.start_epoch(),
+            end_epoch: pool.end_epoch(),
+            cost,
+            wal_balance: fs.wal.value(),
+        });
+        cost
+    }
+
     /// Return the unspent WAL, record the purchase and add the storage.
     fun purchased(fs: &mut FleetStorage, storage: Storage, cost: u64, change: Coin<WAL>): u64 {
         fs.wal.join(change.into_balance());
@@ -605,6 +697,23 @@ module fleet_storage::fleet_storage {
 
     #[test_only]
     public fun set_version_for_testing(fs: &mut FleetStorage, version: u64) { fs.version = version; }
+
+    /// `refill_pool` as if Walrus were at epoch `now`: the Walrus test system
+    /// cannot advance epochs from this package.
+    #[test_only]
+    public fun refill_pool_at_epoch_for_testing(
+        fs: &mut FleetStorage,
+        budget: &FleetBudget,
+        cap: &BudgetOwnerCap,
+        system: &mut System,
+        now: u32,
+        add_size: u64,
+        end_epoch: u32,
+        ctx: &mut TxContext,
+    ): u64 {
+        assert_owner(fs, budget, cap);
+        refill(fs, system, now, add_size, end_epoch, ctx)
+    }
 
     #[test_only]
     public fun certify_for_testing(fs: &mut FleetStorage, system: &System, blob_object_id: ID) {
