@@ -71,12 +71,35 @@ def fleet_binding(raw, manifest):
     return value
 
 
+def seal_binding(raw):
+    value = json.loads(raw)
+    if not isinstance(value, dict) or set(value) != {"keyServers", "threshold"}:
+        raise ValueError("public Seal settings require only keyServers and threshold")
+    servers = value["keyServers"]
+    if not isinstance(servers, list) or not 1 <= len(servers) <= 254:
+        raise ValueError("invalid Seal provider count")
+    normalized = []
+    for server in servers:
+        if not isinstance(server, dict) or set(server) != {"objectId", "weight"}:
+            raise ValueError("Seal providers accept only public objectId and weight")
+        if type(server["weight"]) is not int or not 1 <= server["weight"] <= 255:
+            raise ValueError("invalid Seal provider weight")
+        normalized.append({"objectId": object_id(server["objectId"]), "weight": server["weight"]})
+    if len({server["objectId"] for server in normalized}) != len(normalized):
+        raise ValueError("duplicate Seal provider")
+    threshold = value["threshold"]
+    if type(threshold) is not int or not 1 <= threshold <= min(255, sum(server["weight"] for server in normalized)):
+        raise ValueError("invalid Seal threshold")
+    return {"keyServers": normalized, "threshold": threshold}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--manifest', type=Path, required=True)
     parser.add_argument('--builder', type=Path, required=True)
     parser.add_argument('--receipt', type=Path, required=True)
     parser.add_argument('--fleet-data', type=Path, help='public fleet-data object/type binding for this deployment')
+    parser.add_argument('--seal-settings', type=Path, help='public key-server IDs/weights and threshold; never provider credentials')
     args = parser.parse_args()
     pin = verified_builder(args.builder)
     manifest = json.loads(args.manifest.read_text())
@@ -84,16 +107,22 @@ def main():
     encoded = canonical(manifest)
     raw_data = args.fleet_data.read_text() if args.fleet_data else os.environ.get('NEXT_PUBLIC_FLEET_DATA')
     data = fleet_binding(raw_data, manifest) if raw_data else None
+    seal = seal_binding(args.seal_settings.read_text()) if args.seal_settings else None
     output = ROOT / 'dapp/out'
     if args.receipt.resolve().is_relative_to(output.resolve()):
         raise ValueError('the evidence receipt must be outside the published export')
     environment = dict(os.environ, NEXT_PUBLIC_DEPLOYMENT_MANIFEST=encoded.decode().strip(), NEXT_TELEMETRY_DISABLED='1')
     if data:
         environment['NEXT_PUBLIC_FLEET_DATA'] = canonical(data).decode().strip()
+    if seal:
+        environment['NEXT_PUBLIC_SEAL_KEY_SERVERS'] = json.dumps(seal['keyServers'], separators=(',', ':'))
+        environment['NEXT_PUBLIC_SEAL_THRESHOLD'] = str(seal['threshold'])
     subprocess.run(['pnpm', 'build'], cwd=ROOT / 'dapp', env=environment, check=True)
     (output / 'deployment-manifest.json').write_bytes(encoded)
     if data:
         (output / 'fleet-data-config.json').write_bytes(canonical(data))
+    if seal:
+        (output / 'seal-settings.json').write_bytes(canonical(seal))
     routes = {'/': '/index.html'}
     for path in sorted(output.rglob('index.html')):
         relative = '/' + path.relative_to(output).as_posix()
@@ -112,6 +141,8 @@ def main():
                'files': inventory(output), 'published': False}
     if data:
         receipt['fleet_data_sha256'] = digest(canonical(data))
+    if seal:
+        receipt['seal_settings_sha256'] = digest(canonical(seal))
     args.receipt.parent.mkdir(parents=True, exist_ok=True)
     args.receipt.write_bytes(canonical(receipt))
     print(f'Static site prepared: {len(receipt["files"])} resources; no transaction submitted')

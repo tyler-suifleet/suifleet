@@ -16,6 +16,14 @@ class SiteBindingTests(unittest.TestCase):
         self.assertEqual(checked['packageId'],site.object_id('0xa1'))
         for key,value in [('chainIdentifier','ffffffff'),('registryId','0xff'),('secret','never publish')]:
             with self.assertRaises(ValueError):site.fleet_binding(json.dumps({**data,key:value}),manifest)
+    def test_only_public_seal_binding_and_valid_threshold(self):
+        good = dict(keyServers=[dict(objectId='0x1',weight=1),dict(objectId='0x2',weight=1)], threshold=2)
+        self.assertEqual(site.seal_binding(json.dumps(good))['keyServers'][0]['objectId'],site.object_id('0x1'))
+        for value in [dict(good,threshold=3),dict(good,threshold=True),dict(good,api_key='forbidden'),
+                      dict(good,keyServers=[dict(objectId='0x1',weight=1,api_key='forbidden')]),
+                      dict(good,keyServers=[dict(objectId='0x1',weight=1),dict(objectId='0x01',weight=1)])]:
+            with self.assertRaises(ValueError):site.seal_binding(json.dumps(value))
+
     def test_inventory_rejects_private_files_and_symlinks(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);(root/'index.html').write_text('public');(root/'device.key').write_text('fixture')
