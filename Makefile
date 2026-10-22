@@ -73,6 +73,7 @@ test-ota:
 	$(RUN) python3 scripts/test_cloudwatch_logs.py
 	$(RUN) python3 scripts/test_console.py
 	$(RUN) python3 scripts/test_rollout.py
+	$(RUN) python3 scripts/test_budget_ota.py
 
 # Fleet service configuration, root only in a disposable network-none container
 # for real SO_PEERCRED principals (no host credentials or public network).
