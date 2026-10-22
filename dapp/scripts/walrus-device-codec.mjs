@@ -2,6 +2,7 @@
 // Local, keyless codec/storage-node worker. Run from the locked dApp SDK
 // installation. It never signs transactions or receives archive plaintext.
 import { readFile } from 'node:fs/promises';
+import { writeBounded } from './walrus-node-writes.mjs';
 import { createInterface } from 'node:readline';
 import { SuiGrpcClient } from '@mysten/sui/grpc';
 import { walrus, TESTNET_WALRUS_PACKAGE_CONFIG, blobIdToInt } from '@mysten/walrus';
@@ -43,8 +44,7 @@ try {
     console.log(JSON.stringify({ blob_object_id: found.blob_object_id, end_epoch: found.end_epoch, encoded_size: found.encoded_size, write_fee: found.write_fee }));
   } else if (request.operation === 'write') {
     if (prepared.blob_id !== request.blob_id || prepared.root_hash !== request.root_hash) throw Error('Changed archive encoding');
-    const confirmations = await storage.writeEncodedBlobToNodes({ blobId: encoded.blobId, metadata: encoded.metadata,
-      sliversByNode: encoded.sliversByNode, deletable: false, objectId: request.blob_object_id });
+    const confirmations = await writeBounded(storage, encoded, request.blob_object_id);
     const cert = await storage.certificateFromConfirmations({ confirmations, blobId: encoded.blobId, deletable: false, blobObjectId: request.blob_object_id });
     const bitmap = new Uint8Array(Math.ceil(committee.members.length / 8));
     for (const n of cert.signers) { if (!Number.isInteger(n) || n < 0 || n >= committee.members.length) throw Error('Invalid signer'); bitmap[n >> 3] |= 1 << (n % 8); }
