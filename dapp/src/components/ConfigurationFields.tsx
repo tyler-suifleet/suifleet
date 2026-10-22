@@ -10,7 +10,7 @@ export function ConfigurationFields({ value, onChange, disabled }: {
     <div>
       <label className="block text-xs font-medium text-gray-700 mb-0.5">{label}</label>
       <p className="text-xs text-gray-400 mb-1">{hint}</p>
-      <textarea value={value[key]} onChange={(e) => onChange({ ...value, [key]: e.target.value })} placeholder={placeholder}
+      <textarea aria-label={label} value={value[key]} onChange={(e) => onChange({ ...value, [key]: e.target.value })} placeholder={placeholder}
         disabled={disabled} rows={rows} spellCheck={false}
         className="w-full border border-gray-300 rounded px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[#4DA2FF] disabled:bg-gray-50" />
     </div>
@@ -18,7 +18,7 @@ export function ConfigurationFields({ value, onChange, disabled }: {
   return (
     <div className="space-y-3">
       <p className="text-xs text-gray-500">
-        Optional component configuration. Recipes are public: never put a secret here. Mark it confidential instead and provision
+        Optional component configuration. Never embed a secret in a recipe, whether public or encrypted. Mark the configuration pointer confidential and provision
         its value on each device (configuration overlay). The component receives the result as {"{configuration}"} and
         $SUIFLEET_CONFIGURATION; it needs an install or run command.
       </p>
