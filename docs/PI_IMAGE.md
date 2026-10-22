@@ -6,8 +6,9 @@ boot, real-device identity persistence, networking and OTA acceptance remain
 programmed by this build. This writable development image is not a production
 release or a firmware rollback design. SF-042 remains on hold.
 
-The completed artifact paths, checksums and exact verification are in
-[PI_IMAGE_BUILD.md](PI_IMAGE_BUILD.md).
+The current signer-service image (SF-066), its checksums and exact verification
+are in [PI_IMAGE_REFRESH.md](PI_IMAGE_REFRESH.md). The earlier SF-029 artifact in
+[PI_IMAGE_BUILD.md](PI_IMAGE_BUILD.md) is an older public smoke baseline only.
 
 ## Rebuild
 
@@ -15,9 +16,10 @@ Use the pinned Scarthgap/Rust-mixin layers
 from `kas/packaging.yml` on Ubuntu 22.04. The target is `suifleet-pi-image`, not
 the package-only `suifleet` target. Rust crates are fetched/checksummed by
 BitBake and compiled frozen/offline. Source is commit
-`6c9501603165c5ed24c0f49c38c31cd0213f1fc5` (reviewed main plus the SF-053
-signing service; recorded SF-029 image builds used `795de747`); its Cargo.lock SHA-256 is
-`44aa5b2637fc2b828a796a63e9a550d9c0fa652437cf59ffd31e0b264021290e`.
+`d616fa16e1d3e90eb0f97a669f693dec99546d3c` (reviewed main with the SF-053
+signing service, SF-026 launcher and SF-022 Seal sessions; the SF-029 baseline
+used `795de747`); its Cargo.lock SHA-256 is
+`310102d73d7644815fe05df24917c332136836d64dcff5f7ca35b44c63b2d937`.
 The image includes the cargo-built daemon, first-boot helper, harmless updater,
 CA certificates, the BSP kernel modules/udev rules, OpenSSH, systemd-networkd,
 systemd-resolved, systemd-timesyncd, iproute2 and ethtool.
@@ -75,7 +77,7 @@ reflashing. No build command opens a removable device.
 
 Use the delivered `.wic.bz2` and SHA-256 file recorded with the build evidence.
 Windows can access the WSL Linux artifact directory through
-`\\wsl.localhost\<your-distribution>\home\tyler\dev\codex\yocto-sf029\`;
+`\\wsl.localhost\<your-distribution>\home\tyler\dev\codex\yocto-sf066\artifacts\`;
 `wsl.exe -l -q` gives the distribution name. You can also open the directory
 with `explorer.exe .` from WSL. Verify `sha256sum -c SHA256SUMS` in the artifact
 directory. Decompress with `bzip2 -dk IMAGE.wic.bz2` if the flashing application
@@ -110,7 +112,7 @@ resolvectl status
 timedatectl status
 timedatectl timesync-status
 sudo cat /etc/suifleet/device.address
-sudo systemctl status suifleet.service suifleet-enrollment.path
+sudo systemctl status suifleet.service suifleet-enrollment.path suifleet-signer.socket suifleet-signer.service
 ```
 
 Verify the host fingerprint through a trusted console before accepting an
@@ -130,8 +132,16 @@ verification. Check `journalctl -u systemd-timesyncd` and `date -u`.
 Use [the verified manifest enrollment procedure](YOCTO_PACKAGING.md) after
 registering the public signer address. Preserve per-type origins and the
 supported client/protocol range from that manifest; do not paste stale IDs.
-Install `deployment.json` first and `config.toml` last atomically, root:suifleet
-0640. For this harmless one-shot application test use:
+Install `deployment.json` first (root:suifleet 0640), then `signer.toml`
+(root:suifleet-signer 0640, from `/etc/suifleet/signer.toml.example`) and
+`config.toml` last (root:suifleet 0640, from the service-signer example),
+each atomically. Before the daemon starts, provisioning hands the key to
+`suifleet-signer`; component commands cannot read it. See
+[KEY_ISOLATION.md](KEY_ISOLATION.md). Launcher and signer are modes of
+`/usr/bin/suifleet`. Enabled daemon self-update is refused with the service
+signer ([DAEMON_UPDATE.md](DAEMON_UPDATE.md)); keep it disabled. No reusable
+session credential is installed by this image. For this harmless one-shot
+application test use:
 
 ```toml
 [apply]

@@ -38,3 +38,29 @@ class PartitionTests(unittest.TestCase):
     def test_overlapping_partitions(self):
         data=mbr();struct.pack_into('<I',data,470,10000)
         with self.assertRaises(ValueError):module.partitions(data)
+
+
+RECIPE = 'SRCREV = "abc123"\nSUIFLEET_LOCK_SHA256 = "def456"\n'
+
+
+class BuildInfoTests(unittest.TestCase):
+    def test_recipe_pins(self):
+        self.assertEqual(module.recipe_pins(RECIPE), dict(source_revision='abc123', lock_sha256='def456'))
+
+    def test_recipe_without_lock_pin(self):
+        with self.assertRaises(ValueError):module.recipe_pins('SRCREV = "abc123"\n')
+
+    def test_matching_build_info(self):
+        info = 'source_revision=abc123\nlock_sha256=def456\ncrate_version=0.2.1\n'
+        self.assertEqual(module.check_build_info(info, module.recipe_pins(RECIPE))['crate_version'], '0.2.1')
+
+    def test_stale_source_revision(self):
+        info = 'source_revision=0ld\nlock_sha256=def456\ncrate_version=0.2.1\n'
+        with self.assertRaises(ValueError):module.check_build_info(info, module.recipe_pins(RECIPE))
+
+    def test_stale_lock_digest(self):
+        info = 'source_revision=abc123\nlock_sha256=0ld\ncrate_version=0.2.1\n'
+        with self.assertRaises(ValueError):module.check_build_info(info, module.recipe_pins(RECIPE))
+
+    def test_incomplete_build_info(self):
+        with self.assertRaises(ValueError):module.check_build_info('source_revision=abc123\n', None)

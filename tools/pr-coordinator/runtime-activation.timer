@@ -1,0 +1,10 @@
+[Unit]
+Description=Check merged versus installed automation runtime
+
+[Timer]
+OnBootSec=120
+OnUnitInactiveSec=120
+Unit=runtime-activation.service
+
+[Install]
+WantedBy=timers.target

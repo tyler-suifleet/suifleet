@@ -18,18 +18,19 @@ Other hosts/architectures need a deliberate profile change and validation.
 The local SuiFleet layer comes from this checkout. Archive its commit ID and
 any diff alongside the kas configuration and build artifacts. The daemon source
 is fetched independently at the recipe's fixed `SRCREV`
-`6c9501603165c5ed24c0f49c38c31cd0213f1fc5`: reviewed main through SF-026
-(integrated gRPC, identity, catalog/dependency, desired-state, deployment-control
-and daemon-update implementations) plus the SF-053 device signing service, so the
-packaged `suifleet-signer` units, `signer.toml` and the provisioning script's
-`--key-holder` call match the binary. See
+`d616fa16e1d3e90eb0f97a669f693dec99546d3c`: reviewed main with the SF-026
+launcher/daemon-update integration, the SF-053 device signing service, SF-022
+Seal sessions and current telemetry, so the packaged `suifleet-signer` units,
+`signer.toml` and the provisioning script's `--key-holder` call match the
+binary. The SF-066 image built from it is recorded in
+[PI_IMAGE_REFRESH.md](PI_IMAGE_REFRESH.md); earlier pins are described in
 [the SF-053 package rebuild](#sf053-package-rebuild). `nobranch=1` selects this exact immutable revision, never AUTOREV.
 The daemon crate version is `0.2.1`. It requires indexed gRPC `ListEvents`
 (Sui ≥ 1.81 in SF-004 tests). Packaging/offline checks do not establish
 real-chain OTA acceptance. The Cargo.lock SHA-256 is
-`44aa5b2637fc2b828a796a63e9a550d9c0fa652437cf59ffd31e0b264021290e`.
+`310102d73d7644815fe05df24917c332136836d64dcff5f7ca35b44c63b2d937`.
 
-`suifleet-crates.inc` declares all 302 registry packages/versions and SHA-256 from
+`suifleet-crates.inc` declares all 349 registry packages/versions and SHA-256 from
 that revision's Cargo.lock. BitBake fetches/unpacks them before compilation;
 Yocto's cargo class vendors them locally and passes `--frozen`. The recipe also
 sets `CARGO_NET_OFFLINE=true` and checks the lockfile digest before configure.
@@ -37,7 +38,7 @@ There is no compile-time crate download or `AUTOREV`.
 
 The bootable SD image profile, access provisioning and flashing instructions are
 in [PI_IMAGE.md](PI_IMAGE.md). Historical validation below remains tied to its
-recorded older sources; use the SF-029 image evidence for the new pin.
+recorded older sources; use the SF-066 image evidence for the current pin.
 
 To update: select a reviewed source revision, update `SRCREV`, run
 `bitbake -c update_crates suifleet`, and update `SUIFLEET_LOCK_SHA256` from that
@@ -441,7 +442,7 @@ gates; automatic testnet status, if failing, must remain visible on the PR.
 
 ## SF-053 package rebuild (2026-10-16 UTC)
 
-**Current pin, `6c9501603165c5ed24c0f49c38c31cd0213f1fc5`.** It adds
+**Previous pin, `6c9501603165c5ed24c0f49c38c31cd0213f1fc5`** (superseded by SF-066). It adds
 `--key-holder` (used by the packaged `suifleet-provision`), the base-binary
 check of `--record-main-process` and the refusal of `[daemon_update]` with the
 service signer. Cargo.lock is unchanged, and `bitbake -c update_crates suifleet`
