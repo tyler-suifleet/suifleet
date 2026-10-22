@@ -3,16 +3,19 @@
 chain simulator of scripts/test_ota.py, without keys or gas.
 
 The simulator charges the device for every transaction and keeps the budget
-and the device's account as fleet_budget::draw_gas would. Checked:
+and the device's own shared GasAccount as fleet_budget::draw_gas would: the
+draw reads the budget and takes from the account's reserve. Checked:
 
-- a device below its low-water mark draws once from the budget, within the
-  float cap, and then reports;
+- a device below its low-water mark draws once from its account, within the
+  float cap, and then reports; the draw names the account and leaves the
+  budget object untouched;
 - with the period allowance used up and too little gas to report, the daemon
   draws nothing, records why in its journal (telemetry reports it) and keeps
   the receipt queued, across a restart;
 - a new period restores the allowance: the daemon draws and the queued
   receipt goes out;
 - a paused budget stops draws, and the reason changes accordingly;
+- an empty reserve stops draws until the owner refills it;
 - the simulator refused no draw: the daemon only submits draws the contract
   would accept.
 
@@ -36,6 +39,7 @@ import test_ota as ota
 from deployment_manifest import BUDGET_TYPES, object_id
 
 BUDGET = "0xb0"
+ACCOUNT = "0xac"
 CLOCK = "0x6"
 DRAW_COST, REPORT_COST = 100, 400
 LOW_WATER, DRAW = 1_000, 5_000
@@ -59,7 +63,8 @@ class BudgetSimulator(ota.Simulator):
         self.fail_execution = False
         self.gas = 500
         self.budget = {"version": "1", "paused": False, "balance": {"value": "100000"}, "registry_id": ota.REGISTRY}
-        self.account = {"owner_cap_id": ota.OWNER_CAP, "suspended": False, "enrolled_at_ms": "1", "total_drawn": "0",
+        self.account = {"id": {"id": ACCOUNT}, "budget_id": BUDGET, "device_id": ota.DEVICE, "reserve": {"value": "50000"},
+            "closed": False, "owner_cap_id": ota.OWNER_CAP, "suspended": False, "enrolled_at_ms": "1", "total_drawn": "0",
             "limits": {"float_cap": "6000", "period_ms": str(PERIOD_MS), "period_allowance": "10000",
                        "max_draws_per_period": "3", "min_draw_interval_ms": "0"},
             "period_start_ms": str(now_ms()), "drawn_in_period": "0", "draws_in_period": "0", "last_draw_ms": "0"}
@@ -70,6 +75,9 @@ class BudgetSimulator(ota.Simulator):
         if id == BUDGET:
             return {"data": {"objectId": id, "owner": {"Shared": {"initial_shared_version": "1"}},
                 "content": {"type": f"{ota.TYPE_ORIGINS['fleet_budget::FleetBudget']}::fleet_budget::FleetBudget", "fields": self.budget}}}
+        if id == ACCOUNT:
+            return {"data": {"objectId": id, "owner": {"Shared": {"initial_shared_version": "1"}},
+                "content": {"type": f"{ota.TYPE_ORIGINS['fleet_budget::GasAccount']}::fleet_budget::GasAccount", "fields": self.account}}}
         return super().obj(id)
 
     def refusal(self, amount):
@@ -87,7 +95,7 @@ class BudgetSimulator(ota.Simulator):
             return "ERateLimited"
         if int(account["drawn_in_period"]) + amount > int(limits["period_allowance"]):
             return "EOverAllowance"
-        if int(self.budget["balance"]["value"]) < amount:
+        if int(account["reserve"]["value"]) < amount:
             return "EInsufficientBalance"
         return None
 
@@ -100,11 +108,12 @@ class BudgetSimulator(ota.Simulator):
             return super().rpc(method, params) + [[BUDGET, key, object_id(self.device)[2:]]]
         if method == "suix_getDynamicFieldObject" and params[0] == BUDGET:
             assert params[1]["type"].endswith("::fleet_budget::DeviceKey")
-            return {"data": {"content": {"fields": {"value": self.account}}}}
+            # The budget only indexes the device's current account.
+            return {"data": {"content": {"fields": {"value": ACCOUNT}}}}
         if method == "unsafe_moveCall" and params[2] == "fleet_budget":
             assert params[0] == ota.ADDRESS and params[1] == ota.PACKAGE and params[3] == "draw_gas", params
-            budget, registry, cap, amount, clock = params[5]
-            assert (budget, registry, cap, clock) == (BUDGET, ota.REGISTRY, self.cap, CLOCK), params
+            budget, account, registry, cap, amount, clock = params[5]
+            assert (budget, account, registry, cap, clock) == (BUDGET, ACCOUNT, ota.REGISTRY, self.cap, CLOCK), params
             amount = int(amount)
             if self.gas < DRAW_COST:
                 raise InsufficientGas("insufficient gas for the draw")
@@ -124,7 +133,8 @@ class BudgetSimulator(ota.Simulator):
             kind, value = self.built[-1]
             if kind == "draw":
                 self.gas += value - DRAW_COST
-                self.budget["balance"]["value"] = str(int(self.budget["balance"]["value"]) - value)
+                # The draw takes from the device's reserve; the budget is not written.
+                self.account["reserve"]["value"] = str(int(self.account["reserve"]["value"]) - value)
                 for field, delta in (("drawn_in_period", value), ("draws_in_period", 1), ("total_drawn", value)):
                     self.account[field] = str(int(self.account[field]) + delta)
                 self.account["last_draw_ms"] = str(now_ms())
@@ -220,6 +230,7 @@ def run(binary):
                     # Below low water: one draw of the float cap (asked 5000, cap 6000 → 5000).
                     ota.wait_for(lambda: funding().get("draws") == 1, "daemon did not draw from the budget", process)
                     assert sim.draws == [DRAW] and sim.gas == 500 + DRAW - DRAW_COST, (sim.draws, sim.gas)
+                    assert sim.account["reserve"]["value"] == str(50_000 - DRAW) and sim.budget["balance"]["value"] == "100000"
                     assert funding()["last_draw_digest"] == "draw-1" and funding().get("blocked") is None, funding()
                     ota.wait_for(lambda: "after" in state().get("cursor", {}), "first event scan did not complete", process)
                     sim.add("0x201")
@@ -255,6 +266,16 @@ def run(binary):
                     ota.wait_for(lambda: "paused" in (funding().get("blocked") or ""), "pause not recorded", process)
                     assert len(sim.draws) == 2
                     print("PASS: a paused budget stopped draws and the reason was recorded")
+
+                    # Resumed, but the device's reserve is empty: blocked until the owner refills it.
+                    sim.account["reserve"]["value"] = "0"
+                    sim.budget["paused"] = False
+                    ota.wait_for(lambda: "reserve is empty" in (funding().get("blocked") or ""), "empty reserve not recorded", process)
+                    assert len(sim.draws) == 2
+                    sim.account["reserve"]["value"] = str(DRAW)
+                    ota.wait_for(lambda: funding().get("draws") == 3, "daemon did not draw after the refill", process)
+                    assert sim.draws == [DRAW] * 3 and funding().get("blocked") is None, funding()
+                    print("PASS: an empty reserve stopped draws until the owner refilled it")
                     stop(process)
                     process = None
             except BaseException:

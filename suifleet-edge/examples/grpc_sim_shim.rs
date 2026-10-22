@@ -372,12 +372,17 @@ impl proto::transaction_execution_service_server::TransactionExecutionService fo
                 continue;
             }
             let id = Address::from_str(arguments[index].as_str().unwrap_or("")).map_err(|e| Status::internal(e.to_string()))?;
-            inputs.push(builder.object(match index {
-                // deployment or budget (&mut), registry (&), cap (owned),
-                // group or Clock (&)
-                0 => sui_transaction_builder::ObjectInput::shared(id, 1, true),
-                2 => sui_transaction_builder::ObjectInput::owned(id, 1, Digest::ZERO),
-                _ => sui_transaction_builder::ObjectInput::shared(id, 1, false),
+            inputs.push(builder.object(match (function == "draw_gas", index) {
+                // draw_gas: budget (&), account (&mut), registry (&), cap
+                // (owned), Clock (&), as a node resolves them.
+                (true, 1) => sui_transaction_builder::ObjectInput::shared(id, 1, true),
+                (true, 3) => sui_transaction_builder::ObjectInput::owned(id, 1, Digest::ZERO),
+                (true, _) => sui_transaction_builder::ObjectInput::shared(id, 1, false),
+                // Status reports: deployment (&mut), registry (&), cap
+                // (owned), group (&).
+                (false, 0) => sui_transaction_builder::ObjectInput::shared(id, 1, true),
+                (false, 2) => sui_transaction_builder::ObjectInput::owned(id, 1, Digest::ZERO),
+                (false, _) => sui_transaction_builder::ObjectInput::shared(id, 1, false),
             }));
         }
         builder.move_call(

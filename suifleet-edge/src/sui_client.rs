@@ -944,8 +944,13 @@ impl SuiClient {
         Ok(balance.balance.unwrap_or_default())
     }
 
-    /// The fleet budget (SF-083) and this device's account in it, if enrolled.
-    pub async fn budget(&self, budget_id: &str, device_id: &str) -> anyhow::Result<(crate::funding::Budget, Option<crate::funding::Account>)> {
+    /// The fleet budget (SF-083) and this device's current account in it
+    /// (its shared `GasAccount` object ID and state), if enrolled.
+    pub async fn budget(
+        &self,
+        budget_id: &str,
+        device_id: &str,
+    ) -> anyhow::Result<(crate::funding::Budget, Option<(String, crate::funding::Account)>)> {
         let object = self.object(budget_id).await?;
         anyhow::ensure!(
             same_type(&object.object_type, &self.move_type("fleet_budget::FleetBudget")),
@@ -958,23 +963,39 @@ impl SuiClient {
             "the fleet budget belongs to another registry"
         );
         let device = Address::from_str(device_id).map_err(|e| anyhow::anyhow!("invalid device ID {device_id}: {e}"))?;
-        let account = self
-            .keyed_field(budget_id, "fleet_budget::DeviceKey", device.inner())
-            .await?
-            .map(|value| crate::funding::Account::from_json(&value))
-            .transpose()?;
-        Ok((budget, account))
+        let Some(account_id) = self.keyed_field(budget_id, "fleet_budget::DeviceKey", device.inner()).await? else {
+            return Ok((budget, None));
+        };
+        let account_id = account_id
+            .as_str()
+            .filter(|id| same_id(id, id))
+            .ok_or_else(|| anyhow::anyhow!("the budget's device index is not an object ID: {account_id}"))?
+            .to_owned();
+        let object = self.object(&account_id).await?;
+        anyhow::ensure!(
+            same_type(&object.object_type, &self.move_type("fleet_budget::GasAccount")),
+            "{account_id} is not a GasAccount of this package"
+        );
+        anyhow::ensure!(matches!(object.owner, Owner::Shared { .. }), "the gas account is not shared");
+        let account = crate::funding::Account::from_json(&object.fields)?;
+        anyhow::ensure!(
+            same_id(&account.budget_id, budget_id) && same_id(&account.device_id, device_id),
+            "the gas account belongs to another budget or device"
+        );
+        Ok((budget, Some((account_id, account))))
     }
 
-    /// Draw `amount` MIST from the fleet budget to this device's address:
-    /// exactly one `fleet_budget::draw_gas` call, paid by the device.
-    pub async fn draw_gas(&self, budget_id: &str, cap: &str, amount: u64) -> anyhow::Result<String> {
+    /// Draw `amount` MIST from this device's account to its address:
+    /// exactly one `fleet_budget::draw_gas` call, paid by the device. The
+    /// budget must be an immutable input: draws never write it.
+    pub async fn draw_gas(&self, budget_id: &str, account_id: &str, cap: &str, amount: u64) -> anyhow::Result<String> {
         let registry = self.manifest().shared_objects.registry.id.clone();
         let call = Call {
             module: protocol::fleet_budget::MODULE,
             function: protocol::fleet_budget::DRAW_GAS,
             args: vec![
-                Arg::Object(budget_id.to_owned()),
+                Arg::SharedRead(budget_id.to_owned()),
+                Arg::Object(account_id.to_owned()),
                 Arg::Object(registry),
                 Arg::Object(cap.to_owned()),
                 Arg::Pure(bcs::to_bytes(&amount)?),
@@ -995,7 +1016,7 @@ impl SuiClient {
         let mut arguments = Vec::new();
         for arg in &call.args {
             arguments.push(match arg {
-                Arg::Object(id) => {
+                Arg::Object(id) | Arg::SharedRead(id) => {
                     let id = Address::from_str(id).map_err(|e| anyhow::anyhow!("invalid object ID {id}: {e}"))?;
                     builder.object(sui_transaction_builder::ObjectInput::new(id))
                 }
@@ -1161,6 +1182,8 @@ struct Call {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Arg {
     Object(String),
+    /// A shared object the call only reads; it must be an immutable input.
+    SharedRead(String),
     /// BCS of a pure value.
     Pure(Vec<u8>),
 }
@@ -1218,6 +1241,10 @@ fn check_transaction(
             (Arg::Object(id), Input::Shared(shared)) => anyhow::ensure!(
                 same_id(&shared.object_id().to_string(), id),
                 "simulated call swapped object argument {index}"
+            ),
+            (Arg::SharedRead(id), Input::Shared(shared)) => anyhow::ensure!(
+                same_id(&shared.object_id().to_string(), id) && !shared.mutability().is_mutable(),
+                "simulated call swapped or writes shared argument {index}"
             ),
             (Arg::Pure(expected), Input::Pure(value)) => anyhow::ensure!(
                 value.as_slice() == expected.as_slice(),
@@ -1481,17 +1508,18 @@ mod tests {
     fn signs_only_the_exact_intended_gas_draw() {
         let package = Address::from_str("0x3").unwrap();
         let sender = Address::from_str("0xa0").unwrap();
-        let build = |amount: u64| {
+        let build = |amount: u64, budget_mutable: bool| {
             let mut builder = sui_transaction_builder::TransactionBuilder::new();
             let a = Address::from_str;
-            let budget = builder.object(sui_transaction_builder::ObjectInput::shared(a("0xb0").unwrap(), 1, true));
+            let budget = builder.object(sui_transaction_builder::ObjectInput::shared(a("0xb0").unwrap(), 1, budget_mutable));
+            let account = builder.object(sui_transaction_builder::ObjectInput::shared(a("0xac").unwrap(), 1, true));
             let registry = builder.object(sui_transaction_builder::ObjectInput::shared(a("0x13").unwrap(), 1, false));
             let cap = builder.object(sui_transaction_builder::ObjectInput::owned(a("0x11").unwrap(), 2, Digest::ZERO));
             let value = builder.pure(&amount);
             let clock = builder.object(sui_transaction_builder::ObjectInput::shared(a("0x6").unwrap(), 1, false));
             builder.move_call(
                 sui_transaction_builder::Function::new(package, "fleet_budget".parse().unwrap(), "draw_gas".parse().unwrap()),
-                vec![budget, registry, cap, value, clock],
+                vec![budget, account, registry, cap, value, clock],
             );
             builder.set_sender(sender);
             builder.set_gas_budget(10_000_000);
@@ -1499,20 +1527,25 @@ mod tests {
             builder.add_gas_objects([sui_transaction_builder::ObjectInput::owned(a("0x12").unwrap(), 3, Digest::ZERO)]);
             builder.try_build().unwrap()
         };
-        let call = |amount: u64, budget: &str| Call {
+        let call = |amount: u64, budget: &str, account: &str| Call {
             module: protocol::fleet_budget::MODULE,
             function: protocol::fleet_budget::DRAW_GAS,
             args: vec![
-                Arg::Object(budget.into()),
+                Arg::SharedRead(budget.into()),
+                Arg::Object(account.into()),
                 Arg::Object("0x13".into()),
                 Arg::Object("0x11".into()),
                 Arg::Pure(bcs::to_bytes(&amount).unwrap()),
                 Arg::Object(CLOCK.into()),
             ],
         };
-        check_transaction(&build(5_000), &call(5_000, "0xb0"), package, sender).unwrap();
-        // A node that raises the amount or swaps the budget gets no signature.
-        assert!(check_transaction(&build(5_001), &call(5_000, "0xb0"), package, sender).is_err());
-        assert!(check_transaction(&build(5_000), &call(5_000, "0xb1"), package, sender).is_err());
+        check_transaction(&build(5_000, false), &call(5_000, "0xb0", "0xac"), package, sender).unwrap();
+        // A node that raises the amount or swaps the budget or account gets no signature.
+        assert!(check_transaction(&build(5_001, false), &call(5_000, "0xb0", "0xac"), package, sender).is_err());
+        assert!(check_transaction(&build(5_000, false), &call(5_000, "0xb1", "0xac"), package, sender).is_err());
+        assert!(check_transaction(&build(5_000, false), &call(5_000, "0xb0", "0xad"), package, sender).is_err());
+        // Nor one that takes the fleet budget mutably, contending with every device.
+        let error = check_transaction(&build(5_000, true), &call(5_000, "0xb0", "0xac"), package, sender).unwrap_err();
+        assert!(error.to_string().contains("writes shared argument 0"), "{error}");
     }
 }

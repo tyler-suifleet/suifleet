@@ -1,13 +1,15 @@
 //! Gas top-ups from the owner's prepaid fleet budget (SF-083,
 //! docs/FLEET_BUDGET.md).
 //!
-//! The owner's `fleet_budget::FleetBudget` funds this device's address. When
-//! the device's SUI balance falls below `low_water_mist`, the daemon draws
-//! from the budget with one `fleet_budget::draw_gas` call, which the chain
-//! bounds per draw, per period and by rate. The daemon reads its account
-//! first and only draws when the contract would accept it, so a refused draw
-//! costs nothing; it then records why it cannot draw (paused, suspended,
-//! allowance used up, budget empty) in the journal, where telemetry reports
+//! The owner's `fleet_budget::FleetBudget` funds this device's address
+//! through the device's own shared `GasAccount`, whose reserve the owner
+//! allocates. When the device's SUI balance falls below `low_water_mist`, the
+//! daemon draws from that account with one `fleet_budget::draw_gas` call,
+//! which only reads the fleet budget and which the chain bounds per draw, per
+//! period and by rate. The daemon reads the budget and its account first and
+//! only draws when the contract would accept it, so a refused draw costs
+//! nothing; it then records why it cannot draw (paused, suspended, removed,
+//! allowance used up, reserve empty) in the journal, where telemetry reports
 //! it. Status reports stay queued in the journal meanwhile: nothing is
 //! dropped, and they go out once a later draw or owner refill succeeds.
 use serde::{Deserialize, Serialize};
@@ -32,8 +34,8 @@ pub struct BudgetConfig {
     /// owner refill (`fleet_budget::fund_device`).
     #[serde(default = "default_low_water")]
     pub low_water_mist: u64,
-    /// Asked for per draw (MIST); the float cap, period allowance and budget
-    /// balance may lower it.
+    /// Asked for per draw (MIST); the float cap, period allowance and the
+    /// account's reserve may lower it.
     #[serde(default = "default_draw")]
     pub draw_mist: u64,
 }
@@ -87,19 +89,23 @@ impl Funding {
     }
 }
 
-/// The budget fields a draw depends on.
+/// The budget fields a draw depends on (it only reads them).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Budget {
     pub version: u64,
     pub paused: bool,
-    pub balance: u64,
     pub registry_id: String,
 }
 
-/// The device's `fleet_budget::DeviceAccount`.
+/// The device's `fleet_budget::GasAccount`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Account {
+    pub budget_id: String,
+    pub device_id: String,
+    /// What the device may still draw from, in MIST.
+    pub reserve: u64,
     pub suspended: bool,
+    pub closed: bool,
     pub float_cap: u64,
     pub period_ms: u64,
     pub period_allowance: u64,
@@ -125,26 +131,40 @@ fn bool_of(value: &Value) -> anyhow::Result<bool> {
     value.as_bool().ok_or_else(|| anyhow::anyhow!("not a bool: {value}"))
 }
 
+/// `Balance<SUI>` as its value or as `{ "value": ... }`.
+fn balance_of(value: &Value) -> anyhow::Result<u64> {
+    u64_of(if value.is_object() { &value["value"] } else { value })
+}
+
+fn id_of(value: &Value) -> anyhow::Result<String> {
+    value
+        .as_str()
+        .filter(|id| crate::sui_client::same_id(id, id))
+        .map(str::to_owned)
+        .ok_or_else(|| anyhow::anyhow!("not an object ID: {value}"))
+}
+
 impl Budget {
-    /// From the node's JSON rendering of a `FleetBudget`. `Balance<SUI>` is
-    /// accepted as its value or as `{ "value": ... }`.
+    /// From the node's JSON rendering of a `FleetBudget`.
     pub fn from_json(fields: &Value) -> anyhow::Result<Self> {
-        let balance = &fields["balance"];
-        let balance = if balance.is_object() { &balance["value"] } else { balance };
         Ok(Self {
             version: u64_of(&fields["version"])?,
             paused: bool_of(&fields["paused"])?,
-            balance: u64_of(balance)?,
             registry_id: fields["registry_id"].as_str().unwrap_or_default().to_owned(),
         })
     }
 }
 
 impl Account {
+    /// From the node's JSON rendering of a `GasAccount`.
     pub fn from_json(value: &Value) -> anyhow::Result<Self> {
         let limits = &value["limits"];
         Ok(Self {
+            budget_id: id_of(&value["budget_id"])?,
+            device_id: id_of(&value["device_id"])?,
+            reserve: balance_of(&value["reserve"])?,
             suspended: bool_of(&value["suspended"])?,
+            closed: bool_of(&value["closed"])?,
             float_cap: u64_of(&limits["float_cap"])?,
             period_ms: u64_of(&limits["period_ms"])?,
             period_allowance: u64_of(&limits["period_allowance"])?,
@@ -180,6 +200,9 @@ pub fn decide(config: &BudgetConfig, balance: u64, budget: &Budget, account: Opt
     let Some(account) = account else {
         return Decision::Blocked("this device is not enrolled in the fleet budget".into());
     };
+    if account.closed {
+        return Decision::Blocked("this device was removed from the fleet budget".into());
+    }
     if account.suspended {
         return Decision::Blocked("this device is suspended in the fleet budget".into());
     }
@@ -199,10 +222,10 @@ pub fn decide(config: &BudgetConfig, balance: u64, budget: &Budget, account: Opt
     if room == 0 {
         return Decision::Blocked(format!("gas allowance for this period used up; the period ends at {period_end} ms"));
     }
-    if budget.balance == 0 {
-        return Decision::Blocked("the fleet budget is empty; its owner must deposit".into());
+    if account.reserve == 0 {
+        return Decision::Blocked("this device's gas reserve is empty; its owner must refill it from the fleet budget".into());
     }
-    let amount = config.draw_mist.min(account.float_cap).min(room).min(budget.balance);
+    let amount = config.draw_mist.min(account.float_cap).min(room).min(account.reserve);
     if amount == 0 {
         return Decision::Blocked("the float cap is zero".into());
     }
@@ -225,14 +248,15 @@ pub async fn top_up(
     let balance = sui.gas_balance().await?;
     funding.balance_mist = Some(balance);
     let (budget, account) = sui.budget(&config.budget_id, device_id).await?;
-    match decide(config, balance, &budget, account.as_ref(), now_ms) {
+    match decide(config, balance, &budget, account.as_ref().map(|(_, account)| account), now_ms) {
         Decision::Enough => funding.clear(),
         Decision::Blocked(reason) => {
             tracing::warn!(%reason, balance, "Gas top-up from the fleet budget is not possible");
             funding.block(reason, now_ms);
         }
         Decision::Draw(amount) => {
-            let digest = sui.draw_gas(&config.budget_id, cap, amount).await?;
+            let (account_id, _) = account.as_ref().expect("a draw needs an account");
+            let digest = sui.draw_gas(&config.budget_id, account_id, cap, amount).await?;
             tracing::info!(%digest, amount, "Drew gas from the fleet budget");
             funding.clear();
             funding.balance_mist = Some(balance.saturating_add(amount));
@@ -261,11 +285,15 @@ mod tests {
         BudgetConfig { budget_id: "0xb0".into(), low_water_mist: 20, draw_mist: 50 }
     }
     fn budget() -> Budget {
-        Budget { version: 1, paused: false, balance: 1_000, registry_id: "0xbe".into() }
+        Budget { version: 1, paused: false, registry_id: "0xbe".into() }
     }
     fn account() -> Account {
         Account {
+            budget_id: "0xb0".into(),
+            device_id: "0xde".into(),
+            reserve: 1_000,
             suspended: false,
+            closed: false,
             float_cap: 40,
             period_ms: 1_000,
             period_allowance: 100,
@@ -286,8 +314,8 @@ mod tests {
         // Only 30 left of the allowance.
         let partly = Account { drawn_in_period: 70, draws_in_period: 1, last_draw_ms: 1, ..account() };
         assert_eq!(decide(&config(), 0, &budget(), Some(&partly), 50), Decision::Draw(30));
-        // The budget holds less than asked.
-        assert_eq!(decide(&config(), 0, &Budget { balance: 7, ..budget() }, Some(&account()), 5), Decision::Draw(7));
+        // The account's reserve holds less than asked.
+        assert_eq!(decide(&config(), 0, &budget(), Some(&Account { reserve: 7, ..account() }), 5), Decision::Draw(7));
     }
 
     #[test]
@@ -302,7 +330,8 @@ mod tests {
         assert!(blocked(budget(), Some(Account { drawn_in_period: 100, draws_in_period: 1, last_draw_ms: 1, ..account() }), 50).contains("used up"));
         assert!(blocked(budget(), Some(Account { draws_in_period: 3, last_draw_ms: 1, ..account() }), 50).contains("draw limit"));
         assert!(blocked(budget(), Some(Account { draws_in_period: 1, last_draw_ms: 100, ..account() }), 105).contains("rate limited"));
-        assert!(blocked(Budget { balance: 0, ..budget() }, Some(account()), 5).contains("empty"));
+        assert!(blocked(budget(), Some(Account { reserve: 0, ..account() }), 5).contains("reserve is empty"));
+        assert!(blocked(budget(), Some(Account { closed: true, ..account() }), 5).contains("removed"));
     }
 
     #[test]
@@ -315,16 +344,18 @@ mod tests {
     #[test]
     fn parses_the_nodes_json_rendering() {
         let budget = Budget::from_json(&json!({"version": "1", "paused": false, "balance": {"value": "123"}, "registry_id": "0xbe"})).unwrap();
-        assert_eq!(budget, Budget { version: 1, paused: false, balance: 123, registry_id: "0xbe".into() });
-        assert_eq!(Budget::from_json(&json!({"version": 1, "paused": true, "balance": "9"})).unwrap().balance, 9);
-        assert!(Budget::from_json(&json!({"version": "1", "paused": "no", "balance": "9"})).is_err());
+        assert_eq!(budget, Budget { version: 1, paused: false, registry_id: "0xbe".into() });
+        assert!(Budget::from_json(&json!({"version": 1, "paused": true})).unwrap().paused);
+        assert!(Budget::from_json(&json!({"version": "1", "paused": "no"})).is_err());
         let account = Account::from_json(&json!({
+            "id": {"id": "0xac"}, "budget_id": "0xb0", "device_id": "0xde", "reserve": {"value": "1000"}, "closed": false,
             "owner_cap_id": "0xc1", "suspended": false, "enrolled_at_ms": "1", "total_drawn": "5",
             "limits": {"float_cap": "40", "period_ms": "1000", "period_allowance": "100", "max_draws_per_period": "3", "min_draw_interval_ms": "10"},
             "period_start_ms": "0", "drawn_in_period": "0", "draws_in_period": "0", "last_draw_ms": "0"
         })).unwrap();
         assert_eq!(account, self::account());
         assert!(Account::from_json(&json!({"suspended": false})).is_err());
+        assert!(Account::from_json(&json!({"budget_id": "budget", "device_id": "0xde", "reserve": "1", "suspended": false, "closed": false})).is_err());
     }
 
     #[test]

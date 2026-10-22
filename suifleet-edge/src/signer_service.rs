@@ -21,11 +21,12 @@
 //!
 //! - gas draws (SF-083, only with `[budget]`): exactly one
 //!   `fleet_budget::draw_gas` call on the manifest's package with the
-//!   configured budget, the manifest's registry, this device's cap and the
-//!   Clock, for at most `max_draw_mist`, paid by the device within the gas
-//!   ceiling; only from the daemon's main process. The chain bounds draws
-//!   again, so a compromised daemon is still limited to its device's float
-//!   and period allowance.
+//!   configured budget as an immutable input, a shared gas account, the
+//!   manifest's registry, this device's cap and the Clock, for at most
+//!   `max_draw_mist`, paid by the device within the gas ceiling; only from
+//!   the daemon's main process. The contract binds the account to this
+//!   device and budget, and bounds draws again, so a compromised daemon is
+//!   still limited to its device's float and period allowance.
 //!
 //! Any process may ask for the device's public address. Everything else is
 //! refused. Component processes run as the daemon user and may reach the
@@ -264,20 +265,28 @@ pub fn check(policy: &Policy, bytes: &[u8]) -> anyhow::Result<Intent> {
             };
             anyhow::ensure!(tx.gas_payment.owner == policy.device, "a gas draw must be paid by the device");
             anyhow::ensure!(tx.gas_payment.budget <= policy.max_budget, "gas budget {} exceeds {}", tx.gas_payment.budget, policy.max_budget);
-            anyhow::ensure!(args.len() == 5, "unexpected argument count");
+            anyhow::ensure!(args.len() == 6, "unexpected argument count");
             anyhow::ensure!(shared(args[0])? == budget, "not this fleet's budget");
-            anyhow::ensure!(shared(args[1])? == policy.registry, "not this fleet's registry");
+            // Draws only read the fleet budget; a mutable budget input would
+            // contend with every other device and the owner.
             anyhow::ensure!(
-                matches!(args[2], Input::ImmutableOrOwned(reference) if *reference.object_id() == policy.cap),
+                matches!(args[0], Input::Shared(input) if !input.mutability().is_mutable()),
+                "a gas draw must not take the fleet budget mutably"
+            );
+            // The device's GasAccount; the contract binds it to the cap and budget.
+            shared(args[1])?;
+            anyhow::ensure!(shared(args[2])? == policy.registry, "not this fleet's registry");
+            anyhow::ensure!(
+                matches!(args[3], Input::ImmutableOrOwned(reference) if *reference.object_id() == policy.cap),
                 "not this device's cap"
             );
-            let Input::Pure(amount) = args[3] else {
+            let Input::Pure(amount) = args[4] else {
                 anyhow::bail!("draw amount is not a pure value");
             };
             let amount: [u8; 8] = amount.as_slice().try_into().map_err(|_| anyhow::anyhow!("draw amount is not a u64"))?;
             let amount = u64::from_le_bytes(amount);
             anyhow::ensure!(amount > 0 && amount <= max_draw, "draw of {amount} MIST exceeds {max_draw}");
-            anyhow::ensure!(shared(args[4])? == Address::from_str("0x6")?, "not the Clock");
+            anyhow::ensure!(shared(args[5])? == Address::from_str("0x6")?, "not the Clock");
             Ok(Intent::Draw)
         }
         (enrollment::MODULE, enrollment::ENROLL) => {
@@ -778,6 +787,9 @@ mod tests {
     struct Draw {
         package: &'static str,
         budget: &'static str,
+        budget_mutable: bool,
+        account: &'static str,
+        account_owned: bool,
         registry: &'static str,
         cap: &'static str,
         clock: &'static str,
@@ -789,7 +801,7 @@ mod tests {
     }
     impl Default for Draw {
         fn default() -> Self {
-            Draw { package: "0x3", budget: "0xb0", registry: "0x13", cap: "0x11", clock: "0x6", amount: 50_000_000u64.to_le_bytes().to_vec(),
+            Draw { package: "0x3", budget: "0xb0", budget_mutable: false, account: "0xac", account_owned: false, registry: "0x13", cap: "0x11", clock: "0x6", amount: 50_000_000u64.to_le_bytes().to_vec(),
                    sender: "0xa0", gas_owner: "0xa0", gas_budget: 10_000_000, extra_command: false }
         }
     }
@@ -798,7 +810,8 @@ mod tests {
             let a = |s: &str| Address::from_str(s).unwrap();
             let mut b = TransactionBuilder::new();
             let args = vec![
-                b.object(ObjectInput::shared(a(self.budget), 1, true)),
+                b.object(ObjectInput::shared(a(self.budget), 1, self.budget_mutable)),
+                b.object(if self.account_owned { ObjectInput::owned(a(self.account), 2, Digest::ZERO) } else { ObjectInput::shared(a(self.account), 1, true) }),
                 b.object(ObjectInput::shared(a(self.registry), 1, false)),
                 b.object(ObjectInput::owned(a(self.cap), 2, Digest::ZERO)),
                 b.pure_bytes(self.amount.clone()),
@@ -828,6 +841,8 @@ mod tests {
             ("zero", Draw { amount: 0u64.to_le_bytes().to_vec(), ..Draw::default() }),
             ("not a u64", Draw { amount: vec![1, 2, 3], ..Draw::default() }),
             ("other budget", Draw { budget: "0xb1", ..Draw::default() }),
+            ("budget taken mutably", Draw { budget_mutable: true, ..Draw::default() }),
+            ("account not shared", Draw { account_owned: true, ..Draw::default() }),
             ("other registry", Draw { registry: "0x99", ..Draw::default() }),
             ("other cap", Draw { cap: "0x98", ..Draw::default() }),
             ("not the clock", Draw { clock: "0x7", ..Draw::default() }),
