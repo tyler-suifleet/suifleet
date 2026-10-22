@@ -59,7 +59,7 @@ and the daemon's `[budget]` requires it. The separately published `fleet_storage
 package (Walrus dependency) is not in this catalog: its dApp calls are checked by
 `check_contract_interfaces.py` against its own compiled summary, and the pinned Walrus
 exchange calls are listed as reviewed external references. Storage purchases go through
-`fleet_storage::buy_storage`/`extend_pool`, so the dApp calls no Walrus `System` function
+`fleet_storage::refill_pool`, so the dApp calls no Walrus `System` function
 directly. See [FLEET_BUDGET.md](FLEET_BUDGET.md).
 
 The additive SF-089 handover API and `fleet_handover::Handover` BCS layout are in

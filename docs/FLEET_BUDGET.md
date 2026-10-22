@@ -162,6 +162,16 @@ cap.
 - `buy_storage`: buys storage from Walrus with the fleet's own WAL and adds it
   to the pool in one call, so no WAL leaves the fleet. It must fuse with the
   pool: an empty pool, the same epoch range, or adjacent with the same size.
+- `refill_pool`: tops up the pool and keeps it until a given epoch, at any
+  epoch, also after it expired. The dApp uses it for every purchase. Walrus
+  joins storage only over the same epoch range, or adjacent ranges of the
+  same size, so after the pool's first epoch `buy_storage` can no longer add
+  to it. `refill_pool` first drops the pool's elapsed epochs, which no new
+  blob can use, and an expired pool entirely; the owner receives the Sui
+  storage rebate. It then extends the remaining unused bytes to the new end
+  epoch at their size and buys the added bytes for the same range. The pool
+  then covers [current epoch, end epoch). A refill cannot end before the
+  pool does. Registered blobs keep their own storage and end epochs.
 - `extend_pool`: pushes the whole pool's expiry back by buying the same size
   for the epochs right after it.
 - `deposit_storage`, `withdraw_storage`, `deposit_wal`,
@@ -250,13 +260,15 @@ as separate work, not claimed here.
   `NEXT_PUBLIC_FLEET_STORAGE_PACKAGE`):
   - creating fleet storage with default per-device quotas;
   - funding its WAL with SUI only (swap with a slippage limit, optionally
-    buying storage in the same transaction), with WAL from the wallet, or by
-    card;
-  - buying storage and extending the pool with the fleet's WAL, at the live
-    Walrus price;
+    refilling the pool in the same transaction), with WAL from the wallet, or
+    by card;
+  - refilling the pool with the fleet's WAL (`refill_pool`): add space and
+    keep the pool for a number of epochs from now, at any epoch and after
+    expiry, with the resulting size, epochs and cost at the live Walrus
+    price shown first;
   - withdrawing unused WAL;
   - pool, expiry, WAL and blob totals, with alerts for no space, no WAL or an
-    expiring pool.
+    expiring or expired pool.
 
 **Fleet-paid uploads** (`lib/fleet-upload.ts`). On the Releases page, the
 Components publisher and the Greengrass import, "Pay Walrus storage from the
@@ -303,7 +315,7 @@ estimate: the wallet shows each transaction's real cost.
 through Walrus's pinned Testnet exchange (`wal_exchange::exchange_all_for_wal`,
 fixed posted rate) in the same PTB. It then calls
 `fleet_storage::deposit_wal_at_least`, which aborts the whole transaction if
-fewer WAL than the minimum arrive, and can call `buy_storage` with that WAL
+fewer WAL than the minimum arrive, and can call `refill_pool` with that WAL
 in the same transaction. The dApp reads the exchange's posted rate and WAL
 reserve first and sets the minimum from the user's slippage limit. No DEX
 route is pinned and verified for Mainnet, so the dApp explains that WAL must
@@ -360,7 +372,7 @@ The TypeScript reads are in `dapp/src/lib/fleet-budget.ts` (`fetchBudgets`,
 
 ```bash
 sui move test --path contracts                    # 168 tests, 44 fleet_budget
-sui move test --path contracts/fleet_storage      # 32 tests against Walrus testnet-v1.59.0
+sui move test --path contracts/fleet_storage      # 39 tests against Walrus testnet-v1.59.0 (in make test-contracts)
 make edge-test                                    # funding, exact-draw check (immutable budget), signer draw policy
 python3 scripts/test_budget_ota.py                # in make test-ota: real daemon vs simulator
 node scripts/test_fleet_budget.cjs                # in make test-manifest: estimate vs SF-054, on-ramp, builders, alerts, fleet-paid upload flow
@@ -376,7 +388,14 @@ make test-budget-testnet SUIFLEET_WALLET=…        # public testnet, dedicated 
   and reclaim, and the version gate on the budget and its accounts. For
   storage: exact storage splitting, non-deletable fleet ownership for device
   and owner uploads, quotas, write-fee caps, slippage, purchases and pool
-  extension with fleet WAL, release/extend and version.
+  extension with fleet WAL, release/extend and version. Refills of a partly
+  used pool in its first epoch and after it (elapsed epochs dropped, unused
+  bytes kept and extended, WAL cost equal to Walrus's price for exactly the
+  added storage), of an expired pool, and refusals to shorten the pool, to
+  end in the past, to leave no storage and from another cap. The Walrus
+  test system cannot advance its epoch from this package, so the
+  later-epoch cases run the same code through a test-only entry point that
+  takes the epoch.
 - **Isolated localnet** ([sf083-localnet.json](validation/sf083-localnet.json)).
   A base (main) package with an activated device is upgraded to head. The
   pre-upgrade device enrolls and draws from its own account; the budget is a
@@ -446,6 +465,10 @@ make test-budget-testnet SUIFLEET_WALLET=…        # public testnet, dedicated 
 
 The earlier shared-budget design's runs (head `ada17bc`) are kept under
 `superseded` in the evidence file.
+
+`refill_pool` was added after this run. It has Move tests only; no public
+testnet run has used it yet, and a live refill after the pool's first Walrus
+epoch needs a pool at least one Walrus epoch (one Testnet day) old.
 
 ## Outstanding acceptance
 
