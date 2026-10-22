@@ -300,3 +300,14 @@ class Activation(unittest.TestCase):
             self.engine.activate()
         self.engine.validate.assert_not_called()
         self.service.stop.assert_not_called()
+
+    def test_timer_service_finds_user_installed_github_cli(self):
+        service = (SOURCE/'runtime-activation.service').read_text()
+        search = next(line.removeprefix('Environment=PATH=') for line in service.splitlines()
+                      if line.startswith('Environment=PATH='))
+        home = self.root/'service-home'
+        binary = home/'.local/bin/gh'; binary.parent.mkdir(parents=True)
+        binary.write_text('#!/bin/sh\nprintf fixture-gh\n'); binary.chmod(0o755)
+        result = subprocess.run(['gh', '--version'], env={'PATH': search.replace('%h', str(home))},
+                                capture_output=True, text=True, check=True)
+        self.assertEqual(result.stdout, 'fixture-gh')

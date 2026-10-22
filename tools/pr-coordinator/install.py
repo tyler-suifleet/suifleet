@@ -59,6 +59,9 @@ def bootstrap_activation():
         originals = {unit: (unit_dir/unit).read_bytes() for unit in ('pr-coordinator.service', 'ticket-dispatcher.service')}
         supervisor = library/'activation.py'
         previous_supervisor = supervisor.read_bytes() if supervisor.exists() else None
+        node = shutil.which('node')
+        if not node:
+            raise SystemExit('Node is required by the installed coordinator validation suite')
         try:
             engine.services.stop(units)
             switch(engine.link, generation)
@@ -69,7 +72,10 @@ def bootstrap_activation():
             shutil.copy2(source/'activation.py', supervisor)
             atomic(home/'.config/pr-coordinator/activation.json', activation_settings)
             for name in ('runtime-activation.service', 'runtime-activation.timer'):
-                shutil.copy2(source/name, unit_dir/name)
+                content = (source/name).read_text()
+                if name.endswith('.service'):
+                    content = content.replace('Environment=PATH=', f'Environment=PATH={Path(node).parent}:')
+                (unit_dir/name).write_text(content)
             subprocess.run(['systemctl','--user','daemon-reload'], check=True)
             engine.services.start(units, generation)
             subprocess.run(['systemctl','--user','enable','--now','runtime-activation.timer'], check=True)
