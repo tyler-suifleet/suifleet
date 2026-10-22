@@ -200,7 +200,7 @@ toolchain-versions:
 # CI entry point (run inside the dev image): each step's output is kept under
 # ci-logs/ for failure diagnostics. No step publishes, spends gas or uses secrets.
 ci: SHELL := /bin/bash
-CI_STEPS := indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat test-ml test-industrial edge-test test-ota test-component test-edge-acceptance dapp-typecheck dapp-build
+CI_STEPS := test-prospects indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat test-ml test-industrial edge-test test-ota test-component test-edge-acceptance dapp-typecheck dapp-build
 ci:
 	@mkdir -p ci-logs
 	@$(MAKE) --no-print-directory toolchain-versions | tee ci-logs/toolchain-versions.txt
@@ -213,6 +213,7 @@ ci:
 
 # Sequential recipe: cross-layer checks must not race over shared build artifacts.
 check:
+	$(MAKE) test-prospects
 	$(MAKE) indexer-test
 	$(MAKE) test-manifest
 	$(MAKE) test-publish
@@ -577,3 +578,9 @@ test-tunneling:
 test-device-defender:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
 	python3 scripts/test_device_defender.py --image "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" $(DEVICE_DEFENDER_EVIDENCE)
+
+# Offline manufacturer research consistency and validation failure paths.
+.PHONY: test-prospects
+test-prospects:
+	python3 scripts/check_manufacturer_prospects.py
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_manufacturer_prospects.py
