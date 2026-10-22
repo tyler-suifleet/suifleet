@@ -147,6 +147,7 @@ class RetentionTests(unittest.TestCase):
                     self.end_headers()
             server = ThreadingHTTPServer(('127.0.0.1', 0), Receiver)
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.minimum_version = ssl.TLSVersion.TLSv1_2
             context.load_cert_chain(cert, key)
             server.socket = context.wrap_socket(server.socket, server_side=True)
             thread = threading.Thread(target=server.serve_forever, daemon=True)
