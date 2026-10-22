@@ -10,11 +10,14 @@ import { Transaction } from "@mysten/sui/transactions";
 import { normalizeSuiAddress, toBase58 } from "@mysten/sui/utils";
 import { dAppKit as kit } from "@/lib/dapp-kit";
 import { FirstRun } from "@/components/FirstRun";
+import { DeviceBcs } from "@/lib/move-bcs";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import { manifestClient } from "../fixtures/manifest-client.ts";
 
 const m = ACCEPTANCE_MANIFEST, address = normalizeSuiAddress("0xa"), digest = toBase58(new Uint8Array(32));
 let reject = false, failEffects = false, chain = m.chain_identifier, signCalls = 0, gasBalance = "0", expired = false, epoch = 1n;
+let hold = null, balanceFail = false, inventoryFail = false, registerOnSuccess = null;
+const inventory = [];
 const account = { address, publicKey: new Uint8Array(32), chains: [`sui:${m.network}`], features: ["sui:signTransaction", "sui:signAndExecuteTransaction"] };
 const listeners = new Set();
 const wallet = {
@@ -30,6 +33,7 @@ const wallet = {
       signCalls++;
       if (input.chain !== `sui:${m.network}`) throw new Error("Wrong signing chain");
       if (reject) throw new Error("User rejected signing");
+      if (hold) await hold.promise;
       const tx = Transaction.from(await input.transaction.toJSON());
       const effects = bcs.TransactionEffects.serialize({ V1: {
         status: failEffects ? { Failure: { InsufficientGas: true } } : { Success: true }, executedEpoch: "1",
@@ -39,6 +43,7 @@ const wallet = {
         eventsDigest: null, dependencies: [],
       } }).toBase64();
       const output = new Transaction(); output.setSender(address); output.setGasPayment([{ objectId: "0x1", version: "1", digest }]); output.setGasPrice(1); output.setGasBudget(1000000); output.transferObjects([output.gas], "0xb");
+      if (!failEffects && registerOnSuccess) { inventory.push(registerOnSuccess); registerOnSuccess = null; }
       return { digest, bytes: BufferlessBase64(await output.build()), signature: "fixture-signature", effects };
     } },
   },
@@ -48,8 +53,14 @@ const client = kit.getClient();
 // Only network responses are fixtures: dApp Kit and effect decoding are real.
 const responses = manifestClient(m, () => chain);
 client.ledgerService.getServiceInfo = async () => { const result = await responses.ledgerService.getServiceInfo(); result.response.epoch = epoch; return result; };
-client.getBalance = async () => ({ balance: { balance: gasBalance } });
-client.listOwnedObjects = async () => ({ objects: [], hasNextPage: false });
+client.getBalance = async () => { if (balanceFail) throw new Error("Balance service unavailable"); return { balance: { balance: gasBalance } }; };
+const deviceType = `${m.type_origins["device_registry::Device"]}::device_registry::Device`;
+client.listOwnedObjects = async ({ type }) => {
+  if (inventoryFail) throw new Error("Inventory service unavailable");
+  const objects = type === deviceType ? inventory.map((d) => ({ objectId: d.id, type: deviceType, content: DeviceBcs.serialize({
+    id: d.id, name: d.name, device_address: d.id, arch: "aarch64", meta: { contents: [] }, registered_at: 1, schema_version: 1 }).toBytes() })) : [];
+  return { objects, hasNextPage: false };
+};
 client.getObject = responses.getObject;
 client.waitForTransaction = (async () => ({ $kind: "Transaction", Transaction: { digest, status: { success: true } } }));
 
@@ -57,7 +68,11 @@ window.addEventListener("wallet-standard:app-ready", (event) => event.detail.reg
 window.dispatchEvent(new CustomEvent("wallet-standard:register-wallet", { detail: ({ register }) => register(wallet) }));
 Object.assign(window, { acceptance: {
   fund: () => { gasBalance = "1000000000"; }, expire: () => { expired = true; }, advanceEpoch: () => { epoch = 2n; }, reject: () => { reject = true; }, effectsFail: () => { reject = false; failEffects = true; },
-  reset: () => { reject = false; failEffects = false; chain = m.chain_identifier; expired = false; epoch = 1n; }, wrongChain: () => { chain = "deadbeef"; },
+  reset: () => { reject = false; failEffects = false; chain = m.chain_identifier; expired = false; epoch = 1n; balanceFail = false; inventoryFail = false; },
+  hold: () => { let release; const promise = new Promise((resolve) => { release = resolve; }); hold = { promise, release }; },
+  release: () => { hold?.release(); hold = null; },
+  registerAs: (name) => { registerOnSuccess = { id: normalizeSuiAddress("0x" + "3".repeat(64)), name }; },
+  balanceFail: () => { balanceFail = true; }, inventoryFail: () => { inventoryFail = true; }, wrongChain: () => { chain = "deadbeef"; },
   unsupportedChain: () => { account.chains = ["sui:mainnet"]; listeners.forEach((fn) => fn({ accounts: [account] })); },
   wallets: () => kit.stores.$wallets.get().map((w) => w.name), signCalls: () => signCalls, disconnect: () => kit.disconnectWallet(),
 } });
