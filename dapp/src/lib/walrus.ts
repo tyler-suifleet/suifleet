@@ -216,9 +216,9 @@ export async function probeDeploymentStorage(recipeBlobId: string): Promise<Depl
     if (!res.ok) return { recipe: "unknown", artifact: "unknown" };
     const bytes = new Uint8Array(await res.arrayBuffer());
     if (isEnvelope(bytes)) return { recipe: "available", artifact: "unknown", confidential: true };
-    const recipe = JSON.parse(new TextDecoder().decode(bytes)) as Partial<ComponentRecipe>;
-    if (!recipe.artifactBlobId) return { recipe: "available", artifact: "unknown" };
-    return { recipe: "available", artifact: await probeBlob(recipe.artifactBlobId) };
+    const recipe: unknown = JSON.parse(new TextDecoder().decode(bytes));
+    assertComponentRecipe(recipe);
+    return { recipe: "available", artifact: await probeBlob(recipe.artifactBlobId), confidential: false };
   } catch {
     return { recipe: "unknown", artifact: "unknown" };
   }

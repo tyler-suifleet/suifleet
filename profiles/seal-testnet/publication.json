@@ -1,0 +1,123 @@
+{
+  "model": "gpt-6.1-sol",
+  "network": "testnet",
+  "chain": {
+    "chain_identifier": "4c78adac",
+    "epoch": "1260",
+    "protocol_version": 139
+  },
+  "tools": {
+    "build": {
+      "role": "build",
+      "release": "testnet-v1.81.1",
+      "version": "sui 1.81.1-e04cf9aa915c",
+      "max_protocol": 138,
+      "path": "/tmp/sf102-sui-build"
+    },
+    "network": {
+      "role": "network",
+      "release": "testnet-v1.82.1",
+      "version": "sui 1.82.1-987123842623",
+      "max_protocol": 139,
+      "archive_sha256": "112bf204fab6927b135edfb316cddac07bdba754434b5f12d021ca7e8a72858c",
+      "binary_sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b",
+      "path": "/tmp/sf102-sui-network",
+      "sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b"
+    }
+  },
+  "operator": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+  "start_balance_mist": 1001259216,
+  "initial_allowance_mist": 150000000,
+  "allowance_mist": 400000000,
+  "allowance_revision_reason": "First publication insufficient gas; retain failed cost in cumulative non-replenishing total",
+  "transactions": [
+    {
+      "label": "Publish separate Seal UI profile",
+      "gas_budget_mist": 150000000,
+      "funding_mist": 0,
+      "status": "failure",
+      "allowance_used_mist": 2400000,
+      "digest": "7dx7LfN9g7tsm2V1JQBB9pXvnQSXaHFxr7YHggUWsuUw",
+      "error": "InsufficientGas",
+      "gas_mist": 2400000
+    },
+    {
+      "label": "Publish separate Seal UI profile",
+      "gas_budget_mist": 397600000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "5VRGCbwGRbDVfTstoJs3gso3s3XwJq55DNh9JJQxPTKT",
+      "gas_mist": 265329600,
+      "allowance_used_mist": 267729600
+    }
+  ],
+  "verification": {
+    "kind": "publish",
+    "modules": 10,
+    "digest": "3a92b104061189711fa9b0047b59c6f217f7f2d97bf5e74439f54e76be866ca9"
+  },
+  "objects": [
+    {
+      "type": "created",
+      "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+      "owner": {
+        "Shared": {
+          "initial_shared_version": 1
+        }
+      },
+      "objectType": "0x81050b5c754c021a1584ee94ec0f472f17324428fa2b579649a956df1ae9b139::device_registry::DeviceRegistry",
+      "objectId": "0x5f99cc8476585dda5f9bba7e5e6516cf29faeeb313d3f20fd2de89566acb855d",
+      "version": "1",
+      "digest": "88oUa6EwHQRsHigiNMFFJowpDLmqSfzGD4MtBfjeDxW4"
+    },
+    {
+      "type": "published",
+      "packageId": "0x81050b5c754c021a1584ee94ec0f472f17324428fa2b579649a956df1ae9b139",
+      "version": "1",
+      "digest": "EqpVyt4Xp87eAkug29qLv34Vdb8tkefwDgDJoXDVV394",
+      "modules": [
+        "component_catalog",
+        "deployment_manager",
+        "desired_state",
+        "device_cap",
+        "device_group",
+        "device_registry",
+        "enrollment",
+        "fleet_handover",
+        "roles",
+        "seal_policy"
+      ]
+    },
+    {
+      "type": "created",
+      "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+      "owner": {
+        "AddressOwner": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965"
+      },
+      "objectType": "0x2::package::UpgradeCap",
+      "objectId": "0xe1ee49b7171c4d552b4b712048e2f26e7dbf15a40e8a18c99831b40e330dbf5f",
+      "version": "1",
+      "digest": "DXRmz9yhLkntMtWaMJzMjjWuCUZ5xNaSfvuAoy27WpCt"
+    }
+  ],
+  "independent_effects": {
+    "digest": "5VRGCbwGRbDVfTstoJs3gso3s3XwJq55DNh9JJQxPTKT",
+    "status": {
+      "success": true,
+      "error": null
+    },
+    "gas_used": {
+      "computationCost": "2400000",
+      "storageCost": "262929600",
+      "storageRebate": "0",
+      "nonRefundableStorageFee": "0"
+    }
+  },
+  "source_commit": "6d20d97b0d4942cdd45b0b5be0f1989fb3138994",
+  "checks": [
+    "Pinned compiler bytecode/dependencies/sender/gas/command shape independently verified before signing",
+    "Failed execution reconciled through gRPC before retry",
+    "Successful execution effects read independently through gRPC",
+    "No original app objects changed; separate package and registry; network lock released"
+  ]
+}

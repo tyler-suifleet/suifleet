@@ -168,7 +168,20 @@ impl Drop for Running {
         }
         let _ = self.child.kill();
         let _ = self.child.wait();
+        #[cfg(test)]
+        crate::supervisor::forget_std_tracked(self.child.id());
     }
+}
+
+/// Unit tests share one process with supervisor tests, whose orphan sweep
+/// kills and reaps every unregistered child; register ours as known.
+#[cfg(test)]
+fn spawn(command: &mut Command) -> std::io::Result<Child> {
+    crate::supervisor::spawn_std_tracked(command)
+}
+#[cfg(not(test))]
+fn spawn(command: &mut Command) -> std::io::Result<Child> {
+    command.spawn()
 }
 
 struct Manager {
@@ -281,7 +294,7 @@ impl Manager {
                 Ok(())
             });
         }
-        let spawned = command.spawn();
+        let spawned = spawn(&mut command);
         drop(command); // Drop the parent's copy of the token environment promptly.
         let child = spawned.map_err(|_| anyhow::anyhow!("could not start localproxy"))?;
         self.runs.push(Running {
@@ -449,36 +462,80 @@ mod tests {
             );
         }
     }
+    /// Block until the child exits without reaping it: `reap` must observe
+    /// the exit itself. No sleep-based guess about process start-up time.
+    fn exited(child: &Child) {
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        let waited = unsafe {
+            libc::waitid(libc::P_PID, child.id(), &mut info, libc::WEXITED | libc::WNOWAIT)
+        };
+        assert_eq!(waited, 0, "{}", std::io::Error::last_os_error());
+    }
     #[tokio::test]
     async fn process_timeout_failure_replay_and_revocation() {
         let dir = std::env::temp_dir().join(format!("sf063-unit-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let script = dir.join("proxy");
-        std::fs::write(&script, "#!/bin/sh\nexec /bin/sleep 30\n").unwrap();
+        std::fs::write(&script, "#!/bin/sh\nexec /bin/sleep 3600\n").unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
         let mut cfg = settings();
         cfg.proxy = script;
+        // Capacity and replay must not depend on scheduling: an hour-long
+        // deadline cannot pass between two consecutive notifications.
+        cfg.tunnel_timeout_seconds = 3600;
         let mut m = Manager::new(cfg);
         let body = |token| {
             serde_json::to_vec(&json!({"clientAccessToken":token,"clientMode":"destination","region":"us-east-1","services":["SSH"]})).unwrap()
         };
         let topic = m.settings.topic();
+        let before = Instant::now();
         m.notify(&topic, false, &body("one")).unwrap();
+        let after = Instant::now();
+        let timeout = Duration::from_secs(m.settings.tunnel_timeout_seconds);
+        assert!((before + timeout..=after + timeout).contains(&m.runs[0].deadline));
         let pid = m.runs[0].child.id();
-        assert!(m.notify(&topic, false, &body("one")).is_err());
-        assert!(m.notify(&topic, false, &body("two")).is_err());
-        tokio::time::sleep(Duration::from_millis(1100)).await;
+        // A concurrently running supervisor test sweeps this process's
+        // unregistered children; the running proxy must survive it.
+        crate::supervisor::sweep_orphans();
+        assert_eq!(unsafe { libc::kill(pid as i32, 0) }, 0);
+        assert!(m.notify(&topic, false, &body("one")).is_err()); // replay
+        assert!(m.notify(&topic, false, &body("two")).is_err()); // capacity
+        assert_eq!(m.runs.len(), 1);
+        m.revoke();
+        assert_eq!(unsafe { libc::kill(pid as i32, 0) }, -1);
+        assert!(m.notify(&topic, false, &body("two")).is_err()); // capacity refusals consumed
+        assert!(m.notify(&topic, false, &body("one")).is_err()); // revocation does not re-arm a token
+        // Real subprocess timeout: waiting longer than the deadline only
+        // makes the run more expired, so delay cannot flip this outcome.
+        m.settings.tunnel_timeout_seconds = 1;
+        m.notify(&topic, false, &body("three")).unwrap();
+        let pid = m.runs[0].child.id();
+        let deadline = m.runs[0].deadline;
+        tokio::time::sleep_until((deadline + Duration::from_millis(50)).into()).await;
+        assert!(matches!(m.runs[0].child.try_wait(), Ok(None)), "proxy exited before its deadline");
         m.reap();
         assert!(m.runs.is_empty());
         assert_eq!(unsafe { libc::kill(pid as i32, 0) }, -1);
-        assert!(m.notify(&topic, false, &body("two")).is_err()); // capacity refusals consumed
-        m.notify(&topic, false, &body("three")).unwrap();
-        let pid = m.runs[0].child.id();
-        m.revoke();
-        assert_eq!(unsafe { libc::kill(pid as i32, 0) }, -1);
+        assert!(m.notify(&topic, false, &body("three")).is_err()); // expired token not reusable
+        // Process exit frees the slot once the exit is observed.
+        m.settings.tunnel_timeout_seconds = 3600;
         m.settings.proxy = "/bin/false".into();
         m.notify(&topic, false, &body("four")).unwrap();
-        tokio::time::sleep(Duration::from_millis(30)).await;
+        let exit_deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+            let waited = unsafe {
+                libc::waitid(libc::P_PID, m.runs[0].child.id(), &mut info,
+                    libc::WEXITED | libc::WNOWAIT | libc::WNOHANG)
+            };
+            assert_eq!(waited, 0, "{}", std::io::Error::last_os_error());
+            if unsafe { info.si_pid() } != 0 {
+                break;
+            }
+            assert!(Instant::now() < exit_deadline, "failed proxy did not exit");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        exited(&m.runs[0].child);
         m.reap();
         assert!(m.runs.is_empty());
         assert!(m.notify(&topic, false, &body("four")).is_err());

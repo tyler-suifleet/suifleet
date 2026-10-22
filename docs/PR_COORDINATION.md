@@ -23,24 +23,25 @@ The installer resolves absolute Codex/Claude paths and the Node directory, so a 
 
 WSL must be running for this local service to poll. The user service restarts with the WSL systemd user session; it cannot wake a powered-off Windows host. `KillMode=process` lets existing workers finish if the daemon restarts. Their wrapper persists PID/start time and actual exit status, so the restarted service can collect completed results without launching another worker. Stopping the service stops new work; it does not interrupt an already-running review or feedback repair. Inspect the recorded PID before explicitly stopping a worker.
 
-## Live agent dashboard (SF-106)
+## Live agent dashboard (SF-106/107)
 
-`agent-dashboard` shows what each worker is doing right now: project, family and
+`fleet-status` (also available as `agent-dashboard`) shows what each worker is doing right now: project, family and
 model, implementation/review/repair role, ticket, PR, elapsed time and the ticket
 title with a short task summary. It also shows configured capacity and use,
 waiting/retry/CI/blocked/retained states, the ticket queue, live resource locks,
 how fresh each local store is, and what changed since the last refresh.
 
 ```bash
-python3 tools/pr-coordinator/install.py --dashboard-only   # copies one file and a launcher; no service restart
-agent-dashboard                      # live view on a terminal: q/Esc quit, r refresh, ↑/↓ j/k PgUp/PgDn scroll
-agent-dashboard --project suifleet --interval 10
-agent-dashboard --once               # one readable snapshot (default when stdout is not a terminal)
-agent-dashboard --json               # one machine-readable snapshot
+python3 tools/pr-coordinator/install.py --dashboard-only   # copies one file and both launchers; no service restart
+fleet-status                         # live view on a terminal: q/Esc quit, r refresh, ↑/↓ j/k PgUp/PgDn scroll
+fleet-status --project suifleet --interval 10
+fleet-status --once               # one readable snapshot (default when stdout is not a terminal)
+fleet-status --json               # one machine-readable snapshot
 ```
 
 The full installer also installs it. `--dashboard-only` copies only `dashboard.py`
-and writes `~/.local/bin/agent-dashboard`. It leaves the coordinator, dispatcher,
+and writes `~/.local/bin/fleet-status` and `~/.local/bin/agent-dashboard`.
+An obsolete prototype symlink is replaced without modifying its target. It leaves the coordinator, dispatcher,
 worker, configuration and systemd units alone, and running workers keep running.
 `--live` exits with status 2 when stdout is not a terminal. One-shot modes exit 3
 when any store is unavailable.
@@ -48,11 +49,39 @@ when any store is unavailable.
 Each refresh reads the atomic ticket database, `dispatch.sqlite3`,
 `reviews.sqlite3`, the private configuration, and each PR's latest
 `snapshot.json`/`process.json` receipts. Every database is opened `mode=ro` with
-`query_only`. The dashboard makes no network calls and starts no GitHub, ticket or
-model subprocess. It only selects whitelisted columns and fields: claim tokens, lock
+`query_only`. Normal dashboard refresh makes no network calls and starts no GitHub, ticket or
+model subprocess. The explicit `--refresh-github` option reads GitHub once before
+viewing; it never enables network polling in the live loop. It only selects whitelisted columns and fields: claim tokens, lock
 tokens, claim blobs, prompts, PR bodies/comments and worker logs are never read
 into its output. Handoff evidence and job errors are shortened, and token-like
 strings in them are redacted.
+
+The opening summary separates three different measures:
+
+- **GitHub open issues / open PRs:** complete paginated REST inventories, including
+  draft PRs and PRs without active tickets. PRs are excluded from the issues count.
+  These are cached GitHub counts with their age; after 30 minutes they show STALE.
+- **Tracked open tickets:** the atomic database's backlog + in progress + review +
+  blocked counts. Completed tickets appear separately in local history. Differences
+  from the GitHub open inventory list the issue numbers or ticket keys to investigate.
+- **Running workers:** PID-verified activity on those issues and PRs. Never add this
+  number to the ticket total. Several workers can work on one PR over time.
+
+Refresh the GitHub inventory explicitly when needed:
+
+```bash
+fleet-status --project suifleet --refresh-github --once
+```
+
+This uses each configured project's `repository` and `github_account`, two
+paginated REST listings and a 60-second timeout per command, avoiding GraphQL.
+It writes only sanitized number/title/draft fields and a timestamp under
+`~/.local/state/pr-coordinator/github-inventory/PROJECT.json` (honoring
+`XDG_STATE_HOME`). Both lists must succeed before replacing the snapshot. Failure
+returns status 3 and preserves the previous cache. Missing, corrupt or wrong-repo
+snapshots show **unknown**, never zero. Plain live refresh and `r` remain offline;
+repeat the explicit command to update GitHub counts. PR associations use ticket keys in PR titles or existing coordinator receipts.
+This is a display association, not a claim of ownership or merge eligibility.
 
 A worker counts as **active** only when its recorded PID is running, has the
 recorded `/proc` start time and is not a zombie. Other cases are listed separately
@@ -253,6 +282,35 @@ This repair changes only coordinator code/database schema, not dispatcher or
 ticket-tool behavior. Use the coordinator-only installation/backup/rollback steps
 above after independent review; this feedback worker does not install services.
 
+### Pending Review ownership publication
+
+A Review claim whose local revision is ahead of its Project mirror
+(`publish_pending`) previously stayed unscheduled until someone ran `ticket
+publish`. A normal `--execute` scan now retries that recoverable mirror failure
+before evaluating the PR, for an owned open PR only:
+
+- Re-read the claim with `ticket show` and require the listed token, agent,
+  model, session, branch, worktree, revision and Review status. Any change defers
+  that PR to the next scan without publishing. In progress, blocked or expired
+  states are never resumed, released or published by this path.
+- Run the supported `ticket publish KEY` (300-second timeout; one in-scan retry for
+  transient network failures), then re-read the claim. Scheduling uses only that
+  fresh published owner, and every existing head/base/feedback, review, CI and
+  merge gate still applies. A revision or ownership change during publication
+  defers scheduling.
+- On failure, the claim and pending state are untouched. The
+  `ownership_publication` table in `reviews.sqlite3` records the claim-token hash,
+  revision, attempt count, next retry (60 s doubling to at most one hour) and a
+  sanitized reason (`timeout`, `transient (exit N)`, `failed (exit N)`, `GitHub
+  rate limited` or a known `ticket` refresh message). Logs and the table never
+  contain argv, stderr, or tokens. A new claim or revision restarts the schedule.
+  Other PRs in the same scan continue normally.
+
+Dry runs never publish. Inspect a stuck claim through the coordinator journal
+and a read-only query of `ownership_publication` (`project, ticket, revision,
+attempts, retry_after, error`); `ticket --project suifleet publish KEY` remains
+the manual path.
+
 ### Reviewing while CI runs
 
 The coordinator starts independent source review for an owned, published Review
@@ -283,3 +341,37 @@ An actual account rate limit records a persistent, account-specific shared
 backoff (60–3600 seconds, default 300) rather than retrying each PR. No API
 account switching is used to evade limits. Failed/incomplete snapshots fail
 closed and remain visible in the coordinator's per-PR triage output.
+
+### Obsolete implementation receipts (SF-110)
+
+Before checking implementation capacity, the dispatcher revisits parked and
+quarantined receipts. It archives only a verified stopped wrapper with no
+surviving session members and no reused PID, after reading current ownership.
+Missing or unreadable identity, pending Project publication, unknown ownership
+and unresolved current quarantines remain reserved. These checks also apply
+when retained receipts are counted against execution capacity.
+
+Retirement requires published Done, an explicit release/recovery event after
+the exact historical claim generation, a same-claim published Review handoff,
+or a verified newer same-claim feedback repair. New repair launches preserve a
+hashed claim/branch/worktree/head proof in `jobs.repair_claim`; historical jobs
+without this proof cannot establish replacement. A repair must have a matching
+process receipt and either be running under its recorded identity or have a
+successful collected `fixed` result.
+
+The dispatcher locks the central atomic-ticketing database with `BEGIN IMMEDIATE`,
+compares the fresh ownership revision and publication revision to its observation,
+then compares the original dispatch row and rechecks stopped process identity
+inside a dispatch transaction. It writes only dispatcher receipts: original
+status/message and a sanitized reason go into `retired_runs`, while the retained
+run becomes `finished`. Original claim, directory and process records remain.
+It never changes ownership tokens, branches, worktrees or GitHub state. Each
+failed reconciliation is isolated and retried on a later scan; quarantine limits
+and retry safeguards are unchanged. A crash before receipt commit leaves the
+reservation; a crash after commit leaves a durable retirement record.
+
+This requires the existing central ticket database schema; missing/incompatible
+stores fail closed. Install coordinator and dispatcher together after review so
+new repair proof can be recorded. Existing unknown receipts require explicit
+operator inspection, not database deletion or threshold increases. No services
+are installed or restarted by the implementation tests.
