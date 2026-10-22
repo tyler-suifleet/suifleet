@@ -196,8 +196,8 @@ def generate(manifest, output, device_template):
     sections = re.findall(r"^\s*\[([^\]\n]+)\]\s*(?:#.*)?$", template, re.MULTILINE)
     if re.search(r"^\s*\[\[", template, re.MULTILINE):
         raise ValueError("device template permits no arrays of tables; use inline arrays")
-    if any(section not in ("device", "device.signer", "apply", "runtime", "seal") for section in sections):
-        raise ValueError("device template permits only device, device.signer, apply, runtime and seal sections")
+    if any(section not in ("device", "device.signer", "apply", "runtime", "seal", "budget") for section in sections):
+        raise ValueError("device template permits only device, device.signer, apply, runtime, seal and budget sections")
     if len(set(sections)) != len(sections) or not {"device", "apply"} <= set(sections):
         raise ValueError("missing or duplicate device template sections")
     encoded = json.dumps(manifest, separators=(",", ":"))
