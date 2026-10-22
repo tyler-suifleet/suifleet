@@ -412,7 +412,11 @@ impl DeploymentManifest {
             crate::sui_client::same_id(&self.call_package_id, &self.call_package_id),
             "invalid call package ID"
         );
-        for (label, group) in [("catalog", crate::catalog::TYPES), ("seal policy", crate::protocol::SEAL_POLICY_TYPES)] {
+        for (label, group) in [
+            ("catalog", crate::catalog::TYPES),
+            ("seal policy", crate::protocol::SEAL_POLICY_TYPES),
+            ("fleet budget", crate::protocol::BUDGET_TYPES),
+        ] {
             let count = group.iter().filter(|name| self.type_origins.contains_key(**name)).count();
             anyhow::ensure!(count == 0 || count == group.len(), "partial {label} type origins");
         }
@@ -452,6 +456,7 @@ impl DeploymentManifest {
         crate::catalog::TYPES
             .iter()
             .chain(crate::protocol::SEAL_POLICY_TYPES)
+            .chain(crate::protocol::BUDGET_TYPES)
             .filter(|name| self.type_origins.contains_key(**name))
     }
     pub fn move_type(&self, name: &str) -> String {

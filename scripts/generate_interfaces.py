@@ -107,6 +107,8 @@ def bcs_type(value):
     if base == "sui::table::Table":
         # Entries live in dynamic fields; the struct itself is its UID and size.
         return 'bcs.struct("Table", { id: bcs.Address, size: bcs.u64() })'
+    if base == "sui::balance::Balance":
+        return 'bcs.struct("Balance", { value: bcs.u64() })'
     if base in ["bool", "u8", "u16", "u32", "u64", "u128", "u256"]:
         return f"bcs.{base}()"
     if base.startswith("sui_edge::"):
@@ -126,6 +128,8 @@ def rust_type(value):
         return f"super::VecMap<{rust_type(args[0])}, {rust_type(args[1])}>"
     if base == "sui::table::Table":
         return "super::Table"
+    if base == "sui::balance::Balance":
+        return "super::Balance"
     if base in ["bool", "u8", "u16", "u32", "u64", "u128"]:
         return base
     if base.startswith("sui_edge::"):
@@ -272,6 +276,7 @@ def generate(catalog, recipe):
           f'export const CATALOG_TYPES = {json.dumps(catalog["optional_type_origins"]["component_catalog"])} as const;',
           f'export const HANDOVER_TYPES = {json.dumps(catalog["optional_type_origins"]["fleet_handover"])} as const;',
           f'export const SEAL_POLICY_TYPES = {json.dumps(catalog["optional_type_origins"]["seal_policy"])} as const;',
+          f'export const BUDGET_TYPES = {json.dumps(catalog["optional_type_origins"]["fleet_budget"])} as const;',
           f'export const STATUS = {json.dumps(catalog["statuses"])} as const;',
           f'export const RECIPE_VERSION = {json.dumps(recipe["properties"]["schemaVersion"]["enum"][0])} as const;',
           f'export const RECIPE_VERSIONS = {json.dumps(recipe["properties"]["schemaVersion"]["enum"])} as const;',
@@ -286,6 +291,7 @@ def generate(catalog, recipe):
             f'pub const SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS: &[u64] = &{json.dumps(catalog["supported_deployment_schema_versions"])};',
             'pub const CATALOG_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["component_catalog"]) + '];',
             'pub const SEAL_POLICY_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["seal_policy"]) + '];',
+            'pub const BUDGET_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["fleet_budget"]) + '];',
             f'pub const RECIPE_VERSION: &str = {json.dumps(recipe["properties"]["schemaVersion"]["enum"][0])};',
             'pub const RECIPE_VERSIONS: &[&str] = &[' + ', '.join(json.dumps(v) for v in recipe["properties"]["schemaVersion"]["enum"]) + '];',
             *[f"pub const STATUS_{name.upper()}: u8 = {value};" for name, value in catalog["statuses"].items()],
@@ -294,7 +300,9 @@ def generate(catalog, recipe):
             '#[derive(Debug, Clone, Deserialize, Serialize)]\npub struct Entry<K, V> { pub key: K, pub value: V }',
             '#[derive(Debug, Clone, Deserialize, Serialize)]\npub struct VecMap<K, V> { pub contents: Vec<Entry<K, V>> }',
             '/// sui::table::Table: entries are dynamic fields; the struct is its UID and size.',
-            '#[derive(Debug, Clone, Deserialize, Serialize)]\npub struct Table { pub id: [u8; 32], pub size: u64 }']
+            '#[derive(Debug, Clone, Deserialize, Serialize)]\npub struct Table { pub id: [u8; 32], pub size: u64 }',
+            '/// sui::balance::Balance<T>: its value.',
+            '#[derive(Debug, Clone, Deserialize, Serialize)]\npub struct Balance { pub value: u64 }']
     calls = []
     move_types = []
     for module, contents in abi.items():
@@ -306,7 +314,7 @@ def generate(catalog, recipe):
             for index, datatype in enumerate(params):
                 arg = f"a{index}"
                 base = datatype.removeprefix("&mut ").removeprefix("&")
-                if base.startswith("sui_edge::") or base == "sui::clock::Clock":
+                if base.startswith("sui_edge::") or base == "sui::clock::Clock" or base.startswith("sui::coin::Coin<"):
                     types += [f'{arg}: Parameters<Transaction["object"]>[0]']
                     arguments += [f"tx.object({arg})"]
                 elif base == "std::string::String":
@@ -321,6 +329,8 @@ def generate(catalog, recipe):
                     types += [f"{arg}: (number | bigint | string)[]"]; arguments += [f"tx.pure(bcs.vector(bcs.u64()).serialize({arg}))"]
                 elif base == "u8":
                     types += [f"{arg}: number"]; arguments += [f"tx.pure.u8({arg})"]
+                elif base == "bool":
+                    types += [f"{arg}: boolean"]; arguments += [f"tx.pure.bool({arg})"]
                 elif base == "vector<u8>":
                     types += [f"{arg}: Uint8Array | number[]"]; arguments += [f'tx.pure.vector("u8", {arg})']
                 elif base == "u64":

@@ -14,7 +14,8 @@ REQUIRED_TYPES = tuple(_PROTOCOL["required_type_origins"])
 CATALOG_TYPES = tuple(_PROTOCOL["optional_type_origins"]["component_catalog"])
 SEAL_POLICY_TYPES = tuple(_PROTOCOL["optional_type_origins"]["seal_policy"])
 HANDOVER_TYPES = tuple(_PROTOCOL["optional_type_origins"]["fleet_handover"])
-OPTIONAL_GROUPS = {"catalog": CATALOG_TYPES, "seal policy": SEAL_POLICY_TYPES}
+BUDGET_TYPES = tuple(_PROTOCOL["optional_type_origins"]["fleet_budget"])
+OPTIONAL_GROUPS = {"catalog": CATALOG_TYPES, "seal policy": SEAL_POLICY_TYPES, "fleet budget": BUDGET_TYPES}
 
 def manifest_types(manifest):
     types = REQUIRED_TYPES
@@ -176,7 +177,7 @@ def resolve(args, read=chain_facts):
     manifest = dict(schema_version=_PROTOCOL["manifest_schema_version"], protocol_version=_PROTOCOL["protocol_version"], network=args.network,
         chain_identifier=args.chain_identifier, rpc_url=args.rpc,
         call_package_id=package_id, upgrade_cap_id=object_id(args.upgrade_cap), package_version=str(package["version"]),
-        type_origins={name: table[name] for name in REQUIRED_TYPES + tuple(n for n in CATALOG_TYPES + SEAL_POLICY_TYPES + HANDOVER_TYPES if n in table)},
+        type_origins={name: table[name] for name in REQUIRED_TYPES + tuple(n for n in CATALOG_TYPES + SEAL_POLICY_TYPES + HANDOVER_TYPES + BUDGET_TYPES if n in table)},
         shared_objects={"registry": {"id": object_id(args.registry),
             "initial_shared_version": shared_version(registry, table["device_registry::DeviceRegistry"])}},
         supported_clients={"dapp": {"min": "0.1.0" if all(n in table for n in CATALOG_TYPES) else "0.0.2", "max_exclusive": "0.2.0"}, "edge": {"min": "0.2.1", "max_exclusive": "0.3.0"}},
