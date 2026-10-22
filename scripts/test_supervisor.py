@@ -167,9 +167,14 @@ def run(binary):
                 seen.update(pids)
                 return pids
 
-            def running(version):
+            def running(version, check=lambda current: True):
+                # One status.json snapshot: separate reads can pair a stale
+                # Running phase with the pid/restarts of a later transition.
                 current = status()
-                return current.get("phase") == "running" and current.get("version") == version
+                return current.get("phase") == "running" and current.get("version") == version and check(current)
+
+            def new_pid(old):
+                return lambda current: current.get("pid") is not None and current["pid"] not in old
 
             with (root / "daemon.log").open("w") as log:
                 def start():
@@ -189,7 +194,7 @@ def run(binary):
 
                 # Crash: the on-failure policy restarts the run.
                 os.kill(first[0], signal.SIGKILL)
-                wait_for(lambda: running("1.0.0") and status().get("restarts") == 1, "crashed run was not restarted", process)
+                wait_for(lambda: running("1.0.0", lambda current: current.get("restarts") == 1), "crashed run was not restarted", process)
                 assert read("runs").splitlines() == ["1.0.0", "1.0.0"], read("runs")
                 assert not alive(first[1]), "the crashed run's grouped child survived"
                 wait_for(lambda: not any(map(alive, first)), "a descendant of the crashed run survived", process)
@@ -223,18 +228,12 @@ def run(binary):
 
                 # Runtime failure exhausts the restart budget, then explicit
                 # recovery restores the retained v1 and journal identity.
-                def restarted(old):
-                    # One snapshot: separate reads can pair the old running
-                    # state with a restarting entry that has no pid yet.
-                    current = status()
-                    return (current.get("phase") == "running" and current.get("version") == "3.0.0"
-                            and isinstance(current.get("pid"), int) and current["pid"] != old)
-
                 for crash in range(4):
                     pid = status()["pid"]
+                    assert isinstance(pid, int), status()
                     os.kill(pid, signal.SIGKILL)
                     if crash < 3:
-                        wait_for(lambda: restarted(pid),
+                        wait_for(lambda: running("3.0.0", new_pid([pid])),
                                  "v3 did not restart before its budget was exhausted", process)
                 wait_for(lambda: running("1.0.0") and journal().get("components", {}).get("svc", {}).get("version") == "1.0.0",
                          "runtime recovery did not restore v1 and its journal", process)
@@ -269,7 +268,7 @@ def run(binary):
 
                 # Reboot stage: the committed version starts again.
                 process = start()
-                wait_for(lambda: running("3.0.0") and status().get("pid") not in third, "v3 did not start on daemon start", process)
+                wait_for(lambda: running("3.0.0", new_pid(third)), "v3 did not start on daemon start", process)
                 wait_for(lambda: recorded()[0] == status()["pid"], "the restarted run did not record itself", process)
                 print("PASS: daemon start (reboot stage) restarted the committed v3")
 
@@ -300,7 +299,7 @@ def run(binary):
                 os.kill(detached, signal.SIGKILL)
                 (components / "instance.json").unlink()
                 process = start()
-                wait_for(lambda: running("3.0.0") and status().get("pid") != orphan[0], "v3 did not restart after a daemon kill", process)
+                wait_for(lambda: running("3.0.0", new_pid([orphan[0]])), "v3 did not restart after a daemon kill", process)
                 assert not any(map(alive, orphan)), ("a pre-crash descendant survived daemon recovery",
                                                      dict(zip(RECORDED, map(alive, orphan))))
                 instances = [pid for pid in map(int, filter(str.isdigit, os.listdir("/proc")))
