@@ -1,8 +1,11 @@
 // SF-083 on an isolated localnet: the fleet budget introduced by a compatible
-// base->head upgrade over existing registry/device objects; real draws; real
-// on-chain failures for revoked, paused, suspended and rate-limited draws and
-// for older package versions after a later upgrade migrates the budget; and
-// the real daemon topping itself up over gRPC. Run through
+// base->head upgrade over existing registry/device objects; real draws from
+// per-device GasAccounts that leave the fleet budget a read-only input (two
+// devices drawing in parallel read the same budget version and each writes
+// only its own account); real on-chain failures for revoked, paused,
+// suspended, rate-limited, wrong-account and empty-reserve draws and for older
+// package versions after a later upgrade migrates the budget; and the real
+// daemon topping itself up over gRPC. Run through
 // scripts/test_protocol_localnet.py --budget-upgrade (network none).
 const fs = require("node:fs/promises"), path = require("node:path"), os = require("node:os"), assert = require("node:assert/strict");
 const { execFileSync, spawn } = require("node:child_process");
@@ -108,7 +111,7 @@ const SUI = 1_000_000_000n;
     const pkg = bcs.Object.parse((await client.getObject({ objectId: head, include: { objectBcs: true } })).object.objectBcs).data.Package;
     const origins = Object.fromEntries(pkg.typeOriginTable.map((o) => [`${o.moduleName}::${o.datatypeName}`, o.package]));
     assert.equal(origins["device_registry::DeviceRegistry"], old);
-    for (const name of ["fleet_budget::FleetBudget", "fleet_budget::BudgetOwnerCap", "fleet_budget::DeviceAccount", "fleet_budget::GasDrawn"]) assert.equal(origins[name], head, name);
+    for (const name of ["fleet_budget::FleetBudget", "fleet_budget::BudgetOwnerCap", "fleet_budget::GasAccount", "fleet_budget::GasDrawn"]) assert.equal(origins[name], head, name);
     console.log("PASS: compatible base-to-head upgrade introduces the budget types at head; the registry keeps its base origin");
 
     // The old package version has no budget: a draw through it fails on chain.
@@ -124,25 +127,45 @@ const SUI = 1_000_000_000n;
     tx.transferObjects([budgetCapResult], owner.toSuiAddress());
     const createdBudget = await execute("create budget", tx);
     const budget = created(createdBudget, "::fleet_budget::FleetBudget"), budgetCap = created(createdBudget, "::fleet_budget::BudgetOwnerCap");
-    tx = new Transaction();
-    tx.moveCall({ target: `${head}::fleet_budget::enroll_device`, arguments: [tx.object(budget), tx.object(budgetCap), tx.object(registry), tx.object(pi.ownerCap), tx.pure.u64(60_000_000n), tx.object("0x6")] });
-    const enrolled = await execute("enroll existing device with float", tx);
+    const enroll = async (label, ownerCap, float, reserve, v = head) => {
+      const t = new Transaction();
+      t.moveCall({ target: `${v}::fleet_budget::enroll_device`, arguments: [t.object(budget), t.object(budgetCap), t.object(registry), t.object(ownerCap),
+        t.pure.u64(float), t.pure.u64(reserve), t.object("0x6")] });
+      const r = await execute(label, t);
+      return { r, account: created(r, "::fleet_budget::GasAccount") };
+    };
+    const { r: enrolled, account: piAccount } = await enroll("enroll existing device with float and reserve", pi.ownerCap, 60_000_000n, 150_000_000n);
     const float = enrolled.balanceChanges.find((c) => c.address === device.toSuiAddress());
     assert.equal(BigInt(float.amount), 60_000_000n);
-    console.log("PASS: an existing pre-upgrade device enrolls; its address receives exactly the float");
+    assert.equal((await client.getObject({ objectId: piAccount })).object.owner.$kind, "Shared");
+    console.log("PASS: an existing pre-upgrade device enrolls; its address receives exactly the float and its own shared GasAccount holds the reserve");
 
-    const draw = (v = head, amount = 30_000_000n) => (t) => t.moveCall({ target: `${v}::fleet_budget::draw_gas`,
-      arguments: [t.object(budget), t.object(registry), t.object(pi.deviceCap), t.pure.u64(amount), t.object("0x6")] });
+    // The budget is a read-only input of every draw: never in changedObjects,
+    // listed as a read-only consensus object at an unchanged version.
+    const budgetVersion = async () => (await client.getObject({ objectId: budget })).object.version;
+    const readOnly = (r, label) => {
+      assert.ok(!r.effects.changedObjects.some((o) => o.objectId === budget), `${label} wrote the fleet budget`);
+      const read = r.effects.unchangedConsensusObjects.find((o) => o.objectId === budget);
+      assert.equal(read?.kind, "ReadOnlyRoot", `${label}: ${JSON.stringify(r.effects.unchangedConsensusObjects)}`);
+      return read.version;
+    };
+    const drawCall = (v, account, cap, amount) => (t) => t.moveCall({ target: `${v}::fleet_budget::draw_gas`,
+      arguments: [t.object(budget), t.object(account), t.object(registry), t.object(cap), t.pure.u64(amount), t.object("0x6")] });
+    const draw = (v = head, amount = 30_000_000n) => drawCall(v, piAccount, pi.deviceCap, amount);
+    const before = await budgetVersion();
     tx = new Transaction(); draw()(tx);
     const drawn = await execute("device draw", tx, device);
     assert.ok(drawn.events.some((e) => e.eventType.endsWith("::fleet_budget::GasDrawn")));
+    assert.equal(readOnly(drawn, "device draw"), before);
+    assert.equal(await budgetVersion(), before);
+    assert.ok(drawn.effects.changedObjects.some((o) => o.objectId === piAccount && o.outputState === "ObjectWrite"));
     const drawCost = drawn.effects.gasUsed;
     const drawNet = BigInt(drawCost.computationCost) + BigInt(drawCost.storageCost) - BigInt(drawCost.storageRebate);
-    // The sender pays storage for rewritten shared objects and receives their old rebates.
-    console.log(`PASS: the device draws within its limits and the draw emits GasDrawn (computation ${drawCost.computationCost}, net ${drawNet} MIST)`);
+    // The sender pays storage for its rewritten account and receives its old rebate.
+    console.log(`PASS: the device draws from its own account; the fleet budget is a read-only input at an unchanged version (computation ${drawCost.computationCost}, net ${drawNet} MIST)`);
 
-    const attackDraw = (label, abort, v = head, amount = 1n) => attack(label, device, async (t) => {
-      t.moveCall({ target: `${v}::fleet_budget::draw_gas`, arguments: [await shared(t, budget, true), await shared(t, registry, false),
+    const attackDraw = (label, abort, v = head, amount = 1n, account = piAccount) => attack(label, device, async (t) => {
+      t.moveCall({ target: `${v}::fleet_budget::draw_gas`, arguments: [await shared(t, budget, false), await shared(t, account, true), await shared(t, registry, false),
         await owned(t, pi.deviceCap), t.pure.u64(amount), await shared(t, "0x6", false)] });
     }, abort);
     await attackDraw("draw above the float cap", code(8, "fleet_budget::draw_gas"), head, 60_000_001n);
@@ -153,9 +176,11 @@ const SUI = 1_000_000_000n;
     tx = new Transaction(); tx.moveCall({ target: `${head}::fleet_budget::set_paused`, arguments: [tx.object(budget), tx.object(budgetCap), tx.pure.bool(true)] }); await execute("pause budget", tx);
     await attackDraw("draw while paused", code(3, "fleet_budget::assert_may_draw"));
     tx = new Transaction(); tx.moveCall({ target: `${head}::fleet_budget::set_paused`, arguments: [tx.object(budget), tx.object(budgetCap), tx.pure.bool(false)] }); await execute("resume budget", tx);
-    tx = new Transaction(); tx.moveCall({ target: `${head}::fleet_budget::set_device_suspended`, arguments: [tx.object(budget), tx.object(budgetCap), tx.pure.id(pi.deviceId), tx.pure.bool(true)] }); await execute("suspend device", tx);
+    tx = new Transaction(); tx.moveCall({ target: `${head}::fleet_budget::set_device_suspended`, arguments: [tx.object(budget), tx.object(budgetCap), tx.object(piAccount), tx.pure.bool(true)] });
+    const suspended = await execute("suspend device", tx);
+    readOnly(suspended, "suspend device");
     await attackDraw("draw while suspended", code(7, "fleet_budget::assert_may_draw"));
-    tx = new Transaction(); tx.moveCall({ target: `${head}::fleet_budget::set_device_suspended`, arguments: [tx.object(budget), tx.object(budgetCap), tx.pure.id(pi.deviceId), tx.pure.bool(false)] }); await execute("resume device", tx);
+    tx = new Transaction(); tx.moveCall({ target: `${head}::fleet_budget::set_device_suspended`, arguments: [tx.object(budget), tx.object(budgetCap), tx.object(piAccount), tx.pure.bool(false)] }); await execute("resume device", tx);
     // The device cannot withdraw: only the owner cap can, and the network
     // refuses a transaction using an object the sender does not own.
     {
@@ -171,6 +196,64 @@ const SUI = 1_000_000_000n;
     await attackDraw("fourth draw in the period", code(10, "fleet_budget::draw_gas"));
     console.log("PASS: on-chain failures for above-float, revoked, paused, suspended, device-withdraw, over-allowance and over-count draws");
 
+    // ── Separate accounts: parallel draws, wrong accounts, empty reserves ──
+    const third = Ed25519Keypair.generate(), fourth = Ed25519Keypair.generate();
+    for (const signer of [third, fourth]) await requestSuiFromFaucetV2({ host: faucet, recipient: signer.toSuiAddress() });
+    const pa = await register("pa", third.toSuiAddress(), head), pb = await register("pb", fourth.toSuiAddress(), head);
+    const { account: aAccount } = await enroll("enroll device A", pa.ownerCap, 0n, 100_000_000n);
+    const { account: bAccount } = await enroll("enroll device B", pb.ownerCap, 0n, 20_000_000n);
+    const version = await budgetVersion();
+    const [ra, rb] = await Promise.all([
+      (async () => { const t = new Transaction(); drawCall(head, aAccount, pa.deviceCap, 30_000_000n)(t); return execute("device A draws", t, third); })(),
+      (async () => { const t = new Transaction(); drawCall(head, bAccount, pb.deviceCap, 20_000_000n)(t); return execute("device B draws", t, fourth); })(),
+    ]);
+    // Both read the same budget version: neither waited on the other's write.
+    assert.equal(readOnly(ra, "device A draw"), version);
+    assert.equal(readOnly(rb, "device B draw"), version);
+    assert.ok(!ra.effects.changedObjects.some((o) => o.objectId === bAccount) && !rb.effects.changedObjects.some((o) => o.objectId === aAccount));
+    assert.equal(await budgetVersion(), version);
+    console.log(`PASS: two devices drew in parallel; both read budget version ${version} and each wrote only its own account`);
+    // B emptied its own reserve; the budget still holds funds, out of B's reach.
+    await attack("draw from an emptied reserve", fourth, async (t) => {
+      t.moveCall({ target: `${head}::fleet_budget::draw_gas`, arguments: [await shared(t, budget, false), await shared(t, bAccount, true), await shared(t, registry, false),
+        await owned(t, pb.deviceCap), t.pure.u64(1n), await shared(t, "0x6", false)] });
+    }, code(11, "fleet_budget::draw_gas"));
+    // B's key cannot draw from A's account.
+    await attack("draw from another device's account", fourth, async (t) => {
+      t.moveCall({ target: `${head}::fleet_budget::draw_gas`, arguments: [await shared(t, budget, false), await shared(t, aAccount, true), await shared(t, registry, false),
+        await owned(t, pb.deviceCap), t.pure.u64(1n), await shared(t, "0x6", false)] });
+    }, code(16, "fleet_budget::assert_may_draw"));
+    // The owner refills B's reserve from the budget, and B draws again.
+    tx = new Transaction(); tx.moveCall({ target: `${head}::fleet_budget::fund_reserve`, arguments: [tx.object(budget), tx.object(budgetCap), tx.object(bAccount), tx.pure.u64(20_000_000n)] }); await execute("owner refills a reserve", tx);
+    // Any address may declare a shared object mutable at its own gas cost; an
+    // adversarial device doing so still gets only what its limits allow, and
+    // the budget's contents stay as they were.
+    const u64 = bcs.u64(), Budget = bcs.struct("FleetBudget", { id: bcs.Address, version: u64, registry_id: bcs.Address, owner_cap_id: bcs.Address, balance: u64,
+      paused: bcs.bool(), default_limits: bcs.fixedArray(5, u64), low_balance_threshold: u64, device_count: u64, total_deposited: u64, total_withdrawn: u64,
+      total_paid: u64, total_allocated: u64, total_reclaimed: u64 });
+    const balanceOf = async () => BigInt(Budget.parse((await client.getObject({ objectId: budget, include: { content: true } })).object.content).balance);
+    const held = await balanceOf();
+    {
+      const t = new Transaction(); t.setSender(fourth.toSuiAddress());
+      t.moveCall({ target: `${head}::fleet_budget::draw_gas`, arguments: [await shared(t, budget, true), await shared(t, bAccount, true), await shared(t, registry, false),
+        await owned(t, pb.deviceCap), t.pure.u64(10_000_000n), await shared(t, "0x6", false)] });
+      await execute("adversarial draw declaring the budget mutable", t, fourth);
+    }
+    assert.equal(await balanceOf(), held);
+    await attack("adversarial draw beyond its reserve", fourth, async (t) => {
+      t.moveCall({ target: `${head}::fleet_budget::draw_gas`, arguments: [await shared(t, budget, true), await shared(t, bAccount, true), await shared(t, registry, false),
+        await owned(t, pb.deviceCap), t.pure.u64(20_000_000n), await shared(t, "0x6", false)] });
+    }, code(11, "fleet_budget::draw_gas"));
+    // Removal retires the account and returns its reserve; it never draws again.
+    tx = new Transaction(); tx.moveCall({ target: `${head}::fleet_budget::remove_device`, arguments: [tx.object(budget), tx.object(budgetCap), tx.object(aAccount)] });
+    const removed = await execute("owner removes device A", tx);
+    assert.ok(removed.events.some((e) => e.eventType.endsWith("::fleet_budget::ReserveChanged")));
+    await attack("draw from a removed device's account", third, async (t) => {
+      t.moveCall({ target: `${head}::fleet_budget::draw_gas`, arguments: [await shared(t, budget, false), await shared(t, aAccount, true), await shared(t, registry, false),
+        await owned(t, pa.deviceCap), t.pure.u64(1n), await shared(t, "0x6", false)] });
+    }, code(4, "fleet_budget::assert_current"));
+    console.log("PASS: on-chain failures for an emptied reserve, another device's account and a removed account; an adversarial mutable budget input changed nothing and stayed within limits");
+
     // ── A later upgrade retires this version's draws ──
     const future = path.join(tmp, "future-sources"); await fs.cp(path.join(root, "contracts/sources"), future, { recursive: true });
     const source = path.join(future, "fleet_budget.move"), text = await fs.readFile(source, "utf8");
@@ -178,17 +261,17 @@ const SUI = 1_000_000_000n;
     await fs.writeFile(source, text.replace("const VERSION: u64 = 1;", "const VERSION: u64 = 2;"));
     const next = await upgrade("future", future);
     tx = new Transaction(); tx.moveCall({ target: `${next}::fleet_budget::migrate`, arguments: [tx.object(budget), tx.object(budgetCap)] }); await execute("migrate budget", tx);
-    tx = new Transaction(); tx.moveCall({ target: `${next}::fleet_budget::fund_device`, arguments: [tx.object(budget), tx.object(budgetCap), tx.object(registry), tx.pure.id(pi.deviceId), tx.pure.u64(1n)] }); await execute("owner refill via the newest version", tx);
+    tx = new Transaction(); tx.moveCall({ target: `${next}::fleet_budget::fund_device`, arguments: [tx.object(budget), tx.object(budgetCap), tx.object(registry), tx.object(piAccount), tx.pure.u64(1n)] }); await execute("owner refill via the newest version", tx);
     // New period not reached: test only the version gate with a fresh device.
     const second = Ed25519Keypair.generate();
     await requestSuiFromFaucetV2({ host: faucet, recipient: second.toSuiAddress() });
     const pi2 = await register("pi2", second.toSuiAddress(), next);
-    tx = new Transaction(); tx.moveCall({ target: `${next}::fleet_budget::enroll_device`, arguments: [tx.object(budget), tx.object(budgetCap), tx.object(registry), tx.object(pi2.ownerCap), tx.pure.u64(0n), tx.object("0x6")] }); await execute("enroll second device", tx);
+    const { account: pi2Account } = await enroll("enroll second device", pi2.ownerCap, 0n, 10_000_000n, next);
     await attack("draw through the previous version after migration", second, async (t) => {
-      t.moveCall({ target: `${head}::fleet_budget::draw_gas`, arguments: [await shared(t, budget, true), await shared(t, registry, false),
+      t.moveCall({ target: `${head}::fleet_budget::draw_gas`, arguments: [await shared(t, budget, false), await shared(t, pi2Account, true), await shared(t, registry, false),
         await owned(t, pi2.deviceCap), t.pure.u64(1n), await shared(t, "0x6", false)] });
-    }, code(0, "fleet_budget::draw_gas"));
-    tx = new Transaction(); tx.moveCall({ target: `${next}::fleet_budget::draw_gas`, arguments: [tx.object(budget), tx.object(registry), tx.object(pi2.deviceCap), tx.pure.u64(1_000_000n), tx.object("0x6")] });
+    }, code(0, "fleet_budget::assert_may_draw"));
+    tx = new Transaction(); drawCall(next, pi2Account, pi2.deviceCap, 1_000_000n)(tx);
     await execute("draw through the newest version", tx, second);
     console.log("PASS: after a later upgrade migrates the budget, the previous version's draw fails on chain and the newest succeeds");
 
@@ -197,7 +280,7 @@ const SUI = 1_000_000_000n;
     const daemonAddress = execFileSync(DAEMON, ["--provision", key], { encoding: "utf8" }).trim();
     await requestSuiFromFaucetV2({ host: faucet, recipient: daemonAddress });
     const pi3 = await register("pi3", daemonAddress, next);
-    tx = new Transaction(); tx.moveCall({ target: `${next}::fleet_budget::enroll_device`, arguments: [tx.object(budget), tx.object(budgetCap), tx.object(registry), tx.object(pi3.ownerCap), tx.pure.u64(1_000_000n), tx.object("0x6")] }); await execute("enroll daemon device", tx);
+    await enroll("enroll daemon device", pi3.ownerCap, 1_000_000n, 200_000_000n, next);
     const resolved = JSON.parse(execFileSync("python3", ["-c", `
 import json, sys; sys.path.insert(0, "scripts"); import deployment_manifest as dm
 from types import SimpleNamespace
@@ -215,6 +298,8 @@ print(json.dumps(dm.resolve(a)))`, rpc, next, upgradeCap, registry], { cwd: root
     if (!funding?.last_draw_digest) { await log.close(); throw new Error(`daemon did not draw by ${new Date().toISOString()}; journal ${JSON.stringify(await journal())}\n` + (await fs.readFile(path.join(tmp, "daemon.log"), "utf8")).slice(-6000)); }
     const effects = await client.getTransaction({ digest: funding.last_draw_digest, include: { effects: true, events: true } });
     assert.ok(effects.Transaction.status.success);
+    // The daemon's draw (and the signer policy) take the budget read-only.
+    readOnly(effects.Transaction, "daemon draw");
     assert.ok(effects.Transaction.events.some((e) => e.eventType.endsWith("::fleet_budget::GasDrawn")));
     assert.equal(BigInt(funding.last_draw_mist), 40_000_000n);
     digests["daemon draw"] = funding.last_draw_digest;
