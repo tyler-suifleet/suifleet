@@ -1,0 +1,9 @@
+[Unit]
+Description=Activate reviewed merged local automation runtime
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/.local/lib/pr-coordinator/activation.py
+UMask=0077
+TimeoutStartSec=900
