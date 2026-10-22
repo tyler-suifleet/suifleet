@@ -1,6 +1,7 @@
 """scripts/claims.py roster mode (SF-100), offline with a stand-in daemon."""
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -77,6 +78,9 @@ class ClaimsRoster(unittest.TestCase):
         (out / "claims.json").write_text(json.dumps({f"k{i}": "0x" + f"{i:064x}" for i in range(600)}))
         lines = self.run_claims("ptb", out, "--package", "0x1", "--policy", "0x2").stdout.strip().splitlines()
         self.assertEqual([line.count("--transfer-objects") for line in lines], [250, 250, 100])
+        # The budget scales with the chunk; make test-bulk-enrollment-localnet runs a full chunk under it.
+        budgets = [int(re.search(r"--gas-budget (\d+)$", line).group(1)) for line in lines]
+        self.assertEqual(budgets, [1_010_000_000, 1_010_000_000, 410_000_000])
 
 
 if __name__ == "__main__":

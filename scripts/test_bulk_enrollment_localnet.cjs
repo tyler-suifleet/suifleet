@@ -6,6 +6,8 @@
 //     bound in two PTBs (100 + resumed 1). Replayed, revoked, expired,
 //     unsponsored and cross-fleet claims are refused on chain; a device whose
 //     owner cap left the operator is never bound. Gas and sizes are measured.
+//     The `scripts/claims.py ptb` command for a full 250-claim chunk runs
+//     through the sui CLI and fits its emitted gas budget.
 //  2. The real Enrollment and Devices pages in Chromium with a scripted
 //     wallet: CSV + naming template + conflicts, guided single-device pairing,
 //     downloaded credential archive, wallet rejection and resume, the real
@@ -59,7 +61,7 @@ const credentialsOf = (files) => [...files.keys()].filter((n) => n.endsWith("/cl
       }
     }
     stage = "faucet"; for (const k of [operator, stranger]) await fund(k.toSuiAddress());
-    for (let i = 0; i < 2; i++) await requestSuiFromFaucetV2({ host: faucet, recipient: operator.toSuiAddress() }); // headroom for 260 claim fundings
+    for (let i = 0; i < 3; i++) await requestSuiFromFaucetV2({ host: faucet, recipient: operator.toSuiAddress() }); // headroom for 260 + 250 (CLI) claim fundings
 
     stage = "compile";
     const contracts = path.join(temporary, "contracts");
@@ -153,6 +155,42 @@ const credentialsOf = (files) => [...files.keys()].filter((n) => n.endsWith("/cl
     const lab = groups.find((g) => g.name === "Lab");
     assert.ok((await e.fetchPolicies(client, op)).some((p) => p.id === bulkPolicy));
     assert.ok(!(await e.fetchPolicies(client, op)).some((p) => p.id === strangerPolicy), "another operator's policy was listed");
+
+    stage = "CLI: scripts/claims.py ptb registers and funds a full 250-claim chunk within its budget";
+    {
+      const cliPolicy = await e.createdPolicy(client, (await execute(e.buildCreatePolicyTx(250, 0))).digest);
+      const roster = path.join(temporary, "cli-claims");
+      await fs.mkdir(roster);
+      const cliClaims = Array.from({ length: 250 }, () => normalizeSuiAddress(Ed25519Keypair.generate().toSuiAddress()));
+      await fs.writeFile(path.join(roster, "claims.json"), JSON.stringify(Object.fromEntries(cliClaims.map((a, i) => [`claim-${i}.key`, a]))));
+      const commands = execFileSync("python3", [path.resolve(__dirname, "claims.py"), "ptb", roster, "--package", packageId, "--policy", cliPolicy], { encoding: "utf8" }).trim().split("\n");
+      assert.equal(commands.length, 1);
+      const budget = BigInt(/--gas-budget (\d+)$/.exec(commands[0])[1]);
+      // One gas coin holds the budget and the 250 fundings: smash the operator's coins first.
+      const coins = (await client.listCoins({ owner: operator.toSuiAddress() })).objects;
+      const smash = new Transaction();
+      smash.setGasPayment(coins.map((c) => ({ objectId: c.objectId, version: c.version, digest: c.digest })));
+      smash.transferObjects([smash.gas], operator.toSuiAddress());
+      await execute(smash);
+      const [gasCoin] = (await client.listCoins({ owner: operator.toSuiAddress() })).objects;
+      const { secretKey } = decodeSuiPrivateKey(operator.getSecretKey());
+      await fs.writeFile(keystore, JSON.stringify([Buffer.concat([Buffer.from([0]), Buffer.from(secretKey)]).toString("base64")]) + "\n");
+      await fs.writeFile(path.join(compileEnv.SUI_CONFIG_DIR, "client.yaml"), (await fs.readFile(path.join(compileEnv.SUI_CONFIG_DIR, "client.yaml"), "utf8")).replace("active_address: null", `active_address: "${op}"`));
+      let output;
+      try { output = execFileSync("bash", ["-c", `${commands[0]} --gas-coin @${gasCoin.objectId} --json`], { env: compileEnv, encoding: "utf8", maxBuffer: 20 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] }); }
+      catch (error) { throw new Error(`claims.py ptb command failed: ${String(error.stdout || "").slice(0, 400)}`); }
+      const digest = JSON.parse(output.slice(output.indexOf("{"))).digest;
+      await checkpointed(digest);
+      const { Transaction: cli } = await client.getTransaction({ digest, include: { effects: true, bcs: true } });
+      assert.equal(cli.effects.status.success, true, "the claims.py PTB failed on chain");
+      const gas = cli.effects.gasUsed, gross = BigInt(gas.computationCost) + BigInt(gas.storageCost);
+      assert.ok(gross <= budget, `claims.py budget ${budget} below gross gas ${gross}`);
+      evidence.transactions.push({ label: "claims.py ptb: register+fund 250 claims (sui CLI)", digest, bytes: cli.bcs?.length, budget_mist: budget.toString(),
+        gross_gas_mist: gross.toString(), net_gas_mist: (gross - BigInt(gas.storageRebate)).toString() });
+      const cliChain = await e.snapshot(client, { ...e.newJob(op, cliPolicy), entries: cliClaims.map((claim, i) => ({ serial: `C${i}`, alias: `cli-${i}`, claim })) });
+      assert.equal(cliChain.policy.unusedClaims, 250);
+      assert.ok(cliClaims.every((a) => cliChain.balances.get(a) === e.DEFAULT_CLAIM_FUND_MIST), "a claim was not funded");
+    }
 
     stage = "reservations";
     const csv = "serial,alias,group\n" + Array.from({ length: 260 }, (_, i) => `B${String(i + 1).padStart(4, "0")},,Lab`).join("\n") + "\n";

@@ -22,8 +22,11 @@
   claims.py ptb OUT_DIR --package PKG --policy POLICY [--fund-mist 20000000]
       Prints `sui client ptb` commands that add the claim addresses to the
       policy and fund each with --fund-mist (the enrollment gas it will
-      sponsor), at most 250 claims per transaction. Run them as the policy's
-      operator.
+      sponsor), at most 250 claims per transaction. Each command's gas
+      budget scales with its claim count (about 1 SUI for a full funded
+      chunk, from the gross gas measured on localnet; see docs/ENROLLMENT.md).
+      The budget is a ceiling, not the cost, but the gas coin must hold it
+      plus the claims' funding. Run them as the policy's operator.
 
 Never transmits keys; roster.json and the PTBs contain addresses only.
 """
@@ -41,6 +44,11 @@ DAEMON = Path(__file__).resolve().parents[1] / "suifleet-edge/target/debug/suifl
 # Matches dapp/src/lib/enrollment.ts: safe in TOML, file names and FAT media.
 NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 CHUNK = 250
+# Gas budget per add_claims PTB: gross gas (computation + storage before
+# rebate) of a funded 250-claim chunk measured 0.662 SUI on localnet
+# (make test-bulk-enrollment-localnet runs this command); ~1.5x headroom.
+GAS_BASE_MIST = 10_000_000
+GAS_PER_CLAIM_MIST = 4_000_000
 MAX_ROWS = 100_000
 
 
@@ -144,7 +152,8 @@ def ptb(out, package, policy, fund):
             arguments += ["--split-coins", "gas", "[" + ", ".join([str(fund)] * len(part)) + "]", "--assign", "fees"]
             for index, address in enumerate(part):
                 arguments += ["--transfer-objects", f"[fees.{index}]", f"@{address}"]
-        print("sui client ptb " + " ".join(shlex.quote(a) for a in arguments) + " --gas-budget 200000000")
+        budget = GAS_BASE_MIST + len(part) * GAS_PER_CLAIM_MIST
+        print("sui client ptb " + " ".join(shlex.quote(a) for a in arguments) + f" --gas-budget {budget}")
 
 
 if __name__ == "__main__":

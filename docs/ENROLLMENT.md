@@ -138,7 +138,7 @@ scripts/claims.py generate --roster devices.csv /secure/batch-07 --template 'pi-
 # /secure/batch-07/roster.json: public; import it on the Enrollment page
 ```
 
-It refuses malformed or duplicate rows before writing anything. `scripts/claims.py ptb` prints one funded `add_claims` PTB per 250 claims, if you prefer the CLI to the page for registration.
+It refuses malformed or duplicate rows before writing anything. `scripts/claims.py ptb` prints one funded `add_claims` PTB per 250 claims, if you prefer the CLI to the page for registration. Each command's gas budget scales with its claims (1.01 SUI for a full chunk). The gas coin must hold that budget plus the claims' funding (5 SUI for 250 claims at the default 0.02 SUI).
 
 **Measured capacity, not claimed capacity.**
 - `make test-bulk-enrollment-localnet` registers 260 claims in two transactions on a disposable localnet. 101 devices enroll, and are bound in two transactions.
@@ -148,6 +148,7 @@ It refuses malformed or duplicate rows before writing anything. `scripts/claims.
   |---|---|---|
   | Register and fund 250 claims | 22.6 KB | 0.658 SUI |
   | Bind 100 devices (alias, serial, group) | 49.1 KB | 0.155 SUI |
+  | `scripts/claims.py ptb`, 250 funded claims via `sui client ptb` | 20.0 KB | 0.658 SUI (0.662 SUI gross, budget 1.01 SUI) |
 
   The 101 sequential self-enrollments took 113 s in total.
 - The chunk sizes (250 claims, 100 binds, 250 transfers) stay well inside Sui's PTB limits: 1,024 commands, 512 arguments per command, 16 KiB per pure argument, 128 KiB per transaction.
