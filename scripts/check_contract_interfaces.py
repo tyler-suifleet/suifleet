@@ -96,7 +96,8 @@ def top_level_items(text, start):
 EXTERNAL = frozenset({"key_server::KeyServer",
                       "wal_exchange::exchange_all_for_wal", "wal_exchange::Exchange"})
 # Separately published packages of this repository, checked like the core one.
-EXTRA_PACKAGES = {"fleet_storage": ROOT / "contracts/fleet_storage"}
+EXTRA_PACKAGES = {name: ROOT / "contracts" / name
+                  for name in ("fleet_storage", "fleet_data")}
 
 
 def check(modules, framework=frozenset(), sources=None):
@@ -155,18 +156,27 @@ def check(modules, framework=frozenset(), sources=None):
     return errors, checked
 
 
+def summarize_packages(contracts, summary_dir):
+    """Compile every first-party package; dependencies are not ABI exemptions."""
+    modules, framework = summarize(contracts, summary_dir / "core")
+    for name in EXTRA_PACKAGES:
+        package = contracts / name
+        extra_modules, extra_framework = summarize(package, summary_dir / name)
+        duplicates = modules.keys() & extra_modules.keys()
+        if duplicates:
+            raise ValueError(f"duplicate first-party modules: {sorted(duplicates)}")
+        modules.update(extra_modules)
+        framework.update(extra_framework)
+    return modules, framework
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--contracts", type=Path, default=ROOT / "contracts")
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="move-summary-") as summary_dir:
         try:
-            modules, framework = summarize(args.contracts, Path(summary_dir))
-            for name, package in EXTRA_PACKAGES.items():
-                extra = Path(summary_dir) / name
-                subprocess.run(["sui", "move", "summary", "--path", str(package), "--output-directory", str(extra)],
-                               check=True, capture_output=True, text=True)
-                modules.update({path.stem: json.loads(path.read_text()) for path in (extra / name).glob("*.json")})
+            modules, framework = summarize_packages(args.contracts, Path(summary_dir))
         except subprocess.CalledProcessError as error:
             sys.exit(f"sui move summary failed:\n{error.stdout}\n{error.stderr}")
     errors, checked = check(modules, framework)

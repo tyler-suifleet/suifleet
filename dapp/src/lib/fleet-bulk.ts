@@ -151,9 +151,16 @@ export async function archiveDecryptor(client: SuiGrpcClient, config: FleetDataC
     if (object.threshold !== settings.threshold || servers.join() !== actual.join()) throw Error('Archive Seal provider/threshold mismatch');
     const tx = new Transaction();
     tx.setSender(sessionKey.getAddress());
-    const args = [tx.pure.vector('u8', decodeHex(object.id)), tx.object(config.fleetId)];
-    if (authority.kind === 'owner') args.push(tx.object(config.budgetId), tx.object(authority.ownerCapId));
-    tx.moveCall({ target: `${config.packageId}::fleet_data::seal_approve_${authority.kind}`, arguments: args });
+    if (authority.kind === 'owner') {
+      tx.moveCall({ target: `${config.packageId}::fleet_data::seal_approve_owner`, arguments: [
+        tx.pure.vector('u8', decodeHex(object.id)), tx.object(config.fleetId),
+        tx.object(config.budgetId), tx.object(authority.ownerCapId),
+      ] });
+    } else {
+      tx.moveCall({ target: `${config.packageId}::fleet_data::seal_approve_support`, arguments: [
+        tx.pure.vector('u8', decodeHex(object.id)), tx.object(config.fleetId),
+      ] });
+    }
     const txBytes = await tx.build({ client, onlyTransactionKind: true });
     return seal.decrypt({ data: encrypted, sessionKey, txBytes, checkShareConsistency: true });
   };
