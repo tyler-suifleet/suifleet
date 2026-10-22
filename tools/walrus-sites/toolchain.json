@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "release": "mainnet-v2.12.2",
+  "version_output": "site-builder 2.12.2-7c5dfaf4ed2a",
+  "platform": "ubuntu-x86_64",
+  "archive_url": "https://github.com/MystenLabs/walrus-sites/releases/download/mainnet-v2.12.2/site-builder-mainnet-v2.12.2-ubuntu-x86_64.tgz",
+  "archive_sha256": "0495bc5f94095459094f36c5eb73ecbb87fcda55bb4308445edc1bc2538876f4",
+  "binary_sha256": "c9d9e59c49de2c95b913820b0cbd1d6b1a19f2b1ec5de7e2a3291e6bc2619d50"
+}
