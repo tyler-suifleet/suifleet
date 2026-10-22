@@ -380,6 +380,50 @@ def run(args):
         live.check(f"the dApp's fleet-paid upload registered and certified owner blob {info['blobId']} from fleet storage (write fee "
                    f"{info['costFrost']} FROST), each transaction verified before signing: fleet-owned, non-deletable, read back")
 
+        if getattr(args, "retention", False):
+            from retention_worker import Worker
+            # Restricted device identity is also the executor; it has no owner cap.
+            gas_reserve = 5_000_000
+            renewal_swap = 5_000_000
+            renewal_wal = renewal_swap * int(rate["wal"]) // int(rate["sui"])
+            live.transaction("configure bounded retention executor", "--move-call",
+                             call("fleet_storage", "configure_retention", storage_package), f"@{storage}", f"@{budget}", f"@{budget_cap}",
+                             f"@{device_address}", "6u32", f"{renewal_wal}u64", f"{gas_reserve}u64", "1000000u64", budget=15_000_000)
+            live.transaction("fund isolated retention reserves", "--split-coins", "gas", f"[{renewal_swap}u64,{gas_reserve}u64]",
+                             "--assign", "funds", "--move-call", f"{EXCHANGE_PACKAGE}::wal_exchange::exchange_all_for_wal", f"@{EXCHANGE}", "funds.0",
+                             "--assign", "wal", "--move-call", call("fleet_storage", "fund_retention", storage_package), f"@{storage}", "wal", "funds.1",
+                             budget=20_000_000, funding=renewal_swap + gas_reserve)
+            target = end_epoch + 2
+            live.transaction("authorize finite blob renewal", "--move-call", call("fleet_storage", "authorize_renewal", storage_package),
+                             f"@{storage}", f"@{budget}", f"@{budget_cap}", f"@{blob}", f"{target}u32", f"{renewal_wal}u64", budget=15_000_000)
+            worker = Worker({"chain": live.chain, "network": "testnet", "rpc": live.rpc_url,
+                             "storage": storage, "package": storage_package, "storage_origin": storage_package,
+                             "retention_origin": storage_package, "executor": device_address,
+                             "executor_key_file": str(root / "device/test.key"), "system": SYSTEM,
+                             "walrus_package": WALRUS_PACKAGE, "gas_budget": "10000000", "spend_ceiling": "10000000"}, root / "retention")
+            def transport(action, value=None):
+                if action != "submit":
+                    return worker.call(action, value)
+                live.assert_lock()
+                def submit(reserved):
+                    assert reserved == 10_000_000
+                    return live.executor(device_config)("execute-signed-tx", "--tx-bytes", value["bytes"], "--signatures", value["signature"])
+                r = live.execute("browser-independent restricted renewal worker", submit, gas=10_000_000, sender=device)
+                renewed = event(r, "::fleet_storage::RenewalCompleted")
+                assert int(renewed["end_epoch"]) == target and int(renewed["fee"]) > 0
+                live.evidence["retention_renewal"] = dict(renewed, digest=r["digest"], net_gas_mist=net_gas(r))
+                return {"status": "submitted"}
+            worker.transport = transport
+            worker.tick()
+            wait_for(lambda: int(plain(live.object(blob)["content"])["storage"]["end_epoch"]) == target,
+                     "renewal expiry not observed", timeout=60)
+            worker.tick()
+            assert worker.state["last_success"][dm.object_id(blob)]["end"] == target
+            worker.tick()
+            assert len([t for t in live.evidence["transactions"] if t["label"] == "browser-independent restricted renewal worker"]) == 1
+            worker.lock.close()
+            live.check("owner-run worker renewed before exclusive expiry with separate executor identity, verified effects and expiry; restart/no-op did not spend twice")
+
         # ── Cleanup: device removed (its reserve returns), unused deposit back, device swept ──
         r = live.transaction("remove the device; its reserve returns", "--move-call", call("fleet_budget", "remove_device"), f"@{budget}",
                              f"@{budget_cap}", f"@{account}", budget=20_000_000)
@@ -404,6 +448,7 @@ def run(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--retention", action="store_true", help="SF092 real worker renewal and effects/expiry checks")
     parser.add_argument("--wallet", required=True, help="the dedicated agent wallet's client.yaml")
     parser.add_argument("--max-spend-mist", type=int, default=600_000_000)
     parser.add_argument("--walrus-sdk", default="/tmp/sf083-walrus-sdk")
