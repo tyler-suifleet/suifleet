@@ -1,4 +1,4 @@
-# Wallet onboarding (SF-088)
+# Wallet onboarding (SF-088, SF-101)
 
 `/get-started` guides connection, deployment/network verification, gas funding,
 registration and recipient-confirmed fleet handover. The header wallet menu still supports
@@ -80,19 +80,46 @@ multisig custody for business fleets before large deposits.
 
 ## First run and SF-083 extension
 
-The page shows the manifest network, connected address and verified balance. A
-nonzero gas balance enables registration; it does not promise sufficient gas.
+SF-101 presents `/get-started` as four guided steps: sign in, add gas, register
+a device and deploy a first update. A progress list shows each step's state
+(done, current, blocked or upcoming) and one concise **Next** action. States are
+derived only from verified facts (`onboardingProgress` in `lib/onboarding.ts`):
+connected account, verified gas balance and on-chain inventory. A balance or
+inventory query failure shows the step as blocked and keeps registration
+disabled. Registration is reported as inventory only; the first-update step is
+never marked done and no step claims installation or online health.
+
+The account step shows the wallet account label (or wallet name), a short address
+and the manifest network. Gas is shown as a readable SUI amount rounded down to
+four decimals (never rounding a nonzero balance to zero); **Technical details**
+discloses the network, full address and exact SUI/MIST balance. A zero balance
+shows the full funding address and network inline. The registration form always
+shows the full signing address and network beside the submit button. Essential
+custody guidance stays visible; longer zkLogin/session/business-custody text and
+faucet guidance are behind disclosures. Recipient-confirmed fleet handover moved
+to a collapsed **Advanced: move fleet ownership** section that keeps every
+recipient/authority/partial-cutover warning beside the `/handover` link.
+
+A nonzero gas balance enables registration; it does not promise sufficient gas.
 The wallet estimates the actual cost. Fund using a same-network SUI transfer or a
 disposable localnet/testnet faucet. No card checkout or prepaid budget exists here.
 SF-083 inserts its estimate/card-funding/budget-deposit steps at the marked
-extension point between the gas check and registration in `FirstRun.tsx`; it must
-retain network/account checks and distinguish gas from a fleet budget.
+extension point in the gas step of `FirstRun.tsx`; it must retain network/account
+checks and distinguish gas from a fleet budget. SF-100 address-free naming and
+bulk enrollment integrate at the marked point in the registration step once its
+API is merged; this page does not anticipate that API.
 
 Registration uses the existing single PTB to register, issue the device cap and
-activate custody. Confirmed effects produce a digest and an inventory refresh;
-daemon provisioning/online health remains separate. Errors explain gas charges
-and ambiguous submission: inspect wallet history and refresh inventory before
-retrying. Do not infer a healthy device from a successful registration.
+activate custody. Progress shows verification, wallet approval and network
+confirmation phases. A synchronous in-flight guard and the disabled button prevent
+duplicate submission; confirmed effects produce a digest, clear the form and
+refresh inventory, whose device names are listed. Daemon provisioning/online
+health remains separate. Errors explain gas charges and ambiguous submission:
+inspect wallet history and refresh inventory before retrying. Do not infer a
+healthy device from a successful registration.
+
+Below the `md` breakpoint the application sidebar becomes a horizontally
+scrolling navigation bar so pages, including onboarding, fit 375 px screens.
 
 ## Verification and outstanding acceptance
 
@@ -108,8 +135,13 @@ The unit test is included in `make test-manifest`/`make dapp-typecheck`. Browser
 tests use actual dApp Kit and the production wallet initializer/page component,
 with fixture Wallet Standard signing, network responses and Enoki session metadata.
 They test localnet/testnet configuration, Google registration only on testnet,
-Slush registration, zero-gas gating, registration confirmation/rejection, session
-wall-clock and epoch expiry, network mismatch and disconnect. They do not log
+Slush registration, progress/next-action states, readable and exact balances,
+zero-gas gating, disclosed handover warnings, keyboard focus and disclosure,
+registration confirmation/rejection/inventory, duplicate-submission prevention,
+session wall-clock and epoch expiry, network mismatch, unavailable
+balance/inventory and disconnect. The onboarding run loads the application's
+compiled Tailwind stylesheet and checks 375/768/1280 px widths for horizontal
+overflow and WCAG AA text contrast; set `SCREENSHOT_DIR` to keep screenshots. They do not log
 into Google/Slush, operate an extension or submit to a chain.
 
 The user-authorized implementation/acceptance split now covers SF-088; see
