@@ -232,7 +232,7 @@ class Dispatcher:
                 (directory/'helpers.json').write_text(json.dumps(helpers))
                 if helpers:
                     continue  # Includes detached heartbeat helpers; retain ownership and capacity.
-                owner = self.ticket(project, 'assert', claim['key'], '--token', claim['token'])
+                owner = self.ticket(project, 'show', claim['key'])
                 fields = ('token', 'session', 'branch', 'worktree')
                 if (owner.get('publish_pending') or owner.get('status') != 'in_progress'
                         or any(owner.get(k) != claim.get(k) for k in (*fields, 'agent', 'model'))):
@@ -251,6 +251,20 @@ class Dispatcher:
                         or current['revision'] != current['published_revision']):
                     continue
                 if self.stopped_identity(row) != identity or self.claim_helpers(claim):
+                    continue
+                # Expiry preserves ownership. Renew only after proving that the
+                # original worker is stopped and its published claim is unchanged.
+                # The CLI takes its own authority lock; release ours first, then
+                # assert all remote/dependency gates and fence ownership again.
+                authority.execute('ROLLBACK')
+                self.ticket(project, 'heartbeat', claim['key'], '--token', claim['token'])
+                verified = self.ticket(project, 'assert', claim['key'], '--token', claim['token'])
+                authority.execute('BEGIN IMMEDIATE')
+                current = authority.execute('SELECT * FROM tickets WHERE key=? AND project=?',
+                                            (project['id']+'::'+claim['key'], project['id'])).fetchone()
+                if (not current or any(current[k] != owner.get(k) for k in (*fields, 'status', 'revision', 'published_revision'))
+                        or any(verified.get(k) != owner.get(k) for k in (*fields, 'status', 'revision', 'published_revision'))
+                        or self.stopped_identity(row) != identity or self.claim_helpers(claim)):
                     continue
                 session = row['session']+'-handoff-audit'
                 audit = directory/'handoff-audit'
@@ -374,7 +388,21 @@ Hand off completed work only after verifying all implementation gates. Preserve 
             return False
         rows = self.db.execute("SELECT * FROM runs WHERE project=? AND family=? AND status!='finished'",
                                (slot['project'], slot['family'])).fetchall()
-        if sum(r['status'] in ('quarantined', 'parked') for r in rows) >= slot.get('max_quarantined', 3):
+        # Source and bounded audit receipts retain one claim, not two slots.
+        # Missing/malformed claims remain separate conservative reservations.
+        retained = set()
+        for row in rows:
+            if row['status'] not in ('quarantined', 'parked'):
+                continue
+            try:
+                claim = json.loads(row['claim'])
+                identity = (claim['key'], claim['token'])
+                if not all(identity):
+                    raise ValueError('Missing claim identity')
+            except (ValueError, TypeError, KeyError):
+                identity = ('receipt', row['session'])
+            retained.add(identity)
+        if len(retained) >= slot.get('max_quarantined', 3):
             return False
         managed_sessions = {r['session'] for r in rows}
         # Real ticket responses preserve the dispatch session. Tests/legacy state

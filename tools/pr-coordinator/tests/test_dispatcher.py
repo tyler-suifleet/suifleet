@@ -569,10 +569,6 @@ class ObsoleteReceiptTests(unittest.TestCase):
         self.assertEqual(self.state_of_run(),'quarantined')
 
 
-if __name__ == '__main__':
-    unittest.main()
-
-
 class HandoffAuditTests(unittest.TestCase):
     setUp = DispatchTests.setUp
     receipt = DispatchTests.receipt
@@ -638,6 +634,62 @@ class HandoffAuditTests(unittest.TestCase):
                     for p in reversed(patches): p.stop()
                     (folder/'result.json').unlink(missing_ok=True)
 
+    def test_expired_lease_is_renewed_before_assert_and_audited_once(self):
+        self.setup_audit()
+        expired = True
+        calls = []
+        def ticket(project, *args):
+            nonlocal expired
+            calls.append(args[0])
+            if args[0] == 'heartbeat':
+                expired = False
+            if args[0] == 'assert' and expired:
+                raise subprocess.CalledProcessError(1, 'ticket', stderr='Lease expired')
+            return self.owner
+        self.worker.ticket.side_effect = ticket
+        self.worker.audit_missing_handoff(self.project)
+        self.assertEqual(calls, ['show', 'heartbeat', 'assert'])
+        self.assertEqual(self.attempts(), 1)
+        self.worker.audit_missing_handoff(self.project)
+        self.assertEqual(self.attempts(), 1)
+
+    def test_assert_dependency_or_remote_failure_never_launches(self):
+        self.setup_audit()
+        def ticket(project, *args):
+            if args[0] == 'assert':
+                raise subprocess.CalledProcessError(1, 'ticket', stderr='Dependency incomplete or issue closed')
+            return self.owner
+        self.worker.ticket.side_effect = ticket
+        self.worker.audit_missing_handoff(self.project)
+        self.assertEqual(self.attempts(), 0)
+        self.assertEqual(self.worker.db.execute('SELECT count(*) FROM runs').fetchone()[0], 1)
+
+    def test_ownership_changes_during_renewal_prevent_launch(self):
+        self.setup_audit()
+        def ticket(project, *args):
+            if args[0] == 'heartbeat':
+                with sqlite3.connect(self.state/'atomic-ticketing/coordination.sqlite3') as db:
+                    db.execute("UPDATE tickets SET token='replacement'")
+            return self.owner
+        self.worker.ticket.side_effect = ticket
+        self.worker.audit_missing_handoff(self.project)
+        self.assertEqual(self.attempts(), 0)
+
+    def test_source_and_incomplete_or_blocked_audit_use_one_retention_slot(self):
+        folder = self.setup_audit()
+        self.worker.audit_missing_handoff(self.project)
+        (folder/'handoff-audit/process.json').write_text(json.dumps(dict(pid=12345, started='audit-start')))
+        self.worker.db.execute("UPDATE runs SET status='quarantined'")
+        for status in ('quarantined', 'parked'):
+            with self.subTest(status=status):
+                self.worker.db.execute("UPDATE runs SET status=? WHERE session LIKE '%audit'", (status,))
+                self.assertTrue(self.worker.available({**self.slot, 'max_quarantined':2}, []))
+                self.assertFalse(self.worker.available({**self.slot, 'max_quarantined':1}, []))
+        other = {**self.claim, 'token':'another-generation'}
+        self.worker.db.execute('INSERT INTO runs VALUES(?,?,?,?,?,?,?,?,?)',
+            ('other', 'suifleet', 'Codex', 'quarantined', str(folder), json.dumps(other), 99999999, 'start', None))
+        self.assertFalse(self.worker.available({**self.slot, 'max_quarantined':2}, []))
+
     def test_launch_failure_is_not_retried(self):
         self.setup_audit()
         with patch.object(d.subprocess,'Popen',side_effect=OSError('unavailable')) as spawn:
@@ -694,3 +746,7 @@ class HelperProcessTests(unittest.TestCase):
             self.assertEqual(result.returncode,124)
             self.assertEqual(json.loads((folder/'exit.json').read_text()), {'returncode':124})
             self.assertTrue((folder/'process.json').exists())
+
+
+if __name__ == '__main__':
+    unittest.main()
