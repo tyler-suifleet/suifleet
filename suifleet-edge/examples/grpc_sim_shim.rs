@@ -15,7 +15,8 @@
 //!   returns a real resolved transaction;
 //! - ExecuteTransaction: verifies the user signature with Mysten's
 //!   sui-crypto (independently of the daemon's signer) before the simulator
-//!   decides the execution status.
+//!   decides the execution status;
+//! - GetBalance: the device's SUI balance from the simulator (SF-083).
 //!
 //! Usage: grpc_sim_shim SIMULATOR_URL  (prints "listening PORT")
 use std::{str::FromStr, sync::Arc};
@@ -336,12 +337,19 @@ impl proto::transaction_execution_service_server::TransactionExecutionService fo
             _ => return Err(Status::invalid_argument("expected a Move call")),
         };
         let mut arguments = Vec::new();
+        let mut pures = Vec::new();
         for argument in &call.arguments {
             let input = &ptb.inputs[argument.input.unwrap_or_default() as usize];
             let pure: Option<&prost::bytes::Bytes> = input.pure.as_ref();
             let object: Option<&String> = input.object_id.as_ref();
             arguments.push(match (pure, object) {
-                (Some(pure), _) => Value::String(pure.first().copied().unwrap_or_default().to_string()),
+                // A u8 status, or a u64 amount (fleet_budget::draw_gas).
+                (Some(pure), _) => {
+                    pures.push(pure.to_vec());
+                    let mut bytes = [0u8; 8];
+                    bytes[..pure.len().min(8)].copy_from_slice(&pure[..pure.len().min(8)]);
+                    Value::String(u64::from_le_bytes(bytes).to_string())
+                }
                 (None, Some(id)) => Value::String(short_id(id)),
                 _ => return Err(Status::invalid_argument("unsupported input")),
             });
@@ -356,18 +364,27 @@ impl proto::transaction_execution_service_server::TransactionExecutionService fo
         .await?;
         let mut builder = sui_transaction_builder::TransactionBuilder::new();
         let mut inputs = Vec::new();
-        let objects = &arguments[..arguments.len() - 1];
-        for (index, id) in objects.iter().enumerate() {
-            let id = Address::from_str(id.as_str().unwrap_or("")).map_err(|e| Status::internal(e.to_string()))?;
-            inputs.push(builder.object(match index {
-                // deployment (&mut), registry (&), cap (owned), group (&)
-                0 => sui_transaction_builder::ObjectInput::shared(id, 1, true),
-                2 => sui_transaction_builder::ObjectInput::owned(id, 1, Digest::ZERO),
-                _ => sui_transaction_builder::ObjectInput::shared(id, 1, false),
+        let mut pures = pures.into_iter();
+        for (index, argument) in call.arguments.iter().enumerate() {
+            let input = &ptb.inputs[argument.input.unwrap_or_default() as usize];
+            if input.pure.is_some() {
+                inputs.push(builder.pure_bytes(pures.next().unwrap_or_default()));
+                continue;
+            }
+            let id = Address::from_str(arguments[index].as_str().unwrap_or("")).map_err(|e| Status::internal(e.to_string()))?;
+            inputs.push(builder.object(match (function == "draw_gas", index) {
+                // draw_gas: budget (&), account (&mut), registry (&), cap
+                // (owned), Clock (&), as a node resolves them.
+                (true, 1) => sui_transaction_builder::ObjectInput::shared(id, 1, true),
+                (true, 3) => sui_transaction_builder::ObjectInput::owned(id, 1, Digest::ZERO),
+                (true, _) => sui_transaction_builder::ObjectInput::shared(id, 1, false),
+                // Status reports: deployment (&mut), registry (&), cap
+                // (owned), group (&).
+                (false, 0) => sui_transaction_builder::ObjectInput::shared(id, 1, true),
+                (false, 2) => sui_transaction_builder::ObjectInput::owned(id, 1, Digest::ZERO),
+                (false, _) => sui_transaction_builder::ObjectInput::shared(id, 1, false),
             }));
         }
-        let status: u8 = arguments.last().and_then(Value::as_str).and_then(|s| s.parse().ok()).unwrap_or_default();
-        inputs.push(builder.pure(&status));
         builder.move_call(
             sui_transaction_builder::Function::new(
                 Address::from_str(&package).map_err(|e| Status::internal(e.to_string()))?,
@@ -448,6 +465,24 @@ impl proto::transaction_execution_service_server::TransactionExecutionService fo
     }
 }
 
+#[tonic::async_trait]
+impl proto::state_service_server::StateService for Shim {
+    async fn get_balance(
+        &self,
+        request: Request<proto::GetBalanceRequest>,
+    ) -> Result<Response<proto::GetBalanceResponse>, Status> {
+        let request = request.into_inner();
+        let owner = request.owner.unwrap_or_default();
+        let value = number(&self.call("shim_balance", json!([owner, request.coin_type])).await?);
+        let mut balance = proto::Balance::default();
+        balance.coin_type = request.coin_type;
+        balance.balance = Some(value);
+        let mut response = proto::GetBalanceResponse::default();
+        response.balance = Some(balance);
+        Ok(Response::new(response))
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let simulator = std::env::args()
@@ -463,6 +498,7 @@ async fn main() -> anyhow::Result<()> {
     std::io::stdout().flush()?;
     tonic::transport::Server::builder()
         .add_service(proto::ledger_service_server::LedgerServiceServer::new(shim.clone()))
+        .add_service(proto::state_service_server::StateServiceServer::new(shim.clone()))
         .add_service(
             proto::transaction_execution_service_server::TransactionExecutionServiceServer::new(shim),
         )

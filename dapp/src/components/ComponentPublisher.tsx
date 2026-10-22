@@ -8,7 +8,9 @@ import { validateComponent } from "@/lib/component-selector";
 import { uploadArtifact, uploadRecipe, storageWarnings, renewalCommand, type UploadProgress as Progress } from "@/lib/walrus";
 import { DEFAULT_DELIVERY, releaseProtection } from "@/lib/delivery";
 import { useAccessPolicies } from "@/hooks/useAccessPolicies";
+import { useFleetBlobStore } from "@/hooks/useFleetStorage";
 import { DeliveryFields } from "./DeliveryFields";
+import { FleetStorageChoice } from "./FleetStorageChoice";
 import { ConfigurationFields } from "./ConfigurationFields";
 import { UploadProgress } from "./UploadProgress";
 import { EMPTY_CONFIGURATION, recipeConfiguration } from "@/lib/recipe-configuration";
@@ -33,6 +35,8 @@ export function ComponentPublisher({ catalog, versions, onPublished, onClose }: 
   const [rows, setRows] = useState<Row[]>([{ id: 0, os: "linux", arch: "x86_64", install: "" }]);
   const [configuration, setConfiguration] = useState(EMPTY_CONFIGURATION);
   const [delivery, setDelivery] = useState(DEFAULT_DELIVERY);
+  const fleet = useFleetBlobStore();
+  const [fleetPaid, setFleetPaid] = useState(false);
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const [phase, setPhase] = useState(""), [progress, setProgress] = useState<Progress | null>(null);
   const [receipt, setReceipt] = useState<{ digest: string; warnings: string[] } | null>(null);
@@ -67,13 +71,16 @@ export function ComponentPublisher({ catalog, versions, onPublished, onClose }: 
       });
       for (const row of rows) assertComponentRecipe(recipeFor(row, "pending", "0".repeat(64)));
       const protection = releaseProtection(client, delivery, policies.data ?? []);
+      // Fleet-paid storage is never silently replaced by the publisher.
+      if (fleetPaid && !fleet.store) throw new Error(`Fleet storage is unavailable: ${fleet.reason ?? "unknown reason"}`);
+      const store = fleetPaid ? fleet.store : undefined;
       const manifests = [], warnings: string[] = [];
       for (const [i, row] of rows.entries()) {
         if (!active.current || currentAddress.current !== owner) throw new Error("Wallet account changed. Reconnect the publishing account before retrying.");
         setPhase(`Uploading artifact ${i + 1} of ${rows.length} · ${row.os}/${row.arch}`); setProgress(null);
-        const artifact = await uploadArtifact(row.file!, owner, protection, setProgress);
+        const artifact = await uploadArtifact(row.file!, owner, protection, setProgress, store);
         setPhase(`Uploading recipe ${i + 1} of ${rows.length} · ${row.os}/${row.arch}`); setProgress(null);
-        const recipe = await uploadRecipe(recipeFor(row, artifact.blobId, artifact.sha256), owner, protection, setProgress);
+        const recipe = await uploadRecipe(recipeFor(row, artifact.blobId, artifact.sha256), owner, protection, setProgress, store);
         for (const [label, storage] of [["Artifact", artifact.storage], ["Recipe", recipe.storage]] as const) {
           warnings.push(`${row.os}/${row.arch} ${label}: storage expires at epoch ${storage.endEpoch ?? "unknown"}`, ...storageWarnings(storage));
           const renewal = renewalCommand(storage); if (renewal) warnings.push(renewal);
@@ -108,6 +115,7 @@ export function ComponentPublisher({ catalog, versions, onPublished, onClose }: 
           <button className={button} disabled={rows.length >= 16} onClick={() => setRows(rs => [...rs, { id: nextId.current++, os: "linux", arch: "aarch64", install: "" }])}>Add platform</button>
           <details><summary className="cursor-pointer text-sm">Optional configuration and validation</summary><ConfigurationFields value={configuration} onChange={setConfiguration} disabled={busy} /></details>
           <DeliveryFields value={delivery} onChange={setDelivery} policies={policies.data ?? []} disabled={busy} />
+          <FleetStorageChoice checked={fleetPaid} onChange={setFleetPaid} available={!!fleet.store} storage={fleet.storage} reason={fleet.reason} disabled={busy} />
           {policies.error && <p role="alert">Access policies could not be loaded: {String(policies.error)}</p>}
           <div className="flex gap-2"><button className={button} onClick={() => setStep(1)}>Back to name & version</button><button className={button} onClick={() => continueTo(3)}>Review version</button></div>
         </>}

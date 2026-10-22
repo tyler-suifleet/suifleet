@@ -60,6 +60,18 @@ class ManifestTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "type origin mismatch"):
             dm.verify(forged, chain(manifest))
 
+    def test_optional_fleet_budget_origin_group(self):
+        manifest = fixture()
+        manifest["type_origins"][dm.BUDGET_TYPES[0]] = dm.object_id("0x4")
+        with self.assertRaisesRegex(ValueError, "partial fleet budget"):
+            dm.validate(manifest)
+        manifest["type_origins"].update({n: dm.object_id("0x4") for n in dm.BUDGET_TYPES})
+        dm.verify(manifest, chain(manifest))
+        forged = copy.deepcopy(manifest)
+        forged["type_origins"][dm.BUDGET_TYPES[-1]] = dm.object_id("0x3")
+        with self.assertRaisesRegex(ValueError, "type origin mismatch"):
+            dm.verify(forged, chain(manifest))
+
     def test_optional_catalog_origin_group(self):
         manifest = fixture()
         manifest["type_origins"][dm.CATALOG_TYPES[0]] = dm.object_id("0x4")
@@ -131,6 +143,13 @@ class ManifestTests(unittest.TestCase):
             tables = root / "tables.toml"
             tables.write_text(template.read_text() + '[[seal.key_servers]]\nobject_id="0x6"\n')
             with self.assertRaises(ValueError): dm.generate(fixture(), root / "tables", tables)
+            # Gas top-ups from the fleet budget (SF-083) are device settings too.
+            funded = root / "funded.toml"
+            funded.write_text(template.read_text() + '[budget]\nbudget_id="0xb0"\nlow_water_mist=20000000\n')
+            dm.generate(fixture(), root / "funded", funded)
+            other = root / "other.toml"
+            other.write_text(template.read_text() + '[sui]\nmanifest_path="other.json"\n')
+            with self.assertRaises(ValueError): dm.generate(fixture(), root / "other", other)
 
     def test_latest_package_checked_against_upgrade_cap(self):
         manifest = fixture(); ordinary = chain(manifest)

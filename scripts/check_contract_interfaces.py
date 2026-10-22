@@ -90,9 +90,13 @@ def top_level_items(text, start):
     return count + (1 if saw_item else 0)
 
 
-# Reviewed types of other packages, matched exactly. Clients verify their
-# package at runtime (Seal's key servers: the configured key_server_package).
-EXTERNAL = frozenset({"key_server::KeyServer"})
+# Reviewed types and calls of other packages, matched exactly. Clients verify
+# their package at runtime (Seal's key servers: the configured
+# key_server_package; Walrus: the pinned Testnet objects in fleet-budget.ts).
+EXTERNAL = frozenset({"key_server::KeyServer",
+                      "wal_exchange::exchange_all_for_wal", "wal_exchange::Exchange"})
+# Separately published packages of this repository, checked like the core one.
+EXTRA_PACKAGES = {"fleet_storage": ROOT / "contracts/fleet_storage"}
 
 
 def check(modules, framework=frozenset(), sources=None):
@@ -158,6 +162,11 @@ def main():
     with tempfile.TemporaryDirectory(prefix="move-summary-") as summary_dir:
         try:
             modules, framework = summarize(args.contracts, Path(summary_dir))
+            for name, package in EXTRA_PACKAGES.items():
+                extra = Path(summary_dir) / name
+                subprocess.run(["sui", "move", "summary", "--path", str(package), "--output-directory", str(extra)],
+                               check=True, capture_output=True, text=True)
+                modules.update({path.stem: json.loads(path.read_text()) for path in (extra / name).glob("*.json")})
         except subprocess.CalledProcessError as error:
             sys.exit(f"sui move summary failed:\n{error.stdout}\n{error.stderr}")
     errors, checked = check(modules, framework)
