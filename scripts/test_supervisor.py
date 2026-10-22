@@ -223,11 +223,18 @@ def run(binary):
 
                 # Runtime failure exhausts the restart budget, then explicit
                 # recovery restores the retained v1 and journal identity.
+                def restarted(old):
+                    # One snapshot: separate reads can pair the old running
+                    # state with a restarting entry that has no pid yet.
+                    current = status()
+                    return (current.get("phase") == "running" and current.get("version") == "3.0.0"
+                            and isinstance(current.get("pid"), int) and current["pid"] != old)
+
                 for crash in range(4):
                     pid = status()["pid"]
                     os.kill(pid, signal.SIGKILL)
                     if crash < 3:
-                        wait_for(lambda: running("3.0.0") and status().get("pid") != pid,
+                        wait_for(lambda: restarted(pid),
                                  "v3 did not restart before its budget was exhausted", process)
                 wait_for(lambda: running("1.0.0") and journal().get("components", {}).get("svc", {}).get("version") == "1.0.0",
                          "runtime recovery did not restore v1 and its journal", process)
