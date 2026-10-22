@@ -16,6 +16,9 @@ This is a commercial-prototype baseline, not a KMS/HSM service or a home for reg
 
 ## Access policies
 
+The [guided Access policies flow and separate verified testnet profile](ACCESS_POLICIES.md)
+explain UI availability, recipient selection and the remaining acceptance checks.
+
 An `AccessPolicy` is a shared object. Its holder of `AccessAdminCap` grants and revokes three scopes with ordinary signed transactions:
 
 - **Account**: a Sui address, which decrypts with its own key (for example a human reviewer using the official SDK).
