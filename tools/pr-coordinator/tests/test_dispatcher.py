@@ -47,7 +47,7 @@ class DispatchTests(unittest.TestCase):
         with patch.object(d,'process_identity',return_value='start'):
             self.worker.reconcile(self.project)
         self.assertEqual(self.state_of_run(),'running')
-        with patch.object(d,'process_identity',return_value=None):
+        with patch.object(d,'process_identity',return_value=None),patch.object(d,'worker_stopped',return_value=True):
             self.worker.reconcile(self.project)
         self.assertEqual(self.state_of_run(),'finished')
         self.assertTrue(self.worker.available(self.slot,[]))
@@ -57,7 +57,7 @@ class DispatchTests(unittest.TestCase):
             with self.subTest(owner=owner,code=code,verdict=verdict):
                 self.worker.db.execute('DELETE FROM runs')
                 self.receipt(owner_status=owner,exitcode=code,verdict=verdict)
-                with patch.object(d,'process_identity',return_value=None):
+                with patch.object(d,'process_identity',return_value=None),patch.object(d,'worker_stopped',return_value=True):
                     self.worker.reconcile(self.project)
                 self.assertEqual(self.state_of_run(),'quarantined')
                 self.assertFalse(self.worker.available(self.slot,[self.claim]))
@@ -334,7 +334,7 @@ p=next(Path(sys.argv[1]).glob('implementations/*'))
     def test_merged_completion_clears_token_but_preserves_claim_identity(self):
         self.receipt(owner_status='done')
         self.worker.ticket.return_value={**self.claim,'status':'done','token':None}
-        with patch.object(d,'process_identity',return_value=None):
+        with patch.object(d,'process_identity',return_value=None),patch.object(d,'worker_stopped',return_value=True):
             self.worker.reconcile(self.project)
         self.assertEqual(self.state_of_run(),'finished')
 
