@@ -375,3 +375,79 @@ stores fail closed. Install coordinator and dispatcher together after review so
 new repair proof can be recorded. Existing unknown receipts require explicit
 operator inspection, not database deletion or threshold increases. No services
 are installed or restarted by the implementation tests.
+
+### Reviewed local runtime activation (SF-113)
+
+After this implementation is independently reviewed and merged, bootstrap once
+**from the exact fetched main revision**, using the existing installed private
+project configuration:
+
+```bash
+python3 tools/pr-coordinator/install.py --activation-project suifleet
+systemctl --user status runtime-activation.timer runtime-activation.service
+python3 ~/.local/lib/pr-coordinator/activation.py --status
+journalctl --user -u runtime-activation.service -n 30 --no-pager
+```
+
+Bootstrap enables a two-minute timer and changes only the parent units' runtime
+paths. It preserves their existing environment, protections and `KillMode=process`.
+Bootstrap also requires existing integration evidence and an independently published
+exact-head/base approval plus matching remote merge evidence. It stages/tests
+committed main before stopping parents and restores their original
+units on startup failure. Run it only after review/merge; an implementation worker
+must not install its unmerged branch. Existing model workers continue running.
+The existing full/scoped engine-copy installer refuses to bypass an enabled
+activation installation. Dashboard-only installation remains separate.
+
+The fixed bootstrap supervisor serializes activation with `activation.lock`.
+It fetches main directly from the configured GitHub repository, checks installed
+ancestry and examines every first-parent runtime change since the installed
+revision. Its allowlist is exactly `coordinator.py`, `dispatcher.py`, `worker.py`.
+For each change it requires the coordinator's durable `activation_merges` receipt,
+matching two-parent merge ancestry, a published completed independent approval,
+and a fresh GitHub merged PR with the same repository, head and merge commit.
+The coordinator writes the receipt only after its existing final review/ownership/
+CI gates, before the guarded push. A receipt alone cannot authorize an unmerged
+commit. External/direct runtime merges without this proof fail closed and need
+explicit operator provenance inspection; they are never silently installed.
+
+Files are read by immutable Git revision, compiled, and tested with that revision's
+complete offline coordinator suite in a temporary source tree. Checkout files,
+private credentials, model configuration, wallet protections and system units
+are not update payloads. `runtime-compatibility.json` must retain protocol/store
+compatibility version 1; incompatible migrations require explicit reviewed
+bootstrap work. Preserve backward-compatible durable schemas when using version 1.
+The fixed supervisor, bootstrap installer and unit changes require explicit
+reviewed maintenance; they cannot update their own trust boundary through this
+runtime allowlist. This grant deploys no application, contract, daemon firmware
+or hardware and changes no model permissions.
+
+A generation is fully staged/fsynced before replacement. Main is fetched again
+before switching. Parents are stopped with their worker-preserving units, the
+single `current` symlink is atomically replaced, and only previously active
+parents are started. Readiness must match the unit's actual PID, Linux start
+identity and generation after lock/store initialization, within 30 seconds.
+Existing claims, SQLite stores, worker directories, PID/start identities and
+actual wrapper exit receipts stay in place; the normal parent adoption logic
+reconciles them. A rollback uses the original generation and active-unit set;
+startup or replacement failure restores that pointer. Durable pending intent
+also rolls back on the next timer run after supervisor interruption. Rollback
+failure leaves pending intent and the service failed for explicit recovery;
+never clear claims or worker receipts to repair activation.
+
+`activation.py --status` reads local receipts without network calls and reports
+`installed`, last observed `merged`, and activation state. Identical runtime
+bytes record `unchanged` without restarting parents. Failed validation/provenance
+records a sanitized diagnostic and retries on later timer runs. A startup rollback
+pins that failed target against automatic retry. Inspect the private
+`~/.local/state/pr-coordinator/activation.json`, fix the reported problem, and
+archive/remove that receipt only after confirming parent/worker identities and
+the intended rollback target. Never delete the ticket or job databases.
+Generations are retained for inspection and rollback; no automatic garbage
+collection removes code referenced by an existing worker. The supervisor and
+both parents must use the same default state directory for readiness receipts.
+
+The SF-113 fixture demonstrates successful local activation and continued real
+worker execution/exit receipt; it does not claim the unmerged implementation
+was installed into the running services. Independent review and exact-head CI
+remain required before operational bootstrap.
