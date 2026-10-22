@@ -53,6 +53,8 @@ class DevelopmentPolicy(unittest.TestCase):
         owner={'key':'SF-999','agent':'Codex','model':'test','session':'session',
                'branch':'work','worktree':'/tmp/work','spec':{}}
         engine=c.Coordinator.__new__(c.Coordinator)
+        engine.store=type('EmptyStore',(),{'review':lambda *args:None})()
+        project['id']='test'
         pr,_,_=fixture();pr['_acceptance_policy']=policy;pr['baseRefName']='main'
         review=engine.prompt(project,pr,owner,'review','Claude',Path('/tmp/review'),Path('/tmp/result'))
         implementation=d.Dispatcher.__new__(d.Dispatcher).prompt(project,owner,Path('/tmp/implementation'))
