@@ -2,7 +2,7 @@
 
 Research snapshot: 2026-10-21. Research only; no email, form submission, account creation, outreach or customer contact. This is a set of prospect hypotheses, not a customer pipeline. No fleet size, budget, pricing, dissatisfaction, contact address or purchase intent is asserted.
 
-Use the [ranked report](REPORT.md) for reading and [CSV](manufacturers.csv) for reuse. The CSV is canonical; regenerate the report with `python3 scripts/check_manufacturer_prospects.py --write` and validate with `python3 scripts/check_manufacturer_prospects.py`. Both commands use only Python's standard library and work offline. The report deliberately includes every record's evidence, uncertainty and migration caveat rather than only a top-ten summary.
+Use the [ranked report](REPORT.md) for reading and [CSV](manufacturers.csv) for reuse. The CSV is canonical; regenerate the report with `python3 scripts/check_manufacturer_prospects.py --write` and validate with `python3 scripts/check_manufacturer_prospects.py`. `make test-prospects` runs the validator and its failure-path regressions, including under optimized Python; it is included in `make check` and CI. Both commands use only Python's standard library and work offline. The report deliberately includes every record's evidence, uncertainty and migration caveat rather than only a top-ten summary.
 
 ## Scope and sourcing
 
@@ -32,7 +32,7 @@ Scores are ordinal research judgments, reproducible from three CSV columns:
 
 No discovery calls are authorized by this ticket. The following order prepares a future human-approved research/contact phase.
 
-1. **Reference-integration discovery:** Compulab, KUNBUS, Sfera Labs, SolidRun, Seeed Studio and OnLogic. Their programmable gateway evidence supports a small non-control lab deployment. First determine whether the manufacturer or downstream OEM owns the software and fleet. These are potential channels as well as potential buyers; do not count downstream fleets twice.
+1. **Reference-integration discovery:** Advantech, Kontron, InHand Networks, Compulab, KUNBUS, Sfera Labs, SolidRun, Seeed Studio and OnLogic. Their programmable gateway evidence supports a small non-control lab deployment. First determine whether the manufacturer or downstream OEM owns the software and fleet. These are potential channels as well as potential buyers; do not count downstream fleets twice.
 2. **Platform-preserving integration discovery:** PHYTEC, Variscite, SYS TEC electronic and embeddedTS. Establish exact architecture/BSP and current supported image. Keep RAUC/SWUpdate/boot control with the platform owner. A module reference integration is not a customer fleet pilot.
 3. **Direct workload discovery:** Kuva, Octave and Winnow. Their published application/OTA evidence makes a concrete release-workload comparison possible, but established Mender/balena integrations create migration friction. Ask whether a parallel, non-production application trial is useful; never assume dissatisfaction or demand. Historical stack details require reconfirmation.
 4. **Longer-cycle/conditional candidates:** Axis, Eurotech, Hilscher, Toradex and the remaining controllers, charging/storage, printing and cooking vendors. Preserve OEM firmware and safety boundaries. Require a supported app runtime and named integration owner before scheduling a technical pilot. Low scores indicate weak evidence for the present Linux-agent boundary, not poor businesses.
