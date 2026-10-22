@@ -73,11 +73,12 @@ def transient_delay(error, attempt):
     return min(30, 2 ** attempt + random.uniform(0, 1))
 
 
-def run(args, cwd=None, env=None):
+def run(args, cwd=None, env=None, timeout=None):
     safe = retryable_read(args)
     for attempt in range(3 if safe else 1):
         try:
             options = {'timeout': 600 if args[:1] == ['ticket'] else 45} if safe else {}
+            if timeout is not None: options['timeout'] = timeout
             return subprocess.run(args, cwd=cwd, env=env, text=True,
                                   capture_output=True, check=True, **options).stdout
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
@@ -87,6 +88,26 @@ def run(args, cwd=None, env=None):
             # Do not print argv, stderr, environment, tokens or request bodies.
             print(f'{args[0]} read: transient failure; retry {attempt+1}/2 in {delay:.1f}s', flush=True)
             time.sleep(delay)
+
+
+SAFE_PUBLICATION_ERRORS = (
+    'No GitHub publication snapshot; refresh before publishing',
+    'Project configuration changed; refresh before publishing ownership',
+)
+
+
+def publication_failure(error):
+    """Classify a publish failure without persisting argv, stderr or tokens."""
+    if isinstance(error, subprocess.TimeoutExpired):
+        return 'timeout'
+    if isinstance(error, subprocess.CalledProcessError):
+        message = error.stderr or ''
+        known = next((value for value in SAFE_PUBLICATION_ERRORS if value in message), None)
+        if known: return known
+        if rate_limit_error(error): return 'GitHub rate limited'
+        kind = 'transient' if transient_delay(error, 0) is not None else 'failed'
+        return f'{kind} (exit {error.returncode})'
+    return type(error).__name__
 
 
 def effective_policy(policy, ticket):
@@ -200,6 +221,9 @@ class Store:
             PRIMARY KEY(family,kind));
           CREATE TABLE IF NOT EXISTS github_backoff (account TEXT PRIMARY KEY, retry_after REAL);
           CREATE TABLE IF NOT EXISTS publications (project TEXT, pr INTEGER, node_id TEXT PRIMARY KEY, hash TEXT);
+          CREATE TABLE IF NOT EXISTS ownership_publication (
+            project TEXT, ticket TEXT, claim TEXT, revision INTEGER, attempts INTEGER,
+            retry_after REAL, error TEXT, PRIMARY KEY(project,ticket));
           CREATE TABLE IF NOT EXISTS integrations (
             project TEXT, pr INTEGER, head TEXT, commit_id TEXT, reconciled INTEGER DEFAULT 0,
             PRIMARY KEY(project,pr));
@@ -397,8 +421,58 @@ class Coordinator:
         if pr.get('isCrossRepository'): return None
         return next((o for o in owners if o.get('branch') == pr['headRefName']), None)
 
-    def ticket(self, project, *args):
-        return run(['ticket', '--project', project['id'], *args])
+    def ticket(self, project, *args, timeout=None):
+        return run(['ticket', '--project', project['id'], *args], timeout=timeout)
+
+    def retry_review_publication(self, project, owner):
+        """Retry a recoverable Project mirror failure for one listed Review claim.
+
+        Only the exact listed claim/revision is published, through the supported
+        `ticket publish` path. Nothing is resumed, released or reassigned. Returns
+        the freshly re-read, published owner, or None to defer this PR only.
+        """
+        claim = hashlib.sha256(owner['token'].encode()).hexdigest()
+        key, revision = owner['key'], owner.get('revision')
+        row = self.store.db.execute('SELECT * FROM ownership_publication WHERE project=? AND ticket=?',
+                                    (project['id'], key)).fetchone()
+        if row and (row['claim'] != claim or row['revision'] != revision):
+            row = None  # Another claim/revision starts a fresh bounded schedule.
+        if row and row['retry_after'] > time.time():
+            return None
+        def unchanged(current):
+            return (current.get('status') == 'review' and current.get('revision') == revision
+                    and all(current.get(name) == owner.get(name) for name in
+                            ('token', 'agent', 'model', 'session', 'branch', 'worktree')))
+        current = json.loads(self.ticket(project, 'show', key))
+        if not unchanged(current):
+            print(f"{project['id']} {key}: ownership changed before publication retry; deferred to next scan", flush=True)
+            return None
+        try:
+            if current.get('publish_pending'):
+                for attempt in range(2):
+                    try:
+                        self.ticket(project, 'publish', key, timeout=300)
+                        break
+                    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+                        delay = transient_delay(error, attempt)
+                        if attempt == 1 or delay is None: raise
+                        print(f"{project['id']} {key}: ownership publication transient failure; retry 1/1 in {delay:.1f}s", flush=True)
+                        time.sleep(delay)
+                current = json.loads(self.ticket(project, 'show', key))
+        except Exception as error:
+            attempts = (row['attempts'] if row else 0) + 1
+            delay = min(3600, 60 * 2 ** min(attempts - 1, 6))
+            reason = publication_failure(error)
+            self.store.db.execute('INSERT OR REPLACE INTO ownership_publication VALUES(?,?,?,?,?,?,?)',
+                                  (project['id'], key, claim, revision, attempts, time.time() + delay, reason))
+            print(f"{project['id']} {key}: ownership publication pending ({reason}); attempt {attempts}, next retry in {delay}s; claim retained", flush=True)
+            return None
+        if not unchanged(current) or current.get('publish_pending'):
+            print(f"{project['id']} {key}: ownership changed during publication retry; deferred to next scan", flush=True)
+            return None
+        self.store.db.execute('DELETE FROM ownership_publication WHERE project=? AND ticket=?', (project['id'], key))
+        print(f"{project['id']} {key}: pending Review ownership published at revision {revision}", flush=True)
+        return current
 
     def launch(self, project, pr, owner, kind, recovery=None):
         family = ('Claude' if owner['agent'] == 'Codex' else 'Codex') if kind == 'review' else owner['agent']
@@ -651,6 +725,10 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
         for pr in sorted(prs,key=priority):
             try:
                 owner = self.owner(project,pr,owners)
+                if execute and owner and owner['status'] == 'review' and owner.get('publish_pending'):
+                    # A failed mirror is recoverable; scheduling still requires
+                    # the freshly re-read published claim below.
+                    owner = self.retry_review_publication(project,owner) or owner
                 review = self.store.review(project['id'],pr['number'])
                 reason = gate(pr,owner,review)
                 print(json.dumps({'project':project['id'],'pr':pr['number'],'owner':owner['agent'] if owner else None,'merge_blocker':reason}),flush=True)
