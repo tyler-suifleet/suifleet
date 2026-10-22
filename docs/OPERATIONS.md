@@ -291,7 +291,7 @@ The frontend reads only `NEXT_PUBLIC_DEPLOYMENT_MANIFEST`; the daemon reads the 
 
 ## Static frontend and Linux deployment
 
-`pnpm build` produces `dapp/out`; serve that directory through the selected static host. Walrus Sites is an intended option, but no hosting account/site or current site-builder version is verified here. Select/validate its current publish procedure in a hosting issue before publishing.
+`pnpm build` produces the static `dapp/out` export. The [SF-082 development snapshot](SERVERLESS_FLEET_DATA.md) adds a checksum-pinned site-builder and deployment-bound reproducible build helper. No Walrus Site publication/update/rollback has been validated; its backend replacement is incomplete and must remain draft. Follow the recorded preflight/authorization and acceptance requirements before publication.
 
 Install the daemon, systemd service and real config through the validated image/package workflow. The separate root first-boot provisioning service invokes `--provision`; the unprivileged daemon starts after enrollment config appears and creates its state directory. Register the printed address, record Device/DeviceCap IDs, and fund report gas. Apply success currently means updater exit code zero, not post-boot health.
 
