@@ -35,7 +35,7 @@ class DispatchTests(unittest.TestCase):
         (folder/'exit.json').write_text(json.dumps({'returncode':exitcode}))
         (folder/'result.json').write_text(json.dumps({'verdict':verdict,'evidence':'tests passed; PR ready'}))
         self.worker.db.execute('INSERT INTO runs VALUES(?,?,?,?,?,?,?,?,?)',
-                               ('session','suifleet','Codex',status,str(folder),json.dumps(self.claim),123,'start',None))
+                               ('session','suifleet','Codex',status,str(folder),json.dumps(self.claim),99999999,'start',None))
         self.worker.ticket = Mock(return_value={**self.claim,'status':owner_status})
         return folder
 
@@ -79,14 +79,14 @@ class DispatchTests(unittest.TestCase):
         def stopped_wrapper(argv, **kwargs):
             folder = Path(argv[-1])
             (folder/'exit.json').write_text('{"returncode":1}')
-            return Mock(pid=123, poll=Mock(return_value=1))
+            (folder/'process.json').write_text(json.dumps(dict(pid=99999999,started='start')))
+            return Mock(pid=99999999, poll=Mock(return_value=1))
         self.worker.ticket = Mock(side_effect=ticket)
-        with patch.object(d,'run',return_value='test-token'), patch.object(d.subprocess,'Popen',side_effect=stopped_wrapper), patch.object(d,'process_identity',return_value='start'), patch.object(d,'worker_stopped',return_value=True), patch.object(d.time,'time') as now:
+        with patch.object(d,'run',return_value='test-token'), patch.object(d.subprocess,'Popen',side_effect=stopped_wrapper), patch.object(d,'process_identity',return_value=None), patch.object(d,'worker_stopped',return_value=True), patch.object(d.time,'time') as now:
             # Advance past every backoff: even unlimited ticks cannot reserve the backlog.
             for tick in range(20):
                 now.return_value = tick*10000
-                with patch.object(d,'process_identity',return_value=None) if tick % 2 else patch.object(d,'process_identity',return_value='start'):
-                    self.worker.tick(True)
+                self.worker.tick(True)
                 if tick == 1:
                     self.assertFalse(self.worker.available(self.slot, list(owners.values())))
                     pause = self.worker.db.execute('SELECT attempts FROM backoff').fetchone()
@@ -354,6 +354,216 @@ p=next(Path(sys.argv[1]).glob('implementations/*'))
         self.assertNotEqual(result.returncode,0)
         self.assertIn('BlockingIOError',result.stderr)
         self.assertEqual(self.worker.db.execute('SELECT count(*) FROM runs').fetchone()[0],0)
+
+
+
+class ObsoleteReceiptTests(unittest.TestCase):
+    setUp = DispatchTests.setUp
+    receipt = DispatchTests.receipt
+    state_of_run = DispatchTests.state_of_run
+
+    def authority(self, owner):
+        self.env = patch.dict(d.os.environ, {'XDG_STATE_HOME': str(self.state)})
+        self.env.start()
+        self.addCleanup(self.env.stop)
+        folder = self.state/'atomic-ticketing'
+        folder.mkdir()
+        db = sqlite3.connect(folder/'coordination.sqlite3', isolation_level=None)
+        self.addCleanup(db.close)
+        db.execute('''CREATE TABLE tickets(key TEXT, project TEXT, status TEXT, token TEXT,
+                   session TEXT, branch TEXT, worktree TEXT, revision INTEGER,
+                   published_revision INTEGER, evidence TEXT)''')
+        self.owner = {**self.claim, 'status': 'review', 'revision': 4,
+                      'published_revision': 4, 'evidence': 'published PR handoff', **owner}
+        db.execute('INSERT INTO tickets VALUES(?,?,?,?,?,?,?,?,?,?)',
+                   ('suifleet::SF-099','suifleet',*(self.owner[k] for k in
+                    ('status','token','session','branch','worktree','revision','published_revision','evidence'))))
+        db.execute('CREATE TABLE events(id INTEGER PRIMARY KEY, ticket TEXT, actor TEXT, kind TEXT, detail TEXT)')
+        self.worker.ticket.return_value = self.owner
+        return db
+
+    def retire(self):
+        with patch.object(d,'process_identity',return_value=None), patch.object(d,'worker_stopped',return_value=True):
+            self.worker.retire_obsolete(self.project)
+
+    def test_done_and_review_archive_preserving_original_receipt_and_allow_work(self):
+        for owner in [{'status':'done','token':None}, {'status':'review'}]:
+            with self.subTest(owner=owner):
+                self.receipt(status='quarantined')
+                db = self.authority(owner)
+                original = dict(self.worker.db.execute('SELECT * FROM runs').fetchone())
+                self.retire()
+                self.assertEqual(self.state_of_run(),'finished')
+                saved = self.worker.db.execute('SELECT * FROM retired_runs').fetchone()
+                self.assertEqual(saved['original_status'],'quarantined')
+                self.assertEqual(saved['original_message'],original['message'])
+                self.assertNotIn('private-token', saved['reason'])
+                current = dict(self.worker.db.execute('SELECT * FROM runs').fetchone())
+                for field in ('claim','pid','started','directory'):
+                    self.assertEqual(current[field],original[field])
+                self.assertTrue(self.worker.available({**self.slot,'max_quarantined':1}, []))
+                self.assertTrue((Path(original['directory'])/'result.json').exists())
+                self.worker.db.execute('DELETE FROM runs')
+                self.worker.db.execute('DELETE FROM retired_runs')
+                db.close()
+                (self.state/'atomic-ticketing/coordination.sqlite3').unlink()
+                (self.state/'atomic-ticketing').rmdir()
+                self.env.stop()
+
+    def test_recovery_requires_release_after_exact_claim_generation(self):
+        self.receipt(status='parked')
+        db = self.authority({'token':'new-token','session':'replacement','status':'in_progress'})
+        self.retire()
+        self.assertEqual(self.state_of_run(),'parked')
+        db.execute("INSERT INTO events VALUES(1,'suifleet::SF-099','session','claim','Codex/model; token=private-token; paths=[]')")
+        db.execute("INSERT INTO events VALUES(2,'suifleet::SF-099','session','release','Operator recovery: stopped')")
+        self.retire()
+        self.assertEqual(self.state_of_run(),'finished')
+
+    def test_recovered_review_without_old_result_is_retired(self):
+        folder = self.receipt(status='quarantined')
+        (folder/'result.json').unlink()
+        db = self.authority({'token':'new-token','session':'replacement'})
+        db.execute("INSERT INTO events VALUES(1,'suifleet::SF-099','session','claim','Codex/model; token=private-token; paths=[]')")
+        db.execute("INSERT INTO events VALUES(2,'suifleet::SF-099','session','release','Operator recovery: stopped')")
+        self.retire()
+        self.assertEqual(self.state_of_run(),'finished')
+
+    def test_unresolved_pending_mirror_unknown_and_changed_ownership_stay_reserved(self):
+        self.receipt(status='quarantined')
+        db = self.authority({'status':'blocked'})
+        self.retire()
+        self.assertEqual(self.state_of_run(),'quarantined')
+        db.execute("UPDATE tickets SET status='review',revision=5")
+        self.worker.ticket.return_value = {**self.owner,'status':'review','revision':5,'publish_pending':True}
+        self.retire()
+        self.assertEqual(self.state_of_run(),'quarantined')
+        self.worker.ticket.return_value = {**self.owner,'status':'review'}
+        self.retire()  # stale CLI observation cannot archive a newer authority row
+        self.assertEqual(self.state_of_run(),'quarantined')
+        self.worker.ticket.side_effect = subprocess.CalledProcessError(1,['ticket'])
+        self.retire()
+        self.assertFalse(self.worker.available({**self.slot,'max_quarantined':1}, []))
+
+    def test_live_reused_pid_lingering_and_missing_identity_consume_capacity(self):
+        folder = self.receipt(status='parked')
+        self.authority({})
+        for current, stopped in [('start',False),('reused-start',True),(None,False)]:
+            with self.subTest(current=current), patch.object(d,'process_identity',return_value=current), patch.object(d,'worker_stopped',return_value=stopped):
+                self.worker.retire_obsolete(self.project)
+                self.assertEqual(self.state_of_run(),'parked')
+                self.assertFalse(self.worker.available(self.slot, []))
+        (folder/'process.json').write_text('{}')
+        self.retire()
+        self.assertFalse(self.worker.available(self.slot, []))
+
+    def test_process_restart_and_receipt_race_before_commit_are_retained(self):
+        self.receipt(status='quarantined')
+        self.authority({})
+        original = self.worker.stopped_identity
+        calls = 0
+        def changed(row):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                self.worker.db.execute("UPDATE runs SET message='concurrent change'")
+                return None
+            return original(row)
+        with patch.object(self.worker,'stopped_identity',side_effect=changed):
+            self.retire()
+        self.assertEqual(self.state_of_run(),'quarantined')
+        self.assertEqual(self.worker.db.execute('SELECT COUNT(*) FROM retired_runs').fetchone()[0],0)
+
+    def test_authority_is_locked_while_receipt_is_compared_and_updated(self):
+        self.receipt(status='quarantined')
+        self.authority({})
+        other = sqlite3.connect(self.state/'atomic-ticketing/coordination.sqlite3', timeout=0)
+        self.addCleanup(other.close)
+        original = self.worker.stopped_identity
+        calls = 0
+        def competing_owner(row):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                with self.assertRaises(sqlite3.OperationalError):
+                    other.execute("UPDATE tickets SET token='concurrent'")
+                other.rollback()
+            return original(row)
+        with patch.object(self.worker,'stopped_identity',side_effect=competing_owner):
+            self.retire()
+        self.assertEqual(self.state_of_run(),'finished')
+
+    def test_failure_isolated_and_independent_eligible_work_resumes(self):
+        self.receipt(status='quarantined')
+        self.authority({})
+        self.worker.db.execute("INSERT INTO runs VALUES('broken','suifleet','Claude','quarantined','/missing','{',NULL,NULL,NULL)")
+        self.retire()
+        self.assertEqual(self.worker.db.execute("SELECT status FROM runs WHERE session='broken'").fetchone()[0],'quarantined')
+        self.assertTrue(self.worker.available({**self.slot,'max_quarantined':1}, []))
+        self.worker.ticket = Mock(return_value=[])
+        self.worker.launch = Mock()
+        self.worker.tick(True)
+        self.worker.launch.assert_called_once_with(self.project,self.slot)
+
+    def test_same_claim_repair_requires_fenced_newer_process(self):
+        self.receipt(status='quarantined')
+        self.worker.db.execute("UPDATE runs SET started='100'")
+        self.authority({'status':'in_progress'})
+        folder = self.state/'repair'
+        folder.mkdir()
+        (folder/'process.json').write_text(json.dumps(dict(pid=456,started='200')))
+        with sqlite3.connect(self.state/'reviews.sqlite3') as db:
+            db.execute('DROP TABLE jobs')
+            db.execute('CREATE TABLE jobs(project TEXT, kind TEXT, repair_claim TEXT, pid INTEGER, started TEXT, directory TEXT, status TEXT, result TEXT)')
+            proof = dict(claim=d.hashlib.sha256(self.claim['token'].encode()).hexdigest(),
+                         key=self.claim['key'], branch=self.claim['branch'],worktree=self.claim['worktree'],head='head')
+            db.execute('INSERT INTO jobs VALUES(?,?,?,?,?,?,?,?)',('suifleet','fix',json.dumps(proof),456,'200',str(folder),'running',None))
+        # Neither an unfenced historical job nor a different generation proves repair.
+        with sqlite3.connect(self.state/'reviews.sqlite3') as db:
+            db.execute("UPDATE jobs SET repair_claim=NULL")
+        self.retire()
+        self.assertEqual(self.state_of_run(),'quarantined')
+        with sqlite3.connect(self.state/'reviews.sqlite3') as db:
+            db.execute('UPDATE jobs SET repair_claim=?',(json.dumps({**proof,'claim':'other'}),))
+        self.retire()
+        self.assertEqual(self.state_of_run(),'quarantined')
+        with sqlite3.connect(self.state/'reviews.sqlite3') as db:
+            db.execute('UPDATE jobs SET repair_claim=?',(json.dumps(proof),))
+        def identity(pid):
+            return '200' if pid == 456 else None
+        with patch.object(d,'process_identity',side_effect=identity), patch.object(d,'worker_stopped',return_value=True):
+            self.worker.retire_obsolete(self.project)
+        self.assertEqual(self.state_of_run(),'finished')
+        # A collected successful repair also proves replacement after exit.
+        self.worker.db.execute("UPDATE runs SET status='quarantined'")
+        self.worker.db.execute('DELETE FROM retired_runs')
+        with sqlite3.connect(self.state/'reviews.sqlite3') as db:
+            db.execute("UPDATE jobs SET status='done', result=?",
+                       (json.dumps(dict(verdict='fixed',evidence='verified repair')),))
+        self.retire()
+        self.assertEqual(self.state_of_run(),'finished')
+
+    def test_failed_archive_rolls_back_without_changing_authority(self):
+        self.receipt(status='quarantined')
+        db = self.authority({})
+        before = db.execute('SELECT * FROM tickets').fetchall()
+        self.worker.db.execute("CREATE TRIGGER reject_archive BEFORE UPDATE ON runs BEGIN SELECT RAISE(ABORT,'fixture'); END")
+        self.retire()
+        self.assertEqual(self.state_of_run(),'quarantined')
+        self.assertEqual(self.worker.db.execute('SELECT COUNT(*) FROM retired_runs').fetchone()[0],0)
+        self.assertEqual(db.execute('SELECT * FROM tickets').fetchall(),before)
+        self.worker.db.execute('DROP TRIGGER reject_archive')
+        self.retire()
+        self.assertEqual(self.state_of_run(),'finished')
+
+    def test_other_claim_generation_release_does_not_prove_recovery(self):
+        self.receipt(status='quarantined')
+        db = self.authority({'token':'replacement','session':'other'})
+        db.execute("INSERT INTO events VALUES(1,'suifleet::SF-099','session','claim','token=private-token;')")
+        db.execute("INSERT INTO events VALUES(2,'suifleet::SF-099','session','claim','token=unrelated;')")
+        db.execute("INSERT INTO events VALUES(3,'suifleet::SF-099','session','release','Operator recovery')")
+        self.retire()
+        self.assertEqual(self.state_of_run(),'quarantined')
 
 
 if __name__ == '__main__':
