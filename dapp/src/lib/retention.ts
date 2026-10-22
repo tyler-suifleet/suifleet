@@ -74,6 +74,7 @@ export function buildAuthorizeRenewalTx(c: StorageConfig, storage: string, budge
   const tx = new Transaction();
   tx.moveCall({ target: `${c.packageId}::fleet_storage::authorize_renewal`, arguments: [tx.object(storage), tx.object(budget), tx.object(cap),
     tx.pure.id(blob), tx.pure.u32(target), tx.pure.u64(maxFee)] });
+  tx.moveCall({ target: `${c.packageId}::fleet_storage::prepay_renewal`, arguments: [tx.object(storage), tx.object(budget), tx.object(cap), tx.object(c.walrus.system), tx.pure.id(blob)] });
   return tx;
 }
 export function buildFundRetentionTx(c: StorageConfig, storage: string, wal: bigint, gas: bigint) {

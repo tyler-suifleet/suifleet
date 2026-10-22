@@ -35,7 +35,7 @@ module fleet_storage::fleet_storage {
     use wal::wal::WAL;
     use walrus::blob::Blob;
     use walrus::encoding;
-    use walrus::storage_resource::Storage;
+    use walrus::storage_resource::{Self, Storage};
     use walrus::system::System;
 
     // ── Constants ─────────────────────────────────────────────────────────────
@@ -212,6 +212,10 @@ module fleet_storage::fleet_storage {
         pending_count: u64,
         covered_count: u64,
     }
+    public struct ProtectedBlobsKey has copy, drop, store {}
+    public struct PrepaidKey has copy, drop, store { blob_object_id: ID }
+    public struct PrepaidCountKey has copy, drop, store {}
+    public struct RenewalPrepaid has copy, drop { storage_id: ID, blob_object_id: ID, fee: u64, target: u32 }
     public struct Renewal has copy, drop, store {
         target: u32,
         max_fee: u64,
@@ -238,6 +242,8 @@ module fleet_storage::fleet_storage {
         assert_owner(fs, budget, cap);
         assert!(margin > 0 && reward <= gas_per_epoch, EInvalidQuota);
         if (!df::exists(&fs.id, RetentionKey {})) {
+            df::add(&mut fs.id, PrepaidCountKey {}, 0u64);
+            df::add(&mut fs.id, ProtectedBlobsKey {}, vector<ID>[]);
             df::add(&mut fs.id, RetentionKey {}, Retention {
                 executor, margin, wal: balance::zero(), gas: balance::zero(),
                 wal_per_epoch, gas_per_epoch, reward, epoch: 0,
@@ -284,6 +290,7 @@ module fleet_storage::fleet_storage {
         assert_owner(fs, budget, cap);
         assert!(has_blob(fs, blob_object_id), EUnknownBlob);
         assert!(target > blob(fs, blob_object_id).end_epoch() && max_fee > 0, EInvalidEpochs);
+        discard_prepaid(fs, blob_object_id);
         let key = RenewalKey { blob_object_id };
         if (df::exists(&fs.id, key)) {
             let previous: Renewal = df::remove(&mut fs.id, key);
@@ -295,11 +302,58 @@ module fleet_storage::fleet_storage {
         } else {
             let r: &mut Retention = df::borrow_mut(&mut fs.id, RetentionKey {});
             r.covered_count = r.covered_count + 1;
+            let ids: &mut vector<ID> = df::borrow_mut(&mut fs.id, ProtectedBlobsKey {});
+            assert!(ids.length() < 1024, EOverQuota);
+            ids.push_back(blob_object_id);
         };
         let r: &mut Retention = df::borrow_mut(&mut fs.id, RetentionKey {});
         r.pending_wal = r.pending_wal + max_fee;
         r.pending_count = r.pending_count + 1;
         df::add(&mut fs.id, key, Renewal { target, max_fee, last_success_epoch: option::none() });
+    }
+
+    /// Buy the actual finite renewal resource before admitting discretionary
+    /// work. Walrus computes and charges the current price atomically; a stale
+    /// quote cannot masquerade as sufficient reserves. No price oracle is trusted.
+    public fun prepay_renewal(
+        fs: &mut FleetStorage, budget: &FleetBudget, cap: &BudgetOwnerCap,
+        system: &mut System, blob_object_id: ID, ctx: &mut TxContext,
+    ) {
+        assert_owner(fs, budget, cap);
+        assert!(!dof::exists(&fs.id, PrepaidKey { blob_object_id }), EInvalidEpochs);
+        let p: Renewal = *df::borrow(&fs.id, RenewalKey { blob_object_id });
+        let b = blob(fs, blob_object_id);
+        let (end, size) = (b.end_epoch(), b.storage().size());
+        assert!(p.last_success_epoch.is_none() && system.epoch() < end && p.target > end, EInvalidEpochs);
+        let r: &mut Retention = df::borrow_mut(&mut fs.id, RetentionKey {});
+        if (r.epoch != system.epoch()) {
+            r.epoch = system.epoch(); r.wal_spent = 0; r.gas_spent = 0;
+        };
+        assert!(r.wal_spent <= r.wal_per_epoch && p.max_fee <= r.wal_per_epoch - r.wal_spent, EOverQuota);
+        let mut payment = coin::take(&mut r.wal, p.max_fee, ctx);
+        let resource = system.reserve_space_for_epochs(size, end, p.target, &mut payment, ctx);
+        let fee = p.max_fee - payment.value();
+        let r: &mut Retention = df::borrow_mut(&mut fs.id, RetentionKey {});
+        r.wal.join(payment.into_balance());
+        r.wal_spent = r.wal_spent + fee;
+        r.pending_wal = r.pending_wal - p.max_fee;
+        let policy: &mut Renewal = df::borrow_mut(&mut fs.id, RenewalKey { blob_object_id });
+        policy.max_fee = 0;
+        dof::add(&mut fs.id, PrepaidKey { blob_object_id }, resource);
+        let count: &mut u64 = df::borrow_mut(&mut fs.id, PrepaidCountKey {});
+        *count = *count + 1;
+        event::emit(RenewalPrepaid { storage_id: object::id(fs), blob_object_id, fee, target: p.target });
+    }
+
+    /// Explicit owner overrides discard already paid capacity, never refund WAL.
+    fun discard_prepaid(fs: &mut FleetStorage, blob_object_id: ID) {
+        let key = PrepaidKey { blob_object_id };
+        if (dof::exists(&fs.id, key)) {
+            storage_resource::destroy(dof::remove<PrepaidKey, Storage>(&mut fs.id, key));
+            let count: &mut u64 = df::borrow_mut(&mut fs.id, PrepaidCountKey {});
+            *count = *count - 1;
+            event::emit(RetentionRisk { storage_id: object::id(fs), wal_removed: 0, gas_removed: 0 });
+        };
     }
 
     /// Restricted execution: no owner cap, arbitrary blob, withdrawal or policy
@@ -322,16 +376,16 @@ module fleet_storage::fleet_storage {
             r.wal_spent = 0;
             r.gas_spent = 0;
         };
-        assert!(r.wal_spent <= r.wal_per_epoch && policy.max_fee <= r.wal_per_epoch - r.wal_spent, EOverQuota);
         assert!(r.gas_spent <= r.gas_per_epoch && r.reward <= r.gas_per_epoch - r.gas_spent, EOverQuota);
-        assert!(r.wal.value() >= policy.max_fee && r.gas.value() >= r.reward, EInsufficientWal);
-        let mut payment = coin::take(&mut r.wal, policy.max_fee, ctx);
+        assert!(r.gas.value() >= r.reward, EInsufficientWal);
+        let resource: Storage = dof::remove(&mut fs.id, PrepaidKey { blob_object_id });
         let blob: &mut Blob = dof::borrow_mut(&mut fs.id, BlobKey { blob_object_id });
-        system.extend_blob(blob, policy.target - end, &mut payment);
+        system.extend_blob_with_resource(blob, resource);
         assert!(blob.end_epoch() == policy.target, EInvalidEpochs);
-        let fee = policy.max_fee - payment.value();
+        let count: &mut u64 = df::borrow_mut(&mut fs.id, PrepaidCountKey {});
+        *count = *count - 1;
+        let fee = 0;
         let r: &mut Retention = df::borrow_mut(&mut fs.id, RetentionKey {});
-        r.wal.join(payment.into_balance());
         r.pending_wal = r.pending_wal - policy.max_fee;
         r.pending_count = r.pending_count - 1;
         r.wal_spent = r.wal_spent + fee;
@@ -407,6 +461,7 @@ module fleet_storage::fleet_storage {
         epochs_ahead: u32,
         ctx: &mut TxContext,
     ): u64 {
+        assert_retention_live(fs, system.epoch());
         assert_owner(fs, budget, cap);
         assert!(size > 0 && epochs_ahead > 0, EZeroAmount);
         assert_retention_funded(fs);
@@ -428,6 +483,7 @@ module fleet_storage::fleet_storage {
         epochs: u32,
         ctx: &mut TxContext,
     ): u64 {
+        assert_retention_live(fs, system.epoch());
         assert_owner(fs, budget, cap);
         assert!(fs.pool.is_some(), ENoStorage);
         assert!(epochs > 0, EZeroAmount);
@@ -462,6 +518,7 @@ module fleet_storage::fleet_storage {
         end_epoch: u32,
         ctx: &mut TxContext,
     ): u64 {
+        assert_retention_live(fs, system.epoch());
         assert_owner(fs, budget, cap);
         let now = system.epoch();
         refill(fs, system, now, add_size, end_epoch, ctx)
@@ -523,6 +580,7 @@ module fleet_storage::fleet_storage {
         epochs: u32,
         ctx: &mut TxContext,
     ) {
+        assert_retention_live(fs, system.epoch());
         assert_owner(fs, budget, cap);
         assert!(dof::exists(&fs.id, BlobKey { blob_object_id }), EUnknownBlob);
         assert_retention_funded(fs);
@@ -543,6 +601,7 @@ module fleet_storage::fleet_storage {
     public fun release_blob(fs: &mut FleetStorage, budget: &FleetBudget, cap: &BudgetOwnerCap, blob_object_id: ID): Blob {
         assert_owner(fs, budget, cap);
         assert!(dof::exists(&fs.id, BlobKey { blob_object_id }), EUnknownBlob);
+        discard_prepaid(fs, blob_object_id);
         if (df::exists(&fs.id, RenewalKey { blob_object_id })) {
             let previous: Renewal = df::remove(&mut fs.id, RenewalKey { blob_object_id });
             let r: &mut Retention = df::borrow_mut(&mut fs.id, RetentionKey {});
@@ -551,6 +610,10 @@ module fleet_storage::fleet_storage {
                 r.pending_count = r.pending_count - 1;
                 r.pending_wal = r.pending_wal - previous.max_fee;
             };
+            let ids: &mut vector<ID> = df::borrow_mut(&mut fs.id, ProtectedBlobsKey {});
+            let (found, index) = ids.index_of(&blob_object_id);
+            assert!(found, EUnknownBlob);
+            ids.swap_remove(index);
             event::emit(RetentionRisk { storage_id: object::id(fs), wal_removed: 0, gas_removed: 0 });
         };
         let _: BlobRecord = df::remove(&mut fs.id, RecordKey { blob_object_id });
@@ -673,10 +736,8 @@ module fleet_storage::fleet_storage {
         let id = register_owner_impl(fs, budget, cap, system, blob_id, root_hash, size, encoding_type, clock, ctx);
         let record = blob_record(fs, id).destroy_some();
         assert!(target > record.end_epoch, EInvalidEpochs);
-        // Walrus does not expose a production price getter to Move callers.
-        // Reserve the explicit owner quote ceiling; the worker checks current
-        // measured prices, and Walrus atomically rejects an insufficient coin.
         authorize_renewal(fs, budget, cap, id, target, max_fee);
+        prepay_renewal(fs, budget, cap, system, id, ctx);
         assert_retention_funded(fs);
         id
     }
@@ -693,6 +754,7 @@ module fleet_storage::fleet_storage {
         clock: &Clock,
         ctx: &mut TxContext,
     ): ID {
+        assert_retention_live(fs, system.epoch());
         assert_owner(fs, budget, cap);
         let encoded_size = encoding::encoded_blob_length(size, encoding_type, system.n_shards());
         assert_retention_funded(fs);
@@ -739,12 +801,20 @@ module fleet_storage::fleet_storage {
         system.certify_blob(blob, signature, signers_bitmap, message);
     }
 
+    fun assert_retention_live(fs: &FleetStorage, epoch: u32) {
+        if (!df::exists(&fs.id, RetentionKey {})) return;
+        let ids: &vector<ID> = df::borrow(&fs.id, ProtectedBlobsKey {});
+        ids.do_ref!(|id| assert!(blob(fs, *id).end_epoch() > epoch, EInvalidEpochs));
+    }
+
     /// Fail closed on incomplete fleet closure or inadequate prepaid ceilings.
     /// All fleet blobs form a conservative superset of active release closure.
     fun assert_retention_funded(fs: &FleetStorage) {
         if (!df::exists(&fs.id, RetentionKey {})) return;
         let r: &Retention = df::borrow(&fs.id, RetentionKey {});
         assert!(r.covered_count == fs.blob_count, EInsufficientWal);
+        let prepaid: &u64 = df::borrow(&fs.id, PrepaidCountKey {});
+        assert!(*prepaid == r.pending_count, EInsufficientWal);
         assert!(r.wal.value() >= r.pending_wal, EInsufficientWal);
         assert!((r.gas.value() as u128) >= (r.pending_count as u128) * (r.reward as u128), EInsufficientWal);
     }
@@ -921,6 +991,9 @@ module fleet_storage::fleet_storage {
     public fun record_encoded_size(r: &BlobRecord): u64 { r.encoded_size }
     public fun record_end_epoch(r: &BlobRecord): u32 { r.end_epoch }
     public fun record_uploaded_at_ms(r: &BlobRecord): u64 { r.uploaded_at_ms }
+
+    #[test_only]
+    public fun assert_retention_live_for_testing(fs: &FleetStorage, epoch: u32) { assert_retention_live(fs, epoch); }
 
     #[test_only]
     public fun set_version_for_testing(fs: &mut FleetStorage, version: u64) { fs.version = version; }

@@ -56,4 +56,6 @@ try {
   fs.chmodSync(filename, 0o644);
   assert.throws(() => executorSigner(filename));
 } finally { fs.rmSync(temporary, { recursive: true, force: true }); }
+const authorization = r.buildAuthorizeRenewalTx(config, '0x1', '0x2', '0x3', '0x4', 7, 100n).getData();
+assert.equal(authorization.commands[1].MoveCall.function, 'prepay_renewal');
 console.log('PASS: retention SDK builders, cross-runtime BCS, independent funding/expiry facts');

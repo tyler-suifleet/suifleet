@@ -786,6 +786,7 @@ module fleet_storage::fleet_storage_tests {
         fleet_storage::authorize_renewal(&mut fs, &budget, &cap, id, 7, 1_000_000);
         let ctx = ts::ctx(&mut scenario);
         fleet_storage::fund_retention(&mut fs, coin::mint_for_testing<WAL>(1_000_000, ctx), coin::mint_for_testing<SUI>(10, ctx));
+        fleet_storage::prepay_renewal(&mut fs, &budget, &cap, &mut system, id, ctx);
         owner_end(fs, budget, cap);
         (scenario, system, id)
     }
@@ -834,6 +835,7 @@ module fleet_storage::fleet_storage_tests {
         let (mut fs, budget, cap) = owner(&mut scenario);
         let ctx = ts::ctx(&mut scenario);
         fleet_storage::fund_retention(&mut fs, coin::mint_for_testing<WAL>(1_000_000, ctx), coin::mint_for_testing<SUI>(0, ctx));
+        fleet_storage::configure_retention(&mut fs, &budget, &cap, DEVICE_2, 5, 3_000_000, 10, 5);
         let clock = clock_at(&mut scenario, 20);
         let id = fleet_storage::register_retained_fleet_blob(&mut fs, &budget, &cap, &mut system,
             blob_id(BLOB + 1), ROOT, BLOB + 1, RS2, &clock, 7, 1_000_000, ts::ctx(&mut scenario));
@@ -857,9 +859,58 @@ module fleet_storage::fleet_storage_tests {
     fun owner_withdrawal_pauses_discretionary_spending() {
         let (mut scenario, mut system, _) = renewal_fixture();
         let (mut fs, budget, cap) = owner(&mut scenario);
-        let (wal, gas) = fleet_storage::withdraw_retention(&mut fs, &budget, &cap, 1, 0, ts::ctx(&mut scenario));
+        let (wal, gas) = fleet_storage::withdraw_retention(&mut fs, &budget, &cap, 0, 10, ts::ctx(&mut scenario));
         destroy(wal); destroy(gas);
         fleet_storage::buy_storage(&mut fs, &budget, &cap, &mut system, 1, 5, ts::ctx(&mut scenario));
+        owner_end(fs, budget, cap);
+        finish(scenario, system);
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 7, location = fleet_storage)]
+    fun funded_but_unmeasured_quote_cannot_admit_writes() {
+        let (mut scenario, mut system, id) = renewal_fixture();
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        // Replacing an authorization discards prepaid capacity explicitly.
+        fleet_storage::authorize_renewal(&mut fs, &budget, &cap, id, 8, 1);
+        fleet_storage::buy_storage(&mut fs, &budget, &cap, &mut system, 1, 5, ts::ctx(&mut scenario));
+        owner_end(fs, budget, cap);
+        finish(scenario, system);
+    }
+
+    #[test]
+    #[expected_failure]
+    fun stale_quote_cannot_buy_actual_renewal_capacity() {
+        let (mut scenario, mut system, id) = renewal_fixture();
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        fleet_storage::authorize_renewal(&mut fs, &budget, &cap, id, 8, 1);
+        fleet_storage::prepay_renewal(&mut fs, &budget, &cap, &mut system, id, ts::ctx(&mut scenario));
+        owner_end(fs, budget, cap);
+        finish(scenario, system);
+    }
+
+    #[test]
+    fun prepaid_capacity_survives_wal_withdrawal() {
+        let (mut scenario, mut system, id) = renewal_fixture();
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        let (wal, _) = fleet_storage::retention_balances(&fs);
+        let (w, g) = fleet_storage::withdraw_retention(&mut fs, &budget, &cap, wal, 0, ts::ctx(&mut scenario));
+        destroy(w); destroy(g);
+        owner_end(fs, budget, cap);
+        ts::next_tx(&mut scenario, DEVICE_2);
+        let mut fs = ts::take_shared<FleetStorage>(&scenario);
+        fleet_storage::execute_renewal(&mut fs, &mut system, id, 5, 1, ts::ctx(&mut scenario));
+        assert!(fleet_storage::blob(&fs, id).end_epoch() == 7);
+        ts::return_shared(fs);
+        finish(scenario, system);
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 13, location = fleet_storage)]
+    fun expired_protected_blob_blocks_new_admission() {
+        let (mut scenario, system, _) = renewal_fixture();
+        let (fs, budget, cap) = owner(&mut scenario);
+        fleet_storage::assert_retention_live_for_testing(&fs, 5);
         owner_end(fs, budget, cap);
         finish(scenario, system);
     }

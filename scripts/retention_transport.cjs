@@ -7,7 +7,7 @@ const { SuiGrpcClient } = app('@mysten/sui/grpc');
 const { Transaction } = app('@mysten/sui/transactions');
 const { Ed25519Keypair } = app('@mysten/sui/keypairs/ed25519');
 const { bcs } = app('@mysten/sui/bcs');
-const { normalizeSuiAddress: id, normalizeStructTag: tag } = app('@mysten/sui/utils');
+const { normalizeSuiAddress: id, normalizeStructTag: tag, fromBase58 } = app('@mysten/sui/utils');
 const balance = bcs.struct('Balance', { value: bcs.u64() });
 const Retention = bcs.struct('Retention', {
   executor: bcs.Address, margin: bcs.u32(), wal: balance, gas: balance,
@@ -43,7 +43,8 @@ async function run({ config: c, action, value }) {
   for (const key of ['storage', 'package', 'storage_origin', 'retention_origin', 'executor']) id(c[key]);
   check(BigInt(c.gas_budget) > 0n && BigInt(c.gas_budget) <= 50_000_000n);
   const client = new SuiGrpcClient({ network: 'testnet', baseUrl: c.rpc });
-  check((await client.getChainIdentifier()).chainIdentifier === c.chain);
+  const chain = (await client.getChainIdentifier()).chainIdentifier;
+  check(Buffer.from(fromBase58(chain)).subarray(0, 4).toString('hex') === c.chain);
   const storage = (await client.getObject({ objectId: c.storage, include: { content: true } })).object;
   check(tag(storage.type) === tag(`${c.storage_origin}::fleet_storage::FleetStorage`) && storage.owner.$kind === 'Shared');
   // Existing layout starts UID, version. Require explicitly migrated version 2.
@@ -58,7 +59,7 @@ async function run({ config: c, action, value }) {
     const { walrus, TESTNET_WALRUS_PACKAGE_CONFIG } = app('@mysten/walrus');
     const wal = client.$extend(walrus({ packageConfig: TESTNET_WALRUS_PACKAGE_CONFIG })).walrus;
     const system = await wal.systemObject();
-    check(id(system.id) === id(c.system) && id(system.package_id) === id(c.walrus_package));
+    check(id(system.id.id ?? system.id) === id(c.system) && id(system.package_id) === id(c.walrus_package));
     const ws = await wal.systemState();
     const epoch = ws.committee.epoch;
     const r = await field('RetentionKey', Uint8Array.of(0), Retention);
@@ -75,12 +76,13 @@ async function run({ config: c, action, value }) {
         const p = Renewal.parse(entry.value.bcs);
         const record = await field('RecordKey', bcs.Address.serialize(blob).toBytes(), Record, c.storage_origin);
         const ceiling = BigInt(p.max_fee);
+        const prepaid = p.last_success_epoch === null && ceiling === 0n;
         const quoted = ((BigInt(record.encoded_size) + 1048575n) / 1048576n) * BigInt(ws.storage_price_per_unit_size) * BigInt(Math.max(0, p.target - record.end_epoch));
         const spent = r.epoch === epoch ? BigInt(r.wal_spent) : 0n;
         const gasSpent = r.epoch === epoch ? BigInt(r.gas_spent) : 0n;
         blobs.push({ id: blob, end: record.end_epoch, target: p.target,
           quote: quoted.toString(), last_success_epoch: p.last_success_epoch,
-          affordable: quoted <= ceiling && BigInt(r.wal.value) >= ceiling &&
+          affordable: (prepaid || quoted <= ceiling && BigInt(r.wal.value) >= ceiling) &&
             BigInt(r.gas.value) >= BigInt(r.reward) && ceiling + spent <= BigInt(r.wal_per_epoch) &&
             BigInt(r.reward) + gasSpent <= BigInt(r.gas_per_epoch) });
       }
