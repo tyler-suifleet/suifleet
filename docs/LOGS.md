@@ -91,7 +91,7 @@ Support routes are never public, not even with `--public-read`. Every line they 
 | Kind | Severity | When |
 |---|---|---|
 | `component-broken` | critical | A supervised component exhausted its restart budget |
-| `deployment-failed` | critical | The device's on-chain receipt for a deployment is Failed |
+| `deployment-failed` | critical | The device's on-chain receipt for a deployment is Failed, and the device has not demonstrably recovered that component (below) |
 | `device-offline` | warning | The device stopped reporting |
 | `device-degraded` | warning | The device reports problems, or its report is delayed or inconsistent |
 | `deployment-pending` | warning | An online device has not reported a deployment older than `--stuck-after-minutes`. It may be paused or scheduled (deployment control) |
@@ -106,6 +106,8 @@ Support routes are never public, not even with `--public-read`. Every line they 
 
 The last eight come from the services section of the device's newest report ([TELEMETRY.md](TELEMETRY.md#service-health-sf-085)) and are raised only while the device is online. An alert about events since the previous report resolves with the next report that has none. `suifleet-indexer telemetry-alerts ENVELOPES.json` shows, offline, which of them a set of signed reports raises (it checks signatures and bounds, not the registry identity).
 
+**Recovered deployment failures (SF-098).** A Failed receipt is history: the receipt and the deployment record are never changed. It stops being an active `deployment-failed` incident once the device demonstrates recovery of the same component. Its newest report must be fresh and trusted (the device is `healthy` or `degraded`, not `offline` or `delayed`). Every entry for that component must show it installed, not broken, running if supervised, and from a deployment that targets this device, has an Applied receipt from it and was created on chain after the failed one. Versions are not compared, so a rollback to an older version is a recovery. A newer deployment that is pending, not yet applied, reported without an Applied receipt, for another component or on another device clears nothing. A failure created after the recovery stays active. If the evidence later becomes unavailable (the device goes offline, its report is delayed or the component breaks), the failure is active again under the same key. The webhook reports a recovered failure as `resolved` under its stable key.
+
 Revoked, deregistered and unactivated devices raise none, because their telemetry is not trusted. `--alert-webhook` posts `{"alerts": [new…], "resolved": [keys…], "sent_ms"}` when something changes. Each alert is sent once. A failed delivery is retried at the next interval and nothing is marked sent until the receiver accepts it.
 
 **CLI** (token from `--token-file` or `SUIFLEET_API_TOKEN`):
@@ -119,9 +121,9 @@ suifleet-indexer ctl audit [--limit N]
 
 ## dApp
 
-The dashboard lists the connected owner's alerts, refreshed every 30 s, using the same indexer URL and per-tab `read` token as device health. Every alert is validated strictly: kinds, severities and text bounds. Any invalid alert makes the whole list unavailable rather than partial. A failed or stalled refresh shows alerts as unavailable instead of an old list.
+The dashboard lists the connected owner's alerts as **Active incidents**, refreshed every 30 s, using the same indexer URL and per-tab `read` token as device health. Every alert is validated strictly: kinds, severities and text bounds. Any invalid alert makes the whole list unavailable rather than partial. A failed or stalled refresh shows alerts as unavailable instead of an old list.
 
-Unlike device health, the dApp cannot re-derive alerts from the chain alone, so the panel says "Reported by the fleet indexer". Log search and bundles are not in the dApp: they need a `support` token, and go through the CLI.
+Unlike device health, the dApp cannot re-derive alerts from the chain alone, so the panel says "Reported by the fleet indexer". Below it, the dashboard counts the Failed receipts still in the on-chain deployment history, so a recovered failure is visible as history rather than as an incident (SF-098). Log search and bundles are not in the dApp: they need a `support` token, and go through the CLI.
 
 ## Evidence
 
