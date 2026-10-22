@@ -207,6 +207,84 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(len(model['workers']), 2)
         self.assertTrue(any('unreadable claim' in w for w in model['warnings']))
 
+    def test_source_io_failures_are_unavailable_not_fatal(self):
+        f = self.f
+        f.ticket('SF-001'); f.run('sess-impl', 'SF-001', pid=101); f.process(101)
+        real = Path.read_text
+        config = f.paths['config']
+
+        def denied(path, *args, **kwargs):
+            if path == config:
+                raise PermissionError(13, 'Permission denied')
+            return real(path, *args, **kwargs)
+        with patch.object(Path, 'read_text', denied):
+            model = f.collect()
+        self.assertEqual(model['sources']['config'], {'state': 'unavailable', 'detail': 'unreadable (PermissionError)'})
+        self.assertEqual(model['sources']['tickets']['state'], 'ok')
+        self.assertEqual(len(model['workers']), 1, 'healthy stores still refresh')
+        # A store that disappears between the existence check and the read.
+        with patch.object(dash.sqlite3, 'connect', side_effect=FileNotFoundError(2, 'gone')):
+            model = f.collect()
+        self.assertEqual({model['sources'][n]['state'] for n in ('tickets', 'dispatch', 'reviews')}, {'unavailable'})
+        self.assertEqual(model['sources']['config']['state'], 'ok')
+        config.write_text(json.dumps({'implementation_slots': {'not': 'a list'}}))
+        self.assertEqual(f.collect()['sources']['config']['state'], 'unavailable')
+        config.write_text(json.dumps({'review_worker_limits': {'Codex': 3}}))
+        self.assertEqual(f.collect()['sources']['config']['state'], 'unavailable')
+
+    def test_cli_reports_unreadable_source_without_traceback(self):
+        f = self.f
+        f.paths['config'].write_text(json.dumps({'implementation_slots': [None]}))
+        out = self.cli('--json')
+        self.assertEqual(out.returncode, 3, out.stderr)
+        self.assertEqual(json.loads(out.stdout)['sources']['config']['state'], 'unavailable')
+
+    def test_malformed_nested_records_are_isolated(self):
+        f = self.f
+        f.ticket('SF-001'); f.run('sess-impl', 'SF-001', pid=101); f.process(101)
+        f.ticket('SF-002', session='s2', status='review')
+        with sqlite3.connect(f.paths['tickets']) as db:
+            db.execute("UPDATE tickets SET spec='[]' WHERE key='suifleet::SF-002'")
+        bad_checks = f.job(7, pid=301, ticket='SF-003'); f.process(301)
+        data = json.loads((bad_checks/'snapshot.json').read_text())
+        data['statusCheckRollup'] = [None]
+        (bad_checks/'snapshot.json').write_text(json.dumps(data))
+        bad_branch = f.job(8, pid=302, ticket='SF-004'); f.process(302)
+        data = json.loads((bad_branch/'snapshot.json').read_text())
+        data['headRefName'] = ['not', 'hashable']
+        (bad_branch/'snapshot.json').write_text(json.dumps(data))
+        with sqlite3.connect(f.paths['dispatch']) as db:
+            db.execute("INSERT INTO runs VALUES('bad','suifleet','Claude','running','/nonexistent',?,NULL,NULL,NULL)",
+                       (json.dumps({'key': 'SF-009', 'session': ['x'], 'branch': {}}),))
+        model = f.collect()
+        self.assertEqual({s['state'] for s in model['sources'].values()}, {'ok'})
+        self.assertEqual(len(model['workers']), 3, 'healthy implementation and review workers remain visible')
+        self.assertTrue(any('SF-002 has an unreadable specification' in w for w in model['warnings']))
+        self.assertTrue(any('unreadable claim' in w for w in model['warnings']))
+        review = [a for a in model['attention'] if a.get('ticket') == 'SF-002']
+        self.assertEqual(len(review), 1)
+        self.assertIsNone(dash.ci_state(dash.SnapshotCache().get(str(bad_checks))))
+        self.assertIn('PR snapshot', '\n'.join(dash.render(model, 80)))
+
+    def test_orphaned_implementation_holds_capacity_like_dispatcher(self):
+        f = self.f
+        f.ticket('SF-001', agent='Codex', session='s-orphan')
+        f.run('s-orphan', 'SF-001', status='orphaned', pid=201, family='Codex'); f.process(201)  # PID still matches
+        f.ticket('SF-002', agent='Codex', session='s-quar')
+        f.run('s-quar', 'SF-002', status='quarantined', pid=202, family='Codex')
+        model = f.collect()
+        self.assertEqual(model['workers'], [])
+        codex = next(c for c in model['capacity'] if c['family'] == 'Codex' and c['category'] == 'implementation')
+        self.assertEqual((codex['limit'], codex['active'], codex['held'], codex['retained']), (1, 0, 1, 1))
+        self.assertGreaterEqual(codex['active'] + codex['held'], codex['limit'], 'saturated: dispatcher cannot launch')
+        self.assertIn(('SF-001', 'implementation', 'orphaned'), self.states(model))
+
+    def test_unmanaged_blocked_claim_holds_capacity_like_dispatcher(self):
+        f = self.f
+        f.ticket('SF-001', agent='Codex', session='manual', status='blocked')
+        codex = next(c for c in f.collect()['capacity'] if c['family'] == 'Codex' and c['category'] == 'implementation')
+        self.assertEqual((codex['active'], codex['held']), (0, 1))
+
     def test_duplicate_and_recovered_jobs(self):
         f = self.f
         f.ticket('SF-001', status='review')

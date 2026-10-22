@@ -61,7 +61,12 @@ def connect(path):
 
 
 def modified(path):
-    times = [p.stat().st_mtime for p in (Path(path), Path(str(path)+'-wal')) if p.exists()]
+    times = []
+    for p in (Path(path), Path(str(path)+'-wal')):
+        try:
+            times.append(p.stat().st_mtime)
+        except OSError:
+            pass
     return max(times) if times else None
 
 
@@ -151,15 +156,23 @@ class SnapshotCache:
         if cached and cached[0] == stamp:
             return cached[1]
         data = read_json(path)
-        projection = project_snapshot(data, info.st_mtime) if isinstance(data, dict) else {'corrupt': True, 'mtime': info.st_mtime}
+        try:
+            projection = project_snapshot(data, info.st_mtime)
+        except ValueError:
+            projection = {'corrupt': True, 'mtime': info.st_mtime}
         self.entries[path] = (stamp, projection)
         return projection
 
 
 def project_snapshot(data, mtime):
+    """Validate every nested field used; a malformed receipt is reported corrupt."""
+    if not isinstance(data, dict):
+        raise ValueError('snapshot is not an object')
     checks = data.get('statusCheckRollup') or []
+    if not isinstance(checks, list) or not all(isinstance(c, dict) for c in checks):
+        raise ValueError('malformed status checks')
     outcome = {'success': 0, 'pending': 0, 'failed': 0}
-    for check in checks if isinstance(checks, list) else []:
+    for check in checks:
         value = str(check.get('conclusion') or check.get('state') or check.get('status') or '').upper()
         if value in ('SUCCESS', 'NEUTRAL', 'SKIPPED'):
             outcome['success'] += 1
@@ -170,10 +183,16 @@ def project_snapshot(data, mtime):
     testnet = data.get('_testnet_status') if isinstance(data.get('_testnet_status'), dict) else {}
     ticket = data.get('ticket') if isinstance(data.get('ticket'), dict) else {}
     spec = ticket.get('spec') if isinstance(ticket.get('spec'), dict) else {}
-    return dict(pr=data.get('number'), title=safe_text(data.get('title'), 120), branch=data.get('headRefName'),
+    number, branch = data.get('number'), data.get('headRefName')
+    if (number is not None and (not isinstance(number, int) or isinstance(number, bool))) \
+            or (branch is not None and not isinstance(branch, str)) \
+            or (ticket.get('key') is not None and not isinstance(ticket.get('key'), str)):
+        raise ValueError('malformed snapshot identity')
+    state = testnet.get('state')
+    return dict(pr=number, title=safe_text(data.get('title'), 120), branch=branch,
                 head=str(data.get('headRefOid') or '')[:12], draft=bool(data.get('isDraft')),
                 ticket=short_key(ticket.get('key')), ticket_title=safe_text(spec.get('title'), 120) or None,
-                checks=outcome, testnet=(testnet.get('state') or 'missing') if data.get('_testnet_required') else None,
+                checks=outcome, testnet=(safe_text(state, 30) or 'missing') if data.get('_testnet_required') else None,
                 mtime=mtime)
 
 
@@ -205,7 +224,7 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
             return result
         except Unavailable as error:
             model['sources'][name] = dict(state='unavailable', detail=str(error))
-        except (sqlite3.DatabaseError, ValueError, TypeError, KeyError) as error:
+        except (sqlite3.DatabaseError, OSError, ValueError, TypeError, KeyError, AttributeError) as error:
             model['sources'][name] = dict(state='unavailable', detail=f'unreadable ({type(error).__name__})')
         return None
 
@@ -219,6 +238,12 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
         data = json.loads(path.read_text())
         if not isinstance(data, dict):
             raise ValueError('config is not an object')
+        slots = data.get('implementation_slots', [])
+        limits = data.get('review_worker_limits', {})
+        if not isinstance(slots, list) or not all(isinstance(s, dict) and isinstance(s.get('family'), str) for s in slots):
+            raise ValueError('malformed implementation_slots')
+        if not isinstance(limits, dict) or not all(isinstance(v, dict) for v in limits.values()):
+            raise ValueError('malformed review_worker_limits')
         return data
 
     def load_tickets():
@@ -273,7 +298,9 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
         try:
             row['spec'] = json.loads(row['spec'] or '{}')
             row['remote'] = json.loads(row['remote'] or '{}')
-        except ValueError:
+            if not isinstance(row['spec'], dict) or not isinstance(row['remote'], dict):
+                raise ValueError('not an object')
+        except (ValueError, TypeError):
             row['spec'], row['remote'] = {}, {}
             model['warnings'].append(f"Ticket {short_key(row['key'])} has an unreadable specification")
         by_ticket[(row['project'], short_key(row['key']))] = row
@@ -322,9 +349,10 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
         count = impl_counts.setdefault((run['project'], run['family']), dict(active=0, held=0, retained=0))
         try:
             claim = json.loads(run['claim']) if run['claim'] else {}
-            if not isinstance(claim, dict):
+            if not isinstance(claim, dict) or not all(isinstance(claim.get(f), (str, type(None)))
+                                                      for f in ('key', 'session', 'branch', 'model')):
                 raise ValueError
-        except ValueError:
+        except (ValueError, TypeError):
             claim = {}
             model['warnings'].append(f"Implementation receipt for {run['family']} has an unreadable claim")
         # Whitelisted projection only: the claim blob also contains the token.
@@ -346,7 +374,10 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
         if key:
             seen_keys.setdefault((run['project'], key), []).append(base['id'])
         started_at = processes.started_at(started) if process == 'alive' else None
-        since = started_at or (process_file.stat().st_mtime if process_file and process_file.exists() else None)
+        try:
+            since = started_at or (process_file.stat().st_mtime if process_file else None)
+        except OSError:
+            since = None
         if run['status'] in ACTIVE_RUN and process == 'alive':
             count['active'] += 1
             item('worker', **base, state='active', since=since,
@@ -360,7 +391,9 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
                       'stale': f'recorded worker {process}; awaiting dispatcher reconciliation'}[state]
             item('attention', **base, state=state, since=since, summary=detail)
         elif run['status'] in RETAINED:
-            count['retained'] += 1
+            # Like the dispatcher, an orphaned run still holds its slot; only
+            # quarantined/parked reservations release launch capacity.
+            count['held' if run['status'] == 'orphaned' else 'retained'] += 1
             item('attention', **base, state=run['status'], since=since,
                  summary=safe_text(run['message']) or f"{run['status']}; claim retained for explicit recovery")
         else:
@@ -437,6 +470,9 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
         if row['status'] == 'blocked':
             item('attention', **base, state='blocked', since=row['heartbeat'],
                  summary='blocked: ' + (safe_text(row['evidence'], 110) or 'no handoff recorded'))
+            if row['agent'] and row['session'] not in managed:
+                # The dispatcher counts unmanaged blocked claims against the slot too.
+                impl_counts.setdefault((project_id, row['agent']), dict(active=0, held=0, retained=0))['held'] += 1
         elif row['status'] == 'in_progress' and row['session'] not in managed and (project_id, key) not in repairing:
             item('attention', **base, state='manual', since=row['heartbeat'],
                  summary='manual claim without worker identity; not counted active' + ('; lease EXPIRED' if expired else ''))
