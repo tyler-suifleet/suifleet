@@ -79,7 +79,7 @@ Digests and effects are in [the SF-056 receipt](validation/sf056-testnet.json). 
 
 ## SF-083 fleet budget run
 
-`make test-budget-testnet SUIFLEET_WALLET=…` (`scripts/live_fleet_budget.py`) runs on the same executor and allowance. It covers the fleet budget, refusals, real daemon draws, a SUI→WAL swap and a fleet-paid Walrus upload. It caches its package fixture in `sf083-state.json` beside the wallet and keeps a pending device key until the key is swept. It needs the machine-session lock token and the pinned Walrus SDK installed privately. See [FLEET_BUDGET.md](FLEET_BUDGET.md) and [sf083-testnet.json](validation/sf083-testnet.json).
+`make test-budget-testnet SUIFLEET_WALLET=…` (`scripts/live_fleet_budget.py`) runs on the same executor and allowance. It covers the fleet budget, draws from the device's own gas account with the budget left at its version, refusals, real daemon draws, a SUI→WAL swap, storage bought and extended with the fleet's WAL, a device's fleet-paid Walrus upload and an owner upload through the dApp's own upload code (`scripts/live_fleet_upload.cjs`, each transaction decoded and verified before the wallet signs it). It caches its package fixture in `sf083-state.json` beside the wallet and keeps a pending device key until the key is swept. It needs the machine-session lock token and the pinned Walrus SDK installed privately. See [FLEET_BUDGET.md](FLEET_BUDGET.md) and [sf083-testnet.json](validation/sf083-testnet.json).
 
 ## The `package-upgrade` live gate
 

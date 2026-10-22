@@ -57,8 +57,10 @@ The additive SF-083 `fleet_budget` module is in the same reviewed ABI, with an
 all-or-none optional origin group `fleet_budget`; manifests without it keep working
 and the daemon's `[budget]` requires it. The separately published `fleet_storage`
 package (Walrus dependency) is not in this catalog: its dApp calls are checked by
-`check_contract_interfaces.py` against its own compiled summary, and its pinned Walrus
-calls are listed as reviewed external references. See [FLEET_BUDGET.md](FLEET_BUDGET.md).
+`check_contract_interfaces.py` against its own compiled summary, and the pinned Walrus
+exchange calls are listed as reviewed external references. Storage purchases go through
+`fleet_storage::buy_storage`/`extend_pool`, so the dApp calls no Walrus `System` function
+directly. See [FLEET_BUDGET.md](FLEET_BUDGET.md).
 
 The additive SF-089 handover API and `fleet_handover::Handover` BCS layout are in
 the same reviewed ABI. Its optional origin group permits existing deployments

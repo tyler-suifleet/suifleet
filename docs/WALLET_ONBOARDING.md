@@ -88,8 +88,8 @@ disposable localnet/testnet faucet.
 When the deployment's package has the fleet budget, SF-083 fills the extension
 point between the gas check and registration: the up-front estimate with its fees
 listed separately, optional card funding through a provider's hosted checkout, and
-the budget deposit. Registration then enrolls the device in the budget and sends
-its float in the same PTB. Network and account checks stay as above, and the page
+the budget deposit. Registration then enrolls the device in the budget, with its
+own gas account and reserve, and sends its float in the same PTB. Network and account checks stay as above, and the page
 explains that wallet gas and the fleet budget differ. See
 [FLEET_BUDGET.md](FLEET_BUDGET.md).
 

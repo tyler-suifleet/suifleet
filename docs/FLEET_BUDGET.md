@@ -18,9 +18,9 @@ fully compromised device key can spend, write or destroy.
 
 | Object | Holds |
 |---|---|
-| `FleetBudget` (shared) | the SUI balance, `paused`, default `Limits`, low-balance threshold, totals, the registry it serves and its owner cap's ID, and a package `version` |
+| `FleetBudget` (shared) | the unallocated SUI balance, `paused`, default `Limits`, low-balance threshold, totals, the registry it serves and its owner cap's ID, a package `version`, and an index from device ID to its current `GasAccount` (dynamic fields) |
 | `BudgetOwnerCap` (owned by the owner) | authority over that one budget |
-| `DeviceAccount` (dynamic field, keyed by device ID) | the device's limits, suspension, current period usage, last draw and totals |
+| `GasAccount` (shared, one per enrolled device) | the device's own reserve (`Balance<SUI>`) it draws from, its limits, suspension, a `closed` flag, current period usage, last draw and totals, and the budget, device and owner cap it is bound to |
 
 `Limits` has these fields:
 - `float_cap`: the most a single draw (and the initial float) may send;
@@ -30,32 +30,43 @@ fully compromised device key can spend, write or destroy.
 - `min_draw_interval_ms`.
 
 **Owner calls (owner cap only):**
-- `create`, `deposit`, `withdraw`;
+- `create`, `deposit`, `withdraw` (unallocated funds);
 - `set_paused`: stops every draw and upload at once;
 - `configure`;
-- `enroll_device`: needs the device's `DeviceOwnerCap`; sends the initial float, at most the float cap;
-- `fund_device`: an owner refill, for a device with too little gas to draw;
-- `set_device_limits`, `set_device_suspended`, `remove_device`;
+- `enroll_device`: needs the device's `DeviceOwnerCap`; shares the device's
+  `GasAccount` with a reserve moved from the budget, sends the initial float
+  (at most the float cap) and returns the account ID;
+- `fund_reserve`, `reclaim_reserve`: move funds between the budget and a
+  device's reserve;
+- `fund_device`: an owner refill straight to the device's address, for a
+  device with too little gas to draw;
+- `set_device_limits`, `set_device_suspended`: write only the account and
+  only read the budget;
+- `remove_device`: closes the account for good, removes it from the index
+  and returns its reserve to the budget;
 - `migrate`.
 
-**Device call:** `draw_gas(budget, registry, device_cap, amount, clock)` sends
-`amount` to the sender. It requires all of these:
+**Device call:** `draw_gas(&budget, &mut account, registry, device_cap,
+amount, clock)` sends `amount` from the device's own reserve to the sender.
+It requires all of these:
 - the current package version and an unpaused budget of this registry;
-- an enrolled, unsuspended account;
+- the account is this device's, this budget's and the one the budget
+  currently indexes for the device, and it is open and unsuspended;
 - the device's signer-bound `DeviceCap` held by its current registry signer
   (`device_cap::assert_active`: custodied, unrevoked, current key);
 - a registry identity still bound to the owner cap it was enrolled with;
 - `amount ≤ float_cap`;
 - the period's draw count and minimum interval;
 - `drawn_in_period + amount ≤ period_allowance`;
-- enough balance.
+- enough reserve.
 
 A new period starts when the previous one has elapsed.
 
 **Events:**
-- `GasDrawn` for every draw, with period usage, limits, the remaining
-  balance and `at_limit`;
+- `GasDrawn` for every draw, with the account, period usage, limits, the
+  remaining reserve and `at_limit`;
 - `DeviceFunded` for floats and refills;
+- `ReserveChanged` for every allocation to or reclaim from a reserve;
 - `Deposited`, `Withdrawn`;
 - `BudgetLow` whenever the balance ends below the threshold;
 - `DeviceStateChanged`, `BudgetPaused`, `BudgetConfigured`, `BudgetCreated`.
@@ -64,17 +75,30 @@ A new period starts when the previous one has elapsed.
 be clawed back. A compromised device holds at most its float plus what it
 drew in the current period. Until the owner revokes its key, suspends it,
 removes it or pauses the budget, it can draw at most one `period_allowance`
-per period, in at most `max_draws_per_period` draws of at most `float_cap`.
-Revocation in the registry, suspension and the fleet-wide pause stop draws
-in the next transaction. A device cannot withdraw, change limits or touch
+per period, in at most `max_draws_per_period` draws of at most `float_cap`,
+and never more than its own reserve: the rest of the budget and other
+devices' reserves are out of its reach. Revocation in the registry,
+suspension, removal and the fleet-wide pause stop draws in the next
+transaction. A device cannot withdraw, change limits, move reserves or touch
 another device's account: those need the owner cap.
 
-**Contention.** Per-device state lives in dynamic fields, so the budget
-object itself stays small. Each draw still writes the shared budget, which
-holds the pooled balance. Draws are rare (only below the low-water mark) and
-rate limited. Every attempt, including an aborted one, costs the sender at
-least one computation fee from its own bounded float. Pausing or suspending
-ends a flood.
+**Contention.** Draws do not write the fleet budget. `draw_gas` takes
+`&FleetBudget` (pause flag, version and device index) and writes only the
+drawing device's own `GasAccount`. Devices therefore never serialize on the
+fleet object or on each other, and a device's draws never change the
+budget's version: the isolated localnet run shows two devices drawing in
+parallel against the same budget version, each writing only its own account,
+with the budget listed as a read-only consensus input. The owner's
+per-device changes (suspend, limits) also only read the budget. The pause
+flag and the device index still bind immediately, because a writer of the
+budget (pause, removal) is ordered before later readers.
+
+Sui lets any address declare any shared object mutable in a transaction it
+pays for. A compromised key can do that to the budget. It gets nothing more
+than its limits allow, and the budget's contents stay unchanged (tested on
+localnet). It only spends its own bounded gas, and Sui's per-object
+congestion control prices such spam like any other. The daemon and the
+signing service only ever submit the budget as an immutable input.
 
 **Package versions.** Older Sui package versions stay callable. Every
 mutating call checks `budget.version == VERSION`. A later upgrade that
@@ -105,7 +129,9 @@ against the real Walrus code:
 - only a deletable blob can be deleted; `burn` needs the `Blob` by value;
 - `extend_blob` pays from a WAL coin.
 
-`FleetStorage` (shared, bound to one `FleetBudget`) holds:
+`FleetStorage` (shared, bound to one `FleetBudget`) holds the following.
+Uploads also write Walrus's global `System` object, so they serialize on
+Walrus itself whatever this package does.
 - a single fused `Storage` pool: all deposits share an epoch range, or are
   adjacent with the same size;
 - a WAL balance for write fees;
@@ -114,8 +140,9 @@ against the real Walrus code:
 - the fleet's blobs (dynamic object fields) with a record of who uploaded
   each and when.
 
-**Device upload.** `register_blob` is authorized like a draw
-(`fleet_budget::assert_may_draw`). It works as follows:
+**Device upload.** `register_blob(fs, &budget, &account, …)` is authorized
+like a draw (`fleet_budget::assert_may_draw` on the device's own account). It
+works as follows:
 - It computes the exact encoded size with Walrus's own `encoded_blob_length`
   and splits only that much storage from the pool.
 - It offers at most the device's remaining write-fee quota from the WAL
@@ -125,11 +152,26 @@ against the real Walrus code:
 - `certify_blob` passes the storage nodes' certificate to Walrus, which
   verifies it. Certification cannot shorten or delete.
 
-**Owner calls:** `deposit_storage`, `withdraw_storage`, `deposit_wal`,
-`deposit_wal_at_least` (below), `withdraw_wal`, quotas, `extend_blob` (from
-the prepaid WAL) and `release_blob`. Release hands the `Blob` to the owner,
-who can `burn` it after expiry and receives its Sui storage rebate. Walrus
-storage itself is a consumed purchase, not a refundable deposit.
+**Owner upload.** `register_fleet_blob` registers a blob the owner uploads
+(a release artifact or recipe from the dApp) the same way: exact encoded
+size from the pool, write fee from the fleet's WAL, non-deletable and held
+by the fleet object, recorded without a device. It needs the budget's owner
+cap.
+
+**Owner calls:**
+- `buy_storage`: buys storage from Walrus with the fleet's own WAL and adds it
+  to the pool in one call, so no WAL leaves the fleet. It must fuse with the
+  pool: an empty pool, the same epoch range, or adjacent with the same size.
+- `extend_pool`: pushes the whole pool's expiry back by buying the same size
+  for the epochs right after it.
+- `deposit_storage`, `withdraw_storage`, `deposit_wal`,
+  `deposit_wal_at_least` (below), `withdraw_wal`.
+- quotas.
+- `extend_blob`, paid from the prepaid WAL.
+- `release_blob`: hands the `Blob` to the owner, who can `burn` it after
+  expiry and receives its Sui storage rebate.
+
+Walrus storage itself is a consumed purchase, not a refundable deposit.
 
 `fleet_storage` is built only against the pinned Walrus Testnet contracts.
 No Mainnet build or verification exists, and the dApp says so.
@@ -149,25 +191,30 @@ It needs a manifest with the fleet budget type origins (an all-or-none
 optional origin group, so older manifests keep working).
 
 Each poll, the daemon reads its SUI balance (`GetBalance`). Below the
-low-water mark, it reads the budget and its `DeviceAccount` and decides
-exactly as `draw_gas` would. It draws only what the contract will accept, so
-a refused draw is never submitted or charged. The draw is one checked call:
+low-water mark, it reads the budget and, through the budget's device index,
+its own `GasAccount`. It checks the account's type, that it is shared, and
+that it names this budget and device. It then decides exactly as `draw_gas`
+would, and draws only what the contract will accept, so a refused draw is
+never submitted or charged. The draw is one checked call. Before signing,
 the daemon verifies the simulated transaction's module, function and every
-object and pure argument before signing.
+object and pure argument, and that the budget is an immutable input.
 
-If the device cannot top up (paused, suspended, unenrolled, allowance or
-draw count used up, rate limited, budget empty), the reason is journaled
+If the device cannot top up (paused, suspended, removed, unenrolled,
+allowance or draw count used up, rate limited, reserve empty), the reason is journaled
 (`funding.blocked`). Telemetry then reports `network funding: <reason>; N
 receipt(s) queued until gas is available`. Status reports stay queued in the
 journal across restarts, and nothing is dropped. They go out once a later
-period, deposit or owner refill lets the device pay again. A device with no
-gas at all cannot pay for its own draw. The owner refills it
-(`fund_device`, "Refill float" in the dApp).
+period or owner refill lets the device pay again. A device whose reserve is
+empty waits for the owner to refill it ("Refill reserve" in the dApp). A
+device with no gas at all cannot pay for its own draw, so the owner sends it
+gas directly (`fund_device`, "Send float").
 
 The SF-053 signing service signs draws only with `[budget]` in
 `signer.toml` (`budget_id`, `max_draw_mist`). It requires all of these:
 - exactly one `fleet_budget::draw_gas` on the manifest's package;
-- that budget, the manifest's registry, this device's cap and the Clock;
+- that budget as an immutable input, a shared gas account (the contract
+  binds it to this device and budget), the manifest's registry, this
+  device's cap and the Clock;
 - an amount of at most `max_draw_mist`;
 - gas paid by the device within the gas ceiling;
 - the daemon's main process as the caller.
@@ -177,10 +224,13 @@ the on-chain limits. See [KEY_ISOLATION.md](KEY_ISOLATION.md).
 
 **Device-originated Walrus data.** The contract, the device-key flow and a
 real Testnet upload are implemented and tested (below). The daemon itself
-has no Walrus write path today, since telemetry and logs go to the fleet
-indexer. Archiving device data to Walrus through `fleet_storage` from the
-daemon needs an RS2 encoder in the device client. That is follow-up work,
-reported in #161.
+produces no data for Walrus today: by design, telemetry and logs go to the
+fleet indexer (SF-019, SF-020), and artifacts and recipes are uploaded by
+the owner. Owner uploads now go through fleet storage from the dApp (below).
+A daemon Walrus archival feature would have to choose what to archive and
+add an RS2 encoder to the device client; Mysten's encoder is not published as
+a crate the Yocto build can pin. It is reported in #161 for Codex to triage
+as separate work, not claimed here.
 
 ## dApp
 
@@ -189,18 +239,49 @@ reported in #161.
 - optional card funding;
 - creating the budget with the first deposit, and further deposits;
 - balance, runway and warnings;
-- per-device usage this period, with refill, suspend/resume, remove, and
-  enroll with float;
-- fleet-wide pause/resume and withdrawal of unused funds;
+- per-device reserve and usage this period, with refill or reclaim of the
+  reserve, sending a float, suspend/resume, remove, and enroll with float and
+  reserve;
+- fleet-wide pause/resume and withdrawal of unallocated funds;
 - alerts for devices drawing at their limits or far above the fleet's
-  typical device, and for low, empty or paused budgets.
+  typical device, for low or empty device reserves, and for low, empty or
+  paused budgets;
+- **Prepaid Walrus storage** (testnet builds with
+  `NEXT_PUBLIC_FLEET_STORAGE_PACKAGE`):
+  - creating fleet storage with default per-device quotas;
+  - funding its WAL with SUI only (swap with a slippage limit, optionally
+    buying storage in the same transaction), with WAL from the wallet, or by
+    card;
+  - buying storage and extending the pool with the fleet's WAL, at the live
+    Walrus price;
+  - withdrawing unused WAL;
+  - pool, expiry, WAL and blob totals, with alerts for no space, no WAL or an
+    expiring pool.
+
+**Fleet-paid uploads** (`lib/fleet-upload.ts`). On the Releases page, the
+Components publisher and the Greengrass import, "Pay Walrus storage from the
+fleet's prepaid storage" sends the (Seal-encrypted or explicitly public)
+bytes through fleet storage instead of the publisher. There is no server and
+no fallback:
+1. the browser encodes the blob with the pinned Walrus SDK
+   (`@mysten/walrus` 1.2.35, WASM) after checking that the live Walrus
+   `System` package is the pinned one;
+2. the wallet signs `register_fleet_blob`, and the blob object comes from the
+   confirmed effects' `FleetUploadRegistered` event for this storage and blob;
+3. the slivers go straight to the storage nodes;
+4. the wallet signs `certify_blob` with the nodes' certificate.
+
+The blob is fleet-owned and non-deletable, and renews only through fleet
+storage. A failure before certification reports the error and leaves an
+uncertified fleet blob the owner can release.
 
 **First run.** SF-088's extension point, between the gas check and
 registration, now shows these steps:
 1. the estimate;
 2. card funding;
 3. the deposit;
-4. registration, which enrolls the device with its float in the same PTB.
+4. registration, which enrolls the device with its float and its own gas
+   account and reserve in the same PTB.
 
 The page still checks the network and account, and explains that wallet gas
 and the fleet budget differ.
@@ -218,12 +299,15 @@ storage. Separate rows show the swap route, card and on-ramp fees, regional
 availability and the (absent) service fee before the user approves. It is an
 estimate: the wallet shows each transaction's real cost.
 
-**SUI-only deposits.** On Testnet, the deposit swaps SUI for WAL through
-Walrus's pinned Testnet exchange (`wal_exchange::exchange_all_for_wal`, fixed
-posted rate) in the same PTB. It then calls
+**SUI-only deposits.** On Testnet, the storage deposit swaps SUI for WAL
+through Walrus's pinned Testnet exchange (`wal_exchange::exchange_all_for_wal`,
+fixed posted rate) in the same PTB. It then calls
 `fleet_storage::deposit_wal_at_least`, which aborts the whole transaction if
-fewer WAL than the minimum arrive. No DEX route is pinned and verified for
-Mainnet, so the dApp explains that WAL must be bought directly there.
+fewer WAL than the minimum arrive, and can call `buy_storage` with that WAL
+in the same transaction. The dApp reads the exchange's posted rate and WAL
+reserve first and sets the minimum from the user's slippage limit. No DEX
+route is pinned and verified for Mainnet, so the dApp explains that WAL must
+be bought directly there.
 
 **Card payment without a server** (`lib/onramp.ts`).
 - The dApp opens OnRamp.money's own hosted checkout (`https://onramp.money/main/buy/`)
@@ -252,14 +336,14 @@ reads without changing this authority model:
 | Read | Source |
 |---|---|
 | Interface version | `fleet_budget::interface_version()` = 1; `fleet_storage::interface_version()` = 1 |
-| Balance, spendable, reserved | `balance`, `spendable` (= balance), `reserved` (= 0 until SF-092 adds reserves) |
-| Budget state | `paused`, `default_limits`, `low_balance_threshold`, `device_count`, `total_deposited/withdrawn/drawn`, `version` |
-| Per-device float and quota | `device_account(budget, device_id)` → `DeviceAccount` getters; `fleet_storage::usage(storage, device_id)` |
-| Storage and expiry | `pool_size`, `pool_epochs` (`[start, end)`: blobs end with the pool), `wal_balance`, `blob_record` (end epoch per blob) |
-| Events | `GasDrawn` (`at_limit`), `DeviceFunded`, `Deposited`, `Withdrawn`, `BudgetLow` (exhaustion), `DeviceStateChanged`, `BudgetPaused`, `UploadRegistered` (`at_limit`), `StorageDeposited`, `WalDeposited`, `BlobExtended`, `BlobReleased` |
+| Balance, spendable, reserved | `balance` (unallocated), `spendable` (= balance), `reserved` (= 0 until SF-092 adds renewal reserves; device gas reserves are per account, below) |
+| Budget state | `paused`, `default_limits`, `low_balance_threshold`, `device_count`, `total_deposited/withdrawn/paid/allocated/reclaimed`, `version` |
+| Per-device float and quota | `account_id(budget, device_id)` → the shared `GasAccount` and its getters (`account_reserve`, limits, usage, `account_closed`); `fleet_storage::usage(storage, device_id)` |
+| Storage and expiry | `pool_size`, `pool_epochs` (`[start, end)`: blobs end with the pool), `wal_balance`, `blob_record` (end epoch per blob; device none for owner uploads) |
+| Events | `GasDrawn` (`at_limit`, `reserve`), `DeviceFunded`, `ReserveChanged`, `Deposited`, `Withdrawn`, `BudgetLow` (exhaustion), `DeviceStateChanged`, `BudgetPaused`, `UploadRegistered` (`at_limit`), `FleetUploadRegistered`, `StoragePurchased`, `StorageDeposited`, `WalDeposited`, `BlobExtended`, `BlobReleased` |
 
 The TypeScript reads are in `dapp/src/lib/fleet-budget.ts` (`fetchBudgets`,
-`fetchAccount`, `fetchDraws`). Layouts are in the reviewed ABI
+`fetchAccount`, `fetchDraws`, `fetchStorage`). Layouts are in the reviewed ABI
 (`interfaces/fleet-v1.json`, optional origin group `fleet_budget`).
 
 ## Business decisions and future options
@@ -275,24 +359,30 @@ The TypeScript reads are in `dapp/src/lib/fleet-budget.ts` (`fetchBudgets`,
 ## Verification
 
 ```bash
-sui move test --path contracts                    # 157 tests, 33 fleet_budget
-sui move test --path contracts/fleet_storage      # 25 tests against Walrus testnet-v1.59.0
-make edge-test                                    # funding, exact-draw check, signer draw policy
+sui move test --path contracts                    # 168 tests, 44 fleet_budget
+sui move test --path contracts/fleet_storage      # 32 tests against Walrus testnet-v1.59.0
+make edge-test                                    # funding, exact-draw check (immutable budget), signer draw policy
 python3 scripts/test_budget_ota.py                # in make test-ota: real daemon vs simulator
-node scripts/test_fleet_budget.cjs                # in make test-manifest: estimate vs SF-054, on-ramp, builders, alerts
-make test-budget-localnet                         # network none: upgrade, on-chain refusals, version gate, daemon draws
+node scripts/test_fleet_budget.cjs                # in make test-manifest: estimate vs SF-054, on-ramp, builders, alerts, fleet-paid upload flow
+make test-budget-localnet                         # network none: upgrade, read-only budget, parallel draws, refusals, version gate, daemon draws
 make test-budget-testnet SUIFLEET_WALLET=…        # public testnet, dedicated agent wallet, lock required
 ```
 
 - **Move tests.** Limits, period resets, revocation, rotation, deregistration,
   pause, suspension, removal, ownership and cap checks, a compromised key
-  draining at the maximum rate, and the version gate. For storage: exact
-  storage splitting, non-deletable fleet ownership, quotas, write-fee caps,
-  slippage, release/extend and version.
+  draining at the maximum rate and bounded by its reserve, draws leaving the
+  budget unchanged, separate accounts (another device's account, another
+  budget's account, a retired account after re-enrollment), reserve funding
+  and reclaim, and the version gate on the budget and its accounts. For
+  storage: exact storage splitting, non-deletable fleet ownership for device
+  and owner uploads, quotas, write-fee caps, slippage, purchases and pool
+  extension with fleet WAL, release/extend and version.
 - **Isolated localnet** ([sf083-localnet.json](validation/sf083-localnet.json)).
   A base (main) package with an activated device is upgraded to head. The
-  pre-upgrade device enrolls and draws. These refusals were recorded as
-  failed transactions on chain:
+  pre-upgrade device enrolls and draws from its own account; the budget is a
+  read-only consensus input at an unchanged version. Two more devices draw
+  in parallel: both read the same budget version and each writes only its own
+  account. These refusals were recorded as failed transactions on chain:
   - the base package: `FunctionNotFound`;
   - above the float cap: 8;
   - revoked: `device_cap` 2;
@@ -300,10 +390,16 @@ make test-budget-testnet SUIFLEET_WALLET=…        # public testnet, dedicated 
   - suspended: 7;
   - over the allowance: 9;
   - over the draw count: 10;
+  - an emptied reserve, and beyond the reserve with the budget declared
+    mutable: 11;
+  - another device's account: 16;
+  - a removed device's account: 4;
   - the previous version after a later upgrade's migration: 0.
 
-  The device's attempt to use the owner cap is refused before execution. The
-  real daemon draws three times over gRPC and then journals its limit.
+  A draw that declares the budget mutable succeeds within its limits and
+  leaves the budget's contents unchanged. The device's attempt to use the
+  owner cap is refused before execution. The real daemon draws three times
+  over gRPC with the budget read-only and then journals its limit.
 - **Public testnet** ([sf083-testnet.json](validation/sf083-testnet.json),
   2026-10-21). The run used the dedicated agent wallet, chain `4c78adac`, and
   held `network:suifleet-testnet`. Every transaction's effects were checked.
