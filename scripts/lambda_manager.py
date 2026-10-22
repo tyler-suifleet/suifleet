@@ -761,23 +761,38 @@ def main():
         manager.start()
     except Exception as error:  # noqa: BLE001 - payload-free startup diagnostic
         sys.exit(f'function manager startup rejected: {type(error).__name__}: {str(error)[:200]}')
-    stop = threading.Event()
+    # Signal handlers must not acquire locks: a signal may interrupt Event.wait
+    # while its non-reentrant condition lock is held by this same main thread.
+    stop = False
+
+    def request_stop(*_):
+        nonlocal stop
+        stop = True
+
+    def wait_for_stop(seconds):
+        deadline = time.monotonic() + seconds
+        while not stop:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(0.05, remaining))
+
     for number in (signal.SIGTERM, signal.SIGINT):
-        signal.signal(number, lambda *_: stop.set())
+        signal.signal(number, request_stop)
     delay, idle, exit_status = 0.2, 0.02, 0
     try:
-        while not stop.is_set():
+        while not stop:
             try:
                 progressed = manager.step()
                 delay = 0.2
                 # Receive is nonblocking: poll quickly while busy, back off to 250 ms idle.
                 idle = 0.02 if progressed else min(0.25, idle * 2)
                 if not progressed:
-                    stop.wait(idle)
+                    wait_for_stop(idle)
             except (IpcError, OSError) as error:
                 code = str(error) if isinstance(error, IpcError) else 'unavailable'
                 manager.diagnostic(f'ipc retry ({code[:64]})')
-                stop.wait(delay)
+                wait_for_stop(delay)
                 delay = min(30, delay * 2)
             except CleanupError as error:
                 # Never continue with an unkilled function: stop, and let the platform

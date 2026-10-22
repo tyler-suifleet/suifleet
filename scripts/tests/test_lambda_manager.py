@@ -526,6 +526,33 @@ class ManagerTests(unittest.TestCase):
         self.assertEqual([json.loads(m[2])['tag'] for m in f.marks_of('invoke')], ['routed', 'routed'])
         self.assertEqual(f.daemon.queues[('functions', 'sensors/temp')], [], 'unrouted message acknowledged')
 
+    def test_shutdown_signal_does_not_acquire_an_event_lock(self):
+        # A signal can interrupt Event.wait with its non-reentrant lock held.
+        code = r"""
+import os, signal, threading
+from unittest import mock
+import lambda_manager as lm
+stop = threading.Event()
+install_handler = signal.signal
+def register(number, handler):
+    install_handler(number, handler)
+    if number == signal.SIGTERM:
+        with stop._cond:
+            os.kill(os.getpid(), number)
+with (
+    mock.patch.object(lm, 'Manager'),
+    mock.patch.object(lm, 'load_config'),
+    mock.patch.object(lm.Path, 'read_text', return_value='{}'),
+    mock.patch.object(lm.threading, 'Event', return_value=stop),
+    mock.patch.object(lm.signal, 'signal', side_effect=register),
+):
+    lm.main()
+"""
+        result = subprocess.run([sys.executable, '-c', code, '--config', 'unused'],
+                                env={**os.environ, 'PYTHONPATH': str(ROOT / 'scripts')},
+                                capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_manager_kill_reinvokes_interrupted_work_once(self):
         f = self.fixture()
         f.daemon.inject('sensor', 'sensors/temp', {'op': 'sleep', 'seconds': 2, 'tag': 'k'})
