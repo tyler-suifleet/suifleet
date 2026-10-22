@@ -16,6 +16,7 @@ mod configuration;
 mod console;
 mod deps;
 mod firmware;
+mod funding;
 mod handoff;
 mod identity;
 mod iotcore;
@@ -743,6 +744,20 @@ async fn poll(
         collect_firmware_results(cfg, journal)?;
     }
     settle_configuration(configs, journal, supervisor)?;
+    // Top up gas from the fleet budget before reporting (SF-083). A failure
+    // only delays reports, which stay queued.
+    if let Some(budget) = &cfg.budget {
+        let mut funding = journal.state.funding.clone().unwrap_or_default();
+        match funding::top_up(budget, sui, &cfg.device.device_object_id, &cfg.device.device_cap_id, &mut funding, telemetry::now_ms()).await {
+            Ok(changed) => {
+                if changed || journal.state.funding.is_none() {
+                    journal.state.funding = Some(funding);
+                    journal.save()?;
+                }
+            }
+            Err(error) => warn!(%error, "Gas top-up check failed; retrying next poll"),
+        }
+    }
     // Reports remain queued across network failures and daemon restarts.
     let pending: Vec<_> = journal
         .state

@@ -99,6 +99,10 @@ pub struct Config {
     /// LAN client-device authentication and discovery (SF-035); none when omitted.
     #[serde(default)]
     pub client_devices: Option<crate::clientdevices::Settings>,
+    /// Gas top-ups from the owner's prepaid fleet budget (SF-083); none when
+    /// omitted, and the device pays its own gas as before.
+    #[serde(default)]
+    pub budget: Option<crate::funding::BudgetConfig>,
     /// The file this configuration was loaded from (for the update preflight).
     #[serde(skip)]
     pub path: PathBuf,
@@ -863,6 +867,9 @@ impl Config {
             shadows.validate()?;
         }
         validate_aws_iot(&cfg)?;
+        if let Some(budget) = &cfg.budget {
+            budget.validate(cfg.sui.manifest.as_ref().expect("validated manifest"))?;
+        }
         if let Some(client_devices) = &mut cfg.client_devices {
             if client_devices.device_groups_file.is_relative() {
                 client_devices.device_groups_file = path.parent().unwrap_or(Path::new(".")).join(&client_devices.device_groups_file);
