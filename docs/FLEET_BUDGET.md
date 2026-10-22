@@ -401,35 +401,51 @@ make test-budget-testnet SUIFLEET_WALLET=…        # public testnet, dedicated 
   owner cap is refused before execution. The real daemon draws three times
   over gRPC with the budget read-only and then journals its limit.
 - **Public testnet** ([sf083-testnet.json](validation/sf083-testnet.json),
-  2026-10-21). The run used the dedicated agent wallet, chain `4c78adac`, and
-  held `network:suifleet-testnet`. Every transaction's effects were checked.
+  2026-10-21, head `011ee1c`). The run used the dedicated agent wallet, chain
+  `4c78adac`, held `network:suifleet-testnet`, and made one faucet request
+  through the pinned 1.82.1 CLI. Every transaction's effects were checked.
   - **Publication.** The head `sui_edge` and `fleet_storage` packages were
-    published with bytecode verified before signing. `fleet_storage` links to
-    the live Walrus package. Run 1 published `sui_edge` and stopped before
-    `fleet_storage`. Run 2 adopted that publication after on-chain checks,
-    and nothing was republished.
+    published with bytecode verified before signing (`0x34978350…`,
+    `0x92b60591…`) and cached by content hash. Runs 1 and 2 stopped on harness
+    assertions (an owner rendering and an effects format), not on contract
+    behavior. Run 3 reused the fixture and passed every check. The budgets
+    left by runs 1 and 2 were reclaimed with the owner cap.
   - **Budget.** A budget was created with a 0.06 SUI deposit. A throwaway
-    device was enrolled and received exactly its 0.02 SUI float. It drew
-    0.005 SUI: `GasDrawn`, net gas 1,988,855 MIST, now the estimate's draw
-    cost.
+    device was enrolled: its address received exactly its 0.02 SUI float, and
+    its own shared `GasAccount` holds a 0.025 SUI reserve. It drew 0.005 SUI
+    from that account (`GasDrawn`, net gas 1,988,540 MIST). The fleet budget
+    stayed at the same object version and was not among the mutated objects.
   - **On-chain refusals:** above the float cap (8), after revocation
     (`device_cap` 2) and while paused (3).
-  - **Real daemon.** It drew twice over the public fullnode, then journaled
-    its period draw limit.
-  - **SUI-only deposit.** SUI was swapped for WAL through the pinned
-    exchange into fleet storage in one PTB. A minimum above the posted rate
-    aborted (12). Storage was bought with the prepaid WAL.
-  - **Fleet-paid upload.** The device registered and certified a 2 KiB blob:
-    - exactly its encoded size, from fleet storage;
-    - write fee 328,860 FROST from the prepaid WAL;
-    - non-deletable and owned by the fleet object;
-    - confirmed by 68 storage nodes and read back intact.
+  - **Real daemon.** It drew twice from its account over the public fullnode,
+    then journaled its period draw limit.
+  - **SUI-only storage funding.** 0.02 SUI was swapped for WAL through the
+    pinned exchange into fleet storage in one PTB. A minimum above the posted
+    rate aborted (12).
+  - **Storage bought with the fleet's WAL.** `buy_storage` bought 132,068,000
+    encoded bytes for epochs 558–561 for 986,580 FROST, and `extend_pool`
+    extended the pool to epoch 562. No WAL left the fleet object.
+  - **Device upload.** The device registered and certified a 2 KiB blob
+    through its account: exactly its encoded size, from fleet storage,
+    non-deletable, owned by the fleet object, confirmed by 69 storage nodes,
+    read back intact and ending with the extended pool. Its second upload in
+    the period aborted on its quota (6).
+  - **dApp owner upload.** The dApp's own `uploadToFleetStorage`
+    (`scripts/live_fleet_upload.cjs`, the app's pinned `@mysten/sui` 2.36.0
+    and `@mysten/walrus` 1.2.35) registered and certified an owner blob from
+    fleet storage, with a 328,860 FROST write fee from the fleet's WAL. Each
+    transaction was decoded and checked (sender, gas owner, gas budget,
+    exactly one expected `fleet_storage` call) before the wallet signed it.
+    The blob is fleet-owned and non-deletable, was read back intact, and used
+    the pool's last space.
+  - **Cleanup and cost.** The device was removed and its remaining reserve
+    returned. The unused deposit was withdrawn and the device key swept. The
+    wallet's net decrease was 0.540 SUI: about 0.48 SUI for the one-time
+    package fixture (package storage), 0.066 SUI for the passing run, and the
+    two failed runs' setup, whose budgets were reclaimed.
 
-    Its second upload in the period aborted on its quota (6).
-  - **Cleanup and cost.** The unused deposit was withdrawn and the device
-    key swept. Net spend was 0.3197 SUI for the `sui_edge` publish (package
-    storage) plus 0.1276 SUI for everything else, most of it the
-    `fleet_storage` publish.
+The earlier shared-budget design's runs (head `ada17bc`) are kept under
+`superseded` in the evidence file.
 
 ## Outstanding acceptance
 
