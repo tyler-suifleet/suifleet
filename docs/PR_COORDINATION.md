@@ -253,6 +253,35 @@ This repair changes only coordinator code/database schema, not dispatcher or
 ticket-tool behavior. Use the coordinator-only installation/backup/rollback steps
 above after independent review; this feedback worker does not install services.
 
+### Pending Review ownership publication
+
+A Review claim whose local revision is ahead of its Project mirror
+(`publish_pending`) previously stayed unscheduled until someone ran `ticket
+publish`. A normal `--execute` scan now retries that recoverable mirror failure
+before evaluating the PR, for an owned open PR only:
+
+- Re-read the claim with `ticket show` and require the listed token, agent,
+  model, session, branch, worktree, revision and Review status. Any change defers
+  that PR to the next scan without publishing. In progress, blocked or expired
+  states are never resumed, released or published by this path.
+- Run the supported `ticket publish KEY` (300-second timeout; one in-scan retry for
+  transient network failures), then re-read the claim. Scheduling uses only that
+  fresh published owner, and every existing head/base/feedback, review, CI and
+  merge gate still applies. A revision or ownership change during publication
+  defers scheduling.
+- On failure, the claim and pending state are untouched. The
+  `ownership_publication` table in `reviews.sqlite3` records the claim-token hash,
+  revision, attempt count, next retry (60 s doubling to at most one hour) and a
+  sanitized reason (`timeout`, `transient (exit N)`, `failed (exit N)`, `GitHub
+  rate limited` or a known `ticket` refresh message). Logs and the table never
+  contain argv, stderr, or tokens. A new claim or revision restarts the schedule.
+  Other PRs in the same scan continue normally.
+
+Dry runs never publish. Inspect a stuck claim with
+`sqlite3 ~/.local/state/pr-coordinator/reviews.sqlite3 'SELECT project,ticket,revision,attempts,retry_after,error FROM ownership_publication'`
+and the coordinator journal; `ticket --project suifleet publish KEY` remains the
+manual path.
+
 ### Reviewing while CI runs
 
 The coordinator starts independent source review for an owned, published Review
