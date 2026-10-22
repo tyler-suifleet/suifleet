@@ -132,12 +132,18 @@ def owner_upload(live, root, manifest, storage_package, storage, budget, budget_
     try:
         for step in ("register_fleet_blob", "certify_blob"):
             line = json.loads(node.stdout.readline())
-            data = toolchain.decode(line["tx"])
-            calls = [(dm.object_id(c["package"]), c["module"], c["function"]) for c in data["commands"]]
-            assert dm.object_id(data["sender"]) == live.operator and dm.object_id(data["gas_owner"]) == live.operator, data["sender"]
-            assert int(data["gas_budget"]) == UPLOAD_GAS, data["gas_budget"]
-            assert calls == [(dm.object_id(storage_package), "fleet_storage", step)], calls
-            r = live.execute(f"owner {step.replace('_', ' ')} (dApp upload)", ["serialized-tx", line["tx"]], gas=UPLOAD_GAS)
+
+            def submit(reserved, tx=line["tx"], step=step):
+                data = toolchain.decode(tx)
+                calls = [(dm.object_id(c.get("package", "0x0")), c.get("module"), c.get("function")) for c in data["commands"]]
+                if dm.object_id(data["sender"]) != live.operator or dm.object_id(data["gas_owner"]) != live.operator:
+                    raise toolchain.NotSubmitted("the dApp transaction is not sent and paid by the wallet")
+                if int(data["gas_budget"]) != UPLOAD_GAS or reserved != UPLOAD_GAS:
+                    raise toolchain.NotSubmitted("the dApp transaction's gas budget differs from the reserved allowance")
+                if calls != [(dm.object_id(storage_package), "fleet_storage", step)]:
+                    raise toolchain.NotSubmitted(f"unexpected dApp transaction commands {calls}")
+                return live.executor()("serialized-tx", tx)
+            r = live.execute(f"owner {step.replace('_', ' ')} (dApp upload)", submit, gas=UPLOAD_GAS)
             digests.append(r["digest"])
             node.stdin.write(json.dumps({"digest": r["digest"]}) + "\n")
             node.stdin.flush()
@@ -235,7 +241,7 @@ def run(args):
                              f"@{registry}", f"@{owner_cap}", f"{FLOAT}u64", f"{RESERVE}u64", CLOCK, budget=20_000_000)
         assert balance_change(r, device_address) == FLOAT, r.get("balanceChanges")
         account = live.created(r, "::fleet_budget::GasAccount")[0]
-        assert "Shared" in json.dumps(live.owner(account)), live.owner(account)
+        assert "shared" in json.dumps(live.owner(account)).lower(), live.owner(account)
         assert int(event(r, "::fleet_budget::ReserveChanged")["reserve"]) == RESERVE
         live.evidence.update(device=device_id, device_cap=device_cap, owner_cap=owner_cap, device_address=device_address, budget=budget,
                              budget_cap=budget_cap, account=account)
@@ -252,7 +258,7 @@ def run(args):
         assert int(drawn["reserve"]) == RESERVE - DRAW, drawn
         # Draws only read the fleet budget: its version is unchanged.
         assert version(budget) == before, (version(budget), before)
-        assert not any(dm.object_id(o["objectId"]) == dm.object_id(budget) for o in r["effects"].get("mutated", [])), r["effects"].get("mutated")
+        assert not any(dm.object_id(o["reference"]["objectId"]) == dm.object_id(budget) for o in r["effects"].get("mutated", [])), r["effects"].get("mutated")
         measured["draw_gas"] = dict(r["effects"]["gasUsed"], net_mist=net_gas(r), digest=r["digest"], budget_version=before)
         live.check(f"the device drew {DRAW} MIST from its own account; GasDrawn recorded it; the fleet budget stayed at version {before} "
                    f"(net gas {net_gas(r)} MIST)")
