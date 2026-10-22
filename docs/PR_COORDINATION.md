@@ -232,7 +232,7 @@ Manual active or blocked claims without durable worker identity still consume im
 
 A worker starts only after refresh, fetch, atomic claim, published ownership and assert. It inherits the configured project's account token and claim, heartbeats, pushes scoped user-authored commits, and opens a linked PR. A successful stopped `review_ready` worker with published Review/Done ownership frees its implementation slot. Reconciliation revisits orphaned records after restart, so a delayed valid handoff is not permanently stranded.
 
-Verified stopped blocked workers are **parked**. Verified stopped jobs without a valid handoff are **quarantined**. Both retain ticket ownership, branch, logs and evidence, but no longer consume execution capacity for unrelated tickets. Quarantined review/repair jobs retain exclusion on their original PR. Neither state authorizes automatic claim release, duplicate implementation or retry of an uncertain mutation. Explicit recovery still requires inspection and the atomic ticket workflow. Implementation slots stop claiming when their combined count of distinct parked/quarantined claims reaches `max_quarantined` (default 3, integer 1–16). Quarantine also applies persistent project/family exponential backoff (60–900 seconds), reset only by a valid completed handoff, never merely by starting a process. Review/repair reservations stop after three quarantined jobs per family/category across projects; each quarantine adds durable exponential backoff (300–3600 seconds). These retention caps require explicit operator recovery; they bound a systemic fast-failure cascade while allowing limited unrelated progress. The diagnostics are visible in dispatcher `--status`, the private review-job database and service journal.
+Verified stopped blocked workers are **parked**. Verified stopped jobs without a valid handoff are **quarantined**. Both retain ticket ownership, branch, logs and evidence, but no longer consume execution capacity for unrelated tickets. Quarantined review/repair jobs retain exclusion on their original PR. Neither state authorizes automatic claim release, duplicate implementation or retry of an uncertain mutation. The only automatic continuation is the bounded same-claim dependency-wait resume described below. Explicit recovery still requires inspection and the atomic ticket workflow. Implementation slots stop claiming when their combined count of distinct parked/quarantined claims reaches `max_quarantined` (default 3, integer 1–16). Quarantine also applies persistent project/family exponential backoff (60–900 seconds), reset only by a valid completed handoff, never merely by starting a process. Review/repair reservations stop after three quarantined jobs per family/category across projects; each quarantine adds durable exponential backoff (300–3600 seconds). These retention caps require explicit operator recovery; they bound a systemic fast-failure cascade while allowing limited unrelated progress. The diagnostics are visible in dispatcher `--status`, the private review-job database and service journal.
 
 Stopped means the recorded PID/start-time wrapper has exited **and** a Linux `/proc` scan finds no non-zombie process in its worker session. A surviving model subprocess in that session keeps the slot occupied. A subprocess that deliberately daemonizes or uses `setsid` can escape this session scan; workers must not detach subprocesses. This is cooperative process tracking, not cgroup containment. Missing process identity, unreadable process state, interrupted claims and ambiguous launches fail closed. A malformed dispatcher receipt is isolated to its own job rather than aborting all reconciliation. Capacity counts running, launching and uncertain jobs against configured limits; it does not count verified parked/quarantined jobs. An idle slot can still indicate no dependency-eligible ticket, a retry backoff, or an unverified manual reservation; it is not permission to bypass dependencies or fabricate work.
 
@@ -532,3 +532,62 @@ and stop such helpers before the audit becomes eligible. As with the existing
 session scan this is cooperative process accounting, not containment of an
 arbitrary subprocess deliberately escaping its session and hiding its command.
 No services are installed/restarted by tests; rollout follows reviewed integration.
+
+### Dependency-wait resume (SF-114)
+
+A worker blocked **only** until prerequisite tickets merge blocks its ticket with
+that explanation and writes a structured result:
+
+```json
+{"verdict": "blocked", "evidence": "…",
+ "dependency_wait": {"tickets": ["SF-083"], "integration": "merged_main"}}
+```
+
+The object must contain exactly those two fields, 1–16 distinct other ticket
+keys and `merged_main`. Free-form blocked text, errors, nonzero or uncertain
+exits, hardware/production/authorization blockers and malformed receipts are not
+resumable and stay parked or quarantined for explicit recovery. Prerequisites
+named in the acceptance policy's `acceptance_only_tickets` are refused.
+
+Each scan, before new claims, the dispatcher revisits parked receipts with a
+valid dependency wait. It requires every prerequisite to be published Done
+without a token and its latest `ticket complete` "Merged commit" (a full SHA) to
+be an ancestor of freshly fetched `origin/main`. It then checks the clean exit,
+stopped wrapper/session and claim helpers, an enabled slot for the original
+family, the unchanged published *blocked* claim (token, session, branch,
+worktree, agent, model), a clean worktree on the original branch and execution
+capacity. The `max_quarantined` retention cap does not prevent a resume, since
+resuming releases that retention. Under the atomic database write lock it
+compares the ownership/publication revisions and rechecks stopped identity, then
+persists a `resuming` intent in `dependency_resumes` before any mutation. The
+intent holds its family's execution capacity.
+
+It then runs `ticket resume` (which publishes), `ticket publish` when a mirror
+write was left pending, `heartbeat` and `assert` (live claim, open issue,
+published mirror and dependencies), rechecks process/worktree/merge state and
+records `launched` together with archiving the parked source receipt in one
+transaction, before starting the worker. The resumed worker uses the same claim,
+session, token, branch and worktree with separate files under the original
+directory's `dependency-resume/`; its prompt names the merged prerequisites and
+requires merging `origin/main` into the existing branch, resolving conflicts,
+continuing unfinished work and rerunning required tests. All review, CI, testnet
+and acceptance gates are unchanged; it is a normal worker for reconciliation.
+
+A failure after the intent (mirror, assert or recheck) retries the same intent
+with 60–900 second backoff, never a second `ticket resume`, and becomes `failed`
+after five attempts. Changed ownership or an unexpected status becomes `failed`
+immediately. A failed launch leaves an `orphaned` run and is never relaunched.
+A claim may be resumed at most three times; a further wait is `failed`.
+Terminal states never restart a worker or release/recover a claim. Duplicate
+scans and restarts adopt the durable record; the dispatcher lock prevents
+concurrent scanners.
+
+Status: dispatcher `--status` joins each receipt with `dependency_resume`
+(`waiting`, `resuming`, `launched`, `failed`), its reason, attempts and
+`resumed_as`; the parked receipt message (shown in the dashboard) carries the
+current wait reason, for example `waiting for merged prerequisites: SF-083` or
+`prerequisites merged; waiting for implementation capacity`. For a `failed`
+record, inspect the reason and original/resume receipts. If `ticket resume`
+already applied, the ticket is In Progress without a worker; stop any surviving
+process, then recover or hand off through the normal atomic ticket workflow. Do
+not delete `dependency_resumes` rows to force a relaunch.
