@@ -1,0 +1,317 @@
+{
+  "checked_on": "2026-10-21",
+  "method": "Anonymous public HTTPS GET from research host; no credentials, no outreach. Metadata only; HTTP 200 does not verify page claims or orderability. Search-index retrieval used for inaccessible vendor material.",
+  "checks": [
+    {
+      "url": "https://aceservice.alfen.com/en-us/knowledgebase/article/KA-01108",
+      "status": 200,
+      "final_url": "https://aceservice.alfen.com/en-us/knowledgebase/article/KA-01108"
+    },
+    {
+      "url": "https://advdownload.advantech.com/productfile/Downloadfile4/1-1XS5WFT/UNO-420_EN_User_Manual_Ed.2.PDF",
+      "status": 200,
+      "final_url": "https://advdownload.advantech.com/productfile/Downloadfile4/1-1XS5WFT/UNO-420_EN_User_Manual_Ed.2.PDF"
+    },
+    {
+      "url": "https://agrointelli.com/new-robot/",
+      "status": "unavailable",
+      "error_type": "URLError"
+    },
+    {
+      "url": "https://blog.balena.io/winnow-using-ai-and-balena-to-help-kitchens-pinpoint-waste-and-cut-costs/",
+      "status": 200,
+      "final_url": "https://blog.balena.io/winnow-using-ai-and-balena-to-help-kitchens-pinpoint-waste-and-cut-costs/"
+    },
+    {
+      "url": "https://chargebyte.com/assets/downloads/charge_control_c_datasheet_rev6.pdf",
+      "status": 200,
+      "final_url": "https://chargebyte.com/assets/downloads/charge_control_c_datasheet_rev6.pdf"
+    },
+    {
+      "url": "https://data-us.aaeon.com/DOWNLOAD/MANUAL/BOXER-8622AI%20Manual%201st%20Ed.pdf",
+      "status": 200,
+      "final_url": "https://data-us.aaeon.com/DOWNLOAD/MANUAL/BOXER-8622AI%20Manual%201st%20Ed.pdf"
+    },
+    {
+      "url": "https://dev.variscite.com/var-som-6ul/yocto/swupdate-guide/",
+      "status": 200,
+      "final_url": "https://dev.variscite.com/var-som-6ul/yocto/swupdate-guide/"
+    },
+    {
+      "url": "https://developer.toradex.com/software/cloud-services/over-the-air-update-solutions/",
+      "status": 200,
+      "final_url": "https://developer.toradex.com/software/cloud-services/over-the-air-update-solutions/"
+    },
+    {
+      "url": "https://docs.digi.com/resources/documentation/digidocs/PDFs/90002537.pdf",
+      "status": 200,
+      "final_url": "https://docs.digi.com//resources/documentation/digidocs/pdfs/90002537.pdf"
+    },
+    {
+      "url": "https://docs.embeddedts.com/TS-7800-V2",
+      "status": 200,
+      "final_url": "https://docs.embeddedts.com/TS-7800-V2"
+    },
+    {
+      "url": "https://docs.zaptec.com/docs/zaptec-go-ocpp16j-configuration-guide",
+      "status": 200,
+      "final_url": "https://docs.zaptec.com/docs/zaptec-go-ocpp16j-configuration-guide"
+    },
+    {
+      "url": "https://enphase.com/en-au/installers/resources/documentation/communication?f%5B0%5D=product_media_name%3A2644&f%5B1%5D=product_media_name%3A2741&f%5B2%5D=product_media_name%3A3080&f%5B3%5D=product_media_name%3A5002&f%5B4%5D=product_media_name%3A10280&field_alternative_language=All&page=3&search_api_language=All",
+      "status": 200,
+      "final_url": "https://enphase.com/en-au/installers/resources/documentation/communication?f%5B0%5D=product_media_name%3A2644&f%5B1%5D=product_media_name%3A2741&f%5B2%5D=product_media_name%3A3080&f%5B3%5D=product_media_name%3A5002&f%5B4%5D=product_media_name%3A10280&field_alternative_language=All&page=3&search_api_language=All"
+    },
+    {
+      "url": "https://formlabs.com/support/Using-the-Bulk-Firmware-Updater-in-Dashboard/",
+      "status": 200,
+      "final_url": "https://formlabs.com/support/Using-the-Bulk-Firmware-Updater-in-Dashboard/"
+    },
+    {
+      "url": "https://github.com/sfera-labs/strato-pi-kernel-module",
+      "status": 200,
+      "final_url": "https://github.com/sfera-labs/strato-pi-kernel-module"
+    },
+    {
+      "url": "https://github.com/siemens/meta-iot2050/blob/master/README.md",
+      "status": 200,
+      "final_url": "https://github.com/siemens/meta-iot2050/blob/master/README.md"
+    },
+    {
+      "url": "https://help.axis.com/en-us/axis-device-manager",
+      "status": 200,
+      "final_url": "https://help.axis.com/en-us/axis-device-manager"
+    },
+    {
+      "url": "https://help.axis.com/en-us/axis-os-release-notes",
+      "status": 200,
+      "final_url": "https://help.axis.com/en-us/axis-os-release-notes"
+    },
+    {
+      "url": "https://help.zaptec.com/documentation/zaptec-pro-firmware-updates?lang=en-GB",
+      "status": 200,
+      "final_url": "https://help.zaptec.com/documentation/zaptec-pro-firmware-updates?lang=en-GB"
+    },
+    {
+      "url": "https://manuals.sma.de/EDMM-10A/en-US/4145434379.html",
+      "status": 200,
+      "final_url": "https://manuals.sma.de/EDMM-10A/en-US/4145434379.html"
+    },
+    {
+      "url": "https://mender.io/blog/autonomous-farming-robots-ota-updates",
+      "status": 200,
+      "final_url": "https://mender.io/blog/autonomous-farming-robots-ota-updates"
+    },
+    {
+      "url": "https://mender.io/blog/smart-elevator-ota-software-updates",
+      "status": 200,
+      "final_url": "https://mender.io/blog/smart-elevator-ota-software-updates"
+    },
+    {
+      "url": "https://mender.io/resources/case-studies/kuva-case-study",
+      "status": 200,
+      "final_url": "https://mender.io/resources/case-studies/kuva-case-study"
+    },
+    {
+      "url": "https://mender.io/resources/case-studies/macgregor-case-study",
+      "status": 200,
+      "final_url": "https://mender.io/resources/case-studies/macgregor-case-study"
+    },
+    {
+      "url": "https://mender.io/resources/case-studies/octave-energy-case-study",
+      "status": 200,
+      "final_url": "https://mender.io/resources/case-studies/octave-energy-case-study"
+    },
+    {
+      "url": "https://mender.io/resources/topic/building-management",
+      "status": 200,
+      "final_url": "https://mender.io/resources/topic/building-management"
+    },
+    {
+      "url": "https://octave.energy/en/energy-management-system/",
+      "status": 200,
+      "final_url": "https://octave.energy/en/energy-management-system/"
+    },
+    {
+      "url": "https://press.siemens.com/global/en/pressrelease/new-siemens-gateway-between-cloud-company-it-and-production",
+      "status": 200,
+      "final_url": "https://press.siemens.com/global/en/pressrelease/new-siemens-gateway-between-cloud-company-it-and-production"
+    },
+    {
+      "url": "https://professional.vaillant.co.uk/downloads/aproducts/statement-of-compliance/sensonet-vr921-psti-compliance-29-04-2024-2858450.pdf",
+      "status": 200,
+      "final_url": "https://professional.vaillant.co.uk/downloads/aproducts/statement-of-compliance/sensonet-vr921-psti-compliance-29-04-2024-2858450.pdf"
+    },
+    {
+      "url": "https://revolutionpi.com/en/docs/revpi-images",
+      "status": 200,
+      "final_url": "https://revolutionpi.com/en/docs/revpi-images"
+    },
+    {
+      "url": "https://robustel.com/product/r5020/",
+      "status": 200,
+      "final_url": "https://robustel.com/product/r5020/"
+    },
+    {
+      "url": "https://solaredge.com/en/release-notes/commercial-storage",
+      "status": 200,
+      "final_url": "https://solaredge.com/en/release-notes/commercial-storage"
+    },
+    {
+      "url": "https://support.brightsign.biz/hc/en-us/articles/4403013330459-New-Production-Version-of-OS8-2-Available",
+      "status": 200,
+      "final_url": "https://support.brightsign.biz/hc/en-us/articles/4403013330459-New-Production-Version-of-OS8-2-Available"
+    },
+    {
+      "url": "https://support.onlogic.com/wp-content/uploads/2020/06/Getting-Started-with-AWS-IoT-Greengrass-Updated-4-24-25.pdf",
+      "status": 403
+    },
+    {
+      "url": "https://support.ultimaker.com/articles/Knowledge/1667410781982",
+      "status": 200,
+      "final_url": "https://support.ultimaker.com/articles/Knowledge/1667410781982"
+    },
+    {
+      "url": "https://support.wallbox.com/en/knowledge-base/how-to-update-your-chargers-software-with-the-mywallbox-app/",
+      "status": 200,
+      "final_url": "https://support.wallbox.com/en/knowledge-base/how-to-update-your-chargers-software-with-the-mywallbox-app/"
+    },
+    {
+      "url": "https://tip.kempower.com/r/doc/mykempower-hardware-portal/initial-actions",
+      "status": 200,
+      "final_url": "https://tip.kempower.com/r/doc/mykempower-hardware-portal/initial-actions"
+    },
+    {
+      "url": "https://wiki.seeedstudio.com/reComputer_Industrial_Getting_Started/",
+      "status": 200,
+      "final_url": "https://wiki.seeedstudio.com/reComputer_Industrial_Getting_Started/"
+    },
+    {
+      "url": "https://wiki.teltonika-networks.com/view/RutOS_and_TSWOS_firmware_update",
+      "status": 200,
+      "final_url": "https://wiki.teltonika-networks.com/view/RutOS_and_TSWOS_firmware_update"
+    },
+    {
+      "url": "https://www.compulab.com/products/iot-gateways/iot-gate-rpi4-industrial-raspberry-pi-iot-gateway/",
+      "status": 200,
+      "final_url": "https://www.compulab.com/products/iot-gateways/iot-gate-rpi4-industrial-raspberry-pi-iot-gateway/"
+    },
+    {
+      "url": "https://www.digi.com/support/knowledge-base/ignition-edge-on-digi-dal-os-devices",
+      "status": 200,
+      "final_url": "https://www.digi.com/support/knowledge-base/ignition-edge-on-digi-dal-os-devices"
+    },
+    {
+      "url": "https://www.eurotech.com/en/products/iot/multi-service-iot-edge-gateways/reliagate-10-20",
+      "status": 200,
+      "final_url": "https://www.eurotech.com/en/products/iot/multi-service-iot-edge-gateways/reliagate-10-20"
+    },
+    {
+      "url": "https://www.fronius.com/~/downloads/Solar%20Energy/Operating%20Instructions/42%2C0426%2C0191%2CEA.pdf",
+      "status": 200,
+      "final_url": "https://www.fronius.com/en/~/downloads/Solar%20Energy/Operating%20Instructions/42,0426,0191,EA.pdf"
+    },
+    {
+      "url": "https://www.hilscher.com/in/products/centralized-edge-management",
+      "status": 200,
+      "final_url": "https://www.hilscher.com/in/products/centralized-edge-management"
+    },
+    {
+      "url": "https://www.hms-networks.com/support/tech-support/kb-articles/33479819503378-Temporary-FTP-Activation-on-Ewon-Flexy-and-Cosy-for-Backup-and-Firmware-Update",
+      "status": 200,
+      "final_url": "https://www.hms-networks.com/support/tech-support/kb-articles/33479819503378-Temporary-FTP-Activation-on-Ewon-Flexy-and-Cosy-for-Backup-and-Firmware-Update"
+    },
+    {
+      "url": "https://www.inhand.com/en/products/edge-gateways/ig502/",
+      "status": 200,
+      "final_url": "https://www.inhand.com/en/products/edge-gateways/ig502/"
+    },
+    {
+      "url": "https://www.kontron.com/downloads/manuals/k/kbox-a-230-ls_user-guide_rev-preliminary_0-3_2020-07-22.pdf?product=155778",
+      "status": 200,
+      "final_url": "https://www.kontron.com/download/download?filename=/downloads/manuals/k/kbox-a-230-ls_user-guide_rev-preliminary_0-3_2020-07-22.pdf&product=155778"
+    },
+    {
+      "url": "https://www.kuvasystems.com/resources/kuva-systems-camera-and-tower-user-manual",
+      "status": 200,
+      "final_url": "https://www.kuvasystems.com/resources/kuva-systems-camera-and-tower-user-manual"
+    },
+    {
+      "url": "https://www.moxa.com/en/products/industrial-computing/arm-based-computers/uc-8200-series",
+      "status": 200,
+      "final_url": "https://www.moxa.com/en/products/industrial-computing/arm-based-computers/uc-8200-series"
+    },
+    {
+      "url": "https://www.phoenixcontact.com/assets/b0e8523d-a9e7-48d4-9332-68b1f9620bbd/epaper/EN_PLCnext_Technology_LoRes.pdf",
+      "status": 200,
+      "final_url": "https://www.phoenixcontact.com/assets/b0e8523d-a9e7-48d4-9332-68b1f9620bbd/epaper/EN_PLCnext_Technology_LoRes.pdf"
+    },
+    {
+      "url": "https://www.phytec.de/fileadmin/phytec_base/pdfs/Embedded-Security_2024_E_web.pdf",
+      "status": 200,
+      "final_url": "https://www.phytec.de/fileadmin/phytec_base/pdfs/Embedded-Security_2024_E_web.pdf"
+    },
+    {
+      "url": "https://www.prusa3d.com/p/prusa-connect/",
+      "status": 200,
+      "final_url": "https://www.prusa3d.com/p/prusa-connect/"
+    },
+    {
+      "url": "https://www.rational-online.com/en_ca/products/index.php",
+      "status": 200,
+      "final_url": "https://www.rational-online.com/en_ca/products/index.php"
+    },
+    {
+      "url": "https://www.schindler.com/en/innovations/schindler-ahead.html",
+      "status": 200,
+      "final_url": "https://www.schindler.com/en/innovations/schindler-ahead.html"
+    },
+    {
+      "url": "https://www.sma.de/en/products/energy-management/data-manager-m-10",
+      "status": 200,
+      "final_url": "https://www.sma.de/en/products/energy-management/data-manager-m-10"
+    },
+    {
+      "url": "https://www.solid-run.com/iiot200-8m-gateway/",
+      "status": 403
+    },
+    {
+      "url": "https://www.sonnen.de/rln-sb",
+      "status": 200,
+      "final_url": "https://www.sonnen.de/rln-sb"
+    },
+    {
+      "url": "https://www.systec-electronic.com/media/default/Redakteur/Nur_zum_Download/neueflyer/Flyer-CTR-SYSTEC-electronic-englisch.pdf",
+      "status": "unavailable",
+      "error_type": "URLError"
+    },
+    {
+      "url": "https://www.victronenergy.com/live/venus-os%3Alarge?do=export_pdf",
+      "status": 200,
+      "final_url": "https://www.victronenergy.com/live/venus-os%3Alarge?do=export_pdf"
+    },
+    {
+      "url": "https://www.victronenergy.com/media/pg/Cerbo_GX/en/firmware-updates.html",
+      "status": 200,
+      "final_url": "https://www.victronenergy.com/media/pg/Cerbo_GX/en/firmware-updates.html"
+    },
+    {
+      "url": "https://www.wago.com/ca-en/automation-technology/plcs/pfc200",
+      "status": 200,
+      "final_url": "https://www.wago.com/ca-en/ca-products/ca-automation-technology/ca-plcs/ca-pfc200"
+    },
+    {
+      "url": "https://www.weidmueller.com/int/company/press/trade_press_news/u_control_web_with_container_technology_for_more_flexibility_in_industrial_applications.jsp",
+      "status": 403
+    },
+    {
+      "url": "https://www.weidmueller.com/int/service/industrial_service_platform/apps_and_services/index.jsp",
+      "status": 403
+    },
+    {
+      "url": "https://www.winnowsolutions.com/resources/news/visiongen-5-the-next-generation-of-food-waste-tracking-built-for-zero-disruption-in-the-kitchen-1?hs_amp=true",
+      "status": 200,
+      "final_url": "https://www.winnowsolutions.com/resources/news/visiongen-5-the-next-generation-of-food-waste-tracking-built-for-zero-disruption-in-the-kitchen-1?hs_amp=true"
+    }
+  ]
+}
