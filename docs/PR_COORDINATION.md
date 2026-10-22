@@ -136,6 +136,48 @@ Inspect `journalctl` and the local SQLite `jobs` table; each job directory conta
 
 A stopped review CLI with a durable exit receipt retries usage/auth failures after exponential backoff (5–60 minutes), retaining its logs and reservation history. An interrupted launch, invalid feedback-worker result or disappeared worker is retained as failed/orphaned; it does not restart an unknown implementation or clear a ticket reservation. Recovery requires checking that the original PID/start-time process has stopped, checking the owner worktree/claim, and recording a coordinator/ticket handoff before retrying. Never delete the central ticket database or release another live worker's claim. Operational interruptions therefore fail closed; normal review/change-request/repair/approval cycles require no human reminder.
 
+## Bounded CI failure repair (SF-111)
+
+A ready, same-repository PR with published Review ownership can queue its existing
+owner family's repair when a reported merge-required check completes with
+`FAILURE` or `TIMED_OUT` and has a durable run/job link. This includes a source
+review blocked while CI was pending. Under the existing merge policy every
+reported check must succeed. Cancelled, skipped, startup/action-required,
+ambiguous rerun ordering, status errors and unavailable run evidence stay merge
+blockers without starting source repairs. The newest observation per workflow/job
+name supersedes older runs.
+
+CI repair uses a separate reservation fingerprint containing the exact head,
+integration base and failed run links/outcomes. It does not change source-review
+fingerprints, discard feedback or count as approval. One attempt per fingerprint
+is recorded atomically with the normal PR/family reservation in `ci_repairs`.
+`ci_repair_budget` persists a maximum of three CI repair attempts per PR failure
+episode, with 5/10/20 minute backoff deadlines. New head/base/run evidence can
+receive a new attempt after backoff, but does not reset the episode budget.
+Only a fresh snapshot with every check successful (including current-base testnet
+when required) clears that budget. Duplicate scans, restarts and pending or
+cancelled runs retain attempts and failure history. A reserved fingerprint never
+automatically replays, even after a failed launch.
+
+Scan JSON includes `ci_failures` with exact run links and
+`ci_repair_blocker` with duplicate/backoff/exhaustion diagnostics, including in
+read-only mode. At the limit, inspect the retained job receipts and failure cause
+and arrange explicit owner recovery; do not erase reservations to restart workers.
+Other PRs continue normally.
+
+Repairs use the existing unchanged claim, branch and token. Before resuming,
+the coordinator rereads owner identity and exact live head/base/run evidence,
+checks the clean owner worktree, then uses normal resume/assert. A failed ownership
+mirror retains the launch intent; recovery republishes and asserts the same claim
+without replaying resume. Changed CI base/run evidence during recovery requires
+explicit inspection. Existing live/orphaned/quarantined jobs exclude duplicates.
+Complete comments, threads and independent source feedback accompany the repair.
+All exact-head/base CI, independent review and integration gates remain required.
+
+This change must pass independent review before installation with the normal
+installer. Offline tests and read-only live failure inspection do not install or
+restart the running coordinator.
+
 ## Merge closes the implementation issue
 
 Under the user's merge-closes-issue policy, the service adds `Closes #N` to each owned PR using the ticket's verified same-repository issue URL. `Refs #N` alone does not close an issue. After verifying a default-branch merge and its commit ancestry, reconciliation marks the atomic ticket and Project Done, explicitly closes and verifies the GitHub issue, and retries partial failures. Periodic discovery also imports merges performed outside the service, so missed notifications and older merged PRs are reconciled. Unknown ownership, other repositories and unmerged/closed-without-merge PRs never trigger closure. Active implementation claims require their owner handoff before coordinator completion.
