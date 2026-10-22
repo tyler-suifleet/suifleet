@@ -632,3 +632,7 @@ test-device-defender:
 test-prospects:
 	python3 scripts/check_manufacturer_prospects.py
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_manufacturer_prospects.py
+
+.PHONY: test-fleet-data-upgrade-localnet
+test-fleet-data-upgrade-localnet:
+	$(RUN) python3 scripts/test_protocol_localnet.py --fleet-data-upgrade

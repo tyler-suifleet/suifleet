@@ -1,0 +1,93 @@
+{
+  "result": "PASS",
+  "chain": "46f9d64b",
+  "baseRef": "18f337c8ed0611cad957717ebc35e767f103a5cf",
+  "base": "0xa5e0273cbc32344e4d6cc85e69fc455ded2e3012177ec51d8e1632184602eda0",
+  "head": "0x91b1402cb800a82f6397df94b890dc978081d1a164f07073bfdb40810e960c17",
+  "origins": {
+    "FleetData": "0xa5e0273cbc32344e4d6cc85e69fc455ded2e3012177ec51d8e1632184602eda0",
+    "DeviceKey": "0xa5e0273cbc32344e4d6cc85e69fc455ded2e3012177ec51d8e1632184602eda0",
+    "DeviceData": "0xa5e0273cbc32344e4d6cc85e69fc455ded2e3012177ec51d8e1632184602eda0",
+    "AnchorKey": "0xa5e0273cbc32344e4d6cc85e69fc455ded2e3012177ec51d8e1632184602eda0",
+    "Anchor": "0xa5e0273cbc32344e4d6cc85e69fc455ded2e3012177ec51d8e1632184602eda0",
+    "HealthUpdated": "0xa5e0273cbc32344e4d6cc85e69fc455ded2e3012177ec51d8e1632184602eda0",
+    "DataAnchored": "0xa5e0273cbc32344e4d6cc85e69fc455ded2e3012177ec51d8e1632184602eda0",
+    "DiagnosticKey": "0x91b1402cb800a82f6397df94b890dc978081d1a164f07073bfdb40810e960c17",
+    "DiagnosticRequest": "0x91b1402cb800a82f6397df94b890dc978081d1a164f07073bfdb40810e960c17"
+  },
+  "digests": {
+    "publish core": "vsZTnXBoJ9GHQzuvN9v2xzZ82G9GGCsj4f5bbMZKnmR",
+    "publish WAL": "EgP9PfbU1mDgC3ZjgqcBz2zmif8pstz5aoGSseGgPiNV",
+    "publish Walrus": "7a2ekgXSyzpjTTFqr7Yk858135QVFdywa1nR2ijMWgUa",
+    "publish storage": "EkH7mba2eCHgX5jRUxKX5DiyLGoacEXGheBkVsQwF2wN",
+    "publish base data": "Dh4JXy7jF9cpy5i2iNuSmUiPtjnkPuz3CNraNy3ikDVW",
+    "register existing device": "5tritPfxJMXmLXK4JgE8V5rS5JfhHAU3sYJPKkRvmzFJ",
+    "create budget": "s4x4G9pZgSCntAPesYpiqAx3W8GjAS9XvpYYwHAMQSr",
+    "enroll account": "9R3UvQiTYAZy4RMpFjpxhEhxtNb7hcWKFNr2yJiPv6jd",
+    "create actual storage": "FirT6a2xQ9WhyKi5xzfm8SDpo5EN7yRtraBzucN7VxNk",
+    "create base fleet": "G2ki8Cn5x3A8eYuyqCptiDrjK8m2KBrx6gEJjA2gKcRq",
+    "create base writer": "2JNySg9W3ywefYgaJnYC4EfT9e3KrzmiYgZUgNpBBsMu",
+    "upgrade data": "7pbN4NQArf7RQVvZyEZhTWQbtaJ5kiPAU1YjysJXioQC",
+    "diagnostics on existing writer": "DrjMFLdkYPikRnwwAn28SnRbkZRRMdaTsraoHKMWSPgB",
+    "revoke device": "BTtVnWtdAcGRWe1g7qzPqGCmqmKLMBH4b24SKKYtpoM2"
+  },
+  "attacks": {
+    "0xa5e0273cbc32344e4d6cc85e69fc455ded2e3012177ec51d8e1632184602eda0": {
+      "digest": "2bpKH9AQ6HtG6JL9urs639DLiWci8x2UQFhs2B5gzM7w",
+      "status": {
+        "success": false,
+        "error": {
+          "$kind": "MoveAbort",
+          "message": "MoveAbort in 1st command, abort code: 2, in '0xfc5efb27aaa8de366ccc305e3522dce46b51ee9d21885417a52e912097254374::device_cap::assert_active' (instruction 13)",
+          "command": 0,
+          "MoveAbort": {
+            "abortCode": "2",
+            "location": {
+              "package": "0xfc5efb27aaa8de366ccc305e3522dce46b51ee9d21885417a52e912097254374",
+              "module": "device_cap",
+              "function": 3,
+              "instruction": 13,
+              "functionName": "assert_active"
+            }
+          }
+        }
+      }
+    },
+    "0x91b1402cb800a82f6397df94b890dc978081d1a164f07073bfdb40810e960c17": {
+      "digest": "2Ea6p241YDYieaqTCqgyRoogRipb7dRjoZBTy4YRDxzJ",
+      "status": {
+        "success": false,
+        "error": {
+          "$kind": "MoveAbort",
+          "message": "MoveAbort in 1st command, abort code: 2, in '0xfc5efb27aaa8de366ccc305e3522dce46b51ee9d21885417a52e912097254374::device_cap::assert_active' (instruction 13)",
+          "command": 0,
+          "MoveAbort": {
+            "abortCode": "2",
+            "location": {
+              "package": "0xfc5efb27aaa8de366ccc305e3522dce46b51ee9d21885417a52e912097254374",
+              "module": "device_cap",
+              "function": 3,
+              "instruction": 13,
+              "functionName": "assert_active"
+            }
+          }
+        }
+      }
+    }
+  },
+  "checks": [
+    "pinned real Walrus/storage dependencies",
+    "existing-object byte preservation",
+    "later DiagnosticKey origin",
+    "new API on existing writer",
+    "old and new entry points refuse revoked device"
+  ],
+  "schema": 1,
+  "ticket": "SF-082",
+  "model": "gpt-6.1-sol",
+  "environment": "network-none disposable container; Sui node 1.82.1; compiler 1.81.1",
+  "command": "python3 scripts/test_protocol_localnet.py --fleet-data-upgrade",
+  "limits": [
+    "No public-network, Walrus storage-node or physical acceptance; real pinned Walrus modules are published locally, not simulated."
+  ]
+}

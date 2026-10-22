@@ -27,12 +27,19 @@ def main(script="scripts/test_protocol_live.cjs"):
         env = dict(os.environ, SUI_CONFIG_DIR=directory, PROTOCOL_TEST_DISPOSABLE="1",
                    PROTOCOL_TEST_RPC="http://127.0.0.1:9000", PROTOCOL_TEST_FAUCET="http://127.0.0.1:9123", FLEET_TEST_RPC="http://127.0.0.1:9000", FLEET_TEST_FAUCET="http://127.0.0.1:9123")
         with open(Path(directory) / "node.log", "w") as log:
-            node = subprocess.Popen(["sui", "start", "--with-faucet", "--force-regenesis"], env=env, stdout=log, stderr=subprocess.STDOUT)
+            node_tool = "/opt/sui-network/sui" if script == "scripts/test_fleet_data_upgrade.cjs" else "sui"
+            node = subprocess.Popen([node_tool, "start", "--with-faucet", "--force-regenesis"], env=env, stdout=log, stderr=subprocess.STDOUT)
             try:
                 for attempt in range(120):
                     if node.poll() is not None:
                         raise RuntimeError("disposable localnet exited; temporary node logs may contain secrets and are not printed")
                     try:
+                        if script == "scripts/test_fleet_data_upgrade.cjs":
+                            ready = subprocess.run(["suifleet-edge/target/debug/examples/chain_facts", "http://127.0.0.1:9000"], capture_output=True, timeout=2)
+                            if ready.returncode == 0:
+                                break
+                            time.sleep(0.5)
+                            continue
                         body = json.dumps({"jsonrpc":"2.0","id":1,"method":"sui_getChainIdentifier","params":[]}).encode()
                         with urlopen(Request("http://127.0.0.1:9000", body, {"Content-Type":"application/json"}), timeout=1) as response:
                             if json.load(response).get("result"):
@@ -54,6 +61,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--handover-upgrade", action="store_true")
     parser.add_argument("--budget-upgrade", action="store_true", help="SF-083 fleet budget upgrade, attacks and daemon draws")
+    parser.add_argument("--fleet-data-upgrade", action="store_true", help="SF-082 existing-object/data-package upgrade with real pinned Walrus dependencies")
     args = parser.parse_args()
-    main("scripts/test_handover_upgrade.cjs" if args.handover_upgrade
+    main("scripts/test_fleet_data_upgrade.cjs" if args.fleet_data_upgrade else "scripts/test_handover_upgrade.cjs" if args.handover_upgrade
          else "scripts/test_budget_upgrade.cjs" if args.budget_upgrade else "scripts/test_protocol_live.cjs")
