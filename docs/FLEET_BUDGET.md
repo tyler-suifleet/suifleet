@@ -480,8 +480,11 @@ has run.
 
 ## SF-092 retention extension
 
-Storage mutation/read interface v2 and the still-incomplete SF-092 implementation
+Storage mutation/read interface v2 and the SF-092 prepaid-capacity extension
 are documented in [RETENTION_RENEWAL.md](RETENTION_RENEWAL.md). The v1 read table
 above records the original SF-083 boundary. Core budget interface v1 is unchanged;
 renewal WAL/SUI reserves are separate from discretionary WAL and device accounts.
-No new public-testnet renewal or completed SF-092 acceptance is claimed here.
+Actual bounded testnet renewal, certification/readback and original-intent restart
+evidence is recorded in [the SF-092 receipt](validation/sf092-testnet.json).
+This does not establish final manual-wallet, production-provider, mainnet or
+physical acceptance; exact-head CI and independent review remain separate gates.

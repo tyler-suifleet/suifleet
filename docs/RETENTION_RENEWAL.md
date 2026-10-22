@@ -1,9 +1,9 @@
 # Protected prepaid retention (SF-092)
 
-Implementation is in progress on PR #232. This is an operator guide to the new
-code, not evidence that the ticket's acceptance is complete. Public-testnet
-renewal is unrun: the dedicated machine wallet currently reports no managed
-addresses. Do not deploy this feature or treat an old SF-083 run as its acceptance.
+SF-083 is merged and integrated. This guide describes the finite prepaid policy,
+independent executor and failure behavior implemented by PR #232. Verification
+and its limits are recorded in [the validation receipt](validation/sf092-local.json);
+required exact-head CI and independent review remain separate gates.
 
 ## Authority and finite reserves
 
@@ -11,7 +11,7 @@ The core budget remains SF-083 interface v1. Storage mutations use version 2.
 `FleetStorage`, `BlobRecord`, existing public signatures and existing type origins
 remain unchanged. An owner explicitly calls `migrate` on v1 storage; previous
 version-1 mutation functions then reject it. New `RetentionKey`, `Retention`,
-`RenewalKey`, `Renewal` and events have their own introduction-package origin.
+`RenewalKey`, `Renewal`, `PrepaidKey`, `PrepaidCountKey`, `ProtectedBlobsKey` and events have their own introduction-package origin.
 Configure `NEXT_PUBLIC_FLEET_STORAGE_ORIGIN` to the original storage package,
 `NEXT_PUBLIC_FLEET_STORAGE_PACKAGE` to the current call package and
 `NEXT_PUBLIC_FLEET_RETENTION_ORIGIN` to the retention introduction package.
@@ -24,7 +24,11 @@ Those balances are held in a dynamic field, outside discretionary storage WAL an
 outside all device gas accounts. Legacy withdrawals/uploads/pool purchases cannot
 consume them. `withdraw_retention` requires the owner cap and emits `RetentionRisk`;
 the dashboard requires acknowledgment that the displayed blob expiries become at
-risk. The owner can still withdraw, release blobs or change policy.
+risk. The owner can still withdraw, release blobs or change policy. Withdrawing WAL
+cannot undo already purchased capacity; removing the SUI reward reserve can prevent
+the executor from applying that capacity before the blob expires. Reauthorizing or
+releasing a prepaid target deliberately destroys its unused paid resource and emits
+a risk event; no WAL refund is promised.
 
 `authorize_renewal` gives one existing fleet blob a finite target and WAL quote
 ceiling. The owner must cover **all** fleet blobs, a conservative superset of the
@@ -34,8 +38,10 @@ verify and import/re-upload those references under fleet custody. The dashboard
 lists every fleet record and unprotected entries. Owner-selected targets are not
 an automatic dependency resolver for references outside this storage.
 
-Discretionary purchases require complete fleet coverage and balances covering the
-sum of pending quote ceilings and execution rewards. Legacy registrations stop
+Discretionary purchases require complete fleet coverage, actual purchased renewal
+capacity for every pending target and balances covering execution rewards. A bounded
+on-chain index checks that no protected blob has expired; expired records require
+owner restoration/replacement or explicit release before new admission. Legacy registrations stop
 while retention is configured. Owner uploads use `register_retained_fleet_blob`
 to register and reserve a new target atomically; insufficient reserves abort the
 whole transaction. Device-originated registrations pause under active retention;
@@ -43,15 +49,24 @@ there is no daemon archival producer today (SF-083). Device receipts remain Sui
 transactions, governed by their own gas accounts.
 
 WAL FROST and SUI MIST are separate tokens. No conversion is assumed. The owner
-buys WAL through the supported exchange/payment route, then deposits it. The worker
-reads the current Walrus storage price and exact encoded size, and refuses a quote
-above the owner ceiling or available allowance. Walrus itself charges the actual
-fee and aborts atomically if the offered WAL is insufficient. Its production Move
-API has no public storage-price getter: the reservation is a **ceiling selected by
-the owner**, not an on-chain promise of current/future quote adequacy. A price rise
-can stop renewal; neither a UI projection nor a successful deposit promises
-indefinite retention. Stronger admission behavior across changing quotes remains
-part of the open SF-092 acceptance review.
+buys WAL through the supported exchange/payment route, then deposits it.
+`prepay_renewal` buys the actual Walrus `Storage` resource for `[old_end, target)`
+using the owner's maximum WAL ceiling. Walrus measures and charges its current
+protocol price in that transaction. A higher price, insufficient coins or invalid
+horizon aborts atomically; a stale estimate cannot admit discretionary writes.
+The dashboard authorizes and prepays in one transaction; retained registration
+also prepays atomically. The resource remains in fleet custody under `PrepaidKey`;
+`Renewal.max_fee = 0` identifies a paid pending target. The actual fee is emitted
+by `RenewalPrepaid`, charged against the per-epoch WAL allowance, and removed from
+pending cash ceilings. Executor gas stays separately reserved and bounded.
+
+The worker's fresh price projection is informational for already paid capacity:
+price changes do not charge it again. A pending target without purchased capacity
+produces `prepayment_required` and never spends executor gas. Execution consumes
+only the authorized resource and pays the bounded success reward. A purchased
+resource does not schedule its application or rescue an already expired blob.
+Finite targets, protocol horizons, executor liveness, gas prices, owner overrides
+and future policy renewal remain explicit limits; there is no indefinite guarantee.
 
 ## Run the independent executor
 
@@ -197,8 +212,11 @@ including SF-083 merge `3e796f7`. For a linked worktree, mount its Git common
 directory read-only at the same absolute path as well as the checkout at
 `/workspace`. The fixture publishes the real pinned WAL/Walrus dependencies,
 creates v1 storage, performs a compatible v2 upgrade/migration and checks an old
-package withdrawal's actual failed effects. Its current scope uses empty v1
-storage; populated wrapped-blob/pool migration remains additional acceptance work.
+package withdrawal's actual failed effects. The fixture creates a deterministic Walrus committee only inside the isolated
+copied dependency. It populates exact v1 storage through actual WAL deposit,
+pool purchase and blob registration, then verifies unchanged pool/balance/counter
+bytes and wrapped fields/type origins after upgrade. It does not substitute that
+fixture's initialization for public-network provider acceptance.
 Fixture manifests resolve the same cached pinned framework sources locally so the
 disposable chain never accesses the public network.
 
@@ -207,8 +225,22 @@ disposable chain never accesses the public network.
 to the existing bounded SF-083 testnet runner. Read [TESTNET.md](TESTNET.md), acquire
 and renew the global mutation lock, verify chain/account/authority and release
 promptly. It reserves each transaction against the non-replenishing allowance,
-checks effects and actual blob expiry, and records net gas. This path is authored
-but has **not run** because the machine's dedicated wallet has no managed address.
-It needs review and actual execution; passing offline fixtures cannot establish it.
-Normal exact-head CI/testnet and independent review remain mandatory. Keep PR #232
-draft until these gates and the remaining source/acceptance findings are resolved.
+checks effects and actual blob expiry, and records net gas. Actual testnet effects, certification/readback, restricted renewal and original-digest
+restart evidence are recorded in the validation receipt. A failed preparatory run
+is retained as failed evidence, including its cost; no returned digest alone was
+counted as success. The corrected host wallet configuration is
+`~/.config/suifleet/testnet/agent/client-host.yaml`, the same authorized account and
+original host keystore (no key copy or rotation).
+
+For a stopped acceptance runner with an original durable renewal, the bounded
+`scripts/live_retention_resume.py` probe takes `--original-evidence`, `--state-dir`,
+`--wallet`, `--build-sui`, `--network-sui` and `--evidence`. It requires the shared
+mutation lock, verifies the original owner/fixture, charges all existing executor
+gas against its allowance, and only resubmits the original signed digest. It never
+clears intent, republishes or faucets. Reopening the worker after confirmation
+must produce no extra transaction. This is an acceptance recovery tool, not a
+production service or an owner-policy bypass.
+
+Normal exact-head CI/testnet and independent review remain mandatory. Physical,
+manual real-wallet, mainnet and production-provider acceptance remains explicitly
+unrun in #32/#159.

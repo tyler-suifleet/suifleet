@@ -1,8 +1,8 @@
 # Protected prepaid retention: SF-092 implementation design
 
-Status: original design, retained as acceptance intent. Implementation is in progress;
-see [operator guide and explicit remaining gaps](RETENTION_RENEWAL.md). SF-092 is
-not Review-ready; this design is not test evidence.
+Status: original design, retained as acceptance intent. See the implemented
+[operator guide](RETENTION_RENEWAL.md) and linked validation receipt for the actual
+prepaid-resource extension and evidence. This design itself is not test evidence.
 
 ## Pinned prerequisite and integration gate
 
@@ -34,7 +34,9 @@ The consumed v1 surface is:
 Coordination proposals are recorded in
 [SF-092](https://github.com/tyler-suifleet/suifleet/issues/179#issuecomment-6347887152)
 and [SF-083](https://github.com/tyler-suifleet/suifleet/issues/161#issuecomment-6347887499).
-They are proposals rather than an agreed or implemented new public interface.
+The implemented SF092 extension and later prepaid-resource refinement are recorded
+in those same issues. Actual source and the operator guide take precedence over
+the original proposal below.
 
 ## Contract extension and migration
 
