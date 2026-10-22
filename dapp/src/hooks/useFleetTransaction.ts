@@ -43,11 +43,12 @@ export function useFleetTransaction() {
       }
       // Confirm against the verified fleet node, independently of wallet effects.
       onProgress?.("confirming");
-      const confirmed = await client.waitForTransaction({ digest: result.Transaction.digest, include: { effects: true } });
+      const confirmed = await client.waitForTransaction({ digest: result.Transaction.digest, include: { effects: true, events: true } });
       if (confirmed.FailedTransaction || !confirmed.Transaction.status.success) {
         throw new Error(confirmed.FailedTransaction?.status.error?.message ?? "Transaction execution was not successful");
       }
-      return { digest: confirmed.Transaction.digest };
+      // Events from the verified node's confirmed effects, not the wallet's.
+      return { digest: confirmed.Transaction.digest, events: confirmed.Transaction.events ?? [] };
     },
   });
 }

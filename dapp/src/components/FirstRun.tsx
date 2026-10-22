@@ -8,7 +8,9 @@ import type { Transaction } from "@mysten/sui/transactions";
 import { NETWORK } from "@/lib/constants";
 import { verifyDeployment } from "@/lib/deployment-manifest";
 import { displaySui, formatSui, onboardingConfig, onboardingProgress, registrationInput, shortAddress, type OnboardingStep, type StepState } from "@/lib/onboarding";
-import { buildRegisterDeviceTx } from "@/lib/sui";
+import { budgetSupported, buildRegisterAndEnrollTx, defaultReserve } from "@/lib/fleet-budget";
+import { formatToken, type Estimate } from "@/lib/network-costs";
+import { CardFunding, DepositForm, EstimatePanel, useFleetBudget } from "@/components/FleetBudget";
 import { useDevices } from "@/hooks/useDevices";
 import { useFleetTransaction, type TransactionPhase } from "@/hooks/useFleetTransaction";
 
@@ -36,6 +38,9 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
   const [message, setMessage] = useState<{ address: string; text: string } | null>(null);
   const [error, setError] = useState<{ address: string; text: string } | null>(null);
   const [phase, setPhase] = useState<TransactionPhase | null>(null);
+  const [estimate, setEstimate] = useState<Estimate | undefined>();
+  const { budget } = useFleetBudget();
+  const [fromBudget, setFromBudget] = useState(true);
   // Synchronous guard: a second click can arrive before React re-renders the disabled button.
   const inFlight = useRef(false);
   const form = useRef<HTMLFormElement>(null);
@@ -130,7 +135,6 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
         {state.isSuccess && (BigInt(state.data) === BigInt(0)
           ? <p className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950">Fund this address before registering. Send SUI on <strong>{NETWORK}</strong> to <span className="break-all font-mono">{account.address}</span>.</p>
           : <p className="text-gray-700">Registration needs gas; your wallet shows the actual cost before you approve. Gas is not a fleet budget.</p>)}
-        {/* SF-083 inserts estimate, card funding and budget deposit here. A nonzero gas balance is not a budget deposit. */}
         <div className="flex flex-wrap items-center gap-3">
           <button type="button" disabled={state.isFetching} onClick={() => { void state.refetch(); void devices.refetch(); }} className={SECONDARY}>Refresh account and inventory</button>
           {state.isFetching && !state.isPending && <span className="text-gray-600">Refreshing…</span>}
@@ -138,6 +142,16 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
         <Disclosure summary="How to fund this address">
           <p>Send SUI on this network to your address from another wallet. For localnet use your disposable node’s faucet; for testnet use the Sui testnet faucet. Test tokens have no monetary value. Do not send mainnet funds to a test network.</p>
         </Disclosure>
+        {budgetSupported() && <div className="space-y-3 rounded-md border border-gray-200 p-4">
+          <h3 className="font-semibold">Prepay network costs</h3>
+          <p className="text-gray-700">Your wallet&apos;s gas above pays for your own transactions. The fleet budget is separate: you deposit network costs up front, each device gets a small float at registration and tops up only through the contract, within limits you set.</p>
+          <EstimatePanel onEstimate={setEstimate} />
+          <h4 className="font-semibold">Fund by card (optional)</h4>
+          <CardFunding asset="SUI" amount={estimate ? formatToken(estimate.suiDepositMist) : "1"} />
+          <h4 className="font-semibold">Deposit</h4>
+          <DepositForm suggestedMist={estimate?.suiDepositMist} />
+          <p className="text-gray-700">Manage the balance, per-device usage and limits on the <Link className={LINK} href="/budget">Network budget page</Link>.</p>
+        </div>}
         <Disclosure summary="Technical details">
           <dl className="grid gap-x-4 gap-y-1 sm:grid-cols-[max-content_1fr]">
             <dt className="text-gray-600">Network</dt><dd>{NETWORK}</dd>
@@ -169,7 +183,9 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
           const data = new FormData(event.currentTarget);
           try {
             const input = registrationInput(String(data.get("name")), String(data.get("deviceAddress")), String(data.get("arch")));
-            void submit(buildRegisterDeviceTx(input.name, input.deviceAddress, input.arch, account.address));
+            const funding = budget && fromBudget ? { budgetId: budget.id, capId: budget.capId, floatMist: budget.defaultLimits.floatCap,
+              reserveMist: defaultReserve(budget.defaultLimits, budget.balance, budget.defaultLimits.floatCap) } : undefined;
+            void submit(buildRegisterAndEnrollTx(input.name, input.deviceAddress, input.arch, account.address, funding));
           } catch (cause) { setError({ address: account.address, text: (cause as Error).message }); }
         }}>
           <label className="block font-medium">Device name
@@ -182,6 +198,10 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
             <input className={`mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 font-mono font-normal ${FOCUS}`} name="deviceAddress" required placeholder="0x…" autoComplete="off" spellCheck={false} />
             <span className="mt-1 block font-normal text-gray-600">The device’s own address from the daemon—not your wallet address.</span>
           </label>
+          {budget && <label className="flex items-start gap-2 sm:col-span-2">
+            <input type="checkbox" className={`mt-0.5 ${FOCUS}`} checked={fromBudget} onChange={(e) => setFromBudget(e.target.checked)} />
+            <span>Enroll in my fleet budget: send the device a {formatToken(budget.defaultLimits.floatCap)} SUI float and give its own account a {formatToken(defaultReserve(budget.defaultLimits, budget.balance, budget.defaultLimits.floatCap))} SUI reserve to draw from</span>
+          </label>}
           <div className="space-y-2 sm:col-span-2">
             <p className="text-gray-700">You will sign as <span className="break-all font-mono text-gray-900">{account.address}</span> on <strong>{NETWORK}</strong>.</p>
             <button className={PRIMARY} disabled={!ready || !devices.isSuccess || mutation.isPending}>{mutation.isPending ? "Registering…" : "Register device"}</button>

@@ -18,11 +18,11 @@ use sui_rpc::field::{FieldMask, FieldMaskUtil};
 use sui_rpc::proto::sui::rpc::v2 as proto;
 use sui_sdk_types::{Address, Argument, Command, Digest, Input, StructTag, Transaction, TypeTag};
 
-/// Move module of every call this daemon signs; its functions are checked
-/// against the compiled contracts by scripts/check_contract_interfaces.py.
-const CALL_MODULE: &str = protocol::deployment_manager::MODULE;
-/// Largest gas budget the device will sign for one status report (0.05 SUI).
+/// Largest gas budget the device will sign for one status report or gas
+/// draw (0.05 SUI).
 const MAX_GAS_BUDGET: u64 = 50_000_000;
+/// The shared Clock object.
+const CLOCK: &str = "0x6";
 /// Events requested per ListEvents call.
 const PAGE_SIZE: u32 = 50;
 const DEPLOYMENT_CREATED: &str = "deployment_manager::DeploymentCreated";
@@ -901,11 +901,8 @@ impl SuiClient {
             .await?
             .unwrap_or(Value::Null);
         let registry = self.manifest().shared_objects.registry.id.clone();
-        let mut call = Call {
-            function: protocol::deployment_manager::REPORT_VERIFIED_STATUS,
-            objects: vec![deployment.to_owned(), registry, cap.to_owned()],
-            status,
-        };
+        let mut objects = vec![deployment.to_owned(), registry, cap.to_owned()];
+        let mut function = protocol::deployment_manager::REPORT_VERIFIED_STATUS;
         if !id_list(&direct).iter().any(|id| same_id(id, &device_id)) {
             let groups = self
                 .dynamic_field(deployment, "deployment_manager::TargetGroupsKey")
@@ -919,10 +916,92 @@ impl SuiClient {
                     break;
                 }
             }
-            call.objects
-                .push(found.ok_or_else(|| anyhow::anyhow!("device is no longer targeted"))?);
-            call.function = protocol::deployment_manager::REPORT_VERIFIED_STATUS_FOR_GROUP;
+            objects.push(found.ok_or_else(|| anyhow::anyhow!("device is no longer targeted"))?);
+            function = protocol::deployment_manager::REPORT_VERIFIED_STATUS_FOR_GROUP;
         }
+        let mut args: Vec<Arg> = objects.into_iter().map(Arg::Object).collect();
+        args.push(Arg::Pure(vec![status]));
+        let call = Call { module: protocol::deployment_manager::MODULE, function, args };
+        let transaction = self.build(&call).await?;
+        self.execute(&transaction).await
+    }
+
+    /// This device's SUI balance (MIST).
+    pub async fn gas_balance(&self) -> anyhow::Result<u64> {
+        let mut request = proto::GetBalanceRequest::default();
+        request.owner = Some(self.address());
+        request.coin_type = Some("0x2::sui::SUI".into());
+        let balance = self
+            .rpc
+            .clone()
+            .state_client()
+            .get_balance(request)
+            .await
+            .map_err(status)?
+            .into_inner()
+            .balance
+            .ok_or_else(|| anyhow::anyhow!("node returned no balance"))?;
+        Ok(balance.balance.unwrap_or_default())
+    }
+
+    /// The fleet budget (SF-083) and this device's current account in it
+    /// (its shared `GasAccount` object ID and state), if enrolled.
+    pub async fn budget(
+        &self,
+        budget_id: &str,
+        device_id: &str,
+    ) -> anyhow::Result<(crate::funding::Budget, Option<(String, crate::funding::Account)>)> {
+        let object = self.object(budget_id).await?;
+        anyhow::ensure!(
+            same_type(&object.object_type, &self.move_type("fleet_budget::FleetBudget")),
+            "{budget_id} is not a FleetBudget of this package"
+        );
+        anyhow::ensure!(matches!(object.owner, Owner::Shared { .. }), "the fleet budget is not shared");
+        let budget = crate::funding::Budget::from_json(&object.fields)?;
+        anyhow::ensure!(
+            same_id(&budget.registry_id, &self.manifest().shared_objects.registry.id),
+            "the fleet budget belongs to another registry"
+        );
+        let device = Address::from_str(device_id).map_err(|e| anyhow::anyhow!("invalid device ID {device_id}: {e}"))?;
+        let Some(account_id) = self.keyed_field(budget_id, "fleet_budget::DeviceKey", device.inner()).await? else {
+            return Ok((budget, None));
+        };
+        let account_id = account_id
+            .as_str()
+            .filter(|id| same_id(id, id))
+            .ok_or_else(|| anyhow::anyhow!("the budget's device index is not an object ID: {account_id}"))?
+            .to_owned();
+        let object = self.object(&account_id).await?;
+        anyhow::ensure!(
+            same_type(&object.object_type, &self.move_type("fleet_budget::GasAccount")),
+            "{account_id} is not a GasAccount of this package"
+        );
+        anyhow::ensure!(matches!(object.owner, Owner::Shared { .. }), "the gas account is not shared");
+        let account = crate::funding::Account::from_json(&object.fields)?;
+        anyhow::ensure!(
+            same_id(&account.budget_id, budget_id) && same_id(&account.device_id, device_id),
+            "the gas account belongs to another budget or device"
+        );
+        Ok((budget, Some((account_id, account))))
+    }
+
+    /// Draw `amount` MIST from this device's account to its address:
+    /// exactly one `fleet_budget::draw_gas` call, paid by the device. The
+    /// budget must be an immutable input: draws never write it.
+    pub async fn draw_gas(&self, budget_id: &str, account_id: &str, cap: &str, amount: u64) -> anyhow::Result<String> {
+        let registry = self.manifest().shared_objects.registry.id.clone();
+        let call = Call {
+            module: protocol::fleet_budget::MODULE,
+            function: protocol::fleet_budget::DRAW_GAS,
+            args: vec![
+                Arg::SharedRead(budget_id.to_owned()),
+                Arg::Object(account_id.to_owned()),
+                Arg::Object(registry),
+                Arg::Object(cap.to_owned()),
+                Arg::Pure(bcs::to_bytes(&amount)?),
+                Arg::Object(CLOCK.to_owned()),
+            ],
+        };
         let transaction = self.build(&call).await?;
         self.execute(&transaction).await
     }
@@ -935,15 +1014,19 @@ impl SuiClient {
         let sender = Address::from_str(&self.address())?;
         let mut builder = sui_transaction_builder::TransactionBuilder::new();
         let mut arguments = Vec::new();
-        for id in &call.objects {
-            let id = Address::from_str(id).map_err(|e| anyhow::anyhow!("invalid object ID {id}: {e}"))?;
-            arguments.push(builder.object(sui_transaction_builder::ObjectInput::new(id)));
+        for arg in &call.args {
+            arguments.push(match arg {
+                Arg::Object(id) | Arg::SharedRead(id) => {
+                    let id = Address::from_str(id).map_err(|e| anyhow::anyhow!("invalid object ID {id}: {e}"))?;
+                    builder.object(sui_transaction_builder::ObjectInput::new(id))
+                }
+                Arg::Pure(bytes) => builder.pure_bytes(bytes.clone()),
+            });
         }
-        arguments.push(builder.pure(&call.status));
         builder.move_call(
             sui_transaction_builder::Function::new(
                 package,
-                CALL_MODULE.parse()?,
+                call.module.parse()?,
                 call.function.parse()?,
             ),
             arguments,
@@ -1088,12 +1171,21 @@ fn check_identity(identity: Option<&Value>, address: &str) -> anyhow::Result<()>
     Ok(())
 }
 
-/// The only transaction this daemon signs: one Move call of `function` in
-/// deployment_manager with the given object arguments and status.
+/// The only transactions this daemon signs: one Move call with exactly these
+/// arguments (a status report, or a gas draw from the fleet budget).
 struct Call {
+    module: &'static str,
     function: &'static str,
-    objects: Vec<String>,
-    status: u8,
+    args: Vec<Arg>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Arg {
+    Object(String),
+    /// A shared object the call only reads; it must be an immutable input.
+    SharedRead(String),
+    /// BCS of a pure value.
+    Pure(Vec<u8>),
 }
 
 /// The node resolved gas and versions; it must not have changed anything
@@ -1123,10 +1215,10 @@ fn check_transaction(
     };
     anyhow::ensure!(
         move_call.package == package
-            && move_call.module.as_str() == CALL_MODULE
+            && move_call.module.as_str() == call.module
             && move_call.function.as_str() == call.function
             && move_call.type_arguments.is_empty()
-            && move_call.arguments.len() == call.objects.len() + 1,
+            && move_call.arguments.len() == call.args.len(),
         "simulated transaction calls something else"
     );
     anyhow::ensure!(
@@ -1141,18 +1233,22 @@ fn check_transaction(
             .inputs
             .get(*input as usize)
             .ok_or_else(|| anyhow::anyhow!("simulated call refers to a missing input"))?;
-        match (call.objects.get(index), input) {
-            (Some(id), Input::ImmutableOrOwned(reference)) => anyhow::ensure!(
+        match (&call.args[index], input) {
+            (Arg::Object(id), Input::ImmutableOrOwned(reference)) => anyhow::ensure!(
                 same_id(&reference.object_id().to_string(), id),
                 "simulated call swapped object argument {index}"
             ),
-            (Some(id), Input::Shared(shared)) => anyhow::ensure!(
+            (Arg::Object(id), Input::Shared(shared)) => anyhow::ensure!(
                 same_id(&shared.object_id().to_string(), id),
                 "simulated call swapped object argument {index}"
             ),
-            (None, Input::Pure(value)) => anyhow::ensure!(
-                value.as_slice() == [call.status],
-                "simulated call changed the status"
+            (Arg::SharedRead(id), Input::Shared(shared)) => anyhow::ensure!(
+                same_id(&shared.object_id().to_string(), id) && !shared.mutability().is_mutable(),
+                "simulated call swapped or writes shared argument {index}"
+            ),
+            (Arg::Pure(expected), Input::Pure(value)) => anyhow::ensure!(
+                value.as_slice() == expected.as_slice(),
+                "simulated call changed pure argument {index}"
             ),
             _ => anyhow::bail!("simulated call argument {index} has an unexpected kind"),
         }
@@ -1355,11 +1451,17 @@ mod tests {
             Digest::ZERO,
         )]);
         let call = Call {
+            module: protocol::deployment_manager::MODULE,
             function: protocol::deployment_manager::REPORT_VERIFIED_STATUS,
-            objects: vec!["0x10".into(), "0x13".into(), "0x11".into()],
-            status: 1,
+            args: report_args(&["0x10", "0x13", "0x11"], 1),
         };
         (builder.try_build().unwrap(), call, package, sender)
+    }
+
+    fn report_args(objects: &[&str], status: u8) -> Vec<Arg> {
+        let mut args: Vec<Arg> = objects.iter().map(|id| Arg::Object((*id).into())).collect();
+        args.push(Arg::Pure(vec![status]));
+        args
     }
 
     #[test]
@@ -1379,19 +1481,16 @@ mod tests {
         other.gas_payment.budget = MAX_GAS_BUDGET + 1;
         assert!(check_transaction(&other, &call, package, sender).is_err());
 
-        let wrong_status = Call { status: 2, ..call };
+        let wrong_status = Call { args: report_args(&["0x10", "0x13", "0x11"], 2), ..call };
         assert!(check_transaction(&tx, &wrong_status, package, sender).is_err());
-        let call = Call { status: 1, ..wrong_status };
+        let call = Call { args: report_args(&["0x10", "0x13", "0x11"], 1), ..wrong_status };
 
-        let swapped = Call {
-            objects: vec!["0x10".into(), "0x13".into(), "0x99".into()],
-            ..call
-        };
+        let swapped = Call { args: report_args(&["0x10", "0x13", "0x99"], 1), ..call };
         assert!(check_transaction(&tx, &swapped, package, sender).is_err());
-        let call = Call {
-            objects: vec!["0x10".into(), "0x13".into(), "0x11".into()],
-            ..swapped
-        };
+        let call = Call { args: report_args(&["0x10", "0x13", "0x11"], 1), ..swapped };
+        let other_module = Call { module: protocol::fleet_budget::MODULE, ..call };
+        assert!(check_transaction(&tx, &other_module, package, sender).is_err());
+        let call = Call { module: protocol::deployment_manager::MODULE, ..other_module };
         let unverified = Call { function: protocol::deployment_manager::REPORT_STATUS, ..call };
         assert!(check_transaction(&tx, &unverified, package, sender).is_err());
         let call = Call { function: protocol::deployment_manager::REPORT_VERIFIED_STATUS, ..unverified };
@@ -1403,5 +1502,50 @@ mod tests {
             ptb.commands.push(ptb.commands[0].clone());
         }
         assert!(check_transaction(&extra, &call, package, sender).is_err());
+    }
+
+    #[test]
+    fn signs_only_the_exact_intended_gas_draw() {
+        let package = Address::from_str("0x3").unwrap();
+        let sender = Address::from_str("0xa0").unwrap();
+        let build = |amount: u64, budget_mutable: bool| {
+            let mut builder = sui_transaction_builder::TransactionBuilder::new();
+            let a = Address::from_str;
+            let budget = builder.object(sui_transaction_builder::ObjectInput::shared(a("0xb0").unwrap(), 1, budget_mutable));
+            let account = builder.object(sui_transaction_builder::ObjectInput::shared(a("0xac").unwrap(), 1, true));
+            let registry = builder.object(sui_transaction_builder::ObjectInput::shared(a("0x13").unwrap(), 1, false));
+            let cap = builder.object(sui_transaction_builder::ObjectInput::owned(a("0x11").unwrap(), 2, Digest::ZERO));
+            let value = builder.pure(&amount);
+            let clock = builder.object(sui_transaction_builder::ObjectInput::shared(a("0x6").unwrap(), 1, false));
+            builder.move_call(
+                sui_transaction_builder::Function::new(package, "fleet_budget".parse().unwrap(), "draw_gas".parse().unwrap()),
+                vec![budget, account, registry, cap, value, clock],
+            );
+            builder.set_sender(sender);
+            builder.set_gas_budget(10_000_000);
+            builder.set_gas_price(1000);
+            builder.add_gas_objects([sui_transaction_builder::ObjectInput::owned(a("0x12").unwrap(), 3, Digest::ZERO)]);
+            builder.try_build().unwrap()
+        };
+        let call = |amount: u64, budget: &str, account: &str| Call {
+            module: protocol::fleet_budget::MODULE,
+            function: protocol::fleet_budget::DRAW_GAS,
+            args: vec![
+                Arg::SharedRead(budget.into()),
+                Arg::Object(account.into()),
+                Arg::Object("0x13".into()),
+                Arg::Object("0x11".into()),
+                Arg::Pure(bcs::to_bytes(&amount).unwrap()),
+                Arg::Object(CLOCK.into()),
+            ],
+        };
+        check_transaction(&build(5_000, false), &call(5_000, "0xb0", "0xac"), package, sender).unwrap();
+        // A node that raises the amount or swaps the budget or account gets no signature.
+        assert!(check_transaction(&build(5_001, false), &call(5_000, "0xb0", "0xac"), package, sender).is_err());
+        assert!(check_transaction(&build(5_000, false), &call(5_000, "0xb1", "0xac"), package, sender).is_err());
+        assert!(check_transaction(&build(5_000, false), &call(5_000, "0xb0", "0xad"), package, sender).is_err());
+        // Nor one that takes the fleet budget mutably, contending with every device.
+        let error = check_transaction(&build(5_000, true), &call(5_000, "0xb0", "0xac"), package, sender).unwrap_err();
+        assert!(error.to_string().contains("writes shared argument 0"), "{error}");
     }
 }

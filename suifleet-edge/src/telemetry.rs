@@ -199,6 +199,10 @@ pub fn inventory(state_dir: &Path) -> Inventory {
             inventory.reasons.push(format!("deployment {id}: outcome indeterminate; inspect the device"));
         }
     }
+    // Budget exhaustion (SF-083) is reported, with the receipts it holds back.
+    if let Some(reason) = journal.funding.as_ref().and_then(|f| crate::funding::reason(f, inventory.pending_receipts)) {
+        inventory.reasons.push(reason);
+    }
     // Without the committed specs, the supervisor's own status still names
     // what it runs; nothing else is asserted to be unsupervised by guess.
     let committed: BTreeMap<&String, (&String, &String)> = match &active {
@@ -678,6 +682,14 @@ mod tests {
             "component web: broken (exit status: 1)"]);
         std::fs::remove_dir_all(dir).unwrap();
         // No journal yet is never healthy.
+        let funded = temp();
+        std::fs::write(funded.join("state.json"), serde_json::to_vec(&serde_json::json!({
+            "binding": "b", "cursor": null, "deployments": {"0xa": {"status": 1, "reported": false, "error": null}},
+            "funding": {"blocked": "the fleet budget is empty; its owner must deposit", "draws": 2},
+        })).unwrap()).unwrap();
+        assert_eq!(super::inventory(&funded).reasons,
+            ["network funding: the fleet budget is empty; its owner must deposit; 1 receipt(s) queued until gas is available"]);
+        std::fs::remove_dir_all(funded).unwrap();
         let empty = temp();
         assert_eq!(super::inventory(&empty).reasons, ["daemon journal unreadable"]);
         std::fs::remove_dir_all(empty).unwrap();
