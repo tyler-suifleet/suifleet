@@ -77,6 +77,10 @@ Digests and effects are in [the SF-056 receipt](validation/sf056-testnet.json). 
 
 **Updating the transaction CLI.** When testnet moves past protocol 139, update `SUI_NETWORK_*` in the Dockerfile and `NETWORK` in `sui_toolchain.py` together, with the release's protocol limit and checksums. The tests in `scripts/tests/test_testnet_toolchain.py` check that the Dockerfile and the constants agree, and inside the dev image they check the installed binary's identity. Changing the release compiler is a separate, reviewed toolchain upgrade (the SF-050 baseline), not a fix for network protocol drift.
 
+## SF-083 fleet budget run
+
+`make test-budget-testnet SUIFLEET_WALLET=…` (`scripts/live_fleet_budget.py`) runs on the same executor and allowance. It covers the fleet budget, refusals, real daemon draws, a SUI→WAL swap and a fleet-paid Walrus upload. It caches its package fixture in `sf083-state.json` beside the wallet and keeps a pending device key until the key is swept. It needs the machine-session lock token and the pinned Walrus SDK installed privately. See [FLEET_BUDGET.md](FLEET_BUDGET.md) and [sf083-testnet.json](validation/sf083-testnet.json).
+
 ## The `package-upgrade` live gate
 
 ```bash

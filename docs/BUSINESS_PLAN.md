@@ -49,6 +49,8 @@ Use an auditable usage model: network fees + separately metered selected infrast
 
 Before quoting a production fleet, measure a representative release end to end; count actual transactions/bytes and successful/failed effects; capture storage deposits/refunds, renewal and upload fees; verify delivery at expected concurrency; account for selected service charges; and compare the same workload, retention, security and availability against the customer's actual AWS configuration. Test Mainnet simulation/estimation without publication where possible; live Mainnet spend still requires explicit user authorization. Validate purchasing demand alongside the technical prototype.
 
+**Prepaid network costs (SF-083).** The dApp's fleet budget collects network costs up front and charges no SuiFleet fee. Whether any service fee applies is an **open business decision**; until the user decides, deposits cover network costs only. Sponsored transactions through a gas station, and Nautilus-enclave sponsorship, are recorded as future options, not the current design: both need an always-on signer or self-managed enclave hosting. See [FLEET_BUDGET.md](FLEET_BUDGET.md).
+
 ## Adjacent opportunities, reconsidered
 
 Rank by avoidable customer charges, network fit and implementation burden, not invented AWS service margins. Each row is a product hypothesis requiring its own measured bill and acceptance scope.

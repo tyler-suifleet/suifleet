@@ -83,10 +83,15 @@ multisig custody for business fleets before large deposits.
 The page shows the manifest network, connected address and verified balance. A
 nonzero gas balance enables registration; it does not promise sufficient gas.
 The wallet estimates the actual cost. Fund using a same-network SUI transfer or a
-disposable localnet/testnet faucet. No card checkout or prepaid budget exists here.
-SF-083 inserts its estimate/card-funding/budget-deposit steps at the marked
-extension point between the gas check and registration in `FirstRun.tsx`; it must
-retain network/account checks and distinguish gas from a fleet budget.
+disposable localnet/testnet faucet.
+
+When the deployment's package has the fleet budget, SF-083 fills the extension
+point between the gas check and registration: the up-front estimate with its fees
+listed separately, optional card funding through a provider's hosted checkout, and
+the budget deposit. Registration then enrolls the device in the budget and sends
+its float in the same PTB. Network and account checks stay as above, and the page
+explains that wallet gas and the fleet budget differ. See
+[FLEET_BUDGET.md](FLEET_BUDGET.md).
 
 Registration uses the existing single PTB to register, issue the device cap and
 activate custody. Confirmed effects produce a digest and an inventory refresh;

@@ -53,6 +53,13 @@ Both clients apply the same recipe rules: the frontend before upload, the daemon
 
 Both clients consume the generated interfaces after integrating SF-003 and SF-004. The Rust transaction builder uses generated module/function names with typed object IDs and u8 statuses, and verifies the simulated transaction before signing. Obsolete JSON-RPC argument encoders were removed. Reference-returning Move helpers have no generated transaction encoders. The full ABI snapshot lives separately in `fleet-abi.ts` and is not imported into application bundles.
 
+The additive SF-083 `fleet_budget` module is in the same reviewed ABI, with an
+all-or-none optional origin group `fleet_budget`; manifests without it keep working
+and the daemon's `[budget]` requires it. The separately published `fleet_storage`
+package (Walrus dependency) is not in this catalog: its dApp calls are checked by
+`check_contract_interfaces.py` against its own compiled summary, and its pinned Walrus
+calls are listed as reviewed external references. See [FLEET_BUDGET.md](FLEET_BUDGET.md).
+
 The additive SF-089 handover API and `fleet_handover::Handover` BCS layout are in
 the same reviewed ABI. Its optional origin group permits existing deployments
 without handover to keep working. Manifest resolution records the new type's own
