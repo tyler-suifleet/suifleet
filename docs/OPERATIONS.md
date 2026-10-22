@@ -68,6 +68,12 @@ All toolchain inputs are Dockerfile build arguments: base image digest, Sui rele
 
 Regressions these gates have been shown to catch: renamed/re-shaped Move functions and types used by clients (interface check), treating failed execution effects as success (Rust test and simulator), and reapplying journaled deployments after a crash before the cursor is saved (simulator).
 
+Keep these gates deterministic rather than retried (SF-108):
+- Rust unit tests share one process with the supervisor tests' orphan sweep, which kills and reaps every unregistered child. Spawn test children through `supervisor::spawn_std_tracked` and release them with `forget_std_tracked`.
+- Wait for a condition or an exit, not a guessed sleep. A timing assertion may only become *more* true with delay, as with sleeping past a deadline.
+- Read a status file once per condition. Scan a daemon's state only after stopping it, because it replaces files through temporary renames.
+- Have simulators publish a chain change at the exact read that exposes a window, instead of racing the daemon's poll.
+
 ### Live gates
 
 Public Sui testnet is normal automated validation under the user's standing authorization. `.github/workflows/testnet.yml` runs after successful ordinary CI on trusted main pushes and authenticated same-repository PR heads, daily, and on main-only dispatch. The dedicated `live-package-upgrade` environment is main-only, has no human reviewers, and cannot be bypassed by administrators. It holds only the dedicated testnet wallet. The runner verifies testnet chain `4c78adac`, the wallet, UpgradeCap, per-type origins and execution effects. See [TESTNET.md](TESTNET.md) for spending, encrypted cache and exact-head status rules.
@@ -229,6 +235,7 @@ A group can carry a **desired state**: a revisioned map from component name to t
 **How the daemon reconciles each poll:**
 - **Group discovery.** It finds its groups from `DeviceAddedToGroup` events, scanned from genesis with their own journal cursor.
 - **Membership check.** It confirms membership, and that the group's admin is the device's operator, from each group object.
+- **Authority re-check.** After reading every group's desired state it reads the operator again. If ownership changed in between, it plans nothing that poll, so a transfer cannot admit the previous operator's new desired state.
 - **Merge.** It merges the groups' current revisions. Groups naming different deployments for one component are a conflict: the component is left as installed, and the dApp shows it.
 - **Plan.** In name order, it compares each desired deployment with what the component currently runs: the deployment it last started for that component, one-shot or desired, recorded with that deployment's intent. It applies desired deployments that have never run here, journaling the step and then the intent before the updater starts.
   - The first step that does not apply stops the plan, and that desired state is not retried until it changes. The step is journaled with the desired state it was started for, and the stop is read back from the journal on every poll, so it holds across a crash. A newer desired state waits while the step's update is still in flight in the privileged helper. Once that update settles (Failed or indeterminate), the newer state is planned, even with no further change and across restarts.
