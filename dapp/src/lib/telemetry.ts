@@ -216,6 +216,7 @@ export interface Assessment {
 }
 
 export interface DeviceHealth extends Assessment {
+  intervalSeconds?: number;
   lastSeenMs?: number;
   /** Age of the newest report by the indexer's clock (not the browser's). */
   lastSeenAgeMs?: number;
@@ -341,6 +342,7 @@ export async function deviceHealth(identity: Identity | undefined, indexed: Inde
   return {
     ...assess(false, { snapshot, receivedMs: report.received_ms }, serverNowMs),
     lastSeenMs: report.received_ms, lastSeenAgeMs: Math.max(0, serverNowMs - report.received_ms), observedMs: snapshot.observed_ms, daemonVersion: snapshot.daemon_version,
+    intervalSeconds: snapshot.interval_seconds,
     components: snapshot.components,
     services: snapshot.services,
   };

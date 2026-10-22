@@ -1,7 +1,7 @@
 // Fleet archives authenticate the encrypted bytes on chain and the exact
 // plaintext with the writer's personal-message signature. Never trust an
 // aggregator, an optional relay, or a successful decryption as authentication.
-import { blobIdFromInt, type WalrusClient } from '@mysten/walrus';
+import type { WalrusClient } from '@mysten/walrus';
 import { bcs } from '@mysten/sui/bcs';
 import { isValidPersonalMessageSignature } from '@mysten/sui/verify';
 import { fromBase64, normalizeSuiAddress as id, normalizeStructTag, toHex } from '@mysten/sui/utils';
@@ -177,6 +177,7 @@ export async function fetchVerifiedArchive(client: SuiGrpcClient, walrus: Pick<W
   if (!anchor) throw Error('Archive index does not exist');
   const state = await walrus.systemState();
   await requireArchiveReadable(client, config, deviceId, anchor, state.committee.epoch);
+  const { blobIdFromInt } = await import('@mysten/walrus');
   const url = new URL(aggregator);
   if (url.username || url.password || url.search || url.hash || (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)))) throw Error('Invalid archive aggregator URL');
   const ciphertext = await fetchArchiveBytes(`${aggregator.replace(/\/+$/, '')}/v1/blobs/${blobIdFromInt(anchor.blob_id)}`, fetcher);

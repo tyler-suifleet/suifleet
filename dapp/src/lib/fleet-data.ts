@@ -143,7 +143,24 @@ export async function fetchChainHealth(client: Reads, config: FleetDataConfig, d
       if (receivedMs > now + 300_000 || snapshot.observed_ms > receivedMs + 300_000) throw new Error("Health timestamp is in the future");
       return [deviceId, { ...assess(false, { snapshot, receivedMs }, now, cadenceMs), lastSeenMs: receivedMs,
         lastSeenAgeMs: Math.max(0, now - receivedMs), observedMs: snapshot.observed_ms,
-        daemonVersion: snapshot.daemon_version, components: snapshot.components, services: snapshot.services }];
+        daemonVersion: snapshot.daemon_version, intervalSeconds: snapshot.interval_seconds, components: snapshot.components, services: snapshot.services }];
     } catch (error) { return [deviceId, unavailable(`Chain health could not be verified: ${String(error)}`)]; }
   })));
+}
+
+/** Public fleet index, paged directly from Sui. Read/decrypt authorization is
+ * checked separately; index visibility never grants access to ciphertext keys. */
+export async function listFleetDeviceIds(client: SuiGrpcClient, config: FleetDataConfig, cursor?: string | null) {
+  await readFleetData(client, config);
+  const page = await client.listDynamicFields({ parentId: config.fleetId, cursor, limit: 100 });
+  if (page.dynamicFields.length > 100 || (page.hasNextPage && (!page.cursor || page.cursor === cursor))) throw Error('Invalid fleet index page');
+  const devices: string[] = [];
+  for (const field of page.dynamicFields) {
+    if (normalizeStructTag(field.name.type) !== type(config, 'DeviceKey')) continue;
+    if (field.$kind !== 'DynamicField' || normalizeStructTag(field.valueType) !== normalizeStructTag('0x2::object::ID') || field.name.bcs.length !== 32) throw Error('Invalid fleet device index');
+    const device = id(address.parse(field.name.bcs));
+    if (devices.includes(device)) throw Error('Duplicate fleet device index');
+    devices.push(device);
+  }
+  return { devices, cursor: page.cursor, hasNextPage: page.hasNextPage };
 }
