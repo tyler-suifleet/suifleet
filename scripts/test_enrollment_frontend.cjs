@@ -47,9 +47,9 @@ const commands = (tx) => tx.getData().commands;
   ];
   const check = e.checkReservations(rows, { devices, groups, reserved: [{ serial: "R1", alias: "held" }], defaultGroupId: groups[0].objectId });
   assert.deepEqual(check.accepted, [
-    { serial: "SN-1", alias: "ok-1", groupId: groups[0].objectId },
-    { serial: "SN-2", alias: "ok-2", groupId: groups[2].objectId },
-    { serial: "SN-3", alias: "ok-3", groupId: groups[0].objectId },
+    { line: 2, serial: "SN-1", alias: "ok-1", groupId: groups[0].objectId },
+    { line: 3, serial: "SN-2", alias: "ok-2", groupId: groups[2].objectId },
+    { line: 4, serial: "SN-3", alias: "ok-3", groupId: groups[0].objectId },
   ]);
   assert.deepEqual(check.issues.map((i) => i.line), [5, 6, 7, 8, 9, 10, 11, 12, 13]);
   assert.match(check.issues.find((i) => i.line === 7).message, /already used by device taken/);

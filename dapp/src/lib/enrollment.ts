@@ -112,7 +112,8 @@ function resolveGroup(value: string | undefined, groups: DeviceGroup[]): { id?: 
 }
 
 export interface ReservationCheck {
-  accepted: { serial: string; alias: string; groupId?: string }[];
+  /** Accepted rows, each with the `line` of the input row it came from. */
+  accepted: { line: number; serial: string; alias: string; groupId?: string }[];
   issues: RosterIssue[];
 }
 
@@ -146,7 +147,7 @@ export function checkReservations(rows: RosterRow[], context: {
     if (group.error) { problem(group.error); continue; }
     takenSerial.set(key(row.serial), `row ${row.line}`);
     takenAlias.set(key(row.alias), `row ${row.line}`);
-    accepted.push({ serial: row.serial, alias: row.alias, groupId: group.id });
+    accepted.push({ line: row.line, serial: row.serial, alias: row.alias, groupId: group.id });
   }
   return { accepted, issues };
 }

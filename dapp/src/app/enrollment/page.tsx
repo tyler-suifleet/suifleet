@@ -223,9 +223,8 @@ function JobPanel({ policy, operator, onError }: { policy: PolicyState; operator
       const fresh = imported.entries.filter((e) => !known.has(e.claim));
       const check = checkReservations(fresh.map((e, i) => ({ line: i + 1, serial: e.serial, alias: e.alias, group: e.group ?? e.groupId })),
         { devices, groups, reserved: [...storedReservations(localStorage), ...job.entries] });
-      const accepted = new Map(check.accepted.map((a) => [a.serial, a]));
-      const added = fresh.filter((e) => accepted.has(e.serial))
-        .map(({ group: _, ...e }) => ({ ...e, groupId: accepted.get(e.serial)!.groupId }));
+      // Join by input row, never by serial: a rejected duplicate shares its serial with an accepted row.
+      const added = check.accepted.map((a) => { const { group: _, ...e } = fresh[a.line - 1]; return { ...e, groupId: a.groupId }; });
       setJob({ ...job, claimFundMist: job.entries.length ? job.claimFundMist : imported.claimFundMist, entries: [...job.entries, ...added] });
       if (check.issues.length) onError(`Imported ${added.length}; skipped ${check.issues.length}: ${check.issues.slice(0, 5).map((i) => `${i.serial}: ${i.message}`).join("; ")}`);
     } catch (e) { onError(`Import failed: ${(e as Error).message}`); }

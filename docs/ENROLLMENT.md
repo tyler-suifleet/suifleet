@@ -77,6 +77,7 @@ The dApp's **Enrollment** page puts the claim flow above behind names and serial
 3. **Check** rejects, per line, malformed serials or aliases, duplicates inside the roster, and conflicts with the operator's devices or other reservations. Both serials and aliases are compared case-insensitively.
    - Allowed characters: 1–64 letters, digits, `.`, `_`, `-`, starting alphanumeric.
    - Unknown or ambiguous group names are rejected too.
+   - Imported roster and job files get the same checks; only accepted rows, with their own alias, claim and group, are added.
 4. **Download credentials.** The browser generates one fresh claim key per accepted reservation and downloads a tar archive. Each device gets one folder, `enrollment/SERIAL/`, containing:
    - `claim.key`, mode 0600;
    - `enroll.toml`, with the policy, the alias as `name` and `keypair_path = "/etc/suifleet/device.key"`;
@@ -223,5 +224,5 @@ pin_file = "/etc/suifleet/pkcs11.pin"        # root-only
   - roles: operator attribution, operator delete, delegate cannot delete, revoked role, out of scope, foreign group, operator-only revoke, empty targets.
 - `make edge-test` runs the pkcs11 feature's tests. A P-256 signature produced through the new encoding verifies with Mysten's independent `UserSignatureVerifier`. Address derivation and high-S normalization are covered too.
 - `make test-manifest` runs `scripts/test_enrollment_frontend.cjs` and `scripts/tests/test_claims.py` (SF-100, offline): rosters, templates, conflicts, credential archives, key-free jobs, chain-derived statuses and chunked plans.
-- `make test-bulk-enrollment-localnet` (SF-100; disposable network-none localnet, headless Chromium, real daemon): bulk chunked registration/binding with resumption, refusals of replayed, revoked, expired, unsponsored and cross-fleet claims, and the real pages end to end.
+- `make test-bulk-enrollment-localnet` (SF-100; disposable network-none localnet, headless Chromium, real daemon): bulk chunked registration/binding with resumption, refusals of replayed, revoked, expired, unsponsored and cross-fleet claims, and the real pages end to end. The page run also covers duplicate serials in an imported roster.
 - `make test-enrollment-localnet` (real localnet, SoftHSM2 2.6.1, OpenSC): all 6 scenarios PASS. They cover bulk enrollment of zero-SUI devices, refused claim misuse, a delegate's deployment applied and receipted by the real daemon, refusal outside scope and after revocation, and a SoftHSM-backed device enrolling and reporting Applied.

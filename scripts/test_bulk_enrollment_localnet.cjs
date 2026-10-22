@@ -397,6 +397,34 @@ const credentialsOf = (files) => [...files.keys()].filter((n) => n.endsWith("/cl
     assert.equal(e.parseJob(exported, { operator: op, policyId: uiPolicy }).entries.length, 4);
     assert.ok(allSeeds.every((s) => !exported.includes(s)));
 
+    stage = "browser: duplicate serials in an imported roster";
+    await page.getByLabel(/^Quota/).fill("5");
+    await page.getByRole("button", { name: "Create policy" }).click();
+    for (let i = 0; i < 60 && [uiPolicy, ""].includes(await page.locator("#policy").inputValue()); i++) await page.waitForTimeout(500);
+    const closingPolicy = await page.locator("#policy").inputValue();
+    assert.notEqual(closingPolicy, uiPolicy);
+    await page.getByRole("tab", { name: "Pair one device" }).click();
+    await page.getByLabel("Alias").fill("pi-late");
+    await page.getByLabel("Serial number").fill("SN-200");
+    await page.getByRole("button", { name: "Check", exact: true }).click();
+    const lateCreds = credentialsOf(untar(await downloadFrom(page.getByRole("button", { name: "Download credentials for 1 device" }))));
+    await page.getByRole("button", { name: "Run 1 pending transaction" }).click();
+    await waitCounts(["Waiting for device: 1"]);
+    assert.ok((await enroll(closingPolicy, lateCreds[0].seedHex, "pi-late")).ok);
+    // Same serial twice: only the first row, with its own alias, claim and group, is reserved.
+    const [firstClaim, secondClaim] = [Ed25519Keypair.generate(), Ed25519Keypair.generate()].map((k) => normalizeSuiAddress(k.toSuiAddress()));
+    await page.getByRole("tab", { name: "Import roster file" }).click();
+    await page.getByLabel("Roster or job file").setInputFiles({ name: "roster.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify({ schema: 1, entries: [
+      { serial: "SN-300", alias: "dup-first", claim: firstClaim, group: "Lab" },
+      { serial: "SN-300", alias: "dup-second", claim: secondClaim },
+    ] })) });
+    await page.getByRole("alert").filter({ hasText: "Imported 1; skipped 1: SN-300: serial SN-300 is already used by row 1" }).waitFor();
+    await waitCounts(["Reserved: 1", "Enrolled, naming: 1"]);
+    const closingJob = JSON.parse(await page.evaluate((id) => localStorage.getItem(Object.keys(localStorage).find((k) => k.endsWith(id))), closingPolicy));
+    assert.deepEqual(closingJob.entries.filter((x) => x.serial === "SN-300").map((x) => [x.alias, x.claim, x.groupId]), [["dup-first", firstClaim, lab.objectId]]);
+    const storedLate = await page.evaluate(() => Object.keys(localStorage).map((k) => localStorage.getItem(k)).join("\n"));
+    assert.ok(!storedLate.includes(lateCreds[0].seedHex) && !logs.some((l) => l.includes(lateCreds[0].seedHex)), "a claim key reached storage or the console");
+
     stage = "browser: address-free device listing";
     await page.getByRole("button", { name: "Devices page" }).click();
     const row = page.locator("tr", { has: page.getByText("pi-001", { exact: true }) });
@@ -412,7 +440,7 @@ const credentialsOf = (files) => [...files.keys()].filter((n) => n.endsWith("/cl
     console.log(JSON.stringify(evidence.transactions, null, 1));
     console.log(`PASS: localnet bulk enrollment: 260 reservations in 2 claim PTBs (resumed), 101 self-enrolled devices bound in 2 PTBs (resumed) in ${evidence.enroll_101_devices_ms} ms of enrollment; `
       + `${evidence.refusals.length} refusals (${evidence.refusals.map((r) => r.label).join("; ")}); foreign owner cap not bound. Browser: CSV/template/conflicts, `
-      + `guided pairing, archive credentials, ${typeof evidence.browser.daemon_enrollment === "string" ? "" : "real daemon --enroll, "}rejected-wallet resume, bind, reload resume, revocation, device gas, address-free listing; no key in storage/console/URL`);
+      + `guided pairing, archive credentials, roster duplicate serials, ${typeof evidence.browser.daemon_enrollment === "string" ? "" : "real daemon --enroll, "}rejected-wallet resume, bind, reload resume, revocation, device gas, address-free listing; no key in storage/console/URL`);
   } catch (error) {
     console.error(`FAILED at ${stage}`);
     throw error;
