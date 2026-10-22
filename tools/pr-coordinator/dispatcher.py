@@ -1,23 +1,49 @@
 #!/usr/bin/env python3
 """Dispatch authorized implementation slots; the ticket database owns tickets."""
 import argparse
+from contextlib import closing
+from datetime import datetime
 import fcntl
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
+import signal
 import sqlite3
 import subprocess
+import tempfile
 import time
+from urllib.parse import quote
 import uuid
 
-from coordinator import network_authorization, process_identity, worker_stopped, run, effective_policy
+from coordinator import (network_authorization, process_identity, runnable_identity, worker_stopped, run, effective_policy,
+                         failed_checks, repair_feedback)
 
 TICKET_KEY = re.compile(r'[A-Z][A-Z0-9]*-[0-9]+')
 COMMIT = re.compile(r'[0-9a-f]{40}')
 MAX_RESUMES_PER_CLAIM = 3
 MAX_RESUME_ATTEMPTS = 5
+# SF-116 CI repair-first redirects of live managed implementation workers.
+CI_REDIRECT_GRACE = 600       # seconds after the failed run completed: the owner may fix it first
+CI_REDIRECT_RECHECK = 300     # bounded fresh GitHub revalidation while waiting
+CI_REDIRECTS_PER_CLAIM = 3    # interruptions per claim; later failures stay visible only
+CI_TERM_SECONDS = 60          # SIGTERM grace before SIGKILL of verified session members
+CI_STOP_SECONDS = 300         # then the interruption is uncertain and needs explicit recovery
+CI_KILL_SECONDS = 30          # after an attempted SIGKILL before the stop is declared uncertain
+CI_GUARD_TTL = 600            # guard lease; renewed every scan while a worker is being stopped
+GUARD_PREFIX = 'ci-redirect-guard-'
+GUARD_MODEL = 'pr-coordinator dispatcher (no model)'
+RESOURCE = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}')
+# Repair deadline. The dispatcher stops an overdue repair only through the same
+# guard-fenced escalation; the worker wrapper itself never kills it on a timer.
+CI_REPAIR_TIMEOUT = 7200
+CI_ATTEMPTS = 8              # bounded backoff (60-900 s) for failed steps, about an hour
+# 'guarding', 'interrupting', 'releasing' and 'repair_stopping' hold guard leases; other states hold none.
+CI_TERMINAL = ('resumed', 'superseded', 'handed_off', 'exhausted', 'repair_failed', 'conflict',
+               'uncertain', 'orphaned', 'failed')
+TYLER = {'GIT_AUTHOR_NAME': 'Tyler Bush', 'GIT_AUTHOR_EMAIL': 'tyler.jonathan.bush@gmail.com',
+         'GIT_COMMITTER_NAME': 'Tyler Bush', 'GIT_COMMITTER_EMAIL': 'tyler.jonathan.bush@gmail.com'}
 
 
 def dependency_wait(result, key):
@@ -63,6 +89,26 @@ class Dispatcher:
         self.db.execute('''CREATE TABLE IF NOT EXISTS dependency_resumes (
             source TEXT PRIMARY KEY, project TEXT, family TEXT, claim TEXT, state TEXT,
             session TEXT UNIQUE, attempts INTEGER, retry_after REAL, reason TEXT, updated REAL)''')
+        # One durable record per (claim, failure fingerprint); terminal states never replay.
+        self.db.execute('''CREATE TABLE IF NOT EXISTS ci_redirects (
+            id INTEGER PRIMARY KEY, source TEXT, project TEXT, family TEXT, claim TEXT, ticket TEXT,
+            pr INTEGER, branch TEXT, head TEXT, base TEXT, fingerprint TEXT, failures TEXT,
+            state TEXT, reason TEXT, attempts INTEGER DEFAULT 0, retry_after REAL DEFAULT 0,
+            members TEXT, signalled REAL, killed REAL DEFAULT 0, guard_session TEXT, guards TEXT, original_head TEXT,
+            snapshot TEXT, repair_dir TEXT, repair_deadline REAL, repaired_head TEXT, resumed_as TEXT,
+            created REAL, updated REAL, UNIQUE(claim, fingerprint))''')
+        for project in config.get('projects', []):
+            # Exhaustive shared-mutation resources fenced before any forced CI redirect.
+            # Absent disables forced interruption; an inexact list is a configuration error.
+            resources = project.get('ci_redirect_protected_resources')
+            if resources is None:
+                continue
+            if (not isinstance(resources, list) or not resources or len(set(resources)) != len(resources)
+                    or not all(isinstance(r, str) and RESOURCE.fullmatch(r) for r in resources)):
+                raise ValueError('ci_redirect_protected_resources must be a nonempty list of unique lock resource names')
+            grant = project.get('testnet_authorization')
+            if grant and (not isinstance(grant, dict) or grant.get('lock_resource') not in resources):
+                raise ValueError('ci_redirect_protected_resources must include the testnet authorization lock resource')
         for slot in config.get('implementation_slots', []):
             if slot['family'] not in ('Codex', 'Claude') or not slot['model'].strip():
                 raise ValueError('Each slot needs a known family and actual model')
@@ -540,6 +586,899 @@ resolve conflicts, then continue the unfinished software and rerun all required 
                             (f'launch failed ({type(error).__name__}); claim retained, never relaunched', source))
         return 1
 
+    # ---- SF-116: failed CI on active implementation PRs -------------------------
+
+    def ci_observations(self, project):
+        """Coordinator receipts of current failures on owned in-progress PRs (drafts too)."""
+        path = self.state/'reviews.sqlite3'
+        if not path.exists():
+            return []
+        with closing(sqlite3.connect(f'{path.as_uri()}?mode=ro', uri=True)) as db:
+            db.row_factory = sqlite3.Row
+            if not db.execute("SELECT 1 FROM sqlite_master WHERE name='ci_observations'").fetchone():
+                return []  # Older coordinator: nothing to act on, nothing guessed.
+            return [dict(r) for r in db.execute(
+                "SELECT * FROM ci_observations WHERE project=? AND owner_status='in_progress'", (project['id'],))]
+
+    def redirect_note(self, record, state, reason, retain=None, **fields):
+        """Persist visible redirect state. retain='quarantined' frees execution
+        capacity only once every recorded process is verified stopped."""
+        fields = {**fields, 'state': state, 'reason': reason, 'updated': time.time()}
+        self.db.execute(f"UPDATE ci_redirects SET {','.join(k+'=?' for k in fields)} WHERE id=?",
+                        (*fields.values(), record['id']))
+        if retain:
+            self.db.execute("UPDATE runs SET status=?,message=? WHERE session=? AND status='redirected'",
+                            (retain, f'CI redirect {state}: {reason}', record['source']))
+        else:
+            self.db.execute("UPDATE runs SET message=? WHERE session=? AND status='redirected'",
+                            (f'CI redirect {state}: {reason}', record['source']))
+        print(f"{record['project']}: CI redirect {record['id']} {record['ticket']} PR#{record['pr']}: {state}: {reason}", flush=True)
+
+    def redirect_ci_failures(self, project):
+        try:
+            observations = self.ci_observations(project)
+        except (OSError, sqlite3.Error) as error:
+            observations = []
+            print(f"{project['id']}: CI observations unavailable ({type(error).__name__})", flush=True)
+        for row in self.db.execute("SELECT * FROM runs WHERE project=? AND status='running' AND claim IS NOT NULL",
+                                   (project['id'],)).fetchall():
+            try:
+                claim = json.loads(row['claim'])
+                for observation in observations:
+                    if observation['branch'] == claim['branch'] and observation['ticket'] == claim['key']:
+                        self.detect_redirect(project, row, claim, observation)
+            except (OSError, ValueError, KeyError, TypeError, sqlite3.Error) as error:
+                print(f"{project['id']}: CI observation deferred for {row['session']} ({type(error).__name__})", flush=True)
+        for record in self.db.execute(f"SELECT * FROM ci_redirects WHERE project=? AND state NOT IN ({','.join('?'*len(CI_TERMINAL))}) ORDER BY id",
+                                      (project['id'], *CI_TERMINAL)).fetchall():
+            if (record['retry_after'] or 0) > time.time():
+                continue
+            try:
+                getattr(self, 'redirect_' + record['state'])(project, record)
+            except (OSError, ValueError, KeyError, TypeError, AttributeError, IndexError, RuntimeError,
+                    sqlite3.Error, subprocess.CalledProcessError) as error:
+                attempts = (record['attempts'] or 0) + 1
+                detail = str(error) if type(error) is RuntimeError else type(error).__name__
+                delay = min(900, 60 * 2**(attempts-1))
+                if attempts >= CI_ATTEMPTS and record['state'] in ('pending', 'guarding', 'releasing', 'stopped', 'integrating', 'resuming'):
+                    # Every recorded process was stopped (or never signalled): free capacity, keep the claim.
+                    # An unreleased guard lease expires within CI_GUARD_TTL.
+                    self.redirect_note(record, 'failed', f'{record["state"]} failed {attempts} times ({detail}); claim, branch and preserved work retained for explicit recovery'
+                                       + ('; unreleased guard leases expire within %ds' % CI_GUARD_TTL if record['state'] in ('guarding', 'releasing') else ''),
+                                       retain=None if record['state'] in ('pending', 'guarding') else 'quarantined', attempts=attempts)
+                else:
+                    self.db.execute('UPDATE ci_redirects SET attempts=?,retry_after=?,reason=?,updated=? WHERE id=?',
+                                    (attempts, time.time()+delay, f'{record["state"]}: attempt {attempts} deferred ({detail}); retry in {delay}s',
+                                     time.time(), record['id']))
+                    print(f"{project['id']}: CI redirect {record['id']} deferred ({detail})", flush=True)
+
+    def detect_redirect(self, project, row, claim, observation):
+        digest = hashlib.sha256(claim['token'].encode()).hexdigest()
+        if self.db.execute('SELECT 1 FROM ci_redirects WHERE claim=? AND fingerprint=?',
+                           (digest, observation['fingerprint'])).fetchone():
+            return  # Deduplicated: each failure fingerprint is handled at most once per claim.
+        if self.db.execute(f"SELECT 1 FROM ci_redirects WHERE claim=? AND state NOT IN ({','.join('?'*len(CI_TERMINAL))})",
+                           (digest, *CI_TERMINAL)).fetchone():
+            return  # One redirect at a time per claim.
+        failures = json.loads(observation['failures'])
+        completed = []
+        for failure in failures:
+            try:
+                completed.append(datetime.fromisoformat(failure['completedAt'].replace('Z', '+00:00')).timestamp())
+            except (KeyError, AttributeError, ValueError):
+                completed.append(time.time())
+        used = self.db.execute('SELECT count(*) FROM ci_redirects WHERE claim=? AND members IS NOT NULL', (digest,)).fetchone()[0]
+        state, reason = 'pending', 'failed CI observed; owner grace period before revalidation'
+        if used >= CI_REDIRECTS_PER_CLAIM:
+            state, reason = 'exhausted', f'redirect limit {CI_REDIRECTS_PER_CLAIM} reached for this claim; failure stays visible for explicit owner repair'
+        self.db.execute('''INSERT OR IGNORE INTO ci_redirects(source,project,family,claim,ticket,pr,branch,head,base,fingerprint,
+                           failures,state,reason,retry_after,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                        (row['session'], project['id'], row['family'], digest, claim['key'], observation['pr'], claim['branch'],
+                         observation['head'], observation['base'], observation['fingerprint'], observation['failures'], state, reason,
+                         max(completed) + CI_REDIRECT_GRACE, time.time(), time.time()))
+        print(f"{project['id']}: {claim['key']} PR#{observation['pr']} failed CI on active implementation: {state}", flush=True)
+
+    def fresh_pr(self, project, number):
+        """Minimal fresh read: exact head, current integration base and check runs."""
+        token = run(['gh', 'auth', 'token', '--hostname', 'github.com', '--user', project['github_account']]).strip()
+        env = {**os.environ, 'GH_TOKEN': token}
+        pr = json.loads(run(['gh', 'pr', 'view', str(number), '--repo', project['repository'], '--json',
+                             'number,headRefOid,headRefName,baseRefName,state,isDraft,isCrossRepository,statusCheckRollup'],
+                            cwd=project['root'], env=env))
+        ref = json.loads(run(['gh', 'api', f"repos/{project['repository']}/git/ref/heads/{quote(pr['baseRefName'], safe='/')}"],
+                             cwd=project['root'], env=env))
+        pr['baseRefOid'] = ref['object']['sha']
+        return pr
+
+    def failure_superseded(self, project, record):
+        pr = self.fresh_pr(project, record['pr'])
+        if pr['state'] != 'OPEN' or pr.get('isCrossRepository') or pr['headRefName'] != record['branch']:
+            return 'PR is no longer an open same-repository PR for this branch'
+        failures = failed_checks(pr)
+        if not failures:
+            return 'no current actionable failure (green, pending, cancelled or superseded by a rerun)'
+        if repair_feedback({**pr, '_ci_repair': failures}) != record['fingerprint']:
+            return 'head, base or failed runs changed; a fresh observation is required'
+        return None
+
+    def owner_state(self, project, claim):
+        """'same' for the unchanged live in-progress claim, else the reason it is not."""
+        owner = self.ticket(project, 'show', claim['key'])
+        if any(owner.get(k) != claim.get(k) for k in ('token', 'session', 'branch', 'worktree', 'agent', 'model')):
+            return 'changed'
+        if owner.get('publish_pending'):
+            return 'publish_pending'
+        return 'same' if owner.get('status') == 'in_progress' else owner.get('status')
+
+    @staticmethod
+    def session_members(pid):
+        """Live same-user members of a worker's Linux session, with start identities.
+
+        Never call this for a session whose leader may have exited; use
+        anchored_members(), which proves the numeric session ID was not reused."""
+        members, foreign = [], False
+        for entry in Path('/proc').iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                fields = (entry/'stat').read_text().rsplit(')', 1)[1].split()
+                if fields[0] == 'Z' or int(fields[3]) != int(pid):
+                    continue
+                if entry.stat().st_uid != os.getuid():
+                    foreign = True
+                    continue
+                members.append(dict(pid=int(entry.name), started=fields[19]))
+            except (FileNotFoundError, ProcessLookupError):
+                continue
+        return sorted(members, key=lambda m: (m['pid'] != int(pid), m['pid'])), foreign
+
+    @staticmethod
+    def member_session(member):
+        """Session ID of a live process whose start identity still matches, else None."""
+        try:
+            fields = Path(f"/proc/{member['pid']}/stat").read_text().rsplit(')', 1)[1].split()
+        except (FileNotFoundError, ProcessLookupError):
+            return None
+        return int(fields[3]) if fields[0] != 'Z' and fields[19] == member['started'] else None
+
+    @staticmethod
+    def anchored_members(sid, recorded):
+        """Members of session `sid` only while a recorded original member provably survives.
+
+        A dead session's numeric ID can be reused by an unrelated session, whose
+        members would pass their own fresh identity checks. A pidfd held on a
+        recorded member, whose start identity and session still match before and
+        after listing, pins the original session: the kernel never reuses a PID
+        number another live process still uses as its session ID. Returns None
+        (no expansion) without such an anchor."""
+        for anchor in recorded:
+            try:
+                descriptor = os.pidfd_open(int(anchor['pid']))
+            except OSError:
+                continue
+            try:
+                if Dispatcher.member_session(anchor) != int(sid):
+                    continue
+                listed = Dispatcher.session_members(sid)
+                signal.pidfd_send_signal(descriptor, 0)
+                if Dispatcher.member_session(anchor) == int(sid):
+                    return listed
+            except OSError:
+                continue
+            finally:
+                os.close(descriptor)
+        return None
+
+    @staticmethod
+    def signal_members(members, number):
+        """Signal only processes whose start identity still matches (pidfd fences PID reuse)."""
+        for member in members:
+            try:
+                descriptor = os.pidfd_open(member['pid'])
+            except OSError:
+                continue
+            try:
+                if process_identity(member['pid']) == member['started']:
+                    signal.pidfd_send_signal(descriptor, number)
+            except OSError:
+                pass
+            finally:
+                os.close(descriptor)
+
+    def owner_locks(self, project, claim):
+        """Live locks attributable to the owner's session or ticket; redirect guards excluded."""
+        now, held = time.time(), []
+        for lock in self.ticket(project, 'locks'):
+            if (lock.get('expired') or (lock.get('expires') or 0) <= now
+                    or str(lock.get('session') or '').startswith(GUARD_PREFIX)):
+                continue
+            ticket = str(lock.get('ticket') or '').split('::')[-1]
+            named = set(TICKET_KEY.findall(f"{lock.get('session') or ''} {lock.get('purpose') or ''}".upper()))
+            if lock.get('session') == claim['session'] or ticket == claim['key'] or claim['key'] in named:
+                held.append(str(lock.get('resource')))
+        return held
+
+    @staticmethod
+    def sui_activity(project, members):
+        """Defence in depth: a session member running the Sui CLI or naming the wallet."""
+        wallet = (project.get('testnet_authorization') or {}).get('wallet')
+        for member in members:
+            try:
+                argv = (Path('/proc')/str(member['pid'])/'cmdline').read_bytes().split(b'\0')
+            except (FileNotFoundError, ProcessLookupError):
+                continue
+            if any(Path(arg.decode(errors='replace')).name == 'sui' for arg in argv[:2]) or (wallet and wallet.encode() in b' '.join(argv)):
+                return 'a worker process is running the Sui CLI or using the testnet wallet'
+        return None
+
+    def interruptible(self, project, claim, identity):
+        """(members, blocker) for the live verified wrapper; members None if unverified."""
+        listed = self.anchored_members(identity['pid'], [identity])
+        if listed is None or not listed[0] or listed[0][0] != dict(pid=int(identity['pid']), started=identity['started']):
+            return None, 'worker wrapper identity is no longer verified'
+        members, foreign = listed
+        if foreign:
+            return members, "worker session contains another user's process"
+        if self.claim_helpers(claim):
+            return members, 'detached claim helper exists'
+        held = self.owner_locks(project, claim)
+        if held:
+            return members, f"owner holds lock {', '.join(held)}"
+        return members, self.sui_activity(project, members)
+
+    # Guard leases: real exclusive `ticket lock` leases on every configured protected
+    # resource, held only while a worker is being stopped. Workers already obey those
+    # locks, so while all guards are held the owner cannot start a shared wallet,
+    # network or hardware mutation, and acquiring a guard proves no lock-holding
+    # mutation is in progress. A dispatch.sqlite3 transaction cannot fence them.
+
+    def reload(self, record):
+        return self.db.execute('SELECT * FROM ci_redirects WHERE id=?', (record['id'],)).fetchone()
+
+    def save_guards(self, record, guards):
+        # Lease tokens stay in the private dispatcher state; status output never selects them.
+        self.db.execute('UPDATE ci_redirects SET guards=?,updated=? WHERE id=?', (json.dumps(guards), time.time(), record['id']))
+
+    def guard_lock(self, project, record, resource):
+        return self.ticket(project, 'lock', resource, '--agent', 'Other', '--model', GUARD_MODEL,
+                           '--session', record['guard_session'], '--purpose',
+                           f"{record['ticket']} CI redirect {record['id']}: fence shared mutations while its worker stops",
+                           '--ttl', str(CI_GUARD_TTL))
+
+    def acquire_guards(self, project, record):
+        """Lease every protected resource; each receipt is persisted before the next
+        step. Returns the first unavailable resource, else None."""
+        guards = json.loads(record['guards'] or '[]')
+        for resource in project['ci_redirect_protected_resources']:
+            if resource in {g['resource'] for g in guards}:
+                continue
+            try:
+                lease = self.guard_lock(project, record, resource)
+            except subprocess.CalledProcessError:
+                return resource
+            guards.append(dict(resource=resource, token=lease['token'], expires=lease['expires']))
+            self.save_guards(record, guards)
+        return None
+
+    def renew_guards(self, project, record):
+        """Renew every guard. A lapsed lease is re-taken only if nobody holds it now,
+        which equally proves no lock-holding mutation is running. Returns the first
+        resource that is not fenced right now, else None."""
+        guards = json.loads(record['guards'] or '[]')
+        lost = None
+        for guard in guards:
+            try:
+                lease = self.ticket(project, 'lock-renew', guard['resource'], '--lock-token', guard['token'],
+                                    '--ttl', str(CI_GUARD_TTL))
+            except subprocess.CalledProcessError:
+                try:
+                    lease = self.guard_lock(project, record, guard['resource'])
+                    guard['token'] = lease['token']
+                except subprocess.CalledProcessError:
+                    lost = lost or guard['resource']
+                    continue
+            guard['expires'] = lease['expires']
+        self.save_guards(record, guards)
+        missing = sorted(set(project['ci_redirect_protected_resources']) - {g['resource'] for g in guards})
+        return lost or (missing[0] if missing else None)
+
+    def guards_asserted(self, project, record):
+        guards = json.loads(record['guards'] or '[]')
+        if {g['resource'] for g in guards} != set(project['ci_redirect_protected_resources']):
+            return False
+        try:
+            for guard in guards:
+                self.ticket(project, 'lock-assert', guard['resource'], '--lock-token', guard['token'])
+        except subprocess.CalledProcessError:
+            return False
+        return True
+
+    def release_guards(self, project, record):
+        """Release every guard of this redirect, including one whose receipt a crash
+        lost (re-locking under the same guard session returns its token). Raises
+        while any remains held, so bounded retries continue."""
+        if not record['guard_session']:
+            return
+        guards = json.loads(record['guards'] or '[]')
+        for lock in self.ticket(project, 'locks'):
+            if (lock.get('session') == record['guard_session'] and not lock.get('expired')
+                    and lock.get('resource') not in {g['resource'] for g in guards}):
+                lease = self.guard_lock(project, record, lock['resource'])
+                guards.append(dict(resource=lock['resource'], token=lease['token'], expires=lease['expires']))
+                self.save_guards(record, guards)
+        for guard in guards:
+            try:
+                self.ticket(project, 'unlock', guard['resource'], '--lock-token', guard['token'])
+            except subprocess.CalledProcessError:
+                pass  # Already expired or released: verified below.
+        remaining = sorted(str(l.get('resource')) for l in self.ticket(project, 'locks')
+                           if l.get('session') == record['guard_session'] and not l.get('expired'))
+        if remaining:
+            raise RuntimeError(f"guard release incomplete ({', '.join(remaining)})")
+        self.save_guards(record, [])
+
+    def redirect_pending(self, project, record):
+        row = self.db.execute('SELECT * FROM runs WHERE session=?', (record['source'],)).fetchone()
+        if not row or row['status'] != 'running':
+            self.redirect_note(record, 'superseded', 'worker no longer running before interruption; normal reconciliation applies')
+            return
+        claim = json.loads(row['claim'])
+        process = Path(row['directory'])/'process.json'
+        identity = json.loads(process.read_text()) if process.exists() else dict(pid=row['pid'], started=row['started'])
+        if not identity['pid'] or runnable_identity(identity['pid']) != identity['started']:
+            return  # Exited/zombie/reused: the normal reconciliation decides; never signal an unverified PID.
+        owner = self.owner_state(project, claim)
+        if owner in ('review', 'done'):
+            self.redirect_note(record, 'handed_off', 'owner handed off before interruption; the PR coordinator owns Review CI repair')
+            return
+        if owner != 'same':
+            self.redirect_note(record, 'superseded', f'ownership is not the unchanged published in-progress claim ({owner}); never acted on')
+            return
+        later = time.time() + CI_REDIRECT_RECHECK
+        reason = self.failure_superseded(project, record)
+        if reason:
+            self.redirect_note(record, 'superseded', reason + '; owner not interrupted')
+            return
+        if not project.get('ci_redirect_protected_resources'):
+            # The held-lock list is never assumed exhaustive: no explicit fence, no forced stop.
+            self.redirect_note(record, 'pending', 'forced interruption disabled: project has no explicit ci_redirect_protected_resources; '
+                               'failure stays visible for owner repair', retry_after=later)
+            return
+        members, blocker = self.interruptible(project, claim, identity)
+        if members is None:
+            return
+        if blocker:
+            self.redirect_note(record, 'pending', f'waiting to interrupt safely: {blocker}', retry_after=later)
+            return
+        self.redirect_note(record, 'guarding', 'acquiring shared-resource guard leases before any signal',
+                           guard_session=f"{GUARD_PREFIX}{record['id']}-{uuid.uuid4().hex[:12]}", guards='[]')
+        def check():
+            # Recheck everything under the fence: the owner can no longer take a protected resource.
+            members, blocker = self.interruptible(project, claim, identity)
+            if members is not None and not blocker and self.owner_state(project, claim) != 'same':
+                blocker = 'ownership changed while guarding'
+            return members, blocker
+        record, members, blocker = self.fenced(project, record, check)
+        if members is None or blocker:
+            self.redirect_note(record, 'pending', f'waiting to interrupt safely: {blocker or "worker identity changed"}; '
+                               'guards released, worker left running', retry_after=later, guard_session=None, guards=None)
+            return
+        self.db.execute('BEGIN IMMEDIATE')
+        try:
+            fresh = self.db.execute('SELECT * FROM runs WHERE session=?', (row['session'],)).fetchone()
+            if dict(fresh) != dict(row) or runnable_identity(identity['pid']) != identity['started']:
+                self.db.execute('ROLLBACK')
+                self.redirect_guarding(project, record)
+                return
+            # Persist the exact identities BEFORE signalling; restart never re-derives them.
+            self.redirect_note(record, 'interrupting', 'verified live owner paused for repair-first work under held guards',
+                               members=json.dumps(members), signalled=None, killed=0)
+            self.db.execute("UPDATE runs SET status='redirected' WHERE session=? AND status='running'", (row['session'],))
+            self.db.execute('COMMIT')
+        finally:
+            if self.db.in_transaction:
+                self.db.execute('ROLLBACK')
+        self.signal_members(members, signal.SIGTERM)
+        self.db.execute('UPDATE ci_redirects SET signalled=?,updated=? WHERE id=?', (time.time(), time.time(), record['id']))
+
+    def fenced(self, project, record, check):
+        """Acquire every guard of record['guard_session'], then rerun check() under the
+        fence, where no lock-obeying process can start a protected mutation.
+        Returns (record, members, blocker); guards are released again on any blocker."""
+        record = self.reload(record)
+        unavailable = self.acquire_guards(project, record)
+        record = self.reload(record)
+        if unavailable:
+            members, blocker = None, f'shared resource {unavailable} is held (possible owner mutation)'
+        else:
+            members, blocker = check()
+            if members is not None and not blocker and not self.guards_asserted(project, record):
+                blocker = 'guard lease assertion failed'
+        if members is None or blocker:
+            self.release_guards(project, record)
+        return record, members, blocker
+
+    def redirect_guarding(self, project, record):
+        """Crash/restart (or a lost race) before any signal: release and re-evaluate."""
+        self.release_guards(project, record)
+        self.redirect_note(record, 'pending', 'interruption not started; guards released and the worker left running',
+                           retry_after=time.time(), guard_session=None, guards=None)
+
+    def escalate(self, project, record, claim, stopped, revert):
+        """Guard-fenced SIGTERM, then SIGKILL, of the recorded original members.
+
+        Identities are persisted before each signal; `signalled` and `killed`
+        record only attempts that actually returned, so a crash in between
+        retries the identity- and guard-verified signal (repeating it is
+        harmless). stopped(record) runs once every member is verified stopped;
+        revert(record, lost) undoes an intent whose SIGTERM never ran."""
+        child = self.children.get(record['source'] if record['state'] == 'interrupting' else f"ci-repair-{record['id']}")
+        if child is not None:
+            child.poll()
+        members = json.loads(record['members'])
+        wrapper = members[0]
+        # A zombie never runs again (worker_stopped agrees); live original-session
+        # descendants keep fencing even after the wrapper exited.
+        alive = [m for m in members if self.member_session(m) is not None]
+        if not alive and worker_stopped(wrapper['pid'], wrapper['started']) and not self.claim_helpers(claim):
+            stopped(record)
+            return
+        lost = self.renew_guards(project, record)
+        record = self.reload(record)
+        if record['signalled'] is None:
+            if lost:
+                revert(record, lost)
+                return
+            self.signal_members(alive, signal.SIGTERM)
+            self.db.execute('UPDATE ci_redirects SET signalled=?,updated=? WHERE id=?', (time.time(), time.time(), record['id']))
+            return
+        now = time.time()
+        elapsed = now - record['signalled']
+        if not record['killed'] and elapsed > CI_TERM_SECONDS:
+            if lost or not self.guards_asserted(project, record):
+                if elapsed > CI_STOP_SECONDS:
+                    self.release_guards(project, record)
+                    self.redirect_note(record, 'uncertain', f'stopping worker/session did not stop after SIGTERM; SIGKILL withheld: '
+                                       f'guard {lost or "assertion"} unavailable while a shared mutation may run; guards released; '
+                                       'inspect recorded PIDs; claim and capacity retained', guards=None)
+                else:
+                    self.db.execute('UPDATE ci_redirects SET reason=?,updated=? WHERE id=?',
+                                    (f'guard {lost or "assertion"} unavailable; SIGKILL withheld while a shared mutation may run', now, record['id']))
+                return
+            # Expand only from a proven surviving original member, never a dead/reused session ID.
+            listed = self.anchored_members(wrapper['pid'], alive)
+            known = {(m['pid'], m['started']) for m in members}
+            added = [m for m in (listed[0] if listed else []) if (m['pid'], m['started']) not in known]
+            self.db.execute('UPDATE ci_redirects SET members=?,reason=?,updated=? WHERE id=?',
+                            (json.dumps(members + added), 'SIGKILL pending under held guards for identity-verified original members',
+                             now, record['id']))
+            self.signal_members(alive + added, signal.SIGKILL)
+            self.db.execute('UPDATE ci_redirects SET killed=?,reason=?,updated=? WHERE id=?',
+                            (time.time(), 'SIGKILL attempted under held guards on identity-verified original members; awaiting stop',
+                             time.time(), record['id']))
+        elif record['killed'] and elapsed > CI_STOP_SECONDS and now - record['killed'] > CI_KILL_SECONDS:
+            # After SIGKILL a process never runs user code again; what remains cannot be stopped by us.
+            self.release_guards(project, record)
+            self.redirect_note(record, 'uncertain', 'stopping worker/session did not stop after a SIGKILL attempted under held guards '
+                               'on identity-verified original members; guards released; inspect recorded PIDs; claim and capacity retained',
+                               guards=None)
+
+    def redirect_interrupting(self, project, record):
+        row = self.db.execute('SELECT * FROM runs WHERE session=?', (record['source'],)).fetchone()
+        claim = json.loads(row['claim'])
+
+        def stopped(record):
+            self.redirect_note(record, 'releasing', 'owner worker and its session verified stopped; releasing guards')
+            self.redirect_releasing(project, self.reload(record))
+
+        def revert(record, lost):
+            self.release_guards(project, record)
+            self.db.execute("UPDATE runs SET status='running' WHERE session=? AND status='redirected'", (record['source'],))
+            self.redirect_note(record, 'pending', f'guard {lost} lost before any signal; worker never signalled and left running',
+                               retry_after=time.time(), guard_session=None, guards=None, members=None)
+        self.escalate(project, record, claim, stopped, revert)
+
+    def redirect_releasing(self, project, record):
+        self.release_guards(project, record)
+        self.redirect_note(record, 'stopped', 'owner worker verified stopped; guard leases released', guards=None, guard_session=None)
+
+    def git_path(self, worktree, name):
+        path = Path(run(['git', 'rev-parse', '--git-path', name], cwd=worktree).strip())
+        return path if path.is_absolute() else Path(worktree)/path
+
+    def worktree_tree(self, worktree):
+        """Tree of the complete working state (tracked + untracked, not ignored) via a
+        private copy of the index; the owner's real index and files are never written."""
+        with tempfile.TemporaryDirectory(dir=self.state) as scratch:
+            index = Path(scratch)/'index'
+            source = self.git_path(worktree, 'index')
+            if source.exists():
+                index.write_bytes(source.read_bytes())  # Reuses stat data; content comes from the files.
+            env = {**os.environ, 'GIT_INDEX_FILE': str(index)}
+            if not source.exists():
+                run(['git', 'read-tree', 'HEAD'], cwd=worktree, env=env)
+            run(['git', 'add', '-A', '--', '.'], cwd=worktree, env=env)
+            return run(['git', 'write-tree'], cwd=worktree, env=env).strip()
+
+    def preserve(self, record, worktree):
+        """Durable backup refs of unfinished work before any other step."""
+        head = run(['git', 'rev-parse', 'HEAD'], cwd=worktree).strip()
+        tree = self.worktree_tree(worktree)
+        with tempfile.TemporaryDirectory(dir=self.state) as scratch:
+            index = Path(scratch)/'index'
+            index.write_bytes(self.git_path(worktree, 'index').read_bytes())
+            staged = run(['git', 'write-tree'], cwd=worktree, env={**os.environ, 'GIT_INDEX_FILE': str(index)}).strip()
+        env = {**os.environ, **TYLER}
+        prefix = f"refs/pr-coordinator/ci-redirect/{record['source']}-{record['id']}"
+        refs = {}
+        for name, value in (('worktree', tree), ('index', staged)):
+            commit = run(['git', 'commit-tree', value, '-p', head, '-m',
+                          f"Preserve unfinished {record['ticket']} {name} state before CI repair redirect {record['id']}"],
+                         cwd=worktree, env=env).strip()
+            run(['git', 'update-ref', f'{prefix}/{name}', commit], cwd=worktree)
+            refs[name] = dict(ref=f'{prefix}/{name}', commit=commit, tree=value)
+        return head, refs
+
+    def dirty_preserved(self, record, worktree):
+        """Every path that differed from the original head still has its preserved content."""
+        snapshot = json.loads(record['snapshot'])['worktree']
+        changed = [p for p in run(['git', 'diff', '--name-only', '-z', record['original_head'], snapshot['commit']],
+                                  cwd=worktree).split('\0') if p]
+        current = self.worktree_tree(worktree)
+        def blob(tree, path):
+            try:
+                return run(['git', 'rev-parse', f'{tree}:{path}'], cwd=worktree).strip()
+            except subprocess.CalledProcessError:
+                return None
+        return all(blob(current, path) == blob(snapshot['tree'], path) for path in changed)
+
+    def redirect_stopped(self, project, record):
+        row = self.db.execute('SELECT * FROM runs WHERE session=?', (record['source'],)).fetchone()
+        claim = json.loads(row['claim'])
+        owner = self.owner_state(project, claim)
+        if owner in ('review', 'done'):
+            self.redirect_note(record, 'handed_off', 'owner handed off while being paused; Review reconciliation and coordinator repair apply',
+                               retain='quarantined')
+            return
+        if owner != 'same':
+            self.redirect_note(record, 'uncertain', f'ownership changed during interruption ({owner}); nothing resumed', retain='quarantined')
+            return
+        held = self.owner_locks(project, claim)
+        if held:
+            self.redirect_note(record, 'uncertain', f"paused owner still holds lock {', '.join(held)}; inspect and unlock before recovery",
+                               retain='quarantined')
+            return
+        self.ticket(project, 'heartbeat', claim['key'], '--token', claim['token'])
+        worktree = claim['worktree']
+        if run(['git', 'branch', '--show-current'], cwd=worktree).strip() != claim['branch']:
+            self.redirect_note(record, 'uncertain', 'feature worktree is not on the claimed branch; work left untouched', retain='quarantined')
+            return
+        busy = [name for name in ('index.lock', 'MERGE_HEAD', 'rebase-merge', 'rebase-apply', 'CHERRY_PICK_HEAD', 'REVERT_HEAD')
+                if self.git_path(worktree, name).exists()]
+        if busy:
+            self.redirect_note(record, 'uncertain', f"interrupted git operation in feature worktree ({', '.join(busy)}); resolve manually, work left untouched",
+                               retain='quarantined')
+            return
+        if not record['snapshot']:
+            head, refs = self.preserve(record, worktree)
+            self.db.execute('UPDATE ci_redirects SET original_head=?,snapshot=?,updated=? WHERE id=?',
+                            (head, json.dumps(refs), time.time(), record['id']))
+            record = self.db.execute('SELECT * FROM ci_redirects WHERE id=?', (record['id'],)).fetchone()
+        reason = self.failure_superseded(project, record)
+        remote = f"refs/pr-coordinator/ci-redirect/{record['source']}-{record['id']}/remote"
+        run(['git', 'fetch', 'origin', f"+refs/heads/{claim['branch']}:{remote}"], cwd=project['root'])
+        tip = run(['git', 'rev-parse', remote], cwd=project['root']).strip()
+        if reason or tip != record['head']:
+            self.redirect_note(record, 'resuming', (reason or 'branch moved after the failed head') + '; resuming without a repair worker')
+            return
+        self.ticket(project, 'assert', claim['key'], '--token', claim['token'])
+        directory = Path(row['directory'])/f"ci-redirect-{record['id']}"/'repair'
+        checkout = directory/'checkout'
+        if checkout.exists():
+            if (run(['git', 'rev-parse', 'HEAD'], cwd=checkout).strip() != record['head']
+                    or run(['git', 'status', '--porcelain'], cwd=checkout).strip()):
+                self.redirect_note(record, 'uncertain', 'existing repair checkout is not clean at the failed head', retain='quarantined')
+                return
+        else:
+            directory.mkdir(parents=True, mode=0o700, exist_ok=True)
+            run(['git', 'worktree', 'add', '--detach', str(checkout), record['head']], cwd=project['root'])
+        (directory/'command.json').write_text(json.dumps(self.config['workers'][record['family']]))
+        (directory/'prompt.txt').write_text(self.repair_prompt(project, claim, record, checkout, directory))
+        # No limits.json: worker.py would kill the model on its own timer, without guards.
+        for name in ('process.json', 'exit.json', 'result.json', 'limits.json'):
+            (directory/name).unlink(missing_ok=True)
+        token = run(['gh', 'auth', 'token', '--hostname', 'github.com', '--user', project['github_account']]).strip()
+        env = {**os.environ, 'GH_TOKEN': token, 'PR_COORDINATOR_ACTIVE': '1', 'PR_COORDINATOR_CLAIM_TOKEN': claim['token']}
+        # Recorded BEFORE spawning: an interrupted launch is never repeated.
+        self.redirect_note(record, 'repairing', 'same-claim repair worker in a clean linked checkout', repair_dir=str(directory),
+                           repair_deadline=time.time() + CI_REPAIR_TIMEOUT, members=None, signalled=None, killed=0)
+        try:
+            child = subprocess.Popen(['/usr/bin/python3', str(Path(__file__).with_name('worker.py')), str(directory)],
+                                     cwd=checkout, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                     stderr=subprocess.DEVNULL, start_new_session=True)
+            self.children[f"ci-repair-{record['id']}"] = child
+        except OSError as error:
+            self.redirect_note(record, 'orphaned', f'repair launch failed ({type(error).__name__}); never relaunched; claim retained')
+
+    def repair_prompt(self, project, claim, record, checkout, directory):
+        return f'''CI REPAIR-FIRST for your existing {claim['agent']} claim {claim['key']} (PR #{record['pr']}, branch {claim['branch']}).
+Completed CI failed on exact head {record['head']} with integration base {record['base']}: {record['failures']}
+The dispatcher verified and paused your implementation worker, which had continued despite these failures. Its unfinished
+uncommitted work stays in {claim['worktree']}; NEVER edit, clean, stash, reset, check out or commit in that worktree.
+You are in a clean linked repair checkout {checkout}, detached at {record['head']}. Same claim, session {claim['session']} and branch.
+Claim token is PR_COORDINATOR_CLAIM_TOKEN in the environment; never print/post secrets. Assert before edits/commits and heartbeat every five minutes.
+Inspect the exact failed runs and logs (gh run view --log-failed), reproduce locally and fix the cause narrowly. Never weaken, skip or waive checks.
+Only with concrete evidence of a transient infrastructure failure (not a code or test failure) may you request one rerun of that failed job
+(gh run rerun RUN_ID --failed) instead of a code change; then use verdict rerun_requested with that evidence and push nothing.
+Commit only the repair, with Tyler Bush <tyler.jonathan.bush@gmail.com> as BOTH author and committer, an itemized body and no model attribution.
+Push with: git push origin HEAD:refs/heads/{claim['branch']} (fast-forward only; never force or rewrite history). Leave this checkout clean.
+Do not mark Review, block, release, resume or claim tickets; do not merge, create PRs or issues, or start workers. Your unfinished implementation resumes automatically after you exit.
+{self.repair_network_scope(project)}
+Lock shared build/port resources only during actual use and release them before exiting. Do not touch others' work.
+Result file: {directory/'result.json'}
+Write it as JSON with keys verdict (fixed, rerun_requested or blocked), model (actual model/version) and evidence (a nonempty string:
+cause, commits, exact local test commands and results, pushed head). If you cannot repair it, write blocked with the concrete next step.
+Specification snapshot: {json.dumps(claim.get('spec', {}))}
+'''
+
+    @staticmethod
+    def repair_network_scope(project):
+        resources = ', '.join(project.get('ci_redirect_protected_resources') or ['network:suifleet-testnet'])
+        return f'''This bounded CI-repair subtask has NO machine-session shared-network or hardware mutation authority: do not lock
+{resources}, and do not publish, upgrade, transact, request faucet funds or program devices from this machine. Read-only
+network checks and disposable isolated local chains remain authorized. Public-testnet acceptance of the repair runs through
+the normal CI triggered by your push. If the repair genuinely needs a machine-session testnet or hardware run, write verdict
+blocked naming that need. Your standing authorization returns unchanged when the implementation resumes.'''
+
+    def redirect_repairing(self, project, record):
+        row = self.db.execute('SELECT * FROM runs WHERE session=?', (record['source'],)).fetchone()
+        claim = json.loads(row['claim'])
+        directory = Path(record['repair_dir'])
+        if record['guard_session']:
+            # Crash/race while fencing an overdue repair before any signal: release first.
+            self.release_guards(project, record)
+            self.db.execute('UPDATE ci_redirects SET guard_session=NULL,guards=NULL,members=NULL,signalled=NULL,killed=0 WHERE id=?',
+                            (record['id'],))
+            record = self.reload(record)
+        child = self.children.get(f"ci-repair-{record['id']}")
+        if child is not None:
+            child.poll()
+        if not (directory/'process.json').exists():
+            if time.time() - record['updated'] > 60:
+                self.redirect_note(record, 'orphaned', 'repair launch interrupted before its process receipt; never relaunched; claim retained')
+            return
+        identity = json.loads((directory/'process.json').read_text())
+        if runnable_identity(identity['pid']) == identity['started']:
+            if self.owner_state(project, claim) == 'same':
+                self.ticket(project, 'heartbeat', claim['key'], '--token', claim['token'])
+            if time.time() > (record['repair_deadline'] or float('inf')):
+                self.stop_overdue_repair(project, record, claim, identity)
+            return
+        if not worker_stopped(identity['pid'], identity['started']) or self.claim_helpers(claim):
+            if time.time() > (record['repair_deadline'] or float('inf')):
+                # Its wrapper exited, so the session cannot be pinned for a safe expansion.
+                self.db.execute('UPDATE ci_redirects SET reason=?,updated=? WHERE id=?',
+                                ('overdue repair wrapper exited but a session member or claim helper survives; never signalled; '
+                                 'inspect and stop it explicitly', time.time(), record['id']))
+            return  # A surviving session member or helper keeps the repair live.
+        owner = self.owner_state(project, claim)
+        if owner != 'same':
+            self.redirect_note(record, 'uncertain', f'ownership/status changed during repair ({owner}); a repair worker must not hand off',
+                               retain='quarantined')
+            return
+        failure = None
+        try:
+            code = json.loads((directory/'exit.json').read_text()).get('returncode')
+            result = json.loads((directory/'result.json').read_text())
+        except (OSError, ValueError):
+            code, result = None, {}
+        verdict = result.get('verdict') if isinstance(result, dict) else None
+        if code != 0 or verdict not in ('fixed', 'rerun_requested') or not isinstance(result.get('evidence'), str) or not result['evidence'].strip():
+            failure = f'repair worker exit {code} with verdict {verdict!r}'
+            if record['signalled']:
+                failure = f'overdue repair stopped under guards after {CI_REPAIR_TIMEOUT}s; ' + failure
+        else:
+            remote = f"refs/pr-coordinator/ci-redirect/{record['source']}-{record['id']}/remote"
+            run(['git', 'fetch', 'origin', f"+refs/heads/{claim['branch']}:{remote}"], cwd=project['root'])
+            tip = run(['git', 'rev-parse', remote], cwd=project['root']).strip()
+            checkout = directory/'checkout'
+            local = run(['git', 'rev-parse', 'HEAD'], cwd=checkout).strip()
+            if run(['git', 'status', '--porcelain'], cwd=checkout).strip():
+                failure = 'repair checkout left uncommitted changes'
+            elif verdict == 'rerun_requested':
+                if tip != record['head'] or local != record['head']:
+                    failure = 'rerun_requested but the branch changed'
+            elif tip == record['head'] or local != tip:
+                failure = 'fixed result without a pushed repair head matching the checkout'
+            else:
+                try:
+                    run(['git', 'merge-base', '--is-ancestor', record['head'], tip], cwd=project['root'])
+                    identities = run(['git', 'log', '--format=%an <%ae>|%cn <%ce>', f"{record['head']}..{tip}"],
+                                     cwd=project['root']).splitlines()
+                    expected = TYLER['GIT_AUTHOR_NAME'] + ' <' + TYLER['GIT_AUTHOR_EMAIL'] + '>'
+                    if any(line != expected + '|' + expected for line in identities):
+                        failure = 'repair commits are not authored and committed by the configured user identity'
+                except subprocess.CalledProcessError:
+                    failure = 'pushed repair does not descend from the failed head'
+        if failure:
+            self.redirect_note(record, 'repair_failed', failure + '; feature work preserved and paused; explicit recovery required',
+                               retain='quarantined')
+            return
+        repaired = None if verdict == 'rerun_requested' else tip
+        self.redirect_note(record, 'integrating', 'repair verified; integrating into the paused feature worktree', repaired_head=repaired)
+        try:
+            run(['git', 'worktree', 'remove', str(directory/'checkout')], cwd=project['root'])
+        except subprocess.CalledProcessError:
+            print(f"{project['id']}: retained repair checkout {directory/'checkout'}", flush=True)
+
+    def stop_overdue_repair(self, project, record, claim, identity):
+        """Past its deadline, stop the live repair exactly like an owner interruption:
+        only under held guards on every protected resource, never mid-mutation."""
+        later = time.time() + CI_REDIRECT_RECHECK
+
+        def check():
+            listed = self.anchored_members(identity['pid'], [identity])
+            if listed is None or not listed[0] or listed[0][0] != dict(pid=int(identity['pid']), started=identity['started']):
+                return None, 'repair wrapper identity is no longer verified'
+            members, foreign = listed
+            if foreign:
+                return members, "repair session contains another user's process"
+            held = self.owner_locks(project, claim)
+            if held:
+                return members, f"repair holds lock {', '.join(held)}"
+            return members, self.sui_activity(project, members)
+
+        members, blocker = check()
+        if members is not None and not blocker:
+            self.db.execute('UPDATE ci_redirects SET guard_session=?,guards=?,updated=? WHERE id=?',
+                            (f"{GUARD_PREFIX}{record['id']}-{uuid.uuid4().hex[:12]}", '[]', time.time(), record['id']))
+            record, members, blocker = self.fenced(project, record, check)
+        if members is None or blocker:
+            self.db.execute('UPDATE ci_redirects SET guard_session=NULL,guards=NULL,retry_after=?,reason=?,updated=? WHERE id=?',
+                            (later, f'repair overdue; waiting to stop it safely: {blocker or "identity changed"}; never signalled',
+                             time.time(), record['id']))
+            return
+        # Persist the exact identities BEFORE signalling.
+        self.redirect_note(record, 'repair_stopping', 'repair exceeded its deadline; stopping it under held guards',
+                           members=json.dumps(members), signalled=None, killed=0)
+        self.signal_members(members, signal.SIGTERM)
+        self.db.execute('UPDATE ci_redirects SET signalled=?,updated=? WHERE id=?', (time.time(), time.time(), record['id']))
+
+    def redirect_repair_stopping(self, project, record):
+        row = self.db.execute('SELECT * FROM runs WHERE session=?', (record['source'],)).fetchone()
+        claim = json.loads(row['claim'])
+
+        def stopped(record):
+            # Back to normal evaluation: a killed repair has no exit/result and fails visibly.
+            self.release_guards(project, record)
+            self.redirect_note(record, 'repairing', 'overdue repair verified stopped; guard leases released', guards=None,
+                               guard_session=None, repair_deadline=None)
+
+        def revert(record, lost):
+            self.release_guards(project, record)
+            self.redirect_note(record, 'repairing', f'guard {lost} lost before any signal; overdue repair never signalled',
+                               guard_session=None, guards=None, members=None, retry_after=time.time() + CI_REDIRECT_RECHECK)
+        self.escalate(project, record, claim, stopped, revert)
+
+    def redirect_integrating(self, project, record):
+        row = self.db.execute('SELECT * FROM runs WHERE session=?', (record['source'],)).fetchone()
+        claim = json.loads(row['claim'])
+        worktree, tip, original = claim['worktree'], record['repaired_head'], record['original_head']
+        if self.owner_state(project, claim) != 'same':
+            self.redirect_note(record, 'uncertain', 'ownership changed before integration; nothing resumed', retain='quarantined')
+            return
+        if not tip:
+            self.redirect_note(record, 'resuming', 'evidenced rerun requested; no repair commits to integrate')
+            return
+        if run(['git', 'branch', '--show-current'], cwd=worktree).strip() != claim['branch']:
+            self.redirect_note(record, 'uncertain', 'feature worktree left the claimed branch while paused', retain='quarantined')
+            return
+        current = run(['git', 'rev-parse', 'HEAD'], cwd=worktree).strip()
+        snapshot = json.loads(record['snapshot'])['worktree']
+        if current == original:
+            if self.worktree_tree(worktree) != snapshot['tree']:
+                self.redirect_note(record, 'uncertain', 'paused feature worktree changed before integration; nothing merged',
+                                   retain='quarantined')
+                return
+            try:
+                run(['git', 'merge-base', '--is-ancestor', original, tip], cwd=worktree)
+                fast = True
+            except subprocess.CalledProcessError:
+                fast = False
+            # git refuses to start when the merge would overwrite unfinished
+            # tracked or untracked changes; that refusal is a safe conflict.
+            try:
+                if fast:
+                    run(['git', 'merge', '--ff-only', tip], cwd=worktree)
+                else:
+                    run(['git', 'merge', '--no-edit', '-m', f"Merge CI repair for {record['ticket']} into unfinished feature work",
+                         '-m', f"- Integrate same-claim CI repair {tip} for PR #{record['pr']}.\n- Preserve unfinished feature changes in place.",
+                         tip], cwd=worktree, env={**os.environ, **TYLER})
+            except subprocess.CalledProcessError:
+                if self.git_path(worktree, 'MERGE_HEAD').exists():
+                    run(['git', 'merge', '--abort'], cwd=worktree)
+                preserved = (run(['git', 'rev-parse', 'HEAD'], cwd=worktree).strip() == original
+                             and self.worktree_tree(worktree) == snapshot['tree'])
+                refs = ', '.join(v['ref'] for v in json.loads(record['snapshot']).values())
+                if preserved:
+                    self.redirect_note(record, 'conflict', f'repair {tip[:12]} conflicts with unfinished feature changes; work preserved in place '
+                                       f'and in {refs}; merge origin/{claim["branch"]} manually, then recover the claim', retain='quarantined')
+                else:
+                    self.redirect_note(record, 'uncertain', f'merge abort did not restore the paused state; recover from {refs}', retain='quarantined')
+                return
+        else:
+            parents = run(['git', 'rev-list', '--parents', '-n', '1', current], cwd=worktree).split()[1:]
+            if current != tip and parents != [original, tip]:
+                self.redirect_note(record, 'uncertain', 'feature branch head changed while paused; nothing merged', retain='quarantined')
+                return
+            # Crash after a completed merge: verify and continue.
+        if not self.dirty_preserved(record, worktree):
+            self.redirect_note(record, 'uncertain', 'unfinished changes differ from the preserved snapshot after integration; inspect backup refs',
+                               retain='quarantined')
+            return
+        self.redirect_note(record, 'resuming', f'repair {tip[:12]} integrated; unfinished feature changes verified preserved')
+
+    def redirect_resuming(self, project, record):
+        row = self.db.execute('SELECT * FROM runs WHERE session=?', (record['source'],)).fetchone()
+        claim = json.loads(row['claim'])
+        owner = self.owner_state(project, claim)
+        if owner != 'same':
+            self.redirect_note(record, 'uncertain', f'ownership changed before resume ({owner}); nothing resumed', retain='quarantined')
+            return
+        self.ticket(project, 'heartbeat', claim['key'], '--token', claim['token'])
+        self.ticket(project, 'assert', claim['key'], '--token', claim['token'])
+        if run(['git', 'branch', '--show-current'], cwd=claim['worktree']).strip() != claim['branch']:
+            raise RuntimeError('feature worktree is not on the claimed branch')
+        session = f"{record['source']}-ci{record['id']}"
+        directory = Path(row['directory'])/f"ci-redirect-{record['id']}"/'resume'
+        self.db.execute('BEGIN IMMEDIATE')
+        try:
+            # Record the single launch BEFORE starting it; the paused source is archived, not deleted.
+            if self.db.execute("UPDATE ci_redirects SET state='resumed',resumed_as=?,updated=? WHERE id=? AND state='resuming'",
+                               (session, time.time(), record['id'])).rowcount != 1:
+                return
+            self.db.execute('INSERT INTO retired_runs(session,original_status,original_message,reason,retired_at) VALUES(?,?,?,?,?)',
+                            (row['session'], row['status'], row['message'], 'CI repair-first redirect resumed as '+session, time.time()))
+            self.db.execute("UPDATE runs SET status='finished',message=? WHERE session=? AND status='redirected'",
+                            ('CI redirect resumed as '+session, row['session']))
+            self.db.execute('INSERT INTO runs VALUES(?,?,?,?,?,?,?,?,?)',
+                            (session, project['id'], row['family'], 'launching', str(directory), row['claim'], None, None,
+                             f"Resumed implementation after CI repair-first redirect {record['id']}"))
+            self.db.execute('COMMIT')
+        finally:
+            if self.db.in_transaction:
+                self.db.execute('ROLLBACK')
+        try:
+            directory.mkdir(parents=True, mode=0o700, exist_ok=True)
+            refs = ', '.join(v['ref'] for v in json.loads(record['snapshot'] or '{}').values()) or 'none needed'
+            names = ', '.join(f.get('name', '?') for f in json.loads(record['failures']))
+            if record['repaired_head']:
+                repair = (f"A same-claim repair worker pushed commits ending at {record['repaired_head']} to origin/{claim['branch']}; "
+                          'the dispatcher merged them into this worktree and verified your unfinished changes are unchanged.')
+            else:
+                repair = f"No repair commits were integrated: {record['reason']}."
+            preface = f"""This resumes your retained claim after a dispatcher CI repair-first redirect. Receipts: {directory.parent}.
+PR #{record['pr']} failed completed CI on {record['head']} ({names}); you were paused safely to repair it first. {repair}
+Your interrupted unfinished work is preserved in place in this worktree (backup refs: {refs}); do not discard it.
+The claim stayed In Progress; do not run ticket resume, claim, recover or release.
+First inspect git status/log and the current-head CI, then continue the unfinished implementation and rerun all required tests.
+"""
+            token = run(['gh', 'auth', 'token', '--hostname', 'github.com', '--user', project['github_account']]).strip()
+            env = {**os.environ, 'GH_TOKEN': token, 'PR_COORDINATOR_ACTIVE': '1', 'PR_COORDINATOR_CLAIM_TOKEN': claim['token']}
+            (directory/'command.json').write_text(json.dumps(self.config['workers'][row['family']]))
+            (directory/'prompt.txt').write_text(preface + self.prompt(project, claim, directory))
+            child = subprocess.Popen(['/usr/bin/python3', str(Path(__file__).with_name('worker.py')), str(directory)],
+                                     cwd=claim['worktree'], env=env, stdin=subprocess.DEVNULL,
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            self.children[session] = child
+            self.db.execute("UPDATE runs SET status='running',pid=?,started=? WHERE session=?",
+                            (child.pid, process_identity(child.pid), session))
+            print(f"{project['id']}: {row['family']} resumed {claim['key']} after CI redirect {record['id']}", flush=True)
+        except Exception as error:
+            self.update(session, 'orphaned', f'CI redirect resume launch failed ({type(error).__name__}); inspect before explicit recovery')
+            self.db.execute('UPDATE ci_redirects SET reason=? WHERE id=?',
+                            (f'resume launch failed ({type(error).__name__}); claim retained, never relaunched', record['id']))
+
     def reconcile(self, project):
         self.retire_obsolete(project)
         rows = self.db.execute("SELECT * FROM runs WHERE project=? AND status IN ('claiming','launching','running','orphaned')", (project['id'],)).fetchall()
@@ -738,6 +1677,8 @@ Specification snapshot: {json.dumps(claim['spec'])}
             return
         for project in self.config['projects']:
             self.reconcile(project)
+            # Repair-first work on failed CI precedes audits, resumes and new claims.
+            self.redirect_ci_failures(project)
             self.audit_missing_handoff(project)
             slots = [s for s in self.config.get('implementation_slots', [])
                      if s['project'] == project['id'] and s.get('enabled', False)]
@@ -779,7 +1720,9 @@ def main():
     dispatcher = Dispatcher(json.loads(args.config.read_text()), args.state)
     if args.status:
         print(json.dumps([dict(r) for r in dispatcher.db.execute('''SELECT r.session,r.project,r.family,r.status,r.message,
-            w.state AS dependency_resume,w.reason AS dependency_reason,w.attempts AS dependency_attempts,w.session AS resumed_as
+            w.state AS dependency_resume,w.reason AS dependency_reason,w.attempts AS dependency_attempts,w.session AS resumed_as,
+            (SELECT state FROM ci_redirects c WHERE c.source=r.session ORDER BY id DESC LIMIT 1) AS ci_redirect,
+            (SELECT 'PR#'||pr||' '||head||': '||reason FROM ci_redirects c WHERE c.source=r.session ORDER BY id DESC LIMIT 1) AS ci_redirect_reason
             FROM runs r LEFT JOIN dependency_resumes w ON w.source=r.session''')], indent=2))
         return
     with open(args.state/'dispatcher.lock','w') as lock:

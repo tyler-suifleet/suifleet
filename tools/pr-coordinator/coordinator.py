@@ -201,6 +201,28 @@ def repair_feedback(pr):
           for row in pr['_ci_repair']]], sort_keys=True).encode()).hexdigest()
 
 
+def ci_responsibility(pr, owner, failures, blocker=None):
+    """Name who actually repairs current-head failures, independent of readiness."""
+    if not failures:
+        return None
+    if pr.get('isCrossRepository') or pr.get('state') != 'OPEN':
+        return 'no automatic repair: not an open same-repository PR'
+    if not owner:
+        return 'no verified ticket owner: manual repair required'
+    if owner.get('expired'):
+        return f"{owner.get('agent')} claim expired: explicit recovery required, never automatic"
+    if owner.get('publish_pending'):
+        return f"{owner.get('agent')} ownership mirror pending: repair waits for publication"
+    if owner['status'] == 'in_progress':
+        return (f"{owner.get('agent')} implementation owner: dispatcher redirects its managed live worker to same-claim "
+                "repair-first work; manual or stopped owners need their own repair")
+    if owner['status'] == 'review':
+        if pr.get('isDraft'):
+            return f"{owner.get('agent')} owner: draft Review PR must be marked ready before coordinator repair"
+        return f"{owner.get('agent')} coordinator CI repair" + (f' ({blocker})' if blocker else '')
+    return f"{owner.get('agent')} owner is {owner['status']}: explicit recovery required"
+
+
 def feedback(pr):
     # Coordinator publications are receipts, not new requests for another review.
     comments = [(c['id'], c['body'], c.get('updatedAt', '')) for c in pr['comments'] if pr.get('_receipts',{}).get(c['id']) != publication_hash(c)]
@@ -268,6 +290,10 @@ class Store:
             project TEXT, pr INTEGER, head TEXT, base TEXT, evidence TEXT,
             job INTEGER, created REAL, retry_after REAL,
             PRIMARY KEY(project,pr,head,base,evidence));
+          CREATE TABLE IF NOT EXISTS ci_observations (
+            project TEXT, pr INTEGER, ticket TEXT, branch TEXT, owner_status TEXT,
+            head TEXT, base TEXT, draft INTEGER, failures TEXT, fingerprint TEXT,
+            responsibility TEXT, observed REAL, PRIMARY KEY(project,pr));
           CREATE TABLE IF NOT EXISTS quarantine_backoff (
             family TEXT, kind TEXT, attempts INTEGER, retry_after REAL,
             PRIMARY KEY(family,kind));
@@ -427,6 +453,7 @@ class Coordinator:
         self.store = Store(state / 'reviews.sqlite3', config.get('review_worker_limits'))
         self.children = {}
         self.immutable_reads = {}
+        self.open_numbers = {}
 
     def gh(self, project, args):
         account = project['github_account']
@@ -460,6 +487,7 @@ class Coordinator:
         fields = 'number,headRefOid,headRefName,baseRefName,baseRefOid,isCrossRepository,state,isDraft,mergeable,title,body,statusCheckRollup,mergeCommit'
         pages = json.loads(self.gh(project,['api',f"repos/{project['repository']}/pulls?state=open&per_page=100",'--paginate','--slurp']))
         raw = [row for page in pages for row in page]
+        self.open_numbers[project['id']] = {row['number'] for row in raw}
         result = []
         for row in raw:
             try:
@@ -854,9 +882,13 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                 failures = failed_checks(pr)
                 repair = {**pr, '_ci_repair': failures} if failures else None
                 repair_blocker = self.store.ci_repair_blocker(project['id'], repair) if repair else None
+                responsibility = ci_responsibility(pr, owner, failures, repair_blocker)
+                if execute:
+                    self.observe_ci(project, pr, owner, failures, responsibility)
                 print(json.dumps({'project':project['id'],'pr':pr['number'],
                                   'owner':owner['agent'] if owner else None,'merge_blocker':reason,
-                                  'ci_failures':failures, 'ci_repair_blocker':repair_blocker}),flush=True)
+                                  'ci_failures':failures, 'ci_repair_blocker':repair_blocker,
+                                  'ci_responsibility':responsibility}),flush=True)
                 if not execute or not owner or owner['status'] != 'review' or owner.get('publish_pending') or pr['isDraft'] or pr['state'] != 'OPEN': continue
                 self.ensure_closing_reference(project,pr,owner)
                 intent=self.store.db.execute('SELECT * FROM integrations WHERE project=? AND pr=? AND reconciled=0',(project['id'],pr['number'])).fetchone()
@@ -890,12 +922,32 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                     self.launch(project,pr,owner,'review')
             except Exception as error:
                 print(f"{project['id']} PR#{pr['number']}: action deferred: {error}",flush=True)
+        listed = self.open_numbers.pop(project['id'], None)
+        if execute and listed is not None:
+            # Closed/merged PRs no longer need repair. Unreadable open snapshots keep theirs.
+            for row in self.store.db.execute('SELECT pr FROM ci_observations WHERE project=?', (project['id'],)).fetchall():
+                if row['pr'] not in listed:
+                    self.store.db.execute('DELETE FROM ci_observations WHERE project=? AND pr=?', (project['id'], row['pr']))
         for row in self.store.db.execute('SELECT * FROM integrations WHERE project=? AND reconciled=0',(project['id'],)).fetchall():
             try:
                 merged=self.pr(project,row['pr']);owner=self.owner(project,merged,owners)
                 if execute and owner: self.reconcile(project,merged,owner,self.store.review(project['id'],row['pr']))
             except Exception as error:
                 print(f"{project['id']} PR#{row['pr']}: completion retry deferred: {error}",flush=True)
+
+    def observe_ci(self, project, pr, owner, failures, responsibility):
+        """Durable per-PR failure receipt for the dispatcher and dashboard.
+
+        Every owned PR is observed, including drafts and active implementations.
+        A fresh snapshot without actionable failures (green, pending, cancelled or
+        superseded) clears it. Consumers must still revalidate before acting."""
+        if not failures:
+            self.store.db.execute('DELETE FROM ci_observations WHERE project=? AND pr=?', (project['id'], pr['number']))
+            return
+        self.store.db.execute('INSERT OR REPLACE INTO ci_observations VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
+            (project['id'], pr['number'], owner['key'] if owner else None, pr['headRefName'],
+             owner['status'] if owner else None, pr['headRefOid'], pr['baseRefOid'], int(bool(pr['isDraft'])),
+             json.dumps(failures), repair_feedback({**pr, '_ci_repair': failures}), responsibility, time.time()))
 
     def assert_review_owner(self,project,owner):
         # `ticket assert` intentionally authorizes implementation edits only.
