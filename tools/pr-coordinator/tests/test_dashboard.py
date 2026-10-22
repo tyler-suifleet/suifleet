@@ -266,6 +266,33 @@ class DashboardTests(unittest.TestCase):
         self.assertIsNone(dash.ci_state(dash.SnapshotCache().get(str(bad_checks))))
         self.assertIn('PR snapshot', '\n'.join(dash.render(model, 80)))
 
+    def test_malformed_process_identities_are_unverified_not_fatal(self):
+        f = self.f
+        f.ticket('SF-001'); f.run('sess-impl', 'SF-001', pid=101); f.process(101)
+        f.ticket('SF-002', session='s-dict')
+        bad = f.run('s-dict', 'SF-002', pid=102); f.process(102)  # DB identity would verify; the receipt must not
+        (bad/'process.json').write_text(json.dumps({'pid': {'bad': 102}, 'started': '500'}))
+        f.ticket('SF-003', session='s-list')
+        bad = f.run('s-list', 'SF-003', pid=103); f.process(103)
+        (bad/'process.json').write_text(json.dumps({'pid': 103, 'started': ['500']}))
+        f.ticket('SF-004', session='s-bool')
+        bad = f.run('s-bool', 'SF-004', pid=104); f.process(104)
+        (bad/'process.json').write_text(json.dumps({'pid': True, 'started': '500'}))
+        f.ticket('SF-005', status='review')
+        f.job(9, pid=301, ticket='SF-005'); f.process(301)
+        with sqlite3.connect(f.paths['reviews']) as db:
+            db.execute("UPDATE jobs SET pid='-301', started='5e2' WHERE pr=9")
+        model = f.collect()
+        self.assertEqual({s['state'] for s in model['sources'].values()}, {'ok'})
+        self.assertEqual([w['ticket'] for w in model['workers']], ['SF-001'])
+        states = self.states(model)
+        for key, role in [('SF-002', 'implementation'), ('SF-003', 'implementation'), ('SF-004', 'implementation'), ('SF-005', 'review')]:
+            self.assertIn((key, role, 'unverified'), states)
+        self.assertEqual(sum('unreadable process identity' in w for w in model['warnings']), 3)
+        claude = next(c for c in model['capacity'] if c['family'] == 'Claude' and c['category'] == 'implementation')
+        self.assertEqual((claude['active'], claude['held']), (1, 3))
+        self.assertEqual(json.loads(json.dumps(dash.public(model)))['workers'][0]['ticket'], 'SF-001')
+
     def test_orphaned_implementation_holds_capacity_like_dispatcher(self):
         f = self.f
         f.ticket('SF-001', agent='Codex', session='s-orphan')

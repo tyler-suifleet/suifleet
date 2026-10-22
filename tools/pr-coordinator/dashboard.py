@@ -94,15 +94,24 @@ class Processes:
         except (ValueError, OSError):
             self.ticks = 100
 
+    @staticmethod
+    def identity(value):
+        """A recorded PID or start time as a positive decimal string, else None."""
+        if isinstance(value, bool) or not isinstance(value, (int, str)):
+            return None
+        value = str(value).strip()
+        return value if value.isascii() and value.isdigit() and int(value) > 0 else None
+
     def stat(self, pid):
         try:
             fields = (self.root/str(int(pid))/'stat').read_text().rsplit(')', 1)[1].split()
             return fields if len(fields) > 19 else None
-        except (OSError, ValueError, IndexError):
+        except (OSError, ValueError, TypeError, IndexError):
             return None
 
     def state(self, pid, started):
-        """alive | zombie | lingering | exited | unknown (no identity) | unreadable."""
+        """alive | zombie | lingering | exited | unknown (no valid identity) | unreadable."""
+        pid, started = self.identity(pid), self.identity(started)
         if not pid or not started:
             return 'unknown'
         if not self.readable:
@@ -364,6 +373,9 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
         if not isinstance(identity, dict):
             identity = {}
         pid, started = identity.get('pid') or run['pid'], identity.get('started') or run['started']
+        if (pid and not Processes.identity(pid)) or (started and not Processes.identity(started)):
+            # Never fall back to another identity: a malformed receipt is unverified.
+            model['warnings'].append(f"Implementation receipt for {run['family']} has an unreadable process identity")
         process = processes.state(pid, started)
         owner = by_ticket.get((run['project'], key)) or {}
         base = dict(id='impl:'+run['session'], project=run['project'], family=run['family'],
