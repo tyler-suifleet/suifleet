@@ -369,13 +369,23 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
         if claim.get('session'):
             managed.add(claim['session'])
         process_file = receipt(run['directory'], 'process.json')
-        identity = (read_json(process_file) if process_file else None) or {}
-        if not isinstance(identity, dict):
-            identity = {}
-        pid, started = identity.get('pid') or run['pid'], identity.get('started') or run['started']
-        if (pid and not Processes.identity(pid)) or (started and not Processes.identity(started)):
+        # Like the dispatcher, a present process.json is the only identity; the
+        # persisted DB identity applies only when that receipt does not exist.
+        try:
+            receipt_present = bool(process_file) and process_file.exists()
+        except OSError:
+            receipt_present = True
+        if receipt_present:
+            identity = read_json(process_file)
+            identity = identity if isinstance(identity, dict) else {}
+            pid, started = identity.get('pid'), identity.get('started')
             # Never fall back to another identity: a malformed receipt is unverified.
-            model['warnings'].append(f"Implementation receipt for {run['family']} has an unreadable process identity")
+            if not Processes.identity(pid) or not Processes.identity(started):
+                model['warnings'].append(f"Implementation receipt for {run['family']} has an unreadable process identity")
+        else:
+            pid, started = run['pid'], run['started']
+            if (pid is not None and not Processes.identity(pid)) or (started is not None and not Processes.identity(started)):
+                model['warnings'].append(f"Implementation receipt for {run['family']} has an unreadable process identity")
         process = processes.state(pid, started)
         owner = by_ticket.get((run['project'], key)) or {}
         base = dict(id='impl:'+run['session'], project=run['project'], family=run['family'],

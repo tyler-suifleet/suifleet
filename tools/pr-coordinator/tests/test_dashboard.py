@@ -293,6 +293,31 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual((claude['active'], claude['held']), (1, 3))
         self.assertEqual(json.loads(json.dumps(dash.public(model)))['workers'][0]['ticket'], 'SF-001')
 
+    def test_falsy_or_missing_receipt_identity_never_falls_back_to_db(self):
+        f = self.f
+        receipts = [{'pid': False, 'started': '500'}, {'pid': 0, 'started': '500'}, {'pid': [], 'started': '500'},
+                    {'pid': {}, 'started': '500'}, {'pid': None, 'started': '500'}, {'pid': '', 'started': '500'},
+                    {'pid': 'PID', 'started': False}, {'pid': 'PID', 'started': 0}, {'pid': 'PID', 'started': ''},
+                    {'pid': 'PID', 'started': []}, {'pid': 'PID'}, {'started': '500'}, {}, [], 'text']
+        for n, value in enumerate(receipts):
+            pid = 110 + n
+            key, session = f'SF-{n + 10:03d}', f's-bad-{n}'
+            f.ticket(key, session=session)
+            # The persisted DB identity matches a live process; only the receipt is malformed.
+            folder = f.run(session, key, pid=pid); f.process(pid)
+            if isinstance(value, dict):
+                value = {k: (pid if v == 'PID' else v) for k, v in value.items()}
+            (folder/'process.json').write_text(json.dumps(value))
+        f.ticket('SF-001', session='s-db'); f.run('s-db', 'SF-001', pid=101, process_json=False); f.process(101)
+        model = f.collect()
+        self.assertEqual([w['ticket'] for w in model['workers']], ['SF-001'], 'missing receipt uses the DB identity')
+        states = self.states(model)
+        for n in range(len(receipts)):
+            self.assertIn((f'SF-{n + 10:03d}', 'implementation', 'unverified'), states)
+        self.assertEqual(sum('unreadable process identity' in w for w in model['warnings']), len(receipts))
+        claude = next(c for c in model['capacity'] if c['family'] == 'Claude' and c['category'] == 'implementation')
+        self.assertEqual((claude['active'], claude['held']), (1, len(receipts)))
+
     def test_orphaned_implementation_holds_capacity_like_dispatcher(self):
         f = self.f
         f.ticket('SF-001', agent='Codex', session='s-orphan')
