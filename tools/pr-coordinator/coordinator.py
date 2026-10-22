@@ -276,6 +276,8 @@ class Store:
           CREATE TABLE IF NOT EXISTS ownership_publication (
             project TEXT, ticket TEXT, claim TEXT, revision INTEGER, attempts INTEGER,
             retry_after REAL, error TEXT, PRIMARY KEY(project,ticket));
+          CREATE TABLE IF NOT EXISTS activation_merges (
+            project TEXT, pr INTEGER, head TEXT, base TEXT, commit_id TEXT PRIMARY KEY, review_id INTEGER);
           CREATE TABLE IF NOT EXISTS integrations (
             project TEXT, pr INTEGER, head TEXT, commit_id TEXT, reconciled INTEGER DEFAULT 0,
             PRIMARY KEY(project,pr));
@@ -935,6 +937,11 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
         if remote != base: raise RuntimeError('main changed before push; discard prepared integration and re-review')
         commit = run(['git','rev-parse','HEAD'],cwd=directory).strip()
         self.store.db.execute('INSERT OR REPLACE INTO integrations(project,pr,head,commit_id,reconciled) VALUES(?,?,?,?,0)',(project['id'],pr['number'],pr['headRefOid'],commit))
+        # Durable proof is written before push; activation also verifies the actual
+        # remote merged PR and exact merge parents, so interrupted/failed pushes
+        # never authorize installing an unmerged generation.
+        self.store.db.execute('INSERT OR REPLACE INTO activation_merges VALUES(?,?,?,?,?,?)',
+            (project['id'],pr['number'],pr['headRefOid'],base,commit,review['id']))
         run(['git','push','origin',f"HEAD:refs/heads/{pr['baseRefName']}"],cwd=directory)
 
     def issue_number(self,project,owner):
@@ -1022,6 +1029,9 @@ def main():
     with open(args.state/'daemon.lock','w') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         coordinator = Coordinator(config,args.state)
+        if args.execute and args.watch and Path(__file__).with_name('installed.json').exists():
+            from activation import ready
+            ready(args.state, 'coordinator')
         while True:
             try: coordinator.tick(args.execute)
             except Exception as error:

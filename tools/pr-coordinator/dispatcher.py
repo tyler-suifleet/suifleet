@@ -538,6 +538,9 @@ def main():
         return
     with open(args.state/'dispatcher.lock','w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX|fcntl.LOCK_NB)
+        if args.execute and args.watch and Path(__file__).with_name('installed.json').exists():
+            from activation import ready
+            ready(args.state, 'dispatcher')
         failures = 0
         while True:
             delay = max(10,args.interval)
