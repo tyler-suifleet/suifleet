@@ -378,7 +378,7 @@ def run(args):
                    f"then extended the pool to epoch {end_epoch + 1}; no WAL left the fleet object")
         r = live.transaction("device registers a fleet-paid blob", "--move-call", call("fleet_storage", "register_blob", storage_package), f"@{storage}",
                              f"@{budget}", f"@{account}", f"@{registry}", f"@{device_cap}", f"@{SYSTEM}", f"{encoded['blob_id_u256']}u256",
-                             f"{encoded['root_hash_u256']}u256", f"{encoded['size']}u64", "1u8", CLOCK, budget=50_000_000, sender=device)
+                             f"{encoded['root_hash_u256']}u256", f"{encoded['size']}u64", "1u8", CLOCK, budget=15_000_000, sender=device)
         registered = event(r, "::fleet_storage::UploadRegistered")
         blob = registered["blob_object_id"]
         assert int(registered["encoded_size"]) == ENCODED and int(registered["pool_size"]) == size - ENCODED, registered
@@ -389,7 +389,7 @@ def run(args):
         certificate = json.loads(upload.stdout.readline())
         r = live.transaction("device certifies the fleet blob", "--move-call", call("fleet_storage", "certify_blob", storage_package), f"@{storage}",
                              f"@{SYSTEM}", f"@{blob}", u8_vector(certificate["signature"]), u8_vector(certificate["signers_bitmap"]),
-                             u8_vector(certificate["message"]), budget=50_000_000, sender=device)
+                             u8_vector(certificate["message"]), budget=5_000_000, sender=device)
         measured["certify_blob"] = dict(r["effects"]["gasUsed"], net_mist=net_gas(r))
         upload.stdin.write("read\n")
         upload.stdin.flush()
@@ -407,7 +407,7 @@ def run(args):
                    f"non-deletable, owned by the fleet object, read back from {certificate['confirmations']} confirming nodes")
         live.attack("second upload above the period quota", "--move-call", call("fleet_storage", "register_blob", storage_package), f"@{storage}",
                     f"@{budget}", f"@{account}", f"@{registry}", f"@{device_cap}", f"@{SYSTEM}", "1u256", "1u256", "16u64", "1u8", CLOCK,
-                    module="fleet_storage", function="register_blob", code=6, sender=device, budget=20_000_000)
+                    module="fleet_storage", function="register_blob", code=6, sender=device, budget=2_000_000)
         live.check("the device's second upload in the period aborted on its quota (6)")
 
         # ── The owner's release upload, through the dApp's own code ──
@@ -437,10 +437,11 @@ def run(args):
                              "--assign", "wal", "--move-call", call("fleet_storage", "fund_retention", storage_package), f"@{storage}", "wal", "funds.1",
                              budget=20_000_000, funding=renewal_swap + gas_reserve)
             target = end_epoch + 2
-            live.transaction("authorize finite blob renewal", "--move-call", call("fleet_storage", "authorize_renewal", storage_package),
+            prepaid = live.transaction("authorize finite blob renewal", "--move-call", call("fleet_storage", "authorize_renewal", storage_package),
                              f"@{storage}", f"@{budget}", f"@{budget_cap}", f"@{blob}", f"{target}u32", f"{renewal_wal}u64",
                              "--move-call", call("fleet_storage", "prepay_renewal", storage_package),
                              f"@{storage}", f"@{budget}", f"@{budget_cap}", f"@{SYSTEM}", f"@{blob}", budget=15_000_000)
+            live.evidence["retention_prepayment"] = dict(event(prepaid, "::fleet_storage::RenewalPrepaid"), digest=prepaid["digest"])
             worker = Worker({"chain": live.chain, "network": "testnet", "rpc": live.rpc_url,
                              "storage": storage, "package": storage_package, "storage_origin": storage_package,
                              "retention_origin": storage_package, "executor": device_address,
