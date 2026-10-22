@@ -1,0 +1,24 @@
+import copy
+import json
+from pathlib import Path
+import sys
+import tempfile
+import unittest
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import build_walrus_site as site
+
+class SiteBindingTests(unittest.TestCase):
+    def test_binding_refuses_foreign_chain_registry_and_unexpected_fields(self):
+        manifest=json.loads((site.ROOT/'manifests/fixture.localnet.json').read_text())
+        data=dict(schema=1,chainIdentifier=manifest['chain_identifier'],registryId=manifest['shared_objects']['registry']['id'],
+                  packageId='0xa1',typeOrigin='0xa0',fleetId='0xf1',budgetId='0xb1',storageId='0xb2')
+        checked=site.fleet_binding(json.dumps(data),manifest)
+        self.assertEqual(checked['packageId'],site.object_id('0xa1'))
+        for key,value in [('chainIdentifier','ffffffff'),('registryId','0xff'),('secret','never publish')]:
+            with self.assertRaises(ValueError):site.fleet_binding(json.dumps({**data,key:value}),manifest)
+    def test_inventory_rejects_private_files_and_symlinks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);(root/'index.html').write_text('public');(root/'device.key').write_text('fixture')
+            with self.assertRaises(ValueError):site.inventory(root)
+            (root/'device.key').unlink();(root/'alias').symlink_to(root/'index.html')
+            with self.assertRaises(ValueError):site.inventory(root)
