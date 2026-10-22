@@ -1073,6 +1073,13 @@ async fn reconcile(
             groups.push(desired);
         }
     }
+    // Confirm the operator after reading what it authorizes. A transfer that
+    // lands between the two reads would otherwise admit the previous
+    // operator's new desired state from groups it still administers.
+    if !sui_client::same_id(&sui.operator(device).await?, &operator) {
+        info!("Device operator changed while desired state was read; reconsidered on the next poll");
+        return Ok(());
+    }
     let effective = reconcile::effective(&groups);
     let fingerprint = reconcile::fingerprint(&effective);
     let outcome = |journal: &Journal, deployment: &str| {

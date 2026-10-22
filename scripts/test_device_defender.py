@@ -103,9 +103,14 @@ def main(args):
         retried = [report for report in reports() if report["header"]["report_id"] == retry_report["header"]["report_id"]]
         assert 1 <= len(retried) <= 3 and all(report == retry_report for report in retried)
         check("missing service outcomes retry identical reports after restart, then exhaust the configured persistent allowance; never counted accepted")
+        try:
+            control("/scan")
+            raise RuntimeError("scanned a running daemon's changing state")
+        except AssertionError as error:
+            assert "scan requires a stopped daemon" in str(error), error
+        control("/stop")
         assert not control("/scan")["found"]
         check("no private key material in daemon logs or persisted state")
-        control("/stop")
         if args.evidence:
             Path(args.evidence).write_text(json.dumps({"ticket":"SF-062", "adapter":"device-defender-metrics", "reference_version":"4.0.0",
                 "schema":"1.0", "environment":"network-none container; real daemon/procfs/shared TLS MQTT adapter; AWS-shaped endpoint",

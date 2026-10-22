@@ -4,7 +4,7 @@
 // is uploaded until the translation succeeds and the operator acknowledges
 // the reported differences. Uploads use the chosen delivery: confidential
 // (Seal-encrypted before upload, SF-022) by default, never plaintext fallback.
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { artifactUris,parseGreengrassRecipe,translateGreengrassRecipe,GUIDANCE,ipcAclToml,type ArtifactBinding,type Translation } from '@/lib/greengrass-recipe';
 import { assertComponentRecipe } from '@/lib/recipe-schema';
 import { uploadArtifact,uploadRecipe,storageWarnings,renewalCommand,type Protection } from '@/lib/walrus';
@@ -17,7 +17,9 @@ import type { Transaction } from '@mysten/sui/transactions';
 async function sha256(file:File){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await file.arrayBuffer())),b=>b.toString(16).padStart(2,'0')).join('');}
 const guidance=(code:string)=>GUIDANCE[code.startsWith('ComponentDependencies.')?'aws-managed-dependency':code];
 
-export function GreengrassImport({catalog,owner,execute,onPublished,disabled,policies,protect}:{catalog:string;owner:string;execute:(a:{transaction:Transaction})=>Promise<unknown>;onPublished:()=>void;disabled:boolean;policies:AccessPolicy[];protect:(delivery:Delivery)=>Protection}) {
+export function GreengrassImport({catalog,owner,execute,onPublished,disabled,policies,protect,onBusyChange}:{catalog:string;owner:string;execute:(a:{transaction:Transaction})=>Promise<unknown>;onPublished:()=>void;disabled:boolean;policies:AccessPolicy[];protect:(delivery:Delivery)=>Protection;onBusyChange?:(busy:boolean)=>void}) {
+  const inFlight=useRef(false),active=useRef(true);
+  useEffect(()=>{active.current=true;return ()=>{active.current=false;};},[]);
   const [text,setText]=useState(''),[files,setFiles]=useState<Record<string,File>>({});
   const [result,setResult]=useState<Translation|null>(null),[acknowledged,setAcknowledged]=useState(false);
   const [busy,setBusy]=useState(false),[message,setMessage]=useState('');
@@ -34,6 +36,8 @@ export function GreengrassImport({catalog,owner,execute,onPublished,disabled,pol
   }
   async function check(){setMessage('');setAcknowledged(false);try{setResult(await translate((_,i)=>`pending-${i}`));}catch(e){setMessage(String(e));}}
   async function publish(){
+    if(inFlight.current||disabled) return;
+    inFlight.current=true;onBusyChange?.(true);
     setBusy(true);setMessage('');
     try{
       const preview=await translate((_,i)=>`pending-${i}`);
@@ -62,9 +66,10 @@ export function GreengrassImport({catalog,owner,execute,onPublished,disabled,pol
         manifests.push({os:m.os,arch:m.arch,recipeBlobId:recipe.blobId,recipeSha256:recipe.sha256,artifactSha256:m.recipe.artifactSha256});
       }
       const {componentName,componentVersion}=final.manifests[0].recipe;
+      if(!active.current) throw new Error("Publishing view or account changed; uploaded blobs remain, but registration was cancelled");
       await execute({transaction:buildPublishVersionTx(catalog,componentName,componentVersion,manifests)});
       setMessage(`Translated version registered (${protection.kind==='confidential'?'confidential, Seal-encrypted':'public, unencrypted'}). `+warnings.join('\n'));onPublished();
-    }catch(e){setMessage(String(e));}finally{setBusy(false);}
+    }catch(e){setMessage(String(e));}finally{inFlight.current=false;setBusy(false);onBusyChange?.(false);}
   }
   const name=parsed&&'recipe' in parsed&&typeof (parsed.recipe as {ComponentName?:unknown})?.ComponentName==='string'?(parsed.recipe as {ComponentName:string}).ComponentName:'component';
   const differences=result?.informational??[];
