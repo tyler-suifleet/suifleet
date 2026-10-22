@@ -47,16 +47,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   </div>
                   <span className="font-semibold text-sm tracking-tight">SuiFleet</span>
                 </div>
-                <span className="text-white/20 text-xs">|</span>
-                <span className="text-white/40 text-xs">Edge Fleet Management</span>
+                <span className="hidden sm:inline text-white/20 text-xs">|</span>
+                <span className="hidden sm:inline text-white/40 text-xs">Edge Fleet Management</span>
                 <div className="ml-auto">
                   <ConnectButton />
                 </div>
               </div>
 
+              <MobileNav />
               <div className="flex flex-1 overflow-hidden">
                 <Sidebar />
-                <main className="flex-1 overflow-auto p-8">
+                <main className="flex-1 min-w-0 overflow-auto p-4 md:p-8">
                   {children}
                 </main>
               </div>
@@ -67,10 +68,32 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   );
 }
 
+// Narrow screens: the same navigation as a horizontally scrolling bar.
+function MobileNav() {
+  const pathname = usePathname();
+  return (
+    <nav aria-label="Main" className="md:hidden bg-[#0b1628] border-b border-white/5 overflow-x-auto">
+      <ul className="flex gap-1 px-2 py-1.5 whitespace-nowrap">
+        {NAV.map(({ href, label }) => {
+          const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
+          return (
+            <li key={href}>
+              <Link href={href} aria-current={active ? "page" : undefined}
+                className={`block px-3 py-1.5 text-sm rounded ${active ? "bg-[#4DA2FF]/15 text-[#4DA2FF] font-medium" : "text-white/70 hover:text-white"}`}>
+                {label}
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+    </nav>
+  );
+}
+
 function Sidebar() {
   const pathname = usePathname();
   return (
-    <aside className="w-52 bg-[#0b1628] shrink-0 flex flex-col z-10 border-r border-white/5">
+    <aside className="hidden md:flex w-52 bg-[#0b1628] shrink-0 flex-col z-10 border-r border-white/5">
       <div className="px-3 pt-5 pb-3">
         <p className="text-[10px] font-semibold text-white/30 uppercase tracking-widest px-1">Manage</p>
       </div>
