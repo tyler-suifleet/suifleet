@@ -162,6 +162,7 @@ pub struct SuiClient {
     config: SuiConfig,
     signer: std::sync::Arc<dyn identity::TxSigner>,
     rpc: sui_rpc::Client,
+    mutations: std::sync::Arc<tokio::sync::Mutex<()>>,
 }
 
 /// Objects created by a successful enrollment (SF-021).
@@ -269,6 +270,7 @@ impl SuiClient {
             config,
             signer,
             rpc,
+            mutations: Default::default(),
         })
     }
     pub fn address(&self) -> String {
@@ -890,6 +892,7 @@ impl SuiClient {
         cap: &str,
         status: u8,
     ) -> anyhow::Result<String> {
+        let _mutation = self.mutations.lock().await;
         let record = self.object(deployment).await?;
         let cap_object = self.object(cap).await?;
         let device_id = cap_object.fields["device_id"]
@@ -989,6 +992,7 @@ impl SuiClient {
     /// exactly one `fleet_budget::draw_gas` call, paid by the device. The
     /// budget must be an immutable input: draws never write it.
     pub async fn draw_gas(&self, budget_id: &str, account_id: &str, cap: &str, amount: u64) -> anyhow::Result<String> {
+        let _mutation = self.mutations.lock().await;
         let registry = self.manifest().shared_objects.registry.id.clone();
         let call = Call {
             module: protocol::fleet_budget::MODULE,
@@ -1006,10 +1010,164 @@ impl SuiClient {
         self.execute(&transaction).await
     }
 
+    /// One exact fleet-data health call, verified after simulation before signing.
+    pub async fn report_health(&self, config: &crate::fleet_data::Config, cap: &str,
+        seq: u64, message: Vec<u8>, signature: Vec<u8>) -> anyhow::Result<String> {
+        let _mutation = self.mutations.lock().await;
+        let call = Call { module: "fleet_data", function: "report_health", args: vec![
+            Arg::SharedRead(config.fleet_id.clone()), Arg::Object(config.writer_id.clone()),
+            Arg::SharedRead(config.budget_id.clone()), Arg::SharedRead(config.account_id.clone()),
+            Arg::SharedRead(self.manifest().shared_objects.registry.id.clone()), Arg::Object(cap.into()),
+            Arg::Pure(bcs::to_bytes(&seq)?), Arg::Pure(bcs::to_bytes(&message)?),
+            Arg::Pure(bcs::to_bytes(&signature)?), Arg::SharedRead(CLOCK.into()),
+        ] };
+        let transaction = self.build_package(&config.package_id, &call).await?;
+        self.execute(&transaction).await
+    }
+
+    /// Persist the resolved transaction before submission. Recovery resubmits
+    /// exactly the same digest; it cannot buy the same archive twice.
+    async fn durable_call(&self, package: &str, call: &Call, path: &std::path::Path) -> anyhow::Result<String> {
+        use std::{io::Write, os::unix::fs::OpenOptionsExt};
+        let _mutation = self.mutations.lock().await;
+        // Resolve a persisted transaction's effects before doing anything with
+        // a new gas version. Missing/pruned history is never permission to pay
+        // for the archive again.
+        if let Ok(bytes) = std::fs::read(path) {
+            let old: Transaction = bcs::from_bytes(&bytes)?;
+            check_transaction(&old,call,Address::from_str(package)?,Address::from_str(&self.address())?)?;
+            let digest = old.digest().to_string();
+            let mut request = proto::GetTransactionRequest::default(); request.digest=Some(digest.clone());
+            request.read_mask=Some(mask(&["digest","effects.status"]));
+            match self.rpc.clone().ledger_client().get_transaction(request).await {
+                Ok(response) => {
+                    let executed=response.into_inner().transaction.ok_or_else(||anyhow::anyhow!("missing durable transaction effects"))?;
+                    anyhow::ensure!(executed.digest.as_deref()==Some(digest.as_str()),"durable transaction digest mismatch");
+                    match execution_digest(&executed) {
+                        Err(error) if error.downcast_ref::<FailedExecution>().is_some()=>{
+                            std::fs::remove_file(path)?; std::fs::File::open(path.parent().unwrap())?.sync_all()?;
+                        }
+                        result=>return result,
+                    }
+                }
+                Err(error) if error.code()==tonic::Code::NotFound=>{
+                    let checkpoint:u64=std::fs::read_to_string(path.with_extension("checkpoint"))?.parse()?;
+                    let info=self.rpc.clone().ledger_client().get_service_info(proto::GetServiceInfoRequest::default()).await?.into_inner();
+                    anyhow::ensure!(info.lowest_available_checkpoint.is_some_and(|lowest|lowest<=checkpoint),"durable transaction history unavailable; owner reconciliation required");
+                    let mut stale=false;
+                    for coin in &old.gas_payment.objects {
+                        let mut request=proto::GetObjectRequest::default();request.object_id=Some(coin.object_id().to_string());request.read_mask=Some(mask(&["version"]));
+                        let version=self.rpc.clone().ledger_client().get_object(request).await?.into_inner().object.and_then(|o|o.version).ok_or_else(||anyhow::anyhow!("gas object version unavailable"))?;
+                        anyhow::ensure!(version>=coin.version(),"fullnode is behind the persisted transaction");stale|=version>coin.version();
+                    }
+                    if stale {
+                        // The old transaction could have committed between the
+                        // first effects read and the gas read. Once its gas is
+                        // stale it cannot execute anew: resolve effects again,
+                        // then recheck retention before concluding it is absent.
+                        let mut request = proto::GetTransactionRequest::default();
+                        request.digest = Some(digest.clone()); request.read_mask = Some(mask(&["digest", "effects.status"]));
+                        match self.rpc.clone().ledger_client().get_transaction(request).await {
+                            Ok(response) => {
+                                let executed = response.into_inner().transaction.ok_or_else(|| anyhow::anyhow!("missing durable effects after gas reconciliation"))?;
+                                anyhow::ensure!(executed.digest.as_deref() == Some(digest.as_str()), "durable transaction digest mismatch");
+                                match execution_digest(&executed) {
+                                    Err(error) if error.downcast_ref::<FailedExecution>().is_some() => (),
+                                    result => return result,
+                                }
+                            }
+                            Err(error) if error.code() == tonic::Code::NotFound => {
+                                let info = self.rpc.clone().ledger_client().get_service_info(proto::GetServiceInfoRequest::default()).await?.into_inner();
+                                anyhow::ensure!(info.lowest_available_checkpoint.is_some_and(|lowest| lowest <= checkpoint), "durable transaction history became unavailable; owner reconciliation required");
+                            }
+                            Err(error) => return Err(error.into()),
+                        }
+                        std::fs::remove_file(path)?; std::fs::File::open(path.parent().unwrap())?.sync_all()?;
+                    }
+                }
+                Err(error)=>return Err(error.into()),
+            }
+        }
+        let transaction = match std::fs::read(path) {
+            Ok(bytes) => bcs::from_bytes(&bytes)?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                let info=self.rpc.clone().ledger_client().get_service_info(proto::GetServiceInfoRequest::default()).await?.into_inner();
+                let checkpoint=info.checkpoint_height.ok_or_else(||anyhow::anyhow!("durable creation checkpoint unavailable"))?;
+                let transaction = self.build_package(package, call).await?;
+                let marker=path.with_extension("checkpoint");let temporary=marker.with_extension("tmp");
+                let mut f=std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&temporary)?;
+                f.write_all(checkpoint.to_string().as_bytes())?;f.sync_all()?;std::fs::rename(temporary,marker)?;
+                std::fs::File::open(path.parent().unwrap())?.sync_all()?;
+                let temporary = path.with_extension("tmp");
+                let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&temporary)?;
+                f.write_all(&bcs::to_bytes(&transaction)?)?; f.sync_all()?;
+                std::fs::rename(temporary,path)?; std::fs::File::open(path.parent().unwrap())?.sync_all()?;
+                transaction
+            }
+            Err(e) => return Err(e.into()),
+        };
+        check_transaction(&transaction,call,Address::from_str(package)?,Address::from_str(&self.address())?)?;
+        match self.execute(&transaction).await {
+            Err(error) if error.downcast_ref::<FailedExecution>().is_some() => {
+                // Effects prove no registration/certification/anchor committed.
+                std::fs::remove_file(path)?; std::fs::File::open(path.parent().unwrap())?.sync_all()?;
+                Err(error)
+            }
+            result => result,
+        }
+    }
+    pub async fn register_archive(&self, data: &crate::fleet_data::Config, storage: &crate::fleet_archive::Config,
+        cap: &str, blob_id: &str, root_hash: &str, size: u64, path: &std::path::Path) -> anyhow::Result<String> {
+        let call = Call { module: "fleet_storage", function: "register_blob", args: vec![
+            Arg::Object(data.storage_id.clone()), Arg::SharedRead(data.budget_id.clone()), Arg::SharedRead(data.account_id.clone()),
+            Arg::SharedRead(self.manifest().shared_objects.registry.id.clone()), Arg::Object(cap.into()), Arg::Object(storage.system_id.clone()),
+            Arg::Pure(decimal_u256(blob_id)?), Arg::Pure(decimal_u256(root_hash)?), Arg::Pure(bcs::to_bytes(&size)?),
+            Arg::Pure(vec![1]), Arg::SharedRead(CLOCK.into()),
+        ] };
+        self.durable_call(&storage.storage_package,&call,path).await
+    }
+    pub async fn certify_archive(&self, data: &crate::fleet_data::Config, storage: &crate::fleet_archive::Config,
+        blob: &str, cert: &crate::fleet_archive::Certificate, path: &std::path::Path) -> anyhow::Result<String> {
+        let call = Call { module: "fleet_storage", function: "certify_blob", args: vec![
+            Arg::Object(data.storage_id.clone()), Arg::SharedRead(storage.system_id.clone()),
+            Arg::Pure(bcs::to_bytes(&Address::from_str(blob)?)?), Arg::Pure(bcs::to_bytes(&STANDARD.decode(&cert.signature)?)?),
+            Arg::Pure(bcs::to_bytes(&STANDARD.decode(&cert.bitmap)?)?), Arg::Pure(bcs::to_bytes(&STANDARD.decode(&cert.message)?)?),
+        ] };
+        self.durable_call(&storage.storage_package,&call,path).await
+    }
+    pub async fn anchor_archive(&self, data: &crate::fleet_data::Config, cap: &str, blob: &str,
+        seq: u64, kind: u8, sha256: Vec<u8>, path: &std::path::Path) -> anyhow::Result<String> {
+        let call = Call { module: "fleet_data", function: "anchor", args: vec![
+            Arg::SharedRead(data.fleet_id.clone()), Arg::Object(data.writer_id.clone()), Arg::SharedRead(data.budget_id.clone()),
+            Arg::SharedRead(data.account_id.clone()), Arg::SharedRead(self.manifest().shared_objects.registry.id.clone()), Arg::Object(cap.into()),
+            Arg::SharedRead(data.storage_id.clone()), Arg::Pure(bcs::to_bytes(&Address::from_str(blob)?)?),
+            Arg::Pure(bcs::to_bytes(&seq)?), Arg::Pure(vec![kind]), Arg::Pure(bcs::to_bytes(&sha256)?), Arg::SharedRead(CLOCK.into()),
+        ] };
+        self.durable_call(&data.package_id,&call,path).await
+    }
+    pub async fn requested_diagnostics(&self, data: &crate::fleet_data::Config) -> anyhow::Result<u64> {
+        let key: TypeTag = format!("{}::fleet_data::DiagnosticKey",data.type_origin).parse()?;
+        let id = Address::from_str(&data.writer_id)?.derive_dynamic_child_id(&key,&[0]);
+        let Some(field) = self.optional_object(&id.to_string()).await? else { return Ok(0); };
+        number(&field.fields["value"]["seq"]).ok_or_else(|| anyhow::anyhow!("invalid diagnostic request"))
+    }
+    pub async fn verify_archive_anchor(&self, data: &crate::fleet_data::Config, index: u64, seq: u64, sha256: &[u8]) -> anyhow::Result<()> {
+        let key: TypeTag = format!("{}::fleet_data::AnchorKey",data.type_origin).parse()?;
+        let id = Address::from_str(&data.writer_id)?.derive_dynamic_child_id(&key,&bcs::to_bytes(&index)?);
+        let field = self.object(&id.to_string()).await?;
+        let anchor = &field.fields["value"];
+        anyhow::ensure!(number(&anchor["seq"]) == Some(seq) && byte_vector(&anchor["ciphertext_sha256"])? == sha256, "pending archive is not acknowledged by chain anchor");
+        Ok(())
+    }
+
     /// Ask the node to resolve object versions, gas and budget for `call`,
     /// then refuse anything other than exactly that call paid by this device.
     async fn build(&self, call: &Call) -> anyhow::Result<Transaction> {
-        let package = Address::from_str(&self.config.package_id)
+        self.build_package(&self.config.package_id, call).await
+    }
+
+    async fn build_package(&self, package_id: &str, call: &Call) -> anyhow::Result<Transaction> {
+        let package = Address::from_str(package_id)
             .map_err(|e| anyhow::anyhow!("invalid package ID: {e}"))?;
         let sender = Address::from_str(&self.address())?;
         let mut builder = sui_transaction_builder::TransactionBuilder::new();
@@ -1155,6 +1313,16 @@ impl SuiClient {
     }
 }
 
+/// Canonical little-endian BCS u256 without a platform bigint dependency.
+fn decimal_u256(text: &str) -> anyhow::Result<Vec<u8>> {
+    anyhow::ensure!(!text.is_empty() && text.len() <= 78 && text.bytes().all(|b| b.is_ascii_digit()) && (text == "0" || !text.starts_with('0')), "invalid u256");
+    let mut out = vec![0u8;32];
+    for digit in text.bytes() { let mut carry = u16::from(digit-b'0'); for byte in &mut out {
+        carry += u16::from(*byte)*10; *byte = carry as u8; carry >>= 8;
+    } anyhow::ensure!(carry == 0,"u256 overflow"); }
+    Ok(out)
+}
+
 /// Whether the registry still trusts `address` for this device.
 fn check_identity(identity: Option<&Value>, address: &str) -> anyhow::Result<()> {
     let identity = identity.ok_or_else(|| {
@@ -1256,8 +1424,14 @@ fn check_transaction(
     Ok(())
 }
 
+#[derive(Debug)]
+struct FailedExecution;
+impl std::fmt::Display for FailedExecution { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str("chain execution failed; no fleet mutation committed") } }
+impl std::error::Error for FailedExecution {}
+
 fn execution_digest(executed: &proto::ExecutedTransaction) -> anyhow::Result<String> {
     let status = executed.effects.as_ref().and_then(|e| e.status.as_ref());
+    if status.and_then(|s| s.success) == Some(false) { return Err(FailedExecution.into()); }
     anyhow::ensure!(
         status.and_then(|s| s.success) == Some(true),
         "transaction failed: {}",

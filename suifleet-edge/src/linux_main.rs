@@ -18,6 +18,8 @@ mod console;
 mod deps;
 mod firmware;
 mod funding;
+mod fleet_data;
+mod fleet_archive;
 mod handoff;
 mod identity;
 mod iotcore;
@@ -342,6 +344,13 @@ async fn main() -> anyhow::Result<()> {
     sd_notify::notify(false, &[sd_notify::NotifyState::Ready]).ok();
     // Telemetry runs beside the poll loop, so a long apply or bootstrap does
     // not silence the heartbeat; it reads only the state files on disk.
+    let fleet_reporter = cfg.fleet_data.clone().map(|config| tokio::spawn(crate::fleet_data::Task {
+        config, sui: sui.clone(), signer: signer.clone(), cap: cfg.device.device_cap_id.clone(),
+        device_id: cfg.device.device_object_id.clone(), state_dir: cfg.runtime.state_dir.clone(),
+        overlay_dir: cfg.components.configuration_overlay_dir.clone(), log_settings: cfg.logs.clone(),
+        sync: sync.clone(), services: service_runtime.clone(), started_ms, poll_seconds: cfg.runtime.poll_seconds,
+    }.run()));
+    let _ = &fleet_reporter;
     let reporter = match &cfg.telemetry {
         Some(settings) => Some(tokio::spawn(
             telemetry::Task {
