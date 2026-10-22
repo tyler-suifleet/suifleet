@@ -7,12 +7,14 @@ import type { Transaction } from "@mysten/sui/transactions";
 import { NETWORK } from "@/lib/constants";
 import { useDevices } from "@/hooks/useDevices";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
+import { useBudgets, useFleetStorage } from "@/hooks/useFleetStorage";
 import {
-  DEFAULT_LIMITS, budgetAlerts, budgetSupported, buildCreateBudgetTx, buildDepositTx, buildEnrollDeviceTx, buildFundDeviceTx,
-  buildRemoveDeviceTx, buildSetDeviceSuspendedTx, buildSetPausedTx, buildWithdrawTx, fetchAccount, fetchBudgets, periodUsage,
-  storageConfig, swapRoute, type AccountView, type BudgetView,
+  DEFAULT_LIMITS, DEFAULT_QUOTA, budgetAlerts, budgetSupported, buildBuyStorageTx, buildCreateBudgetTx, buildCreateStorageTx, buildDepositTx,
+  buildDepositWalTx, buildEnrollDeviceTx, buildExtendPoolTx, buildFundDeviceTx, buildFundReserveTx, buildReclaimReserveTx, buildRemoveDeviceTx,
+  buildSetDeviceSuspendedTx, buildSetPausedTx, buildSwapAndDepositWalTx, buildWithdrawTx, buildWithdrawWalTx, defaultReserve, fetchAccount,
+  minWalOut, periodUsage, readExchange, storageAlerts, storageConfig, storageCost, swapRoute, type AccountView, type StorageConfig,
 } from "@/lib/fleet-budget";
-import { MEASURED, estimate, formatToken, parseToken, runwayDays, type Estimate, type EstimateInput } from "@/lib/network-costs";
+import { MEASURED, encodedBlobLength, estimate, formatToken, parseToken, runwayDays, type Estimate, type EstimateInput } from "@/lib/network-costs";
 import { FEE_NOTES, checkoutUrl, onrampProvider, purchaseStatus, type OnrampAsset, type PendingPurchase } from "@/lib/onramp";
 
 const sui = (mist: bigint) => `${formatToken(mist)} SUI`;
@@ -122,16 +124,6 @@ export function CardFunding({ asset, amount }: { asset: OnrampAsset; amount: str
   </div>;
 }
 
-function useBudgets() {
-  const account = useCurrentAccount(), client = useCurrentClient();
-  return useQuery<BudgetView[]>({
-    queryKey: ["fleet-budgets", NETWORK, account?.address],
-    enabled: !!account && budgetSupported(),
-    refetchInterval: 15_000,
-    queryFn: () => fetchBudgets(client, account!.address),
-  });
-}
-
 /** The budget this account manages, if any (the first one). */
 export function useFleetBudget() {
   const budgets = useBudgets();
@@ -141,15 +133,15 @@ export function useFleetBudget() {
 function useSubmit() {
   const account = useCurrentAccount(), cache = useQueryClient(), mutation = useFleetTransaction();
   const [message, setMessage] = useState<string | null>(null), [error, setError] = useState<string | null>(null);
-  async function submit(build: () => Transaction) {
+  async function submit(build: () => Transaction | Promise<Transaction>) {
     setMessage(null); setError(null);
     try {
-      const tx = build();
+      const tx = await build();
       tx.setSender(account!.address);
       const result = await mutation.mutateAsync({ transaction: tx });
       setMessage(`Confirmed ${result.digest}.`);
       await Promise.all([cache.invalidateQueries({ queryKey: ["fleet-budgets"] }), cache.invalidateQueries({ queryKey: ["fleet-budget-accounts"] }),
-        cache.invalidateQueries({ queryKey: ["first-run-account"] })]);
+        cache.invalidateQueries({ queryKey: ["first-run-account"] }), cache.invalidateQueries({ queryKey: ["fleet-storage"] })]);
     } catch (cause) {
       setError(`${cause instanceof Error ? cause.message : "Wallet request failed"}. Nothing is credited unless the transaction confirms; if it may have reached the network, refresh before retrying.`);
     }
@@ -183,7 +175,7 @@ export function DepositForm({ suggestedMist }: { suggestedMist?: bigint }) {
   </form>;
 }
 
-/** Balance, warnings, per-device usage and the owner controls. */
+/** Balance, warnings, per-device reserves and usage, and the owner controls. */
 export function BudgetManager() {
   const account = useCurrentAccount(), client = useCurrentClient();
   const { budget, isLoading, error: readError } = useFleetBudget();
@@ -201,37 +193,146 @@ export function BudgetManager() {
   const now = BigInt(Date.now());
   const enrolled = (accounts.data ?? []).filter((a): a is AccountView => !!a);
   const spent = enrolled.reduce((sum, a) => sum + periodUsage(a, now).drawn, BigInt(0));
-  const runway = runwayDays(budget.balance, spent, Number(budget.defaultLimits.periodMs) / 86_400_000);
+  const reserves = enrolled.reduce((sum, a) => sum + a.reserve, BigInt(0));
+  const runway = runwayDays(budget.balance + reserves, spent, Number(budget.defaultLimits.periodMs) / 86_400_000);
   const alerts = budgetAlerts(budget, enrolled, now, runway);
   return <div className="space-y-3 text-xs">
-    <p>Balance {sui(budget.balance)} (spendable {sui(budget.balance)}; reserved 0). Deposited {sui(budget.totalDeposited)}, withdrawn {sui(budget.totalWithdrawn)}, paid to devices {sui(budget.totalDrawn)}. {runway === null ? "No draws this period." : `About ${runway.toFixed(1)} days left at this period's rate.`}</p>
+    <p>Unallocated {sui(budget.balance)} (spendable {sui(budget.balance)}; reserved 0) and {sui(reserves)} in device reserves. Deposited {sui(budget.totalDeposited)}, withdrawn {sui(budget.totalWithdrawn)}, paid straight to devices {sui(budget.totalPaid)}, allocated to reserves {sui(budget.totalAllocated)}, reclaimed {sui(budget.totalReclaimed)}. {runway === null ? "No draws this period." : `About ${runway.toFixed(1)} days left at this period's rate.`}</p>
+    <p>Each device draws only from its own reserve, through its own on-chain account, so devices never wait on each other or on the fleet budget. Refill reserves from the budget; reclaim unused reserves before withdrawing.</p>
     {alerts.length > 0 && <ul role="alert" className="list-disc ml-5">{alerts.map((alert, index) =>
       <li key={index} className={alert.severity === "critical" ? "text-red-700" : "text-amber-700"}>{alert.deviceId ? `Device ${alert.deviceId.slice(0, 10)}…: ` : ""}{alert.text}</li>)}</ul>}
     <div className="flex gap-2 items-center flex-wrap">
       <button type="button" className="border rounded px-2 py-1" disabled={pending} onClick={() => void submit(() => buildSetPausedTx(budget.id, budget.capId, !budget.paused))}>{budget.paused ? "Resume all devices" : "Pause all devices"}</button>
       <input className="border p-1 w-28" placeholder="SUI" value={withdraw} onChange={(e) => setWithdraw(e.target.value)} />
-      <button type="button" className="border rounded px-2 py-1" disabled={pending} onClick={() => void submit(() => buildWithdrawTx(budget.id, budget.capId, parseToken(withdraw), account.address))}>Withdraw unused funds</button>
+      <button type="button" className="border rounded px-2 py-1" disabled={pending} onClick={() => void submit(() => buildWithdrawTx(budget.id, budget.capId, parseToken(withdraw), account.address))}>Withdraw unallocated funds</button>
     </div>
-    <p>SUI already sent to a device stays with it: a compromised device can spend at most its float plus one period allowance per period until you suspend it here, pause the budget or revoke its key on the Devices page.</p>
+    <p>SUI already sent to a device stays with it: a compromised device can spend at most its float plus one period allowance per period, never more than its reserve, until you suspend or remove it here, pause the budget or revoke its key on the Devices page.</p>
     <table className="w-full border">
-      <thead><tr className="text-left"><th className="p-1">Device</th><th className="p-1">This period</th><th className="p-1">Draws</th><th className="p-1">Total paid</th><th className="p-1">Actions</th></tr></thead>
+      <thead><tr className="text-left"><th className="p-1">Device</th><th className="p-1">Reserve</th><th className="p-1">This period</th><th className="p-1">Draws</th><th className="p-1">Total paid</th><th className="p-1">Actions</th></tr></thead>
       <tbody>{activated.map((device, index) => {
         const a = accounts.data?.[index];
         const usage = a ? periodUsage(a, now) : undefined;
+        const target = a ? a.limits.periodAllowance * BigInt(2) : BigInt(0);
         return <tr key={device.objectId} className="border-t">
-          <td className="p-1">{device.name}</td>
-          <td className="p-1">{a ? `${sui(usage!.drawn)} of ${sui(a.limits.periodAllowance)}` : "not enrolled"}</td>
+          <td className="p-1">{device.name}{a?.suspended ? " (suspended)" : ""}</td>
+          <td className="p-1">{a ? sui(a.reserve) : "not enrolled"}</td>
+          <td className="p-1">{a ? `${sui(usage!.drawn)} of ${sui(a.limits.periodAllowance)}` : ""}</td>
           <td className="p-1">{a ? `${usage!.draws}/${a.limits.maxDrawsPerPeriod}` : ""}</td>
           <td className="p-1">{a ? sui(a.totalDrawn) : ""}</td>
           <td className="p-1 space-x-2">{a ? <>
-            <button type="button" className="underline" disabled={pending} onClick={() => void submit(() => buildFundDeviceTx(budget.id, budget.capId, device.objectId, a.limits.floatCap))}>Refill float</button>
-            <button type="button" className="underline" disabled={pending} onClick={() => void submit(() => buildSetDeviceSuspendedTx(budget.id, budget.capId, device.objectId, !a.suspended))}>{a.suspended ? "Resume" : "Suspend"}</button>
-            <button type="button" className="underline" disabled={pending} onClick={() => void submit(() => buildRemoveDeviceTx(budget.id, budget.capId, device.objectId))}>Remove</button>
-          </> : <button type="button" className="underline" disabled={pending} onClick={() => void submit(() => buildEnrollDeviceTx(budget.id, budget.capId, device.ownerCapId!, budget.defaultLimits.floatCap))}>Enroll with float</button>}</td>
+            <button type="button" className="underline" disabled={pending || a.reserve >= target} onClick={() => void submit(() => buildFundReserveTx(budget.id, budget.capId, a.accountId, target - a.reserve))}>Refill reserve</button>
+            <button type="button" className="underline" disabled={pending || a.reserve === BigInt(0)} onClick={() => void submit(() => buildReclaimReserveTx(budget.id, budget.capId, a.accountId, a.reserve))}>Reclaim reserve</button>
+            <button type="button" className="underline" disabled={pending} onClick={() => void submit(() => buildFundDeviceTx(budget.id, budget.capId, a.accountId, a.limits.floatCap))}>Send float</button>
+            <button type="button" className="underline" disabled={pending} onClick={() => void submit(() => buildSetDeviceSuspendedTx(budget.id, budget.capId, a.accountId, !a.suspended))}>{a.suspended ? "Resume" : "Suspend"}</button>
+            <button type="button" className="underline" disabled={pending} onClick={() => void submit(() => buildRemoveDeviceTx(budget.id, budget.capId, a.accountId))}>Remove</button>
+          </> : <button type="button" className="underline" disabled={pending} onClick={() => void submit(() => buildEnrollDeviceTx(budget.id, budget.capId, device.ownerCapId!, budget.defaultLimits.floatCap,
+            defaultReserve(budget.defaultLimits, budget.balance, budget.defaultLimits.floatCap)))}>Enroll with float and reserve</button>}</td>
         </tr>;
       })}</tbody>
     </table>
     {accounts.error && <p role="alert">Usage unavailable: {accounts.error.message}</p>}
+    {message && <p role="status">{message}</p>}
+    {error && <p role="alert">{error}</p>}
+  </div>;
+}
+
+/** The live Walrus epoch and storage price, from the pinned Testnet system (fleet storage builds only). */
+function useWalrusState(config?: StorageConfig) {
+  const client = useCurrentClient();
+  return useQuery({
+    queryKey: ["walrus-state", NETWORK, config?.walrus.system],
+    enabled: !!config,
+    refetchInterval: 60_000,
+    queryFn: async () => {
+      const { walrus, TESTNET_WALRUS_PACKAGE_CONFIG } = await import("@mysten/walrus");
+      const state = await client.$extend(walrus({ packageConfig: TESTNET_WALRUS_PACKAGE_CONFIG })).walrus.systemState();
+      return { epoch: state.committee.epoch, storagePrice: BigInt(state.storage_price_per_unit_size), writePrice: BigInt(state.write_price_per_unit_size) };
+    },
+  });
+}
+
+const MIB = 1024 * 1024;
+
+/**
+ * Owner-prepaid Walrus storage held by the fleet: create it, fund its WAL
+ * (from SUI in one transaction with a slippage limit, or WAL bought
+ * directly), buy and extend storage with that WAL, and withdraw unused WAL.
+ * Uploads choose it on the Releases and Components pages.
+ */
+export function StoragePanel({ suggestedWalFrost }: { suggestedWalFrost?: bigint }) {
+  const account = useCurrentAccount(), client = useCurrentClient();
+  const { budget, storage, config, reason } = useFleetStorage();
+  const walrusState = useWalrusState(config);
+  const { submit, message, error, pending } = useSubmit();
+  const [suiAmount, setSuiAmount] = useState("1"), [slippage, setSlippage] = useState(100);
+  const [buyMib, setBuyMib] = useState(64), [epochs, setEpochs] = useState(2), [alsoBuy, setAlsoBuy] = useState(true);
+  const [walAmount, setWalAmount] = useState(""), [extend, setExtend] = useState(2), [withdrawWal, setWithdrawWal] = useState("");
+  const route = swapRoute();
+  if (!account || !budget) return null;
+  if (!config) return <p className="text-xs">{reason}</p>;
+  const price = walrusState.data?.storagePrice;
+  const buyBytes = BigInt(Math.max(0, Math.round(buyMib * MIB)));
+  const cost = price !== undefined ? storageCost(buyBytes, epochs, price) : undefined;
+  const sameRange = !storage?.startEpoch || walrusState.data?.epoch === storage.startEpoch;
+  async function swap() {
+    const mist = parseToken(suiAmount);
+    // The first pinned exchange holding enough WAL at its posted rate.
+    for (const exchangeId of config!.walrus.exchange.objects) {
+      const exchange = await readExchange(client, config!, exchangeId);
+      const minWal = minWalOut(mist, exchange.rate, slippage);
+      if (exchange.walAvailable < minWal) continue;
+      return buildSwapAndDepositWalTx(config!, exchangeId, storage!.id, budget!.id, budget!.capId, mist, minWal,
+        alsoBuy && sameRange ? { encodedBytes: buyBytes, epochs } : undefined);
+    }
+    throw new Error("No pinned Testnet exchange holds enough WAL for this swap; buy WAL directly and deposit it.");
+  }
+  const alerts = storage ? storageAlerts(storage, walrusState.data?.epoch) : [];
+  return <div className="space-y-3 text-xs">
+    {!storage && <div className="space-y-2">
+      <p>No fleet storage yet. Create it to prepay Walrus storage for releases and device uploads: blobs it pays for stay fleet-owned, and no device or upload can delete or shorten them.</p>
+      <p>Each device may upload up to {(Number(DEFAULT_QUOTA.encodedBytesPerPeriod) / MIB).toFixed(0)} MiB encoded in {DEFAULT_QUOTA.uploadsPerPeriod.toString()} uploads per day, at most {(Number(DEFAULT_QUOTA.maxBlobSize) / MIB).toFixed(0)} MiB per blob and {wal(DEFAULT_QUOTA.writeFeesPerPeriod)} in write fees.</p>
+      <button type="button" className="bg-blue-600 text-white rounded px-2 py-1 disabled:opacity-40" disabled={pending} onClick={() => void submit(() => buildCreateStorageTx(config, budget.id, budget.capId, DEFAULT_QUOTA))}>Create fleet storage</button>
+    </div>}
+    {storage && <>
+      <p>Prepaid storage: {(Number(storage.poolSize) / MIB).toFixed(2)} MiB encoded{storage.endEpoch !== undefined ? `, Walrus epochs ${storage.startEpoch}–${storage.endEpoch}` : ""} (current epoch {walrusState.data?.epoch ?? "…"}). WAL for fees and purchases: {wal(storage.walBalance)}. {storage.blobCount.toString()} fleet blob(s), {(Number(storage.totalEncodedBytes) / MIB).toFixed(2)} MiB encoded, {wal(storage.totalWriteFees)} in write fees so far.</p>
+      {alerts.length > 0 && <ul role="alert" className="list-disc ml-5">{alerts.map((alert, index) =>
+        <li key={index} className={alert.severity === "critical" ? "text-red-700" : "text-amber-700"}>{alert.text}</li>)}</ul>}
+      <fieldset className="border rounded p-2 space-y-2" disabled={pending}>
+        <legend className="px-1 font-semibold">Fund with SUI</legend>
+        {route.route ? <>
+          <p>{route.explanation}</p>
+          <div className="flex flex-wrap gap-2 items-end">
+            <label>SUI to swap <input className="border p-1 w-24 block" value={suiAmount} onChange={(e) => setSuiAmount(e.target.value)} /></label>
+            <label>Slippage limit (basis points) <input type="number" min={0} max={1000} className="border p-1 w-24 block" value={slippage} onChange={(e) => setSlippage(Number(e.target.value))} /></label>
+            <label className="flex items-center gap-1"><input type="checkbox" checked={alsoBuy && sameRange} disabled={!sameRange} onChange={(e) => setAlsoBuy(e.target.checked)} /> and buy the storage below in the same transaction</label>
+            <button type="button" className="bg-blue-600 text-white rounded px-2 py-1" onClick={() => void submit(swap)}>Swap and deposit</button>
+          </div>
+        </> : <p>{route.explanation}</p>}
+        <div className="flex flex-wrap gap-2 items-end">
+          <label>WAL from this wallet <input className="border p-1 w-24 block" placeholder={suggestedWalFrost ? formatToken(suggestedWalFrost) : "WAL"} value={walAmount} onChange={(e) => setWalAmount(e.target.value)} /></label>
+          <button type="button" className="border rounded px-2 py-1" onClick={() => void submit(() => buildDepositWalTx(config, storage.id, budget.id, budget.capId, parseToken(walAmount)))}>Deposit WAL</button>
+        </div>
+        <CardFunding asset="WAL" amount={walAmount || (suggestedWalFrost ? formatToken(suggestedWalFrost) : "1")} />
+      </fieldset>
+      <fieldset className="border rounded p-2 space-y-2" disabled={pending}>
+        <legend className="px-1 font-semibold">Storage</legend>
+        <div className="flex flex-wrap gap-2 items-end">
+          <label>Encoded MiB <input type="number" min={1} className="border p-1 w-24 block" value={buyMib} onChange={(e) => setBuyMib(Number(e.target.value))} /></label>
+          <label>Epochs <input type="number" min={1} className="border p-1 w-20 block" value={epochs} onChange={(e) => setEpochs(Number(e.target.value))} /></label>
+          <button type="button" className="border rounded px-2 py-1" disabled={!sameRange} onClick={() => void submit(() => buildBuyStorageTx(config, storage.id, budget.id, budget.capId, buyBytes, epochs))}>Buy with fleet WAL</button>
+        </div>
+        <p>{cost !== undefined ? `About ${wal(cost)} at the current price, paid from the fleet's WAL; no WAL leaves the fleet. ` : ""}Walrus encodes a blob to about {(Number(encodedBlobLength(MIB)) / MIB).toFixed(1)}× its size: a 1 MiB artifact needs that many MiB of storage.{!sameRange ? ` The pool started at epoch ${storage.startEpoch}; Walrus only joins storage with the same epoch range, so extend the pool instead.` : ""}</p>
+        <div className="flex flex-wrap gap-2 items-end">
+          <label>Extend the pool by epochs <input type="number" min={1} className="border p-1 w-20 block" value={extend} onChange={(e) => setExtend(Number(e.target.value))} /></label>
+          <button type="button" className="border rounded px-2 py-1" disabled={!storage.endEpoch} onClick={() => void submit(() => buildExtendPoolTx(config, storage.id, budget.id, budget.capId, extend))}>Extend with fleet WAL</button>
+        </div>
+        <div className="flex flex-wrap gap-2 items-end">
+          <label>Withdraw WAL <input className="border p-1 w-24 block" value={withdrawWal} onChange={(e) => setWithdrawWal(e.target.value)} /></label>
+          <button type="button" className="border rounded px-2 py-1" onClick={() => void submit(() => buildWithdrawWalTx(config, storage.id, budget.id, budget.capId, parseToken(withdrawWal), account.address))}>Withdraw unused WAL</button>
+        </div>
+      </fieldset>
+    </>}
+    {walrusState.error && <p role="alert">Walrus state unavailable: {walrusState.error.message}</p>}
     {message && <p role="status">{message}</p>}
     {error && <p role="alert">{error}</p>}
   </div>;

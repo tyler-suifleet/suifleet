@@ -7,8 +7,8 @@ import { ObjectError } from "@mysten/sui/client";
 import { Transaction, coinWithBalance } from "@mysten/sui/transactions";
 import { normalizeStructTag, normalizeSuiAddress } from "@mysten/sui/utils";
 import { BUDGET_TYPES, MANIFEST, moveType, requireManifest, verifyDeployment } from "./deployment-manifest";
-import { calls, fleet_budget_BudgetOwnerCapBcs, fleet_budget_DeviceAccountBcs, fleet_budget_DeviceKeyBcs,
-  fleet_budget_FleetBudgetBcs, fleet_budget_GasDrawnBcs } from "./fleet-protocol";
+import { calls, fleet_budget_BudgetOwnerCapBcs, fleet_budget_DeviceKeyBcs, fleet_budget_FleetBudgetBcs,
+  fleet_budget_GasAccountBcs, fleet_budget_GasDrawnBcs } from "./fleet-protocol";
 import { PACKAGE_ID, REGISTRY_ID } from "./constants";
 import { allEvents, allOwned } from "./sui";
 
@@ -40,6 +40,17 @@ export const DEFAULT_LIMITS: Limits = {
   maxDrawsPerPeriod: BigInt(6),
   minDrawIntervalMs: BigInt(600_000),
 };
+
+/**
+ * The reserve given to a newly enrolled device's own account: two period
+ * allowances, at most what the budget holds after the float. Devices draw
+ * only from their reserve; the owner refills or reclaims it.
+ */
+export function defaultReserve(limits: Limits, available: bigint, floatMist: bigint): bigint {
+  const rest = available > floatMist ? available - floatMist : BigInt(0);
+  const wanted = limits.periodAllowance * BigInt(2);
+  return wanted < rest ? wanted : rest;
+}
 
 export function validateLimits(limits: Limits): Limits {
   if (limits.periodMs <= BigInt(0)) throw new Error("The period must be positive");
@@ -100,48 +111,69 @@ export function buildConfigureTx(budgetId: string, capId: string, limits: Limits
   return tx;
 }
 
-export function buildSetDeviceSuspendedTx(budgetId: string, capId: string, deviceId: string, suspended: boolean): Transaction {
+export function buildSetDeviceSuspendedTx(budgetId: string, capId: string, accountId: string, suspended: boolean): Transaction {
   requireBudget();
   const tx = new Transaction();
-  calls.fleet_budget_set_device_suspended(tx, PACKAGE_ID, budgetId, capId, deviceId, suspended);
+  calls.fleet_budget_set_device_suspended(tx, PACKAGE_ID, budgetId, capId, accountId, suspended);
   return tx;
 }
 
-export function buildSetDeviceLimitsTx(budgetId: string, capId: string, deviceId: string, limits: Limits): Transaction {
+export function buildSetDeviceLimitsTx(budgetId: string, capId: string, accountId: string, limits: Limits): Transaction {
   requireBudget();
   const tx = new Transaction();
-  calls.fleet_budget_set_device_limits(tx, PACKAGE_ID, budgetId, capId, deviceId, limitsArg(tx, limits));
+  calls.fleet_budget_set_device_limits(tx, PACKAGE_ID, budgetId, capId, accountId, limitsArg(tx, limits));
   return tx;
 }
 
-export function buildFundDeviceTx(budgetId: string, capId: string, deviceId: string, amountMist: bigint): Transaction {
+/** Owner-paid gas straight to a device too empty to pay for its own draw. */
+export function buildFundDeviceTx(budgetId: string, capId: string, accountId: string, amountMist: bigint): Transaction {
   requireBudget();
   const tx = new Transaction();
-  calls.fleet_budget_fund_device(tx, PACKAGE_ID, budgetId, capId, REGISTRY_ID, deviceId, amountMist);
+  calls.fleet_budget_fund_device(tx, PACKAGE_ID, budgetId, capId, REGISTRY_ID, accountId, amountMist);
   return tx;
 }
 
-export function buildRemoveDeviceTx(budgetId: string, capId: string, deviceId: string): Transaction {
+/** Move budget funds into a device's reserve, which its draws come from. */
+export function buildFundReserveTx(budgetId: string, capId: string, accountId: string, amountMist: bigint): Transaction {
+  requireBudget();
+  if (amountMist <= BigInt(0)) throw new Error("Refill a positive amount");
+  const tx = new Transaction();
+  calls.fleet_budget_fund_reserve(tx, PACKAGE_ID, budgetId, capId, accountId, amountMist);
+  return tx;
+}
+
+/** Move a device's unused reserve back into the budget. */
+export function buildReclaimReserveTx(budgetId: string, capId: string, accountId: string, amountMist: bigint): Transaction {
+  requireBudget();
+  if (amountMist <= BigInt(0)) throw new Error("Nothing to reclaim");
+  const tx = new Transaction();
+  calls.fleet_budget_reclaim_reserve(tx, PACKAGE_ID, budgetId, capId, accountId, amountMist);
+  return tx;
+}
+
+/** Close a device's account for good; its reserve returns to the budget. */
+export function buildRemoveDeviceTx(budgetId: string, capId: string, accountId: string): Transaction {
   requireBudget();
   const tx = new Transaction();
-  calls.fleet_budget_remove_device(tx, PACKAGE_ID, budgetId, capId, deviceId);
+  calls.fleet_budget_remove_device(tx, PACKAGE_ID, budgetId, capId, accountId);
   return tx;
 }
 
 /** Enroll an already activated device the owner holds (its owner cap). */
-export function buildEnrollDeviceTx(budgetId: string, capId: string, ownerCapId: string, floatMist: bigint): Transaction {
+export function buildEnrollDeviceTx(budgetId: string, capId: string, ownerCapId: string, floatMist: bigint, reserveMist: bigint): Transaction {
   requireBudget();
   const tx = new Transaction();
-  calls.fleet_budget_enroll_device(tx, PACKAGE_ID, budgetId, capId, REGISTRY_ID, ownerCapId, floatMist, CLOCK);
+  calls.fleet_budget_enroll_device(tx, PACKAGE_ID, budgetId, capId, REGISTRY_ID, ownerCapId, floatMist, reserveMist, CLOCK);
   return tx;
 }
 
 /**
- * Register, issue the device cap, activate and (with a budget) enroll and
- * send the device its float, in one atomic PTB. The owner cap goes to `sender`.
+ * Register, issue the device cap, activate and (with a budget) enroll the
+ * device with its own gas account and reserve and send it its float, in one
+ * atomic PTB. The owner cap goes to `sender`.
  */
 export function buildRegisterAndEnrollTx(name: string, deviceAddress: string, arch: string, sender: string,
-  budget?: { budgetId: string; capId: string; floatMist: bigint }): Transaction {
+  budget?: { budgetId: string; capId: string; floatMist: bigint; reserveMist: bigint }): Transaction {
   requireManifest();
   const tx = new Transaction();
   const [device] = calls.device_registry_register_device(tx, PACKAGE_ID, REGISTRY_ID, name, deviceAddress, arch, CLOCK);
@@ -149,7 +181,7 @@ export function buildRegisterAndEnrollTx(name: string, deviceAddress: string, ar
   const [owner] = calls.device_registry_activate_device(tx, PACKAGE_ID, REGISTRY_ID, device);
   if (budget) {
     requireBudget();
-    calls.fleet_budget_enroll_device(tx, PACKAGE_ID, budget.budgetId, budget.capId, REGISTRY_ID, owner, budget.floatMist, CLOCK);
+    calls.fleet_budget_enroll_device(tx, PACKAGE_ID, budget.budgetId, budget.capId, REGISTRY_ID, owner, budget.floatMist, budget.reserveMist, CLOCK);
   }
   tx.transferObjects([owner], tx.pure.address(sender));
   return tx;
@@ -168,12 +200,19 @@ export interface BudgetView {
   deviceCount: bigint;
   totalDeposited: bigint;
   totalWithdrawn: bigint;
-  totalDrawn: bigint;
+  /** Floats and owner refills paid straight to devices. */
+  totalPaid: bigint;
+  totalAllocated: bigint;
+  totalReclaimed: bigint;
 }
 
 export interface AccountView {
+  /** The device's own shared GasAccount. */
+  accountId: string;
   deviceId: string;
   ownerCapId: string;
+  /** What the device may still draw. */
+  reserve: bigint;
   limits: Limits;
   suspended: boolean;
   periodStartMs: bigint;
@@ -184,7 +223,7 @@ export interface AccountView {
   enrolledAtMs: bigint;
 }
 
-function limitsOf(value: ReturnType<typeof fleet_budget_DeviceAccountBcs.parse>["limits"]): Limits {
+function limitsOf(value: ReturnType<typeof fleet_budget_GasAccountBcs.parse>["limits"]): Limits {
   return { floatCap: BigInt(value.float_cap), periodMs: BigInt(value.period_ms), periodAllowance: BigInt(value.period_allowance),
     maxDrawsPerPeriod: BigInt(value.max_draws_per_period), minDrawIntervalMs: BigInt(value.min_draw_interval_ms) };
 }
@@ -208,12 +247,17 @@ export async function fetchBudgets(client: SuiGrpcClient, owner: string): Promis
     return [{ id: object.objectId, capId: caps[index].capId, version: BigInt(fields.version), balance: BigInt(fields.balance.value),
       paused: fields.paused, defaultLimits: limitsOf(fields.default_limits), lowBalanceThreshold: BigInt(fields.low_balance_threshold),
       deviceCount: BigInt(fields.device_count), totalDeposited: BigInt(fields.total_deposited),
-      totalWithdrawn: BigInt(fields.total_withdrawn), totalDrawn: BigInt(fields.total_drawn) }];
+      totalWithdrawn: BigInt(fields.total_withdrawn), totalPaid: BigInt(fields.total_paid),
+      totalAllocated: BigInt(fields.total_allocated), totalReclaimed: BigInt(fields.total_reclaimed) }];
   });
 }
 
-/** A device's account in a budget, or undefined if it is not enrolled. */
-export async function fetchAccount(client: Pick<SuiGrpcClient, "getDynamicField">, budgetId: string, deviceId: string): Promise<AccountView | undefined> {
+/**
+ * A device's current account in a budget, or undefined if it is not
+ * enrolled: the budget indexes the account's ID, and the shared GasAccount
+ * must name this budget and device.
+ */
+export async function fetchAccount(client: Pick<SuiGrpcClient, "getDynamicField" | "getObject">, budgetId: string, deviceId: string): Promise<AccountView | undefined> {
   let field;
   try {
     field = await client.getDynamicField({ parentId: budgetId,
@@ -222,10 +266,16 @@ export async function fetchAccount(client: Pick<SuiGrpcClient, "getDynamicField"
     if (error instanceof ObjectError && error.reason === "notFound") return undefined;
     throw error;
   }
-  if (normalizeStructTag(field.dynamicField.value.type) !== normalizeStructTag(moveType("fleet_budget::DeviceAccount"))) throw new Error("Unexpected DeviceAccount type");
-  const value = fleet_budget_DeviceAccountBcs.parse(field.dynamicField.value.bcs);
-  return { deviceId, ownerCapId: value.owner_cap_id, limits: limitsOf(value.limits), suspended: value.suspended,
-    periodStartMs: BigInt(value.period_start_ms), drawnInPeriod: BigInt(value.drawn_in_period),
+  if (normalizeStructTag(field.dynamicField.value.type) !== normalizeStructTag("0x2::object::ID")) throw new Error("Unexpected device index type");
+  const accountId = bcs.Address.parse(field.dynamicField.value.bcs);
+  const { object } = await client.getObject({ objectId: accountId, include: { content: true } });
+  if (normalizeStructTag(object.type) !== normalizeStructTag(moveType("fleet_budget::GasAccount"))) throw new Error("Unexpected GasAccount type");
+  const value = fleet_budget_GasAccountBcs.parse(object.content);
+  if (normalizeSuiAddress(value.budget_id) !== normalizeSuiAddress(budgetId) || normalizeSuiAddress(value.device_id) !== normalizeSuiAddress(deviceId)) {
+    throw new Error("The gas account belongs to another budget or device");
+  }
+  return { accountId, deviceId, ownerCapId: value.owner_cap_id, reserve: BigInt(value.reserve.value), limits: limitsOf(value.limits),
+    suspended: value.suspended, periodStartMs: BigInt(value.period_start_ms), drawnInPeriod: BigInt(value.drawn_in_period),
     drawsInPeriod: BigInt(value.draws_in_period), lastDrawMs: BigInt(value.last_draw_ms),
     totalDrawn: BigInt(value.total_drawn), enrolledAtMs: BigInt(value.enrolled_at_ms) };
 }
@@ -233,7 +283,8 @@ export async function fetchAccount(client: Pick<SuiGrpcClient, "getDynamicField"
 export interface DrawEvent {
   deviceId: string;
   amount: bigint;
-  balance: bigint;
+  /** The device's reserve after the draw. */
+  reserve: bigint;
   atLimit: boolean;
   checkpoint: string | null;
   digest: string;
@@ -245,7 +296,7 @@ export async function fetchDraws(client: SuiGrpcClient, budgetId: string): Promi
   return events.flatMap((event) => {
     const value = fleet_budget_GasDrawnBcs.parse(event.bcs);
     if (normalizeSuiAddress(value.budget_id) !== normalizeSuiAddress(budgetId)) return [];
-    return [{ deviceId: value.device_id, amount: BigInt(value.amount), balance: BigInt(value.balance), atLimit: value.at_limit,
+    return [{ deviceId: value.device_id, amount: BigInt(value.amount), reserve: BigInt(value.reserve), atLimit: value.at_limit,
       checkpoint: event.checkpoint, digest: event.transactionDigest }];
   });
 }
@@ -266,20 +317,26 @@ export function periodUsage(account: AccountView, nowMs: bigint) {
 
 /**
  * Devices drawing at their limits or far above the fleet's typical device,
- * and a budget near exhaustion. Signals for the owner to act (suspend,
- * revoke, pause, deposit); the limits themselves are enforced on chain.
+ * device reserves running out, and a budget near exhaustion. Signals for the
+ * owner to act (suspend, revoke, pause, refill, deposit); the limits
+ * themselves are enforced on chain.
  */
 export function budgetAlerts(budget: BudgetView, accounts: AccountView[], nowMs: bigint, runway: number | null): BudgetAlert[] {
   const alerts: BudgetAlert[] = [];
   if (budget.paused) alerts.push({ severity: "warning", text: "The budget is paused: no device can draw gas or upload storage until you resume it." });
-  if (budget.balance === BigInt(0)) alerts.push({ severity: "critical", text: "The budget is empty. Devices cannot top up; their receipts queue until you deposit." });
-  else if (budget.balance < budget.lowBalanceThreshold) alerts.push({ severity: "warning", text: "The budget is below your low-balance threshold. Deposit before it runs out." });
+  if (budget.balance === BigInt(0)) alerts.push({ severity: accounts.length ? "warning" : "critical", text: "The budget holds no unallocated funds: devices draw only from their reserves, and you cannot refill them until you deposit." });
+  else if (budget.balance < budget.lowBalanceThreshold) alerts.push({ severity: "warning", text: "The budget is below your low-balance threshold. Deposit before device reserves need refilling." });
   if (runway !== null && runway < 7) alerts.push({ severity: runway < 2 ? "critical" : "warning", text: `At the recent draw rate the budget lasts about ${runway.toFixed(1)} days.` });
   const usage = accounts.map((account) => ({ account, ...periodUsage(account, nowMs) }));
   const drawn = usage.map((u) => u.drawn).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   const median = drawn.length ? drawn[Math.floor((drawn.length - 1) / 2)] : BigInt(0);
   for (const { account, drawn, draws } of usage) {
     if (account.suspended) continue;
+    if (account.reserve === BigInt(0)) {
+      alerts.push({ severity: "critical", deviceId: account.deviceId, text: "Its gas reserve is empty: it cannot top up, and its receipts queue until you refill the reserve." });
+    } else if (account.reserve < account.limits.periodAllowance) {
+      alerts.push({ severity: "warning", deviceId: account.deviceId, text: "Its gas reserve is below one period allowance. Refill it from the budget." });
+    }
     if (drawn >= account.limits.periodAllowance || draws >= account.limits.maxDrawsPerPeriod) {
       alerts.push({ severity: "warning", deviceId: account.deviceId, text: "Drawing at its period limit. If this is unexpected, suspend it or revoke its key." });
     } else if (accounts.length >= 3 && drawn > BigInt(0) && drawn >= median * BigInt(3) && draws >= BigInt(2)) {
@@ -328,14 +385,42 @@ export function storageConfig(network = MANIFEST?.network, packageId = process.e
 /** Why the deposit cannot swap SUI for WAL on this network, if it cannot. */
 export function swapRoute(network = MANIFEST?.network): { route?: "testnet-exchange"; explanation: string } {
   if (network === "testnet") {
-    return { route: "testnet-exchange", explanation: "The deposit swaps SUI for WAL through Walrus's pinned Testnet exchange at its posted fixed rate, in the same transaction, and aborts if fewer WAL than the minimum arrive." };
+    return { route: "testnet-exchange", explanation: "Fleet storage can be funded in SUI only: its deposit swaps SUI for WAL through Walrus's pinned Testnet exchange at its posted fixed rate, deposits the WAL and can buy the storage, all in one transaction that aborts if fewer WAL than the minimum arrive." };
   }
   return { explanation: "No DEX route is pinned and verified for this network, so the deposit cannot swap SUI for WAL safely in one transaction. Buy WAL directly (an exchange, or a card on-ramp that sells WAL) and deposit it." };
 }
 
-export function buildCreateStorageTx(config: StorageConfig, budgetId: string, capId: string, quota: {
-  periodMs: bigint; encodedBytesPerPeriod: bigint; uploadsPerPeriod: bigint; maxBlobSize: bigint; writeFeesPerPeriod: bigint }): Transaction {
+export interface Quota {
+  periodMs: bigint;
+  /** Walrus encoded bytes, which storage is reserved and paid in. */
+  encodedBytesPerPeriod: bigint;
+  uploadsPerPeriod: bigint;
+  maxBlobSize: bigint;
+  /** WAL FROST. */
+  writeFeesPerPeriod: bigint;
+}
+
+/** Per-device upload limits for new fleet storage: a day's period. */
+export const DEFAULT_QUOTA: Quota = {
+  periodMs: BigInt(86_400_000),
+  encodedBytesPerPeriod: BigInt(512 * 1024 * 1024),
+  uploadsPerPeriod: BigInt(24),
+  maxBlobSize: BigInt(8 * 1024 * 1024),
+  writeFeesPerPeriod: BigInt(100_000_000),
+};
+
+/** Walrus prices storage per 1 MiB unit per epoch. */
+export const WALRUS_UNIT_BYTES = BigInt(1024 * 1024);
+
+/** WAL FROST Walrus charges for `encodedBytes` over `epochs` at `pricePerUnit`. */
+export function storageCost(encodedBytes: bigint, epochs: number, pricePerUnit: bigint): bigint {
+  const units = (encodedBytes + WALRUS_UNIT_BYTES - BigInt(1)) / WALRUS_UNIT_BYTES;
+  return units * pricePerUnit * BigInt(epochs);
+}
+
+export function buildCreateStorageTx(config: StorageConfig, budgetId: string, capId: string, quota: Quota): Transaction {
   requireBudget();
+  if (quota.periodMs <= BigInt(0) || quota.uploadsPerPeriod <= BigInt(0)) throw new Error("The quota needs a positive period and upload count");
   const tx = new Transaction();
   const [q] = tx.moveCall({ target: `${config.packageId}::fleet_storage::new_quota`, arguments: [tx.pure.u64(quota.periodMs),
     tx.pure.u64(quota.encodedBytesPerPeriod), tx.pure.u64(quota.uploadsPerPeriod), tx.pure.u64(quota.maxBlobSize), tx.pure.u64(quota.writeFeesPerPeriod)] });
@@ -343,34 +428,125 @@ export function buildCreateStorageTx(config: StorageConfig, budgetId: string, ca
   return tx;
 }
 
-/** Buy `encodedBytes` of Walrus storage for `epochs` with the owner's WAL and hold it for the fleet. */
-export function buildBuyStorageTx(config: StorageConfig, storageId: string, budgetId: string, capId: string,
-  encodedBytes: bigint, epochs: number, maxPaymentFrost: bigint, sender: string): Transaction {
+function buyStorage(tx: Transaction, config: StorageConfig, storageId: string, budgetId: string, capId: string, encodedBytes: bigint, epochs: number) {
+  if (encodedBytes <= BigInt(0) || !Number.isInteger(epochs) || epochs <= 0) throw new Error("Buy a positive size for at least one epoch");
+  tx.moveCall({ target: `${config.packageId}::fleet_storage::buy_storage`, arguments: [tx.object(storageId), tx.object(budgetId), tx.object(capId),
+    tx.object(config.walrus.system), tx.pure.u64(encodedBytes), tx.pure.u32(epochs)] });
+}
+
+/**
+ * Buy `encodedBytes` of Walrus storage for `epochs` with the fleet's own WAL
+ * and add it to the pool, in one call: no WAL leaves the fleet object.
+ */
+export function buildBuyStorageTx(config: StorageConfig, storageId: string, budgetId: string, capId: string, encodedBytes: bigint, epochs: number): Transaction {
   requireBudget();
   const tx = new Transaction();
-  const payment = tx.add(coinWithBalance({ type: config.walrus.walType, balance: maxPaymentFrost }));
-  const [storage] = tx.moveCall({ target: `${config.walrus.walrusPackage}::system::reserve_space`,
-    arguments: [tx.object(config.walrus.system), tx.pure.u64(encodedBytes), tx.pure.u32(epochs), payment] });
-  tx.moveCall({ target: `${config.packageId}::fleet_storage::deposit_storage`, arguments: [tx.object(storageId), tx.object(budgetId), tx.object(capId), storage] });
-  // Unspent WAL goes back to the owner.
-  tx.transferObjects([payment], tx.pure.address(sender));
+  buyStorage(tx, config, storageId, budgetId, capId, encodedBytes, epochs);
+  return tx;
+}
+
+/** Push the whole pool's expiry back by `epochs`, paid with the fleet's WAL. */
+export function buildExtendPoolTx(config: StorageConfig, storageId: string, budgetId: string, capId: string, epochs: number): Transaction {
+  requireBudget();
+  if (!Number.isInteger(epochs) || epochs <= 0) throw new Error("Extend by at least one epoch");
+  const tx = new Transaction();
+  tx.moveCall({ target: `${config.packageId}::fleet_storage::extend_pool`, arguments: [tx.object(storageId), tx.object(budgetId), tx.object(capId),
+    tx.object(config.walrus.system), tx.pure.u32(epochs)] });
+  return tx;
+}
+
+/** Deposit WAL from the wallet (bought directly, for example by card) into fleet storage. */
+export function buildDepositWalTx(config: StorageConfig, storageId: string, budgetId: string, capId: string, amountFrost: bigint): Transaction {
+  requireBudget();
+  if (amountFrost <= BigInt(0)) throw new Error("Deposit a positive amount");
+  const tx = new Transaction();
+  const wal = tx.add(coinWithBalance({ type: config.walrus.walType, balance: amountFrost }));
+  tx.moveCall({ target: `${config.packageId}::fleet_storage::deposit_wal`, arguments: [tx.object(storageId), tx.object(budgetId), tx.object(capId), wal] });
+  return tx;
+}
+
+export function buildWithdrawWalTx(config: StorageConfig, storageId: string, budgetId: string, capId: string, amountFrost: bigint, sender: string): Transaction {
+  requireBudget();
+  if (amountFrost <= BigInt(0)) throw new Error("Withdraw a positive amount");
+  const tx = new Transaction();
+  const [wal] = tx.moveCall({ target: `${config.packageId}::fleet_storage::withdraw_wal`, arguments: [tx.object(storageId), tx.object(budgetId), tx.object(capId), tx.pure.u64(amountFrost)] });
+  tx.transferObjects([wal], tx.pure.address(sender));
   return tx;
 }
 
 /**
- * Deposit write-fee WAL bought from SUI in the same transaction, through the
- * pinned Testnet exchange; aborts unless at least `minWal` arrives.
+ * Pay in SUI only: swap SUI for WAL through the pinned Testnet exchange and
+ * deposit it, aborting the whole transaction unless at least `minWal`
+ * arrives; optionally buy storage with it in the same transaction.
  */
 export function buildSwapAndDepositWalTx(config: StorageConfig, exchangeId: string, storageId: string, budgetId: string, capId: string,
-  suiMist: bigint, minWal: bigint): Transaction {
+  suiMist: bigint, minWal: bigint, buy?: { encodedBytes: bigint; epochs: number }): Transaction {
   requireBudget();
   if (!config.walrus.exchange.objects.some((id) => normalizeSuiAddress(id) === normalizeSuiAddress(exchangeId))) throw new Error("Not a pinned exchange");
+  if (suiMist <= BigInt(0) || minWal <= BigInt(0)) throw new Error("Swap a positive amount with a positive minimum");
   const tx = new Transaction();
   const [sui] = tx.splitCoins(tx.gas, [tx.pure.u64(suiMist)]);
   const [wal] = tx.moveCall({ target: `${config.walrus.exchange.package}::wal_exchange::exchange_all_for_wal`, arguments: [tx.object(exchangeId), sui] });
   tx.moveCall({ target: `${config.packageId}::fleet_storage::deposit_wal_at_least`,
     arguments: [tx.object(storageId), tx.object(budgetId), tx.object(capId), wal, tx.pure.u64(minWal)] });
+  if (buy) buyStorage(tx, config, storageId, budgetId, capId, buy.encodedBytes, buy.epochs);
   return tx;
+}
+
+// fleet_storage::FleetStorage, with walrus::storage_resource::Storage as pinned (testnet-v1.59.0).
+const StorageBcs = bcs.struct("Storage", { id: bcs.Address, start_epoch: bcs.u32(), end_epoch: bcs.u32(), storage_size: bcs.u64() });
+const QuotaBcs = bcs.struct("Quota", { period_ms: bcs.u64(), encoded_bytes_per_period: bcs.u64(), uploads_per_period: bcs.u64(),
+  max_blob_size: bcs.u64(), write_fees_per_period: bcs.u64() });
+const FleetStorageBcs = bcs.struct("FleetStorage", { id: bcs.Address, version: bcs.u64(), budget_id: bcs.Address, pool: bcs.option(StorageBcs),
+  wal: bcs.struct("Balance", { value: bcs.u64() }), default_quota: QuotaBcs, blob_count: bcs.u64(), total_encoded_bytes: bcs.u64(), total_write_fees: bcs.u64() });
+const StorageCreatedBcs = bcs.struct("StorageCreated", { storage_id: bcs.Address, budget_id: bcs.Address });
+
+export interface StorageView {
+  id: string;
+  version: bigint;
+  /** Unused prepaid storage, in encoded bytes. */
+  poolSize: bigint;
+  /** The pool's Walrus epochs; uploads end with the pool. */
+  startEpoch?: number;
+  endEpoch?: number;
+  walBalance: bigint;
+  defaultQuota: Quota;
+  blobCount: bigint;
+  totalEncodedBytes: bigint;
+  totalWriteFees: bigint;
+}
+
+/** The fleet storage created for `budgetId` (the newest, if several), checked against its type and budget. */
+export async function fetchStorage(client: SuiGrpcClient, config: StorageConfig, budgetId: string): Promise<StorageView | undefined> {
+  const created = (await allEvents(client, `${config.packageId}::fleet_storage::StorageCreated`))
+    .map((event) => StorageCreatedBcs.parse(event.bcs))
+    .filter((event) => normalizeSuiAddress(event.budget_id) === normalizeSuiAddress(budgetId));
+  for (const { storage_id } of created) {
+    let object;
+    try { ({ object } = await client.getObject({ objectId: storage_id, include: { content: true } })); }
+    catch (error) { if (error instanceof ObjectError && (error.reason === "notFound" || error.reason === "deleted")) continue; throw error; }
+    if (normalizeStructTag(object.type) !== normalizeStructTag(`${config.packageId}::fleet_storage::FleetStorage`)) throw new Error("Unexpected FleetStorage type");
+    const fields = FleetStorageBcs.parse(object.content);
+    if (normalizeSuiAddress(fields.budget_id) !== normalizeSuiAddress(budgetId)) throw new Error("The fleet storage belongs to another budget");
+    const q = fields.default_quota;
+    return { id: object.objectId, version: BigInt(fields.version), poolSize: fields.pool ? BigInt(fields.pool.storage_size) : BigInt(0),
+      startEpoch: fields.pool?.start_epoch, endEpoch: fields.pool?.end_epoch, walBalance: BigInt(fields.wal.value),
+      defaultQuota: { periodMs: BigInt(q.period_ms), encodedBytesPerPeriod: BigInt(q.encoded_bytes_per_period), uploadsPerPeriod: BigInt(q.uploads_per_period),
+        maxBlobSize: BigInt(q.max_blob_size), writeFeesPerPeriod: BigInt(q.write_fees_per_period) },
+      blobCount: BigInt(fields.blob_count), totalEncodedBytes: BigInt(fields.total_encoded_bytes), totalWriteFees: BigInt(fields.total_write_fees) };
+  }
+  return undefined;
+}
+
+/** Warnings about fleet storage running out or expiring. */
+export function storageAlerts(storage: StorageView, currentEpoch: number | undefined): BudgetAlert[] {
+  const alerts: BudgetAlert[] = [];
+  if (storage.poolSize === BigInt(0)) alerts.push({ severity: "warning", text: "Fleet storage holds no prepaid space: fleet-paid uploads fail until you buy storage." });
+  if (storage.walBalance === BigInt(0)) alerts.push({ severity: "warning", text: "Fleet storage holds no WAL for write fees: fleet-paid uploads fail until you deposit WAL." });
+  if (storage.endEpoch !== undefined && currentEpoch !== undefined && storage.endEpoch - currentEpoch <= 1) {
+    alerts.push({ severity: "critical", text: `Prepaid storage ends at Walrus epoch ${storage.endEpoch}: extend the pool before new uploads would expire at once.` });
+  }
+  return alerts;
 }
 
 /** WAL out for `suiMist`, at the exchange's posted rate, less `slippageBps`. */

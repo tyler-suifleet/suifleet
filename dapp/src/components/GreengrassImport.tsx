@@ -11,6 +11,8 @@ import { uploadArtifact,uploadRecipe,storageWarnings,renewalCommand,type Protect
 import { DEFAULT_DELIVERY,type Delivery } from '@/lib/delivery';
 import type { AccessPolicy } from '@/lib/access-policy';
 import { DeliveryFields } from '@/components/DeliveryFields';
+import { FleetStorageChoice } from '@/components/FleetStorageChoice';
+import { useFleetBlobStore } from '@/hooks/useFleetStorage';
 import { buildPublishVersionTx } from '@/lib/catalog';
 import type { Transaction } from '@mysten/sui/transactions';
 
@@ -24,6 +26,7 @@ export function GreengrassImport({catalog,owner,execute,onPublished,disabled,pol
   const [result,setResult]=useState<Translation|null>(null),[acknowledged,setAcknowledged]=useState(false);
   const [busy,setBusy]=useState(false),[message,setMessage]=useState('');
   const [delivery,setDelivery]=useState(DEFAULT_DELIVERY);
+  const fleet=useFleetBlobStore(),[fleetPaid,setFleetPaid]=useState(false);
   const parsed=text.trim()?parseGreengrassRecipe(text):null;
   const uris=parsed&&'recipe' in parsed?artifactUris(parsed.recipe):[];
   // Placeholder blob IDs mark which uploads the translated manifests use.
@@ -47,11 +50,14 @@ export function GreengrassImport({catalog,owner,execute,onPublished,disabled,pol
       if(!catalog) throw new Error('Choose a catalog');
       // One release identity for every artifact and recipe; no plaintext fallback.
       const protection=protect(delivery);
+      // Fleet-paid storage is never silently replaced by the publisher.
+      if(fleetPaid&&!fleet.store) throw new Error(`Fleet storage is unavailable: ${fleet.reason??'unknown reason'}`);
+      const store=fleetPaid?fleet.store:undefined;
       const used=new Set(preview.manifests.map(m=>m.recipe.artifactBlobId));
       const uploaded:Record<string,{blobId:string;sha256:string}>={},warnings:string[]=[];
       for(const [i,uri] of uris.entries()){
         if(!used.has(`pending-${i}`)) continue;
-        const artifact=await uploadArtifact(files[uri],owner,protection);
+        const artifact=await uploadArtifact(files[uri],owner,protection,undefined,store);
         uploaded[uri]=artifact;warnings.push(`Artifact ${uri}: storage expires at epoch ${artifact.storage.endEpoch??'unknown'}`,...storageWarnings(artifact.storage));
       }
       // Translate again with the real uploads; the digests were already checked locally.
@@ -60,7 +66,7 @@ export function GreengrassImport({catalog,owner,execute,onPublished,disabled,pol
       for(const m of final.manifests) assertComponentRecipe(m.recipe);
       const manifests=[];
       for(const m of final.manifests){
-        const recipe=await uploadRecipe(m.recipe,owner,protection);
+        const recipe=await uploadRecipe(m.recipe,owner,protection,undefined,store);
         warnings.push(`Recipe ${m.os}/${m.arch}: storage expires at epoch ${recipe.storage.endEpoch??'unknown'}`,...storageWarnings(recipe.storage));
         const renew=renewalCommand(recipe.storage);if(renew) warnings.push(renew);
         manifests.push({os:m.os,arch:m.arch,recipeBlobId:recipe.blobId,recipeSha256:recipe.sha256,artifactSha256:m.recipe.artifactSha256});
@@ -88,6 +94,7 @@ export function GreengrassImport({catalog,owner,execute,onPublished,disabled,pol
         <label><input type="checkbox" checked={acknowledged} onChange={e=>setAcknowledged(e.target.checked)}/> I reviewed these differences</label></div>}
     </div>}
     <DeliveryFields value={delivery} onChange={setDelivery} policies={policies} disabled={busy}/>
+    <FleetStorageChoice checked={fleetPaid} onChange={setFleetPaid} available={!!fleet.store} storage={fleet.storage} reason={fleet.reason} disabled={busy}/>
     <button disabled={disabled||busy||result?.outcome!=='translate'||(differences.length>0&&!acknowledged)} onClick={publish}>{busy?'Uploading…':'Upload and register translated version'}</button>
     {message&&<p className="whitespace-pre-wrap" role="status">{message}</p>}
   </div>;

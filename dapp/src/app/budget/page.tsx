@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useCurrentAccount } from "@mysten/dapp-kit-react";
 import { PageHeader, Section } from "@/components/ui";
-import { BudgetManager, CardFunding, DepositForm, EstimatePanel } from "@/components/FleetBudget";
+import { BudgetManager, CardFunding, DepositForm, EstimatePanel, StoragePanel } from "@/components/FleetBudget";
 import { formatToken, type Estimate } from "@/lib/network-costs";
 
 export default function BudgetPage() {
@@ -18,5 +18,6 @@ export default function BudgetPage() {
     </Section>}
     {account && <Section title="3. Deposit"><DepositForm suggestedMist={estimate?.suiDepositMist} /></Section>}
     {account && <Section title="4. Balance, usage and controls"><BudgetManager /></Section>}
+    {account && <Section title="5. Prepaid Walrus storage"><StoragePanel suggestedWalFrost={estimate?.walDepositFrost} /></Section>}
   </div>;
 }

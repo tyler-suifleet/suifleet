@@ -1,10 +1,13 @@
 // SF-083 frontend: the up-front estimate against the measured SF-054 costs,
-// serverless card checkout, purchase status, budget transactions and reads,
-// and owner alerts. Offline; no wallet, provider or network.
+// serverless card checkout, purchase status, budget and per-device account
+// transactions and reads, owner alerts, fleet storage funding/purchase
+// transactions, and the fleet-paid upload flow (pinned-package check,
+// register effects, sliver write and certification) against a stubbed
+// Walrus client. Offline; no wallet, provider or network.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const { loader } = require("./frontend_test_utils.cjs");
+const { loader, appRequire } = require("./frontend_test_utils.cjs");
 
 const root = path.resolve(__dirname, "..");
 const evidence = (name) => JSON.parse(fs.readFileSync(path.join(root, "docs/business/sf054", name), "utf8"));
@@ -19,7 +22,8 @@ const load = loader();
 const costs = load("lib/network-costs.ts");
 const onramp = load("lib/onramp.ts");
 const budget = load("lib/fleet-budget.ts");
-const { fleet_budget_DeviceAccountBcs } = load("lib/fleet-protocol.ts");
+const { fleet_budget_GasAccountBcs } = load("lib/fleet-protocol.ts");
+const { bcs } = appRequire("@mysten/sui/bcs");
 
 // ── The estimate's inputs are the SF-054 measurements ──
 const receipt = quotes.historical_testnet_transactions.find((t) => t.label === "device receipt").effects.gasEffects.gasSummary;
@@ -98,7 +102,8 @@ console.log("PASS: hosted checkout URL with public app ID only; purchases count 
 const sender = "0x" + "1".repeat(64), budgetId = "0x" + "b".repeat(64), capId = "0x" + "c".repeat(64), deviceId = "0x" + "d".repeat(64);
 const fns = (tx) => tx.getData().commands.filter((c) => c.$kind === "MoveCall").map((c) => `${c.MoveCall.module}::${c.MoveCall.function}`);
 assert.ok(budget.budgetSupported());
-assert.deepEqual(fns(budget.buildRegisterAndEnrollTx("Pi", wallet, "aarch64", sender, { budgetId, capId, floatMist: BigInt(5) })),
+const accountId = "0x" + "e".repeat(64);
+assert.deepEqual(fns(budget.buildRegisterAndEnrollTx("Pi", wallet, "aarch64", sender, { budgetId, capId, floatMist: BigInt(5), reserveMist: BigInt(10) })),
   ["device_registry::register_device", "device_cap::issue_cap", "device_registry::activate_device", "fleet_budget::enroll_device"]);
 assert.deepEqual(fns(budget.buildRegisterAndEnrollTx("Pi", wallet, "aarch64", sender)),
   ["device_registry::register_device", "device_cap::issue_cap", "device_registry::activate_device"]);
@@ -106,16 +111,31 @@ assert.deepEqual(fns(budget.buildCreateBudgetTx(BigInt(10), budget.DEFAULT_LIMIT
 assert.deepEqual(fns(budget.buildDepositTx(budgetId, capId, BigInt(1))), ["fleet_budget::deposit"]);
 assert.deepEqual(fns(budget.buildWithdrawTx(budgetId, capId, BigInt(1), sender)), ["fleet_budget::withdraw"]);
 assert.deepEqual(fns(budget.buildSetPausedTx(budgetId, capId, true)), ["fleet_budget::set_paused"]);
-assert.deepEqual(fns(budget.buildFundDeviceTx(budgetId, capId, deviceId, BigInt(1))), ["fleet_budget::fund_device"]);
-assert.deepEqual(fns(budget.buildSetDeviceSuspendedTx(budgetId, capId, deviceId, true)), ["fleet_budget::set_device_suspended"]);
+assert.deepEqual(fns(budget.buildFundDeviceTx(budgetId, capId, accountId, BigInt(1))), ["fleet_budget::fund_device"]);
+assert.deepEqual(fns(budget.buildSetDeviceSuspendedTx(budgetId, capId, accountId, true)), ["fleet_budget::set_device_suspended"]);
+assert.deepEqual(fns(budget.buildFundReserveTx(budgetId, capId, accountId, BigInt(1))), ["fleet_budget::fund_reserve"]);
+assert.deepEqual(fns(budget.buildReclaimReserveTx(budgetId, capId, accountId, BigInt(1))), ["fleet_budget::reclaim_reserve"]);
+assert.deepEqual(fns(budget.buildRemoveDeviceTx(budgetId, capId, accountId)), ["fleet_budget::remove_device"]);
+assert.deepEqual(fns(budget.buildEnrollDeviceTx(budgetId, capId, deviceId, BigInt(1), BigInt(2))), ["fleet_budget::enroll_device"]);
+assert.throws(() => budget.buildFundReserveTx(budgetId, capId, accountId, BigInt(0)), /positive/);
+// Owner account changes name the account and only read the budget.
+const inputs = (tx) => tx.getData().inputs.map((input) => input.UnresolvedObject?.objectId ?? input.$kind);
+assert.ok(inputs(budget.buildSetDeviceSuspendedTx(budgetId, capId, accountId, true)).includes(accountId));
+// The reserve: two allowances, at most what the budget holds after the float.
+assert.equal(budget.defaultReserve(budget.DEFAULT_LIMITS, BigInt(10_000_000_000), BigInt(60_000_000)), budget.DEFAULT_LIMITS.periodAllowance * BigInt(2));
+assert.equal(budget.defaultReserve(budget.DEFAULT_LIMITS, BigInt(100_000_000), BigInt(60_000_000)), BigInt(40_000_000));
+assert.equal(budget.defaultReserve(budget.DEFAULT_LIMITS, BigInt(10), BigInt(60_000_000)), BigInt(0));
 assert.throws(() => budget.buildDepositTx(budgetId, capId, BigInt(0)), /positive/);
 assert.throws(() => budget.validateLimits({ ...budget.DEFAULT_LIMITS, periodMs: BigInt(0) }), /period/);
 assert.throws(() => budget.validateLimits({ ...budget.DEFAULT_LIMITS, floatCap: budget.DEFAULT_LIMITS.periodAllowance + BigInt(1) }), /float cap/);
 // Every call the builders make is in the reviewed ABI.
-for (const name of ["create", "deposit", "withdraw", "enroll_device", "draw_gas", "set_paused", "fund_device"]) {
+for (const name of ["create", "deposit", "withdraw", "enroll_device", "draw_gas", "set_paused", "fund_device", "fund_reserve", "reclaim_reserve", "remove_device"]) {
   assert.ok(protocol.modules.fleet_budget.functions[name], `fleet_budget::${name} is in the reviewed ABI`);
 }
-console.log("PASS: registration enrolls atomically with its float; owner budget transactions use the reviewed encoders");
+// draw_gas reads the fleet budget and writes only the device's own account.
+assert.deepEqual(protocol.modules.fleet_budget.functions.draw_gas.parameters.slice(0, 2),
+  ["&sui_edge::fleet_budget::FleetBudget", "&mut sui_edge::fleet_budget::GasAccount"]);
+console.log("PASS: registration enrolls atomically with its float and reserve; owner budget and account transactions use the reviewed encoders");
 
 // ── Storage and the swap route ──
 assert.match(budget.storageConfig("testnet", undefined).reason, /not configured/);
@@ -124,29 +144,51 @@ const storage = budget.storageConfig("testnet", "0x5").config;
 assert.equal(budget.swapRoute("testnet").route, "testnet-exchange");
 assert.match(budget.swapRoute("mainnet").explanation, /Buy WAL directly/);
 const exchange = storage.walrus.exchange.objects[0];
+assert.deepEqual(fns(budget.buildCreateStorageTx(storage, budgetId, capId, budget.DEFAULT_QUOTA)), ["fleet_storage::new_quota", "fleet_storage::create"]);
+assert.throws(() => budget.buildCreateStorageTx(storage, budgetId, capId, { ...budget.DEFAULT_QUOTA, uploadsPerPeriod: BigInt(0) }), /positive/);
 assert.deepEqual(fns(budget.buildSwapAndDepositWalTx(storage, exchange, "0x7", budgetId, capId, BigInt(1000), BigInt(990))),
   ["wal_exchange::exchange_all_for_wal", "fleet_storage::deposit_wal_at_least"]);
+// SUI only: swap, deposit with its minimum and buy the storage in one transaction.
+assert.deepEqual(fns(budget.buildSwapAndDepositWalTx(storage, exchange, "0x7", budgetId, capId, BigInt(1000), BigInt(990), { encodedBytes: BigInt(1 << 20), epochs: 2 })),
+  ["wal_exchange::exchange_all_for_wal", "fleet_storage::deposit_wal_at_least", "fleet_storage::buy_storage"]);
 assert.throws(() => budget.buildSwapAndDepositWalTx(storage, "0x99", "0x7", budgetId, capId, BigInt(1000), BigInt(990)), /pinned exchange/);
-assert.deepEqual(fns(budget.buildBuyStorageTx(storage, "0x7", budgetId, capId, BigInt(1 << 20), 2, BigInt(5), sender)),
-  ["system::reserve_space", "fleet_storage::deposit_storage"]);
+assert.throws(() => budget.buildSwapAndDepositWalTx(storage, exchange, "0x7", budgetId, capId, BigInt(1000), BigInt(0)), /positive minimum/);
+assert.deepEqual(fns(budget.buildBuyStorageTx(storage, "0x7", budgetId, capId, BigInt(1 << 20), 2)), ["fleet_storage::buy_storage"]);
+assert.throws(() => budget.buildBuyStorageTx(storage, "0x7", budgetId, capId, BigInt(0), 2), /positive size/);
+assert.deepEqual(fns(budget.buildExtendPoolTx(storage, "0x7", budgetId, capId, 3)), ["fleet_storage::extend_pool"]);
+assert.deepEqual(fns(budget.buildDepositWalTx(storage, "0x7", budgetId, capId, BigInt(5))), ["fleet_storage::deposit_wal"]);
+assert.deepEqual(fns(budget.buildWithdrawWalTx(storage, "0x7", budgetId, capId, BigInt(5), sender)), ["fleet_storage::withdraw_wal"]);
+assert.equal(budget.storageCost(BigInt(1), 2, BigInt(100)), BigInt(200));
+assert.equal(budget.storageCost(BigInt((1 << 20) + 1), 3, BigInt(100)), BigInt(600));
 assert.equal(budget.minWalOut(BigInt(1000), { wal: BigInt(1), sui: BigInt(1) }, 100), BigInt(990));
 assert.throws(() => budget.minWalOut(BigInt(1), { wal: BigInt(1), sui: BigInt(0) }, 0), /Invalid/);
-console.log("PASS: storage only on the pinned Walrus Testnet build; SUI-only deposit swaps with an on-chain minimum or explains direct WAL");
+console.log("PASS: storage only on the pinned Walrus Testnet build; create, fund (SUI swap with an on-chain minimum, or direct WAL), buy, extend and withdraw use fleet_storage");
 
 // ── Reads and alerts ──
 const limits = { float_cap: "60", period_ms: "1000", period_allowance: "100", max_draws_per_period: "3", min_draw_interval_ms: "0" };
-const raw = (extra) => fleet_budget_DeviceAccountBcs.serialize({ owner_cap_id: capId, limits, suspended: false, period_start_ms: "0",
-  drawn_in_period: "0", draws_in_period: "0", last_draw_ms: "0", total_drawn: "60", enrolled_at_ms: "1", ...extra }).toBytes();
+const raw = (extra) => fleet_budget_GasAccountBcs.serialize({ id: accountId, budget_id: budgetId, device_id: deviceId, owner_cap_id: capId,
+  reserve: { value: "500" }, limits, suspended: false, closed: false, period_start_ms: "0", drawn_in_period: "0", draws_in_period: "0",
+  last_draw_ms: "0", total_drawn: "60", enrolled_at_ms: "1", ...extra }).toBytes();
 async function reads() {
-  const accountType = `${manifest.call_package_id}::fleet_budget::DeviceAccount`;
-  const field = (type, bytes) => ({ getDynamicField: async () => ({ dynamicField: { value: { type, bcs: bytes } } }) });
-  const account = await budget.fetchAccount(field(accountType, raw({ drawn_in_period: "40", draws_in_period: "1" })), budgetId, deviceId);
+  const accountType = `${manifest.call_package_id}::fleet_budget::GasAccount`;
+  // The budget indexes the account's ID; the account is its own shared object.
+  const client = (type, bytes, index = "0x2::object::ID") => ({
+    getDynamicField: async () => ({ dynamicField: { value: { type: index, bcs: bcs.Address.serialize(accountId).toBytes() } } }),
+    getObject: async ({ objectId }) => { assert.equal(objectId, accountId); return { object: { objectId, type, content: bytes } }; },
+  });
+  const account = await budget.fetchAccount(client(accountType, raw({ drawn_in_period: "40", draws_in_period: "1" })), budgetId, deviceId);
+  assert.equal(account.accountId, accountId);
   assert.equal(account.drawnInPeriod, BigInt(40));
+  assert.equal(account.reserve, BigInt(500));
   assert.equal(account.limits.floatCap, BigInt(60));
-  await assert.rejects(budget.fetchAccount(field(`0x9::fleet_budget::DeviceAccount`, raw({})), budgetId, deviceId), /Unexpected DeviceAccount type/);
+  await assert.rejects(budget.fetchAccount(client(`0x9::fleet_budget::GasAccount`, raw({})), budgetId, deviceId), /Unexpected GasAccount type/);
+  await assert.rejects(budget.fetchAccount(client(accountType, raw({}), "0x2::object::UID"), budgetId, deviceId), /device index/);
+  await assert.rejects(budget.fetchAccount(client(accountType, raw({ device_id: "0x" + "9".repeat(64) })), budgetId, deviceId), /another budget or device/);
+  await assert.rejects(budget.fetchAccount(client(accountType, raw({ budget_id: "0x" + "9".repeat(64) })), budgetId, deviceId), /another budget or device/);
   const view = { id: budgetId, capId, version: BigInt(1), balance: BigInt(1000), paused: false, defaultLimits: budget.DEFAULT_LIMITS,
-    lowBalanceThreshold: BigInt(100), deviceCount: BigInt(4), totalDeposited: BigInt(0), totalWithdrawn: BigInt(0), totalDrawn: BigInt(0) };
-  const acct = (id, drawn, drawsInPeriod, extra = {}) => ({ deviceId: id, ownerCapId: capId, limits: { floatCap: BigInt(60), periodMs: BigInt(1000),
+    lowBalanceThreshold: BigInt(100), deviceCount: BigInt(4), totalDeposited: BigInt(0), totalWithdrawn: BigInt(0), totalPaid: BigInt(0),
+    totalAllocated: BigInt(0), totalReclaimed: BigInt(0) };
+  const acct = (id, drawn, drawsInPeriod, extra = {}) => ({ accountId, deviceId: id, ownerCapId: capId, reserve: BigInt(500), limits: { floatCap: BigInt(60), periodMs: BigInt(1000),
     periodAllowance: BigInt(100), maxDrawsPerPeriod: BigInt(3), minDrawIntervalMs: BigInt(0) }, suspended: false, periodStartMs: BigInt(0),
     drawnInPeriod: BigInt(drawn), drawsInPeriod: BigInt(drawsInPeriod), lastDrawMs: BigInt(1), totalDrawn: BigInt(drawn), enrolledAtMs: BigInt(0), ...extra });
   const quiet = [acct("0xa1", 10, 1), acct("0xa2", 10, 1), acct("0xa3", 0, 0)];
@@ -157,6 +199,10 @@ async function reads() {
   const anomalous = budget.budgetAlerts(view, [...quiet, acct("0xa5", 60, 2)], BigInt(5), null);
   assert.deepEqual(anomalous.map((a) => a.deviceId), ["0xa5"]);
   assert.match(anomalous[0].text, /far more/);
+  // Device reserves running low or empty.
+  const reserves = budget.budgetAlerts(view, [...quiet, acct("0xa6", 0, 0, { reserve: BigInt(99) }), acct("0xa7", 0, 0, { reserve: BigInt(0) })], BigInt(5), null);
+  assert.deepEqual(reserves.map((a) => [a.deviceId, a.severity]), [["0xa6", "warning"], ["0xa7", "critical"]]);
+  assert.match(reserves[1].text, /reserve is empty/);
   // A new period clears usage; suspended devices are already handled.
   assert.deepEqual(budget.budgetAlerts(view, [...quiet, acct("0xa4", 100, 3)], BigInt(1000), null), []);
   assert.deepEqual(budget.budgetAlerts(view, [...quiet, acct("0xa4", 100, 3, { suspended: true })], BigInt(5), null), []);
@@ -164,6 +210,69 @@ async function reads() {
   assert.deepEqual(empty.map((a) => a.severity), ["warning", "critical", "critical"]);
   assert.match(budget.budgetAlerts({ ...view, balance: BigInt(50) }, [], BigInt(5), 5)[0].text, /low-balance threshold/);
   assert.match(budget.budgetAlerts(view, [], BigInt(5), 5)[0].text, /5.0 days/);
+  // Storage alerts: no space, no WAL, expiring pool.
+  const sv = { id: "0x7", version: BigInt(1), poolSize: BigInt(0), startEpoch: 3, endEpoch: 5, walBalance: BigInt(0), defaultQuota: budget.DEFAULT_QUOTA,
+    blobCount: BigInt(0), totalEncodedBytes: BigInt(0), totalWriteFees: BigInt(0) };
+  assert.deepEqual(budget.storageAlerts(sv, 4).map((a) => a.severity), ["warning", "warning", "critical"]);
+  assert.deepEqual(budget.storageAlerts({ ...sv, poolSize: BigInt(1), walBalance: BigInt(1) }, 2), []);
 }
-reads().then(() => console.log("PASS: account reads verify their type; at-limit, anomalous, low, empty, paused and runway alerts"),
+
+// ── Fleet-paid uploads, against a stubbed Walrus client ──
+async function uploads() {
+  const walrusSdk = appRequire("@mysten/walrus");
+  const target = { config: storage, storageId: "0x" + "7".repeat(64), budgetId, capId };
+  const blobObjectId = "0x" + "f".repeat(64);
+  const encoded = { blobId: walrusSdk.blobIdFromInt(BigInt(123456789)), rootHash: bcs.u256().serialize(BigInt(42)).toBytes(), metadata: { V1: {} }, sliversByNode: [[], []] };
+  const Registered = bcs.struct("FleetUploadRegistered", { storage_id: bcs.Address, blob_object_id: bcs.Address, blob_id: bcs.u256(), size: bcs.u64(),
+    encoded_size: bcs.u64(), write_fee: bcs.u64(), end_epoch: bcs.u32(), pool_size: bcs.u64(), wal_balance: bcs.u64() });
+  const event = (storageId, blobId) => ({ eventType: `${storage.packageId}::fleet_storage::FleetUploadRegistered`, bcs: Registered.serialize({ storage_id: storageId,
+    blob_object_id: blobObjectId, blob_id: blobId, size: "5", encoded_size: "65000000", write_fee: "20000", end_epoch: 9, pool_size: "1", wal_balance: "2" }).toBytes() });
+  function stub({ packageId = storage.walrus.walrusPackage, events = [event(target.storageId, BigInt(123456789))] } = {}) {
+    const calls = [];
+    const walrusClient = {
+      systemObject: async () => ({ id: storage.walrus.system, package_id: packageId }),
+      systemState: async () => ({ committee: { members: Array.from({ length: 10 }, () => ({})), epoch: 7 } }),
+      encodeBlob: async (bytes) => { calls.push(["encode", bytes.length]); return encoded; },
+      writeEncodedBlobToNodes: async (options) => { calls.push(["write", options.objectId, options.deletable]); return ["c1", "c2"]; },
+      certificateFromConfirmations: async (options) => { calls.push(["certificate", options.blobObjectId]); return { signature: new Uint8Array([1]), signers: [0, 9], serializedMessage: new Uint8Array([2]) }; },
+    };
+    const client = { $extend: () => ({ walrus: walrusClient }) };
+    const execute = async (tx) => { const names = fns(tx); calls.push(["execute", ...names]); return { digest: "d", events: names.includes("fleet_storage::register_fleet_blob") ? events : [] }; };
+    return { client, execute, calls };
+  }
+  const upload = load("lib/fleet-upload.ts");
+  const ok = stub();
+  const info = await upload.uploadToFleetStorage(ok.client, target, new Uint8Array(5), ok.execute);
+  assert.deepEqual(ok.calls, [["encode", 5], ["execute", "fleet_storage::register_fleet_blob"], ["write", blobObjectId, false],
+    ["certificate", blobObjectId], ["execute", "fleet_storage::certify_blob"]]);
+  assert.deepEqual(info, { blobId: encoded.blobId, blobObjectId, endEpoch: 9, costFrost: BigInt(20000), owner: "fleet", alreadyCertified: false });
+  // The live Walrus package must be the pinned one: nothing is registered otherwise.
+  const moved = stub({ packageId: "0x" + "5".repeat(64) });
+  await assert.rejects(upload.uploadToFleetStorage(moved.client, target, new Uint8Array(5), moved.execute), /not the pinned/);
+  assert.deepEqual(moved.calls, []);
+  // Without this storage's event for this blob in the confirmed effects, no sliver is written.
+  for (const events of [[], [event("0x" + "8".repeat(64), BigInt(123456789))], [event(target.storageId, BigInt(1))]]) {
+    const missing = stub({ events });
+    await assert.rejects(upload.uploadToFleetStorage(missing.client, target, new Uint8Array(5), missing.execute), /without a fleet upload event/);
+    assert.deepEqual(missing.calls.map((c) => c[0]), ["encode", "execute"]);
+  }
+  // A failed sliver write or certification stops before success is reported.
+  const failing = stub();
+  const write = failing.client.$extend().walrus;
+  failing.client.$extend = () => ({ walrus: { ...write, writeEncodedBlobToNodes: async () => { throw new Error("NotEnoughBlobConfirmationsError"); } } });
+  await assert.rejects(upload.uploadToFleetStorage(failing.client, target, new Uint8Array(5), failing.execute), /NotEnoughBlobConfirmations/);
+  assert.deepEqual(upload.signersToBitmap([0, 9], 10), new Uint8Array([1, 2]));
+  assert.throws(() => upload.signersToBitmap([10], 10), /not in the committee/);
+  // walrus.ts uses the fleet store as the only path when one is given.
+  const walrusLib = load("lib/walrus.ts");
+  const stored = [];
+  const result = await walrusLib.uploadArtifact(new File([new Uint8Array(7)], "a.bin"), sender, { kind: "public" }, undefined,
+    async (body) => { stored.push(body.length); return info; });
+  assert.deepEqual(stored, [7]);
+  assert.equal(result.storage.owner, "fleet");
+  assert.equal(walrusLib.renewalCommand(info), null);
+  assert.deepEqual(walrusLib.storageWarnings(info), []);
+}
+reads().then(() => console.log("PASS: account reads follow the budget index and verify the account's type, budget and device; reserve, at-limit, anomalous, low, empty, paused, runway and storage alerts"))
+  .then(uploads).then(() => console.log("PASS: fleet-paid uploads check the pinned Walrus package, need the registration event, write slivers to the registered blob and certify it; failures stop without success"),
   (error) => { console.error(error); process.exit(1); });

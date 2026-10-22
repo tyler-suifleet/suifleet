@@ -7,7 +7,7 @@ import type { Transaction } from "@mysten/sui/transactions";
 import { NETWORK } from "@/lib/constants";
 import { verifyDeployment } from "@/lib/deployment-manifest";
 import { onboardingConfig, registrationInput } from "@/lib/onboarding";
-import { budgetSupported, buildRegisterAndEnrollTx } from "@/lib/fleet-budget";
+import { budgetSupported, buildRegisterAndEnrollTx, defaultReserve } from "@/lib/fleet-budget";
 import { formatToken, type Estimate } from "@/lib/network-costs";
 import { CardFunding, DepositForm, EstimatePanel, useFleetBudget } from "@/components/FleetBudget";
 import { useDevices } from "@/hooks/useDevices";
@@ -92,14 +92,15 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
         const data = new FormData(event.currentTarget);
         try {
           const input = registrationInput(String(data.get("name")), String(data.get("deviceAddress")), String(data.get("arch")));
-          const funding = budget && fromBudget ? { budgetId: budget.id, capId: budget.capId, floatMist: budget.defaultLimits.floatCap } : undefined;
+          const funding = budget && fromBudget ? { budgetId: budget.id, capId: budget.capId, floatMist: budget.defaultLimits.floatCap,
+            reserveMist: defaultReserve(budget.defaultLimits, budget.balance, budget.defaultLimits.floatCap) } : undefined;
           void submit(buildRegisterAndEnrollTx(input.name, input.deviceAddress, input.arch, account.address, funding));
         } catch (cause) { setError({ address: account.address, text: (cause as Error).message }); }
       }}>
         <label className="block">Device name <input className="border p-2 block w-full" name="name" required /></label>
         <label className="block">Device public address <input className="border p-2 block w-full" name="deviceAddress" required placeholder="0x…" /></label>
         <label className="block">Architecture <select className="border p-2 ml-2" name="arch"><option>aarch64</option><option>armv7</option><option>x86_64</option></select></label>
-        {budget && <label className="block"><input type="checkbox" checked={fromBudget} onChange={(e) => setFromBudget(e.target.checked)} /> Enroll in my fleet budget and send the device a {formatToken(budget.defaultLimits.floatCap)} SUI float</label>}
+        {budget && <label className="block"><input type="checkbox" checked={fromBudget} onChange={(e) => setFromBudget(e.target.checked)} /> Enroll in my fleet budget: send the device a {formatToken(budget.defaultLimits.floatCap)} SUI float and give its own account a {formatToken(defaultReserve(budget.defaultLimits, budget.balance, budget.defaultLimits.floatCap))} SUI reserve to draw from</label>}
         <button className="bg-blue-600 text-white rounded p-2 disabled:opacity-40" disabled={!ready || !devices.isSuccess || mutation.isPending}>Register device</button>
       </form>
       {message?.address === account.address && <p role="status" className="break-all">{message.text}</p>}
