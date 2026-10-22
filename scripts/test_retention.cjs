@@ -42,4 +42,18 @@ assert.deepEqual(Budget.parse(generated.fleet_budget_FleetBudgetBcs.serialize(bu
 const account = { id: id('0x4'), budget_id: id('0x1'), device_id: id('0x5'), owner_cap_id: id('0x6'), reserve: { value: '50' }, limits,
   suspended: false, closed: false, period_start_ms: '1', drawn_in_period: '0', draws_in_period: '0', last_draw_ms: '0', total_drawn: '0', enrolled_at_ms: '1' };
 assert.deepEqual(Account.parse(generated.fleet_budget_GasAccountBcs.serialize(account).toBytes()), account);
+// Descriptor-based key validation must reject symlinks and public permissions.
+const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
+const { executorSigner } = require('./retention_transport.cjs');
+const { Ed25519Keypair } = appRequire('@mysten/sui/keypairs/ed25519');
+const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'sf092-key-'));
+try {
+  const key = Ed25519Keypair.generate(), filename = path.join(temporary, 'executor');
+  fs.writeFileSync(filename, key.getSecretKey(), { mode: 0o600 });
+  assert.equal(executorSigner(filename).toSuiAddress(), key.toSuiAddress());
+  fs.symlinkSync(filename, path.join(temporary, 'link'));
+  assert.throws(() => executorSigner(path.join(temporary, 'link')));
+  fs.chmodSync(filename, 0o644);
+  assert.throws(() => executorSigner(filename));
+} finally { fs.rmSync(temporary, { recursive: true, force: true }); }
 console.log('PASS: retention SDK builders, cross-runtime BCS, independent funding/expiry facts');

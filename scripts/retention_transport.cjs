@@ -26,6 +26,18 @@ const Account = bcs.struct('GasAccount', { id: bcs.Address, budget_id: bcs.Addre
   reserve: balance, limits: Limits, suspended: bcs.bool(), closed: bcs.bool(), period_start_ms: bcs.u64(), drawn_in_period: bcs.u64(),
   draws_in_period: bcs.u64(), last_draw_ms: bcs.u64(), total_drawn: bcs.u64(), enrolled_at_ms: bcs.u64() });
 function check(ok) { if (!ok) throw Error('retention configuration or authority mismatch'); }
+function executorSigner(filename) {
+  // Only an executor-specific key file; never a Sui wallet/owner keystore.
+  const keyFd = fs.openSync(filename, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  let privateKey;
+  try {
+    const stat = fs.fstatSync(keyFd);
+    check(stat.isFile() && (stat.mode & 0o077) === 0 && stat.size < 1024);
+    privateKey = fs.readFileSync(keyFd, 'utf8').trim();
+  } finally { fs.closeSync(keyFd); }
+  const signer = Ed25519Keypair.fromSecretKey(/^[0-9a-f]{64}$/i.test(privateKey) ? Uint8Array.from(Buffer.from(privateKey, 'hex')) : privateKey);
+  return signer;
+}
 async function run({ config: c, action, value }) {
   check(c.chain === '4c78adac' && c.network === 'testnet');
   for (const key of ['storage', 'package', 'storage_origin', 'retention_origin', 'executor']) id(c[key]);
@@ -127,11 +139,7 @@ async function run({ config: c, action, value }) {
       throw error;
     }
   }
-  // Only an executor-specific key file; never a Sui wallet/owner keystore.
-  const stat = fs.statSync(c.executor_key_file);
-  check((stat.mode & 0o077) === 0 && stat.size < 1024);
-  const privateKey = fs.readFileSync(c.executor_key_file, 'utf8').trim();
-  const signer = Ed25519Keypair.fromSecretKey(/^[0-9a-f]{64}$/i.test(privateKey) ? Uint8Array.from(Buffer.from(privateKey, 'hex')) : privateKey);
+  const signer = executorSigner(c.executor_key_file);
   check(id(signer.toSuiAddress()) === id(c.executor));
   if (action === 'prepare') {
     const tx = new Transaction();
@@ -167,4 +175,4 @@ if (require.main === module) {
     catch { process.stderr.write('retention transport failed\n'); process.exitCode = 1; }
   });
 }
-module.exports = { run, Retention, Renewal, Record, Budget, Account };
+module.exports = { executorSigner, run, Retention, Renewal, Record, Budget, Account };
