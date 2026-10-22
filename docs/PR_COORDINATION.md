@@ -277,10 +277,10 @@ before evaluating the PR, for an owned open PR only:
   contain argv, stderr, or tokens. A new claim or revision restarts the schedule.
   Other PRs in the same scan continue normally.
 
-Dry runs never publish. Inspect a stuck claim with
-`sqlite3 ~/.local/state/pr-coordinator/reviews.sqlite3 'SELECT project,ticket,revision,attempts,retry_after,error FROM ownership_publication'`
-and the coordinator journal; `ticket --project suifleet publish KEY` remains the
-manual path.
+Dry runs never publish. Inspect a stuck claim through the coordinator journal
+and a read-only query of `ownership_publication` (`project, ticket, revision,
+attempts, retry_after, error`); `ticket --project suifleet publish KEY` remains
+the manual path.
 
 ### Reviewing while CI runs
 
