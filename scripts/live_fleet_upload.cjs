@@ -22,7 +22,20 @@ const next = async () => JSON.parse((await lines.next()).value);
 (async () => {
   const { config, reason } = budget.storageConfig("testnet", storagePackage);
   if (!config) throw new Error(reason);
-  const client = new SuiGrpcClient({ network: "testnet", baseUrl: rpc });
+  // Retry only failed read/simulation HTTP requests. Signing/submission remains
+  // the Python ledger's single, verified operation with effects reconciliation.
+  const readFetch = async (input, init) => {
+    const url = String(input);
+    const read = /\/(?:Get|List|Simulate)[A-Za-z]+$/.test(new URL(url).pathname);
+    for (let attempt = 0; ; attempt++) {
+      try { return await fetch(input, init); }
+      catch (error) {
+        if (!read || attempt >= 2) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
+      }
+    }
+  };
+  const client = new SuiGrpcClient({ network: "testnet", baseUrl: rpc, fetch: readFetch });
   const execute = async (transaction) => {
     transaction.setSender(sender);
     transaction.setGasBudget(BigInt(gas));

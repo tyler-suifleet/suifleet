@@ -621,7 +621,7 @@ test-prospects:
 
 .PHONY: test-retention
 test-retention:
-	$(RUN) python3 -m unittest discover -s scripts/tests -p test_retention_worker.py -v
+	$(RUN) python3 -m unittest discover -s scripts/tests -p 'test_retention*.py' -v
 	$(RUN) node scripts/test_retention.cjs
 
 # Run inside a disposable network-none dev container with Git history and warm Move cache.

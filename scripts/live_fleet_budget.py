@@ -27,6 +27,7 @@ Walrus SDK installed privately for the device side
 (scripts/live_walrus_upload.mjs) and dapp/node_modules for the owner side.
 """
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -50,6 +51,34 @@ BLOB_BYTES = 2048
 ENCODED = 66_034_000  # One RS2-encoded 2 KiB blob at 1000 shards (scripts/test_fleet_budget.cjs).
 UPLOAD_GAS = 60_000_000
 DAEMON_DRAW = 4_000_000
+
+
+def unrelocate_module(module, package):
+    """Normalize only Move's address-identifier table, never literal constants."""
+    data = bytearray(module)
+    assert data[:4] == bytes.fromhex("a11ceb0b"), "not Move bytecode"
+    offset = 8
+    def uleb():
+        nonlocal offset
+        value = shift = 0
+        while True:
+            byte = data[offset]; offset += 1
+            value |= (byte & 127) << shift
+            if byte < 128: return value
+            shift += 7
+            assert shift <= 28
+    count = uleb()
+    tables = []
+    for _ in range(count):
+        kind = data[offset]; offset += 1
+        tables.append((kind, uleb(), uleb()))
+    for kind, start, size in tables:
+        if kind == 8:
+            assert size % 32 == 0
+            for at in range(offset + start, offset + start + size, 32):
+                if data[at:at + 32] == bytes.fromhex(dm.object_id(package)[2:]):
+                    data[at:at + 32] = bytes(32)
+    return bytes(data)
 
 
 def fixture_key(tools):
@@ -163,7 +192,7 @@ def run(args):
     sdk = Path(args.walrus_sdk)
     assert (sdk / "node_modules/@mysten/walrus/package.json").exists(), "install the pinned Walrus SDK first (scripts/live_walrus_upload.mjs)"
     live = Live(args.wallet, "testnet", args.max_spend_mist, build_sui=args.build_sui, network_sui=args.network_sui)
-    live.preflight()
+    live.preflight(auto_fund=True)
     measured = live.evidence.setdefault("measured", {})
     root = Path(tempfile.mkdtemp(prefix="sf083-live-"))
     state_path = live.wallet.parent / "sf083-state.json"
@@ -191,7 +220,21 @@ def run(args):
             fixture = None
         package_dir = root / "contracts"
         stage(ROOT / "contracts", package_dir)
+        core_build = toolchain.compile_package(live.build_sui, package_dir)
+        def same_modules(package, built):
+            raw = live.client("object", package, "--bcs")["data"]["Package"]
+            return sorted(unrelocate_module(bytes(v), package) for v in raw["module_map"].values()) == sorted(base64.b64decode(v) for v in built["modules"])
+        if not fixture:
+            # A storage-only change must not republish identical core bytecode.
+            # Re-verify on-chain modules and ownership before adopting a cache.
+            for previous in fixtures.values():
+                if exists(previous["package"]) and same_modules(previous["package"], core_build):
+                    fixture = {k: previous[k] for k in ("package", "registry", "upgrade_cap")}
+                    fixtures[key] = fixture
+                    save()
+                    break
         if fixture:
+            assert same_modules(fixture["package"], core_build), "cached core bytecode differs from pinned compilation"
             assert dm.object_id(live.owner(fixture["upgrade_cap"])) == live.operator, "fixture UpgradeCap is not the wallet's"
             facts = dm.chain_facts(live.rpc_url, fixture["package"], fixture["upgrade_cap"], fixture["registry"])
             assert dm.upgrade_cap(facts["objects"][dm.object_id(fixture["upgrade_cap"])])[:2] == (dm.object_id(fixture["package"]), "1")
@@ -248,7 +291,7 @@ def run(args):
         live.check(f"budget {budget} created with a {DEPOSIT} MIST deposit; the device address received exactly its {FLOAT} MIST float "
                    f"and its own shared GasAccount {account} holds a {RESERVE} MIST reserve")
         # The float came from the charged deposit; the device's own gas is bounded by it.
-        device = live.child(device_config, FLOAT)
+        device = live.child(device_config, FLOAT + RESERVE)
         version = lambda object_id: str(live.object(object_id)["version"])
         before = version(budget)
         r = live.transaction("device draws from its account", "--move-call", call("fleet_budget", "draw_gas"), f"@{budget}", f"@{account}",
@@ -395,7 +438,9 @@ def run(args):
                              budget=20_000_000, funding=renewal_swap + gas_reserve)
             target = end_epoch + 2
             live.transaction("authorize finite blob renewal", "--move-call", call("fleet_storage", "authorize_renewal", storage_package),
-                             f"@{storage}", f"@{budget}", f"@{budget_cap}", f"@{blob}", f"{target}u32", f"{renewal_wal}u64", budget=15_000_000)
+                             f"@{storage}", f"@{budget}", f"@{budget_cap}", f"@{blob}", f"{target}u32", f"{renewal_wal}u64",
+                             "--move-call", call("fleet_storage", "prepay_renewal", storage_package),
+                             f"@{storage}", f"@{budget}", f"@{budget_cap}", f"@{SYSTEM}", f"@{blob}", budget=15_000_000)
             worker = Worker({"chain": live.chain, "network": "testnet", "rpc": live.rpc_url,
                              "storage": storage, "package": storage_package, "storage_origin": storage_package,
                              "retention_origin": storage_package, "executor": device_address,
@@ -410,7 +455,7 @@ def run(args):
                     return live.executor(device_config)("execute-signed-tx", "--tx-bytes", value["bytes"], "--signatures", value["signature"])
                 r = live.execute("browser-independent restricted renewal worker", submit, gas=10_000_000, sender=device)
                 renewed = event(r, "::fleet_storage::RenewalCompleted")
-                assert int(renewed["end_epoch"]) == target and int(renewed["fee"]) > 0
+                assert int(renewed["end_epoch"]) == target and int(renewed["fee"]) == 0
                 live.evidence["retention_renewal"] = dict(renewed, digest=r["digest"], net_gas_mist=net_gas(r))
                 return {"status": "submitted"}
             worker.transport = transport
