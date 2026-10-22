@@ -23,6 +23,59 @@ The installer resolves absolute Codex/Claude paths and the Node directory, so a 
 
 WSL must be running for this local service to poll. The user service restarts with the WSL systemd user session; it cannot wake a powered-off Windows host. `KillMode=process` lets existing workers finish if the daemon restarts. Their wrapper persists PID/start time and actual exit status, so the restarted service can collect completed results without launching another worker. Stopping the service stops new work; it does not interrupt an already-running review or feedback repair. Inspect the recorded PID before explicitly stopping a worker.
 
+## Live agent dashboard (SF-106)
+
+`agent-dashboard` shows what each worker is doing right now: project, family and
+model, implementation/review/repair role, ticket, PR, elapsed time and the ticket
+title with a short task summary. It also shows configured capacity and use,
+waiting/retry/CI/blocked/retained states, the ticket queue, live resource locks,
+how fresh each local store is, and what changed since the last refresh.
+
+```bash
+python3 tools/pr-coordinator/install.py --dashboard-only   # copies one file and a launcher; no service restart
+agent-dashboard                      # live view on a terminal: q/Esc quit, r refresh, ↑/↓ j/k PgUp/PgDn scroll
+agent-dashboard --project suifleet --interval 10
+agent-dashboard --once               # one readable snapshot (default when stdout is not a terminal)
+agent-dashboard --json               # one machine-readable snapshot
+```
+
+The full installer also installs it. `--dashboard-only` copies only `dashboard.py`
+and writes `~/.local/bin/agent-dashboard`. It leaves the coordinator, dispatcher,
+worker, configuration and systemd units alone, and running workers keep running.
+`--live` exits with status 2 when stdout is not a terminal. One-shot modes exit 3
+when any store is unavailable.
+
+Each refresh reads the atomic ticket database, `dispatch.sqlite3`,
+`reviews.sqlite3`, the private configuration, and each PR's latest
+`snapshot.json`/`process.json` receipts. Every database is opened `mode=ro` with
+`query_only`. The dashboard makes no network calls and starts no GitHub, ticket or
+model subprocess. It only selects whitelisted columns and fields: claim tokens, lock
+tokens, claim blobs, prompts, PR bodies/comments and worker logs are never read
+into its output. Handoff evidence and job errors are shortened, and token-like
+strings in them are redacted.
+
+A worker counts as **active** only when its recorded PID is running, has the
+recorded `/proc` start time and is not a zombie. Other cases are listed separately
+and never counted active:
+
+| State | Meaning |
+|---|---|
+| `stale` | The process exited or the PID was reused, and the dispatcher hasn't reconciled it yet |
+| `lingering` | The wrapper exited but a process in its session is still running, so it still holds capacity |
+| `unverified` | There is no readable process identity |
+| `manual` | A claim with no worker receipt |
+| `orphaned`, `quarantined`, `parked` | Reservations kept for explicit recovery |
+
+Capacity uses the same buckets: *held* is unverified or waiting work that still
+occupies a slot, and *retained* is parked or quarantined work. Review tickets show
+CI as `ci-failed`, `ci-pending` or `awaiting-review`, taken from the newest local
+PR snapshot and its age. These are local receipts, not a live GitHub query.
+
+If a store is missing or corrupt, the dashboard reports it as `UNAVAILABLE`, never
+as an empty queue. Duplicate open jobs for one PR, and several retained receipts for
+one ticket, appear as warnings. Small terminals scroll, and narrow ones drop the
+model and project columns.
+
 ## Ownership and review loop
 
 Only same-repository PRs whose head branch exactly matches a centrally reserved ticket are dispatched. Unknown ownership, draft PRs, blocked/in-progress tickets and missing model identity are reported and left alone. An active implementation is never resumed by a second worker. A feedback worker can resume only its existing family's published Review claim, with its unchanged token and clean worktree. The coordinator renews a running feedback claim; workers must also assert/heartbeat before edits and commits.
@@ -199,3 +252,34 @@ Existing worker receipts continue through normal process-identity reconciliation
 This repair changes only coordinator code/database schema, not dispatcher or
 ticket-tool behavior. Use the coordinator-only installation/backup/rollback steps
 above after independent review; this feedback worker does not install services.
+
+### Reviewing while CI runs
+
+The coordinator starts independent source review for an owned, published Review
+PR as soon as its current base is integrated and GitHub reports it mergeable.
+Drafts, unknown mergeability, unpublished ownership and pending integration
+intents do not bypass their existing gates. Required CI/testnet checks can run
+in parallel with source review.
+
+A snapshot with missing, pending or unsuccessful checks is **source review
+only**. Workers report concrete code defects immediately, or return blocked
+with their completed source-review evidence. Collection enforces incomplete
+acceptance even if a worker mistakenly approves that snapshot. Pending/failed
+check transitions share a source-review key to avoid duplicate reviews. Changes
+to head, current base, comments, reviews, threads or acceptance scope still
+invalidate it. When all checks succeed, the full check evidence changes the
+fingerprint and dispatches a final independent evidence review, with the prior
+review available as evidence to revalidate. No review is automatically promoted.
+Only a complete, published, current-snapshot approval can pass the unchanged
+mandatory CI and exact-base testnet merge gates. Blocked reviews publish a
+GitHub comment, not a code change request; genuine code findings still request
+changes.
+
+PR reads no longer request comments/reviews twice: complete paginated REST
+collections and complete GraphQL review threads remain authoritative. Only
+content-addressed Git trees and SHA-to-SHA ancestry comparisons are cached;
+branch tips, PR state, feedback and CI are freshly read at integration gates.
+An actual account rate limit records a persistent, account-specific shared
+backoff (60–3600 seconds, default 300) rather than retrying each PR. No API
+account switching is used to evade limits. Failed/incomplete snapshots fail
+closed and remain visible in the coordinator's per-PR triage output.

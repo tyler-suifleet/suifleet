@@ -72,6 +72,19 @@ jobs:
             -v "$PWD/.ci-cache/move:/home/dev/.move" \
             suifleet-dev:ci make ci
 
+      - name: OCI supervised containers with a local engine and registry rejection fixture
+        run: |
+          oci_image=docker.io/library/alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+          docker pull "$oci_image"
+          docker run --rm --network host --group-add "$(stat -c %g /var/run/docker.sock)" \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v /usr/bin/docker:/usr/bin/docker:ro \
+            -v "$PWD:/workspace" -w /workspace \
+            -v "$PWD/.ci-cache/cargo-registry:/home/dev/.cargo/registry" \
+            -v "$PWD/.ci-cache/cargo-git:/home/dev/.cargo/git" \
+            -e SF_OCI_TEST_IMAGE="$oci_image" \
+            suifleet-dev:ci python3 scripts/test_oci.py
+
       - name: Scoped AWS credentials with unmodified SDKs and local mTLS
         run: make test-aws-credentials SUIFLEET_DEV_IMAGE=suifleet-dev:ci
       - name: Durable AWS stream exporter protocols
@@ -89,6 +102,11 @@ jobs:
 
       - name: Function manager processes, subscriptions and daemon restart
         run: make test-lambda SUIFLEET_DEV_IMAGE=suifleet-dev:ci
+
+      - name: Configured secure tunnel destination with actual proxy and systemd
+        run: |
+          make package-tunneling
+          python3 scripts/test_tunneling.py --package /tmp/suifleet-tunnel.tar.gz
 
       - name: Component IPC with distinct Unix peer identities
         run: |

@@ -226,15 +226,20 @@
   }
  },
  {
-  "id": "secure-tunneling-adapter-specification-incomplete",
+  "id": "secure-tunneling-adapter-requires-explicit-configuration",
   "dependency": "aws.greengrass.SecureTunneling",
   "spec": {
    "VersionRequirement": ">=2.0.0"
   },
   "expected": {
-   "outcome": "reject",
-   "reason": "adapter-specification-incomplete",
+   "outcome": "defer",
    "adapter": "secure-tunneling",
+   "requires": [
+    "SF-014",
+    "SF-025",
+    "SF-027",
+    "SF-061"
+   ],
    "implementation_ticket": "SF-063"
   }
  },

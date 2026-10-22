@@ -3,7 +3,10 @@ import { TELEMETRY_URL } from "@/lib/telemetry";
 /**
  * Fleet alerts (SF-020) as the indexer derives them from verified telemetry
  * and indexed receipts. Unlike device health, the dApp cannot re-derive these
- * from the chain alone, so they are shown as reported by the indexer.
+ * from the chain alone, so they are shown as reported by the indexer. They are
+ * active incidents: a failed deployment that a later applied deployment of the
+ * same component demonstrably recovered (SF-098) is no longer one, but its
+ * Failed receipt stays in the deployment history.
  */
 export type AlertKind = "component-broken" | "deployment-failed" | "device-offline" | "device-degraded" | "deployment-pending"
   // Service health (SF-085): pub/sub, MQTT bridge, streams and shadow sync.
@@ -85,4 +88,9 @@ export function currentAlerts(result: AlertsResult | undefined, updatedAt: numbe
   if (!result) return { status: "unavailable", reason: "alerts not loaded yet" };
   if (result.status === "ok" && now - updatedAt > ALERTS_STALE_MS) return { status: "unavailable", reason: "alerts have not refreshed recently" };
   return result;
+}
+
+/** Failed device results in the on-chain deployment history (SF-098), whether or not still an active incident. */
+export function historicalFailures(deployments: readonly { statuses: Record<string, number> }[]): number {
+  return deployments.reduce((sum, d) => sum + Object.values(d.statuses).filter((s) => s === 2).length, 0);
 }

@@ -294,8 +294,10 @@ test-manifest:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_deployment_manifest.py'
 	$(RUN) node scripts/test_deployment_manifest.cjs
 	$(RUN) node scripts/test_wallet_manifest.cjs
+	$(RUN) node scripts/test_onboarding.cjs
 	$(RUN) node scripts/test_deployment_receipts.cjs
 	$(RUN) node scripts/test_frontend_queries.cjs
+	$(RUN) node scripts/test_device_history.cjs
 	$(RUN) node scripts/test_target_groups.cjs
 	$(RUN) node scripts/test_desired_state.cjs
 	$(RUN) node scripts/test_seal_frontend.cjs
@@ -573,6 +575,17 @@ test-lambda:
 	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 \
 	  -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:?set pinned dev image}" \
 	  sh -ec 'python3 -m unittest discover -s scripts/tests -p test_lambda_manager.py -v; python3 scripts/test_lambda.py $(LAMBDA_EVIDENCE)'
+
+# SF-063: native optional proxy package and real systemd/process/TLS forwarding.
+# Host Docker only; the privileged test container has no external network.
+.PHONY: package-tunneling test-tunneling
+package-tunneling:
+	python3 scripts/package_tunneling.py --output "$${TUNNEL_PACKAGE:-/tmp/suifleet-tunnel.tar.gz}"
+
+test-tunneling:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins
+	$(MAKE) package-tunneling
+	python3 scripts/test_tunneling.py --package "$${TUNNEL_PACKAGE:-/tmp/suifleet-tunnel.tar.gz}" $(TUNNEL_EVIDENCE)
 
 # SF-062: real Linux metrics and shared TLS IoT adapter, no live AWS resources.
 .PHONY: test-device-defender

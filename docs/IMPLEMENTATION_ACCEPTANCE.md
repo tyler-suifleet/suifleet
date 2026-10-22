@@ -21,6 +21,7 @@ merging implementation does not establish them or authorize deployment.
 | SF-024 indexer | SF-010 public-node/archival integration |
 | SF-025 packaging | SF-029 bootable Pi image and SF-031 physical acceptance; final BitBake/QEMU evidence remains required for the packaging implementation |
 | SF-029 bootable Pi image | Physical flashing/boot, real-device identity persistence, networking and OTA remain SF-031/#32; a completed BitBake SD image and local partition/rootfs inspection remain required before Review. User will flash the image. |
+| SF-036 OCI supervised containers | SF-031/#32 native ARM/Pi engine installation, reboot and target-specific boundaries; SF-031/#32 and SF-087/#159 production registry/provider acceptance. Host engine crash/restart, cache/rollback, authentication failures, software boundaries, normal CI/testnet and independent review remain implementation gates. |
 | SF-039 signed releases | [SF-042: provisioned signing workflow and device trust](https://github.com/tyler-suifleet/suifleet/issues/62), plus SF-031 |
 | SF-043 automatic testnet controller | First full automatic Actions execution requires reviewed main-only bootstrap; tracked in SF-043/#64 and observed before declaring the overall request complete |
 | SF-045 testnet preflight repair | First full automatic Actions success after reviewed repair integration; exact-head CI, keyless Actions metadata probe and genuine current-head/base testnet effects/status remain premerge gates; tracked in #69/#64 |
@@ -112,6 +113,8 @@ no existing approval is relabeled. Install the same trusted policy in the privat
 project configuration without replacing worker limits, wallets or other projects.
 Keep genuine blockers visible locally and continue other eligible work rather than
 stopping all dispatch or inventing successful evidence.
+
+SF-063 secure tunneling retains actual proxy/process, source authentication, CAT isolation, ACL/limit/failure and systemd cleanup tests as implementation gates. Final AWS service/IAM/operator/account and physical target acceptance is deferred and unrun in [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32) and [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159); the offline receipt is [sf063-tunneling.json](validation/sf063-tunneling.json). This grants no AWS account mutation or production credential provisioning.
 
 
 ## Final external acceptance after implementation (2026-10-21)
