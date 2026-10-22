@@ -156,6 +156,44 @@ def checks_blocker(pr):
     return None
 
 
+def failed_checks(pr):
+    """Only actionable completed runs with a durable evidence link can start repair.
+
+    Every reported check is a merge requirement under this coordinator's policy.
+    Status errors, cancelled runs and missing infrastructure evidence stay blockers,
+    but cannot safely identify a source repair. Rollups can contain old reruns:
+    select the newest observation per workflow/name before considering failures.
+    """
+    latest = {}
+    for check in pr['statusCheckRollup']:
+        if check.get('__typename') != 'CheckRun' or not check.get('name'):
+            continue
+        key = (check.get('workflowName', ''), check['name'])
+        stamp = (check.get('startedAt') or '', check.get('completedAt') or '')
+        previous = latest.get(key)
+        if previous is None or stamp > previous[0]:
+            latest[key] = (stamp, check)
+        elif stamp == previous[0] and check != previous[1]:
+            # Ambiguous ordering is unavailable evidence, never a reason to restart.
+            latest[key] = (stamp, {})
+    failures = []
+    for _, check in latest.values():
+        if (check.get('status') == 'COMPLETED'
+                and check.get('conclusion') in ('FAILURE', 'TIMED_OUT')
+                and check.get('detailsUrl')):
+            failures.append({key: check.get(key) for key in
+                             ('name', 'workflowName', 'conclusion', 'detailsUrl', 'startedAt', 'completedAt')})
+    return sorted(failures, key=lambda row: json.dumps(row, sort_keys=True))
+
+
+def repair_feedback(pr):
+    """Keep CI repair reservations independent of stable source-review receipts."""
+    return hashlib.sha256(json.dumps(
+        [pr['headRefOid'], pr['baseRefOid'],
+         [{key: row.get(key) for key in ('name', 'workflowName', 'conclusion', 'detailsUrl')}
+          for row in pr['_ci_repair']]], sort_keys=True).encode()).hexdigest()
+
+
 def feedback(pr):
     # Coordinator publications are receipts, not new requests for another review.
     comments = [(c['id'], c['body'], c.get('updatedAt', '')) for c in pr['comments'] if pr.get('_receipts',{}).get(c['id']) != publication_hash(c)]
@@ -216,6 +254,13 @@ class Store:
             head TEXT, feedback TEXT, status TEXT, directory TEXT, pid INTEGER, started TEXT,
             result TEXT, error TEXT, created REAL, retry_after REAL, attempts INTEGER DEFAULT 0,
             UNIQUE(project,pr,kind,head,feedback));
+          CREATE TABLE IF NOT EXISTS ci_repair_budget (
+            project TEXT, pr INTEGER, attempts INTEGER, retry_after REAL,
+            PRIMARY KEY(project,pr));
+          CREATE TABLE IF NOT EXISTS ci_repairs (
+            project TEXT, pr INTEGER, head TEXT, base TEXT, evidence TEXT,
+            job INTEGER, created REAL, retry_after REAL,
+            PRIMARY KEY(project,pr,head,base,evidence));
           CREATE TABLE IF NOT EXISTS quarantine_backoff (
             family TEXT, kind TEXT, attempts INTEGER, retry_after REAL,
             PRIMARY KEY(family,kind));
@@ -249,6 +294,21 @@ class Store:
         except BaseException:
             self.db.execute('ROLLBACK'); raise
 
+    def ci_repair_blocker(self, project, pr):
+        rows = self.db.execute(
+            'SELECT * FROM ci_repairs WHERE project=? AND pr=? AND head=? AND base=? ORDER BY created DESC',
+            (project, pr['number'], pr['headRefOid'], pr['baseRefOid'])).fetchall()
+        evidence = repair_feedback(pr)
+        if any(row['evidence'] == evidence for row in rows):
+            return 'CI failure already reserved; inspect existing repair receipt (no automatic replay)'
+        budget = self.db.execute('SELECT attempts,retry_after FROM ci_repair_budget WHERE project=? AND pr=?',
+                                 (project, pr['number'])).fetchone()
+        if budget and budget['attempts'] >= 3:
+            return 'CI repair limit reached (3 attempts); owner must inspect failure and explicitly recover'
+        if budget and budget['retry_after'] > time.time():
+            return 'CI repair backoff until ' + str(budget['retry_after'])
+        return None
+
     def reserve(self, project, pr, family, kind, directory):
         self.db.execute('BEGIN IMMEDIATE')
         try:
@@ -259,11 +319,25 @@ class Store:
             pause = self.db.execute('SELECT retry_after FROM quarantine_backoff WHERE family=? AND kind=?', (family,kind)).fetchone()
             if active or count >= limit or quarantine_count >= 3 or (pause and pause[0] > time.time()):
                 self.db.execute('COMMIT'); return None
-            previous = self.db.execute("SELECT * FROM jobs WHERE project=? AND pr=? AND kind=? AND head=? AND feedback=?",(project,pr['number'],kind,pr['headRefOid'],feedback(pr))).fetchone()
+            ci_repair = kind == 'fix' and bool(pr.get('_ci_repair'))
+            fingerprint = repair_feedback(pr) if ci_repair else feedback(pr)
+            if ci_repair and self.ci_repair_blocker(project, pr):
+                self.db.execute('COMMIT'); return None
+            previous = self.db.execute("SELECT * FROM jobs WHERE project=? AND pr=? AND kind=? AND head=? AND feedback=?",(project,pr['number'],kind,pr['headRefOid'],fingerprint)).fetchone()
             if previous and previous['status'] == 'retry' and previous['retry_after'] <= time.time():
                 self.db.execute("UPDATE jobs SET status='reserved',created=?,attempts=attempts+1 WHERE id=?",(time.time(),previous['id']))
                 self.db.execute('COMMIT');return previous['id']
-            cursor = self.db.execute("INSERT OR IGNORE INTO jobs(project,pr,family,kind,head,feedback,status,directory,created) VALUES(?,?,?,?,?,?,'reserved',?,?)", (project, pr['number'], family, kind, pr['headRefOid'], feedback(pr), str(directory), time.time()))
+            cursor = self.db.execute("INSERT OR IGNORE INTO jobs(project,pr,family,kind,head,feedback,status,directory,created) VALUES(?,?,?,?,?,?,'reserved',?,?)", (project, pr['number'], family, kind, pr['headRefOid'], fingerprint, str(directory), time.time()))
+            if cursor.rowcount and ci_repair:
+                old = self.db.execute('SELECT attempts FROM ci_repair_budget WHERE project=? AND pr=?',
+                                      (project, pr['number'])).fetchone()
+                attempts = old[0] if old else 0
+                deadline = time.time() + min(3600, 300 * 2**attempts)
+                self.db.execute('INSERT OR REPLACE INTO ci_repair_budget VALUES(?,?,?,?)',
+                                (project, pr['number'], attempts + 1, deadline))
+                self.db.execute('INSERT INTO ci_repairs VALUES(?,?,?,?,?,?,?,?)',
+                    (project, pr['number'], pr['headRefOid'], pr['baseRefOid'], fingerprint,
+                     cursor.lastrowid, time.time(), deadline))
             self.db.execute('COMMIT')
             return cursor.lastrowid if cursor.rowcount else None
         except BaseException:
@@ -477,7 +551,8 @@ class Coordinator:
 
     def launch(self, project, pr, owner, kind, recovery=None):
         family = ('Claude' if owner['agent'] == 'Codex' else 'Codex') if kind == 'review' else owner['agent']
-        directory = self.state / project['id'] / f"pr-{pr['number']}-{kind}-{pr['headRefOid'][:12]}-{feedback(pr)[:12]}"
+        fingerprint = repair_feedback(pr) if kind == 'fix' and pr.get('_ci_repair') else feedback(pr)
+        directory = self.state / project['id'] / f"pr-{pr['number']}-{kind}-{pr['headRefOid'][:12]}-{fingerprint[:12]}"
         if recovery is not None:
             directory = Path(recovery['directory'])
         job = recovery['id'] if recovery is not None else self.store.reserve(project['id'], pr, family, kind, directory)
@@ -502,6 +577,8 @@ class Coordinator:
                 intent = {'claim': hashlib.sha256(owner['token'].encode()).hexdigest(),
                           'key': owner['key'], 'branch': owner['branch'],
                           'worktree': owner['worktree'], 'head': pr['headRefOid']}
+                if pr.get('_ci_repair'):
+                    intent.update(base=pr['baseRefOid'], ci_repair=pr['_ci_repair'])
                 if recovery is not None:
                     if json.loads(recovery['launch_intent']) != intent:
                         raise RuntimeError('launch intent no longer matches ownership')
@@ -510,10 +587,19 @@ class Coordinator:
                         raise RuntimeError('uncertain worker launch; manual recovery required')
                 elif current['status'] != 'review':
                     raise RuntimeError('owner became active; no second implementation worker')
-                if current['token'] != owner['token'] or current['branch'] != owner['branch'] or current['worktree'] != owner['worktree']:
+                if (current.get('expired') or any(current.get(key) != owner.get(key) for key in
+                        ('token', 'branch', 'worktree', 'agent', 'model', 'session'))):
                     raise RuntimeError('launch ownership changed')
                 if current['status'] not in ('review','in_progress'):
                     raise RuntimeError('launch ownership is not resumable')
+                if pr.get('_ci_repair'):
+                    fresh = self.pr(project, pr['number'])
+                    candidate = {**fresh, '_ci_repair': failed_checks(fresh)}
+                    if (fresh['state'] != 'OPEN' or fresh['isDraft'] or fresh.get('isCrossRepository')
+                            or fresh.get('headRefName') != owner['branch']
+                            or repair_feedback(candidate) != repair_feedback(pr)):
+                        raise RuntimeError('CI repair head/base/run evidence changed before launch')
+                    pr = candidate  # Preserve fresh complete source feedback too.
                 worktree = Path(owner['worktree'])
                 if run(['git', 'status', '--porcelain'], cwd=worktree).strip():
                     raise RuntimeError('implementation worktree is dirty; manual handoff needed')
@@ -587,6 +673,8 @@ Do not edit the coordinator database or forge another model's review. Only this 
                 common += '\nSOURCE REVIEW WHILE CI IS UNREADY: inspect source and run scoped local checks now. Do not wait for CI. Report actionable defects as changes_requested; otherwise return blocked with acceptance_complete=false and completed source-review evidence. This is not merge approval. A fresh evidence review is required once all checks succeed.\n'
             return common + f'''Independently review this exact detached commit against origin/{pr['baseRefName']}. Check correctness, security, compatibility, all existing change requests and acceptance evidence. Run meaningful scoped tests using globally locked build/port resources only while in use. Do not modify the implementation branch or post GitHub reviews yourself. Return approve only when all feedback and acceptance are resolved; otherwise changes_requested or blocked with precise file/line findings. Independent source review is required even when CI passes.
 '''
+        if pr.get('_ci_repair'):
+            common += '\nCI FAILURE REPAIR: inspect these exact failed runs, reproduce and fix the cause; do not rerun blindly or weaken checks: ' + json.dumps(pr['_ci_repair']) + '\nAll source feedback in the snapshot and prior independent review remains binding. This repair is not approval; fresh independent review and all exact-head/base checks remain required.\n'
         return common + f'''You inherit the existing {owner['agent']} claim for {owner['key']}; token is PR_COORDINATOR_CLAIM_TOKEN in the environment, never print/post it.
 The service renewed/resumed this reserved Review claim; assert before edits and commits and heartbeat every five minutes. Fix all review feedback on the owner branch, merge/rebase the snapshot's current base into this branch even when the only upstream changes are tracking documents, ensure the pushed head contains that base, then run required tests, commit and push contained Tyler-authored changes. Do not claim another ticket or resolve threads merely to hide findings. Post a detailed feedback reply on the existing PR. Mark ticket Review with exact evidence after push. Return fixed only after verifying the pushed head and required checks; if blocked retain the claim and report the next step. The coordinator will request a fresh independent review automatically.
 '''
@@ -622,6 +710,11 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                         pr = self.pr(project,row['pr'])
                         if pr['headRefOid'] != row['head']:
                             raise RuntimeError('pending launch head changed; manual recovery required')
+                        if intent.get('ci_repair'):
+                            if (pr['baseRefOid'] != intent['base']
+                                    or failed_checks(pr) != intent['ci_repair']):
+                                raise RuntimeError('pending CI repair evidence/base changed; manual recovery required')
+                            pr = {**pr, '_ci_repair': intent['ci_repair']}
                         self.launch(project,pr,owner,'fix',recovery=row)
                     elif time.time()-row['created'] > 30:
                         self.store.db.execute("UPDATE jobs SET status='failed',error='launch interrupted before worker started' WHERE id=?",(row['id'],))
@@ -733,7 +826,17 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                     owner = self.retry_review_publication(project,owner) or owner
                 review = self.store.review(project['id'],pr['number'])
                 reason = gate(pr,owner,review)
-                print(json.dumps({'project':project['id'],'pr':pr['number'],'owner':owner['agent'] if owner else None,'merge_blocker':reason}),flush=True)
+                if execute and checks_blocker(pr) is None:
+                    # A verified green snapshot ends this failure episode; head/base
+                    # movement and cancelled/pending runs never reset the budget.
+                    self.store.db.execute('DELETE FROM ci_repair_budget WHERE project=? AND pr=?',
+                                          (project['id'], pr['number']))
+                failures = failed_checks(pr)
+                repair = {**pr, '_ci_repair': failures} if failures else None
+                repair_blocker = self.store.ci_repair_blocker(project['id'], repair) if repair else None
+                print(json.dumps({'project':project['id'],'pr':pr['number'],
+                                  'owner':owner['agent'] if owner else None,'merge_blocker':reason,
+                                  'ci_failures':failures, 'ci_repair_blocker':repair_blocker}),flush=True)
                 if not execute or not owner or owner['status'] != 'review' or owner.get('publish_pending') or pr['isDraft'] or pr['state'] != 'OPEN': continue
                 self.ensure_closing_reference(project,pr,owner)
                 intent=self.store.db.execute('SELECT * FROM integrations WHERE project=? AND pr=? AND reconciled=0',(project['id'],pr['number'])).fetchone()
@@ -760,6 +863,9 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                     break
                 if not pr['baseIncluded'] or (review and review['head'] == pr['headRefOid'] and review['result']['verdict'] == 'changes_requested'):
                     self.launch(project,pr,owner,'fix')
+                elif repair:
+                    if not repair_blocker and not owner.get('expired') and owner.get('model'):
+                        self.launch(project,repair,owner,'fix')
                 elif pr['mergeable'] == 'MERGEABLE' and (not review or review['head'] != pr['headRefOid'] or review['feedback'] != feedback(pr)):
                     self.launch(project,pr,owner,'review')
             except Exception as error:
