@@ -39,26 +39,28 @@ class ProspectValidationTests(unittest.TestCase):
                     self.assertEqual(run(optimized).returncode, 0)
                 for case in ('budget', 'http', 'missing', 'duplicate', 'report', 'sources'):
                     with self.subTest(optimized=optimized, case=case):
-                        rows = list(csv.DictReader(io.StringIO(original_csv)))
-                        if case == 'budget':
-                            rows[0]['budget'] = 'Invented budget'
-                        elif case == 'http':
-                            rows[0]['primary_url'] = 'http://example.com'
-                        elif case == 'missing':
-                            rows.pop()
-                        elif case == 'duplicate':
-                            rows[1]['company'] = rows[0]['company']
-                        elif case == 'report':
-                            report.write_text(original_report + '\nstale')
-                        elif case == 'sources':
-                            sources.write_text(original_sources.replace('2026-10-21', '2000-01-01'))
-                        with csv_path.open('w', newline='') as stream:
-                            writer = csv.DictWriter(stream, fieldnames=rows[0].keys(), lineterminator='\n')
-                            writer.writeheader()
-                            writer.writerows(rows)
-                        result = run(optimized)
-                        self.assertNotEqual(result.returncode, 0, result.stdout)
-                        self.assertIn('ValueError', result.stderr)
-                        csv_path.write_text(original_csv)
-                        report.write_text(original_report)
-                        sources.write_text(original_sources)
+                        try:
+                            rows = list(csv.DictReader(io.StringIO(original_csv)))
+                            if case == 'budget':
+                                rows[0]['budget'] = 'Invented budget'
+                            elif case == 'http':
+                                rows[0]['primary_url'] = 'http://example.com'
+                            elif case == 'missing':
+                                rows.pop()
+                            elif case == 'duplicate':
+                                rows[1]['company'] = rows[0]['company']
+                            elif case == 'report':
+                                report.write_text(original_report + '\nstale')
+                            elif case == 'sources':
+                                sources.write_text(original_sources.replace('2026-10-21', '2000-01-01'))
+                            with csv_path.open('w', newline='') as stream:
+                                writer = csv.DictWriter(stream, fieldnames=rows[0].keys(), lineterminator='\n')
+                                writer.writeheader()
+                                writer.writerows(rows)
+                            result = run(optimized)
+                            self.assertNotEqual(result.returncode, 0, result.stdout)
+                            self.assertIn('ValueError', result.stderr)
+                        finally:
+                            csv_path.write_text(original_csv)
+                            report.write_text(original_report)
+                            sources.write_text(original_sources)
