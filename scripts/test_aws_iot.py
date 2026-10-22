@@ -264,6 +264,10 @@ def serve():
 
     def scan():
         """Key material anywhere the daemon writes: its log and state."""
+        # A running daemon replaces state through temporary files, so a
+        # listing can name a file that is gone before it is read. Scan only
+        # a stopped daemon's files: complete, and nothing skipped.
+        assert daemon["process"] is None, "scan requires a stopped daemon"
         markers = [b"PRIVATE KEY"]
         for name in ("thing1a", "thing1b", "thing2", "rogue-thing1"):
             body = [line for line in (pki / f"{name}.key").read_bytes().splitlines() if line and not line.startswith(b"-----")]
@@ -716,10 +720,10 @@ def host(args):
         check("kill -9 during an outage: spooled publications delivered in order after restart; the persisted sync base "
               "means no redundant shadow writes")
 
+        control("/stop")
         found = control("/scan")["found"]
         assert not found, found
         check("no private key material in the daemon log or state directory (bridge.json, spools, shadows)")
-        control("/stop")
 
         evidence = {"ticket": "SF-061", "head": sh("git", "-C", str(ROOT), "rev-parse", "HEAD"), "broker": BROKER_IMAGE,
                     "broker_version": version[0], "aws_endpoint": "scripts/aws_iot_harness.py (AWS-shaped, local)", "checks": checks,

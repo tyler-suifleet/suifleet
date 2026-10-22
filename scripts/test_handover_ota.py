@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from test_ota import Simulator, OWNER_CAP, OPERATOR, DEVICE, CAP, GROUP, wait_for
 from test_desired_state import serve, manifest
@@ -17,7 +18,15 @@ NEW_OWNER = '0xbb'
 
 class Fleet(Simulator):
     operator = OPERATOR
+    on_group_read = None
+    hook_lock = threading.Lock()
     def obj(self, id):
+        # Publish chain changes at an exact point of the daemon's poll: just
+        # before it next reads the group, i.e. after its operator read.
+        with self.hook_lock:
+            hook, self.on_group_read = (self.on_group_read, None) if id == GROUP else (None, self.on_group_read)
+        if hook:
+            hook()
         result = super().obj(id)
         if id == OWNER_CAP:
             result['data']['owner'] = {'AddressOwner': self.operator}
@@ -65,11 +74,17 @@ def run(binary):
             wait_for(lambda: outcomes().get('0x901',{}).get('reported'), 'initial desired state failed',process)
             assert runs()==1
             # Transfer capability first. The source's records and groups are
-            # not silently inherited during this partial migration.
-            sim.operator=NEW_OWNER
-            deploy('0x902',OPERATOR)
-            deploy('0x903',OPERATOR,True)
-            sim.desired[GROUP]=(2,{'app':'0x903'})
+            # not silently inherited during this partial migration. The
+            # transfer and the old owner's new desired state land between the
+            # daemon's operator read and its group read, so authority read
+            # before the desired state must be confirmed after it.
+            def transfer():
+                sim.operator=NEW_OWNER
+                deploy('0x902',OPERATOR)
+                deploy('0x903',OPERATOR,True)
+                sim.desired[GROUP]=(2,{'app':'0x903'})
+            sim.on_group_read=transfer
+            wait_for(lambda: sim.on_group_read is None, 'daemon did not read its group', process)
             settle()
             assert runs()==1, 'partially migrated group admitted work'
             # Complete group authority. Current signed registry identity and

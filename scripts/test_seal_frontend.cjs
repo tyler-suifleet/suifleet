@@ -113,6 +113,14 @@ const chain = {
   global.fetch = async () => new Response(requests[1].body);
   assert.deepEqual(await walrus.probeDeploymentStorage("blob2"), { recipe: "available", artifact: "unknown", confidential: true });
 
+  // Only a schema-valid plaintext recipe can be labeled public in the library.
+  global.fetch = async (url) => new Response(String(url).endsWith("/blob2") ? JSON.stringify(recipe) : "artifact");
+  assert.deepEqual(await walrus.probeDeploymentStorage("blob2"), { recipe: "available", artifact: "available", confidential: false });
+  global.fetch = async () => new Response(JSON.stringify({ artifactBlobId: "anything" }));
+  assert.deepEqual(await walrus.probeDeploymentStorage("invalid"), { recipe: "unknown", artifact: "unknown" });
+  global.fetch = async () => new Response("", { status: 410 });
+  assert.deepEqual(await walrus.probeDeploymentStorage("expired"), { recipe: "unavailable", artifact: "unknown" });
+
   // Policy transactions target the fleet package's seal_policy module.
   const grant = access.buildGrantTx({ ...policy, objectId: "0x" + "11".repeat(32) }, "device", "0x22");
   const data = grant.getData();
