@@ -1,0 +1,814 @@
+#!/usr/bin/env python3
+"""Read-only local dashboard of agent workers, tickets and PR jobs.
+
+Reads the atomic-ticketing and PR-coordinator SQLite stores, the private
+coordinator configuration and existing job snapshot receipts. It opens every
+database read-only, never contacts GitHub or a model, and never outputs claim
+tokens, claim blobs, prompts, PR bodies/comments or worker logs.
+"""
+import argparse
+import json
+import os
+from pathlib import Path
+import re
+import sqlite3
+import sys
+import time
+from urllib.parse import quote
+
+ACTIVE_RUN = ('claiming', 'launching', 'running')
+RETAINED = ('orphaned', 'quarantined', 'parked')
+JOB_OPEN = ('reserved', 'running', 'retry', 'orphaned', 'quarantined')
+ROLE = {'review': 'review', 'fix': 'repair'}
+# Free-text fields (handoff evidence, job errors) are redacted before display.
+# Claim and lock tokens are 32-hex; commit IDs are shown separately, shortened.
+SECRET = re.compile(r'(?i)(gh[opsru]_[A-Za-z0-9]{16,}|github_pat_\w+|suiprivkey\w+|bearer\s+\S+'
+                    r'|(?:token|secret|password|key)\s*[=:]\s*\S+|\b[0-9a-f]{32,}\b|[A-Za-z0-9+/_-]{40,}={0,2})')
+
+
+def default_paths():
+    state = Path(os.environ.get('XDG_STATE_HOME') or Path.home()/'.local/state')
+    config = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home()/'.config')
+    return dict(tickets=state/'atomic-ticketing/coordination.sqlite3',
+                dispatch=state/'pr-coordinator/dispatch.sqlite3',
+                reviews=state/'pr-coordinator/reviews.sqlite3',
+                config=config/'pr-coordinator/config.json')
+
+
+def safe_text(value, limit=160):
+    text = ' '.join(str(value or '').split())
+    text = SECRET.sub('[redacted]', text)
+    return text if len(text) <= limit else text[:limit-1] + '…'
+
+
+class Unavailable(Exception):
+    pass
+
+
+def connect(path):
+    """Open an existing store read-only; never create or migrate it."""
+    path = Path(path)
+    if not path.is_file():
+        raise Unavailable('missing')
+    try:
+        db = sqlite3.connect(f'file:{quote(str(path))}?mode=ro', uri=True, timeout=2)
+        db.row_factory = sqlite3.Row
+        db.execute('PRAGMA query_only=ON')
+        db.execute('SELECT count(*) FROM sqlite_master').fetchone()
+        return db
+    except sqlite3.DatabaseError as error:
+        raise Unavailable(f'unreadable ({type(error).__name__})') from error
+
+
+def modified(path):
+    times = []
+    for p in (Path(path), Path(str(path)+'-wal')):
+        try:
+            times.append(p.stat().st_mtime)
+        except OSError:
+            pass
+    return max(times) if times else None
+
+
+class Processes:
+    """One /proc scan per refresh: identity is the recorded PID *and* start time."""
+
+    def __init__(self, root='/proc'):
+        self.root = Path(root)
+        self.sessions = {}
+        self.readable = True
+        self.boot = None
+        try:
+            for line in (self.root/'stat').read_text().splitlines():
+                if line.startswith('btime '):
+                    self.boot = float(line.split()[1])
+            for entry in self.root.iterdir():
+                if entry.name.isdigit():
+                    fields = self.stat(entry.name)
+                    if fields and fields[0] not in 'ZX':
+                        self.sessions[fields[3]] = self.sessions.get(fields[3], 0) + 1
+        except (OSError, ValueError, IndexError):
+            self.readable = False
+        try:
+            self.ticks = os.sysconf('SC_CLK_TCK')
+        except (ValueError, OSError):
+            self.ticks = 100
+
+    @staticmethod
+    def identity(value):
+        """A recorded PID or start time as a positive decimal string, else None."""
+        if isinstance(value, bool) or not isinstance(value, (int, str)):
+            return None
+        value = str(value).strip()
+        return value if value.isascii() and value.isdigit() and int(value) > 0 else None
+
+    def stat(self, pid):
+        try:
+            fields = (self.root/str(int(pid))/'stat').read_text().rsplit(')', 1)[1].split()
+            return fields if len(fields) > 19 else None
+        except (OSError, ValueError, TypeError, IndexError):
+            return None
+
+    def state(self, pid, started):
+        """alive | zombie | lingering | exited | unknown (no valid identity) | unreadable."""
+        pid, started = self.identity(pid), self.identity(started)
+        if not pid or not started:
+            return 'unknown'
+        if not self.readable:
+            return 'unreadable'
+        fields = self.stat(pid)
+        if fields and fields[19] == str(started):
+            if fields[0] in 'ZX':
+                return 'zombie'
+            return 'alive'
+        # Wrapper gone (or PID reused): a surviving member of its session still
+        # holds capacity, but it is not a verified worker.
+        return 'lingering' if self.sessions.get(str(pid)) else 'exited'
+
+    def started_at(self, started):
+        try:
+            return self.boot + int(started)/self.ticks if self.boot else None
+        except (TypeError, ValueError):
+            return None
+
+
+def read_json(path):
+    try:
+        return json.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def receipt(directory, name):
+    # A missing directory must never fall back to a relative path in the cwd.
+    return Path(directory)/name if isinstance(directory, str) and os.path.isabs(directory) else None
+
+
+def short_key(key):
+    return str(key).split('::', 1)[-1] if key else None
+
+
+class SnapshotCache:
+    """Public projection of PR job snapshots, reparsed only when a file changes."""
+
+    def __init__(self):
+        self.entries = {}
+
+    def get(self, directory):
+        path = receipt(directory, 'snapshot.json')
+        try:
+            info = path.stat()
+        except (OSError, AttributeError):
+            return None
+        stamp = (info.st_mtime_ns, info.st_size)
+        cached = self.entries.get(path)
+        if cached and cached[0] == stamp:
+            return cached[1]
+        data = read_json(path)
+        try:
+            projection = project_snapshot(data, info.st_mtime)
+        except ValueError:
+            projection = {'corrupt': True, 'mtime': info.st_mtime}
+        self.entries[path] = (stamp, projection)
+        return projection
+
+
+def project_snapshot(data, mtime):
+    """Validate every nested field used; a malformed receipt is reported corrupt."""
+    if not isinstance(data, dict):
+        raise ValueError('snapshot is not an object')
+    checks = data.get('statusCheckRollup') or []
+    if not isinstance(checks, list) or not all(isinstance(c, dict) for c in checks):
+        raise ValueError('malformed status checks')
+    outcome = {'success': 0, 'pending': 0, 'failed': 0}
+    for check in checks:
+        value = str(check.get('conclusion') or check.get('state') or check.get('status') or '').upper()
+        if value in ('SUCCESS', 'NEUTRAL', 'SKIPPED'):
+            outcome['success'] += 1
+        elif value in ('', 'PENDING', 'QUEUED', 'IN_PROGRESS', 'EXPECTED', 'WAITING', 'REQUESTED'):
+            outcome['pending'] += 1
+        else:
+            outcome['failed'] += 1
+    testnet = data.get('_testnet_status') if isinstance(data.get('_testnet_status'), dict) else {}
+    ticket = data.get('ticket') if isinstance(data.get('ticket'), dict) else {}
+    spec = ticket.get('spec') if isinstance(ticket.get('spec'), dict) else {}
+    number, branch = data.get('number'), data.get('headRefName')
+    if (number is not None and (not isinstance(number, int) or isinstance(number, bool))) \
+            or (branch is not None and not isinstance(branch, str)) \
+            or (ticket.get('key') is not None and not isinstance(ticket.get('key'), str)):
+        raise ValueError('malformed snapshot identity')
+    state = testnet.get('state')
+    return dict(pr=number, title=safe_text(data.get('title'), 120), branch=branch,
+                head=str(data.get('headRefOid') or '')[:12], draft=bool(data.get('isDraft')),
+                ticket=short_key(ticket.get('key')), ticket_title=safe_text(spec.get('title'), 120) or None,
+                checks=outcome, testnet=(safe_text(state, 30) or 'missing') if data.get('_testnet_required') else None,
+                mtime=mtime)
+
+
+def ci_state(snapshot):
+    if not snapshot or snapshot.get('corrupt'):
+        return None
+    checks = snapshot['checks']
+    if checks['failed'] or snapshot.get('testnet') in ('failure', 'error'):
+        return 'ci-failed'
+    if checks['pending'] or not sum(checks.values()) or (snapshot.get('testnet') not in (None, 'success')):
+        return 'ci-pending'
+    return 'ci-passed'
+
+
+def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
+    paths = {**default_paths(), **(paths or {})}
+    now = time.time() if now is None else now
+    cache = cache or SnapshotCache()
+    processes = Processes(proc)
+    model = dict(generated_at=now, project_filter=project, sources={}, ticket_refresh={}, capacity=[],
+                 workers=[], attention=[], queue={}, locks=[], warnings=[])
+    if not processes.readable:
+        model['warnings'].append('Process table unreadable: no worker can be verified active')
+
+    def source(name, fn):
+        try:
+            result = fn()
+            model['sources'][name] = dict(state='ok', modified_at=modified(paths[name]))
+            return result
+        except Unavailable as error:
+            model['sources'][name] = dict(state='unavailable', detail=str(error))
+        except (sqlite3.DatabaseError, OSError, ValueError, TypeError, KeyError, AttributeError) as error:
+            model['sources'][name] = dict(state='unavailable', detail=f'unreadable ({type(error).__name__})')
+        return None
+
+    def wanted(row_project):
+        return project is None or row_project == project
+
+    def load_config():
+        path = Path(paths['config'])
+        if not path.is_file():
+            raise Unavailable('missing')
+        data = json.loads(path.read_text())
+        if not isinstance(data, dict):
+            raise ValueError('config is not an object')
+        slots = data.get('implementation_slots', [])
+        limits = data.get('review_worker_limits', {})
+        if not isinstance(slots, list) or not all(isinstance(s, dict) and isinstance(s.get('family'), str) for s in slots):
+            raise ValueError('malformed implementation_slots')
+        if not isinstance(limits, dict) or not all(isinstance(v, dict) for v in limits.values()):
+            raise ValueError('malformed review_worker_limits')
+        return data
+
+    def load_tickets():
+        db = connect(paths['tickets'])
+        try:
+            # Explicit columns: claim tokens are never selected.
+            rows = db.execute('SELECT key,project,spec,remote,status,agent,model,session,heartbeat,expires,branch,evidence FROM tickets').fetchall()
+            refresh = {r['key'][len('snapshot_at:'):]: float(r['value'])
+                       for r in db.execute("SELECT key,value FROM metadata WHERE key LIKE 'snapshot_at:%'")}
+            locks = db.execute('SELECT resource,agent,model,session,project,ticket,purpose,acquired,expires FROM locks WHERE expires>?', (now,)).fetchall()
+            return [dict(r) for r in rows], refresh, [dict(r) for r in locks]
+        finally:
+            db.close()
+
+    def load_dispatch():
+        db = connect(paths['dispatch'])
+        try:
+            runs = [dict(r) for r in db.execute("SELECT session,project,family,status,directory,claim,pid,started,message FROM runs WHERE status!='finished'")]
+            backoff = [dict(r) for r in db.execute('SELECT project,family,attempts,retry_after,reason FROM backoff')]
+            return runs, backoff
+        finally:
+            db.close()
+
+    def load_reviews():
+        db = connect(paths['reviews'])
+        try:
+            columns = {r[1] for r in db.execute('PRAGMA table_info(jobs)')}
+            optional = ', '.join(c if c in columns else f'NULL AS {c}' for c in ('error', 'created', 'retry_after', 'attempts'))
+            jobs = [dict(r) for r in db.execute(f'SELECT id,project,pr,family,kind,head,status,directory,pid,started,{optional} FROM jobs ORDER BY id')]
+            merged = set()
+            if db.execute("SELECT 1 FROM sqlite_master WHERE name='integrations'").fetchone():
+                merged = {(r[0], r[1]) for r in db.execute('SELECT project,pr FROM integrations WHERE reconciled=1')}
+            pauses = []
+            if db.execute("SELECT 1 FROM sqlite_master WHERE name='quarantine_backoff'").fetchone():
+                pauses = [dict(r) for r in db.execute('SELECT family,kind,attempts,retry_after FROM quarantine_backoff')]
+            return jobs, merged, pauses
+        finally:
+            db.close()
+
+    config = source('config', load_config) or {}
+    tickets_data = source('tickets', load_tickets)
+    dispatch_data = source('dispatch', load_dispatch)
+    reviews_data = source('reviews', load_reviews)
+
+    tickets, refresh, locks = tickets_data or ([], {}, [])
+    runs, backoff = dispatch_data or ([], [])
+    jobs, merged, pauses = reviews_data or ([], set(), [])
+    by_ticket = {}
+    for row in tickets:
+        if not wanted(row['project']):
+            continue
+        try:
+            row['spec'] = json.loads(row['spec'] or '{}')
+            row['remote'] = json.loads(row['remote'] or '{}')
+            if not isinstance(row['spec'], dict) or not isinstance(row['remote'], dict):
+                raise ValueError('not an object')
+        except (ValueError, TypeError):
+            row['spec'], row['remote'] = {}, {}
+            model['warnings'].append(f"Ticket {short_key(row['key'])} has an unreadable specification")
+        by_ticket[(row['project'], short_key(row['key']))] = row
+    for name, stamp in refresh.items():
+        if wanted(name):
+            model['ticket_refresh'][name] = stamp
+    slots = [s for s in config.get('implementation_slots', []) if isinstance(s, dict) and wanted(s.get('project'))]
+    slot_model = {(s.get('project'), s.get('family')): s.get('model') for s in slots}
+
+    def ticket_title(project_id, key, fallback=None):
+        row = by_ticket.get((project_id, key))
+        title = (row or {}).get('spec', {}).get('title') or fallback
+        return safe_text(title, 120) if title else None
+
+    # Latest public snapshot per PR links tickets to PRs and CI evidence.
+    latest = {}
+    for job in jobs:
+        if wanted(job['project']):
+            latest[(job['project'], job['pr'])] = job
+    pr_snapshot, ticket_pr = {}, {}
+    for key, job in latest.items():
+        if key in merged:
+            continue
+        snapshot = cache.get(job['directory'])
+        if snapshot is None:
+            continue
+        pr_snapshot[key] = snapshot
+        if snapshot.get('ticket'):
+            ticket_pr[(key[0], snapshot['ticket'])] = key[1]
+    branch_pr = {(k[0], s.get('branch')): k[1] for k, s in pr_snapshot.items() if s.get('branch')}
+
+    def pr_for(project_id, key, branch=None):
+        return ticket_pr.get((project_id, key)) or branch_pr.get((project_id, branch))
+
+    def item(kind, **fields):
+        fields.setdefault('since', None)
+        target = model['workers'] if kind == 'worker' else model['attention']
+        target.append(fields)
+
+    impl_counts, managed = {}, set()
+    seen_keys = {}
+    for run in runs:
+        if not wanted(run['project']):
+            continue
+        managed.add(run['session'])
+        count = impl_counts.setdefault((run['project'], run['family']), dict(active=0, held=0, retained=0))
+        try:
+            claim = json.loads(run['claim']) if run['claim'] else {}
+            if not isinstance(claim, dict) or not all(isinstance(claim.get(f), (str, type(None)))
+                                                      for f in ('key', 'session', 'branch', 'model')):
+                raise ValueError
+        except (ValueError, TypeError):
+            claim = {}
+            model['warnings'].append(f"Implementation receipt for {run['family']} has an unreadable claim")
+        # Whitelisted projection only: the claim blob also contains the token.
+        key = short_key(claim.get('key'))
+        if claim.get('session'):
+            managed.add(claim['session'])
+        process_file = receipt(run['directory'], 'process.json')
+        # Like the dispatcher, a present process.json is the only identity; the
+        # persisted DB identity applies only when that receipt does not exist.
+        try:
+            receipt_present = bool(process_file) and process_file.exists()
+        except OSError:
+            receipt_present = True
+        if receipt_present:
+            identity = read_json(process_file)
+            identity = identity if isinstance(identity, dict) else {}
+            pid, started = identity.get('pid'), identity.get('started')
+            # Never fall back to another identity: a malformed receipt is unverified.
+            if not Processes.identity(pid) or not Processes.identity(started):
+                model['warnings'].append(f"Implementation receipt for {run['family']} has an unreadable process identity")
+        else:
+            pid, started = run['pid'], run['started']
+            if (pid is not None and not Processes.identity(pid)) or (started is not None and not Processes.identity(started)):
+                model['warnings'].append(f"Implementation receipt for {run['family']} has an unreadable process identity")
+        process = processes.state(pid, started)
+        owner = by_ticket.get((run['project'], key)) or {}
+        base = dict(id='impl:'+run['session'], project=run['project'], family=run['family'],
+                    model=owner.get('model') or claim.get('model') or slot_model.get((run['project'], run['family'])),
+                    role='implementation', ticket=key, pr=pr_for(run['project'], key, claim.get('branch')),
+                    title=ticket_title(run['project'], key, (claim.get('spec') or {}).get('title') if isinstance(claim.get('spec'), dict) else None),
+                    process=process, ticket_status=owner.get('status'))
+        if key:
+            seen_keys.setdefault((run['project'], key), []).append(base['id'])
+        started_at = processes.started_at(started) if process == 'alive' else None
+        try:
+            since = started_at or (process_file.stat().st_mtime if process_file else None)
+        except OSError:
+            since = None
+        if run['status'] in ACTIVE_RUN and process == 'alive':
+            count['active'] += 1
+            item('worker', **base, state='active', since=since,
+                 summary=f"Implementing {key or 'unknown ticket'}" + (f" (ticket now {owner['status']})" if owner.get('status') not in (None, 'in_progress') else ''))
+        elif run['status'] in ACTIVE_RUN:
+            # Dispatcher counts these until it reconciles them; they are never active.
+            count['held'] += 1
+            state = {'lingering': 'lingering', 'unknown': 'unverified', 'unreadable': 'unverified'}.get(process, 'stale')
+            detail = {'lingering': 'wrapper exited; a session process remains (holds capacity)',
+                      'unverified': 'no verifiable process identity (holds capacity)',
+                      'stale': f'recorded worker {process}; awaiting dispatcher reconciliation'}[state]
+            item('attention', **base, state=state, since=since, summary=detail)
+        elif run['status'] in RETAINED:
+            # Like the dispatcher, an orphaned run still holds its slot; only
+            # quarantined/parked reservations release launch capacity.
+            count['held' if run['status'] == 'orphaned' else 'retained'] += 1
+            item('attention', **base, state=run['status'], since=since,
+                 summary=safe_text(run['message']) or f"{run['status']}; claim retained for explicit recovery")
+        else:
+            count['held'] += 1
+            item('attention', **base, state='unverified', since=since, summary=f"unrecognised dispatcher state {safe_text(run['status'], 30)}")
+    for (project_id, key), ids in seen_keys.items():
+        if len(ids) > 1:
+            model['warnings'].append(f'{key}: {len(ids)} retained implementation receipts (recovered or duplicate); only PID-verified ones count as active')
+
+    # Review/repair jobs.
+    job_counts = {}
+    open_by_pr = {}
+    repairing = set()
+    for job in jobs:
+        if not wanted(job['project']):
+            continue
+        is_latest = latest.get((job['project'], job['pr'])) is job
+        if job['status'] not in JOB_OPEN and not (job['status'] == 'failed' and is_latest and (job['project'], job['pr']) not in merged):
+            continue
+        role = ROLE.get(job['kind'], safe_text(job['kind'], 20))
+        count = job_counts.setdefault((job['family'], role), dict(active=0, held=0, retained=0))
+        snapshot = cache.get(job['directory']) or {}
+        key = snapshot.get('ticket')
+        if job['status'] in ('reserved', 'running', 'orphaned', 'quarantined'):
+            open_by_pr.setdefault((job['project'], job['pr']), []).append(job['id'])
+        process = processes.state(job['pid'], job['started']) if job['status'] == 'running' else None
+        if role == 'repair' and key and job['status'] in ('reserved', 'running'):
+            # Same rule as the dispatcher: a resumed Review claim is repair work.
+            repairing.add((job['project'], key))
+        base = dict(id=f"job:{job['project']}:{job['id']}", project=job['project'], family=job['family'],
+                    model=slot_model.get((job['project'], job['family'])), role=role, ticket=key, pr=job['pr'],
+                    head=str(job['head'] or '')[:12],
+                    title=ticket_title(job['project'], key, snapshot.get('ticket_title')) or snapshot.get('title'),
+                    process=process, attempts=job['attempts'] or 0)
+        verb = 'Reviewing' if role == 'review' else 'Repairing feedback on'
+        task = f"{verb} PR #{job['pr']} at {base['head'] or 'unknown head'}"
+        if base['attempts']:
+            task += f" (attempt {base['attempts']+1})"
+        since = job['created']
+        if job['status'] == 'running' and process == 'alive':
+            count['active'] += 1
+            item('worker', **base, state='active', since=processes.started_at(job['started']) or since, summary=task)
+        elif job['status'] == 'running':
+            count['held'] += 1
+            state = {'lingering': 'lingering', 'unknown': 'unverified', 'unreadable': 'unverified'}.get(process, 'stale')
+            item('attention', **base, state=state, since=since, summary=f"{task}: recorded worker {process}")
+        elif job['status'] == 'reserved':
+            count['held'] += 1
+            item('attention', **base, state='waiting', since=since, summary=f'{task}: reserved, awaiting launch')
+        elif job['status'] == 'retry':
+            item('attention', **base, state='retry', since=since, retry_after=job['retry_after'],
+                 summary=f"{task}: {safe_text(job['error'], 90) or 'retry scheduled'}")
+        elif job['status'] == 'orphaned':
+            count['held'] += 1
+            item('attention', **base, state='orphaned', since=since, summary=f"{task}: {safe_text(job['error'], 90) or 'requires explicit recovery'}")
+        elif job['status'] == 'quarantined':
+            count['retained'] += 1
+            item('attention', **base, state='quarantined', since=since, summary=f'{task}: verified stopped; PR reserved for explicit recovery')
+        else:
+            item('attention', **base, state='failed', since=since, summary=f"{task}: {safe_text(job['error'], 90) or 'failed'}")
+    for (project_id, pr), ids in open_by_pr.items():
+        if len(ids) > 1:
+            model['warnings'].append(f'PR #{pr}: {len(ids)} open jobs (duplicate reservation); only PID-verified ones count as active')
+
+    # Tickets: manual claims, blocked work and PRs awaiting CI/review.
+    queue = {}
+    for (project_id, key), row in sorted(by_ticket.items()):
+        counts = queue.setdefault(project_id, {})
+        counts[row['status']] = counts.get(row['status'], 0) + 1
+        base = dict(id=f'ticket:{project_id}:{key}', project=project_id, family=row['agent'], model=row['model'],
+                    role='implementation', ticket=key, pr=pr_for(project_id, key, row['branch']),
+                    title=ticket_title(project_id, key), ticket_status=row['status'])
+        expired = bool(row['expires'] and row['expires'] < now)
+        if row['status'] == 'blocked':
+            item('attention', **base, state='blocked', since=row['heartbeat'],
+                 summary='blocked: ' + (safe_text(row['evidence'], 110) or 'no handoff recorded'))
+            if row['agent'] and row['session'] not in managed:
+                # The dispatcher counts unmanaged blocked claims against the slot too.
+                impl_counts.setdefault((project_id, row['agent']), dict(active=0, held=0, retained=0))['held'] += 1
+        elif row['status'] == 'in_progress' and row['session'] not in managed and (project_id, key) not in repairing:
+            item('attention', **base, state='manual', since=row['heartbeat'],
+                 summary='manual claim without worker identity; not counted active' + ('; lease EXPIRED' if expired else ''))
+            if row['agent']:
+                counts_for = impl_counts.setdefault((project_id, row['agent']), dict(active=0, held=0, retained=0))
+                counts_for['held'] += 1
+        elif row['status'] == 'review' and (project_id, key) not in repairing:
+            pr = base['pr']
+            snapshot = pr_snapshot.get((project_id, pr)) if pr else None
+            state = ci_state(snapshot) or 'review'
+            if snapshot and not snapshot.get('corrupt'):
+                c = snapshot['checks']
+                detail = (f"checks {c['success']} ok/{c['pending']} pending/{c['failed']} failed"
+                          + (f"; testnet {snapshot['testnet']}" if snapshot.get('testnet') else '')
+                          + f" (local snapshot {fmt_age(now - snapshot['mtime'])} old)")
+                state = 'awaiting-review' if state == 'ci-passed' else state
+            else:
+                detail = 'no local PR snapshot yet' if not pr else 'PR snapshot unreadable'
+            item('attention', **base, state=state, since=snapshot.get('mtime') if snapshot else None, summary=detail)
+
+    for lock in locks:
+        if wanted(lock['project']):
+            model['locks'].append(dict(resource=lock['resource'], family=lock['agent'], model=lock['model'],
+                                       project=lock['project'], ticket=short_key(lock['ticket']),
+                                       purpose=safe_text(lock['purpose'], 80), acquired=lock['acquired'], expires=lock['expires']))
+
+    # Capacity: implementation slots are per project/family; review/repair are global per family.
+    for slot in slots:
+        key = (slot.get('project'), slot.get('family'))
+        count = impl_counts.pop(key, dict(active=0, held=0, retained=0))
+        pause = next((b for b in backoff if (b['project'], b['family']) == key and (b['retry_after'] or 0) > now), None)
+        model['capacity'].append(dict(project=key[0], family=key[1], model=slot.get('model'), category='implementation',
+                                      enabled=bool(slot.get('enabled', True)), limit=slot.get('max_workers', 1), **count,
+                                      backoff_until=pause['retry_after'] if pause else None,
+                                      backoff_reason=safe_text(pause['reason'], 60) if pause else None))
+    for (project_id, family), count in sorted(impl_counts.items()):
+        if any(count.values()):
+            model['capacity'].append(dict(project=project_id, family=family, model=None, category='implementation',
+                                          enabled=False, limit=0, **count, backoff_until=None, backoff_reason='no configured slot'))
+    limits = config.get('review_worker_limits', {}) if isinstance(config.get('review_worker_limits'), dict) else {}
+    families = sorted({s.get('family') for s in config.get('implementation_slots', []) if isinstance(s, dict)}
+                      | set(limits) | set(config.get('workers', {}) if isinstance(config.get('workers'), dict) else {})
+                      | {f for f, _ in job_counts})
+    for family in families:
+        for role, kind in (('review', 'review'), ('repair', 'fix')):
+            count = job_counts.get((family, role), dict(active=0, held=0, retained=0))
+            pause = next((p for p in pauses if (p['family'], p['kind']) == (family, kind) and (p['retry_after'] or 0) > now), None)
+            model['capacity'].append(dict(project='*', family=family, model=None, category=role, enabled=True,
+                                          limit=(limits.get(family) or {}).get(kind, 1), **count,
+                                          backoff_until=pause['retry_after'] if pause else None,
+                                          backoff_reason='quarantine backoff' if pause else None))
+    model['queue'] = queue
+    order = {s: i for i, s in enumerate(['ci-failed', 'retry', 'stale', 'lingering', 'unverified', 'orphaned', 'manual',
+                                          'waiting', 'ci-pending', 'awaiting-review', 'review', 'blocked', 'failed',
+                                          'quarantined', 'parked'])}
+    model['attention'].sort(key=lambda x: (order.get(x['state'], 99), x['project'], str(x.get('ticket') or ''), x.get('pr') or 0))
+    model['workers'].sort(key=lambda x: (x['project'], x['family'], x['role'], x.get('since') or 0))
+    return model
+
+
+def changes(previous, current):
+    """Human-readable differences between two refreshes."""
+    if previous is None:
+        return []
+    out = []
+    old_workers = {w['id']: w for w in previous['workers']}
+    new_workers = {w['id']: w for w in current['workers']}
+    for wid in new_workers.keys() - old_workers.keys():
+        out.append('+ started: ' + label(new_workers[wid]))
+    for wid in old_workers.keys() - new_workers.keys():
+        out.append('- no longer active: ' + label(old_workers[wid]))
+    old_items = {a['id']: a for a in previous['attention']}
+    for item in current['attention']:
+        before = old_items.get(item['id'])
+        if before is None:
+            out.append(f"+ {item['state']}: " + label(item))
+        elif before['state'] != item['state']:
+            out.append(f"~ {before['state']} -> {item['state']}: " + label(item))
+    for aid in old_items.keys() - {a['id'] for a in current['attention']} - new_workers.keys():
+        out.append(f"- cleared {old_items[aid]['state']}: " + label(old_items[aid]))
+    for name, src in current['sources'].items():
+        before = previous['sources'].get(name, {}).get('state')
+        if before and before != src['state']:
+            out.append(f"~ source {name}: {before} -> {src['state']}")
+    for project_id, counts in current['queue'].items():
+        old = previous['queue'].get(project_id, {})
+        for status in sorted(set(counts) | set(old)):
+            if counts.get(status, 0) != old.get(status, 0):
+                out.append(f"~ {project_id} {status}: {old.get(status, 0)} -> {counts.get(status, 0)}")
+    return sorted(out, key=lambda x: x[0] != '+')
+
+
+def label(entry):
+    parts = [entry.get('family') or '?', entry.get('role') or '']
+    if entry.get('ticket'):
+        parts.append(entry['ticket'])
+    if entry.get('pr'):
+        parts.append(f"PR #{entry['pr']}")
+    return ' '.join(p for p in parts if p)
+
+
+def fmt_age(seconds):
+    if seconds is None:
+        return '?'
+    seconds = max(0, int(seconds))
+    if seconds < 60:
+        return f'{seconds}s'
+    if seconds < 3600:
+        return f'{seconds//60}m'
+    if seconds < 86400:
+        return f'{seconds//3600}h{seconds%3600//60:02d}m'
+    return f'{seconds//86400}d{seconds%86400//3600}h'
+
+
+def fit(text, width):
+    return text if len(text) <= width else text[:max(0, width-1)] + '…'
+
+
+def table(rows, width):
+    """Left-aligned columns; the last column takes the remaining width."""
+    widths = [max(len(str(r[i])) for r in rows) for i in range(len(rows[0]) - 1)]
+    return [fit('  ' + '  '.join([str(c).ljust(w) for c, w in zip(r, widths)] + [str(r[-1])]).rstrip(), width) for r in rows]
+
+
+def render(model, width=100, delta=None, interval=None):
+    now = model['generated_at']
+    width = max(20, width)
+    compact = width < 90
+    stamp = time.strftime('%Y-%m-%d %H:%M:%S %Z', time.localtime(now))
+    lines = [fit(f"Agent dashboard · {stamp} · project {model['project_filter'] or 'all'}"
+                 + (f' · refresh {interval:g}s · q quits' if interval else ' · read-only snapshot'), width)]
+    sources = []
+    for name, src in model['sources'].items():
+        if src['state'] == 'ok':
+            sources.append(f"{name} ok ({fmt_age(now - src['modified_at']) if src.get('modified_at') else 'no writes'})")
+        else:
+            sources.append(f"{name} UNAVAILABLE: {src.get('detail', '')}")
+    lines.append(fit('Sources: ' + ' · '.join(sources), width))
+    if model['ticket_refresh']:
+        lines.append(fit('Ticket snapshot: ' + ' · '.join(f'{p} refreshed {fmt_age(now - t)} ago' for p, t in sorted(model['ticket_refresh'].items())), width))
+    for warning in model['warnings']:
+        lines.append(fit('! ' + warning, width))
+
+    lines += ['', 'CAPACITY (active = PID+start-time verified; held = unverified/waiting; retained = parked/quarantined)']
+    if not model['capacity']:
+        lines.append('  ' + ('No configured slots.' if model['sources'].get('config', {}).get('state') == 'ok' else 'Configuration unavailable.'))
+    rows = []
+    for c in model['capacity']:
+        scope = c['project'] if c['project'] != '*' else 'all'
+        note = '' if c['enabled'] else 'disabled'
+        if c.get('backoff_until'):
+            note = (note + ' ' if note else '') + f"paused {fmt_age(c['backoff_until'] - now)} ({c.get('backoff_reason') or 'backoff'})"
+        rows.append((scope, c['family'], c['category'], f"{c['active']}/{c['limit']}", f"held {c['held']}",
+                     f"retained {c['retained']}", *(() if compact else (c.get('model') or '',)), note))
+    lines += table(rows, width) if rows else []
+
+    workers = model['workers']
+    lines += ['', f'ACTIVE WORKERS ({len(workers)})']
+    if not workers:
+        lines.append('  None verified.' if model['sources'].get('dispatch', {}).get('state') == 'ok'
+                     or model['sources'].get('reviews', {}).get('state') == 'ok' else '  Unknown: worker stores unavailable.')
+    # Narrow terminals keep the task readable by dropping model/project columns.
+    pick = (lambda row: row[:1] + row[2:3] + row[4:]) if compact else (lambda row: row)
+    rows = [pick(('FAMILY', 'MODEL', 'ROLE', 'PROJECT', 'TICKET', 'PR', 'ELAPSED', 'TASK'))]
+    for w in workers:
+        rows.append(pick((w['family'], w.get('model') or '?', w['role'], w['project'], w.get('ticket') or '-',
+                          f"#{w['pr']}" if w.get('pr') else '-', fmt_age(now - w['since']) if w.get('since') else '?',
+                          ' — '.join(x for x in (w.get('title'), w['summary']) if x))))
+    if workers:
+        lines += table(rows, width)
+
+    attention = model['attention']
+    lines += ['', f'WAITING / BLOCKED / CI / RETRY ({len(attention)})']
+    if not attention:
+        lines.append('  Nothing waiting.' if model['sources'].get('tickets', {}).get('state') == 'ok' else '  Unknown: ticket store unavailable.')
+    for a in attention:
+        when = f" for {fmt_age(now - a['since'])}" if a.get('since') else ''
+        if a['state'] == 'retry':
+            due = a.get('retry_after')
+            when += f' · retry in {fmt_age(due - now)}' if due and due > now else ' · retry due'
+        head = ' '.join(x for x in (f"[{a['state']}]", a.get('family') or '', a['role'], a.get('ticket') or '',
+                                    f"PR #{a['pr']}" if a.get('pr') else '') if x)
+        lines.append(fit(f"  {head}{when}: " + ' — '.join(x for x in (a.get('title'), a['summary']) if x), width))
+
+    lines += ['', 'TICKET QUEUE']
+    if model['sources'].get('tickets', {}).get('state') != 'ok':
+        lines.append('  Unknown: ticket store unavailable (not an empty queue).')
+    elif not model['queue']:
+        lines.append('  Empty: no tickets for this project filter.')
+    for project_id, counts in sorted(model['queue'].items()):
+        order = ['backlog', 'in_progress', 'review', 'blocked', 'done']
+        parts = [f"{counts[s]} {s.replace('_', ' ')}" for s in order if s in counts]
+        parts += [f'{v} {k}' for k, v in sorted(counts.items()) if k not in order]
+        lines.append(fit(f'  {project_id}: ' + ' · '.join(parts), width))
+
+    if model['locks']:
+        lines += ['', 'RESOURCE LOCKS']
+        for lock in model['locks']:
+            lines.append(fit(f"  {lock['resource']} — {lock['family']} {lock.get('ticket') or ''} expires in {fmt_age(lock['expires'] - now)}: {lock['purpose']}", width))
+
+    if delta is not None:
+        lines += ['', 'CHANGES SINCE LAST REFRESH'] + (['  ' + d for d in delta] or ['  None.'])
+    return [fit(line, width) for line in lines]
+
+
+def public(model, delta=None):
+    data = dict(model)
+    data['generated_at_iso'] = time.strftime('%Y-%m-%dT%H:%M:%S%z', time.localtime(model['generated_at']))
+    if delta is not None:
+        data['changes'] = delta
+    return data
+
+
+def live(args, paths):
+    import curses
+    cache, previous, delta = SnapshotCache(), None, []
+    state = dict(model=None, offset=0, due=0.0, error=None)
+
+    def refresh():
+        nonlocal previous, delta
+        state['due'] = time.monotonic() + args.interval
+        try:
+            current = collect(paths, args.project, cache=cache)
+        except Exception as error:  # keep the last good view rather than crash the terminal
+            state['error'] = f'refresh failed ({type(error).__name__}); showing previous data'
+            return
+        state['error'] = None
+        delta = changes(previous, current) if previous else delta
+        previous, state['model'] = current, current
+
+    def loop(screen):
+        try:
+            curses.curs_set(0)
+        except curses.error:
+            pass
+        screen.timeout(200)
+        while True:
+            if time.monotonic() >= state['due']:
+                refresh()
+            height, width = screen.getmaxyx()
+            lines = render(state['model'], width - 1, delta, args.interval) if state['model'] else []
+            if state['error']:
+                lines.insert(0, '! ' + state['error'])
+            body = max(1, height - 1)
+            state['offset'] = max(0, min(state['offset'], len(lines) - body))
+            screen.erase()
+            for row, text in enumerate(lines[state['offset']:state['offset'] + body]):
+                try:
+                    screen.addnstr(row, 0, text, width - 1)
+                except curses.error:
+                    pass
+            hidden = len(lines) - body
+            footer = (f"lines {state['offset']+1}-{min(len(lines), state['offset']+body)} of {len(lines)} · ↑/↓ scroll · r refresh · q quit"
+                      if hidden > 0 else 'r refresh · q quit')
+            try:
+                screen.addnstr(height - 1, 0, fit(footer, width - 1), width - 1, curses.A_REVERSE)
+            except curses.error:
+                pass
+            screen.refresh()
+            key = screen.getch()
+            if key in (ord('q'), ord('Q'), 27):
+                return
+            if key in (ord('r'), ord('R')):
+                state['due'] = 0.0
+            elif key in (curses.KEY_DOWN, ord('j')):
+                state['offset'] += 1
+            elif key in (curses.KEY_UP, ord('k')):
+                state['offset'] -= 1
+            elif key == curses.KEY_NPAGE:
+                state['offset'] += body
+            elif key == curses.KEY_PPAGE:
+                state['offset'] -= body
+            elif key == curses.KEY_HOME:
+                state['offset'] = 0
+
+    try:
+        curses.wrapper(loop)
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--once', action='store_true', help='Print one readable snapshot and exit')
+    mode.add_argument('--json', action='store_true', help='Print one machine-readable snapshot and exit')
+    mode.add_argument('--live', action='store_true', help='Live terminal view (default on a terminal)')
+    parser.add_argument('--project', help='Only show this project (for example suifleet)')
+    parser.add_argument('--interval', type=float, default=5.0, help='Live refresh seconds (minimum 1)')
+    parser.add_argument('--width', type=int, help='Text width for --once (default: terminal width)')
+    for name in ('tickets', 'dispatch', 'reviews', 'config'):
+        parser.add_argument(f'--{name}-path', dest=name, type=Path, help=argparse.SUPPRESS)
+    args = parser.parse_args(argv)
+    args.interval = max(1.0, args.interval)
+    paths = {k: getattr(args, k) for k in ('tickets', 'dispatch', 'reviews', 'config') if getattr(args, k)}
+    interactive = sys.stdout.isatty() and sys.stdin.isatty()
+    if args.live and not interactive:
+        print('Live mode needs an interactive terminal; use --once or --json.', file=sys.stderr)
+        return 2
+    if args.live or not (args.once or args.json) and interactive and os.environ.get('TERM', 'dumb') != 'dumb':
+        return live(args, paths)
+    model = collect(paths, args.project)
+    if args.json:
+        json.dump(public(model), sys.stdout, indent=2, sort_keys=True)
+        sys.stdout.write('\n')
+    else:
+        width = args.width or (os.get_terminal_size().columns if sys.stdout.isatty() else 120)
+        sys.stdout.write('\n'.join(render(model, width)) + '\n')
+    return 3 if any(s['state'] != 'ok' for s in model['sources'].values()) else 0
+
+
+if __name__ == '__main__':
+    try:
+        sys.exit(main())
+    except BrokenPipeError:
+        sys.exit(0)
