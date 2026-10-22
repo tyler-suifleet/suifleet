@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import subprocess
 import ssl
+import stat
 import time
 import urllib.request
 
@@ -90,9 +91,14 @@ class Worker:
         if not notifier['url'].startswith('https://'):
             raise ValueError('notifier requires HTTPS')
         secret_path = Path(notifier['secret_file'])
-        if secret_path.stat().st_mode & 0o077:
-            raise ValueError('notifier secret must be private')
-        secret = secret_path.read_bytes()
+        descriptor = os.open(secret_path, os.O_RDONLY | os.O_NOFOLLOW)
+        try:
+            metadata = os.fstat(descriptor)
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & 0o077 or metadata.st_size > 4096:
+                raise ValueError('notifier secret must be a bounded private regular file')
+            secret = os.read(descriptor, 4097)
+        finally:
+            os.close(descriptor)
         if len(secret) < 32:
             raise ValueError('notifier secret must contain at least 32 bytes')
         payload = json.dumps({'schema': 1, 'id': hashlib.sha256(key.encode()).hexdigest(),

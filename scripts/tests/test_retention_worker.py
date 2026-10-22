@@ -121,6 +121,26 @@ class RetentionTests(unittest.TestCase):
             self.assertIn('unconfigured', next(iter(worker.state['alerts'].values()))['status'])
             worker.lock.close()
 
+    def test_notifier_rejects_symlink_and_public_secret(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            secret = root / 'secret'
+            secret.write_bytes(b'x' * 32)
+            secret.chmod(0o600)
+            link = root / 'link'
+            link.symlink_to(secret)
+            config = {'gas_budget': '10', 'spend_ceiling': '20',
+                      'notifier': {'url': 'https://localhost/alerts', 'secret_file': str(link)}}
+            worker = module.Worker(config, root / 'state', Chain())
+            try:
+                with self.assertRaises(OSError): worker.notify('low', 1, 0)
+                link.unlink()
+                secret.rename(link)
+                link.chmod(0o644)
+                with self.assertRaises(ValueError): worker.notify('low', 1, 1)
+            finally:
+                worker.lock.close()
+
     def test_real_https_notifier_authentication_acknowledgment_and_dedup(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
