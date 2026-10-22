@@ -381,6 +381,17 @@ def process_identity(pid):
         return None
 
 
+def runnable_identity(pid):
+    """Start identity of a process that can still run; None once exited or a zombie.
+
+    An unreaped zombie keeps its PID (so it cannot be reused) but never runs again."""
+    try:
+        fields = Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()
+    except (FileNotFoundError, ProcessLookupError):
+        return None
+    return None if fields[0] in 'ZX' else fields[19]
+
+
 def worker_stopped(pid, started):
     """Prove the wrapper and its Linux session have no runnable members.
 
@@ -390,7 +401,7 @@ def worker_stopped(pid, started):
     if not pid or not started:
         return False
     try:
-        if process_identity(pid) == started:
+        if runnable_identity(pid) == started:
             return False
         for entry in Path('/proc').iterdir():
             if not entry.name.isdigit():
