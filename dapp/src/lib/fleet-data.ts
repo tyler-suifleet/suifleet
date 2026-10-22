@@ -124,7 +124,9 @@ export function validateHealthSnapshot(snapshot: Snapshot): void {
 
 /** Reads chain objects directly. A configured data path never silently falls back to an indexer. */
 export async function fetchChainHealth(client: Reads, config: FleetDataConfig, deviceIds: string[], now = Date.now()): Promise<Record<string, DeviceHealth>> {
-  try { await readFleetData(client, config); }
+  let cadenceMs: number;
+  try { cadenceMs = safeNumber((await readFleetData(client, config)).health_interval_ms);
+    if (cadenceMs < 60_000 || cadenceMs > 86_400_000) throw new Error("Invalid chain health cadence"); }
   catch (error) { return Object.fromEntries(deviceIds.map(device => [device, unavailable(String(error))])); }
   return Object.fromEntries(await Promise.all(deviceIds.map(async deviceId => {
     try {
@@ -139,7 +141,7 @@ export async function fetchChainHealth(client: Reads, config: FleetDataConfig, d
       if (BigInt(snapshot.seq) !== BigInt(writer.health_seq)) throw new Error("Snapshot sequence differs from the chain anchor");
       const receivedMs = safeNumber(writer.health_at_ms);
       if (receivedMs > now + 300_000 || snapshot.observed_ms > receivedMs + 300_000) throw new Error("Health timestamp is in the future");
-      return [deviceId, { ...assess(false, { snapshot, receivedMs }, now), lastSeenMs: receivedMs,
+      return [deviceId, { ...assess(false, { snapshot, receivedMs }, now, cadenceMs), lastSeenMs: receivedMs,
         lastSeenAgeMs: Math.max(0, now - receivedMs), observedMs: snapshot.observed_ms,
         daemonVersion: snapshot.daemon_version, components: snapshot.components, services: snapshot.services }];
     } catch (error) { return [deviceId, unavailable(`Chain health could not be verified: ${String(error)}`)]; }

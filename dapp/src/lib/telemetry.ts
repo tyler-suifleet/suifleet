@@ -232,7 +232,7 @@ export interface DeviceHealth extends Assessment {
  * interfaces/telemetry-cases.json). Healthy needs a fresh, timely report
  * whose own judgement is healthy and whose facts agree with it.
  */
-export function assess(revoked: boolean, latest: { snapshot: Snapshot; receivedMs: number } | undefined, nowMs: number): Assessment {
+export function assess(revoked: boolean, latest: { snapshot: Snapshot; receivedMs: number } | undefined, nowMs: number, chainCadenceMs?: number): Assessment {
   if (revoked) {
     return { status: "unreported", codes: ["revoked"], reasons: ["device identity is revoked or deregistered; its telemetry is not trusted"] };
   }
@@ -240,7 +240,10 @@ export function assess(revoked: boolean, latest: { snapshot: Snapshot; receivedM
   const { snapshot, receivedMs } = latest;
   const codes: string[] = [];
   const reasons: string[] = [];
-  const interval = Math.min(Math.max(snapshot.interval_seconds, MIN_INTERVAL_SECONDS), MAX_INTERVAL_SECONDS) * 1000;
+  // A chain-configured producer cannot report faster than its enforced cadence.
+  // Only the direct-chain reader supplies this independently verified value.
+  if (chainCadenceMs !== undefined && (!Number.isSafeInteger(chainCadenceMs) || chainCadenceMs < 60_000 || chainCadenceMs > 86_400_000)) throw new Error("Invalid chain health cadence");
+  const interval = chainCadenceMs ?? Math.min(Math.max(snapshot.interval_seconds, MIN_INTERVAL_SECONDS), MAX_INTERVAL_SECONDS) * 1000;
   const offline = nowMs - receivedMs > OFFLINE_INTERVALS * interval;
   if (offline) {
     codes.push("offline");

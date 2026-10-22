@@ -66,7 +66,9 @@ function client({ f = fleet, w = writer, revoked = false, currentSigner = signer
   ['chain outage', client({ fail: true })],
  ]) assert.equal((await result(c)).status, 'unavailable', name);
  assert.equal((await result(client({ revoked: true }))).status, 'unreported');
- assert.equal((await data.fetchChainHealth(client(), config, [deviceId], now + snapshot.interval_seconds * 4000))[deviceId].status, 'offline');
+ assert.equal((await data.fetchChainHealth(client(), config, [deviceId], now + Number(fleet.health_interval_ms) * 4))[deviceId].status, 'offline');
+ assert.notEqual((await data.fetchChainHealth(client(), config, [deviceId], now + Number(fleet.health_interval_ms)))[deviceId].status, 'offline', 'hourly chain cadence must not use the device local sampling interval');
+ assert.equal((await result(client({ f: { ...fleet, health_interval_ms: "1" } }))).status, 'unavailable');
  assert.throws(() => data.parseDataConfig(JSON.stringify({ ...config, chainIdentifier: 'deadbeef' })));
  assert.throws(() => data.validateHealthSnapshot({ ...snapshot, components: [{}] }));
  assert.throws(() => data.validateHealthSnapshot({ ...snapshot, unexpected: 'topic' }));
