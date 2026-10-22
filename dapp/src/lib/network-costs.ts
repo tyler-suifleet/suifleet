@@ -62,7 +62,9 @@ export interface EstimateInput {
   /** Releases uploaded per month; each is one artifact plus its recipe. */
   releasesPerMonth: number;
   artifactBytes: number;
-  /** Device data stored on Walrus per device per month (one blob each). */
+  /** Archive uploads per device per month. Legacy callers default to one. */
+  dataUploadsPerDeviceMonth?: number;
+  /** Total device data stored on Walrus per device per month, across those uploads. */
   dataBytesPerDeviceMonth: number;
   /** Walrus epochs each blob is kept. */
   storageEpochs: number;
@@ -108,6 +110,8 @@ export function estimate(input: EstimateInput): Estimate {
   checked("releases", input.releasesPerMonth, 10_000);
   checked("artifact bytes", input.artifactBytes, 1 << 30);
   checked("data bytes", input.dataBytesPerDeviceMonth, 1 << 30);
+  const uploads = checked("device archive uploads", input.dataUploadsPerDeviceMonth ?? 1, 100_000);
+  if (input.dataBytesPerDeviceMonth > 0 && uploads === 0) throw new Error("Device data needs at least one archive upload");
   checked("storage epochs", input.storageEpochs, 53);
   checked("margin", input.marginPercent, 1000);
   if (input.drawMist <= BigInt(0) || input.floatMist < BigInt(0)) throw new Error("draw must be positive and float non-negative");
@@ -122,8 +126,8 @@ export function estimate(input: EstimateInput): Estimate {
   const releases = input.releasesPerMonth * months;
   const artifact = blobCostFrost(input.artifactBytes, input.storageEpochs), recipe = blobCostFrost(RECIPE_ENVELOPE_BYTES, input.storageEpochs);
   const artifactFrost = BigInt(releases) * (artifact.storage + artifact.write + recipe.storage + recipe.write);
-  const data = input.dataBytesPerDeviceMonth ? blobCostFrost(input.dataBytesPerDeviceMonth, input.storageEpochs) : undefined;
-  const dataFrost = data ? BigInt(devices * months) * (data.storage + data.write) : BigInt(0);
+  const data = input.dataBytesPerDeviceMonth ? blobCostFrost(Math.ceil(input.dataBytesPerDeviceMonth / Math.max(1, uploads)), input.storageEpochs) : undefined;
+  const dataFrost = data ? BigInt(devices * months * uploads) * (data.storage + data.write) : BigInt(0);
   // The floats are paid from the deposit, so they are part of it (not extra spend).
   const suiDepositMist = margin(gasMist, input.marginPercent) + floatsMist;
   const walDepositFrost = margin(artifactFrost + dataFrost, input.marginPercent);

@@ -76,6 +76,11 @@ assert.equal(busy.suiDepositMist, gas + gas / BigInt(10) + BigInt(2) * base.floa
 const withData = costs.estimate({ ...base, dataBytesPerDeviceMonth: 1 << 20 });
 const one = costs.blobCostFrost(1 << 20, 2);
 assert.equal(withData.dataFrost, BigInt(1000) * (one.storage + one.write));
+const daily = costs.estimate({ ...base, dataBytesPerDeviceMonth: 1 << 20, dataUploadsPerDeviceMonth: 30 });
+const batch = costs.blobCostFrost(Math.ceil((1 << 20)/30), 2);
+assert.equal(daily.dataFrost, BigInt(30000) * (batch.storage + batch.write));
+assert(daily.dataFrost > withData.dataFrost, "daily uploads each pay their own fixed overhead");
+assert.throws(() => costs.estimate({ ...base, dataBytesPerDeviceMonth: 1, dataUploadsPerDeviceMonth: 0 }), /archive upload/);
 assert.throws(() => costs.estimate({ ...base, devices: -1 }), /devices/);
 assert.throws(() => costs.estimate({ ...base, storageEpochs: 54 }), /storage epochs/);
 assert.throws(() => costs.estimate({ ...base, drawMist: BigInt(0) }), /draw/);

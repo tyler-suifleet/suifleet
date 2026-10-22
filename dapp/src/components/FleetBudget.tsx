@@ -24,7 +24,7 @@ const wal = (frost: bigint) => `${formatToken(frost)} WAL`;
 
 export const DEFAULT_ESTIMATE: EstimateInput = {
   devices: 1, months: 12, receiptsPerDeviceMonth: 30, anchorsPerDeviceMonth: 0, releasesPerMonth: 1,
-  artifactBytes: 1024 * 1024, dataBytesPerDeviceMonth: 0, storageEpochs: 2,
+  artifactBytes: 1024 * 1024, dataBytesPerDeviceMonth: 0, dataUploadsPerDeviceMonth: 30, storageEpochs: 2,
   floatMist: DEFAULT_LIMITS.floatCap, drawMist: BigInt(50_000_000), marginPercent: 20,
 };
 
@@ -51,6 +51,7 @@ export function EstimatePanel({ onEstimate }: { onEstimate?: (estimate: Estimate
       <NumberField label="Data anchors per device per month" value={input.anchorsPerDeviceMonth} onChange={set("anchorsPerDeviceMonth")} />
       <NumberField label="Releases per month" value={input.releasesPerMonth} onChange={set("releasesPerMonth")} />
       <NumberField label="Artifact size (MiB)" value={input.artifactBytes / 1024 / 1024} step={0.1} onChange={set("artifactBytes")} />
+      <NumberField label="Archive uploads per device per month (daily = 30; add diagnostics/crashes)" value={input.dataUploadsPerDeviceMonth ?? 1} onChange={set("dataUploadsPerDeviceMonth")} />
       <NumberField label="Device data stored per month (MiB)" value={input.dataBytesPerDeviceMonth / 1024 / 1024} step={0.1} onChange={set("dataBytesPerDeviceMonth")} />
       <NumberField label={`Storage epochs (~${epochDays} day(s) each)`} value={input.storageEpochs} onChange={set("storageEpochs")} />
     </div>
