@@ -721,6 +721,278 @@ class HandoffAuditTests(unittest.TestCase):
         self.assertEqual(self.worker.db.execute("SELECT status FROM runs WHERE session LIKE '%audit'").fetchone()[0], 'finished')
 
 
+class DependencyResumeTests(unittest.TestCase):
+    setUp = DispatchTests.setUp
+    receipt = DispatchTests.receipt
+    authority = ObsoleteReceiptTests.authority
+    MERGE = 'a' * 40
+
+    def setup_wait(self, wait=None, dependency=None):
+        self.folder = self.receipt(status='parked', owner_status='blocked', verdict='blocked')
+        result = {'verdict': 'blocked', 'evidence': 'needs SF-083 merged first',
+                  'dependency_wait': {'tickets': ['SF-083'], 'integration': 'merged_main'} if wait is None else wait}
+        (self.folder/'result.json').write_text(json.dumps(result))
+        (self.folder/'process.json').write_text(json.dumps(dict(pid=99999999, started='start')))
+        self.db = self.authority({'status': 'blocked'})
+        self.dependency = {'key': 'SF-083', 'status': 'done', 'token': None, 'publish_pending': False,
+                           'events': [{'kind': 'complete', 'detail': 'approved\nMerged commit: ' + self.MERGE}],
+                           **(dependency or {})}
+        self.calls = []
+        self.failures = {}
+        def ticket(project, *args):
+            self.calls.append(args[:2])
+            if args[0] in self.failures:
+                self.failures[args[0]] -= 1
+                if self.failures[args[0]] == 0:
+                    del self.failures[args[0]]
+                raise subprocess.CalledProcessError(1, 'ticket', stderr='mirror unavailable')
+            if args[0] == 'show':
+                return dict(self.dependency) if args[1] == 'SF-083' else dict(self.owner)
+            if args[0] == 'resume':
+                self.owner = {**self.owner, 'status': 'in_progress'}
+            if args[0] == 'list':
+                return [dict(self.owner)]
+            return dict(self.owner)
+        self.worker.ticket = Mock(side_effect=ticket)
+        self.merged = True
+        def command(args, **kwargs):
+            if args[:2] == ['git', 'branch']:
+                return 'branch'
+            if args[:2] == ['git', 'merge-base'] and not self.merged:
+                raise subprocess.CalledProcessError(1, args)
+            return 'secret-gh-token' if args[0] == 'gh' else ''
+        self.spawn = Mock(return_value=Mock(pid=12345))
+        for patcher in (patch.object(d, 'process_identity', return_value=None),
+                        patch.object(d, 'worker_stopped', return_value=True),
+                        patch.object(d, 'run', side_effect=command),
+                        patch.object(d.subprocess, 'Popen', self.spawn)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def resume(self, worker=None, owners=None):
+        return (worker or self.worker).resume_dependency_waits(self.project, [self.slot], owners or [])
+
+    def record(self):
+        return self.worker.db.execute('SELECT * FROM dependency_resumes').fetchone()
+
+    def restart(self):
+        restarted = d.Dispatcher(self.config, self.state)
+        restarted.ticket = self.worker.ticket
+        return restarted
+
+    def runs(self):
+        return {r['session']: r['status'] for r in self.worker.db.execute('SELECT * FROM runs')}
+
+    def test_merged_dependency_resumes_once_on_unchanged_claim(self):
+        self.setup_wait()
+        self.assertEqual(self.resume(), 1)
+        self.assertEqual(self.spawn.call_count, 1)
+        self.assertEqual(self.runs(), {'session': 'finished', 'session-resume': 'running'})
+        resumed = self.worker.db.execute("SELECT * FROM runs WHERE session='session-resume'").fetchone()
+        self.assertEqual(json.loads(resumed['claim']), self.claim)
+        self.assertEqual(self.spawn.call_args.kwargs['cwd'], self.claim['worktree'])
+        self.assertEqual(self.spawn.call_args.kwargs['env']['PR_COORDINATOR_CLAIM_TOKEN'], 'private-token')
+        prompt = (self.folder/'dependency-resume/prompt.txt').read_text()
+        self.assertIn('merge origin/main into your existing branch', prompt)
+        self.assertIn('SF-083 (merge ' + self.MERGE, prompt)
+        self.assertNotIn('private-token', prompt)
+        self.assertNotIn('secret-gh-token', prompt)
+        mutations = [c for c in self.calls if c[0] not in ('show', 'list')]
+        self.assertEqual(mutations, [('resume', 'SF-099'), ('heartbeat', 'SF-099'), ('assert', 'SF-099')])
+        self.assertEqual(self.record()['state'], 'launched')
+        self.assertNotIn('private-token', json.dumps(dict(self.record())))
+        retired = self.worker.db.execute('SELECT * FROM retired_runs').fetchone()
+        self.assertEqual((retired['session'], retired['original_status']), ('session', 'parked'))
+        self.assertTrue((self.folder/'result.json').exists())
+        # Duplicate scans and a restarted dispatcher never resume twice.
+        self.assertEqual(self.resume(), 0)
+        self.assertEqual(self.resume(self.restart()), 0)
+        self.assertEqual(self.spawn.call_count, 1)
+
+    def test_incomplete_or_unmerged_prerequisites_wait_visibly(self):
+        for case, dependency in [('review', {'status': 'review', 'token': 'dependency-token'}),
+                                 ('pending', {'publish_pending': True}),
+                                 ('no_evidence', {'events': [{'kind': 'complete', 'detail': 'approved'}]}),
+                                 ('bad_commit', {'events': [{'kind': 'complete', 'detail': 'Merged commit: --upload-pack=x'}]}),
+                                 ('not_in_main', {})]:
+            with self.subTest(case=case):
+                self.setUp()
+                self.setup_wait(dependency=dependency)
+                self.merged = case != 'not_in_main'
+                self.assertEqual(self.resume(), 0)
+                self.assertEqual(self.record()['state'], 'waiting')
+                self.assertEqual(self.runs(), {'session': 'parked'})
+                self.assertIn('Dependency wait waiting', self.worker.db.execute('SELECT message FROM runs').fetchone()[0])
+                self.assertFalse([c for c in self.calls if c[0] not in ('show', 'list')])
+                self.spawn.assert_not_called()
+        # A prerequisite merging later is picked up by an ordinary scan.
+        self.merged = True
+        self.assertEqual(self.resume(), 1)
+
+    def test_non_dependency_blockers_and_malformed_receipts_never_resume(self):
+        waits = [{}, {'tickets': ['SF-083']}, {'tickets': ['SF-083'], 'integration': 'review'},
+                 {'tickets': ['SF-099'], 'integration': 'merged_main'}, {'tickets': [], 'integration': 'merged_main'},
+                 {'tickets': ['SF-083', 'SF-083'], 'integration': 'merged_main'},
+                 {'tickets': ['sf-83'], 'integration': 'merged_main'},
+                 {'tickets': ['SF-083'], 'integration': 'merged_main', 'hardware': True}]
+        for wait in waits:
+            with self.subTest(wait=wait):
+                self.setUp()
+                self.setup_wait(wait=wait)
+                self.assertEqual(self.resume(), 0)
+                self.assertIsNone(self.record())
+                self.assertFalse(self.calls)
+        self.setUp()
+        self.setup_wait()
+        (self.folder/'result.json').write_text(json.dumps({'verdict': 'blocked', 'evidence': 'hardware approval needed'}))
+        self.assertEqual(self.resume(), 0)
+        self.assertIsNone(self.record())
+
+    def test_acceptance_only_prerequisite_needs_explicit_recovery(self):
+        self.setup_wait(wait={'tickets': ['SF-031'], 'integration': 'merged_main'})
+        self.project['acceptance_policy'] = {'development_defaults': {'acceptance_only_tickets': ['SF-031']}}
+        self.assertEqual(self.resume(), 0)
+        self.assertIn('acceptance-only', self.record()['reason'])
+        self.spawn.assert_not_called()
+
+    def test_unsafe_worker_or_ownership_state_never_resumes(self):
+        for kind in ('live', 'children', 'helpers', 'uncertain_exit', 'token', 'mirror', 'status', 'family',
+                     'branch', 'dirty', 'authority_race', 'capacity'):
+            with self.subTest(kind=kind):
+                self.setUp()
+                self.setup_wait()
+                patches = []
+                if kind == 'live': patches.append(patch.object(d, 'process_identity', return_value='start'))
+                if kind == 'children': patches.append(patch.object(d, 'worker_stopped', return_value=False))
+                if kind == 'helpers': patches.append(patch.object(self.worker, 'claim_helpers', return_value=[{'pid': 1, 'started': 'x'}]))
+                if kind == 'uncertain_exit': (self.folder/'exit.json').write_text('{"returncode":1}')
+                if kind == 'token': self.owner = {**self.owner, 'token': 'replacement'}
+                if kind == 'mirror': self.owner = {**self.owner, 'publish_pending': True}
+                if kind == 'status': self.owner = {**self.owner, 'status': 'in_progress'}
+                if kind == 'family': self.slot = {**self.slot, 'family': 'Claude'}
+                if kind == 'branch': patches.append(patch.object(d, 'run', return_value='other'))
+                if kind == 'dirty': patches.append(patch.object(d, 'run', side_effect=lambda a, **k: 'branch' if a[:2] == ['git', 'branch'] else (' M x' if a[:2] == ['git', 'status'] else '')))
+                if kind == 'authority_race': self.db.execute("UPDATE tickets SET revision=5")
+                if kind == 'capacity':
+                    self.worker.db.execute('INSERT INTO runs VALUES(?,?,?,?,?,?,?,?,?)',
+                        ('busy', 'suifleet', 'Codex', 'running', str(self.state), None, 1, 'x', None))
+                for p in patches: p.start()
+                try:
+                    self.assertEqual(self.resume(), 0)
+                finally:
+                    for p in reversed(patches): p.stop()
+                self.assertNotIn(('resume', 'SF-099'), self.calls)
+                self.spawn.assert_not_called()
+                self.assertIn(self.runs()['session'], ('parked',))
+                if self.record() is not None:
+                    self.assertIn(self.record()['state'], ('waiting',))
+
+    def test_retention_cap_does_not_prevent_resume_but_execution_capacity_does(self):
+        self.setup_wait()
+        self.slot = {**self.slot, 'max_quarantined': 1}
+        self.assertFalse(self.worker.available(self.slot, []))
+        self.assertEqual(self.resume(), 1)
+
+    def test_failed_publication_retries_with_backoff_then_launches_once(self):
+        self.setup_wait()
+        self.failures = {'resume': 1}
+        with patch.object(d.time, 'time', return_value=1000.0):
+            self.assertEqual(self.resume(), 0)
+        record = self.record()
+        self.assertEqual((record['state'], record['attempts'], record['retry_after']), ('resuming', 1, 1060.0))
+        # The in-flight resume holds execution capacity against new claims.
+        self.assertFalse(self.worker.available(self.slot, []))
+        # The mirror failed after the local transition: publish, not a second resume.
+        self.owner = {**self.owner, 'status': 'in_progress', 'publish_pending': True}
+        with patch.object(d.time, 'time', return_value=1030.0):
+            self.assertEqual(self.resume(), 0)
+        with patch.object(d.time, 'time', return_value=1061.0):
+            self.assertEqual(self.resume(self.restart()), 1)
+        self.assertEqual(self.calls.count(('resume', 'SF-099')), 1)
+        self.assertEqual(self.calls.count(('publish', 'SF-099')), 1)
+        self.assertEqual(self.spawn.call_count, 1)
+
+    def test_bounded_retry_exhaustion_is_visible_and_retains_claim(self):
+        self.setup_wait()
+        self.failures = {'assert': 99}
+        for attempt in range(d.MAX_RESUME_ATTEMPTS + 2):
+            with patch.object(d.time, 'time', return_value=10000.0 * (attempt + 1)):
+                self.resume()
+        record = self.record()
+        self.assertEqual((record['state'], record['attempts']), ('failed', d.MAX_RESUME_ATTEMPTS))
+        self.assertIn('explicit recovery', record['reason'])
+        self.assertEqual(self.calls.count(('assert', 'SF-099')), d.MAX_RESUME_ATTEMPTS)
+        self.assertEqual(self.runs(), {'session': 'parked'})
+        self.assertIn('failed', self.worker.db.execute('SELECT message FROM runs').fetchone()[0])
+        self.spawn.assert_not_called()
+
+    def test_ownership_change_after_intent_fails_without_resume(self):
+        self.setup_wait()
+        self.failures = {'resume': 1}
+        self.resume()
+        self.owner = {**self.owner, 'token': 'replacement'}
+        with patch.object(d.time, 'time', return_value=time_after_backoff()):
+            self.resume()
+        self.assertEqual(self.record()['state'], 'failed')
+        self.assertEqual(self.calls.count(('resume', 'SF-099')), 1)
+        self.spawn.assert_not_called()
+
+    def test_failed_launch_is_retained_and_never_retried(self):
+        self.setup_wait()
+        self.spawn.side_effect = OSError('unavailable')
+        self.assertEqual(self.resume(), 1)
+        self.assertEqual(self.runs(), {'session': 'finished', 'session-resume': 'orphaned'})
+        self.assertIn('never relaunched', self.record()['reason'])
+        self.resume()
+        self.resume(self.restart())
+        self.assertEqual(self.spawn.call_count, 1)
+
+    def test_restart_adopts_recorded_intent(self):
+        self.setup_wait()
+        self.worker.db.execute('INSERT INTO dependency_resumes VALUES(?,?,?,?,?,?,?,?,?,?)',
+                               ('session', 'suifleet', 'Codex', 'hash', 'resuming', None, 0, 0, 'interrupted', 0))
+        restarted = self.restart()
+        self.assertFalse(restarted.available(self.slot, []))
+        self.assertEqual(self.resume(restarted), 1)
+        self.assertEqual(self.calls.count(('resume', 'SF-099')), 1)
+
+    def test_per_claim_resume_limit(self):
+        self.setup_wait()
+        digest = d.hashlib.sha256(b'private-token').hexdigest()
+        for n in range(d.MAX_RESUMES_PER_CLAIM):
+            self.worker.db.execute('INSERT INTO dependency_resumes VALUES(?,?,?,?,?,?,?,?,?,?)',
+                                   (f'old{n}', 'suifleet', 'Codex', digest, 'launched', f'old{n}-resume', 0, 0, '', 0))
+        self.assertEqual(self.resume(), 0)
+        self.assertEqual(self.worker.db.execute("SELECT state FROM dependency_resumes WHERE source='session'").fetchone()[0], 'failed')
+        self.spawn.assert_not_called()
+
+    def test_tick_resumes_before_claiming_new_work(self):
+        self.setup_wait()
+        self.worker.tick(True)
+        self.assertEqual(self.spawn.call_count, 1)
+        self.assertNotIn('claim', [c[0] for c in self.calls])
+        self.assertNotIn('refresh', [c[0] for c in self.calls])
+
+    def test_reparked_resume_is_resumable_again_within_limit(self):
+        self.setup_wait()
+        self.resume()
+        resumed = self.folder/'dependency-resume'
+        (resumed/'process.json').write_text(json.dumps(dict(pid=12345, started='resume-start')))
+        (resumed/'exit.json').write_text('{"returncode":0}')
+        (resumed/'result.json').write_text(json.dumps({'verdict': 'blocked', 'evidence': 'needs SF-084',
+            'dependency_wait': {'tickets': ['SF-084'], 'integration': 'merged_main'}}))
+        self.owner = {**self.owner, 'status': 'blocked'}
+        self.worker.reconcile(self.project)
+        self.assertEqual(self.runs()['session-resume'], 'parked')
+        self.dependency = {**self.dependency, 'key': 'SF-084', 'status': 'in_progress', 'token': 'x'}
+        self.assertEqual(self.resume(), 0)
+        self.assertEqual(self.worker.db.execute("SELECT state FROM dependency_resumes WHERE source='session-resume'").fetchone()[0], 'waiting')
+
+
+def time_after_backoff():
+    return d.time.time() + 10000
+
+
 class HelperProcessTests(unittest.TestCase):
     def test_detached_heartbeat_detected_and_stale_helper_not_reused(self):
         token = d.uuid.uuid4().hex

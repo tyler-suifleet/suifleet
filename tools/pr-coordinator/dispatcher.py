@@ -6,12 +6,36 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import sqlite3
 import subprocess
 import time
 import uuid
 
 from coordinator import network_authorization, process_identity, worker_stopped, run, effective_policy
+
+TICKET_KEY = re.compile(r'[A-Z][A-Z0-9]*-[0-9]+')
+COMMIT = re.compile(r'[0-9a-f]{40}')
+MAX_RESUMES_PER_CLAIM = 3
+MAX_RESUME_ATTEMPTS = 5
+
+
+def dependency_wait(result, key):
+    """Return the prerequisite keys of a structured dependency-wait receipt.
+
+    Anything else (free-form blocked text, hardware/production authorization,
+    errors or extra conditions) is not resumable automatically."""
+    wait = result.get('dependency_wait') if isinstance(result, dict) else None
+    if (result.get('verdict') != 'blocked' or not isinstance(result.get('evidence'), str)
+            or not result['evidence'].strip() or not isinstance(wait, dict)):
+        return None
+    if set(wait) != {'tickets', 'integration'} or wait['integration'] != 'merged_main':
+        return None
+    tickets = wait['tickets']
+    if (not isinstance(tickets, list) or not 1 <= len(tickets) <= 16 or len(set(map(str, tickets))) != len(tickets)
+            or not all(isinstance(t, str) and TICKET_KEY.fullmatch(t) and t != key for t in tickets)):
+        return None
+    return sorted(tickets)
 
 
 class Dispatcher:
@@ -35,6 +59,10 @@ class Dispatcher:
             reason TEXT NOT NULL, retired_at REAL NOT NULL)''')
         self.db.execute('CREATE TABLE IF NOT EXISTS handoff_audits (source TEXT PRIMARY KEY, session TEXT UNIQUE, state TEXT, reason TEXT)')
         self.db.execute('CREATE TABLE IF NOT EXISTS eligibility (project TEXT PRIMARY KEY, fingerprint TEXT)')
+        # One durable record per parked source receipt; terminal states never relaunch.
+        self.db.execute('''CREATE TABLE IF NOT EXISTS dependency_resumes (
+            source TEXT PRIMARY KEY, project TEXT, family TEXT, claim TEXT, state TEXT,
+            session TEXT UNIQUE, attempts INTEGER, retry_after REAL, reason TEXT, updated REAL)''')
         for slot in config.get('implementation_slots', []):
             if slot['family'] not in ('Codex', 'Claude') or not slot['model'].strip():
                 raise ValueError('Each slot needs a known family and actual model')
@@ -302,6 +330,216 @@ Hand off completed work only after verifying all implementation gates. Preserve 
                 if authority is not None:
                     authority.close()
 
+    def dependency_status(self, project, tickets):
+        """Return (None, commits) when every prerequisite is published Done and
+        its recorded merge commit is in origin/main; otherwise (reason, None)."""
+        policy = project.get('acceptance_policy', {}).get('development_defaults', {})
+        excluded = [key for key in tickets if key in policy.get('acceptance_only_tickets', [])]
+        if excluded:
+            return 'acceptance-only prerequisite needs explicit recovery: ' + ', '.join(excluded), None
+        commits, missing = {}, []
+        for key in tickets:
+            dependency = self.ticket(project, 'show', key)
+            if (dependency.get('status') != 'done' or dependency.get('token') is not None
+                    or dependency.get('publish_pending')):
+                missing.append(key)
+                continue
+            merged = [event['detail'].rsplit('Merged commit: ', 1)[1].strip() for event in dependency.get('events', [])
+                      if event.get('kind') == 'complete' and 'Merged commit: ' in (event.get('detail') or '')]
+            if not merged or not COMMIT.fullmatch(merged[-1]):
+                return f'{key} is Done without merged-commit evidence; needs explicit recovery', None
+            commits[key] = merged[-1]
+        if missing:
+            return 'waiting for merged prerequisites: ' + ', '.join(missing), None
+        run(['git', 'fetch', 'origin', 'main'], cwd=project['root'])
+        for key, commit in commits.items():
+            try:
+                run(['git', 'merge-base', '--is-ancestor', commit, 'origin/main'], cwd=project['root'])
+            except subprocess.CalledProcessError:
+                return f'{key} merge commit {commit[:12]} is not in origin/main', None
+        return None, commits
+
+    def resume_note(self, source, state, reason, attempts=None, retry_after=None):
+        """Persist visible resume state; also surface it on the parked receipt."""
+        old = self.db.execute('SELECT * FROM dependency_resumes WHERE source=?', (source,)).fetchone()
+        if old and (old['state'], old['reason']) == (state, reason) and attempts is None:
+            return
+        self.db.execute('''UPDATE dependency_resumes SET state=?,reason=?,attempts=COALESCE(?,attempts),
+                           retry_after=COALESCE(?,retry_after),updated=? WHERE source=?''',
+                        (state, reason, attempts, retry_after, time.time(), source))
+        self.db.execute("UPDATE runs SET message=? WHERE session=? AND status='parked'",
+                        (f'Dependency wait {state}: {reason}', source))
+        print(f'dependency resume {source}: {state}: {reason}', flush=True)
+
+    def resume_dependency_waits(self, project, slots, owners):
+        """Resume a verified stopped dependency wait once, on its unchanged claim."""
+        families = {slot['family']: slot for slot in slots}
+        launched = 0
+        rows = self.db.execute("SELECT * FROM runs WHERE project=? AND status='parked' ORDER BY session",
+                               (project['id'],)).fetchall()
+        for row in rows:
+            source = row['session']
+            authority = None
+            try:
+                directory = Path(row['directory'])
+                claim = json.loads(row['claim'])
+                result_path = directory/'result.json'
+                result = json.loads(result_path.read_text()) if result_path.exists() else {}
+                tickets = dependency_wait(result, claim['key'])
+                if tickets is None:
+                    continue  # Ordinary blocked/hardware/authorization: explicit recovery only.
+                record = self.db.execute('SELECT * FROM dependency_resumes WHERE source=?', (source,)).fetchone()
+                if record is None:
+                    self.db.execute('INSERT INTO dependency_resumes VALUES(?,?,?,?,?,?,?,?,?,?)',
+                                    (source, project['id'], row['family'], hashlib.sha256(claim['token'].encode()).hexdigest(),
+                                     'waiting', None, 0, 0, 'recorded dependency wait: ' + ', '.join(tickets), time.time()))
+                    record = self.db.execute('SELECT * FROM dependency_resumes WHERE source=?', (source,)).fetchone()
+                if record['state'] in ('launched', 'failed') or (record['retry_after'] or 0) > time.time():
+                    continue
+                slot = families.get(row['family'])
+                if slot is None or claim.get('agent') != row['family']:
+                    self.resume_note(source, 'waiting', 'no enabled slot for the original family')
+                    continue
+                if record['state'] == 'waiting':
+                    if json.loads((directory/'exit.json').read_text()) != {'returncode': 0}:
+                        continue  # Not a clean handoff; parked rows normally guarantee this.
+                    reason, commits = self.dependency_status(project, tickets)
+                    if reason:
+                        self.resume_note(source, 'waiting', reason)
+                        continue
+                    used = self.db.execute("SELECT count(*) FROM dependency_resumes WHERE claim=? AND state IN ('resuming','launched','failed')",
+                                           (record['claim'],)).fetchone()[0]
+                    if used >= MAX_RESUMES_PER_CLAIM:
+                        self.resume_note(source, 'failed', f'resume limit {MAX_RESUMES_PER_CLAIM} reached for this claim; explicit recovery required')
+                        continue
+                    identity = self.stopped_identity(row)
+                    if identity is None:
+                        self.resume_note(source, 'waiting', 'original worker or claim helper not verified stopped')
+                        continue
+                    owner = self.ticket(project, 'show', claim['key'])
+                    fields = ('token', 'session', 'branch', 'worktree', 'agent', 'model')
+                    if owner.get('publish_pending') or owner.get('status') != 'blocked' or any(owner.get(k) != claim.get(k) for k in fields):
+                        self.resume_note(source, 'waiting', 'ownership is not the unchanged published blocked claim')
+                        continue
+                    if (run(['git', 'branch', '--show-current'], cwd=claim['worktree']).strip() != claim['branch']
+                            or run(['git', 'status', '--porcelain'], cwd=claim['worktree']).strip()):
+                        self.resume_note(source, 'waiting', 'original worktree is not clean on the original branch')
+                        continue
+                    if not self.available(slot, owners, retention=False):
+                        self.resume_note(source, 'waiting', 'prerequisites merged; waiting for implementation capacity')
+                        continue
+                    path = Path(os.environ.get('XDG_STATE_HOME', str(Path.home()/'.local/state')))/'atomic-ticketing/coordination.sqlite3'
+                    authority = sqlite3.connect(f'{path.as_uri()}?mode=rw', uri=True, isolation_level=None, timeout=1)
+                    authority.row_factory = sqlite3.Row
+                    authority.execute('BEGIN IMMEDIATE')
+                    current = authority.execute('SELECT * FROM tickets WHERE key=? AND project=?',
+                                                (project['id']+'::'+claim['key'], project['id'])).fetchone()
+                    compared = ('status', 'token', 'session', 'branch', 'worktree', 'revision', 'published_revision')
+                    if (not current or any(current[k] != owner.get(k) for k in compared)
+                            or current['revision'] != current['published_revision']
+                            or self.stopped_identity(row) != identity or self.claim_helpers(claim)):
+                        self.resume_note(source, 'waiting', 'ownership or process state changed during verification')
+                        continue
+                    # Persist intent under the authority lock, BEFORE any ownership mutation.
+                    self.db.execute("UPDATE dependency_resumes SET state='resuming',attempts=0,retry_after=0,reason=?,updated=? WHERE source=? AND state='waiting'",
+                                    ('prerequisites merged: ' + ', '.join(f'{k}@{c[:12]}' for k, c in commits.items()), time.time(), source))
+                    authority.execute('ROLLBACK')
+                    authority.close()
+                    authority = None
+                    record = self.db.execute('SELECT * FROM dependency_resumes WHERE source=?', (source,)).fetchone()
+                    if record['state'] != 'resuming':
+                        continue
+                launched += self.continue_resume(project, row, claim, tickets, record)
+            except (OSError, ValueError, KeyError, TypeError, AttributeError, sqlite3.Error, subprocess.CalledProcessError) as error:
+                # Pre-intent failures are retried next scan without any mutation.
+                print(f"{project['id']}: dependency resume check deferred for {source} ({type(error).__name__})", flush=True)
+            finally:
+                if authority is not None:
+                    authority.close()
+        return launched
+
+    def continue_resume(self, project, row, claim, tickets, record):
+        """Drive one recorded resume intent to a single launch, with bounded retry."""
+        source = row['session']
+        try:
+            owner = self.ticket(project, 'show', claim['key'])
+            if any(owner.get(k) != claim.get(k) for k in ('token', 'session', 'branch', 'worktree', 'agent', 'model')):
+                self.resume_note(source, 'failed', 'ownership changed; original claim never resumed')
+                return 0
+            if owner.get('status') == 'blocked':
+                owner = self.ticket(project, 'resume', claim['key'], '--token', claim['token'])
+            elif owner.get('status') != 'in_progress':
+                self.resume_note(source, 'failed', f"unexpected ticket status {owner.get('status')}; explicit recovery required")
+                return 0
+            if owner.get('publish_pending'):
+                owner = self.ticket(project, 'publish', claim['key'])
+            self.ticket(project, 'heartbeat', claim['key'], '--token', claim['token'])
+            # Assert enforces the live claim, published mirror, open issue and dependencies.
+            self.ticket(project, 'assert', claim['key'], '--token', claim['token'])
+            if (self.stopped_identity(row) is None or self.claim_helpers(claim)
+                    or run(['git', 'branch', '--show-current'], cwd=claim['worktree']).strip() != claim['branch']
+                    or run(['git', 'status', '--porcelain'], cwd=claim['worktree']).strip()):
+                raise RuntimeError('original worker, helper or worktree state changed')
+            reason, commits = self.dependency_status(project, tickets)
+            if reason:
+                raise RuntimeError(reason)
+        except (OSError, ValueError, KeyError, TypeError, RuntimeError, subprocess.CalledProcessError) as error:
+            attempts = (record['attempts'] or 0) + 1
+            detail = str(error) if isinstance(error, RuntimeError) else type(error).__name__
+            if attempts >= MAX_RESUME_ATTEMPTS:
+                self.resume_note(source, 'failed', f'resume failed {attempts} times ({detail}); claim retained for explicit recovery', attempts)
+            else:
+                delay = min(900, 60 * 2**(attempts-1))
+                self.resume_note(source, 'resuming', f'attempt {attempts} failed ({detail}); retry in {delay}s',
+                                 attempts, time.time()+delay)
+            return 0
+        session = source + '-resume'
+        directory = Path(row['directory'])/'dependency-resume'
+        self.db.execute('BEGIN IMMEDIATE')
+        try:
+            # Record the single launch BEFORE starting it: an interrupted or failed
+            # launch is never repeated. The parked source is archived, not deleted.
+            if self.db.execute("UPDATE dependency_resumes SET state='launched',session=?,updated=? WHERE source=? AND state='resuming'",
+                               (session, time.time(), source)).rowcount != 1:
+                return 0
+            self.db.execute('INSERT INTO retired_runs(session,original_status,original_message,reason,retired_at) VALUES(?,?,?,?,?)',
+                            (source, row['status'], row['message'], 'dependency wait resumed as '+session, time.time()))
+            self.db.execute("UPDATE runs SET status='finished',message=? WHERE session=? AND status='parked'",
+                            ('Dependency wait resumed as '+session, source))
+            self.db.execute('INSERT INTO runs VALUES(?,?,?,?,?,?,?,?,?)',
+                            (session, project['id'], row['family'], 'launching', str(directory), row['claim'], None, None,
+                             'Resumed retained claim after merged prerequisites'))
+            self.db.execute('COMMIT')
+        finally:
+            if self.db.in_transaction:
+                self.db.execute('ROLLBACK')
+        try:
+            directory.mkdir(mode=0o700)
+            merged = ', '.join(f'{key} (merge {commit})' for key, commit in commits.items())
+            preface = f"""This resumes your retained claim after its recorded dependency wait. Original receipts: {row['directory']}.
+Prerequisites now Done and merged into origin/main: {merged}.
+The dispatcher already resumed the claim to In Progress; do not run ticket resume, claim, recover or release.
+First fetch origin main and merge origin/main into your existing branch (never force-push or rewrite published history),
+resolve conflicts, then continue the unfinished software and rerun all required tests on the merged result.
+"""
+            token = run(['gh', 'auth', 'token', '--hostname', 'github.com', '--user', project['github_account']]).strip()
+            env = {**os.environ, 'GH_TOKEN': token, 'PR_COORDINATOR_ACTIVE': '1',
+                   'PR_COORDINATOR_CLAIM_TOKEN': claim['token']}
+            (directory/'command.json').write_text(json.dumps(self.config['workers'][row['family']]))
+            (directory/'prompt.txt').write_text(preface + self.prompt(project, claim, directory))
+            child = subprocess.Popen(['/usr/bin/python3', str(Path(__file__).with_name('worker.py')), str(directory)],
+                                     cwd=claim['worktree'], env=env, stdin=subprocess.DEVNULL,
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            self.children[session] = child
+            self.db.execute("UPDATE runs SET status='running',pid=?,started=? WHERE session=?",
+                            (child.pid, process_identity(child.pid), session))
+            print(f"{project['id']}: {row['family']} resumed {claim['key']} after {merged}", flush=True)
+        except Exception as error:
+            self.update(session, 'orphaned', f'Resume launch failed ({type(error).__name__}); inspect before explicit recovery')
+            self.db.execute('UPDATE dependency_resumes SET reason=? WHERE source=?',
+                            (f'launch failed ({type(error).__name__}); claim retained, never relaunched', source))
+        return 1
+
     def reconcile(self, project):
         self.retire_obsolete(project)
         rows = self.db.execute("SELECT * FROM runs WHERE project=? AND status IN ('claiming','launching','running','orphaned')", (project['id'],)).fetchall()
@@ -378,7 +616,7 @@ Hand off completed work only after verifying all implementation gates. Preserve 
                 self.db.execute('INSERT OR REPLACE INTO eligibility VALUES(?,?)', (project['id'], fingerprint))
                 self.db.execute("UPDATE backoff SET attempts=0,retry_after=0 WHERE project=? AND reason='idle: no eligible ticket'", (project['id'],))
 
-    def available(self, slot, owners):
+    def available(self, slot, owners, retention=True):
         pause = self.db.execute('SELECT retry_after FROM backoff WHERE project=? AND family=?', (slot['project'],slot['family'])).fetchone()
         if pause and pause[0] > time.time():
             return False
@@ -402,7 +640,7 @@ Hand off completed work only after verifying all implementation gates. Preserve 
             except (ValueError, TypeError, KeyError):
                 identity = ('receipt', row['session'])
             retained.add(identity)
-        if len(retained) >= slot.get('max_quarantined', 3):
+        if retention and len(retained) >= slot.get('max_quarantined', 3):
             return False
         managed_sessions = {r['session'] for r in rows}
         # Real ticket responses preserve the dispatch session. Tests/legacy state
@@ -413,7 +651,9 @@ Hand off completed work only after verifying all implementation gates. Preserve 
                      and owner['status'] in ('in_progress', 'blocked')
                      and (not owner.get('session') or owner['session'] not in managed_sessions))
         # Retained jobs free execution capacity only while still proven stopped.
-        active = 0
+        # A dependency resume in flight already holds its slot before launch.
+        active = self.db.execute("SELECT count(*) FROM dependency_resumes WHERE project=? AND family=? AND state='resuming'",
+                                 (slot['project'], slot['family'])).fetchone()[0]
         for row in rows:
             if row['status'] not in ('quarantined', 'parked'):
                 active += 1
@@ -485,6 +725,7 @@ Authorized: local builds, simulators and disposable network-none local Sui chain
 Lock shared build/port/hardware resources only during actual use, renew while used and release before Review. Do not touch others' work.
 Do not create any new issues, start model workers, merge PRs or relax test/review gates. Report newly discovered work in this issue.
 If genuine external acceptance is unavailable, record it honestly and retain/block your claim; do not claim the next ticket yourself.
+If blocked ONLY until prerequisite tickets merge, block the ticket with that explanation and add "dependency_wait": {{"tickets": ["SF-NNN"], "integration": "merged_main"}} to a blocked result; the dispatcher then resumes this claim once after they merge. Never use dependency_wait for failures, hardware, production or authorization blockers.
 When implementation acceptance is ready, wait for current-head CI, mark PR Ready and ticket Review with complete evidence, release resources.
 Write {directory/'result.json'} as JSON with verdict review_ready, actual model, and nonempty evidence including PR/head/tests/limits.
 Then EXIT: the existing PR coordinator handles independent review/feedback/merge, and this dispatcher assigns your successor.
@@ -504,6 +745,9 @@ Specification snapshot: {json.dumps(claim['spec'])}
                 continue
             owners = self.ticket(project, 'list')
             self.wake_on_change(project, owners)
+            # Resuming retained work takes precedence over new claims.
+            if self.resume_dependency_waits(project, slots, owners):
+                owners = self.ticket(project, 'list')
             if not any(self.available(slot, owners) for slot in slots):
                 continue
             try:
@@ -534,7 +778,9 @@ def main():
     os.umask(0o077)
     dispatcher = Dispatcher(json.loads(args.config.read_text()), args.state)
     if args.status:
-        print(json.dumps([dict(r) for r in dispatcher.db.execute('SELECT session,project,family,status,message FROM runs')], indent=2))
+        print(json.dumps([dict(r) for r in dispatcher.db.execute('''SELECT r.session,r.project,r.family,r.status,r.message,
+            w.state AS dependency_resume,w.reason AS dependency_reason,w.attempts AS dependency_attempts,w.session AS resumed_as
+            FROM runs r LEFT JOIN dependency_resumes w ON w.source=r.session''')], indent=2))
         return
     with open(args.state/'dispatcher.lock','w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX|fcntl.LOCK_NB)
