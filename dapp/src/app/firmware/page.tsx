@@ -184,7 +184,7 @@ export default function FirmwarePage() {
 
   if (step === "done" && txDigest) {
     return (
-      <div className="max-w-2xl space-y-4">
+      <div className="max-w-2xl space-y-4 [overflow-wrap:anywhere]">
         <PageHeader title="Deploy component" />
         <div className="bg-white border border-gray-200 rounded p-8 text-center space-y-3">
           <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto">
@@ -220,18 +220,18 @@ export default function FirmwarePage() {
     );
   }
 
-  const steps: { key: Step; label: string }[] = [
+  const steps: { key: Step; label: string }[] = catalogVersion ? [{ key: "deploy", label: "Targets & review" }] : [
     { key: "artifact", label: "Artifact" },
     { key: "recipe",   label: "Recipe" },
     { key: "deploy",   label: "Target groups" },
   ];
 
   return (
-    <div className="max-w-2xl space-y-4">
-      <PageHeader title="Deploy component" subtitle="Upload an artifact, define its lifecycle recipe, and deploy to device groups" />
+    <div className="max-w-2xl space-y-4 [overflow-wrap:anywhere]">
+      <PageHeader title="Deploy component" subtitle={catalogVersion ? "Review this published version and select deployment targets" : "Upload an artifact, define its lifecycle recipe, and deploy to device groups"} />
 
       {catalogError && <p role="alert">{catalogError}</p>}
-      {catalogVersion && <p>{catalogVersion.name} {catalogVersion.version} · immutable catalog version. Each device selects its own platform.</p>}
+      {catalogVersion && <section aria-label="Published version review" className="rounded border bg-white p-4 space-y-2"><p>{catalogVersion.name} {catalogVersion.version} · immutable catalog version. Each device selects its own platform.</p><ol className="text-sm">{catalogVersion.manifests.map((m, i) => <li key={i}>{i + 1}. {m.os}/{m.arch}</li>)}</ol><p className="text-sm text-gray-500">Review targets below before submitting. Deployment requests delivery; installed and running state require device reports.</p><Link href="/components" className="text-sm text-blue-600">Back to software library</Link></section>}
       {/* Step indicators */}
       <div className="flex items-center gap-2 text-sm">
         {steps.map((s, i) => (
@@ -248,6 +248,7 @@ export default function FirmwarePage() {
         ))}
       </div>
 
+      {!catalogVersion && <>
       {/* Step 1 — Artifact */}
       <Card disabled={step !== "artifact" || uploading} title="1. Component details & artifact">
         <div className="grid grid-cols-2 gap-3">
@@ -361,9 +362,11 @@ export default function FirmwarePage() {
         )}
       </Card>
 
+      </>}
+
       {deployPhase && <DeploymentProgress phase={deployPhase} progress={recipeProgress} startedAt={deploymentStartedAt} catalog={!!catalogVersion} />}
       {/* Step 3 — Targets */}
-      <Card disabled={step !== "deploy"} title="3. Select targets">
+      <Card disabled={step !== "deploy"} title={catalogVersion ? "Select targets & review" : "3. Select targets"}>
         <label className="flex gap-2 text-sm mb-3"><input type="checkbox" checked={initiallyPaused} onChange={e => setInitiallyPaused(e.target.checked)} />
           Create paused. Configure UTC schedule, expiry, maintenance window and advance notice on Deployments, then resume.
         </label>
