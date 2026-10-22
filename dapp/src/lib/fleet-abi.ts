@@ -2365,12 +2365,45 @@ export const MOVE_ABI = {
   },
   "fleet_budget": {
     "functions": {
+      "account_budget_id": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::fleet_budget::GasAccount"
+        ],
+        "returns": [
+          "sui::object::ID"
+        ]
+      },
+      "account_closed": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::fleet_budget::GasAccount"
+        ],
+        "returns": [
+          "bool"
+        ]
+      },
+      "account_device_id": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::fleet_budget::GasAccount"
+        ],
+        "returns": [
+          "sui::object::ID"
+        ]
+      },
       "account_drawn_in_period": {
         "visibility": "Public",
         "entry": false,
         "type_parameters": [],
         "parameters": [
-          "&sui_edge::fleet_budget::DeviceAccount"
+          "&sui_edge::fleet_budget::GasAccount"
         ],
         "returns": [
           "u64"
@@ -2381,7 +2414,7 @@ export const MOVE_ABI = {
         "entry": false,
         "type_parameters": [],
         "parameters": [
-          "&sui_edge::fleet_budget::DeviceAccount"
+          "&sui_edge::fleet_budget::GasAccount"
         ],
         "returns": [
           "u64"
@@ -2392,10 +2425,22 @@ export const MOVE_ABI = {
         "entry": false,
         "type_parameters": [],
         "parameters": [
-          "&sui_edge::fleet_budget::DeviceAccount"
+          "&sui_edge::fleet_budget::GasAccount"
         ],
         "returns": [
           "u64"
+        ]
+      },
+      "account_id": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::fleet_budget::FleetBudget",
+          "sui::object::ID"
+        ],
+        "returns": [
+          "std::option::Option<sui::object::ID>"
         ]
       },
       "account_last_draw_ms": {
@@ -2403,7 +2448,7 @@ export const MOVE_ABI = {
         "entry": false,
         "type_parameters": [],
         "parameters": [
-          "&sui_edge::fleet_budget::DeviceAccount"
+          "&sui_edge::fleet_budget::GasAccount"
         ],
         "returns": [
           "u64"
@@ -2414,7 +2459,7 @@ export const MOVE_ABI = {
         "entry": false,
         "type_parameters": [],
         "parameters": [
-          "&sui_edge::fleet_budget::DeviceAccount"
+          "&sui_edge::fleet_budget::GasAccount"
         ],
         "returns": [
           "sui_edge::fleet_budget::Limits"
@@ -2425,7 +2470,7 @@ export const MOVE_ABI = {
         "entry": false,
         "type_parameters": [],
         "parameters": [
-          "&sui_edge::fleet_budget::DeviceAccount"
+          "&sui_edge::fleet_budget::GasAccount"
         ],
         "returns": [
           "sui::object::ID"
@@ -2436,7 +2481,18 @@ export const MOVE_ABI = {
         "entry": false,
         "type_parameters": [],
         "parameters": [
-          "&sui_edge::fleet_budget::DeviceAccount"
+          "&sui_edge::fleet_budget::GasAccount"
+        ],
+        "returns": [
+          "u64"
+        ]
+      },
+      "account_reserve": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::fleet_budget::GasAccount"
         ],
         "returns": [
           "u64"
@@ -2447,7 +2503,7 @@ export const MOVE_ABI = {
         "entry": false,
         "type_parameters": [],
         "parameters": [
-          "&sui_edge::fleet_budget::DeviceAccount"
+          "&sui_edge::fleet_budget::GasAccount"
         ],
         "returns": [
           "bool"
@@ -2458,7 +2514,7 @@ export const MOVE_ABI = {
         "entry": false,
         "type_parameters": [],
         "parameters": [
-          "&sui_edge::fleet_budget::DeviceAccount"
+          "&sui_edge::fleet_budget::GasAccount"
         ],
         "returns": [
           "u64"
@@ -2470,6 +2526,7 @@ export const MOVE_ABI = {
         "type_parameters": [],
         "parameters": [
           "&sui_edge::fleet_budget::FleetBudget",
+          "&sui_edge::fleet_budget::GasAccount",
           "&sui_edge::device_registry::DeviceRegistry",
           "&sui_edge::device_cap::DeviceCap",
           "&sui::tx_context::TxContext"
@@ -2557,18 +2614,6 @@ export const MOVE_ABI = {
         ],
         "returns": []
       },
-      "device_account": {
-        "visibility": "Public",
-        "entry": false,
-        "type_parameters": [],
-        "parameters": [
-          "&sui_edge::fleet_budget::FleetBudget",
-          "sui::object::ID"
-        ],
-        "returns": [
-          "std::option::Option<sui_edge::fleet_budget::DeviceAccount>"
-        ]
-      },
       "device_count": {
         "visibility": "Public",
         "entry": false,
@@ -2585,7 +2630,8 @@ export const MOVE_ABI = {
         "entry": false,
         "type_parameters": [],
         "parameters": [
-          "&mut sui_edge::fleet_budget::FleetBudget",
+          "&sui_edge::fleet_budget::FleetBudget",
+          "&mut sui_edge::fleet_budget::GasAccount",
           "&sui_edge::device_registry::DeviceRegistry",
           "&sui_edge::device_cap::DeviceCap",
           "u64",
@@ -2604,10 +2650,13 @@ export const MOVE_ABI = {
           "&sui_edge::device_registry::DeviceRegistry",
           "&sui_edge::device_registry::DeviceOwnerCap",
           "u64",
+          "u64",
           "&sui::clock::Clock",
           "&mut sui::tx_context::TxContext"
         ],
-        "returns": []
+        "returns": [
+          "sui::object::ID"
+        ]
       },
       "fund_device": {
         "visibility": "Public",
@@ -2617,9 +2666,21 @@ export const MOVE_ABI = {
           "&mut sui_edge::fleet_budget::FleetBudget",
           "&sui_edge::fleet_budget::BudgetOwnerCap",
           "&sui_edge::device_registry::DeviceRegistry",
-          "sui::object::ID",
+          "&mut sui_edge::fleet_budget::GasAccount",
           "u64",
           "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "fund_reserve": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::fleet_budget::FleetBudget",
+          "&sui_edge::fleet_budget::BudgetOwnerCap",
+          "&mut sui_edge::fleet_budget::GasAccount",
+          "u64"
         ],
         "returns": []
       },
@@ -2766,6 +2827,18 @@ export const MOVE_ABI = {
           "bool"
         ]
       },
+      "reclaim_reserve": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::fleet_budget::FleetBudget",
+          "&sui_edge::fleet_budget::BudgetOwnerCap",
+          "&mut sui_edge::fleet_budget::GasAccount",
+          "u64"
+        ],
+        "returns": []
+      },
       "registry_id": {
         "visibility": "Public",
         "entry": false,
@@ -2784,7 +2857,7 @@ export const MOVE_ABI = {
         "parameters": [
           "&mut sui_edge::fleet_budget::FleetBudget",
           "&sui_edge::fleet_budget::BudgetOwnerCap",
-          "sui::object::ID"
+          "&mut sui_edge::fleet_budget::GasAccount"
         ],
         "returns": []
       },
@@ -2804,9 +2877,9 @@ export const MOVE_ABI = {
         "entry": false,
         "type_parameters": [],
         "parameters": [
-          "&mut sui_edge::fleet_budget::FleetBudget",
+          "&sui_edge::fleet_budget::FleetBudget",
           "&sui_edge::fleet_budget::BudgetOwnerCap",
-          "sui::object::ID",
+          "&mut sui_edge::fleet_budget::GasAccount",
           "sui_edge::fleet_budget::Limits"
         ],
         "returns": []
@@ -2816,9 +2889,9 @@ export const MOVE_ABI = {
         "entry": false,
         "type_parameters": [],
         "parameters": [
-          "&mut sui_edge::fleet_budget::FleetBudget",
+          "&sui_edge::fleet_budget::FleetBudget",
           "&sui_edge::fleet_budget::BudgetOwnerCap",
-          "sui::object::ID",
+          "&mut sui_edge::fleet_budget::GasAccount",
           "bool"
         ],
         "returns": []
@@ -2845,6 +2918,17 @@ export const MOVE_ABI = {
           "u64"
         ]
       },
+      "total_allocated": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::fleet_budget::FleetBudget"
+        ],
+        "returns": [
+          "u64"
+        ]
+      },
       "total_deposited": {
         "visibility": "Public",
         "entry": false,
@@ -2856,7 +2940,18 @@ export const MOVE_ABI = {
           "u64"
         ]
       },
-      "total_drawn": {
+      "total_paid": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::fleet_budget::FleetBudget"
+        ],
+        "returns": [
+          "u64"
+        ]
+      },
+      "total_reclaimed": {
         "visibility": "Public",
         "entry": false,
         "type_parameters": [],
@@ -3027,52 +3122,6 @@ export const MOVE_ABI = {
           ]
         ]
       },
-      "DeviceAccount": {
-        "abilities": [
-          "Copy",
-          "Drop",
-          "Store"
-        ],
-        "type_parameters": [],
-        "fields": [
-          [
-            "owner_cap_id",
-            "sui::object::ID"
-          ],
-          [
-            "limits",
-            "sui_edge::fleet_budget::Limits"
-          ],
-          [
-            "suspended",
-            "bool"
-          ],
-          [
-            "period_start_ms",
-            "u64"
-          ],
-          [
-            "drawn_in_period",
-            "u64"
-          ],
-          [
-            "draws_in_period",
-            "u64"
-          ],
-          [
-            "last_draw_ms",
-            "u64"
-          ],
-          [
-            "total_drawn",
-            "u64"
-          ],
-          [
-            "enrolled_at_ms",
-            "u64"
-          ]
-        ]
-      },
       "DeviceFunded": {
         "abilities": [
           "Copy",
@@ -3129,6 +3178,10 @@ export const MOVE_ABI = {
           ],
           [
             "device_id",
+            "sui::object::ID"
+          ],
+          [
+            "account_id",
             "sui::object::ID"
           ],
           [
@@ -3196,7 +3249,79 @@ export const MOVE_ABI = {
             "u64"
           ],
           [
+            "total_paid",
+            "u64"
+          ],
+          [
+            "total_allocated",
+            "u64"
+          ],
+          [
+            "total_reclaimed",
+            "u64"
+          ]
+        ]
+      },
+      "GasAccount": {
+        "abilities": [
+          "Key"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "id",
+            "sui::object::UID"
+          ],
+          [
+            "budget_id",
+            "sui::object::ID"
+          ],
+          [
+            "device_id",
+            "sui::object::ID"
+          ],
+          [
+            "owner_cap_id",
+            "sui::object::ID"
+          ],
+          [
+            "reserve",
+            "sui::balance::Balance<sui::sui::SUI>"
+          ],
+          [
+            "limits",
+            "sui_edge::fleet_budget::Limits"
+          ],
+          [
+            "suspended",
+            "bool"
+          ],
+          [
+            "closed",
+            "bool"
+          ],
+          [
+            "period_start_ms",
+            "u64"
+          ],
+          [
+            "drawn_in_period",
+            "u64"
+          ],
+          [
+            "draws_in_period",
+            "u64"
+          ],
+          [
+            "last_draw_ms",
+            "u64"
+          ],
+          [
             "total_drawn",
+            "u64"
+          ],
+          [
+            "enrolled_at_ms",
             "u64"
           ]
         ]
@@ -3214,6 +3339,10 @@ export const MOVE_ABI = {
           ],
           [
             "device_id",
+            "sui::object::ID"
+          ],
+          [
+            "account_id",
             "sui::object::ID"
           ],
           [
@@ -3241,7 +3370,7 @@ export const MOVE_ABI = {
             "u64"
           ],
           [
-            "balance",
+            "reserve",
             "u64"
           ],
           [
@@ -3276,6 +3405,43 @@ export const MOVE_ABI = {
           ],
           [
             "min_draw_interval_ms",
+            "u64"
+          ]
+        ]
+      },
+      "ReserveChanged": {
+        "abilities": [
+          "Copy",
+          "Drop"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "budget_id",
+            "sui::object::ID"
+          ],
+          [
+            "device_id",
+            "sui::object::ID"
+          ],
+          [
+            "account_id",
+            "sui::object::ID"
+          ],
+          [
+            "allocated",
+            "bool"
+          ],
+          [
+            "amount",
+            "u64"
+          ],
+          [
+            "reserve",
+            "u64"
+          ],
+          [
+            "balance",
             "u64"
           ]
         ]

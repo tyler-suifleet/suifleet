@@ -3,8 +3,10 @@
 /// The fleet owner deposits Walrus `Storage` resources and a WAL balance for
 /// write fees into a shared `FleetStorage` bound to their `FleetBudget`. A
 /// device that may draw from that budget (`fleet_budget::assert_may_draw`:
-/// unpaused, enrolled, unsuspended, active registry identity, signer-bound
-/// DeviceCap) can register a blob paid from it:
+/// unpaused, its current open and unsuspended `GasAccount`, active registry
+/// identity, signer-bound DeviceCap) can register a blob paid from it, and so
+/// can the owner, for the artifacts and recipes they upload from the dApp
+/// (`register_fleet_blob`):
 ///
 /// - the contract computes the blob's exact encoded size with Walrus's own
 ///   `encoding::encoded_blob_length` and splits only that much storage from
@@ -29,7 +31,7 @@ module fleet_storage::fleet_storage {
     use sui::event;
     use sui_edge::device_cap::{Self, DeviceCap};
     use sui_edge::device_registry::DeviceRegistry;
-    use sui_edge::fleet_budget::{Self, FleetBudget, BudgetOwnerCap};
+    use sui_edge::fleet_budget::{Self, FleetBudget, BudgetOwnerCap, GasAccount};
     use wal::wal::WAL;
     use walrus::blob::Blob;
     use walrus::encoding;
@@ -102,7 +104,8 @@ module fleet_storage::fleet_storage {
     public struct RecordKey has copy, drop, store { blob_object_id: ID }
 
     public struct BlobRecord has copy, drop, store {
-        device_id: ID,
+        /// The uploading device; none for the owner's own uploads.
+        device_id: Option<ID>,
         blob_id: u256,
         size: u64,
         encoded_size: u64,
@@ -124,6 +127,17 @@ module fleet_storage::fleet_storage {
 
     public struct StorageWithdrawn has copy, drop { storage_id: ID, size: u64, pool_size: u64 }
 
+    /// Storage bought from Walrus with the fleet's WAL (`buy_storage`,
+    /// `extend_pool`); `StorageDeposited` follows with the new pool.
+    public struct StoragePurchased has copy, drop {
+        storage_id: ID,
+        size: u64,
+        start_epoch: u32,
+        end_epoch: u32,
+        cost: u64,
+        wal_balance: u64,
+    }
+
     public struct WalDeposited has copy, drop { storage_id: ID, amount: u64, balance: u64 }
 
     public struct WalWithdrawn has copy, drop { storage_id: ID, amount: u64, balance: u64 }
@@ -143,6 +157,19 @@ module fleet_storage::fleet_storage {
         pool_size: u64,
         wal_balance: u64,
         at_limit: bool,
+    }
+
+    /// Every upload the owner registers (artifacts and recipes from the dApp).
+    public struct FleetUploadRegistered has copy, drop {
+        storage_id: ID,
+        blob_object_id: ID,
+        blob_id: u256,
+        size: u64,
+        encoded_size: u64,
+        write_fee: u64,
+        end_epoch: u32,
+        pool_size: u64,
+        wal_balance: u64,
     }
 
     public struct BlobReleased has copy, drop { storage_id: ID, blob_object_id: ID }
@@ -184,17 +211,51 @@ module fleet_storage::fleet_storage {
 
     public fun deposit_storage(fs: &mut FleetStorage, budget: &FleetBudget, cap: &BudgetOwnerCap, storage: Storage) {
         assert_owner(fs, budget, cap);
-        let size = storage.size();
-        assert!(size > 0, EZeroAmount);
-        if (fs.pool.is_none()) fs.pool.fill(storage) else fs.pool.borrow_mut().fuse(storage);
-        let pool = fs.pool.borrow();
-        event::emit(StorageDeposited {
-            storage_id: object::id(fs),
-            size,
-            pool_size: pool.size(),
-            start_epoch: pool.start_epoch(),
-            end_epoch: pool.end_epoch(),
-        });
+        add_to_pool(fs, storage);
+    }
+
+    /// Buy `size` bytes of storage for `epochs_ahead` epochs from Walrus with
+    /// the fleet's WAL and add it to the pool, in one call: no WAL leaves the
+    /// fleet. It must fuse with the pool (empty, the same epoch range, or the
+    /// same size and adjacent); otherwise Walrus aborts and nothing is spent.
+    /// Returns the WAL cost.
+    public fun buy_storage(
+        fs: &mut FleetStorage,
+        budget: &FleetBudget,
+        cap: &BudgetOwnerCap,
+        system: &mut System,
+        size: u64,
+        epochs_ahead: u32,
+        ctx: &mut TxContext,
+    ): u64 {
+        assert_owner(fs, budget, cap);
+        assert!(size > 0 && epochs_ahead > 0, EZeroAmount);
+        let mut payment = coin::from_balance(fs.wal.withdraw_all(), ctx);
+        let before = payment.value();
+        let storage = system.reserve_space(size, epochs_ahead, &mut payment, ctx);
+        purchased(fs, storage, before - payment.value(), payment)
+    }
+
+    /// Extend the whole pool's expiry by `epochs`, buying the same size for
+    /// the epochs right after it with the fleet's WAL. Blobs already
+    /// registered keep their own end epochs (see `extend_blob`). Returns the
+    /// WAL cost.
+    public fun extend_pool(
+        fs: &mut FleetStorage,
+        budget: &FleetBudget,
+        cap: &BudgetOwnerCap,
+        system: &mut System,
+        epochs: u32,
+        ctx: &mut TxContext,
+    ): u64 {
+        assert_owner(fs, budget, cap);
+        assert!(fs.pool.is_some(), ENoStorage);
+        assert!(epochs > 0, EZeroAmount);
+        let (size, end) = (fs.pool.borrow().size(), fs.pool.borrow().end_epoch());
+        let mut payment = coin::from_balance(fs.wal.withdraw_all(), ctx);
+        let before = payment.value();
+        let storage = system.reserve_space_for_epochs(size, end, end + epochs, &mut payment, ctx);
+        purchased(fs, storage, before - payment.value(), payment)
     }
 
     /// Take `size` bytes of unused storage back out of the pool.
@@ -293,6 +354,7 @@ module fleet_storage::fleet_storage {
     public fun register_blob(
         fs: &mut FleetStorage,
         budget: &FleetBudget,
+        account: &GasAccount,
         registry: &DeviceRegistry,
         cap: &DeviceCap,
         system: &mut System,
@@ -305,7 +367,7 @@ module fleet_storage::fleet_storage {
     ): ID {
         assert!(fs.version == VERSION, EWrongVersion);
         assert!(object::id(budget) == fs.budget_id, EWrongBudget);
-        fleet_budget::assert_may_draw(budget, registry, cap, ctx);
+        fleet_budget::assert_may_draw(budget, account, registry, cap, ctx);
         let device_id = device_cap::device_id(cap);
         let encoded_size = encoding::encoded_blob_length(size, encoding_type, system.n_shards());
         let now = clock.timestamp_ms();
@@ -338,7 +400,7 @@ module fleet_storage::fleet_storage {
         fs.blob_count = fs.blob_count + 1;
         fs.total_encoded_bytes = fs.total_encoded_bytes + encoded_size;
         fs.total_write_fees = fs.total_write_fees + fee;
-        df::add(&mut fs.id, RecordKey { blob_object_id }, BlobRecord { device_id, blob_id, size, encoded_size, end_epoch, uploaded_at_ms: now });
+        df::add(&mut fs.id, RecordKey { blob_object_id }, BlobRecord { device_id: option::some(device_id), blob_id, size, encoded_size, end_epoch, uploaded_at_ms: now });
         dof::add(&mut fs.id, BlobKey { blob_object_id }, blob);
         event::emit(UploadRegistered {
             storage_id: object::id(fs),
@@ -354,6 +416,50 @@ module fleet_storage::fleet_storage {
             pool_size: pool_size(fs),
             wal_balance: fs.wal.value(),
             at_limit,
+        });
+        blob_object_id
+    }
+
+    /// Register a blob the owner uploads (for example a release artifact),
+    /// paid from the fleet's storage and WAL and kept here, fleet-owned and
+    /// non-deletable, like device uploads. Certify it with `certify_blob`.
+    public fun register_fleet_blob(
+        fs: &mut FleetStorage,
+        budget: &FleetBudget,
+        cap: &BudgetOwnerCap,
+        system: &mut System,
+        blob_id: u256,
+        root_hash: u256,
+        size: u64,
+        encoding_type: u8,
+        clock: &Clock,
+        ctx: &mut TxContext,
+    ): ID {
+        assert_owner(fs, budget, cap);
+        let encoded_size = encoding::encoded_blob_length(size, encoding_type, system.n_shards());
+        let storage = take_storage(fs, encoded_size, ctx);
+        let offered = fs.wal.value();
+        let mut payment = coin::take(&mut fs.wal, offered, ctx);
+        let blob = system.register_blob(storage, blob_id, root_hash, size, encoding_type, false, &mut payment, ctx);
+        let fee = offered - payment.value();
+        fs.wal.join(payment.into_balance());
+        let blob_object_id = object::id(&blob);
+        let end_epoch = blob.end_epoch();
+        fs.blob_count = fs.blob_count + 1;
+        fs.total_encoded_bytes = fs.total_encoded_bytes + encoded_size;
+        fs.total_write_fees = fs.total_write_fees + fee;
+        df::add(&mut fs.id, RecordKey { blob_object_id }, BlobRecord { device_id: option::none(), blob_id, size, encoded_size, end_epoch, uploaded_at_ms: clock.timestamp_ms() });
+        dof::add(&mut fs.id, BlobKey { blob_object_id }, blob);
+        event::emit(FleetUploadRegistered {
+            storage_id: object::id(fs),
+            blob_object_id,
+            blob_id,
+            size,
+            encoded_size,
+            write_fee: fee,
+            end_epoch,
+            pool_size: pool_size(fs),
+            wal_balance: fs.wal.value(),
         });
         blob_object_id
     }
@@ -380,6 +486,35 @@ module fleet_storage::fleet_storage {
         assert!(fs.version == VERSION, EWrongVersion);
         assert!(object::id(budget) == fs.budget_id, EWrongBudget);
         fleet_budget::assert_owner(budget, cap);
+    }
+
+    fun add_to_pool(fs: &mut FleetStorage, storage: Storage) {
+        let size = storage.size();
+        assert!(size > 0, EZeroAmount);
+        if (fs.pool.is_none()) fs.pool.fill(storage) else fs.pool.borrow_mut().fuse(storage);
+        let pool = fs.pool.borrow();
+        event::emit(StorageDeposited {
+            storage_id: object::id(fs),
+            size,
+            pool_size: pool.size(),
+            start_epoch: pool.start_epoch(),
+            end_epoch: pool.end_epoch(),
+        });
+    }
+
+    /// Return the unspent WAL, record the purchase and add the storage.
+    fun purchased(fs: &mut FleetStorage, storage: Storage, cost: u64, change: Coin<WAL>): u64 {
+        fs.wal.join(change.into_balance());
+        event::emit(StoragePurchased {
+            storage_id: object::id(fs),
+            size: storage.size(),
+            start_epoch: storage.start_epoch(),
+            end_epoch: storage.end_epoch(),
+            cost,
+            wal_balance: fs.wal.value(),
+        });
+        add_to_pool(fs, storage);
+        cost
     }
 
     fun take_storage(fs: &mut FleetStorage, size: u64, ctx: &mut TxContext): Storage {
@@ -461,7 +596,7 @@ module fleet_storage::fleet_storage {
     public fun usage_total_encoded_bytes(u: &Usage): u64 { u.total_encoded_bytes }
     public fun usage_total_uploads(u: &Usage): u64 { u.total_uploads }
 
-    public fun record_device_id(r: &BlobRecord): ID { r.device_id }
+    public fun record_device_id(r: &BlobRecord): Option<ID> { r.device_id }
     public fun record_blob_id(r: &BlobRecord): u256 { r.blob_id }
     public fun record_size(r: &BlobRecord): u64 { r.size }
     public fun record_encoded_size(r: &BlobRecord): u64 { r.encoded_size }

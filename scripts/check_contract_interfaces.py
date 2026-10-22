@@ -93,7 +93,7 @@ def top_level_items(text, start):
 # Reviewed types and calls of other packages, matched exactly. Clients verify
 # their package at runtime (Seal's key servers: the configured
 # key_server_package; Walrus: the pinned Testnet objects in fleet-budget.ts).
-EXTERNAL = frozenset({"key_server::KeyServer", "system::reserve_space",
+EXTERNAL = frozenset({"key_server::KeyServer",
                       "wal_exchange::exchange_all_for_wal", "wal_exchange::Exchange"})
 # Separately published packages of this repository, checked like the core one.
 EXTRA_PACKAGES = {"fleet_storage": ROOT / "contracts/fleet_storage"}

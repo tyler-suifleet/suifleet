@@ -10,7 +10,7 @@ module fleet_storage::fleet_storage_tests {
     use fleet_storage::fleet_storage::{Self, FleetStorage, UploadRegistered};
     use sui_edge::device_cap::{Self, DeviceCap};
     use sui_edge::device_registry::{Self, DeviceRegistry, DeviceOwnerCap};
-    use sui_edge::fleet_budget::{Self, FleetBudget, BudgetOwnerCap};
+    use sui_edge::fleet_budget::{Self, FleetBudget, BudgetOwnerCap, GasAccount};
     use wal::wal::WAL;
     use walrus::blob::{Self, Blob};
     use walrus::encoding;
@@ -63,7 +63,7 @@ module fleet_storage::fleet_storage_tests {
         let registry = ts::take_shared<DeviceRegistry>(&scenario);
         let owner_cap = ts::take_from_address<DeviceOwnerCap>(&scenario, OWNER);
         let clock = clock_at(&mut scenario, 1);
-        fleet_budget::enroll_device(&mut budget, &budget_cap, &registry, &owner_cap, 0, &clock, ts::ctx(&mut scenario));
+        fleet_budget::enroll_device(&mut budget, &budget_cap, &registry, &owner_cap, 0, 0, &clock, ts::ctx(&mut scenario));
         fleet_storage::create(&budget, &budget_cap, q, ts::ctx(&mut scenario));
         clock::destroy_for_testing(clock);
         ts::return_to_address(OWNER, owner_cap);
@@ -109,13 +109,15 @@ module fleet_storage::fleet_storage_tests {
         ts::next_tx(scenario, sender);
         let mut fs = ts::take_shared<FleetStorage>(scenario);
         let budget = ts::take_shared<FleetBudget>(scenario);
+        let account = ts::take_shared<GasAccount>(scenario);
         let registry = ts::take_shared<DeviceRegistry>(scenario);
         let cap = ts::take_from_address<DeviceCap>(scenario, holder);
         let clock = clock_at(scenario, now);
-        let id = fleet_storage::register_blob(&mut fs, &budget, &registry, &cap, system, blob_id(size), ROOT, size, RS2, &clock, ts::ctx(scenario));
+        let id = fleet_storage::register_blob(&mut fs, &budget, &account, &registry, &cap, system, blob_id(size), ROOT, size, RS2, &clock, ts::ctx(scenario));
         clock::destroy_for_testing(clock);
         ts::return_to_address(holder, cap);
         ts::return_shared(registry);
+        ts::return_shared(account);
         ts::return_shared(budget);
         ts::return_shared(fs);
         id
@@ -142,10 +144,9 @@ module fleet_storage::fleet_storage_tests {
             ts::return_to_address(OWNER, owner_cap);
             ts::return_shared(registry);
         } else if (f == 2) {
-            let device_cap = ts::take_from_address<DeviceCap>(scenario, DEVICE);
-            let device_id = device_cap::device_id(&device_cap);
-            ts::return_to_address(DEVICE, device_cap);
-            fleet_budget::set_device_suspended(&mut budget, &cap, device_id, true);
+            let mut account = ts::take_shared<GasAccount>(scenario);
+            fleet_budget::set_device_suspended(&budget, &cap, &mut account, true);
+            ts::return_shared(account);
         } else if (f == 3) fleet_storage::set_version_for_testing(&mut fs, arg)
         else abort 99;
         owner_end(fs, budget, cap);
@@ -167,6 +168,7 @@ module fleet_storage::fleet_storage_tests {
         assert!(!b.is_deletable() && b.storage().size() == needed && b.blob_id() == blob_id(BLOB), 2);
         let record = fleet_storage::blob_record(&fs, id).destroy_some();
         assert!(fleet_storage::record_encoded_size(&record) == needed && fleet_storage::record_end_epoch(&record) == 5, 3);
+        assert!(fleet_storage::record_device_id(&record).is_some(), 6);
         // The write fee was paid from the fleet's WAL.
         assert!(fleet_storage::wal_balance(&fs) < WAL_DEPOSIT && fleet_storage::total_write_fees(&fs) == WAL_DEPOSIT - fleet_storage::wal_balance(&fs), 4);
         ts::return_shared(fs);
@@ -182,14 +184,16 @@ module fleet_storage::fleet_storage_tests {
         ts::next_tx(&mut scenario, DEVICE);
         let mut fs = ts::take_shared<FleetStorage>(&scenario);
         let budget = ts::take_shared<FleetBudget>(&scenario);
+        let account = ts::take_shared<GasAccount>(&scenario);
         let registry = ts::take_shared<DeviceRegistry>(&scenario);
         let cap = ts::take_from_address<DeviceCap>(&scenario, DEVICE);
         let clock = clock_at(&mut scenario, 10);
-        fleet_storage::register_blob(&mut fs, &budget, &registry, &cap, &mut system, blob_id(BLOB), ROOT, BLOB, RS2, &clock, ts::ctx(&mut scenario));
+        fleet_storage::register_blob(&mut fs, &budget, &account, &registry, &cap, &mut system, blob_id(BLOB), ROOT, BLOB, RS2, &clock, ts::ctx(&mut scenario));
         assert!(event::events_by_type<UploadRegistered>().length() == 1, 0);
         clock::destroy_for_testing(clock);
         ts::return_to_address(DEVICE, cap);
         ts::return_shared(registry);
+        ts::return_shared(account);
         ts::return_shared(budget);
         ts::return_shared(fs);
         finish(scenario, system);
@@ -328,7 +332,8 @@ module fleet_storage::fleet_storage_tests {
         finish(scenario, system);
     }
 
-    #[test, expected_failure(abort_code = sui_edge::fleet_budget::ENotEnrolled)]
+    /// An unenrolled device has no account; the only one there is not its own.
+    #[test, expected_failure(abort_code = sui_edge::fleet_budget::EWrongAccount)]
     fun an_unenrolled_device_cannot_upload() {
         let (mut scenario, mut system) = setup(quota(POOL, 10));
         ts::next_tx(&mut scenario, OWNER);
@@ -439,6 +444,148 @@ module fleet_storage::fleet_storage_tests {
         assert!(coin.value() == WAL_DEPOSIT && fleet_storage::wal_balance(&fs) == 0, 0);
         destroy(coin);
         owner_end(fs, budget, cap);
+        finish(scenario, system);
+    }
+
+    // ── Owner uploads ─────────────────────────────────────────────────────────
+
+    fun owner_upload(scenario: &mut ts::Scenario, system: &mut System, sender: address, cap_holder: address, size: u64): ID {
+        ts::next_tx(scenario, sender);
+        let mut fs = ts::take_shared<FleetStorage>(scenario);
+        let budget = ts::take_shared<FleetBudget>(scenario);
+        let cap = ts::take_from_address<BudgetOwnerCap>(scenario, cap_holder);
+        let clock = clock_at(scenario, 10);
+        let id = fleet_storage::register_fleet_blob(&mut fs, &budget, &cap, system, blob_id(size), ROOT, size, RS2, &clock, ts::ctx(scenario));
+        clock::destroy_for_testing(clock);
+        ts::return_to_address(cap_holder, cap);
+        ts::return_shared(budget);
+        ts::return_shared(fs);
+        id
+    }
+
+    /// The owner's dApp uploads are paid from the same pool and are
+    /// fleet-owned and non-deletable, recorded without a device.
+    #[test]
+    fun an_owner_upload_is_paid_from_the_pool_and_fleet_owned() {
+        let (mut scenario, mut system) = setup(quota(POOL, 10));
+        let needed = encoded(&system, BLOB);
+        let id = owner_upload(&mut scenario, &mut system, OWNER, OWNER, BLOB);
+        let effects = ts::next_tx(&mut scenario, OWNER);
+        // Walrus's BlobRegistered and this package's FleetUploadRegistered.
+        assert!(ts::num_user_events(&effects) == 2, 4);
+        assert!(pool(&mut scenario) == POOL - needed, 0);
+        ts::next_tx(&mut scenario, OWNER);
+        let fs = ts::take_shared<FleetStorage>(&scenario);
+        let b = fleet_storage::blob(&fs, id);
+        assert!(!b.is_deletable() && b.storage().size() == needed && b.blob_id() == blob_id(BLOB), 1);
+        let record = fleet_storage::blob_record(&fs, id).destroy_some();
+        assert!(fleet_storage::record_device_id(&record).is_none() && fleet_storage::record_encoded_size(&record) == needed, 2);
+        assert!(fleet_storage::wal_balance(&fs) < WAL_DEPOSIT, 3);
+        ts::return_shared(fs);
+        assert!(ts::ids_for_address<Blob>(OWNER).is_empty(), 5);
+        finish(scenario, system);
+    }
+
+    #[test, expected_failure(abort_code = fleet_storage::EInsufficientStorage)]
+    fun owner_uploads_cannot_exceed_the_pool() {
+        let (mut scenario, mut system) = setup(quota(POOL, 10));
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        destroy(fleet_storage::withdraw_storage(&mut fs, &budget, &cap, POOL - 1, ts::ctx(&mut scenario)));
+        owner_end(fs, budget, cap);
+        owner_upload(&mut scenario, &mut system, OWNER, OWNER, BLOB);
+        finish(scenario, system);
+    }
+
+    /// Only this budget's cap registers owner uploads.
+    #[test, expected_failure(abort_code = sui_edge::fleet_budget::ENotOwner)]
+    fun another_cap_cannot_register_owner_uploads() {
+        let (mut scenario, mut system) = setup(quota(POOL, 10));
+        ts::next_tx(&mut scenario, STRANGER);
+        let registry = ts::take_shared<DeviceRegistry>(&scenario);
+        let forged = fleet_budget::create(&registry, coin::zero<SUI>(ts::ctx(&mut scenario)), fleet_budget::new_limits(1, 1, 1, 1, 0), 0, ts::ctx(&mut scenario));
+        ts::return_shared(registry);
+        transfer::public_transfer(forged, STRANGER);
+        ts::next_tx(&mut scenario, STRANGER);
+        let mut fs = ts::take_shared<FleetStorage>(&scenario);
+        let budget_id = fleet_storage::budget_id(&fs);
+        let budget = ts::take_shared_by_id<FleetBudget>(&scenario, budget_id);
+        let cap = ts::take_from_address<BudgetOwnerCap>(&scenario, STRANGER);
+        let clock = clock_at(&mut scenario, 10);
+        fleet_storage::register_fleet_blob(&mut fs, &budget, &cap, &mut system, blob_id(BLOB), ROOT, BLOB, RS2, &clock, ts::ctx(&mut scenario));
+        clock::destroy_for_testing(clock);
+        ts::return_to_address(STRANGER, cap);
+        ts::return_shared(budget);
+        ts::return_shared(fs);
+        finish(scenario, system);
+    }
+
+    // ── Buying storage with the fleet's WAL ───────────────────────────────────
+
+    fun fund_wal(scenario: &mut ts::Scenario, amount: u64) {
+        let (mut fs, budget, cap) = owner(scenario);
+        fleet_storage::deposit_wal(&mut fs, &budget, &cap, coin::mint_for_testing<WAL>(amount, ts::ctx(scenario)));
+        owner_end(fs, budget, cap);
+    }
+
+    /// Bought storage joins the pool and is paid from the fleet's WAL; no WAL
+    /// leaves the fleet object.
+    #[test]
+    fun the_owner_buys_storage_with_fleet_wal() {
+        let (mut scenario, mut system) = setup(quota(POOL, 10));
+        fund_wal(&mut scenario, 1_000_000_000);
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        let before = fleet_storage::wal_balance(&fs);
+        let cost = fleet_storage::buy_storage(&mut fs, &budget, &cap, &mut system, POOL, 5, ts::ctx(&mut scenario));
+        assert!(cost > 0 && fleet_storage::wal_balance(&fs) == before - cost, 0);
+        assert!(fleet_storage::pool_size(&fs) == 2 * POOL && fleet_storage::pool_epochs(&fs).destroy_some() == vector[0, 5], 1);
+        owner_end(fs, budget, cap);
+        ts::next_tx(&mut scenario, OWNER);
+        assert!(ts::ids_for_address<Coin<WAL>>(OWNER).is_empty(), 2);
+        finish(scenario, system);
+    }
+
+    #[test]
+    fun the_owner_extends_the_pool_expiry_with_fleet_wal() {
+        let (mut scenario, mut system) = setup(quota(POOL, 10));
+        fund_wal(&mut scenario, 1_000_000_000);
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        let cost = fleet_storage::extend_pool(&mut fs, &budget, &cap, &mut system, 3, ts::ctx(&mut scenario));
+        assert!(cost > 0 && fleet_storage::pool_size(&fs) == POOL, 0);
+        assert!(fleet_storage::pool_epochs(&fs).destroy_some() == vector[0, 8], 1);
+        owner_end(fs, budget, cap);
+        // Uploads now end with the extended pool.
+        let id = upload(&mut scenario, &mut system, BLOB, 10);
+        ts::next_tx(&mut scenario, OWNER);
+        let fs = ts::take_shared<FleetStorage>(&scenario);
+        assert!(fleet_storage::blob(&fs, id).end_epoch() == 8, 2);
+        ts::return_shared(fs);
+        finish(scenario, system);
+    }
+
+    /// Without enough fleet WAL, Walrus refuses the purchase and nothing changes.
+    #[test, expected_failure]
+    fun buying_storage_needs_enough_fleet_wal() {
+        let (mut scenario, mut system) = setup(quota(POOL, 10));
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        fleet_storage::buy_storage(&mut fs, &budget, &cap, &mut system, POOL * 1_000, 50, ts::ctx(&mut scenario));
+        owner_end(fs, budget, cap);
+        finish(scenario, system);
+    }
+
+    #[test, expected_failure(abort_code = sui_edge::fleet_budget::ENotOwner)]
+    fun only_the_owner_buys_storage() {
+        let (mut scenario, mut system) = setup(quota(POOL, 10));
+        ts::next_tx(&mut scenario, STRANGER);
+        let registry = ts::take_shared<DeviceRegistry>(&scenario);
+        let forged = fleet_budget::create(&registry, coin::zero<SUI>(ts::ctx(&mut scenario)), fleet_budget::new_limits(1, 1, 1, 1, 0), 0, ts::ctx(&mut scenario));
+        ts::return_shared(registry);
+        ts::next_tx(&mut scenario, STRANGER);
+        let mut fs = ts::take_shared<FleetStorage>(&scenario);
+        let budget = ts::take_shared_by_id<FleetBudget>(&scenario, fleet_storage::budget_id(&fs));
+        fleet_storage::buy_storage(&mut fs, &budget, &forged, &mut system, 1, 1, ts::ctx(&mut scenario));
+        transfer::public_transfer(forged, STRANGER);
+        ts::return_shared(budget);
+        ts::return_shared(fs);
         finish(scenario, system);
     }
 
