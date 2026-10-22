@@ -157,20 +157,34 @@ assert.throws(() => budget.buildCreateStorageTx(storage, budgetId, capId, { ...b
 assert.deepEqual(fns(budget.buildSwapAndDepositWalTx(storage, exchange, "0x7", budgetId, capId, BigInt(1000), BigInt(990))),
   ["wal_exchange::exchange_all_for_wal", "fleet_storage::deposit_wal_at_least"]);
 // SUI only: swap, deposit with its minimum and buy the storage in one transaction.
-assert.deepEqual(fns(budget.buildSwapAndDepositWalTx(storage, exchange, "0x7", budgetId, capId, BigInt(1000), BigInt(990), { encodedBytes: BigInt(1 << 20), epochs: 2 })),
-  ["wal_exchange::exchange_all_for_wal", "fleet_storage::deposit_wal_at_least", "fleet_storage::buy_storage"]);
+assert.deepEqual(fns(budget.buildSwapAndDepositWalTx(storage, exchange, "0x7", budgetId, capId, BigInt(1000), BigInt(990), { addBytes: BigInt(1 << 20), endEpoch: 12 })),
+  ["wal_exchange::exchange_all_for_wal", "fleet_storage::deposit_wal_at_least", "fleet_storage::refill_pool"]);
 assert.throws(() => budget.buildSwapAndDepositWalTx(storage, "0x99", "0x7", budgetId, capId, BigInt(1000), BigInt(990)), /pinned exchange/);
 assert.throws(() => budget.buildSwapAndDepositWalTx(storage, exchange, "0x7", budgetId, capId, BigInt(1000), BigInt(0)), /positive minimum/);
-assert.deepEqual(fns(budget.buildBuyStorageTx(storage, "0x7", budgetId, capId, BigInt(1 << 20), 2)), ["fleet_storage::buy_storage"]);
-assert.throws(() => budget.buildBuyStorageTx(storage, "0x7", budgetId, capId, BigInt(0), 2), /positive size/);
-assert.deepEqual(fns(budget.buildExtendPoolTx(storage, "0x7", budgetId, capId, 3)), ["fleet_storage::extend_pool"]);
+assert.deepEqual(fns(budget.buildRefillPoolTx(storage, "0x7", budgetId, capId, { addBytes: BigInt(1 << 20), endEpoch: 12 })), ["fleet_storage::refill_pool"]);
+assert.throws(() => budget.buildRefillPoolTx(storage, "0x7", budgetId, capId, { addBytes: BigInt(-1), endEpoch: 12 }), /non-negative/);
+// Refill plans, as fleet_storage::refill_pool applies them (Move tests cover the contract side).
+const MiB = BigInt(1 << 20), price = BigInt(100);
+const pool = (poolSize, startEpoch, endEpoch) => ({ poolSize, startEpoch, endEpoch });
+// No storage yet: buy for the epochs from now.
+assert.deepEqual(budget.planRefill(undefined, 10, MiB, 2, price), { endEpoch: 12, poolSize: MiB, startEpoch: 10, droppedBytes: BigInt(0), cost: BigInt(200) });
+// A partly used pool after its first epoch: keep the unused bytes, extend them, add the new ones over [now, end).
+assert.deepEqual(budget.planRefill(pool(MiB, 8, 12), 10, MiB, 4, price), { endEpoch: 14, poolSize: BigInt(2) * MiB, startEpoch: 10, droppedBytes: BigInt(0), cost: BigInt(200 + 400) });
+// A refill cannot shorten the pool: the end is raised to the pool's.
+assert.equal(budget.planRefill(pool(MiB, 8, 20), 10, MiB, 2, price).endEpoch, 20);
+// Only adding space, through the pool's end.
+assert.equal(budget.planRefill(pool(MiB, 8, 20), 10, MiB, 2, price).cost, BigInt(1000));
+// An expired pool is replaced; its unused bytes are dropped.
+assert.deepEqual(budget.planRefill(pool(BigInt(3) * MiB, 4, 9), 10, MiB, 3, price), { endEpoch: 13, poolSize: MiB, startEpoch: 10, droppedBytes: BigInt(3) * MiB, cost: BigInt(300) });
+assert.throws(() => budget.planRefill(pool(MiB, 4, 9), 10, BigInt(0), 3, price), /none left/);
+assert.throws(() => budget.planRefill(undefined, 10, MiB, 0, price), /at least one epoch/);
 assert.deepEqual(fns(budget.buildDepositWalTx(storage, "0x7", budgetId, capId, BigInt(5))), ["fleet_storage::deposit_wal"]);
 assert.deepEqual(fns(budget.buildWithdrawWalTx(storage, "0x7", budgetId, capId, BigInt(5), sender)), ["fleet_storage::withdraw_wal"]);
 assert.equal(budget.storageCost(BigInt(1), 2, BigInt(100)), BigInt(200));
 assert.equal(budget.storageCost(BigInt((1 << 20) + 1), 3, BigInt(100)), BigInt(600));
 assert.equal(budget.minWalOut(BigInt(1000), { wal: BigInt(1), sui: BigInt(1) }, 100), BigInt(990));
 assert.throws(() => budget.minWalOut(BigInt(1), { wal: BigInt(1), sui: BigInt(0) }, 0), /Invalid/);
-console.log("PASS: storage only on the pinned Walrus Testnet build; create, fund (SUI swap with an on-chain minimum, or direct WAL), buy, extend and withdraw use fleet_storage");
+console.log("PASS: storage only on the pinned Walrus Testnet build; create, fund (SUI swap with an on-chain minimum, or direct WAL), refill at any epoch and withdraw use fleet_storage");
 
 // ── Reads and alerts ──
 const limits = { float_cap: "60", period_ms: "1000", period_allowance: "100", max_draws_per_period: "3", min_draw_interval_ms: "0" };
@@ -218,11 +232,12 @@ async function reads() {
   assert.deepEqual(empty.map((a) => a.severity), ["warning", "critical", "critical"]);
   assert.match(budget.budgetAlerts({ ...view, balance: BigInt(50) }, [], BigInt(5), 5)[0].text, /low-balance threshold/);
   assert.match(budget.budgetAlerts(view, [], BigInt(5), 5)[0].text, /5.0 days/);
-  // Storage alerts: no space, no WAL, expiring pool.
+  // Storage alerts: no space, no WAL, expiring and expired pool.
   const sv = { id: "0x7", version: BigInt(1), poolSize: BigInt(0), startEpoch: 3, endEpoch: 5, walBalance: BigInt(0), defaultQuota: budget.DEFAULT_QUOTA,
     blobCount: BigInt(0), totalEncodedBytes: BigInt(0), totalWriteFees: BigInt(0) };
   assert.deepEqual(budget.storageAlerts(sv, 4).map((a) => a.severity), ["warning", "warning", "critical"]);
   assert.deepEqual(budget.storageAlerts({ ...sv, poolSize: BigInt(1), walBalance: BigInt(1) }, 2), []);
+  assert.match(budget.storageAlerts({ ...sv, poolSize: BigInt(1), walBalance: BigInt(1) }, 5)[0].text, /expired.*refill the pool/);
 }
 
 // ── Fleet-paid uploads, against a stubbed Walrus client ──

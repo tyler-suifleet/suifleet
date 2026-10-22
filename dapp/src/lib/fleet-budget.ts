@@ -428,30 +428,44 @@ export function buildCreateStorageTx(config: StorageConfig, budgetId: string, ca
   return tx;
 }
 
-function buyStorage(tx: Transaction, config: StorageConfig, storageId: string, budgetId: string, capId: string, encodedBytes: bigint, epochs: number) {
-  if (encodedBytes <= BigInt(0) || !Number.isInteger(epochs) || epochs <= 0) throw new Error("Buy a positive size for at least one epoch");
-  tx.moveCall({ target: `${config.packageId}::fleet_storage::buy_storage`, arguments: [tx.object(storageId), tx.object(budgetId), tx.object(capId),
-    tx.object(config.walrus.system), tx.pure.u64(encodedBytes), tx.pure.u32(epochs)] });
+/** A pool refill: add `addBytes` and keep the pool until `endEpoch`. */
+export interface Refill { addBytes: bigint; endEpoch: number }
+
+/**
+ * What `fleet_storage::refill_pool` does at `currentEpoch`: the pool's
+ * elapsed epochs are dropped (an expired pool entirely), the rest is kept at
+ * its size until `endEpoch` and `addBytes` are added over the same range.
+ * `endEpoch` is raised to the pool's end, which a refill cannot shorten.
+ * `cost` is the WAL FROST at `pricePerUnit`.
+ */
+export function planRefill(storage: Pick<StorageView, "poolSize" | "startEpoch" | "endEpoch"> | undefined, currentEpoch: number,
+  addBytes: bigint, epochs: number, pricePerUnit: bigint) {
+  if (addBytes < BigInt(0) || !Number.isInteger(epochs) || epochs <= 0) throw new Error("Keep the storage for at least one epoch");
+  const live = storage?.endEpoch !== undefined && storage.endEpoch > currentEpoch;
+  const kept = live ? storage!.poolSize : BigInt(0);
+  const start = live ? Math.max(storage!.startEpoch ?? currentEpoch, currentEpoch) : currentEpoch;
+  const endEpoch = live ? Math.max(currentEpoch + epochs, storage!.endEpoch!) : currentEpoch + epochs;
+  if (kept + addBytes <= BigInt(0)) throw new Error("Add storage: the pool has none left to keep");
+  const cost = (live ? storageCost(kept, endEpoch - storage!.endEpoch!, pricePerUnit) : BigInt(0))
+    + (addBytes > BigInt(0) ? storageCost(addBytes, endEpoch - start, pricePerUnit) : BigInt(0));
+  return { endEpoch, poolSize: kept + addBytes, startEpoch: start, droppedBytes: live ? BigInt(0) : storage?.poolSize ?? BigInt(0), cost };
+}
+
+function refillPool(tx: Transaction, config: StorageConfig, storageId: string, budgetId: string, capId: string, refill: Refill) {
+  if (refill.addBytes < BigInt(0) || !Number.isInteger(refill.endEpoch) || refill.endEpoch <= 0) throw new Error("Refill a non-negative size until a later epoch");
+  tx.moveCall({ target: `${config.packageId}::fleet_storage::refill_pool`, arguments: [tx.object(storageId), tx.object(budgetId), tx.object(capId),
+    tx.object(config.walrus.system), tx.pure.u64(refill.addBytes), tx.pure.u32(refill.endEpoch)] });
 }
 
 /**
- * Buy `encodedBytes` of Walrus storage for `epochs` with the fleet's own WAL
- * and add it to the pool, in one call: no WAL leaves the fleet object.
+ * Top up the pool and keep it until `endEpoch` with the fleet's own WAL, in
+ * one call that works at any epoch (also after the pool expired): no WAL
+ * leaves the fleet object. See `planRefill`.
  */
-export function buildBuyStorageTx(config: StorageConfig, storageId: string, budgetId: string, capId: string, encodedBytes: bigint, epochs: number): Transaction {
+export function buildRefillPoolTx(config: StorageConfig, storageId: string, budgetId: string, capId: string, refill: Refill): Transaction {
   requireBudget();
   const tx = new Transaction();
-  buyStorage(tx, config, storageId, budgetId, capId, encodedBytes, epochs);
-  return tx;
-}
-
-/** Push the whole pool's expiry back by `epochs`, paid with the fleet's WAL. */
-export function buildExtendPoolTx(config: StorageConfig, storageId: string, budgetId: string, capId: string, epochs: number): Transaction {
-  requireBudget();
-  if (!Number.isInteger(epochs) || epochs <= 0) throw new Error("Extend by at least one epoch");
-  const tx = new Transaction();
-  tx.moveCall({ target: `${config.packageId}::fleet_storage::extend_pool`, arguments: [tx.object(storageId), tx.object(budgetId), tx.object(capId),
-    tx.object(config.walrus.system), tx.pure.u32(epochs)] });
+  refillPool(tx, config, storageId, budgetId, capId, refill);
   return tx;
 }
 
@@ -477,10 +491,10 @@ export function buildWithdrawWalTx(config: StorageConfig, storageId: string, bud
 /**
  * Pay in SUI only: swap SUI for WAL through the pinned Testnet exchange and
  * deposit it, aborting the whole transaction unless at least `minWal`
- * arrives; optionally buy storage with it in the same transaction.
+ * arrives; optionally refill the pool with it in the same transaction.
  */
 export function buildSwapAndDepositWalTx(config: StorageConfig, exchangeId: string, storageId: string, budgetId: string, capId: string,
-  suiMist: bigint, minWal: bigint, buy?: { encodedBytes: bigint; epochs: number }): Transaction {
+  suiMist: bigint, minWal: bigint, refill?: Refill): Transaction {
   requireBudget();
   if (!config.walrus.exchange.objects.some((id) => normalizeSuiAddress(id) === normalizeSuiAddress(exchangeId))) throw new Error("Not a pinned exchange");
   if (suiMist <= BigInt(0) || minWal <= BigInt(0)) throw new Error("Swap a positive amount with a positive minimum");
@@ -489,7 +503,7 @@ export function buildSwapAndDepositWalTx(config: StorageConfig, exchangeId: stri
   const [wal] = tx.moveCall({ target: `${config.walrus.exchange.package}::wal_exchange::exchange_all_for_wal`, arguments: [tx.object(exchangeId), sui] });
   tx.moveCall({ target: `${config.packageId}::fleet_storage::deposit_wal_at_least`,
     arguments: [tx.object(storageId), tx.object(budgetId), tx.object(capId), wal, tx.pure.u64(minWal)] });
-  if (buy) buyStorage(tx, config, storageId, budgetId, capId, buy.encodedBytes, buy.epochs);
+  if (refill) refillPool(tx, config, storageId, budgetId, capId, refill);
   return tx;
 }
 
@@ -543,8 +557,10 @@ export function storageAlerts(storage: StorageView, currentEpoch: number | undef
   const alerts: BudgetAlert[] = [];
   if (storage.poolSize === BigInt(0)) alerts.push({ severity: "warning", text: "Fleet storage holds no prepaid space: fleet-paid uploads fail until you buy storage." });
   if (storage.walBalance === BigInt(0)) alerts.push({ severity: "warning", text: "Fleet storage holds no WAL for write fees: fleet-paid uploads fail until you deposit WAL." });
-  if (storage.endEpoch !== undefined && currentEpoch !== undefined && storage.endEpoch - currentEpoch <= 1) {
-    alerts.push({ severity: "critical", text: `Prepaid storage ends at Walrus epoch ${storage.endEpoch}: extend the pool before new uploads would expire at once.` });
+  if (storage.endEpoch !== undefined && currentEpoch !== undefined && storage.endEpoch <= currentEpoch) {
+    alerts.push({ severity: "critical", text: `Prepaid storage expired at Walrus epoch ${storage.endEpoch}: fleet-paid uploads fail until you refill the pool.` });
+  } else if (storage.endEpoch !== undefined && currentEpoch !== undefined && storage.endEpoch - currentEpoch <= 1) {
+    alerts.push({ severity: "critical", text: `Prepaid storage ends at Walrus epoch ${storage.endEpoch}: refill the pool to keep it longer before new uploads would expire at once.` });
   }
   return alerts;
 }

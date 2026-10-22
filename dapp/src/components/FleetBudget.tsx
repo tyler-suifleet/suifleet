@@ -9,10 +9,10 @@ import { useDevices } from "@/hooks/useDevices";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import { useBudgets, useFleetStorage } from "@/hooks/useFleetStorage";
 import {
-  DEFAULT_LIMITS, DEFAULT_QUOTA, budgetAlerts, budgetSupported, buildBuyStorageTx, buildCreateBudgetTx, buildCreateStorageTx, buildDepositTx,
-  buildDepositWalTx, buildEnrollDeviceTx, buildExtendPoolTx, buildFundDeviceTx, buildFundReserveTx, buildReclaimReserveTx, buildRemoveDeviceTx,
+  DEFAULT_LIMITS, DEFAULT_QUOTA, budgetAlerts, budgetSupported, buildCreateBudgetTx, buildCreateStorageTx, buildDepositTx,
+  buildDepositWalTx, buildEnrollDeviceTx, buildFundDeviceTx, buildFundReserveTx, buildReclaimReserveTx, buildRefillPoolTx, buildRemoveDeviceTx,
   buildSetDeviceSuspendedTx, buildSetPausedTx, buildSwapAndDepositWalTx, buildWithdrawTx, buildWithdrawWalTx, defaultReserve, fetchAccount,
-  minWalOut, periodUsage, readExchange, storageAlerts, storageConfig, storageCost, swapRoute, type AccountView, type StorageConfig,
+  minWalOut, periodUsage, planRefill, readExchange, storageAlerts, storageConfig, swapRoute, type AccountView, type StorageConfig,
 } from "@/lib/fleet-budget";
 import { MEASURED, encodedBlobLength, estimate, formatToken, parseToken, runwayDays, type Estimate, type EstimateInput } from "@/lib/network-costs";
 import { FEE_NOTES, checkoutUrl, onrampProvider, purchaseStatus, type OnrampAsset, type PendingPurchase } from "@/lib/onramp";
@@ -256,7 +256,8 @@ const MIB = 1024 * 1024;
 /**
  * Owner-prepaid Walrus storage held by the fleet: create it, fund its WAL
  * (from SUI in one transaction with a slippage limit, or WAL bought
- * directly), buy and extend storage with that WAL, and withdraw unused WAL.
+ * directly), refill and keep storage with that WAL at any epoch, and
+ * withdraw unused WAL.
  * Uploads choose it on the Releases and Components pages.
  */
 export function StoragePanel({ suggestedWalFrost }: { suggestedWalFrost?: bigint }) {
@@ -266,14 +267,18 @@ export function StoragePanel({ suggestedWalFrost }: { suggestedWalFrost?: bigint
   const { submit, message, error, pending } = useSubmit();
   const [suiAmount, setSuiAmount] = useState("1"), [slippage, setSlippage] = useState(100);
   const [buyMib, setBuyMib] = useState(64), [epochs, setEpochs] = useState(2), [alsoBuy, setAlsoBuy] = useState(true);
-  const [walAmount, setWalAmount] = useState(""), [extend, setExtend] = useState(2), [withdrawWal, setWithdrawWal] = useState("");
+  const [walAmount, setWalAmount] = useState(""), [withdrawWal, setWithdrawWal] = useState("");
   const route = swapRoute();
   if (!account || !budget) return null;
   if (!config) return <p className="text-xs">{reason}</p>;
-  const price = walrusState.data?.storagePrice;
-  const buyBytes = BigInt(Math.max(0, Math.round(buyMib * MIB)));
-  const cost = price !== undefined ? storageCost(buyBytes, epochs, price) : undefined;
-  const sameRange = !storage?.startEpoch || walrusState.data?.epoch === storage.startEpoch;
+  const addBytes = BigInt(Math.max(0, Math.round(buyMib * MIB)));
+  // The refill as fleet_storage::refill_pool will apply it at the current Walrus epoch.
+  let plan: ReturnType<typeof planRefill> | undefined, planError: string | undefined;
+  if (walrusState.data) {
+    try { plan = planRefill(storage, walrusState.data.epoch, addBytes, epochs, walrusState.data.storagePrice); }
+    catch (e) { planError = e instanceof Error ? e.message : String(e); }
+  }
+  const refill = plan ? { addBytes, endEpoch: plan.endEpoch } : undefined;
   async function swap() {
     const mist = parseToken(suiAmount);
     // The first pinned exchange holding enough WAL at its posted rate.
@@ -282,7 +287,7 @@ export function StoragePanel({ suggestedWalFrost }: { suggestedWalFrost?: bigint
       const minWal = minWalOut(mist, exchange.rate, slippage);
       if (exchange.walAvailable < minWal) continue;
       return buildSwapAndDepositWalTx(config!, exchangeId, storage!.id, budget!.id, budget!.capId, mist, minWal,
-        alsoBuy && sameRange ? { encodedBytes: buyBytes, epochs } : undefined);
+        alsoBuy ? refill : undefined);
     }
     throw new Error("No pinned Testnet exchange holds enough WAL for this swap; buy WAL directly and deposit it.");
   }
@@ -304,7 +309,7 @@ export function StoragePanel({ suggestedWalFrost }: { suggestedWalFrost?: bigint
           <div className="flex flex-wrap gap-2 items-end">
             <label>SUI to swap <input className="border p-1 w-24 block" value={suiAmount} onChange={(e) => setSuiAmount(e.target.value)} /></label>
             <label>Slippage limit (basis points) <input type="number" min={0} max={1000} className="border p-1 w-24 block" value={slippage} onChange={(e) => setSlippage(Number(e.target.value))} /></label>
-            <label className="flex items-center gap-1"><input type="checkbox" checked={alsoBuy && sameRange} disabled={!sameRange} onChange={(e) => setAlsoBuy(e.target.checked)} /> and buy the storage below in the same transaction</label>
+            <label className="flex items-center gap-1"><input type="checkbox" checked={alsoBuy && !!refill} disabled={!refill} onChange={(e) => setAlsoBuy(e.target.checked)} /> and refill the storage below in the same transaction</label>
             <button type="button" className="bg-blue-600 text-white rounded px-2 py-1" onClick={() => void submit(swap)}>Swap and deposit</button>
           </div>
         </> : <p>{route.explanation}</p>}
@@ -317,15 +322,13 @@ export function StoragePanel({ suggestedWalFrost }: { suggestedWalFrost?: bigint
       <fieldset className="border rounded p-2 space-y-2" disabled={pending}>
         <legend className="px-1 font-semibold">Storage</legend>
         <div className="flex flex-wrap gap-2 items-end">
-          <label>Encoded MiB <input type="number" min={1} className="border p-1 w-24 block" value={buyMib} onChange={(e) => setBuyMib(Number(e.target.value))} /></label>
-          <label>Epochs <input type="number" min={1} className="border p-1 w-20 block" value={epochs} onChange={(e) => setEpochs(Number(e.target.value))} /></label>
-          <button type="button" className="border rounded px-2 py-1" disabled={!sameRange} onClick={() => void submit(() => buildBuyStorageTx(config, storage.id, budget.id, budget.capId, buyBytes, epochs))}>Buy with fleet WAL</button>
+          <label>Add encoded MiB <input type="number" min={0} className="border p-1 w-24 block" value={buyMib} onChange={(e) => setBuyMib(Number(e.target.value))} /></label>
+          <label>Keep for epochs from now <input type="number" min={1} className="border p-1 w-20 block" value={epochs} onChange={(e) => setEpochs(Number(e.target.value))} /></label>
+          <button type="button" className="border rounded px-2 py-1" disabled={!refill} onClick={() => void submit(() => buildRefillPoolTx(config, storage.id, budget.id, budget.capId, refill!))}>Refill with fleet WAL</button>
         </div>
-        <p>{cost !== undefined ? `About ${wal(cost)} at the current price, paid from the fleet's WAL; no WAL leaves the fleet. ` : ""}Walrus encodes a blob to about {(Number(encodedBlobLength(MIB)) / MIB).toFixed(1)}× its size: a 1 MiB artifact needs that many MiB of storage.{!sameRange ? ` The pool started at epoch ${storage.startEpoch}; Walrus only joins storage with the same epoch range, so extend the pool instead.` : ""}</p>
-        <div className="flex flex-wrap gap-2 items-end">
-          <label>Extend the pool by epochs <input type="number" min={1} className="border p-1 w-20 block" value={extend} onChange={(e) => setExtend(Number(e.target.value))} /></label>
-          <button type="button" className="border rounded px-2 py-1" disabled={!storage.endEpoch} onClick={() => void submit(() => buildExtendPoolTx(config, storage.id, budget.id, budget.capId, extend))}>Extend with fleet WAL</button>
-        </div>
+        {plan && <p>The pool will hold {(Number(plan.poolSize) / MIB).toFixed(2)} MiB encoded for Walrus epochs {plan.startEpoch}–{plan.endEpoch}, for about {wal(plan.cost)} at the current price, paid from the fleet&apos;s WAL; no WAL leaves the fleet.{plan.droppedBytes > BigInt(0) ? ` The expired pool's unused ${(Number(plan.droppedBytes) / MIB).toFixed(2)} MiB are dropped.` : ""}</p>}
+        {planError && <p role="alert">{planError}</p>}
+        <p>Walrus joins storage only over the same epochs, so a refill first drops the pool&apos;s elapsed epochs, keeps its unused space and cannot end before the pool does. Walrus encodes a blob to about {(Number(encodedBlobLength(MIB)) / MIB).toFixed(1)}× its size: a 1 MiB artifact needs that many MiB of storage.</p>
         <div className="flex flex-wrap gap-2 items-end">
           <label>Withdraw WAL <input className="border p-1 w-24 block" value={withdrawWal} onChange={(e) => setWithdrawWal(e.target.value)} /></label>
           <button type="button" className="border rounded px-2 py-1" onClick={() => void submit(() => buildWithdrawWalTx(config, storage.id, budget.id, budget.capId, parseToken(withdrawWal), account.address))}>Withdraw unused WAL</button>
