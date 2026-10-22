@@ -30,6 +30,9 @@ class Dispatcher:
         self.db.execute('''CREATE TABLE IF NOT EXISTS backoff (
             project TEXT, family TEXT, attempts INTEGER, retry_after REAL, reason TEXT,
             PRIMARY KEY(project,family))''')
+        self.db.execute('''CREATE TABLE IF NOT EXISTS retired_runs (
+            session TEXT PRIMARY KEY, original_status TEXT, original_message TEXT,
+            reason TEXT NOT NULL, retired_at REAL NOT NULL)''')
         self.db.execute('CREATE TABLE IF NOT EXISTS eligibility (project TEXT PRIMARY KEY, fingerprint TEXT)')
         for slot in config.get('implementation_slots', []):
             if slot['family'] not in ('Codex', 'Claude') or not slot['model'].strip():
@@ -68,7 +71,115 @@ class Dispatcher:
     def update(self, session, status, message):
         self.db.execute('UPDATE runs SET status=?,message=? WHERE session=?', (status, message, session))
 
+    def stopped_identity(self, row):
+        path = Path(row['directory'])/'process.json'
+        identity = json.loads(path.read_text()) if path.exists() else dict(pid=row['pid'], started=row['started'])
+        pid, started = identity['pid'], identity['started']
+        # A reused PID is deliberately retained too: inspect it explicitly.
+        if not pid or not started or process_identity(pid) is not None or not worker_stopped(pid, started):
+            return None
+        return identity
+
+    def replacement_repair(self, project, claim, identity):
+        path = self.state/'reviews.sqlite3'
+        with sqlite3.connect(f'{path.as_uri()}?mode=ro', uri=True) as db:
+            db.row_factory = sqlite3.Row
+            if 'repair_claim' not in {r[1] for r in db.execute('PRAGMA table_info(jobs)')}:
+                return False  # Historical jobs have no fenced same-claim proof.
+            expected = dict(claim=hashlib.sha256(claim['token'].encode()).hexdigest(),
+                            key=claim['key'], branch=claim['branch'], worktree=claim['worktree'])
+            for job in db.execute("SELECT * FROM jobs WHERE project=? AND kind='fix' AND repair_claim IS NOT NULL",
+                                  (project['id'],)):
+                proof = json.loads(job['repair_claim'])
+                proof.pop('head', None)
+                if proof != expected or not job['pid'] or not job['started']:
+                    continue
+                if int(job['started']) <= int(identity['started']):
+                    continue
+                receipt = Path(job['directory'])/'process.json'
+                if not receipt.exists() or json.loads(receipt.read_text()) != dict(pid=job['pid'], started=job['started']):
+                    continue
+                if job['status'] == 'running' and process_identity(job['pid']) == job['started']:
+                    return True
+                if job['status'] == 'done' and worker_stopped(job['pid'], job['started']):
+                    result = json.loads(job['result'])
+                    if result.get('verdict') == 'fixed' and result.get('evidence'):
+                        return True
+        return False
+
+    def retire_obsolete(self, project):
+        rows = self.db.execute("SELECT * FROM runs WHERE project=? AND status IN ('parked','quarantined')",
+                               (project['id'],)).fetchall()
+        for row in rows:
+            authority = None
+            try:
+                claim = json.loads(row['claim'])
+                identity = self.stopped_identity(row)
+                if identity is None:
+                    continue
+                owner = self.ticket(project, 'show', claim['key'])
+                if owner.get('publish_pending'):
+                    continue
+                # Lock the authority before the receipt store, never call ticket
+                # while locked. No ownership writes are made by this connection.
+                path = Path(os.environ.get('XDG_STATE_HOME', str(Path.home()/'.local/state')))/'atomic-ticketing/coordination.sqlite3'
+                authority = sqlite3.connect(f'{path.as_uri()}?mode=rw', uri=True, isolation_level=None, timeout=1)
+                authority.row_factory = sqlite3.Row
+                authority.execute('BEGIN IMMEDIATE')
+                current = authority.execute('SELECT * FROM tickets WHERE key=? AND project=?',
+                                            (project['id']+'::'+claim['key'], project['id'])).fetchone()
+                fields = ('status','token','session','branch','worktree','revision','published_revision')
+                if not current or any(current[k] != owner.get(k) for k in fields):
+                    continue
+                if current['revision'] != current['published_revision']:
+                    continue
+                same = all(current[k] == claim[k] for k in ('token','session','branch','worktree'))
+                reason = None
+                if current['status'] == 'done' and current['token'] is None:
+                    reason = 'authoritative published Done'
+                elif current['token'] != claim['token']:
+                    # Recovery/release must follow this exact historical claim,
+                    # not merely some earlier worker for the same ticket.
+                    events = authority.execute('SELECT * FROM events WHERE ticket=? ORDER BY id',
+                                               (current['key'],)).fetchall()
+                    generation = None
+                    for event in events:
+                        if event['kind'] == 'claim':
+                            generation = (event['actor'] == claim['session'] and
+                                          ('token='+claim['token']+';') in event['detail'])
+                        elif generation and event['kind'] == 'release' and event['actor'] == claim['session']:
+                            reason = 'explicit historical claim recovery/release'
+                            break
+                elif same and current['status'] == 'review' and current['evidence']:
+                    reason = 'authoritative published Review handoff'
+                elif same and current['status'] == 'in_progress' and self.replacement_repair(project, claim, identity):
+                    reason = 'verified same-claim replacement repair'
+                if reason is None:
+                    continue
+                self.db.execute('BEGIN IMMEDIATE')
+                try:
+                    fresh = self.db.execute('SELECT * FROM runs WHERE session=?', (row['session'],)).fetchone()
+                    if not fresh or dict(fresh) != dict(row) or self.stopped_identity(row) != identity:
+                        continue
+                    if reason == 'verified same-claim replacement repair' and not self.replacement_repair(project, claim, identity):
+                        continue
+                    # Preserve claim, directory, process and original message.
+                    self.db.execute('INSERT INTO retired_runs(session,original_status,original_message,reason,retired_at) VALUES(?,?,?,?,?)',
+                                    (row['session'],row['status'],row['message'],reason,time.time()))
+                    self.db.execute("UPDATE runs SET status='finished',message=? WHERE session=? AND status=?",
+                                    ('Archived obsolete stopped receipt: '+reason,row['session'],row['status']))
+                    self.db.execute('COMMIT')
+                finally:
+                    if self.db.in_transaction:
+                        self.db.execute('ROLLBACK')
+            except (OSError, ValueError, KeyError, TypeError, AttributeError, IndexError, sqlite3.Error, subprocess.CalledProcessError) as error:
+                print(f"{project['id']}: obsolete receipt retained ({type(error).__name__})", flush=True)
+            finally:
+                if authority is not None:
+                    authority.close()
+
     def reconcile(self, project):
+        self.retire_obsolete(project)
         rows = self.db.execute("SELECT * FROM runs WHERE project=? AND status IN ('claiming','launching','running','orphaned')", (project['id'],)).fetchall()
         for row in rows:
             try:
@@ -149,7 +260,7 @@ class Dispatcher:
         # service database, but a lengthy review/repair must not pause a family.
         if not (self.state/'reviews.sqlite3').exists():
             return False
-        rows = self.db.execute("SELECT session,claim,status FROM runs WHERE project=? AND family=? AND status!='finished'",
+        rows = self.db.execute("SELECT * FROM runs WHERE project=? AND family=? AND status!='finished'",
                                (slot['project'], slot['family'])).fetchall()
         if sum(r['status'] in ('quarantined', 'parked') for r in rows) >= slot.get('max_quarantined', 3):
             return False
@@ -161,8 +272,16 @@ class Dispatcher:
                      if owner.get('agent') == slot['family']
                      and owner['status'] in ('in_progress', 'blocked')
                      and (not owner.get('session') or owner['session'] not in managed_sessions))
-        # Quarantined/parked jobs retain ownership, but have no runnable worker.
-        active = sum(r['status'] not in ('quarantined', 'parked') for r in rows)
+        # Retained jobs free execution capacity only while still proven stopped.
+        active = 0
+        for row in rows:
+            if row['status'] not in ('quarantined', 'parked'):
+                active += 1
+                continue
+            try:
+                active += self.stopped_identity(row) is None
+            except (OSError, ValueError, KeyError, TypeError, AttributeError, IndexError):
+                active += 1  # Unknown stop state still consumes execution capacity.
         return active + manual < slot.get('max_workers', 1)
 
     def launch(self, project, slot):
