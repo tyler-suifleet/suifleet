@@ -12,9 +12,21 @@ import { PACKAGE_ID, REGISTRY_ID, DEVICE_TYPE, DEVICE_OWNER_CAP_TYPE, DEVICE_GRO
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+/**
+ * Operator-set Device metadata (SF-100). Bulk enrollment writes these after a
+ * device has enrolled under the operator's claim; the on-chain `name` is the
+ * device-chosen name and stays visible as `chainName`.
+ */
+export const ALIAS_META_KEY = "suifleet.alias";
+export const SERIAL_META_KEY = "suifleet.serial";
+
 export interface DeviceObject {
   objectId: string;
+  /** The operator's alias when set, otherwise the registered name. */
   name: string;
+  chainName: string;
+  serial?: string;
+  meta: Record<string, string>;
   deviceAddress: string;
   arch: string;
   registeredAt: number;
@@ -242,8 +254,9 @@ export async function fetchDevices(client: SuiGrpcClient, owner: string): Promis
   return devices.map((object) => {
     const fields = DeviceBcs.parse(object.content);
     if (fields.schema_version !== "1") throw new Error("Unsupported Device schema");
-    return { objectId: object.objectId, name: fields.name, deviceAddress: fields.device_address,
-      arch: fields.arch, registeredAt: Number(fields.registered_at), ownerCapId: ownerCaps.get(object.objectId) };
+    const meta = Object.fromEntries(fields.meta.contents.map((entry) => [entry.key, entry.value]));
+    return { objectId: object.objectId, name: meta[ALIAS_META_KEY] || fields.name, chainName: fields.name, serial: meta[SERIAL_META_KEY] || undefined,
+      meta, deviceAddress: fields.device_address, arch: fields.arch, registeredAt: Number(fields.registered_at), ownerCapId: ownerCaps.get(object.objectId) };
   });
 }
 
@@ -275,7 +288,7 @@ export async function allEvents(client: SuiGrpcClient, type: string) {
   return events;
 }
 
-async function objectsInBatches(client: SuiGrpcClient, ids: string[]) {
+export async function objectsInBatches(client: SuiGrpcClient, ids: string[]) {
   const objects = [];
   for (let index = 0; index < ids.length; index += 50) {
     const batch = await client.getObjects({ objectIds: ids.slice(index, index + 50), include: { content: true } });

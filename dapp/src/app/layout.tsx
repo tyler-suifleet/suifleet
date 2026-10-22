@@ -16,6 +16,7 @@ const NAV = [
   { href: "/get-started", label: "Get started" },
   { href: "/",            label: "Dashboard" },
   { href: "/devices",     label: "Devices" },
+  { href: "/enrollment",  label: "Enrollment" },
   { href: "/deployments", label: "Deployments" },
   { href: "/components", label: "Components" },
   { href: "/firmware",    label: "Deploy component" },
