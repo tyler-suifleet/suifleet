@@ -123,7 +123,7 @@ async function run({ config: c, action, value }) {
       const result = await client.getTransaction({ digest: value.digest, include: { effects: true } });
       return { status: result.Transaction?.status.success ? 'success' : 'failed' };
     } catch (error) {
-      if (error.reason === 'notFound') return { status: 'unknown' };
+      if (error.reason === 'notFound' || error.code === 'NOT_FOUND' || error.code === 5) return { status: 'unknown' };
       throw error;
     }
   }
