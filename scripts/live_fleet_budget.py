@@ -71,11 +71,11 @@ def record_publication(package_dir, chain, package, upgrade_cap):
         f'build-config = {{ flavor = "sui", edition = "2024" }}\nupgrade-capability = "{toolchain.normal(upgrade_cap)}"\n')
 
 
-def publish_storage(live, storage_dir):
+def publish_storage(live, storage_dir, label="publish fleet_storage"):
     """fleet_storage built by the pinned release compiler, its bytecode and
     dependencies verified in the unsigned transaction before signing."""
     execute = live.executor()
-    record = live.evidence.setdefault("verified_package_transactions", {}).setdefault("publish fleet_storage", {})
+    record = live.evidence.setdefault("verified_package_transactions", {}).setdefault(label, {})
 
     def submit(budget):
         try:
@@ -95,7 +95,7 @@ def publish_storage(live, storage_dir):
         record.update(toolchain.verify_package_transaction(toolchain.decode(tx_bytes), built, sender=live.operator, budget=budget),
                       digest=bytes(built["digest"]).hex(), dependencies=built["dependencies"])
         return execute("serialized-tx", tx_bytes)
-    return live.execute("publish fleet_storage", submit, gas=300_000_000)
+    return live.execute(label, submit, gas=300_000_000)
 
 
 def event(result, suffix):
