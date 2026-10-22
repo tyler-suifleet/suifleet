@@ -87,7 +87,11 @@ class ParallelSourceReview(unittest.TestCase):
                                          ({},{'status':'in_progress'})]:
                 candidate={**pr,**change}; current={**owner,**owner_change}
                 helper.configure_scan(engine,candidate,current)
-                with patch.object(engine,'launch') as launch,patch.object(engine,'merge') as merge:
+                # Pending publication is retried, but a failed mirror still blocks dispatch.
+                failure=subprocess.CalledProcessError(1,['ticket','publish'],stderr='HTTP 422')
+                ticket=lambda project,command,*args,**kwargs:(_ for _ in ()).throw(failure) if command=='publish' else json.dumps(current)
+                engine.store.db.execute('DELETE FROM ownership_publication')
+                with patch.object(engine,'launch') as launch,patch.object(engine,'merge') as merge,patch.object(engine,'ticket',side_effect=ticket):
                     engine.tick(True);launch.assert_not_called();merge.assert_not_called()
 
     def test_pending_and_failed_checks_never_merge_even_with_forged_approval(self):
