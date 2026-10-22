@@ -14,30 +14,35 @@ ROOT = Path(__file__).resolve().parents[1]
 DIRECTORY = ROOT / 'docs/business/prospects'
 
 
+def require(condition, message):
+    if not condition:
+        raise ValueError(message)
+
+
 def load():
     with (DIRECTORY / 'manufacturers.csv').open(newline='', encoding='utf-8') as stream:
         rows = list(csv.DictReader(stream))
-    assert len(rows) == 50, 'Expected exactly 50 records'
-    assert len({r['company'].casefold().strip() for r in rows}) == 50, 'Duplicate company'
-    assert {r['sector'] for r in rows} == {'industrial', 'energy', 'commercial'}
-    assert rows == sorted(rows, key=lambda r: (-int(r['score']), r['company'].casefold()))
+    require(len(rows) == 50, 'Expected exactly 50 records')
+    require(len({r['company'].casefold().strip() for r in rows}) == 50, 'Duplicate company')
+    require({r['sector'] for r in rows} == {'industrial', 'energy', 'commercial'}, 'Expected all three research sectors')
+    require(rows == sorted(rows, key=lambda r: (-int(r['score']), r['company'].casefold())), 'Records must be sorted by score and company')
     for rank, row in enumerate(rows, 1):
-        assert all(v and v.strip() for v in row.values()), f'Empty field: {row["company"]}'
-        assert row['rank'] == str(rank)
-        assert row['checked_on'] == '2026-10-21'
-        assert row['source_basis'] in {'Vendor documentation', 'Supplier case study; historical relationship claim'}
-        assert row['role'].startswith('manufacturer'), row['company']
+        require(all(v and v.strip() for v in row.values()), f'Empty field: {row["company"]}')
+        require(row['rank'] == str(rank), 'Rank does not match sorted position')
+        require(row['checked_on'] == '2026-10-21', 'Unexpected research date')
+        require(row['source_basis'] in {'Vendor documentation', 'Supplier case study; historical relationship claim'}, 'Unsupported source basis')
+        require(row['role'].startswith('manufacturer'), row['company'])
         for key in ('fleet_size', 'budget', 'buyer_interest'):
-            assert row[key] == 'Unknown', f'Unsubstantiated commercial claim: {key}'
+            require(row[key] == 'Unknown', f'Unsubstantiated commercial claim: {key}')
         for key in ('primary_url', 'ota_url'):
             if row[key] == 'Unknown':
-                assert key == 'ota_url'
+                require(key == 'ota_url', 'Primary source is required')
                 continue
             url = urlsplit(row[key])
-            assert url.scheme == 'https' and url.hostname and not url.username and not url.password
+            require(url.scheme == 'https' and url.hostname and not url.username and not url.password, 'Sources must be HTTPS without embedded credentials')
         linux, boundary, friction = (int(row[k]) for k in ('linux_evidence', 'application_boundary', 'friction'))
-        assert all(v in range(3) for v in (linux, boundary, friction))
-        assert int(row['score']) == 2 * linux + boundary - friction
+        require(all(v in range(3) for v in (linux, boundary, friction)), 'Scoring inputs must be between zero and two')
+        require(int(row['score']) == 2 * linux + boundary - friction, 'Score does not match ranking formula')
     return rows
 
 
@@ -72,15 +77,15 @@ def main():
     sources = json.loads((DIRECTORY / 'source-checks.json').read_text(encoding='utf-8'))
     urls = {r[k] for r in rows for k in ('primary_url', 'ota_url') if r[k] != 'Unknown'}
     checks = sources['checks']
-    assert sources['checked_on'] == '2026-10-21'
-    assert len(checks) == len(urls) and {c['url'] for c in checks} == urls, 'Stale source coverage'
-    assert all(c['status'] in (200, 403, 'unavailable') for c in checks), 'Unresolved source URL failure'
+    require(sources['checked_on'] == '2026-10-21', 'Unexpected source-check date')
+    require(len(checks) == len(urls) and {c['url'] for c in checks} == urls, 'Stale source coverage')
+    require(all(c['status'] in (200, 403, 'unavailable') for c in checks), 'Unresolved source URL failure')
     report = DIRECTORY / 'REPORT.md'
     expected = render(rows)
     if args.write:
         report.write_text(expected, encoding='utf-8')
     else:
-        assert report.read_text(encoding='utf-8') == expected, 'Stale report; rerun with --write'
+        require(report.read_text(encoding='utf-8') == expected, 'Stale report; rerun with --write')
     print('PASS: 50 unique manufacturers; 3 sectors; required fields/primary HTTPS sources; scores/ranks; unknown commercial facts; exact CSV/report consistency')
 
 
