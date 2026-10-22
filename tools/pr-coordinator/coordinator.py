@@ -440,7 +440,8 @@ class Coordinator:
         if row and row['retry_after'] > time.time():
             return None
         def unchanged(current):
-            return (current.get('status') == 'review' and current.get('revision') == revision
+            return (current.get('status') == 'review' and not current.get('expired')
+                    and current.get('revision') == revision
                     and all(current.get(name) == owner.get(name) for name in
                             ('token', 'agent', 'model', 'session', 'branch', 'worktree')))
         current = json.loads(self.ticket(project, 'show', key))

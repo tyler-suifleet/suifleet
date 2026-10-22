@@ -128,7 +128,8 @@ class PendingReviewPublication(unittest.TestCase):
 
     def test_ownership_change_before_publication_is_not_published(self):
         for change in ({'revision': 12}, {'token': 'replacement'}, {'status': 'in_progress'},
-                       {'branch': 'other'}, {'worktree': '/elsewhere'}, {'session': 'other'}):
+                       {'branch': 'other'}, {'worktree': '/elsewhere'}, {'session': 'other'},
+                       {'expired': True}):
             with self.subTest(change=change), tempfile.TemporaryDirectory() as d:
                 pr, owner = self.pending()
                 engine, state, calls, launched = self.scan(d, [pr], [owner])
