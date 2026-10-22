@@ -1,0 +1,111 @@
+{
+  "ticket": "SF-083",
+  "kind": "isolated localnet (network none), pinned Sui 1.81.1",
+  "command": "make test-budget-localnet (python3 scripts/test_protocol_localnet.py --budget-upgrade)",
+  "recorded_by": "Claude, claude-opus-5-5",
+  "checks": [
+    "compatible base-to-head upgrade introduces the budget types at head; the registry keeps its base origin",
+    "an existing pre-upgrade device enrolls; its address receives exactly the float and its own shared GasAccount holds the reserve",
+    "the device draws from its own account; the fleet budget is a read-only input at an unchanged version (computation 1000000, net -2848564 MIST)",
+    "on-chain failures for above-float, revoked, paused, suspended, device-withdraw, over-allowance and over-count draws",
+    "two devices drew in parallel; both read budget version 664 and each wrote only its own account",
+    "on-chain failures for an emptied reserve, another device's account and a removed account; an adversarial mutable budget input changed nothing and stayed within limits",
+    "after a later upgrade migrates the budget, the previous version's draw fails on chain and the newest succeeds",
+    "the real daemon read its balance, budget and account over gRPC, drew 3 time(s) with checked effects, then journaled: draw limit for this period reached; the period ends at 1792651585742 ms"
+  ],
+  "result": "PASS",
+  "base": "181aea524fb0958d65072cb0c76410bdc36a715c",
+  "old_package": "0x1e9c230bb8a2a8522c23417cf922881ebc0d024fe2ab4431c05daacc65c0f7ef",
+  "head_package": "0x94586b35cecc51c6b7dcfa345f3caae1d237be192022d6c41dc94f44d254660c",
+  "next_package": "0xc6667dbd8eff3fa471dff3c5444c2ad7a9de12b00abbb925286f7845621f29b6",
+  "budget": "0xf0145b6dc142a0b60b84768a9ab2f3af7e7259f58bcb892361adfc7bafa1568e",
+  "draw_net_mist": "-2848564",
+  "digests": {
+    "publish base": "HK63juYeerWxZjA1YgB1fbRtZeEeZg5UU7xm5jJVzARE",
+    "register pi": "Bduz4tLDb9Uhb5yjVKycUciuDWTBypWBRcShqZCCsRMr",
+    "upgrade head": "7w7nA4gGz1nZTYVe7jWRAsftWCkXdqYc41KYRhF3iRrn",
+    "create budget": "AzsAyZARDELjG1ycCkx32RoSJYgHM9qxpT12gabg95QR",
+    "enroll existing device with float and reserve": "61prQoCkhWeREWBsiQSwNJDBtSfoYnkeY9TdJ54nPns7",
+    "device draw": "5Ca9s8iifZUUvLgJckaf95cGJ1v8R2EpbADEXofMTLmm",
+    "revoke device": "E3zEb12rwhRjB4KpgXNFrdxtWrZZUnf8dxvZojDLpodb",
+    "reinstate device": "H6vR1QzZxQAe9oBggD3qcXsDRTD21rYvYKMjyuRVeAph",
+    "pause budget": "6Zv6ZgoN3WrdFnfcgQGtMnM6ygnQUTTSDo2eC3eD1KrR",
+    "resume budget": "HJJV6Ufrj99kLWvZqPkPzjwCM3yAV6i9NwdDXbphGop9",
+    "suspend device": "8zBErjF1MXyV1c1D7EFFVeX1b7U6VVVm6xDVTbt9jTCv",
+    "resume device": "5EvEwS617Pfg9igeNxie7Wwy7anGcmFL7xjFy66poS9N",
+    "second draw": "9VmzWK4fjUk9hGLQ4LQJ89Xqrca4paySceUwPgFtT65H",
+    "third draw": "7yMwBszYfBNH7grd7QH4Gyh1k2PKs5GxosqxLEc8h2FQ",
+    "register pa": "Bndq3V5RUEgVZKBMZPbT66Ym4NWbAyMiFWGDaEwHEjd",
+    "register pb": "5zLXoTNFoLEmrzRKN75ReSJrsCBPokiyZQRy46ThutfC",
+    "enroll device A": "HbUzqkPuxN3pcv78BJVV9yxz28kVDhE2BLPFvrZAXrMP",
+    "enroll device B": "wr3Mw9iRx8rNFChFopWHg5YX545yhGsgZRNr73tT9CE",
+    "device A draws": "DBNJt7eCdYXVbQcKQzukae5WXJCGykL8mVj1y51s6CEZ",
+    "device B draws": "AHn4qaqkQ7sFn2MNx6eNis5gwyqhc98Ca7eew4ebKja5",
+    "owner refills a reserve": "FLwvxMJKjsFs1jEvmxRPBMPygyaF6KujYRPoshkcQEGo",
+    "adversarial draw declaring the budget mutable": "5BAQuNGkNSpL2SojbvHmhZszcV3hVfr3p1ybcYwJqJ5v",
+    "owner removes device A": "8q8y7GCPQiQJ7nW8RdR9MwmR7ywLLnHnNgWYGtmU9DED",
+    "upgrade future": "DhQiAaWLoFHRTG33E7xyDFhJynn4ppzgSK35URNehU1k",
+    "migrate budget": "4cRr7CEKXAkQT51cCpZ5So574qCLFixqEcLmUzimYcpd",
+    "owner refill via the newest version": "5oJ6EE7uMgfY8M9r8auy2SXSub35ZG8kE1BjXhE2R9Cz",
+    "register pi2": "GqJt1UZEy4VwSRzSJYT4VP9XXACcxcV5n8WCTn193tCh",
+    "enroll second device": "EQhTZ4A8zSuFzjsMTEcrpbztZAfSqZqsAVojTHwkPMRr",
+    "draw through the newest version": "GPmshPy65n6Hi1dV8QT5js34juaz9jkYncNHXm4p5UsP",
+    "register pi3": "EhQW3XgXjCw81hZ99mniEU3pTfhtqmjAbA1uCeE9xYcS",
+    "enroll daemon device": "Fhto1DqB7gv3SaePZYfEqSApwdsugbk4g7spqCBnU4iD",
+    "daemon draw": "B7yV5smfWRHLgmAvB33uy7sqsqVSVe5627PZSBMCNCe"
+  },
+  "failures": {
+    "draw through the base package": {
+      "digest": "gdSy5iKD9YWeuJuZaLHz2fjEH1aQEtaxKASt5yhiJax",
+      "status": "FunctionNotFound in command 0"
+    },
+    "draw above the float cap": {
+      "digest": "5PFLaaaBrxrLSojNDWzzFYeT566CsDsaCg6XCApd3Xfn",
+      "status": "MoveAbort in 1st command, abort code: 8, in '0x94586b35cecc51c6b7dcfa345f3caae1d237be192022d6c41dc94f44d254660c::fleet_budget::draw_gas' (instruction 43)"
+    },
+    "draw after revocation": {
+      "digest": "H6ouNfhZiJsYwPgwGhnDDhBvVNE2RrrCLpRzW8HS3555",
+      "status": "MoveAbort in 1st command, abort code: 2, in '0x94586b35cecc51c6b7dcfa345f3caae1d237be192022d6c41dc94f44d254660c::device_cap::assert_active' (instruction 13)"
+    },
+    "draw while paused": {
+      "digest": "7iUiTmM9VUC7YXMP5eDqh4BWTmeVLVGz3gaBunCr8Y4J",
+      "status": "MoveAbort in 1st command, abort code: 3, in '0x94586b35cecc51c6b7dcfa345f3caae1d237be192022d6c41dc94f44d254660c::fleet_budget::assert_may_draw' (instruction 36)"
+    },
+    "draw while suspended": {
+      "digest": "9eSR5PUAp5bpLctTXR7x2a4nB6Ev8SmgWcvjXTgueGob",
+      "status": "MoveAbort in 1st command, abort code: 7, in '0x94586b35cecc51c6b7dcfa345f3caae1d237be192022d6c41dc94f44d254660c::fleet_budget::assert_may_draw' (instruction 95)"
+    },
+    "device withdraws with the owner's cap": {
+      "digest": null,
+      "status": "rejected before execution: the owner cap is not the device's object"
+    },
+    "draw above the period allowance": {
+      "digest": "2JwHggmtSzPi8q9aJebpjPsocwSXEh4Gq5VP7W8vbcmr",
+      "status": "MoveAbort in 1st command, abort code: 9, in '0x94586b35cecc51c6b7dcfa345f3caae1d237be192022d6c41dc94f44d254660c::fleet_budget::draw_gas' (instruction 103)"
+    },
+    "fourth draw in the period": {
+      "digest": "2BfLuDDRmatj6pb1NeZj6h63DMagHT3wsEY9gnax67d1",
+      "status": "MoveAbort in 1st command, abort code: 10, in '0x94586b35cecc51c6b7dcfa345f3caae1d237be192022d6c41dc94f44d254660c::fleet_budget::draw_gas' (instruction 58)"
+    },
+    "draw from an emptied reserve": {
+      "digest": "4s9Nn3T7AsyyfUydTo9rWsBohrSEbPemKJ83eiM9bKQk",
+      "status": "MoveAbort in 1st command, abort code: 11, in '0x94586b35cecc51c6b7dcfa345f3caae1d237be192022d6c41dc94f44d254660c::fleet_budget::draw_gas' (instruction 116)"
+    },
+    "draw from another device's account": {
+      "digest": "7er96AFp4z9bEeRigg5fzcJCxZ6QzXMwpT3fcfg1qgnX",
+      "status": "MoveAbort in 1st command, abort code: 16, in '0x94586b35cecc51c6b7dcfa345f3caae1d237be192022d6c41dc94f44d254660c::fleet_budget::assert_may_draw' (instruction 76)"
+    },
+    "adversarial draw beyond its reserve": {
+      "digest": "Ff5waALUqomv9pd9c3AYyxyqCNDreZE3EwHPQipWQTTa",
+      "status": "MoveAbort in 1st command, abort code: 11, in '0x94586b35cecc51c6b7dcfa345f3caae1d237be192022d6c41dc94f44d254660c::fleet_budget::draw_gas' (instruction 116)"
+    },
+    "draw from a removed device's account": {
+      "digest": "67KC7BQnUmWKbwEVHfXsUDd8zGk3H9g1EuQzwcH4iezT",
+      "status": "MoveAbort in 1st command, abort code: 4, in '0x94586b35cecc51c6b7dcfa345f3caae1d237be192022d6c41dc94f44d254660c::fleet_budget::assert_current' (instruction 40)"
+    },
+    "draw through the previous version after migration": {
+      "digest": "HBzQrr9iJPdu5fFreeKnhE9pLVydFCX1sH9Fqf9PnsLW",
+      "status": "MoveAbort in 1st command, abort code: 0, in '0x94586b35cecc51c6b7dcfa345f3caae1d237be192022d6c41dc94f44d254660c::fleet_budget::assert_may_draw' (instruction 18)"
+    }
+  }
+}

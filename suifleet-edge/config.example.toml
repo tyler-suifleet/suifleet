@@ -103,6 +103,15 @@ replay_history = false
 # interval_seconds = 60           # 10..=3600
 # buffer_max = 1024               # snapshots kept offline; oldest dropped beyond
 
+# Prepaid network costs (docs/FLEET_BUDGET.md): top up this device's gas from
+# the owner's on-chain fleet budget. The contract bounds every draw (float cap,
+# period allowance, rate); these only choose when. Needs a manifest with the
+# fleet budget type origins; with the service signer, also [budget] in signer.toml.
+# [budget]
+# budget_id = "0x<FleetBudget object ID>"
+# low_water_mist = 20000000   # draw below 0.02 SUI; keep above one draw's gas
+# draw_mist = 50000000        # asked per draw
+
 # Confidential delivery (docs/CONFIDENTIAL_DELIVERY.md): decrypt Seal-encrypted
 # recipes and artifacts with this device's own identity. "required" refuses
 # unencrypted ones. Key servers are trusted by object ID; their URL and public

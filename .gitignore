@@ -9,6 +9,7 @@ tmp-swu/
 
 # ── Move build artifacts ──────────────────────────────────────────────────────
 contracts/build/
+contracts/fleet_storage/build/
 
 # ── Rust build artifacts ──────────────────────────────────────────────────────
 suifleet-edge/target/

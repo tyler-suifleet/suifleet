@@ -29,12 +29,14 @@ including a new daemon that hangs before readiness.
             staging (interrupted)        v5 confirms
 """
 import argparse
+import contextlib
 import hashlib
 import json
 import os
 from pathlib import Path
 import signal
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -44,6 +46,13 @@ import test_ota
 from test_ota import CAP, DEVICE, PACKAGE, REGISTRY, TYPE_ORIGINS, UPGRADE_CAP, Simulator, start_grpc, wait_for
 
 COMPONENT = "suifleet-daemon"
+# The daemon's bound on a candidate's preflight self-check.
+PREFLIGHT_SECONDS = 30
+# Waits that cover delivering the full daemon executable: its download and
+# hash, then, when admitted, copy, fsync, preflight, restart and confirmation.
+# The 32-bit debug build is about 240 MB, so a slow runner needs longer than
+# the default wait, which is shorter than the preflight bound alone.
+HANDOFF_SECONDS = PREFLIGHT_SECONDS + 60
 # Passes the preflight self-check, then fails every real start.
 FAILS_AT_STARTUP = b'#!/bin/sh\n[ "$1" = --self-check ] && exit 0\necho "broken daemon" >&2\nexit 3\n'
 NOT_RUNNABLE = b"\x7fELF this is not an executable\n"
@@ -56,6 +65,19 @@ def other_architecture(binary):
     machine = int.from_bytes(data[18:20], order)
     data[18:20] = (62 if machine == 3 else 3).to_bytes(2, order)
     return bytes(data)
+
+
+@contextlib.contextmanager
+def on_failure(report):
+    """Run `report` if the block fails, before its temporary files are removed."""
+    try:
+        yield
+    except BaseException:
+        try:
+            report()
+        except Exception as error:
+            print(f"(diagnostics unavailable: {error!r})", file=sys.stderr)
+        raise
 
 
 class ServiceManager:
@@ -156,8 +178,32 @@ def run(binary):
     threading.Thread(target=server.serve_forever, daemon=True).start()
     shim, rpc_url = start_grpc(f"http://127.0.0.1:{server.server_port}")
     manager = None
+
+    def diagnose(root):
+        state, daemon_dir = root / "state", root / "state" / "daemon"
+        try:
+            journal = json.loads((state / "state.json").read_text())
+        except (OSError, ValueError) as error:
+            journal = {"unreadable": repr(error)}
+        handoff = daemon_dir / "handoff.json"
+        try:
+            log = (root / "daemon.log").read_text(errors="replace")
+        except OSError:
+            log = ""
+        print("DIAGNOSTICS (test_daemon_update.py failure)", file=sys.stderr)
+        print(f"deployments: {json.dumps(journal.get('deployments', journal))[:800]}", file=sys.stderr)
+        print(f"deferred: {json.dumps(journal.get('deferred', {}))[:300]}", file=sys.stderr)
+        print(f"handoff: {handoff.read_text()[:400] if handoff.exists() else None}", file=sys.stderr)
+        versions = daemon_dir / "versions"
+        print(f"versions: {sorted(p.name for p in versions.iterdir()) if versions.exists() else []}", file=sys.stderr)
+        if manager:
+            print(f"service manager: starts={manager.starts} exits={manager.exits} exe={manager.exe()}", file=sys.stderr)
+        print(f"reports: {sim.reports} rpc errors: {sim.errors[-3:]}", file=sys.stderr)
+        print(f"daemon log tail:\n{log[-1200:]}", file=sys.stderr)
+
     try:
-        with tempfile.TemporaryDirectory(prefix="suifleet-daemon-update-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="suifleet-daemon-update-") as temporary, \
+                on_failure(lambda: diagnose(Path(temporary))):
             root = Path(temporary)
             key = root / "device.key"
             key.write_text("07" * 32)
@@ -176,7 +222,7 @@ def run(binary):
                 f'[walrus]\naggregator_url = "{url}"\n'
                 '[apply]\ncommand = "/bin/false"\ntimeout_seconds = 5\n'
                 f'[runtime]\nstate_dir = {json.dumps(str(state_dir))}\npoll_seconds = 1\n'
-                f'[daemon_update]\nenabled = true\ncomponent = "{COMPONENT}"\nmax_start_attempts = 2\npreflight_timeout_seconds = 30\n')
+                f'[daemon_update]\nenabled = true\ncomponent = "{COMPONENT}"\nmax_start_attempts = 2\npreflight_timeout_seconds = {PREFLIGHT_SECONDS}\n')
             daemon_dir = state_dir / "daemon"
 
             def journal():
@@ -206,8 +252,10 @@ def run(binary):
             assert manager.exe() == base, manager.exe()
 
             # A working new daemon (the same build, delivered as an update).
+            deployed = time.monotonic()
             deploy("0x701", "2.0.0", Path(binary).read_bytes())
-            wait_for(lambda: outcome("0x701").get("status") == 1, "the new daemon did not confirm and apply")
+            wait_for(lambda: outcome("0x701").get("status") == 1, "the new daemon did not confirm and apply", timeout=HANDOFF_SECONDS)
+            handoff_seconds = time.monotonic() - deployed
             v2 = current()
             assert v2 and "/versions/2.0.0-" in v2, v2
             assert 75 in manager.exits, f"no handoff restart: {manager.exits}"
@@ -216,7 +264,8 @@ def run(binary):
             # The record is dropped right after the outcome is journaled.
             wait_for(lambda: not (daemon_dir / "handoff.json").exists(), "the confirmed handoff record was not finished")
             wait_for(lambda: outcome("0x701").get("reported"), "the update's outcome was not reported")
-            print("PASS: new daemon staged, preflighted and started by the launcher; confirmed; Applied reported with the same identity and journal")
+            print("PASS: new daemon staged, preflighted and started by the launcher; confirmed; Applied reported with the same identity and journal"
+                  f" ({handoff_seconds:.1f}s of {HANDOFF_SECONDS}s)")
 
             # A restart keeps running the confirmed update.
             pid = manager.pid()
@@ -247,7 +296,8 @@ def run(binary):
             # Built for another ELF architecture: refused before it is installed or run.
             pid, starts = manager.pid(), manager.starts
             deploy("0x707", "8.0.0", other_architecture(binary))
-            wait_for(lambda: outcome("0x707").get("status") == 2, "the other-architecture update was not rejected")
+            wait_for(lambda: outcome("0x707").get("status") == 2, "the other-architecture update was not rejected",
+                     timeout=HANDOFF_SECONDS)
             assert "built for another architecture" in outcome("0x707")["error"], outcome("0x707")
             assert "preflight" not in outcome("0x707")["error"], outcome("0x707")
             assert not any("8.0.0-" in p.name for p in (daemon_dir / "versions").iterdir()), "candidate installed"
@@ -272,7 +322,8 @@ def run(binary):
                     wait_for(lambda: now() >= end + 5000, "window end did not elapse")
                 reason = {"cancel": "cancelled", "window": "outside maintenance window"}[action]
                 release.set()
-                wait_for(lambda: journal().get("deferred", {}).get(id, {}).get("reason") == reason, f"{action}: not deferred after download")
+                wait_for(lambda: journal().get("deferred", {}).get(id, {}).get("reason") == reason, f"{action}: not deferred after download",
+                         timeout=HANDOFF_SECONDS)
                 time.sleep(2)
                 assert not outcome(id), (action, outcome(id))
                 assert not (daemon_dir / "handoff.json").exists(), f"{action}: handoff staged after admission ended"
@@ -282,17 +333,20 @@ def run(binary):
             assert journal()["deferred"]["0x705"]["terminal"]
             gates.clear()
             control("0x706", window_start_ms=now() - 1000, window_end_ms=now() + 120000)
-            wait_for(lambda: outcome("0x706").get("status") == 1, "the reopened window did not apply the daemon update")
+            wait_for(lambda: outcome("0x706").get("status") == 1, "the reopened window did not apply the daemon update",
+                     timeout=HANDOFF_SECONDS)
             assert "/versions/7.0.0-" in current(), current()
             print("PASS: a window deferral is retryable: once reopened, the daemon update staged, handed over and applied")
 
             # Killed right after staging: the next start still hands over.
             deploy("0x704", "5.0.0", Path(binary).read_bytes())
-            wait_for(lambda: (daemon_dir / "handoff.json").exists() or outcome("0x704").get("status"), "the update was not staged")
+            wait_for(lambda: (daemon_dir / "handoff.json").exists() or outcome("0x704").get("status"), "the update was not staged",
+                     timeout=HANDOFF_SECONDS)
             pid = manager.pid()
             if pid and (daemon_dir / "handoff.json").exists():
                 os.kill(pid, signal.SIGKILL)
-            wait_for(lambda: outcome("0x704").get("status") == 1, "the interrupted handoff did not complete")
+            wait_for(lambda: outcome("0x704").get("status") == 1, "the interrupted handoff did not complete",
+                     timeout=HANDOFF_SECONDS)
             assert "/versions/5.0.0-" in current(), current()
             assert journal()["binding"] == binding
             print("PASS: a daemon killed right after staging: the next start handed over and v5 confirmed")
