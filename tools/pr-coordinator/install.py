@@ -3,6 +3,7 @@
 import argparse
 import os
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 
@@ -12,13 +13,27 @@ parser.add_argument('--enable-dispatcher',action='store_true',help='Enable confi
 scope = parser.add_mutually_exclusive_group()
 scope.add_argument('--dispatcher-only',action='store_true',help='Preserve the installed review coordinator and worker')
 scope.add_argument('--coordinator-only',action='store_true',help='Replace only coordinator.py; preserve dispatcher, worker and service units')
+scope.add_argument('--dashboard-only',action='store_true',help='Install only the read-only agent-dashboard command; touch no service, config or engine')
 args = parser.parse_args()
 source = Path(__file__).resolve().parent
 home = Path.home()
+def install_dashboard():
+    (home/'.local/bin').mkdir(parents=True,exist_ok=True)
+    shutil.copy2(source/'dashboard.py',home/'.local/lib/pr-coordinator/dashboard.py')
+    command = home/'.local/bin/agent-dashboard'
+    command.write_text(f'#!/bin/sh\nexec python3 {shlex.quote(str(home/".local/lib/pr-coordinator/dashboard.py"))} "$@"\n')
+    command.chmod(0o755)
+if args.dashboard_only:
+    (home/'.local/lib/pr-coordinator').mkdir(parents=True,exist_ok=True)
+    install_dashboard()
+    print(f"Installed {home/'.local/bin/agent-dashboard'}; services and workers untouched.")
+    raise SystemExit(0)
 for directory in ['.local/lib/pr-coordinator','.config/pr-coordinator','.config/systemd/user']:
     (home/directory).mkdir(parents=True,exist_ok=True)
 for name in (('coordinator.py',) if args.coordinator_only else ('dispatcher.py',) if args.dispatcher_only else ('coordinator.py','worker.py','dispatcher.py')):
     shutil.copy2(source/name,home/'.local/lib/pr-coordinator'/name)
+if not args.coordinator_only and not args.dispatcher_only:
+    install_dashboard()
 config = home/'.config/pr-coordinator/config.json'
 if not config.exists():
     import json
