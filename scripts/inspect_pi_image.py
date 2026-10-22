@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only inspection of an SF-029 SD image; never opens a block device."""
+"""Read-only inspection of an SF-029/SF-066 SD image; never opens a block device."""
 import argparse
 import bz2
 import hashlib
@@ -37,7 +37,30 @@ def sha(path):
         return digest.hexdigest()
 
 
-def inspect(image, work, mtools_dir, expected_keys=None, debugfs="debugfs", e2fsck=None):
+def recipe_pins(text):
+    """The daemon source revision and Cargo.lock digest a recipe builds."""
+    pins = {}
+    for key, field in [('SRCREV', 'source_revision'), ('SUIFLEET_LOCK_SHA256', 'lock_sha256')]:
+        match = re.search(r'^'+key+r' = "([0-9a-f]+)"$', text, re.M)
+        if not match:
+            raise ValueError('recipe does not pin '+key)
+        pins[field] = match.group(1)
+    return pins
+
+
+def check_build_info(build_info, pins):
+    """Require the image's build-info to name exactly the recipe's pins."""
+    fields = dict(line.split('=', 1) for line in build_info.splitlines() if '=' in line)
+    for field in ['source_revision', 'lock_sha256', 'crate_version']:
+        if not fields.get(field):
+            raise ValueError('build-info lacks '+field)
+    for field, value in (pins or {}).items():
+        if fields[field] != value:
+            raise ValueError(f'image {field} {fields[field]} differs from the recipe pin {value}')
+    return fields
+
+
+def inspect(image, work, mtools_dir, expected_keys=None, debugfs="debugfs", e2fsck=None, pins=None):
     if not stat.S_ISREG(image.stat().st_mode):
         raise ValueError('input must be a regular image file, never a device')
     disk = work/'disk.wic'
@@ -88,7 +111,7 @@ def inspect(image, work, mtools_dir, expected_keys=None, debugfs="debugfs", e2fs
     def exists(path):
         out, err = debug('stat '+path)
         return 'Inode:' in out and 'File not found' not in err
-    absent = ['/etc/suifleet/device.key','/etc/suifleet/device.address','/etc/suifleet/config.toml','/etc/suifleet/deployment.json','/etc/suifleet/firmware.toml','/var/lib/suifleet','/home/operator/.ssh/id_ed25519','/root/.ssh/id_ed25519']
+    absent = ['/etc/suifleet/device.key','/etc/suifleet/device.address','/etc/suifleet/config.toml','/etc/suifleet/deployment.json','/etc/suifleet/firmware.toml','/etc/suifleet/signer.toml','/etc/suifleet/pkcs11.pin','/etc/suifleet/env','/run/suifleet-signer','/var/lib/suifleet','/home/operator/.ssh/id_ed25519','/root/.ssh/id_ed25519']
     for path in absent:
         assert not exists(path), 'runtime secret/state baked into image: '+path
     ssh_listing = debug('ls -p /etc/ssh')[0]
@@ -117,16 +140,46 @@ def inspect(image, work, mtools_dir, expected_keys=None, debugfs="debugfs", e2fs
         assert authorized_keys == expected_keys.read_text(), 'image authorized keys differ from the private local overlay'
     keys = authorized_keys.splitlines()
     assert keys and all(k.startswith(('ssh-ed25519 ', 'ssh-rsa ', 'ecdsa-')) for k in keys)
-    enabled = ['/etc/systemd/system/multi-user.target.wants/systemd-networkd.service','/etc/systemd/system/multi-user.target.wants/systemd-resolved.service','/etc/systemd/system/sysinit.target.wants/systemd-timesyncd.service','/etc/systemd/system/multi-user.target.wants/suifleet-provision.service','/etc/systemd/system/multi-user.target.wants/suifleet-enrollment.path']
+    enabled = ['/etc/systemd/system/multi-user.target.wants/systemd-networkd.service','/etc/systemd/system/multi-user.target.wants/systemd-resolved.service','/etc/systemd/system/sysinit.target.wants/systemd-timesyncd.service','/etc/systemd/system/multi-user.target.wants/suifleet-provision.service','/etc/systemd/system/multi-user.target.wants/suifleet-enrollment.path','/etc/systemd/system/multi-user.target.wants/suifleet.service','/etc/systemd/system/multi-user.target.wants/suifleet-signer.service','/etc/systemd/system/multi-user.target.wants/suifleet-firmware.path','/etc/systemd/system/sockets.target.wants/suifleet-signer.socket']
     for path in enabled:
         assert exists(path), 'service not enabled: '+path
         assert exists('/usr/lib/systemd/system/'+Path(path).name), 'missing enabled unit target: '+path
     assert any(exists(path) for path in ['/etc/systemd/system/sockets.target.wants/sshd.socket', '/etc/systemd/system/multi-user.target.wants/sshd.service']), 'SSH not enabled'
     assert 'ConditionPathExists=/etc/suifleet/config.toml' in read('/usr/lib/systemd/system/suifleet.service')
     assert 'User=suifleet' in read('/usr/lib/systemd/system/suifleet.service')
+    # SF-066: the launcher and signer are modes of the same immutable binary.
+    daemon_unit = read('/usr/lib/systemd/system/suifleet.service')
+    for setting in ['ExecStart=/usr/bin/suifleet --launch',
+                    'ExecStartPost=+/usr/bin/suifleet --record-main-process',
+                    'NotifyAccess=main', 'KillMode=mixed']:
+        assert setting in daemon_unit, setting
+    signer_unit = read('/usr/lib/systemd/system/suifleet-signer.service')
+    for setting in ['User=suifleet-signer', 'Group=suifleet-signer',
+                    '--signer-service /etc/suifleet/signer.toml',
+                    'ConditionPathExists=/etc/suifleet/signer.toml',
+                    'IPAddressDeny=any', 'NoNewPrivileges=yes']:
+        assert setting in signer_unit, setting
+    passwd = read('/etc/passwd').splitlines()
+    groups = read('/etc/group').splitlines()
+    def account_id(lines, name):
+        return next(line.split(':')[2] for line in lines if line.startswith(name+':'))
+    assert account_id(passwd, 'suifleet') != account_id(passwd, 'suifleet-signer')
+    signer_group = next(line.split(':')[3] for line in groups if line.startswith('suifleet-signer:'))
+    assert 'suifleet' not in signer_group.split(','), 'daemon belongs to signer group'
+    for path, mode, group in [
+            ('/etc/suifleet', '0750', 'suifleet'),
+            ('/etc/suifleet/config.toml.example', '0640', 'suifleet'),
+            ('/etc/suifleet/signer.toml.example', '0640', 'suifleet-signer'),
+            ('/usr/bin/suifleet', '0755', 'root'),
+            ('/usr/libexec/suifleet-provision', '0755', 'root')]:
+        info, _ = debug('stat '+path)
+        assert 'Mode:  '+mode in info, 'unsafe mode: '+path
+        assert re.search(r'User:\s+0\s', info), 'not root owned: '+path
+        assert re.search(r'Group:\s+'+account_id(groups, group)+r'\s', info), 'wrong group: '+path
+    assert 'kind = "service"' in read('/etc/suifleet/config.toml.example')
     assert exists('/etc/ssl/certs/ca-certificates.crt')
     build_info = read('/usr/share/suifleet/build-info')
-    assert 'source_revision=' in build_info and 'lock_sha256=' in build_info and 'crate_version=' in build_info
+    build_fields = check_build_info(build_info, pins)
     binaries = {}
     for name in ['suifleet','suifleet-test-updater']:
         dest = work/name
@@ -136,7 +189,7 @@ def inspect(image, work, mtools_dir, expected_keys=None, debugfs="debugfs", e2fs
     with (work/'suifleet').open('rb') as stream:
         elf = stream.read(20)
     assert elf[:4] == b'\x7fELF' and elf[4:6] == b'\x02\x01' and struct.unpack_from('<H',elf,18)[0] == 183, 'daemon must be AArch64 ELF64'
-    return dict(image=str(image.resolve()),sha256=sha(image),size=image.stat().st_size,uncompressed_size=disk.stat().st_size,uncompressed_sha256=sha(disk),partitions=parts,boot_files=boot_files,boot_file_sha256=boot_hashes,boot_config=config,boot_command_line=command_line,daemon_build_info=build_info,binaries=binaries,authorized_public_key_count=len(keys),authorized_keys_match_expected=True if expected_keys is not None else None,runtime_state_absent=absent,enabled_services=enabled,ext4_fsck_read_only_passed=fsck_checked,physical_boot_tested=False)
+    return dict(image=str(image.resolve()),sha256=sha(image),size=image.stat().st_size,uncompressed_size=disk.stat().st_size,uncompressed_sha256=sha(disk),partitions=parts,boot_files=boot_files,boot_file_sha256=boot_hashes,boot_config=config,boot_command_line=command_line,daemon_build_info=build_fields,build_info_matches_recipe=pins is not None,binaries=binaries,authorized_public_key_count=len(keys),authorized_keys_match_expected=True if expected_keys is not None else None,runtime_state_absent=absent,enabled_services=enabled,ext4_fsck_read_only_passed=fsck_checked,signer_service_separation_inspected=True,physical_boot_tested=False)
 
 
 def main():
@@ -146,10 +199,12 @@ def main():
     parser.add_argument('--e2fsck',type=Path)
     parser.add_argument('--expected-authorized-keys',type=Path)
     parser.add_argument('--mtools-dir',type=Path,default=Path('/usr/bin'))
+    parser.add_argument('--recipe',type=Path,help='suifleet_1.0.bb whose SRCREV/lock digest the image must contain')
     parser.add_argument('--output',type=Path,required=True)
     args=parser.parse_args()
     with tempfile.TemporaryDirectory(prefix='sf029-inspect-') as directory:
-        result=inspect(args.image,Path(directory),args.mtools_dir,args.expected_authorized_keys,args.debugfs,args.e2fsck)
+        pins=recipe_pins(args.recipe.read_text()) if args.recipe else None
+        result=inspect(args.image,Path(directory),args.mtools_dir,args.expected_authorized_keys,args.debugfs,args.e2fsck,pins)
     args.output.write_text(json.dumps(result,indent=2)+'\n')
     print(json.dumps(result,indent=2))
 
