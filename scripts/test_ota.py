@@ -64,8 +64,8 @@ def scanned(count):
     return {"after": base64.b64encode(count.to_bytes(8, "little")).decode()}
 
 
-def wait_for(condition, message, process=None):
-    deadline = time.monotonic() + 25
+def wait_for(condition, message, process=None, timeout=25):
+    deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if condition():
             return
