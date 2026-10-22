@@ -143,6 +143,9 @@ function JobPanel({ policy, operator, onError }: { policy: PolicyState; operator
   const steps = chain.data ? plan(job, views, chain.data) : [];
   const counts = views.reduce((c, v) => ({ ...c, [v.status]: (c[v.status] ?? 0) + 1 }), {} as Partial<Record<EntryStatus, number>>);
   const accepting = policyAccepting(policy);
+  // Claims cannot be registered under a policy that no longer accepts
+  // enrollments; naming and grouping already-enrolled devices still can.
+  const runnable = accepting ? steps.filter((s) => s.kind === "bind") : steps;
   const quotaShort = (counts.unregistered ?? 0) + (counts.unfunded ?? 0) + (counts["awaiting-device"] ?? 0) - Number(policy.remaining);
 
   function record(action: string, count: number, digest?: string, error?: string) {
@@ -251,9 +254,8 @@ function JobPanel({ policy, operator, onError }: { policy: PolicyState; operator
         {quotaShort > 0 && <p className="text-amber-700">The policy allows {quotaShort} fewer enrollments than you have reserved; raise its quota.</p>}
         {progress && <div role="status" className="text-[#2e6fb0]">{progress.label} (transaction {progress.step} of {progress.total}){progress.phase === "wallet" ? " · approve in your wallet" : progress.phase === "confirming" ? " · confirming" : ""}</div>}
         <div className="flex flex-wrap gap-2">
-          <button className={primary} disabled={!!progress || !steps.length || (!!accepting && steps[0]?.kind === "claims")}
-            onClick={() => runSteps(accepting ? steps.filter((s) => s.kind === "bind") : steps)}>
-            {steps.length ? `Run ${steps.length} pending transaction${steps.length === 1 ? "" : "s"}` : "Nothing pending"}
+          <button className={primary} disabled={!!progress || !runnable.length} onClick={() => runSteps(runnable)}>
+            {runnable.length ? `Run ${runnable.length} pending transaction${runnable.length === 1 ? "" : "s"}` : "Nothing pending"}
           </button>
           {progress && <button className={button} onClick={() => { stop.current = true; }}>Stop after this transaction</button>}
           <button className={button} disabled={!!progress} onClick={() => chain.refetch()}>Refresh</button>

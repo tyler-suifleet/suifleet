@@ -422,6 +422,21 @@ const credentialsOf = (files) => [...files.keys()].filter((n) => n.endsWith("/cl
     await waitCounts(["Reserved: 1", "Enrolled, naming: 1"]);
     const closingJob = JSON.parse(await page.evaluate((id) => localStorage.getItem(Object.keys(localStorage).find((k) => k.endsWith(id))), closingPolicy));
     assert.deepEqual(closingJob.entries.filter((x) => x.serial === "SN-300").map((x) => [x.alias, x.claim, x.groupId]), [["dup-first", firstClaim, lab.objectId]]);
+
+    stage = "browser: closed policy still binds enrolled devices";
+    await page.getByRole("button", { name: "Run 2 pending transactions" }).waitFor();
+    await page.getByRole("button", { name: "Close policy" }).click();
+    await page.getByText("Not accepting enrollments: closed.").waitFor();
+    const runClosed = page.getByRole("button", { name: "Run 1 pending transaction", exact: true });
+    await runClosed.waitFor();
+    assert.ok(await runClosed.isEnabled(), "bind work was stranded by the closed policy");
+    const callsClosed = await page.evaluate(() => window.enrollment.calls());
+    await runClosed.click();
+    await waitCounts(["Reserved: 1", "Enrolled: 1"]);
+    assert.equal(await page.evaluate(() => window.enrollment.calls()), callsClosed + 1, "a claim registration was attempted under a closed policy");
+    const late = (await sui.fetchDevices(client, op)).find((d) => d.name === "pi-late");
+    assert.equal(late?.serial, "SN-200");
+    await page.getByRole("button", { name: "Nothing pending" }).waitFor();
     const storedLate = await page.evaluate(() => Object.keys(localStorage).map((k) => localStorage.getItem(k)).join("\n"));
     assert.ok(!storedLate.includes(lateCreds[0].seedHex) && !logs.some((l) => l.includes(lateCreds[0].seedHex)), "a claim key reached storage or the console");
 
@@ -440,7 +455,7 @@ const credentialsOf = (files) => [...files.keys()].filter((n) => n.endsWith("/cl
     console.log(JSON.stringify(evidence.transactions, null, 1));
     console.log(`PASS: localnet bulk enrollment: 260 reservations in 2 claim PTBs (resumed), 101 self-enrolled devices bound in 2 PTBs (resumed) in ${evidence.enroll_101_devices_ms} ms of enrollment; `
       + `${evidence.refusals.length} refusals (${evidence.refusals.map((r) => r.label).join("; ")}); foreign owner cap not bound. Browser: CSV/template/conflicts, `
-      + `guided pairing, archive credentials, roster duplicate serials, ${typeof evidence.browser.daemon_enrollment === "string" ? "" : "real daemon --enroll, "}rejected-wallet resume, bind, reload resume, revocation, device gas, address-free listing; no key in storage/console/URL`);
+      + `guided pairing, archive credentials, roster duplicate serials, closed-policy binding, ${typeof evidence.browser.daemon_enrollment === "string" ? "" : "real daemon --enroll, "}rejected-wallet resume, bind, reload resume, revocation, device gas, address-free listing; no key in storage/console/URL`);
   } catch (error) {
     console.error(`FAILED at ${stage}`);
     throw error;

@@ -85,6 +85,7 @@ The dApp's **Enrollment** page puts the claim flow above behind names and serial
 5. **Run pending transactions.** These register the claims and fund each claim's enrollment gas, at most 250 claims per transaction.
 6. **Devices enroll themselves.** At first boot, `suifleet --provision` (or a hardware signer) makes the device's own key, then `suifleet --enroll /path/to/enroll.toml` enrolls it.
 7. **Run pending transactions** again to bind each enrolled device. This writes metadata `suifleet.alias` and `suifleet.serial` and adds the device to its group, at most 100 devices per transaction.
+   - Binding does not need the policy to accept enrollments. Under a closed, expired or exhausted policy, the run skips claim registration and still binds devices that already enrolled.
    - Devices, groups, access and deployment pages then show the alias and serial.
    - Addresses and object IDs appear only under *Technical details*.
 
@@ -224,5 +225,5 @@ pin_file = "/etc/suifleet/pkcs11.pin"        # root-only
   - roles: operator attribution, operator delete, delegate cannot delete, revoked role, out of scope, foreign group, operator-only revoke, empty targets.
 - `make edge-test` runs the pkcs11 feature's tests. A P-256 signature produced through the new encoding verifies with Mysten's independent `UserSignatureVerifier`. Address derivation and high-S normalization are covered too.
 - `make test-manifest` runs `scripts/test_enrollment_frontend.cjs` and `scripts/tests/test_claims.py` (SF-100, offline): rosters, templates, conflicts, credential archives, key-free jobs, chain-derived statuses and chunked plans.
-- `make test-bulk-enrollment-localnet` (SF-100; disposable network-none localnet, headless Chromium, real daemon): bulk chunked registration/binding with resumption, refusals of replayed, revoked, expired, unsponsored and cross-fleet claims, and the real pages end to end. The page run also covers duplicate serials in an imported roster.
+- `make test-bulk-enrollment-localnet` (SF-100; disposable network-none localnet, headless Chromium, real daemon): bulk chunked registration/binding with resumption, refusals of replayed, revoked, expired, unsponsored and cross-fleet claims, and the real pages end to end. The page run also covers duplicate serials in an imported roster and binding under a closed policy.
 - `make test-enrollment-localnet` (real localnet, SoftHSM2 2.6.1, OpenSC): all 6 scenarios PASS. They cover bulk enrollment of zero-SUI devices, refused claim misuse, a delegate's deployment applied and receipted by the real daemon, refusal outside scope and after revocation, and a SoftHSM-backed device enrolling and reporting Applied.
