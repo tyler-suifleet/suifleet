@@ -5,8 +5,8 @@ edition = "2024.beta"
 
 [dependencies]
 sui_edge = { local = ".." }
-# Pinned Walrus Testnet contracts (tag testnet-v1.39.1); see docs/FLEET_BUDGET.md.
-wal = { git = "https://github.com/MystenLabs/walrus.git", subdir = "testnet-contracts/wal", rev = "685377c58a12637acfc027244a7b813eaf6499aa" }
-walrus = { git = "https://github.com/MystenLabs/walrus.git", subdir = "testnet-contracts/walrus", rev = "685377c58a12637acfc027244a7b813eaf6499aa" }
+# Pinned Walrus Testnet contracts (tag testnet-v1.59.0); see docs/FLEET_BUDGET.md.
+wal = { git = "https://github.com/MystenLabs/walrus.git", subdir = "testnet-contracts/wal", rev = "c68b530e0b1e522b4a3896190d883e4312a1cf0e" }
+walrus = { git = "https://github.com/MystenLabs/walrus.git", subdir = "testnet-contracts/walrus", rev = "c68b530e0b1e522b4a3896190d883e4312a1cf0e" }
 
 [environments]

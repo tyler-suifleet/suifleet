@@ -16,7 +16,7 @@
 ///
 /// This lives in its own package so the core `sui_edge` package keeps no
 /// Walrus dependency. It is pinned to the Walrus Testnet contracts at tag
-/// testnet-v1.39.1 (Move.toml). Every mutating call checks `version`, as in
+/// testnet-v1.59.0 (Move.toml). Every mutating call checks `version`, as in
 /// `fleet_budget`, so a later upgrade can retire older package versions.
 ///
 /// Read interface version 1 (SF-092): the getters at the end and the events.

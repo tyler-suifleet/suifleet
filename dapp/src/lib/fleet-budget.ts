@@ -291,10 +291,10 @@ export function budgetAlerts(budget: BudgetView, accounts: AccountView[], nowMs:
 
 // ── Owner-prepaid Walrus storage (fleet_storage package) ─────────────────────
 
-/** Pinned Walrus Testnet objects (MystenLabs/walrus testnet-v1.39.1, setup/client_config_testnet.yaml). */
+/** Pinned Walrus Testnet objects (MystenLabs/walrus testnet-v1.59.0 c68b530e, setup/client_config_testnet.yaml; system version 4). */
 export const PINNED_WALRUS = {
   testnet: {
-    walrusPackage: "0xa998b8719ca1c0a6dc4e24a859bbb39f5477417f71885fbf2967a6510f699144",
+    walrusPackage: "0x7d3b2086808a62bbc44d18c6b1d407973d77dd26946735873092c2f5650b4611",
     walrusOrigin: "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66",
     system: "0x6c2547cbbc38025cf3adac45f63cb0a8d12ecf777cdc75a4971612bf97fdf6af",
     walType: "0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a::wal::WAL",
