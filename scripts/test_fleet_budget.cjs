@@ -29,7 +29,15 @@ const { bcs } = appRequire("@mysten/sui/bcs");
 const receipt = quotes.historical_testnet_transactions.find((t) => t.label === "device receipt").effects.gasEffects.gasSummary;
 assert.equal(costs.MEASURED.receiptNetMist, BigInt(receipt.computationCost + receipt.storageCost - receipt.storageRebate));
 const sf083 = JSON.parse(fs.readFileSync(path.join(root, "docs/validation/sf083-testnet.json"), "utf8"));
-assert.equal(costs.MEASURED.drawNetMist, BigInt(sf083.runs[1].measured.draw_gas.net_mist), "draw cost measured on testnet");
+// The latest finished run that measured a draw; that draw must have succeeded and its net must follow from its effects.
+const drawRun = sf083.runs.filter((run) => run.finished && run.measured?.draw_gas).at(-1);
+assert.ok(drawRun, "a finished testnet run measured a draw");
+const drawGas = drawRun.measured.draw_gas;
+const drawTx = drawRun.transactions.find((t) => t.digest === drawGas.digest);
+assert.equal(drawTx?.status, "success", "the measured draw succeeded");
+assert.equal(BigInt(drawGas.net_mist), BigInt(drawGas.computationCost) + BigInt(drawGas.storageCost) - BigInt(drawGas.storageRebate));
+assert.equal(BigInt(drawTx.gas_mist), BigInt(drawGas.net_mist));
+assert.equal(costs.MEASURED.drawNetMist, BigInt(drawGas.net_mist), "draw cost measured on testnet");
 assert.equal(costs.MEASURED.minComputationMist, BigInt(receipt.computationCost));
 assert.equal(costs.MEASURED.walrus.nShards, quotes.walrus.n_shards);
 assert.equal(costs.MEASURED.walrus.storagePricePerUnit, BigInt(quotes.walrus.storage_price_per_unit_size));
