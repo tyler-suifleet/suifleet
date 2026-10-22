@@ -140,6 +140,13 @@ test-protocol-live:
 test-handover-upgrade-localnet:
 	$(RUN) python3 scripts/test_protocol_localnet.py --handover-upgrade
 
+# SF-083 on a disposable localnet (network none): budget upgrade over existing
+# objects, real on-chain draw refusals, version gate and real daemon draws.
+.PHONY: test-budget-localnet
+test-budget-localnet:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
+	$(RUN) python3 scripts/test_protocol_localnet.py --budget-upgrade
+
 .PHONY: test-catalog-live
 test-catalog-live:
 	$(RUN) python3 scripts/test_catalog_localnet.py

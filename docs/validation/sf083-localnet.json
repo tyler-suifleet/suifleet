@@ -1,0 +1,84 @@
+{
+ "ticket": "SF-083",
+ "kind": "isolated localnet (network none), pinned Sui 1.81.1",
+ "command": "make test-budget-localnet (python3 scripts/test_protocol_localnet.py --budget-upgrade)",
+ "recorded_by": "Claude, claude-opus-5-5",
+ "checks": [
+  "compatible base-to-head upgrade introduces the budget types at head; the registry keeps its base origin",
+  "an existing pre-upgrade device enrolls; its address receives exactly the float",
+  "the device draws within its limits and the draw emits GasDrawn (computation 1000000, net -2817100 MIST)",
+  "on-chain failures for above-float, revoked, paused, suspended, device-withdraw, over-allowance and over-count draws",
+  "after a later upgrade migrates the budget, the previous version's draw fails on chain and the newest succeeds",
+  "the real daemon read its balance, budget and account over gRPC, drew 3 time(s) with checked effects, then journaled: draw limit for this period reached; the period ends at 1792642012948 ms"
+ ],
+ "result": "PASS",
+ "base": "796a09536c370874b0c1cccb93ee8676b0044399",
+ "old_package": "0x1912fd7e9de95dcd3a8468e7b6c0f1c52a503074a8dbd94ae8f7856b7aa0213a",
+ "head_package": "0x524713badff69c8c430b4fe1fe458255a1ad4bd8d9f03f6b63a1addaecae82b0",
+ "next_package": "0x7194bdbf4edab3924aeaccaa44501b3ee266443cca6a81352800984894ab0162",
+ "budget": "0x4ccd812e6e2f5af3694d3ed13b6657b255ab2e909b329a2f4797a5c5baa3f3d5",
+ "draw_net_mist": "-2817100",
+ "digests": {
+  "publish base": "CyTmS2NpxWus95yJ9uRjmiuBqNG5PrVJiyUsMD56XV9u",
+  "register pi": "DTNJFsckCrEWiXt6raRse57D2ZMMuMqfHVp5Yf9u5YRn",
+  "upgrade head": "FqZcJRZ8S7ZPpc1w6Nw1xHRYEzf2WwPLDJxw2SzPD5e",
+  "create budget": "4wes5UR1o3Cpf5NpjpZifGEgY6V2qxqR87cUjpB17iFn",
+  "enroll existing device with float": "DF94sWgUMZYYnmjSkuGyqD29yEMF8xaeutiHFrxe5Cjv",
+  "device draw": "CwXP6Ms5MPRH81D75jgEkrfJd4TohVWD1SvfgMbdtQEp",
+  "revoke device": "3gr7mwxrTjHFiffrLv5TzznmbQtVPY1Mjqnrr3afD7Gm",
+  "reinstate device": "6Tp8ifAmxGUyqzz9azjYbjWjuhTg1kgmjYDbwhnbqjmn",
+  "pause budget": "5jqs8QAuqrGn7YeCJzWr3L4t5UpBtX2aXr9xPw16E2N",
+  "resume budget": "XLNxE8whj6dk9VZ87TH9FMRLUTU3KWQvgaTHzWJDdr5",
+  "suspend device": "4Y7k83KUbdqSQtDSeG3JS3nu8UZPJtiG2QEix7Gw52VG",
+  "resume device": "8Q1Mft1B6TXdEZhuBik11VMnMgAJTpnijL2yFr5UKwx9",
+  "second draw": "8eYTZenHcGMa44kqG3RBTALwRS3YsHhgYiZMdbbRX2kK",
+  "third draw": "JDRjMntSynn15t4JMTq1WxvVtJQ39pxTfwqqiCvnwHRM",
+  "upgrade future": "WnFNXLaQgNCv37QXPHNeyhtV1Gd1RqjKUzj4PrTk9sv",
+  "migrate budget": "59Mu2DVUfRmBhMJhxR8aFqcsGECMdBVFTamL94VuUURb",
+  "owner refill via the newest version": "G1ahteecFxTyGbavvk3fNHFMX61fUQ43sB6QyMjbVGzy",
+  "register pi2": "8UWR2inn9YxUw93aYBbMwf8iUS3SFZvMhEztdULe3iru",
+  "enroll second device": "HGDA82S5AA3AUaeLgt5BP6sppL7rgjjjUBSB5zTajMdD",
+  "draw through the newest version": "3hUuU6qLR4A6TV16nBSBQAhoNMW62K23htWBrmbAMFUW",
+  "register pi3": "HvVAyQg3WBig9fGUi6DjAdR4AqP62qSLgmG6e62RRQaa",
+  "enroll daemon device": "9EedZpxjkeDhDzE6EgcDLsbmQoh4aE6Eg6eTq63Nx98x",
+  "daemon draw": "BAFkn5YZBxUNmGe67cXwMjuPoa8MVMX7i4fsFWkSYLzF"
+ },
+ "failures": {
+  "draw through the base package": {
+   "digest": "Gph9E56vBiuCDUYD3x4mitm4BCrsSDAUA4qh6rYGdB7m",
+   "status": "FunctionNotFound in command 0"
+  },
+  "draw above the float cap": {
+   "digest": "9txQoHCKDfNWHhVXHz2TQEEmVA46AurxurzTNjQjfjWX",
+   "status": "MoveAbort in 1st command, abort code: 8, in '0x524713badff69c8c430b4fe1fe458255a1ad4bd8d9f03f6b63a1addaecae82b0::fleet_budget::draw_gas' (instruction 70)"
+  },
+  "draw after revocation": {
+   "digest": "D9zSvVsVbztZnMvbU28F7EzbgTEMVMxL5py2qcQzUKdH",
+   "status": "MoveAbort in 1st command, abort code: 2, in '0x524713badff69c8c430b4fe1fe458255a1ad4bd8d9f03f6b63a1addaecae82b0::device_cap::assert_active' (instruction 13)"
+  },
+  "draw while paused": {
+   "digest": "EoWEBe4rEkxwE44WUSeFs2b3ZzKDKroAALnii2ePYsFQ",
+   "status": "MoveAbort in 1st command, abort code: 3, in '0x524713badff69c8c430b4fe1fe458255a1ad4bd8d9f03f6b63a1addaecae82b0::fleet_budget::assert_may_draw' (instruction 32)"
+  },
+  "draw while suspended": {
+   "digest": "EPYNyuicXx369uocrTnmfedfLmS3rL4dBqykNivL8vj7",
+   "status": "MoveAbort in 1st command, abort code: 7, in '0x524713badff69c8c430b4fe1fe458255a1ad4bd8d9f03f6b63a1addaecae82b0::fleet_budget::assert_may_draw' (instruction 92)"
+  },
+  "device withdraws with the owner's cap": {
+   "digest": null,
+   "status": "rejected before execution: the owner cap is not the device's object"
+  },
+  "draw above the period allowance": {
+   "digest": "6oMZUrcCS8migurv3FkVP4uNTDWzHpQ7npWS46tae5GG",
+   "status": "MoveAbort in 1st command, abort code: 9, in '0x524713badff69c8c430b4fe1fe458255a1ad4bd8d9f03f6b63a1addaecae82b0::fleet_budget::draw_gas' (instruction 136)"
+  },
+  "fourth draw in the period": {
+   "digest": "2oz7BGvoyAPgJfZCEuiwhgdA9kGGAnuwFXkH1HtxAhqE",
+   "status": "MoveAbort in 1st command, abort code: 10, in '0x524713badff69c8c430b4fe1fe458255a1ad4bd8d9f03f6b63a1addaecae82b0::fleet_budget::draw_gas' (instruction 87)"
+  },
+  "draw through the previous version after migration": {
+   "digest": "ATWqtqi54ZZo8xbmjSup3XJG9za2Rob2RpZqGG7AjgSN",
+   "status": "MoveAbort in 1st command, abort code: 0, in '0x524713badff69c8c430b4fe1fe458255a1ad4bd8d9f03f6b63a1addaecae82b0::fleet_budget::draw_gas' (instruction 18)"
+  }
+ }
+}
