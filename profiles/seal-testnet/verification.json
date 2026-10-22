@@ -1,0 +1,28 @@
+{
+  "checked_at": "2026-10-21T21:45:33.093Z",
+  "network": "testnet",
+  "chain": "4c78adac",
+  "package": "0x81050b5c754c021a1584ee94ec0f472f17324428fa2b579649a956df1ae9b139",
+  "registry": "0x5f99cc8476585dda5f9bba7e5e6516cf29faeeb313d3f20fd2de89566acb855d",
+  "upgrade_cap": "0xe1ee49b7171c4d552b4b712048e2f26e7dbf15a40e8a18c99831b40e330dbf5f",
+  "namespace": "0x81050b5c754c021a1584ee94ec0f472f17324428fa2b579649a956df1ae9b139",
+  "threshold": 2,
+  "key_servers": [
+    "0x73d05d62c18d9374e3ea529e8e0ed6161da1a141a94d3f76ae3fe4e99356db75",
+    "0xf5d14a81a982144ae441cd7d64b09027f116a468bd36e7eca494f750591623c8"
+  ],
+  "checks": [
+    "current frontend schema/client range",
+    "fresh chain identity",
+    "package version and per-type origins",
+    "latest UpgradeCap and expected owner",
+    "registry type and shared version",
+    "Seal key server types and HTTPS proof of possession",
+    "frontend environment matches profile"
+  ],
+  "limits": [
+    "Read-only verification; no encrypted delivery or wallet acceptance",
+    "Allow/deny/revoke delivery remains #32; final provider acceptance remains #159",
+    "Testnet providers have no durability/SLA promise; reverify before use"
+  ]
+}
