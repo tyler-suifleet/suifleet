@@ -230,4 +230,35 @@ module fleet_data::fleet_data_tests {
         destroy(system); ts::end(s);
     }
 
+    #[test]
+    fun owner_account_replacement_preserves_health_cadence_and_history() {
+        let (mut s, system) = setup();
+        health(&mut s, 1, 1);
+        ts::next_tx(&mut s, OWNER);
+        let mut budget = ts::take_shared<FleetBudget>(&s);
+        let cap = ts::take_from_address<BudgetOwnerCap>(&s, OWNER);
+        let mut old = ts::take_shared<GasAccount>(&s);
+        fleet_budget::remove_device(&mut budget, &cap, &mut old);
+        let registry = ts::take_shared<DeviceRegistry>(&s);
+        let device_cap = ts::take_from_address<DeviceOwnerCap>(&s, OWNER);
+        let clock = clock_at(&mut s, 2);
+        fleet_budget::enroll_device(&mut budget, &cap, &registry, &device_cap, 0, 0, &clock, ts::ctx(&mut s));
+        clock::destroy_for_testing(clock);
+        ts::return_shared(budget); ts::return_shared(old); ts::return_shared(registry);
+        ts::return_to_address(OWNER, cap); ts::return_to_address(OWNER, device_cap);
+        ts::next_tx(&mut s, OWNER);
+        let fleet = ts::take_shared<FleetData>(&s);
+        let mut writer = ts::take_shared<DeviceData>(&s);
+        let budget = ts::take_shared<FleetBudget>(&s);
+        let cap = ts::take_from_address<BudgetOwnerCap>(&s, OWNER);
+        let identity_cap = ts::take_from_address<DeviceCap>(&s, DEVICE);
+        let account_id = fleet_budget::account_id(&budget, device_cap::device_id(&identity_cap)).destroy_some();
+        let account = ts::take_shared_by_id<GasAccount>(&s, account_id);
+        fleet_data::replace_account(&fleet, &mut writer, &budget, &cap, &account);
+        assert!(fleet_data::health_seq(&writer) == 1);
+        assert!(fleet_data::anchor_count(&writer) == 0);
+        ts::return_shared(fleet); ts::return_shared(writer); ts::return_shared(budget); ts::return_shared(account);
+        ts::return_to_address(OWNER, cap); ts::return_to_address(DEVICE, identity_cap); destroy(system); ts::end(s);
+    }
+
 }

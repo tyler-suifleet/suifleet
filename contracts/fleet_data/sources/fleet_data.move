@@ -107,6 +107,19 @@ module fleet_data::fleet_data {
         transfer::share_object(writer);
     }
 
+    /// Explicit owner migration after SF-083 replaces a GasAccount. Preserve
+    /// the complete history, sequences and cadence; devices cannot reset them.
+    public fun replace_account(fleet: &FleetData, writer: &mut DeviceData,
+        budget: &FleetBudget, cap: &BudgetOwnerCap, account: &GasAccount) {
+        owner(fleet, budget, cap);
+        assert!(writer.version == VERSION && writer.fleet_id == object::id(fleet), EBinding);
+        assert!(*df::borrow<DeviceKey, ID>(&fleet.id, DeviceKey { device_id: writer.device_id }) == object::id(writer), EBinding);
+        assert!(fleet_budget::account_budget_id(account) == fleet.budget_id
+            && fleet_budget::account_device_id(account) == writer.device_id, EBinding);
+        assert!(fleet_budget::account_id(budget, writer.device_id) == option::some(object::id(account)), EBinding);
+        writer.account_id = object::id(account);
+    }
+
     public fun configure(fleet: &mut FleetData, budget: &FleetBudget,
         cap: &BudgetOwnerCap, health_interval_ms: u64, batch_interval_ms: u64,
         emergency_interval_ms: u64) {
