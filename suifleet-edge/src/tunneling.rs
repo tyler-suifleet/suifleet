@@ -454,20 +454,27 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("sf063-unit-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let script = dir.join("proxy");
-        std::fs::write(&script, "#!/bin/sh\nexec /bin/sleep 30\n").unwrap();
+        std::fs::write(&script, "#!/bin/sh\nexec /bin/sleep 3600\n").unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
         let mut cfg = settings();
         cfg.proxy = script;
+        // Capacity/replay assertions must not race a one-second CI scheduling delay.
+        // Exercise expiry explicitly below while still reaping a real child process.
+        cfg.tunnel_timeout_seconds = 3600;
         let mut m = Manager::new(cfg);
         let body = |token| {
             serde_json::to_vec(&json!({"clientAccessToken":token,"clientMode":"destination","region":"us-east-1","services":["SSH"]})).unwrap()
         };
         let topic = m.settings.topic();
+        let before = Instant::now();
         m.notify(&topic, false, &body("one")).unwrap();
+        let after = Instant::now();
+        let timeout = Duration::from_secs(m.settings.tunnel_timeout_seconds);
+        assert!((before + timeout..=after + timeout).contains(&m.runs[0].deadline));
         let pid = m.runs[0].child.id();
         assert!(m.notify(&topic, false, &body("one")).is_err());
         assert!(m.notify(&topic, false, &body("two")).is_err());
-        tokio::time::sleep(Duration::from_millis(1100)).await;
+        m.runs[0].deadline = Instant::now();
         m.reap();
         assert!(m.runs.is_empty());
         assert_eq!(unsafe { libc::kill(pid as i32, 0) }, -1);
@@ -478,8 +485,15 @@ mod tests {
         assert_eq!(unsafe { libc::kill(pid as i32, 0) }, -1);
         m.settings.proxy = "/bin/false".into();
         m.notify(&topic, false, &body("four")).unwrap();
-        tokio::time::sleep(Duration::from_millis(30)).await;
-        m.reap();
+        let exit_deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            m.reap();
+            if m.runs.is_empty() {
+                break;
+            }
+            assert!(Instant::now() < exit_deadline, "failed proxy did not exit");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
         assert!(m.runs.is_empty());
         assert!(m.notify(&topic, false, &body("four")).is_err());
         m.settings.proxy = "/does-not-exist".into();
