@@ -46,4 +46,3 @@ class ScopedInstall(unittest.TestCase):
                                  capture_output=True, text=True, stdin=subprocess.DEVNULL)
             self.assertEqual(run.returncode, 3, run.stderr)
             self.assertEqual({s['state'] for s in json.loads(run.stdout)['sources'].values()}, {'unavailable'})
-
