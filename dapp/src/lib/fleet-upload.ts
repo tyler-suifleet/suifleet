@@ -66,7 +66,7 @@ const FleetUploadRegisteredBcs = bcs.struct("FleetUploadRegistered", { storage_i
 
 /** The registration's FleetUploadRegistered event for this storage and blob, from the confirmed effects. */
 export function registeredBlob(events: ExecutedEvent[], target: FleetStorageTarget, blobId: bigint) {
-  const type = normalizeStructTag(`${target.config.packageId}::fleet_storage::FleetUploadRegistered`);
+  const type = normalizeStructTag(`${target.config.storageOrigin ?? target.config.packageId}::fleet_storage::FleetUploadRegistered`);
   for (const event of events) {
     if (normalizeStructTag(event.eventType) !== type) continue;
     const value = FleetUploadRegisteredBcs.parse(event.bcs);

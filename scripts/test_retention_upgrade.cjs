@@ -3,7 +3,7 @@
 const fs = require('node:fs/promises'), path = require('node:path'), os = require('node:os');
 const assert = require('node:assert/strict');
 const { execFileSync } = require('node:child_process');
-const { appRequire } = require('./frontend_test_utils.cjs');
+const { appRequire, loader } = require('./frontend_test_utils.cjs');
 const { SuiGrpcClient } = appRequire('@mysten/sui/grpc');
 const { Transaction } = appRequire('@mysten/sui/transactions');
 const { Ed25519Keypair } = appRequire('@mysten/sui/keypairs/ed25519');
@@ -80,7 +80,7 @@ public fun retention_fixture(ctx: &mut TxContext) {
     }
     const receipts = [];
     async function execute(label, tx) {
-      const result = await client.signAndExecuteTransaction({ transaction: tx, signer, include: { effects: true, objectTypes: true } });
+      const result = await client.signAndExecuteTransaction({ transaction: tx, signer, include: { effects: true, objectTypes: true, events: true } });
       assert.ok(result.Transaction?.status.success, JSON.stringify(result.FailedTransaction?.status));
       const r = result.Transaction;
       await client.waitForTransaction({ digest: r.digest });
@@ -122,7 +122,7 @@ public fun retention_fixture(ctx: &mut TxContext) {
     const walCoin = created(walPub.result, '::coin::Coin<' + walPub.pkg + '::wal::WAL>');
     const [walDeposit] = tx.splitCoins(tx.object(walCoin), [tx.pure.u64(1000000)]);
     tx.moveCall({ target: `${base.pkg}::fleet_storage::deposit_wal`, arguments: [tx.object(oldStorage), tx.object(budget), tx.object(ownerCap), walDeposit] });
-    tx.moveCall({ target: `${base.pkg}::fleet_storage::buy_storage`, arguments: [tx.object(oldStorage), tx.object(budget), tx.object(ownerCap), tx.object(system), tx.pure.u64(1000000), tx.pure.u32(5)] });
+    tx.moveCall({ target: `${base.pkg}::fleet_storage::buy_storage`, arguments: [tx.object(oldStorage), tx.object(budget), tx.object(ownerCap), tx.object(system), tx.pure.u64(10000000), tx.pure.u32(5)] });
     const [blobId] = tx.moveCall({ target: `${walrusPub.pkg}::blob::derive_blob_id`, arguments: [tx.pure.u256(123), tx.pure.u8(1), tx.pure.u64(10)] });
     tx.moveCall({ target: `${base.pkg}::fleet_storage::register_fleet_blob`, arguments: [tx.object(oldStorage), tx.object(budget), tx.object(ownerCap), tx.object(system), blobId, tx.pure.u256(123), tx.pure.u64(10), tx.pure.u8(1), tx.object('0x6')] });
     await execute('populate v1 pool and wrapped blob with real registration', tx);
@@ -143,6 +143,17 @@ public fun retention_fixture(ctx: &mut TxContext) {
     assert.deepEqual(content.slice(40), before.slice(40), 'pool, WAL, counters and budget binding survive migration');
     const fieldsAfter = await client.listDynamicFields({ parentId: oldStorage, include: { value: true } });
     assert.deepEqual(fieldsAfter.dynamicFields, fieldsBefore.dynamicFields, 'wrapped blob and record origins/content survive');
+    // Register through v2 on the existing v1-origin object and feed actual
+    // confirmed events into the same parser used by browser certification.
+    tx = new Transaction();
+    const [newBlobId] = tx.moveCall({ target: `${walrusPub.pkg}::blob::derive_blob_id`, arguments: [tx.pure.u256(124), tx.pure.u8(1), tx.pure.u64(11)] });
+    tx.moveCall({ target: `${head}::fleet_storage::register_fleet_blob`, arguments: [tx.object(oldStorage), tx.object(budget), tx.object(ownerCap), tx.object(system), newBlobId, tx.pure.u256(124), tx.pure.u64(11), tx.pure.u8(1), tx.object('0x6')] });
+    const registered = await execute('v2 registration on migrated pool with v1-origin event', tx);
+    const emitted = registered.events.find((event) => event.eventType.endsWith('::fleet_storage::FleetUploadRegistered'));
+    assert.ok(emitted.eventType.startsWith(base.pkg + '::'));
+    const upload = loader()('lib/fleet-upload.ts');
+    const info = upload.registeredBlob(registered.events, { config: { packageId: head, storageOrigin: base.pkg }, storageId: oldStorage }, BigInt(bcs.u256().parse(emitted.bcs.slice(64, 96))));
+    assert.equal(info.endEpoch, 5);
     tx = new Transaction(); tx.moveCall({ target: `${head}::fleet_storage::configure_retention`, arguments: [tx.object(oldStorage), tx.object(budget), tx.object(ownerCap), tx.pure.address(signer.toSuiAddress()), tx.pure.u32(2), tx.pure.u64(100), tx.pure.u64(10), tx.pure.u64(1)] });
     await execute('configure on existing object', tx);
     // Resolve explicit refs to force an on-chain failure rather than dry-run refusal.

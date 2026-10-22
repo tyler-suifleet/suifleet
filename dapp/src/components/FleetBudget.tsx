@@ -142,7 +142,7 @@ function useSubmit() {
       const result = await mutation.mutateAsync({ transaction: tx });
       setMessage(`Confirmed ${result.digest}.`);
       await Promise.all([cache.invalidateQueries({ queryKey: ["fleet-budgets"] }), cache.invalidateQueries({ queryKey: ["fleet-budget-accounts"] }),
-        cache.invalidateQueries({ queryKey: ["first-run-account"] }), cache.invalidateQueries({ queryKey: ["fleet-storage"] })]);
+        cache.invalidateQueries({ queryKey: ["retention"] }), cache.invalidateQueries({ queryKey: ["first-run-account"] }), cache.invalidateQueries({ queryKey: ["fleet-storage"] })]);
     } catch (cause) {
       setError(`${cause instanceof Error ? cause.message : "Wallet request failed"}. Nothing is credited unless the transaction confirms; if it may have reached the network, refresh before retrying.`);
     }
