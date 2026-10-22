@@ -111,6 +111,11 @@ class CIRepairs(unittest.TestCase):
             self.assertEqual(c.failed_checks({'statusCheckRollup':[check, newest]}), [])
             self.assertEqual(c.failed_checks({'statusCheckRollup':[newest, check]}), [])
 
+        for started in (None, '0001-01-01T00:00:00Z'):
+            queued = {**failure(2), 'status':'QUEUED', 'conclusion':None, 'startedAt':started}
+            self.assertEqual(c.failed_checks({'statusCheckRollup':[check, queued]}), [])
+            self.assertEqual(c.failed_checks({'statusCheckRollup':[queued, check]}), [])
+
     def test_missing_owner_draft_fork_active_expired_and_unpublished_never_launch(self):
         with tempfile.TemporaryDirectory() as d:
             engine, _, pr, owner = self.setup(d)

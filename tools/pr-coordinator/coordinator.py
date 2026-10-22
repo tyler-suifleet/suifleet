@@ -164,20 +164,27 @@ def failed_checks(pr):
     but cannot safely identify a source repair. Rollups can contain old reruns:
     select the newest observation per workflow/name before considering failures.
     """
-    latest = {}
+    grouped = {}
     for check in pr['statusCheckRollup']:
         if check.get('__typename') != 'CheckRun' or not check.get('name'):
             continue
         key = (check.get('workflowName', ''), check['name'])
-        stamp = (check.get('startedAt') or '', check.get('completedAt') or '')
-        previous = latest.get(key)
-        if previous is None or stamp > previous[0]:
-            latest[key] = (stamp, check)
-        elif stamp == previous[0] and check != previous[1]:
-            # Ambiguous ordering is unavailable evidence, never a reason to restart.
-            latest[key] = (stamp, {})
+        grouped.setdefault(key, []).append(check)
+    latest = []
+    for checks in grouped.values():
+        # A newly queued rerun can have no start time. Its order relative to a
+        # completed failure is unknown; never repair the potentially stale run.
+        if len(checks) > 1 and any(not row.get('startedAt')
+                                   or row['startedAt'].startswith('0001-') for row in checks):
+            continue
+        stamp = lambda row: (row.get('startedAt') or '', row.get('completedAt') or '')
+        newest = max(map(stamp, checks))
+        candidates = [row for row in checks if stamp(row) == newest]
+        if any(row != candidates[0] for row in candidates):
+            continue  # Ambiguous rerun ordering is unavailable evidence.
+        latest.append(candidates[0])
     failures = []
-    for _, check in latest.values():
+    for check in latest:
         if (check.get('status') == 'COMPLETED'
                 and check.get('conclusion') in ('FAILURE', 'TIMED_OUT')
                 and check.get('detailsUrl')):
