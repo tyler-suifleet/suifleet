@@ -32,7 +32,8 @@ def run(args):
     assert os.environ.get('SUIFLEET_TESTNET_LOCK_TOKEN'), 'machine mutation lock required'
     os.umask(0o077)
     live = Live(args.wallet, 'testnet', args.max_spend_mist, build_sui=args.build_sui, network_sui=args.network_sui)
-    live.preflight(auto_fund=False)
+    # At most one faucet request, only when the balance is below the ceiling.
+    live.preflight(auto_fund=args.auto_fund)
     data, packages = FLEET['fleet_data'], FLEET['packages']
     base, cap, storage_package = packages['data']['package'], packages['data']['cap'], packages['storage']
     state = Path(args.cache)
@@ -124,6 +125,7 @@ if __name__ == '__main__':
     parser.add_argument('--wallet', required=True)
     parser.add_argument('--cache', required=True)
     parser.add_argument('--evidence', required=True)
+    parser.add_argument('--auto-fund', action='store_true', help='One faucet request if the balance is below the ceiling')
     parser.add_argument('--reclaim', action='store_true', help='Also prune archives whose storage has ended')
     parser.add_argument('--max-spend-mist', type=int, default=150_000_000)
     parser.add_argument('--upgrade-budget', type=int, default=120_000_000)
