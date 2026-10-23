@@ -114,6 +114,37 @@ def main():
         print("PASS: current Move authorization/upgrade regression tests")
         print(next((line for line in output.splitlines() if "Test result:" in line), output[-300:]))
 
+        # The Walrus-dependent package is a separate compilation/security unit.
+        storage = package / "fleet_storage"
+        storage_build = [arg if arg != str(package) else str(storage) for arg in build]
+        run(storage_build, env)
+        print("PASS: separate fleet_storage pinned compiler and strict Sui linters")
+        storage_unsuppressed = unsuppressed / "fleet_storage"
+        for source in (storage_unsuppressed / "sources").glob("*.move"):
+            source.write_text(re.sub(r"^[ \t]*#\[allow\([^\n]+\)\]\n", "", source.read_text(), flags=re.M))
+        check_unsuppressed([arg if arg != str(storage) else str(storage_unsuppressed) for arg in storage_build],
+                           storage_unsuppressed, env, ["fleet_storage.move::execute_renewal:ESL06002"])
+        print("PASS: fleet_storage unsuppressed baseline (authenticated executor reward)")
+        output = run(["sui", "move", "test", "--path", str(storage)], env)
+        print("PASS: separate fleet_storage authorization/quota/retention tests")
+        print(next((line for line in output.splitlines() if "Test result:" in line), output[-300:]))
+
+        storage_source = storage / "sources/fleet_storage.move"
+        original = storage_source.read_text()
+        start = original.index("    fun assert_owner(")
+        end = original.index("\n    }", start)
+        checked = original[start:end]
+        statement = "fleet_budget::assert_owner(budget, cap);"
+        if checked.count(statement) != 1:
+            raise RuntimeError("Storage owner mutation anchor drift")
+        storage_source.write_text(original[:start] + checked.replace(statement, "") + original[end:])
+        try:
+            run(["sui", "move", "test", "--path", str(storage), "a_device_cannot_release_fleet_blobs"],
+                env, failure="Test did not error as expected")
+            print("PASS: fleet_storage rejects owner-authority removal by genuine failing test")
+        finally:
+            storage_source.write_text(original)
+
         # These mutate actual implementation bodies and run the existing tests.
         # A compiler failure is not accepted as a detected authority violation.
         mutations = [
