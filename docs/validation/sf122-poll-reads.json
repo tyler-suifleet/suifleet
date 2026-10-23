@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "ticket": "SF-122",
+  "date_utc": "2026-10-23",
+  "implementation_agent": {
+    "family": "Codex",
+    "actual_model": "gpt-6.1-sol",
+    "branch": "work/suifleet/sf-122-70feba54"
+  },
+  "baseline": {
+    "revision": "e19970e045c42aad2452d5a67294fe1b770133f9",
+    "patch": "sf122-baseline-metrics.patch",
+    "patch_sha256": "b536d75ee8637a835aa30ea6a0f831ef4ba8ea963c9213fa1a3be758ce529bbd",
+    "scope": "Counters/logging only; no change to pre-cache daemon behavior. Built with Rust 1.94.0 and locked dependencies."
+  },
+  "metric_scope": {
+    "requests": "Read RPC attempts; one streamed ListEvents call counts once. Per-poll daemon counters include concurrent fleet producers.",
+    "bytes": "Encoded protobuf response payloads; excludes request bytes, headers, transport framing/compression and top-level transport error-status payloads. Per-item batch errors are included.",
+    "measurement": "Healthy idle polls after initial validation/cursor migration; no pending writes. Slow scans, due work and failures cost additional reads.",
+    "capacity_limit": "No 1,000-device load test, production provider capacity, public endpoint allowance or monetary bill is established."
+  },
+  "measurements": [
+    {
+      "fixture": "OTA simulator; known group; no fleet producer or budget",
+      "baseline_command": "python3 scripts/test_ota.py --baseline-profile --binary BASELINE_BINARY",
+      "baseline_polls": [
+        {
+          "requests": 17,
+          "response_bytes": 5348
+        },
+        {
+          "requests": 17,
+          "response_bytes": 5348
+        },
+        {
+          "requests": 17,
+          "response_bytes": 5348
+        }
+      ],
+      "head_command": "python3 scripts/test_ota.py --poll-reads",
+      "head_polls": 3,
+      "head_total_requests": 3,
+      "head_request_type": "BatchGetObjects",
+      "head_total_response_bytes": 645,
+      "assertions": [
+        "No successful idle poll performs validation/event reads",
+        "Revocation, rotation, stale UpgradeCap, simulated chain reset and missing DeviceCap force fail-closed revalidation within the next poll"
+      ]
+    },
+    {
+      "fixture": "Fleet simulator; health and archives enabled, not due",
+      "command": "python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim --idle-reads",
+      "head_polls": 3,
+      "head_total_requests": 3,
+      "head_request_type": "BatchGetObjects",
+      "head_total_response_bytes": 861,
+      "assertions": [
+        "No health/archive validation reads while asleep",
+        "A watched core-package upgrade blocks due background writes even if the cap remains valid"
+      ]
+    },
+    {
+      "fixture": "Actual disposable localnet; metrics-only baseline then current daemon on the same fresh fixture",
+      "command": "python3 scripts/test_daemon_localnet.py --poll-cache-only --cache-reset-node-pid OWNED_DISPOSABLE_NODE_PID --baseline-binary BASELINE_BINARY",
+      "network": "Docker --network none; private writable Move-cache copy; Sui 1.81.1 compiler/node; no host ports/wallets",
+      "baseline_polls": [
+        {
+          "requests": 19,
+          "response_bytes": 49378
+        },
+        {
+          "requests": 19,
+          "response_bytes": 49378
+        },
+        {
+          "requests": 19,
+          "response_bytes": 49378
+        }
+      ],
+      "head_polls": [
+        {
+          "requests": 1,
+          "response_bytes": 683
+        },
+        {
+          "requests": 1,
+          "response_bytes": 683
+        },
+        {
+          "requests": 1,
+          "response_bytes": 683
+        }
+      ],
+      "assertions": [
+        "Warm cache detects actual on-chain revocation and rotation",
+        "Compatible package upgrade invalidates stale manifest before more apply",
+        "Reloaded upgraded manifest warms successfully",
+        "Terminating/replacing the owned node with fresh genesis invalidates the warm cache and stops apply"
+      ]
+    }
+  ],
+  "other_local_evidence": [
+    {
+      "command": "cargo +1.94.0 test --locked --manifest-path suifleet-edge/Cargo.toml",
+      "result": "395 passed, 0 failed, 4 existing engine-dependent tests ignored on completed run; exact-head CI is separately recorded on the PR"
+    },
+    {
+      "command": "python3 scripts/test_daemon_localnet.py",
+      "result": "Actual localnet direct/group/failure receipts, offline catch-up, same-transaction and same-checkpoint legacy cursor boundaries, revocation/reinstatement passed in the full harness"
+    },
+    {
+      "command": "python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim",
+      "result": "Signed health and encrypted logs/diagnostics/shadows, real SDK threshold decryption/browser verification, cadence/restart/outage/authority regressions passed"
+    }
+  ],
+  "ci_and_testnet": "Normal exact-head ordinary CI and bounded automatic testnet/package-upgrade are required before Review; their remote run/effects/spend evidence belongs on the implementation PR. This local performance receipt does not claim a public-network run.",
+  "deferred_acceptance": {
+    "issues": [
+      "https://github.com/tyler-suifleet/suifleet/issues/32",
+      "https://github.com/tyler-suifleet/suifleet/issues/159"
+    ],
+    "unrun": [
+      "Physical target programming/boot/power-loss",
+      "Actual Mainnet writes/end-to-end acceptance",
+      "Production-provider/account/credential and manual real-wallet acceptance"
+    ]
+  }
+}
