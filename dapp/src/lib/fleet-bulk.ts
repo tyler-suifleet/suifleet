@@ -70,7 +70,8 @@ export async function readAnchors(client: SuiGrpcClient, config: FleetDataConfig
 }
 
 /** Also used after fetching: the anchor's signer is historical chain authority,
- * so key rotation does not erase prior history. Current revocation blocks reads
+ * so signer rotation preserves signature verification. Seal key-epoch rotation
+ * denies old-epoch decryption while retaining anchors. Current revocation blocks reads
  * here; actual confidentiality remains the Move owner/support policy. */
 export async function verifyArchive(plaintext: Uint8Array, config: FleetDataConfig, deviceId: string, anchor: Anchor): Promise<Archive> {
   if (plaintext.length > MAX_ARCHIVE_BYTES) throw Error('Archive exceeds size limit');

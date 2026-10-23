@@ -124,7 +124,12 @@ quotes, not a production invoice, fiat price or paid-storage receipt.
 The serverless estimator defaults to 720 health summaries and 30 periodic batches
 per device per 30 days. Measured first health costs 7,255,298 MIST, recurring health
 up to 4,459,123 MIST, and a complete periodic archive (registration, certification,
-anchor) up to 27,075,739 MIST with protected retention. These are included separately from Walrus fees. Match the
+anchor) was observed at 27,075,739 MIST with protected retention in the small fixture.
+This is not an upper bound: registration scans all protected blobs and gas grows
+linearly with retained history. There is no measured fleet-scale maximum; protocol
+gas/object limits may stop admission before the 1,024-record ceiling. The estimator
+uses this fixture observation separately from Walrus fees, and projects capacity;
+headroom does not make an over-capacity plan feasible. Match the
 configured cadence and add diagnostic/crash allowance and headroom. See the
 [sender effects](validation/sf082-device-effects.json). SF-083 quotas must
 cover **encoded** bytes, uploads and write fees. Retention is the prepaid pool's
@@ -154,6 +159,36 @@ record before and after decryption. Executor reward/gas reserves are additional
 to the device transaction estimates; select the same finite horizon in the WAL
 estimate and the retention policy. No background renewal worker is implied by
 opening the dApp; see [retention operations](RETENTION_RENEWAL.md).
+
+### Fleet-wide capacity and owner maintenance
+
+Protected retention has a hard **1,024 protected blob** ceiling across this entire
+storage object, including device archives and owner releases/recipes/sites. Renewal
+does not remove entries. Only owner `release_blob` removes a protected entry; no
+automatic expiry pruning or rolling per-device window exists. With no other blobs,
+10 devices uploading daily fill it in 102.4 days (1,020 blobs after day 102);
+monthly planning at 30 days gives 300 slots/month. Diagnostics/crashes and owner
+uploads shorten that horizon. At capacity the next registration aborts with
+`EOverQuota`; device gas can still be charged for failed transactions. This finite
+maintenance design is unsuitable for unattended growing fleets without owner
+retirement. It is not an indefinite history service.
+
+Every protected registration scans all indexed blob objects for liveness: costs
+rise with retained history, and chain gas/object limits can fail earlier. The
+27,075,739 MIST fixture measurement cannot price that growth or guarantee a month's
+budget. The estimator displays planned archives, remaining slots and days to the
+ceiling from an entered existing count; owner uploads and emergency traffic must
+be included separately. Reconcile that input against the live protected panel and
+simulate the actual transaction against current state before committing funds.
+
+`DeviceRetention.target` is one **absolute Walrus epoch**, not a rolling lifetime.
+New blobs share it; applying their prepaid resources brings them to that same
+exclusive expiry. If any protected blob expires, all new registrations abort with
+`EInvalidEpochs` until owner maintenance removes expired entries. Changing the
+new-archive target does not renew existing blobs. Before expiry/capacity, follow
+the [owner maintenance runbook](RETENTION_RENEWAL.md#archive-capacity-and-expiry-maintenance).
+After release, the old archive is unavailable in the browser even though permanent
+anchor metadata remains. Devices cannot release their own history.
 
 ## Direct browser health reads
 
@@ -195,9 +230,9 @@ purchase bound; owner extensions update the live SF-083 record. Released or
 shortened records are unavailable even if the anchor has not expired. It verifies SHA-256 of ciphertext before
 requesting keys, requires the fleet-data original Seal namespace, fleet ID,
 key epoch and exact AAD, and verifies the personal-message signature against the
-signer recorded by the authorized anchor transaction. Key rotation therefore
-does not discard authenticated history, while current device revocation refuses
-reads. The Move owner/support policy remains the confidentiality boundary.
+signer recorded by the authorized anchor transaction. Signer rotation preserves verification of anchored signatures. Seal key-epoch
+rotation retains anchor metadata but denies old-epoch decryption, including owner
+reads. Current device revocation also refuses reads. The Move owner/support policy remains the confidentiality boundary.
 Streaming responses have a 4 MiB limit and a 60-second deadline; archives contain
 at most 4096 records, with SF-020 line/source bounds. Returned plaintext buffers
 are wiped after parsing. This does not erase parsed JavaScript strings.

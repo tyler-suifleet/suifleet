@@ -14,7 +14,7 @@ import {
   buildSetDeviceSuspendedTx, buildSetPausedTx, buildSwapAndDepositWalTx, buildWithdrawTx, buildWithdrawWalTx, defaultReserve, fetchAccount,
   minWalOut, periodUsage, planRefill, readExchange, storageAlerts, storageConfig, swapRoute, type AccountView, type StorageConfig,
 } from "@/lib/fleet-budget";
-import { MEASURED, encodedBlobLength, estimate, formatToken, parseToken, runwayDays, type Estimate, type EstimateInput } from "@/lib/network-costs";
+import { MEASURED, PROTECTED_BLOB_LIMIT, encodedBlobLength, estimate, formatToken, parseToken, runwayDays, type Estimate, type EstimateInput } from "@/lib/network-costs";
 import {
   FEE_NOTES, checkoutUrl, clearPurchase, loadPurchase, onrampProvider, purchaseStatus, savePurchase, type OnrampAsset, type PendingPurchase,
 } from "@/lib/onramp";
@@ -51,6 +51,7 @@ export function EstimatePanel({ onEstimate }: { onEstimate?: (estimate: Estimate
   return <div className="space-y-3 text-sm">
     <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
       <NumberField label="Devices" value={input.devices} onChange={set("devices")} />
+      <NumberField label="Existing protected blobs (all fleet uses)" value={input.existingProtectedBlobs ?? 0} onChange={set("existingProtectedBlobs")} />
       <NumberField label="Months" value={input.months} onChange={set("months")} />
       <NumberField label="Receipts per device per month" value={input.receiptsPerDeviceMonth} onChange={set("receiptsPerDeviceMonth")} />
       <NumberField label="Other device transactions per month" value={input.anchorsPerDeviceMonth} onChange={set("anchorsPerDeviceMonth")} />
@@ -61,7 +62,8 @@ export function EstimatePanel({ onEstimate }: { onEstimate?: (estimate: Estimate
       <NumberField label="Device data stored per month (MiB)" value={input.dataBytesPerDeviceMonth / 1024 / 1024} step={0.1} onChange={set("dataBytesPerDeviceMonth")} />
       <NumberField label={`Storage epochs (~${epochDays} day(s) each)`} value={input.storageEpochs} onChange={set("storageEpochs")} />
     </div>
-    {input.serverlessData && <p>Defaults assume hourly health and daily archives; match these counts to your configured cadence. Includes observed first-use and recurring health gas plus registration, certification and anchoring for each archive. Cadence and payload growth affect fees; include diagnostic/crash headroom. These Testnet measurements are estimates.</p>}
+    {input.serverlessData && <p>Defaults assume hourly health and daily archives; match these counts to your configured cadence. Includes observed first-use and recurring health gas plus registration, certification and anchoring for each archive. Cadence and payload growth affect fees; include diagnostic/crash headroom. These Testnet measurements are fixture observations, not a gas ceiling. Protected registration scans every retained blob; gas grows with history and protocol object/gas limits may stop writes before the index fills. No measured maximum at fleet scale is available.</p>}
+    {result.estimate?.protectedCapacity && <p role="status">If protected retention is enabled: {result.estimate.protectedCapacity.planned} planned archives; {result.estimate.protectedCapacity.remaining} of {PROTECTED_BLOB_LIMIT} fleet-wide slots remain from the entered count. {result.estimate.protectedCapacity.daysToCapacity === null ? "No archive uploads are planned." : `At this rate the index fills in ${result.estimate.protectedCapacity.daysToCapacity.toFixed(1)} days without owner releases.`} Additional releases/diagnostics/crashes consume more slots. {result.estimate.protectedCapacity.exceedsCapacity ? "Planned archives exceed capacity: this deposit cannot make that retention plan feasible." : "Capacity does not guarantee admission."} All new device archives share one absolute target epoch; any expired protected blob halts new registrations until owner maintenance. Reconcile the live retention panel before funding.</p>}
     {result.error && <p role="alert">{result.error}</p>}
     {result.estimate && <table className="w-full text-xs border">
       <tbody>
@@ -372,6 +374,7 @@ function RetentionPanel({ config, storage, version, budget, cap, epoch, schedule
   const policy = view.data?.policy, blobs = view.data?.blobs ?? [];
   return <fieldset disabled={pending} className="border rounded p-2 space-y-2">
     <legend>Protected retention</legend>
+    <p role="status">{view.isSuccess ? `${blobs.filter((item) => item.policy).length}/${PROTECTED_BLOB_LIMIT} protected slots used across the entire fleet.` : "Protected slot usage unavailable; do not assume empty storage."} Only owner release frees slots; renewal does not. Every registration scans retained blobs, so gas grows with history and chain limits can halt admission earlier. New archives share one absolute target epoch. Any expired protected blob blocks all new registrations. Apply prepaid renewals before expiry or deliberately release obsolete references with verified backups; changing the new-archive target does not renew old blobs.</p>
     <p>Renewal executor rewards and gas use these separate protected reserves. They are additional to device health/archive transaction estimates; match the estimate storage horizon to the finite target.</p>
     {version < BigInt(2) ? <button type="button" onClick={() => void submit(() => buildMigrateRetentionTx(config, storage, budget, cap))}>Migrate storage to retention v2 (retires old mutation calls)</button> : <>
       {retentionFacts(policy, blobs, epoch).map((fact) => <p key={fact} role="status">{fact}</p>)}

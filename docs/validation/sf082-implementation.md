@@ -75,3 +75,38 @@ Recovery validation (actual model `gpt-6.1-sol`, same reserved session):
   completed upgrade. Tests reject foreign package, version, cap owner and registry
   ownership without mutations; both version-1 and version-2 checkpoints pass.
   All 74 offline testnet/toolchain tests passed.
+
+## PR #233 protected-retention feedback repair
+
+Reviewer finding 1 is addressed using its explicit-limits option (b), not a
+scaling redesign. The estimator now projects remaining fleet-wide protected
+slots, planned archives and average days to capacity from the existing count.
+It warns that funding/headroom cannot make an over-capacity plan feasible. The
+live retention panel reports protected usage and the shared expiry halt. Both
+runbooks document linear registration gas, potentially earlier protocol limits,
+owner retirement, finite absolute targets and expiry recovery. The fixture's
+27,075,739 MIST is an observation, not a worst-case gas bound. No on-chain
+behavior/layout/API changed; no rolling retention or automated pruning is claimed.
+Signer versus Seal key-epoch rotation wording is corrected. The nonblocking 8 MiB
+signer request suggestion was considered; no transport change is included.
+
+Scoped checks on the repaired tree:
+
+- `node scripts/test_fleet_budget.cjs`: passed, including ten devices/daily over
+  four months, exact fit, exhaustion, emergency uploads and deposit independence.
+- `node scripts/test_retention.cjs` and `node scripts/test_fleet_bulk.cjs`: passed.
+- Pinned `suifleet-dev:sf037`, network none, Sui 1.81.1:
+  `sui move test --path contracts/fleet_storage --build-env testnet`: 60 passed;
+  `sui move test --path contracts/fleet_data --build-env testnet`: 16 passed.
+- Same container, Node 22.22.2/pnpm 11.0.8: `cd dapp && pnpm typecheck && pnpm build`:
+  passed, all 14 static pages generated. Initial missing-cache/host-pnpm and
+  generated-output ownership failures were corrected before successful reruns.
+- `git diff --check`: passed. Snapshot base `5137be97ef273848dec1df81a433c0ec5454effb`
+  already included; explicit merge reported already up to date.
+
+New pushed-head ordinary/security/automatic-Testnet CI and fresh independent
+review are required again; historical successes do not test this repair. The
+finite capacity and rising gas remain operational limitations, now explicitly
+modeled/documented. Production providers/manual real wallets/Pi/Mainnet remain
+unrun under #32/#159. No chain mutation or Site update was performed for this
+repair; the previously published Site is historical acceptance of its old build.
