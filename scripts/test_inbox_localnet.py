@@ -239,6 +239,7 @@ def run(rpc_url, faucet_url, base_dir, evidence_path):
                            "--assign", "inbox", "--move-call", f"{new}::fleet_inbox::follow_group", "inbox", f"@{group}",
                            "--move-call", f"{new}::fleet_inbox::share_inbox", "inbox")
         inbox = created(made, "::fleet_inbox::DeviceInbox")[0]
+        assert dm.object_id(inbox) == dm.inbox_id(registry, origins["fleet_inbox::InboxKey"], device), "inbox not at its derived address"
         assert fields(inbox)["groups"] == [group]
         stranger_record = ["--move-call", f"{new}::deployment_manager::new_deployment_verified", *recipe("intruder"),
                            f"vector[@{group}]", "vector[]", CLOCK, "--assign", "record",

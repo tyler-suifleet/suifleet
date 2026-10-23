@@ -192,4 +192,12 @@ class ManifestTests(unittest.TestCase):
         package["type_origins"].append(package["type_origins"][0])
         with self.assertRaises(ValueError): dm.origins(package)
 
+class InboxIdTest(unittest.TestCase):
+    def test_inbox_address_matches_the_sdk_derivation(self):
+        # The same vector as @mysten/sui deriveObjectID and the daemon (SF-125).
+        self.assertEqual(dm.inbox_id("0x1", "0x125", "0xde"),
+                         "0x0085d65fcfe36c94b1bbe99a04811031070b86693e13140f71a8f27ddfb8dfac")
+        self.assertNotEqual(dm.inbox_id("0x1", "0x125", "0xdf"), dm.inbox_id("0x1", "0x125", "0xde"))
+
+
 if __name__ == "__main__": unittest.main()

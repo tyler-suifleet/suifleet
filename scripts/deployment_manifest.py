@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Resolve and verify Sui deployment metadata over gRPC; never publishes or spends gas."""
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -34,6 +35,35 @@ def object_id(value):
     if not isinstance(value, str) or not re.fullmatch(r"0x[0-9a-fA-F]{1,64}", value):
         raise ValueError("invalid Sui ID")
     return "0x" + value[2:].lower().zfill(64)
+
+
+def _uleb(n):
+    out = bytearray()
+    while True:
+        byte, n = n & 0x7F, n >> 7
+        out.append(byte | (0x80 if n else 0))
+        if not n:
+            return bytes(out)
+
+
+def _struct_tag(address, module, name, params=()):
+    """BCS of TypeTag::Struct (variant 7)."""
+    out = bytes([7]) + bytes.fromhex(object_id(address)[2:])
+    for ident in (module, name):
+        out += _uleb(len(ident)) + ident.encode()
+    return out + _uleb(len(params)) + b"".join(params)
+
+
+def inbox_id(registry, inbox_key_origin, device):
+    """A device inbox's derived address (SF-125): the dynamic-field child ID of
+    the registry keyed DerivedObjectKey<InboxKey { device_id }>, computed
+    independently of Move, the SDKs and the daemon."""
+    key_type = _struct_tag("0x2", "derived_object", "DerivedObjectKey",
+                           [_struct_tag(inbox_key_origin, "fleet_inbox", "InboxKey")])
+    key = bytes.fromhex(object_id(device)[2:])
+    digest = hashlib.blake2b(bytes([0xF0]) + bytes.fromhex(object_id(registry)[2:])
+                             + len(key).to_bytes(8, "little") + key + key_type, digest_size=32)
+    return "0x" + digest.hexdigest()
 
 
 def version(value):
