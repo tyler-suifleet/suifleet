@@ -417,3 +417,36 @@ writes remain explicitly unrun in [SF-031/#32](https://github.com/tyler-suifleet
 and [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159). These do
 not waive software or authorized automatic public-Testnet gates. Publishing a
 Testnet fixture never establishes a production deployment or a hardware result.
+
+## Opt-in bounded archive history (SF-121)
+
+After deploying the additive data-package API, set `compact_history = true` in
+`[fleet_data.archives]` configuration and set `compactHistoryOrigin` in
+`NEXT_PUBLIC_FLEET_DATA` to the actual introduction origin of `CompactHeadKey`
+and `CompactHead`. Both clients verify the package type-origin table. The daemon
+option defaults to false; existing fleets, packages and archive formats keep
+working. This change does not update an existing Pi image or deploy to hardware.
+
+`anchor_compact` replaces one dynamic-field root per writer. The signed,
+Seal-encrypted schema-3 archive includes the exact predecessor root BCS bytes;
+the current root commits their SHA-256. Compare-and-swap against the previous
+root prevents stale writers from severing history. Device authorization, fleet
+storage ownership, certification, cadence and monotonic sequence checks remain.
+The browser follows verified predecessor hashes and historical device signatures,
+including across signer rotation. Missing/expired predecessors are unavailable,
+never trusted from an unauthenticated discovery service.
+
+Only the data-history index is bounded. Walrus Blob objects and fleet-storage
+BlobRecords still exist per upload. Legacy `anchor` APIs remain callable, including
+through old packages; legacy entries are preserved and are not automatically
+pruned. This is not a global constant-storage claim. Browser traversal is bounded
+to 64 linked archives per request; unlimited historical browsing/pagination is
+not implemented. Periodic refresh rebuilds discovery from the chain root.
+
+The native journal persists ciphertext and predecessor bytes across retries;
+source records are acknowledged only after independently reading the matching
+committed root. The signer's exact transaction verification permits SDK input
+aliasing only when every typed argument matches and every input is used.
+
+See [the controlled cost experiment](business/SF121_ARCHIVE_COSTS.md) for measured
+retention/cleanup costs and the outstanding public-testnet certification check.
