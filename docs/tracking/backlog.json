@@ -2346,6 +2346,62 @@
         "Scoped Tyler-authored itemized commits, meaningful offline packaging regressions, current-head CI/testnet where relevant and independent review before merge. Existing shared build/cache/resource ownership must be honored only during actual use; cap build concurrency for15GiB host."
       ],
       "validation": "Actual pinned BitBake recipe/image build and artifact/rootfs inspection; target-emulation daemon/codec smoke and meaningful missing/tampered runtime controls; package manifest/SRCREV/crate lock consistency; normal CI and independent review. Final physical Pi/mainnet tests excluded."
+    },
+    {
+      "key": "SF-050",
+      "title": "Audit Move contracts and add security analysis gates",
+      "priority": "P1",
+      "area": "security",
+      "phase": "baseline",
+      "kind": "type:infrastructure",
+      "depends_on": [],
+      "paths": [
+        ".github",
+        "contracts",
+        "docs",
+        "scripts"
+      ],
+      "evidence": "Current securityCI lacks Move contract analysis; user explicitly clarified scope.",
+      "acceptance": [
+        "- Audit current contracts and security boundaries: authoritative receipts/old-package isolation, device/enrollment capabilities, scoped role revocation, group/deployment authority, artifact/recipe binding and upgrade compatibility. Record concrete findings by file/function and severity, plus coverage limits.",
+        "- Add pinned Sui Move compiler/linter checks as meaningful normal CI gates, with negative fixtures showing the checks actually reject violations. Do not present compiler success as a complete security audit.",
+        "- Evaluate a maintained Sui-specific formal/static analysis tool (Asymptotic Sui Prover is a candidate) against the project pinned Sui1.81.1/Move2024 framework. Pin tooling and dependencies; do not assume Aptos Move Prover or editor language servers establish Sui security.",
+        "- Implement explicit non-vacuous specifications/checks for critical security invariants where supported, demonstrate genuine passing verification and deliberately failing negative cases. Preserve public layouts, type origins and release compatibility.",
+        "- If essential language/native/dynamic-field modeling is unsupported, record exact reproducible compatibility limits and retain the unmet proof scope as a real blocker; do not claim unsupported properties verified or silently waive formal acceptance.",
+        "- Keep authority/upgrade adversarial regression tests and genuine effects evidence where applicable. No production/mainnet/hardware programming; no keys in source/logs; shared build/network resources only while used.",
+        "- Wire applicable checks into CI for contract changes, document exact coverage and commands, and hand off through independent review with truthful tool/test evidence."
+      ],
+      "validation": "Pinned Move/static/formal checks, genuine positive/negative verification, authority/upgrade regressions and exact CI evidence.",
+      "description": "The user explicitly requested security auditing of the dApp including Sui Move smart contracts. SF-048 web/dependency/secret/CodeQL scans do not analyze Move authorization or business logic.\n\nAcceptance:\n- Audit current contracts and security boundaries: authoritative receipts/old-package isolation, device/enrollment capabilities, scoped role revocation, group/deployment authority, artifact/recipe binding and upgrade compatibility. Record concrete findings by file/function and severity, plus coverage limits.\n- Add pinned Sui Move compiler/linter checks as meaningful normal CI gates, with negative fixtures showing the checks actually reject violations. Do not present compiler success as a complete security audit.\n- Evaluate a maintained Sui-specific formal/static analysis tool (Asymptotic Sui Prover is a candidate) against the project pinned Sui1.81.1/Move2024 framework. Pin tooling and dependencies; do not assume Aptos Move Prover or editor language servers establish Sui security.\n- Implement explicit non-vacuous specifications/checks for critical security invariants where supported, demonstrate genuine passing verification and deliberately failing negative cases. Preserve public layouts, type origins and release compatibility.\n- If essential language/native/dynamic-field modeling is unsupported, record exact reproducible compatibility limits and retain the unmet proof scope as a real blocker; do not claim unsupported properties verified or silently waive formal acceptance.\n- Keep authority/upgrade adversarial regression tests and genuine effects evidence where applicable. No production/mainnet/hardware programming; no keys in source/logs; shared build/network resources only while used.\n- Wire applicable checks into CI for contract changes, document exact coverage and commands, and hand off through independent review with truthful tool/test evidence.\n\nThis fills the Move-specific gap in SF-048/#78. Other Codex workers own the web security audit and frontend remediation; do not edit their worktrees or recreate their tasks.\n",
+      "resources": []
+    },
+    {
+      "key": "SF-087",
+      "title": "Rehearse mainnet deployment and package upgrade",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "baseline",
+      "kind": "type:infrastructure",
+      "depends_on": [
+        "SF-010",
+        "SF-042",
+        "SF-050"
+      ],
+      "paths": [
+        "scripts",
+        "manifests",
+        "docs",
+        ".github"
+      ],
+      "resources": [],
+      "description": "Prepare and rehearse the production path on mainnet: publish under the proper UpgradeCap custody, record the deployment manifest and type origins, build both client configurations, publish the dApp, and rehearse a compatible upgrade and migration with old-package attack checks, as OPERATIONS.md requires for a release.",
+      "evidence": "SF-010 covers testnet only; OPERATIONS.md lists the release steps but no ticket runs them on mainnet. Found 2026-10-19 gap review.",
+      "acceptance": [
+        "A scripted, reviewed mainnet runbook with dry runs: chain and account verification, gas and storage estimates, UpgradeCap custody, effects-checked publication and upgrade, manifest and type-origin recording, client config generation.",
+        "A full rehearsal on an isolated network or testnet using the exact mainnet scripts and artifacts.",
+        "Actual mainnet spending, publication or UpgradeCap transfer happens only after explicit user authorization for that run; record exact IDs, digests, effects and costs."
+      ],
+      "validation": "Script tests and dry runs; rehearsal evidence with effects checked; mainnet evidence only under explicit authorization."
     }
   ]
 }

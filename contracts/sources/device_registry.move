@@ -154,6 +154,7 @@ module sui_edge::device_registry {
         device
     }
 
+    #[allow(lint(prefer_mut_tx_context, public_entry))]
     public entry fun deregister_device(
         registry: &mut DeviceRegistry,
         device: Device,
@@ -178,6 +179,7 @@ module sui_edge::device_registry {
         id.delete();
     }
 
+    #[allow(lint(prefer_mut_tx_context))]
     public fun set_meta(
         device: &mut Device,
         key: String,
@@ -228,6 +230,7 @@ module sui_edge::device_registry {
 
     /// Deregister an activated device: leaves a revoked tombstone, so caps never
     /// outlive the device.
+    #[allow(lint(prefer_mut_tx_context))]
     public fun deregister_activated_device(registry: &mut DeviceRegistry, cap: DeviceOwnerCap, ctx: &TxContext) {
         let DeviceOwnerCap { id, device_id } = cap;
         id.delete();

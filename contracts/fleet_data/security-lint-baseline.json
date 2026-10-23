@@ -1,0 +1,8 @@
+{
+  "reason": "SF-082 public APIs are already published; preserve their immutable TxContext signatures and review each function-local compatibility allowance. Stripping all allowances must produce exactly these diagnostics.",
+  "diagnostics": [
+    "fleet_data.move::anchor:ESL06010",
+    "fleet_data.move::report_health:ESL06010",
+    "fleet_data.move::request_diagnostics_support:ESL06010"
+  ]
+}

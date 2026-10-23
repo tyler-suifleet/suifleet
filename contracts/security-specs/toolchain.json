@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "prover": {
+    "repository": "https://github.com/asymptotic-code/sui-prover.git",
+    "commit": "949d14419515038d341d440e9c01c0737adf2ff0",
+    "version": "1.5.3",
+    "cargo_lock_sha256": "1eef09da8f81320d53075275dbcbaa6b42350d5b481b1c71fcb3e2e142592011",
+    "compiler_fork_commit": "a30b3efcfaa333241c1864581753128eedc5dbf1"
+  },
+  "release_framework": {
+    "repository": "https://github.com/MystenLabs/sui.git",
+    "commit": "73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1",
+    "source_sha256": "366540c50b2daaa755c8b433601aa278391855cf161950dd97feb1791caca233"
+  },
+  "boogie": {
+    "repository": "https://github.com/asymptotic-code/boogie.git",
+    "commit": "b104805d9070f99a0b494b7760f82a274926c171",
+    "version": "3.5.6.0",
+    "nuget_locks_sha256": "738a73ecb2fa972709f497e778b83d2779512fdb411ccbd518695723e93341c3"
+  },
+  "z3": {
+    "url": "https://github.com/Z3Prover/z3/releases/download/z3-4.13.4/z3-4.13.4-x64-glibc-2.35.zip",
+    "sha256": "93f91f9c6f4a00a041c19fc7a74adc1f441c8244ce70d486e19abcd89c6a014b",
+    "version": "4.13.4"
+  },
+  "dotnet_sdk": {
+    "version": "8.0.426",
+    "name": "dotnet-sdk-linux-x64.tar.gz",
+    "rid": "linux-x64",
+    "url": "https://builds.dotnet.microsoft.com/dotnet/Sdk/8.0.426/dotnet-sdk-8.0.426-linux-x64.tar.gz",
+    "hash": "8141d01bdc53f604aed3bb661b604707a64209f8a947cd81bf95b4f518951593d77864069191f54ea5e84362a409da6b0f69074bf893b283d7e0cf93e2bf20a8"
+  },
+  "rust": "1.94.0",
+  "status": "87 application/raw-model phase obligations and 28 exact solver negatives verified; DOF heap, complete custody/enrollment/init proofs remain unmet",
+  "compatibility": {
+    "release-model.patch": "650a8322973642f7131e3348f4d12473488d8c4c72b7323f8d2d6fe03d7b5cbd",
+    "integer.move": "6c629571d86aa27280b7bc023405e600ddc0a3e15f855f8810f2a23f2ee433a1",
+    "registry-spec-helpers.move": "49ddffaf2377b35c3e81834803dd0b531f47c47f4ee644c22a9c9a6f80dd85b3",
+    "dof-spec-helpers.move": "098bdcbd995453a09f77e2b54f6051449665a194bb8f3d9a2e3060429bc9fa44",
+    "roles-spec-helpers.move": "da1e9f29509351788a451ab7279bb22cc1ff8b400ed273d85d1e4c0840e82a49",
+    "deployment-spec-helpers.move": "b8f9c445577bcc910f68bbeb88e9d62294db3b33f13076da4e426e88c403280b",
+    "cap-spec-helpers.move": "e9d84071f8e15197ffadedee373f06638106b6b357c4e11624a6457d80a66c98",
+    "registry-custody-pending.move": "1636d8ec76c280c18fade7284691c3936c5699ae92dc6bb6794e3d71fa62ac21",
+    "enrollment-spec-helpers.move": "99d58edbfd2a4934c2347305565a2905ef6080667e5386ae0d99ce4317e4411a",
+    "group-spec-helpers.move": "8ef3b68bf4944c81b25b48b0a717e02e2acd562623fc12e31679e8a3b77eb72a",
+    "enrollment-pending.move": "412973a54a82ade9431d4cc9fe9fe96bd0eb665a49534536839667968f86a7bf",
+    "raw-field-spec-helpers.move": "ae52dcad322ff955f6ac81a445fc4103aea562f753efc779cae6ced631d0613a",
+    "carrier-field-spec-helpers.move": "b940fdaa4eae18627d691b67f5c54685c077d6dfe0978003fb29158fa619cced",
+    "object-field-spec-helpers.move": "99ecab61c47d066f0a2d1032fc0d8b60ce9e88d37fa38b12b6141d0f0116f8b9",
+    "object-hashed-fixture.move": "02a3235000d65ae3a4a58511441e3676bc5c758ddfa3ae0854a988beeaad1aec",
+    "allocation-context-helpers.move": "dc51eef719431117b1f17fea4f5ad190dbc9482fb6e6faf58a8d694b22b3c4d4",
+    "registry-induction.move": "2c37d9d536350d584cc49852ce646a80bc3f45b40c07c74a43f717f78c92f8bf",
+    "roles-induction.move": "05c04a86a88c0ab70c178af596f6fc67f90118e3239ba4011d8fe80b4d89bab6"
+  }
+}

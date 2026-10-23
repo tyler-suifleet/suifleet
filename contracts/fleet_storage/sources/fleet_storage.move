@@ -401,6 +401,8 @@ module fleet_storage::fleet_storage {
     /// Restricted execution: no owner cap, arbitrary blob, withdrawal or policy
     /// change. The shared object serializes races; duplicates abort before spend.
     /// Walrus independently enforces certification, live expiry and horizon.
+    /// Reward is intentionally paid to the authenticated configured executor.
+    #[allow(lint(self_transfer))]
     public fun execute_renewal(
         fs: &mut FleetStorage, system: &mut System, blob_object_id: ID,
         expected_end: u32, expected_revision: u64, ctx: &mut TxContext,

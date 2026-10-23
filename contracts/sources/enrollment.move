@@ -86,6 +86,7 @@ module sui_edge::enrollment {
     }
 
     /// Add claim addresses (duplicates are ignored).
+    #[allow(lint(prefer_mut_tx_context))]
     public fun add_claims(policy: &mut EnrollmentPolicy, claims: vector<address>, ctx: &TxContext) {
         assert_operator(policy, ctx);
         let mut i = 0;
@@ -98,12 +99,14 @@ module sui_edge::enrollment {
     }
 
     /// Withdraw an unused claim, e.g. for a lost or leaked claim key.
+    #[allow(lint(prefer_mut_tx_context))]
     public fun revoke_claim(policy: &mut EnrollmentPolicy, claim: address, ctx: &TxContext) {
         assert_operator(policy, ctx);
         assert!(policy.claims.contains(claim), EUnknownClaim);
         policy.claims.remove(claim);
     }
 
+    #[allow(lint(prefer_mut_tx_context))]
     public fun set_limits(policy: &mut EnrollmentPolicy, quota: u64, expires_at_ms: u64, ctx: &TxContext) {
         assert_operator(policy, ctx);
         policy.remaining = quota;
@@ -111,6 +114,7 @@ module sui_edge::enrollment {
     }
 
     /// Stop all enrollment under this policy (permanent).
+    #[allow(lint(prefer_mut_tx_context))]
     public fun close(policy: &mut EnrollmentPolicy, ctx: &TxContext) {
         assert_operator(policy, ctx);
         policy.open = false;
@@ -120,6 +124,7 @@ module sui_edge::enrollment {
 
     /// Enroll the sender's key as a new device of the policy's operator.
     /// Must be sponsored by an unused claim address of this policy.
+    #[allow(lint(self_transfer))]
     public fun enroll(
         policy: &mut EnrollmentPolicy,
         registry: &mut DeviceRegistry,

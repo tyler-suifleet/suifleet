@@ -1,0 +1,193 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net8.0": {
+      "StyleCop.Analyzers": {
+        "type": "Direct",
+        "requested": "[1.1.118, )",
+        "resolved": "1.1.118",
+        "contentHash": "Onx6ovGSqXSK07n/0eM3ZusiNdB6cIlJdabQhWGgJp3Vooy9AaLS/tigeybOJAobqbtggTamoWndz72JscZBvw=="
+      },
+      "System.Reactive": {
+        "type": "Direct",
+        "requested": "[4.4.1, )",
+        "resolved": "4.4.1",
+        "contentHash": "iSTPeWR9HJhGoNV4WhVlvofuiTjpok1i4E3LPgMdbMqf3jKhFlT9HAlO32lb52NLppWC/4dZQFfUzTytvyXBmw=="
+      },
+      "System.Runtime.Caching": {
+        "type": "Direct",
+        "requested": "[6.0.0, )",
+        "resolved": "6.0.0",
+        "contentHash": "E0e03kUp5X2k+UAoVl6efmI7uU7JRBWi5EIdlQ7cr0NpBGjHG4fWII35PgsBY9T4fJQ8E4QPsL0rKksU9gcL5A==",
+        "dependencies": {
+          "System.Configuration.ConfigurationManager": "6.0.0"
+        }
+      },
+      "Microsoft.Bcl.AsyncInterfaces": {
+        "type": "Transitive",
+        "resolved": "6.0.0",
+        "contentHash": "UcSjPsst+DfAdJGVDsu346FX0ci0ah+lw3WRtn18NUwEqRt70HaOQ7lI72vy3+1LxtqI3T5GWwV39rQSrCzAeg=="
+      },
+      "Microsoft.Win32.SystemEvents": {
+        "type": "Transitive",
+        "resolved": "6.0.0",
+        "contentHash": "hqTM5628jSsQiv+HGpiq3WKBl2c8v1KZfby2J6Pr7pEPlK9waPdgEO6b8A/+/xn/yZ9ulv8HuqK71ONy2tg67A=="
+      },
+      "System.Configuration.ConfigurationManager": {
+        "type": "Transitive",
+        "resolved": "6.0.0",
+        "contentHash": "7T+m0kDSlIPTHIkPMIu6m6tV6qsMqJpvQWW2jIc2qi7sn40qxFo0q+7mEQAhMPXZHMKnWrnv47ntGlM/ejvw3g==",
+        "dependencies": {
+          "System.Security.Cryptography.ProtectedData": "6.0.0",
+          "System.Security.Permissions": "6.0.0"
+        }
+      },
+      "System.Drawing.Common": {
+        "type": "Transitive",
+        "resolved": "6.0.0",
+        "contentHash": "NfuoKUiP2nUWwKZN6twGqXioIe1zVD0RIj2t976A+czLHr2nY454RwwXs6JU9Htc6mwqL6Dn/nEL3dpVf2jOhg==",
+        "dependencies": {
+          "Microsoft.Win32.SystemEvents": "6.0.0"
+        }
+      },
+      "System.Linq.Async": {
+        "type": "Transitive",
+        "resolved": "6.0.1",
+        "contentHash": "0YhHcaroWpQ9UCot3Pizah7ryAzQhNvobLMSxeDIGmnXfkQn8u5owvpOH0K6EVB+z9L7u6Cc4W17Br/+jyttEQ==",
+        "dependencies": {
+          "Microsoft.Bcl.AsyncInterfaces": "6.0.0"
+        }
+      },
+      "System.Security.AccessControl": {
+        "type": "Transitive",
+        "resolved": "6.0.0",
+        "contentHash": "AUADIc0LIEQe7MzC+I0cl0rAT8RrTAKFHl53yHjEUzNVIaUlhFY11vc2ebiVJzVBuOzun6F7FBA+8KAbGTTedQ=="
+      },
+      "System.Security.Cryptography.ProtectedData": {
+        "type": "Transitive",
+        "resolved": "6.0.0",
+        "contentHash": "rp1gMNEZpvx9vP0JW0oHLxlf8oSiQgtno77Y4PLUBjSiDYoD77Y8uXHr1Ea5XG4/pIKhqAdxZ8v8OTUtqo9PeQ=="
+      },
+      "System.Security.Permissions": {
+        "type": "Transitive",
+        "resolved": "6.0.0",
+        "contentHash": "T/uuc7AklkDoxmcJ7LGkyX1CcSviZuLCa4jg3PekfJ7SU0niF0IVTXwUiNVP9DSpzou2PpxJ+eNY2IfDM90ZCg==",
+        "dependencies": {
+          "System.Security.AccessControl": "6.0.0",
+          "System.Windows.Extensions": "6.0.0"
+        }
+      },
+      "System.Windows.Extensions": {
+        "type": "Transitive",
+        "resolved": "6.0.0",
+        "contentHash": "IXoJOXIqc39AIe+CIR7koBtRGMiCt/LPM3lI+PELtDIy9XdyeSrwXFdWV9dzJ2Awl0paLWUaknLxFQ5HpHZUog==",
+        "dependencies": {
+          "System.Drawing.Common": "6.0.0"
+        }
+      },
+      "Boogie.AbstractInterpretation": {
+        "type": "Project",
+        "dependencies": {
+          "Boogie.BaseTypes": "[3.5.6, )",
+          "Boogie.CodeContractsExtender": "[3.5.6, )",
+          "Boogie.Core": "[3.5.6, )"
+        }
+      },
+      "Boogie.BaseTypes": {
+        "type": "Project",
+        "dependencies": {
+          "Boogie.CodeContractsExtender": "[3.5.6, )"
+        }
+      },
+      "Boogie.CodeContractsExtender": {
+        "type": "Project"
+      },
+      "Boogie.Concurrency": {
+        "type": "Project",
+        "dependencies": {
+          "Boogie.BaseTypes": "[3.5.6, )",
+          "Boogie.CodeContractsExtender": "[3.5.6, )",
+          "Boogie.Core": "[3.5.6, )",
+          "Boogie.Graph": "[3.5.6, )"
+        }
+      },
+      "Boogie.Core": {
+        "type": "Project",
+        "dependencies": {
+          "Boogie.BaseTypes": "[3.5.6, )",
+          "Boogie.CodeContractsExtender": "[3.5.6, )",
+          "Boogie.Graph": "[3.5.6, )"
+        }
+      },
+      "Boogie.Graph": {
+        "type": "Project",
+        "dependencies": {
+          "Boogie.CodeContractsExtender": "[3.5.6, )"
+        }
+      },
+      "Boogie.Houdini": {
+        "type": "Project",
+        "dependencies": {
+          "Boogie.BaseTypes": "[3.5.6, )",
+          "Boogie.CodeContractsExtender": "[3.5.6, )",
+          "Boogie.Core": "[3.5.6, )",
+          "Boogie.Graph": "[3.5.6, )",
+          "Boogie.Model": "[3.5.6, )",
+          "Boogie.Provers.SMTLib": "[3.5.6, )",
+          "Boogie.VCExpr": "[3.5.6, )",
+          "Boogie.VCGeneration": "[3.5.6, )"
+        }
+      },
+      "Boogie.Model": {
+        "type": "Project",
+        "dependencies": {
+          "Boogie.BaseTypes": "[3.5.6, )",
+          "Boogie.CodeContractsExtender": "[3.5.6, )"
+        }
+      },
+      "Boogie.Provers.LeanAuto": {
+        "type": "Project",
+        "dependencies": {
+          "Boogie.BaseTypes": "[3.5.6, )",
+          "Boogie.CodeContractsExtender": "[3.5.6, )",
+          "Boogie.Core": "[3.5.6, )",
+          "Boogie.VCGeneration": "[3.5.6, )",
+          "System.Linq.Async": "[6.0.1, )"
+        }
+      },
+      "Boogie.Provers.SMTLib": {
+        "type": "Project",
+        "dependencies": {
+          "Boogie.BaseTypes": "[3.5.6, )",
+          "Boogie.CodeContractsExtender": "[3.5.6, )",
+          "Boogie.Core": "[3.5.6, )",
+          "Boogie.Graph": "[3.5.6, )",
+          "Boogie.Model": "[3.5.6, )",
+          "Boogie.VCExpr": "[3.5.6, )",
+          "System.Linq.Async": "[6.0.1, )"
+        }
+      },
+      "Boogie.VCExpr": {
+        "type": "Project",
+        "dependencies": {
+          "Boogie.BaseTypes": "[3.5.6, )",
+          "Boogie.CodeContractsExtender": "[3.5.6, )",
+          "Boogie.Core": "[3.5.6, )"
+        }
+      },
+      "Boogie.VCGeneration": {
+        "type": "Project",
+        "dependencies": {
+          "Boogie.BaseTypes": "[3.5.6, )",
+          "Boogie.CodeContractsExtender": "[3.5.6, )",
+          "Boogie.Core": "[3.5.6, )",
+          "Boogie.Graph": "[3.5.6, )",
+          "Boogie.Model": "[3.5.6, )",
+          "Boogie.Provers.SMTLib": "[3.5.6, )",
+          "Boogie.VCExpr": "[3.5.6, )",
+          "System.Reactive": "[4.4.1, )"
+        }
+      }
+    }
+  }
+}
