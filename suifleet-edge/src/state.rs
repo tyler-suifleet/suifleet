@@ -167,6 +167,21 @@ impl Journal {
         journal.save()?;
         Ok(journal)
     }
+    /// Bounded receipt/deferral backlog. Existing entries are never evicted;
+    /// failed admission leaves the event cursor unchanged for later replay.
+    pub fn ensure_receipt_room(&self, id: &str) -> anyhow::Result<()> {
+        const ITEMS: usize = 1024;
+        const BYTES: usize = 8 * 1024 * 1024;
+        let pending: Vec<_> = self.state.deployments.iter().filter(|(_, o)| !o.reported).collect();
+        let count = pending.len() + self.state.deferred.keys()
+            .filter(|key| !self.state.deployments.contains_key(*key)).count();
+        let existing = self.state.deployments.contains_key(id) || self.state.deferred.contains_key(id);
+        anyhow::ensure!(existing || count < ITEMS, "receipt queue full (1024); new work paused, existing receipts retained");
+        let size = serde_json::to_vec(&pending)?.len() + serde_json::to_vec(&self.state.deferred)?.len();
+        anyhow::ensure!(size <= BYTES - 16384, "receipt queue byte limit (8 MiB); new work paused, export retained data");
+        Ok(())
+    }
+
     /// Persist the reader requirement before staging any service metadata.
     pub fn require_service_reader(&mut self) -> anyhow::Result<()> {
         if !self.state.binding.ends_with(SERVICES_READER) {
@@ -269,6 +284,28 @@ mod tests {
         assert!(check(&dir,base).is_err());
         assert!(Journal::open(&dir,base.into()).is_err());
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn receipt_backpressure_retains_entries_across_restart_and_releases_after_reports() {
+        let path = std::env::temp_dir().join(format!("suifleet-receipt-limit-{}", rand::random::<u64>()));
+        let mut journal = Journal::open(&path, "test/device".into()).unwrap();
+        for index in 0..1024 {
+            journal.state.deployments.insert(format!("d{index}"), Outcome::default());
+        }
+        assert!(journal.ensure_receipt_room("new").is_err());
+        assert!(journal.ensure_receipt_room("d0").is_ok());
+        journal.save().unwrap();
+        drop(journal);
+        let mut journal = Journal::open(&path, "test/device".into()).unwrap();
+        assert_eq!(journal.state.deployments.len(), 1024);
+        assert!(journal.ensure_receipt_room("new").is_err());
+        journal.state.deployments.get_mut("d0").unwrap().reported = true;
+        assert!(journal.ensure_receipt_room("new").is_ok());
+        journal.state.deployments.get_mut("d1").unwrap().error = Some("x".repeat(8 * 1024 * 1024));
+        assert!(journal.ensure_receipt_room("new").is_err());
+        drop(journal);
+        std::fs::remove_dir_all(path).unwrap();
     }
 
     #[test]

@@ -218,6 +218,37 @@ class PackageTransactionTests(unittest.TestCase):
         self.assertEqual(ran.call_args.args[0][:2], ["/opt/sui-network/sui", "client"])
 
 
+class FleetPreflightFundingTests(unittest.TestCase):
+    def test_one_pinned_faucet_credit_preserves_used_allowance(self):
+        run = Live("/nonexistent/client.yaml", "testnet", 100)
+        run.ledger.used = 7
+        run.client = Mock(side_effect=[([{"alias": "testnet", "rpc": "https://example.test"}], "testnet"), CompletedProcess([], 0, OPERATOR, "")])
+        run.balance = Mock(side_effect=[1, 200])
+        run.assert_lock = Mock()
+        tools = {"build": {"path": "/compiler", "version": "build"}, "network": {"path": "/pinned", "version": "network"}}
+        with patch.object(live_common.toolchain, "check_tools", return_value=tools), patch.object(live_common.toolchain, "preflight", return_value={}), \
+             patch.object(live_common.dm, "chain_facts", return_value={"chain_identifier": "4c78adac"}), \
+             patch.object(live_common.subprocess, "run", return_value=CompletedProcess([], 0)), \
+             patch.object(live_common.subprocess, "check_output", return_value="head"):
+            run.preflight(auto_fund=True)
+        run.assert_lock.assert_called_once()
+        self.assertEqual(run.ledger.faucet_attempts, 1)
+        self.assertEqual(run.ledger.used, 7)
+        self.assertEqual(run.evidence["faucet"]["balance_after_mist"], 200)
+        with self.assertRaises(Spent):
+            run.ledger.faucet(lambda: self.fail("second faucet request"))
+
+    def test_wrong_chain_cannot_request_funding(self):
+        run = Live("/nonexistent/client.yaml", "testnet", 100)
+        run.client = Mock(side_effect=[([{"alias": "testnet", "rpc": "https://example.test"}], "testnet"), CompletedProcess([], 0, OPERATOR, "")])
+        with patch.object(live_common.toolchain, "check_tools", return_value={"build": {"path": "/compiler"}, "network": {"path": "/pinned"}}), \
+             patch.object(live_common.dm, "chain_facts", return_value={"chain_identifier": "mainnet"}), \
+             patch.object(live_common.subprocess, "run") as execute:
+            with self.assertRaises(AssertionError): run.preflight(auto_fund=True)
+        execute.assert_not_called()
+        self.assertEqual(run.ledger.faucet_attempts, 0)
+
+
 class WalrusUploadTests(unittest.TestCase):
     STORED = json.dumps({"newlyCreated": {"blobObject": {"blobId": "blob1"}}}).encode()
 

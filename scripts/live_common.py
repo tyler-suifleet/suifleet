@@ -2,7 +2,8 @@
 
 Everything here reads and writes the chain through the Sui CLI and gRPC
 (`chain_facts`): public testnet fullnodes do not serve JSON-RPC. Nothing
-here faucets, reads a default wallet or prints a key.
+here reads a default wallet or prints a key. Explicit testnet preflight may
+request one bounded faucet top-up after chain, account, CLI and lock checks.
 
 Toolchain (scripts/sui_toolchain.py, SF-056): every `sui client` command
 runs on the pinned transaction CLI, which must support the chain's protocol
@@ -155,7 +156,7 @@ class Live:
         coins = gas.get("gasCoins", []) if isinstance(gas, dict) else gas
         return sum(int(c.get("mistBalance", 0)) for c in coins) + (int(gas.get("addressMistBalance") or 0) if isinstance(gas, dict) else 0)
 
-    def preflight(self):
+    def preflight(self, *, auto_fund=False):
         # Pinned release compiler and transaction CLI, never PATH substitutes.
         self.tools = toolchain.check_tools(self.build_sui, self.network_sui)
         self.build_sui, self.network_sui = self.tools["build"]["path"], self.tools["network"]["path"]
@@ -173,6 +174,15 @@ class Live:
         self.evidence["toolchain"] = dict(self.tools, compatibility=toolchain.preflight(
             self.tools, facts, CHAINS.get(self.network)))
         self.start_balance = self.balance()
+        if self.start_balance < self.max_spend and auto_fund:
+            assert self.network == "testnet" and self.operator in TESTNET_WALLETS
+            self.assert_lock()
+            funded = self.ledger.faucet(lambda: subprocess.run(
+                [self.network_sui, "client", "--client.config", str(self.wallet), "faucet", "--address", self.operator],
+                capture_output=True, timeout=180))
+            self.start_balance = self.balance()
+            self.evidence["faucet"] = {"attempts": 1, "cli_returncode": funded.returncode,
+                                      "balance_after_mist": self.start_balance}
         assert self.start_balance >= self.max_spend, (
             f"{self.operator} holds {self.start_balance} MIST; this run may spend up to {self.max_spend}. "
             "Fund it first (docs/TESTNET.md)")

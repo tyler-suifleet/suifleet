@@ -20,6 +20,8 @@ import {
 } from "@/lib/onramp";
 
 import { DATA_CONFIG } from "@/lib/fleet-data";
+import { buildAuthorizeRenewalTx, buildConfigureRetentionTx, buildFundRetentionTx, buildMigrateRetentionTx,
+  buildWithdrawRetentionTx, fetchRetention, retentionFacts, retentionOrigin } from '@/lib/retention';
 
 const sui = (mist: bigint) => `${formatToken(mist)} SUI`;
 const wal = (frost: bigint) => `${formatToken(frost)} WAL`;
@@ -145,7 +147,7 @@ function useSubmit() {
       const result = await mutation.mutateAsync({ transaction: tx });
       setMessage(`Confirmed ${result.digest}.`);
       await Promise.all([cache.invalidateQueries({ queryKey: ["fleet-budgets"] }), cache.invalidateQueries({ queryKey: ["fleet-budget-accounts"] }),
-        cache.invalidateQueries({ queryKey: ["first-run-account"] }), cache.invalidateQueries({ queryKey: ["fleet-storage"] })]);
+        cache.invalidateQueries({ queryKey: ["retention"] }), cache.invalidateQueries({ queryKey: ["first-run-account"] }), cache.invalidateQueries({ queryKey: ["fleet-storage"] })]);
     } catch (cause) {
       setError(`${cause instanceof Error ? cause.message : "Wallet request failed"}. Nothing is credited unless the transaction confirms; if it may have reached the network, refresh before retrying.`);
     }
@@ -250,7 +252,9 @@ function useWalrusState(config?: StorageConfig) {
     queryFn: async () => {
       const { walrus, TESTNET_WALRUS_PACKAGE_CONFIG } = await import("@mysten/walrus");
       const state = await client.$extend(walrus({ packageConfig: TESTNET_WALRUS_PACKAGE_CONFIG })).walrus.systemState();
-      return { epoch: state.committee.epoch, storagePrice: BigInt(state.storage_price_per_unit_size), writePrice: BigInt(state.write_price_per_unit_size) };
+      const staking = await client.$extend(walrus({ packageConfig: TESTNET_WALRUS_PACKAGE_CONFIG })).walrus.stakingState();
+      return { epoch: state.committee.epoch, storagePrice: BigInt(state.storage_price_per_unit_size), writePrice: BigInt(state.write_price_per_unit_size),
+        epochDurationMs: Number(staking.epoch_duration), firstEpochStartMs: Number(staking.first_epoch_start) };
     },
   });
 }
@@ -303,6 +307,7 @@ export function StoragePanel({ suggestedWalFrost }: { suggestedWalFrost?: bigint
       <button type="button" className="bg-blue-600 text-white rounded px-2 py-1 disabled:opacity-40" disabled={pending} onClick={() => void submit(() => buildCreateStorageTx(config, budget.id, budget.capId, DEFAULT_QUOTA))}>Create fleet storage</button>
     </div>}
     {storage && <>
+      <RetentionPanel config={config} storage={storage.id} version={storage.version} budget={budget.id} cap={budget.capId} epoch={walrusState.data?.epoch} schedule={walrusState.data} />
       <p>Prepaid storage: {(Number(storage.poolSize) / MIB).toFixed(2)} MiB encoded{storage.endEpoch !== undefined ? `, Walrus epochs ${storage.startEpoch}–${storage.endEpoch}` : ""} (current epoch {walrusState.data?.epoch ?? "…"}). WAL for fees and purchases: {wal(storage.walBalance)}. {storage.blobCount.toString()} fleet blob(s), {(Number(storage.totalEncodedBytes) / MIB).toFixed(2)} MiB encoded, {wal(storage.totalWriteFees)} in write fees so far.</p>
       {alerts.length > 0 && <ul role="alert" className="list-disc ml-5">{alerts.map((alert, index) =>
         <li key={index} className={alert.severity === "critical" ? "text-red-700" : "text-amber-700"}>{alert.text}</li>)}</ul>}
@@ -346,3 +351,53 @@ export function StoragePanel({ suggestedWalFrost }: { suggestedWalFrost?: bigint
 }
 
 export type { AccountView };
+
+function RetentionPanel({ config, storage, version, budget, cap, epoch, schedule }: {
+  config: StorageConfig; storage: string; version: bigint; budget: string; cap: string; epoch?: number;
+  schedule?: { epochDurationMs: number; firstEpochStartMs: number };
+}) {
+  const client = useCurrentClient(), account = useCurrentAccount();
+  const { submit, message, error, pending } = useSubmit();
+  const origin = retentionOrigin();
+  const [executor, setExecutor] = useState(''), [margin, setMargin] = useState(2);
+  const [walLimit, setWalLimit] = useState('1'), [gasLimit, setGasLimit] = useState('0.1'), [reward, setReward] = useState('0.01');
+  const [walFunds, setWalFunds] = useState('1'), [gasFunds, setGasFunds] = useState('0.1');
+  const [blob, setBlob] = useState(''), [target, setTarget] = useState(0), [maxFee, setMaxFee] = useState('1');
+  const [withdrawConfirmed, setWithdrawConfirmed] = useState(false);
+  const view = useQuery({ queryKey: ['retention', NETWORK, storage, origin], enabled: !!origin && version === BigInt(2), refetchInterval: 30000,
+    queryFn: () => fetchRetention(client, storage, origin!, config.storageOrigin ?? config.packageId) });
+  if (!origin) return <p>Protected retention is not configured for this build. No renewal or out-of-browser alerts are guaranteed.</p>;
+  const policy = view.data?.policy, blobs = view.data?.blobs ?? [];
+  return <fieldset disabled={pending} className="border rounded p-2 space-y-2">
+    <legend>Protected retention</legend>
+    {version < BigInt(2) ? <button type="button" onClick={() => void submit(() => buildMigrateRetentionTx(config, storage, budget, cap))}>Migrate storage to retention v2 (retires old mutation calls)</button> : <>
+      {retentionFacts(policy, blobs, epoch).map((fact) => <p key={fact} role="status">{fact}</p>)}
+      <p>Run the owner-configured renewal worker separately from this browser. Check its private status file for persistent failures and notifier delivery acknowledgments. No running notifier means no alert guarantee.</p>
+      {policy && <p>Discretionary WAL is separate from protected reserves: {wal(BigInt(policy.wal.value))} and {sui(BigInt(policy.gas.value))}. Unpaid renewal ceilings (zero after capacity purchase): {wal(BigInt(policy.pending_wal))}. Executor {policy.executor}; policy revision {policy.revision}. Funds are prepaid; no recurring card debit.</p>}
+      <div className="flex flex-wrap gap-2">
+        <label>Executor address <input className="border" value={executor} onChange={(e) => setExecutor(e.target.value)} /></label>
+        <label>Safety margin (epochs) <input className="border w-16" type="number" min={1} value={margin} onChange={(e) => setMargin(Number(e.target.value))} /></label>
+        <label>WAL per epoch <input className="border w-20" value={walLimit} onChange={(e) => setWalLimit(e.target.value)} /></label>
+        <label>SUI per epoch <input className="border w-20" value={gasLimit} onChange={(e) => setGasLimit(e.target.value)} /></label>
+        <label>SUI reward per renewal <input className="border w-20" value={reward} onChange={(e) => setReward(e.target.value)} /></label>
+        <button type="button" onClick={() => void submit(() => buildConfigureRetentionTx(config, storage, budget, cap, executor, margin, parseToken(walLimit), parseToken(gasLimit), parseToken(reward)))}>Set bounded executor policy</button>
+      </div>
+      <p>Protect every fleet blob, including recipes, configuration, dependencies, rollback/recovery, site/manifest and history. External blobs are not protected by this storage; retain verified backups and import/re-upload them with owner-authorized references. Newly registered blobs pause further discretionary writes until authorized.</p>
+      <table><thead><tr><th>Blob</th><th>Exclusive expiry epoch</th><th>Projected exclusive expiry / runway</th><th>Authorized target</th><th>Last successful renewal epoch</th></tr></thead><tbody>
+        {blobs.map((item) => <tr key={item.id}><td><button type="button" onClick={() => { setBlob(item.id); setTarget(item.end + 1); }}>{item.id}</button></td><td>{item.end}</td><td>{schedule ? new Date(schedule.firstEpochStartMs + item.end * schedule.epochDurationMs).toISOString() : 'schedule unavailable'}; {epoch === undefined ? '?' : Math.max(0, item.end - epoch)} epoch(s). Projection assumes unchanged epoch duration.</td><td>{item.policy?.target ?? 'unprotected'}{item.policy && item.policy.last_success_epoch === null && item.policy.max_fee === '0' ? ' (capacity prepaid)' : ''}</td><td>{item.policy?.last_success_epoch ?? 'none'}</td></tr>)}
+      </tbody></table>
+      <label>Blob object ID <input className="border" value={blob} onChange={(e) => setBlob(e.target.value)} /></label>
+      <label>Finite target epoch <input className="border w-16" type="number" value={target} onChange={(e) => setTarget(Number(e.target.value))} /></label>
+      <label>Maximum WAL quote <input className="border w-20" value={maxFee} onChange={(e) => setMaxFee(e.target.value)} /></label>
+      <button type="button" onClick={() => void submit(() => buildAuthorizeRenewalTx(config, storage, budget, cap, blob, target, parseToken(maxFee)))}>Authorize this renewal</button>
+      <div><label>Reserve WAL <input className="border w-20" value={walFunds} onChange={(e) => setWalFunds(e.target.value)} /></label>
+        <label>Reserve SUI <input className="border w-20" value={gasFunds} onChange={(e) => setGasFunds(e.target.value)} /></label>
+        <button type="button" disabled={!policy} onClick={() => void submit(() => buildFundRetentionTx(config, storage, parseToken(walFunds), parseToken(gasFunds)))}>Deposit protected reserves</button>
+        <label><input type="checkbox" checked={withdrawConfirmed} onChange={(e) => setWithdrawConfirmed(e.target.checked)} /> I understand withdrawing these amounts can leave every protected blob at risk at its shown expiry.</label>
+        <button type="button" disabled={!withdrawConfirmed || !account || !policy} onClick={() => void submit(() => buildWithdrawRetentionTx(config, storage, budget, cap, parseToken(walFunds), parseToken(gasFunds), account!.address))}>Withdraw reserves with expiry risk</button>
+      </div>
+    </>}
+    {view.error && <p role="alert">Retention state unavailable: {view.error.message}</p>}
+    {message && <p role="status">{message}</p>}{error && <p role="alert">{error}</p>}
+  </fieldset>;
+}

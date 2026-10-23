@@ -902,6 +902,9 @@ async fn execute(
         ),
         "wrong deployment type"
     );
+    journal.ensure_receipt_room(&event.deployment_id)?;
+    anyhow::ensure!(cfg.budget.is_none() || !journal.state.funding.as_ref().is_some_and(|f| f.blocked.is_some()),
+        "network funding unavailable; new deployments paused, installed applications unchanged");
     if !admit(sui, journal, &event.deployment_id, &cfg.device.device_object_id).await? {
         return Ok(None);
     }
@@ -1014,6 +1017,7 @@ async fn stage_daemon_update(
 /// Persist notice and deferral independently of execution outcomes. A terminal
 /// observation is never forgotten if the device clock subsequently moves back.
 async fn admit(sui: &SuiClient, journal: &mut Journal, id: &str, device: &str) -> anyhow::Result<bool> {
+    journal.ensure_receipt_room(id)?;
     if journal.state.deferred.get(id).is_some_and(|d| d.terminal) { return Ok(false); }
     // A missing record (including old-package deletion) is never permission.
     anyhow::ensure!(sui.optional_object(id).await?.is_some(), "deployment deleted before admission");
@@ -1556,7 +1560,13 @@ fn record_result(outcome: &mut Outcome, result: anyhow::Result<()>) {
         Err(_) if outcome.indeterminate => None,
         Err(_) => Some(protocol::STATUS_FAILED),
     };
-    outcome.error = result.err().map(|error| format!("{error:#}"));
+    outcome.error = result.err().map(|error| {
+        let text = format!("{error:#}");
+        if text.len() <= 4096 { return text; }
+        let mut end = 4096;
+        while !text.is_char_boundary(end) { end -= 1; }
+        format!("{} [diagnostic truncated at queue bound]", &text[..end])
+    });
 }
 
 /// Pick up firmware-helper results for deployments still without a status:
