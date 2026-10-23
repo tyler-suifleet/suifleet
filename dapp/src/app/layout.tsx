@@ -20,6 +20,7 @@ const NAV = [
   { href: "/data",        label: "Logs and diagnostics" },
   { href: "/enrollment",  label: "Enrollment" },
   { href: "/deployments", label: "Deployments" },
+  { href: "/rollouts",    label: "Rollouts" },
   { href: "/components", label: "Components" },
   { href: "/firmware",    label: "Deploy component" },
   { href: "/access",      label: "Access policies" },
