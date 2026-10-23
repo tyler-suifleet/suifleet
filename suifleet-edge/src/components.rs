@@ -315,11 +315,57 @@ pub async fn artifact(
             return Ok(());
         }
     }
+    tokio::time::timeout(walrus.deadline(), async {
+        let mut error = anyhow::anyhow!("no Walrus mirrors configured");
+        for (index, mirror) in walrus.mirrors().enumerate() {
+            // Start each fallback mirror cleanly. The first attempt can resume
+            // persisted bytes; the final digest authenticates the entire file.
+            if index > 0 {
+                WalrusClient::discard_partial(dest)?;
+            }
+            match tokio::time::timeout(
+                walrus.mirror_deadline(),
+                artifact_from_mirror(&mirror, blob_id, sha256, dest),
+            )
+            .await
+            {
+                Ok(Ok(())) => return Ok(()),
+                outcome => {
+                    let e = match outcome {
+                        Ok(Err(e)) => e,
+                        _ => anyhow::anyhow!("artifact mirror deadline exceeded"),
+                    };
+                    let _ = std::fs::remove_file(dest);
+                    error = e;
+                }
+            }
+        }
+        // A complete corrupt candidate must not poison the next poll's resume.
+        Err(error)
+    })
+    .await
+    .map_err(|_| anyhow::anyhow!("artifact mirror deadline exceeded"))??;
+    if let Some(store) = store {
+        if let Err(error) = store.save_artifact(walrus, sha256, dest) {
+            warn!(%error, "Cannot cache artifact");
+        }
+    }
+    Ok(())
+}
+
+async fn artifact_from_mirror(
+    walrus: &WalrusClient,
+    blob_id: &str,
+    sha256: &str,
+    dest: &Path,
+) -> anyhow::Result<()> {
     let actual = walrus.download(blob_id, dest).await?;
     if actual != sha256 && is_envelope_file(dest)? {
         let ciphertext = std::fs::read(dest)?;
         let _ = std::fs::remove_file(dest);
-        let plaintext = walrus.open(ciphertext, crate::seal::Kind::Artifact, sha256).await?;
+        let plaintext = walrus
+            .open(ciphertext, crate::seal::Kind::Artifact, sha256)
+            .await?;
         return replace_private(dest, &plaintext);
     }
     anyhow::ensure!(
@@ -331,11 +377,6 @@ pub async fn artifact(
     if walrus.confidential_only() {
         let _ = std::fs::remove_file(dest);
         anyhow::bail!("unencrypted artifact refused: [seal] mode = \"required\" accepts only confidential delivery");
-    }
-    if let Some(store) = store {
-        if let Err(error) = store.save_artifact(walrus, sha256, dest) {
-            warn!(%error, "Cannot cache artifact");
-        }
     }
     Ok(())
 }
