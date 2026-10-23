@@ -15,6 +15,9 @@
 //! - Returned keys are ElGamal-encrypted to a fresh per-request key, checked
 //!   against the server's public key, and kept only in memory for at most
 //!   `key_cache_seconds`.
+//! - Key servers bill per request, so keys are requested from only as many
+//!   servers as the threshold needs, in the ciphertext's order, and from the
+//!   next ones only to replace a failed server's shares (SF-133).
 use crate::{
     config::{SealConfig, SealMode},
     identity::TxSigner,
@@ -27,6 +30,7 @@ use ed25519_dalek::{Signer, SigningKey};
 use serde_json::{json, Value};
 use std::{
     collections::HashMap,
+    future::Future,
     ops::Range,
     str::FromStr,
     sync::{Arc, Mutex},
@@ -433,6 +437,47 @@ impl KeyServer {
     }
 }
 
+/// Fetch keys from servers in `order` (each with its share weight) until the
+/// fetched weight reaches `threshold`: first only as many servers as needed,
+/// then, after failures, the next ones in order to replace the missing
+/// weight. A round's servers are asked concurrently; none is asked twice.
+/// Returns each failed server's error.
+async fn fetch_threshold<K, F, Fut>(
+    order: &[([u8; 32], usize)],
+    threshold: usize,
+    keys: &mut HashMap<[u8; 32], K>,
+    mut fetch: F,
+) -> Vec<([u8; 32], anyhow::Error)>
+where
+    F: FnMut([u8; 32]) -> Fut,
+    Fut: Future<Output = anyhow::Result<K>>,
+{
+    let weight = |keys: &HashMap<[u8; 32], K>| order.iter().filter(|(id, _)| keys.contains_key(id)).map(|(_, w)| w).sum::<usize>();
+    let mut pending = order.iter().filter(|(id, _)| !keys.contains_key(id)).copied().collect::<Vec<_>>().into_iter();
+    let mut errors = Vec::new();
+    loop {
+        let missing = threshold.saturating_sub(weight(keys));
+        let (mut round, mut added) = (Vec::new(), 0);
+        while added < missing {
+            let Some((id, w)) = pending.next() else { break };
+            round.push(id);
+            added += w;
+        }
+        if round.is_empty() {
+            return errors;
+        }
+        let results = futures_util::future::join_all(round.iter().map(|id| fetch(*id))).await;
+        for (id, result) in round.into_iter().zip(results) {
+            match result {
+                Ok(key) => {
+                    keys.insert(id, key);
+                }
+                Err(error) => errors.push((id, error)),
+            }
+        }
+    }
+}
+
 // ── Confidential blobs ───────────────────────────────────────────────────────
 
 /// The daemon's view of an access policy.
@@ -581,7 +626,8 @@ impl Seal {
         servers.iter().filter_map(|s| keys.get(&(full_id.to_vec(), s.object_id)).map(|(k, _)| (s.object_id, *k))).collect()
     }
 
-    /// Ask every needed key server concurrently; enough weight must answer.
+    /// Ask just enough key servers for the threshold, concurrently, and the
+    /// next ones in order to replace failures; enough weight must answer.
     async fn fetch_keys(&self, object: &Object, servers: &[KeyServer], ptb: &ProgrammableTransaction) -> anyhow::Result<HashMap<[u8; 32], G1Affine>> {
         let full_id = object.full_id();
         let mut keys = self.cached(&full_id, servers);
@@ -605,24 +651,30 @@ impl Seal {
             "request_signature": STANDARD.encode(&signature),
             "certificate": certificate.to_json(),
         });
-        let pending: Vec<_> = servers.iter().filter(|s| !keys.contains_key(&s.object_id)).collect();
-        let results = futures_util::future::join_all(pending.iter().map(|s| self.fetch_from(s, &request, &enc_secret))).await;
-        let mut errors = Vec::new();
-        for (server, result) in pending.iter().zip(results) {
-            match result.and_then(|found| {
-                found.into_iter().find(|(id, _)| *id == full_id).map(|(_, key)| key).ok_or_else(|| anyhow::anyhow!("no key for this identity"))
-            }) {
-                Ok(key) => {
-                    keys.insert(server.object_id, key);
-                    if self.config.key_cache_seconds > 0 {
-                        self.keys.lock().unwrap().insert((full_id.clone(), server.object_id), (key, Instant::now()));
-                    }
-                }
-                Err(error) => {
-                    warn!(server = server.name, "Seal key request refused or failed: {error:#}");
-                    errors.push(format!("{}: {error:#}", server.name));
-                }
+        // In the ciphertext's order, each server weighted by its shares.
+        let order: Vec<_> = servers.iter().map(|s| (s.object_id, object.services.iter().filter(|(id, _)| *id == s.object_id).count())).collect();
+        let server = |id: [u8; 32]| servers.iter().find(|s| s.object_id == id).expect("ordered from these servers");
+        let (request, enc_secret, full_id) = (&request, &enc_secret, &full_id);
+        let failures = fetch_threshold(&order, usize::from(object.threshold), &mut keys, |id| async move {
+            let server = server(id);
+            let key = self
+                .fetch_from(server, request, enc_secret)
+                .await?
+                .into_iter()
+                .find(|(found, _)| found == full_id)
+                .map(|(_, key)| key)
+                .ok_or_else(|| anyhow::anyhow!("no key for this identity"))?;
+            if self.config.key_cache_seconds > 0 {
+                self.keys.lock().unwrap().insert((full_id.clone(), id), (key, Instant::now()));
             }
+            Ok(key)
+        })
+        .await;
+        let mut errors = Vec::new();
+        for (id, error) in failures {
+            let server = server(id);
+            warn!(server = server.name, "Seal key request refused or failed: {error:#}");
+            errors.push(format!("{}: {error:#}", server.name));
         }
         anyhow::ensure!(
             weight(&keys) >= usize::from(object.threshold),
@@ -801,6 +853,79 @@ mod tests {
         assert!(transport("http://seal.example").is_err(), "plain HTTP off-host");
         assert!(transport("https://user:pass@seal.example").is_err());
         assert!(transport("ftp://seal.example").is_err());
+    }
+
+    /// Runs `fetch_threshold` against fake servers: those in `failing`
+    /// refuse. Returns the servers asked, round by round, and the outcome.
+    async fn threshold_run(order: &[([u8; 32], usize)], threshold: usize, cached: &[[u8; 32]], failing: &[[u8; 32]]) -> (Vec<Vec<[u8; 32]>>, HashMap<[u8; 32], u8>, Vec<[u8; 32]>) {
+        let calls = Mutex::new(Vec::<[u8; 32]>::new());
+        let rounds = Mutex::new(Vec::<Vec<[u8; 32]>>::new());
+        let mut keys: HashMap<[u8; 32], u8> = cached.iter().map(|id| (*id, 0)).collect();
+        let failures = fetch_threshold(order, threshold, &mut keys, |id| {
+            calls.lock().unwrap().push(id);
+            let (calls, rounds) = (&calls, &rounds);
+            async move {
+                // Every request of a round starts before any of them finishes.
+                let started = std::mem::take(&mut *calls.lock().unwrap());
+                if !started.is_empty() {
+                    rounds.lock().unwrap().push(started);
+                }
+                tokio::task::yield_now().await;
+                anyhow::ensure!(!failing.contains(&id), "refused");
+                Ok(id[0])
+            }
+        })
+        .await;
+        let errors = failures.iter().map(|(id, error)| {
+            assert_eq!(error.to_string(), "refused");
+            *id
+        });
+        (rounds.into_inner().unwrap(), keys, errors.collect())
+    }
+
+    #[tokio::test]
+    async fn keys_come_from_a_threshold_of_servers_with_ordered_fallback() {
+        let (a, b, c, d) = ([1; 32], [2; 32], [3; 32], [4; 32]);
+        let even = [(a, 1), (b, 1), (c, 1)];
+        // Only as many servers as the threshold needs are asked.
+        let (rounds, keys, errors) = threshold_run(&even, 2, &[], &[]).await;
+        assert_eq!(rounds, vec![vec![a, b]]);
+        assert_eq!((keys.len(), errors.len()), (2, 0));
+        // A failure is replaced by the next server in order, and only it.
+        let (rounds, keys, errors) = threshold_run(&even, 2, &[], &[a]).await;
+        assert_eq!(rounds, vec![vec![a, b], vec![c]]);
+        assert!(keys.contains_key(&b) && keys.contains_key(&c) && !keys.contains_key(&a));
+        assert_eq!(errors, vec![a]);
+        let (rounds, _, errors) = threshold_run(&even, 2, &[], &[b]).await;
+        assert_eq!((rounds, errors), (vec![vec![a, b], vec![c]], vec![b]));
+        // Too many failures: every server is asked once, then the shortfall shows.
+        let (rounds, keys, errors) = threshold_run(&even, 2, &[], &[a, c]).await;
+        assert_eq!(rounds, vec![vec![a, b], vec![c]]);
+        assert_eq!((keys.len(), errors), (1, vec![a, c]));
+        // The threshold equals the server count: all are needed at once.
+        let (rounds, keys, _) = threshold_run(&even, 3, &[], &[]).await;
+        assert_eq!((rounds, keys.len()), (vec![vec![a, b, c]], 3));
+        // A threshold beyond every server's weight asks each once and fails.
+        let (rounds, keys, _) = threshold_run(&even, 4, &[], &[]).await;
+        assert_eq!((rounds, keys.len()), (vec![vec![a, b, c]], 3));
+        // Threshold 1: one server; failures fall through one at a time.
+        let (rounds, _, _) = threshold_run(&even, 1, &[], &[a, b]).await;
+        assert_eq!(rounds, vec![vec![a], vec![b], vec![c]]);
+        // Cached keys count: only the missing weight is requested.
+        let (rounds, keys, _) = threshold_run(&even, 2, &[b], &[]).await;
+        assert_eq!((rounds, keys.len()), (vec![vec![a]], 2));
+        let (rounds, _, _) = threshold_run(&even, 2, &[a, c], &[]).await;
+        assert!(rounds.is_empty(), "the cache already meets the threshold");
+        // Weight is the number of shares a server holds.
+        let weighted = [(a, 2), (b, 1), (c, 1), (d, 1)];
+        let (rounds, keys, _) = threshold_run(&weighted, 2, &[], &[]).await;
+        assert_eq!((rounds, keys.len()), (vec![vec![a]], 1));
+        let (rounds, _, _) = threshold_run(&weighted, 2, &[], &[a]).await;
+        assert_eq!(rounds, vec![vec![a], vec![b, c]]);
+        let (rounds, _, _) = threshold_run(&weighted, 3, &[], &[b]).await;
+        assert_eq!(rounds, vec![vec![a, b], vec![c]]);
+        let (rounds, _, _) = threshold_run(&[(b, 1), (a, 2)], 2, &[], &[]).await;
+        assert_eq!(rounds, vec![vec![b, a]], "the ciphertext's order decides, not weight");
     }
 
     /// A provider redirect is refused on both the proof-of-possession and the
