@@ -245,3 +245,36 @@ production service or an owner-policy bypass.
 Normal exact-head CI/testnet and independent review remain mandatory. Physical,
 manual real-wallet, mainnet and production-provider acceptance remains explicitly
 unrun in #32/#159.
+
+### Recovering executor and alert outages
+
+New signed transactions are limited to three preparations per authorized target
+and the configured non-replenishing gas ceiling. An uncertain transaction keeps
+its original signed bytes: receipt reconciliation and idempotent resubmission
+continue with exponential backoff capped at one hour, until exclusive blob expiry.
+`renewal_retry_exhausted` warns after three submissions; it does not abandon prepaid
+capacity. A stopped worker still provides no renewal guarantee.
+
+Stop the worker before acknowledging old alerts. Inspect its private
+`retention.json`, then export and explicitly acknowledge entries older than a chosen
+epoch (including undelivered or retry-exhausted entries):
+
+```bash
+python3 scripts/retention_worker.py --config /private/retention-config.json \
+  --state-dir /private/retention-state --archive-alerts-before 560 \
+  --alert-export /private/alerts-before-560.json
+```
+
+The export must be a new file; it is private and flushed before entries are removed
+from durable state. Keep the export for audit. Alerts at or after the cutoff remain
+queued, and the worker can admit new warnings after restart. Archiving an active
+condition can allow it to be queued again; prefer past epochs. A full queue retains
+all unacknowledged warnings and records backpressure locally; delivery of new alerts
+is unavailable until the owner frees space. Monitor this state as well as the relay.
+
+Owner `extend_blob` must not be used while prepaid renewal capacity is attached:
+changing its expected expiry strands that capacity and delegated execution aborts.
+Use the prepaid executor first. Reauthorization discards capacity without refund;
+inspect pending intent before any owner policy/reference change. During funding
+outages the daemon retries the unprocessed one-shot event on a later poll; that
+cycle can defer bookkeeping reconciliation, while installed applications persist.

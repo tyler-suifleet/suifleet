@@ -74,6 +74,25 @@ class Worker:
             raise RuntimeError('transport response exceeds limit')
         return json.loads(result.stdout)
 
+    def archive_alerts(self, before_epoch, destination):
+        # Explicit owner acknowledgment, including warnings never delivered.
+        archived = {key: value for key, value in self.state['alerts'].items()
+                    if int(key.rsplit(':', 1)[1]) < before_epoch}
+        fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, 'w') as stream:
+            json.dump({'binding': self.state['binding'], 'alerts': archived}, stream, sort_keys=True)
+            stream.flush()
+            os.fsync(stream.fileno())
+        directory_fd = os.open(Path(destination).parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+        for key in archived:
+            del self.state['alerts'][key]
+        self.state.pop('notifier', None)
+        self.save()
+
     def notify(self, code, epoch, now):
         # Payload deliberately excludes blob IDs, fleet metadata and credentials.
         key = f'{code}:{epoch}'
@@ -152,11 +171,19 @@ class Worker:
             attempt = self.state['attempts'].setdefault(key, {'count': 0, 'next': 0, 'target': target})
             # New targets require deliberate authorization, but cannot clear uncertain intent.
             if attempt['target'] != target and key not in self.state['pending']:
-                attempt.update(count=0, next=0, target=target)
-            if attempt['count'] >= 3 or now < attempt['next']:
-                continue
+                attempt.update(count=0, prepared=0, next=0, target=target)
             pending = self.state['pending'].get(key)
+            attempt.setdefault('prepared', max(1, attempt['count']) if pending else attempt['count'])
+            if attempt['count'] >= 3:
+                self.notify('renewal_retry_exhausted', snapshot['epoch'], now)
+            if now < attempt['next']:
+                continue
+            if not pending and attempt.get('prepared', attempt['count']) >= 3:
+                continue
             if pending:
+                # Receipt outages must not discard intent or bypass retry pacing.
+                attempt['next'] = now + min(3600, 60 * 2 ** min(attempt['count'], 6))
+                self.save()
                 receipt = self.transport('receipt', pending)
                 if receipt['status'] == 'failed':
                     del self.state['pending'][key]
@@ -179,9 +206,10 @@ class Worker:
                     self.notify('retention_low', snapshot['epoch'], now)
                     continue
                 pending = self.transport('prepare', {'blob': key, 'end': blob['end'], 'revision': snapshot['revision']})
+                attempt['prepared'] = attempt.get('prepared', attempt['count']) + 1
                 self.state['pending'][key] = pending
                 self.state['spent_ceiling'] += gas  # refunds/top-ups never replenish run ceiling
-            attempt.update(count=attempt['count'] + 1, next=now + 60 * 2 ** attempt['count'])
+            attempt.update(count=attempt['count'] + 1, next=now + min(3600, 60 * 2 ** min(attempt['count'], 6)))
             self.save()  # intent and same signed bytes durable before sending
             try:
                 self.transport('submit', pending)
@@ -197,8 +225,15 @@ def main():
     parser.add_argument('--config', type=Path, required=True)
     parser.add_argument('--state-dir', type=Path, required=True)
     parser.add_argument('--once', action='store_true')
+    parser.add_argument('--archive-alerts-before', type=int)
+    parser.add_argument('--alert-export', type=Path)
     args = parser.parse_args()
+    if (args.archive_alerts_before is None) != (args.alert_export is None):
+        parser.error('archive requires both --archive-alerts-before and --alert-export')
     worker = Worker(json.loads(args.config.read_text()), args.state_dir)
+    if args.alert_export is not None:
+        worker.archive_alerts(args.archive_alerts_before, args.alert_export)
+        return
     while True:
         try:
             worker.tick()

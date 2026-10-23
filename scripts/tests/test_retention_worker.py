@@ -115,10 +115,63 @@ class RetentionTests(unittest.TestCase):
             worker = self.worker(directory, chain)
             for now in range(0, 10000, 300):
                 worker.tick(now)
-            self.assertEqual(chain.submitted, 3)
+            self.assertGreater(chain.submitted, 3)
             self.assertEqual(chain.prepared, 1)
-            self.assertEqual(len(worker.state['alerts']), 1)
+            self.assertEqual(len(worker.state['alerts']), 2)
             self.assertIn('unconfigured', next(iter(worker.state['alerts'].values()))['status'])
+            worker.lock.close()
+
+    def test_long_submit_outage_recovers_original_intent_after_restart(self):
+        with tempfile.TemporaryDirectory() as directory:
+            chain = Chain()
+            chain.outage = True
+            worker = self.worker(directory, chain)
+            for now in (0, 60, 180, 420, 900, 1860):
+                worker.tick(now)
+            self.assertGreater(chain.submitted, 3)
+            self.assertIn('renewal_retry_exhausted:4', worker.state['alerts'])
+            original = dict(worker.state['pending']['blob'])
+            worker.lock.close()
+            worker = self.worker(directory, chain)
+            chain.outage = False
+            worker.tick(10000)
+            worker.tick(10001)
+            self.assertEqual(worker.state['last_success']['blob']['digest'], original['digest'])
+            self.assertEqual(chain.prepared, 1)
+            self.assertEqual(worker.state['spent_ceiling'], 10)
+            worker.lock.close()
+
+    def test_retry_stops_at_exclusive_expiry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            chain = Chain()
+            chain.outage = True
+            worker = self.worker(directory, chain)
+            worker.tick(0)
+            chain.epoch = 5
+            worker.tick(10000)
+            self.assertEqual(chain.submitted, 1)
+            self.assertIn('blob_expired:5', worker.state['alerts'])
+            worker.lock.close()
+
+    def test_full_alert_queue_export_acknowledgment_and_restart(self):
+        with tempfile.TemporaryDirectory() as directory:
+            worker = self.worker(directory, Chain())
+            for epoch in range(256):
+                worker.notify('old_warning', epoch, epoch)
+            worker.notify('blob_expired', 300, 300)
+            self.assertNotIn('blob_expired:300', worker.state['alerts'])
+            export = Path(directory) / 'alerts-export.json'
+            worker.archive_alerts(256, export)
+            self.assertEqual(len(json.loads(export.read_text())['alerts']), 256)
+            self.assertEqual(export.stat().st_mode & 0o777, 0o600)
+            worker.lock.close()
+            worker = self.worker(directory, Chain())
+            worker.notify('blob_expired', 300, 301)
+            self.assertIn('blob_expired:300', worker.state['alerts'])
+            # Refuse overwriting an export; never acknowledge without exporting.
+            with self.assertRaises(FileExistsError):
+                worker.archive_alerts(301, export)
+            self.assertIn('blob_expired:300', worker.state['alerts'])
             worker.lock.close()
 
     def test_notifier_rejects_symlink_and_public_secret(self):
