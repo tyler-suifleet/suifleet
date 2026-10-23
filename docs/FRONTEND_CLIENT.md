@@ -18,7 +18,57 @@ One dApp Kit instance selects the manifest's single network. Wallet account chai
 
 ## Queries and layouts
 
-Inventory uses `listOwnedObjects`; groups and deployment history use `listEvents`, including empty scan-limited pages with a continuation cursor. Collection cursors and history `before` cursors are separate. Repeated/missing continuation cursors fail instead of spinning. Object batches skip only missing/deleted records; transport failures propagate.
+Inventory uses `listOwnedObjects` and batches custodied Device objects. Groups,
+policies, catalogs and deployments discover IDs through typed gRPC `ListEvents`
+with a durable ascending watermark. The cursor and decoded event bytes are saved
+atomically in browser local storage, scoped by chain, endpoint, call package, type
+and sender. Owner-created streams combine type and sender predicates. Cross-sender
+streams (device gas draws/enrollments and fleet-wide alert deployments) retain a
+type filter: filtering those by the operator would discard legitimate events.
+Concurrent scans of the same stream share one request. Empty scan pages advance
+the watermark; missing/repeated cursors and incomplete streams fail visibly.
+A failed scan does not commit its partial results. Storage/quota failures and
+backpressure (200 pages or a 4 MiB stream cache) remain visible failures.
+
+The endpoint's `lowestAvailableCheckpoint` is checked on every scan. First reads
+on a pruned endpoint show **History unavailable** with the retained boundary;
+available results remain explicitly partial. A saved cursor that fell behind
+retention fails instead of silently crossing a gap. Missing retention metadata
+also fails. Use an archival endpoint to recover complete discovery; changing the
+endpoint intentionally selects a separate cache. Current group/record objects,
+deployment target fields, receipts and controls are freshly read: cached events
+are discovery hints only. Objects predating retained history cannot be discovered
+from events on a fresh browser. SF-125's deployment inbox must be integrated only
+after that API merges; this change neither guesses its interface nor claims that
+older objects were recovered.
+
+Network refresh defaults are 60 seconds (storage certification checks already
+using a longer interval keep it). Budget accounts batch both deterministic
+DeviceKey fields and GasAccount objects, preserving input order and validating
+budget/device bindings. Fleet health batches identities, device indexes and
+DeviceData objects while retaining signature/origin/binding checks. Only absent
+indexes mean unenrolled/unreported; transport and dangling-object failures stay
+unavailable. Legacy isolated query fixtures without `getObjects` retain the
+single-object health adapter; the shipped SDK client uses batches.
+
+The browser's SDK transport shares one per-tab request queue, spacing starts by
+350 ms (at most 86 starts per 30 seconds), including SDK proof and receipt reads.
+Aborted queued requests never reach the network. A 500-request queue limit fails
+visibly; it does not drop work or treat it as success. Large initial views can
+take longer than a refresh interval and stay loading/unavailable until verified.
+This per-tab bound is not a shared-IP quota across tabs/users and does not make
+public testing endpoints a production service. See the official
+[public endpoint guidance](https://docs.sui.io/operators/data-management/indexer-stack-setup).
+
+`node scripts/test_dashboard_requests.cjs` measures real query calls for 1,000
+fixture devices: 44 inventory reads/proofs, 40 budget-account batches and 61
+chain-health object reads. Its conservative combined load (two inventory/health
+consumers, budget accounts and 30 additional calls) is 280 requests; the actual
+queue drains it in 97,650 ms of virtual time, with a peak of 86 starts in any
+30-second window. This is offline query/request-scheduler evidence, not a live
+endpoint throughput or production capacity measurement. The existing browser
+fixtures separately exercise actual browser/wallet/health flows.
+
 
 `dapp/src/lib/move-bcs.ts` defines the current contract layouts. Objects, events, UpgradeCap and receipts decode BCS rather than transport-dependent JSON. Deployment timestamps come from the actual record. Missing authoritative receipts mark legacy history unverified; legacy StatusesKey is never read. Invalid receipt authority generations, unknown statuses and object schema versions are rejected. A positive receipts version is an authority generation, so an additive upgrade may bump it without changing the client layout; protocol/schema compatibility is enforced separately by the manifest. SF-005 remains responsible for generated/compiled layout compatibility; these definitions do not by themselves prove future upgrades compatible.
 

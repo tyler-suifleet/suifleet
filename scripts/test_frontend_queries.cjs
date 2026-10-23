@@ -36,6 +36,7 @@ const deploymentBytes = schema.DeploymentBcs.serialize({ id: deployment, creator
   assert.deepEqual((await sui.fetchGroups(c, owner))[0].deviceIds, [device]);
   assert.deepEqual(eventCursors, [undefined, "scanned-next"]);
   c.getDynamicField = async ({name}) => {
+    if (name.type.endsWith("::TargetGroupsKey") || name.type.endsWith("::TargetDevicesKey")) return {dynamicField:{value:{type:"vector<0x2::object::ID>", bcs:appRequire("@mysten/sui/bcs").bcs.vector(appRequire("@mysten/sui/bcs").bcs.Address).serialize(name.type.endsWith("::TargetGroupsKey") ? [group] : [device]).toBytes()}}};
     if (name.type.endsWith("::ControlKey")) throw new ObjectError("missing", "missing", {reason:"notFound"});
     return ({ dynamicField: { value: { type: `${m.type_origins["deployment_manager::Receipts"]}::deployment_manager::Receipts`, bcs: schema.ReceiptsBcs.serialize({ version: 2, statuses: { contents: [{ key: device, value: 1 }] } }).toBytes() } } });
   };

@@ -11,7 +11,7 @@ import { useBudgets, useFleetStorage } from "@/hooks/useFleetStorage";
 import {
   DEFAULT_LIMITS, DEFAULT_QUOTA, budgetAlerts, budgetSupported, buildCreateBudgetTx, buildCreateStorageTx, buildDepositTx,
   buildDepositWalTx, buildEnrollDeviceTx, buildFundDeviceTx, buildFundReserveTx, buildReclaimReserveTx, buildRefillPoolTx, buildRemoveDeviceTx,
-  buildSetDeviceSuspendedTx, buildSetPausedTx, buildSwapAndDepositWalTx, buildWithdrawTx, buildWithdrawWalTx, defaultReserve, fetchAccount,
+  buildSetDeviceSuspendedTx, buildSetPausedTx, buildSwapAndDepositWalTx, buildWithdrawTx, buildWithdrawWalTx, defaultReserve, fetchAccount, fetchAccounts,
   minWalOut, periodUsage, planRefill, readExchange, storageAlerts, storageConfig, swapRoute, type AccountView, type StorageConfig,
 } from "@/lib/fleet-budget";
 import { MEASURED, PROTECTED_BLOB_LIMIT, encodedBlobLength, estimate, formatToken, parseToken, runwayDays, type Estimate, type EstimateInput } from "@/lib/network-costs";
@@ -100,7 +100,7 @@ export function CardFunding({ asset, amount }: { asset: OnrampAsset; amount: str
   const balance = useQuery({
     queryKey: ["onramp-balance", NETWORK, account?.address, pending?.asset],
     enabled: !!account && !!pending,
-    refetchInterval: 15_000,
+    refetchInterval: 60_000,
     queryFn: async () => BigInt((await client.getBalance({ owner: account!.address, coinType: coinType(pending!.asset) })).balance.balance),
   });
   if (!account) return null;
@@ -194,10 +194,11 @@ export function BudgetManager() {
   const accounts = useQuery<(AccountView | undefined)[]>({
     queryKey: ["fleet-budget-accounts", NETWORK, budget?.id, activated.map((d) => d.objectId).join()],
     enabled: !!budget && devices.isSuccess,
-    refetchInterval: 15_000,
-    queryFn: () => Promise.all(activated.map((device) => fetchAccount(client, budget!.id, device.objectId))),
+    refetchInterval: 60_000,
+    queryFn: () => fetchAccounts(client, budget!.id, activated.map((device) => device.objectId)),
   });
   if (!account || !budget) return isLoading ? <p className="text-xs">Loading…</p> : readError ? <p role="alert" className="text-xs">{readError.message}</p> : null;
+  if (accounts.error) return <p role="alert">Budget accounts unavailable: {accounts.error.message}</p>;
   const now = BigInt(Date.now());
   const enrolled = (accounts.data ?? []).filter((a): a is AccountView => !!a);
   const spent = enrolled.reduce((sum, a) => sum + periodUsage(a, now).drawn, BigInt(0));
@@ -238,7 +239,7 @@ export function BudgetManager() {
         </tr>;
       })}</tbody>
     </table>
-    {accounts.error && <p role="alert">Usage unavailable: {accounts.error.message}</p>}
+
     {message && <p role="status">{message}</p>}
     {error && <p role="alert">{error}</p>}
   </div>;
@@ -366,9 +367,9 @@ function RetentionPanel({ config, storage, version, budget, cap, epoch, schedule
   const [walFunds, setWalFunds] = useState('1'), [gasFunds, setGasFunds] = useState('0.1');
   const [blob, setBlob] = useState(''), [target, setTarget] = useState(0), [maxFee, setMaxFee] = useState('1');
   const [withdrawConfirmed, setWithdrawConfirmed] = useState(false);
-  const view = useQuery({ queryKey: ['retention', NETWORK, storage, origin], enabled: !!origin && version === BigInt(2), refetchInterval: 30000,
+  const view = useQuery({ queryKey: ['retention', NETWORK, storage, origin], enabled: !!origin && version === BigInt(2), refetchInterval: 60_000,
     queryFn: () => fetchRetention(client, storage, origin!, config.storageOrigin ?? config.packageId) });
-  const deviceView = useQuery({ queryKey: ['device-retention', NETWORK, storage, config.packageId], enabled: !!origin && version === BigInt(2), refetchInterval: 30000,
+  const deviceView = useQuery({ queryKey: ['device-retention', NETWORK, storage, config.packageId], enabled: !!origin && version === BigInt(2), refetchInterval: 60_000,
     queryFn: () => fetchDeviceRetention(client, config, storage) });
   if (!origin) return <p>Protected retention is not configured for this build. No renewal or out-of-browser alerts are guaranteed.</p>;
   const policy = view.data?.policy, blobs = view.data?.blobs ?? [];

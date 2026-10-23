@@ -13,6 +13,6 @@ export function useDeployments() {
     queryKey: ["deployments", NETWORK, account?.address],
     queryFn: () => fetchDeploymentEvents(client, account!.address),
     enabled: !!account?.address,
-    refetchInterval: 10_000,
+    refetchInterval: 60_000,
   });
 }

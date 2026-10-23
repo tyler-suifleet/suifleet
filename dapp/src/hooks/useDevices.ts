@@ -13,6 +13,6 @@ export function useDevices() {
     queryKey: ["devices", NETWORK, account?.address],
     queryFn: () => fetchDevices(client, account!.address),
     enabled: !!account?.address,
-    refetchInterval: 15_000,
+    refetchInterval: 60_000,
   });
 }

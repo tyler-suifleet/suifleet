@@ -22,7 +22,14 @@ function client(target, creators = [owner, owner], shared = false) {
   }).toBytes()}]));
   c.listEvents = async () => ({events:events.map(e => ({bcs:schema.DeploymentCreatedBcs.serialize(e).toBytes()})),hasNextPage:false});
   c.getObjects = async ({objectIds}) => ({objects:objectIds.map(objectId => objectId === groupId ? target : records.get(objectId))});
-  c.getDynamicField = async () => { throw new ObjectError("missing", "not found", {reason:"notFound"}); };
+  c.getDynamicField = async ({parentId,name}) => {
+    if (name.type.endsWith("::TargetGroupsKey") || name.type.endsWith("::TargetDevicesKey")) {
+      const event = events.find(e=>e.deployment_id===parentId);
+      const {bcs} = appRequire("@mysten/sui/bcs");
+      return {dynamicField:{value:{type:"vector<0x2::object::ID>",bcs:bcs.vector(bcs.Address).serialize(name.type.endsWith("::TargetGroupsKey") ? event.target_groups : event.target_devices).toBytes()}}};
+    }
+    throw new ObjectError("missing", "not found", {reason:"notFound"});
+  };
   return c;
 }
 (async () => {

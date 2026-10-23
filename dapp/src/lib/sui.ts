@@ -1,3 +1,4 @@
+import { incrementalEvents as allEvents } from "./event-history";
 import { readDeploymentControl, type DeploymentControl } from "./deployment-control";
 import { calls } from "./fleet-protocol";
 import { SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS } from "./protocol-version";
@@ -5,7 +6,7 @@ import { requireManifest, moveType, verifyDeployment } from "./deployment-manife
 import { Transaction } from "@mysten/sui/transactions";
 import type { SuiGrpcClient } from "@mysten/sui/grpc";
 import { ObjectError } from "@mysten/sui/client";
-import { normalizeStructTag } from "@mysten/sui/utils";
+import { normalizeStructTag, normalizeTypeTag } from "@mysten/sui/utils";
 import { DeviceBcs, DeviceOwnerCapBcs, GroupBcs, GroupCreatedBcs, DeploymentCreatedBcs, DeploymentBcs, ReceiptsBcs } from "./move-bcs";
 import { bcs } from "@mysten/sui/bcs";
 import { PACKAGE_ID, REGISTRY_ID, DEVICE_TYPE, DEVICE_OWNER_CAP_TYPE, DEVICE_GROUP_TYPE, DEPLOYMENT_CREATED_EVENT } from "./constants";
@@ -262,7 +263,7 @@ export async function fetchDevices(client: SuiGrpcClient, owner: string): Promis
 
 export async function fetchGroups(client: SuiGrpcClient, owner: string): Promise<DeviceGroup[]> {
   await verifyDeployment(client);
-  const events = await allEvents(client, moveType("device_group::GroupCreated"));
+  const events = await allEvents(client, moveType("device_group::GroupCreated"), owner);
   const ids = events.map((event) => GroupCreatedBcs.parse(event.bcs))
     .map((event) => event.group_id);
   const objects = await objectsInBatches(client, [...new Set(ids)]);
@@ -274,19 +275,7 @@ export async function fetchGroups(client: SuiGrpcClient, owner: string): Promise
   }).filter((group) => group.admin === owner);
 }
 
-export async function allEvents(client: SuiGrpcClient, type: string) {
-  let page = await client.listEvents({ filter: { eventType: type }, order: "descending", limit: 50 });
-  const events = [...page.events];
-  // A scan-limited gRPC page may be empty and still have more history.
-  while (page.hasNextPage) {
-    if (!page.endCursor) throw new Error("Event pagination returned no cursor");
-    const before = page.endCursor;
-    page = await client.listEvents({ filter: { eventType: type }, before, limit: 50 });
-    if (page.hasNextPage && page.endCursor === before) throw new Error("Event pagination made no progress");
-    events.push(...page.events);
-  }
-  return events;
-}
+export { incrementalEvents as allEvents } from "./event-history";
 
 export async function objectsInBatches(client: SuiGrpcClient, ids: string[]) {
   const objects = [];
@@ -315,16 +304,29 @@ function supportedTargetGroup(group: { type: string; content: Uint8Array }) {
 
 export async function fetchDeploymentEvents(client: SuiGrpcClient, owner?: string): Promise<DeploymentEvent[]> {
   await verifyDeployment(client);
-  const events = (await allEvents(client, DEPLOYMENT_CREATED_EVENT)).map((event) => DeploymentCreatedBcs.parse(event.bcs));
+  const events = (await allEvents(client, DEPLOYMENT_CREATED_EVENT, owner)).map((event) => DeploymentCreatedBcs.parse(event.bcs));
   const objects = await objectsInBatches(client, [...new Set(events.map((event) => event.deployment_id))]);
   const live = new Map(objects.map((object) => [object.objectId, DeploymentBcs.parse(object.content)]));
   const liveEvents = events.filter((event) => {
     const record = live.get(event.deployment_id);
     return record && (!owner || record.creator === owner);
   });
-  const groups = await objectsInBatches(client, [...new Set(liveEvents.flatMap((event) => event.target_groups))]);
+  // Persisted events discover IDs only. Targets must be re-read from objects:
+  // browser storage is neither a current target list nor an authority source.
+  const currentEvents = await Promise.all(liveEvents.map(async event => {
+    async function targets(name: "TargetGroupsKey" | "TargetDevicesKey", optional = false): Promise<string[]> {
+      let field;
+      try { field = await client.getDynamicField({ parentId: event.deployment_id,
+        name: { type: moveType(`deployment_manager::${name}`), bcs: bcs.bool().serialize(false).toBytes() } }); }
+      catch (error) { if (optional && error instanceof ObjectError && error.reason === "notFound") return []; throw error; }
+      if (normalizeTypeTag(field.dynamicField.value.type) !== normalizeTypeTag("vector<0x2::object::ID>")) throw Error("Unexpected deployment targets type");
+      return bcs.vector(bcs.Address).parse(field.dynamicField.value.bcs);
+    }
+    return { ...event, target_groups: await targets("TargetGroupsKey"), target_devices: await targets("TargetDevicesKey", true) };
+  }));
+  const groups = await objectsInBatches(client, [...new Set(currentEvents.flatMap((event) => event.target_groups))]);
   const groupsById = new Map(groups.map((group) => [group.objectId, supportedTargetGroup(group)]));
-  return Promise.all(liveEvents.map(async (event) => {
+  return Promise.all(currentEvents.map(async (event) => {
     const record = live.get(event.deployment_id)!;
     if (!SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS.some(v => BigInt(v) === BigInt(record.schema_version))) throw new Error("Unsupported DeploymentRecord schema");
     const resolvedDeviceIds = [...new Set([...event.target_devices, ...event.target_groups.flatMap((id) => {
