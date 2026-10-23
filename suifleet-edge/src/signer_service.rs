@@ -51,7 +51,7 @@ use sui_sdk_types::{Address, Argument, Command, Input, Transaction};
 
 pub const MAX_ENROLL_BUDGET: u64 = 50_000_000;
 /// Room for a base64 telemetry snapshot of [`crate::telemetry::MAX_MESSAGE_BYTES`].
-const MAX_REQUEST_BYTES: u64 = 128 * 1024;
+const MAX_REQUEST_BYTES: u64 = 8 * 1024 * 1024;
 const IO_TIMEOUT: Duration = Duration::from_secs(10);
 
 fn default_socket() -> PathBuf {
@@ -97,6 +97,9 @@ pub struct ServiceConfig {
     /// Gas draws from the fleet budget (SF-083). Absent: refused.
     #[serde(default)]
     pub budget: Option<BudgetDraws>,
+    /// Explicit direct-chain writer binding; absent means refused.
+    #[serde(default)]
+    pub fleet_data: Option<crate::fleet_data::Config>,
 }
 
 /// `[budget]` in `signer.toml`: the one budget draws may name, and the most
@@ -142,7 +145,9 @@ impl ServiceConfig {
         let manifest: crate::config::DeploymentManifest =
             serde_json::from_str(&std::fs::read_to_string(&manifest_path).with_context(|| format!("reading {}", manifest_path.display()))?)?;
         manifest.validate()?;
+        if let Some(data) = &config.fleet_data { data.validate()?; }
         let policy = Policy {
+            fleet_data: config.fleet_data.clone(),
             device: Address::ZERO,
             package: Address::from_str(&manifest.call_package_id)?,
             namespace: Address::from_str(&manifest.type_origins["device_registry::DeviceRegistry"])?,
@@ -194,6 +199,7 @@ pub enum Intent {
     Report,
     Enroll,
     Draw,
+    FleetData,
 }
 
 #[derive(Debug, Clone)]
@@ -209,6 +215,7 @@ pub struct Policy {
     pub chain_identifier: String,
     /// The fleet budget gas draws may name and the most one draw may take.
     pub budget: Option<(Address, u64)>,
+    pub fleet_data: Option<crate::fleet_data::Config>,
 }
 
 fn input<'a>(inputs: &'a [Input], argument: &Argument) -> anyhow::Result<&'a Input> {
@@ -235,6 +242,12 @@ pub fn check(policy: &Policy, bytes: &[u8]) -> anyhow::Result<Intent> {
     let [Command::MoveCall(call)] = ptb.commands.as_slice() else {
         anyhow::bail!("transaction must contain exactly one call");
     };
+    if call.module.as_str() == "fleet_storage" {
+        return check_storage_transaction(policy, &tx, ptb, call);
+    }
+    if call.module.as_str() == "fleet_data" {
+        return check_fleet_transaction(policy, &tx, ptb, call);
+    }
     anyhow::ensure!(call.package == policy.package && call.type_arguments.is_empty(), "call is not on the fleet package");
     anyhow::ensure!(ptb.inputs.len() == call.arguments.len(), "transaction has extra inputs");
     let args: Vec<&Input> = call.arguments.iter().map(|a| input(&ptb.inputs, a)).collect::<anyhow::Result<_>>()?;
@@ -301,6 +314,73 @@ pub fn check(policy: &Policy, bytes: &[u8]) -> anyhow::Result<Intent> {
     }
 }
 
+/// Fleet-data intents have a separate configured package and fixed object set.
+/// Keep the budget/account/fleet/registry read-only; only the indexed writer mutates.
+fn check_fleet_transaction(policy: &Policy, tx: &Transaction,
+    ptb: &sui_sdk_types::ProgrammableTransaction, call: &sui_sdk_types::MoveCall) -> anyhow::Result<Intent> {
+    let cfg = policy.fleet_data.as_ref().ok_or_else(|| anyhow::anyhow!("fleet data signing is disabled"))?;
+    anyhow::ensure!(call.package == Address::from_str(&cfg.package_id)? && call.type_arguments.is_empty(), "wrong fleet-data package");
+    anyhow::ensure!(tx.gas_payment.owner == policy.device && tx.gas_payment.budget <= policy.max_budget, "wrong gas owner/budget");
+    let anchor = call.function.as_str() == "anchor";
+    anyhow::ensure!(anchor || call.function.as_str() == "report_health", "unexpected fleet-data intent");
+    let length = if anchor { 12 } else { 10 };
+    anyhow::ensure!(call.arguments.len() == length && ptb.inputs.len() == length, "unexpected fleet-data inputs");
+    let args: Vec<_> = call.arguments.iter().map(|a| input(&ptb.inputs, a)).collect::<anyhow::Result<_>>()?;
+    for (index, expected, mutable) in [(0, Address::from_str(&cfg.fleet_id)?, false),
+        (1, Address::from_str(&cfg.writer_id)?, true), (2, Address::from_str(&cfg.budget_id)?, false),
+        (3, Address::from_str(&cfg.account_id)?, false), (4, policy.registry, false),
+        (length-1, Address::from_str("0x6")?, false)] {
+        anyhow::ensure!(matches!(args[index], Input::Shared(s) if s.object_id() == expected && s.mutability().is_mutable() == mutable), "wrong fleet-data object/mutability at {index}");
+    }
+    anyhow::ensure!(matches!(args[5], Input::ImmutableOrOwned(r) if *r.object_id() == policy.cap), "not this device cap");
+    let pure = |index: usize| -> anyhow::Result<&[u8]> { match args[index] { Input::Pure(b) => Ok(b), _ => anyhow::bail!("not pure") } };
+    if anchor {
+        anyhow::ensure!(cfg.archives.is_some(), "archive signing disabled");
+        anyhow::ensure!(matches!(args[6], Input::Shared(s) if s.object_id() == Address::from_str(&cfg.storage_id).unwrap() && !s.mutability().is_mutable()), "foreign archive storage");
+        let _: Address = bcs::from_bytes(pure(7)?)?;
+        let seq: u64 = bcs::from_bytes(pure(8)?)?; let kind: u8 = bcs::from_bytes(pure(9)?)?;
+        let hash: Vec<u8> = bcs::from_bytes(pure(10)?)?;
+        anyhow::ensure!(seq > 0 && seq <= 9_007_199_254_740_991 && kind <= 2 && hash.len() == 32, "archive anchor bounds");
+        return Ok(Intent::FleetData);
+    }
+    let seq: u64 = bcs::from_bytes(pure(6)?)?;
+    let message: Vec<u8> = bcs::from_bytes(pure(7)?)?;
+    let signature: Vec<u8> = bcs::from_bytes(pure(8)?)?;
+    anyhow::ensure!(message.len() <= crate::fleet_data::MAX_HEALTH && [97, 98].contains(&signature.len()), "health payload bounds");
+    check_telemetry(policy, &message)?;
+    let snapshot: crate::telemetry::Snapshot = serde_json::from_slice(&message)?;
+    anyhow::ensure!(seq > 0 && snapshot.seq == seq, "health sequence mismatch");
+    Ok(Intent::FleetData)
+}
+
+fn check_storage_transaction(policy: &Policy, tx: &Transaction,
+    ptb: &sui_sdk_types::ProgrammableTransaction, call: &sui_sdk_types::MoveCall) -> anyhow::Result<Intent> {
+    let data = policy.fleet_data.as_ref().ok_or_else(|| anyhow::anyhow!("fleet data disabled"))?;
+    let storage = data.archives.as_ref().ok_or_else(|| anyhow::anyhow!("archives disabled"))?;
+    anyhow::ensure!(call.package == Address::from_str(&storage.storage_package)? && call.type_arguments.is_empty(), "foreign storage package");
+    anyhow::ensure!(tx.gas_payment.owner == policy.device && tx.gas_payment.budget <= policy.max_budget, "wrong gas owner/budget");
+    let register = call.function.as_str() == "register_blob";
+    anyhow::ensure!(register || call.function.as_str() == "certify_blob", "unexpected storage intent");
+    let count = if register { 11 } else { 6 };
+    anyhow::ensure!(call.arguments.len() == count && ptb.inputs.len() == count, "unexpected storage inputs");
+    let args: Vec<_> = call.arguments.iter().map(|a| input(&ptb.inputs,a)).collect::<anyhow::Result<_>>()?;
+    let mut objects = vec![(0, Address::from_str(&data.storage_id)?,true), (if register {5} else {1},Address::from_str(&storage.system_id)?,register)];
+    if register { objects.extend([(1,Address::from_str(&data.budget_id)?,false),(2,Address::from_str(&data.account_id)?,false),(3,policy.registry,false),(10,Address::from_str("0x6")?,false)]); }
+    for (index,id,mutable) in objects { anyhow::ensure!(matches!(args[index],Input::Shared(s) if s.object_id()==id && s.mutability().is_mutable()==mutable), "wrong storage object/mutability at {index}"); }
+    let pure = |index: usize| -> anyhow::Result<&[u8]> { match args[index] { Input::Pure(b) => Ok(b),_ => anyhow::bail!("not pure") } };
+    if register {
+        anyhow::ensure!(matches!(args[4],Input::ImmutableOrOwned(r) if *r.object_id()==policy.cap),"not this device cap");
+        anyhow::ensure!(pure(6)?.len()==32 && pure(7)?.len()==32,"invalid blob/root hash");
+        let size: u64 = bcs::from_bytes(pure(8)?)?; let encoding: u8 = bcs::from_bytes(pure(9)?)?;
+        anyhow::ensure!(size>0 && size<=crate::fleet_data::MAX_ARCHIVE as u64 && encoding==1,"archive encoding/size bounds");
+    } else {
+        let _: Address = bcs::from_bytes(pure(2)?)?;
+        let sig: Vec<u8> = bcs::from_bytes(pure(3)?)?; let bitmap: Vec<u8> = bcs::from_bytes(pure(4)?)?; let message: Vec<u8> = bcs::from_bytes(pure(5)?)?;
+        anyhow::ensure!(!sig.is_empty() && sig.len()<=256 && !bitmap.is_empty() && bitmap.len()<=512 && !message.is_empty() && message.len()<=4096,"certificate bounds");
+    }
+    Ok(Intent::FleetData)
+}
+
 /// Check a telemetry personal message: exactly the canonical JSON of one
 /// bounded snapshot, of this chain and registry, naming this key as signer.
 /// Its content is otherwise the daemon's own report, like a status report's.
@@ -340,6 +420,19 @@ pub fn check_logs(policy: &Policy, message: &[u8]) -> anyhow::Result<()> {
 pub fn check_personal(policy: &Policy, message: &[u8]) -> anyhow::Result<()> {
     let kind = serde_json::from_slice::<serde_json::Value>(message).ok().and_then(|v| v.get("kind").and_then(|k| k.as_str()).map(str::to_owned));
     match kind.as_deref() {
+        Some("fleet-data") => {
+            let cfg = policy.fleet_data.as_ref().ok_or_else(|| anyhow::anyhow!("fleet data signing is disabled"))?;
+            anyhow::ensure!(cfg.archives.is_some(), "archive signing is disabled");
+            anyhow::ensure!(message.len() <= crate::fleet_data::MAX_ARCHIVE, "archive too large");
+            let archive: crate::fleet_data::Archive = serde_json::from_slice(message).map_err(|_| anyhow::anyhow!("invalid archive JSON"))?;
+            archive.validate()?;
+            anyhow::ensure!(serde_json::to_vec(&archive)? == message, "noncanonical archive");
+            anyhow::ensure!(archive.chain_identifier == policy.chain_identifier
+                && Address::from_str(&archive.registry)? == policy.registry
+                && Address::from_str(&archive.signer)? == policy.device
+                && Address::from_str(&archive.fleet_id)? == Address::from_str(&cfg.fleet_id)?, "foreign archive binding");
+            Ok(())
+        }
         Some(crate::logs::KIND) => check_logs(policy, message),
         Some(crate::streams::MANIFEST_KIND) => crate::streams::check_manifest(message, &policy.chain_identifier, &policy.registry.to_string(), &policy.device.to_string()),
         Some(crate::shadows::MANIFEST_KIND) => crate::shadows::check_manifest(message, &policy.chain_identifier, &policy.registry.to_string(), &policy.device.to_string()),
@@ -592,6 +685,7 @@ pub fn handle(
                 let bytes = STANDARD.decode(request["tx"].as_str().unwrap_or(""))?;
                 match check(policy, &bytes)? {
                     Intent::Report => anyhow::ensure!(daemon, "status reports are signed only for the daemon's main process"),
+                    Intent::FleetData => anyhow::ensure!(daemon, "fleet data is signed only for the daemon main process"),
                     Intent::Draw => anyhow::ensure!(daemon, "gas draws are signed only for the daemon's main process"),
                     Intent::Enroll => anyhow::ensure!(root, "enrollment is signed only for root at provisioning"),
                 }
@@ -781,6 +875,7 @@ mod tests {
             max_budget: 50_000_000,
             chain_identifier: "4c78adac".into(),
             budget: Some((Address::from_str("0xb0").unwrap(), 100_000_000)),
+            fleet_data: None,
         }
     }
 
@@ -1294,4 +1389,106 @@ mod tests {
         let refused = signer.sign_personal_message(b"anything").unwrap_err();
         assert!(format!("{refused:#}").contains("not a telemetry snapshot"), "{refused:#}");
     }
+}
+
+#[cfg(test)]
+mod fleet_intent_tests {
+    use super::*;
+    use sui_transaction_builder::{Function, ObjectInput, TransactionBuilder};
+    fn a(s: &str) -> Address { s.parse().unwrap() }
+    fn policy() -> Policy {
+        Policy { device: a("0xa0"), package: a("0x3"), namespace: a("0x3"), registry: a("0x13"),
+            cap: a("0x11"), max_budget: 50_000_000, chain_identifier: "4c78adac".into(), budget: None,
+            fleet_data: Some(crate::fleet_data::Config { package_id: "0xf0".into(), type_origin: "0xf0".into(),
+                fleet_id: "0xf1".into(), writer_id: "0xf2".into(), budget_id: "0xb0".into(), account_id: "0xac".into(), storage_id: "0x5".into(), archives: None }) }
+    }
+    fn archive_policy() -> Policy {
+        let mut p=policy();
+        p.fleet_data.as_mut().unwrap().archives=Some(crate::fleet_archive::Config {
+            storage_package:"0xf6".into(), storage_type_origin:"0xf6".into(), system_id:"0xf4".into(), walrus_package:"0xf7".into(),
+            key_server_package:"0xf5".into(), key_servers:vec![crate::config::KeyServerConfig { object_id:"0xf8".into(),weight:1,api_key_name:None,api_key_file:None }],
+            threshold:1,node:"/usr/bin/node".into(),codec:"/usr/lib/codec.cjs".into(),codec_sha256:"00".repeat(32),
+        });p
+    }
+    fn snapshot(p: &Policy) -> crate::telemetry::Snapshot {
+        crate::telemetry::snapshot(&crate::telemetry::Binding { chain_identifier: p.chain_identifier.clone(), registry: p.registry.to_string(),
+            device_id: "0xd0".into(), interval_seconds: 60, poll_seconds: 10, started_ms: 1, boot_id: None },
+            &p.device.to_string(), 1, 0, Default::default(), Default::default(), 100)
+    }
+    fn transaction(change: Option<(usize, &str, bool)>, package: &str, sequence: u64, extra: bool) -> Vec<u8> {
+        let p = policy(); let mut b = TransactionBuilder::new();
+        let mut args = Vec::new();
+        for (index, id, mutable) in [(0,"0xf1",false),(1,"0xf2",true),(2,"0xb0",false),(3,"0xac",false),(4,"0x13",false)] {
+            let (id, mutable) = change.filter(|c| c.0 == index).map(|c| (c.1,c.2)).unwrap_or((id,mutable));
+            args.push(b.object(ObjectInput::shared(a(id),1,mutable)));
+        }
+        args.push(b.object(ObjectInput::owned(a("0x11"), 1, sui_sdk_types::Digest::ZERO)));
+        args.push(b.pure(&sequence)); args.push(b.pure(&serde_json::to_vec(&snapshot(&p)).unwrap())); args.push(b.pure(&vec![0u8;97]));
+        args.push(b.object(ObjectInput::shared(a("0x6"),1,false)));
+        b.move_call(Function::new(a(package),"fleet_data".parse().unwrap(),"report_health".parse().unwrap()),args);
+        if extra { b.pure(&123u64); }
+        b.set_sender(p.device); b.set_gas_budget(10_000_000); b.set_gas_price(1000);
+        b.add_gas_objects([ObjectInput::owned(a("0x12"),1,sui_sdk_types::Digest::ZERO)]);
+        bcs::to_bytes(&b.try_build().unwrap()).unwrap()
+    }
+    #[test]
+    fn health_intent_is_opt_in_and_binds_all_objects_mutability_and_sequence() {
+        let p = policy(); let good = transaction(None,"0xf0",1,false);
+        assert_eq!(check(&p,&good).unwrap(),Intent::FleetData);
+        assert!(check(&Policy { fleet_data: None, ..p.clone() },&good).is_err());
+        for index in 0..5 {
+            assert!(check(&p,&transaction(Some((index,"0xfe",index==1)),"0xf0",1,false)).is_err());
+            assert!(check(&p,&transaction(Some((index,["0xf1","0xf2","0xb0","0xac","0x13"][index],index!=1)),"0xf0",1,false)).is_err());
+        }
+        for bad in [transaction(None,"0xf3",1,false), transaction(None,"0xf0",2,false), transaction(None,"0xf0",1,true)] { assert!(check(&p,&bad).is_err()); }
+    }
+    #[test]
+    fn archive_signatures_are_bound_to_chain_registry_fleet_and_signer() {
+        let p = archive_policy();
+        let mut archive = crate::fleet_data::Archive { schema: 1, kind: "fleet-data".into(), chain_identifier: p.chain_identifier.clone(), registry: p.registry.to_string(),
+            fleet_id: "0xf1".into(), device_id: "0xd0".into(), signer: p.device.to_string(), seq: 1, observed_ms: 100,
+            reason: "diagnostics".into(), dropped_lines: 0, records: vec![] };
+        let bytes = serde_json::to_vec(&archive).unwrap(); check_personal(&p,&bytes).unwrap();
+        assert!(check_personal(&Policy { fleet_data: None, ..p.clone() },&bytes).is_err());
+        for field in ["chain_identifier","registry","fleet_id","signer"] {
+            let mut value = serde_json::to_value(&archive).unwrap(); value[field] = if field == "chain_identifier" { "ffffffff" } else { "0xff" }.into();
+            let bad: crate::fleet_data::Archive = serde_json::from_value(value).unwrap();
+            assert!(check_personal(&p,&serde_json::to_vec(&bad).unwrap()).is_err());
+        }
+        archive.records.push(crate::fleet_data::Record { source: "component".into(), line: "x".repeat(4097) });
+        assert!(check_personal(&p,&serde_json::to_vec(&archive).unwrap()).is_err());
+    }
+    fn archive_transaction(kind:&str, change:Option<(usize,&str,bool)>,size:u64,package:&str)->Vec<u8> {
+        let p=archive_policy();let mut b=TransactionBuilder::new();let mut args=Vec::new();
+        let objects:Vec<(&str,bool)>=match kind {
+            "register_blob"=>vec![("0x5",true),("0xb0",false),("0xac",false),("0x13",false)],
+            "certify_blob"=>vec![("0x5",true),("0xf4",false)],
+            _=>vec![("0xf1",false),("0xf2",true),("0xb0",false),("0xac",false),("0x13",false)],
+        };
+        for(index,(id,mutable))in objects.iter().enumerate(){let(id,mutable)=change.filter(|c|c.0==index).map(|c|(c.1,c.2)).unwrap_or((*id,*mutable));args.push(b.object(ObjectInput::shared(a(id),1,mutable)));}
+        if kind=="register_blob" || kind=="anchor" {args.push(b.object(ObjectInput::owned(a("0x11"),1,sui_sdk_types::Digest::ZERO)));}
+        if kind=="register_blob" {
+            args.push(b.object(ObjectInput::shared(a("0xf4"),1,true)));args.push(b.pure_bytes(vec![2;32]));args.push(b.pure_bytes(vec![3;32]));args.push(b.pure(&size));args.push(b.pure(&1u8));args.push(b.object(ObjectInput::shared(a("0x6"),1,false)));
+        }else if kind=="certify_blob"{
+            args.push(b.pure(&a("0xc0")));args.push(b.pure(&vec![0u8;96]));args.push(b.pure(&vec![1u8]));args.push(b.pure(&b"certificate".to_vec()));
+        }else{
+            args.push(b.object(ObjectInput::shared(a("0x5"),1,false)));args.push(b.pure(&a("0xc0")));args.push(b.pure(&1u64));args.push(b.pure(&0u8));args.push(b.pure(&vec![4u8;32]));args.push(b.object(ObjectInput::shared(a("0x6"),1,false)));
+        }
+        b.move_call(Function::new(a(package),if kind=="anchor"{"fleet_data"}else{"fleet_storage"}.parse().unwrap(),kind.parse().unwrap()),args);
+        b.set_sender(p.device);b.set_gas_budget(10_000_000);b.set_gas_price(1000);b.add_gas_objects([ObjectInput::owned(a("0x12"),1,sui_sdk_types::Digest::ZERO)]);
+        bcs::to_bytes(&b.try_build().unwrap()).unwrap()
+    }
+    #[test]
+    fn archive_transactions_are_opt_in_and_cannot_replace_authority_or_storage() {
+        let p=archive_policy();
+        for(kind,package,count)in [("register_blob","0xf6",4),("certify_blob","0xf6",2),("anchor","0xf0",5)]{
+            let good=archive_transaction(kind,None,2048,package);assert_eq!(check(&p,&good).unwrap(),Intent::FleetData);
+            assert!(check(&policy(),&good).is_err(),"health-only policy cannot publish archives");
+            for index in 0..count{assert!(check(&p,&archive_transaction(kind,Some((index,"0xfe",false)),2048,package)).is_err());}
+            assert!(check(&p,&archive_transaction(kind,None,2048,"0xff")).is_err());
+        }
+        assert!(check(&p,&archive_transaction("register_blob",None,crate::fleet_data::MAX_ARCHIVE as u64+1,"0xf6")).is_err());
+        assert!(check(&p,&archive_transaction("register_blob",Some((1,"0xb0",true)),2048,"0xf6")).is_err());
+    }
+
 }

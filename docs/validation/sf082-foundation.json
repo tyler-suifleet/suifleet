@@ -1,0 +1,79 @@
+{
+  "schema": 1,
+  "ticket": "SF-082",
+  "model": "gpt-6.1-sol",
+  "session": "dispatch-ddcd0efd95924d10a490f43407d69309",
+  "status": "incomplete_draft_foundation",
+  "dependency_pin": "57cd3bc1aec364d302b7192c8c19eb550c10aa23",
+  "dependency_pr": "https://github.com/tyler-suifleet/suifleet/pull/218",
+  "dependency_merged": false,
+  "toolchain": {
+    "image": "suifleet-dev:sf037",
+    "sui": "1.81.1-e04cf9aa915c",
+    "node": "22.22.2",
+    "pnpm": "11.0.8"
+  },
+  "tests": [
+    {
+      "command": "sui move test --path contracts/fleet_data --build-env testnet",
+      "environment": "network-none disposable container; empty wallet",
+      "result": "13 passed, 0 failed"
+    },
+    {
+      "command": "node scripts/test_fleet_data.cjs",
+      "environment": "network-none disposable container",
+      "result": "PASS: direct-chain BCS/signature/identity/binding/origin/replay/tamper/revocation/freshness/outage fixtures; no live chain"
+    },
+    {
+      "command": "node scripts/test_telemetry.cjs",
+      "environment": "network-none disposable container",
+      "result": "PASS: existing telemetry signature/service-health/status/identity/query/stale-cache regressions"
+    },
+    {
+      "command": "pnpm typecheck",
+      "directory": "dapp",
+      "result": "PASS"
+    },
+    {
+      "command": "python3 scripts/build_walrus_site.py --manifest manifests/fixture.localnet.json --builder /tmp/sf082-site-builder/site-builder --receipt /evidence/sf082-site-final-a.json",
+      "environment": "network-none disposable container",
+      "result": "PASS; repeated with final-b receipt; identical complete receipts"
+    },
+    {
+      "command": "python3 -m py_compile scripts/build_walrus_site.py",
+      "result": "PASS"
+    },
+    {
+      "command": "git diff --check",
+      "result": "PASS"
+    }
+  ],
+  "static_export": {
+    "fixture_only": true,
+    "served_resources": 111,
+    "identical_repeated_exports": true,
+    "receipt_sha256": "c7fe7a1285c37c4496fdb27925f29d4541d62e42e2cfd3894bb023148e189d2e",
+    "deployment_manifest_sha256": "b99e76e8ccd1e4f0ec720543944109b40d01aac9b63ca7840952ea00372494e6",
+    "ws_resources_sha256": "0926879b1c2f924c5d48e8c09d10d3807b6f7418454362124137c0f050a7dd1c",
+    "builder": {
+      "archive_sha256": "0495bc5f94095459094f36c5eb73ecbb87fcda55bb4308445edc1bc2538876f4",
+      "archive_url": "https://github.com/MystenLabs/walrus-sites/releases/download/mainnet-v2.12.2/site-builder-mainnet-v2.12.2-ubuntu-x86_64.tgz",
+      "binary_sha256": "c9d9e59c49de2c95b913820b0cbd1d6b1a19f2b1ec5de7e2a3291e6bc2619d50",
+      "platform": "ubuntu-x86_64",
+      "release": "mainnet-v2.12.2",
+      "schema": 1,
+      "version_output": "site-builder 2.12.2-7c5dfaf4ed2a"
+    },
+    "published": false
+  },
+  "not_run": [
+    "new-package isolated-chain publish/upgrade/old-package/existing-object tests",
+    "daemon/signer/OTA simulator integration for serverless data (not implemented)",
+    "bulk Seal encryption/decryption and browser alerts E2E (not implemented)",
+    "fresh cost quote/quilt comparison/budget integration",
+    "Testnet site publish/update/rollback or data writes",
+    "full make check, exact-head CI/security/automatic-Testnet acceptance and independent review",
+    "physical/manual-wallet/production-provider/Mainnet acceptance (#32/#159)"
+  ],
+  "limits": "This is partial software implementation, not Review readiness. SF-083 merge/current-main integration is a mandatory blocker. Unfinished SF-082 software is listed in docs/SERVERLESS_FLEET_DATA.md and stays in #160; only final external checks are deferred to #32/#159."
+}

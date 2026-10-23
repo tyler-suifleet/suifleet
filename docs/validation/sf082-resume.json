@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "ticket": "SF-082",
+  "model": "gpt-6.1-sol",
+  "session": "dispatch-ddcd0efd95924d10a490f43407d69309",
+  "status": "incomplete_software_not_review_ready",
+  "dependency_merged": true,
+  "dependency_merge": "3e796f7c2a91e88734970b0d3956469e3a86c7ed",
+  "integration_commit": "3bf26f6",
+  "environment": {
+    "image": "suifleet-dev:sf037",
+    "network": "none",
+    "sui": "1.81.1",
+    "node": "22.22.2",
+    "pnpm": "11.0.8"
+  },
+  "tests": [
+    {
+      "command": "sui move test --path contracts/fleet_data --build-env testnet",
+      "result": "13 passed, 0 failed; merged dependency; isolated container, disposable cache copy and empty wallet"
+    },
+    {
+      "command": "node scripts/test_fleet_bulk.cjs",
+      "result": "passed; real device signatures, actual SDK encryption, independent AES-GCM decryption; fixture chain/key objects; policy/binding/replay/tamper/UTF8/stream limits and expiry/revocation negatives"
+    },
+    {
+      "command": "node scripts/test_fleet_data.cjs",
+      "result": "passed; direct-chain health fixtures including enforced cadence, invalid cadence and offline expiry"
+    },
+    {
+      "command": "node scripts/test_telemetry.cjs",
+      "result": "passed; existing signature/service-health/status/identity/query/stale-cache regressions"
+    },
+    {
+      "command": "cd dapp && pnpm typecheck",
+      "result": "passed"
+    },
+    {
+      "command": "cd dapp && pnpm build",
+      "result": "passed; static production export"
+    },
+    {
+      "command": "python3 scripts/build_walrus_site.py --manifest manifests/fixture.localnet.json --builder /builder/site-builder --receipt /evidence/sf082-resume-site-a.json",
+      "result": "passed; repeated with site-b receipt, both complete receipts identical, all 111 resources identical; fixture deployment only"
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    }
+  ],
+  "initial_move_failures": "Read-only cache lock and Git cache ownership errors; resolved with writable disposable cache copy and container-local safe.directory setting. Neither was ignored; final test passed.",
+  "remaining_software": [
+    "daemon bounded health publication and safe transaction/signing intents",
+    "RS2/prepaid registration/certification and durable encrypted batch producer/scheduler/retry/exhaustion/diagnostics/crashes",
+    "log/diagnostic UI integration and browser alert parity",
+    "real cadence/overhead/quilt quote and budget estimator integration",
+    "optional same-data relay",
+    "isolated-chain upgrade/adversarial/device-to-browser E2E",
+    "authorized Testnet data/site publication/update/rollback and normal full local/CI/security/testnet/review gates"
+  ],
+  "limits": "No Review readiness or completed acceptance claimed. Bulk read helper and cryptographic fixtures are not a running serverless fleet backend; daemon and existing UI still use HTTP. Final physical/manual-wallet/production-provider/Mainnet acceptance remains unrun in #32/#159. SF-083 is merged and no longer a blocker. No chain writes or hardware operations occurred."
+}

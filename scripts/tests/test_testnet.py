@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import sys
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from testnet_budget import Budget, Spent
 from testnet_ci import trusted_pr, plan
@@ -93,10 +93,14 @@ class TrustTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root/'source.move').write_text('same contracts')
-            before = live.contracts_digest(root)
+            built={'digest':[1]*32}
+            before = live.contracts_digest(root,compiled=built)
             (root/'build').mkdir()
             (root/'build'/'junk').write_text('changed build output')
-            self.assertEqual(before, live.contracts_digest(root))
+            self.assertEqual(before, live.contracts_digest(root,compiled=built))
+            (root/'fleet_data').mkdir();(root/'fleet_data/source.move').write_text('separate package changed')
+            self.assertEqual(before,live.contracts_digest(root,compiled=built))
+            self.assertNotEqual(before,live.contracts_digest(root,compiled={'digest':[2]*32}))
 
     def test_exact_sha_actor_and_main_binding(self):
         pr = self.fixture()
@@ -426,3 +430,150 @@ class PublicEnvironmentTests(unittest.TestCase):
         self.assertNotIn('secrets.', probe)
         self.assertNotIn('environment:', probe)
         self.assertNotIn('SUIFLEET_TESTNET_KEY', probe)
+
+class BytecodeFixtureTests(unittest.TestCase):
+    def test_pair_compiler_framework_and_verified_digest_are_required_for_migration(self):
+        import copy, live_package_upgrade as live
+        tools={'build':{'version':'pinned compiler'},'network':{'sha256':'pinned network'}}
+        framework={'base':'framework-a','head':'framework-a'}
+        proof=dict(build_cli='pinned compiler',network_cli_sha256='pinned network',framework=framework,
+                   verified_transactions={'base':{'digest':'aa'},'upgrade':{'digest':'bb'}})
+        good={'provenance':proof,'public_marker':'existing'}
+        self.assertIs(live.matching_fixture({'fixtures':{'old source hash':good}},'bytecode-v1:aa','bytecode-v1:bb',tools,framework),good)
+        for edit in [lambda p:p.update(build_cli='other'),lambda p:p.update(network_cli_sha256='other'),lambda p:p.update(framework={}),lambda p:p['verified_transactions']['upgrade'].update(digest='cc')]:
+            bad=copy.deepcopy(good);edit(bad['provenance'])
+            self.assertIsNone(live.matching_fixture({'fixtures':{'old':bad}},'bytecode-v1:aa','bytecode-v1:bb',tools,framework))
+        self.assertIsNone(live.matching_fixture({'fixtures':{'old':good}},'bytecode-v1:bb','bytecode-v1:aa',tools,framework))
+    def test_unknown_setup_is_never_retried_and_refusals_do_not_hide_publication(self):
+        import tempfile, live_package_upgrade as live
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as d:
+            path=Path(d)/'private-state';p={};state={'publications':{'pair':p}}
+            ledger=SimpleNamespace(evidence=[])
+            def interrupted():raise RuntimeError('transport outcome unknown')
+            with self.assertRaises(RuntimeError):live.checkpoint_setup(path,state,p,'publish base',interrupted,ledger)
+            self.assertEqual(json.loads(path.read_text())['publications']['pair']['pending_operation'],'publish base')
+            refused=Mock()
+            with self.assertRaises(RuntimeError):live.checkpoint_setup(path,state,p,'publish again',refused,ledger)
+            refused.assert_not_called()
+            p.clear()
+            def not_sent():raise live.toolchain.NotSubmitted('refused before sign')
+            with self.assertRaises(live.toolchain.NotSubmitted):live.checkpoint_setup(path,state,p,'publish base',not_sent,ledger)
+            self.assertNotIn('pending_operation',json.loads(path.read_text())['publications']['pair'])
+            self.assertEqual(live.checkpoint_setup(path,state,p,'publish base',lambda:{'id':'known'},ledger),{'id':'known'})
+            self.assertNotIn('pending_operation',p)
+            self.assertIn('pending_operation',json.loads(path.read_text())['publications']['pair'],'success is checkpointed only with its IDs by the caller')
+    def test_malformed_private_state_does_not_trigger_a_fresh_publication(self):
+        import tempfile, live_package_upgrade as live
+        with tempfile.TemporaryDirectory() as d:
+            path=Path(d)/'private-state';path.write_text('malformed')
+            with self.assertRaisesRegex(RuntimeError,'reconcile'):live.load_state(path,'chain','owner')
+
+
+class FreshFixtureFlowTests(unittest.TestCase):
+    def test_new_and_resumed_publications_reach_verified_submitter_with_saved_proof(self):
+        # Exercise run(), not just checkpoint helpers: the original NameError
+        # happened between compilation and the first pre-sign verification.
+        import io, tarfile, tempfile, subprocess
+        from types import SimpleNamespace
+        import live_package_upgrade as live
+        address = "0x99894c1ae83e8179dd05f3f419f3967c24508159fc5ddaf232af67fdf0c2dcac"
+        tools = {"build": {"path": "/compiler", "version": live.toolchain.BUILD["version"]},
+                 "network": {"path": "/network", "version": live.toolchain.NETWORK["version"], "sha256": "pinned"}}
+        buffer = io.BytesIO()
+        with tarfile.open(fileobj=buffer, mode="w") as archive:
+            info = tarfile.TarInfo("contracts/Move.lock"); data = b"offline fixture"
+            info.size = len(data); archive.addfile(info, io.BytesIO(data))
+        real_run = subprocess.run
+        def command(argv, **kwargs):
+            if argv[0] == "tar":
+                return real_run(argv, **kwargs)
+            if argv[0] == "git":
+                return SimpleNamespace(stdout=buffer.getvalue(), returncode=0)
+            self.assertEqual(argv[0], "/network")
+            if "envs" in argv:
+                output = json.dumps([[{"alias": "testnet", "rpc": "https://offline.invalid"}], "testnet"])
+            elif "active-address" in argv:
+                output = address
+            else:
+                self.assertIn("gas", argv)
+                output = json.dumps({"addressMistBalance": "1000000000", "gasCoins": []})
+            return SimpleNamespace(stdout=output, stderr="", returncode=0)
+        for resumed in (False, True):
+            with self.subTest(resumed=resumed), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary); state_path = root/"state.json"
+                digest = "bytecode-v1:" + bytes(range(32)).hex()
+                key = live.fixture_key(digest, digest)
+                proof = {"base": {"digest": "saved-proof"}} if resumed else {}
+                state = {"chain": "4c78adac", "operator": address, "fixtures": {}, "publications": {}}
+                if resumed:
+                    state["publications"][key] = {"source_pair": [digest, digest],
+                        "compiler": tools["build"]["version"], "built": proof}
+                live.save_state(state_path, state)
+                observed = []
+                def submitter(*args, **kwargs):
+                    observed.append(dict(kwargs["record"]))
+                    def refuse(_budget):
+                        raise live.toolchain.NotSubmitted("offline pre-sign boundary reached")
+                    return refuse
+                args = SimpleNamespace(wallet=str(root/"client.yaml"), network="testnet",
+                    evidence=str(root/"evidence.json"), max_spend_mist=800000000,
+                    build_sui="/compiler", network_sui="/network", faucet_tool=None,
+                    base_ref="b"*40, walrus="simulated", state=str(state_path), fresh=False)
+                walrus = SimpleNamespace(aggregator="http://offline.invalid", mode="simulated", close=Mock())
+                with patch.object(live.subprocess, "run", side_effect=command), \
+                     patch.object(live.subprocess, "check_output", return_value="b"*40), \
+                     patch.object(live.toolchain, "check_tools", return_value=tools), \
+                     patch.object(live.toolchain, "preflight", return_value={"protocol_version":139}), \
+                     patch.object(live.toolchain, "compile_package", return_value={"digest":list(range(32))}), \
+                     patch.object(live.toolchain, "framework_pins", return_value={}), \
+                     patch.object(live.toolchain, "package_submitter", side_effect=submitter), \
+                     patch.object(live.dm, "chain_facts", return_value={"chain_identifier":"4c78adac"}), \
+                     patch.object(live.live_common, "Walrus", return_value=walrus), \
+                     patch.dict("os.environ", {"SUIFLEET_TESTNET_LOCK_TOKEN":""}):
+                    with self.assertRaisesRegex(live.toolchain.NotSubmitted, "offline pre-sign boundary"):
+                        live.run(args)
+                self.assertEqual(observed, [proof.get("base", {})])
+                saved = json.loads(state_path.read_text())["publications"][key]
+                self.assertEqual(saved["built"], {"base": proof.get("base", {})})
+                self.assertNotIn("pending_operation", saved)
+                evidence = json.loads((root/"evidence.json").read_text())
+                self.assertFalse(evidence["success"])
+                self.assertEqual(evidence["allowance_used_mist"], 0)
+                walrus.close.assert_called_once()
+
+
+class PublicationAuthorityTests(unittest.TestCase):
+    def test_checkpoint_recovery_requires_latest_cap_package_version_and_owners(self):
+        import live_package_upgrade as live
+        operator = live.dm.object_id("0xa")
+        publication = dict(base_package="0x1", registry="0x2", upgrade_cap="0x3")
+        owners = {"0x3": {"AddressOwner": operator}, "0x2": {"Shared": {}}}
+        def reader(command, object_id):
+            self.assertEqual(command, "object")  # Recovery is read-only.
+            return {"owner": owners[object_id]}
+        for upgraded in (False, True):
+            with self.subTest(upgraded=upgraded):
+                current = dict(publication)
+                if upgraded:
+                    current["head_package"] = "0x4"
+                package = current.get("head_package", current["base_package"])
+                cap = dict(kind="object", type="0x2::package::UpgradeCap",
+                           upgrade_cap={"package": package, "version": 2 if upgraded else 1},
+                           owner={"address": operator})
+                facts = {"objects": {live.dm.object_id("0x3"): cap}}
+                with patch.object(live.dm, "chain_facts", return_value=facts):
+                    live.verify_publication(current, "offline", operator, reader)
+                    for field, bad in (("package", "0x9"), ("version", 3)):
+                        previous = cap["upgrade_cap"][field]; cap["upgrade_cap"][field] = bad
+                        with self.assertRaises(AssertionError):
+                            live.verify_publication(current, "offline", operator, reader)
+                        cap["upgrade_cap"][field] = previous
+                    owners["0x3"] = {"AddressOwner": live.dm.object_id("0xb")}
+                    with self.assertRaises(AssertionError):
+                        live.verify_publication(current, "offline", operator, reader)
+                    owners["0x3"] = {"AddressOwner": operator}
+                    owners["0x2"] = {"AddressOwner": operator}
+                    with self.assertRaises(AssertionError):
+                        live.verify_publication(current, "offline", operator, reader)
+                    owners["0x2"] = {"Shared": {}}

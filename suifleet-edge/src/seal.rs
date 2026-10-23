@@ -211,15 +211,15 @@ pub fn hash_identity(full_id: &[u8]) -> G1Projective {
 }
 
 pub fn g1_bytes(point: &G1Projective) -> [u8; 48] {
-    let mut out = [0u8; 48];
-    point.into_affine().serialize_compressed(&mut out[..]).expect("48 bytes");
-    out
+    let mut out = Vec::with_capacity(48);
+    point.into_affine().serialize_compressed(&mut out).expect("G1 encoding");
+    out.try_into().expect("48-byte G1 encoding")
 }
 
 pub fn g2_bytes(point: &G2Projective) -> [u8; 96] {
-    let mut out = [0u8; 96];
-    point.into_affine().serialize_compressed(&mut out[..]).expect("96 bytes");
-    out
+    let mut out = Vec::with_capacity(96);
+    point.into_affine().serialize_compressed(&mut out).expect("G2 encoding");
+    out.try_into().expect("96-byte G2 encoding")
 }
 
 /// A compressed point, rejected unless on the curve and in the subgroup.
@@ -241,7 +241,6 @@ pub fn scalar(bytes: &[u8]) -> anyhow::Result<Fr> {
     Ok(value)
 }
 
-#[cfg(test)]
 pub fn scalar_bytes(value: &Fr) -> [u8; 32] {
     value.into_bigint().to_bytes_be().try_into().expect("32 bytes")
 }
@@ -639,4 +638,42 @@ pub(crate) mod tests {
         let r = random_scalar();
         assert_eq!(scalar(&scalar_bytes(&r)).unwrap(), r);
     }
+}
+
+/// Encrypt with public on-chain server keys. No session or device read grant is
+/// needed to write confidential data. The caller supplies the fleet policy ID
+/// and signed archive AAD; encryption itself does not authenticate the writer.
+pub fn encrypt(package_id: [u8; 32], id: Vec<u8>, servers: &[([u8; 32], G2Affine)],
+    threshold: u8, aad: Vec<u8>, plaintext: &[u8]) -> anyhow::Result<Vec<u8>> {
+    use rand::RngCore;
+    use aes_gcm::{aead::AeadInPlace, aes::Aes256, AesGcm, KeyInit};
+    anyhow::ensure!(!servers.is_empty() && servers.len() < 255 && threshold > 0 && usize::from(threshold) <= servers.len(), "invalid encryption threshold");
+    let unique: std::collections::BTreeSet<_> = servers.iter().map(|s| s.0).collect();
+    anyhow::ensure!(unique.len() == servers.len() && servers.iter().all(|(_, pk)| !pk.is_zero()), "duplicate/invalid encryption server");
+    let randomness = random_scalar();
+    let nonce = (G2Projective::generator() * randomness).into_affine();
+    let mut object = Object { package_id, id, services: servers.iter().enumerate().map(|(i,s)| (s.0, (i+1) as u8)).collect(),
+        threshold, nonce, nonce_bytes: g2_bytes(&nonce.into_group()), encrypted_shares: vec![], encrypted_randomness: [0;32],
+        dem: Dem::Aes256Gcm, aad, blob: 0..0 };
+    let mut polynomial = zeroize::Zeroizing::new(vec![[0u8;32]; threshold as usize]);
+    for coefficient in polynomial.iter_mut() { rand::rngs::OsRng.fill_bytes(coefficient); }
+    let full_id = object.full_id();
+    let gid_r = (hash_identity(&full_id) * randomness).into_affine();
+    for ((server_id, pk), (_, index)) in servers.iter().zip(&object.services) {
+        let share: [u8;32] = std::array::from_fn(|b| polynomial.iter().rev().fold(0, |acc,c| gf_mul(acc,*index)^c[b]));
+        object.encrypted_shares.push(xor(&share, &kdf(&pairing(gid_r,*pk), &object.nonce_bytes, &full_id, server_id, *index)));
+    }
+    object.encrypted_randomness = xor(&scalar_bytes(&randomness), &derive_key(Purpose::Randomness, &polynomial[0], &object));
+    let key = zeroize::Zeroizing::new(derive_key(Purpose::Dem, &polynomial[0], &object));
+    let mut ciphertext = plaintext.to_vec();
+    let cipher = AesGcm::<Aes256, aes_gcm::aead::consts::U16>::new_from_slice(key.as_slice()).expect("32-byte key");
+    let tag = cipher.encrypt_in_place_detached(&AES_IV.into(), &object.aad, &mut ciphertext).map_err(|_| anyhow::anyhow!("archive encryption failed"))?;
+    ciphertext.extend_from_slice(&tag);
+    let mut out = MAGIC.to_vec();
+    out.push(0); out.extend(package_id); out.extend(bcs::to_bytes(&object.id)?);
+    out.extend(bcs::to_bytes(&object.services)?); out.push(threshold); out.push(0);
+    out.extend(object.nonce_bytes); out.extend(bcs::to_bytes(&object.encrypted_shares)?);
+    out.extend(object.encrypted_randomness); out.push(0); out.extend(bcs::to_bytes(&ciphertext)?);
+    out.extend(bcs::to_bytes(&Some(object.aad))?);
+    Ok(out)
 }

@@ -1,4 +1,5 @@
 import { bcs } from '@mysten/sui/bcs';
+import { ObjectError } from '@mysten/sui/client';
 import type { SuiGrpcClient } from '@mysten/sui/grpc';
 import { Transaction, coinWithBalance } from '@mysten/sui/transactions';
 import { normalizeStructTag, normalizeSuiAddress } from '@mysten/sui/utils';
@@ -89,5 +90,33 @@ export function buildWithdrawRetentionTx(c: StorageConfig, storage: string, budg
   const tx = new Transaction();
   const [w, g] = tx.moveCall({ target: `${c.packageId}::fleet_storage::withdraw_retention`, arguments: [tx.object(storage), tx.object(budget), tx.object(cap), tx.pure.u64(wal), tx.pure.u64(gas)] });
   tx.transferObjects([w, g], tx.pure.address(sender));
+  return tx;
+}
+
+// Added after SF-092: resolve each introduction origin from the current package.
+export const DeviceRetentionBcs = bcs.struct('DeviceRetention', { target: bcs.u32(), max_fee: bcs.u64() });
+export async function fetchDeviceRetention(client: SuiGrpcClient, c: StorageConfig, storage: string) {
+  const origin = async (name: string) => { const type = (await client.movePackageService.getDatatype({ packageId: c.packageId, moduleName: 'fleet_storage', name })).response.datatype; if (!type?.definingId) throw Error('Archive retention type unavailable'); return type.definingId; };
+  const [keyOrigin, valueOrigin] = await Promise.all([origin('DeviceRetentionKey'), origin('DeviceRetention')]);
+  try {
+    const field = await client.getDynamicField({ parentId: storage, name: {
+      type: `${keyOrigin}::fleet_storage::DeviceRetentionKey`, bcs: new Uint8Array([0]),
+    } });
+    if (normalizeStructTag(field.dynamicField.value.type) !== normalizeStructTag(`${valueOrigin}::fleet_storage::DeviceRetention`)) throw Error('Foreign device retention policy');
+    return DeviceRetentionBcs.parse(field.dynamicField.value.bcs);
+  } catch (error) {
+    if (error instanceof ObjectError && error.reason === 'notFound') return undefined;
+    throw error;
+  }
+}
+export function buildConfigureDeviceRetentionTx(c: StorageConfig, storage: string, budget: string, cap: string, target: number, maxFee: bigint) {
+  if (!Number.isSafeInteger(target) || target <= 0 || target > 0xffffffff || maxFee <= BigInt(0)) throw Error('Select a finite positive archive target and WAL ceiling');
+  const tx = new Transaction();
+  tx.moveCall({ target: `${c.packageId}::fleet_storage::configure_device_retention`, arguments: [tx.object(storage), tx.object(budget), tx.object(cap), tx.pure.u32(target), tx.pure.u64(maxFee)] });
+  return tx;
+}
+export function buildClearDeviceRetentionTx(c: StorageConfig, storage: string, budget: string, cap: string) {
+  const tx = new Transaction();
+  tx.moveCall({ target: `${c.packageId}::fleet_storage::clear_device_retention`, arguments: [tx.object(storage), tx.object(budget), tx.object(cap)] });
   return tx;
 }

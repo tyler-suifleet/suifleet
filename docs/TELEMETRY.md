@@ -1,5 +1,7 @@
 # Device heartbeat, inventory and health (SF-019)
 
+This page describes the existing HTTP-indexer mode. The optional direct-chain browser reader and separate data package are an incomplete [SF-082 development snapshot](SERVERLESS_FLEET_DATA.md); the daemon still uses this HTTP path. No complete serverless backend or external acceptance is claimed.
+
 Redacted remote logs, diagnostic bundles and alerts build on this path: see [LOGS.md](LOGS.md) (SF-020).
 
 Devices report a heartbeat with their installed components and health. The fleet indexer ([INDEXER.md](INDEXER.md)) receives these reports, and the dApp shows online, last-seen and degraded state for each device.

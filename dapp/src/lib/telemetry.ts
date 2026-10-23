@@ -216,6 +216,7 @@ export interface Assessment {
 }
 
 export interface DeviceHealth extends Assessment {
+  intervalSeconds?: number;
   lastSeenMs?: number;
   /** Age of the newest report by the indexer's clock (not the browser's). */
   lastSeenAgeMs?: number;
@@ -232,7 +233,7 @@ export interface DeviceHealth extends Assessment {
  * interfaces/telemetry-cases.json). Healthy needs a fresh, timely report
  * whose own judgement is healthy and whose facts agree with it.
  */
-export function assess(revoked: boolean, latest: { snapshot: Snapshot; receivedMs: number } | undefined, nowMs: number): Assessment {
+export function assess(revoked: boolean, latest: { snapshot: Snapshot; receivedMs: number } | undefined, nowMs: number, chainCadenceMs?: number): Assessment {
   if (revoked) {
     return { status: "unreported", codes: ["revoked"], reasons: ["device identity is revoked or deregistered; its telemetry is not trusted"] };
   }
@@ -240,7 +241,10 @@ export function assess(revoked: boolean, latest: { snapshot: Snapshot; receivedM
   const { snapshot, receivedMs } = latest;
   const codes: string[] = [];
   const reasons: string[] = [];
-  const interval = Math.min(Math.max(snapshot.interval_seconds, MIN_INTERVAL_SECONDS), MAX_INTERVAL_SECONDS) * 1000;
+  // A chain-configured producer cannot report faster than its enforced cadence.
+  // Only the direct-chain reader supplies this independently verified value.
+  if (chainCadenceMs !== undefined && (!Number.isSafeInteger(chainCadenceMs) || chainCadenceMs < 60_000 || chainCadenceMs > 86_400_000)) throw new Error("Invalid chain health cadence");
+  const interval = chainCadenceMs ?? Math.min(Math.max(snapshot.interval_seconds, MIN_INTERVAL_SECONDS), MAX_INTERVAL_SECONDS) * 1000;
   const offline = nowMs - receivedMs > OFFLINE_INTERVALS * interval;
   if (offline) {
     codes.push("offline");
@@ -338,6 +342,7 @@ export async function deviceHealth(identity: Identity | undefined, indexed: Inde
   return {
     ...assess(false, { snapshot, receivedMs: report.received_ms }, serverNowMs),
     lastSeenMs: report.received_ms, lastSeenAgeMs: Math.max(0, serverNowMs - report.received_ms), observedMs: snapshot.observed_ms, daemonVersion: snapshot.daemon_version,
+    intervalSeconds: snapshot.interval_seconds,
     components: snapshot.components,
     services: snapshot.services,
   };
@@ -373,9 +378,18 @@ const unavailableHealth = (reason: string): DeviceHealth => ({ status: "unavaila
  * cannot be checked, is `unavailable` on its own; this never rejects, so a
  * failed refresh cannot leave an earlier result on screen.
  */
-export async function fetchFleetHealth(client: Pick<SuiGrpcClient, "getDynamicField">, deviceIds: string[], owner: string,
+export async function fetchFleetHealth(client: Pick<SuiGrpcClient, "getDynamicField"> & Partial<Pick<SuiGrpcClient, "getObject" | "ledgerService">>, deviceIds: string[], owner: string,
   url = TELEMETRY_URL, token = "", fetcher: typeof fetch = fetch): Promise<Record<string, DeviceHealth>> {
   const unavailable = (reason: string): Record<string, DeviceHealth> => Object.fromEntries(deviceIds.map((id) => [id, unavailableHealth(reason)]));
+  if (process.env.NEXT_PUBLIC_FLEET_DATA) {
+    try {
+      const { DATA_CONFIG, fetchChainHealth } = await import("./fleet-data");
+      const getObject = client.getObject?.bind(client);
+      const ledgerService = client.ledgerService;
+      if (!DATA_CONFIG || !getObject || !ledgerService) return unavailable("fleet data chain reads unavailable");
+      return await fetchChainHealth({ getObject, getDynamicField: client.getDynamicField.bind(client), ledgerService }, DATA_CONFIG, deviceIds);
+    } catch (error) { return unavailable(`fleet data unavailable: ${message(error)}`); }
+  }
   if (!url) return unavailable("no telemetry service configured (NEXT_PUBLIC_SUIFLEET_TELEMETRY_URL)");
   let indexed;
   try {

@@ -291,7 +291,7 @@ The frontend reads only `NEXT_PUBLIC_DEPLOYMENT_MANIFEST`; the daemon reads the 
 
 ## Static frontend and Linux deployment
 
-`pnpm build` produces `dapp/out`; serve that directory through the selected static host. Walrus Sites is an intended option, but no hosting account/site or current site-builder version is verified here. Select/validate its current publish procedure in a hosting issue before publishing.
+`pnpm build` produces the static `dapp/out` export. The [SF-082 development snapshot](SERVERLESS_FLEET_DATA.md) adds a checksum-pinned site-builder and deployment-bound reproducible build helper. No Walrus Site publication/update/rollback has been validated; its backend replacement is incomplete and must remain draft. Follow the recorded preflight/authorization and acceptance requirements before publication.
 
 Install the daemon, systemd service and real config through the validated image/package workflow. The separate root first-boot provisioning service invokes `--provision`; the unprivileged daemon starts after enrollment config appears and creates its state directory. Register the printed address, record Device/DeviceCap IDs, and fund report gas. Apply success currently means updater exit code zero, not post-boot health.
 
@@ -542,3 +542,14 @@ The opt-in secure tunnel destination companion, its separate service identity,
 installation, revocation controls and offline real-proxy tests are documented in
 [SECURE_TUNNELING.md](SECURE_TUNNELING.md). AWS account/service and physical
 acceptance remain unrun in SF-031/#32 and SF-087/#159.
+
+### Direct-chain fleet data
+
+For the optional Sui/Walrus backend, follow [serverless fleet data](SERVERLESS_FLEET_DATA.md).
+Install the checksum-bound keyless Node/WASM codec artifact, configure public
+fleet/writer/budget/storage IDs and matching isolated-signer policy, and preserve
+`state_dir/fleet-data` during upgrades. The ordinary HTTP telemetry/log endpoints
+are unnecessary in this mode. Do not remove a pending transaction or ciphertext
+to force a fresh upload: reconcile retained effects first. Owner prepaid storage,
+revocation and cadence remain enforced on chain. A static export or simulator run
+does not establish live Site deployment, certification or production acceptance.
