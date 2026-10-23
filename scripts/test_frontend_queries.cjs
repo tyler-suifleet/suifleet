@@ -11,6 +11,15 @@ const custodiedBytes = schema.DeviceBcs.serialize({ id: custodied, name: "Pi 2",
 const groupBytes = schema.GroupBcs.serialize({ id: group, name: "Lab", description: "Test fleet", admin: owner, device_ids: [device], created_at: 123, schema_version: 1 }).toBytes();
 const event = { deployment_id: deployment, component_name: "app", version: "1", recipe_blob_id: "recipe", artifact_sha256: "a".repeat(64), target_groups: [group], target_devices: [device], creator: owner };
 const deploymentBytes = schema.DeploymentBcs.serialize({ id: deployment, creator: owner, component_name: "app", version: "1", recipe_blob_id: "recipe", artifact_sha256: "a".repeat(64), created_at: 456, schema_version: 1 }).toBytes();
+const targetFields = new Map();
+{
+  const {bcs,TypeTagSerializer}=appRequire('@mysten/sui/bcs'), {deriveDynamicFieldID}=appRequire('@mysten/sui/utils');
+  for (const [name,value] of [['TargetGroupsKey',[group]],['TargetDevicesKey',[device]]]) {
+    const keyType=`${m.type_origins[`deployment_manager::${name}`]}::deployment_manager::${name}`;
+    const objectId=deriveDynamicFieldID(deployment,TypeTagSerializer.parseFromStr(keyType),bcs.bool().serialize(false).toBytes());
+    targetFields.set(objectId,{objectId,type:`0x2::dynamic_field::Field<${keyType},vector<0x2::object::ID>>`,content:bcs.struct('Field',{id:bcs.Address,name:bcs.bool(),value:bcs.vector(bcs.Address)}).serialize({id:objectId,name:false,value}).toBytes()});
+  }
+}
 (async () => {
   const c = manifestClient(m), ownedCursors = [], eventCursors = [];
   c.listOwnedObjects = async (args) => {
@@ -33,7 +42,7 @@ const deploymentBytes = schema.DeploymentBcs.serialize({ id: deployment, creator
     const bytes = args.filter.eventType.endsWith("GroupCreated") ? schema.GroupCreatedBcs.serialize({ group_id: group, name: "Lab", admin: owner }).toBytes() : schema.DeploymentCreatedBcs.serialize(event).toBytes();
     return { events: [{ bcs: bytes, json: null }], hasNextPage: false };
   };
-  c.getObjects = async ({ objectIds }) => ({ objects: objectIds.map((objectId) => ({ objectId, type: `${m.type_origins["device_group::DeviceGroup"]}::device_group::DeviceGroup`, content: objectId === group ? groupBytes : deploymentBytes })) });
+  c.getObjects = async ({ objectIds }) => ({ objects: objectIds.map((objectId) => targetFields.get(objectId) ?? ({ objectId, type: `${m.type_origins["device_group::DeviceGroup"]}::device_group::DeviceGroup`, content: objectId === group ? groupBytes : deploymentBytes })) });
   assert.deepEqual((await sui.fetchGroups(c, owner))[0].deviceIds, [device]);
   assert.deepEqual(eventCursors, [undefined, "scanned-next"]);
   c.getDynamicField = async ({name}) => {
@@ -48,7 +57,7 @@ const deploymentBytes = schema.DeploymentBcs.serialize({ id: deployment, creator
   // A handed-over group/deployment is still discovered from its original
   // creation event, even though its current admin/creator is another owner.
   const readObjects = c.getObjects, recipient = id("0xb");
-  c.getObjects = async ({objectIds}) => ({objects:objectIds.map(objectId=>({objectId,
+  c.getObjects = async ({objectIds}) => ({objects:objectIds.map(objectId=>targetFields.get(objectId) ?? ({objectId,
     type:`${m.type_origins["device_group::DeviceGroup"]}::device_group::DeviceGroup`, content:objectId===group
       ? schema.GroupBcs.serialize({...schema.GroupBcs.parse(groupBytes),admin:recipient}).toBytes()
       : schema.DeploymentBcs.serialize({...schema.DeploymentBcs.parse(deploymentBytes),creator:recipient}).toBytes()}))});
@@ -60,7 +69,7 @@ const deploymentBytes = schema.DeploymentBcs.serialize({ id: deployment, creator
   for (const schemaVersion of ["1", "2", "3"]) {
     const emptyBlob = schema.DeploymentBcs.serialize({ id: deployment, creator: owner, component_name: "app", version: "1",
       recipe_blob_id: "", artifact_sha256: "", created_at: 456, schema_version: schemaVersion }).toBytes();
-    c.getObjects = async ({ objectIds }) => ({ objects: objectIds.map(objectId => ({ objectId,
+    c.getObjects = async ({ objectIds }) => ({ objects: objectIds.map(objectId => targetFields.get(objectId) ?? ({ objectId,
       type: `${m.type_origins["device_group::DeviceGroup"]}::device_group::DeviceGroup`, content: objectId === group ? groupBytes : emptyBlob })) });
     const [record] = await sui.fetchDeploymentEvents(c, owner);
     assert.equal(record.schemaVersion, schemaVersion);

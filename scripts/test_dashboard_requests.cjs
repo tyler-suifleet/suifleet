@@ -5,6 +5,7 @@ const m = require('../manifests/fixture.localnet.json');
 for (const name of require('../interfaces/fleet-v1.json').optional_type_origins.fleet_budget) m.type_origins[name] = m.call_package_id;
 process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST = JSON.stringify(m);
 const load = loader(), sui = load('lib/sui.ts'), budget = load('lib/fleet-budget.ts'), protocol = load('lib/fleet-protocol.ts');
+const schema = load('lib/move-bcs.ts');
 const health = load('lib/telemetry.ts'), data = load('lib/fleet-data.ts');
 const { bcs, TypeTagSerializer } = appRequire('@mysten/sui/bcs');
 const { normalizeSuiAddress: id, deriveDynamicFieldID } = appRequire('@mysten/sui/utils');
@@ -43,6 +44,13 @@ for (const [n, device] of devices.entries()) {
   };
   client.getObjects = async ({ objectIds }) => { calls++; assert.ok(objectIds.length <= 50); return { objects: objectIds.map(objectId => objects.get(objectId) ?? new ObjectError(objectId,'missing',{reason:'notFound'})) }; };
   client.listOwnedObjects = async ({ type, cursor }) => { calls++; if (type.endsWith('::Device')) return { objects: [], hasNextPage: false }; const offset = Number(cursor ?? 0); return { objects: caps.slice(offset,offset+50), hasNextPage: offset+50<caps.length, cursor:String(offset+50) }; };
+  const deployments = Array.from({length:100},(_,n)=>({deployment_id:id(`0x${(50000+n).toString(16)}`),creator:owner,component_name:'app',version:'1',recipe_blob_id:'recipe',artifact_sha256:'a'.repeat(64),target_groups:[],target_devices:[devices[n]]}));
+  for (const e of deployments) {
+    objects.set(e.deployment_id,{objectId:e.deployment_id,content:schema.DeploymentBcs.serialize({id:e.deployment_id,creator:owner,component_name:'app',version:'1',recipe_blob_id:'recipe',artifact_sha256:e.artifact_sha256,created_at:1,schema_version:1}).toBytes()});
+    for (const name of ['TargetGroupsKey','TargetDevicesKey']) field(e.deployment_id,origin(`deployment_manager::${name}`),bcs.bool(),false,'vector<0x2::object::ID>',bcs.vector(bcs.Address),name==='TargetGroupsKey'?[]:e.target_devices);
+  }
+  client.listEvents = async () => {calls++;return {events:deployments.map(e=>({bcs:schema.DeploymentCreatedBcs.serialize(e).toBytes()})),hasNextPage:false};};
+  client.getDynamicField = async ({name}) => {calls++;assert.ok(!name.type.endsWith('::TargetGroupsKey')&&!name.type.endsWith('::TargetDevicesKey'),'targets must be batched');throw new ObjectError('missing','missing',{reason:'notFound'});};
   let before = calls;
   assert.equal((await sui.fetchDevices(client, owner)).length, 1000);
   const inventory = calls-before; // manifest object proofs + ownership pages + batch objects
@@ -56,6 +64,10 @@ for (const [n, device] of devices.entries()) {
   assert.ok(Object.values(result).every(h => h.status === 'unreported'));
   const chainHealth = calls-before;
   assert.equal(chainHealth,62,'20 identity + 20 index + 20 writer batches + fleet object + service info');
+  before = calls;
+  assert.equal((await sui.fetchDeploymentEvents(client)).length,100,'network-wide deployment discovery used by alerts');
+  const deploymentRequests = calls-before;
+  assert.ok(deploymentRequests < 215, `batched deployment reads: ${deploymentRequests}`);
   // Batch mismatch and missing-index behavior remain explicit.
   const bad = {getObjects: async ({objectIds}) => ({objects:objectIds.map(objectId => ({...objects.get(objectId), type:'0x2::object::ID'}))})};
   await assert.rejects(budget.fetchAccounts(bad,budgetId,[devices[0]]), /index type/);
@@ -74,12 +86,12 @@ for (const [n, device] of devices.entries()) {
   let clock = 0; const starts = [];
   const fetcher = budgetedFetch(async () => { starts.push(clock); return new Response('ok'); }, () => clock, async ms => {clock+=ms;});
   // Includes two health/inventory consumers, budget accounts, proofs, events and receipts.
-  const requestCount = 2*(inventory+chainHealth)+accounts+30;
+  const requestCount = 2*(inventory+chainHealth+deploymentRequests)+accounts+30;
   for (let remaining=requestCount;remaining>0;remaining-=100) await Promise.all(Array.from({length:Math.min(100,remaining)},()=>fetcher('https://fixture.invalid')));
   const peak = Math.max(...starts.map(t=>starts.filter(s=>s>=t&&s<t+30000).length));
   assert.ok(peak<=86,`public-node request budget exceeded: ${peak}`);
   const abort = new AbortController(); abort.abort();
   await assert.rejects(fetcher('https://fixture.invalid',{signal:abort.signal}),/abort/i);
   assert.equal(starts.length,requestCount,'aborted queued requests do not reach transport');
-  console.log(JSON.stringify({devices:1000,inventoryRequests:inventory,budgetAccountRequests:accounts,chainHealthRequests:chainHealth,combinedFixtureRequests:requestCount,peakStartsPer30Seconds:peak,virtualDrainMs:clock}));
+  console.log(JSON.stringify({devices:1000,inventoryRequests:inventory,budgetAccountRequests:accounts,chainHealthRequests:chainHealth,networkDeployments:100,deploymentRequests,combinedFixtureRequests:requestCount,peakStartsPer30Seconds:peak,virtualDrainMs:clock}));
 })().catch(e=>{console.error(e);process.exitCode=1;});

@@ -1,3 +1,4 @@
+import { batchFields } from './batch-fields';
 import { incrementalEvents as allEvents } from "./event-history";
 import { readDeploymentControl, type DeploymentControl } from "./deployment-control";
 import { calls } from "./fleet-protocol";
@@ -6,7 +7,7 @@ import { requireManifest, moveType, verifyDeployment } from "./deployment-manife
 import { Transaction } from "@mysten/sui/transactions";
 import type { SuiGrpcClient } from "@mysten/sui/grpc";
 import { ObjectError } from "@mysten/sui/client";
-import { normalizeStructTag, normalizeTypeTag } from "@mysten/sui/utils";
+import { normalizeStructTag } from "@mysten/sui/utils";
 import { DeviceBcs, DeviceOwnerCapBcs, GroupBcs, GroupCreatedBcs, DeploymentCreatedBcs, DeploymentBcs, ReceiptsBcs } from "./move-bcs";
 import { bcs } from "@mysten/sui/bcs";
 import { PACKAGE_ID, REGISTRY_ID, DEVICE_TYPE, DEVICE_OWNER_CAP_TYPE, DEVICE_GROUP_TYPE, DEPLOYMENT_CREATED_EVENT } from "./constants";
@@ -315,17 +316,16 @@ export async function fetchDeploymentEvents(client: SuiGrpcClient, owner?: strin
   });
   // Persisted events discover IDs only. Targets must be re-read from objects:
   // browser storage is neither a current target list nor an authority source.
-  const currentEvents = await Promise.all(liveEvents.map(async event => {
-    async function targets(name: "TargetGroupsKey" | "TargetDevicesKey", optional = false): Promise<string[]> {
-      let field;
-      try { field = await client.getDynamicField({ parentId: event.deployment_id,
-        name: { type: moveType(`deployment_manager::${name}`), bcs: bcs.bool().serialize(false).toBytes() } }); }
-      catch (error) { if (optional && error instanceof ObjectError && error.reason === "notFound") return []; throw error; }
-      if (normalizeTypeTag(field.dynamicField.value.type) !== normalizeTypeTag("vector<0x2::object::ID>")) throw Error("Unexpected deployment targets type");
-      return bcs.vector(bcs.Address).parse(field.dynamicField.value.bcs);
-    }
-    return { ...event, target_groups: await targets("TargetGroupsKey"), target_devices: await targets("TargetDevicesKey", true) };
-  }));
+  const targetValues = await batchFields(client, liveEvents.flatMap(event =>
+    (["TargetGroupsKey", "TargetDevicesKey"] as const).map(name => ({ parent: event.deployment_id,
+      keyType: moveType(`deployment_manager::${name}`), key: bcs.bool().serialize(false).toBytes(),
+      valueType: "vector<0x2::object::ID>" }))));
+  const currentEvents = liveEvents.map((event, index) => {
+    const groups = targetValues[index * 2], devices = targetValues[index * 2 + 1];
+    if (!groups) throw Error("Missing deployment target groups");
+    return { ...event, target_groups: bcs.vector(bcs.Address).parse(groups),
+      target_devices: devices ? bcs.vector(bcs.Address).parse(devices) : [] };
+  });
   const groups = await objectsInBatches(client, [...new Set(currentEvents.flatMap((event) => event.target_groups))]);
   const groupsById = new Map(groups.map((group) => [group.objectId, supportedTargetGroup(group)]));
   return Promise.all(currentEvents.map(async (event) => {
