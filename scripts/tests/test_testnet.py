@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import sys
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from testnet_budget import Budget, Spent
 from testnet_ci import trusted_pr, plan
@@ -93,10 +93,14 @@ class TrustTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root/'source.move').write_text('same contracts')
-            before = live.contracts_digest(root)
+            built={'digest':[1]*32}
+            before = live.contracts_digest(root,compiled=built)
             (root/'build').mkdir()
             (root/'build'/'junk').write_text('changed build output')
-            self.assertEqual(before, live.contracts_digest(root))
+            self.assertEqual(before, live.contracts_digest(root,compiled=built))
+            (root/'fleet_data').mkdir();(root/'fleet_data/source.move').write_text('separate package changed')
+            self.assertEqual(before,live.contracts_digest(root,compiled=built))
+            self.assertNotEqual(before,live.contracts_digest(root,compiled={'digest':[2]*32}))
 
     def test_exact_sha_actor_and_main_binding(self):
         pr = self.fixture()
@@ -319,3 +323,41 @@ class PublicEnvironmentTests(unittest.TestCase):
         self.assertNotIn('secrets.', probe)
         self.assertNotIn('environment:', probe)
         self.assertNotIn('SUIFLEET_TESTNET_KEY', probe)
+
+class BytecodeFixtureTests(unittest.TestCase):
+    def test_pair_compiler_framework_and_verified_digest_are_required_for_migration(self):
+        import copy, live_package_upgrade as live
+        tools={'build':{'version':'pinned compiler'},'network':{'sha256':'pinned network'}}
+        framework={'base':'framework-a','head':'framework-a'}
+        proof=dict(build_cli='pinned compiler',network_cli_sha256='pinned network',framework=framework,
+                   verified_transactions={'base':{'digest':'aa'},'upgrade':{'digest':'bb'}})
+        good={'provenance':proof,'public_marker':'existing'}
+        self.assertIs(live.matching_fixture({'fixtures':{'old source hash':good}},'bytecode-v1:aa','bytecode-v1:bb',tools,framework),good)
+        for edit in [lambda p:p.update(build_cli='other'),lambda p:p.update(network_cli_sha256='other'),lambda p:p.update(framework={}),lambda p:p['verified_transactions']['upgrade'].update(digest='cc')]:
+            bad=copy.deepcopy(good);edit(bad['provenance'])
+            self.assertIsNone(live.matching_fixture({'fixtures':{'old':bad}},'bytecode-v1:aa','bytecode-v1:bb',tools,framework))
+        self.assertIsNone(live.matching_fixture({'fixtures':{'old':good}},'bytecode-v1:bb','bytecode-v1:aa',tools,framework))
+    def test_unknown_setup_is_never_retried_and_refusals_do_not_hide_publication(self):
+        import tempfile, live_package_upgrade as live
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as d:
+            path=Path(d)/'private-state';p={};state={'publications':{'pair':p}}
+            ledger=SimpleNamespace(evidence=[])
+            def interrupted():raise RuntimeError('transport outcome unknown')
+            with self.assertRaises(RuntimeError):live.checkpoint_setup(path,state,p,'publish base',interrupted,ledger)
+            self.assertEqual(json.loads(path.read_text())['publications']['pair']['pending_operation'],'publish base')
+            refused=Mock()
+            with self.assertRaises(RuntimeError):live.checkpoint_setup(path,state,p,'publish again',refused,ledger)
+            refused.assert_not_called()
+            p.clear()
+            def not_sent():raise live.toolchain.NotSubmitted('refused before sign')
+            with self.assertRaises(live.toolchain.NotSubmitted):live.checkpoint_setup(path,state,p,'publish base',not_sent,ledger)
+            self.assertNotIn('pending_operation',json.loads(path.read_text())['publications']['pair'])
+            self.assertEqual(live.checkpoint_setup(path,state,p,'publish base',lambda:{'id':'known'},ledger),{'id':'known'})
+            self.assertNotIn('pending_operation',p)
+            self.assertIn('pending_operation',json.loads(path.read_text())['publications']['pair'],'success is checkpointed only with its IDs by the caller')
+    def test_malformed_private_state_does_not_trigger_a_fresh_publication(self):
+        import tempfile, live_package_upgrade as live
+        with tempfile.TemporaryDirectory() as d:
+            path=Path(d)/'private-state';path.write_text('malformed')
+            with self.assertRaisesRegex(RuntimeError,'reconcile'):live.load_state(path,'chain','owner')
