@@ -113,13 +113,15 @@ formula, with unchanged pass criterion (one success). Those failed local attempt
 are not Testnet spending or passing evidence. Their logs remain under private
 `/tmp/sf090-*`; no raw daemon/chain logs are published.
 
-`make test-tracking`: **10 tests, 1 failure and 1 error**. The explicitly requested
-SF-090 seed depends on existing SF-083/#161, but the pinned seed and fetched main
-omit SF-083. `python3 scripts/bootstrap_tracking.py` fails closed with
-`unknown dependency: SF-090`. Existing #177/Project IDs were verified/synchronized;
-no new issue or unrelated seed entry was imported. The gap is reported in
-[SF-090/#177](https://github.com/tyler-suifleet/suifleet/issues/177#issuecomment-6357030558).
-It is an unresolved software gate, not an external-acceptance waiver.
+The initial `make test-tracking` run had 1 failure and 1 error of 10;
+the bootstrap dry run rejected the missing SF-083 dependency. On 2026-10-22,
+under explicit restoration authorization, only existing published SF-083/#161
+and its prerequisite SF-088/#171 were restored from the audited canonical entries.
+Their issue IDs, node IDs, closed titles and Project-item issue identities were
+verified against GitHub before restoration. No issue was created and no
+acceptance or ownership rule changed. `make test-tracking` now passes all
+10 tests; `python3 scripts/bootstrap_tracking.py` completes its offline dry run.
+The catalog blocker is resolved; this does not establish integrated acceptance.
 
 `make test-manifest` passed in the network-none container (14 manifest Python
 tests, all frontend assertions including the new pilot regressions, and the final
@@ -128,8 +130,7 @@ Make target dry runs and `git diff --check` passed. Receipt-specific source path
 were compared with their recorded revisions and match; no full Rust build,
 full application suite, physical test or final integrated acceptance is implied.
 
-Before Ready/Review: synchronize the missing prerequisite seed under authorized
-tracking scope; verify SF-082/#160 is actually merged/Done; integrate actual merged
+Before Ready/Review: verify SF-082/#160 is actually merged/Done; integrate actual merged
 main; rerun compatibility, adversarial, native and end-to-end experiments; require
 current-head CI and automatic Testnet validation and independent review. Actual
 whole-product multi-device certified encrypted operation/soak at a supported pilot

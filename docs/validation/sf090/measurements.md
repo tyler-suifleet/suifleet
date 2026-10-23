@@ -51,7 +51,7 @@ No public enrollment/upload/keyserver capacity or latency was measured.
 
 Threshold failures in completed experiment receipts: zero. Injected faults and
 expected on-chain refusals are separately retained. Initial setup failures and
-the unresolved tracking regression are described in README.md; they are not
+the repaired tracking regression are described in README.md; they are not
 erased by these passing measurements.
 
 External provider quotas, paid capacity, actual service bill, production fees,
