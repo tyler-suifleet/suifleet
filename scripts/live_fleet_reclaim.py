@@ -45,11 +45,17 @@ def run(args):
         facts = dm.chain_facts(live.rpc_url, cap, CORE_CAP, data['fleetId'], data['writerId'])
         assert dm.object_id(live.owner(cap)) == live.operator
         cap_package, cap_version = dm.upgrade_cap(facts['objects'][dm.object_id(cap)])[:2]
-        owned = live.client('objects', live.operator)
-        budget_caps = [o for o in (owned if isinstance(owned, list) else owned.get('data', []))
-                       if str((o.get('data') or o).get('type', '')).endswith('::fleet_budget::BudgetOwnerCap')]
-        budget_cap = next(dm.object_id((o.get('data') or o)['objectId']) for o in budget_caps
-                          if dm.object_id(plain(live.object((o.get('data') or o)['objectId'])['content'])['budget_id']) == dm.object_id(data['budgetId']))
+        # The CLI lists owned objects as raw Move BCS: BudgetOwnerCap is (id, budget_id).
+        budget_caps = []
+        for item in live.client('objects', live.operator):
+            move = (item.get('data') or {}).get('Move') or {}
+            kind = (move.get('type_') or {}).get('Other') or {}
+            if (kind.get('module'), kind.get('name')) == ('fleet_budget', 'BudgetOwnerCap') and dm.object_id('0x' + kind['address'].removeprefix('0x')) == dm.object_id(CORE):
+                raw = bytes(move['contents'])
+                if dm.object_id('0x' + raw[32:64].hex()) == dm.object_id(data['budgetId']):
+                    budget_caps.append(dm.object_id('0x' + raw[:32].hex()))
+        assert len(budget_caps) == 1, 'expected exactly one owner cap for the SF-082 fleet budget'
+        budget_cap = budget_caps[0]
         live.check('Testnet chain/account, data UpgradeCap and fleet budget owner cap verified')
         before = {name: plain(live.object(data[name])['content']) for name in ('fleetId', 'writerId')}
         with tempfile.TemporaryDirectory(prefix='sf129-live-') as directory:
