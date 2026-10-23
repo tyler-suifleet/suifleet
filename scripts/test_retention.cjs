@@ -59,3 +59,36 @@ try {
 const authorization = r.buildAuthorizeRenewalTx(config, '0x1', '0x2', '0x3', '0x4', 7, 100n).getData();
 assert.equal(authorization.commands[1].MoveCall.function, 'prepay_renewal');
 console.log('PASS: retention SDK builders, cross-runtime BCS, independent funding/expiry facts');
+
+(async () => {
+  const { renewalReceipt } = require('./retention_transport.cjs');
+  const tx = new Transaction();
+  tx.setSender(id('0xc')); tx.setGasBudget(10); tx.setGasPrice(1);
+  const ref = (objectId) => ({ objectId: id(objectId), version: '1', digest: '11111111111111111111111111111111' });
+  tx.setGasPayment([ref('0x10')]);
+  tx.transferObjects([tx.objectRef(ref('0x11'))], id('0xc'));
+  const bytes = await tx.build();
+  const value = { bytes: Buffer.from(bytes).toString('base64'), digest: await Transaction.from(bytes).getDigest() };
+  let advanced = '', calls = 0, indexed = false;
+  const client = {
+    async getTransaction() {
+      calls++;
+      if (indexed && calls > 1) return { Transaction: { status: { success: true } } };
+      throw Object.assign(Error('not indexed'), { code: 5 });
+    },
+    async getObject({ objectId }) { return { object: { version: objectId === advanced ? '2' : '1' } }; },
+  };
+  assert.equal((await renewalReceipt(client, value)).status, 'unknown');
+  for (advanced of [id('0x10'), id('0x11')]) {
+    calls = 0;
+    assert.equal((await renewalReceipt(client, value)).status, 'failed');
+    assert.equal(calls, 2);
+  }
+  calls = 0; indexed = true;
+  assert.equal((await renewalReceipt(client, value)).status, 'success');
+  indexed = false;
+  client.getObject = async () => { throw Error('unavailable'); };
+  await assert.rejects(renewalReceipt(client, value), /unavailable/);
+  await assert.rejects(renewalReceipt(client, { ...value, digest: 'wrong' }));
+  console.log('PASS: signed gas/owned reference invalidation, unchanged refs, indexing race and read failure');
+})().catch((error) => { console.error(error); process.exitCode = 1; });

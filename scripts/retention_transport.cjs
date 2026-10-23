@@ -38,6 +38,39 @@ function executorSigner(filename) {
   const signer = Ed25519Keypair.fromSecretKey(/^[0-9a-f]{64}$/i.test(privateKey) ? Uint8Array.from(Buffer.from(privateKey, 'hex')) : privateKey);
   return signer;
 }
+// A not-yet-indexed digest is uncertain until one of its owned references has
+// advanced. Re-read effects after object reads to close the common indexing race.
+async function renewalReceipt(client, value) {
+  const lookup = async () => {
+    try {
+      const result = await client.getTransaction({ digest: value.digest, include: { effects: true } });
+      return { status: result.Transaction?.status.success ? 'success' : 'failed' };
+    } catch (error) {
+      if (error.reason === 'notFound' || error.code === 'NOT_FOUND' || error.code === 5) return null;
+      throw error;
+    }
+  };
+  const receipt = await lookup();
+  if (receipt) return receipt;
+  const bytes = Buffer.from(value.bytes, 'base64');
+  check(bytes.length <= 16384 && await Transaction.from(bytes).getDigest() === value.digest);
+  const tx = Transaction.from(bytes).getData();
+  const refs = [...(tx.gasData.payment || []), ...tx.inputs.flatMap(
+    (input) => input.Object?.ImmOrOwnedObject ? [input.Object.ImmOrOwnedObject] : [])];
+  for (const ref of refs) {
+    let object;
+    try { object = (await client.getObject({ objectId: ref.objectId })).object; }
+    catch (error) {
+      // Missing/pruned objects do not establish a newer version.
+      if (error.reason === 'notFound' || error.code === 'NOT_FOUND' || error.code === 5) continue;
+      throw error;
+    }
+    if (BigInt(object.version) > BigInt(ref.version)) {
+      return await lookup() || { status: 'failed' };
+    }
+  }
+  return { status: 'unknown' };
+}
 async function run({ config: c, action, value }) {
   check(c.chain === '4c78adac' && c.network === 'testnet');
   for (const key of ['storage', 'package', 'storage_origin', 'retention_origin', 'executor']) id(c[key]);
@@ -131,15 +164,7 @@ async function run({ config: c, action, value }) {
       reserve_wal: r.wal.value, reserve_gas: r.gas.value, spendable_wal: fleet.wal.value,
       epoch_duration_ms: staking.epoch_duration, first_epoch_start_ms: staking.first_epoch_start };
   }
-  if (action === 'receipt') {
-    try {
-      const result = await client.getTransaction({ digest: value.digest, include: { effects: true } });
-      return { status: result.Transaction?.status.success ? 'success' : 'failed' };
-    } catch (error) {
-      if (error.reason === 'notFound' || error.code === 'NOT_FOUND' || error.code === 5) return { status: 'unknown' };
-      throw error;
-    }
-  }
+  if (action === 'receipt') return renewalReceipt(client, value);
   const signer = executorSigner(c.executor_key_file);
   check(id(signer.toSuiAddress()) === id(c.executor));
   if (action === 'prepare') {
@@ -176,4 +201,4 @@ if (require.main === module) {
     catch { process.stderr.write('retention transport failed\n'); process.exitCode = 1; }
   });
 }
-module.exports = { executorSigner, run, Retention, Renewal, Record, Budget, Account };
+module.exports = { renewalReceipt, executorSigner, run, Retention, Renewal, Record, Budget, Account };

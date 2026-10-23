@@ -68,6 +68,58 @@ class RetentionTests(unittest.TestCase):
             self.assertEqual(chain.submitted, 2)
             worker.lock.close()
 
+    def test_two_blobs_shared_gas_invalidates_then_reprepares_after_restart(self):
+        class SharedGas:
+            def __init__(self):
+                self.version = 1
+                self.ends = {'A': 5, 'B': 5}
+                self.prepared = []
+                self.effects = set()
+                self.outage = True
+
+            def __call__(self, action, value=None):
+                if action == 'snapshot':
+                    return {'epoch': 4, 'margin': 2, 'revision': '1', 'blobs': [
+                        {'id': key, 'end': end, 'target': 7, 'affordable': True}
+                        for key, end in self.ends.items()]}
+                if action == 'prepare':
+                    intent = {'digest': f"{value['blob']}@{self.version}",
+                              'blob': value['blob'], 'version': self.version}
+                    self.prepared.append(intent)
+                    return intent
+                if action == 'receipt':
+                    return {'status': 'success' if value['digest'] in self.effects else
+                            'failed' if value['version'] < self.version else 'unknown'}
+                if action == 'submit':
+                    if value['blob'] == 'A' and self.outage:
+                        raise OSError('timeout before execution')
+                    if value['version'] != self.version:
+                        raise OSError('stale gas')
+                    self.version += 1
+                    self.ends[value['blob']] = 7
+                    self.effects.add(value['digest'])
+                    return {'status': 'submitted'}
+                raise AssertionError(action)
+
+        with tempfile.TemporaryDirectory() as directory:
+            chain = SharedGas()
+            config = {'gas_budget': '10', 'spend_ceiling': '30'}
+            worker = module.Worker(config, directory, chain)
+            worker.tick(0)  # B consumes A's gas reference while A is uncertain.
+            self.assertEqual(chain.ends, {'A': 5, 'B': 7})
+            worker.lock.close()
+            worker = module.Worker(config, directory, chain)
+            chain.outage = False
+            worker.tick(300)  # Definitively invalidated A is cleared.
+            worker.tick(10000)  # Fresh A uses B's new gas version.
+            worker.tick(10001)
+            self.assertEqual(chain.ends, {'A': 7, 'B': 7})
+            self.assertEqual(len(chain.prepared), 3)
+            self.assertEqual(worker.state['spent_ceiling'], 30)
+            self.assertEqual(worker.state['pending'], {})
+            self.assertEqual(worker.state['last_success']['A']['digest'], 'A@2')
+            worker.lock.close()
+
     def test_purchase_decline_has_no_credit_and_topup_resumes(self):
         with tempfile.TemporaryDirectory() as directory:
             chain = Chain()

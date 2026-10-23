@@ -252,6 +252,12 @@ New signed transactions are limited to three preparations per authorized target
 and the configured non-replenishing gas ceiling. An uncertain transaction keeps
 its original signed bytes: receipt reconciliation and idempotent resubmission
 continue with exponential backoff capped at one hour, until exclusive blob expiry.
+If a gas-payment or owned-input reference has advanced and a second digest lookup
+still finds no effects, those signed bytes cannot execute again. The worker clears
+that intent and may prepare a replacement within the same three-preparation and
+non-replenishing gas bounds. An unchanged or unreadable reference never proves
+failure. Each fresh snapshot still gates renewal on the actual expiry; a missing
+receipt never establishes success.
 `renewal_retry_exhausted` warns after three submissions; it does not abandon prepaid
 capacity. A stopped worker still provides no renewal guarantee.
 
