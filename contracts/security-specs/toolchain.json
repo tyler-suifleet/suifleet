@@ -33,7 +33,7 @@
   "rust": "1.94.0",
   "status": "87 application/raw-model phase obligations and 28 exact solver negatives verified; DOF heap, complete custody/enrollment/init proofs remain unmet",
   "compatibility": {
-    "release-model.patch": "1bf2e6530a4d35a694897f5b73740f45f5045eddb75612bc8124a7ee98492267",
+    "release-model.patch": "dc9428b6591df6dfb8d0f5411018a65865879c858aeeac6ecb0adb9d2b82f082",
     "integer.move": "6c629571d86aa27280b7bc023405e600ddc0a3e15f855f8810f2a23f2ee433a1",
     "registry-spec-helpers.move": "356c74b4159ee19989b51512a483cfdf9e08552359227df10e2ce6dd057bd979",
     "dof-spec-helpers.move": "098bdcbd995453a09f77e2b54f6051449665a194bb8f3d9a2e3060429bc9fa44",
@@ -46,6 +46,6 @@
     "enrollment-pending.move": "412973a54a82ade9431d4cc9fe9fe96bd0eb665a49534536839667968f86a7bf",
     "raw-field-spec-helpers.move": "ae52dcad322ff955f6ac81a445fc4103aea562f753efc779cae6ced631d0613a",
     "carrier-field-spec-helpers.move": "1134c2441cc1d26e5102adf8be0ac059438305b01fdcde74d732e195df845966",
-    "object-field-spec-helpers.move": "aa0ca50b3ef49537625ee144330605242979c320d53e67f15a541958e4fd63d6"
+    "object-field-spec-helpers.move": "5e7eb1feea6c77b5c6a4e868ab74813b9b61526f021afe77522027b2286e3733"
   }
 }

@@ -67,7 +67,8 @@ def main():
     parser.add_argument("--framework-packages", type=Path, required=True)
     parser.add_argument("--prover-binary", type=Path, required=True)
     parser.add_argument("--unknown-occupancy-control", action="store_true", help="Deliberately assert unmodeled occupied slots are impossible; must fail")
-    parser.add_argument("--native-model-control", choices=("missing-tag-clear", "wrong-type-alias"), help="Deliberately mutate an emitted native transition; solver rejection required")
+    parser.add_argument("--native-model-control", choices=("missing-tag-clear", "wrong-type-alias", "object-omit-outer", "object-omit-child", "object-skip-clear", "object-wrong-owner", "object-wrong-id"), help="Deliberately mutate an emitted native transition; solver rejection required")
+    parser.add_argument("--include-overlap-fixtures", action="store_true", help="Reproduce unsupported same-Name raw/object overlap; not a proof")
     parser.add_argument("--include-object-fixtures", action="store_true", help="Reproduce real outer Wrapper/ID and UID-bearing child obligations")
     parser.add_argument("--include-carrier-fixtures", action="store_true", help="Reproduce existing-UID carrier reconstruction boundary")
     parser.add_argument("--include-raw-fixtures", action="store_true", help="Run executable raw native conformance fixtures and actual-function specifications")
@@ -167,6 +168,11 @@ def main():
         if args.include_carrier_fixtures:
             shutil.copyfile(ROOT / "contracts/security-native-fixtures/sources/carrier_fields.move", specs / "sources/carrier_fields.move")
             shutil.copyfile(overlay / "carrier-field-spec-helpers.move", specs / "sources/carrier_field_specs.move")
+        if args.include_overlap_fixtures:
+            overlap = (ROOT / "contracts/security-native-fixtures/sources/overlap_fields.move").read_text()
+            overlap += "\n#[mode(spec), ext(spec(prove, target = same_name_noninterference))]\nfun overlap_same_spec(ctx: &mut TxContext) { same_name_noninterference(ctx); }\n"
+            overlap += "\n#[mode(spec), ext(spec(prove, target = raw_value_noninterference))]\nfun overlap_different_spec(ctx: &mut TxContext) { raw_value_noninterference(ctx); }\n"
+            (specs / "sources/overlap_fields.move").write_text(overlap)
         if args.include_object_fixtures:
             body = (ROOT / "contracts/security-native-fixtures/sources/object_fields.move").read_text()
             # Semicolon module syntax extends to EOF; append spec-only obligations.
@@ -179,8 +185,8 @@ def main():
             + '\nsui_edge = "0x0"\nsf050_native = "0x51"\n')
         env = dict(os.environ, SUI_PROVER_FRAMEWORK_PATH=str(libraries))
         if args.native_model_control:
-            if not args.include_raw_fixtures:
-                raise SystemExit("Native model controls require the raw fixtures")
+            if not (args.include_raw_fixtures or args.include_object_fixtures):
+                raise SystemExit("Native model controls require the matching native fixtures")
             wrapper = temporary / "boogie-control"
             shutil.copyfile(ROOT / "scripts/move_native_model_control.py", wrapper)
             wrapper.chmod(0o700)

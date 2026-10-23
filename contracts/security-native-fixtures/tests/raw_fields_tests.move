@@ -64,3 +64,25 @@ fun unknown_type_duplicate() {
     assert!(raw_fields::name_only_occupied(&p, 9), 0);
     let _ = df::remove<raw_fields::NameOnly, vector<u8>>(&mut p, key); p.delete();
 }
+
+#[test] fun same_name_raw_object_noninterference() {
+    sf050_native::overlap_fields::same_name_noninterference(&mut tx_context::dummy());
+}
+#[test] fun same_name_different_value_noninterference() {
+    sf050_native::overlap_fields::raw_value_noninterference(&mut tx_context::dummy());
+}
+#[test, expected_failure(abort_code = 2, location = sui::dynamic_field)]
+fun object_wrong_requested_type() {
+    sf050_native::object_fields::wrong_requested_child(&mut tx_context::dummy());
+}
+#[test, expected_failure(abort_code = 0, location = sui::dynamic_field)]
+fun object_duplicate_different_type() {
+    sf050_native::object_fields::duplicate_child_type(&mut tx_context::dummy());
+}
+#[test, expected_failure(abort_code = 1, location = sui::dynamic_field)]
+fun object_missing() {
+    sf050_native::object_fields::missing_child(&mut tx_context::dummy());
+}
+#[test] fun object_readd_mutation_frame() {
+    sf050_native::object_fields::remove_readd_and_frame(&mut tx_context::dummy());
+}
