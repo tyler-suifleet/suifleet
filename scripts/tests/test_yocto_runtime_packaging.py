@@ -17,6 +17,9 @@ spec.loader.exec_module(codec)
 spec = importlib.util.spec_from_file_location('test_pi_codec', ROOT/'scripts/test_pi_codec.py')
 smoke = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(smoke)
+spec = importlib.util.spec_from_file_location('test_pi_archive', ROOT/'scripts/test_pi_archive.py')
+archive = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(archive)
 
 DAEMON = (LAYER/'recipes-edge/suifleet/suifleet_1.0.bb').read_text()
 CODEC = (LAYER/'recipes-edge/suifleet-walrus-codec/suifleet-walrus-codec_1.0.bb').read_text()
@@ -236,6 +239,27 @@ class InstalledArtifactTests(unittest.TestCase):
     def test_vector_is_deterministic(self):
         self.assertEqual(smoke.ciphertext(100), smoke.ciphertext(100))
         self.assertEqual(len(smoke.ciphertext(1000)), 1000)
+
+
+class TargetArchiveHarnessTests(unittest.TestCase):
+    def test_dependency_control_sysroot_omits_only_libstdcxx(self):
+        with tempfile.TemporaryDirectory() as d:
+            rootfs, sysroot = Path(d)/'rootfs', Path(d)/'sysroot'
+            for sub in ['lib', 'usr/lib']:
+                (rootfs/sub/'suifleet').mkdir(parents=True)
+                for name in ['ld-linux-aarch64.so.1', 'libc.so.6', 'libstdc++.so.6', 'libstdc++.so.6.0.32']:
+                    (rootfs/sub/name).write_text(name)
+            self.assertEqual(archive.minimal_sysroot(rootfs, sysroot), ['libstdc++.so.6', 'libstdc++.so.6.0.32'])
+            self.assertEqual(sorted(p.name for p in (sysroot/'usr/lib').iterdir()), ['ld-linux-aarch64.so.1', 'libc.so.6'])
+            self.assertEqual((sysroot/'lib/libc.so.6').resolve(), (rootfs/'lib/libc.so.6').resolve())
+            with self.assertRaises(AssertionError):
+                archive.minimal_sysroot(sysroot, Path(d)/'again')
+
+    def test_launcher_is_valid_and_retargets_only_prepare_to_testnet(self):
+        source = archive.LAUNCHER % json.dumps({})
+        compile(source, 'launcher', 'exec')
+        self.assertIn("if request['operation'] == 'prepare':\n    request.update(C['testnet'])", source)
+        self.assertEqual(archive.TESTNET['chain'], smoke.TESTNET_CHAIN)
 
 
 class RecipeTests(unittest.TestCase):
