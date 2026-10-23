@@ -12,6 +12,7 @@ import { AnchorBcs, readDeviceData, readFleetData, type FleetDataConfig } from '
 import { readIdentity } from './telemetry';
 import { FleetStorageBcs } from './fleet-budget';
 import { MAGIC, isEnvelope, type SealSettings } from './seal';
+import { parseShadowSnapshot, type ShadowSnapshot } from './shadow-documents';
 
 export const BlobRecordBcs = bcs.struct('BlobRecord', { device_id: bcs.option(bcs.Address), blob_id: bcs.u256(), size: bcs.u64(), encoded_size: bcs.u64(), end_epoch: bcs.u32(), uploaded_at_ms: bcs.u64() });
 
@@ -19,7 +20,8 @@ export const MAX_ARCHIVE_BYTES = 4 * 1024 * 1024;
 export const MAX_ARCHIVE_RECORDS = 4096;
 export interface ArchiveRecord { source: string; line: string }
 export interface Archive {
-  schema: 1;
+  /** 2 (SF-084): also carries the device's shadow documents. */
+  schema: 1 | 2;
   kind: 'fleet-data';
   chain_identifier: string;
   registry: string;
@@ -31,7 +33,10 @@ export interface Archive {
   reason: 'logs' | 'diagnostics' | 'crash';
   dropped_lines: number;
   records: ArchiveRecord[];
+  /** Present exactly in schema 2. */
+  shadows?: ShadowSnapshot;
 }
+const ARCHIVE_FIELDS = ['schema', 'kind', 'chain_identifier', 'registry', 'fleet_id', 'device_id', 'signer', 'seq', 'observed_ms', 'reason', 'dropped_lines', 'records'];
 export type Anchor = ReturnType<typeof AnchorBcs.parse>;
 const integer = (n: unknown): n is number => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0;
 const equal = (a: ArrayLike<number>, b: ArrayLike<number>) => a.length === b.length && Array.from(a).every((v, i) => v === b[i]);
@@ -74,8 +79,8 @@ export async function verifyArchive(plaintext: Uint8Array, config: FleetDataConf
   const message = fromBase64(envelope.message), signature = fromBase64(envelope.signature);
   if ((signature[0] !== 0 && signature[0] !== 2) || !await isValidPersonalMessageSignature(message, envelope.signature, { address: anchor.signer })) throw Error('Archive signature mismatch');
   const a: Archive = parsePrivateJson(message);
-  if (!a || !exact(a, ['schema', 'kind', 'chain_identifier', 'registry', 'fleet_id', 'device_id', 'signer', 'seq', 'observed_ms', 'reason', 'dropped_lines', 'records'])
-    || a.schema !== 1 || a.kind !== 'fleet-data' || a.chain_identifier !== config.chainIdentifier || id(a.registry) !== config.registryId
+  if (!a || typeof a !== 'object' || !(a.schema === 1 ? exact(a, ARCHIVE_FIELDS) : a.schema === 2 && exact(a, [...ARCHIVE_FIELDS, 'shadows']))
+    || a.kind !== 'fleet-data' || a.chain_identifier !== config.chainIdentifier || id(a.registry) !== config.registryId
     || id(a.fleet_id) !== config.fleetId || id(a.device_id) !== id(deviceId) || id(a.signer) !== id(anchor.signer)
     || !integer(a.seq) || a.seq === 0 || BigInt(a.seq) !== BigInt(anchor.seq)
     || !integer(a.observed_ms) || BigInt(a.observed_ms) > BigInt(anchor.at_ms) + BigInt(300_000)
@@ -87,6 +92,7 @@ export async function verifyArchive(plaintext: Uint8Array, config: FleetDataConf
       || !(r.source === 'daemon' || (r.source.startsWith('component:') && r.source.length > 10))
       || typeof r.line !== 'string' || bytes(r.line) > 1024 || /[\r\n]/.test(r.line)) throw Error('Invalid archive log record');
   }
+  if (a.schema === 2) parseShadowSnapshot(a.shadows);
   return a;
 }
 
