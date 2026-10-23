@@ -158,7 +158,7 @@ export async function requireArchiveReadable(client: SuiGrpcClient, config: Flee
   const [origin, module, name] = normalizeStructTag(object.type).split('::');
   if (module !== 'fleet_storage' || name !== 'FleetStorage' || object.owner.$kind !== 'Shared') throw Error('Invalid fleet storage');
   const storage = FleetStorageBcs.parse(object.content!);
-  if (id(storage.id) !== config.storageId || id(storage.budget_id) !== config.budgetId || !['1', '2'].includes(storage.version)) throw Error('Foreign fleet storage');
+  if (id(storage.id) !== config.storageId || id(storage.budget_id) !== config.budgetId || !['1', '2', '3'].includes(storage.version)) throw Error('Foreign fleet storage');
   // RecordKey and BlobRecord were introduced with FleetStorage in interface v1.
   const field = await client.getDynamicField({ parentId: config.storageId, name: {
     type: `${origin}::fleet_storage::RecordKey`, bcs: bcs.struct('RecordKey', { blob_object_id: bcs.Address }).serialize({ blob_object_id: anchor.blob_object_id }).toBytes(),
