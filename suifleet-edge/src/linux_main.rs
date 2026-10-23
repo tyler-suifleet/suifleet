@@ -8,6 +8,7 @@ mod tunneling;
 mod clientdevices;
 mod client_gateway;
 mod control;
+mod cadence;
 mod apply;
 mod oci;
 mod bridge;
@@ -453,8 +454,18 @@ async fn main() -> anyhow::Result<()> {
             address = sui.address(),
             "Daemon started with durable deployment polling"
         );
+        let mut cadence = cadence::Cadence::default();
         loop {
-            let cycle = poll(&cfg, &sui, &walrus, &runner, store.as_ref(), &configs, &mut supervisor, &mut journal);
+            let cycle = poll(
+                &cfg,
+                &sui,
+                &walrus,
+                &runner,
+                store.as_ref(),
+                &configs,
+                &mut supervisor,
+                &mut journal,
+            );
             tokio::select! {
                 result = cycle => match result {
                     Err(error) if error.downcast_ref::<handoff::Requested>().is_some() => {
@@ -468,13 +479,18 @@ async fn main() -> anyhow::Result<()> {
                         break;
                     }
                     result => {
+                        cadence.record(result.is_ok());
                         sync.lock().unwrap().record(&result);
                         if let Err(error) = result { warn!(%error, "Sync failed; retrying without advancing cursor"); }
                     }
                 },
                 _ = &mut shutdown => { info!("Stopping; interrupted apply requires inspection on restart"); break; }
             }
-            let delay = tokio::time::sleep(Duration::from_secs(cfg.runtime.poll_seconds));
+            let delay = tokio::time::sleep(cadence.delay(
+                &cfg.runtime,
+                journal.state.deferred.values(),
+                telemetry::now_ms(),
+            ));
             tokio::pin!(delay);
             let mut stopped = false;
             loop {
@@ -502,6 +518,12 @@ async fn main() -> anyhow::Result<()> {
                         }
                         if let Err(error) = &result { warn!(operation = pending.request.operation, %error, "Local IPC request failed"); }
                         let _ = pending.reply.send(ipc::response(result));
+                        // A local request can discover a scheduled record while
+                        // the normal check sleeps. Only shorten the wakeup;
+                        // unrelated IPC traffic must never postpone a check.
+                        let next = tokio::time::Instant::now() + cadence.delay(
+                            &cfg.runtime, journal.state.deferred.values(), telemetry::now_ms());
+                        if next < delay.deadline() { delay.as_mut().reset(next); }
                     }
                     Some(control) = async {
                         match console_server.as_mut() {
@@ -768,26 +790,6 @@ async fn poll(
             Err(error) => warn!(%error, "Gas top-up check failed; retrying next poll"),
         }
     }
-    // Reports remain queued across network failures and daemon restarts.
-    let pending: Vec<_> = journal
-        .state
-        .deployments
-        .iter()
-        .filter(|(_, outcome)| !outcome.reported && outcome.status.is_some())
-        .map(|(id, outcome)| (id.clone(), outcome.status.unwrap()))
-        .collect();
-    for (id, status) in pending {
-        match sui
-            .report_status(&id, &cfg.device.device_cap_id, status)
-            .await
-        {
-            Ok(_) => {
-                journal.state.deployments.get_mut(&id).unwrap().reported = true;
-                journal.save()?;
-            }
-            Err(error) => warn!(%id, %error, "Status report remains queued"),
-        }
-    }
     loop {
         let page = sui.deployments(&journal.state.cursor).await?;
         for (event, cursor) in page.events {
@@ -843,7 +845,33 @@ async fn poll(
             execute(cfg, sui, walrus, runner, store, configs, supervisor, journal, &event, &record).await?;
         }
     }
-    reconcile(cfg, sui, walrus, runner, store, configs, supervisor, journal).await
+    reconcile(
+        cfg, sui, walrus, runner, store, configs, supervisor, journal,
+    )
+    .await?;
+    // Flush newly produced receipts in this cycle. Waiting until the next
+    // normal check would delay rollout health by up to thirty minutes.
+    // Reports remain queued across network failures and daemon restarts.
+    let pending: Vec<_> = journal
+        .state
+        .deployments
+        .iter()
+        .filter(|(_, outcome)| !outcome.reported && outcome.status.is_some())
+        .map(|(id, outcome)| (id.clone(), outcome.status.unwrap()))
+        .collect();
+    for (id, status) in pending {
+        match sui
+            .report_status(&id, &cfg.device.device_cap_id, status)
+            .await
+        {
+            Ok(_) => {
+                journal.state.deployments.get_mut(&id).unwrap().reported = true;
+                journal.save()?;
+            }
+            Err(error) => return Err(error.context("Status report remains queued")),
+        }
+    }
+    Ok(())
 }
 
 /// Commit, keep or discard the configuration each interrupted or finished
