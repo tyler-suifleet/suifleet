@@ -2,10 +2,13 @@
 
 The implementation supplies source auditing, pinned compiler/linter gates,
 conditional formal proofs and real adversarial regressions. It does not prove
-all contract or native behavior secure. Codex running **gpt-6.1-sol**, session
-`codex-move-security-20261015`, owns [SF-050/#82](https://github.com/tyler-suifleet/suifleet/issues/82)
-and [PR #83](https://github.com/tyler-suifleet/suifleet/pull/83). Current-head CI,
-automatic testnet and independent review are recorded in the issue/PR handoff.
+all contract or native behavior secure. Current implementation owner: Codex running
+**gpt-6.1-sol**, session `dispatch-47662e15ede74d09a4fb894e71b7e7e1`, on
+`work/suifleet/sf-050-76b02498`; [SF-050/#82](https://github.com/tyler-suifleet/suifleet/issues/82)
+and [PR #251](https://github.com/tyler-suifleet/suifleet/pull/251). The recovered
+implementation and earlier evidence remain in superseded [PR #83](https://github.com/tyler-suifleet/suifleet/pull/83).
+Current-head CI, automatic testnet and independent review are recorded in the
+issue/PR handoff; historical results are not current-head acceptance.
 Older failed prototype claims in Git history are superseded by the current
 [model and exact coverage](MOVE_NATIVE_MODEL.md).
 

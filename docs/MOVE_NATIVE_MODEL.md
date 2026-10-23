@@ -5,7 +5,7 @@ shape and closes the earlier failing construction/enrollment obligations. It is
 conditional verification, **not a proof of the Sui Rust runtime**. Independent
 review and exact-head CI remain required. Actual running model: **gpt-6.1-sol**;
 issue [#82](https://github.com/tyler-suifleet/suifleet/issues/82), PR
-[#83](https://github.com/tyler-suifleet/suifleet/pull/83).
+[#251](https://github.com/tyler-suifleet/suifleet/pull/251) (recovered from #83).
 
 Every backend/template/spec overlay is pinned by SHA-256 in
 `contracts/security-specs/toolchain.json`. `release-model.patch` applies to the
