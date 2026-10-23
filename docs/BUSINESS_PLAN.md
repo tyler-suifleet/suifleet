@@ -2,13 +2,163 @@
 
 Decision basis: 2026-10-16. This records Tyler's original commercial thesis, not a newly discovered positioning idea. Product implementation and hardware acceptance remain separate from business hypotheses.
 
+Updated 2026-10-23 with a [proposed price list and cost model](#pricing-and-cost-model-proposal-2026-10-23) for a low-cost, Sui-stack-only product, prepared at the user's request. Its prices are derived from estimated cost to serve, not from an arbitrary subscription; its margins stay estimates until [SF-135/#267](https://github.com/tyler-suifleet/suifleet/issues/267) measures a Mainnet bill.
+
 ## The opportunity
 
 SuiFleet can potentially replace recurring fleet-platform charges with low marginal network usage: publish an authenticated release once, distribute the same artifact across many devices, and pay for authority changes and execution receipts. The opportunity is to pass a substantial share of that infrastructure saving to customers while retaining a margin on measured usage. Cost advantage is part of the product, alongside deployment control and independently verifiable records.
 
-Do not begin with an arbitrary per-device SaaS subscription or use assumed engineering labor to manufacture savings. Establish the network-only bill first. Separately measure any paid delivery, RPC, indexing, hosting and key services needed for the chosen operating model; optional managed hosting and support can be distinct offers. No subscription price, production saving percentage or gross-margin claim is established here.
+Do not begin with an arbitrary per-device SaaS subscription or use assumed engineering labor to manufacture savings. Establish the network-only bill first. Separately measure any paid delivery, RPC, indexing, hosting and key services needed for the chosen operating model; optional managed hosting and support can be distinct offers. The 2026-10-23 proposal below sets a per-device price from the estimated cost to serve; no production saving percentage or gross margin is established until it is measured on Mainnet.
 
 A fleet with many devices and relatively infrequent releases is the initial economic hypothesis. Idle devices do not themselves require a periodic Sui transaction, although retained objects, active integrations and selected services can have costs. Receipts still scale with device activity: one shared artifact does not make 1,000 device reports one transaction.
+
+## Pricing and cost model (proposal, 2026-10-23)
+
+Prepared by Claude (claude-opus-5-5) at the user's request on 2026-10-23; the user has not yet approved a final price. Costs are estimates from list prices retrieved that day and from Testnet gas rescaled to Mainnet's 100 MIST reference gas price. No Mainnet transaction has run; [SF-135/#267](https://github.com/tyler-suifleet/suifleet/issues/267) replaces these estimates with a measured bill. Margins are gross margins over infrastructure and network fees; they exclude engineering, support and on-call time.
+
+### Decisions recorded
+
+- **Sui stack only.** SuiFleet runs on Sui, Walrus, Seal and Sui RPC. The base product needs no SuiFleet-operated web2 service: no CDN, indexer server or message broker. Pilots use Mysten's public full node; paying fleets move to a SuiFleet-run Sui full node or a paid RPC plan under SuiFleet's account. Customers never need their own RPC account.
+- **All-in per-device price.** Network fees are included. SuiFleet funds each fleet's on-chain budget (SF-083) from the subscription, so customers need not hold SUI or WAL.
+- **Configurable cost settings.** Every fleet gets sensible defaults and can change the settings that drive cost, seeing the cost and prepaying it before saving ([SF-130/#265](https://github.com/tyler-suifleet/suifleet/issues/265), [SF-131/#266](https://github.com/tyler-suifleet/suifleet/issues/266)).
+
+### Proposed price list
+
+| Item | Price |
+|---|---|
+| Base, first 100,000 devices | $0.05 per device per month |
+| Base, devices above 100,000 | $0.04 per device per month |
+| Above 1,000,000 devices | Custom, from $0.03 |
+| Monthly minimum | $49 |
+| Activation | $0.10 per device, one-time (enrollment objects and gas-float capital) |
+| Annual prepay | 10% discount |
+
+The base price includes the default settings: an update check every 30 minutes (hourly on request), 60-second checks during rollout windows, staged rollouts, daily on-chain health, weekly encrypted log archives kept 6 weeks, enrollment and the dashboard. Live telemetry is not in the base product; it needs an off-chain service and would be a later add-on.
+
+### Configurable settings: added cost, price and margin
+
+| Setting | Option | Added cost, $/device/month | Price, $/device/month | Gross margin |
+|---|---|---:|---:|---:|
+| Update check | 30 minutes (default) or 1 hour | included | included | – |
+| Update check | 15 minutes | 0.0036 | 0.01 | 64% |
+| Update check | 5 minutes | 0.018 | 0.05 | 64% |
+| On-chain health | Daily (default) | included | included | – |
+| On-chain health | Every 6 hours | 0.009 | 0.03 | 70% |
+| On-chain health | Hourly | 0.069 | 0.20 | 65% |
+| Log archives | Weekly, kept 6 weeks (default) | included | included | – |
+| Log archives | Daily | 0.025 | 0.08 | 69% |
+| Log retention | 6 months | 0.006 | 0.02 | 70% |
+| Log retention | 1 year | 0.014 | 0.04 | 65% |
+| Encrypted delivery (Seal) | On | ~0.005 | 0.02 | 75% |
+
+Update-check costs assume paid RPC at about $2.50 per million requests. On the public endpoint or SuiFleet's own node their marginal cost is near zero.
+
+### Cost to serve and margin by fleet size (default settings)
+
+| Devices | Cost to serve per month | Per device | List revenue per month | Gross margin | Greengrass typical per month |
+|---:|---:|---:|---:|---:|---:|
+| 1,000 | ~$9 | ~$0.009 | $50 | ~82% | $259 |
+| 10,000 | ~$136 | ~$0.014 | $500 | ~73% | $2,590 |
+| 100,000 | $1,430–2,020 | $0.014–0.020 | $5,000 | 60–71% | ~$25,000 |
+| 1,000,000 | $10,000–11,200 | $0.010–0.011 | $41,000 | 73–76% | ~$240,000 |
+
+Cost components per device per month:
+
+- Daily on-chain health: $0.003.
+- Weekly log archive: $0.004. This requires deposit reclaim; it is about $0.10 before [SF-129/#264](https://github.com/tyler-suifleet/suifleet/issues/264).
+- Four deployment receipts: $0.0014.
+- RPC:
+  - $0 at 1,000 devices, on the public endpoint or Chainstack's free tier.
+  - About $0.005 on a paid plan at 10,000 devices.
+  - SuiFleet nodes ($520–2,080 a month) from about 100,000 devices.
+- Artifact downloads: free on public Walrus aggregators up to about 10,000 devices, then SuiFleet aggregators ($60–450 a month).
+
+Owner-side release uploads add about $0.03 per 50 MB release per fleet. One-time per device: about $0.03 of mostly refundable storage deposits plus a 0.06 SUI gas float, which is working capital (about 60,000 SUI at 1,000,000 devices).
+
+Reference values on 2026-10-23:
+
+- SUI $0.987 and WAL $0.0368 (CoinGecko).
+- Sui reference gas price 100 MIST, storage price 76, storage rebate 99.99%.
+- Walrus 57,374 FROST per encoded MiB per epoch, and 104,294 per encoded MiB written.
+
+### Comparison baseline
+
+| Profile, 1,000 devices | Greengrass all-in, $/device/month |
+|---|---:|
+| Light: one 50 MB deployment, status every 5 minutes, no cloud logs | 0.18 |
+| Typical: four 50 MB deployments, telemetry each minute, hourly shadows, 10 MB of logs | 0.26 |
+| Heavy: eight 200 MB deployments, telemetry every 10 s, 100 MB of logs, tunnels, Device Defender | 0.77 |
+
+These use us-east-1 list prices from the AWS Price List API on 2026-10-23, with no free tier or discount. [Greengrass](https://aws.amazon.com/greengrass/pricing/) publishes no volume discount; see also [IoT Core](https://aws.amazon.com/iot-core/pricing/) and [Device Management](https://aws.amazon.com/iot-device-management/pricing/).
+
+Turnkey OTA products at about 1,000 devices, per device per month:
+
+| Product | Price |
+|---|---|
+| [Mender](https://mender.io/pricing) Basic | $0.31 |
+| Mender Professional | $0.95 |
+| [Qbee](https://qbee.io/pricing/) | ~€0.88 |
+| [Particle](https://www.particle.io/pricing/) | $2.99 |
+| [balenaCloud](https://www.balena.io/pricing) | $3.08–3.22 |
+| [Memfault](https://memfault.com/pricing/) | $3.50 |
+
+Azure IoT Hub with Device Update costs $0.17–0.64 depending on the profile. At $0.05 SuiFleet is 72%, 81% and 94% below Greengrass in the three profiles, and 84% below Mender Basic.
+
+### Why today's build costs more
+
+As built, every daemon polls every 10 seconds with about 23 gRPC reads, or about 45 with on-chain health and archives on. Per 1,000 devices that is about 11.7 billion reads and 39 TB of RPC traffic a month, which needs two dedicated full nodes. A 1,000-device fleet therefore costs about $0.78–2.29 per device per month, 3–9 times Greengrass, even though its network fees are under $4 a month. One device alone exceeds Mysten's documented public-endpoint guidance of 100 requests per 30 seconds.
+
+### RPC and hosting path
+
+- **Mysten public full node** ([best practices](https://docs.sui.io/references/sui-api/rpc-best-practices)), used for pilots:
+  - Free, with documented guidance of 100 requests per 30 seconds. A 180-request probe on 2026-10-23 was not throttled.
+  - Keeps about 14 days of event history.
+  - Documented for development and testing.
+- **Chainstack:**
+  - Probed live on its free tier on 2026-10-23. It serves every call the daemon uses, including indexed `ListEvents` back about 7.7 months.
+  - Free tier: 3M requests a month. Paid plans: about $2.50 per million requests ([guide](https://chainstack.com/how-to-get-sui-rpc-endpoint-2026/)).
+  - Its [terms](https://chainstack.com/tos/) appear to allow serving SuiFleet's devices from SuiFleet's account, since end-user traffic is normal use; confirm in writing before relying on it.
+  - A token on devices can be extracted, so rely on plan rate caps, alerts and token rotation.
+- **SuiFleet Sui full node:**
+  - Hetzner AX102-class bare metal with extra NVMe, about €449 a month.
+  - Cheaper than paid RPC above about 200M requests a month, roughly 100,000 devices at 30-minute checks.
+  - Needs prompt upgrades and monitoring.
+
+### Development required
+
+Stage 1, pilot-ready on the public endpoint (no contract change):
+
+- [SF-122/#254](https://github.com/tyler-suifleet/suifleet/issues/254): one batched chain read per poll.
+- [SF-123/#262](https://github.com/tyler-suifleet/suifleet/issues/262): 30-minute checks, rollout fast-checks, jittered backoff, and RPC endpoint fallback.
+- [SF-124/#255](https://github.com/tyler-suifleet/suifleet/issues/255): public Walrus aggregators with fallback and ranged downloads.
+- [SF-126/#256](https://github.com/tyler-suifleet/suifleet/issues/256): the dApp and indexer stop full-history scans and per-device sweeps.
+
+Stage 2, robust on public endpoints (additive Move upgrade):
+
+- [SF-125/#263](https://github.com/tyler-suifleet/suifleet/issues/263): device inbox, group heads and per-member index; scheduled starts on time.
+- [SF-130/#265](https://github.com/tyler-suifleet/suifleet/issues/265): on-chain per-fleet cost settings.
+- [SF-131/#266](https://github.com/tyler-suifleet/suifleet/issues/266): settings page with live cost and a prepaid deposit.
+
+Stage 3, scale and the cost floor:
+
+- [SF-127/#257](https://github.com/tyler-suifleet/suifleet/issues/257): sharded receipts.
+- [SF-128/#258](https://github.com/tyler-suifleet/suifleet/issues/258): protected-blob cap.
+- [SF-129/#264](https://github.com/tyler-suifleet/suifleet/issues/264): deposit reclaim.
+- [SF-121/#252](https://github.com/tyler-suifleet/suifleet/issues/252): device-local archive quilting.
+- [SF-132/#259](https://github.com/tyler-suifleet/suifleet/issues/259): batched gas-account enrollment.
+- [SF-133/#260](https://github.com/tyler-suifleet/suifleet/issues/260): threshold Seal key fetch.
+
+Bug: [SF-134/#261](https://github.com/tyler-suifleet/suifleet/issues/261), where the indexer shows foreign deployments in a device's history.
+
+Validation: [SF-135/#267](https://github.com/tyler-suifleet/suifleet/issues/267), a measured Mainnet bill, after the SF-087 Mainnet deployment.
+
+### Risks
+
+- **Token prices.** Network fees are about $0.0086 of the $0.05 base price at reference prices. SUI ranged $0.65–1.26 over the last 90 days, so a doubling of SUI costs about 17 points of base margin. Walrus storage has targeted a fixed USD price since May 2026.
+- **No Mainnet measurement yet** (SF-135).
+- **The public endpoint is guidance-limited** and not intended for production; move paying fleets off it before relying on it.
+- **The weekly-archive figure** depends on deposit reclaim (SF-129) and on SF-121's archive work.
+- **The Greengrass comparison** is modelled list pricing; a customer's actual AWS bill may differ.
 
 ## Customer offer and product boundary
 
@@ -45,11 +195,11 @@ For comparison, AWS's example Greengrass rate is $0.16 per active core-month: $1
 
 ## Pricing discipline and validation
 
-Use an auditable usage model: network fees + separately metered selected infrastructure + an explicit commercial markup. Whether markup is a percentage, operation fee or an allowance is undecided until complete bills are measured. Exclude labor from the base cost comparison; price requested integration/support separately. Do not assume percentage markup on cents will fund a company: validate fleet scale, paid usage and optional service demand.
+Use an auditable usage model: network fees + separately metered selected infrastructure + an explicit commercial markup. The 2026-10-23 proposal expresses the markup as an all-in per-device price with priced add-ons for each cost setting; revisit it once SF-135 measures complete bills. Exclude labor from the base cost comparison; price requested integration/support separately. Do not assume percentage markup on cents will fund a company: validate fleet scale, paid usage and optional service demand.
 
 Before quoting a production fleet, measure a representative release end to end; count actual transactions/bytes and successful/failed effects; capture storage deposits/refunds, renewal and upload fees; verify delivery at expected concurrency; account for selected service charges; and compare the same workload, retention, security and availability against the customer's actual AWS configuration. Test Mainnet simulation/estimation without publication where possible; live Mainnet spend still requires explicit user authorization. Validate purchasing demand alongside the technical prototype.
 
-**Prepaid network costs (SF-083).** The dApp's fleet budget collects network costs up front and charges no SuiFleet fee. Whether any service fee applies is an **open business decision**; until the user decides, deposits cover network costs only. Sponsored transactions through a gas station, and Nautilus-enclave sponsorship, are recorded as future options, not the current design: both need an always-on signer or self-managed enclave hosting. See [FLEET_BUDGET.md](FLEET_BUDGET.md).
+**Prepaid network costs (SF-083).** The dApp's fleet budget collects network costs up front and charges no SuiFleet fee. The 2026-10-23 proposal answers the service-fee question with an all-in per-device price that funds each fleet's budget; the budget itself still holds only network funds, and [SF-131/#266](https://github.com/tyler-suifleet/suifleet/issues/266) sizes it from the fleet's chosen settings. Sponsored transactions through a gas station, and Nautilus-enclave sponsorship, are recorded as future options, not the current design: both need an always-on signer or self-managed enclave hosting. See [FLEET_BUDGET.md](FLEET_BUDGET.md).
 
 ## Adjacent opportunities, reconsidered
 
