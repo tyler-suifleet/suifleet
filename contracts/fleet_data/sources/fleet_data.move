@@ -142,6 +142,7 @@ module fleet_data::fleet_data {
         owner(fleet, budget, cap);
         request(fleet, writer, clock);
     }
+    #[allow(lint(prefer_mut_tx_context))]
     public fun request_diagnostics_support(fleet: &FleetData, writer: &mut DeviceData,
         clock: &Clock, ctx: &TxContext) {
         assert!(fleet.version == VERSION && fleet.support.contains(&ctx.sender()), EAccess);
@@ -181,6 +182,7 @@ module fleet_data::fleet_data {
     /// Compact signed snapshot, directly on chain, never a Walrus blob. The
     /// browser verifies the personal-message signature and JSON bindings; chain
     /// authorization alone does not make malformed device claims trustworthy.
+    #[allow(lint(prefer_mut_tx_context))]
     public fun report_health(fleet: &FleetData, writer: &mut DeviceData,
         budget: &FleetBudget, account: &GasAccount, registry: &DeviceRegistry,
         cap: &DeviceCap, seq: u64, message: vector<u8>, signature: vector<u8>,
@@ -203,6 +205,7 @@ module fleet_data::fleet_data {
     /// certify first. Kind 0 = periodic logs, 1 = diagnostics, 2 = crash.
     /// Emergency uploads share a bounded rate even when a device lies about
     /// the reason; SF-083 byte/upload/fee quotas are the final spending bound.
+    #[allow(lint(prefer_mut_tx_context))]
     public fun anchor(fleet: &FleetData, writer: &mut DeviceData,
         budget: &FleetBudget, account: &GasAccount, registry: &DeviceRegistry,
         cap: &DeviceCap, storage: &FleetStorage, blob_object_id: ID,

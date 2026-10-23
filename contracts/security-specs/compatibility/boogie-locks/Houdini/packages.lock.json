@@ -1,0 +1,94 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net8.0": {
+      "StyleCop.Analyzers": {
+        "type": "Direct",
+        "requested": "[1.1.118, )",
+        "resolved": "1.1.118",
+        "contentHash": "Onx6ovGSqXSK07n/0eM3ZusiNdB6cIlJdabQhWGgJp3Vooy9AaLS/tigeybOJAobqbtggTamoWndz72JscZBvw=="
+      },
+      "Microsoft.Bcl.AsyncInterfaces": {
+        "type": "Transitive",
+        "resolved": "6.0.0",
+        "contentHash": "UcSjPsst+DfAdJGVDsu346FX0ci0ah+lw3WRtn18NUwEqRt70HaOQ7lI72vy3+1LxtqI3T5GWwV39rQSrCzAeg=="
+      },
+      "System.Linq.Async": {
+        "type": "Transitive",
+        "resolved": "6.0.1",
+        "contentHash": "0YhHcaroWpQ9UCot3Pizah7ryAzQhNvobLMSxeDIGmnXfkQn8u5owvpOH0K6EVB+z9L7u6Cc4W17Br/+jyttEQ==",
+        "dependencies": {
+          "Microsoft.Bcl.AsyncInterfaces": "6.0.0"
+        }
+      },
+      "System.Reactive": {
+        "type": "Transitive",
+        "resolved": "4.4.1",
+        "contentHash": "iSTPeWR9HJhGoNV4WhVlvofuiTjpok1i4E3LPgMdbMqf3jKhFlT9HAlO32lb52NLppWC/4dZQFfUzTytvyXBmw=="
+      },
+      "Boogie.BaseTypes": {
+        "type": "Project",
+        "dependencies": {
+          "Boogie.CodeContractsExtender": "[3.5.6, )"
+        }
+      },
+      "Boogie.CodeContractsExtender": {
+        "type": "Project"
+      },
+      "Boogie.Core": {
+        "type": "Project",
+        "dependencies": {
+          "Boogie.BaseTypes": "[3.5.6, )",
+          "Boogie.CodeContractsExtender": "[3.5.6, )",
+          "Boogie.Graph": "[3.5.6, )"
+        }
+      },
+      "Boogie.Graph": {
+        "type": "Project",
+        "dependencies": {
+          "Boogie.CodeContractsExtender": "[3.5.6, )"
+        }
+      },
+      "Boogie.Model": {
+        "type": "Project",
+        "dependencies": {
+          "Boogie.BaseTypes": "[3.5.6, )",
+          "Boogie.CodeContractsExtender": "[3.5.6, )"
+        }
+      },
+      "Boogie.Provers.SMTLib": {
+        "type": "Project",
+        "dependencies": {
+          "Boogie.BaseTypes": "[3.5.6, )",
+          "Boogie.CodeContractsExtender": "[3.5.6, )",
+          "Boogie.Core": "[3.5.6, )",
+          "Boogie.Graph": "[3.5.6, )",
+          "Boogie.Model": "[3.5.6, )",
+          "Boogie.VCExpr": "[3.5.6, )",
+          "System.Linq.Async": "[6.0.1, )"
+        }
+      },
+      "Boogie.VCExpr": {
+        "type": "Project",
+        "dependencies": {
+          "Boogie.BaseTypes": "[3.5.6, )",
+          "Boogie.CodeContractsExtender": "[3.5.6, )",
+          "Boogie.Core": "[3.5.6, )"
+        }
+      },
+      "Boogie.VCGeneration": {
+        "type": "Project",
+        "dependencies": {
+          "Boogie.BaseTypes": "[3.5.6, )",
+          "Boogie.CodeContractsExtender": "[3.5.6, )",
+          "Boogie.Core": "[3.5.6, )",
+          "Boogie.Graph": "[3.5.6, )",
+          "Boogie.Model": "[3.5.6, )",
+          "Boogie.Provers.SMTLib": "[3.5.6, )",
+          "Boogie.VCExpr": "[3.5.6, )",
+          "System.Reactive": "[4.4.1, )"
+        }
+      }
+    }
+  }
+}

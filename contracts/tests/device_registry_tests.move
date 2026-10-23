@@ -188,4 +188,38 @@ module sui_edge::device_registry_tests {
         ts::return_shared(registry);
         ts::end(scenario);
     }
+
+    // L-01 is an arbitrary-state accounting limitation: constructing two
+    // same-origin registries requires the test-only initializer. Production
+    // exposes no constructor besides the private one-time package init.
+    #[test]
+    fun test_two_test_only_registries_do_not_confer_identity_authority() {
+        let mut scenario = ts::begin(ADMIN);
+        setup(&mut scenario);
+        ts::next_tx(&mut scenario, ADMIN);
+        let first = ts::most_recent_id_shared<DeviceRegistry>().destroy_some();
+        device_registry::init_for_testing(ts::ctx(&mut scenario));
+        ts::next_tx(&mut scenario, ADMIN);
+        let second = ts::most_recent_id_shared<DeviceRegistry>().destroy_some();
+        assert!(first != second, 0);
+        let mut a = ts::take_shared_by_id<DeviceRegistry>(&scenario, first);
+        let mut b = ts::take_shared_by_id<DeviceRegistry>(&scenario, second);
+        let clock = clock::create_for_testing(ts::ctx(&mut scenario));
+        let da = device_registry::register_device(&mut a, string::utf8(b"a"), DEVICE_ADDR,
+            string::utf8(b"aarch64"), &clock, ts::ctx(&mut scenario));
+        let db = device_registry::register_device(&mut b, string::utf8(b"b"), DEVICE_ADDR,
+            string::utf8(b"aarch64"), &clock, ts::ctx(&mut scenario));
+        let id = device_registry::device_id(&da);
+        device_registry::deregister_device(&mut b, da, ts::ctx(&mut scenario));
+        assert!(device_registry::device_count(&a) == 1, 1);
+        assert!(device_registry::device_count(&b) == 0, 2);
+        assert!(!device_registry::is_active_signer(&a, id, DEVICE_ADDR), 3);
+        assert!(!device_registry::is_active_signer(&b, id, DEVICE_ADDR), 4);
+        // Restore the diagnostic counts without claiming an origin binding.
+        device_registry::deregister_device(&mut a, db, ts::ctx(&mut scenario));
+        clock::destroy_for_testing(clock);
+        ts::return_shared(a);
+        ts::return_shared(b);
+        ts::end(scenario);
+    }
 }

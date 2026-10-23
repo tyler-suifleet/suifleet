@@ -1,0 +1,108 @@
+name: Move security
+
+on:
+  pull_request:
+    paths:
+      - 'contracts/**'
+      - 'scripts/check_move_security.py'
+      - 'scripts/build_move_prover.py'
+      - 'scripts/check_move_proofs.py'
+      - 'scripts/check_move_native_proofs.py'
+      - 'scripts/check_move_object_proofs.py'
+      - 'scripts/check_move_registry_proofs.py'
+      - 'scripts/check_move_native_vm.py'
+      - 'scripts/move_native_model_control.py'
+      - 'scripts/evaluate_move_prover.py'
+      - '.github/workflows/move-security.yml'
+      - 'Dockerfile'
+      - 'docs/MOVE_SECURITY.md'
+      - 'docs/MOVE_NATIVE_MODEL.md'
+      - 'docs/SECURITY_CI.md'
+      - 'docs/OPERATIONS.md'
+  push:
+    branches: [main]
+    paths:
+      - 'contracts/**'
+      - 'scripts/check_move_security.py'
+      - 'scripts/build_move_prover.py'
+      - 'scripts/check_move_proofs.py'
+      - 'scripts/check_move_native_proofs.py'
+      - 'scripts/check_move_object_proofs.py'
+      - 'scripts/check_move_registry_proofs.py'
+      - 'scripts/check_move_native_vm.py'
+      - 'scripts/move_native_model_control.py'
+      - 'scripts/evaluate_move_prover.py'
+      - '.github/workflows/move-security.yml'
+      - 'Dockerfile'
+      - 'docs/MOVE_SECURITY.md'
+      - 'docs/MOVE_NATIVE_MODEL.md'
+      - 'docs/SECURITY_CI.md'
+      - 'docs/OPERATIONS.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: move-security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compiler-lints-regressions:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Match container identity to cache owner
+        id: ids
+        run: |
+          echo "uid=$(id -u)" >> "$GITHUB_OUTPUT"
+          echo "gid=$(id -g)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: .
+          load: true
+          tags: suifleet-move-security:ci
+          build-args: |
+            USER_UID=${{ steps.ids.outputs.uid }}
+            USER_GID=${{ steps.ids.outputs.gid }}
+          cache-from: type=gha,scope=move-security
+          cache-to: type=gha,scope=move-security,mode=max
+      - name: Restore pinned framework sources
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .ci-move-security
+          key: move-security-${{ hashFiles('Dockerfile', 'contracts/Move.lock', 'contracts/fleet_storage/Move.lock', 'contracts/fleet_data/Move.lock') }}
+      - name: Compiler, Sui linters, tests and deliberately failing controls
+        run: |
+          mkdir -p .ci-move-security
+          docker run --rm --user "$(id -u):$(id -g)" -e CARGO_BUILD_JOBS=2 \
+            -v "$PWD:/workspace:ro" -w /workspace \
+            -v "$PWD/.ci-move-security:/home/dev/.move" \
+            suifleet-move-security:ci sh -eu -c '
+              python3 scripts/check_move_security.py
+              python3 scripts/check_move_native_vm.py
+            '
+      - name: Restore pinned proof tool build cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .ci-cache/move-proofs
+          key: move-proofs-${{ hashFiles('Dockerfile', 'contracts/security-specs/toolchain.json', 'contracts/security-specs/compatibility/**', 'scripts/build_move_prover.py') }}
+      - name: Build pinned proof tools and verify security positive/negative cases
+        run: |
+          mkdir -p .ci-cache/move-proofs/cargo/git .ci-cache/move-proofs/cargo/registry
+          docker run --rm --user "$(id -u):$(id -g)" -e CARGO_BUILD_JOBS=2 \
+            -v "$PWD:/workspace:ro" -w /workspace \
+            -v "$PWD/.ci-cache/move-proofs:/proof-tools" \
+            -v "$PWD/.ci-cache/move-proofs/cargo/git:/home/dev/.cargo/git" \
+            -v "$PWD/.ci-cache/move-proofs/cargo/registry:/home/dev/.cargo/registry" \
+            suifleet-move-security:ci sh -eu -c '
+              python3 scripts/build_move_prover.py --tools /proof-tools
+              python3 scripts/check_move_proofs.py --tools /proof-tools
+              python3 scripts/check_move_native_proofs.py --tools /proof-tools
+              python3 scripts/check_move_object_proofs.py --tools /proof-tools
+              python3 scripts/check_move_registry_proofs.py --tools /proof-tools
+            '

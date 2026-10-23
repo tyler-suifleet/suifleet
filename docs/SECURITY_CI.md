@@ -59,3 +59,16 @@ These checks do not prove AWS Greengrass parity, Move-contract authority safety,
 Sources: [CodeQL language support](https://codeql.github.com/docs/codeql-overview/supported-languages-and-frameworks/), [CodeQL query suites](https://docs.github.com/en/code-security/reference/code-scanning/codeql/codeql-queries), [SARIF 2.1.0 sections 3.19.23, 3.52 and 3.54](https://docs.oasis-open.org/sarif/sarif/v2.1.0/os/sarif-v2.1.0-os.html), [CodeQL checkout TOCTOU guidance](https://codeql.github.com/codeql-query-help/actions/actions-untrusted-checkout-toctou-critical/), [Trivy filesystem scanning](https://trivy.dev/docs/dev/target/filesystem/), and [Trivy secret scanning](https://www.trivy.dev/docs/latest/guide/scanner/secret/).
 
 SF-063 uses the same disposable root/systemd harness boundary in `scripts/test_tunneling.py`, with a private cgroup namespace and `--network none`. It mounts only the checkout, test binary and credential-free package read-only, generates throwaway certificates inside the container and removes the container afterward. The shipped adapter runs as its dedicated unprivileged UID. The proxy artifact builder and scratch artifact stages end as UID/GID 65534; they are covered by the configuration security gate.
+
+## Move contract security
+
+[SF-050 Move security](MOVE_SECURITY.md) adds a separate read-only `Move security`
+workflow for contract/toolchain changes. It runs the pinned Sui 1.81.1 compiler
+and extra linters with warnings as errors, independent unsuppressed diagnostic
+baselines, release-VM tests and authority-removal controls for all three contract
+packages. Four pinned Sui-specific solver gates exercise actual implementation
+and native-model invariants with deliberately failing controls. Compiler success
+and finite tests do not establish complete security; the proofs depend on the
+explicit [native/VM model boundary](MOVE_NATIVE_MODEL.md). Unsupported modeling
+shapes fail closed and are not counted as successful proofs. Current-head ordinary
+CI, automatic testnet and independent review remain separate required gates.

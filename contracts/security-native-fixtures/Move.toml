@@ -1,0 +1,6 @@
+[package]
+name = "sf050_native"
+edition = "2024.beta"
+
+[addresses]
+sf050_native = "0x51"

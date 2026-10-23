@@ -33,6 +33,7 @@ module sui_edge::device_cap {
     /// Entry point: issue a cap for an existing device and send it to device_address.
     /// Can be called standalone (e.g. for devices registered before cap issuance was
     /// added) or composed into a PTB alongside register_device.
+    #[allow(lint(public_entry))]
     public entry fun issue_cap(device: &Device, ctx: &mut TxContext) {
         let cap = issue(device, ctx);
         transfer::transfer(cap, device_registry::device_address(device));
@@ -42,6 +43,7 @@ module sui_edge::device_cap {
 
     /// Cap possession alone is insufficient: public issuance/transfer must not
     /// let an operator impersonate the registered device signer.
+    #[allow(lint(prefer_mut_tx_context))]
     public fun assert_signer(cap: &DeviceCap, ctx: &TxContext) {
         assert!(df::exists(&cap.id, DeviceAddressKey {}), EUnboundLegacyCap);
         let signer: &address = df::borrow(&cap.id, DeviceAddressKey {});
@@ -51,6 +53,7 @@ module sui_edge::device_cap {
     /// The signer check plus the registry's current identity: the device must
     /// be registered or activated, not revoked or deregistered, and the
     /// sender must be its current key (a rotation invalidates older caps).
+    #[allow(lint(prefer_mut_tx_context))]
     public fun assert_active(cap: &DeviceCap, registry: &DeviceRegistry, ctx: &TxContext) {
         assert_signer(cap, ctx);
         assert!(device_registry::is_active_signer(registry, cap.device_id, ctx.sender()), EInactiveIdentity);
