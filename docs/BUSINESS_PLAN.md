@@ -21,19 +21,40 @@ Prepared by Claude (claude-opus-5-5) at the user's request on 2026-10-23; the us
 - **Sui stack only.** SuiFleet runs on Sui, Walrus, Seal and Sui RPC. The base product needs no SuiFleet-operated web2 service: no CDN, indexer server or message broker. Pilots use Mysten's public full node; paying fleets move to a SuiFleet-run Sui full node or a paid RPC plan under SuiFleet's account. Customers never need their own RPC account.
 - **All-in per-device price.** Network fees are included. SuiFleet funds each fleet's on-chain budget (SF-083) from the subscription, so customers need not hold SUI or WAL.
 - **Configurable cost settings.** Every fleet gets sensible defaults and can change the settings that drive cost, seeing the cost and prepaying it before saving ([SF-130/#265](https://github.com/tyler-suifleet/suifleet/issues/265), [SF-131/#266](https://github.com/tyler-suifleet/suifleet/issues/266)).
+- **Packaging by customer segment.** Pricing depends partly on who the customer is, so the same platform is sold in two packages (below), not as two price lists for the same thing.
 
 ### Proposed price list
 
-| Item | Price |
+Platform plan, graduated per device per month (each band applies only to the devices in it):
+
+| Devices | Price |
 |---|---|
-| Base, first 100,000 devices | $0.05 per device per month |
-| Base, devices above 100,000 | $0.04 per device per month |
-| Above 1,000,000 devices | Custom, from $0.03 |
+| First 10,000 | $0.08 |
+| 10,001 to 100,000 | $0.05 |
+| Above 100,000 | $0.04 |
+| Above 1,000,000 | Custom, from $0.03 |
+
+| Other terms | Price |
+|---|---|
 | Monthly minimum | $49 |
 | Activation | $0.10 per device, one-time (enrollment objects and gas-float capital) |
 | Annual prepay | 10% discount |
 
-The base price includes the default settings: an update check every 30 minutes (hourly on request), 60-second checks during rollout windows, staged rollouts, daily on-chain health, weekly encrypted log archives kept 6 weeks, enrollment and the dashboard. Live telemetry is not in the base product; it needs an off-chain service and would be a later add-on.
+The platform price includes the default settings: an update check every 30 minutes (hourly on request), 60-second checks during rollout windows, staged rollouts, daily on-chain health, weekly encrypted log archives kept 6 weeks, enrollment and the dashboard. Live telemetry is not in the base product; it needs an off-chain service and would be a later add-on.
+
+Managed plan: the platform price plus $0.10 per device per month, with a $199 monthly minimum. It adds onboarding, help integrating SuiFleet into the customer's device image, and a support SLA. Its premium funds the support time that gross margin excludes.
+
+### Customer segments
+
+- **Greengrass switchers** already run fleet tooling and will compare SuiFleet with their AWS bill.
+  - Sell the platform plan, quoted side by side with their current bill at matched settings.
+  - Aim for at least 50% savings in every profile; the tables below show 56–83%.
+  - Offer migration help, for example free months during the switch. Recipe and component translation is on the Greengrass-compatibility roadmap, not a current sales claim.
+- **Greenfield customers** have no fleet management today.
+  - Their alternatives are building it themselves or turnkey products: Mender at $0.31–0.95, balenaCloud at about $3.08 and Memfault at about $3.50 per device.
+  - They value onboarding and support more than the last cent, so sell the managed plan.
+  - At 10,000 devices that is $0.18 per device: 42% below Mender Basic and 81% below Mender Professional. Small fleets pay more per device until the $199 minimum is covered.
+- Validate both packages and the managed premium with the first customers; neither has been tested with buyers.
 
 ### Configurable settings: added cost, price and margin
 
@@ -44,46 +65,47 @@ The base price includes the default settings: an update check every 30 minutes (
 | Update check | 5 minutes | 0.018 | 0.05 | 64% |
 | On-chain health | Daily (default) | included | included | – |
 | On-chain health | Every 6 hours | 0.009 | 0.03 | 70% |
-| On-chain health | Hourly | 0.069 | 0.20 | 65% |
+| On-chain health | Hourly | 0.069 | 0.12 | 42% |
 | Log archives | Weekly, kept 6 weeks (default) | included | included | – |
 | Log archives | Daily | 0.028 | 0.08 | 65% |
 | Log retention | 6 months | 0.006 | 0.02 | 70% |
 | Log retention | 1 year | 0.014 | 0.04 | 65% |
 | Encrypted delivery (Seal) | On | ~0.005 | 0.02 | 75% |
 
-Update-check costs assume paid RPC at about $2.50 per million requests. On the public endpoint or SuiFleet's own node their marginal cost is near zero.
+Update-check costs assume paid RPC at about $2.50 per million requests. On the public endpoint or SuiFleet's own node their marginal cost is near zero. Hourly health is deliberately priced at a lower margin so heavy fleets still save about 60% against Greengrass.
 
 ### Cost to serve, margin and Greengrass comparison by profile
 
 Each Greengrass usage profile is matched with the SuiFleet settings that cover the same workload:
 
-| Profile | Greengrass workload | SuiFleet equivalent settings | SuiFleet price, $/device/month |
+| Profile | Greengrass workload | SuiFleet equivalent settings | SuiFleet platform price, $/device/month (first 10,000 devices) |
 |---|---|---|---:|
-| Light | One 50 MB deployment a month, status every 5 minutes, no cloud logs | 30-minute checks, daily on-chain health, logs off | 0.05 |
-| Typical | Four 50 MB deployments, telemetry each minute, hourly shadows, 10 MB of logs | Defaults: 30-minute checks, daily health, weekly logs kept 6 weeks | 0.05 |
-| Heavy | Eight 200 MB deployments, telemetry every 10 s, 100 MB of logs, tunnels, Device Defender | 15-minute checks (+0.01), hourly health (+0.20), daily logs kept 6 weeks (+0.08) | 0.34 |
+| Light | One 50 MB deployment a month, status every 5 minutes, no cloud logs | 30-minute checks, daily on-chain health, logs off | 0.08 |
+| Typical | Four 50 MB deployments, telemetry each minute, hourly shadows, 10 MB of logs | Defaults: 30-minute checks, daily health, weekly logs kept 6 weeks | 0.08 |
+| Heavy | Eight 200 MB deployments, telemetry every 10 s, 100 MB of logs, tunnels, Device Defender | 15-minute checks (+0.01), hourly health (+0.12), daily logs kept 6 weeks (+0.08) | 0.29 |
 
-Monthly totals for the whole fleet:
+Monthly totals for the whole fleet on the platform plan:
 
 | Devices | Profile | SuiFleet cost to serve | SuiFleet list revenue | Gross margin | Greengrass | Customer saving vs Greengrass |
 |---:|---|---:|---:|---:|---:|---:|
-| 1,000 | Light | ~$3 | $50 | ~93% | $182 | 73% |
-| 1,000 | Typical | ~$9 | $50 | ~82% | $259 | 81% |
-| 1,000 | Heavy | $108–157 | $340 | 54–68% | $766 | 56% |
-| 10,000 | Light | ~$83 | $500 | ~83% | $1,822 | 73% |
-| 10,000 | Typical | ~$138 | $500 | ~72% | $2,590 | 81% |
-| 10,000 | Heavy | $1,340–1,500 | $3,400 | 56–61% | ~$7,300 | 54% |
-| 100,000 | Light | $920–1,600 | $5,000 | 68–82% | ~$18,200 | 73% |
-| 100,000 | Typical | $1,470–2,150 | $5,000 | 57–71% | ~$25,200 | 80% |
-| 100,000 | Heavy | $11,600–12,300 | $34,000 | 64–66% | ~$67,000 | 49% |
-| 1,000,000 | Light | $4,700–5,900 | $41,000 | 86–89% | ~$180,000 | 77% |
-| 1,000,000 | Typical | $10,200–11,500 | $41,000 | 72–75% | ~$243,000 | 83% |
-| 1,000,000 | Heavy | $111,100–113,700 | $331,000 | 66% | ~$629,000 | 47% |
+| 1,000 | Light | ~$3 | $80 | ~96% | $182 | 56% |
+| 1,000 | Typical | ~$9 | $80 | ~89% | $259 | 69% |
+| 1,000 | Heavy | $108–157 | $290 | 46–63% | $766 | 62% |
+| 10,000 | Light | ~$83 | $800 | ~90% | $1,822 | 56% |
+| 10,000 | Typical | ~$138 | $800 | ~83% | $2,590 | 69% |
+| 10,000 | Heavy | $1,340–1,500 | $2,900 | 48–54% | ~$7,300 | 60% |
+| 100,000 | Light | $920–1,600 | $5,300 | 70–83% | ~$18,200 | 71% |
+| 100,000 | Typical | $1,470–2,150 | $5,300 | 59–72% | ~$25,200 | 79% |
+| 100,000 | Heavy | $11,600–12,300 | $26,300 | 53–56% | ~$67,000 | 61% |
+| 1,000,000 | Light | $4,700–5,900 | $41,300 | 86–89% | ~$180,000 | 77% |
+| 1,000,000 | Typical | $10,200–11,500 | $41,300 | 72–75% | ~$243,000 | 83% |
+| 1,000,000 | Heavy | $111,100–113,700 | $251,300 | 55–56% | ~$629,000 | 60% |
 
 Notes on the comparison:
 
-- **Heavy is dominated by hourly on-chain health.** Hourly health costs SuiFleet about $0.072 per device and is priced at $0.20. If a heavy fleet keeps daily health instead, it pays SuiFleet $0.14 per device, 82% less than Greengrass heavy's $0.77. SuiFleet's cost for that fleet falls to about $0.04–0.05 per device: $0.038 in network fees plus about $0.009 of RPC on a paid plan.
-- **Gross margin** means (revenue − cost to serve) ÷ revenue. For example, typical at 1,000 devices is ($50 − $9) ÷ $50 = 82%, which is a markup of about 456% on cost.
+- **Heavy is dominated by hourly on-chain health.** Hourly health costs SuiFleet about $0.072 per device and is priced at $0.12. If a heavy fleet keeps daily health instead, it pays SuiFleet $0.17 per device for its first 10,000 devices, 78% less than Greengrass heavy's $0.77. SuiFleet's cost for that fleet falls to about $0.04–0.05 per device: $0.038 in network fees plus about $0.009 of RPC on a paid plan.
+- **Gross margin** means (revenue − cost to serve) ÷ revenue. For example, typical at 1,000 devices is ($80 − $9) ÷ $80 = 89%, which is a markup of about 790% on cost.
+- **Gross profit** on the typical profile is about $71 a month at 1,000 devices, $660 at 10,000, $3,100–3,800 at 100,000 and $30,000 at 1,000,000. That is before engineering, support, on-call and card-processing fees (about 3% plus $0.30 per invoice).
 - **The equivalents are not feature-identical.** SuiFleet replaces Greengrass's live telemetry with signed on-chain health at the chosen cadence, and its rows include no cost for secure tunnels or Device Defender.
 - **Greengrass totals use list prices,** including IoT Core's lower messaging tiers above 1 billion messages and S3's lower egress tiers. Greengrass's own $0.16 per device has no published volume discount.
 - **Ranges** cover RPC on the public endpoint versus a paid plan or one to several SuiFleet nodes, and one to several SuiFleet Walrus aggregators.
@@ -122,7 +144,7 @@ Turnkey OTA products at about 1,000 devices, per device per month:
 | [balenaCloud](https://www.balena.io/pricing) | $3.08–3.22 |
 | [Memfault](https://memfault.com/pricing/) | $3.50 |
 
-Azure IoT Hub with Device Update costs $0.17–0.64 depending on the profile. With equivalent settings SuiFleet costs customers 73–77% less than Greengrass for light fleets, 80–83% less for typical and 47–56% less for heavy (about 82% less with daily health). The $0.05 base price is 84% below Mender Basic.
+Azure IoT Hub with Device Update costs $0.17–0.64 depending on the profile. With equivalent settings, the platform plan costs customers 56–77% less than Greengrass for light fleets, 69–83% less for typical, and 60–62% less for heavy (77–79% less with daily health). The $0.08 small-fleet platform price is 74% below Mender Basic.
 
 ### Why today's build costs more
 
@@ -174,7 +196,7 @@ Validation: [SF-135/#267](https://github.com/tyler-suifleet/suifleet/issues/267)
 
 ### Risks
 
-- **Token prices.** Network fees are about $0.0086 of the $0.05 base price at reference prices. SUI ranged $0.65–1.26 over the last 90 days, so a doubling of SUI costs about 17 points of base margin. Walrus storage has targeted a fixed USD price since May 2026.
+- **Token prices.** Network fees are about $0.0086 of the $0.04–0.08 platform price at reference prices. SUI ranged $0.65–1.26 over the last 90 days, so a doubling of SUI costs about 11 points of margin at $0.08 and about 21 points at $0.04. Walrus storage has targeted a fixed USD price since May 2026.
 - **No Mainnet measurement yet** (SF-135).
 - **The public endpoint is guidance-limited** and not intended for production; move paying fleets off it before relying on it.
 - **The weekly-archive figure** depends on deposit reclaim (SF-129) and on SF-121's archive work.
