@@ -1,14 +1,143 @@
 # Move security audit and gates (SF-050)
 
-Status: **blocked, not formally verified or Review-ready**. Audit performed by
-Codex, running model **gpt-6.1-sol**, session `codex-move-security-20261015`,
-on 2026-10-15. Baseline: `54a68504afce1b1dc73d57eb708e4607cd74061e`;
-branch `work/suifleet/sf-050-533dfe05`. Scope is the seven modules under
-`contracts/sources`, their tests, and existing upgrade/effects harnesses.
-This is a source audit plus executable checks, not a complete security proof.
-Remaining work is retained in [SF-050/#82](https://github.com/tyler-suifleet/suifleet/issues/82).
+Status: **partially verified; blocked, not Review-ready**. Codex running model
+**gpt-6.1-sol**, session `codex-move-security-20261015`, retains SF-050/#82 and
+PR #83. The current root package contains eleven modules; the separate
+`contracts/fleet_storage` analysis remains incomplete. This audit and the
+verified enrollment subset are not a complete security proof.
 
-## Recovery on 2026-10-22: software proof blocker retained
+## Concrete compatibility implementation on 2026-10-22
+
+Current main `7e899f32270337aee6ed113a499fcf1b5201d63e` is integrated. The
+previous arithmetic/native startup barrier was repaired with the checksum-pinned
+[compatibility overlay](../contracts/security-specs/compatibility/README.md):
+
+- Add only the upstream spec-only native `std::integer::Integer` **datatype** in
+  a temporary proof framework, without arithmetic functions or axioms.
+- Match the actual release `record_new_uid(address)` in both Rust recognition
+  and the Move spec wrapper. Keep the actual release funds add/withdraw models;
+  remove only the wrapper for the fork-only, nonexistent reservation native.
+- Fix optional function lookup to require an existing declaration. After the
+  initial adapter, the full run panicked at `model.rs:4977` on nonexistent
+  `0x2::dynamic_field::borrow_or_unknown`. The existing upstream existence-check
+  helper repairs that lookup without adding fake native semantics.
+- Preserve every executable release source. Before staging, the evaluator checks
+  original framework SHA-256
+  `366540c50b2daaa755c8b433601aa278391855cf161950dd97feb1791caca233`.
+  The UID cycle detector and all other upstream analyses remain enabled.
+
+The patched prover was genuinely built with Rust 1.94.0, `cargo build --locked
+--release -p sui-prover`, and two jobs (initial build 7m06s; incremental lookup
+repair 2m11s). Boogie 3.5.6.0, Z3 4.13.4 and .NET 8.0.426 use the existing
+revision/archive pins. Fourteen runtime NuGet lockfiles and their aggregate checksum now
+pin Boogie's transitive restore; the build uses `--locked-mode` and
+`--no-restore`. The initial locked solution build returned zero errors and 26,054
+upstream warnings, including StyleCop globalization-invariant culture warnings.
+The final build targets BoogieDriver and its fourteen runtime projects; upstream
+test projects are not installed as part of the solver. A scan of their tentative
+locks exposed Newtonsoft.Json 9.0.1 / CVE-2024-21907 and
+System.Text.RegularExpressions 4.3.0 / CVE-2019-0820 (six HIGH records in three
+upstream test projects). Those test locks are not shipped or restored by the
+runtime build. No advisory suppression was added.
+No warnings are relabeled as source security findings or hidden by suppression.
+
+### Actual successful solver proofs and rejected implementation mutations
+
+Run inside the pinned dev image, with no wallet and `--network none`, after
+building the tools with `python3 scripts/build_move_prover.py --tools /tools`:
+
+```bash
+python3 scripts/check_move_proofs.py --tools /tools
+```
+
+**PASS** on the final patched/locked tools. Each positive target passed its
+`Check`, `Assume` and `SpecNoAbortCheck` obligations (six total):
+
+| Actual target | Verified subset |
+|---|---|
+| `enrollment::close` | Exact successful-path operator condition, closed state, remaining quota and enrolled count unchanged |
+| `enrollment::set_limits` | Exact successful-path operator condition, requested quota stored, open state and enrolled count unchanged |
+
+No sender-equals-operator precondition, `ignore_abort`, trusted replacement body
+or copied transition model was added. Real counterexamples demonstrate
+non-vacuity:
+
+| Mutation in temporary actual implementation | Solver rejection |
+|---|---|
+| Remove `assert_operator` from `close` | `close_spec_Assume`, operator condition fails; sender 0x0 versus operator 0x1 |
+| Remove `policy.open = false` | `close_spec_Check`, closed-state postcondition fails for an open policy |
+| Remove `assert_operator` from `set_limits` | `set_limits_spec_Assume`, operator condition fails |
+| Replace quota assignment by zero | `set_limits_spec_Check`, requested-quota equality fails |
+
+Zero quota is permitted by the implementation; no new nonzero quota requirement
+is asserted. These proofs do **not** cover claim consumption, expiry, enrollment
+custody, or the expiry-field update. The gate requires each negative to fail at
+its exact intended solver obligation and statement, not merely return nonzero.
+Model/compiler errors and timeouts do not count as invariant counterexamples.
+`.github/workflows/move-security.yml` now builds the pinned tools and gates this
+explicit subset on contract/tool/spec changes. Hosted results belong to the
+exact PR head; local success alone does not claim hosted acceptance.
+
+### Reproduced remaining software failure
+
+The unrestricted command (same tool environment, omit `--functions`) now gets
+through model construction and reaches Boogie/Z3, then exits 1:
+
+```bash
+python3 scripts/evaluate_move_prover.py \
+  --prover-source /tools/sui-prover --framework-packages /tools/framework \
+  --prover-binary /tools/sui-prover/target/release/sui-prover
+```
+
+`identity::is_active_signer_spec_Check` and `SpecNoAbortCheck` fail with **code
+should not abort** at `device_registry.move:293`, the typed identity dynamic-field
+borrow. The counterexample has `custodied == false`; the spec nevertheless calls
+`identity()` before its existing custody/identity precondition. The model permits
+an identity-key slot with a different value type: untyped `df::exists` alone does
+not justify typed `df::borrow`. The existing post-read precondition does not
+establish this storage invariant or prevent the read from aborting.
+
+This is a **failed proof/specification over unconstrained storage**, not a
+confirmed reachable source exploit or an unsupported-language/cycle-detector
+result. No custody success stub, extra precondition or cycle-check suppression
+was introduced to hide it. Next work must model and prove the reachable typed
+identity/custody invariant across construction and lifecycle updates, repair the
+spec's call ordering, and prove the complete critical authority/receipt/revocation/
+enrollment/binding scope with positive/negative solver evidence. This failure
+and the unmet essential scope retain SF-050 as blocked; they are software gates,
+not deferred external acceptance. Other previously recorded open work (L-01,
+historical manifest-tail strategy, separate storage-package audit) also remains.
+
+### Other exact validation in this implementation
+
+- Network-none `python3 scripts/check_move_security.py`: **PASS**, strict
+  compiler/linters, exact unsuppressed baseline, all negative controls, 168/168
+  Move tests and both actual authority-removal regression mutations.
+- Eleven release module arrays equal current main byte for byte; SHA-256
+  `1e5d1b39c20e5e19d224aa12eba924f8db550919a86ac0546c595bfc723f4e19`.
+- Evaluator integrity negatives: extra tracked model edit and untracked model
+  source each rejected before prover execution; original framework hash matches.
+- `python3 -m unittest discover -s scripts/tests -p test_upgrade_security_localnet.py -v`:
+  **PASS**, 4/4 parsing/local-only safety regressions. No new chain-effects run
+  is claimed; historical chain results below remain historical.
+- Final BoogieDriver runtime build: **PASS**, zero errors and zero warnings in
+  the incremental build. Trivy 0.76.0 scanned all fourteen committed NuGet runtime
+  locks: zero vulnerabilities, secrets or misconfigurations. Full repository scan
+  plus the normal report gate: **PASS**, 10 nonblocking findings, zero blocking.
+  Raw reports stay private outside the checkout.
+- `actionlint 1.7.7 .github/workflows/move-security.yml`, Python compilation and
+  `git diff --check`: **PASS**.
+
+No deployment, schema migration, device key or production credential is involved.
+Physical/mainnet/final-provider/real-wallet checks remain unrun and separately
+tracked in [#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
+[#159](https://github.com/tyler-suifleet/suifleet/issues/159).
+
+The following recovery sections retain historical observations and superseded
+startup failures. Their earlier “no proofs” statements describe those runs,
+not the now-verified enrollment subset.
+
+## Earlier recovery on 2026-10-22: historical startup blocker
 
 Codex running **gpt-6.1-sol** resumed the same reservation/session and integrated
 main `7e899f32270337aee6ed113a499fcf1b5201d63e`. This is a software blocker,
@@ -315,7 +444,7 @@ subset into CI and finish the remaining essential proofs before Review. The
 current workflow intentionally advertises compiler/lints/regressions only, not
 successful formal verification. SF-050 software/formal acceptance is not deferred by the physical/mainnet/provider acceptance split.
 
-## Current validation
+## Historical validation on 2026-10-15
 
 | Command/check | Result |
 |---|---|
