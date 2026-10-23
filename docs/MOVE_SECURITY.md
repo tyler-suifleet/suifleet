@@ -6,23 +6,23 @@ PR #83. The current root package contains eleven modules; the separate
 `contracts/fleet_storage` now has a separate source audit and compiler/lint/test gate. This audit and the
 verified enrollment subset are not a complete security proof.
 
-## Raw-field native model milestone: 2026-10-22
+## Two-slot object-field continuation: 2026-10-22
 
 The latest [native-model continuation](MOVE_NATIVE_MODEL.md) supersedes the older
-raw occupancy/name-removal limitation below. The pinned backend now implements
-shared raw-field tags, unknown-type occupancy, both removal updates, Name-only
-key/carrier generation and conservative fresh-UID constructor checks. The native
-gate requires 24 positive obligations, three genuine solver-negative controls and
-an explicitly classified unsupported-rewrap rejection. Twelve actual release-VM
-fixtures pass. The application gate preserves the prior 63/24 scope and adds a 25th negative
-control that deliberately inserts legacy statuses. Role name removal and fresh
-legacy-status absence now pass as normal application obligations.
+raw-field and disconnected DOF model limitations below. The actual pinned backend
+now updates the raw Wrapper/ID slot and child-ID/owner/type heap together. The
+fresh-object roundtrip passes three phases and five genuine solver-negative
+controls. Eighteen release-VM fixtures pass; the existing raw 24/3 and application
+63/25 gates are retained. Unsupported raw/object Name overlap is rejected before
+code generation rather than silently aliased; that rejection is not a proof.
 
-The object-field prototype now puts raw Wrapper/ID and Child observations on the
-same parent carrier without a UID cycle. Its real obligations still fail; two
-physical heap slots, child ownership/identity and complete custody/enrollment/init
-preservation remain essential unproved software scope. The PR stays draft and
-SF-050 stays blocked. No external-acceptance deferral applies to those gaps.
+Arbitrary-input add, multi-child construction, activation/return and full
+enrollment still fail. The new concrete failures expose missing linear-input/heap
+separation and unconstrained fresh-address identity, rather than the unchanged old
+DOF template. Actual closed-writer/init preservation and identity-omission controls
+remain required software work. SF-050 remains blocked and PR #83 stays draft.
+No external-acceptance deferral applies to these proof gaps. Exact commands,
+runtime-source comparison, controls and limitations are in the continuation.
 
 ## Current continuation: 2026-10-22
 

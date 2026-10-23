@@ -1,188 +1,159 @@
 # Native dynamic-field model continuation (SF-050)
 
-SF-050 remains **blocked**, not ready for Review. This continuation implements
-and tests the raw-field tag-table milestone. It does not complete the object-field
-heap refinement or the custody/enrollment/init proofs. Model: **gpt-6.1-sol**;
+SF-050 remains **blocked, not Review-ready**. Codex running **gpt-6.1-sol**,
 reserved session `codex-move-security-20261015`, branch
-`work/suifleet/sf-050-533dfe05`, issue [#82](https://github.com/tyler-suifleet/suifleet/issues/82),
-draft [PR #83](https://github.com/tyler-suifleet/suifleet/pull/83).
+`work/suifleet/sf-050-533dfe05`, continues [#82](https://github.com/tyler-suifleet/suifleet/issues/82)
+and draft [PR #83](https://github.com/tyler-suifleet/suifleet/pull/83).
+This is a concrete backend implementation following the independent findings
+6358405907 and 6358436872, not a rerun of the unchanged old DOF model.
 
-## Implemented raw-field representation
+## Implemented representation and operations
 
-The checksum-pinned `release-model.patch` extends the actual backend rather than
-replacing application bodies. For each parent carrier and canonical Name type,
-there is one `Table int int` of value-type tags, including Name-only observations.
-The existing typed value tables remain. Name existence is defined by tag-table
-membership. `$IsValid` relates each modeled typed table's membership to occupied
-name plus its corresponding tag. This is representation consistency, not a
-SuiFleet custody/authority invariant.
+The checksum-pinned `release-model.patch` changes the actual analysis, code
+generator and native templates. Release application/framework bodies, public
+layouts, type origins and UID cycle checks are unchanged.
 
-Tags enumerate distinct resolved Move `Type` identities across the analysis;
-renamed imports resolve to the same Type. They do not use the Boogie primitive
-representation (for example, different integer widths must remain distinct Move
-types). Unresolved generic value types are rejected rather than assigned
-potentially unsound distinct tags. Occupied slots may have arbitrary integer tags
-outside the observed set. No finite-type exhaustiveness axiom is added.
+Raw fields retain the shared occupancy/type-tag table per parent/Name, typed
+value tables, unknown tags, exact missing/type/duplicate errors 1/2/0, and atomic
+tag/value updates. Name-only observations retain complete carriers and encoders.
+Existing/unproven-fresh UID rewrapping remains explicitly unsupported rather than
+being assigned empty storage.
 
-The raw native templates now:
+The new `object_field_module` replaces the old per-name DOF template:
 
-- Reject add on **any** name occupancy, including an unknown/wrong value type;
-  atomically update the tag and selected typed table on success.
-- Check typed membership on borrow, mutable borrow and remove. Distinguish missing
-  field (1), wrong type (2), and duplicate add (0), matching the release API.
-- Remove both the typed value and shared tag. `remove_opt` aborts on an occupied
-  wrong type instead of incorrectly returning none.
-- Preserve tag fields in ordinary field updates and typed mutable writeback.
-  Both Pack paths and default constructors carry the additional fields.
-- Emit key encoders and full carrier datatypes for **Name-only** observations,
-  even when no value projection is modeled. The new independent Name-only fixture
-  caught missing encoder/opaque-carrier defects during implementation; both were
-  fixed before accepting its proof.
+- Analysis automatically collects the actual outer raw `Wrapper<Name> -> ID`
+  projection, even without an explicit spec observer. Raw typed existence of
+  that slot defines DOF `exists`; it does not require a particular child type.
+- Child values are indexed by **child ID**, with separate owner and type metadata
+  on the same parent carrier. An uninterpreted deterministic field-identity
+  function abstracts the release hash of parent, Wrapper type and name. There
+  is no injectivity/freshness/custody axiom.
+- Add checks **any** raw outer occupancy and rejects duplicates with error 0.
+  Successful add writes the outer ID/tag, child value, owner field identity and
+  child type. It does not overwrite an independently occupied child ID.
+- Borrow/remove resolve the outer ID to the child, checking owner, type and actual
+  embedded child ID. Missing outer/child/owner gives error 1; wrong outer/child
+  type gives error 2. Remove clears the child, its metadata, and outer ID/tag.
+- Mutable borrow uses the child-ID path for writeback, preserving outer and
+  metadata fields. `remove_opt` follows the release's **typed outer** existence
+  guard: a wrong-typed outer slot returns none, unlike raw DF `remove_opt`.
+- Struct updates, default constructors and both Pack paths preserve/initialize the
+  added metadata. Arbitrary raw types, unknown child tags, orphan children and
+  foreign owners are not excluded by an application custody precondition.
 
-The carrier's initial empty tables are accepted only through a conservative
-straight-line fresh-UID provenance check. An existing or unproven-fresh UID,
-control-flow ambiguity, nested/non-leading UID carrier, or unknown constructor
-fails condition generation instead of gaining an empty-store assumption. The
-pinned framework's private `object::new`/`new_uid_from_hash` constructors retain
-their native identity boundary. This is a limited supported constructor analysis,
-not a general address-indexed heap preservation implementation. Raw and object
-fields using the same Name type are rejected because the old shared typed-table
-representation cannot distinguish their physical slots.
+This is not a complete global heap refinement. The carrier-local child heap does
+not yet establish input-object/heap disjointness or cross-carrier identity
+uniqueness. Multiple object Name types on one carrier are rejected explicitly.
+No claimed proof depends on these unsupported configurations.
 
-## Comparison to actual release sources
+## Namespace correctness boundary
 
-Source inspection used Git objects at framework pin
-`73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1`, without modifying release bodies:
+The old `(Name,Value)` selectors dropped the raw/object kind. A shared Name could
+alias physically independent fields or panic while assigning a raw tag to an
+object-only Child type. The new analysis rejects overlapping raw/object Name
+types **before code generation**, including same and different value types.
+This is an unsupported-coverage rejection, not a security proof or solver-negative
+control. Actual release-VM fixtures demonstrate that both configurations work and
+that mutation/removal of one namespace preserves the other. Supporting their
+proofs requires carrying kind through selectors, validity and mutable writeback;
+compiler rejection is not counted as that proof.
 
-- [dynamic_field.move](https://github.com/MystenLabs/sui/blob/73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1/crates/sui-framework/packages/sui-framework/sources/dynamic_field.move):
-  `add` checks untyped `has_child_object` before creating `Field<Name,Value>`;
-  borrow/remove use typed child lookup. Removing destroys the Field UID.
-- [native dynamic_field.rs](https://github.com/MystenLabs/sui/blob/73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1/sui-execution/latest/sui-move-natives/src/dynamic_field.rs):
-  `hash_type_and_key` passes parent, Name's type tag and serialized Name to
-  `derive_dynamic_field_id`; it does not include Value's type. Typed child loading
-  rejects mismatches, and removal moves the stored child out.
-- [sui-types dynamic_field.rs](https://github.com/MystenLabs/sui/blob/73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1/crates/sui-types/src/dynamic_field.rs):
-  the derived child ID hashes parent, encoded Name length/bytes and Name type.
-  The model's separate typed-name domains abstract this addressing; it does not
-  prove cryptographic collision resistance, native correctness or gas behavior.
-- [dynamic_object_field.move](https://github.com/MystenLabs/sui/blob/73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1/crates/sui-framework/packages/sui-framework/sources/dynamic_object_field.move):
-  `add_impl` stores raw `Wrapper<Name> -> ID`, then adds the actual child under
-  the Field UID. `exists` checks the typed outer ID field; `exists_with_type_impl`
-  also checks the child. Raw occupancy alone is not object-field membership.
+## Comparison with the pinned runtime
 
-Actual executable conformance uses the pinned checksum-verified CLI/Move VM
-`sui 1.81.1-e04cf9aa915c`, independently of these prover templates. No wallet keys,
-network mutations or application release bodies are needed.
+The framework/runtime pin remains
+`73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1`.
 
-## Reproduction and controls
+- [dynamic_object_field.move](https://github.com/MystenLabs/sui/blob/73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1/crates/sui-framework/packages/sui-framework/sources/dynamic_object_field.move),
+  `add_impl`, `borrow_impl`, `remove_impl`, `exists_with_type_impl`:
+  raw Wrapper/ID first, child owned by that field UID second.
+- [dynamic_field.move](https://github.com/MystenLabs/sui/blob/73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1/crates/sui-framework/packages/sui-framework/sources/dynamic_field.move),
+  `field_info`: typed outer lookup returns field UID and stored child address.
+- [native dynamic_field.rs](https://github.com/MystenLabs/sui/blob/73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1/sui-execution/latest/sui-move-natives/src/dynamic_field.rs),
+  `add_child_object`: extracts the actual child's ID and type before insertion.
+- [object_store.rs](https://github.com/MystenLabs/sui/blob/73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1/sui-execution/latest/sui-move-natives/src/object_runtime/object_store.rs),
+  `add_object:588–654`: an already-live child ID causes an invariant execution
+  failure, rather than silently replacing its value. The prototype's
+  `$ExecFailureAbort` collision branch preserves this failure. The source was
+  read from the pinned Git object: blob `36d4ab4e61ec926c75a58a9da5badf0db3445684`,
+  SHA-256 `6cc93ffde92d82171d208bb5d400b09b2fa1e364a73d13c482c9aa9875779964`.
 
-Use the pinned image and existing tools root as in [MOVE_SECURITY.md](MOVE_SECURITY.md).
-Inside the image:
+This comparison does not prove native correctness, hashing collision resistance,
+gas/resource bounds, storage effects or general heap simulation.
+
+## Reproduction
+
+Inside `suifleet-dev:sf004`, use the pinned `/tools` environment documented in
+[MOVE_SECURITY.md](MOVE_SECURITY.md), including DOTNET_ROOT, BOOGIE_EXE and Z3_EXE.
+Builds use locked dependencies and `CARGO_BUILD_JOBS=2`.
 
 ```bash
-CARGO_BUILD_JOBS=2 python3 scripts/build_move_prover.py --tools /tools
+python3 scripts/build_move_prover.py --tools /tools
 python3 scripts/check_move_native_vm.py
 python3 scripts/check_move_native_proofs.py --tools /tools
+python3 scripts/check_move_object_proofs.py --tools /tools
 python3 scripts/check_move_proofs.py --tools /tools
+python3 scripts/check_move_security.py
 ```
 
-The VM fixtures cover fresh UID, typed/untyped existence, correct read, mutable
-writeback, wrong-type borrow/remove/remove_opt, same/different-type duplicate add,
-remove/re-add with another value type, parent isolation, untouched key and Name
-type framing, an unmodeled occupied type and a Name-only observer. They also
-exercise legal non-key UID rewrapping and a real object-field add/borrow/remove.
+The fresh object roundtrip invokes the actual native DOF operations directly;
+it does not assume the still-failing arbitrary-add contract. Each native negative
+mutates exactly one emitted operation, then executes real Boogie/Z3. The gate
+requires the intended Check failure/abort code and successful Assume and
+SpecNoAbortCheck; parser errors, empty runs and timeouts fail the gate.
 
-The raw prover gate requires all three phases for eight actual-function targets
-(**24 obligations**). It then executes real Boogie/Z3 on three deliberate
-controls: missing tag clear, wrong-type alias, and the false assertion that an
-occupied unknown-type slot is impossible. The arbitrary-input borrow and remove_opt specifications additionally require
-exact missing/wrong-type abort boundaries, including wrong-type remove_opt
-instead of a successful none result. Each control must fail exactly its intended
-Check/postcondition while Assume and SpecNoAbortCheck pass. The first two mutate
-only the emitted native transition/function in a guarded Boogie wrapper; the
-third mutates only the temporary specification. No production proof uses those
-controls. A parser/model error, timeout or unsuccessful positive fails the gate.
+## Current results and remaining blockers
 
-The separate constructor rejection is explicitly **not a verified property or
-solver counterexample**. The real VM accepts a non-key `Parent { id: UID }` whose
-UID is unpacked and repacked, preserving its field. A carrier-local empty-Pack
-model would discard that store. The current checker rejects that operation with
-`packing an existing or unproven-fresh UID would discard its child store`.
-Key-bearing rewrapping is independently rejected by Sui's object-construction
-verifier; the non-key fixture is necessary to demonstrate the actual limitation.
+Commands ran network-none in the pinned image, on unchanged main
+`5137be97ef273848dec1df81a433c0ec5454effb`. `git fetch origin main` confirmed no
+new base. Actual results:
 
-CI runs both the VM/native gate and the application 63-obligation /
-25-negative gate, preserving all prior 24 controls and adding a deliberately
-inserted legacy-status field. The stronger role name-removal and fresh legacy-status absence
-obligations pass and belong to the application specifications, separately from the native
-model implementation. Hosted CI remains an exact-head gate, never inferred from
-local success.
-
-## Unmet object-field and application scope
-
-The opt-in `object_add_slots_spec` uses exact spec-only Wrapper construction and
-macros expanded at the caller. Generated artifacts contain **the same Parent
-carrier** for the raw outer Wrapper/ID/tag tables and UID-bearing Child table;
-`Parent -> Child -> UID` is well founded and the UID cycle detector stays enabled.
-This concrete prototype gets through model construction and reaches the solver.
-Check and Assume fail: empty raw outer occupancy does not prevent the old DOF
-model's disconnected typed-table duplicate abort, and adding a Child does not
-establish the actual outer typed ID/value postconditions. SpecNoAbortCheck passes.
-The actual VM object's roundtrip passes. These are model counterexamples, not an
-established executable SuiFleet exploit.
-
-```bash
-python3 scripts/evaluate_move_prover.py --prover-source /tools/sui-prover \
-  --framework-packages /tools/framework \
-  --prover-binary /tools/sui-prover/target/release/sui-prover \
-  --include-object-fixtures --functions object_add_slots_spec \
-  --artifacts /tools/NEW_OBJECT_ARTIFACT_DIRECTORY
-```
-
-A safe continuation must replace the old DOF projection with both actual slots:
-outer Field identity/Wrapper/ID plus child heap keyed by that Field UID and
-referenced child ID, checking child identity and ownership. It must retain wrong
-outer types, unknown child types and orphan states until construction/preservation
-proves otherwise. Equating raw-wrapper presence and Child membership, or requiring
-custody validity on arbitrary inputs, would hide the failing obligations.
-
-Activation/return now use the caller-expanded raw-name observer. Their actual
-Check/Assume obligations still fail. Full enrollment also remains a concrete
-Check failure; construction/init and all custody writer preservation and the
-omitted-identity/incorrect-ID controls remain required. They cannot be labeled
-external acceptance or handed to Review. Complete this heap refinement and prove
-those actual writers before requesting independent full-scope approval.
-
-No new release arrays/layouts/type origins, physical results, public-network
-acceptance, mainnet writes, production-provider sessions or wallet acceptance are
-claimed by this continuation. Earlier 169/53 contract tests and 35/47 local-chain
-effects remain historical evidence, not rerun results here.
-
-## Results for this continuation
-
-All commands below ran in `suifleet-dev:sf004`; prover/solver paths and environment
-are the pinned `/tools` layout above. Local build used `CARGO_BUILD_JOBS=2` and
-locked dependencies. No shared-wallet mutation or physical operation occurred.
-
-| Command | Actual result |
+| Command | Result |
 |---|---|
-| `cargo build --offline --locked --release -p sui-prover` after final Name-only correction | Exit 0, 1m01s; prior tag/guard/key-encoder incremental builds also succeeded |
-| `python3 scripts/build_move_prover.py --tools /tools` | Exit 0 on cached tools; source-overlay/lock/archive checks and pinned Boogie build succeeded (0 errors) |
-| `python3 scripts/check_move_native_vm.py` | Exit 0, **12/12 tests** |
-| `python3 scripts/check_move_native_proofs.py --tools /tools` | Exit 0, **24 positive phase obligations**, **3 intended solver-negative controls**; existing-UID reconstruction explicitly rejected as unsupported |
-| `python3 scripts/check_move_proofs.py --tools /tools` | Exit 0, **63 positive phase obligations**, **25 intended solver-negative controls**, preserving all earlier 24 |
-| Opt-in `--include-object-fixtures --functions object_add_slots_spec` | Exit 1; Check/Assume fail in 0.7/0.7s; SpecNoAbortCheck passes |
-| Opt-in `--include-pending-custody --functions activate_device_security_spec return_device_security_spec` | Exit 1; both Checks fail (1.2/0.9s), both Assumes fail (1.1/1.0s); both SpecNoAbortChecks pass |
-| Opt-in `--include-pending-enrollment --functions enroll_security_spec --timeout 180` | Exit 1; concrete Check failure **34.4s**; Assume and SpecNoAbortCheck pass |
-| Python compilation of six changed build/evaluation/gate/control scripts | Pass |
-| `actionlint 1.7.7 .github/workflows/move-security.yml` | Pass |
-| Compatibility SHA-256 pins, local documentation links and `git diff --check` | Pass |
-| Comparison of release source/manifests/lockfiles with previous head `c0279c7` | No changes; no new release-bytecode build or chain-effects run claimed |
+| Locked offline Rust build | Pass; final incremental native-template build 37.26s |
+| `build_move_prover.py --tools /tools` | Pass; exact patch/overlay/lock pins accepted, Boogie 0 warnings/errors |
+| `check_move_native_vm.py` | **18/18 pass**: retained 12 plus same/different-value raw/object noninterference, wrong requested Child (2), different-type duplicate (0), missing field (1), remove/re-add/mutation/name/parent framing |
+| `check_move_native_proofs.py --tools /tools` | **24 phase obligations/3 intended solver negatives pass**; existing-UID rejection remains explicitly unsupported |
+| `check_move_object_proofs.py --tools /tools` | **3 fresh-roundtrip phase obligations/5 intended solver negatives pass**: omit outer, omit child, skip clear, wrong owner, wrong ID; same-Name overlap rejected before code generation, not proved |
+| `check_move_proofs.py --tools /tools` | **63 phase obligations/25 intended solver negatives pass**, all retained |
+| `check_move_security.py` | Pass: strict root/storage compiler and linters, reviewed unsuppressed diagnostics, compiler/linter negatives, **169 root/53 storage tests**, authority-removal negatives |
+| Python parsing, actionlint 1.7.7, compatibility SHA-256 pins, `git diff --check` | Pass |
+| Tracking tests and dry run | Initial failure exposed the missing existing SF-050 seed. After restoring its authoritative specification and verified issue/Project IDs separately: **10/10 pass**, 85-issue offline plan passes. SF-087 was restored only from the supplied seed; no new issue or dependency waiver. |
 
-The first legacy-status omission control timed out at 30s; that was **not**
-accepted as a negative result. Supported bounded VC splitting on the actual
-constructor spec produced the intended absence-postcondition counterexample in
-1.4s, and the complete application gate subsequently passed with that control.
-`rustfmt` was unavailable in the pinned image/host toolchain; no formatting-tool
-success is claimed. This is not a configured gate. Hosted CI/testnet and fresh
-independent review are not established by any local result in this table.
+Essential failing obligations, **not deferred external acceptance**:
+
+1. `--include-object-fixtures --functions object_add_slots_spec`: Check fails
+   **2.0s** at actual add, while Assume/SpecNoAbortCheck pass. Raw absence no
+   longer conflicts with an independent per-name table. Instead the input heap
+   can already contain the incoming child's ID. Its owner/tag state remains
+   possible; no input-custody/freshness assumption excludes it.
+2. `--include-object-fixtures --functions object_frame_spec --timeout 90`:
+   concrete Check failures **21.4s** at the second/different-name add after
+   supported VC splitting. Assume/SpecNoAbortCheck pass. The initial unsplit
+   30s timeout was not accepted as a counterexample. The upstream
+   `packages/sui-specs/sources/sui-framework/tx_context.move::fresh_object_address_spec`
+   preserves only context digest and leaves its returned address unconstrained;
+   distinct `object::new` calls may therefore produce the same child ID in the
+   model. The release VM's same fixture passes. Fixing this requires a faithful
+   transaction/object-identity model and construction/preservation evidence;
+   adding a freshness axiom or silently overwriting a child would hide the gap.
+3. `--include-pending-custody --functions activate_device_security_spec return_device_security_spec`:
+   both Checks fail (**6.8/7.7s**) at native add. Activation Assume also fails
+   (**1.9s**) because raw outer absence is stronger than arbitrary incoming
+   registry state; return Assume and both SpecNoAbortChecks pass.
+4. `--include-pending-enrollment --functions enroll_security_spec --timeout 180`:
+   Check fails with concrete diagnostics (**145.3s**), remaining phases pass.
+   Actual init/activation/return/enrollment inductive preservation and the
+   identity-omission controls remain required, not completed by the fresh fixture.
+
+No language-level impossibility or executable SuiFleet exploit is established.
+The concrete remaining work is identity/global-heap refinement and complete
+closed-writer induction, retaining unknown/orphan/foreign states until genuinely
+excluded. Existing-UID reconstruction also needs heap-preserving support.
+
+There are no changed release application sources/manifests/locks versus `f941092`.
+Prior byte-array and 35/47 local-chain effects evidence remains historical; no new
+release-array/chain-effects run is claimed here. Hosted exact-head CI, automatic
+testnet and independent review must still be recorded. PR #83 stays draft and the
+claim remains reserved. Physical/provider/manual-wallet/mainnet acceptance remains
+unrun in #32/#159; it does not cover any software proof gap above. No wallet,
+production credential, hardware programming or mainnet mutation was used.
