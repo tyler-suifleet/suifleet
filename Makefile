@@ -28,6 +28,7 @@ build-contracts:
 test-contracts:
 	$(RUN) sui move test --path contracts
 	$(RUN) sui move test --path contracts/fleet_storage
+	$(RUN) sui move test --path contracts/fleet_data --build-env testnet
 
 # Spends gas: PUBLISH_ARGS="--expect-address 0x... [--dry-run]" (docs/DEPLOYMENT_MANIFEST.md).
 publish-contracts:
@@ -50,7 +51,14 @@ edge-build:
 edge-test:
 	$(RUN) bash -c "cd suifleet-edge && cargo test --locked && cargo test --locked --features pkcs11"
 
-.PHONY: test-ota test-component dapp-typecheck
+.PHONY: test-ota test-component dapp-typecheck build-walrus-codec test-native-seal
+
+build-walrus-codec:
+	$(RUN) node scripts/build_walrus_codec.cjs
+
+test-native-seal:
+	$(RUN) bash -c 'fixture=$$(mktemp); trap "rm -f \"$$fixture\"" EXIT; cargo run --locked --quiet --manifest-path suifleet-edge/Cargo.toml --example seal_encrypt_vector > "$$fixture" && node scripts/test_native_seal.cjs "$$fixture"'
+
 
 # The daemon speaks gRPC; the simulator is served through the test-only shim
 # example (suifleet-edge/examples/grpc_sim_shim.rs).
@@ -75,6 +83,7 @@ test-ota:
 	$(RUN) python3 scripts/test_console.py
 	$(RUN) python3 scripts/test_rollout.py
 	$(RUN) python3 scripts/test_budget_ota.py
+	$(RUN) python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim
 
 # Fleet service configuration, root only in a disposable network-none container
 # for real SO_PEERCRED principals (no host credentials or public network).
@@ -314,7 +323,13 @@ test-manifest:
 	$(RUN) node scripts/test_seal_frontend.cjs
 	$(RUN) node scripts/test_upload_progress.cjs
 	$(RUN) node scripts/test_telemetry.cjs
+	$(RUN) node scripts/test_fleet_data.cjs
+	$(RUN) node scripts/test_fleet_bulk.cjs
 	$(RUN) node scripts/test_alerts.cjs
+	$(RUN) node scripts/test_chain_alerts.cjs
+	$(RUN) node scripts/test_fleet_relay.cjs
+	$(RUN) node scripts/test_walrus_node_writes.cjs
+	$(RUN) node scripts/test_walrus_site_protocol.cjs
 	$(RUN) node scripts/test_enrollment_frontend.cjs
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_claims.py'
 
@@ -619,6 +634,9 @@ test-prospects:
 	python3 scripts/check_manufacturer_prospects.py
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_manufacturer_prospects.py
 
+.PHONY: test-fleet-data-upgrade-localnet
+test-fleet-data-upgrade-localnet:
+	$(RUN) python3 scripts/test_protocol_localnet.py --fleet-data-upgrade
 .PHONY: test-retention
 test-retention:
 	$(RUN) python3 -m unittest discover -s scripts/tests -p 'test_retention*.py' -v
@@ -628,3 +646,7 @@ test-retention:
 .PHONY: test-retention-upgrade
 test-retention-upgrade:
 	$(RUN) python3 scripts/test_protocol_localnet.py --retention-upgrade
+
+.PHONY: test-device-retention-upgrade
+test-device-retention-upgrade:
+	$(RUN) python3 scripts/test_protocol_localnet.py --device-retention-upgrade

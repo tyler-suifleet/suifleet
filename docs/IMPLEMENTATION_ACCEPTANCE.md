@@ -7,6 +7,7 @@ merging implementation does not establish them or authorize deployment.
 
 | Implementation | Deferred integration |
 |---|---|
+| SF-082 serverless dApp and fleet data | Final production Seal/provider/domain and manual wallet acceptance, physical target and Mainnet checks remain SF-031/#32 and SF-087/#159. Actual merged SF-083 compatibility, native simulator, isolated-chain upgrade/adversarial tests, reproducible production export, authorized Testnet data/Site effects and verified browser decryption, normal CI/testnet/security and independent review remain implementation gates. |
 | SF-054 network cost model | Final production provider/account/credential and manual real-wallet acceptance, plus actual Mainnet/physical acceptance, remain in SF-031/#32 and SF-087/#159. Read-only Mainnet rates, exact encoding, Testnet effects/token accounting, offline regression tests and independent review remain implementation evidence. Unquoted services and incomplete invoices must remain labeled. |
 | SF-006 publishing and SF-008 identity | [SF-010: public-network upgrade and wallet acceptance](https://github.com/tyler-suifleet/suifleet/issues/11) |
 | SF-011 catalog and SF-013 desired state | SF-010 plus [SF-031: physical Pi OTA and recovery](https://github.com/tyler-suifleet/suifleet/issues/32) |

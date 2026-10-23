@@ -6,6 +6,7 @@
 // wallet registers it, the slivers go straight to the storage nodes, and the
 // wallet certifies it with the nodes' certificate. See docs/FLEET_BUDGET.md.
 import { bcs } from "@mysten/sui/bcs";
+import { requireWeightedQuorum } from "../../scripts/walrus-node-writes.mjs";
 import type { SuiGrpcClient } from "@mysten/sui/grpc";
 import { Transaction } from "@mysten/sui/transactions";
 import { normalizeStructTag, normalizeSuiAddress } from "@mysten/sui/utils";
@@ -94,7 +95,6 @@ export async function uploadToFleetStorage(client: SuiGrpcClient, target: FleetS
   if (normalizeSuiAddress(system.package_id) !== normalizeSuiAddress(pinned.walrusPackage)) {
     throw new Error(`The live Walrus package ${system.package_id} is not the pinned ${pinned.walrusPackage} fleet storage was built against`);
   }
-  const committee = (await walrusClient.systemState()).committee;
   const encoded = await walrusClient.encodeBlob(body);
   const blobId = blobIdToInt(encoded.blobId);
   const rootHash = BigInt(bcs.u256().parse(encoded.rootHash));
@@ -105,6 +105,8 @@ export async function uploadToFleetStorage(client: SuiGrpcClient, target: FleetS
     sliversByNode: encoded.sliversByNode, deletable: false, objectId: blob.blobObjectId });
   progress?.({ phase: "processing", loaded: body.byteLength, total: body.byteLength });
   const certificate = await walrusClient.certificateFromConfirmations({ confirmations, blobId: encoded.blobId, deletable: false, blobObjectId: blob.blobObjectId });
+  const committee = (await walrusClient.systemState()).committee;
+  requireWeightedQuorum(committee, certificate.signers);
   await execute(buildCertifyFleetBlobTx(target, blob.blobObjectId, certificate, committee.members.length));
   progress?.({ phase: "complete", loaded: body.byteLength, total: body.byteLength });
   return { blobId: encoded.blobId, blobObjectId: blob.blobObjectId, endEpoch: blob.endEpoch, costFrost: blob.writeFee, owner: "fleet", alreadyCertified: false };

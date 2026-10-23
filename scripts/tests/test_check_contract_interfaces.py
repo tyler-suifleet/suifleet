@@ -1,6 +1,10 @@
 """Offline tests for the contract drift gate, using synthetic Move summaries."""
 from pathlib import Path
 import sys
+import json
+import shutil
+from copy import deepcopy
+from unittest.mock import patch
 import tempfile
 import unittest
 
@@ -36,6 +40,63 @@ class DriftCheckTest(unittest.TestCase):
         errors, checked = self.run_check(source, suffix, modules)
         self.assertTrue(checked, "the reference must be recognized")
         self.assertTrue(any(fragment in error for error in errors), errors)
+
+    def test_separate_package_compilation_and_drift(self):
+        """Exercise collection of distinct compiler outputs, not an exemption."""
+        data = {"functions": {"seal_approve_": function("vector", "object", TX_CONTEXT)},
+                "structs": {"AnchorKey": {}, "Anchor": {}}}
+        compiled = {
+            "core": ("sui_edge", MODULES),
+            "fleet_storage": ("fleet_storage", {"fleet_storage": {"functions": {}, "structs": {}}}),
+            "fleet_data": ("fleet_data", {"fleet_data": data}),
+        }
+        calls = []
+
+        def compiler(argv, **kwargs):
+            package = Path(argv[argv.index("--path") + 1])
+            output = Path(argv[argv.index("--output-directory") + 1])
+            key = package.name if package.name in drift.EXTRA_PACKAGES else "core"
+            calls.append(key)
+            name, modules = compiled[key]
+            (output / name).mkdir(parents=True)
+            (output / "address_mapping.json").write_text(json.dumps({name: "0x0"}))
+            for module, summary in modules.items():
+                (output / name / f"{module}.json").write_text(json.dumps(summary))
+
+        with tempfile.TemporaryDirectory() as directory, patch.object(drift.subprocess, "run", compiler):
+            modules, framework = drift.summarize_packages(Path(directory) / "contracts", Path(directory) / "summaries")
+        self.assertEqual(calls, ["core", "fleet_storage", "fleet_data"])
+        self.assertIn("fleet_data", modules)
+        source = ('"fleet_data::AnchorKey"; "fleet_data::Anchor"; '
+                  'tx.moveCall({ target: `${DATA_PACKAGE}::fleet_data::seal_approve_`, arguments: [a, b] });')
+        self.assertEqual(self.run_check(source, modules=modules), ([], 3))
+        for old, new, message in (
+            ("AnchorKey", "MissingKey", "MissingKey is not a struct"),
+            ("Anchor\"", "MissingAnchor\"", "MissingAnchor is not a struct"),
+            ("seal_approve_", "missing_call", "missing_call is not a function"),
+            ("[a, b]", "[a]", "takes 2 arguments; client passes 1"),
+        ):
+            with self.subTest(message=message):
+                self.assert_drift(source.replace(old, new), message, modules=modules)
+        self.assert_drift(source, "no module fleet_data", modules=MODULES)
+        missing_type = {**modules, "fleet_data": {**data, "structs": {"AnchorKey": {}}}}
+        self.assert_drift(source, "Anchor is not a struct", modules=missing_type)
+
+    @unittest.skipUnless(shutil.which("sui"), "requires the pinned Sui compiler")
+    def test_real_fleet_data_summary_rejects_missing_types_and_calls(self):
+        with tempfile.TemporaryDirectory() as directory:
+            modules, _ = drift.summarize_packages(drift.ROOT / "contracts", Path(directory))
+        source = ('"fleet_data::AnchorKey"; "fleet_data::Anchor"; '
+                  'tx.moveCall({ target: `${DATA_PACKAGE}::fleet_data::seal_approve_support`, arguments: [a, b] });')
+        self.assertEqual(self.run_check(source, modules=modules), ([], 3))
+        for kind, name in (("structs", "AnchorKey"), ("structs", "Anchor"),
+                           ("functions", "seal_approve_support")):
+            with self.subTest(kind=kind, name=name):
+                changed = deepcopy(modules)
+                del changed["fleet_data"][kind][name]
+                self.assert_drift(source, f"{name} is not a", modules=changed)
+        self.assert_drift(source.replace("[a, b]", "[a]"), "takes 2 arguments", modules=modules)
+        self.assert_drift(source.replace("AnchorKey", "AnchorKeys"), "AnchorKeys is not a struct", modules=modules)
 
     def test_valid_call_passes(self):
         errors, checked = self.run_check(
@@ -111,6 +172,12 @@ class DriftCheckTest(unittest.TestCase):
                           "report_status_for_grp is not a function", suffix=".rs", modules=modules)
         self.assert_drift(source.replace('"deployment_manager"', '"deployment_mgr"'),
                           "is not a function", suffix=".rs", modules=modules)
+
+    def test_daemon_literal_call_module(self):
+        modules = {"fleet_data": {"structs": {}, "functions": {"report_health": function()}}}
+        source = 'Call { module: "fleet_data", function: "report_health", args: vec![] }'
+        self.assertEqual(self.run_check(source, suffix=".rs", modules=modules), ([], 1))
+        self.assert_drift(source.replace('"fleet_data"', '"fleet_datx"'), "is not a function", suffix=".rs", modules=modules)
 
     def test_daemon_public_and_private_entry_functions_pass(self):
         for visibility, entry in (("Public", False), ("Private", True)):

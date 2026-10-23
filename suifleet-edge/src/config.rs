@@ -103,6 +103,9 @@ pub struct Config {
     /// omitted, and the device pays its own gas as before.
     #[serde(default)]
     pub budget: Option<crate::funding::BudgetConfig>,
+    /// Direct Sui health and prepaid encrypted archive delivery (SF-082).
+    #[serde(default)]
+    pub fleet_data: Option<crate::fleet_data::Config>,
     /// The file this configuration was loaded from (for the update preflight).
     #[serde(skip)]
     pub path: PathBuf,
@@ -857,7 +860,7 @@ impl Config {
             telemetry.validate()?;
         }
         if let Some(logs) = &cfg.logs {
-            anyhow::ensure!(cfg.telemetry.is_some(), "[logs] needs [telemetry] (the fleet indexer URL)");
+            anyhow::ensure!(cfg.telemetry.is_some() || cfg.fleet_data.as_ref().is_some_and(|d| d.archives.is_some()), "[logs] needs [telemetry] or fleet_data.archives");
             logs.validate()?;
         }
         if let Some(streams) = &cfg.streams {
@@ -867,6 +870,11 @@ impl Config {
             shadows.validate()?;
         }
         validate_aws_iot(&cfg)?;
+        if let Some(data) = &cfg.fleet_data {
+            data.validate()?;
+            anyhow::ensure!(data.archives.is_none() || cfg.logs.is_some(), "fleet_data.archives needs [logs]");
+            anyhow::ensure!(cfg.telemetry.is_none(), "configure fleet_data or HTTP telemetry, not both");
+        }
         if let Some(budget) = &cfg.budget {
             budget.validate(cfg.sui.manifest.as_ref().expect("validated manifest"))?;
         }

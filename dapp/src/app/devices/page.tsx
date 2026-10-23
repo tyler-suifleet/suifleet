@@ -15,6 +15,7 @@ import {
   buildCreateGroupTx, buildAddDeviceToGroupTx, buildRemoveDeviceFromGroupTx, buildDeleteGroupTx,
 } from "@/lib/sui";
 import Link from "next/link";
+import { DATA_CONFIG } from "@/lib/fleet-data";
 import { DeviceUpdateHistory } from "@/components/DeviceUpdateHistory";
 import { PageHeader, HealthBadge } from "@/components/ui";
 import type { DeviceRef } from "@/lib/sui";
@@ -469,6 +470,7 @@ function GroupsTab() {
 function TelemetrySettings() {
   const token = useTelemetryToken();
   const [draft, setDraft] = useState("");
+  if (DATA_CONFIG) return <p className="text-xs text-gray-500">Health is verified directly from Sui. <Link href="/data" className="text-blue-700 underline">Read encrypted logs and diagnostics.</Link></p>;
   if (!TELEMETRY_URL) {
     return <p className="text-xs text-gray-500">Device health is not reported: no telemetry service is configured for this build.</p>;
   }

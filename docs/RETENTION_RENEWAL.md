@@ -44,9 +44,11 @@ on-chain index checks that no protected blob has expired; expired records requir
 owner restoration/replacement or explicit release before new admission. Legacy registrations stop
 while retention is configured. Owner uploads use `register_retained_fleet_blob`
 to register and reserve a new target atomically; insufficient reserves abort the
-whole transaction. Device-originated registrations pause under active retention;
-there is no daemon archival producer today (SF-083). Device receipts remain Sui
-transactions, governed by their own gas accounts.
+whole transaction. SF-082 adds owner `configure_device_retention` admission for
+native daemon archives: `register_blob` atomically prepays their owner-selected
+finite target and maximum WAL quote. Without that explicit approval device
+registrations pause. `clear_device_retention` pauses new archives without deleting
+history. Device receipts remain Sui transactions governed by their gas accounts.
 
 WAL FROST and SUI MIST are separate tokens. No conversion is assumed. The owner
 buys WAL through the supported exchange/payment route, then deposits it.
@@ -284,3 +286,50 @@ Use the prepaid executor first. Reauthorization discards capacity without refund
 inspect pending intent before any owner policy/reference change. During funding
 outages the daemon retries the unprocessed one-shot event on a later poll; that
 cycle can defer bookkeeping reconciliation, while installed applications persist.
+
+## Archive capacity and expiry maintenance
+
+Protected storage admits at most **1,024 protected blobs fleet-wide**, shared by
+archives, releases, recipes and other owner data. Only owner `release_blob` frees
+an entry; renewals and expiry do not. Ten devices at daily cadence consume 300
+slots per 30-day month, filling an otherwise empty index in 102.4 days; diagnostic,
+crash and owner uploads reduce that horizon. At capacity new registration aborts
+with `EOverQuota`. Every registration reads all protected blobs; gas grows linearly
+with history. Protocol gas/object limits may stop admission before 1,024. The small
+fixture's 27,075,739 MIST archive cost is an observation, never a fleet-scale ceiling.
+No measured worst-case gas is available. The budget estimator projects slot usage,
+not that unknown gas growth; simulate against current state and review actual costs.
+
+The device admission target is an absolute epoch shared by new archives. It is
+not a rolling retention window. Any expired protected blob halts registration
+fleet-wide with `EInvalidEpochs`; funding alone cannot repair expiry. The daemon
+retains queued data within its disk bounds, not an infinite offline backlog.
+
+1. Monitor the live protected count, each actual exclusive expiry, prepaid targets,
+   executor journal and disk backlog. Allow slots for all fleet uses and emergency
+   traffic. Do not treat an unavailable query as zero usage.
+2. Before expiry, ensure the separate executor applies paid capacity successfully;
+   verify actual effects and new blob expiry. Then explicitly authorize/prepay a
+   later target for existing blobs if needed, within Walrus's horizon. Changing
+   `configure_device_retention` affects new admissions only. Do not use owner
+   `extend_blob` while prepaid capacity remains attached.
+3. Before capacity is exhausted, export and authenticate history and review active
+   application/recovery references. Only the owner may retire obsolete blobs:
+   construct `fleet_storage::release_blob(storage, budget, cap, blob_id)` and transfer
+   its returned Blob to the verified owner (or burn an expired Blob using the pinned
+   Walrus API). Verify effects, reduced protected count and remaining references.
+   Release discards attached paid capacity without WAL refund and makes historical
+   archive reads unavailable; preserve required ciphertext and decryption material
+   privately. Anchor metadata is not deleted. Never release a required rollback,
+   recipe or recovery reference just to free a slot.
+4. If expiry already halted admission, explicitly release **every expired protected
+   record**, after the same backup/reference review. Expired bytes need restoration,
+   authorized re-upload/certification and new references; a target change alone
+   cannot restore them. Reconcile remaining coverage/reserves and verify an actual
+   new admission before resuming uploads. Clearing device admission does not clear
+   expired protected records or enlarge the index.
+
+This is a finite owner-maintained policy. Continuous unattended growth requires a
+separately reviewed scaling design; no automatic deletion or rolling window is
+implemented. The write cadence and owner quotas bound upload frequency/spend, not
+the lifetime of a growing protected fleet.

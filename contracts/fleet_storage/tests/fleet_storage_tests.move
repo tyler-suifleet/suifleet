@@ -949,4 +949,99 @@ module fleet_storage::fleet_storage_tests {
         finish(scenario, system);
     }
 
+    fun device_retention_fixture(): (ts::Scenario, System) {
+        let (mut scenario, mut system, _) = renewal_fixture();
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        fleet_storage::configure_retention(&mut fs, &budget, &cap, DEVICE_2, 5, 4_000_000, 100, 5);
+        fleet_storage::fund_retention(&mut fs, coin::mint_for_testing<WAL>(2_000_000, ts::ctx(&mut scenario)), coin::mint_for_testing<SUI>(100, ts::ctx(&mut scenario)));
+        fleet_storage::configure_device_retention(&mut fs, &budget, &cap, 8, 1_000_000);
+        owner_end(fs, budget, cap);
+        (scenario, system)
+    }
+
+    #[test]
+    fun owner_approved_device_upload_prepays_renewal_atomically() {
+        let (mut scenario, mut system) = device_retention_fixture();
+        let id = upload(&mut scenario, &mut system, BLOB + 1, 20);
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        let policy = fleet_storage::renewal(&fs, id).destroy_some();
+        assert!(std::bcs::to_bytes(&policy) == vector[8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert!(fleet_storage::record_device_id(&fleet_storage::blob_record(&fs, id).destroy_some()).is_some());
+        owner_end(fs, budget, cap);
+        finish(scenario, system);
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 7, location = fleet_storage)]
+    fun clearing_device_policy_restores_pause_without_releasing_history() {
+        let (mut scenario, mut system) = device_retention_fixture();
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        fleet_storage::clear_device_retention(&mut fs, &budget, &cap);
+        assert!(fleet_storage::blob_count(&fs) == 1);
+        owner_end(fs, budget, cap);
+        upload(&mut scenario, &mut system, BLOB + 1, 20);
+        finish(scenario, system);
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 13, location = fleet_storage)]
+    fun device_policy_target_must_extend_the_original_purchase() {
+        let (mut scenario, mut system) = device_retention_fixture();
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        fleet_storage::configure_device_retention(&mut fs, &budget, &cap, 5, 1_000_000);
+        owner_end(fs, budget, cap);
+        upload(&mut scenario, &mut system, BLOB + 1, 20);
+        finish(scenario, system);
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 7, location = fleet_storage)]
+    fun device_upload_requires_new_renewal_reward_reserves() {
+        let (mut scenario, mut system) = device_retention_fixture();
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        let (w, g) = fleet_storage::withdraw_retention(&mut fs, &budget, &cap, 0, 105, ts::ctx(&mut scenario));
+        transfer::public_transfer(w, OWNER); transfer::public_transfer(g, OWNER);
+        owner_end(fs, budget, cap);
+        upload(&mut scenario, &mut system, BLOB + 1, 20);
+        finish(scenario, system);
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 4, location = fleet_storage)]
+    fun device_upload_cannot_exceed_owner_renewal_epoch_allowance() {
+        let (mut scenario, mut system) = device_retention_fixture();
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        fleet_storage::configure_retention(&mut fs, &budget, &cap, DEVICE_2, 5, 1, 100, 5);
+        owner_end(fs, budget, cap);
+        upload(&mut scenario, &mut system, BLOB + 1, 20);
+        finish(scenario, system);
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 1, location = fleet_budget)]
+    fun another_budget_cap_cannot_approve_device_retention() {
+        let (mut scenario, system) = device_retention_fixture();
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        let registry = ts::take_shared<DeviceRegistry>(&scenario);
+        let foreign = fleet_budget::create(&registry, coin::mint_for_testing<SUI>(10, ts::ctx(&mut scenario)), fleet_budget::new_limits(1, DAY, 1, 1, 0), 0, ts::ctx(&mut scenario));
+        fleet_storage::configure_device_retention(&mut fs, &budget, &foreign, 8, 1_000_000);
+        transfer::public_transfer(foreign, OWNER); ts::return_shared(registry);
+        owner_end(fs, budget, cap); finish(scenario, system);
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 6, location = fleet_storage)]
+    fun protected_device_admission_keeps_existing_upload_quotas() {
+        let (mut scenario, mut system) = device_retention_fixture();
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        let device_cap = ts::take_from_address<DeviceCap>(&scenario, DEVICE);
+        let id = device_cap::device_id(&device_cap);
+        ts::return_to_address(DEVICE, device_cap);
+        let clock = clock_at(&mut scenario, 20);
+        fleet_storage::set_device_quota(&mut fs, &budget, &cap, id, quota(POOL, 1), &clock);
+        clock::destroy_for_testing(clock); owner_end(fs, budget, cap);
+        upload(&mut scenario, &mut system, BLOB + 1, 20);
+        finish(scenario, system);
+    }
+
 }

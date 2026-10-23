@@ -190,3 +190,33 @@ replay_history = false
 # interval_seconds = 30
 # desired_conflict = "cloud"        # who wins a key both sides changed
 # reported_conflict = "device"
+
+# Direct Sui/Walrus fleet backend (alternative to [telemetry], no HTTP indexer).
+# Owner creates/enrolls these objects first; use their actual introduction origin.
+# [fleet_data]
+# package_id = "0x<FleetData call package>"
+# type_origin = "0x<FleetData introduction package>"
+# fleet_id = "0x<FleetData>"
+# budget_id = "0x<FleetBudget>"
+# storage_id = "0x<FleetStorage>"
+# writer_id = "0x<this device's indexed DeviceData>"
+# account_id = "0x<this device's current GasAccount>"
+#
+# Encrypted archives additionally need [logs] collection limits. Build the
+# keyless codec with scripts/build_walrus_codec.cjs; install its bundle and WASM
+# together in a root-owned directory, plus Node 22.22.2. No SDK tree is needed.
+# [fleet_data.archives]
+# storage_package = "0x<fleet_storage call package>"
+# storage_type_origin = "0x<fleet_storage introduction package>"
+# system_id = "0x<pinned Testnet Walrus System>"
+# walrus_package = "0x<live, compiler-pinned Testnet Walrus package>"
+# key_server_package = "0x<Seal key server package>"
+# key_servers = [{ object_id = "0x<public key server object>", weight = 1 }]
+# threshold = 1
+# node = "/usr/bin/node"
+# codec = "/usr/lib/suifleet/walrus-codec/walrus-device-codec.cjs"
+# codec_sha256 = "<manifest.json files.walrus-device-codec.cjs.sha256>"
+#
+# The signing service needs the same [fleet_data] object bindings and archive
+# storage bindings in signer.toml. It permits only these bounded native intents;
+# the codec process receives ciphertext, never a key, PIN or signing socket.

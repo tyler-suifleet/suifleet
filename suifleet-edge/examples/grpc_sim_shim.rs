@@ -22,6 +22,7 @@
 use std::{str::FromStr, sync::Arc};
 
 use serde_json::{json, Value};
+use base64::{engine::general_purpose::STANDARD, Engine};
 use sui_crypto::SuiVerifier;
 use sui_rpc::proto::sui::rpc::v2 as proto;
 use sui_sdk_types::{Address, Digest, MoveStruct, Object, ObjectData, StructTag, TypeTag};
@@ -138,7 +139,9 @@ impl proto::ledger_service_server::LedgerService for Shim {
         genesis[..prefix.len()].copy_from_slice(&prefix);
         let mut info = proto::GetServiceInfoResponse::default();
         info.chain_id = Some(Digest::new(genesis).to_string());
-        info.checkpoint_height = Some(number(&self.call("shim_height", json!([])).await?));
+        let height=self.call("shim_height",json!([])).await?;
+        info.checkpoint_height=Some(number(if height.is_object(){&height["height"]}else{&height}));
+        info.lowest_available_checkpoint=Some(if height.is_object(){number(&height["lowest"])}else{0});
         Ok(Response::new(info))
     }
 
@@ -149,6 +152,11 @@ impl proto::ledger_service_server::LedgerService for Shim {
         let request = request.into_inner();
         let id = request.object_id.unwrap_or_default();
         let address = Address::from_str(&id).map_err(|e| Status::invalid_argument(e.to_string()))?;
+        if short_id(&id)=="0x5ca1ab1e" && request.read_mask.as_ref().is_some_and(|m|m.paths.iter().any(|p|p=="version")) {
+            let mut object=proto::Object::default();object.object_id=Some(id);
+            object.version=Some(number(&self.call("shim_fleet_gas_version",json!([])).await?));
+            let mut response=proto::GetObjectResponse::default();response.object=Some(object);return Ok(Response::new(response));
+        }
         let wants_bcs = request
             .read_mask
             .as_ref()
@@ -253,6 +261,14 @@ impl proto::ledger_service_server::LedgerService for Shim {
         request: Request<proto::GetTransactionRequest>,
     ) -> Result<Response<proto::GetTransactionResponse>, Status> {
         let digest = request.into_inner().digest.unwrap_or_default();
+        if !digest.starts_with("event-") {
+            let result=self.call("shim_fleet_transaction",json!([digest.clone()])).await?;
+            if result.is_null(){return Err(Status::not_found("not executed"));}
+            let mut status=proto::ExecutionStatus::default();status.success=Some(result["effects"]["status"]["status"]=="success");
+            let mut effects=proto::TransactionEffects::default();effects.status=Some(status);
+            let mut tx=proto::ExecutedTransaction::default();tx.digest=Some(digest);tx.effects=Some(effects);tx.checkpoint=Some(0);
+            let mut response=proto::GetTransactionResponse::default();response.transaction=Some(tx);return Ok(Response::new(response));
+        }
         let index: u64 = digest
             .strip_prefix("event-")
             .and_then(|n| n.parse().ok())
@@ -344,6 +360,10 @@ impl proto::transaction_execution_service_server::TransactionExecutionService fo
             let object: Option<&String> = input.object_id.as_ref();
             arguments.push(match (pure, object) {
                 // A u8 status, or a u64 amount (fleet_budget::draw_gas).
+                (Some(pure), _) if matches!(call.module.as_deref(), Some("fleet_data" | "fleet_storage")) => {
+                    pures.push(pure.to_vec());
+                    json!({"bcs": STANDARD.encode(pure)})
+                }
                 (Some(pure), _) => {
                     pures.push(pure.to_vec());
                     let mut bytes = [0u8; 8];
@@ -372,6 +392,13 @@ impl proto::transaction_execution_service_server::TransactionExecutionService fo
                 continue;
             }
             let id = Address::from_str(arguments[index].as_str().unwrap_or("")).map_err(|e| Status::internal(e.to_string()))?;
+            if matches!(call.module.as_deref(), Some("fleet_data" | "fleet_storage")) {
+                let owned = match function.as_str() { "report_health" | "anchor" => index==5, "register_blob" => index==4, _=>false };
+                let mutable = match function.as_str() { "report_health" | "anchor" => index==1, "register_blob" => index==0 || index==5, "certify_blob" => index==0, _=>false };
+                inputs.push(builder.object(if owned { sui_transaction_builder::ObjectInput::owned(id,1,Digest::ZERO) }
+                    else { sui_transaction_builder::ObjectInput::shared(id,1,mutable) }));
+                continue;
+            }
             inputs.push(builder.object(match (function == "draw_gas", index) {
                 // draw_gas: budget (&), account (&mut), registry (&), cap
                 // (owned), Clock (&), as a node resolves them.
@@ -396,9 +423,10 @@ impl proto::transaction_execution_service_server::TransactionExecutionService fo
         builder.set_sender(sender);
         builder.set_gas_budget(10_000_000);
         builder.set_gas_price(1000);
+        let gas_version=if matches!(call.module.as_deref(),Some("fleet_data" | "fleet_storage")){number(&self.call("shim_fleet_gas_version",json!([])).await?)}else{1};
         builder.add_gas_objects([sui_transaction_builder::ObjectInput::owned(
             Address::from_str("0x5ca1ab1e").unwrap(),
-            1,
+            gas_version,
             Digest::ZERO,
         )]);
         let resolved = builder.try_build().map_err(|e| Status::internal(e.to_string()))?;
@@ -441,12 +469,26 @@ impl proto::transaction_execution_service_server::TransactionExecutionService fo
         sui_crypto::UserSignatureVerifier::new()
             .verify_transaction(&transaction, &signature)
             .map_err(|e| Status::permission_denied(format!("invalid signature: {e}")))?;
-        let result = self
-            .call(
-                "sui_executeTransactionBlock",
-                json!([hex::encode(&bytes), [format!("verified:{}", transaction.sender)]]),
-            )
-            .await?;
+        let custom = match &transaction.kind {
+            sui_sdk_types::TransactionKind::ProgrammableTransaction(ptb) => match ptb.commands.as_slice() {
+                [sui_sdk_types::Command::MoveCall(call)] if matches!(call.module.as_str(),"fleet_data" | "fleet_storage") => {
+                    let args: Vec<_> = call.arguments.iter().map(|arg| {
+                        let sui_sdk_types::Argument::Input(index) = arg else { return Value::Null };
+                        match &ptb.inputs[*index as usize] {
+                            sui_sdk_types::Input::Pure(b) => json!({"bcs":STANDARD.encode(b)}),
+                            sui_sdk_types::Input::Shared(o) => json!(short_id(&o.object_id().to_string())),
+                            sui_sdk_types::Input::ImmutableOrOwned(o) => json!(short_id(&o.object_id().to_string())),
+                            _ => Value::Null,
+                        }
+                    }).collect();
+                    Some(json!([call.module.to_string(),call.function.to_string(),args,transaction.sender.to_string(),transaction.digest().to_string(),transaction.gas_payment.objects[0].version()]))
+                }
+                _=>None,
+            }, _=>None,
+        };
+        let result = if let Some(args) = custom { self.call("shim_fleet_execute",args).await? } else {
+            self.call("sui_executeTransactionBlock", json!([hex::encode(&bytes), [format!("verified:{}", transaction.sender)]])).await?
+        };
         let mut status = proto::ExecutionStatus::default();
         status.success = Some(result["effects"]["status"]["status"] == "success");
         if status.success != Some(true) {

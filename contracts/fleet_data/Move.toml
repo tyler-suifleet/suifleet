@@ -1,0 +1,13 @@
+[package]
+name = "fleet_data"
+version = "0.0.1"
+edition = "2024.beta"
+
+[dependencies]
+sui_edge = { local = ".." }
+fleet_storage = { local = "../fleet_storage" }
+# Pinned Walrus Testnet contracts (tag testnet-v1.59.0); see docs/FLEET_BUDGET.md.
+wal = { git = "https://github.com/MystenLabs/walrus.git", subdir = "testnet-contracts/wal", rev = "c68b530e0b1e522b4a3896190d883e4312a1cf0e" }
+walrus = { git = "https://github.com/MystenLabs/walrus.git", subdir = "testnet-contracts/walrus", rev = "c68b530e0b1e522b4a3896190d883e4312a1cf0e" }
+
+[environments]

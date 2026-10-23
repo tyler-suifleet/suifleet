@@ -17,6 +17,8 @@ assert.deepEqual(r.RenewalBcs.parse(Renewal.serialize({ target: 7, max_fee: '100
 const record = { device_id: null, blob_id: '123', size: '2', encoded_size: '50', end_epoch: 5, uploaded_at_ms: '1' };
 assert.deepEqual(r.RecordBcs.parse(Record.serialize(record).toBytes()), record);
 const builders = [
+ ['configure_device_retention', r.buildConfigureDeviceRetentionTx(config, '0x1', '0x2', '0x3', 8, 100n)],
+ ['clear_device_retention', r.buildClearDeviceRetentionTx(config, '0x1', '0x2', '0x3')],
   ['migrate', r.buildMigrateRetentionTx(config, '0x1', '0x2', '0x3')],
   ['configure_retention', r.buildConfigureRetentionTx(config, '0x1', '0x2', '0x3', '0xc', 2, 100n, 10n, 5n)],
   ['authorize_renewal', r.buildAuthorizeRenewalTx(config, '0x1', '0x2', '0x3', '0x4', 7, 100n)],
@@ -92,3 +94,15 @@ console.log('PASS: retention SDK builders, cross-runtime BCS, independent fundin
   await assert.rejects(renewalReceipt(client, { ...value, digest: 'wrong' }));
   console.log('PASS: signed gas/owned reference invalidation, unchanged refs, indexing race and read failure');
 })().catch((error) => { console.error(error); process.exitCode = 1; });
+
+(async()=>{
+ const origins={DeviceRetentionKey:id('0x91'),DeviceRetention:id('0x92')};let captured;
+ const client={movePackageService:{getDatatype:async({name})=>({response:{datatype:{definingId:origins[name]}}})},
+  async getDynamicField(request){captured=request;return {dynamicField:{value:{type:`${origins.DeviceRetention}::fleet_storage::DeviceRetention`,bcs:r.DeviceRetentionBcs.serialize({target:8,max_fee:'100'}).toBytes()}}};}};
+ assert.deepEqual(await r.fetchDeviceRetention(client,config,'0x1'),{target:8,max_fee:'100'});
+ assert.equal(captured.name.type,`${origins.DeviceRetentionKey}::fleet_storage::DeviceRetentionKey`,'later key introduction is independent of original storage and retention origins');
+ client.getDynamicField=async()=>({dynamicField:{value:{type:`${id('0x99')}::fleet_storage::DeviceRetention`,bcs:r.DeviceRetentionBcs.serialize({target:8,max_fee:'100'}).toBytes()}}});
+ await assert.rejects(r.fetchDeviceRetention(client,config,'0x1'),/Foreign/);
+ for(const [target,fee] of [[0,1n],[-1,1n],[0x100000000,1n],[8,0n]])assert.throws(()=>r.buildConfigureDeviceRetentionTx(config,'0x1','0x2','0x3',target,fee));
+ console.log('PASS: owner finite device policy builders and independent later introduction origins');
+})().catch(e=>{console.error(e);process.exitCode=1});

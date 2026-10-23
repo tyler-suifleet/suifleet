@@ -150,6 +150,23 @@ class Pins(unittest.TestCase):
         self.assertEqual(found['network']['sha256'], tc.NETWORK['binary_sha256'])
 
 
+class OfflineCompilation(unittest.TestCase):
+    def test_release_compilation_disables_rpc_tree_shaking_and_keeps_lock(self):
+        with tempfile.TemporaryDirectory() as directory:
+            package = Path(directory)
+            (package / 'Move.lock').write_text('reviewed lock')
+            built = dict(modules=['module'], dependencies=['0x1'], digest=[1] * 32)
+            run = Mock(return_value=SimpleNamespace(returncode=0, stdout=json.dumps(built), stderr=''))
+            self.assertEqual(tc.compile_package('/pinned/sui', package, run=run)['modules'], ['module'])
+            self.assertIn('--no-tree-shaking', run.call_args.args[0])
+            self.assertEqual((package / 'Move.lock').read_text(), 'reviewed lock')
+            def changed(*args, **kwargs):
+                (package / 'Move.lock').write_text('changed')
+                return SimpleNamespace(returncode=0, stdout=json.dumps(built), stderr='')
+            with self.assertRaisesRegex(RuntimeError, 'changed Move.lock'):
+                tc.compile_package('/pinned/sui', package, run=changed)
+
+
 class NotSubmittedBudget(unittest.TestCase):
     def test_refusal_before_signing_releases_reservation_only(self):
         rows = []
