@@ -145,16 +145,72 @@ fn after(watermark: &proto::Watermark) -> anyhow::Result<Value> {
 
 /// Resuming from `position` needs the node to still hold that checkpoint's
 /// events. Pruned history is an operator decision (an archival node, or a
-/// deliberate re-enrollment), never something to skip silently.
+/// deliberate re-enrollment), never something to skip silently — unless the
+/// device can resynchronize from its inbox and group heads (SF-125), which
+/// the caller decides on `HistoryPruned`.
 fn ensure_retained(position: Option<u64>, lowest: Option<u64>) -> anyhow::Result<()> {
     if let (Some(position), Some(lowest)) = (position, lowest) {
-        anyhow::ensure!(
-            position >= lowest,
-            "event history before checkpoint {lowest} is pruned on this node, but this device resumes \
-             at checkpoint {position}; point rpc_url at a node that retains it (nothing is skipped)"
-        );
+        if position < lowest {
+            return Err(anyhow::Error::new(HistoryPruned { position, lowest }));
+        }
     }
     Ok(())
+}
+
+/// The node no longer holds the events this device resumes from.
+#[derive(Debug)]
+pub struct HistoryPruned {
+    pub position: u64,
+    pub lowest: u64,
+}
+impl std::fmt::Display for HistoryPruned {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "event history before checkpoint {} is pruned on this node, but this device resumes \
+             at checkpoint {}; point rpc_url at a node that retains it (nothing is skipped)",
+            self.lowest, self.position
+        )
+    }
+}
+impl std::error::Error for HistoryPruned {}
+
+/// What has been announced to a device inbox or group (fleet_inbox::Head).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Head {
+    pub seq: u64,
+    pub next_start_ms: u64,
+    /// Component name → latest announced deployment.
+    pub components: std::collections::BTreeMap<String, String>,
+}
+
+/// A device's inbox: its head and the groups it was added to.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Inbox {
+    pub head: Head,
+    pub groups: Vec<String>,
+}
+
+fn parse_head(value: &Value) -> anyhow::Result<Head> {
+    let value = value.get("fields").unwrap_or(value);
+    let seq = number(&value["seq"]).ok_or_else(|| anyhow::anyhow!("head without a sequence: {value}"))?;
+    let next_start_ms = number(&value["next_start_ms"])
+        .ok_or_else(|| anyhow::anyhow!("head without a next start: {value}"))?;
+    let components = value["components"].get("fields").unwrap_or(&value["components"]);
+    let entries = components["contents"]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("undecodable head components: {value}"))?;
+    let mut head = Head { seq, next_start_ms, components: Default::default() };
+    for entry in entries {
+        let entry = entry.get("fields").unwrap_or(entry);
+        match (entry["key"].as_str(), entry["value"].as_str()) {
+            (Some(name), Some(deployment)) => {
+                head.components.insert(name.to_owned(), deployment.to_owned());
+            }
+            _ => anyhow::bail!("undecodable head component: {entry}"),
+        }
+    }
+    Ok(head)
 }
 
 #[derive(Clone)]
@@ -575,14 +631,15 @@ impl SuiClient {
             Start::Checkpoint(checkpoint) => request.start_checkpoint = Some(checkpoint),
         }
         request.options = Some(options);
-        let mut stream = self
-            .rpc
-            .clone()
-            .ledger_client()
-            .list_events(request)
-            .await
-            .map_err(status)?
-            .into_inner();
+        let mut stream = match self.rpc.clone().ledger_client().list_events(request).await {
+            Ok(response) => response.into_inner(),
+            // Public nodes reject ranges below their retained history.
+            Err(e) if e.code() == tonic::Code::OutOfRange => {
+                return Err(anyhow::Error::new(HistoryPruned { position: 0, lowest: 0 })
+                    .context(e.message().to_owned()));
+            }
+            Err(e) => return Err(status(e)),
+        };
         let expected = self.move_type(event_type);
         let mut events = Vec::new();
         while let Some(frame) = stream.next().await {
@@ -629,6 +686,72 @@ impl SuiClient {
             .ok_or_else(|| {
                 anyhow::anyhow!("cannot locate legacy event cursor {digest}; the node may have pruned it")
             })
+    }
+
+    /// Whether this deployment has device inboxes and group heads (SF-125).
+    pub fn has_inbox(&self) -> bool {
+        crate::protocol::INBOX_TYPES
+            .iter()
+            .all(|name| self.manifest().type_origins.contains_key(*name))
+    }
+
+    /// The device's inbox address: derived from the registry and the device
+    /// ID by `sui::derived_object` (key DerivedObjectKey<InboxKey>).
+    pub fn inbox_id(&self, device: &str) -> anyhow::Result<String> {
+        let inner = StructTag::from_str(&self.move_type("fleet_inbox::InboxKey"))
+            .map_err(|e| anyhow::anyhow!("invalid inbox key type: {e}"))?;
+        let key = TypeTag::Struct(Box::new(StructTag::new(
+            Address::TWO,
+            sui_sdk_types::Identifier::from_static("derived_object"),
+            sui_sdk_types::Identifier::from_static("DerivedObjectKey"),
+            vec![TypeTag::Struct(Box::new(inner))],
+        )));
+        let registry = Address::from_str(&self.manifest().shared_objects.registry.id)
+            .map_err(|e| anyhow::anyhow!("invalid registry ID: {e}"))?;
+        let device = Address::from_str(device)
+            .map_err(|e| anyhow::anyhow!("invalid device ID {device}: {e}"))?;
+        Ok(registry.derive_dynamic_child_id(&key, device.inner()).to_string())
+    }
+
+    /// The device's inbox, or None until its operator creates it.
+    pub async fn inbox(&self, device: &str) -> anyhow::Result<Option<Inbox>> {
+        let id = self.inbox_id(device)?;
+        let Some(object) = self.optional_object(&id).await? else {
+            return Ok(None);
+        };
+        anyhow::ensure!(
+            same_type(&object.object_type, &self.move_type("fleet_inbox::DeviceInbox"))
+                && matches!(object.owner, Owner::Shared { .. })
+                && same_id(object.fields["device_id"].as_str().unwrap_or(""), device),
+            "{id} is not this device's shared inbox"
+        );
+        Ok(Some(Inbox {
+            head: parse_head(&object.fields["head"])?,
+            groups: id_list(&object.fields["groups"]),
+        }))
+    }
+
+    /// The group's head; an empty head before its first announcement.
+    pub async fn group_head(&self, group: &str) -> anyhow::Result<Head> {
+        match self.dynamic_field(group, "fleet_inbox::HeadKey").await? {
+            None => Ok(Head::default()),
+            Some(value) => parse_head(&value),
+        }
+    }
+
+    /// Chain time (UTC ms) of the node's latest checkpoint.
+    pub async fn chain_time_ms(&self) -> anyhow::Result<u64> {
+        let info = self
+            .rpc
+            .clone()
+            .ledger_client()
+            .get_service_info(proto::GetServiceInfoRequest::default())
+            .await
+            .map_err(status)?
+            .into_inner();
+        let at = info.timestamp.ok_or_else(|| anyhow::anyhow!("node reported no checkpoint time"))?;
+        let ms = at.seconds.saturating_mul(1000).saturating_add(i64::from(at.nanos) / 1_000_000);
+        u64::try_from(ms).map_err(|_| anyhow::anyhow!("node reported a negative checkpoint time"))
     }
 
     /// The next page of DeviceAddedToGroup events after `cursor` (from
@@ -832,16 +955,27 @@ impl SuiClient {
     }
 
     async fn group_contains(&self, group: &str, admin: &str, device: &str) -> anyhow::Result<bool> {
-        let Some(group) = self.optional_object(group).await? else {
+        let Some(object) = self.optional_object(group).await? else {
             return Ok(false);
         };
-        Ok(
-            same_type(&group.object_type, &self.move_type("device_group::DeviceGroup"))
-                && same_id(group.fields["admin"].as_str().unwrap_or(""), admin)
-                && id_list(&group.fields["device_ids"])
-                    .iter()
-                    .any(|id| same_id(id, device)),
-        )
+        if !same_type(&object.object_type, &self.move_type("device_group::DeviceGroup"))
+            || !same_id(object.fields["admin"].as_str().unwrap_or(""), admin)
+        {
+            return Ok(false);
+        }
+        if id_list(&object.fields["device_ids"]).iter().any(|id| same_id(id, device)) {
+            return Ok(true);
+        }
+        // Indexed members (SF-125) are MemberKey fields, not vector entries.
+        if !self.has_inbox() {
+            return Ok(false);
+        }
+        let member = Address::from_str(device)
+            .map_err(|e| anyhow::anyhow!("invalid device ID {device}: {e}"))?;
+        Ok(self
+            .keyed_field(group, "device_group::MemberKey", member.inner())
+            .await?
+            .is_some_and(|value| value.as_bool() == Some(true)))
     }
 
     pub async fn validate_cap(&self, cap_id: &str, device_id: &str) -> anyhow::Result<()> {
@@ -1571,11 +1705,28 @@ mod tests {
     }
 
     #[test]
+    fn heads_decode_from_either_rendering() {
+        let head = parse_head(&json!({"seq": "3", "latest": "0xb", "next_start_ms": "90",
+            "components": {"contents": [{"key": "app", "value": "0xb"}, {"key": "db", "value": "0xd"}]}}))
+            .unwrap();
+        assert_eq!((head.seq, head.next_start_ms, head.components.len()), (3, 90, 2));
+        assert_eq!(head.components["app"], "0xb");
+        let nested = parse_head(&json!({"fields": {"seq": 1, "next_start_ms": 0,
+            "components": {"fields": {"contents": [{"fields": {"key": "app", "value": "0xa"}}]}}}})).unwrap();
+        assert_eq!(nested.components["app"], "0xa");
+        assert!(parse_head(&json!({"seq": "1", "next_start_ms": "0", "components": {"contents": [{"key": "app"}]}})).is_err());
+        assert!(parse_head(&json!({"next_start_ms": "0", "components": {"contents": []}})).is_err());
+    }
+
+    #[test]
     fn pruned_history_stops_instead_of_skipping() {
         ensure_retained(Some(100), Some(100)).unwrap();
         ensure_retained(Some(100), None).unwrap();
         ensure_retained(None, Some(100)).unwrap();
-        let error = ensure_retained(Some(99), Some(100)).unwrap_err().to_string();
+        let error = ensure_retained(Some(99), Some(100)).unwrap_err();
+        // Typed, so a device with an inbox can resynchronize from objects.
+        assert!(error.downcast_ref::<HistoryPruned>().is_some());
+        let error = error.to_string();
         assert!(error.contains("pruned") && error.contains("nothing is skipped"), "{error}");
         // From genesis on a pruned node is pruned too.
         assert!(ensure_retained(Some(0), Some(1)).is_err());

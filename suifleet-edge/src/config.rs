@@ -423,6 +423,7 @@ impl DeploymentManifest {
             ("catalog", crate::catalog::TYPES),
             ("seal policy", crate::protocol::SEAL_POLICY_TYPES),
             ("fleet budget", crate::protocol::BUDGET_TYPES),
+            ("fleet inbox", crate::protocol::INBOX_TYPES),
         ] {
             let count = group.iter().filter(|name| self.type_origins.contains_key(**name)).count();
             anyhow::ensure!(count == 0 || count == group.len(), "partial {label} type origins");
@@ -464,6 +465,7 @@ impl DeploymentManifest {
             .iter()
             .chain(crate::protocol::SEAL_POLICY_TYPES)
             .chain(crate::protocol::BUDGET_TYPES)
+            .chain(crate::protocol::INBOX_TYPES)
             .filter(|name| self.type_origins.contains_key(**name))
     }
     pub fn move_type(&self, name: &str) -> String {
@@ -969,6 +971,11 @@ pub struct RuntimeConfig {
     pub state_dir: PathBuf,
     pub poll_seconds: u64,
     pub replay_history: bool,
+    /// With device inboxes (SF-125), how often the DeploymentCreated and
+    /// DeviceAddedToGroup event scan runs as a safety net for deployments
+    /// older packages and clients create without announcing them. 0 scans
+    /// every poll. Without inboxes the scan runs every poll regardless.
+    pub event_scan_seconds: u64,
     /// Supervised components without a readiness command are ready once their
     /// run survives this long.
     pub component_startup_seconds: u64,
@@ -989,6 +996,7 @@ impl Default for RuntimeConfig {
             state_dir: "/var/lib/suifleet".into(),
             poll_seconds: 10,
             replay_history: false,
+            event_scan_seconds: 3600,
             component_startup_seconds: 3,
             component_ready_timeout_seconds: 60,
             component_stop_timeout_seconds: 10,

@@ -59,6 +59,23 @@ impl Control {
     }
 }
 
+impl Deferred {
+    /// When admission may next change for a non-terminal deferral (UTC ms):
+    /// the scheduled start, window bounds, end of notice or expiry. The
+    /// daemon wakes then instead of waiting for its next poll (SF-125).
+    pub fn next_change_ms(&self, now: u64) -> Option<u64> {
+        if self.terminal {
+            return None;
+        }
+        let c = &self.control;
+        [c.not_before_ms, c.window_start_ms, c.window_end_ms,
+            self.notified_ms.saturating_add(c.notice_ms), c.expires_ms]
+            .into_iter()
+            .filter(|at| *at > now)
+            .min()
+    }
+}
+
 #[derive(Debug)]
 pub struct NotAdmitted;
 impl std::fmt::Display for NotAdmitted {
@@ -69,6 +86,18 @@ impl std::error::Error for NotAdmitted {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn deferrals_wake_at_their_next_admission_change() {
+        let control = Control { not_before_ms: 50, expires_ms: 500, window_start_ms: 100,
+            window_end_ms: 200, notice_ms: 30, ..Control::default() };
+        let deferred = Deferred { control, notified_ms: 10, reason: String::new(), terminal: false };
+        assert_eq!(deferred.next_change_ms(0), Some(40));
+        assert_eq!(deferred.next_change_ms(45), Some(50));
+        assert_eq!(deferred.next_change_ms(150), Some(200));
+        assert_eq!(deferred.next_change_ms(600), None);
+        assert_eq!(Deferred { terminal: true, ..deferred }.next_change_ms(0), None);
+    }
+
     #[test]
     fn deadlines_windows_and_notice_use_exclusive_end() {
         let c = Control { not_before_ms: 10, expires_ms: 100, window_start_ms: 20,
