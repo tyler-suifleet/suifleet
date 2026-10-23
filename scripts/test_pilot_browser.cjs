@@ -17,6 +17,7 @@ const {build}=appRequire('esbuild'),{chromium}=appRequire('playwright'),{normali
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   browser=await chromium.launch({executablePath:process.env.CHROME_EXECUTABLE||undefined,headless:true,args:['--no-sandbox']});
   const page=await browser.newPage(),errors=[];page.setDefaultTimeout(10000);page.on('pageerror',e=>errors.push(e.message));
+  const cdp=await page.context().newCDPSession(page);await cdp.send('Performance.enable');
   const timings=[];
   for(let round=0;round<5;round++) {
    const start=performance.now();await page.goto(`http://127.0.0.1:${server.address().port}`);
@@ -30,12 +31,13 @@ const {build}=appRequire('esbuild'),{chromium}=appRequire('playwright'),{normali
    await page.waitForFunction(()=>document.querySelector('select')?.options.length===129);
    assert.equal(await page.getByRole('button',{name:'Load more devices'}).count(),0);
    assert.equal(new Set(await page.locator('select option').evaluateAll(options=>options.map(o=>o.value))).size,129);
-   timings.push({initial_ms:initial,page_recovery_ms:performance.now()-moreStart});
+   const metrics=(await cdp.send('Performance.getMetrics')).metrics;
+   timings.push({initial_ms:initial,page_recovery_ms:performance.now()-moreStart,js_heap_used_bytes:metrics.find(m=>m.name==='JSHeapUsedSize').value,dom_nodes:metrics.find(m=>m.name==='Nodes').value});
   }
   assert.deepEqual(errors,[]);
   const {distribution}=require('./pilot_load.cjs'),measurements={initial:distribution(timings.map(t=>t.initial_ms)),page_recovery:distribution(timings.map(t=>t.page_recovery_ms))};
   assert(measurements.initial.p95_ms<5000);assert(measurements.page_recovery.p95_ms<1000);
-  const receipt={schema:1,result:'PASS',mode:'real-chromium-fixture-transport',revision:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),browser:browser.version(),devices:128,rounds:5,measurements,timings,checks:['real FleetDataPage + BCS index verification','100 to 128 devices without duplicates','RPC outage does not fabricate devices','page recovery after throttling'],limits:['fixture chain and wallet hooks','no real extension/session/provider authorization','pagination only; no encrypted archive rendering load']};
+  const receipt={schema:1,result:'PASS',mode:'real-chromium-fixture-transport',revision:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),browser:browser.version(),devices:128,rounds:5,measurements,timings,checks:['real FleetDataPage + BCS index verification','100 to 128 devices without duplicates','RPC outage does not fabricate devices','page recovery after throttling'],limits:['fixture chain and wallet hooks','no real extension/session/provider authorization','pagination only; no encrypted archive rendering load','renderer JS heap, not complete browser/host RSS']};
   await fs.writeFile(process.argv[2]||'/tmp/sf090-browser.json',JSON.stringify(receipt,null,2)+'\n');console.log(JSON.stringify(receipt));
  }finally{if(browser)await browser.close();if(server)await new Promise(resolve=>server.close(resolve));await fs.rm(dir,{recursive:true,force:true});}
 })().catch(e=>{console.error(e.stack);process.exitCode=1;});
