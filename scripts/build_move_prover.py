@@ -69,7 +69,7 @@ def main():
     diff = subprocess.check_output(diff_args, cwd=source)
     if not diff:
         run("git", "apply", str(patch), cwd=source)
-    elif diff != patch.read_bytes():
+    elif diff.replace(b"\n \n", b"\n\n") != patch.read_bytes():
         raise RuntimeError("Unexpected prover modifications; refusing to overwrite")
     if subprocess.check_output(["git", "ls-files", "--others", "--exclude-standard"], cwd=source):
         raise RuntimeError("Untracked prover source/model files")

@@ -65,6 +65,11 @@ def main():
     parser.add_argument("--prover-source", type=Path, required=True)
     parser.add_argument("--framework-packages", type=Path, required=True)
     parser.add_argument("--prover-binary", type=Path, required=True)
+    parser.add_argument("--unknown-occupancy-control", action="store_true", help="Deliberately assert unmodeled occupied slots are impossible; must fail")
+    parser.add_argument("--native-model-control", choices=("missing-tag-clear", "wrong-type-alias"), help="Deliberately mutate an emitted native transition; solver rejection required")
+    parser.add_argument("--include-object-fixtures", action="store_true", help="Reproduce real outer Wrapper/ID and UID-bearing child obligations")
+    parser.add_argument("--include-carrier-fixtures", action="store_true", help="Reproduce existing-UID carrier reconstruction boundary")
+    parser.add_argument("--include-raw-fixtures", action="store_true", help="Run executable raw native conformance fixtures and actual-function specifications")
     parser.add_argument("--artifacts", type=Path, help="Copy proof-only generated solver artifacts to a new private directory")
     parser.add_argument("--include-pending-enrollment", action="store_true", help="Run the unverified full enrollment obligation")
     parser.add_argument("--include-name-absence", action="store_true", help="Reproduce stronger untyped name-absence obligations (not verified)")
@@ -86,7 +91,9 @@ def main():
             raise SystemExit("Compatibility overlay checksum mismatch: " + name)
     # Require exactly the reviewed patch, including the compiled Rust native map.
     actual = subprocess.check_output(["git", "-C", str(source), "diff", "--no-ext-diff", "--no-textconv", "--no-color", "--full-index", "HEAD"])
-    if actual != (overlay / "release-model.patch").read_bytes():
+    # Git accepts unprefixed empty context lines. Normalize only diff context,
+    # preserving every source byte while avoiding whitespace-only patch lines.
+    if actual.replace(b"\n \n", b"\n\n") != (overlay / "release-model.patch").read_bytes():
         raise SystemExit("Prover source must contain exactly release-model.patch")
     untracked = subprocess.check_output(["git", "-C", str(source), "ls-files", "--others", "--exclude-standard"])
     if untracked:
@@ -149,12 +156,37 @@ def main():
         specs = package / "security-specs"
         for implementation in (package / "sources").glob("*.move"):
             shutil.copyfile(implementation, specs / "sources" / ("impl_" + implementation.name))
+        if args.include_raw_fixtures:
+            shutil.copyfile(ROOT / "contracts/security-native-fixtures/sources/raw_fields.move", specs / "sources/raw_fields.move")
+            raw_spec = (overlay / "raw-field-spec-helpers.move").read_text()
+            if args.unknown_occupancy_control:
+                old = "    ensures(result == (df::exists(parent, key)\n        && !df::exists_with_type<u64, u64>(parent, key)\n        && !df::exists_with_type<u64, bool>(parent, key)));"
+                if raw_spec.count(old) != 1:
+                    raise SystemExit("Unknown occupancy control must match exactly one obligation")
+                raw_spec = raw_spec.replace(old, "    ensures(!result);")
+            (specs / "sources/raw_field_specs.move").write_text(raw_spec)
+        if args.include_carrier_fixtures:
+            shutil.copyfile(ROOT / "contracts/security-native-fixtures/sources/carrier_fields.move", specs / "sources/carrier_fields.move")
+            shutil.copyfile(overlay / "carrier-field-spec-helpers.move", specs / "sources/carrier_field_specs.move")
+        if args.include_object_fixtures:
+            body = (ROOT / "contracts/security-native-fixtures/sources/object_fields.move").read_text()
+            # Semicolon module syntax extends to EOF; append spec-only obligations.
+            body += (overlay / "object-field-spec-helpers.move").read_text()
+            (specs / "sources/object_fields.move").write_text(body)
         spec_manifest = specs / "Move.toml"
         spec_manifest.write_text(spec_manifest.read_text().replace(
             'sui_edge = { local = ".." }',
             '')
-            + '\nsui_edge = "0x0"\n')
+            + '\nsui_edge = "0x0"\nsf050_native = "0x51"\n')
         env = dict(os.environ, SUI_PROVER_FRAMEWORK_PATH=str(libraries))
+        if args.native_model_control:
+            if not args.include_raw_fixtures:
+                raise SystemExit("Native model controls require the raw fixtures")
+            wrapper = temporary / "boogie-control"
+            shutil.copyfile(ROOT / "scripts/move_native_model_control.py", wrapper)
+            wrapper.chmod(0o700)
+            env.update(SF050_REAL_BOOGIE=env["BOOGIE_EXE"], BOOGIE_EXE=str(wrapper),
+                       SF050_NATIVE_CONTROL=args.native_model_control)
         result = subprocess.run([str(args.prover_binary.resolve()), "--path", str(package / "security-specs"),
                                  "--timeout", str(args.timeout), "--force-timeout",
                                  *(["--keep-temp"] if args.artifacts else []),

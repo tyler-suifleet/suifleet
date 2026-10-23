@@ -33,16 +33,19 @@
   "rust": "1.94.0",
   "status": "enrollment close/set_limits verified with solver negatives; identity and complete critical proof scope remain unmet",
   "compatibility": {
-    "release-model.patch": "655b0e1c0602d640618ff115c7df41166fede6690e37531f4b9c0a4768a55fa1",
+    "release-model.patch": "1bf2e6530a4d35a694897f5b73740f45f5045eddb75612bc8124a7ee98492267",
     "integer.move": "6c629571d86aa27280b7bc023405e600ddc0a3e15f855f8810f2a23f2ee433a1",
     "registry-spec-helpers.move": "356c74b4159ee19989b51512a483cfdf9e08552359227df10e2ce6dd057bd979",
-    "dof-spec-helpers.move": "4dba6fc701a14c4d72b27deac7e29cac682e51dc1326004e7df6e7c64ff13999",
+    "dof-spec-helpers.move": "098bdcbd995453a09f77e2b54f6051449665a194bb8f3d9a2e3060429bc9fa44",
     "roles-spec-helpers.move": "41bce37086bbd87c14e928dc3d4f99adc1c87d06e2db6dd5109aa3e378f6a9de",
     "deployment-spec-helpers.move": "64b6bc3b07f65b68aede1b54b30d910aab7585441bc5abb1239dfbb4f4bba5f3",
     "cap-spec-helpers.move": "e9d84071f8e15197ffadedee373f06638106b6b357c4e11624a6457d80a66c98",
     "registry-custody-pending.move": "d00a1fbbc01cecbe13279364bd67a12ce8b1562cd880ef257ec91aa183e77b4d",
     "enrollment-spec-helpers.move": "99d58edbfd2a4934c2347305565a2905ef6080667e5386ae0d99ce4317e4411a",
     "group-spec-helpers.move": "8ef3b68bf4944c81b25b48b0a717e02e2acd562623fc12e31679e8a3b77eb72a",
-    "enrollment-pending.move": "412973a54a82ade9431d4cc9fe9fe96bd0eb665a49534536839667968f86a7bf"
+    "enrollment-pending.move": "412973a54a82ade9431d4cc9fe9fe96bd0eb665a49534536839667968f86a7bf",
+    "raw-field-spec-helpers.move": "ae52dcad322ff955f6ac81a445fc4103aea562f753efc779cae6ced631d0613a",
+    "carrier-field-spec-helpers.move": "1134c2441cc1d26e5102adf8be0ac059438305b01fdcde74d732e195df845966",
+    "object-field-spec-helpers.move": "aa0ca50b3ef49537625ee144330605242979c320d53e67f15a541958e4fd63d6"
   }
 }

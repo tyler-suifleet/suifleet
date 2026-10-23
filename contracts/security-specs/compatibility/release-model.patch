@@ -4,7 +4,7 @@ index 8b38a9fe7181035d0a1adf90aea28f86932cd341..a87b3bee67c4b4a53f42e928e7482804
 +++ b/crates/move-model/src/model.rs
 @@ -1485,12 +1485,9 @@ impl GlobalEnv {
      }
- 
+
      fn get_fun_qid_opt(&self, module_name: &str, fun_name: &str) -> Option<QualifiedId<FunId>> {
 -        self.find_module_by_name(self.symbol_pool().make(module_name))
 -            .map(|module_env| {
@@ -16,7 +16,7 @@ index 8b38a9fe7181035d0a1adf90aea28f86932cd341..a87b3bee67c4b4a53f42e928e7482804
 +        // manufacture a function id for a declaration absent from the model.
 +        self.get_existing_fun_qid_opt(module_name, fun_name)
      }
- 
+
      /// Like `get_fun_qid_opt`, but only returns the id if the module actually
 @@ -1749,7 +1746,7 @@ impl GlobalEnv {
      // object function names
@@ -24,14 +24,539 @@ index 8b38a9fe7181035d0a1adf90aea28f86932cd341..a87b3bee67c4b4a53f42e928e7482804
      const OBJECT_DELETE_FUNCTION_NAME: &'static str = "delete_impl";
 -    const OBJECT_RECORD_NEW_UID_FUNCTION_NAME: &'static str = "record_new_uid_from_hash";
 +    const OBJECT_RECORD_NEW_UID_FUNCTION_NAME: &'static str = "record_new_uid";
- 
+
      // dynamic_field function names
      const DYNAMIC_FIELD_ADD_FUNCTION_NAME: &'static str = "add";
+diff --git a/crates/move-prover-boogie-backend/src/boogie_backend/boogie_helpers.rs b/crates/move-prover-boogie-backend/src/boogie_backend/boogie_helpers.rs
+index 8f37fd228dd08a44a2b58877597777165e95dbb7..060d961f329122b661a370a76fb3efbd0a003deb 100644
+--- a/crates/move-prover-boogie-backend/src/boogie_backend/boogie_helpers.rs
++++ b/crates/move-prover-boogie-backend/src/boogie_backend/boogie_helpers.rs
+@@ -217,6 +217,12 @@ pub fn boogie_default_value(env: &GlobalEnv, ty: &Type) -> String {
+                 let field_defaults = struct_env
+                     .get_fields()
+                     .map(|f| boogie_default_value(env, &f.get_type().instantiate(inst)))
++                    .chain({
++                        let info = move_stackless_bytecode::dynamic_field_analysis::get_env_info(env);
++                        let ty = Type::Datatype(*mid, *did, inst.clone());
++                        let count = info.dynamic_field_names_values(&ty).count() + info.raw_names(&ty).count();
++                        std::iter::repeat("EmptyTable()".to_string()).take(count)
++                    })
+                     .collect::<Vec<_>>()
+                     .join(", ");
+                 if field_defaults.is_empty() {
+diff --git a/crates/move-prover-boogie-backend/src/boogie_backend/bytecode_translator.rs b/crates/move-prover-boogie-backend/src/boogie_backend/bytecode_translator.rs
+index 3f69c2c67f081651b64f7e030c04155d8caf8cd0..4d405e5909f14d880a28616f48237a53c3529200 100644
+--- a/crates/move-prover-boogie-backend/src/boogie_backend/bytecode_translator.rs
++++ b/crates/move-prover-boogie-backend/src/boogie_backend/bytecode_translator.rs
+@@ -1494,6 +1494,9 @@ impl<'env> StructTranslator<'env> {
+             .dynamic_field_names_values(&struct_type)
+             .collect_vec();
+
++        let raw_names = dynamic_field_info.raw_names(&struct_type).collect_vec();
++        let tag_sel = |name: &Type| format!("$dynamic_tags{}", boogie_inst_suffix(env, &[name.clone()]));
++
+         // Emit data type
+         let struct_name = boogie_struct_name(struct_env, self.type_inst);
+         emitln!(writer, "datatype {} {{", struct_name);
+@@ -1523,7 +1526,8 @@ impl<'env> StructTranslator<'env> {
+                 value_type,
+             )
+         });
+-        let all_fields = fields.chain(dynamic_fields).join(", ");
++        let tags = raw_names.iter().map(|n| format!("{}: (Table int int)", tag_sel(n)));
++        let all_fields = fields.chain(dynamic_fields).chain(tags).join(", ");
+         emitln!(writer, "    {}({})", struct_name, all_fields);
+         emitln!(writer, "}");
+
+@@ -1561,7 +1565,8 @@ impl<'env> StructTranslator<'env> {
+                                 boogie_dynamic_field_sel(self.parent.env, name, value)
+                             )
+                         });
+-                    let all_args = args.chain(dynamic_field_args).join(", ");
++                    let tags = raw_names.iter().map(|n| format!("s->{}", tag_sel(n)));
++                    let all_args = args.chain(dynamic_field_args).chain(tags).join(", ");
+                     emitln!(writer, "{}({})", struct_name, all_args);
+                 },
+             );
+@@ -1599,12 +1604,26 @@ impl<'env> StructTranslator<'env> {
+                                     )
+                                 }
+                             });
+-                    let all_args = args.chain(dynamic_field_args).join(", ");
++                    let tags = raw_names.iter().map(|n| format!("s->{}", tag_sel(n)));
++                    let all_args = args.chain(dynamic_field_args).chain(tags).join(", ");
+                     emitln!(writer, "{}({})", struct_name, all_args);
+                 },
+             );
+         }
+
++        for name in &raw_names {
++            let sel = tag_sel(name);
++            self.emit_function(
++                &format!("$Update'{}'_{}(s: {}, x: (Table int int)): {}",
++                    suffix, &sel[1..], struct_name, struct_name),
++                || {
++                    let args = fields.iter().map(|f| format!("s->{}", boogie_field_sel(f, self.type_inst)));
++                    let values = dynamic_field_names_values.iter().map(|(n,v)| format!("s->{}", boogie_dynamic_field_sel(env,n,v)));
++                    let tags = raw_names.iter().map(|n| if *n == *name { "x".to_string() } else { format!("s->{}",tag_sel(n)) });
++                    emitln!(writer, "{}({})", struct_name, args.chain(values).chain(tags).join(", "));
++                });
++        }
++
+         // Skip for table_vec and option as it's handled by native templates
+         let skip_is_valid = self.parent.env.table_vec_qid().unwrap()
+             == struct_env.get_qualified_id()
+@@ -1632,6 +1651,15 @@ impl<'env> StructTranslator<'env> {
+                             );
+                             sep = "  && ";
+                         }
++                        for (name, value) in &dynamic_field_names_values {
++                            if raw_names.contains(name) {
++                                let tag = dynamic_field_info.raw_value_tag(value);
++                                emitln!(writer,
++                                    "{}(forall k: int :: ContainsTable(s->{}, k) <==> (ContainsTable(s->{}, k) && GetTable(s->{}, k) == {}))",
++                                    sep, boogie_dynamic_field_sel(env, name, value), tag_sel(name), tag_sel(name), tag);
++                                sep = "  && ";
++                            }
++                        }
+                         if let Some(vec_set_qid) = self.parent.env.vec_set_qid() {
+                             if struct_env.get_qualified_id() == vec_set_qid {
+                                 emitln!(
+@@ -2151,6 +2179,74 @@ impl<'env> EnumTranslator<'env> {
+ // Function Translation
+
+ impl<'env> FunctionTranslator<'env> {
++
++    /// The carrier-local projection may start empty only for a genuinely fresh
++    /// UID. Moving an existing UID into a new struct preserves its native child
++    /// store; silently defaulting the carrier's tables would be unsound.
++    /// This deliberately conservative straight-line provenance check rejects
++    /// unsupported constructors rather than assuming an application invariant.
++    fn check_storage_pack(&self, ty: &Type, srcs: &[usize], at: move_stackless_bytecode::stackless_bytecode::AttrId) {
++        let target = self.fun_target;
++        let env = target.global_env();
++        let info = dynamic_field_analysis::get_env_info(env);
++        if info.dynamic_field_names_values(ty).next().is_none() && info.raw_names(ty).next().is_none() { return; }
++        let (qid, _) = ty.get_datatype().expect("Pack datatype");
++        if Some(qid) == env.uid_qid() {
++            // Only the pinned framework owns UID's private constructor.
++            let module = target.func_env.module_env.get_full_name_str();
++            let fun = target.func_env.get_name_str();
++            if module == "0x2::object" && (fun == "new" || fun == "new_uid_from_hash") { return; }
++            env.error(&target.get_bytecode_loc(at), "native storage projection: unsupported UID constructor");
++            return;
++        }
++        let Some(uid_src) = srcs.first() else {
++            env.error(&target.get_bytecode_loc(at), "native storage projection: carrier has no UID source");
++            return;
++        };
++        if !matches!(self.get_local_type(*uid_src), Type::Datatype(mid,sid,_) if Some(mid.qualified(sid)) == env.uid_qid()) {
++            env.error(&target.get_bytecode_loc(at), "native storage projection: nested or non-leading UID constructor requires heap preservation");
++            return;
++        }
++        let mut roots = BTreeMap::<usize, usize>::new();
++        let mut fresh = BTreeSet::<usize>::new();
++        for bc in target.get_bytecode() {
++            if bc.get_attr_id() == at { break; }
++            match bc {
++                Bytecode::Assign(_, dst, src, _) => {
++                    if let Some(root) = roots.get(src).copied() { roots.insert(*dst, root); }
++                    else { roots.remove(dst); }
++                }
++                Bytecode::Call(_, dsts, Operation::Function(mid, fid, _), args, _) => {
++                    let callee = env.get_function(mid.qualified(*fid));
++                    let is_new = callee.module_env.get_full_name_str() == "0x2::object" && callee.get_name_str() == "new";
++                    if is_new {
++                        for dst in dsts { roots.insert(*dst,*dst); fresh.insert(*dst); }
++                    } else {
++                        for arg in args { if let Some(root) = roots.get(arg) { fresh.remove(root); } }
++                        for dst in dsts { roots.remove(dst); }
++                    }
++                }
++                Bytecode::Call(_, dsts, Operation::BorrowLoc | Operation::FreezeRef, args, _) => {
++                    for dst in dsts {
++                        if let Some(root) = args.first().and_then(|a| roots.get(a)).copied() { roots.insert(*dst,root); }
++                        else { roots.remove(dst); }
++                    }
++                }
++                Bytecode::Call(_, dsts, _, args, _) => {
++                    // Any other use may move, unpack or mutate the UID.
++                    for arg in args { if let Some(root) = roots.get(arg) { fresh.remove(root); } }
++                    for dst in dsts { roots.remove(dst); }
++                }
++                Bytecode::Branch(..) | Bytecode::Jump(..) | Bytecode::Label(..) => { fresh.clear(); }
++                _ => {}
++            }
++        }
++        if !roots.get(uid_src).is_some_and(|root| fresh.contains(root)) {
++            env.error(&target.get_bytecode_loc(at),
++                "native storage projection: packing an existing or unproven-fresh UID would discard its child store");
++        }
++    }
++
+     /// Return whether a specific TempIndex involves in bitwise operations
+     pub fn bv_flag_from_map(&self, i: &usize, operation_map: &FuncOperationMap) -> bool {
+         let mid = self.fun_target.module_env().get_id();
+@@ -3277,6 +3373,7 @@ impl<'env> FunctionTranslator<'env> {
+
+                             // Get dynamic field arguments
+                             let struct_type = Type::Datatype(*mid, *sid, inst.to_owned());
++                            self.check_storage_pack(&struct_type, srcs, bytecode.get_attr_id());
+                             let dynamic_field_info =
+                                 dynamic_field_analysis::get_env_info(fun_target.global_env());
+                             let dynamic_field_names_values = dynamic_field_info
+@@ -3287,6 +3384,7 @@ impl<'env> FunctionTranslator<'env> {
+                             let dynamic_args = dynamic_field_names_values
+                                 .iter()
+                                 .map(|_| "EmptyTable()".to_string())
++                                .chain(dynamic_field_info.raw_names(&struct_type).map(|_| "EmptyTable()".to_string()))
+                                 .collect_vec();
+
+                             // Combine all arguments
+@@ -4940,6 +5038,7 @@ impl<'env> FunctionTranslator<'env> {
+
+                         // Get dynamic field arguments
+                         let struct_type = Type::Datatype(*mid, *sid, inst.to_owned());
++                        self.check_storage_pack(&struct_type, srcs, attr_id);
+                         let dynamic_field_info = dynamic_field_analysis::get_env_info(env);
+                         let dynamic_field_names_values = dynamic_field_info
+                             .dynamic_field_names_values(&struct_type)
+@@ -4949,6 +5048,7 @@ impl<'env> FunctionTranslator<'env> {
+                         let dynamic_args = dynamic_field_names_values
+                             .iter()
+                             .map(|_| "EmptyTable()".to_string())
++                            .chain(dynamic_field_info.raw_names(&struct_type).map(|_| "EmptyTable()".to_string()))
+                             .collect_vec();
+
+                         // Combine all arguments
+diff --git a/crates/move-prover-boogie-backend/src/boogie_backend/lib.rs b/crates/move-prover-boogie-backend/src/boogie_backend/lib.rs
+index 259d860f4c8a6bc7e649ecea25aedd2ce8d718a5..cd96c34e857b7286369bcda4a654fe3e79bf39c9 100644
+--- a/crates/move-prover-boogie-backend/src/boogie_backend/lib.rs
++++ b/crates/move-prover-boogie-backend/src/boogie_backend/lib.rs
+@@ -60,6 +60,7 @@ struct TypeInfo {
+     /// True for U8..U256 (fixed-width unsigned). False for Num (arbitrary precision).
+     is_unsigned: bool,
+     bit_width: String,
++    raw_tag: usize,
+ }
+
+ #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Default)]
+@@ -114,6 +115,7 @@ struct TableImpl {
+ #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
+ struct DynamicFieldInfo {
+     struct_name: String,
++    raw: bool,
+     insts: Vec<(TypeInfo, TypeInfo)>,
+     key_insts: Vec<TypeInfo>,
+     fun_add: String,
+@@ -270,6 +272,12 @@ pub fn add_prelude(
+     let mut dynamic_field_instances = vec![];
+     let uid_qid = env.uid_qid();
+     for info in dynamic_field_analysis::get_env_info(env).dynamic_fields() {
++        let raw_names: BTreeSet<_> = info.1.iter().filter(|nv| !nv.is_object()).map(|nv| nv.name()).collect();
++        let object_names: BTreeSet<_> = info.1.iter().filter(|nv| nv.is_object()).map(|nv| nv.name()).collect();
++        if !raw_names.is_disjoint(&object_names) {
++            env.error(&env.internal_loc(), "native storage projection: raw DF and DOF with the same Name type require separate physical slots");
++            continue;
++        }
+         let (struct_qid, type_inst) = info.0.get_datatype().unwrap();
+         let is_uid_type = uid_qid.as_ref().is_some_and(|uid| *uid == struct_qid);
+         if is_uid_type
+@@ -422,7 +430,7 @@ pub fn add_prelude(
+         .chain(
+             dynamic_field_instances
+                 .iter()
+-                .flat_map(|dynamic_field| dynamic_field.insts.iter().map(|(kty, _)| kty)),
++                .flat_map(|dynamic_field| dynamic_field.key_insts.iter()),
+         )
+         .collect::<BTreeSet<_>>()
+         .into_iter()
+@@ -699,6 +707,7 @@ impl TypeInfo {
+     fn new(env: &GlobalEnv, options: &BoogieOptions, ty: &Type, bv_flag: bool) -> Self {
+         let name_fun = if bv_flag { boogie_bv_type } else { boogie_type };
+         Self {
++            raw_tag: 0,
+             name: name_fun(env, ty),
+             suffix: boogie_type_suffix_bv(env, ty, bv_flag),
+             has_native_equality: has_native_equality(env, options, ty),
+@@ -845,17 +854,20 @@ impl DynamicFieldInfo {
+     ) -> Self {
+         let insts = name_value_infos
+             .iter()
++            .filter(|nv| !nv.is_object())
+             .filter_map(|name_value_info| name_value_info.as_name_value())
+             .unique()
+             .map(|(name, value)| {
+                 (
+                     TypeInfo::new(env, options, name, false),
+-                    TypeInfo::new(env, options, value, bv_flag),
++                    { let mut t = TypeInfo::new(env, options, value, bv_flag);
++                      t.raw_tag = dynamic_field_analysis::get_env_info(env).raw_value_tag(value); t },
+                 )
+             })
+             .collect();
+         let key_insts = name_value_infos
+             .iter()
++            .filter(|nv| !nv.is_object())
+             .map(|name_value_info| name_value_info.name())
+             .unique()
+             .map(|name| TypeInfo::new(env, options, name, false))
+@@ -866,6 +878,7 @@ impl DynamicFieldInfo {
+             env.dynamic_field_exists_deprecated_qid(),
+         ];
+         DynamicFieldInfo {
++            raw: true,
+             struct_name: boogie_type_suffix_bv(env, tp, bv_flag),
+             insts,
+             key_insts,
+@@ -899,6 +912,7 @@ impl DynamicFieldInfo {
+     ) -> Self {
+         let insts = name_value_infos
+             .iter()
++            .filter(|nv| nv.is_object())
+             .filter_map(|name_value_info| name_value_info.as_name_value())
+             .unique()
+             .map(|(name, value)| {
+@@ -910,6 +924,7 @@ impl DynamicFieldInfo {
+             .collect();
+         let key_insts = name_value_infos
+             .iter()
++            .filter(|nv| nv.is_object())
+             .map(|name_value_info| name_value_info.name())
+             .unique()
+             .map(|name| TypeInfo::new(env, options, name, false))
+@@ -920,6 +935,7 @@ impl DynamicFieldInfo {
+             env.dynamic_object_field_exists_deprecated_qid(),
+         ];
+         DynamicFieldInfo {
++            raw: false,
+             struct_name: boogie_type_suffix_bv(env, tp, bv_flag),
+             insts,
+             key_insts,
+diff --git a/crates/move-prover-boogie-backend/src/boogie_backend/prelude/native.bpl b/crates/move-prover-boogie-backend/src/boogie_backend/prelude/native.bpl
+index d6b3147eabca070ebbaf075d483177ef2fb8f3ec..7ea33d453fdcb24f4ef442b4a4403aef9e250636 100644
+--- a/crates/move-prover-boogie-backend/src/boogie_backend/prelude/native.bpl
++++ b/crates/move-prover-boogie-backend/src/boogie_backend/prelude/native.bpl
+@@ -996,6 +996,8 @@ procedure {:inline 2} {{impl.fun_drop}}{{S}}(t: {{Type}}{{S}}) {}
+ {%- set SK = "'" ~ instance.0.suffix ~ "_" ~ impl.struct_name ~ "'" -%}
+ {%- set SV = "'" ~ instance.1.suffix ~ "'" -%}
+ {%- set DF_S = "'" ~ instance.0.suffix ~ "_" ~ instance.1.suffix ~ "_" ~ impl.struct_name ~ "'" -%}
++{%- set TAGS = "$dynamic_tags'" ~ instance.0.suffix ~ "'" -%}
++{%- set TAG_UPDATE = "$Update'" ~ Type ~ "'_dynamic_tags'" ~ instance.0.suffix ~ "'" -%}
+ {%- set ENC = "$EncodeKey'" ~ instance.0.suffix ~ "'" -%}
+
+ {%- if impl.fun_add != "" %}
+@@ -1004,10 +1006,10 @@ procedure {:inline 2} {{impl.fun_add}}{{DF_S}}(m: $Mutation ({{Type}}), k: {{K}}
+     var t: {{Type}};
+     enc_k := {{ENC}}(k);
+     t := $Dereference(m);
+-    if (ContainsTable(t->$dynamic_fields{{S}}, enc_k)) {
+-        call $Abort($StdError(7/*INVALID_ARGUMENTS*/, 100/*EALREADY_EXISTS*/));
++    if ({% if impl.raw %}ContainsTable(t->{{TAGS}}, enc_k){% else %}ContainsTable(t->$dynamic_fields{{S}}, enc_k){% endif %}) {
++        {% if impl.raw %}call $Abort(0/*EFieldAlreadyExists*/);{% else %}call $Abort($StdError(7/*INVALID_ARGUMENTS*/, 100/*EALREADY_EXISTS*/));{% endif %}
+     } else {
+-        m' := $UpdateMutation(m, $Update'{{Type}}'_dynamic_fields{{S}}(t, AddTable(t->$dynamic_fields{{S}}, enc_k, v)));
++        m' := $UpdateMutation(m, {% if impl.raw %}{{TAG_UPDATE}}({% endif %}$Update'{{Type}}'_dynamic_fields{{S}}(t, AddTable(t->$dynamic_fields{{S}}, enc_k, v)){% if impl.raw %}, AddTable(t->{{TAGS}}, enc_k, {{instance.1.raw_tag}})){% endif %});
+     }
+ }
+ {%- endif %}
+@@ -1017,7 +1019,10 @@ procedure {:inline 2} {{impl.fun_borrow}}{{DF_S}}(t: {{Type}}, k: {{K}}) returns
+     var enc_k: int;
+     enc_k := {{ENC}}(k);
+     if (!ContainsTable(t->$dynamic_fields{{S}}, enc_k)) {
+-        call $Abort($StdError(7/*INVALID_ARGUMENTS*/, 101/*ENOT_FOUND*/));
++        {% if impl.raw %}
++        if (ContainsTable(t->{{TAGS}}, enc_k)) { call $Abort(2/*EFieldTypeMismatch*/); }
++        else { call $Abort(1/*EFieldDoesNotExist*/); }
++        {% else %}call $Abort($StdError(7/*INVALID_ARGUMENTS*/, 101/*ENOT_FOUND*/));{% endif %}
+     } else {
+         v := GetTable(t->$dynamic_fields{{S}}, {{ENC}}(k));
+         assume $IsValid{{SV}}(v);
+@@ -1048,7 +1053,10 @@ procedure {:inline 2} {{impl.fun_borrow_mut}}{{DF_S}}(m: $Mutation ({{Type}}), k
+     enc_k := {{ENC}}(k);
+     t := $Dereference(m);
+     if (!ContainsTable(t->$dynamic_fields{{S}}, enc_k)) {
+-        call $Abort($StdError(7/*INVALID_ARGUMENTS*/, 101/*ENOT_FOUND*/));
++        {% if impl.raw %}
++        if (ContainsTable(t->{{TAGS}}, enc_k)) { call $Abort(2/*EFieldTypeMismatch*/); }
++        else { call $Abort(1/*EFieldDoesNotExist*/); }
++        {% else %}call $Abort($StdError(7/*INVALID_ARGUMENTS*/, 101/*ENOT_FOUND*/));{% endif %}
+     } else {
+         v := GetTable(t->$dynamic_fields{{S}}, enc_k);
+         assume $IsValid{{SV}}(v);
+@@ -1065,11 +1073,14 @@ procedure {:inline 2} {{impl.fun_remove}}{{DF_S}}(m: $Mutation ({{Type}}), k: {{
+     enc_k := {{ENC}}(k);
+     t := $Dereference(m);
+     if (!ContainsTable(t->$dynamic_fields{{S}}, enc_k)) {
+-        call $Abort($StdError(7/*INVALID_ARGUMENTS*/, 101/*ENOT_FOUND*/));
++        {% if impl.raw %}
++        if (ContainsTable(t->{{TAGS}}, enc_k)) { call $Abort(2/*EFieldTypeMismatch*/); }
++        else { call $Abort(1/*EFieldDoesNotExist*/); }
++        {% else %}call $Abort($StdError(7/*INVALID_ARGUMENTS*/, 101/*ENOT_FOUND*/));{% endif %}
+     } else {
+         v := GetTable(t->$dynamic_fields{{S}}, enc_k);
+         assume $IsValid{{SV}}(v);
+-        m' := $UpdateMutation(m, $Update'{{Type}}'_dynamic_fields{{S}}(t, RemoveTable(t->$dynamic_fields{{S}}, enc_k)));
++        m' := $UpdateMutation(m, {% if impl.raw %}{{TAG_UPDATE}}({% endif %}$Update'{{Type}}'_dynamic_fields{{S}}(t, RemoveTable(t->$dynamic_fields{{S}}, enc_k)){% if impl.raw %}, RemoveTable(t->{{TAGS}}, enc_k)){% endif %});
+     }
+ }
+ {%- endif %}
+@@ -1085,10 +1096,13 @@ procedure {:inline 2} {{fun_remove_opt}}{{DF_S}}(m: $Mutation ({{Type}}), k: {{K
+     if (ContainsTable(t->$dynamic_fields{{S}}, enc_k)) {
+         val := GetTable(t->$dynamic_fields{{S}}, enc_k);
+         assume $IsValid{{SV}}(val);
+-        m' := $UpdateMutation(m, $Update'{{Type}}'_dynamic_fields{{S}}(t, RemoveTable(t->$dynamic_fields{{S}}, enc_k)));
++        m' := $UpdateMutation(m, {% if impl.raw %}{{TAG_UPDATE}}({% endif %}$Update'{{Type}}'_dynamic_fields{{S}}(t, RemoveTable(t->$dynamic_fields{{S}}, enc_k)){% if impl.raw %}, RemoveTable(t->{{TAGS}}, enc_k)){% endif %});
+         v := $1_option_Option{{SV}}(MakeVec1(val));
+     } else {
+         m' := m;
++        {% if impl.raw %}
++        if (ContainsTable(t->{{TAGS}}, enc_k)) { call $Abort(2/*EFieldTypeMismatch*/); }
++        {% endif %}
+         v := $1_option_Option{{SV}}(EmptyVec());
+     }
+ }
+@@ -1100,7 +1114,7 @@ function {:inline} {{impl.fun_exists_with_type}}{{DF_S}}(t: ({{Type}}), k: {{K}}
+ }
+ {%- endif %}
+
+-{%- if impl.fun_exists_inner != "" %}
++{%- if impl.fun_exists_inner != "" and not impl.raw %}
+ axiom (forall t: {{Type}}, k: {{K}} :: {({{impl.fun_exists_inner}}{{SK}}(t, k))}
+    ContainsTable(t->$dynamic_fields{{S}}, {{ENC}}(k)) ==> {{impl.fun_exists_inner}}{{SK}}(t, k));
+ {%- endif %}
+@@ -1627,7 +1641,13 @@ axiom (forall {{QP}}, a: int, b: int ::
+ {%- set DF_S = "'" ~ instance.suffix ~ "_" ~ impl.struct_name ~ "'" -%}
+
+ {%- if impl.fun_exists_inner != "" %}
++{% if impl.raw %}
++function {:inline} {{impl.fun_exists_inner}}{{DF_S}}(t: ({{Type}}), k: {{T}}): bool {
++    ContainsTable(t->$dynamic_tags{{S}}, $EncodeKey{{S}}(k))
++}
++{% else %}
+ function {{impl.fun_exists_inner}}{{DF_S}}(t: ({{Type}}), k: {{T}}): bool;
++{% endif %}
+ {%- endif %}
+
+ {%- for fun_exists in impl.fun_exists %}
 diff --git a/crates/move-stackless-bytecode/src/dynamic_field_analysis.rs b/crates/move-stackless-bytecode/src/dynamic_field_analysis.rs
-index f5f833bb9a14ed0caa379edbe05a7c4eec2ff626..b9c32f706d9fe618c007673756edfbbbd2d6cc1e 100644
+index f5f833bb9a14ed0caa379edbe05a7c4eec2ff626..0dcd2a33dc48828cc8574d38b2d1599eb602b117 100644
 --- a/crates/move-stackless-bytecode/src/dynamic_field_analysis.rs
 +++ b/crates/move-stackless-bytecode/src/dynamic_field_analysis.rs
-@@ -422,6 +422,10 @@ fn collect_dynamic_field_info(
+@@ -36,8 +36,9 @@ pub enum NameValueInfo {
+         name: Type,
+         value: Type,
+         is_mut: bool,
++        is_object: bool,
+     },
+-    NameOnly(Type),
++    NameOnly(Type, bool),
+ }
+
+ impl NameValueInfo {
+@@ -47,15 +48,23 @@ impl NameValueInfo {
+                 name,
+                 value,
+                 is_mut: _,
++                ..
+             } => Some((name, value)),
+             NameValueInfo::NameOnly(..) => None,
+         }
+     }
+
++    pub fn is_object(&self) -> bool {
++        match self {
++            Self::NameValue { is_object, .. } => *is_object,
++            Self::NameOnly(_, is_object) => *is_object,
++        }
++    }
++
+     pub fn name(&self) -> &Type {
+         match self {
+             NameValueInfo::NameValue { name, .. } => name,
+-            NameValueInfo::NameOnly(name) => name,
++            NameValueInfo::NameOnly(name, _) => name,
+         }
+     }
+
+@@ -65,12 +74,14 @@ impl NameValueInfo {
+                 name,
+                 value,
+                 is_mut,
++                is_object,
+             } => NameValueInfo::NameValue {
+                 name: name.instantiate(type_inst),
+                 value: value.instantiate(type_inst),
+                 is_mut: *is_mut,
++                is_object: *is_object,
+             },
+-            NameValueInfo::NameOnly(name) => NameValueInfo::NameOnly(name.instantiate(type_inst)),
++            NameValueInfo::NameOnly(name, obj) => NameValueInfo::NameOnly(name.instantiate(type_inst), *obj),
+         }
+     }
+ }
+@@ -108,6 +119,21 @@ impl DynamicFieldInfo {
+             .unique()
+     }
+
++    pub fn raw_names(&self, ty: &Type) -> impl Iterator<Item = &Type> {
++        self.dynamic_field_mappings.get(ty).into_iter().flatten()
++            .filter(|nv| !nv.is_object()).map(|nv| nv.name()).unique()
++    }
++
++    /// Canonical concrete Move identity, shared across parents and aliases.
++    /// The integer range remains unbounded: unknown value types are representable.
++    pub fn raw_value_tag(&self, value: &Type) -> usize {
++        assert!(!value.is_open(), "unresolved raw DF value type cannot receive a distinct tag");
++        self.dynamic_field_mappings.values().flatten()
++            .filter(|nv| !nv.is_object()).filter_map(|nv| nv.as_name_value())
++            .map(|(_, v)| v).collect::<BTreeSet<_>>().iter()
++            .position(|v| *v == value).expect("observed raw DF value type") + 1
++    }
++
+     /// union two DynamicFieldTypeInfo
+     pub fn union(&self, other: &Self) -> Self {
+         let mut new_info = self.clone();
+@@ -339,6 +365,13 @@ fn collect_dynamic_field_info(
+                     return None;
+                 }
+
++                let is_object = [env.dynamic_object_field_add_qid(),
++                    env.dynamic_object_field_borrow_qid(), env.dynamic_object_field_borrow_mut_qid(),
++                    env.dynamic_object_field_remove_qid(), env.dynamic_object_field_remove_opt_qid(),
++                    env.dynamic_object_field_exists_qid(), env.dynamic_object_field_exists_deprecated_qid(),
++                    env.dynamic_object_field_exists_with_type_qid(), env.dynamic_object_field_ext_borrow_or_unknown_qid()]
++                    .into_iter().flatten().any(|qid| qid == callee_id);
++
+                 if df_qids.name_value.contains(&callee_id) {
+                     if let Some(obj_type) = get_obj_type(offset) {
+                         return Some(DynamicFieldInfo::singleton(
+@@ -347,6 +380,7 @@ fn collect_dynamic_field_info(
+                                 name: type_inst[0].clone(),
+                                 value: type_inst[1].clone(),
+                                 is_mut: false,
++                                is_object,
+                             },
+                         ));
+                     }
+@@ -360,6 +394,7 @@ fn collect_dynamic_field_info(
+                                 name: type_inst[0].clone(),
+                                 value: type_inst[1].clone(),
+                                 is_mut: true,
++                                is_object,
+                             },
+                         ));
+                     }
+@@ -369,7 +404,7 @@ fn collect_dynamic_field_info(
+                     if let Some(obj_type) = get_obj_type(offset) {
+                         return Some(DynamicFieldInfo::singleton(
+                             obj_type,
+-                            NameValueInfo::NameOnly(type_inst[0].clone()),
++                            NameValueInfo::NameOnly(type_inst[0].clone(), is_object),
+                         ));
+                     }
+                 }
+@@ -422,6 +457,10 @@ fn collect_dynamic_field_info(
                          srcs[0] = builder.emit_let_read_ref(srcs[0]);
                      }
                      type_inst.push(obj_type.clone());
@@ -42,24 +567,51 @@ index f5f833bb9a14ed0caa379edbe05a7c4eec2ff626..b9c32f706d9fe618c007673756edfbbb
                  }
                  builder.emit(Bytecode::Call(
                      attr_id,
+diff --git a/crates/move-stackless-bytecode/src/mono_analysis.rs b/crates/move-stackless-bytecode/src/mono_analysis.rs
+index 9c8822177fe346e345515341e0500b399379925d..f5f648d6d627601807b931632644fbb50a2ed841 100644
+--- a/crates/move-stackless-bytecode/src/mono_analysis.rs
++++ b/crates/move-stackless-bytecode/src/mono_analysis.rs
+@@ -69,6 +69,7 @@ impl MonoInfo {
+             .dynamic_field_names_values(&struct_type)
+             .next()
+             .is_some()
++            || dynamic_field_analysis::get_env_info(env).raw_names(&struct_type).next().is_some()
+         {
+             return true;
+         }
+@@ -316,12 +317,13 @@ impl MonoAnalysisProcessor {
+                         name,
+                         value,
+                         is_mut: _,
++                        ..
+                     } => {
+                         analyzer.add_type_root(name);
+                         // add the value type to Option instantiations
+                         analyzer.add_option_type(value);
+                     }
+-                    NameValueInfo::NameOnly(name) => {
++                    NameValueInfo::NameOnly(name, _) => {
+                         analyzer.add_type_root(name);
+                     }
+                 }
 diff --git a/packages/sui-specs/sources/sui-framework/funds_accumulator.move b/packages/sui-specs/sources/sui-framework/funds_accumulator.move
 index 0189420ebcbe9ac86fd0e8ae208cbddf72708d7c..49562748fa32a07c7f51f74f73cc89b76d35de69 100644
 --- a/packages/sui-specs/sources/sui-framework/funds_accumulator.move
 +++ b/packages/sui-specs/sources/sui-framework/funds_accumulator.move
 @@ -2,8 +2,7 @@ module specs::funds_accumulator_spec;
- 
+
  use sui::funds_accumulator::{
      add_to_accumulator_address,
 -    withdraw_from_accumulator_address,
 -    reserve_object_funds_for_withdrawal
 +    withdraw_from_accumulator_address
  };
- 
+
  
 @@ -25,7 +24,3 @@ public fun withdraw_from_accumulator_address_spec<T: store>(
      withdraw_from_accumulator_address(accumulator, owner, value)
  }
- 
+
 -#[mode(spec), ext(spec(target = sui::funds_accumulator::reserve_object_funds_for_withdrawal))]
 -public fun reserve_object_funds_for_withdrawal_spec<T: store>(owner: address, limit: u256) {
 -    reserve_object_funds_for_withdrawal<T>(owner, limit)
@@ -70,15 +622,15 @@ index 0ecb48f460f0e6e098fb4713bc2b5eb065eca12d..06bc8d6940a503caf696092cd08211aa
 +++ b/packages/sui-specs/sources/sui-framework/object.move
 @@ -1,13 +1,13 @@
  module specs::object_spec;
- 
+
 -use sui::object::{delete_impl, record_new_uid_from_hash};
 +use sui::object::{delete_impl, record_new_uid};
- 
+
  #[mode(spec), ext(spec(target = sui::object::delete_impl))]
  fun delete_impl_spec(id: address) {
      delete_impl(id)
  }
- 
+
 -#[mode(spec), ext(spec(target = sui::object::record_new_uid_from_hash))]
 -fun record_new_uid_from_hash_spec(parent: address, bytes: address) {
 -    record_new_uid_from_hash(parent, bytes)
