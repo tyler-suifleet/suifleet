@@ -72,7 +72,7 @@
         prover::prover::ensures(d.recipe_blob_id == blob);
     }
 
-    #[mode(spec), ext(spec(prove, no_opaque, target = make_deployment))]
+    #[mode(spec), ext(spec(prove, no_opaque, target = make_deployment, boogie_opt = b"vcsMaxKeepGoingSplits:2 vcsSplitOnEveryAssert vcsFinalAssertTimeout:120"))]
     fun make_deployment_security_spec(creator: address, component_name: String,
         version: String, recipe_blob_id: String, artifact_sha256: String,
         target_groups: vector<ID>, target_devices: vector<ID>, clock: &Clock,
@@ -86,6 +86,7 @@
         prover::prover::ensures(record.artifact_sha256 == artifact);
         prover::prover::ensures(record.recipe_blob_id == blob);
         prover::prover::ensures(df::exists_with_type<ReceiptsKey, Receipts>(&record.id, ReceiptsKey {}));
+        prover::prover::ensures(!df::exists(&record.id, StatusesKey {}));
         record
     }
 

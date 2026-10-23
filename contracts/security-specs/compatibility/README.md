@@ -11,7 +11,9 @@ git -C "$TOOLS/sui-prover" apply "$PWD/contracts/security-specs/compatibility/re
 (cd "$TOOLS/sui-prover" && CARGO_BUILD_JOBS=2 cargo build --locked --release -p sui-prover)
 ```
 
-The patch changes three locations:
+The initial release adapter changes three locations; the additional raw-field
+backend extension and its exact limits are documented in
+[the native model continuation](../../../docs/MOVE_NATIVE_MODEL.md). The adapter:
 
 - `move-model/src/model.rs` recognizes release `sui::object::record_new_uid`.
   Optional function lookup also checks that the declaration exists, using the
@@ -81,7 +83,7 @@ checksum-pinned in `toolchain.json`. Original framework hashes are checked befor
 staging; the evaluator puts implementation modules at the proof-package root so
 upstream does not silently skip their proof annotations as dependencies.
 
-Normal CI requires 63 positive obligations and 22 specific solver-rejected
+Normal CI requires 63 application obligations and 25 specific solver-rejected
 mutations. It compares exact target/phase/statement and never accepts a timeout,
 compiler/model error or a missing target as an intended negative. See
 `check_move_proofs.py` for the explicit target/control inventory.
@@ -90,7 +92,26 @@ compiler/model error or a missing target as an intended negative. See
 `--include-pending-custody` and `--include-pending-enrollment`. They are not used
 as trusted summaries by the passing subset. Complete custody construction,
 return, init and inductive preservation are not proved. `--include-name-absence`
-reproduces the stronger untyped-name removal theorem. Full enrollment and
-recipe-binding omission/wrong-value negatives still time out; these results are
-unmet software acceptance, not external checks. Read `docs/MOVE_SECURITY.md`
+reproduces the stronger untyped-name removal theorem, now also required normally.
+Recipe-binding omission/wrong-value controls produce exact solver counterexamples.
+Raw name absence after removal is supported by the shared tag model. Full
+enrollment and custody/heap preservation still fail and remain unmet software
+acceptance, not external checks. Read `docs/MOVE_SECURITY.md`
 for commands, actual counterexamples, model limits and current ticket status.
+
+
+## Raw dynamic-field model conformance
+
+`check_move_native_vm.py` executes the isolated `security-native-fixtures` package
+with the checksum-pinned release compiler/VM and an empty keystore. The fixture
+package is never added to application release sources. `check_move_native_proofs.py`
+requires all 24 raw-field obligations, three exact solver-negative controls and a
+separate explicit rejection of existing-UID reconstruction. This last check is
+an unsupported-operation guard, never a proof or solver-negative success.
+
+Name-only fields receive the shared tag table, key encoder and nonopaque carrier
+even without a modeled value projection. Canonical resolved Move Type identities
+select tags; arbitrary unmodeled tags remain possible. See the native-model
+document for transitions, native source comparison, constructor limits and the
+still-failing two-slot DOF prototype. No app custody invariant is assumed by these
+representation checks. Independent review of the model is still required.

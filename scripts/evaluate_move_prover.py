@@ -20,6 +20,7 @@ PIN = json.loads((ROOT / "contracts/security-specs/toolchain.json").read_text())
 
 # Mutations affect only a disposable copy of the actual release implementation.
 MUTATIONS = {
+    "binding-legacy-status": ("deployment_manager", "make_deployment", "df::add(&mut record.id, ReceiptsKey {},      new_receipts());", "df::add(&mut record.id, ReceiptsKey {},      new_receipts());\n        df::add(&mut record.id, StatusesKey {}, vec_map::empty<ID, u8>());"),
     "close-authority": ("enrollment", "close", "assert_operator(policy, ctx);", ""),
     "close-state": ("enrollment", "close", "policy.open = false;", ""),
     "limits-authority": ("enrollment", "set_limits", "assert_operator(policy, ctx);", ""),
@@ -72,12 +73,14 @@ def main():
     parser.add_argument("--include-raw-fixtures", action="store_true", help="Run executable raw native conformance fixtures and actual-function specifications")
     parser.add_argument("--artifacts", type=Path, help="Copy proof-only generated solver artifacts to a new private directory")
     parser.add_argument("--include-pending-enrollment", action="store_true", help="Run the unverified full enrollment obligation")
-    parser.add_argument("--include-name-absence", action="store_true", help="Reproduce stronger untyped name-absence obligations (not verified)")
+    parser.add_argument("--include-name-absence", action="store_true", help="Legacy flag: name absence is now required by the default role specification")
     parser.add_argument("--timeout", type=int, default=30, help="Per-obligation hard solver timeout in seconds")
     parser.add_argument("--include-pending-custody", action="store_true", help="Reproduce unverified custody construction/return obligations")
     parser.add_argument("--functions", nargs="+", help="Exact prover target filter; does not change implementation sources")
     parser.add_argument("--mutation", choices=MUTATIONS, help="Negative control in temporary implementation copy; expect solver failure")
     args = parser.parse_args()
+    if args.unknown_occupancy_control and not args.include_raw_fixtures:
+        parser.error("Unknown occupancy control requires --include-raw-fixtures")
     if args.artifacts and args.artifacts.exists():
         raise SystemExit("Artifact destination must not already exist")
     source = args.prover_source.resolve()
@@ -141,10 +144,6 @@ def main():
                 additions += (overlay / "registry-custody-pending.move").read_text()
             if module == "enrollment" and args.include_pending_enrollment:
                 additions += (overlay / "enrollment-pending.move").read_text()
-            if args.include_name_absence and module == "roles":
-                additions = additions.replace(
-                    'prover::prover::ensures(!df::exists_with_type<RoleKey, address>(device_registry::uid(registry), key));',
-                    'prover::prover::ensures(!df::exists(device_registry::uid(registry), key));')
             implementation.write_text(body[:end] + additions + body[end:])
         if args.mutation:
             mutate_implementation(package, args.mutation)

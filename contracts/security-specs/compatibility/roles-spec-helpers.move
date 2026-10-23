@@ -7,6 +7,7 @@
         prover::prover::asserts(ctx.sender() == operator);
         revoke(registry, role_id, ctx);
         prover::prover::ensures(!df::exists_with_type<RoleKey, address>(device_registry::uid(registry), key));
+        prover::prover::ensures(!df::exists(device_registry::uid(registry), key));
     }
 
     #[mode(spec), ext(spec(prove, target = is_active))]

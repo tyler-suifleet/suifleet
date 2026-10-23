@@ -7,6 +7,9 @@ on:
       - 'scripts/check_move_security.py'
       - 'scripts/build_move_prover.py'
       - 'scripts/check_move_proofs.py'
+      - 'scripts/check_move_native_proofs.py'
+      - 'scripts/check_move_native_vm.py'
+      - 'scripts/move_native_model_control.py'
       - 'scripts/evaluate_move_prover.py'
       - '.github/workflows/move-security.yml'
       - 'Dockerfile'
@@ -17,6 +20,9 @@ on:
       - 'scripts/check_move_security.py'
       - 'scripts/build_move_prover.py'
       - 'scripts/check_move_proofs.py'
+      - 'scripts/check_move_native_proofs.py'
+      - 'scripts/check_move_native_vm.py'
+      - 'scripts/move_native_model_control.py'
       - 'scripts/evaluate_move_prover.py'
       - '.github/workflows/move-security.yml'
       - 'Dockerfile'
@@ -64,7 +70,10 @@ jobs:
           docker run --rm --user "$(id -u):$(id -g)" -e CARGO_BUILD_JOBS=2 \
             -v "$PWD:/workspace:ro" -w /workspace \
             -v "$PWD/.ci-move-security:/home/dev/.move" \
-            suifleet-move-security:ci python3 scripts/check_move_security.py
+            suifleet-move-security:ci sh -eu -c '
+              python3 scripts/check_move_security.py
+              python3 scripts/check_move_native_vm.py
+            '
       - name: Restore pinned proof tool build cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
@@ -81,4 +90,5 @@ jobs:
             suifleet-move-security:ci sh -eu -c '
               python3 scripts/build_move_prover.py --tools /proof-tools
               python3 scripts/check_move_proofs.py --tools /proof-tools
+              python3 scripts/check_move_native_proofs.py --tools /proof-tools
             '

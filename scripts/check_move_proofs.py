@@ -27,6 +27,7 @@ POSITIVES = {
 }
 # Each failure must identify its exact intended specification statement.
 NEGATIVES = [
+    ("binding-legacy-status", "deployment_manager", "make_deployment_security_spec", "Check", "prover::prover::ensures(!df::exists(&record.id, StatusesKey {}));"),
     ("legacy-report", "deployment_manager", "report_status_security_spec", "Assume", "prover::prover::asserts(false);"),
     ("legacy-group-report", "deployment_manager", "report_status_for_group_security_spec", "Assume", "prover::prover::asserts(false);"),
     ("group-authority", "device_group", "handover_security_spec", "Assume", "prover::prover::asserts(ctx.sender() == group.admin);"),
