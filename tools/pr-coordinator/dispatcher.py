@@ -251,6 +251,60 @@ class Dispatcher:
                         return True
         return False
 
+    def repair_owned(self, slot, owner):
+        """Whether a manual In-progress claim is held by one verified live coordinator fix job.
+
+        Such a resumed Review claim is repair work counted by review/fix
+        capacity. Proof is the job's fenced repair_claim (token digest, key,
+        branch, worktree), the current published owner generation and the
+        job's live process receipt. A ticket key or snapshot alone never
+        qualifies; any doubt keeps the implementation reservation.
+        """
+        try:
+            if owner.get('status') != 'in_progress' or owner.get('expired') or owner.get('publish_pending'):
+                return False
+            project = next(p for p in self.config['projects'] if p['id'] == slot['project'])
+            path = self.state/'reviews.sqlite3'
+            with closing(sqlite3.connect(f'{path.as_uri()}?mode=ro', uri=True)) as db:
+                db.row_factory = sqlite3.Row
+                if 'repair_claim' not in {r[1] for r in db.execute('PRAGMA table_info(jobs)')}:
+                    return False  # Historical jobs have no fenced same-claim proof.
+                jobs = db.execute("SELECT * FROM jobs WHERE project=? AND kind='fix' AND repair_claim IS NOT NULL "
+                                  "AND status IN ('reserved','running','orphaned')", (project['id'],)).fetchall()
+            # Every unfinished fix job naming this ticket must be the same single live repair.
+            named = [job for job in jobs if json.loads(job['repair_claim']).get('key') == owner['key']]
+            if len(named) != 1:
+                return False
+            job = named[0]
+            proof = json.loads(job['repair_claim'])
+            if (job['status'] != 'running' or job['family'] != slot['family'] or not job['pid'] or not job['started']
+                    or any(proof.get(k) != owner.get(k) for k in ('branch', 'worktree'))):
+                return False
+            receipt = Path(job['directory'])/'process.json'
+            if json.loads(receipt.read_text()) != dict(pid=job['pid'], started=job['started']):
+                return False
+            if process_identity(job['pid']) != job['started']:
+                return False
+            current = self.ticket(project, 'show', owner['key'])
+            if (current.get('status') != 'in_progress' or current.get('expired') or current.get('publish_pending')
+                    or current.get('revision') != current.get('published_revision')
+                    or not isinstance(current.get('token'), str) or not current['token']
+                    or hashlib.sha256(current['token'].encode()).hexdigest() != proof.get('claim')
+                    or any(current.get(k) != owner.get(k) for k in ('key', 'agent', 'session', 'branch', 'worktree'))
+                    or any(current.get(k) != proof.get(k) for k in ('key', 'branch', 'worktree'))):
+                return False
+            # SF-116 redirects and SF-117 capacity recoveries of this claim keep their own accounting.
+            if self.db.execute("SELECT 1 FROM ci_redirects WHERE claim=? AND state NOT IN ('resumed','superseded','handed_off','exhausted')",
+                               (proof['claim'],)).fetchone():
+                return False
+            if self.db.execute("SELECT 1 FROM capacity_retries WHERE claim=? AND state NOT IN ('cancelled','exhausted','launched')",
+                               (proof['claim'],)).fetchone():
+                return False
+            return True
+        except (OSError, ValueError, KeyError, TypeError, AttributeError, StopIteration,
+                sqlite3.Error, subprocess.CalledProcessError):
+            return False
+
     def retire_obsolete(self, project):
         rows = self.db.execute("SELECT * FROM runs WHERE project=? AND status IN ('parked','quarantined')",
                                (project['id'],)).fetchall()
@@ -1820,10 +1874,13 @@ First inspect git status/log and the current-head CI, then continue the unfinish
         # Real ticket responses preserve the dispatch session. Tests/legacy state
         # may preserve it only in the persisted claim; use both identities.
         managed_sessions.update(json.loads(r['claim']).get('session') for r in rows if r['claim'])
+        # A Review claim resumed by a verified live fix job uses review/fix
+        # capacity; counting it again would idle an implementation slot.
         manual = sum(1 for owner in owners
                      if owner.get('agent') == slot['family']
                      and owner['status'] in ('in_progress', 'blocked')
-                     and (not owner.get('session') or owner['session'] not in managed_sessions))
+                     and (not owner.get('session') or owner['session'] not in managed_sessions)
+                     and not self.repair_owned(slot, owner))
         # Retained jobs free execution capacity only while still proven stopped.
         # A dependency resume in flight already holds its slot before launch.
         active = self.db.execute("SELECT count(*) FROM dependency_resumes WHERE project=? AND family=? AND state='resuming'",
