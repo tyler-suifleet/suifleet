@@ -325,6 +325,7 @@ test-manifest:
 	$(RUN) node scripts/test_telemetry.cjs
 	$(RUN) node scripts/test_fleet_data.cjs
 	$(RUN) node scripts/test_fleet_bulk.cjs
+	$(RUN) node scripts/test_pilot_load.cjs
 	$(RUN) node scripts/test_alerts.cjs
 	$(RUN) node scripts/test_chain_alerts.cjs
 	$(RUN) node scripts/test_dashboard_views.cjs
@@ -652,3 +653,24 @@ test-retention-upgrade:
 .PHONY: test-device-retention-upgrade
 test-device-retention-upgrade:
 	$(RUN) python3 scripts/test_protocol_localnet.py --device-retention-upgrade
+
+# SF-090 offline crypto/consumer load experiment; receipts stay outside checkout.
+PILOT_EVIDENCE_DIR ?= /tmp/suifleet-pilot
+.PHONY: pilot-fixtures
+pilot-fixtures:
+	$(RUN) mkdir -p "$(PILOT_EVIDENCE_DIR)"
+	$(RUN) node scripts/test_pilot_load.cjs
+	$(RUN) node scripts/pilot_load.cjs docs/validation/sf090/workload.json "$(PILOT_EVIDENCE_DIR)/fixtures.json"
+
+.PHONY: pilot-browser pilot-localnet pilot-public-read
+pilot-browser:
+	$(RUN) mkdir -p "$(PILOT_EVIDENCE_DIR)"
+	$(RUN) node scripts/test_pilot_browser.cjs "$(PILOT_EVIDENCE_DIR)/browser.json"
+
+pilot-localnet:
+	$(RUN) mkdir -p "$(PILOT_EVIDENCE_DIR)"
+	$(RUN) env SF090_CHAIN_RECEIPT="$(PILOT_EVIDENCE_DIR)/chain.json" python3 scripts/pilot_localnet.py
+
+pilot-public-read:
+	$(RUN) mkdir -p "$(PILOT_EVIDENCE_DIR)"
+	$(RUN) node scripts/pilot_public_read.cjs "$(PILOT_EVIDENCE_DIR)/public-read.json"

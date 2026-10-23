@@ -2190,6 +2190,103 @@
       "validation": "Run the relevant disposable localnet daemon suite and meaningful failure control plus scoped offline harness checks; normal exact-head CI/testnet and independent review.",
       "legacy_pr": 53,
       "legacy_head": "09bcdc9f0873d96c64f14dac5d5af4efd8b7fa19"
+    },
+    {
+      "key": "SF-090",
+      "title": "Validate encrypted fleet operation at a declared paid-pilot scale",
+      "depends_on": [
+        "SF-022",
+        "SF-083"
+      ],
+      "paths": [
+        "scripts",
+        "docs/validation",
+        "dapp",
+        "suifleet-edge/src",
+        "contracts"
+      ],
+      "area": "fleet",
+      "evidence": "SF-024 covers indexer load tests, SF-054 measures fees, and SF-083 tests budget contention. No ticket establishes whole-product encrypted serverless capacity, browser usability and provider throttling at a stated customer fleet size. Existing simulator and local-chain acceptance are not that evidence.",
+      "description": "Publish and verify a bounded paid-pilot operating envelope for the integrated product. Agree workload and pass thresholds before measuring; do not invent fleet-capacity or availability claims.\n\nParallel implementation: develop against SF-082 81a4d2e6e8b94a62b7e1b682ba9bdf115367e634; SF-082 remains a mandatory integration/merge gate, not a claim-blocking prerequisite. Keep the PR draft until the real dependency merges and integrated validation passes.",
+      "acceptance": [
+        "Declare device count, concurrent downloads, artifact sizes, log/report cadence, retention, browser fleet size, target RPC/Walrus/Seal endpoints and latency/error/memory/cost thresholds. Record provider quotas and unquoted limits.",
+        "Build a reproducible synthetic-device/load harness using actual signing, encrypted artifacts, budgeting, telemetry anchoring and dashboard verification; keep isolated-network scale separate from bounded public-testnet samples.",
+        "Measure enrollment, deployment admission, encrypted fetch, receipt finalization, telemetry visibility, browser pagination and budget/storage contention. Report p50/p95, failures, resource use and observed network spend.",
+        "Inject throttling, keyserver/gateway/RPC outage, delayed events, reconnect storms and exhausted budget; prove bounded retry/backpressure and recovery without duplicate apply, fabricated success or cross-fleet disclosure.",
+        "Publish supported pilot limits, reproducible evidence and explicit unsupported scale. Hardware acceptance remains separate and does not block this software validation.",
+        "Parallel implementation is authorized against SF-082 commit 81a4d2e6e8b94a62b7e1b682ba9bdf115367e634. Keep PR DRAFT until SF-082/#160 is verified merged/Done; integrate actual merged main, rerun relevant compatibility, adversarial and end-to-end tests, and only then allow Ready/Review. Coordinate producer ABI changes in #160. Never claim unmerged pinned fixtures as final integrated acceptance."
+      ],
+      "validation": "Deterministic load-harness checks, isolated multi-device end-to-end load/soak and bounded authorized testnet runs; record exact revisions, workload, thresholds and costs.",
+      "priority": "P1",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "resources": []
+    },
+    {
+      "key": "SF-083",
+      "title": "Prepay fleet network costs up front and fund devices through an on-chain gas float",
+      "priority": "P1",
+      "area": "fleet",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-054",
+        "SF-088"
+      ],
+      "paths": [
+        "contracts",
+        "dapp/src",
+        "suifleet-edge/src",
+        "scripts",
+        "docs"
+      ],
+      "resources": [],
+      "description": "The person using the dApp pays all fleet network costs up front: device gas for receipts and data anchors, and Walrus/Seal storage for artifacts, telemetry and logs. Design (user decision 2026-10-19): an on-chain gas float. The owner deposits into a fleet budget contract; at registration the dApp funds the device's address with a small capped float, and devices top up from the budget only through the contract, within on-chain limits. No server, gas station or sponsoring key; Walrus storage is drawn from owner-prepaid storage held by the contract, and the resulting blobs are fleet-owned. Compromised devices are a primary threat: every limit must bound what a fully compromised device can spend, write or destroy.\n\nPayment-failure integration \u2014 user requirement: https://github.com/tyler-suifleet/suifleet/issues/179",
+      "evidence": "Devices currently need their own SUI for every receipt; the only allowance today is the CI testnet runner's (docs/TESTNET.md). User direction 2026-10-19: network costs are paid up front by whoever uses the app; use the on-chain float now, not a server-side gas station. Sui sponsored transactions need a live sponsor signature (an always-on signer); Nautilus enclaves are self-managed AWS instances, so both were rejected for now and recorded as future options.",
+      "acceptance": [
+        "Fleet budget contract: owner deposits and withdraws (owner capability only); per-device and per-period gas and storage limits; draws only by registered, activated, non-revoked devices proving their registry identity; an event for every draw; per-device state kept off the shared hot path (for example dynamic fields) so one device cannot contend the whole fleet.",
+        "Gas float: device registration funds the device address with at most a configured float; top-ups only through the contract, never above the float cap or the period allowance. Document that SUI already held by a device cannot be clawed back, so loss from a compromised device is bounded by its float plus one period allowance.",
+        "Owner-prepaid Walrus storage held by the contract: a device's upload takes only the storage it needs within its quota, the blob is registered under fleet ownership (the device cannot delete or shorten fleet history), and storage rebates return to the owner. Verify Storage splitting and blob wrapping against a pinned Walrus version before building on them.",
+        "Compromised-device controls: revocation stops all draws immediately; a fleet-wide pause; per-device rate limits; dApp alerts for devices drawing at their limits or anomalously; draw and upload calls exist only in the current package, with old-package entry points proven unable to draw (old-package attack tests).",
+        "Key isolation: the SF-053 signing service signs draw transactions only for the budget contract, within the configured amounts, and only for the daemon's main process; a compromised component cannot request draws, and a compromised daemon remains bounded by the on-chain limits.",
+        "The dApp shows an up-front estimate (devices, receipt and data cadence, artifact and data storage) from measured SF-054 costs, asks the user to approve the deposit, shows balance and per-device usage, warns before exhaustion, and supports top-up and withdrawal of unused funds.",
+        "Show on-ramp and swap fees, regional availability limits and the final network-cost deposit separately in the estimate before the user approves.",
+        "Users can pay in SUI only: the deposit transaction swaps the WAL portion through a pinned, verified Sui DEX route in the same transaction with slippage limits, or the dApp explains why a direct WAL purchase is required.",
+        "Card payment without a server: embed a fiat on-ramp's hosted checkout (prefer providers that sell WAL, currently Coinbase or OnRamp.money per Sui's on-ramp list), pre-filled with the user's wallet address, asset and amount; KYC stays inside the provider's flow; no provider webhooks or server-side APIs.",
+        "When the budget, float or quota is exhausted, devices queue receipts and data durably and report it; nothing is silently dropped.",
+        "Integrate the SF-088 first-run flow: sign in, see the estimate, fund by card if needed, deposit, then register the first device, using SF-088's extension point.",
+        "Record whether any SuiFleet service fee applies as an explicit open business decision; network costs only unless the user decides otherwise. Record sponsored transactions through a gas station and Nautilus-enclave sponsorship as future options, not this ticket's design.",
+        "Expose a documented, versioned read interface for SF-092: on-chain budget balances (spendable vs reserved once SF-092 adds reserves), per-device float and quota state, storage expiry, and draw/deposit/exhaustion events, so reserves, renewal and out-of-browser notification can be built on top without changing this contract's authority model.",
+        "A failed/cancelled on-ramp purchase does not delete existing Sui state, revoke prepaid storage or shut down installed applications. Credit funding only after verified on-chain deposit effects. Show failed/uncertain purchases separately from budget exhaustion."
+      ],
+      "validation": "Move tests for limits, period resets, revocation, pause, ownership, storage quota and blob ownership, and old-package entry points; adversarial tests where a compromised device key drains at maximum rate, retries after revocation, tries to delete or shorten fleet blobs, and contends the shared budget; daemon simulator tests for draw, exhaustion, queueing and recovery; signer-service policy tests; frontend typecheck/build and estimate tests against measured SF-054 costs; authorized testnet run recording real deposits, draws and uploads with effects checked."
+    },
+    {
+      "key": "SF-088",
+      "title": "Onboard first-time users with a wallet created at sign-in",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-003"
+      ],
+      "paths": [
+        "dapp/src",
+        "contracts",
+        "scripts",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Let a first-time user without a crypto wallet get started: sign in with an existing account (Sui zkLogin, for example Google or Apple, or the Slush web wallet) to get a Sui address in seconds, without installing an extension or handling a seed phrase, then use the dApp's existing flows. Existing extension wallets keep working. Scope correction 2026-10-20 (Claude, user-authorized): card funding, the cost estimate and the budget deposit are SF-083; the funded first-run flow is integrated there once SF-083 exists, so this ticket depends only on SF-003.",
+      "evidence": "User request 2026-10-19 after the card-payment design: first-time users need wallet onboarding. The dApp currently assumes an existing wallet through dApp Kit (SF-003).",
+      "acceptance": [
+        "Offer zkLogin sign-in (pin the providers and prover/salt arrangement; prefer options that need no SuiFleet-operated server, and document any third-party dependency such as Enoki, its credentials and how they stay out of source) and connection to the Slush web wallet, alongside existing extension wallets through dApp Kit.",
+        "Explain plainly that a zkLogin address is controlled by the sign-in account, cover recovery and loss of that account, and let owners move fleet ownership to an extension wallet or multisig later; recommend stronger custody for business fleets before large deposits.",
+        "Fleet-owner authority, revocation and old-package protections are unchanged regardless of how the address was created; sessions and ephemeral keys follow zkLogin expiry rules and are never persisted insecurely.",
+        "A guided first-run for the existing flows: sign in, connect, see the network and account state, and register the first device using today's funding model, with clear errors and no partial state left unexplained. Leave a documented extension point where SF-083 inserts its estimate, card funding and deposit steps."
+      ],
+      "validation": "Frontend typecheck/build and unit tests; browser tests for the sign-in and first-run flow on localnet and testnet; wallet acceptance for zkLogin, Slush web and an extension wallet including expiry, rejection and network-mismatch errors."
     }
   ]
 }
