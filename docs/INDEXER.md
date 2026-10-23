@@ -30,14 +30,14 @@ make test-indexer-localnet               # real localnet (start a node first, as
 
 ```bash
 suifleet-indexer serve --manifest deployment.json --db /var/lib/suifleet-indexer/fleet.db \
-  --tokens /etc/suifleet-indexer/tokens [--listen 127.0.0.1:8650] [--interval-seconds 2] \
+  --tokens /etc/suifleet-indexer/tokens [--listen 127.0.0.1:8650] [--interval-seconds 60] \
   [--reconcile-batch 500] [--reconcile-interval-seconds 600]
 ```
 
 **Startup.**
 - The indexer reads the same deployment manifest as the dApp and the daemon ([DEPLOYMENT_MANIFEST.md](DEPLOYMENT_MANIFEST.md)), and verifies it against the chain first: chain identity, package version and origins, UpgradeCap, and registry.
 - It catches up, including a full device sweep, before serving, so the API never answers from an empty or pre-restart index.
-- It then indexes every `--interval-seconds`, and runs a full device sweep when its independent reconciliation timer is due. A failed stream or batch is retried without advancing its position.
+- It then indexes every `--interval-seconds` (default 60), and runs a full device sweep when its independent reconciliation timer is due. A failed stream or batch is retried without advancing its position.
 
 **Network.**
 - Run one instance per network and database.

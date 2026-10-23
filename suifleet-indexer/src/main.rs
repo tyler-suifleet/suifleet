@@ -2,7 +2,7 @@
 //!
 //!   suifleet-indexer serve --manifest deployment.json --db fleet.db
 //!                          [--listen 127.0.0.1:8650] (--tokens FILE | --public-read)
-//!                          [--interval-seconds 2] [--reconcile-batch 500] [--reconcile-interval-seconds 600] [--reset]
+//!                          [--interval-seconds 60] [--reconcile-batch 500] [--reconcile-interval-seconds 600] [--reset]
 //!                          [--telemetry-db telemetry.db [--telemetry-retain 1000]]
 //!                          [--cors-origin https://dapp.example]
 //!   suifleet-indexer index --manifest deployment.json --db fleet.db [--reconcile-batch 500]
@@ -169,7 +169,7 @@ async fn main() -> anyhow::Result<()> {
                     .get("--interval-seconds")
                     .map(|s| s.parse())
                     .transpose()?
-                    .unwrap_or(2),
+                    .unwrap_or(60),
             );
             // Catch up (and re-read every device) before serving, so the API
             // never answers from an empty or pre-restart index.
