@@ -45,6 +45,15 @@ certification or customer upload is claimed. Populated v1/v2 upgrades, prepaid
 preservation, old-entry rejection, per-blob expiry, unrelated admission and actual
 enrolled-device finite-target/fully-paid checks are in the localnet receipt.
 
+The executor joins renewal policies and blob records from paginated field values;
+it no longer performs a separate record RPC per renewal. A10000-policy/10000-record
+fixture takes200 page reads and zero per-blob fetches. Optional budget account
+monitoring uses the pinned SDK batch API:100 accounts take two50-object RPCs,
+with object/type/budget/device bindings and missing/error checks preserved. These
+are RPC-count regressions, not a public-node latency or throughput SLA. The real
+isolated-chain reader check returns three renewal policies, excludes the fully-paid
+archive and verifies the enrolled account through actual gRPC batch reads.
+
 Local browser/executor safety bounds remain 100,000 records, 128 MiB journal and
 64 MiB transport response. These do not constrain chain admission. Above them,
 separate storage objects or a future paged executor are needed before relying on

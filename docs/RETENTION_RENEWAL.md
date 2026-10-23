@@ -337,3 +337,8 @@ acceptance remains unrun in #32/#159.
 Current software evidence: [SF-128 validation](validation/SF128_RETENTION.md).
 These checks do not establish production Walrus certification, provider operation
 or hardware acceptance.
+
+Executor snapshots join paginated record/policy values rather than fetching each
+record separately; optional budget monitoring batches account reads. Full scans
+remain linear in off-chain records and subject to provider latency and the
+90-second transport deadline; no public-node throughput SLA is claimed.

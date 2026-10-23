@@ -64,14 +64,15 @@
     "node_retention": "pass: SDK/BCS, origins, 100-page/10000 records",
     "fleet_budget": "pass",
     "interfaces": "pass: 11 modules",
-    "frontend_typecheck_and_build": "pass under pinned Node22"
+    "frontend_typecheck_and_build": "pass under pinned Node22",
+    "transport_rpc_scaling": "10000 policies and10000 records across200 pages; zero per-blob reads.100 accounts through actual SDK adapter use two50-object RPCs; binding/error negatives pass. No public latency SLA claimed."
   },
   "keyed_upgrade": {
     "check": "populated-object compatible storage upgrade and old-package retirement",
     "receipts": [
       {
         "label": "publish wal",
-        "digest": "FVVVU8ZY2Zof2Y6uNALX2MHswBMBqFVDdhyCuDWvGaDP",
+        "digest": "CpCtpph5Fgyub6VgNBFEmK3gUQBz6piMrTVfkG1yE7R1",
         "gas": {
           "computationCost": "1000000",
           "storageCost": "24289600",
@@ -81,7 +82,7 @@
       },
       {
         "label": "publish walrus",
-        "digest": "G47kx4mEkuLyeD5GwW6P8zb82bbWcV88LigpvzJMmkcj",
+        "digest": "7jpRa8kefF8L48JZoorZacCEiTNzVzcJsWLKV7f2iYXU",
         "gas": {
           "computationCost": "6700000",
           "storageCost": "678801600",
@@ -91,7 +92,7 @@
       },
       {
         "label": "initialize isolated Walrus fixture",
-        "digest": "4QNAbtR3YxeYQvvGVK6i9MEyDfnbxPCKxvx3RiDfPMsB",
+        "digest": "AmVvcfF7eWR2HUtkhqZfk5jRYEJFCrmRE7GLQtme3RRr",
         "gas": {
           "computationCost": "1360000",
           "storageCost": "24791200",
@@ -101,7 +102,7 @@
       },
       {
         "label": "publish contracts",
-        "digest": "9DCoNviLSQN6DYwRr5GG3Yzs9b5gssCV3E3UnCUg2LYU",
+        "digest": "HTXCR7dGENDWzsUoKx2EViwwDZJRWYyHLKZk7jmTVS4g",
         "gas": {
           "computationCost": "2980000",
           "storageCost": "325226800",
@@ -111,7 +112,7 @@
       },
       {
         "label": "publish fleet_storage",
-        "digest": "PbbcMVz7VZspkbm1GAhKKwVMDjp8AAnCxz4SM46s2t6",
+        "digest": "AEZ4Sm7qRfiwuRB148NVYiPrtjwvFevfReFf7LBLC8Nv",
         "gas": {
           "computationCost": "2650000",
           "storageCost": "76874000",
@@ -121,7 +122,7 @@
       },
       {
         "label": "create budget",
-        "digest": "DeocXvChz5f6E5HzefhH6H2r34MaA3593mtA3KH42y6V",
+        "digest": "BsMHVqZKSF2hRcRhVVL6LizgcxVbaYYq7X27BVsGrzbs",
         "gas": {
           "computationCost": "1000000",
           "storageCost": "5335200",
@@ -131,7 +132,7 @@
       },
       {
         "label": "create v1 storage",
-        "digest": "Cc15pqiKwfH8iCdmLyYiAKDesXYt25TTT4YF7YkhiEgV",
+        "digest": "FpbmtybL7FGSVxpcrxj2G2ZBm9AvARo1XJAjaL2tdGHA",
         "gas": {
           "computationCost": "1000000",
           "storageCost": "4864000",
@@ -141,7 +142,7 @@
       },
       {
         "label": "populate v1 pool and wrapped blob with real registration",
-        "digest": "3EXTxYqArpVPVYbFedwx78368gUCm2VnXMH4geNhfZEY",
+        "digest": "HQKfV4Z2FMZCsXMQXXcoaXVwQKc9pVCjk3NvQy7PdXxg",
         "gas": {
           "computationCost": "1710000",
           "storageCost": "35834000",
@@ -151,7 +152,7 @@
       },
       {
         "label": "compatible storage upgrade",
-        "digest": "6w5w76gPUAHPocqk6ajxdjt8JcBy11qZph2dShCAbuHD",
+        "digest": "81v854Nv7qhJwRx3b94oowCv55goz9D9dyjhXixLfuDa",
         "gas": {
           "computationCost": "3200000",
           "storageCost": "121296000",
@@ -161,7 +162,7 @@
       },
       {
         "label": "migrate existing storage",
-        "digest": "6vsvpFE3QhmZJNQJpkWAA7HmnP4ZgrPYuDBV5CsDcXW3",
+        "digest": "8Ce2PkBXGMzFpLLd3LRp1uxRHs8tTDmorRKFi8Vdf6h2",
         "gas": {
           "computationCost": "1000000",
           "storageCost": "5228800",
@@ -171,7 +172,7 @@
       },
       {
         "label": "v2 registration on migrated pool with v1-origin event",
-        "digest": "ETnfbH86wptCAA2zyXUGNV7rykRiyJDTWqSnRaptXeQS",
+        "digest": "GVUizC8PzjwH9q1d5ZJv2rze1nYbZuFoC4hV5Bx6NuDY",
         "gas": {
           "computationCost": "1630000",
           "storageCost": "34526800",
@@ -181,7 +182,7 @@
       },
       {
         "label": "configure on existing object",
-        "digest": "ERHRDvNmieGyrQwGssnJznz7fQaUU2psMbeg2goNuT97",
+        "digest": "HqF6NGr3tUCqWEtTp5pUL94aXGu7LU9YGFxMY28jiTvW",
         "gas": {
           "computationCost": "1000000",
           "storageCost": "12524800",
@@ -191,11 +192,11 @@
       },
       {
         "label": "old-package withdrawal rejected after migration",
-        "digest": "6VpyD5vChqeQaLqRZ8HQ8LCH7cHz56J8VKjP1zPhRurB"
+        "digest": "EboQaw8ey4CaGfLJRGDgwDMJWGanPSwkPqRVLYezDsaW"
       },
       {
         "label": "populate v2 protected vector and real prepaid resources",
-        "digest": "6ZrTtsEwQ16GzAA5gZxwJJPq3A7Ed7iA7fpP8uyxMVuE",
+        "digest": "5nnUEM5WXitagKxeHoUNN3CUz3hvwAemMBkT4m1bLbCS",
         "gas": {
           "computationCost": "1000000",
           "storageCost": "49886400",
@@ -205,7 +206,7 @@
       },
       {
         "label": "compatible populated v2 to v3 upgrade",
-        "digest": "AvMXY35GBLvFniEZRgW2nx3hQ6PPDxM7N7oFmnknJKLq",
+        "digest": "Ft6KFeWB7fhaT7bjGRXVcKmLpf35HcuDwKbwAuogii4c",
         "gas": {
           "computationCost": "3280000",
           "storageCost": "120536000",
@@ -215,7 +216,7 @@
       },
       {
         "label": "owner migration removes only legacy vector",
-        "digest": "92nn8jP84JACZrUHz7Rr55jZBA6fqEbe2StYsPkwGYNU",
+        "digest": "93BofUcnkwsfjKJaWmGRETKkAHeSNFE4xXiEiikDcB8m",
         "gas": {
           "computationCost": "1000000",
           "storageCost": "5228800",
@@ -225,7 +226,7 @@
       },
       {
         "label": "expired v2 protected blobs do not block new v3 retained registration",
-        "digest": "tvjhTLLSuktWkiTEeLWXwEFkUfcgMQ4qwKFLn5FpGqs",
+        "digest": "4ozxSGQPV8GECZkEvoKd6mhLmMnLUzSkeRF4p9oKY2SX",
         "gas": {
           "computationCost": "1690000",
           "storageCost": "46747600",
@@ -235,15 +236,15 @@
       },
       {
         "label": "expired selected blob renewal still fails closed",
-        "digest": "GCU8SxNhyWXP2m7DPYJCSZaiDtHeTYLzYU6Fc61yTDau"
+        "digest": "wz6BytS72EvWTaUX4VdBCmq9SutuqVnF1K4YqohB9CA"
       },
       {
         "label": "v2 mutation rejects migrated v3 storage",
-        "digest": "33TtTkQ98ydiM3ngrm9CqmoTRgpUC3NMwAwtH9uMPgoC"
+        "digest": "EMoMChFmMFGK3b7bJcuZbVnc8tNSF8ef81p5ES4pxw8D"
       },
       {
         "label": "enroll actual device for finite fully-paid admission regression",
-        "digest": "HdPRsqpQ9XhFqk2ZzuAerGU5VdE4MrU4nZfrFMFVyCRg",
+        "digest": "4DHmivVvm5FndTLmK35VmziLpzvFX7Dy1BWAXJM1oYDj",
         "gas": {
           "computationCost": "1000000",
           "storageCost": "25733600",
@@ -253,7 +254,7 @@
       },
       {
         "label": "configure already-passed absolute device target at epoch six",
-        "digest": "EVUMwgai58fiTkRj9woQZ6Cyj4rXmLGFATqbTArpLBdj",
+        "digest": "Dq3oEEakisJe4j4Uyk12hJXxyXoY44CPPHFGfJPx6hSa",
         "gas": {
           "computationCost": "1000000",
           "storageCost": "10868000",
@@ -263,11 +264,11 @@
       },
       {
         "label": "expired absolute admission target rejects fully-paid archive",
-        "digest": "2PqfEbcB2Ws9UTUKQ4EhbBSdKXjYUffSc4SXgnL9VQrP"
+        "digest": "3Lp1kkoqDM3GEQSdqiRmakd8jeaQ7voE2USNMABFzkpd"
       },
       {
         "label": "approve live target already covered by initial pool purchase",
-        "digest": "6w2fQkC65yZDW9WSjhBqXt5np14oNgbrXgguxCQDdiED",
+        "digest": "8ahNoBEYDTVxNy7mafGQaksj8tzYmqQAtfwkz858KuGo",
         "gas": {
           "computationCost": "1000000",
           "storageCost": "10868000",
@@ -277,7 +278,7 @@
       },
       {
         "label": "actual device fully-paid archive admission without renewal",
-        "digest": "9S4F5Mm6NytH66ys4pHMkb1vpznF3aw8zZoKJHpjQ51A",
+        "digest": "2HSKQpFkrkQwPm6GB984C1nnFfUccfQANLFK54SUmLhj",
         "gas": {
           "computationCost": "1660000",
           "storageCost": "43122400",
@@ -288,5 +289,11 @@
     ]
   },
   "keyed_upgrade_command": "python3 scripts/test_protocol_localnet.py --retention-keyed-upgrade",
-  "keyed_upgrade_result": "passed; exit 0"
+  "keyed_upgrade_result": "passed; exit 0",
+  "transport_snapshot": {
+    "check": "SF128 real gRPC paginated renewal records and batched account bindings",
+    "renewals": 3,
+    "accounts": 1,
+    "fully_paid_excluded": true
+  }
 }
