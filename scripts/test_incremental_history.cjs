@@ -5,7 +5,7 @@ process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST = JSON.stringify(manifest);
 const { toBase64 } = appRequire('@mysten/sui/utils');
 const bytes = s => new TextEncoder().encode(s);
 const store = new Map();
-global.window = { localStorage: { getItem: k => store.get(k) ?? null, setItem: (k,v) => store.set(k,v) } };
+global.window = { localStorage: { getItem: k => store.get(k) ?? null, setItem: (k,v) => store.set(k,v), removeItem: k => store.delete(k), key: i => [...store.keys()][i] ?? null, get length() { return store.size; } } };
 function fixture() {
   let lowest = 0n, calls = [], frames = [], fail = false;
   const client = { ledgerService: {
@@ -42,8 +42,9 @@ const event = n => ({ event: { transactionDigest: `digest${n}`, eventIndex: 0, c
   await history.incrementalEvents(reloaded.client, '0x1::test::Created', '0xa');
   assert.equal(toBase64(reloaded.calls[2].options.after), toBase64(bytes('tip3')));
   reloaded.floor(6n);
-  await assert.rejects(history.incrementalEvents(reloaded.client, '0x1::test::Created', '0xa'), /History unavailable/);
-  assert.equal(reloaded.calls.length, 3, 'pruned cursor rejected before scan');
+  reloaded.frames([event(7), end('tip7', 7n)]);
+  assert.equal((await history.incrementalEvents(reloaded.client, '0x1::test::Created', '0xa')).length, 3);
+  assert.equal(reloaded.calls[3].options.after, undefined, 'pruned cursor restarts retained range while preserving known events');
   // First scan on a pruned endpoint reads the available range with an explicit warning.
   const partial = fixture(); partial.floor(50n); partial.frames([end('partial', 51n)]);
   assert.deepEqual(await history.incrementalEvents(partial.client, '0x1::test::Partial'), []);
@@ -58,6 +59,30 @@ const event = n => ({ event: { transactionDigest: `digest${n}`, eventIndex: 0, c
   assert.equal([...store.keys()].some(k => k.endsWith('Failure:*')), false, 'no cursor committed on failure');
   const quota = fixture(); quota.frames([end('quota', 1n)]);
   window.localStorage.setItem = () => { throw Error('quota exceeded'); };
-  await assert.rejects(history.incrementalEvents(quota.client, '0x1::test::Quota'), /quota exceeded/);
-  console.log('PASS: type/sender filters; persisted cursor+BCS; reload, empty scan progress, concurrency, pruned ranges, incomplete/failed streams and storage failures');
+  assert.deepEqual(await history.incrementalEvents(quota.client, '0x1::test::Quota'), []);
+  assert.match(history.historySnapshot(), /storage is full/);
+  window.localStorage.setItem = (k,v) => store.set(k,v);
+  const paged = fixture(); let page = 0;
+  paged.client.ledgerService.listEvents = request => { paged.calls.push(request); return { responses: (async function* () { page++; yield end(`page${page}`, BigInt(page), page < 250 ? 2 : 5); })() }; };
+  await history.incrementalEvents(paged.client, '0x1::test::Paged');
+  assert.equal(page, 200); assert.match(history.historySnapshot(), /still loading/);
+  history = loader()('lib/event-history.ts');
+  await history.incrementalEvents(paged.client, '0x1::test::Paged');
+  assert.equal(page, 250);
+  assert.equal(new TextDecoder().decode(paged.calls[200].options.after), 'page200');
+  assert.doesNotMatch(history.historySnapshot(), /still loading/);
+  const corruptKey = [...store.keys()].find(k => k.includes('Paged')); store.set(corruptKey, '{bad');
+  history = loader()('lib/event-history.ts'); const recovered = fixture(); recovered.frames([end('recovered', 251n)]);
+  await history.incrementalEvents(recovered.client, '0x1::test::Paged');
+  assert.equal(recovered.calls[0].options.after, undefined);
+  for (let i=0;i<12;i++) {
+    const large = fixture(); const e = event(i+1); e.event.contents.value = new Uint8Array(100000);
+    large.frames([e, end(`large${i}`, 300n)]);
+    await history.incrementalEvents(large.client, `0x1::test::Large${i}`);
+  }
+  assert.ok([...store].reduce((n,[k,v])=>n+2*(k.length+v.length),0) <= 2*1024*1024, 'origin budget shared across streams');
+  const huge=fixture(), e=event(1);e.event.contents.value=new Uint8Array(300000);huge.frames([e,end('huge',400n)]);
+  assert.deepEqual(await history.incrementalEvents(huge.client,'0x1::test::Huge'),[]);
+  assert.match(history.historySnapshot(), /capacity reached/);
+  console.log('PASS: type/sender filters; persisted cursor+BCS; reload, empty scan progress, concurrency, pruned/corrupt cache recovery, 250-page reload resumption, origin/stream capacity and nonfatal storage failures');
 })().catch(e => { console.error(e); process.exitCode = 1; });

@@ -19,20 +19,44 @@ function warn(key: string, message: string) {
   snapshot = [...new Set(warnings.values())].join(' ');
   listeners.forEach(listener => listener());
 }
-function storage() { return typeof window === 'undefined' ? undefined : window.localStorage; }
+function storage() { try { return typeof window === 'undefined' ? undefined : window.localStorage; } catch { return undefined; } }
+const PREFIX = 'suifleet-history-v1:';
+const STREAM_LIMIT = 256 * 1024;
+const ORIGIN_LIMIT = 2 * 1024 * 1024;
+const encode = (scan: Scan) => JSON.stringify(scan, (name, value) => name === 'bcs' ? toBase64(value) : value);
 function restore(key: string): Scan | undefined {
   const value = storage()?.getItem(key);
   if (!value) return;
+  if (value.length * 2 > STREAM_LIMIT) throw Error('Oversized saved history');
   const parsed = JSON.parse(value, (name, value) => name === 'bcs' ? fromBase64(value) : value) as Scan;
   if (parsed.version !== 1 || !/^\d+$/.test(parsed.checkpoint) || !Array.isArray(parsed.events)
-    || typeof parsed.partial !== 'boolean' || (parsed.cursor !== undefined && typeof parsed.cursor !== 'string')) throw Error('Invalid saved history; preserve it and inspect before resetting');
+    || parsed.events.some(event => !(event.bcs instanceof Uint8Array) || typeof event.transactionDigest !== 'string' || typeof event.eventIndex !== 'number' || typeof event.checkpoint !== 'string')
+    || typeof parsed.partial !== 'boolean' || (parsed.cursor !== undefined && typeof parsed.cursor !== 'string')) throw Error('Invalid saved history');
   return parsed;
 }
 function persist(key: string, scan: Scan) {
-  const value = JSON.stringify(scan, (name, value) => name === 'bcs' ? toBase64(value) : value);
-  if (value.length > 4 * 1024 * 1024) throw Error('History cache full; use an archival indexer');
-  // Quota/private-mode failures must be visible, not trigger full rescans on reload.
-  storage()?.setItem(key, value);
+  // Bound memory as well as storage. Evicted discovery is always explicitly partial.
+  while (encode(scan).length * 2 > STREAM_LIMIT && scan.events.length) {
+    scan.events.shift();
+    scan.partial = true;
+    warn(key, 'History unavailable: discovery cache capacity reached; older objects may be omitted. Use an archival indexer.');
+  }
+  try {
+    const local = storage();
+    if (!local) throw Error('storage unavailable');
+    const value = encode(scan);
+    const keys = Array.from({ length: local.length }, (_, i) => local.key(i)).filter((k): k is string => !!k && k.startsWith(PREFIX) && k !== key);
+    let used = keys.reduce((n, k) => n + (k.length + (local.getItem(k)?.length ?? 0)) * 2, (key.length + value.length) * 2);
+    for (const old of keys) {
+      if (used <= ORIGIN_LIMIT) break;
+      used -= (old.length + (local.getItem(old)?.length ?? 0)) * 2;
+      local.removeItem(old);
+      warn(old, 'History unavailable: cached discovery evicted; this stream will rescan the retained range.');
+    }
+    local.setItem(key, value);
+  } catch {
+    warn(key, 'History unavailable on reload: browser storage is full or inaccessible. Discovery continues in memory; free storage to retain progress.');
+  }
 }
 
 export async function incrementalEvents(client: SuiGrpcClient, type: string, sender?: string): Promise<Event[]> {
@@ -57,14 +81,25 @@ async function scan(client: SuiGrpcClient, key: string, type: string, sender?: s
   const lowest = info.lowestAvailableCheckpoint;
   let cache = memory.get(client);
   if (!cache) memory.set(client, cache = new Map());
-  const saved = cache.get(key) ?? restore(key);
-  if (saved && BigInt(saved.checkpoint) + BigInt(1) < lowest) throw Error(`History unavailable: saved scan precedes lowest available checkpoint ${lowest}. Use an archival endpoint to fill the gap.`);
+  let invalid = false;
+  let saved = cache.get(key);
+  if (!saved) {
+    try { saved = restore(key); }
+    catch { invalid = true; warn(key, 'History unavailable: invalid saved discovery; rescanning the retained range.'); }
+  }
+  if (saved && BigInt(saved.checkpoint) + BigInt(1) < lowest) {
+    saved = { ...saved, cursor: undefined, checkpoint: lowest.toString(), partial: true };
+  }
   // Initial public-node discovery is explicitly partial. Do not label it complete.
-  const next: Scan = saved ? { ...saved, events: [...saved.events] } : { version: 1, checkpoint: lowest.toString(), partial: lowest > BigInt(0), events: [] };
-  if (next.partial) warn(key, `History unavailable before checkpoint ${lowest}; event-based discovery may omit older objects. Use an archival endpoint for complete history.`);
+  const next: Scan = saved ? { ...saved, events: [...saved.events] } : { version: 1, checkpoint: lowest.toString(), partial: invalid || lowest > BigInt(0), events: [] };
+  if (next.partial) warn(key, `History unavailable before checkpoint ${lowest}; event-based discovery may omit older or evicted objects. Use an archival endpoint for complete history.`);
   const known = new Set(next.events.map(event => `${event.transactionDigest}:${event.eventIndex}`));
   for (let pages = 0; ; pages++) {
-    if (pages >= 200) throw Error('History scan exceeds 200 pages; use an archival indexer');
+    if (pages >= 200) {
+      warn(key, 'History still loading: partial discovery saved; the next refresh resumes from this checkpoint.');
+      persist(key, next); cache.set(key, next);
+      return [...next.events].reverse();
+    }
     const before = next.cursor;
     const call = client.ledgerService.listEvents({
       startCheckpoint: lowest,
@@ -94,11 +129,13 @@ async function scan(client: SuiGrpcClient, key: string, type: string, sender?: s
     if (reason === undefined || reason === 0) throw Error('History stream ended without a successful terminal frame');
     if (reason === 1 || reason === 2) {
       if (!next.cursor || next.cursor === before) throw Error('Event pagination made no progress or returned no cursor');
+      persist(key, next); cache.set(key, { ...next, events: [...next.events] });
       continue;
     }
     if (reason !== 3 && reason !== 5) throw Error('Unexpected history scan boundary');
     // Watermarks include safe progress even when no matching event was emitted.
     if (!next.cursor) throw Error('History unavailable: endpoint returned no scan watermark');
+    if (!next.partial) { warnings.delete(key); snapshot = [...new Set(warnings.values())].join(' '); listeners.forEach(listener => listener()); }
     persist(key, next);
     cache.set(key, next);
     return [...next.events].reverse();
