@@ -111,6 +111,10 @@ missing: that fixture attempt failed before measurement, then passed with the mo
 The first new integrated setup failed with an arity mismatch (missing registry in
 the harness grant call); the harness was corrected to the actual merged ABI and
 rerun. Neither failure is counted as passing acceptance or public spending.
+The first final-head JavaScript CodeQL run also blocked three predictable receipt
+writes. Receipt publication now uses exclusive mode-0600 creation, refusing
+intervening symlinks or existing files. Regression checks preserve the symlink
+target and existing receipt; no scanner finding was suppressed.
 
 Tracking tests pass 10/10 and the offline bootstrap dry run passes after preserving
 both branches' published catalog entries during merge. The merged manifest suite

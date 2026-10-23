@@ -1,3 +1,4 @@
+const {writeReceipt}=require('./pilot_receipt.cjs');
 // Read-only bounded Testnet sample. No wallet, signing API or faucet is loaded.
 const assert=require('node:assert/strict'),fs=require('node:fs'),{performance}=require('node:perf_hooks'),{execFileSync}=require('node:child_process');
 const {appRequire}=require('./frontend_test_utils.cjs'),{SuiGrpcClient}=appRequire('@mysten/sui/grpc'),{fromBase58,toHex}=appRequire('@mysten/sui/utils');
@@ -18,5 +19,5 @@ const {pool,distribution}=require('./pilot_load.cjs');
  });
  const timing=distribution(results.map(r=>r.read_ms));assert(timing.p95_ms<workload.read_p95_ms);
  const receipt={schema:1,result:'PASS',mode:'fresh-public-testnet-historical-effects-readback',revision:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),observed_at:new Date().toISOString(),chain,rpc:workload.rpc,peak_concurrency:peak,measurements:timing,results,new_spend_mist:'0',writes:0,limits:['historical producer effects independently re-read; not new SF-090 native transactions','no upload/keyserver latency or availability measurement','no production capacity claim']};
- fs.writeFileSync(process.argv[2]||'/tmp/sf090-public-read.json',JSON.stringify(receipt,null,2)+'\n');console.log(JSON.stringify({result:receipt.result,measurements:timing,new_spend_mist:'0'}));
+ await writeReceipt(process.argv[2]||'/tmp/sf090-public-read.json',receipt);console.log(JSON.stringify({result:receipt.result,measurements:timing,new_spend_mist:'0'}));
 })().catch(e=>{console.error(e.stack);process.exitCode=1;});

@@ -1,3 +1,4 @@
+const {writeReceipt}=require('./pilot_receipt.cjs');
 // SF-090: real crypto/consumer code over explicitly synthetic chain/provider I/O.
 // No keys or plaintext are written to the receipt. This submits no transactions.
 const assert = require('node:assert/strict');
@@ -168,6 +169,6 @@ async function run(w) {
 if(require.main===module) {
  const [workloadFile,receiptFile]=process.argv.slice(2);if(!workloadFile||!receiptFile)throw Error('Usage: node scripts/pilot_load.cjs WORKLOAD.json RECEIPT.json');
  fs.rmSync(receiptFile,{force:true});
- run(JSON.parse(fs.readFileSync(workloadFile,'utf8'))).then(result=>{fs.writeFileSync(receiptFile,JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify({result:result.result,measurements:result.measurements,limits:result.limits}));if(result.result!=='PASS')process.exitCode=1;}).catch(error=>{console.error(error.stack);process.exitCode=1;});
+ run(JSON.parse(fs.readFileSync(workloadFile,'utf8'))).then(async result=>{await writeReceipt(receiptFile,result);console.log(JSON.stringify({result:result.result,measurements:result.measurements,limits:result.limits}));if(result.result!=='PASS')process.exitCode=1;}).catch(error=>{console.error(error.stack);process.exitCode=1;});
 }
 module.exports={validate,distribution,pool,retry,run};

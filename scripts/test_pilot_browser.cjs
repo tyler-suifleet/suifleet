@@ -1,3 +1,4 @@
+const {writeReceipt}=require('./pilot_receipt.cjs');
 // Real FleetDataPage in Chromium with real BCS index parsing; no wallet/provider claim.
 const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:os'),http=require('node:http'),assert=require('node:assert/strict');
 const {performance}=require('node:perf_hooks'),{execFileSync}=require('node:child_process');
@@ -38,6 +39,6 @@ const {build}=appRequire('esbuild'),{chromium}=appRequire('playwright'),{normali
   const {distribution}=require('./pilot_load.cjs'),measurements={initial:distribution(timings.map(t=>t.initial_ms)),page_recovery:distribution(timings.map(t=>t.page_recovery_ms))};
   assert(measurements.initial.p95_ms<5000);assert(measurements.page_recovery.p95_ms<1000);
   const receipt={schema:1,result:'PASS',mode:'real-chromium-fixture-transport',revision:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),browser:browser.version(),devices:128,rounds:5,measurements,timings,checks:['real FleetDataPage + BCS index verification','100 to 128 devices without duplicates','RPC outage does not fabricate devices','page recovery after throttling'],limits:['fixture chain and wallet hooks','no real extension/session/provider authorization','pagination only; no encrypted archive rendering load','renderer JS heap, not complete browser/host RSS']};
-  await fs.writeFile(process.argv[2]||'/tmp/sf090-browser.json',JSON.stringify(receipt,null,2)+'\n');console.log(JSON.stringify(receipt));
+  await writeReceipt(process.argv[2]||'/tmp/sf090-browser.json',receipt);console.log(JSON.stringify(receipt));
  }finally{if(browser)await browser.close();if(server)await new Promise(resolve=>server.close(resolve));await fs.rm(dir,{recursive:true,force:true});}
 })().catch(e=>{console.error(e.stack);process.exitCode=1;});

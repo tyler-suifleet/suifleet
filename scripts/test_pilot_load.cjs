@@ -14,5 +14,14 @@ const workload = require('../docs/validation/sf090/workload.json');
  await assert.rejects(retry(async()=>{attempts++;throw Error('integrity');},policy),/integrity/);assert.equal(attempts,1);
  attempts=0;assert.equal(await retry(async n=>{attempts++;if(n<3)throw Object.assign(Error('429'),{transient:true});return 'recovered';},policy),'recovered');assert.equal(attempts,3);
  attempts=0;await assert.rejects(retry(async()=>{attempts++;throw Object.assign(Error('outage'),{transient:true});},policy));assert.equal(attempts,3);
+ const fs=require('node:fs/promises'),os=require('node:os'),path=require('node:path'),{writeReceipt}=require('./pilot_receipt.cjs');
+ const temp=await fs.mkdtemp(path.join(os.tmpdir(),'pilot-receipt-test-'));
+ try {
+  const target=path.join(temp,'original'),output=path.join(temp,'receipt');await fs.writeFile(target,'preserve');await fs.symlink(target,output);
+  await assert.rejects(writeReceipt(output,{result:'PASS'}),{code:'EEXIST'});assert.equal(await fs.readFile(target,'utf8'),'preserve');
+  await fs.unlink(output);await writeReceipt(output,{result:'PASS'});assert.equal((await fs.stat(output)).mode&0o777,0o600);
+  await assert.rejects(writeReceipt(output,{result:'FAIL'}),{code:'EEXIST'});assert.equal(JSON.parse(await fs.readFile(output,'utf8')).result,'PASS');
+ }finally{await fs.rm(temp,{recursive:true,force:true});}
+ console.log('PASS receipt symlink/overwrite refusal, target preservation and private mode');
  console.log('PASS workload rejection, nearest-rank percentiles, bounded concurrency and retry exhaustion/recovery/nonretryable failures');
 })().catch(e=>{console.error(e);process.exitCode=1;});

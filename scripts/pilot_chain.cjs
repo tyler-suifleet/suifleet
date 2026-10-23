@@ -1,3 +1,4 @@
+const {writeReceipt}=require('./pilot_receipt.cjs');
 // SF-090 disposable chain experiment. Publication setup follows SF-082 upgrade harness.
 const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:os'),assert=require('node:assert/strict'),{execFileSync}=require('node:child_process');
 const {appRequire,loader}=require('./frontend_test_utils.cjs');
@@ -156,6 +157,6 @@ public fun pilot_fixture(ctx: &mut TxContext) {
   const result={schema:1,mode:'isolated-real-chain',result:failures.length?'FAIL':'PASS',failures,revision:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),chain,devices:devices.length,peak_concurrency:peak,elapsed_ms:performance.now()-start,peak_rss_bytes:rss,measurements:summary,raw_samples_ms:measurements,encrypted_pipeline:encryptedPipeline,transactions,rejected,storage_contention:storageResults,
    net_gas_mist:[...transactions,...rejected,...storageResults].reduce((sum,t)=>sum+net(t.gas),0n).toString(),public_network_spend_mist:'0',
    limits:['local synthetic faucet gas; not public pricing','deployment receipt follows verified encrypted synthetic file application, not native daemon application','instrumented one-member isolated Walrus system; registrations only, not certified storage/provider capacity','no physical or production capacity claim']};
-  await fs.writeFile(process.env.SF090_CHAIN_RECEIPT||'/tmp/sf090-chain.json',JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify({result:result.result,measurements:summary,limits:result.limits}));if(failures.length)process.exitCode=1;
+  await writeReceipt(process.env.SF090_CHAIN_RECEIPT||'/tmp/sf090-chain.json',result);console.log(JSON.stringify({result:result.result,measurements:summary,limits:result.limits}));if(failures.length)process.exitCode=1;
  }finally{if(encrypted)await encrypted.close();await fs.rm(tmp,{recursive:true,force:true});}
 })().catch(e=>{console.error(e.stack);process.exitCode=1;});
