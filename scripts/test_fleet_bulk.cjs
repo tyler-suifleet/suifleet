@@ -13,6 +13,8 @@ process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST = JSON.stringify(fixture);
 const load = loader();
 const bulk = load('lib/fleet-bulk.ts');
 const data = load('lib/fleet-data.ts');
+const budget = load('lib/fleet-budget.ts');
+const storageOrigin = id('0xb3');
 const protocol = load('lib/fleet-protocol.ts');
 const key = Ed25519Keypair.generate(), device = id('0xd1');
 const config = { schema: 1, chainIdentifier: '4c78adac', registryId: id('0xa1'), packageId: id('0xa2'), typeOrigin: id('0xa2'), fleetId: id('0xf1'), budgetId: id('0xb1'), storageId: id('0xb2') };
@@ -49,7 +51,8 @@ async function signed(value, signer = key) {
  const KeyServerV1 = bcs.struct('KeyServerV1', { name: bcs.string(), url: bcs.string(), keyType: bcs.u8(), pk: bcs.byteVector() });
  const chain = { core: {
   async getObject({ objectId }) { return { object: objectId === config.typeOrigin ? { version: '1' } : { content: KeyServer.serialize({ id: objectId, firstVersion: 1, lastVersion: 1 }).toBytes() } }; },
-  async getDynamicField({ parentId }) { const server = vectors.servers.find(s => s.object_id === parentId); return { dynamicField: { value: { bcs: KeyServerV1.serialize({ name: 'fixture', url: 'https://fixture.invalid', keyType: 0, pk: Buffer.from(server.public_key, 'hex') }).toBytes() } } }; },
+  async getDynamicField({ parentId }) {
+    if(parentId===config.storageId){if(released || (shorten && identityReads>1))throw Error('Missing released record');return {dynamicField:{value:{type:`${storageOrigin}::fleet_storage::${badRecordType?'WrongRecord':'BlobRecord'}`,bcs:bulk.BlobRecordBcs.serialize({device_id:foreignRecord?id('0xde'):device,blob_id:foreignBlob?'999':encryptedAnchor.blob_id,size:'1',encoded_size:'1',end_epoch:endEpoch,uploaded_at_ms:'1'}).toBytes()}}};} const server = vectors.servers.find(s => s.object_id === parentId); return { dynamicField: { value: { bcs: KeyServerV1.serialize({ name: 'fixture', url: 'https://fixture.invalid', keyType: 0, pk: Buffer.from(server.public_key, 'hex') }).toBytes() } } }; },
  } };
  const client = new SealClient({ suiClient: chain, serverConfigs: vectors.servers.map(s => ({ objectId: s.object_id, weight: 1 })), verifyKeyServers: false });
  const identity = Buffer.concat([Buffer.from(config.fleetId.slice(2), 'hex'), Buffer.alloc(8), Buffer.alloc(32, 7)]).toString('hex');
@@ -84,12 +87,13 @@ async function signed(value, signer = key) {
  const fleet = { id: config.fleetId, version: '1', budget_id: config.budgetId, storage_id: config.storageId, registry_id: config.registryId,
   chain_identifier: config.chainIdentifier, key_epoch: '0', support: [], health_interval_ms: '3600000', batch_interval_ms: '86400000', emergency_interval_ms: '300000', device_count: '1' };
  const writer = { id: writerId, version: '1', fleet_id: config.fleetId, device_id: device, account_id: id('0xa3'), health_seq: '0', health_at_ms: '0', message: [], signature: [], batch_seq: '8', batch_at_ms: null, emergency_at_ms: null, anchor_count: '1' };
- function reads({ revoked = false, keyEpoch = '0', badIndex = false, revokeAfter = false } = {}) {
+ function reads({ revoked = false, keyEpoch = '0', badIndex = false, revokeAfter = false, endEpoch = 100, released = false, foreignRecord = false, shorten = false, foreignBlob = false, badRecordType = false, foreignStorage = false } = {}) {
   let identityReads = 0;
   return {
    ledgerService: { async getServiceInfo() { return { response: { chainId: toBase58(Buffer.from(config.chainIdentifier + '00'.repeat(28), 'hex')) } }; } },
-   async getObject({ objectId }) { const isFleet = objectId === config.fleetId; return { object: { owner: { $kind: 'Shared' }, type: `${config.typeOrigin}::fleet_data::${isFleet ? 'FleetData' : 'DeviceData'}`, content: (isFleet ? data.FleetDataBcs : data.DeviceDataBcs).serialize(isFleet ? { ...fleet, key_epoch: keyEpoch } : writer).toBytes() } }; },
+   async getObject({ objectId }) { if(objectId===config.storageId)return {object:{owner:{$kind:'Shared'},type:`${storageOrigin}::fleet_storage::FleetStorage`,content:budget.FleetStorageBcs.serialize({id:config.storageId,version:'1',budget_id:foreignStorage?id('0xbe'):config.budgetId,pool:null,wal:{value:'0'},default_quota:{period_ms:'1',encoded_bytes_per_period:'1',uploads_per_period:'1',max_blob_size:'1',write_fees_per_period:'1'},blob_count:'1',total_encoded_bytes:'1',total_write_fees:'1'}).toBytes()}}; const isFleet = objectId === config.fleetId; return { object: { owner: { $kind: 'Shared' }, type: `${config.typeOrigin}::fleet_data::${isFleet ? 'FleetData' : 'DeviceData'}`, content: (isFleet ? data.FleetDataBcs : data.DeviceDataBcs).serialize(isFleet ? { ...fleet, key_epoch: keyEpoch } : writer).toBytes() } }; },
    async getDynamicField({ parentId }) {
+    if(parentId===config.storageId){if(released || (shorten && identityReads>1))throw Error('Missing released record');return {dynamicField:{value:{type:`${storageOrigin}::fleet_storage::${badRecordType?'WrongRecord':'BlobRecord'}`,bcs:bulk.BlobRecordBcs.serialize({device_id:foreignRecord?id('0xde'):device,blob_id:foreignBlob?'999':encryptedAnchor.blob_id,size:'1',encoded_size:'1',end_epoch:endEpoch,uploaded_at_ms:'1'}).toBytes()}}};}
     if (parentId === config.fleetId) return { dynamicField: { value: { type: '0x2::object::ID', bcs: bcs.Address.serialize(writerId).toBytes() } } };
     if (parentId === writerId) return { dynamicField: { value: { type: `${config.typeOrigin}::fleet_data::${badIndex ? 'Bad' : 'Anchor'}`, bcs: data.AnchorBcs.serialize(encryptedAnchor).toBytes() } } };
     identityReads++;
@@ -100,7 +104,10 @@ async function signed(value, signer = key) {
  const walrus = epoch => ({ async systemState() { return { committee: { epoch } }; } });
  const request = async () => new Response(ciphertext);
  assert.deepEqual(await bulk.fetchVerifiedArchive(reads(), walrus(99), config, device, 0, 'https://fixture.invalid', decrypt, request), archive);
+ assert.deepEqual(await bulk.fetchVerifiedArchive(reads({endEpoch:110}), walrus(105), config, device, 0, 'https://fixture.invalid', decrypt, request), archive, 'owner extension remains readable after original anchor expiry');
  for (const [name, source, storage] of [
+  ['foreign storage budget', reads({foreignStorage:true}), walrus(99)], ['foreign record type', reads({badRecordType:true}), walrus(99)], ['foreign blob binding', reads({foreignBlob:true}), walrus(99)],
+  ['released before original expiry', reads({released:true}), walrus(99)], ['foreign record', reads({foreignRecord:true}), walrus(99)], ['shortened record', reads({endEpoch:90}), walrus(89)], ['released during download', reads({shorten:true}), walrus(99)],
   ['revoked', reads({ revoked: true }), walrus(99)], ['key rotated', reads({ keyEpoch: '1' }), walrus(99)],
   ['expired', reads(), walrus(100)], ['invalid chain index', reads({ badIndex: true }), walrus(99)],
   ['revoked during download', reads({ revokeAfter: true }), walrus(99)],

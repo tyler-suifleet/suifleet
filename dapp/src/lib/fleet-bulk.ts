@@ -10,7 +10,10 @@ import { Transaction } from '@mysten/sui/transactions';
 import type { SuiGrpcClient } from '@mysten/sui/grpc';
 import { AnchorBcs, readDeviceData, readFleetData, type FleetDataConfig } from './fleet-data';
 import { readIdentity } from './telemetry';
+import { FleetStorageBcs } from './fleet-budget';
 import { MAGIC, isEnvelope, type SealSettings } from './seal';
+
+export const BlobRecordBcs = bcs.struct('BlobRecord', { device_id: bcs.option(bcs.Address), blob_id: bcs.u256(), size: bcs.u64(), encoded_size: bcs.u64(), end_epoch: bcs.u32(), uploaded_at_ms: bcs.u64() });
 
 export const MAX_ARCHIVE_BYTES = 4 * 1024 * 1024;
 export const MAX_ARCHIVE_RECORDS = 4096;
@@ -134,7 +137,23 @@ export async function requireArchiveReadable(client: SuiGrpcClient, config: Flee
   const fleet = await readFleetData(client, config);
   const identity = await readIdentity(client, deviceId);
   if (!identity || identity.revoked) throw Error('Device is missing or revoked');
-  if (!integer(currentEpoch) || currentEpoch >= anchor.end_epoch || BigInt(anchor.key_epoch) !== BigInt(fleet.key_epoch)) throw Error('Archive expired or key epoch revoked');
+  if (!integer(currentEpoch) || BigInt(anchor.key_epoch) !== BigInt(fleet.key_epoch)) throw Error('Archive expired or key epoch revoked');
+  // The immutable anchor records the original purchase, not later owner-paid
+  // extensions. The fleet-owned live record is updated by SF-083 extend_blob
+  // and removed by release_blob; never use the historical epoch as live expiry.
+  const { object } = await client.getObject({ objectId: config.storageId, include: { content: true } });
+  const [origin, module, name] = normalizeStructTag(object.type).split('::');
+  if (module !== 'fleet_storage' || name !== 'FleetStorage' || object.owner.$kind !== 'Shared') throw Error('Invalid fleet storage');
+  const storage = FleetStorageBcs.parse(object.content!);
+  if (id(storage.id) !== config.storageId || id(storage.budget_id) !== config.budgetId || storage.version !== '1') throw Error('Foreign fleet storage');
+  // RecordKey and BlobRecord were introduced with FleetStorage in interface v1.
+  const field = await client.getDynamicField({ parentId: config.storageId, name: {
+    type: `${origin}::fleet_storage::RecordKey`, bcs: bcs.struct('RecordKey', { blob_object_id: bcs.Address }).serialize({ blob_object_id: anchor.blob_object_id }).toBytes(),
+  } });
+  if (normalizeStructTag(field.dynamicField.value.type) !== normalizeStructTag(`${origin}::fleet_storage::BlobRecord`)) throw Error('Invalid live archive record');
+  const record = BlobRecordBcs.parse(field.dynamicField.value.bcs);
+  if (!record.device_id || id(record.device_id) !== id(deviceId) || BigInt(record.blob_id) !== BigInt(anchor.blob_id)
+    || record.end_epoch < anchor.end_epoch || currentEpoch >= record.end_epoch) throw Error('Archive expired, released or foreign');
 }
 
 /** Build a transaction kind for Seal evaluation only; never submits a chain write. */
