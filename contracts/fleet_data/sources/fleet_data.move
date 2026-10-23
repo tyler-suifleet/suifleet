@@ -65,6 +65,17 @@ module fleet_data::fleet_data {
         end_epoch: u32,
         key_epoch: u64,
     }
+    /// Bounded current root. Historical heads are carried inside signed,
+    /// encrypted archives, committed by this hash chain, not repeated on Sui.
+    /// These types have their own introduction-package origin on upgrades.
+    public struct CompactHeadKey has copy, drop, store { reserved: bool }
+    public struct CompactHead has copy, drop, store {
+        first_index: u64,
+        index: u64,
+        anchor: Anchor,
+        previous_hash: vector<u8>,
+    }
+
     public struct HealthUpdated has copy, drop {
         fleet_id: ID, device_id: ID, seq: u64, at_ms: u64,
     }
@@ -210,6 +221,32 @@ module fleet_data::fleet_data {
         budget: &FleetBudget, account: &GasAccount, registry: &DeviceRegistry,
         cap: &DeviceCap, storage: &FleetStorage, blob_object_id: ID,
         seq: u64, kind: u8, ciphertext_sha256: vector<u8>, clock: &Clock, ctx: &TxContext) {
+        anchor_impl(fleet, writer, budget, account, registry, cap, storage,
+            blob_object_id, seq, kind, ciphertext_sha256, false, vector[], clock, ctx);
+    }
+
+    /// Opt-in bounded index. The archive contains the complete previous head
+    /// bytes; readers authenticate that link against previous_hash. No mutable
+    /// gateway/indexer is trusted and no archive contents are put on chain.
+    public fun anchor_compact(fleet: &FleetData, writer: &mut DeviceData,
+        budget: &FleetBudget, account: &GasAccount, registry: &DeviceRegistry,
+        cap: &DeviceCap, storage: &FleetStorage, blob_object_id: ID,
+        seq: u64, kind: u8, ciphertext_sha256: vector<u8>, expected_previous: vector<u8>,
+        clock: &Clock, ctx: &TxContext) {
+        assert!(expected_previous.is_empty() || expected_previous.length() == 32, EBounds);
+        anchor_impl(fleet, writer, budget, account, registry, cap, storage,
+            blob_object_id, seq, kind, ciphertext_sha256, true, expected_previous, clock, ctx);
+    }
+
+    public fun compact_head(writer: &DeviceData): Option<CompactHead> {
+        let key = CompactHeadKey { reserved: false };
+        if (df::exists(&writer.id, key)) option::some(*df::borrow(&writer.id, key)) else option::none()
+    }
+
+    fun anchor_impl(fleet: &FleetData, writer: &mut DeviceData,
+        budget: &FleetBudget, account: &GasAccount, registry: &DeviceRegistry,
+        cap: &DeviceCap, storage: &FleetStorage, blob_object_id: ID,
+        seq: u64, kind: u8, ciphertext_sha256: vector<u8>, compact: bool, expected_previous: vector<u8>, clock: &Clock, ctx: &TxContext) {
         device(fleet, writer, budget, account, registry, cap, ctx);
         assert!(object::id(storage) == fleet.storage_id, EBinding);
         assert!(seq > writer.batch_seq, ESequence);
@@ -233,8 +270,27 @@ module fleet_data::fleet_data {
             signer: ctx.sender(), at_ms: now,
             end_epoch: fleet_storage::record_end_epoch(&record), key_epoch: fleet.key_epoch };
         let index = writer.anchor_count;
-        df::add(&mut writer.id, AnchorKey { index }, anchor);
-        df::add(&mut writer.id, blob_object_id, true);
+        if (compact) {
+            let key = CompactHeadKey { reserved: false };
+            let first_index;
+            let previous_hash;
+            if (df::exists(&writer.id, key)) {
+                let old: CompactHead = df::remove(&mut writer.id, key);
+                assert!(old.anchor.blob_object_id != blob_object_id, EExists);
+                first_index = old.first_index;
+                previous_hash = std::hash::sha2_256(bcs::to_bytes(&old));
+            } else {
+                first_index = index;
+                previous_hash = vector[];
+            };
+            // Compare-and-swap binds the encrypted archive's predecessor to
+            // the actual prior chain head, including across signer rotation.
+            assert!(expected_previous == previous_hash, ESequence);
+            df::add(&mut writer.id, key, CompactHead { first_index, index, anchor, previous_hash });
+        } else {
+            df::add(&mut writer.id, AnchorKey { index }, anchor);
+            df::add(&mut writer.id, blob_object_id, true);
+        };
         writer.anchor_count = index + 1;
         writer.batch_seq = seq;
         event::emit(DataAnchored { fleet_id: object::id(fleet), device_id: writer.device_id, index, anchor });
