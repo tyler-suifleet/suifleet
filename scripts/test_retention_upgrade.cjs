@@ -54,7 +54,7 @@ public(package) fun retention_fixture(ctx: &mut TxContext): SystemStateInnerV1 {
         sui::bls12381::g1_to_uncompressed_g1(&sui::bls12381::g1_generator()),
         100, object::id_from_address(@0xabc));
     state.committee = bls_aggregate::new_bls_committee(0, vector[member]);
-    state.total_capacity_size = 1_000_000_000;
+    state.total_capacity_size = 1_000_000_000_000_000;
     state.storage_price_per_unit_size = 5;
     state.write_price_per_unit_size = 1;
     state
@@ -68,6 +68,22 @@ public fun retention_fixture(ctx: &mut TxContext) {
     transfer::share_object(system);
 }
 `);
+    if (process.env.SF128_SCALE_UPGRADE === '1') {
+      // Isolated epoch control only; never publish instrumented Walrus publicly.
+      await fs.appendFile(innerPath, `
+public(package) fun sf128_set_epoch(state: &mut SystemStateInnerV1, epoch: u32) {
+    let member = bls_aggregate::new_bls_committee_member(
+        sui::bls12381::g1_to_uncompressed_g1(&sui::bls12381::g1_generator()),
+        100, object::id_from_address(@0xabc));
+    state.committee = bls_aggregate::new_bls_committee(epoch, vector[member]);
+}
+`);
+      await fs.appendFile(path.join(tmp, 'walrus/sources/system.move'), `
+public fun sf128_set_epoch(system: &mut System, epoch: u32) {
+    system_state_inner::sf128_set_epoch(system.inner_mut(), epoch);
+}
+`);
+    }
     const storage = path.join(core, 'fleet_storage');
     await fs.writeFile(path.join(storage, 'Move.toml'), (await fs.readFile(path.join(storage, 'Move.toml'), 'utf8'))
       .replace(/wal = \{[^\n]+\}/, `wal = { local = "${tmp}/wal" }`)
@@ -79,12 +95,40 @@ public fun retention_fixture(ctx: &mut TxContext) {
       } catch (error) { throw Error(`isolated compilation failed for ${path.basename(directory)}: ${String(error.stderr).slice(-4000)}`); }
     }
     const receipts = [];
+    let latestGas;
     async function execute(label, tx) {
-      const result = await client.signAndExecuteTransaction({ transaction: tx, signer, include: { effects: true, objectTypes: true, events: true } });
+      if (process.env.SF128_SCALE_UPGRADE === '1') console.log(JSON.stringify({starting:label}));
+      tx.setGasBudget(2000000000);
+      if (latestGas) tx.setGasPayment([latestGas]);
+      let result;
+      for(let attempt=0;attempt<30;attempt++) {
+        try {
+          result=await client.signAndExecuteTransaction({transaction:tx,signer,include:{effects:true,objectTypes:true,events:true}});
+          break;
+        } catch(error) {
+          // Only a pre-signing resolution failure is safe to retry. A submit
+          // error or unknown outcome is never replaced.
+          if(error.constructor.name!=='SimulationError' || !error.message.includes("provided version doesn't match") || attempt===29) throw error;
+          await new Promise(resolve=>setTimeout(resolve,500));
+        }
+      }
       assert.ok(result.Transaction?.status.success, JSON.stringify(result.FailedTransaction?.status));
       const r = result.Transaction;
       await client.waitForTransaction({ digest: r.digest });
-      receipts.push({ label, digest: r.digest });
+      const gas=r.effects.gasObject;
+      if (gas?.outputVersion && gas?.outputDigest) latestGas={objectId:gas.objectId,version:gas.outputVersion,digest:gas.outputDigest};
+      // Owned inputs must be visible at their effects version before the next
+      // transaction resolves them. Receipt indexing alone is insufficient.
+      for (const object of r.effects.changedObjects.filter(o=>o.outputOwner?.$kind === 'AddressOwner')) {
+        for (let tries=0;tries<60;tries++) {
+          const actual=(await client.getObject({objectId:object.objectId})).object;
+          if(BigInt(actual.version)>=BigInt(object.outputVersion)) break;
+          assert.ok(tries<59,'owned object effects not visible');
+          await new Promise(resolve=>setTimeout(resolve,100));
+        }
+      }
+      receipts.push({ label, digest: r.digest, gas: r.effects.gasUsed });
+      if (process.env.SF128_SCALE_UPGRADE === '1') console.log(JSON.stringify({progress: label, digest:r.digest}));
       return r;
     }
     const created = (r, suffix) => Object.keys(r.objectTypes).find((key) => r.objectTypes[key].endsWith(suffix));
@@ -130,6 +174,7 @@ public fun retention_fixture(ctx: &mut TxContext) {
     const fieldsBefore = await client.listDynamicFields({ parentId: oldStorage, include: { value: true } });
     assert.ok(fieldsBefore.dynamicFields.some((f) => f.name.type.endsWith('::fleet_storage::RecordKey')));
     if (process.env.SF082_DEVICE_POLICY_UPGRADE === '1') await fs.writeFile(path.join(storage, 'sources/fleet_storage.move'), execFileSync('git',['show','2e9a7f4d1b35a9e69b6acc5da1a40ea39562e575:contracts/fleet_storage/sources/fleet_storage.move'],{cwd:root}));
+    else if (process.env.SF128_SCALE_UPGRADE === '1') await fs.writeFile(path.join(storage, 'sources/fleet_storage.move'), execFileSync('git', ['show', 'e19970e045c42aad2452d5a67294fe1b770133f9:contracts/fleet_storage/sources/fleet_storage.move'], { cwd: root }));
     else await fs.copyFile(path.join(root, 'contracts/fleet_storage/sources/fleet_storage.move'), path.join(storage, 'sources/fleet_storage.move'));
     const built = compile(storage);
     tx = new Transaction();
@@ -140,7 +185,7 @@ public fun retention_fixture(ctx: &mut TxContext) {
     tx = new Transaction(); tx.moveCall({ target: `${head}::fleet_storage::migrate`, arguments: [tx.object(oldStorage), tx.object(budget), tx.object(ownerCap)] });
     await execute('migrate existing storage', tx);
     const content = (await client.getObject({ objectId: oldStorage, include: { content: true } })).object.content;
-    assert.equal(bcs.u64().parse(content.slice(32, 40)), '2');
+    assert.equal(bcs.u64().parse(content.slice(32, 40)), process.env.SF082_DEVICE_POLICY_UPGRADE === '1' || process.env.SF128_SCALE_UPGRADE === '1' ? '2' : '3');
     assert.deepEqual(content.slice(40), before.slice(40), 'pool, WAL, counters and budget binding survive migration');
     const fieldsAfter = await client.listDynamicFields({ parentId: oldStorage, include: { value: true } });
     assert.deepEqual(fieldsAfter.dynamicFields, fieldsBefore.dynamicFields, 'wrapped blob and record origins/content survive');
@@ -173,6 +218,8 @@ public fun retention_fixture(ctx: &mut TxContext) {
     const failed = await client.executeTransaction({ transaction: bytes, signatures: [signed.signature], include: { effects: true } });
     assert.equal(failed.$kind, 'FailedTransaction');
     assert.match(JSON.stringify(failed.FailedTransaction.status), /abort code: 0/);
+    const failedGas=failed.FailedTransaction.effects.gasObject;
+    latestGas={objectId:failedGas.objectId,version:failedGas.outputVersion,digest:failedGas.outputDigest};
     receipts.push({ label: 'old-package withdrawal rejected after migration', digest: failed.FailedTransaction.digest });
     if (process.env.SF082_DEVICE_POLICY_UPGRADE === '1') {
       const bytesBefore=(await client.getObject({objectId:oldStorage,include:{content:true}})).object.content;
@@ -189,12 +236,85 @@ public fun retention_fixture(ctx: &mut TxContext) {
       assert.deepEqual((await client.listDynamicFields({parentId:oldStorage,include:{value:true}})).dynamicFields,priorFields);
       const datatype=async name=>(await client.movePackageService.getDatatype({packageId:current,moduleName:'fleet_storage',name})).response.datatype.definingId;
       assert.equal(await datatype('FleetStorage'),base.pkg);assert.equal(await datatype('RetentionKey'),head);assert.equal(await datatype('DeviceRetentionKey'),current);
+      tx=new Transaction();tx.moveCall({target:`${current}::fleet_storage::migrate`,arguments:[tx.object(oldStorage),tx.object(budget),tx.object(ownerCap)]});await execute('migrate device-policy storage to current version',tx);
       tx=new Transaction();tx.moveCall({target:`${current}::fleet_storage::configure_device_retention`,arguments:[tx.object(oldStorage),tx.object(budget),tx.object(ownerCap),tx.pure.u32(8),tx.pure.u64(100)]});
       await execute('owner configures later-origin device policy on existing v2 storage',tx);
       const actual=await loader()('lib/retention.ts').fetchDeviceRetention(client,{packageId:current,storageOrigin:base.pkg},oldStorage);
       assert.deepEqual(actual,{target:8,max_fee:'100'});
       tx=new Transaction();tx.moveCall({target:`${current}::fleet_storage::clear_device_retention`,arguments:[tx.object(oldStorage),tx.object(budget),tx.object(ownerCap)]});await execute('owner clears device admission without deleting old history',tx);
       assert.equal(await loader()('lib/retention.ts').fetchDeviceRetention(client,{packageId:current,storageOrigin:base.pkg},oldStorage),undefined);
+    }
+
+    if (process.env.SF128_SCALE_UPGRADE === '1') {
+      // Populate v2 renewal/prepaid/vector fields before the compatible upgrade.
+      tx = new Transaction();
+      const [funds] = tx.splitCoins(tx.object(walCoin), [tx.pure.u64(1000000)]);
+      const [gasFunds] = tx.splitCoins(tx.gas, [tx.pure.u64(100)]);
+      tx.moveCall({target: `${head}::fleet_storage::configure_retention`, arguments: [tx.object(oldStorage),tx.object(budget),tx.object(ownerCap),tx.pure.address(signer.toSuiAddress()),tx.pure.u32(2),tx.pure.u64(1000000),tx.pure.u64(100),tx.pure.u64(1)]});
+      tx.moveCall({target: `${head}::fleet_storage::fund_retention`, arguments: [tx.object(oldStorage),funds,gasFunds]});
+      const oldRecords=(await client.listDynamicFields({parentId:oldStorage,include:{value:true}})).dynamicFields.filter(f=>f.name.type.endsWith('::RecordKey'));
+      for (const f of oldRecords) {
+        const blob=bcs.Address.parse(f.name.bcs);
+        tx.moveCall({target:`${head}::fleet_storage::authorize_renewal`,arguments:[tx.object(oldStorage),tx.object(budget),tx.object(ownerCap),tx.pure.id(blob),tx.pure.u32(7),tx.pure.u64(100)]});
+        tx.moveCall({target:`${head}::fleet_storage::prepay_renewal`,arguments:[tx.object(oldStorage),tx.object(budget),tx.object(ownerCap),tx.object(system),tx.pure.id(blob)]});
+      }
+      await execute('populate v2 protected vector and real prepaid resources',tx);
+      const prior=(await client.listDynamicFields({parentId:oldStorage,include:{value:true}})).dynamicFields;
+      await fs.copyFile(path.join(root,'contracts/fleet_storage/sources/fleet_storage.move'),path.join(storage,'sources/fleet_storage.move'));
+      const pub=await fs.readFile(path.join(storage,'Published.toml'),'utf8');
+      await fs.writeFile(path.join(storage,'Published.toml'),pub.replace(`published-at = "${base.pkg}"`,`published-at = "${head}"`).replace('version = 1','version = 2'));
+      const compiled=compile(storage);
+      tx=new Transaction();
+      const [authorization]=tx.moveCall({target:'0x2::package::authorize_upgrade',arguments:[tx.object(base.upgrade),tx.pure.u8(0),tx.pure.vector('u8',compiled.digest)]});
+      const upgrade=tx.upgrade({modules:compiled.modules,dependencies:compiled.dependencies,package:head,ticket:authorization});
+      tx.moveCall({target:'0x2::package::commit_upgrade',arguments:[tx.object(base.upgrade),upgrade]});
+      const current=(await execute('compatible populated v2 to v3 upgrade',tx)).effects.changedObjects.find(o=>o.outputState==='PackageWrite').objectId;
+      tx=new Transaction();tx.moveCall({target:`${current}::fleet_storage::migrate`,arguments:[tx.object(oldStorage),tx.object(budget),tx.object(ownerCap)]});
+      await execute('owner migration removes only legacy vector',tx);
+      const after=(await client.listDynamicFields({parentId:oldStorage,include:{value:true}})).dynamicFields;
+      const withoutVector=prior.filter(f=>!f.name.type.endsWith('::ProtectedBlobsKey'));
+      assert.equal(after.length,withoutVector.length);
+      const sorted=a=>a.sort((a,b)=>a.fieldId.localeCompare(b.fieldId));
+      assert.deepEqual(sorted(after),sorted(withoutVector),'keyed renewal, prepaid storage, records and blobs retain original content and origins');
+      assert.equal(bcs.u64().parse((await client.getObject({objectId:oldStorage,include:{content:true}})).object.content.slice(32,40)),'3');
+      await require('./test_retention_scale.cjs')({client,signer,Transaction,bcs,execute,current,budget,ownerCap,system,walCoin,walrusPackage:walrusPub.pkg,created,receipts});
+      tx=new Transaction();
+      tx.moveCall({target:`${walrusPub.pkg}::system::sf128_set_epoch`,arguments:[tx.object(system),tx.pure.u32(6)]});
+      tx.moveCall({target:`${current}::fleet_storage::refill_pool`,arguments:[tx.object(oldStorage),tx.object(budget),tx.object(ownerCap),tx.object(system),tx.pure.u64(10000000),tx.pure.u32(8)]});
+      const [freshId]=tx.moveCall({target:`${walrusPub.pkg}::blob::derive_blob_id`,arguments:[tx.pure.u256(99001),tx.pure.u8(1),tx.pure.u64(10)]});
+      tx.moveCall({target:`${current}::fleet_storage::register_retained_fleet_blob`,arguments:[tx.object(oldStorage),tx.object(budget),tx.object(ownerCap),tx.object(system),freshId,tx.pure.u256(99001),tx.pure.u64(10),tx.pure.u8(1),tx.object('0x6'),tx.pure.u32(9),tx.pure.u64(100)]});
+      await execute('expired v2 protected blobs do not block new v3 retained registration',tx);
+      async function abort(label, transaction, code) {
+        transaction.setGasBudget(50000000);
+        transaction.setSender(signer.toSuiAddress());
+        transaction.setGasPrice((await client.getReferenceGasPrice()).referenceGasPrice);
+        transaction.setGasPayment([latestGas]);
+        transaction.addBuildPlugin(async (data, _options, next) => {
+          for(let i=0;i<data.inputs.length;i++) {
+            const input=data.inputs[i].UnresolvedObject;
+            if(!input) continue;
+            const object=(await client.getObject({objectId:input.objectId})).object;
+            data.inputs[i]=object.owner.$kind==='Shared'
+              ? {$kind:'Object',Object:{$kind:'SharedObject',SharedObject:{objectId:object.objectId,initialSharedVersion:object.owner.Shared.initialSharedVersion,mutable:true}}}
+              : {$kind:'Object',Object:{$kind:'ImmOrOwnedObject',ImmOrOwnedObject:{objectId:object.objectId,version:object.version,digest:object.digest}}};
+          }
+          await next();
+        });
+        const result=await client.signAndExecuteTransaction({transaction,signer,include:{effects:true}});
+        assert.equal(result.$kind,'FailedTransaction',label);
+        assert.match(JSON.stringify(result.FailedTransaction.status),new RegExp('abort code: '+code+'(?:[^0-9]|$)'));
+        const gas=result.FailedTransaction.effects.gasObject;
+        latestGas={objectId:gas.objectId,version:gas.outputVersion,digest:gas.outputDigest};
+        receipts.push({label,digest:result.FailedTransaction.digest});
+      }
+      tx=new Transaction();
+      tx.moveCall({target:`${current}::fleet_storage::execute_renewal`,arguments:[tx.object(oldStorage),tx.object(system),tx.pure.id(bcs.Address.parse(oldRecords[0].name.bcs)),tx.pure.u32(5),tx.pure.u64(2)]});
+      await abort('expired selected blob renewal still fails closed',tx,13);
+      tx=new Transaction();
+      const [w]=tx.moveCall({target:`${head}::fleet_storage::withdraw_wal`,arguments:[tx.object(oldStorage),tx.object(budget),tx.object(ownerCap),tx.pure.u64(0)]});
+      tx.transferObjects([w],signer.toSuiAddress());
+      await abort('v2 mutation rejects migrated v3 storage',tx,0);
+
     }
     console.log(JSON.stringify({ check: 'populated-object compatible storage upgrade and old-package retirement', receipts }));
   } finally { await fs.rm(tmp, { recursive: true, force: true }); }

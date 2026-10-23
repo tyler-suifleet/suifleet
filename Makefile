@@ -702,3 +702,9 @@ pilot-localnet:
 pilot-public-read:
 	$(RUN) mkdir -p "$(PILOT_EVIDENCE_DIR)"
 	$(RUN) node scripts/pilot_public_read.cjs "$(PILOT_EVIDENCE_DIR)/public-read.json"
+
+# SF-128: real populated-object v1/v2 upgrades and 10->10000 protected blob gas.
+# Run only in a disposable --network none container (same as retention-upgrade).
+.PHONY: test-retention-scale-upgrade
+test-retention-scale-upgrade:
+	$(RUN) python3 scripts/test_protocol_localnet.py --retention-scale-upgrade
