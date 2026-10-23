@@ -335,3 +335,21 @@ async function uploads() {
 reads().then(() => console.log("PASS: account reads follow the budget index and verify the account's type, budget and device; reserve, at-limit, anomalous, low, empty, paused, runway and storage alerts"))
   .then(uploads).then(() => console.log("PASS: fleet-paid uploads check the pinned Walrus package, need the registration event, write slivers to the registered blob and certify it; failures stop without success"),
   (error) => { console.error(error); process.exit(1); });
+
+{
+  const { MEASURED, estimate } = costs;
+  const records = JSON.parse(fs.readFileSync(path.join(root, 'docs/validation/sf082-device-effects.json'), 'utf8')).transactions;
+  const health = records.filter(r => r.health_seq);
+  assert.equal(MEASURED.fleetData.initialHealthNetMist, BigInt(health.find(r => r.health_seq === 1).net_gas_mist));
+  assert.equal(MEASURED.fleetData.recurringHealthNetMist, BigInt(Math.max(...health.filter(r => r.health_seq > 1).map(r => r.net_gas_mist))));
+  const native = JSON.parse(fs.readFileSync(path.join(root, 'docs/validation/sf082-testnet-native.json'), 'utf8'));
+  assert.equal(MEASURED.fleetData.archiveNetMist, native.native_transactions.filter(r => r.label.startsWith('periodic-')).reduce((sum, r) => sum + BigInt(r.net_gas_mist), 0n));
+  const base = { devices: 1, months: 1, receiptsPerDeviceMonth: 0, anchorsPerDeviceMonth: 0, releasesPerMonth: 0, artifactBytes: 0, dataBytesPerDeviceMonth: 0, storageEpochs: 3, floatMist: 100000000000n, drawMist: 50000000n, marginPercent: 0 };
+  const first = estimate({ ...base, healthSummariesPerDeviceMonth: 1 });
+  assert.equal(first.gasMist, MEASURED.fleetData.initialHealthNetMist);
+  assert.equal(estimate({ ...base, healthSummariesPerDeviceMonth: 2 }).gasMist, MEASURED.fleetData.initialHealthNetMist + MEASURED.fleetData.recurringHealthNetMist);
+  const daily = estimate({ ...base, serverlessData: true, dataBytesPerDeviceMonth: 64 * 1024 * 1024, dataUploadsPerDeviceMonth: 30 });
+  assert.equal(daily.deviceTransactions, 90); assert.equal(daily.gasMist, 30n * MEASURED.fleetData.archiveNetMist);
+  assert.equal(estimate({ ...base, serverlessData: true, dataUploadsPerDeviceMonth: 30 }).deviceTransactions, 0, 'empty periodic logs need no blob');
+  console.log('SF082 estimate reproduces measured first/recurring health and all three archive transaction costs');
+}

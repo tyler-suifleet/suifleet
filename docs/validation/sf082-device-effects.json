@@ -1,0 +1,429 @@
+{
+  "schema": 1,
+  "chain": "4c78adac",
+  "source": "gRPC ListTransactions by each disposable acceptance sender; execution effects, including failures and signed rebates",
+  "transactions": [
+    {
+      "sender": "0x727e95b39b4f718dcb3a2b01057a4385563d3173a569e75c133e83c36a219636",
+      "digest": "DcZwGL11emt5K4t3qgjnjx8VSuSzhCaHVroJyTk2jVT7",
+      "status": {
+        "success": true,
+        "error": null
+      },
+      "net_gas_mist": 1000099,
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "988000",
+        "storageRebate": "987901",
+        "nonRefundableStorageFee": "99"
+      },
+      "events": []
+    },
+    {
+      "sender": "0xcf67e822678cc6cb89984fe44f563d031db13e9871cc947415edee75064dc9f9",
+      "digest": "FzS9R7rs7xscfoKMRk6yVq8GYGUG8uP3puxzzt8X29zu",
+      "status": {
+        "success": true,
+        "error": null
+      },
+      "net_gas_mist": 1000099,
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "988000",
+        "storageRebate": "987901",
+        "nonRefundableStorageFee": "99"
+      },
+      "events": []
+    },
+    {
+      "sender": "0xcf67e822678cc6cb89984fe44f563d031db13e9871cc947415edee75064dc9f9",
+      "digest": "43FrFtxQs2SPfbfgJV2Vfr1tEPQnk6LmpXwXyMw1BGXi",
+      "status": {
+        "success": true,
+        "error": null
+      },
+      "net_gas_mist": 1654839,
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "13041600",
+        "storageRebate": "12386761",
+        "nonRefundableStorageFee": "1239"
+      },
+      "health_seq": 12,
+      "events": [
+        "0xc841f6f5232e60602d4b951d1a6914e1e3b567fc71fbc57f2b98e5ee4a8e4b50::fleet_data::HealthUpdated"
+      ]
+    },
+    {
+      "sender": "0xcf67e822678cc6cb89984fe44f563d031db13e9871cc947415edee75064dc9f9",
+      "digest": "98MBhAnxtPGHK5rLyh5KLo2qPxeTZgqovT9LaNfdM6L1",
+      "status": {
+        "success": true,
+        "error": null
+      },
+      "net_gas_mist": -1802881,
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "12388000",
+        "storageRebate": "15190881",
+        "nonRefundableStorageFee": "1519"
+      },
+      "health_seq": 11,
+      "events": [
+        "0xc841f6f5232e60602d4b951d1a6914e1e3b567fc71fbc57f2b98e5ee4a8e4b50::fleet_data::HealthUpdated"
+      ]
+    },
+    {
+      "sender": "0xcf67e822678cc6cb89984fe44f563d031db13e9871cc947415edee75064dc9f9",
+      "digest": "DKg3cBffgqLEKrHhAVqQXGMgVeddJ2FWY2fUqx8zi4rJ",
+      "status": {
+        "success": true,
+        "error": null
+      },
+      "net_gas_mist": 1381481,
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "15192400",
+        "storageRebate": "14810919",
+        "nonRefundableStorageFee": "1481"
+      },
+      "health_seq": 10,
+      "events": [
+        "0xc841f6f5232e60602d4b951d1a6914e1e3b567fc71fbc57f2b98e5ee4a8e4b50::fleet_data::HealthUpdated"
+      ]
+    },
+    {
+      "sender": "0xcf67e822678cc6cb89984fe44f563d031db13e9871cc947415edee75064dc9f9",
+      "digest": "3CrksXm8MWsi2dNbHGzBuPDvuk1bHNKV8yAjkdUd1VCD",
+      "status": {
+        "success": true,
+        "error": null
+      },
+      "net_gas_mist": 6389875,
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "20140000",
+        "storageRebate": "14750125",
+        "nonRefundableStorageFee": "1475"
+      },
+      "events": [
+        "0xc841f6f5232e60602d4b951d1a6914e1e3b567fc71fbc57f2b98e5ee4a8e4b50::fleet_data::DataAnchored"
+      ]
+    },
+    {
+      "sender": "0xcf67e822678cc6cb89984fe44f563d031db13e9871cc947415edee75064dc9f9",
+      "digest": "DRtu9j2DEYziht3oFdmoHDeUPS1Q7nsMHSMiV53Zz7Vn",
+      "status": {
+        "success": true,
+        "error": null
+      },
+      "net_gas_mist": 43019,
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "5236400",
+        "storageRebate": "6193381",
+        "nonRefundableStorageFee": "619"
+      },
+      "events": [
+        "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::events::BlobCertified"
+      ]
+    },
+    {
+      "sender": "0xcf67e822678cc6cb89984fe44f563d031db13e9871cc947415edee75064dc9f9",
+      "digest": "FVZxyhNHf4W55SPqf6vBJuWWxNCPAjpFDhqwoBTWgt9T",
+      "status": {
+        "success": true,
+        "error": null
+      },
+      "net_gas_mist": 1988540,
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "6391600",
+        "storageRebate": "5403060",
+        "nonRefundableStorageFee": "540"
+      },
+      "events": [
+        "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2::fleet_budget::GasDrawn"
+      ]
+    },
+    {
+      "sender": "0xcf67e822678cc6cb89984fe44f563d031db13e9871cc947415edee75064dc9f9",
+      "digest": "Qzrk55CuCjTCcdhzHU9jci4QZTzAENpft34A2pLUicb",
+      "status": {
+        "success": true,
+        "error": null
+      },
+      "net_gas_mist": 7859671,
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "127558400",
+        "storageRebate": "120698729",
+        "nonRefundableStorageFee": "12071"
+      },
+      "events": [
+        "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::events::BlobRegistered",
+        "0x2c9382fd49ee2f09e3aeddcfc470fbbf922ba0cc30862b72dd3528e668ffb370::fleet_storage::UploadRegistered"
+      ]
+    },
+    {
+      "sender": "0xcf67e822678cc6cb89984fe44f563d031db13e9871cc947415edee75064dc9f9",
+      "digest": "BnmXz3xwYu1ebWJp5EVpR7wiFKgksE6eUg7XNDSFE732",
+      "status": {
+        "success": true,
+        "error": null
+      },
+      "net_gas_mist": 1000639,
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "6391600",
+        "storageRebate": "6390961",
+        "nonRefundableStorageFee": "639"
+      },
+      "events": [
+        "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2::fleet_budget::GasDrawn"
+      ]
+    },
+    {
+      "sender": "0xcf67e822678cc6cb89984fe44f563d031db13e9871cc947415edee75064dc9f9",
+      "digest": "CbyzZHcYFYSSFgPLgnNDGsRHpPke6SZwXmBcFnKVrMcd",
+      "status": {
+        "success": true,
+        "error": null
+      },
+      "net_gas_mist": 1001475,
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "14751600",
+        "storageRebate": "14750125",
+        "nonRefundableStorageFee": "1475"
+      },
+      "health_seq": 9,
+      "events": [
+        "0xc841f6f5232e60602d4b951d1a6914e1e3b567fc71fbc57f2b98e5ee4a8e4b50::fleet_data::HealthUpdated"
+      ]
+    },
+    {
+      "sender": "0xcf67e822678cc6cb89984fe44f563d031db13e9871cc947415edee75064dc9f9",
+      "digest": "HVutxnG2jyE36Dff9RxF9iBHt2Jew4hrTAMg3VTK3tBs",
+      "status": {
+        "success": true,
+        "error": null
+      },
+      "net_gas_mist": 1009074,
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "14751600",
+        "storageRebate": "14742526",
+        "nonRefundableStorageFee": "1474"
+      },
+      "health_seq": 8,
+      "events": [
+        "0xc841f6f5232e60602d4b951d1a6914e1e3b567fc71fbc57f2b98e5ee4a8e4b50::fleet_data::HealthUpdated"
+      ]
+    },
+    {
+      "sender": "0xcf67e822678cc6cb89984fe44f563d031db13e9871cc947415edee75064dc9f9",
+      "digest": "3Z1hyydJVUXCM8jELLZ8ZxJScKCAsJb6jGHSWqfbUVHs",
+      "status": {
+        "success": true,
+        "error": null
+      },
+      "net_gas_mist": 1001474,
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "14744000",
+        "storageRebate": "14742526",
+        "nonRefundableStorageFee": "1474"
+      },
+      "health_seq": 7,
+      "events": [
+        "0xc841f6f5232e60602d4b951d1a6914e1e3b567fc71fbc57f2b98e5ee4a8e4b50::fleet_data::HealthUpdated"
+      ]
+    },
+    {
+      "sender": "0xcf67e822678cc6cb89984fe44f563d031db13e9871cc947415edee75064dc9f9",
+      "digest": "9JBGASEVELWSNzESNRmKcaR4yvteYgKmRV8k4GW6b4NL",
+      "status": {
+        "success": true,
+        "error": null
+      },
+      "net_gas_mist": 6389868,
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "20071600",
+        "storageRebate": "14681732",
+        "nonRefundableStorageFee": "1468"
+      },
+      "events": [
+        "0xc841f6f5232e60602d4b951d1a6914e1e3b567fc71fbc57f2b98e5ee4a8e4b50::fleet_data::DataAnchored"
+      ]
+    },
+    {
+      "sender": "0xcf67e822678cc6cb89984fe44f563d031db13e9871cc947415edee75064dc9f9",
+      "digest": "9LkjrzwTWS9HFTb3ugkmjKxoPBcTEPJiS28YZsEoLZm4",
+      "status": {
+        "success": true,
+        "error": null
+      },
+      "net_gas_mist": 1030957,
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "5601200",
+        "storageRebate": "5570243",
+        "nonRefundableStorageFee": "557"
+      },
+      "events": [
+        "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::events::BlobCertified"
+      ]
+    },
+    {
+      "sender": "0xcf67e822678cc6cb89984fe44f563d031db13e9871cc947415edee75064dc9f9",
+      "digest": "CWZd8WwZeKJheVkGWYVskaEG3wgNiRbGvgZDCWhcwMUw",
+      "status": {
+        "success": true,
+        "error": null
+      },
+      "net_gas_mist": 993869,
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "14683200",
+        "storageRebate": "14689331",
+        "nonRefundableStorageFee": "1469"
+      },
+      "health_seq": 6,
+      "events": [
+        "0xc841f6f5232e60602d4b951d1a6914e1e3b567fc71fbc57f2b98e5ee4a8e4b50::fleet_data::HealthUpdated"
+      ]
+    },
+    {
+      "sender": "0xcf67e822678cc6cb89984fe44f563d031db13e9871cc947415edee75064dc9f9",
+      "digest": "CQkw4fTXUXNZiFdvcPNc4jvZCtZGt3z76WhR5DiFDwfK",
+      "status": {
+        "success": true,
+        "error": null
+      },
+      "net_gas_mist": 1009068,
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "14690800",
+        "storageRebate": "14681732",
+        "nonRefundableStorageFee": "1468"
+      },
+      "health_seq": 5,
+      "events": [
+        "0xc841f6f5232e60602d4b951d1a6914e1e3b567fc71fbc57f2b98e5ee4a8e4b50::fleet_data::HealthUpdated"
+      ]
+    },
+    {
+      "sender": "0xcf67e822678cc6cb89984fe44f563d031db13e9871cc947415edee75064dc9f9",
+      "digest": "6gLjJ4ZXb44QPpwbbpKQka5HdxvGgKDtxuagNwphnfXd",
+      "status": {
+        "success": true,
+        "error": null
+      },
+      "net_gas_mist": 3797989,
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "14683200",
+        "storageRebate": "11885211",
+        "nonRefundableStorageFee": "1189"
+      },
+      "health_seq": 4,
+      "events": [
+        "0xc841f6f5232e60602d4b951d1a6914e1e3b567fc71fbc57f2b98e5ee4a8e4b50::fleet_data::HealthUpdated"
+      ]
+    },
+    {
+      "sender": "0xcf67e822678cc6cb89984fe44f563d031db13e9871cc947415edee75064dc9f9",
+      "digest": "6zw8xuyLC19Me9vhEHVz7mC9uqn6mZNQULPdMd7M1Amw",
+      "status": {
+        "success": true,
+        "error": null
+      },
+      "net_gas_mist": 12297664,
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "127923200",
+        "storageRebate": "116625536",
+        "nonRefundableStorageFee": "11664"
+      },
+      "events": [
+        "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::events::BlobRegistered",
+        "0x2c9382fd49ee2f09e3aeddcfc470fbbf922ba0cc30862b72dd3528e668ffb370::fleet_storage::UploadRegistered"
+      ]
+    },
+    {
+      "sender": "0xcf67e822678cc6cb89984fe44f563d031db13e9871cc947415edee75064dc9f9",
+      "digest": "7v2f9LCxS7tS1wju6CGvGR9n1cw63DSy6DjUpW8cSJ5t",
+      "status": {
+        "success": true,
+        "error": null
+      },
+      "net_gas_mist": -1802931,
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "11886400",
+        "storageRebate": "14689331",
+        "nonRefundableStorageFee": "1469"
+      },
+      "health_seq": 3,
+      "events": [
+        "0xc841f6f5232e60602d4b951d1a6914e1e3b567fc71fbc57f2b98e5ee4a8e4b50::fleet_data::HealthUpdated"
+      ]
+    },
+    {
+      "sender": "0xcf67e822678cc6cb89984fe44f563d031db13e9871cc947415edee75064dc9f9",
+      "digest": "A99gJoseg9erT1sPPQpNyaPWKAYa3VEgSWG2tBveisVm",
+      "status": {
+        "success": true,
+        "error": null
+      },
+      "net_gas_mist": 4459123,
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "14690800",
+        "storageRebate": "11231677",
+        "nonRefundableStorageFee": "1123"
+      },
+      "health_seq": 2,
+      "events": [
+        "0xc841f6f5232e60602d4b951d1a6914e1e3b567fc71fbc57f2b98e5ee4a8e4b50::fleet_data::HealthUpdated"
+      ]
+    },
+    {
+      "sender": "0xcf67e822678cc6cb89984fe44f563d031db13e9871cc947415edee75064dc9f9",
+      "digest": "4RwY1sd8xAdQdxD3D2mph7mmDuhbo8sMgervvFsdo8GQ",
+      "status": {
+        "success": true,
+        "error": null
+      },
+      "net_gas_mist": 7255298,
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "11232800",
+        "storageRebate": "4977502",
+        "nonRefundableStorageFee": "498"
+      },
+      "health_seq": 1,
+      "events": [
+        "0xc841f6f5232e60602d4b951d1a6914e1e3b567fc71fbc57f2b98e5ee4a8e4b50::fleet_data::HealthUpdated"
+      ]
+    },
+    {
+      "sender": "0xe7f00ba7150fda5dd2ebf5c67d1fae224706544273ba8add3d56babc8c7182e1",
+      "digest": "7gXj7LQbDd4o74idJQva2p1mVfbZzwx5FWc1FKTjrfK",
+      "status": {
+        "success": true,
+        "error": null
+      },
+      "net_gas_mist": 1000099,
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "988000",
+        "storageRebate": "987901",
+        "nonRefundableStorageFee": "99"
+      },
+      "events": []
+    }
+  ]
+}
