@@ -129,6 +129,42 @@ def main():
         print("PASS: separate fleet_storage authorization/quota/retention tests")
         print(next((line for line in output.splitlines() if "Test result:" in line), output[-300:]))
 
+        # SF-082 is a third, independently compiled package, not coverage
+        # inherited merely because root/storage are its dependencies.
+        data = package / "fleet_data"
+        data_build = [arg if arg != str(package) else str(data) for arg in build]
+        run(data_build, env)
+        print("PASS: separate fleet_data pinned compiler and strict Sui linters")
+        data_unsuppressed = unsuppressed / "fleet_data"
+        for source in (data_unsuppressed / "sources").glob("*.move"):
+            source.write_text(re.sub(r"^[ \t]*#\[allow\([^\n]+\)\]\n", "", source.read_text(), flags=re.M))
+        data_expected = json.loads((ROOT / "contracts/fleet_data/security-lint-baseline.json").read_text())["diagnostics"]
+        check_unsuppressed([arg if arg != str(data) else str(data_unsuppressed) for arg in data_build],
+                           data_unsuppressed, env, data_expected)
+        print("PASS: fleet_data unsuppressed public-signature compatibility baseline")
+        output = run(["sui", "move", "test", "--path", str(data)], env)
+        print("PASS: separate fleet_data signer, sequence, cadence, blob and Seal access tests")
+        print(next((line for line in output.splitlines() if "Test result:" in line), output[-300:]))
+        data_source = data / "sources/fleet_data.move"
+        for before, after, test in [
+            ("fleet_budget::assert_may_draw(budget, account, registry, cap, ctx);",
+             "let _ = ctx;", "revoked_health"),
+            ("assert!(identity_matches(fleet, &id) && fleet.support.contains(&ctx.sender()), EAccess);",
+             "assert!(identity_matches(fleet, &id), EAccess);", "device_cannot_read"),
+        ]:
+            original = data_source.read_text()
+            if original.count(before) != 1:
+                raise RuntimeError("fleet_data authority mutation anchor drift")
+            data_source.write_text(original.replace(before, after))
+            try:
+                output = run(["sui", "move", "test", "--path", str(data), test], env,
+                             failure="Test did not error as expected")
+                if test not in output or "FAIL" not in output:
+                    raise RuntimeError("Missing actual fleet_data authority counterexample")
+                print(f"PASS: fleet_data rejects authority bypass: {test}")
+            finally:
+                data_source.write_text(original)
+
         storage_source = storage / "sources/fleet_storage.move"
         original = storage_source.read_text()
         start = original.index("    fun assert_owner(")
