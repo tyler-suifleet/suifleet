@@ -60,7 +60,7 @@ const USD = { sui: { usd: 2.5, last_updated_at: 1792900000 }, "walrus-2": { usd:
       // The fleet size starts from the enrolled devices; the owner sets it to 1,000.
       assert.equal(await page.getByLabel("Devices", { exact: true }).first().inputValue(), "3");
       await page.getByLabel("Devices", { exact: true }).first().fill("1000");
-      await waitText("Per fleet $50.00");
+      await waitText("Per fleet $80.00");
       // Defaults from the price table are selected.
       for (const id of ["checkIntervalMs-1800000", "rolloutCheckIntervalMs-60000", "healthIntervalMs-86400000", "archiveIntervalMs-604800000", "archiveRetentionDays-42"]) {
         assert.ok(await page.locator(`#${id}`).isChecked(), `${id} is the default`);
@@ -69,7 +69,7 @@ const USD = { sui: { usd: 2.5, last_updated_at: 1792900000 }, "walrus-2": { usd:
       const hourly = await cells("healthIntervalMs-3600000");
       assert.match(hourly[1], /731 signed health reports/);
       assert.match(hourly[2], /^\$0\.\d{4}$/); assert.notEqual(hourly[2], "$0.0000");
-      assert.deepEqual(hourly.slice(4), ["$0.2000", "$200.00"]);
+      assert.deepEqual(hourly.slice(4), ["$0.1200", "$120.00"]);
       assert.deepEqual((await cells("healthIntervalMs-86400000")).slice(4), ["included", "included"]);
       const fiveMinutes = await cells("checkIntervalMs-300000");
       assert.match(fiveMinutes[1], /8,766 reads, no network fee/);
@@ -79,8 +79,8 @@ const USD = { sui: { usd: 2.5, last_updated_at: 1792900000 }, "walrus-2": { usd:
       assert.match((await cells("archiveRetentionDays-365"))[1], /Unavailable here: needs 365 Walrus epochs of 1 day\(s\); the limit is 53/);
       // Network cost and the SuiFleet price are shown apart.
       assert.match(await text("network-cost"), /paid from your fleet budget/);
-      assert.doesNotMatch(await text("network-cost"), /\$50\.00/);
-      assert.match(await text("suifleet-price"), /Base \$50\.00; add-ons \$0/);
+      assert.doesNotMatch(await text("network-cost"), /\$80\.00/);
+      assert.match(await text("suifleet-price"), /Base \$80\.00; add-ons \$0/);
       assert.match(await text("suifleet-price"), /Activation \$100\.00 one-time/);
       // Quotes: the live Testnet gas and Walrus reads, each dated; USD stays recorded until fetched.
       const quote = await text("quote");
@@ -97,7 +97,7 @@ const USD = { sui: { usd: 2.5, last_updated_at: 1792900000 }, "walrus-2": { usd:
       // The deposit follows the settings.
       const daily = await depositSui();
       await page.locator("#healthIntervalMs-3600000").check();
-      await waitText("add-ons $200.00");
+      await waitText("add-ons $120.00");
       const hourlyDeposit = await depositSui();
       assert.ok(hourlyDeposit > daily * 2, `hourly health needs a much larger deposit: ${daily} → ${hourlyDeposit}`);
       assert.match(await text("deposit"), /Your fleet budget holds 0\.01 SUI; fleet storage holds 0 WAL/);

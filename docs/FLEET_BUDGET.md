@@ -295,8 +295,8 @@ saving:
   added together.
 - **One price table** (`lib/fleet-pricing.ts`). Every default and price
   comes from the 2026-10-23 proposal in [BUSINESS_PLAN.md](BUSINESS_PLAN.md)
-  ([PR #268](https://github.com/tyler-suifleet/suifleet/pull/268)), which is
-  not yet an approved price. A build can replace the whole table with
+  (merged in [PR #268](https://github.com/tyler-suifleet/suifleet/pull/268)),
+  which is not yet an approved price. A build can replace the whole table with
   `NEXT_PUBLIC_FLEET_PRICE_TABLE` (JSON of the same shape). A malformed table
   is refused whole and the page shows why, rather than partial prices.
 - **Mainnet-rescaled estimator** (`lib/network-costs.ts`). The gas
@@ -336,7 +336,7 @@ Until deposit reclaim
 ([SF-129/#264](https://github.com/tyler-suifleet/suifleet/issues/264)), a
 weekly archive's Walrus storage deposit dominates the default network cost.
 That is about $0.10 per device a month at the recorded quote, above the
-proposed $0.05 base price, as the business plan notes.
+proposed $0.08 first-tier base price, as the business plan notes.
 
 **Fleet-paid uploads** (`lib/fleet-upload.ts`). On the Releases page, the
 Components publisher and the Greengrass import, "Pay Walrus storage from the

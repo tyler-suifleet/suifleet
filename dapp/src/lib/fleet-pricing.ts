@@ -1,7 +1,7 @@
 // SF-131: the SuiFleet price list, in one table. Every default and add-on price
 // the settings page shows comes from here; nothing else hard-codes a price.
-// Source: the 2026-10-23 pricing proposal in docs/BUSINESS_PLAN.md (PR #268),
-// not yet approved as a final price. A deployment can replace the whole table
+// Source: the 2026-10-23 pricing proposal in docs/BUSINESS_PLAN.md (merged in
+// PR #268), not yet approved as a final price. A deployment can replace the whole table
 // with NEXT_PUBLIC_FLEET_PRICE_TABLE (JSON of the same shape); it is validated
 // and refused, not partially applied, when malformed.
 //
@@ -43,7 +43,7 @@ export const DEFAULT_PRICE_TABLE: PriceTable = {
   source: "docs/BUSINESS_PLAN.md pricing proposal, 2026-10-23 (not yet approved)",
   currency: "USD",
   base: {
-    tiers: [{ upToDevices: 100_000, usdPerDeviceMonth: 0.05 }, { upToDevices: 1_000_000, usdPerDeviceMonth: 0.04 }],
+    tiers: [{ upToDevices: 10_000, usdPerDeviceMonth: 0.08 }, { upToDevices: 100_000, usdPerDeviceMonth: 0.05 }, { upToDevices: 1_000_000, usdPerDeviceMonth: 0.04 }],
     customFromUsdPerDeviceMonth: 0.03,
     monthlyMinimumUsd: 49,
     activationUsdPerDevice: 0.10,
@@ -62,7 +62,7 @@ export const DEFAULT_PRICE_TABLE: PriceTable = {
       { label: "Off (normal checks only)", value: 0, usdPerDeviceMonth: 0 },
     ],
     healthIntervalMs: [
-      { label: "Hourly", value: HOUR, usdPerDeviceMonth: 0.20 },
+      { label: "Hourly", value: HOUR, usdPerDeviceMonth: 0.12 },
       { label: "Every 6 hours", value: 6 * HOUR, usdPerDeviceMonth: 0.03 },
       { label: "Daily", value: DAY, usdPerDeviceMonth: 0, default: true },
     ],

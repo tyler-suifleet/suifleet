@@ -65,10 +65,10 @@ const table = pricing.DEFAULT_PRICE_TABLE;
 assert.equal(pricing.validatePriceTable(table), table);
 const priceOf = (key, value) => pricing.optionFor(table, key, value).usdPerDeviceMonth;
 const MIN = 60_000, HOUR = 60 * MIN, DAY = 24 * HOUR;
-assert.deepEqual(table.base.tiers, [{ upToDevices: 100_000, usdPerDeviceMonth: 0.05 }, { upToDevices: 1_000_000, usdPerDeviceMonth: 0.04 }]);
+assert.deepEqual(table.base.tiers, [{ upToDevices: 10_000, usdPerDeviceMonth: 0.08 }, { upToDevices: 100_000, usdPerDeviceMonth: 0.05 }, { upToDevices: 1_000_000, usdPerDeviceMonth: 0.04 }]);
 assert.deepEqual([table.base.customFromUsdPerDeviceMonth, table.base.monthlyMinimumUsd, table.base.activationUsdPerDevice, table.base.annualPrepayDiscountPercent], [0.03, 49, 0.10, 10]);
 assert.deepEqual([priceOf("checkIntervalMs", 5 * MIN), priceOf("checkIntervalMs", 15 * MIN), priceOf("checkIntervalMs", 30 * MIN), priceOf("checkIntervalMs", HOUR)], [0.05, 0.01, 0, 0]);
-assert.deepEqual([priceOf("healthIntervalMs", HOUR), priceOf("healthIntervalMs", 6 * HOUR), priceOf("healthIntervalMs", DAY)], [0.20, 0.03, 0]);
+assert.deepEqual([priceOf("healthIntervalMs", HOUR), priceOf("healthIntervalMs", 6 * HOUR), priceOf("healthIntervalMs", DAY)], [0.12, 0.03, 0]);
 assert.deepEqual([priceOf("archiveIntervalMs", DAY), priceOf("archiveIntervalMs", 7 * DAY)], [0.08, 0]);
 assert.deepEqual([priceOf("archiveRetentionDays", 42), priceOf("archiveRetentionDays", 182), priceOf("archiveRetentionDays", 365)], [0, 0.02, 0.04]);
 assert.equal(table.addOns.encryptedDelivery.usdPerDeviceMonth, 0.02);
@@ -93,19 +93,19 @@ for (const [mutate, error] of broken) { const t = clone(); mutate(t); assert.mat
 console.log("PASS: price table holds the business-plan defaults, tiers and add-on prices; overrides are validated and refused whole");
 
 // ── The SuiFleet price: tiers, minimum, add-ons, annual discount, activation ──
-assert.deepEqual(pricing.basePrice(table, 1000), { usd: 50, custom: false });
-near(pricing.basePrice(table, 150_000).usd, 100_000 * 0.05 + 50_000 * 0.04, 1e-9, "second tier");
+assert.deepEqual(pricing.basePrice(table, 1000), { usd: 80, custom: false });
+near(pricing.basePrice(table, 150_000).usd, 10_000 * 0.08 + 90_000 * 0.05 + 50_000 * 0.04, 1e-9, "third tier");
 const huge = pricing.basePrice(table, 1_200_000);
-near(huge.usd, 5000 + 900_000 * 0.04 + 200_000 * 0.03, 1e-9, "custom tier"); assert.equal(huge.custom, true);
+near(huge.usd, 800 + 4500 + 900_000 * 0.04 + 200_000 * 0.03, 1e-9, "custom tier"); assert.equal(huge.custom, true);
 const defaults = settings.defaultValues(table);
 const small = pricing.fleetPrice(table, 100, { values: defaults, encryptedDelivery: false, annualPrepay: false });
 assert.equal(small.minimumApplied, true); assert.equal(small.monthly, 49); near(small.activationOneTime, 10, 1e-9, "activation");
-// The plan's heavy profile at 10,000 devices: 15-minute checks, hourly health, daily archives = $0.34 a device, $3,400.
+// The plan's heavy profile at 10,000 devices: 15-minute checks, hourly health, daily archives = $0.29 a device, $2,900.
 const heavy = { ...defaults, checkIntervalMs: 15 * MIN, healthIntervalMs: HOUR, archiveIntervalMs: DAY };
 const heavyPrice = pricing.fleetPrice(table, 10_000, { values: heavy, encryptedDelivery: false, annualPrepay: false });
-near(heavyPrice.monthly, 3400, 1e-9, "heavy fleet"); near(heavyPrice.perDevice, 0.34, 1e-9, "heavy device");
+near(heavyPrice.monthly, 2900, 1e-9, "heavy fleet"); near(heavyPrice.perDevice, 0.29, 1e-9, "heavy device");
 const annual = pricing.fleetPrice(table, 10_000, { values: heavy, encryptedDelivery: true, annualPrepay: true });
-near(annual.monthly, (3400 + 200) * 0.9, 1e-9, "Seal add-on and annual discount");
+near(annual.monthly, (2900 + 200) * 0.9, 1e-9, "Seal add-on and annual discount");
 assert.throws(() => pricing.fleetPrice(table, 10, { values: { ...defaults, healthIntervalMs: 2 * HOUR }, encryptedDelivery: false, annualPrepay: false }), /not an option/);
 console.log("PASS: SuiFleet price: graduated tiers, custom above 1M, $49 minimum, add-ons per device and fleet, Seal, annual discount, activation");
 
@@ -149,7 +149,7 @@ const fleet = settings.fleetNetworkCost(onMainnet, workload, MAINNET_QUOTE);
 const sum = fleet.lines.reduce((s, l) => s + l.usdPerDevice, 0) + fleet.base.receipts.usdPerDevice;
 near(fleet.usdPerDevice, sum, 1e-12, "lines add up");
 near(fleet.usdPerFleet, sum * 1000 + fleet.base.releasesUsdPerFleet, 1e-12, "fleet adds releases once");
-// Until deposit reclaim (SF-129) the archive line dominates and the default network cost exceeds the $0.05 base price.
+// Until deposit reclaim (SF-129) the archive line dominates and the default network cost exceeds the $0.08 first-tier base price.
 assert.ok(fleet.lines.find((l) => l.key === "archiveIntervalMs").usdPerDevice > 0.9 * fleet.usdPerDevice);
 assert.ok(fleet.usdPerDevice > pricing.basePrice(table, 1).usd);
 console.log("PASS: each setting's network cost per device and per fleet, at Mainnet-rescaled gas and Walrus rates, matching the plan's estimates; kept apart from price");
