@@ -1,175 +1,109 @@
 # Move security audit and gates (SF-050)
 
-Status: **partially verified; blocked, not Review-ready**. Codex running model
-**gpt-6.1-sol**, session `codex-move-security-20261015`, retains SF-050/#82 and
-PR #83. The current root package contains eleven modules; the separate
-`contracts/fleet_storage` now has a separate source audit and compiler/lint/test gate. This audit and the
-verified enrollment subset are not a complete security proof.
+The implementation supplies source auditing, pinned compiler/linter gates,
+conditional formal proofs and real adversarial regressions. It does not prove
+all contract or native behavior secure. Codex running **gpt-6.1-sol**, session
+`codex-move-security-20261015`, owns [SF-050/#82](https://github.com/tyler-suifleet/suifleet/issues/82)
+and [PR #83](https://github.com/tyler-suifleet/suifleet/pull/83). Current-head CI,
+automatic testnet and independent review are recorded in the issue/PR handoff.
+Older failed prototype claims in Git history are superseded by the current
+[model and exact coverage](MOVE_NATIVE_MODEL.md).
 
-## Two-slot object-field continuation: 2026-10-22
+## Pinned formal environment and proved scope
 
-The latest [native-model continuation](MOVE_NATIVE_MODEL.md) supersedes the older
-raw-field and disconnected DOF model limitations below. The actual pinned backend
-now updates the raw Wrapper/ID slot and child-ID/owner/type heap together. The
-fresh-object roundtrip passes three phases and five genuine solver-negative
-controls. Eighteen release-VM fixtures pass; the existing raw 24/3 and application
-63/25 gates are retained. Unsupported raw/object Name overlap is rejected before
-code generation rather than silently aliased; that rejection is not a proof.
+Asymptotic's Sui-specific prover was evaluated against the actual Sui 1.81.1 /
+Move 2024 release framework. Its unmodified framework model failed before the
+solver: absent spec-only Integer and mismatched fork-only native functions.
+A checksum-pinned release adapter and native backend port now resolve that
+compatibility gap, preserving release executable framework/application bodies,
+UID cycle checks, public layouts and introduction origins. An Aptos prover,
+language server or compiler success was not substituted for security analysis.
 
-Arbitrary-input add, multi-child construction, activation/return and full
-enrollment still fail. The new concrete failures expose missing linear-input/heap
-separation and unconstrained fresh-address identity, rather than the unchanged old
-DOF template. Actual closed-writer/init preservation and identity-omission controls
-remain required software work. SF-050 remains blocked and PR #83 stays draft.
-No external-acceptance deferral applies to these proof gaps. Exact commands,
-runtime-source comparison, controls and limitations are in the continuation.
+`contracts/security-specs/toolchain.json` pins every overlay and tool: prover
+`949d14419515038d341d440e9c01c0737adf2ff0` (1.5.3), compiler fork
+`a30b3efcfaa333241c1864581753128eedc5dbf1`, release framework
+`73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1`, Boogie
+`b104805d9070f99a0b494b7760f82a274926c171` (3.5.6.0), Z3 4.13.4,
+.NET SDK 8.0.426 and Rust 1.94.0. Cargo and fourteen runtime NuGet dependencies
+use locked resolution. Binary archives and overlay/source inputs have checked
+digests. The evaluator rejects altered/untracked backend code. Build the binary
+from the reviewed patched source; source checks alone cannot authenticate an
+arbitrary supplied binary. Primary tool source:
+[Asymptotic at the evaluated revision](https://github.com/asymptotic-code/sui-prover/tree/949d14419515038d341d440e9c01c0737adf2ff0).
 
-## Current continuation: 2026-10-22
+| Gate | Positive phases / intended solver negatives | Exact property boundary |
+|---|---|---|
+| `check_move_proofs.py` | 63 / 25 | Arbitrary-state identity signer/revocation/custody read behavior; cap signer; role state/revocation; enrollment operator/claim controls; group/deployment handover; receipt generations and legacy reporting rejection; recipe format and artifact/recipe/blob binding. |
+| `check_move_native_proofs.py` | 24 / 3 | Raw typed/untyped occupancy, unknown tags, exact missing/type/duplicate errors, mutation/removal and parent/name framing. |
+| `check_move_object_proofs.py` | 21 / 9 | Two-slot DOF, arbitrary input add, multi-child framing, counter/last-created/legacy-field observations, distinct allocations, local ownership production and internal-call/return obligations. |
+| `check_move_registry_proofs.py` | 42 / 5 | Actual initializer, registration/deregistration, activation/return/borrow, identity writers and role-field framing preserve the quantified registry invariant. Actual full enrollment consumes the claim and updates quota/count. |
 
-Codex **gpt-6.1-sol**, same reserved session/branch, continued the actual software
-scope rather than deferring proofs to external acceptance. The results below
-supersede the earlier identity-spec failure and incomplete storage/manifest tail.
-The ticket remains blocked on the explicitly identified essential proof gaps;
-passing the normal subset gate does not establish full SF-050 acceptance.
+Each positive includes Check, Assume and SpecNoAbortCheck. Negatives must fail
+their specified solver phase/diagnostic with the other expected phases passing;
+timeouts, parser errors, unsupported projections and empty runs fail the gate.
+The retained-owner control intentionally fails both real ownership obligations
+(Check and Assume); the specification well-definedness phase still passes.
+Compiler/linter negatives and native-VM executions are separate evidence.
 
-### Identity correction and extended actual-implementation proofs
+The registry invariant says existing private IdentityKey entries are typed, and
+an occupied private custody name has a real Device of the matching ID and a typed
+identity. It is checked at construction and preserved by the closed writers;
+it is not added as a freshness/custody `requires` to make a failing call pass.
+The actual initializer is renamed only in the disposable proof copy because
+Move prohibits directly invoking `init`; every body statement remains intact.
+A wrong-typed initializer and omitted activation identity fail real obligations.
+The role-add frame verifies the exact sole registry write in `grant`, checked
+against its source statement. This establishes frame preservation, not all
+allocation/transfer/abort behavior of `grant`. Public read-only registry APIs,
+private key visibility and package-only UID exposure to roles close this writer
+scope. Old packages never acquire the later private key constructors.
 
-`is_active_signer_spec` now uses the non-aborting typed identity predicate,
-`asserts(!custodied || typed_identity)`, and reads Identity only inside the custody
-branch. It has no `requires` storage invariant or sender/operator precondition.
-All three obligations pass. Removing the custody early return, revocation check
-or signer equality produces the intended solver counterexample, including a
-non-custodied state. An absent/wrong-typed identity aborts only on the custody
-branch, as the implementation does.
+The ordinary 63/25 gate deliberately runs without the registry type invariant,
+retaining unknown, malformed and orphan arbitrary-state cases. `no_opaque` keeps
+real mutator bodies where an incomplete modular summary would lose storage
+framing. No failed essential registry/enrollment proof is excluded from CI.
 
-Proof-only observations/obligations are staged from SHA-256-pinned
-`compatibility/*-spec-helpers.move`; every helper uses `mode(spec)` with
-`ext(spec_only)` or targets the actual implementation. The evaluator copies
-implementation modules into the root proof package because upstream skips
-prove-annotations in dependencies. It changes no runtime body. There are no
-trusted replacement bodies, authorization `requires`, ignored aborts, extra axioms,
-or disabled UID-cycle checks. Pending custody specifications are opt-in and are
-not used as modular summaries by the normal subset.
+These proofs are **conditional on the trusted Sui native/VM contracts and the
+explicit cryptographic allocation abstraction** in MOVE_NATIVE_MODEL.md. They
+do not verify Rust hashing/collision resistance, package/transaction admission,
+gas or native resource limits, Walrus, external services, future malicious
+upgrades, arbitrary PTBs or complete business logic. Unsupported reconstruction
+and namespace shapes fail closed; no proof claims those shapes supported.
 
-The positive solver scope now covers 21 targets / 63 obligations:
+## Reproduction and evidence
 
-- Identity signer abort/return boundary; identity installation, revoke/reinstate,
-  rotation preserving revocation; borrowing the actual stored Device, loan ID,
-  typed custody removal and unchanged typed identity presence. The borrowed
-  Device ID is compared to the stored Device ID: arbitrary storage need not bind
-  that ID to its custody key, so no reachable invariant is smuggled in.
-- Signer-bound device-cap authorization; role active-state abort/return predicate
-  and operator-authorized removal of the **typed** role entry.
-- Enrollment close/limits and claim revocation, including operator authority and
-  claim removal. Full enrollment is a separate pending obligation below.
-- Group/deployment handover authority, new creator/admin and preserved payload;
-  receipt construction/current version, rejection of future authority versions
-  and discarding previous-generation statuses; both superseded current-package
-  reporting functions always abort.
-- Lowercase 64-byte recipe-hash validation with a proved loop invariant; stored
-  artifact digest/blob/creator, typed recipe digest and exact recipe value in
-  verified construction; fresh receipt presence in base construction. This is
-  digest **binding**, not a proof about Walrus bytes or updater execution.
-
-`make_deployment_security_spec` uses `no_opaque`: callers retain the real body,
-not an incomplete freshness summary. The positive target set includes every
-project-specific modular summary used by another verified target.
-
-### Remaining essential software proof scope (not deferred)
-
-Reproduce with the pinned tools/environment used by `check_move_proofs.py`:
+Inside the pinned dev image, mount a private tools cache at `/tools`, the checkout
+read-only at `/workspace`, and the pinned Move cache. Set DOTNET_ROOT=/tools/dotnet,
+DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1,
+BOOGIE_EXE=/tools/boogie/Source/BoogieDriver/bin/Release/net8.0/BoogieDriver and
+Z3_EXE=/tools/z3/z3-4.13.4-x64-glibc-2.35/bin/z3. Use two Cargo jobs:
 
 ```bash
-python3 scripts/evaluate_move_prover.py --prover-source /tools/sui-prover \
-  --framework-packages /tools/framework \
-  --prover-binary /tools/sui-prover/target/release/sui-prover \
-  --include-pending-custody --functions activate_device_security_spec
-# Independently: --include-pending-custody --functions return_device_security_spec
-# Independently: --include-name-absence --functions revoke_security_spec
-# Independently: --include-pending-enrollment --functions enroll_security_spec --timeout 180
+python3 scripts/build_move_prover.py --tools /tools
+python3 scripts/check_move_security.py
+python3 scripts/check_move_native_vm.py
+python3 scripts/check_move_proofs.py --tools /tools
+python3 scripts/check_move_native_proofs.py --tools /tools
+python3 scripts/check_move_object_proofs.py --tools /tools
+python3 scripts/check_move_registry_proofs.py --tools /tools
+python3 scripts/test_move_security_localnet.py --help
 ```
 
-- Activation and return use actual-function obligations with typed identity reads
-  and the raw custody **name**-absence predicate. The pinned backend overlay now
-  repairs the collector/emitter mismatch: unresolved parent provenance appends the
-  UID type selected by the collector, leaving the source operand unchanged.
-  Before this patch the actual bare-UID helper inside the skipped dynamic-field
-  API module emitted an undeclared one-type-argument call. After rebuilding, all
-  six generated Check/Assume/SpecNoAbortCheck files contain matching
-  `Wrapper<CustodyKey>_UID` declarations and call sites. Both Check and Assume
-  phases now fail semantically (0.9–1.1 seconds), while both SpecNoAbortCheck
-  phases pass. **This is a translation repair, not a custody theorem.** The raw
-  wrapper UID predicate and registry-backed DOF tables remain disconnected.
-- The exact observer macro was also tested, not assumed to work. Direct Wrapper
-  construction fails private-field visibility; an exact spec-only constructor
-  permits expansion and reaches the solver, but activation/return still fail.
-  That experimental overlay is not shipped. Neither path adds a trusted body,
-  predicate stub, freshness assumption or relaxed cycle detector.
-- Stronger untyped role-name absence after removal still fails with a solver
-  counterexample. Upstream `native.bpl` updates one typed table on removal and
-  constrains untyped existence only by `typed presence ==> name presence`.
-  Name absence after removal or fresh construction is therefore not established.
-  The same limitation prevents a fresh-record legacy `StatusesKey` absence proof.
-  A faithful extension must represent one shared occupied slot and value-type tag
-  per parent/name-type/key, including unknown value types, and native add/remove,
-  wrong-type and fresh-object transitions. DOF must additionally preserve its
-  real Wrapper-to-ID/child relationship. Universal equality between untyped
-  existence and every typed table is unsound and is not added here.
-- Full enrollment now uses supported bounded VC splitting:
-  `vcsMaxKeepGoingSplits:2 vcsSplitOnEveryAssert vcsFinalAssertTimeout:120`.
-  With a 180-second hard bound its Check produces a concrete counterexample in
-  **25 seconds**, reaching custody add and identity installation. Assume and
-  SpecNoAbortCheck pass. This supersedes the earlier timeouts; it is still a
-  failing implementation proof, not an established executable exploit.
+The normal contract CI job runs all four proof gates and release-VM/compiler
+controls without wallets/secrets. Exact final commands/results, unchanged release
+byte arrays, isolated-chain effects and current-head hosted checks are recorded
+in #82/PR #83. Prior network-none local-chain evidence on 2026-10-22 was 35/35
+historical receipt/old-package checks and 47/47 current identity checks; the
+historical harness genuinely upgrades to current source before resolving the
+manifest, preserving original receipt type origins. Those earlier results do
+not substitute for a claimed fresh run.
 
-Construction/init and complete inductive custody/key/value preservation across
-all UID writers remain unmet. The real activation `set_identity`-removal negative
-and missing/duplicate/wrong-typed/foreign-parent slot controls remain required
-before claiming that scope. No datatype invariant is silently assumed on inputs.
-These essential software checks are not deferred to hardware/provider acceptance.
+Physical/production-provider/manual-wallet/mainnet acceptance remains explicitly
+unrun in [#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
+[#159](https://github.com/tyler-suifleet/suifleet/issues/159). No software proof,
+CI, security review or normal automatic testnet gate is deferred by that split.
 
-Recipe binding has advanced: the same bounded VC options turn omission and
-wrong-value mutations into genuine Check counterexamples at the exact typed
-presence/value postconditions (**1.3/2.0 seconds** at the normal 30-second bound).
-Their Assume and SpecNoAbortCheck phases pass. Both controls are now included in
-normal CI, preserving the previous 63 positive obligations and 22 negative
-controls and bringing the negative total to **24**. Timeouts and model/compiler
-errors still cannot qualify as negative proof results.
-
-For exact generated-signature inspection, add `--artifacts /tools/NEW_DIRECTORY`
-to the custody reproduction command above. The evaluator requests upstream
-`--keep-temp` and copies only generated `.bpl` files to a new private directory;
-it preserves the prover's failing exit status. Inspect both call and declaration
-for the hidden UID argument in every phase. Artifacts are diagnostic proof-only
-state and are not published as evidence of successful custody verification.
-
-### Backend continuation evidence (2026-10-22)
-
-The locked offline release rebuild after the UID fallback patch passed in 1m22s.
-`python3 scripts/check_move_proofs.py --tools /tools` then passed all **63 positive
-obligations and 24 exact solver-negative controls** with the final split specs.
-The generated-signature regression uses the actual skipped-API bare-UID helper,
-not a generic outside-module helper that would enable global UID mode. Actual
-activation/return runs preserve all three phases; the failing phases remain
-explicit failures. Python compilation, compatibility checksums and `git diff
---check` pass. No new executable contract body or native-state axiom is added.
-
-Current main `5137be97ef273848dec1df81a433c0ec5454effb` is integrated separately.
-The root release comparison builds both actual packages and compares all eleven
-module arrays, not just source names: equal, SHA-256
-`1e5d1b39c20e5e19d224aa12eba924f8db550919a86ac0546c595bfc723f4e19`.
-The separate storage/root comparison also passes all twelve arrays, SHA-256
-`61d6a792faab43f0d75a3093cd597af3efb12e5302e788e67a5f256f00526cf7`.
-Its first network-none attempt lacked a pinned framework cache entry and failed;
-retry with download access completed the exact comparison. This accessed sources,
-not a wallet or chain.
-Earlier 169 root / 53 storage Move tests and 35 historical / 47 identity local-chain
-effects checks below remain historical evidence; they were not rerun for this
-proof-only continuation. Public-testnet, independent approval and final current
-head CI are not claimed passed here. The PR stays draft and the claim reserved
-because essential native-state/custody/enrollment proofs remain incomplete.
-
-### L-01 reachability and separate storage audit
+## L-01 reachability and separate storage audit
 
 The cross-registry counter example requires **two same-origin registries**.
 A complete constructor search finds only private `device_registry::init`;
@@ -203,318 +137,6 @@ Source audit of `fleet_storage.move` found no confirmed new security defect:
 | `assert_retention_funded`, `assert_retention_live`, `withdraw_retention`, `release_blob` | Conservative fleet-blob closure, prepaid count/reserves and actual expiry checks; explicit owner withdrawal/release may reduce protection and emits risk evidence. They are owner powers, not a perpetual-availability guarantee. |
 | `certify_blob`, `extend_blob`, storage resource operations | Delegate certificate/epoch/storage semantics to pinned Walrus contracts. Unit tests do not prove real Walrus certification, native correctness or production availability. |
 
-### Current verification and historical-tail repair
-
-- `python3 scripts/check_move_proofs.py --tools /tools`: **PASS**, all 63
-  positive obligations and 22 precise solver-negative controls. Pending proof
-  attempts described above remain failures and are excluded from that count.
-- Network-none compiler gate: **169/169 main tests and 53/53 storage tests**,
-  strict linters, both independently checked baselines, compiler/linter negatives
-  and all three actual authority-removal regressions pass.
-- Root release bytecode: all **11** arrays equal integrated main `7e899f3`,
-  SHA-256 `1e5d1b39c20e5e19d224aa12eba924f8db550919a86ac0546c595bfc723f4e19`.
-  Storage plus its unpublished root dependency: all **12** arrays equal,
-  SHA-256 `61d6a792faab43f0d75a3093cd597af3efb12e5302e788e67a5f256f00526cf7`.
-  Runtime layouts, bodies and introduction origins are unchanged.
-- `scripts/test_move_security_localnet.py` runs each suite on its own fresh
-  network-none chain/wallet; readiness checks wait for indexed gRPC and faucet.
-  Node logs/bootstrap output stay private and are deleted after the suite.
-  Historical fixtures: `eb8a43b`, `8728d61`, identity prior `d3acb1e`.
-  Historical receipt/old-package effects: **35/35 PASS**. Current identity/upgrade
-  effects: **47/47 PASS**. The historical harness now performs a genuine fourth
-  upgrade to current source before resolving today's manifest. It checks the
-  original receipt introduction origin and correctly treats version-1 receipts
-  as unverified; no missing type origin is invented.
-- Current real filesystem Trivy scan: **10 findings, zero blocking**, no ignores
-  or suppressions; raw output remains private. Python parser/localnet safety
-  regressions: **4/4 PASS**. Hosted CI and testnet remain exact-head gates; their
-  current URLs/results belong in the issue/PR handoff, not this historical file.
-
-No mainnet, physical programming, production provider or real-wallet acceptance
-was performed. Those remain #32/#159; the software proof gaps above remain here.
-
-## Concrete compatibility implementation on 2026-10-22
-
-Current main `7e899f32270337aee6ed113a499fcf1b5201d63e` is integrated. The
-previous arithmetic/native startup barrier was repaired with the checksum-pinned
-[compatibility overlay](../contracts/security-specs/compatibility/README.md):
-
-- Add only the upstream spec-only native `std::integer::Integer` **datatype** in
-  a temporary proof framework, without arithmetic functions or axioms.
-- Match the actual release `record_new_uid(address)` in both Rust recognition
-  and the Move spec wrapper. Keep the actual release funds add/withdraw models;
-  remove only the wrapper for the fork-only, nonexistent reservation native.
-- Fix optional function lookup to require an existing declaration. After the
-  initial adapter, the full run panicked at `model.rs:4977` on nonexistent
-  `0x2::dynamic_field::borrow_or_unknown`. The existing upstream existence-check
-  helper repairs that lookup without adding fake native semantics.
-- Preserve every executable release source. Before staging, the evaluator checks
-  original framework SHA-256
-  `366540c50b2daaa755c8b433601aa278391855cf161950dd97feb1791caca233`.
-  The UID cycle detector and all other upstream analyses remain enabled.
-
-The patched prover was genuinely built with Rust 1.94.0, `cargo build --locked
---release -p sui-prover`, and two jobs (initial build 7m06s; incremental lookup
-repair 2m11s). Boogie 3.5.6.0, Z3 4.13.4 and .NET 8.0.426 use the existing
-revision/archive pins. Fourteen runtime NuGet lockfiles and their aggregate checksum now
-pin Boogie's transitive restore; the build uses `--locked-mode` and
-`--no-restore`. The initial locked solution build returned zero errors and 26,054
-upstream warnings, including StyleCop globalization-invariant culture warnings.
-The final build targets BoogieDriver and its fourteen runtime projects; upstream
-test projects are not installed as part of the solver. A scan of their tentative
-locks exposed Newtonsoft.Json 9.0.1 / CVE-2024-21907 and
-System.Text.RegularExpressions 4.3.0 / CVE-2019-0820 (six HIGH records in three
-upstream test projects). Those test locks are not shipped or restored by the
-runtime build. No advisory suppression was added.
-No warnings are relabeled as source security findings or hidden by suppression.
-
-### Actual successful solver proofs and rejected implementation mutations
-
-Run inside the pinned dev image, with no wallet and `--network none`, after
-building the tools with `python3 scripts/build_move_prover.py --tools /tools`:
-
-```bash
-python3 scripts/check_move_proofs.py --tools /tools
-```
-
-**PASS** on the final patched/locked tools. Each positive target passed its
-`Check`, `Assume` and `SpecNoAbortCheck` obligations (six total):
-
-| Actual target | Verified subset |
-|---|---|
-| `enrollment::close` | Exact successful-path operator condition, closed state, remaining quota and enrolled count unchanged |
-| `enrollment::set_limits` | Exact successful-path operator condition, requested quota stored, open state and enrolled count unchanged |
-
-No sender-equals-operator precondition, `ignore_abort`, trusted replacement body
-or copied transition model was added. Real counterexamples demonstrate
-non-vacuity:
-
-| Mutation in temporary actual implementation | Solver rejection |
-|---|---|
-| Remove `assert_operator` from `close` | `close_spec_Assume`, operator condition fails; sender 0x0 versus operator 0x1 |
-| Remove `policy.open = false` | `close_spec_Check`, closed-state postcondition fails for an open policy |
-| Remove `assert_operator` from `set_limits` | `set_limits_spec_Assume`, operator condition fails |
-| Replace quota assignment by zero | `set_limits_spec_Check`, requested-quota equality fails |
-
-Zero quota is permitted by the implementation; no new nonzero quota requirement
-is asserted. These proofs do **not** cover claim consumption, expiry, enrollment
-custody, or the expiry-field update. The gate requires each negative to fail at
-its exact intended solver obligation and statement, not merely return nonzero.
-Model/compiler errors and timeouts do not count as invariant counterexamples.
-`.github/workflows/move-security.yml` now builds the pinned tools and gates this
-explicit subset on contract/tool/spec changes. Hosted results belong to the
-exact PR head; local success alone does not claim hosted acceptance.
-
-### Reproduced remaining software failure
-
-The unrestricted command (same tool environment, omit `--functions`) now gets
-through model construction and reaches Boogie/Z3, then exits 1:
-
-```bash
-python3 scripts/evaluate_move_prover.py \
-  --prover-source /tools/sui-prover --framework-packages /tools/framework \
-  --prover-binary /tools/sui-prover/target/release/sui-prover
-```
-
-`identity::is_active_signer_spec_Check` and `SpecNoAbortCheck` fail with **code
-should not abort** at `device_registry.move:293`, the typed identity dynamic-field
-borrow. The counterexample has `custodied == false`; the spec nevertheless calls
-`identity()` before its existing custody/identity precondition. The model permits
-an identity-key slot with a different value type: untyped `df::exists` alone does
-not justify typed `df::borrow`. The existing post-read precondition does not
-establish this storage invariant or prevent the read from aborting.
-
-This is a **failed proof/specification over unconstrained storage**, not a
-confirmed reachable source exploit or an unsupported-language/cycle-detector
-result. No custody success stub, extra precondition or cycle-check suppression
-was introduced to hide it. Next work must model and prove the reachable typed
-identity/custody invariant across construction and lifecycle updates, repair the
-spec's call ordering, and prove the complete critical authority/receipt/revocation/
-enrollment/binding scope with positive/negative solver evidence. This failure
-and the unmet essential scope retain SF-050 as blocked; they are software gates,
-not deferred external acceptance. Other previously recorded open work (L-01,
-historical manifest-tail strategy, separate storage-package audit) also remains.
-
-### Other exact validation in this implementation
-
-- Network-none `python3 scripts/check_move_security.py`: **PASS**, strict
-  compiler/linters, exact unsuppressed baseline, all negative controls, 168/168
-  Move tests and both actual authority-removal regression mutations.
-- Eleven release module arrays equal current main byte for byte; SHA-256
-  `1e5d1b39c20e5e19d224aa12eba924f8db550919a86ac0546c595bfc723f4e19`.
-- Evaluator integrity negatives: extra tracked model edit and untracked model
-  source each rejected before prover execution; original framework hash matches.
-- `python3 -m unittest discover -s scripts/tests -p test_upgrade_security_localnet.py -v`:
-  **PASS**, 4/4 parsing/local-only safety regressions. No new chain-effects run
-  is claimed; historical chain results below remain historical.
-- Final BoogieDriver runtime build: **PASS**, zero errors and zero warnings in
-  the incremental build. Trivy 0.76.0 scanned all fourteen committed NuGet runtime
-  locks: zero vulnerabilities, secrets or misconfigurations. Full repository scan
-  plus the normal report gate: **PASS**, 10 nonblocking findings, zero blocking.
-  Raw reports stay private outside the checkout.
-- `actionlint 1.7.7 .github/workflows/move-security.yml`, Python compilation and
-  `git diff --check`: **PASS**.
-
-No deployment, schema migration, device key or production credential is involved.
-Physical/mainnet/final-provider/real-wallet checks remain unrun and separately
-tracked in [#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
-[#159](https://github.com/tyler-suifleet/suifleet/issues/159).
-
-The following recovery sections retain historical observations and superseded
-startup failures. Their earlier “no proofs” statements describe those runs,
-not the now-verified enrollment subset.
-
-## Earlier recovery on 2026-10-22: historical startup blocker
-
-Codex running **gpt-6.1-sol** resumed the same reservation/session and integrated
-main `7e899f32270337aee6ed113a499fcf1b5201d63e`. This is a software blocker,
-not deferred Pi/mainnet/provider acceptance. PR #83 remains draft; issue #82
-remains open. No successful formal verification is claimed.
-
-The network-none pinned gate passed on the merged source: **168/168 Move
-tests**, strict compiler/extra linters, exact unsuppressed diagnostic baseline,
-both lint negatives, linear-capability negative and both real authority-removal
-mutations. The initial merged-source run correctly failed the baseline check
-on 15 new diagnostics. Those were reviewed individually: 13 existing immutable
-`TxContext` signatures, the intentional authenticated-sender gas transfer in
-`fleet_budget::draw_gas`, and the compatibility `fleet_budget::reserved` getter
-(which returns zero because reserves live in `GasAccount`). The baseline records
-the reasons. No new suppression or executable contract change was introduced. Both release
-builds produced identical arrays for all **11 modules**, compared against main
-`7e899f3` with the pinned compiler/framework; serialized-array SHA-256
-`1e5d1b39c20e5e19d224aa12eba924f8db550919a86ac0546c595bfc723f4e19`.
-This establishes unchanged release bytecode, not formal security.
-
-The original seven-module source audit and earlier eight-module evidence below
-are historical. The compiler/test gate now covers the eleven modules of the
-root package. Additional boundary review for this recovery:
-
-- `deployment_manager::{advance_rollout,control_rollout,delete_rollout}` checks
-  the creator. Health and online lists are operator attestations; they are not
-  chain verification of off-chain telemetry. The rollout state machine and all
-  new adversarial tests pass, but have no formal proof here.
-- `fleet_handover::{confirm,step,finish}` checks recipient confirmation, source
-  execution, inventory/kind, expiration and completion. Owned cap transfer uses
-  transaction input authorization; group/deployment transfers and role/policy
-  operations retain their own authority checks. Cancellation does not undo an
-  already completed transfer. No exhaustive PTB-composition proof is claimed.
-- `fleet_budget::{draw_gas,assert_may_draw}` binds the budget, registry, current
-  gas account, active signer and enrolled owner cap, then enforces the reserve,
-  period, amount and rate limits. `seal_policy::grant_group` requires both the
-  policy admin cap and the current group admin sender. These are inspected
-  source boundaries and regression evidence, not formal verification.
-- The separate `contracts/fleet_storage` package is **not** covered by this
-  root-package compiler/lint runner or the original audit. Complete its analysis
-  and gate coverage before claiming an audit of all current contracts complete.
-
-### Upstream compatibility investigation (source evidence, not a proof run)
-
-Fetched the full upstream prover history on this date. `main` still resolves to
-`949d14419515038d341d440e9c01c0737adf2ff0`; the releases API returns no releases.
-The unchanged failing evaluation was deliberately **not rerun**. A different
-framework/model combination must be established first.
-
-1. At the pinned release framework, `sui::object::new_uid_from_hash(bytes)` calls
-   `record_new_uid(bytes)` (`object.move:270-281`). The prover's commit
-   `c710bd57d13cec3e9c81776ac11c7ff006e9a8a4` changed both the object spec and
-   the Rust model lookup to `record_new_uid_from_hash(parent, bytes)`. Merely
-   renaming the spec leaves the Rust intrinsic lookup incorrect.
-2. Checked predecessor `82b1f464d4f1b2c414c5cd4d9e08560d34295222`: its object
-   spec and Rust lookup still target `record_new_uid`, and its accumulator spec
-   does not require the newer reservation native. However, its prover vector
-   package still imports missing `std::integer::Integer`; its compiler fork is
-   `512c3ff9a14608d281f4b1095508f59cf7ad6cce`, not the release framework. This
-   candidate is **not a verified compatible toolchain**, and was not built or
-   run as a passing verifier.
-3. Examined `integer.move` at the current pinned compiler fork. It is a spec-only
-   native arithmetic type, but its extension methods depend on `real`, `q32`,
-   `q64`, `q128`, `q_wad` and `q_ray`, which are absent from release stdlib.
-   Copying just this file is not a complete compatibility port. Replacing all
-   release framework bodies with the fork would change the verification subject.
-4. Current upstream `dynamic_field_analysis.rs:790-830` explicitly rejects
-   datatype well-foundedness cycles; its
-   `dynamic_field/well_foundedness_cycle.fail.move` fixture exercises this.
-   This is a source-confirmed model limitation, **not a newly reproduced failure
-   of SuiFleet custody**: SuiFleet model construction has not yet reached that
-   phase. Establish whether typed parent resolution handles the real custody
-   functions after fixing the earlier errors; do not assume it does.
-
-Reproduce the source comparison without executing a solver (in a checkout of
-`https://github.com/asymptotic-code/sui-prover.git`):
-
-```bash
-git show c710bd57d1 -- packages/sui-specs/sources/sui-framework/object.move crates/move-model/src/model.rs
-git show 82b1f464d4:packages/prover/sources/vector.move
-git show 82b1f464d4:packages/sui-specs/sources/sui-framework/object.move
-git show 82b1f464d4:packages/sui-specs/sources/sui-framework/funds_accumulator.move
-git show 949d144195:crates/move-stackless-bytecode/src/dynamic_field_analysis.rs
-```
-
-**Minimal next step:** produce and independently review a release-compatible
-model port: spec-only arithmetic support with its complete dependencies, the
-release `record_new_uid` signature **and Rust intrinsic mapping**, and accumulator
-models matching release natives. Preserve and compare all executable release
-framework bodies. Run `evaluate_move_prover.py` against that pinned port with
-real Boogie/Z3; require model/type checking and non-vacuous successful proofs,
-then deliberate solver-rejected invariant mutations. Resolve any actual custody
-model limitation rather than erasing custody or assuming its invariant. Only
-then wire the verified subset into normal CI. No local unsupported-native stub,
-`ignore_abort`, trusted replacement body or vacuous precondition was added.
-
-Remaining source/acceptance work stays in #82: Low L-01 legacy cross-registry
-accounting (old packages remain callable, so an in-place new-function assertion
-alone cannot eliminate the old-entry attack); the historical receipt harness's
-manifest tail still requires a truthful historical/current client test strategy;
-and complete critical receipt/capability/revocation/enrollment/binding proof
-coverage. Prior 47-check identity and 33-check partial historical receipt results
-below were **not rerun or relabeled** as current-head acceptance. Physical,
-mainnet and final provider/wallet acceptance remain separately tracked in
-[SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
-[SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159); this does not
-defer software proof, source-correctness, compatibility or CI gates.
-
-## Historical recovery validation on 2026-10-15
-
-On 2026-10-15 the reserved SF-050 worker was safely resumed after verifying
-its prior service/PID had stopped. Main at
-`795de747e066ee97af0e9e0e53deda3c6c71e90c` was integrated (the exact baseline
-is also the merge commit's second parent). The audit now includes the eighth
-module, `desired_state`, and the deployment-control APIs. Historical evidence
-below remains historical; this section records the new checks.
-
-- Corrected the hosted CI container/cache identity mismatch by building with
-  the runner UID/GID, following ordinary CI. No root compiler execution.
-- Pinned standalone negative controls to the release `Move.toml`/`Move.lock`.
-  A fresh manifest had selected a newer implicit framework; a compiler-version
-  check alone did not pin those dependencies.
-- Reviewed three new baseline diagnostics: `deployment_manager::set_control`
-  and `desired_state::{begin,commit}` use already-published `&TxContext` public
-  signatures. Changing those signatures would break compatibility. Existing
-  module-level allowances are independently stripped by the baseline check.
-- The complete gate passed with `--network none`: strict compiler/lints,
-  exact unsuppressed baseline, both lint negative controls, linear-capability
-  negative, **82/82 Move tests**, and both authority-check removal mutations.
-- All **eight** release module byte arrays equal current main, serialized-array
-  SHA-256 `5d8bb6d05e67fb5b9706cc374ea5e2661731133099a6f08b634760568ca70b99`.
-  No source function body or public signature was changed by the audit repair.
-- `actionlint 1.7.7` and `git diff --check` passed. Current-head hosted workflow
-  results are recorded in PR #83; local success is not a hosted-CI claim.
-
-`desired_state::begin/commit` checks group admin, group identity and stale
-revision; `set_component` requires creator, target-group membership and an
-authenticated recipe. The non-droppable `RevisionPlan` cannot escape its PTB.
-`deployment_manager::set_control` checks creator, state/schedule constraints
-and irreversible cancellation; removal before its cancellation check is atomic
-on abort. These are source-review and regression-test observations, not proofs.
-None of the new controls disables old package entry points; existing mixed-
-version trust rules remain necessary.
-
-The pinned prover upstream HEAD is still `949d14419515038d341d440e9c01c0737adf2ff0`.
-A release-compatible model port remains required: preserve release executable
-framework bodies while supplying reviewed spec-only integer support and models
-matching the release native signatures. Substituting the fork's moving `next`
-framework or deleting unsupported checks would not prove this release. That
-port and successful positive/negative proofs are still unmet SF-050 acceptance.
 
 ## Authority map and findings
 
@@ -527,13 +149,17 @@ and current limitations are distinguished below.
 |---|---|---|
 | `deployment_manager.move`: `make_deployment`, `receipts_mut`, `record_status`, `migrate`, `receipt_status*` | New records omit `StatusesKey`. Authoritative `ReceiptsKey` has its own introduction origin. Version 2 writers reject future generations and discard prior-generation statuses. Readers reject prior generations; legacy events are notifications, not evidence. Old packages remain callable. A sweep does not prevent old code creating fresh version-1 records, so every reader must check generation. | Historical High receipt forgery mitigated; adversarial unit/effects tests retained. No proof of all future upgrades. |
 | `device_cap.move`: `issue`, `assert_signer`, `assert_active` | Public issuance does not grant impersonation: the cap's private UID holds its registered signer binding. Unbound legacy caps fail. Active reporting additionally needs live custody, unrevoked identity and current signer. Transferring a cap does not change its signer. | Checked by current tests, including operator impersonation, revocation and rotation failures. |
-| `device_registry.move`: `activate_device`, `borrow_device`, `return_device`, `rotate_device_key`, `revoke_device`, `reinstate_device`, `deregister_activated_device` | `DeviceOwnerCap` is bearer authority. Custody plus a linear, non-droppable `DeviceLoan` prevents passing a Device by value to old deregistration code and committing without returning it. Return checks ID and signer. Rotation preserves revocation. Deregistration leaves a tombstone. The owner-cap holder can issue a new bound device cap through a temporary loan. | Current unit coverage; custody representation and cross-version linkage remain outside formal coverage. Transferring/wrapping a bearer cap delegates its authority. |
+| `device_registry.move`: `activate_device`, `borrow_device`, `return_device`, `rotate_device_key`, `revoke_device`, `reinstate_device`, `deregister_activated_device` | `DeviceOwnerCap` is bearer authority. Custody plus a linear, non-droppable `DeviceLoan` prevents passing a Device by value to old deregistration code and committing without returning it. Return checks ID and signer. Rotation preserves revocation. Deregistration leaves a tombstone. The owner-cap holder can issue a new bound device cap through a temporary loan. | Current unit coverage; closed-writer custody representation now has the conditional model proofs described above; cross-version linkage uses real-chain regressions. Transferring/wrapping a bearer cap delegates its authority. |
 | `device_registry.move`: `register_device`, `deregister_device` | **Finding L-01:** the registry counter is incremented/decremented through the supplied registry, but the legacy Device has no originating-registry binding. A holder of an unactivated Device can supply another registry with a nonzero counter and corrupt its accounting. With zero count the subtraction aborts atomically. This does not forge active custody or receipts. Do not use this count as an authorization/quota source. | **Informational/arbitrary-state limitation** after constructor reachability review above. Reproduced through the test-only repeated initializer; no reachable production exploit established. No new origin binding is claimed. Tracked in #82. |
 | `enrollment.move`: `create_policy`, `add_claims`, `revoke_claim`, `set_limits`, `close`, `enroll` | Shared policy mutations check its operator. Enrollment binds registry, open flag, Clock expiry and quota; consumes a claim identified by gas sponsor, requires sponsorship and a distinct device sender, then atomically activates custody and transfers caps. Runtime signature validation, not a Move address comparison alone, establishes sponsor/device key possession. Aborts roll back claim/quota changes. | Existing positive/negative tests retained. Operator can deliberately re-add an already consumed claim address; “single use” means consumed until operator reauthorizes it. Provisioning must not recycle claim keys unintentionally. |
 | `roles.move`: `allow_group`, `grant`, `revoke`, `is_active`, `create_deployment_as`; `deployment_manager.move`: `create_delegated` | Builder has no abilities and must be completed. Groups are checked against the immutable operator/admin. Shared registry activation is required on every delegated deployment; revocation checks recorded operator. Every target must be in scope; empty targets fail. Attributed creation is package-private. Delegate cannot use this API for direct devices or creator-only deletion. | Revocation/scope/unauthorized revoker/delete tests retained. Role is transferable bearer authority, not bound to the address logged in `RoleGranted`. A holder may further delegate via transfer/wrapping; do not interpret that event as a permanent signer ACL. |
 | `device_group.move`: `add_device`, `remove_device`, `delete_group`; `deployment_manager.move`: `report_verified_status_for_group` | Shared group writes require admin. Group reporting requires targeted group ID, current membership and group admin equal to deployment creator. Enrollment/device custody does not make a group admin the device operator. Public `custodied_device` permits reading another operator's Device, so group membership alone is not operator consent. | Current targeting checks retained. Device operator authorization before apply remains a client/daemon boundary. |
 | `deployment_manager.move`: `create_deployment`, `create_deployment_verified`, `report_verified_status`, `delete_deployment` | Legacy creation lacks a recipe digest and must remain unusable by secure clients. Verified creation validates a lowercase 64-byte recipe SHA-256 string, not Walrus bytes. Artifact digest strings in this legacy API are not format-validated on chain. Direct creation/reporting validates targeting and live signer, **not creator ownership of the device**; a receipt attests a device report, not independent proof of safe firmware/operator approval. Deletion checks creator. | Intentional client/daemon integrity and authorization boundary, not established by compiler/prover. Unknown/malformed hashes must fail before updater execution. |
 | `component_catalog.move`: `publish_version`, `create_deployment`, `delete_deployment`, validators | Shared catalog updates require publisher. Name/version/platform/digest/token and vector consistency checks precede immutable version freezing. Duplicate versions/platform pairs fail. Deployment binding uses the immutable version ID; catalog deletion removes it through creator-checked package APIs. Choosing a version from another publisher is possible and must be an explicit operator trust decision. | Current catalog tests retained. Hash strings authenticate expected bytes only when clients actually verify downloads. No Walrus availability/certification proof. |
+| `desired_state.move`: `begin`, `set_component`, `commit`; `deployment_manager.move`: `set_control` | Group admin/group ID/stale revision and authenticated recipe are checked; the non-droppable plan cannot escape its PTB. Creator controls schedule/state and cancellation is irreversible. | Source review and unit regressions; no exhaustive temporal/deployment-scheduling proof. |
+| `fleet_handover.move`: `propose`, `confirm`, `step`, transfer steps, `finish` | Bounded unique inventory; independent recipient confirmation; source, expiry, kind and progress checks; group/deployment/role/enrollment operations retain underlying authority checks. Aborts roll back progress. Cancellation does not undo completed transfers. | Source review and unit regressions; no key recovery or atomic all-object transfer guarantee. |
+| `fleet_budget.move`: owner/account guards, `draw_gas`, migration | Bound budget/cap/account IDs, current version, active signer/identity, owner-cap generation, pause/suspension and finite account reserve/period/draw limits. A compromised active key can spend its permitted allowance; funds already transferred cannot be recalled. | Source review and unit regressions; no formal SUI conservation/rate/Clock or future-upgrade proof. |
+| `seal_policy.move`: `check_admin`, `identity_matches`, `*_allowed`, approvals | Bound bearer admin cap, code version, policy ID/epoch prefix and nonce bounds; device/group approvals require current signer and membership; group grants also require group admin. | Source review and unit regressions; external provider authentication/availability and cryptographic encryption are outside Move proofs. |
 
 Upgrade compatibility depends on the deployment manifest's per-type origins,
 the UpgradeCap holder and the actual package version used for each transaction.
@@ -573,7 +199,7 @@ to its authenticated sender. One inferred `u64` is now explicit. No other
 runtime behavior changes.
 
 The runner also strips **all** `allow` annotations from a separate copy and
-requires exactly the 46 reviewed diagnostics in
+requires exactly the reviewed diagnostics in
 `contracts/security-lint-baseline.json`, keyed by file, enclosing symbol and
 diagnostic code (including multiplicity). This expected diagnostic build exits
 1; any unexpected diagnostic/status fails the gate. This additional pass matters:
@@ -589,127 +215,3 @@ active-identity checks. The last two must reach the targeted Move test and fail
 with `Test did not error as expected`; a compilation failure is not accepted.
 These are finite regression checks, not exhaustive authorization proofs.
 
-## Formal tool evaluation: reproducible blocker
-
-Primary sources: [Asymptotic Sui Prover repository/README at the evaluated commit](https://github.com/asymptotic-code/sui-prover/tree/949d14419515038d341d440e9c01c0737adf2ff0),
-its `crates/sui-prover/src/system_dependencies.rs`, `packages/*/Move.toml`,
-`Cargo.lock`, and [official documentation link](https://info.asymptotic.tech/sui-prover)
-(returned HTTP 404 during this run). The repository's latest commit was dated
-2026-09-25, and its CI contains real positive/negative verifier fixtures.
-This is a Sui-specific prover using Boogie/Z3; neither an editor analyzer nor
-the generic Aptos prover was substituted.
-
-All evaluated revisions/checksums are in
-`contracts/security-specs/toolchain.json`: prover commit
-`949d14419515038d341d440e9c01c0737adf2ff0` (binary reports `1.5.3`), its locked
-compiler fork `a30b3efcfaa333241c1864581753128eedc5dbf1`, Boogie fork
-`b104805d9070f99a0b494b7760f82a274926c171` (`3.5.6.0`), Z3 `4.13.4`, .NET SDK
-`8.0.426`, Rust `1.94.0`, and the **release** framework revision
-`73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1` from `contracts/Move.lock`.
-The Homebrew formula's moving `main`/`next`/`master` references were not used
-as version pins. Boogie was built from its pinned source; its transitive NuGet
-resolution is not promoted here as a locked production verification toolchain.
-
-Reproduction after cloning/checking out the above exact commits and downloading
-the checksum-verified SDK/Z3 archives:
-
-```bash
-# Inside the existing pinned dev image; TOOLS is a private temporary tools root.
-cd "$TOOLS/sui-prover"
-CARGO_BUILD_JOBS=2 cargo build --locked --release -p sui-prover
-cd "$TOOLS/boogie"
-DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 "$TOOLS/dotnet/dotnet" \
-  build Source/Boogie.sln -c Release -m:2
-cd /workspace
-export DOTNET_ROOT="$TOOLS/dotnet"
-export DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
-export BOOGIE_EXE="$TOOLS/boogie/Source/BoogieDriver/bin/Release/net8.0/BoogieDriver"
-export Z3_EXE="$TOOLS/z3/z3-4.13.4-x64-glibc-2.35/bin/z3"
-python3 scripts/evaluate_move_prover.py \
-  --prover-source "$TOOLS/sui-prover" \
-  --framework-packages "$TOOLS/framework" \
-  --prover-binary "$TOOLS/sui-prover/target/release/sui-prover"
-```
-
-`$TOOLS/framework` must contain `move-stdlib/` and `sui-framework/` copied from
-`crates/sui-framework/packages/` at the release revision. The script checks their
-combined source hash and the prover revision/lockfile, and stages sibling spec
-and implementation packages. It adapts only package metadata: the legacy prover
-resolver needs an explicit `sui_edge = 0x0` named address, has no release CLI
-environment lockfile, and uses local paths for the pinned release dependencies.
-No implementation or framework function body is modified. Prover model packages
-are copied from the pinned prover with only moving dependency URLs replaced by
-these local paths. All model code remains intact.
-
-**Observed result: exit 1, model-building errors, before solver execution.**
-`prover/sources/vector.move` imports missing `std::integer::Integer`.
-`sui-specs/sources/sui-framework/funds_accumulator.move` requires absent
-`reserve_object_funds_for_withdrawal`; `object.move` requires absent
-`record_new_uid_from_hash`. The default prover instead injects its fork's moving
-`next` framework, which would not establish correctness of this release.
-The evaluated prover also has an upstream negative fixture rejecting dynamic
-fields whose value contains UID (`well_foundedness_cycle.fail.move`); that is
-an additional modeling concern, **not** a reproduced failure of this project's
-custody functions, since model building already stops earlier.
-
-The sibling specs target actual `enrollment::close`, `set_limits` and
-`device_registry::is_active_signer`. They state operator abort conditions,
-closure/quota stability and signer/revocation/custody conditions without
-`ignore_abort`, trusted replacement bodies or false preconditions. The identity
-spec explicitly assumes custody has an identity; proving preservation of that
-representation invariant is still required. **None of these specs has passed
-verification or completed type/model checking.** No solver-positive result or
-deliberately failing solver-negative result is claimed. The tools were built,
-but no theorem was verified. Compiler mutation tests do not fill that gap.
-
-Formal receipt isolation, capability lifecycle, scoped revocation, enrollment
-claim consumption and hash/target invariants remain unmet scope. A compatible,
-pinned and reviewed framework/native model (including reachable-state invariants)
-must first be supplied; then run real successful proofs and deliberately broken
-specifications/implementation mutations with counterexamples. Wire that verified
-subset into CI and finish the remaining essential proofs before Review. The
-current workflow intentionally advertises compiler/lints/regressions only, not
-successful formal verification. SF-050 software/formal acceptance is not deferred by the physical/mainnet/provider acceptance split.
-
-## Historical validation on 2026-10-15
-
-| Command/check | Result |
-|---|---|
-| `python3 scripts/check_move_security.py` in pinned network-none image | PASS: strict build, exact unsuppressed baseline, both lint negatives, linear-ability negative, 66/66 Move tests, both authority-bypass mutations rejected |
-| Baseline/current `sui move build --dump-bytecode-as-base64 --no-tree-shaking` | PASS: all seven module byte arrays identical; serialized array SHA-256 `c186e6ac36e1ae01e13909838848ffdfbea4b7d6052d082939a097f8df3875c9` |
-| Prover `cargo build --locked --release -p sui-prover` with two jobs | PASS, 8m57s; built tool only |
-| Pinned Boogie build with two jobs | PASS, 0 errors, 195 upstream warnings; reports 3.5.6.0 |
-| `python3 scripts/evaluate_move_prover.py ...` | FAIL (exit 1): incompatible models as above; formal acceptance blocked |
-| `actionlint 1.7.7 .github/workflows/move-security.yml` | PASS |
-| `cargo build --locked --manifest-path suifleet-edge/Cargo.toml --example chain_facts` with two jobs | PASS (prerequisite for the existing upgrade harness) |
-| `python3 -m unittest discover -s scripts/tests -p test_upgrade_security_localnet.py -v` | PASS, four CLI parsing/local-only safety regressions |
-| `python3 scripts/identity_lifecycle_localnet.py --prior /tools/prior/contracts --new contracts` on disposable network-none 1.81.1 localnet | PASS, 47/47 checks, real upgrade/old-package calls, exact abort sites, live receipt state and current dApp receipt reader |
-| `python3 scripts/upgrade_security_localnet.py --v1 /tools/initial/contracts --v2 /tools/receipts/contracts` on separate disposable localnet | FAIL overall: 33 passing receipt/attack/effects checks, then current manifest resolver requires later identity/enrollment/role types absent from the historical package |
-
-For those local runs, `/tools/initial/contracts` was archived from `eb8a43b`,
-`/tools/receipts/contracts` from `8728d61`, and `/tools/prior/contracts` from
-`81f0bf8^` (`d3acb1e1628ce6ff53949d74616907e8c3ab504b`). Each run used
-private temporary `SUI_CONFIG_DIR`, `sui start --with-faucet --force-regenesis`,
-an explicit loopback-only client config and a captured disposable bootstrap
-`new-address` result. Startup waited for gRPC chain identity and the faucet;
-the node was terminated and private keys/logs deleted afterward. No existing
-wallet or chain was mounted. The earlier harness cannot currently finish its
-frontend-manifest tail against those historical packages; do not call its
-33 successful checks a passing end-to-end run. The chain-ID parsing repair
-does not weaken the current resolver's required-type check. The current
-identity suite independently passed all 47 checks.
-
-Selected local execution effects from the successful current identity run:
-revoked old-package write after sweep
-`G16npXhvFPBPFAUkPgxhJuxY3Gf9PkR8hHfP4eJ17c1v` executed successfully but
-remained untrusted at receipts version 1; the current active-device report
-`BNSqkapw8fnEVQnLYYE37CCD2VTjhfx31fKdX2pgiT7U` replaced it with version-2
-state containing only the active device. These digests belong to a destroyed
-local chain, not public-network acceptance receipts.
-
-The byte comparison is against the audit baseline with identical compiler and
-framework inputs. It establishes unchanged release bytecode/layouts/signatures,
-not security or public-network acceptance. No public wallet, mainnet, production,
-Walrus or physical-device operation is part of this audit. Upgrade-effects and
-current-head CI results are recorded in #82/the draft PR; incomplete runs are
-reported as failures, never as acceptance.

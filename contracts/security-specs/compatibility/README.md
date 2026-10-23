@@ -83,35 +83,26 @@ checksum-pinned in `toolchain.json`. Original framework hashes are checked befor
 staging; the evaluator puts implementation modules at the proof-package root so
 upstream does not silently skip their proof annotations as dependencies.
 
-Normal CI requires 63 application obligations and 25 specific solver-rejected
-mutations. It compares exact target/phase/statement and never accepts a timeout,
-compiler/model error or a missing target as an intended negative. See
-`check_move_proofs.py` for the explicit target/control inventory.
+Normal CI runs the four real solver gates: 63/25 arbitrary application,
+24/3 raw-native, 21/9 allocation/DOF/ownership and 42/5 closed-writer phases/negatives.
+Exact target/phase/diagnostic checks reject timeouts, compiler/model failures and
+empty selections. The native allocator's scoped cryptographic abstraction and
+VM admission assumptions are explicit in
+[the model boundary](../../../docs/MOVE_NATIVE_MODEL.md); they are not verified
+Rust/cryptography or application custody preconditions.
 
-`registry-custody-pending.move` and `enrollment-pending.move` are opt-in through
-`--include-pending-custody` and `--include-pending-enrollment`. They are not used
-as trusted summaries by the passing subset. Complete custody construction,
-return, init and inductive preservation are not proved. `--include-name-absence`
-reproduces the stronger untyped-name removal theorem, now also required normally.
-Recipe-binding omission/wrong-value controls produce exact solver counterexamples.
-Raw name absence after removal is supported by the shared tag model. Full
-enrollment and custody/heap preservation still fail and remain unmet software
-acceptance, not external checks. Read `docs/MOVE_SECURITY.md`
-for commands, actual counterexamples, model limits and current ticket status.
+The registry's quantified representation invariant is proved at the actual
+initializer and preserved by all private-key writers; the ordinary arbitrary-state
+gate runs without it. The initializer is renamed only in the temporary proof copy
+because Move prohibits direct init calls, preserving its entire body. `no_opaque`
+retains actual mutator bodies instead of losing unrelated storage framing.
+Native ownership is assumed only at verification admission, asserted at internal
+calls/real returns, and exposed as checked postconditions in modular summaries.
+SpecNoAbortCheck checks well-definedness on deliberately havoced spec results.
 
-
-## Raw dynamic-field model conformance
-
-`check_move_native_vm.py` executes the isolated `security-native-fixtures` package
-with the checksum-pinned release compiler/VM and an empty keystore. The fixture
-package is never added to application release sources. `check_move_native_proofs.py`
-requires all 24 raw-field obligations, three exact solver-negative controls and a
-separate explicit rejection of existing-UID reconstruction. This last check is
-an unsupported-operation guard, never a proof or solver-negative success.
-
-Name-only fields receive the shared tag table, key encoder and nonopaque carrier
-even without a modeled value projection. Canonical resolved Move Type identities
-select tags; arbitrary unmodeled tags remain possible. See the native-model
-document for transitions, native source comparison, constructor limits and the
-still-failing two-slot DOF prototype. No app custody invariant is assumed by these
-representation checks. Independent review of the model is still required.
+Existing-UID and specifically hashed-UID reconstruction with projected child
+storage are rejected rather than defaulted empty. Raw/DOF same-Name namespace
+aliasing and unsupported nested layouts also fail closed. Those compatibility
+rejections are not successful proofs. Generic native fixtures retain unknown
+raw tags, foreign owners and unrelated/orphan children within the documented VM
+resource boundary. See MOVE_SECURITY.md for exact commands and coverage limits.
