@@ -206,6 +206,14 @@ class PublishTests(unittest.TestCase):
         publish.run(args, self.cli, self.chain)
         self.assertEqual(self.manifest()["walrus"]["aggregator_url"], "http://127.0.0.1:31416")
 
+    def test_ordered_mirrors_survive_upgrade(self):
+        mirrors = ["https://one.example", "https://two.example"]
+        self.run_publish("--aggregator-mirror", mirrors[0], "--aggregator-mirror", mirrors[1])
+        self.assertEqual(self.manifest()["walrus"]["aggregator_urls"], mirrors)
+        args = self.args(); args.publisher = args.aggregator = None
+        publish.run(args, self.cli, self.chain)
+        self.assertEqual(self.manifest()["walrus"]["aggregator_urls"], mirrors)
+
     def test_dry_run_writes_nothing(self):
         before = self.snapshot()
         self.assertIsNone(self.run_publish("--dry-run"))

@@ -37,6 +37,16 @@ def chain(manifest, cap_owner="0xa11ce"):
 
 
 class ManifestTests(unittest.TestCase):
+    def test_optional_ordered_aggregator_mirrors(self):
+        manifest = fixture()
+        mirrors = ["https://one.example", "https://two.example"]
+        manifest["walrus"]["aggregator_urls"] = mirrors
+        self.assertEqual(dm.validate(manifest)["walrus"]["aggregator_urls"], mirrors)
+        for invalid in ["https://one.example", ["file:///tmp/blob"], [""]]:
+            manifest["walrus"]["aggregator_urls"] = invalid
+            with self.assertRaises(ValueError):
+                dm.validate(manifest)
+
     def test_control_manifest_fences_pre_control_daemons(self):
         from unittest.mock import patch
         manifest = fixture()
