@@ -295,6 +295,8 @@ async function uploads() {
     return { client, execute, calls };
   }
   const upload = load("lib/fleet-upload.ts");
+  const upgradedTarget = { ...target, config: { ...target.config, packageId: '0x' + 'a'.repeat(64), storageOrigin: storage.packageId } };
+  assert.equal(upload.registeredBlob([event(target.storageId, 123456789n)], upgradedTarget, 123456789n).blobObjectId, blobObjectId);
   const ok = stub();
   const info = await upload.uploadToFleetStorage(ok.client, target, new Uint8Array(5), ok.execute);
   assert.deepEqual(ok.calls, [["encode", 5], ["execute", "fleet_storage::register_fleet_blob"], ["write", blobObjectId, false],

@@ -94,7 +94,7 @@ export function GreengrassImport({catalog,owner,execute,onPublished,disabled,pol
         <label><input type="checkbox" checked={acknowledged} onChange={e=>setAcknowledged(e.target.checked)}/> I reviewed these differences</label></div>}
     </div>}
     <DeliveryFields value={delivery} onChange={setDelivery} policies={policies} disabled={busy}/>
-    <FleetStorageChoice checked={fleetPaid} onChange={setFleetPaid} available={!!fleet.store} storage={fleet.storage} reason={fleet.reason} disabled={busy}/>
+    <FleetStorageChoice checked={fleetPaid} onChange={setFleetPaid} available={!!fleet.store} storage={fleet.storage} reason={fleet.reason} retention={fleet.retention} disabled={busy}/>
     <button disabled={disabled||busy||result?.outcome!=='translate'||(differences.length>0&&!acknowledged)} onClick={publish}>{busy?'Uploading…':'Upload and register translated version'}</button>
     {message&&<p className="whitespace-pre-wrap" role="status">{message}</p>}
   </div>;
