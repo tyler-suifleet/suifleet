@@ -20,6 +20,7 @@ module sui_edge::desired_state {
     use sui::dynamic_field as df;
     use sui::event;
     use sui::vec_map::{Self, VecMap};
+    use sui_edge::component_catalog;
     use sui_edge::deployment_manager::{Self, DeploymentRecord};
     use sui_edge::device_group::{Self, DeviceGroup};
 
@@ -32,6 +33,9 @@ module sui_edge::desired_state {
     const EWrongGroup: u64 = 4;
     const EStaleRevision: u64 = 5;
     const EUnknownComponent: u64 = 6;
+    const EStillDesired: u64 = 7;
+    const EUnconfirmed: u64 = 8;
+    const EWrongRecord: u64 = 9;
 
     // ── State ─────────────────────────────────────────────────────────────────
 
@@ -113,6 +117,56 @@ module sui_edge::desired_state {
         };
         df::add(uid, DesiredKey {}, state);
     }
+
+    // ── Retirement (SF-129) ───────────────────────────────────────────────────
+
+    /// Proof, within one transaction, that no group still desires a record.
+    /// No abilities: it must be consumed by `retire` in the same transaction.
+    public struct Retirement {
+        deployment_id: ID,
+        /// Target groups whose current desired state is still unchecked.
+        pending: vector<ID>,
+    }
+
+    /// Start deleting a finished record. Only a managed record can be desired,
+    /// and only by a group it targets (`set_component`), so those groups are
+    /// the complete set to check. Creator only.
+    public fun begin_retirement(deployment: &DeploymentRecord, ctx: &TxContext): Retirement {
+        assert!(ctx.sender() == deployment_manager::creator(deployment), ENotCreator);
+        let pending = if (deployment_manager::is_managed(deployment)) {
+            *deployment_manager::target_groups(deployment)
+        } else { vector[] };
+        Retirement { deployment_id: object::id(deployment), pending }
+    }
+
+    /// Check one target group's current desired state. Aborts while it still
+    /// references the record: commit a revision that supersedes it first.
+    public fun confirm_not_desired(retirement: &mut Retirement, group: &DeviceGroup) {
+        let group_id = device_group::group_id(group);
+        assert!(retirement.pending.contains(&group_id), EWrongGroup);
+        let (_, deployments) = components(group).into_keys_values();
+        assert!(!deployments.contains(&retirement.deployment_id), EStillDesired);
+        // A record may list a group more than once.
+        while (retirement.pending.contains(&group_id)) {
+            let (_, index) = retirement.pending.index_of(&group_id);
+            retirement.pending.swap_remove(index);
+        };
+    }
+
+    /// Delete the record and return its storage rebate once every target group
+    /// is confirmed. Catalog bindings are removed by their defining module
+    /// first; devices already refuse deleted records.
+    public fun retire(retirement: Retirement, deployment: DeploymentRecord, ctx: &TxContext) {
+        let Retirement { deployment_id, pending } = retirement;
+        assert!(object::id(&deployment) == deployment_id, EWrongRecord);
+        assert!(pending.is_empty(), EUnconfirmed);
+        let schema = deployment_manager::schema_version(&deployment);
+        if (schema == 2) component_catalog::delete_deployment(deployment, ctx)
+        else if (schema == 3) deployment_manager::delete_rollout(deployment, ctx)
+        else deployment_manager::delete_deployment(deployment, ctx);
+    }
+
+    public fun retirement_pending(retirement: &Retirement): &vector<ID> { &retirement.pending }
 
     // ── Reads ─────────────────────────────────────────────────────────────────
 

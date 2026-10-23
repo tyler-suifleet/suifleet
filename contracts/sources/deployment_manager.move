@@ -611,6 +611,8 @@ module sui_edge::deployment_manager {
     public fun component_name(d: &DeploymentRecord): &String { &d.component_name }
     public fun has_recipe_digest(d: &DeploymentRecord): bool { df::exists(&d.id, RecipeDigestKey {}) }
     public fun is_managed(d: &DeploymentRecord): bool { df::exists(&d.id, ManagedKey {}) }
+    /// 1 plain, 2 catalog-bound, 3 staged rollout; selects the deletion path.
+    public fun schema_version(d: &DeploymentRecord): u64 { d.schema_version }
 
     /// Marks a record as owned by desired-state reconciliation (idempotent).
     public(package) fun mark_managed(d: &mut DeploymentRecord) {

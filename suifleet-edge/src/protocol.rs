@@ -121,6 +121,7 @@ pub mod deployment_manager {
     pub const ROLLOUT_ELIGIBLE: &str = "rollout_eligible";
     pub const ROLLOUT_POLICY: &str = "rollout_policy";
     pub const ROLLOUT_PROGRESS: &str = "rollout_progress";
+    pub const SCHEMA_VERSION: &str = "schema_version";
     pub const SET_CONTROL: &str = "set_control";
     pub const SHARE_DEPLOYMENT: &str = "share_deployment";
     pub const STATUS_APPLIED: &str = "status_applied";
@@ -277,10 +278,14 @@ pub mod desired_state {
     use super::*;
     pub const MODULE: &str = "desired_state";
     pub const BEGIN: &str = "begin";
+    pub const BEGIN_RETIREMENT: &str = "begin_retirement";
     pub const COMMIT: &str = "commit";
     pub const COMPONENTS: &str = "components";
+    pub const CONFIRM_NOT_DESIRED: &str = "confirm_not_desired";
     pub const PLAN_COMPONENTS: &str = "plan_components";
     pub const REMOVE_COMPONENT: &str = "remove_component";
+    pub const RETIRE: &str = "retire";
+    pub const RETIREMENT_PENDING: &str = "retirement_pending";
     pub const REVISION: &str = "revision";
     pub const SET_COMPONENT: &str = "set_component";
     #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -303,6 +308,12 @@ pub mod desired_state {
         pub deployments: Vec<[u8; 32]>,
     }
     impl DesiredStateChanged { pub const MOVE_TYPE: &'static str = "desired_state::DesiredStateChanged"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Retirement {
+        pub deployment_id: [u8; 32],
+        pub pending: Vec<[u8; 32]>,
+    }
+    impl Retirement { pub const MOVE_TYPE: &'static str = "desired_state::Retirement"; }
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct RevisionPlan {
         pub group_id: [u8; 32],
