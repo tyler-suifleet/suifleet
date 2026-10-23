@@ -119,6 +119,32 @@ class Fixture:
                         str(folder), pid, str(start) if pid else None, error, NOW-300, retry_after, attempts))
         return folder
 
+    def redirect(self, source, state, pr=7, reason='x', repair=None, resumed_as=None, fingerprint='fp', ticket='SF-001'):
+        """A dispatcher SF-116 CI repair-first record (schema of dispatcher.py)."""
+        with sqlite3.connect(self.paths['dispatch']) as db:
+            db.execute('''CREATE TABLE IF NOT EXISTS ci_redirects (
+                id INTEGER PRIMARY KEY, source TEXT, project TEXT, family TEXT, claim TEXT, ticket TEXT,
+                pr INTEGER, branch TEXT, head TEXT, base TEXT, fingerprint TEXT, failures TEXT,
+                state TEXT, reason TEXT, attempts INTEGER DEFAULT 0, retry_after REAL DEFAULT 0,
+                members TEXT, signalled REAL, killed REAL DEFAULT 0, guard_session TEXT, guards TEXT, original_head TEXT,
+                snapshot TEXT, repair_dir TEXT, repair_deadline REAL, repaired_head TEXT, resumed_as TEXT,
+                created REAL, updated REAL, UNIQUE(claim, fingerprint))''')
+            db.execute('''INSERT INTO ci_redirects(source,project,family,claim,ticket,pr,branch,head,fingerprint,failures,state,reason,
+                          guard_session,guards,repair_dir,resumed_as,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                       (source, 'suifleet', 'Claude', hashlib.sha256(TOKEN.encode()).hexdigest(), ticket, pr, f'work/{ticket.lower()}',
+                        'c'*40, fingerprint, json.dumps([{'name': 'check-interfaces', 'detailsUrl': 'https://x/runs/1'}]), state, reason,
+                        'ci-redirect-guard-1', json.dumps([{'resource': 'network:suifleet-testnet', 'token': LOCK_TOKEN}]),
+                        str(repair) if repair else None, resumed_as, NOW-200, NOW-100))
+
+    def observation(self, pr=7, ticket='SF-001', owner_status='in_progress', fingerprint='fp', responsibility='Claude implementation owner: dispatcher redirects'):
+        with sqlite3.connect(self.paths['reviews']) as db:
+            db.execute('''CREATE TABLE IF NOT EXISTS ci_observations (
+                project TEXT, pr INTEGER, ticket TEXT, branch TEXT, owner_status TEXT, head TEXT, base TEXT, draft INTEGER,
+                failures TEXT, fingerprint TEXT, responsibility TEXT, observed REAL, PRIMARY KEY(project,pr))''')
+            db.execute('INSERT OR REPLACE INTO ci_observations VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
+                       ('suifleet', pr, ticket, f'work/{ticket.lower()}', owner_status, 'c'*40, 'b'*40, 1,
+                        json.dumps([{'name': 'check-interfaces'}]), fingerprint, responsibility, NOW-90))
+
     def collect(self, **kw):
         return dash.collect(self.paths, now=NOW, proc=self.proc, **kw)
 
@@ -389,6 +415,131 @@ class DashboardTests(unittest.TestCase):
             os.chdir(cwd)
         self.assertEqual(model['workers'], [])
         self.assertIn(('SF-001', 'implementation', 'unverified'), self.states(model))
+
+    def implementation_capacity(self, model, family='Claude'):
+        c = next(c for c in model['capacity'] if c['family'] == family and c['category'] == 'implementation')
+        return c['active'], c['held'], c['retained']
+
+    def review_repair_capacity(self, model, family='Claude'):
+        c = next(c for c in model['capacity'] if c['family'] == family and c['category'] == 'repair')
+        return c['active'], c['held']
+
+    def test_ci_repair_requested_on_live_owner_is_visible_without_double_count(self):
+        f = self.f
+        f.ticket('SF-001'); f.run('sess-impl', 'SF-001', pid=101); f.process(101)
+        f.redirect('sess-impl', 'pending', reason='failed CI observed; owner grace period before revalidation')
+        f.observation()
+        model = f.collect()
+        self.assertEqual([(w['ticket'], w['role']) for w in model['workers']], [('SF-001', 'implementation')])
+        requested = [a for a in model['attention'] if a['state'] == 'ci-repair-requested']
+        self.assertEqual(len(requested), 1)
+        self.assertEqual((requested[0]['ticket'], requested[0]['pr']), ('SF-001', 7))
+        self.assertIn('check-interfaces', requested[0]['summary'])
+        self.assertNotIn('ci-failed', {a['state'] for a in model['attention']})  # One notice, not two.
+        self.assertEqual(self.implementation_capacity(model), (1, 0, 0))
+        # Closed/green PR: the coordinator dropped its observation, so no stale alert remains.
+        with sqlite3.connect(f.paths['reviews']) as db:
+            db.execute('DELETE FROM ci_observations')
+        model = f.collect()
+        self.assertFalse([a for a in model['attention'] if a['state'] in ('ci-repair-requested', 'ci-failed')])
+
+    def test_guarded_interruption_pauses_the_owner_instead_of_an_active_editor(self):
+        f = self.f
+        f.ticket('SF-001'); f.run('sess-impl', 'SF-001', status='redirected', pid=101); f.process(101)
+        f.redirect('sess-impl', 'interrupting', reason='verified live owner paused for repair-first work under held guards')
+        model = f.collect()
+        self.assertEqual(model['workers'], [])
+        self.assertIn(('SF-001', 'implementation', 'pausing'), self.states(model))
+        self.assertNotIn('unverified', {a['state'] for a in model['attention']})
+        self.assertEqual(self.implementation_capacity(model), (0, 1, 0))
+        self.assertNotIn('manual', {a['state'] for a in model['attention']})
+
+    def test_live_ci_repair_is_a_repair_worker_using_the_owner_slot_once(self):
+        f = self.f
+        f.ticket('SF-001'); f.run('sess-impl', 'SF-001', status='redirected', pid=101)  # Original owner stopped.
+        repair = f.base/'repair'
+        repair.mkdir()
+        (repair/'process.json').write_text(json.dumps({'pid': 301, 'started': '700'}))
+        (repair/'prompt.txt').write_text('PROMPT-SECRET-TEXT')
+        f.process(301, start=700)
+        f.redirect('sess-impl', 'repairing', repair=repair, reason='same-claim repair worker in a clean linked checkout')
+        f.observation()
+        model = f.collect()
+        self.assertEqual(len(model['workers']), 1)
+        worker = model['workers'][0]
+        self.assertEqual((worker['role'], worker['family'], worker['model'], worker['ticket'], worker['pr']),
+                         ('ci-repair', 'Claude', 'model-claude', 'SF-001', 7))
+        self.assertIn('check-interfaces', worker['summary'])
+        self.assertIn('implementation paused', worker['summary'])
+        self.assertIn(('SF-001', 'implementation', 'paused'), self.states(model))
+        self.assertNotIn('ci-failed', {a['state'] for a in model['attention']})
+        self.assertEqual(self.implementation_capacity(model), (1, 0, 0))  # Same claim counted once.
+        self.assertEqual(self.review_repair_capacity(model), (0, 0))      # Not a global review repair slot.
+        text = '\n'.join(dash.render(model, 160))
+        self.assertIn('ci-repair', text)
+        self.assertIn('[paused]', text)
+        # Repair exited (awaiting evaluation) or launch receipt missing: held, never active.
+        (f.proc/'301').rename(f.proc/'gone')
+        model = f.collect()
+        self.assertEqual(model['workers'], [])
+        self.assertIn(('SF-001', 'ci-repair', 'stale'), self.states(model))
+        self.assertEqual(self.implementation_capacity(model), (0, 1, 0))
+        (repair/'process.json').unlink()
+        self.assertIn(('SF-001', 'ci-repair', 'waiting'), self.states(f.collect()))
+
+    def test_uncertain_orphaned_and_failed_redirects_stay_visible_and_reserved(self):
+        f = self.f
+        f.ticket('SF-001'); f.run('sess-impl', 'SF-001', status='redirected', pid=101)
+        f.redirect('sess-impl', 'uncertain', reason='stopping worker/session did not stop; inspect recorded PIDs')
+        f.ticket('SF-002', session='sess-b'); f.run('sess-b', 'SF-002', status='redirected', pid=102)
+        f.redirect('sess-b', 'orphaned', pr=8, ticket='SF-002', fingerprint='fp2', reason='repair launch failed; never relaunched')
+        f.ticket('SF-003', session='sess-c'); f.run('sess-c', 'SF-003', status='quarantined', pid=103)
+        with sqlite3.connect(f.paths['dispatch']) as db:
+            db.execute("UPDATE runs SET message='CI redirect repair_failed: repair worker exit 1' WHERE session='sess-c'")
+        f.redirect('sess-c', 'repair_failed', pr=9, ticket='SF-003', fingerprint='fp3', reason='repair worker exit 1')
+        model = f.collect()
+        states = self.states(model)
+        self.assertIn(('SF-001', 'implementation', 'uncertain'), states)
+        self.assertIn(('SF-002', 'implementation', 'orphaned'), states)
+        self.assertIn(('SF-003', 'implementation', 'quarantined'), states)
+        quarantined = next(a for a in model['attention'] if a['ticket'] == 'SF-003')
+        self.assertIn('CI redirect repair_failed', quarantined['summary'])
+        self.assertEqual(model['workers'], [])
+        self.assertEqual(self.implementation_capacity(model), (0, 2, 1))
+
+    def test_resumed_feature_work_is_one_implementation_worker(self):
+        f = self.f
+        # The fixture's claim session follows the run; the dispatcher keeps the same claim for the resumed run.
+        f.ticket('SF-001', session='sess-impl-ci1'); f.run('sess-impl-ci1', 'SF-001', pid=111); f.process(111)
+        f.run('sess-impl', 'SF-001', status='finished', pid=101)
+        f.redirect('sess-impl', 'resumed', resumed_as='sess-impl-ci1', reason='repair integrated')
+        model = f.collect()
+        self.assertEqual([(w['role'], w['ticket']) for w in model['workers']], [('implementation', 'SF-001')])
+        self.assertIn('resumed after CI repair-first on PR #7', model['workers'][0]['summary'])
+        self.assertFalse([a for a in model['attention'] if a['ticket'] == 'SF-001'])
+        self.assertEqual(self.implementation_capacity(model), (1, 0, 0))
+
+    def test_ci_observations_show_cause_and_actual_responsibility(self):
+        f = self.f
+        f.ticket('SF-001', session='manual-session')
+        f.observation(responsibility='Claude implementation owner: manual or stopped owners need their own repair')
+        f.ticket('SF-002', status='review', session='rev')
+        f.observation(pr=8, ticket='SF-002', owner_status='review', responsibility='Claude coordinator CI repair')
+        model = f.collect()
+        failed = [a for a in model['attention'] if a['state'] == 'ci-failed']
+        self.assertEqual([(a['ticket'], a['pr']) for a in failed], [('SF-001', 7)])
+        self.assertIn('check-interfaces', failed[0]['summary'])
+        self.assertIn('(draft)', failed[0]['summary'])
+        self.assertIn('manual or stopped owners need their own repair', failed[0]['summary'])
+
+    def test_redirect_receipts_never_expose_tokens(self):
+        f = self.f
+        f.ticket('SF-001'); f.run('sess-impl', 'SF-001', status='redirected', pid=101)
+        f.redirect('sess-impl', 'interrupting', reason=f'leaked {TOKEN} in a reason')
+        model = f.collect()
+        output = json.dumps(dash.public(model)) + '\n'.join(dash.render(model, 200))
+        for secret in (TOKEN, LOCK_TOKEN, hashlib.sha256(TOKEN.encode()).hexdigest()):
+            self.assertNotIn(secret, output)
 
     def test_waiting_retry_and_ci_states_are_distinct(self):
         f = self.f
