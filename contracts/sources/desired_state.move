@@ -131,7 +131,7 @@ module sui_edge::desired_state {
     /// Start deleting a finished record. Only a managed record can be desired,
     /// and only by a group it targets (`set_component`), so those groups are
     /// the complete set to check. Creator only.
-    public fun begin_retirement(deployment: &DeploymentRecord, ctx: &TxContext): Retirement {
+    public fun begin_retirement(deployment: &DeploymentRecord, ctx: &mut TxContext): Retirement {
         assert!(ctx.sender() == deployment_manager::creator(deployment), ENotCreator);
         let pending = if (deployment_manager::is_managed(deployment)) {
             *deployment_manager::target_groups(deployment)
@@ -156,7 +156,7 @@ module sui_edge::desired_state {
     /// Delete the record and return its storage rebate once every target group
     /// is confirmed. Catalog bindings are removed by their defining module
     /// first; devices already refuse deleted records.
-    public fun retire(retirement: Retirement, deployment: DeploymentRecord, ctx: &TxContext) {
+    public fun retire(retirement: Retirement, deployment: DeploymentRecord, ctx: &mut TxContext) {
         let Retirement { deployment_id, pending } = retirement;
         assert!(object::id(&deployment) == deployment_id, EWrongRecord);
         assert!(pending.is_empty(), EUnconfirmed);

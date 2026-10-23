@@ -1229,7 +1229,7 @@
           "type_parameters": [],
           "parameters": [
             "&sui_edge::deployment_manager::DeploymentRecord",
-            "&sui::tx_context::TxContext"
+            "&mut sui::tx_context::TxContext"
           ],
           "returns": [
             "sui_edge::desired_state::Retirement"
@@ -1296,7 +1296,7 @@
           "parameters": [
             "sui_edge::desired_state::Retirement",
             "sui_edge::deployment_manager::DeploymentRecord",
-            "&sui::tx_context::TxContext"
+            "&mut sui::tx_context::TxContext"
           ],
           "returns": []
         },

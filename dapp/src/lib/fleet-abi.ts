@@ -1222,7 +1222,7 @@ export const MOVE_ABI = {
         "type_parameters": [],
         "parameters": [
           "&sui_edge::deployment_manager::DeploymentRecord",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": [
           "sui_edge::desired_state::Retirement"
@@ -1289,7 +1289,7 @@ export const MOVE_ABI = {
         "parameters": [
           "sui_edge::desired_state::Retirement",
           "sui_edge::deployment_manager::DeploymentRecord",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },
