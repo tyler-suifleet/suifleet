@@ -34,7 +34,7 @@ functions, axioms or replacement executable bodies**. Its purpose is to resolve
 the datatype imported by the prover's vector specifications. This does not
 establish arithmetic modeling for release programs.
 
-Both overlay files have SHA-256 pins in `../toolchain.json`. The evaluator
+All overlay files have SHA-256 pins in `../toolchain.json`. The evaluator
 requires exactly the committed patch in the prover source and rejects extra
 tracked edits or untracked source/model files. A binary must be rebuilt from
 that patched source; input checks alone do not authenticate an arbitrary binary.
@@ -65,6 +65,32 @@ project graph. Their ordered path/content hash is pinned in `toolchain.json`.
 `scripts/build_move_prover.py` verifies this hash and restores with
 `--locked-mode`, then builds with `--no-restore`. Cargo uses the pinned lockfile.
 The SDK and Z3 archives are independently checksum-verified. The normal CI gate
-runs `scripts/check_move_proofs.py`; it requires all six positive obligations and
+runs `scripts/check_move_proofs.py`; it requires all 63 positive obligations and
 exactly the intended solver obligation/counterexample for each mutation. A
 parser failure, model panic, timeout or unsuccessful positive fails the gate.
+
+
+## Project proof overlays and coverage boundary
+
+The `*-spec-helpers.move` files contain only spec-mode observations and
+obligations against actual project functions. They are staged additively inside
+those functions' defining modules to observe private keys/fields; they add no
+runtime UID accessor or executable replacement. `dof-spec-helpers.move` observes
+the release wrapper's actual name-only dynamic-field existence. Every file is
+checksum-pinned in `toolchain.json`. Original framework hashes are checked before
+staging; the evaluator puts implementation modules at the proof-package root so
+upstream does not silently skip their proof annotations as dependencies.
+
+Normal CI requires 63 positive obligations and 22 specific solver-rejected
+mutations. It compares exact target/phase/statement and never accepts a timeout,
+compiler/model error or a missing target as an intended negative. See
+`check_move_proofs.py` for the explicit target/control inventory.
+
+`registry-custody-pending.move` and `enrollment-pending.move` are opt-in through
+`--include-pending-custody` and `--include-pending-enrollment`. They are not used
+as trusted summaries by the passing subset. Complete custody construction,
+return, init and inductive preservation are not proved. `--include-name-absence`
+reproduces the stronger untyped-name removal theorem. Full enrollment and
+recipe-binding omission/wrong-value negatives still time out; these results are
+unmet software acceptance, not external checks. Read `docs/MOVE_SECURITY.md`
+for commands, actual counterexamples, model limits and current ticket status.
