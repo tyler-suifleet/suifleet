@@ -653,6 +653,12 @@ test-prospects:
 test-fleet-data-upgrade-localnet:
 	$(RUN) python3 scripts/test_protocol_localnet.py --fleet-data-upgrade
 
+# SF-129 reclaim lifecycle on a disposable network-none chain: base objects,
+# in-place core/data upgrades, expiry, prune/burn/retire and measured rebates.
+.PHONY: test-reclaim-localnet
+test-reclaim-localnet:
+	$(RUN) python3 scripts/test_reclaim_localnet.py
+
 # SF-091 integrated recovery drill on isolated infrastructure: restore/rollback,
 # browser outage/loss/export, real-daemon recovery and SF-092 payment failure
 # scenarios, recorded with durations (docs/FLEET_RECOVERY.md). Offline.
