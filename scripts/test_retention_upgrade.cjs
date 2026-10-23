@@ -129,7 +129,8 @@ public fun retention_fixture(ctx: &mut TxContext) {
     const before = (await client.getObject({ objectId: oldStorage, include: { content: true } })).object.content;
     const fieldsBefore = await client.listDynamicFields({ parentId: oldStorage, include: { value: true } });
     assert.ok(fieldsBefore.dynamicFields.some((f) => f.name.type.endsWith('::fleet_storage::RecordKey')));
-    await fs.copyFile(path.join(root, 'contracts/fleet_storage/sources/fleet_storage.move'), path.join(storage, 'sources/fleet_storage.move'));
+    if (process.env.SF082_DEVICE_POLICY_UPGRADE === '1') await fs.writeFile(path.join(storage, 'sources/fleet_storage.move'), execFileSync('git',['show','2e9a7f4d1b35a9e69b6acc5da1a40ea39562e575:contracts/fleet_storage/sources/fleet_storage.move'],{cwd:root}));
+    else await fs.copyFile(path.join(root, 'contracts/fleet_storage/sources/fleet_storage.move'), path.join(storage, 'sources/fleet_storage.move'));
     const built = compile(storage);
     tx = new Transaction();
     const [ticket] = tx.moveCall({ target: '0x2::package::authorize_upgrade', arguments: [tx.object(base.upgrade), tx.pure.u8(0), tx.pure.vector('u8', built.digest)] });
@@ -173,6 +174,28 @@ public fun retention_fixture(ctx: &mut TxContext) {
     assert.equal(failed.$kind, 'FailedTransaction');
     assert.match(JSON.stringify(failed.FailedTransaction.status), /abort code: 0/);
     receipts.push({ label: 'old-package withdrawal rejected after migration', digest: failed.FailedTransaction.digest });
+    if (process.env.SF082_DEVICE_POLICY_UPGRADE === '1') {
+      const bytesBefore=(await client.getObject({objectId:oldStorage,include:{content:true}})).object.content;
+      const priorFields=(await client.listDynamicFields({parentId:oldStorage,include:{value:true}})).dynamicFields;
+      await fs.copyFile(path.join(root,'contracts/fleet_storage/sources/fleet_storage.move'),path.join(storage,'sources/fleet_storage.move'));
+      const published=await fs.readFile(path.join(storage,'Published.toml'),'utf8');
+      await fs.writeFile(path.join(storage,'Published.toml'),published.replace(`published-at = "${base.pkg}"`,`published-at = "${head}"`).replace('version = 1','version = 2'));
+      const deviceBuilt=compile(storage);tx=new Transaction();
+      const [t]=tx.moveCall({target:'0x2::package::authorize_upgrade',arguments:[tx.object(base.upgrade),tx.pure.u8(0),tx.pure.vector('u8',deviceBuilt.digest)]});
+      const upgradeReceipt=tx.upgrade({modules:deviceBuilt.modules,dependencies:deviceBuilt.dependencies,package:head,ticket:t});
+      tx.moveCall({target:'0x2::package::commit_upgrade',arguments:[tx.object(base.upgrade),upgradeReceipt]});
+      const current=(await execute('upgrade exact merged SF092 to SF082 device policy',tx)).effects.changedObjects.find(o=>o.outputState==='PackageWrite').objectId;
+      assert.deepEqual((await client.getObject({objectId:oldStorage,include:{content:true}})).object.content,bytesBefore);
+      assert.deepEqual((await client.listDynamicFields({parentId:oldStorage,include:{value:true}})).dynamicFields,priorFields);
+      const datatype=async name=>(await client.movePackageService.getDatatype({packageId:current,moduleName:'fleet_storage',name})).response.datatype.definingId;
+      assert.equal(await datatype('FleetStorage'),base.pkg);assert.equal(await datatype('RetentionKey'),head);assert.equal(await datatype('DeviceRetentionKey'),current);
+      tx=new Transaction();tx.moveCall({target:`${current}::fleet_storage::configure_device_retention`,arguments:[tx.object(oldStorage),tx.object(budget),tx.object(ownerCap),tx.pure.u32(8),tx.pure.u64(100)]});
+      await execute('owner configures later-origin device policy on existing v2 storage',tx);
+      const actual=await loader()('lib/retention.ts').fetchDeviceRetention(client,{packageId:current,storageOrigin:base.pkg},oldStorage);
+      assert.deepEqual(actual,{target:8,max_fee:'100'});
+      tx=new Transaction();tx.moveCall({target:`${current}::fleet_storage::clear_device_retention`,arguments:[tx.object(oldStorage),tx.object(budget),tx.object(ownerCap)]});await execute('owner clears device admission without deleting old history',tx);
+      assert.equal(await loader()('lib/retention.ts').fetchDeviceRetention(client,{packageId:current,storageOrigin:base.pkg},oldStorage),undefined);
+    }
     console.log(JSON.stringify({ check: 'populated-object compatible storage upgrade and old-package retirement', receipts }));
   } finally { await fs.rm(tmp, { recursive: true, force: true }); }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

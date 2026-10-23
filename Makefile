@@ -646,3 +646,7 @@ test-retention:
 .PHONY: test-retention-upgrade
 test-retention-upgrade:
 	$(RUN) python3 scripts/test_protocol_localnet.py --retention-upgrade
+
+.PHONY: test-device-retention-upgrade
+test-device-retention-upgrade:
+	$(RUN) python3 scripts/test_protocol_localnet.py --device-retention-upgrade

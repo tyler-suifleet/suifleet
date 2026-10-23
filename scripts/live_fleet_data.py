@@ -19,7 +19,7 @@ REGISTRY='0xd3afc908876326367294ba95d13cbac5775dd1370a23fb3ba8ba29b25daeaf41'
 CORE_CAP='0x400dda2c3b0788a08841c0a81a4bdc444c6e399268d60f352eb37f04066d0983'
 KEY_PACKAGE='0x0f16e84a49dec8425e6900cfdfe3730aaf1e8bc608d9f0500fcfa2c2267abfb4'
 SERVERS=['0x73d05d62c18d9374e3ea529e8e0ed6161da1a141a94d3f76ae3fe4e99356db75','0xf5d14a81a982144ae441cd7d64b09027f116a468bd36e7eca494f750591623c8']
-DEPOSIT,FLOAT,RESERVE,SWAP=100_000_000,40_000_000,20_000_000,20_000_000
+DEPOSIT,FLOAT,RESERVE,SWAP=250_000_000,80_000_000,100_000_000,20_000_000
 ENCODED=66_034_000
 
 def source_key(directory, dependency=''):
@@ -96,7 +96,7 @@ def run(args):
             r=live.transaction('register SF082 device','--move-call',call('device_registry','register_device'),f'@{REGISTRY}','"sf082-native-producer"',f'@{address}','"x86_64"',CLOCK,'--assign','device',
                 '--move-call',call('device_cap','issue_cap'),'device','--move-call',call('device_registry','activate_device'),f'@{REGISTRY}','device','--assign','owner','--transfer-objects','[owner]',f'@{live.operator}',budget=40_000_000)
             device_id=live.created(r,'::device_registry::Device')[0];cap=live.created(r,'::device_cap::DeviceCap')[0];owner_cap=live.created(r,'::device_registry::DeviceOwnerCap')[0]
-            r=live.transaction('create SF082 prepaid budget','--split-coins','gas',f'[{DEPOSIT}u64]','--assign','deposit','--move-call',call('fleet_budget','new_limits'),f'{FLOAT}u64','86400000u64','20000000u64','2u64','0u64','--assign','limits',
+            r=live.transaction('create SF082 prepaid budget','--split-coins','gas',f'[{DEPOSIT}u64]','--assign','deposit','--move-call',call('fleet_budget','new_limits'),f'{FLOAT}u64','86400000u64','80000000u64','4u64','0u64','--assign','limits',
                 '--move-call',call('fleet_budget','create'),f'@{REGISTRY}','deposit','limits','10000000u64','--assign','cap','--transfer-objects','[cap]',f'@{live.operator}',budget=30_000_000,funding=DEPOSIT)
             budget=live.created(r,'::fleet_budget::FleetBudget')[0];budget_cap=live.created(r,'::fleet_budget::BudgetOwnerCap')[0]
             r=live.transaction('enroll SF082 device float and reserve','--move-call',call('fleet_budget','enroll_device'),f'@{budget}',f'@{budget_cap}',f'@{REGISTRY}',f'@{owner_cap}',f'{FLOAT}u64',f'{RESERVE}u64',CLOCK,budget=20_000_000)
@@ -111,6 +111,13 @@ def run(args):
             r=live.transaction('SUI-only prepaid storage purchase','--split-coins','gas',f'[{SWAP}u64]','--assign','sui','--move-call',f'{EXCHANGE_PACKAGE}::wal_exchange::exchange_all_for_wal',f'@{EXCHANGE}','sui','--assign','wal',
                 '--move-call',call('fleet_storage','deposit_wal_at_least',storage_pkg),f'@{storage}',f'@{budget}',f'@{budget_cap}','wal',f'{minimum}u64',
                 '--move-call',call('fleet_storage','refill_pool',storage_pkg),f'@{storage}',f'@{budget}',f'@{budget_cap}',f'@{SYSTEM}',f'{ENCODED*2}u64',f'{end_epoch}u32',budget=40_000_000,funding=SWAP)
+            live.transaction('owner approves finite retained device archives',
+                '--move-call',call('fleet_storage','configure_retention',storage_pkg),f'@{storage}',f'@{budget}',f'@{budget_cap}',f'@{live.operator}','4u32','10000000u64','5000000u64','1000000u64',
+                '--move-call',call('fleet_storage','withdraw_wal',storage_pkg),f'@{storage}',f'@{budget}',f'@{budget_cap}','10000000u64','--assign','renewal_wal',
+                '--split-coins','gas','[5000000u64]','--assign','renewal_gas',
+                '--move-call',call('fleet_storage','fund_retention',storage_pkg),f'@{storage}','renewal_wal','renewal_gas',
+                '--move-call',call('fleet_storage','configure_device_retention',storage_pkg),f'@{storage}',f'@{budget}',f'@{budget_cap}',f'{end_epoch+1}u32','2000000u64',budget=40000000,funding=5000000)
+            live.evidence['retention_policy']={'target':end_epoch+1,'initial_end':end_epoch,'max_fee_frost':2000000,'executor':live.operator}
             live.evidence['storage_purchase']={'digest':r['digest'],'events':r.get('events',[]),'net_gas_mist':net_gas(r)}
             r=live.transaction('create fleet data index','--move-call',call('fleet_data','create',data_pkg),f'@{budget}',f'@{budget_cap}',f'@{storage}',f'"{live.chain}"',budget=20_000_000)
             fleet=live.created(r,'::fleet_data::FleetData')[0]
@@ -137,7 +144,7 @@ def run(args):
         live.ledger.grant(reserve);live.evidence['precharged_reserve_mist']=reserve
         config_file=release/'config.toml'
         if '[budget]' not in config_file.read_text():
-            with config_file.open('a') as out:out.write(f'\n[budget]\nbudget_id="{budget}"\nlow_water_mist=15000000\ndraw_mist=10000000\n')
+            with config_file.open('a') as out:out.write(f'\n[budget]\nbudget_id="{budget}"\nlow_water_mist=45000000\ndraw_mist=30000000\n')
         completed_file=state_dir/'fleet-data/completed.json'
         periodic_file=root/'periodic-receipt.json'
         prior_completed=json.loads(completed_file.read_text()) if completed_file.exists() else {}
@@ -173,7 +180,8 @@ def run(args):
         wait_for(lambda:completed().get('seq')==2,'native diagnostic archive did not certify/anchor',daemon,timeout=300)
         diagnostic=completed();wait_for(lambda:health().get('seq',0)>int(health_first['seq']),'second direct health summary missing',daemon,timeout=120);health_second=health()
         daemon.terminate();daemon.wait(timeout=30);daemon=None
-        assert before=={id:str(live.object(id)['version']) for id in before},'device writes must not mutate fleet budget or policy'
+        assert before[fleet]==str(live.object(fleet)['version']),'device writes must not mutate fleet policy'
+        if not funding_receipts:assert before[budget]==str(live.object(budget)['version']),'archive writes must not mutate the fleet budget'
         health_receipts[int(health_second['seq'])]=health_second;watch_stop.set()
         assert sorted(health_receipts)==list(range(min(health_receipts),int(health_second['seq'])+1)),'missed a native health transaction receipt'
         receipts=[]
@@ -182,7 +190,24 @@ def run(args):
             receipts.append(dict(label=label,digest=digest,net_gas_mist=net_gas(r),gas=r['effects']['gasUsed']))
         total=sum(max(0,r['net_gas_mist']) for r in receipts);live.ledger.grant(total)
         live.evidence['native_transactions']=receipts;live.evidence['precharged_device_allowance_mist']=FLOAT
-        live.check('native hourly-cadence health path and prepaid encrypted logs/diagnostics certified and anchored; restart made no duplicate upload')
+        live.check('native configured-cadence health path and prepaid encrypted logs/diagnostics certified and anchored; restart made no duplicate upload')
+        # Apply both prepaid finite renewals with the explicitly authorized
+        # executor; keep original anchor epochs to exercise live-record reads.
+        renewal_record=prior.get('retention_policy') if prior else live.evidence.get('retention_policy')
+        if renewal_record:
+            live.evidence['retention_policy']=renewal_record
+            current_end=renewal_record['initial_end'];target=renewal_record['target']
+            args=['--move-call',call('fleet_storage','execute_renewal',storage_pkg),f'@{storage}',f'@{SYSTEM}',f'@{event(live.executed(periodic["registration"]),"::fleet_storage::UploadRegistered")["blob_object_id"]}',f'{current_end}u32','2u64',
+                  '--move-call',call('fleet_storage','execute_renewal',storage_pkg),f'@{storage}',f'@{SYSTEM}',f'@{event(live.executed(diagnostic["registration"]),"::fleet_storage::UploadRegistered")["blob_object_id"]}',f'{current_end}u32','2u64']
+            marker=root/'renewal-execution.json'
+            if marker.exists():
+                saved=json.loads(marker.read_text());assert saved.get('status')=='success','reconcile unknown owner renewal effects before resuming'
+                r=live.executed(saved['digest']);assert r and r['effects']['status']['status']=='success'
+            else:
+                marker.write_text(json.dumps({'status':'unknown'}))
+                r=live.transaction('apply finite prepaid archive renewals',*args,budget=30000000)
+                marker.write_text(json.dumps({'status':'success','digest':r['digest']}))
+            live.evidence['retention_execution']={'digest':r['digest'],'events':r.get('events',[]),'target':target}
         # Native bridge signs only a bounded owner Seal personal-message
         # session from the explicit profile; no key bytes reach Node.
         request=root/'browser.json';request.write_text(json.dumps(dict(manifest=manifest,config=config,device=device_id,budgetCap=budget_cap,servers=SERVERS,codec=str(args.codec))))
