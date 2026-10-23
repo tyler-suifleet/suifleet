@@ -26,3 +26,38 @@ the user-authorized implementation split. No production credentials, Mainnet wri
 or hardware programming occurred. Fresh independent review remains mandatory.
 
 Final retention regression: browser re-reads the actual fleet-owned BlobRecord before/after decryption. Owner-paid extension succeeds beyond the original anchor epoch; released, shortened, foreign-device/blob/type/budget and mid-download released records fail closed. Scoped archive tests, real-daemon producer simulator, typecheck and actual Testnet signed-session browser verification/decryption passed after this fix. Two final static builds again matched, and the retained Site was updated/read back using the descriptor-safe packer.
+
+Recovery validation (actual model `gpt-6.1-sol`, same reserved session):
+
+- Integrated reviewed SF-092 `2e9a7f4` and SF-116/current main `3957940`.
+  The owner-approved finite device-retention extension preserves existing public
+  signatures/layouts; its new dynamic fields retain their actual introduction origin.
+- Network-none storage Move tests: 60 passed after the final additions
+  (preserved `/tmp/sf082-retained-final-move.log`); core 168 and data 16
+  passed earlier, with unchanged sources. Both real disposable-chain
+  populated storage upgrade paths and fleet-data upgrade/adversarial checks passed
+  (`/tmp/sf082-retained-real-upgrades.log`); their public receipts remain committed.
+- `make test-manifest`, `make check-interfaces`, frontend typecheck and native
+  producer simulator passed after integration. Compiled check: 637 references,
+  13 modules, zero drift. Final recovery reran 72 offline testnet/toolchain tests,
+  fleet-budget browser tests and frontend typecheck: all passed.
+- Native Testnet continuation verified weighted storage-shard quorum, certified
+  logs/diagnostics, signed owner-session browser decryption, restart without
+  repurchase, finite protected renewal and account cleanup. Original charges and
+  failed registration/certification attempts were retained. Total non-replenishing
+  allowance used: 631,790,822 MIST of 800,000,000; net balance change includes
+  returned reserves and never determines the allowance. See the updated native
+  and device-effects receipts. This is Testnet evidence, not production acceptance.
+- Old automatic package-upgrade run 39881586656 failed before upgrade submission;
+  it remains failed evidence. Root fixtures now use pinned compiled bytecode, so
+  separate storage/data packages do not cause identical core republication.
+  Compiler/framework-bound verified cache migration and durable publication
+  checkpoints retain unknown outcomes for reconciliation. Fresh current-head
+  ordinary/security/automatic-Testnet checks are still mandatory.
+
+- Final retained-storage export: two `build_walrus_site.py` runs with the actual
+  deployment/fleet/storage/public-Seal bindings yielded identical complete receipts
+  (122 resources). Updated the same owned Site in the sixth phase; full Walrus
+  bytes/ranges/headers and 27 Sui routes read back, independent effects checked.
+  Publisher lifetime used 485,105,631 of 700,000,000 MIST, with no new funding.
+  The latest Site receipt supersedes earlier export/cost counts above.

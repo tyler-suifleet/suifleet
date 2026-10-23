@@ -18,7 +18,8 @@ isolated-chain compatibility or end-to-end acceptance. Keep the consumer PR draf
 and its normal integration/CI/review gates are complete.
 
 `contracts/fleet_data` is a separate package depending on the core and storage
-packages. It adds no functions or fields to SF-083. It consumes:
+packages. Its data model is separate from SF-083; the later additive storage
+retention extension is described below. It consumes:
 
 - `fleet_budget::assert_owner`, `assert_may_draw`, `account_id`,
   `account_budget_id`, `account_device_id` and `registry_id`;
@@ -123,7 +124,7 @@ quotes, not a production invoice, fiat price or paid-storage receipt.
 The serverless estimator defaults to 720 health summaries and 30 periodic batches
 per device per 30 days. Measured first health costs 7,255,298 MIST, recurring health
 up to 4,459,123 MIST, and a complete periodic archive (registration, certification,
-anchor) 19,718,489 MIST. These are included separately from Walrus fees. Match the
+anchor) up to 27,075,739 MIST with protected retention. These are included separately from Walrus fees. Match the
 configured cadence and add diagnostic/crash allowance and headroom. See the
 [sender effects](validation/sf082-device-effects.json). SF-083 quotas must
 cover **encoded** bytes, uploads and write fees. Retention is the prepaid pool's
@@ -131,6 +132,28 @@ end epoch (three Testnet epochs in the fixture), not indefinite availability.
 Owners extend before expiry under SF-083 authority; released/expired storage does
 not replenish a device's spend allowance. Sui rebates belong to the fleet owner.
 Production provider/fees/availability acceptance remains in #159.
+
+### Protected retention integration
+
+Actual SF-092 merge `2e9a7f4d1b35a9e69b6acc5da1a40ea39562e575` is integrated.
+The additive `configure_device_retention` / `clear_device_retention` owner calls
+use later-origin `DeviceRetentionKey` / `DeviceRetention` dynamic fields; existing
+storage and budget signatures/layouts stay unchanged. With protection enabled,
+device registration requires an explicit finite target and maximum renewal WAL
+fee selected by the owner. It atomically prepays the new blob and its bounded
+renewal resource from the separate protected reserves. Missing approval, incomplete
+coverage, insufficient reserves or epoch limits abort the entire registration.
+Devices cannot choose the retention target, delete history or spend owner caps.
+Clearing admission preserves existing history and renewal obligations.
+
+Configure the finite policy through a reviewed owner transaction before enabling
+native device uploads on protected storage. The native producer keeps the same
+registration/certification API and binds the current call package and per-type
+origins explicitly. Browser reads support storage v1/v2 and verify the current
+record before and after decryption. Executor reward/gas reserves are additional
+to the device transaction estimates; select the same finite horizon in the WAL
+estimate and the retention policy. No background renewal worker is implied by
+opening the dApp; see [retention operations](RETENTION_RENEWAL.md).
 
 ## Direct browser health reads
 
