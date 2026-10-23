@@ -434,3 +434,39 @@ class FreshFixtureFlowTests(unittest.TestCase):
                 self.assertFalse(evidence["success"])
                 self.assertEqual(evidence["allowance_used_mist"], 0)
                 walrus.close.assert_called_once()
+
+
+class PublicationAuthorityTests(unittest.TestCase):
+    def test_checkpoint_recovery_requires_latest_cap_package_version_and_owners(self):
+        import live_package_upgrade as live
+        operator = live.dm.object_id("0xa")
+        publication = dict(base_package="0x1", registry="0x2", upgrade_cap="0x3")
+        owners = {"0x3": {"AddressOwner": operator}, "0x2": {"Shared": {}}}
+        def reader(command, object_id):
+            self.assertEqual(command, "object")  # Recovery is read-only.
+            return {"owner": owners[object_id]}
+        for upgraded in (False, True):
+            with self.subTest(upgraded=upgraded):
+                current = dict(publication)
+                if upgraded:
+                    current["head_package"] = "0x4"
+                package = current.get("head_package", current["base_package"])
+                cap = dict(kind="object", type="0x2::package::UpgradeCap",
+                           upgrade_cap={"package": package, "version": 2 if upgraded else 1},
+                           owner={"address": operator})
+                facts = {"objects": {live.dm.object_id("0x3"): cap}}
+                with patch.object(live.dm, "chain_facts", return_value=facts):
+                    live.verify_publication(current, "offline", operator, reader)
+                    for field, bad in (("package", "0x9"), ("version", 3)):
+                        previous = cap["upgrade_cap"][field]; cap["upgrade_cap"][field] = bad
+                        with self.assertRaises(AssertionError):
+                            live.verify_publication(current, "offline", operator, reader)
+                        cap["upgrade_cap"][field] = previous
+                    owners["0x3"] = {"AddressOwner": live.dm.object_id("0xb")}
+                    with self.assertRaises(AssertionError):
+                        live.verify_publication(current, "offline", operator, reader)
+                    owners["0x3"] = {"AddressOwner": operator}
+                    owners["0x2"] = {"AddressOwner": operator}
+                    with self.assertRaises(AssertionError):
+                        live.verify_publication(current, "offline", operator, reader)
+                    owners["0x2"] = {"Shared": {}}

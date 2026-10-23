@@ -182,6 +182,17 @@ def fixture_alive(fixture, operator, client):
     return True
 
 
+
+def verify_publication(publication, rpc_url, operator, client):
+    # Reconcile checkpointed authority with the last completed upgrade.
+    old, registry, cap = (publication[k] for k in ("base_package", "registry", "upgrade_cap"))
+    head = publication.get("head_package", old)
+    facts = dm.chain_facts(rpc_url, old, cap, registry)
+    expected_version = "2" if head != old else "1"
+    assert dm.upgrade_cap(facts["objects"][dm.object_id(cap)])[:2] == (dm.object_id(head), expected_version)
+    assert owner_of(client, cap) == operator and owner_of(client, registry) == "shared"
+
+
 def balance_of(client, address):
     gas = client("gas", address)
     coins = gas.get("gasCoins", []) if isinstance(gas, dict) else gas
@@ -371,10 +382,7 @@ def run(args):
                     save_publication(base_package=published(first), registry=created(first, "::device_registry::DeviceRegistry")[0],
                                      upgrade_cap=created(first, "::package::UpgradeCap")[0])
                 old, registry, upgrade_cap = (publication[k] for k in ("base_package", "registry", "upgrade_cap"))
-                facts = dm.chain_facts(rpc_url, old, upgrade_cap, registry)
-                expected_version = "2" if publication.get("head_package", old) != old else "1"
-                assert dm.upgrade_cap(facts["objects"][dm.object_id(upgrade_cap)])[:2] == (dm.object_id(old), expected_version)
-                assert owner_of(client, upgrade_cap) == operator and owner_of(client, registry) == "shared"
+                verify_publication(publication, rpc_url, operator, client)
                 toolchain.write_pubfile(pubfile, chain, package_dir, old, upgrade_cap)
                 check(f"verified/reused base package {old}; no identical package is republished")
                 if "device_key" not in publication:

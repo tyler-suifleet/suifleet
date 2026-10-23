@@ -69,3 +69,9 @@ Recovery validation (actual model `gpt-6.1-sol`, same reserved session):
   pre-sign refusal boundary; both variants reject the original source and pass
   with the fix. All 73 offline testnet/toolchain tests passed. Final-head CI and
   automatic Testnet must pass anew; the failed run is not relabeled successful.
+
+- Adjacent checkpoint recovery now verifies UpgradeCap against the recorded latest
+  package/version, rather than incorrectly requiring the base package after a
+  completed upgrade. Tests reject foreign package, version, cap owner and registry
+  ownership without mutations; both version-1 and version-2 checkpoints pass.
+  All 74 offline testnet/toolchain tests passed.
