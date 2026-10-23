@@ -30,6 +30,8 @@ def source_key(directory, dependency=''):
 def run(args):
     if not os.environ.get('SUIFLEET_TESTNET_LOCK_TOKEN'):raise RuntimeError('network:suifleet-testnet lock required')
     os.umask(0o077)
+    args.codec=args.codec.resolve(strict=True)
+    assert args.codec.is_file(), 'codec artifact must exist before wallet operations'
     live=Live(args.wallet,'testnet',args.max_spend_mist);live.preflight()
     # No republishing an identical core: these are the source/lock inputs of
     # the effects-verified publication in sf083-testnet.json, freshly re-read.
@@ -40,7 +42,11 @@ def run(args):
     assert dm.upgrade_cap(facts['objects'][dm.object_id(CORE_CAP)])[:2]==(CORE,'1')
     live.check('reused immutable SF083 core, exact source/lock/compiler inputs; chain, account and UpgradeCap reverified')
     prior=json.loads(args.resume_evidence.read_text()) if args.resume_evidence else None
-    if prior:assert prior['chain']==live.chain and prior['operator']==live.operator
+    if prior:
+        assert prior['chain']==live.chain and prior['operator']==live.operator
+        live.ledger.grant(prior['allowance_used_mist'])
+        live.evidence['carried_allowance_mist']=prior['allowance_used_mist']
+        live.evidence['setup_transactions']=prior.get('setup_transactions',prior['transactions'])
     root=Path(prior['runtime']) if prior else Path(tempfile.mkdtemp(prefix='sf082-live-',dir=args.runtime_dir))
     daemon=None;watch_stop=threading.Event();health_receipts={};funding_receipts={}
     state_path=live.wallet.parent/'sf082-state.json';cache=json.loads(state_path.read_text()) if state_path.exists() else {'chain':live.chain,'packages':{}}
@@ -111,6 +117,7 @@ def run(args):
             r=live.transaction('SUI-only prepaid storage purchase','--split-coins','gas',f'[{SWAP}u64]','--assign','sui','--move-call',f'{EXCHANGE_PACKAGE}::wal_exchange::exchange_all_for_wal',f'@{EXCHANGE}','sui','--assign','wal',
                 '--move-call',call('fleet_storage','deposit_wal_at_least',storage_pkg),f'@{storage}',f'@{budget}',f'@{budget_cap}','wal',f'{minimum}u64',
                 '--move-call',call('fleet_storage','refill_pool',storage_pkg),f'@{storage}',f'@{budget}',f'@{budget_cap}',f'@{SYSTEM}',f'{ENCODED*2}u64',f'{end_epoch}u32',budget=40_000_000,funding=SWAP)
+            live.evidence['storage_purchase']={'digest':r['digest'],'events':r.get('events',[]),'net_gas_mist':net_gas(r)}
             live.transaction('owner approves finite retained device archives',
                 '--move-call',call('fleet_storage','configure_retention',storage_pkg),f'@{storage}',f'@{budget}',f'@{budget_cap}',f'@{live.operator}','4u32','10000000u64','5000000u64','1000000u64',
                 '--move-call',call('fleet_storage','withdraw_wal',storage_pkg),f'@{storage}',f'@{budget}',f'@{budget_cap}','10000000u64','--assign','renewal_wal',
@@ -118,7 +125,6 @@ def run(args):
                 '--move-call',call('fleet_storage','fund_retention',storage_pkg),f'@{storage}','renewal_wal','renewal_gas',
                 '--move-call',call('fleet_storage','configure_device_retention',storage_pkg),f'@{storage}',f'@{budget}',f'@{budget_cap}',f'{end_epoch+1}u32','2000000u64',budget=40000000,funding=5000000)
             live.evidence['retention_policy']={'target':end_epoch+1,'initial_end':end_epoch,'max_fee_frost':2000000,'executor':live.operator}
-            live.evidence['storage_purchase']={'digest':r['digest'],'events':r.get('events',[]),'net_gas_mist':net_gas(r)}
             r=live.transaction('create fleet data index','--move-call',call('fleet_data','create',data_pkg),f'@{budget}',f'@{budget_cap}',f'@{storage}',f'"{live.chain}"',budget=20_000_000)
             fleet=live.created(r,'::fleet_data::FleetData')[0]
             r=live.transaction('enroll indexed device writer','--move-call',call('fleet_data','enroll',data_pkg),f'@{fleet}',f'@{budget}',f'@{budget_cap}',f'@{account}',
@@ -127,8 +133,12 @@ def run(args):
             config=dict(schema=1,chainIdentifier=live.chain,registryId=REGISTRY,packageId=data_pkg,typeOrigin=data_pkg,fleetId=fleet,budgetId=budget,storageId=storage)
             cache['last_objects']=dict(budget=budget,budget_cap=budget_cap,account=account,storage=storage,fleet=fleet,writer=writer,device=device_id,owner_cap=owner_cap);save()
             live.evidence['fleet_data']=dict(config,writerId=writer,deviceId=device_id,accountId=account,storagePackage=storage_pkg)
-            state_dir=root/'state';overlays=root/'overlays';overlays.mkdir();(overlays/'fixture.json').write_text(json.dumps({'/password':'sf082-private-fixture-value'}))
-            (state_dir/'supervised'/'fixture').mkdir(parents=True);(state_dir/'supervised'/'fixture'/'component.log').write_text('fixture sf082-private-fixture-value must be redacted\n')
+        if not (root/'release'/'config.toml').exists():
+            if prior:
+                setup=live.evidence['setup_transactions'];registration=next(t['digest'] for t in setup if t['label']=='register SF082 device')
+                cap=live.created(live.executed(registration),'::device_cap::DeviceCap')[0]
+            state_dir=root/'state';overlays=root/'overlays';overlays.mkdir(exist_ok=True);(overlays/'fixture.json').write_text(json.dumps({'/password':'sf082-private-fixture-value'}))
+            (state_dir/'supervised'/'fixture').mkdir(parents=True,exist_ok=True);(state_dir/'supervised'/'fixture'/'component.log').write_text('fixture sf082-private-fixture-value must be redacted\n')
             template=root/'template.toml';template.write_text(f'[device]\nkeypair_path={json.dumps(str(root/"device/test.key"))}\ndevice_object_id="{device_id}"\ndevice_cap_id="{cap}"\n[apply]\ncommand="/bin/false"\n[runtime]\nstate_dir={json.dumps(str(state_dir))}\npoll_seconds=3\n'
                 f'[components]\nconfiguration_overlay_dir={json.dumps(str(overlays))}\n[logs]\ninterval_seconds=10\nbuffer_max=32\n[fleet_data]\npackage_id="{data_pkg}"\ntype_origin="{data_pkg}"\nfleet_id="{fleet}"\nbudget_id="{budget}"\nstorage_id="{storage}"\nwriter_id="{writer}"\naccount_id="{account}"\n'
                 f'[fleet_data.archives]\nstorage_package="{storage_pkg}"\nstorage_type_origin="{storage_pkg}"\nsystem_id="{SYSTEM}"\nwalrus_package="{WALRUS_PACKAGE}"\nkey_server_package="{KEY_PACKAGE}"\n'
@@ -197,7 +207,7 @@ def run(args):
         if renewal_record:
             live.evidence['retention_policy']=renewal_record
             current_end=renewal_record['initial_end'];target=renewal_record['target']
-            args=['--move-call',call('fleet_storage','execute_renewal',storage_pkg),f'@{storage}',f'@{SYSTEM}',f'@{event(live.executed(periodic["registration"]),"::fleet_storage::UploadRegistered")["blob_object_id"]}',f'{current_end}u32','2u64',
+            renewal_args=['--move-call',call('fleet_storage','execute_renewal',storage_pkg),f'@{storage}',f'@{SYSTEM}',f'@{event(live.executed(periodic["registration"]),"::fleet_storage::UploadRegistered")["blob_object_id"]}',f'{current_end}u32','2u64',
                   '--move-call',call('fleet_storage','execute_renewal',storage_pkg),f'@{storage}',f'@{SYSTEM}',f'@{event(live.executed(diagnostic["registration"]),"::fleet_storage::UploadRegistered")["blob_object_id"]}',f'{current_end}u32','2u64']
             marker=root/'renewal-execution.json'
             if marker.exists():
@@ -205,7 +215,7 @@ def run(args):
                 r=live.executed(saved['digest']);assert r and r['effects']['status']['status']=='success'
             else:
                 marker.write_text(json.dumps({'status':'unknown'}))
-                r=live.transaction('apply finite prepaid archive renewals',*args,budget=30000000)
+                r=live.transaction('apply finite prepaid archive renewals',*renewal_args,budget=30000000)
                 marker.write_text(json.dumps({'status':'success','digest':r['digest']}))
             live.evidence['retention_execution']={'digest':r['digest'],'events':r.get('events',[]),'target':target}
         # Native bridge signs only a bounded owner Seal personal-message
