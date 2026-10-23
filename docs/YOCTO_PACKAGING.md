@@ -100,6 +100,133 @@ enabled.
 Use a writable persistent root filesystem for these initial profiles.
 Read-only-rootfs/data-partition migration is not implemented here.
 
+## Serverless archive runtime (SF-120)
+
+SF-082 encrypted fleet archives run a keyless Node.js codec from the daemon
+(`[fleet_data.archives]` `node`, `codec`, `codec_sha256`). The daemon executes
+`node codec` with a cleared environment, its state directory as working
+directory and home, the `suifleet.service` sandbox and resource limits, and
+verifies the codec file's SHA-256 before every run. The codec encodes
+ciphertext and talks to Sui/Walrus storage nodes; Seal encryption and every
+signature stay native in the daemon/signer. The layer packages that runtime in
+two recipes; the Pi and both QEMU images install them.
+
+| Package | Installed files | Source and pin |
+|---|---|---|
+| `suifleet-node` 22.22.2 | `/usr/lib/suifleet/node/bin/node` (root 0755), `LICENSE` | Official `node-v22.22.2-linux-arm64.tar.xz`, SHA-256 `e9e1930f…a091fe` from `SHASUMS256.txt` |
+| `suifleet-walrus-codec` 1.0 | `/usr/lib/suifleet/walrus-codec/` bundle, `walrus_wasm_bg.wasm`, `manifest.json`, `THIRD_PARTY_LICENSES.txt`, `provenance.json` (root 0644) | `scripts/package_walrus_codec.py` at `SUIFLEET_CODEC_SOURCE_REV`; all five SHA-256 values pinned in the recipe |
+
+Runtime requirements, taken from the source rather than assumed:
+
+- **Node release.** `scripts/build_walrus_codec.cjs` targets `node22` and writes
+  `"node": "22.22.2"` into the manifest; `config.example.toml` asks for Node
+  22.22.2. The codec recipe requires `suifleet-node (= 22.22.2)` and refuses a
+  manifest naming another release. The packager refuses a builder Node other
+  than the manifest's.
+- **Layout.** The bundle loads `walrus_wasm_bg.wasm` from its own directory
+  (`${__dirname}`), so both files are installed together. No `node_modules`,
+  npm or SDK tree is shipped or needed.
+- **Libraries.** The official binary needs glibc ≥ 2.28 and
+  `libstdc++` (GLIBCXX 3.4.21); BitBake records `glibc`, `libgcc` and
+  `libstdc++` as runtime dependencies. Scarthgap ships glibc 2.39.
+- **Memory.** Measured with the x86-64 Node 22.22.2 build against Testnet,
+  `prepare` peaked at 147 MB RSS for a 1 MiB ciphertext and 177 MB for the
+  4 MiB maximum, with 11 threads. It completed under a 200 MiB cgroup.
+  `suifleet.service` caps the daemon and all children at `MemoryMax=256M` and
+  `TasksMax=64`, so archive encoding fits with little headroom. `write` was not
+  measured. Check memory on the Pi in SF-031 before raising limits.
+  `MemoryDenyWriteExecute` stays unset, as the unit already documents for JIT
+  runtimes.
+
+The Node recipe installs the official binary byte for byte, so the
+`already-stripped` and `ldflags` QA checks are skipped for that one prebuilt
+executable. The fetcher enforces the SHA-256 value. That value comes from
+`SHASUMS256.txt`, whose detached signature was checked against Node.js
+releaser key `890C08DB8579162FEE0DF9DB8BEAB4DFCF555EF4` (Rafael Gonzaga, listed
+in the Node.js README). Verify it the same way before changing the release:
+
+```sh
+curl -fsSLO https://nodejs.org/dist/v22.22.2/SHASUMS256.txt
+curl -fsSLO https://nodejs.org/dist/v22.22.2/SHASUMS256.txt.sig
+gpg --verify SHASUMS256.txt.sig SHASUMS256.txt   # with the releaser key imported
+grep linux-arm64.tar.xz SHASUMS256.txt
+```
+
+### Building the codec artifact
+
+BitBake does not fetch npm packages. Build the codec from the exact daemon
+source revision, using that revision's frozen pnpm lockfile, with Node 22.22.2.
+Put the result where the recipe expects it:
+`${TOPDIR}/suifleet-walrus-codec/<SUIFLEET_CODEC_SOURCE_REV>/`, or set
+`SUIFLEET_WALRUS_CODEC_DIR`. In the dev image (Node 22.22.2, pnpm 11.0.8):
+
+```sh
+git worktree add --detach /tmp/codec-src <SRCREV>
+(cd /tmp/codec-src/dapp && pnpm install --frozen-lockfile)
+python3 scripts/package_walrus_codec.py --source /tmp/codec-src --revision <SRCREV> \
+  --output "$BUILDDIR/suifleet-walrus-codec/<SRCREV>"   # prints the recipe pins
+python3 scripts/package_walrus_codec.py --output "$BUILDDIR/suifleet-walrus-codec/<SRCREV>" \
+  --recipe suifleet-edge/meta-suifleet/recipes-edge/suifleet-walrus-codec/suifleet-walrus-codec_1.0.bb
+```
+
+The packager runs the reviewed, unmodified `build_walrus_codec.cjs` from that
+checkout and refuses tracked modifications or another revision. It copies
+the license file of every npm package that esbuild compiled into the bundle
+into `THIRD_PARTY_LICENSES.txt`. It refuses any package without license
+metadata unless that package has a reviewed undeclared entry. Two
+builds of `ca002d3934bf4e53398ed6d57024cc95b467202c` produced byte-identical
+artifacts. The bundle contains 13 package versions: `@mysten/sui`, `bcs`, `utils` (0.4.1 and 0.4.2),
+`walrus`, `walrus-wasm`, `@noble/hashes`, `@scure/base`, three
+`@protobuf-ts` packages, `dataloader` and `valibot`, with the Apache-2.0, MIT
+and BSD-3-Clause licenses.
+
+**Licensing gap:** `@mysten/walrus-wasm` 0.3.1 publishes no license field or
+file, and its repository has no LICENSE. The recipe declares it as
+`SuiFleet-walrus-wasm-undeclared` (text in `THIRD_PARTY_LICENSES.txt`) rather
+than guessing Apache-2.0. The Rust crates compiled into the WASM, listed in
+that package's `Cargo.lock`, are not license-resolved. Resolve both with the
+publisher before a production release.
+
+The recipe's `do_verify_codec` runs before license population and install. It
+requires exactly the five pinned files, their SHA-256 values, a schema-1
+manifest naming the packaged Node release, recipe pins equal to the manifest's,
+and provenance from `SUIFLEET_CODEC_SOURCE_REV`. A tampered file fails that
+task. A missing artifact directory fails parsing for every target in the build,
+because the `file://` checksums cannot be computed. `inspect_pi_image.py` also
+requires the codec's provenance revision to equal the daemon's `build-info`.
+`make test-yocto-packaging` covers these rules offline. Its
+`test_codec_and_daemon_share_source_revision` is an expected failure until
+`SRCREV` advances to the merged SF-082/SF-084 source; remove the decorator in
+that commit.
+
+### Final source pin (after SF-082 and SF-084 merge)
+
+1. Select the merged main revision containing both, and set `SRCREV` and
+   `SUIFLEET_CRATE_VERSION` (checked against `suifleet-edge/Cargo.toml`).
+2. Run `bitbake -c update_crates suifleet`. Commit the regenerated
+   `suifleet-crates.inc` with `SUIFLEET_LOCK_SHA256` from that revision's
+   `Cargo.lock`.
+3. Rebuild the codec artifact at the same revision and update
+   `SUIFLEET_CODEC_SOURCE_REV`, the five SHA-256 values and the license
+   `md5`. If `@mysten/walrus-wasm` or the SDK versions changed, review the
+   packager's undeclared entry.
+4. Build the image in a build directory whose `bblayers.conf` names this
+   reviewed checkout's `meta-suifleet`. Then run `inspect_pi_image.py`,
+   `test_pi_binary.py` and `test_pi_codec.py`.
+
+### Target codec smoke
+
+`scripts/test_pi_codec.py --qemu …/qemu-aarch64 --rootfs …/rootfs --output codec-test.json`
+runs the image's AArch64 Node 22.22.2 on the image's codec in user-mode QEMU.
+It checks the exact release, the manifest/provenance binding, categorical
+refusal of malformed and foreign-chain requests, and failure when the WASM is
+missing or corrupt. With `--rpc-url https://fullnode.testnet.sui.io:443` it
+runs `prepare` on a deterministic 1 MiB vector. That makes read-only chain and
+Walrus system reads and no transaction. With `--host-node` (official x86-64
+22.22.2) it also requires an identical blob ID and root hash. It does not boot
+the Pi, run systemd, write to storage nodes or exercise the daemon's codec
+checksum refusal.
+
 ## First boot and enrollment
 
 The image contains no private key, device address, deployment manifest,
