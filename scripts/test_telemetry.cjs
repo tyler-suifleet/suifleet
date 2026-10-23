@@ -117,6 +117,40 @@ async function sign(keypair, snapshot) {
   assert.ok(farLines.some((l) => l.startsWith(`  svc: 1000 queued (100% full since ${raw})`)), farLines.join("\n"));
   console.log("PASS: schema-2 service health verifies; unknown/oversized/missing service fields (topics, URLs) and error texts are refused; summary lines, including out-of-range device times");
 
+  // Services version 2 (SF-084): the same report with each stream's retained
+  // sequence range and export checkpoint, signed by Mysten's SDK and
+  // reproduced byte for byte by the daemon. Version 1 stays accepted.
+  const v2 = cases.signed_services_v2;
+  assert.equal(v2.snapshot.services.version, telemetry.SERVICES_VERSION);
+  assert.deepEqual(await telemetry.verifyReport(v2.envelope, device, signer), v2.snapshot);
+  const clone2 = () => JSON.parse(JSON.stringify(v2.snapshot.services));
+  const stream2 = (edit) => { const v = clone2(); edit(v.streams.streams[0]); return { ...v2.snapshot, services: v }; };
+  for (const [label, snapshot] of [
+    ["unknown section version", { ...v2.snapshot, services: { ...clone2(), version: 3 } }],
+    ["version 2 without a range", stream2((st) => { delete st.oldest; })],
+    ["version 2 without a checkpoint", stream2((st) => { delete st.export.checkpoint; })],
+    ["version 1 with a range", { ...v2.snapshot, services: { ...clone2(), version: 1 } }],
+    ["reversed range", stream2((st) => { st.oldest = 25; })],
+    ["more messages than the range holds", stream2((st) => { st.messages = 12; })],
+    ["one end of a range", stream2((st) => { st.newest = null; })],
+    ["an empty range with messages", stream2((st) => { st.oldest = null; st.newest = null; })],
+    ["a range without messages", stream2((st) => { st.messages = 0; })],
+    ["negative checkpoint sentinel", stream2((st) => { st.export.checkpoint = -1; })],
+    ["unsafe sequence", stream2((st) => { st.newest = Number.MAX_SAFE_INTEGER + 1; })],
+  ]) {
+    assert.equal(await telemetry.verifyReport(await sign(ed, snapshot), device, signer), "invalid services section", label);
+  }
+  for (const [label, snapshot] of [
+    ["an empty stream that kept its checkpoint", stream2((st) => { st.messages = 0; st.oldest = null; st.newest = null; })],
+    ["nothing exported yet", stream2((st) => { st.export.checkpoint = null; })],
+    ["a single message", stream2((st) => { st.messages = 1; st.oldest = 24; })],
+  ]) {
+    assert.deepEqual(await telemetry.verifyReport(await sign(ed, snapshot), device, signer), snapshot, label);
+  }
+  const lines2 = telemetry.describeServices(v2.snapshot.services);
+  assert.ok(lines2.some((l) => l.includes("10 messages (sequences 14–24)") && l.includes("export 10 behind, checkpoint 9,")), lines2.join("\n"));
+  console.log("PASS: services version 2 verifies with stream ranges and export checkpoints; missing, inconsistent, sentinel and cross-version fields are refused; version 1 still verifies");
+
   // Status rules shared with the indexer.
   for (const c of cases.status) {
     const latest = c.snapshot ? { snapshot: c.snapshot, receivedMs: c.received_ms } : undefined;
