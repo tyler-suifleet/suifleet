@@ -78,7 +78,7 @@ async function start({client,rpc,core,registry,devices,owner,execute,created,pub
    async apply(d,expected) {
     assert.equal(expected.artifact_sha256,artifactHash);assert.equal(expected.recipe_digest,recipeHash);
     if(applies.has(d.deviceId))return; // one process-local synthetic application, not daemon restart recovery
-    const [a,r]=await measure('encrypted_fetch',()=>Promise.all([open(d,'artifact'),open(d,'recipe')]));
+    const [a,r]=await measure('encrypted_fetch',async()=>[await open(d,'artifact'),await open(d,'recipe')]);
     assert.equal(JSON.parse(Buffer.from(r)).artifact_sha256,digest(a));
     await measure('synthetic_apply',async()=>{const destination=`${tmp}/applied-${d.deviceId}`;await fs.writeFile(destination,a,{flag:'wx',mode:0o600});assert.equal(digest(await fs.readFile(destination)),expected.artifact_sha256);applies.set(d.deviceId,1);});
    },
