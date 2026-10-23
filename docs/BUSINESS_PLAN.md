@@ -56,6 +56,23 @@ Managed plan: the platform price plus $0.10 per device per month, with a $199 mo
   - At 10,000 devices that is $0.18 per device: 42% below Mender Basic and 81% below Mender Professional. Small fleets pay more per device until the $199 minimum is covered.
 - Validate both packages and the managed premium with the first customers; neither has been tested with buyers.
 
+### Positioning
+
+- **Infrastructure, not a "blockchain product".** Customer-facing language describes fleet and OTA infrastructure: verifiable release authority, tamper-evident update records, no lock-in and low cost. Sui, Walrus and Seal belong in the technical and security documentation, where security reviews will ask how the infrastructure works.
+- **Deployments, not telemetry pipelines.** AWS provides live telemetry through IoT Core MQTT, device shadows and rules into services such as CloudWatch, IoT SiteWise and Kinesis. SuiFleet targets deployment and fleet management; live telemetry is not a near-term target.
+  - Customers who need minute-level telemetry can keep sending it straight to IoT Core or their existing pipeline, without Greengrass, and move deployments to SuiFleet.
+  - That still removes Greengrass's $0.16 per-device fee and its Jobs charges.
+
+### Entry offers (proposal)
+
+- **At-cost tier.** Up to 100 devices per organization with no SuiFleet margin: the customer pays only network and hosting costs, about $0.01 per device per month at default settings (about $12 a year for 100 devices).
+  - Billed annually in advance, so card fees do not exceed the bill. Customers who prefer to pay in SUI can fund the fleet budget directly; SF-083 already collects network costs up front with no SuiFleet fee.
+  - Community support only.
+- **Design partners.** Three to five companies from the prospect shortlist.
+  - Up to 5,000 devices each at cost for 12 months, with managed onboarding free.
+  - In exchange: regular feedback, a production reference, and permission to publish a case study.
+  - Afterwards partners move to list price or a pre-agreed discount.
+
 ### Configurable settings: added cost, price and margin
 
 | Setting | Option | Added cost, $/device/month | Price, $/device/month | Gross margin |
