@@ -5,6 +5,7 @@ This is simulator evidence. Move unit tests and isolated/public-chain evidence
 remain separate; the simulator never pretends to verify a Walrus certificate.
 """
 import argparse, base64, copy, hashlib, json, os, signal, struct, subprocess, sys, tempfile, threading, time
+from contextlib import contextmanager
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import test_budget_ota as budget
@@ -29,7 +30,8 @@ def raw(id,kind,fields,contents):
     return {'data':{'objectId':id,'owner':{'Shared':{'initial_shared_version':'1'}},'content':{'type':kind,'fields':fields},
         'bcs':{'dataType':'moveObject','type':kind,'bcsBytes':contents.hex()}}}
 class Simulator(budget.BudgetSimulator):
-    def __init__(self):
+    def __init__(self,compact=False):
+        self.compact=compact;self.heads=[]
         super().__init__();self.gas=100_000_000;self.seq=0;self.at=0;self.message=b'';self.signature=b'';self.clock=int(time.time()*1000);self.health=[];self.fail_once=True;self.batchseq=0;self.batch_at=None;self.emergency_at=None;self.anchors=[];self.registered={};self.certified=set();self.tx_results={};self.uploads_paused=True;self.certify_outage=True;self.request_seq=0;self.upload_dir=None;self.key_objects={};self.gas_version=1;self.register_reply_outage=True;self.history_pruned=False;self.status_reads={};self.stale_certificate_rejections=0
     def fleet(self):
         return dict(id=object_id(FLEET),version='1',budget_id=object_id(budget.BUDGET),storage_id=object_id(STORAGE),registry_id=object_id(ota.REGISTRY),
@@ -38,7 +40,7 @@ class Simulator(budget.BudgetSimulator):
         return dict(id=object_id(WRITER),version='1',fleet_id=object_id(FLEET),device_id=object_id(ota.DEVICE),account_id=object_id(budget.ACCOUNT),
             health_seq=str(self.seq),health_at_ms=str(self.at),message=list(self.message),signature=list(self.signature),batch_seq=str(self.batchseq),batch_at_ms=None if self.batch_at is None else str(self.batch_at),emergency_at_ms=None if self.emergency_at is None else str(self.emergency_at),anchor_count=str(len(self.anchors)))
     def obj(self,id):
-        if id==PACKAGE:return {'data':{'version':'2','bcs':{'dataType':'package','typeOriginTable':[{'module_name':'fleet_data','datatype_name':'DiagnosticKey','package':'0xf8'}]}}}
+        if id==PACKAGE:return {'data':{'version':'2','bcs':{'dataType':'package','typeOriginTable':[{'module_name':'fleet_data','datatype_name':name,'package':origin} for name,origin in [('DiagnosticKey','0xf8'),('CompactHeadKey','0xf9'),('CompactHead','0xf9')]]}}}
         if id==FLEET:
             b=addr(id)+u64(1)+addr(budget.BUDGET)+addr(STORAGE)+addr(ota.REGISTRY)+vec(self.chain.encode())+u64(0)+b'\0'+u64(60000)+u64(86400000)+u64(60000)+u64(1)
             return raw(id,f'{PACKAGE}::fleet_data::FleetData',self.fleet(),b)
@@ -51,8 +53,10 @@ class Simulator(budget.BudgetSimulator):
     def rpc(self,method,params):
         if method=='shim_height':return {'height':1 if self.history_pruned else 0,'lowest':1 if self.history_pruned else 0}
         if method=='shim_fields':return super().rpc(method,params)+[[FLEET,f'{PACKAGE}::fleet_data::DeviceKey',addr(ota.DEVICE).hex()],
-            [WRITER,'0xf8::fleet_data::DiagnosticKey','00']]+[[WRITER,f'{PACKAGE}::fleet_data::AnchorKey',u64(i).hex()] for i in range(len(self.anchors))]
+            [WRITER,'0xf8::fleet_data::DiagnosticKey','00']]+([[WRITER,'0xf9::fleet_data::CompactHeadKey','00']] if self.compact else [])+[[WRITER,f'{PACKAGE}::fleet_data::AnchorKey',u64(i).hex()] for i in range(len(self.anchors))]
         if method=='suix_getDynamicFieldObject' and params[0]==WRITER:
+            if params[1]['type'].endswith('::CompactHeadKey'):
+                return {'data':{'content':{'fields':{'value':{'bcs_hex':self.heads[-1].hex()} if self.heads else None}}}}
             value=({'seq':str(self.request_seq),'at_ms':str(self.clock)} if self.request_seq else None) if params[1]['type'].endswith('::DiagnosticKey') else self.anchors[struct.unpack('<Q',bytes.fromhex(params[1]['value']))[0]]
             return {'data':{'content':{'fields':{'value':value}}}}
         if method=='test_blob':return self.registered[params[0]]
@@ -90,7 +94,7 @@ class Simulator(budget.BudgetSimulator):
                 elif fn=='certify_blob':
                     if self.certify_outage:raise ConnectionError('certification transport outage')
                     blob='0x'+base64.b64decode(args[2]['bcs']).hex();self.certified.add(blob)
-                elif fn=='anchor':
+                elif fn in ['anchor','anchor_compact']:
                     blob='0x'+base64.b64decode(args[7]['bcs']).hex();assert blob in self.certified
                     seq=struct.unpack('<Q',base64.b64decode(args[8]['bcs']))[0];kind=base64.b64decode(args[9]['bcs'])[0]
                     sha=unvec(base64.b64decode(args[10]['bcs']));assert sha==hashlib.sha256((self.upload_dir/(blob+'.bin')).read_bytes()).digest()
@@ -101,6 +105,11 @@ class Simulator(budget.BudgetSimulator):
                     if kind==0:self.batch_at=self.clock
                     else:self.emergency_at=self.clock
                     self.anchors.append(dict(seq=str(seq),kind=kind,blob_object_id=blob,blob_id='2',ciphertext_sha256=list(sha),signer=ota.ADDRESS,at_ms=str(self.clock),end_epoch=100,key_epoch='0'))
+                    if fn=='anchor_compact':
+                        previous=hashlib.sha256(self.heads[-1]).digest() if self.heads else b''
+                        assert unvec(base64.b64decode(args[11]['bcs']))==previous
+                        value=u64(seq)+bytes([kind])+addr(blob)+(2).to_bytes(32,'little')+vec(sha)+addr(ota.ADDRESS)+u64(self.clock)+struct.pack('<I',100)+u64(0)
+                        self.heads.append(u64(0)+u64(len(self.anchors)-1)+value+vec(previous))
                 else:raise AssertionError('unrecognized archive write')
                 result={'digest':digest,'effects':{'status':{'status':'success'}}};self.tx_results[digest]=result;self.gas_version+=1
                 if fn=='register_blob' and self.register_reply_outage:self.register_reply_outage=False;raise ConnectionError('lost response after committed registration')
@@ -121,8 +130,15 @@ def wait(predicate,seconds=20):
         if predicate():return
         time.sleep(.1)
     raise AssertionError('daemon condition timed out')
-def run(binary,shim_binary):
-    ota.SHIM=shim_binary;sim=Simulator()
+@contextmanager
+def stopped_workspace(stop):
+    # Stop the daemon before removing files it may still be flushing on failure.
+    with tempfile.TemporaryDirectory(prefix='sf082-producer-') as temp:
+        try:yield temp
+        finally:stop()
+
+def run(binary,shim_binary,compact=False):
+    ota.SHIM=shim_binary;sim=Simulator(compact)
     class Handler(BaseHTTPRequestHandler):
         def log_message(self,*args):pass
         def do_POST(self):
@@ -136,8 +152,13 @@ def run(binary,shim_binary):
             except (BrokenPipeError,ConnectionResetError):pass  # cancelled loopback request during daemon shutdown
     server=ThreadingHTTPServer(('127.0.0.1',0),Handler);threading.Thread(target=server.serve_forever,daemon=True).start()
     shim,rpc=ota.start_grpc(f'http://127.0.0.1:{server.server_port}');process=None
+    def cleanup():
+        nonlocal process
+        if process:
+            if process.poll() is None:process.send_signal(signal.SIGINT)
+            process.wait(timeout=10);process=None
     try:
-        with tempfile.TemporaryDirectory(prefix='sf082-producer-') as temp:
+        with stopped_workspace(cleanup) as temp:
             root=Path(temp);key=root/'device.key';key.write_text('07'*32);key.chmod(0o600)
             manifest=dict(schema_version=1,protocol_version=1,network='localnet',chain_identifier=sim.chain,rpc_url=rpc,call_package_id=ota.PACKAGE,upgrade_cap_id=ota.UPGRADE_CAP,package_version='3',type_origins=ota.TYPE_ORIGINS,
                 shared_objects={'registry':{'id':ota.REGISTRY,'initial_shared_version':'1'}},supported_clients={'dapp':{'min':'0.0.1','max_exclusive':'0.3.0'},'edge':{'min':'0.1.0','max_exclusive':'0.3.0'}},walrus={'publisher_url':rpc,'aggregator_url':rpc})
@@ -163,7 +184,7 @@ def run(binary,shim_binary):
             archive_config=(f'[components]\nconfiguration_overlay_dir={json.dumps(str(root/"state"/"overlays"))}\n[logs]\ninterval_seconds=10\nmax_lines_per_interval=128\nbuffer_max=16\n'
                 f'[fleet_data.archives]\nstorage_package="0xf6"\nstorage_type_origin="0xf6"\nsystem_id="0xf4"\nwalrus_package="0xf7"\nkey_server_package="0xf5"\n'
                 f'key_servers = '+json.dumps([{'object_id':s['object_id'],'weight':1} for s in vectors['servers']]).replace(': ', ' = ')+ '\n'
-                f'threshold=2\nnode={json.dumps(sys.executable)}\ncodec={json.dumps(str(codec))}\ncodec_sha256="{hashlib.sha256(codec.read_bytes()).hexdigest()}"\n')
+                f'threshold=2\ncompact_history={str(compact).lower()}\nnode={json.dumps(sys.executable)}\ncodec={json.dumps(str(codec))}\ncodec_sha256="{hashlib.sha256(codec.read_bytes()).hexdigest()}"\n')
             # Add source logs only after the startup reconciliation created its
             # state; the collection path is the shipped SF-020 redactor.
             with (root/'daemon.log').open('w') as log:
@@ -220,7 +241,7 @@ def run(binary,shim_binary):
                 assert b'shadow-private-value' not in sim.message and b'secret_key' not in sim.message
                 assert json.loads(sim.message)['services']['shadows']['shadows']==2
                 fixture=root/'fixture.json';fixture.write_text(json.dumps({'manifest':manifest,'config':dict(schema=1,chainIdentifier=sim.chain,registryId=object_id(ota.REGISTRY),packageId=object_id(PACKAGE),typeOrigin=object_id(PACKAGE),fleetId=object_id(FLEET),budgetId=object_id(budget.BUDGET),storageId=object_id(STORAGE)),
-                    'anchors':sim.anchors,'ciphertexts':{a['blob_object_id']:base64.b64encode((sim.upload_dir/(a['blob_object_id']+'.bin')).read_bytes()).decode() for a in sim.anchors},'device':object_id(ota.DEVICE),'signer':ota.ADDRESS,'fleet':sim.fleet(),'writer':sim.writer(),'now':max(sim.clock,int(time.time()*1000)),
+                    'compact_heads':[h.hex() for h in sim.heads],'anchors':sim.anchors,'ciphertexts':{a['blob_object_id']:base64.b64encode((sim.upload_dir/(a['blob_object_id']+'.bin')).read_bytes()).decode() for a in sim.anchors},'device':object_id(ota.DEVICE),'signer':ota.ADDRESS,'fleet':sim.fleet(),'writer':sim.writer(),'now':max(sim.clock,int(time.time()*1000)),
                     'shadows':[{'':2,'cfg':5}]*3+[{'':3,'cfg':5}]}))
                 subprocess.run(['node','scripts/verify_native_fleet.cjs',str(fixture)],check=True)
                 assert not sim.errors,sim.errors
@@ -230,4 +251,4 @@ def run(binary,shim_binary):
         if process:process.terminate();process.wait(timeout=10)
         shim.terminate();shim.wait(timeout=10);server.shutdown();server.server_close()
 if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('--binary',type=Path,required=True);p.add_argument('--shim',type=Path,required=True);a=p.parse_args();run(a.binary.resolve(),a.shim.resolve())
+    p=argparse.ArgumentParser();p.add_argument('--binary',type=Path,required=True);p.add_argument('--shim',type=Path,required=True);p.add_argument('--compact-history',action='store_true');a=p.parse_args();run(a.binary.resolve(),a.shim.resolve(),a.compact_history)

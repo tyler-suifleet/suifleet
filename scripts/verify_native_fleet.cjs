@@ -27,15 +27,25 @@ const chain={ledgerService:{async getServiceInfo(){return {response:{chainId:toB
      const keys=new Map(vectors.servers.map(s=>[`${fullId}:${s.object_id}`,hashToG1(Buffer.from(fullId.replace(/^0x/,''),'hex')).multiply(Scalar.fromBytes(Buffer.from(s.master_secret,'hex')))]));
      return decrypt({encryptedObject,keys,publicKeys:vectors.servers.map(s=>G2Element.fromBytes(Buffer.from(s.public_key,'hex'))),checkLEEncoding:false});
    };
-   for(let index=0;index<f.anchors.length;index++){
+   let compact=f.compact_heads?.length?bulk.parseCompactHead(Buffer.from(f.compact_heads.at(-1),'hex')):undefined;
+   for(let position=0;position<f.anchors.length;position++){
+     const index=compact?f.anchors.length-1-position:position;
      const anchor=f.anchors[index],ciphertext=Buffer.from(f.ciphertexts[anchor.blob_object_id],'base64');
      const fetcher=async()=>new Response(ciphertext);
-     const archive=await bulk.fetchVerifiedArchive(chain,{systemState:async()=>({committee:{epoch:1}})},f.config,f.device,index,'https://fixture.invalid',open,fetcher);
+     let archive;
+     if(compact){
+       assert.deepEqual(compact.anchor,anchor);
+       archive=await bulk.openArchive(ciphertext,f.config,f.device,compact.anchor,open);
+       const previous=await bulk.previousCompactHead(archive,compact);
+       if(index>0)assert.equal(Buffer.from(bulk.CompactHeadBcs.serialize(previous).toBytes()).toString('hex'),f.compact_heads[index-1]);
+       else assert.equal(previous,undefined);
+       compact=previous;
+     }else archive=await bulk.fetchVerifiedArchive(chain,{systemState:async()=>({committee:{epoch:1}})},f.config,f.device,index,'https://fixture.invalid',open,fetcher);
      assert.equal(archive.reason,['logs','diagnostics','crash'][anchor.kind]);
      assert(!JSON.stringify(archive).includes('fixture-confidential-value'),'collector must redact before signing and encryption');
      if(f.shadows){
        // SF-084: every archive carries the device's shadow documents (schema 2).
-       assert.equal(archive.schema,2);
+       assert.equal(archive.schema,f.compact_heads?.length?3:2);
        assert.deepEqual(Object.fromEntries(archive.shadows.documents.map(d=>[d.name,d.version])),f.shadows[index]);
        const view=shadows.shadowDocumentsView(archive,index,f.anchors.length);
        assert.equal(view.newest,index===f.anchors.length-1);

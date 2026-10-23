@@ -22,6 +22,10 @@ pub struct Config {
     pub node: PathBuf,
     pub codec: PathBuf,
     pub codec_sha256: String,
+    /// Requires the reviewed additive CompactHead API on the configured package.
+    /// Disabled for existing deployments until they are explicitly upgraded.
+    #[serde(default)]
+    pub compact_history: bool,
 }
 impl Config {
     pub fn validate(&self) -> anyhow::Result<()> {
@@ -49,6 +53,8 @@ struct Pending {
     #[serde(default)] anchor_digest: Option<String>,
     /// Fingerprint of the archived shadow snapshot (schema 2), if any.
     #[serde(default)] shadows: String,
+    /// None is a legacy journal; Some(empty) starts a compact history.
+    #[serde(default)] previous_head: Option<Vec<u8>>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Certificate { pub signature: String, pub bitmap: String, pub message: String }
@@ -161,10 +167,13 @@ pub async fn tick(task: &Task) -> anyhow::Result<()> {
         if kind != 0 && records.len() < 4096 { records.push(Record { source: "daemon".into(), line: if diagnostics { "Owner/support diagnostic request observed" } else { "Supervised component crash observed" }.into() }); }
         if records.is_empty() { records.push(Record { source: "daemon".into(), line: "Shadow state snapshot".into() }); }
         let seq = writer.batch_seq.checked_add(1).filter(|n| *n <= 9_007_199_254_740_991).ok_or_else(|| anyhow::anyhow!("archive sequence exhausted"))?;
+        let previous_head = if config.compact_history {
+            Some(task.sui.compact_archive_head(&task.config).await?)
+        } else { None };
         let archive = Archive { kind: "fleet-data".into(), chain_identifier: fleet.chain_identifier.clone(),
             registry: fleet.registry_id.to_string(), fleet_id: fleet.id.to_string(), device_id: task.device_id.clone(), signer: task.signer.address(),
             seq, observed_ms: telemetry::now_ms(), reason: ["logs", "diagnostics", "crash"][kind as usize].into(), dropped_lines, records,
-            schema: if shadows.is_some() { 2 } else { 1 }, shadows };
+            schema: if previous_head.is_some() { 3 } else if shadows.is_some() { 2 } else { 1 }, shadows, previous_head: previous_head.clone() };
         archive.validate()?;
         let message = zeroize::Zeroizing::new(serde_json::to_vec(&archive)?);
         let signature = task.signer.sign_personal_message(&message)?;
@@ -180,14 +189,18 @@ pub async fn tick(task: &Task) -> anyhow::Result<()> {
         let encoded = codec(task, config, &dir, "prepare", json!({})).await?;
         let pending = Pending { seq, kind, request_seq: if diagnostics { request_seq } else { completed.request_seq }, fingerprint, anchor_index: writer.anchor_count, logs,
             blob_id: string(&encoded,"blob_id")?, root_hash: string(&encoded,"root_hash")?, ciphertext_sha256: Sha256::digest(&ciphertext).to_vec(),
-            registration: None, blob_object_id: None, certificate: None, certification_digest: None, anchor_digest: None, shadows: shadow_fingerprint };
+            registration: None, blob_object_id: None, certificate: None, certification_digest: None, anchor_digest: None, previous_head, shadows: shadow_fingerprint };
         atomic(&pending_path, &serde_json::to_vec(&pending)?)?; pending
     };
     // Never regenerate ciphertext or purchase again after an uncertain submit.
     anyhow::ensure!(Sha256::digest(std::fs::read(dir.join("ciphertext.bin"))?).as_slice() == pending.ciphertext_sha256, "pending ciphertext changed");
     if writer.batch_seq >= pending.seq {
         // A chain anchor, not an execution response, acknowledges completion.
-        task.sui.verify_archive_anchor(&task.config, pending.anchor_index, pending.seq, &pending.ciphertext_sha256).await?;
+        if pending.previous_head.is_some() {
+            task.sui.verify_compact_archive_anchor(&task.config, pending.seq, &pending.ciphertext_sha256).await?;
+        } else {
+            task.sui.verify_archive_anchor(&task.config, pending.anchor_index, pending.seq, &pending.ciphertext_sha256).await?;
+        }
         for (seq,path) in spool.pending()? { if pending.logs.contains(&seq) { std::fs::remove_file(path)?; } }
         std::fs::File::open(dir.join("logs"))?.sync_all()?;
         atomic(&dir.join("completed.json"), &serde_json::to_vec(&Completed { crash: pending.fingerprint, request_seq: pending.request_seq, shadows: pending.shadows, seq: pending.seq, registration: pending.registration, certification: pending.certification_digest, anchor: pending.anchor_digest })?)?;
@@ -232,7 +245,12 @@ pub async fn tick(task: &Task) -> anyhow::Result<()> {
         atomic(&pending_path,&serde_json::to_vec(&pending)?)?;
     }
     if pending.anchor_digest.is_none() {
-        pending.anchor_digest=Some(task.sui.anchor_archive(&task.config,&task.cap,blob,pending.seq,pending.kind,pending.ciphertext_sha256.clone(),&dir.join("anchor.bcs")).await?);
+        pending.anchor_digest=Some(if let Some(previous) = &pending.previous_head {
+            let hash = if previous.is_empty() { vec![] } else { Sha256::digest(previous).to_vec() };
+            task.sui.anchor_archive_compact(&task.config,&task.cap,blob,pending.seq,pending.kind,pending.ciphertext_sha256.clone(),hash,&dir.join("anchor.bcs")).await?
+        } else {
+            task.sui.anchor_archive(&task.config,&task.cap,blob,pending.seq,pending.kind,pending.ciphertext_sha256.clone(),&dir.join("anchor.bcs")).await?
+        });
         atomic(&pending_path,&serde_json::to_vec(&pending)?)?;
     }
     Ok(()) // Next tick verifies the anchored record before deleting any spool data.

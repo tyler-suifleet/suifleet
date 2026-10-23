@@ -8,7 +8,7 @@ import { Transaction } from '@mysten/sui/transactions';
 import { useDevices } from '@/hooks/useDevices';
 import { useFleetTransaction } from '@/hooks/useFleetTransaction';
 import { DATA_CONFIG, readDeviceData, readFleetData, listFleetDeviceIds } from '@/lib/fleet-data';
-import { archiveDecryptor, fetchVerifiedArchive, readAnchors, type Anchor, type Archive } from '@/lib/fleet-bulk';
+import { archiveDecryptor, fetchVerifiedArchive, readAnchors, parseCompactHead, type Anchor, type Archive } from '@/lib/fleet-bulk';
 import { fetchBudgets } from '@/lib/fleet-budget';
 import { requireManifest, verifyDeployment } from '@/lib/deployment-manifest';
 import { SEAL_SETTINGS } from '@/lib/seal';
@@ -76,7 +76,7 @@ export default function FleetDataPage() {
       const count=Number(writer?.anchor_count ?? 0);
       if(!Number.isSafeInteger(count)) throw Error('Archive index exceeds browser limits');
       const start=Math.max(0,count-32),anchors=await readAnchors(client,DATA_CONFIG,device,start,32);
-      if(current===generation.current){setEntries(anchors.map((anchor,i)=>({index:start+i,anchor})).reverse());setAnchorCount(count);}
+      if(current===generation.current){setEntries(anchors.map((anchor,i)=>({index:anchor.index ?? start+i,anchor})).reverse());setAnchorCount(count);}
     } catch {if(current===generation.current){setArchive(undefined);setEntries([]);setAnchorCount(0);setMessage('Archive index unavailable or permission revoked.');}}
   }
   useEffect(()=>{void refresh();const timer=setInterval(()=>void refresh(),30_000);return ()=>clearInterval(timer);},[device,account?.address,client]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -110,7 +110,14 @@ export default function FleetDataPage() {
       await authority();
       if(current!==generation.current)return;
       if(session.current!==reading || reading.isExpired()) {if(session.current===reading)expire();note(index,kind,allowed.kind,'refused');return;}
-      if(wallet.stores.$connection.get().account?.address===account.address && wallet.stores.$currentNetwork.get()===manifest.network) {setArchive(opened);setOpened(index);note(index,kind,allowed.kind,'opened');}
+      if(wallet.stores.$connection.get().account?.address===account.address && wallet.stores.$currentNetwork.get()===manifest.network) {
+        setArchive(opened);setOpened(index);note(index,kind,allowed.kind,'opened');
+        if(opened.schema===3 && opened.previous_head?.length){
+          const previous=parseCompactHead(new Uint8Array(opened.previous_head));
+          const previousIndex=Number(previous.index);
+          if(Number.isSafeInteger(previousIndex))setEntries(old=>old.some(e=>e.index===previousIndex)?old:[...old,{index:previousIndex,anchor:previous.anchor}]);
+        }
+      }
     } catch {if(current===generation.current){note(index,kind,allowed?.kind,'refused');setMessage('Archive unavailable: identity, signature, policy, expiry, network or provider verification failed.');}}
     finally{if(current===generation.current)setBusy(false);}
   }
@@ -142,6 +149,7 @@ export default function FleetDataPage() {
       {message && <p role="status">{message}</p>}
       {entries.length>0 && (role==='owner' || role==='support') && <button className="border rounded p-2" disabled={busy || !SEAL_SETTINGS} onClick={()=>void open(entries[0].index,entries[0].anchor.kind)}>Open current shadow documents</button>}
       <ul>{entries.map(({index,anchor})=><li key={index} className="border-b p-3"><button disabled={busy || !SEAL_SETTINGS} onClick={()=>void open(index,anchor.kind)} className="underline text-blue-700">{['Logs','Diagnostics','Crash'][anchor.kind]} · {new Date(Number(anchor.at_ms)).toLocaleString()}</button><span className="ml-3 text-sm">Originally purchased through Walrus epoch {anchor.end_epoch}; live retention is checked on open</span></li>)}</ul>
+      {DATA_CONFIG?.compactHistoryOrigin && <p className="text-sm">Older archive links appear as you open their newer archive. History reads verify at most 64 links from the current root; expired or missing predecessors are unavailable.</p>}
       {archive && opened!==undefined && <ShadowDocuments view={shadowDocumentsView(archive,opened,anchorCount)} index={opened} />}
       {archive && <ArchiveView archive={archive} index={opened} query={query} setQuery={setQuery} close={close} />}
       {(role==='owner' || role==='support') && <AccessRecord entries={access} />}

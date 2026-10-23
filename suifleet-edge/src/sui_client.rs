@@ -42,6 +42,7 @@ pub struct Object {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Owner {
     Address(String),
+    Object(String),
     Shared { initial_version: u64 },
     Immutable,
     Other,
@@ -392,6 +393,7 @@ impl SuiClient {
             .map_err(|e| anyhow::anyhow!("undecodable object {id}: {e}"))?;
         let owner = match object.owner() {
             sui_sdk_types::Owner::Address(address) => Owner::Address(address.to_string()),
+            sui_sdk_types::Owner::Object(parent) => Owner::Object(parent.to_string()),
             sui_sdk_types::Owner::Shared(version) => Owner::Shared {
                 initial_version: *version,
             },
@@ -423,6 +425,7 @@ impl SuiClient {
             Some(o) if o.kind == Some(proto::owner::OwnerKind::Address as i32) => {
                 Owner::Address(o.address.clone().unwrap_or_default())
             }
+            Some(o) if o.kind == Some(proto::owner::OwnerKind::Object as i32) => Owner::Object(o.address.clone().unwrap_or_default()),
             Some(o) if o.kind == Some(proto::owner::OwnerKind::Shared as i32) => Owner::Shared {
                 initial_version: o.version.unwrap_or_default(),
             },
@@ -1145,6 +1148,49 @@ impl SuiClient {
         ] };
         self.durable_call(&data.package_id,&call,path).await
     }
+    /// Resolve the new key's actual type origin; never use DeviceData's older
+    /// introduction package for a type added by an upgrade.
+    pub async fn compact_archive_head(&self, data: &crate::fleet_data::Config) -> anyhow::Result<Vec<u8>> {
+        let package = self.package(&data.package_id).await?;
+        let origins: Vec<_> = package.type_origin_table.iter().filter(|o|
+            o.module_name.as_str() == "fleet_data" && o.struct_name.as_str() == "CompactHeadKey").collect();
+        anyhow::ensure!(origins.len() == 1, "compact history requires an upgraded fleet-data package");
+        let origin = origins[0].package;
+        let value_origin: Vec<_> = package.type_origin_table.iter().filter(|o|
+            o.module_name.as_str() == "fleet_data" && o.struct_name.as_str() == "CompactHead").collect();
+        anyhow::ensure!(value_origin.len() == 1 && value_origin[0].package == origin, "compact history type origin mismatch");
+        let key: TypeTag = format!("{}::fleet_data::CompactHeadKey",origin).parse()?;
+        let parent = Address::from_str(&data.writer_id)?;
+        let id = parent.derive_dynamic_child_id(&key, &[0]);
+        let Some(_) = self.optional_object(&id.to_string()).await? else { return Ok(vec![]); };
+        let (kind, owner, bytes) = self.move_object(&id.to_string()).await?;
+        anyhow::ensure!(matches!(owner, Owner::Object(ref parent_id) if same_id(parent_id, &data.writer_id)), "compact root is not held by this writer");
+        let expected = format!("0x2::dynamic_field::Field<{}::fleet_data::CompactHeadKey,{}::fleet_data::CompactHead>",origin,origin);
+        anyhow::ensure!(kind.parse::<TypeTag>()? == expected.parse::<TypeTag>()? && bytes.len() > 33
+            && bytes[..32] == *id.inner() && bytes[32] == 0, "unexpected compact history field");
+        let head = &bytes[33..];
+        crate::fleet_data::CompactHead::parse(head)?;
+        Ok(head.to_vec())
+    }
+    pub async fn verify_compact_archive_anchor(&self, data: &crate::fleet_data::Config,
+        seq: u64, digest: &[u8]) -> anyhow::Result<()> {
+        let bytes = self.compact_archive_head(data).await?;
+        let head = crate::fleet_data::CompactHead::parse(&bytes)?;
+        anyhow::ensure!(head.anchor.seq == seq && head.anchor.ciphertext_sha256 == digest,
+            "pending compact archive is not acknowledged by chain head");
+        Ok(())
+    }
+    pub async fn anchor_archive_compact(&self, data: &crate::fleet_data::Config, cap: &str, blob: &str,
+        seq: u64, kind: u8, sha256: Vec<u8>, previous_hash: Vec<u8>, path: &std::path::Path) -> anyhow::Result<String> {
+        let call = Call { module: "fleet_data", function: "anchor_compact", args: vec![
+            Arg::SharedRead(data.fleet_id.clone()), Arg::Object(data.writer_id.clone()), Arg::SharedRead(data.budget_id.clone()),
+            Arg::SharedRead(data.account_id.clone()), Arg::SharedRead(self.manifest().shared_objects.registry.id.clone()), Arg::Object(cap.into()),
+            Arg::SharedRead(data.storage_id.clone()), Arg::Pure(bcs::to_bytes(&Address::from_str(blob)?)?),
+            Arg::Pure(bcs::to_bytes(&seq)?), Arg::Pure(vec![kind]), Arg::Pure(bcs::to_bytes(&sha256)?),
+            Arg::Pure(bcs::to_bytes(&previous_hash)?), Arg::SharedRead(CLOCK.into()),
+        ] };
+        self.durable_call(&data.package_id,&call,path).await
+    }
     pub async fn requested_diagnostics(&self, data: &crate::fleet_data::Config) -> anyhow::Result<u64> {
         // DiagnosticKey was added after the original data objects. Resolve
         // its own introduction package, never reuse FleetData's origin.
@@ -1396,9 +1442,15 @@ fn check_transaction(
         "simulated transaction calls something else"
     );
     anyhow::ensure!(
-        ptb.inputs.len() == move_call.arguments.len(),
+        ptb.inputs.len() <= move_call.arguments.len(),
         "simulated transaction has extra inputs"
     );
+    // Equal pure BCS values can share a builder input. Require every input
+    // to be referenced and still compare each argument's exact bytes below.
+    for index in 0..ptb.inputs.len() {
+        anyhow::ensure!(move_call.arguments.iter().any(|a| matches!(a, Argument::Input(i) if *i as usize == index)),
+            "simulated transaction has unused inputs");
+    }
     for (index, argument) in move_call.arguments.iter().enumerate() {
         let Argument::Input(input) = argument else {
             anyhow::bail!("simulated call argument is not a transaction input");
@@ -1684,6 +1736,25 @@ mod tests {
         assert!(check_transaction(&extra, &call, package, sender).is_err());
     }
 
+    #[test]
+    fn pure_input_deduplication_keeps_exact_call_and_unused_input_guards() {
+        use sui_transaction_builder::{TransactionBuilder, Function, ObjectInput};
+        let package: Address = "0x3".parse().unwrap();
+        let sender: Address = "0xa0".parse().unwrap();
+        let mut b = TransactionBuilder::new();
+        let kind = b.pure(&0u8); let previous = b.pure(&Vec::<u8>::new());
+        b.move_call(Function::new(package,"fleet_data".parse().unwrap(),"anchor_compact".parse().unwrap()),vec![kind,previous]);
+        b.set_sender(sender); b.set_gas_budget(10_000_000); b.set_gas_price(1000);
+        b.add_gas_objects([ObjectInput::owned("0x12".parse().unwrap(),1,Digest::ZERO)]);
+        let tx=b.try_build().unwrap();
+        let call=Call { module:"fleet_data",function:"anchor_compact",args:vec![Arg::Pure(vec![0]),Arg::Pure(vec![0])] };
+        check_transaction(&tx,&call,package,sender).unwrap();
+        let mut extra=tx.clone();
+        if let sui_sdk_types::TransactionKind::ProgrammableTransaction(p)=&mut extra.kind {p.inputs.push(Input::Pure(vec![42]));}
+        assert!(check_transaction(&extra,&call,package,sender).is_err());
+        let changed=Call { args:vec![Arg::Pure(vec![0]),Arg::Pure(vec![1])],..call };
+        assert!(check_transaction(&tx,&changed,package,sender).is_err());
+    }
     #[test]
     fn signs_only_the_exact_intended_gas_draw() {
         let package = Address::from_str("0x3").unwrap();

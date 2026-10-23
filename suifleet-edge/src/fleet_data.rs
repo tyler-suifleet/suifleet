@@ -112,6 +112,27 @@ impl ShadowSnapshot {
         Ok(())
     }
 }
+/// Exact BCS layout of the compact root; u256 is 32 little-endian bytes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompactAnchor {
+    pub seq: u64, pub kind: u8, pub blob_object_id: Address, pub blob_id: [u8; 32],
+    pub ciphertext_sha256: Vec<u8>, pub signer: Address, pub at_ms: u64,
+    pub end_epoch: u32, pub key_epoch: u64,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompactHead {
+    pub first_index: u64, pub index: u64, pub anchor: CompactAnchor, pub previous_hash: Vec<u8>,
+}
+impl CompactHead {
+    pub fn parse(bytes: &[u8]) -> anyhow::Result<Self> {
+        anyhow::ensure!(bytes.len() <= 512, "compact archive head exceeds limit");
+        let head: Self = bcs::from_bytes(bytes)?;
+        anyhow::ensure!(head.first_index <= head.index && head.anchor.seq > 0 && head.anchor.kind <= 2
+            && head.anchor.ciphertext_sha256.len() == 32
+            && matches!(head.previous_hash.len(), 0 | 32), "invalid compact archive head");
+        Ok(head)
+    }
+}
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Archive {
@@ -121,10 +142,25 @@ pub struct Archive {
     /// Present exactly in schema 2; devices without shadows keep schema 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shadows: Option<ShadowSnapshot>,
+    /// Schema 3: exact prior on-chain CompactHead BCS bytes (empty at start).
+    /// Its hash is checked against the new head before history is trusted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_head: Option<Vec<u8>>,
 }
 impl Archive {
     pub fn validate(&self) -> anyhow::Result<()> {
-        anyhow::ensure!(matches!((self.schema, &self.shadows), (1, None) | (2, Some(_))) && self.kind == "fleet-data", "unsupported archive schema/kind");
+        anyhow::ensure!(self.kind == "fleet-data" && match self.schema {
+            1 => self.shadows.is_none() && self.previous_head.is_none(),
+            2 => self.shadows.is_some() && self.previous_head.is_none(),
+            3 => self.previous_head.is_some(),
+            _ => false,
+        }, "unsupported archive schema/kind");
+        if let Some(previous) = &self.previous_head {
+            if !previous.is_empty() {
+                let head = CompactHead::parse(previous)?;
+                anyhow::ensure!(head.anchor.seq < self.seq, "archive history does not move backwards");
+            }
+        }
         if let Some(shadows) = &self.shadows { shadows.validate()?; }
         anyhow::ensure!(["logs", "diagnostics", "crash"].contains(&self.reason.as_str()), "invalid archive reason");
         anyhow::ensure!(self.seq > 0 && [self.seq, self.observed_ms, self.dropped_lines].iter().all(|n| *n <= 9_007_199_254_740_991), "archive integer out of range");
@@ -188,10 +224,37 @@ impl Task {
 mod tests {
     use super::*;
     #[test]
+    fn compact_head_matches_browser_bcs_and_rejects_invalid_history() {
+        let vector: serde_json::Value = serde_json::from_str(include_str!("../../interfaces/compat/compact-head.json")).unwrap();
+        let bytes = hex::decode(vector["bcs_hex"].as_str().unwrap()).unwrap();
+        let mut head = CompactHead::parse(&bytes).unwrap();
+        assert_eq!(head.anchor.seq, 2);
+        assert_eq!(head.anchor.blob_id[0], 123);
+        assert_eq!(bcs::to_bytes(&head).unwrap(), bytes);
+        head.first_index = 2;
+        assert!(CompactHead::parse(&bcs::to_bytes(&head).unwrap()).is_err());
+        assert!(CompactHead::parse(&vec![0;513]).is_err());
+        head.first_index = 0; head.previous_hash = vec![0;31];
+        assert!(CompactHead::parse(&bcs::to_bytes(&head).unwrap()).is_err());
+    }
+    #[test]
+    fn compact_archive_schema_keeps_legacy_shapes_and_requires_backward_link() {
+        let vector: serde_json::Value = serde_json::from_str(include_str!("../../interfaces/compat/compact-head.json")).unwrap();
+        let previous = hex::decode(vector["bcs_hex"].as_str().unwrap()).unwrap();
+        let mut a = Archive { schema: 3, kind: "fleet-data".into(), chain_identifier: "4c78adac".into(), registry: "0x1".into(),
+            fleet_id: "0x2".into(), device_id: "0x3".into(), signer: "0x4".into(), seq: 3, observed_ms: 1,
+            reason: "logs".into(), dropped_lines: 0, records: vec![], shadows: None, previous_head: Some(previous) };
+        a.validate().unwrap();
+        a.seq = 2; assert!(a.validate().is_err()); a.seq = 3;
+        a.schema = 1; assert!(a.validate().is_err()); a.schema = 3;
+        a.previous_head = None; assert!(a.validate().is_err());
+        a.previous_head = Some(vec![]); a.validate().unwrap();
+    }
+    #[test]
     fn archive_shape_rejects_unsafe_integers_unknown_fields_and_oversized_records() {
         let mut a = Archive { schema: 1, kind: "fleet-data".into(), chain_identifier: "4c78adac".into(), registry: "0x1".into(),
             fleet_id: "0x2".into(), device_id: "0x3".into(), signer: "0x4".into(), seq: 1, observed_ms: 1,
-            reason: "logs".into(), dropped_lines: 0, records: vec![Record { source: "daemon".into(), line: "ready".into() }], shadows: None };
+            reason: "logs".into(), dropped_lines: 0, records: vec![Record { source: "daemon".into(), line: "ready".into() }], shadows: None, previous_head: None };
         a.validate().unwrap();
         a.seq = 9_007_199_254_740_992; assert!(a.validate().is_err()); a.seq = 1;
         a.records[0].line = "x".repeat(4097); assert!(a.validate().is_err()); a.records.clear();
@@ -211,7 +274,7 @@ mod tests {
         let mut a = Archive { schema: 2, kind: "fleet-data".into(), chain_identifier: "4c78adac".into(), registry: "0x1".into(),
             fleet_id: "0x2".into(), device_id: "0x3".into(), signer: "0x4".into(), seq: 1, observed_ms: 1,
             reason: "logs".into(), dropped_lines: 0, records: vec![Record { source: "daemon".into(), line: "Shadow state snapshot".into() }],
-            shadows: Some(snapshot.clone()) };
+            shadows: Some(snapshot.clone()), previous_head: None };
         a.validate().unwrap();
         // Round trip, and schema 1 bytes never mention shadows.
         let bytes = serde_json::to_vec(&a).unwrap();
