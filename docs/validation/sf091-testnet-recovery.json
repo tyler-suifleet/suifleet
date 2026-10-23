@@ -1,0 +1,105 @@
+{
+  "schema": 1,
+  "ticket": "SF-091",
+  "kind": "read-only-testnet-recovery-confirmation",
+  "model": "Claude claude-opus-5-5",
+  "source_head": "5eea72f41a65c895b9f1c4db90d8df0b6a5432bb",
+  "producer_pin": "81a4d2e6e8b94a62b7e1b682ba9bdf115367e634",
+  "command": "python3 scripts/live_fleet_recovery.py --wallet ~/.config/suifleet/testnet/agent/client-host.yaml --evidence PATH (fresh suifleet-dev:sf037 container, HOME=/tmp, only client-host.yaml and its keystore mounted read-only)",
+  "transactions": [],
+  "gas_spent_mist": 0,
+  "mutation_lock": "not required: no transaction; only the Seal session personal message was signed",
+  "clean_environment": "New container; NEXT_PUBLIC_* cleared; configuration restored only from committed public SF-082 receipts by fleet_recovery.py restore into a new temporary directory",
+  "result": {
+    "schema": 1,
+    "kind": "suifleet-recovery-check",
+    "network": "testnet",
+    "chainIdentifier": "4c78adac",
+    "fleetId": "0xffd47b80859847b037e82806c49c3850763e4ba9f7bb755020de98af3dd0f722",
+    "walrusEpoch": 559,
+    "checkedAt": "2026-10-23T04:08:51.942Z",
+    "discoveredMs": 335,
+    "totalMs": 6470,
+    "devices": [
+      {
+        "device": "0xddab1bfc4b37b3c47037fda79a1582207a54b07be050b68e57ca4e3156df3cc4",
+        "health": "offline",
+        "archives": [
+          {
+            "index": 0,
+            "state": "available",
+            "recovery": "none",
+            "verified": "plaintext",
+            "reason": "signed archive verified after decryption",
+            "seq": 1,
+            "archiveReason": "logs",
+            "records": 3
+          },
+          {
+            "index": 1,
+            "state": "available",
+            "recovery": "none",
+            "verified": "plaintext",
+            "reason": "signed archive verified after decryption",
+            "seq": 2,
+            "archiveReason": "diagnostics",
+            "records": 109
+          }
+        ]
+      }
+    ],
+    "publicExport": {
+      "schema": 1,
+      "kind": "suifleet-public-records",
+      "exportedAtMs": 1792728537251,
+      "chainIdentifier": "4c78adac",
+      "fleetId": "0xffd47b80859847b037e82806c49c3850763e4ba9f7bb755020de98af3dd0f722",
+      "budgetId": "0xc68cbb2d0f071466bc7b8c0a80dc8b49c64068ab7530f7bce66b27a6953da237",
+      "storageId": "0x9afc334986a31043acc5197379bbb742c760ecca6f3f0d3e192817c07353b15b",
+      "registryId": "0xd3afc908876326367294ba95d13cbac5775dd1370a23fb3ba8ba29b25daeaf41",
+      "keyEpoch": "0",
+      "support": [],
+      "healthIntervalMs": "60000",
+      "devices": [
+        {
+          "deviceId": "0xddab1bfc4b37b3c47037fda79a1582207a54b07be050b68e57ca4e3156df3cc4",
+          "health": "offline",
+          "lastSeenMs": 1792720169980,
+          "healthSeq": "7",
+          "batchSeq": "2",
+          "anchors": [
+            {
+              "seq": "1",
+              "kind": 0,
+              "blobObjectId": "0x25d6a1ea30757485e52d57997d50ed797cfcbf324c60154119e527af46c3e4df",
+              "blobId": "63612731015090456880541763462812098634278471383749520367233717737718636811558",
+              "ciphertextSha256": "e770bd9d97d7f3e45065cf5fcbbb6a02799087d4cf8c29c1cbd1fb62cb57df59",
+              "signer": "0xb6fe01bbb92e91b24660b511cfbfcd3643dcdb5e90eb01b97470c0437b0094e5",
+              "atMs": "1792720158027",
+              "endEpoch": 562,
+              "keyEpoch": "0"
+            },
+            {
+              "seq": "2",
+              "kind": 1,
+              "blobObjectId": "0xf2e02cac1a3b8fcf0faa2072b33a86b8b2c90ebcd787b641c4027a8b7aa3aa09",
+              "blobId": "48754620459249600176821591220912249378094678870638581070168409405301176715034",
+              "ciphertextSha256": "e0a264d30462dbedfaf4f2fb43358659fdfdcacf7752db3d8c4166e60f8a0f86",
+              "signer": "0xb6fe01bbb92e91b24660b511cfbfcd3643dcdb5e90eb01b97470c0437b0094e5",
+              "atMs": "1792720221194",
+              "endEpoch": 562,
+              "keyEpoch": "0"
+            }
+          ]
+        }
+      ]
+    },
+    "ownerPolicy": {
+      "owner": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+      "budgetOwnerCap": "0xffb183d8e4a7bbc944d173856295b3e193e94a498ab4d588397e630b474ca19b",
+      "sessionMinutes": 5,
+      "threshold": 2
+    },
+    "boundary": "Read-only chain/Walrus reads plus owner-policy key release with a signed session; no transaction or plaintext recorded."
+  }
+}
