@@ -277,7 +277,7 @@ public fun sf128_set_epoch(system: &mut System, epoch: u32) {
       const sorted=a=>a.sort((a,b)=>a.fieldId.localeCompare(b.fieldId));
       assert.deepEqual(sorted(after),sorted(withoutVector),'keyed renewal, prepaid storage, records and blobs retain original content and origins');
       assert.equal(bcs.u64().parse((await client.getObject({objectId:oldStorage,include:{content:true}})).object.content.slice(32,40)),'3');
-      await require('./test_retention_scale.cjs')({client,signer,Transaction,bcs,execute,current,budget,ownerCap,system,walCoin,walrusPackage:walrusPub.pkg,created,receipts});
+      if (process.env.SF128_UPGRADE_ONLY !== '1') await require('./test_retention_scale.cjs')({client,signer,Transaction,bcs,execute,current,budget,ownerCap,system,walCoin,walrusPackage:walrusPub.pkg,created,receipts});
       tx=new Transaction();
       tx.moveCall({target:`${walrusPub.pkg}::system::sf128_set_epoch`,arguments:[tx.object(system),tx.pure.u32(6)]});
       tx.moveCall({target:`${current}::fleet_storage::refill_pool`,arguments:[tx.object(oldStorage),tx.object(budget),tx.object(ownerCap),tx.object(system),tx.pure.u64(10000000),tx.pure.u32(8)]});
@@ -295,7 +295,7 @@ public fun sf128_set_epoch(system: &mut System, epoch: u32) {
             if(!input) continue;
             const object=(await client.getObject({objectId:input.objectId})).object;
             data.inputs[i]=object.owner.$kind==='Shared'
-              ? {$kind:'Object',Object:{$kind:'SharedObject',SharedObject:{objectId:object.objectId,initialSharedVersion:object.owner.Shared.initialSharedVersion,mutable:true}}}
+              ? {$kind:'Object',Object:{$kind:'SharedObject',SharedObject:{objectId:object.objectId,initialSharedVersion:object.owner.Shared.initialSharedVersion,mutable:object.objectId===oldStorage||object.objectId===system}}}
               : {$kind:'Object',Object:{$kind:'ImmOrOwnedObject',ImmOrOwnedObject:{objectId:object.objectId,version:object.version,digest:object.digest}}};
           }
           await next();
