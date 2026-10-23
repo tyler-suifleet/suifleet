@@ -231,6 +231,9 @@ in-flight plaintext. SF-020 health, deployment and service alert rules run in
 `chain-alerts.ts`, using verified health and authoritative receipts. Failures are
 unavailable; an outage never resolves an incident.
 
+The [dashboard views](DASHBOARD_VIEWS.md) (SF-084) build per-device service,
+alert drill-down, archive search and rollout progress pages on this verified path.
+
 Sui/Walrus do not initiate push webhooks, background email or off-browser alert
 polling. `scripts/fleet_alert_relay.cjs OWNER HTTPS_WEBHOOK PRIVATE_STATE_FILE`
 is an optional owner-run process using the same browser verifier and rules. Supply
