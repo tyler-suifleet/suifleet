@@ -641,6 +641,14 @@ test-prospects:
 test-fleet-data-upgrade-localnet:
 	$(RUN) python3 scripts/test_protocol_localnet.py --fleet-data-upgrade
 
+# SF-091 integrated recovery drill on isolated infrastructure: restore/rollback,
+# browser outage/loss/export, real-daemon recovery and SF-092 payment failure
+# scenarios, recorded with durations (docs/FLEET_RECOVERY.md). Offline.
+.PHONY: test-fleet-recovery-drill
+test-fleet-recovery-drill:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+	$(RUN) python3 scripts/fleet_recovery_drill.py --receipt "$${SUIFLEET_RECOVERY_RECEIPT:-/tmp/sf091-recovery-drill.json}"
+
 # Read-only public-Testnet confirmation from a clean operator state: restore,
 # discovery, health and ciphertext availability; with SUIFLEET_WALLET, owner
 # policy decryption by a signed Seal session. No transaction or gas.
