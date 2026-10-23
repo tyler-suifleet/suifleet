@@ -2087,6 +2087,37 @@
         "Install fleet-status as the supported dashboard alias without restarting services or workers; verify counting, project filtering, stale/missing snapshots, secret redaction and existing dashboard tests."
       ],
       "validation": "Dashboard and installer regression tests; compare local output with an explicit GitHub snapshot; no service restarts."
+    },
+    {
+      "key": "SF-090",
+      "title": "Validate encrypted fleet operation at a declared paid-pilot scale",
+      "depends_on": [
+        "SF-022",
+        "SF-083"
+      ],
+      "paths": [
+        "scripts",
+        "docs/validation",
+        "dapp",
+        "suifleet-edge/src",
+        "contracts"
+      ],
+      "area": "fleet",
+      "evidence": "SF-024 covers indexer load tests, SF-054 measures fees, and SF-083 tests budget contention. No ticket establishes whole-product encrypted serverless capacity, browser usability and provider throttling at a stated customer fleet size. Existing simulator and local-chain acceptance are not that evidence.",
+      "description": "Publish and verify a bounded paid-pilot operating envelope for the integrated product. Agree workload and pass thresholds before measuring; do not invent fleet-capacity or availability claims.\n\nParallel implementation: develop against SF-082 81a4d2e6e8b94a62b7e1b682ba9bdf115367e634; SF-082 remains a mandatory integration/merge gate, not a claim-blocking prerequisite. Keep the PR draft until the real dependency merges and integrated validation passes.",
+      "acceptance": [
+        "Declare device count, concurrent downloads, artifact sizes, log/report cadence, retention, browser fleet size, target RPC/Walrus/Seal endpoints and latency/error/memory/cost thresholds. Record provider quotas and unquoted limits.",
+        "Build a reproducible synthetic-device/load harness using actual signing, encrypted artifacts, budgeting, telemetry anchoring and dashboard verification; keep isolated-network scale separate from bounded public-testnet samples.",
+        "Measure enrollment, deployment admission, encrypted fetch, receipt finalization, telemetry visibility, browser pagination and budget/storage contention. Report p50/p95, failures, resource use and observed network spend.",
+        "Inject throttling, keyserver/gateway/RPC outage, delayed events, reconnect storms and exhausted budget; prove bounded retry/backpressure and recovery without duplicate apply, fabricated success or cross-fleet disclosure.",
+        "Publish supported pilot limits, reproducible evidence and explicit unsupported scale. Hardware acceptance remains separate and does not block this software validation.",
+        "Parallel implementation is authorized against SF-082 commit 81a4d2e6e8b94a62b7e1b682ba9bdf115367e634. Keep PR DRAFT until SF-082/#160 is verified merged/Done; integrate actual merged main, rerun relevant compatibility, adversarial and end-to-end tests, and only then allow Ready/Review. Coordinate producer ABI changes in #160. Never claim unmerged pinned fixtures as final integrated acceptance."
+      ],
+      "validation": "Deterministic load-harness checks, isolated multi-device end-to-end load/soak and bounded authorized testnet runs; record exact revisions, workload, thresholds and costs.",
+      "priority": "P1",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "resources": []
     }
   ]
 }
