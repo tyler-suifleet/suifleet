@@ -445,7 +445,10 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
                 # Explicit columns: the claim digest and guard lease tokens are never selected.
                 redirects = [dict(r) for r in db.execute('SELECT id,source,project,family,ticket,pr,head,fingerprint,failures,state,'
                                                          'reason,repair_dir,resumed_as,updated FROM ci_redirects ORDER BY id')]
-            return runs, backoff, redirects
+            capacities = []
+            if db.execute("SELECT 1 FROM sqlite_master WHERE name='capacity_retries'").fetchone():
+                capacities = [dict(r) for r in db.execute('SELECT source,state,attempt,retry_after,reason,replacement,updated FROM capacity_retries')]
+            return runs, backoff, redirects, capacities
         finally:
             db.close()
 
@@ -475,7 +478,8 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
     reviews_data = source('reviews', load_reviews)
 
     tickets, refresh, locks = tickets_data or ([], {}, [])
-    runs, backoff, redirects = dispatch_data or ([], [], [])
+    runs, backoff, redirects, capacities = dispatch_data or ([], [], [], [])
+    capacity_for = {r["source"]: r for r in capacities}
     jobs, merged, pauses, observations = reviews_data or ([], set(), [], [])
     by_ticket = {}
     for row in tickets:
@@ -631,6 +635,15 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
         except OSError:
             since = None
         redirect = redirect_for.get(run['session'])
+        capacity = capacity_for.get(run['session'])
+        if run['status'] == 'capacity_wait':
+            count['retained' if process == 'exited' else 'held'] += 1
+            item('attention', **base, state='capacity-backoff', since=capacity.get('updated') if capacity else since,
+                 retry_after=capacity.get('retry_after') if capacity else None,
+                 summary=(f"provider capacity retry {capacity['attempt']}/3; next retry "
+                          f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(capacity['retry_after']))}: "
+                          f"{safe_text(capacity['reason'])}" if capacity else 'capacity wait without retry receipt; inspect dispatcher'))
+            continue
         if run['status'] == 'redirected':
             if redirect:
                 redirect_items(run, base, count, redirect)
@@ -670,7 +683,7 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
             # Like the dispatcher, an orphaned run still holds its slot; only
             # quarantined/parked reservations release launch capacity.
             count['held' if run['status'] == 'orphaned' else 'retained'] += 1
-            item('attention', **base, state=run['status'], since=since,
+            item('attention', **base, state='capacity-exhausted' if capacity and capacity['state'] == 'exhausted' else run['status'], since=since,
                  summary=safe_text(run['message']) or f"{run['status']}; claim retained for explicit recovery")
         else:
             count['held'] += 1

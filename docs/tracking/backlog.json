@@ -2087,6 +2087,30 @@
         "Install fleet-status as the supported dashboard alias without restarting services or workers; verify counting, project filtering, stale/missing snapshots, secret redaction and existing dashboard tests."
       ],
       "validation": "Dashboard and installer regression tests; compare local output with an explicit GitHub snapshot; no service restarts."
+    },
+    {
+      "key": "SF-117",
+      "title": "Automatically retry stopped implementation workers after transient model-capacity errors",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "baseline",
+      "kind": "type:infrastructure",
+      "depends_on": [],
+      "paths": [
+        "repositories/suifleet/tools/pr-coordinator",
+        "repositories/suifleet/docs/PR_COORDINATION.md"
+      ],
+      "resources": [],
+      "description": "User requests automatic recovery after SF-082 exited with Selected model is at capacity and remained quarantined. Preserve its same atomic claim, branch, worktree and partial work; never start a duplicate editor or silently switch models. Apply the reusable mechanism to configured projects/families.",
+      "evidence": "SF-082 wrapper exited1 at 2026-10-23T02:10:26Z after provider model-capacity errors, with no result handoff. Operator verified complete stop and manually resumed same claim. Installed SF-116 handles active CI failures but reconcile still quarantines every missing handoff.",
+      "acceptance": [
+        "Classify explicit provider model-capacity failures conservatively from bounded CLI output/structured terminal errors; unrelated crashes, malformed receipts, usage/auth errors and uncertain exits must not be mistaken for retryable capacity.",
+        "Only retry after durable nonzero exit, original PID/start/session descendants and detached claim helpers all verified stopped, unchanged valid In Progress claim, same claimed worktree/branch, and no owner-held shared-resource leases. Preserve all dirty/staged/untracked work and original evidence.",
+        "Persist per-claim bounded exponential backoff and retry budget across scans/restarts, heartbeat retained claims during waits, honor configured family/project execution capacity, and launch at most one replacement with the same configured model and ownership. Exhaustion is visible and retains the claim.",
+        "Expose capacity backoff, next retry and exhaustion in fleet-status without duplicate counts or tokens. Coordinate with dependency-resume/CI-redirect states and do not restart Review/Done/Blocked/expired/changed owners.",
+        "Add meaningful classifier, restart/idempotency, live-descendant/resource/ownership refusal, retry-budget/capacity and real-process exit-to-replacement regressions. Document behavior and exact operational rollout evidence."
+      ],
+      "validation": "Offline coordinator/tracking tests and real fake-CLI process tests, fresh exact-head CI/review, then merged-only automatic runtime activation and live service/dashboard checks; no induced real wallet/hardware writes."
     }
   ]
 }
