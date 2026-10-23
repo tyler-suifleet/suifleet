@@ -4,6 +4,7 @@ const {appRequire,loader}=require('./frontend_test_utils.cjs');
 const {SuiGrpcClient}=appRequire('@mysten/sui/grpc'),{Transaction}=appRequire('@mysten/sui/transactions'),{Ed25519Keypair}=appRequire('@mysten/sui/keypairs/ed25519'),{requestSuiFromFaucetV2}=appRequire('@mysten/sui/faucet'),{bcs}=appRequire('@mysten/sui/bcs'),{fromBase58,toHex,normalizeSuiAddress:id}=appRequire('@mysten/sui/utils');
 (async()=>{
  assert.equal(process.env.PROTOCOL_TEST_DISPOSABLE,'1');assert.deepEqual((await fs.readdir('/sys/class/net')).sort(),['lo']);
+ let encrypted;
  const root=path.resolve(__dirname,'..'),tmp=await fs.mkdtemp(path.join(os.tmpdir(),'sf082-upgrade-'));
  try{
   const rpc=process.env.PROTOCOL_TEST_RPC,client=new SuiGrpcClient({network:'localnet',baseUrl:rpc});
@@ -18,7 +19,8 @@ const {SuiGrpcClient}=appRequire('@mysten/sui/grpc'),{Transaction}=appRequire('@
   assert((await fs.readdir(cache)).includes(pin),'pinned Walrus source cache missing');
   const deps=path.join(tmp,'deps');await fs.mkdir(deps);
   for(const name of ['wal','walrus'])await fs.cp(path.join(cache,pin,'testnet-contracts',name),path.join(deps,name),{recursive:true,filter:p=>!['build','Published.toml'].includes(path.basename(p))});
-  const directories=[tree,path.join(deps,'wal'),path.join(deps,'walrus'),path.join(tree,'fleet_storage'),path.join(tree,'fleet_data')];
+  const keyDirectory=path.join(tmp,'seal-key-server');await fs.cp(path.join(root,'tests/seal-key-server'),keyDirectory,{recursive:true,filter:p=>!['build','Published.toml'].includes(path.basename(p))});
+  const directories=[keyDirectory,tree,path.join(deps,'wal'),path.join(deps,'walrus'),path.join(tree,'fleet_storage'),path.join(tree,'fleet_data')];
   for(const directory of directories){
    const file=path.join(directory,'Move.toml');let text=(await fs.readFile(file,'utf8')).replaceAll('rev = "testnet-v1.82.1"','rev = "987123842623d6cb0e772dc665789cfd69bdec9f"');
    text=text.includes('[environments]')?text.replace('[environments]',`[environments]\nsf082 = "${chain}"`):text+`\n[environments]\nsf082 = "${chain}"\n`;
@@ -93,8 +95,9 @@ public fun pilot_fixture(ctx: &mut TxContext) {
   const load=loader(),data=load('lib/fleet-data.ts'),sui=load('lib/sui.ts');
   const config=data.parseDataConfig(JSON.stringify({schema:1,chainIdentifier:chain,registryId:registry,packageId:dataPackage.pkg,typeOrigin:dataPackage.pkg,fleetId:fleet,budgetId:budget,storageId:storage}));
   const {pool,distribution}=require('./pilot_load.cjs');
-  const hashes={artifact:'a'.repeat(64),recipe:'b'.repeat(64)};
-  tx=new Transaction();tx.moveCall({target:`${core.pkg}::deployment_manager::create_deployment_verified`,arguments:[tx.pure.string('pilot'),tx.pure.string('1'),tx.pure.string('fixture-encrypted-artifact'),tx.pure.string(hashes.artifact),tx.pure.string(hashes.recipe),tx.pure.vector('address',[]),tx.pure.vector('address',devices.map(d=>d.deviceId)),tx.object('0x6')]});
+  encrypted=await require('./pilot_encrypted.cjs').start({client,rpc,core:core.pkg,registry,devices,owner,execute,created,publish,keyDirectory,tmp,workload,measure});
+  const hashes={artifact:encrypted.artifactHash,recipe:encrypted.recipeHash};
+  tx=new Transaction();tx.moveCall({target:`${core.pkg}::deployment_manager::create_deployment_verified`,arguments:[tx.pure.string('pilot'),tx.pure.string('1'),tx.pure.string(encrypted.blobId),tx.pure.string(hashes.artifact),tx.pure.string(hashes.recipe),tx.pure.vector('address',[]),tx.pure.vector('address',devices.map(d=>d.deviceId)),tx.object('0x6')]});
   r=await measure('deployment_admission',()=>execute('pilot deployment admission',tx));const deployment=created(r,'::deployment_manager::DeploymentRecord');
   // Independent per-device gas coins/accounts; the shared budget stays immutable.
   const peak=await pool(devices,workload.concurrency,async(d)=>{
@@ -103,6 +106,7 @@ public fun pilot_fixture(ctx: &mut TxContext) {
    const message=Buffer.from(JSON.stringify(snapshot)),signed=await d.key.signPersonalMessage(message);
    await measure('health_anchor',async()=>{const tx=new Transaction();tx.moveCall({target:`${dataPackage.pkg}::fleet_data::report_health`,arguments:[tx.object(fleet),tx.object(d.writer),tx.object(budget),tx.object(d.account),tx.object(registry),tx.object(d.cap),tx.pure.u64(1),tx.pure.vector('u8',message),tx.pure.vector('u8',Buffer.from(signed.signature,'base64')),tx.object('0x6')]});await execute(`health ${d.deviceId}`,tx,d.key);});
    await measure('telemetry_visibility',async()=>{const health=await data.fetchChainHealth(client,config,[d.deviceId]);assert.equal(health[d.deviceId].observedMs,now,JSON.stringify(health));});
+   await encrypted.apply(d);
    await measure('receipt_finalization',async()=>{const tx=new Transaction();tx.moveCall({target:`${core.pkg}::deployment_manager::report_verified_status`,arguments:[tx.object(deployment),tx.object(registry),tx.object(d.cap),tx.pure.u8(1)]});await execute(`receipt ${d.deviceId}`,tx,d.key);});
   });
   const receipts=await sui.readReceipts(client,deployment);assert.equal(receipts.verified,true);assert.equal(Object.keys(receipts.statuses).length,devices.length);for(const d of devices)assert.equal(receipts.statuses[d.deviceId],1);
@@ -140,13 +144,14 @@ public fun pilot_fixture(ctx: &mut TxContext) {
   }));
   assert.equal(storageResults.filter(r=>r.status==='success').length,1);
   const stored=load('lib/fleet-budget.ts').FleetStorageBcs.parse((await client.getObject({objectId:storage,include:{content:true}})).object.content);assert.equal(stored.blob_count,'1','failed purchases are atomic and must not fabricate records');
+  const encryptedPipeline=await encrypted.verify();
   const summary=Object.fromEntries(Object.entries(measurements).map(([k,v])=>[k,distribution(v)]));
   const failures=Object.entries(summary).filter(([,v])=>v.p95_ms>workload.thresholds.stage_p95_ms).map(([k])=>`${k} p95 threshold`);
   const rss=process.resourceUsage().maxRSS*1024;if(rss>workload.thresholds.peak_rss_bytes)failures.push('RSS threshold');
   const net=gas=>BigInt(gas.computationCost)+BigInt(gas.storageCost)-BigInt(gas.storageRebate);
-  const result={schema:1,mode:'isolated-real-chain',result:failures.length?'FAIL':'PASS',failures,revision:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),chain,devices:devices.length,peak_concurrency:peak,elapsed_ms:performance.now()-start,peak_rss_bytes:rss,measurements:summary,raw_samples_ms:measurements,transactions,rejected,storage_contention:storageResults,
+  const result={schema:1,mode:'isolated-real-chain',result:failures.length?'FAIL':'PASS',failures,revision:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),chain,devices:devices.length,peak_concurrency:peak,elapsed_ms:performance.now()-start,peak_rss_bytes:rss,measurements:summary,raw_samples_ms:measurements,encrypted_pipeline:encryptedPipeline,transactions,rejected,storage_contention:storageResults,
    net_gas_mist:[...transactions,...rejected,...storageResults].reduce((sum,t)=>sum+net(t.gas),0n).toString(),public_network_spend_mist:'0',
-   limits:['local synthetic faucet gas; not public pricing','deployment receipt is a synthetic-device claim, not daemon artifact application','instrumented one-member isolated Walrus system; registrations only, not certified storage/provider capacity','no physical or production capacity claim']};
+   limits:['local synthetic faucet gas; not public pricing','deployment receipt follows verified encrypted synthetic file application, not native daemon application','instrumented one-member isolated Walrus system; registrations only, not certified storage/provider capacity','no physical or production capacity claim']};
   await fs.writeFile(process.env.SF090_CHAIN_RECEIPT||'/tmp/sf090-chain.json',JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify({result:result.result,measurements:summary,limits:result.limits}));if(failures.length)process.exitCode=1;
- }finally{await fs.rm(tmp,{recursive:true,force:true});}
+ }finally{if(encrypted)await encrypted.close();await fs.rm(tmp,{recursive:true,force:true});}
 })().catch(e=>{console.error(e.stack);process.exitCode=1;});
