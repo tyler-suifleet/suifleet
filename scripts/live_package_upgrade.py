@@ -575,7 +575,7 @@ if __name__ == "__main__":
                         help="pinned transaction CLI (Dockerfile SUI_NETWORK_VERSION)")
     parser.add_argument("--transaction-gas-budget", type=int, default=200_000_000,
                         help="lower ordinary PTB gas budgets for available gas funding pools (2000000..200000000 MIST); the run ceiling still applies")
-    parser.add_argument("--fresh", action="store_true", help="ignore the cache and publish a new fixture")
+    parser.add_argument("--fresh", action="store_true", help="request a fresh fixture; refused if matching verified bytecode already exists")
     parser.add_argument("--walrus", default="local", choices=["local", "testnet"],
                         help="recipe/artifact storage: a local stand-in (default) or real Walrus testnet")
     args = parser.parse_args()
