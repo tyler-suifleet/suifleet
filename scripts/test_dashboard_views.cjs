@@ -194,5 +194,11 @@ const view = async (w, options) => views.deviceServicesView(await read(w, option
   let log = [];
   for (let i = 0; i < 205; i++) log = search.recordAccess(log, { atMs: i, account: signer, authority: 'support', device: deviceId, index: i, kind: 'logs', outcome: 'opened' });
   assert.equal(log.length, 200); assert.equal(log[0].index, 204);
-  console.log('PASS: SF-084 dashboard views: verified/unavailable service views, alert drill-down, strict rollout progress/decisions, bounded literal log search and session access record');
+  // ?device= links select only a full object ID; anything else selects nothing.
+  assert.equal(views.linkedDevice(deviceId.toUpperCase().replace('0X', '0x')), deviceId);
+  for (const bad of [null, '', '0xd1', 'javascript:alert(1)', `${deviceId}"><script>`, `${deviceId}&x=1`, deviceId.slice(2), `0x${'g'.repeat(64)}`])
+    assert.equal(views.linkedDevice(bad), null, String(bad));
+  assert.equal(views.deviceHref('/data/', deviceId), `/data/?device=${deviceId}`);
+  assert.equal(views.deviceHref('/services/', 'a&b=<c>'), '/services/?device=a%26b%3D%3Cc%3E');
+  console.log('PASS: SF-084 dashboard views: verified/unavailable service views, alert drill-down, strict rollout progress/decisions, bounded literal log search, session access record and strict device links');
 })().catch(error => { console.error(error); process.exitCode = 1; });

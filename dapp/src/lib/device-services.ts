@@ -4,10 +4,23 @@
 // chain identity and the fleet data anchor (fetchChainHealth). Anything else is
 // unavailable with a reason: an unverified, offline, delayed or missing report
 // never supplies values, so the dashboard cannot show stale or partial state.
-import { normalizeSuiAddress } from "@mysten/sui/utils";
+import { isValidSuiObjectId, normalizeSuiAddress } from "@mysten/sui/utils";
 import type { AlertsResult, FleetAlert } from "./alerts";
 import { validServices, type BridgeHealth, type DeviceHealth, type QueueHealth, type ServicesHealth,
   type ShadowSyncHealth, type StreamHealth } from "./telemetry";
+
+/**
+ * A device selected through a `?device=` link. Only a full 32-byte object ID is
+ * accepted; anything else (short forms, schemes, markup) selects nothing.
+ */
+export function linkedDevice(value: string | null): string | null {
+  return value !== null && /^0x[0-9a-fA-F]{64}$/.test(value) && isValidSuiObjectId(value) ? normalizeSuiAddress(value) : null;
+}
+
+/** Same-origin link selecting a device on a dashboard page. */
+export function deviceHref(page: "/services/" | "/data/", device: string): string {
+  return `${page}?${new URLSearchParams({ device })}`;
+}
 
 export type Unavailable = { state: "unavailable"; reason: string };
 /** A service the device reported as not enabled (`null` in the signed section). */
