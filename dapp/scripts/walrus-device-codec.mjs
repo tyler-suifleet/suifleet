@@ -2,7 +2,7 @@
 // Local, keyless codec/storage-node worker. Run from the locked dApp SDK
 // installation. It never signs transactions or receives archive plaintext.
 import { readFile } from 'node:fs/promises';
-import { writeBounded } from './walrus-node-writes.mjs';
+import { writeBounded, requireWeightedQuorum } from './walrus-node-writes.mjs';
 import { createInterface } from 'node:readline';
 import { SuiGrpcClient } from '@mysten/sui/grpc';
 import { walrus, TESTNET_WALRUS_PACKAGE_CONFIG, blobIdToInt } from '@mysten/walrus';
@@ -46,8 +46,10 @@ try {
     if (prepared.blob_id !== request.blob_id || prepared.root_hash !== request.root_hash) throw Error('Changed archive encoding');
     const confirmations = await writeBounded(storage, encoded, request.blob_object_id);
     const cert = await storage.certificateFromConfirmations({ confirmations, blobId: encoded.blobId, deletable: false, blobObjectId: request.blob_object_id });
-    const bitmap = new Uint8Array(Math.ceil(committee.members.length / 8));
-    for (const n of cert.signers) { if (!Number.isInteger(n) || n < 0 || n >= committee.members.length) throw Error('Invalid signer'); bitmap[n >> 3] |= 1 << (n % 8); }
+    const certificateCommittee = (await storage.systemState()).committee;
+    requireWeightedQuorum(certificateCommittee, cert.signers);
+    const bitmap = new Uint8Array(Math.ceil(certificateCommittee.members.length / 8));
+    for (const n of cert.signers) { if (!Number.isInteger(n) || n < 0 || n >= certificateCommittee.members.length) throw Error('Invalid signer'); bitmap[n >> 3] |= 1 << (n % 8); }
     console.log(JSON.stringify({ signature: Buffer.from(cert.signature).toString('base64'), bitmap: Buffer.from(bitmap).toString('base64'), message: Buffer.from(cert.serializedMessage).toString('base64') }));
   } else throw Error('Unknown codec operation');
 } catch {

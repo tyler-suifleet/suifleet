@@ -290,10 +290,10 @@ async function uploads() {
     const calls = [];
     const walrusClient = {
       systemObject: async () => ({ id: storage.walrus.system, package_id: packageId }),
-      systemState: async () => ({ committee: { members: Array.from({ length: 10 }, () => ({})), epoch: 7 } }),
+      systemState: async () => ({ committee: { n_shards: 1000, members: Array.from({ length: 10 }, () => ({weight:100})), epoch: 7 } }),
       encodeBlob: async (bytes) => { calls.push(["encode", bytes.length]); return encoded; },
       writeEncodedBlobToNodes: async (options) => { calls.push(["write", options.objectId, options.deletable]); return ["c1", "c2"]; },
-      certificateFromConfirmations: async (options) => { calls.push(["certificate", options.blobObjectId]); return { signature: new Uint8Array([1]), signers: [0, 9], serializedMessage: new Uint8Array([2]) }; },
+      certificateFromConfirmations: async (options) => { calls.push(["certificate", options.blobObjectId]); return { signature: new Uint8Array([1]), signers: Array.from({length:7},(_,i)=>i), serializedMessage: new Uint8Array([2]) }; },
     };
     const client = { $extend: () => ({ walrus: walrusClient }) };
     const execute = async (tx) => { const names = fns(tx); calls.push(["execute", ...names]); return { digest: "d", events: names.includes("fleet_storage::register_fleet_blob") ? events : [] }; };
@@ -318,6 +318,11 @@ async function uploads() {
     assert.deepEqual(missing.calls.map((c) => c[0]), ["encode", "execute"]);
   }
   // A failed sliver write or certification stops before success is reported.
+  const underweight = stub();
+  const originalWalrus=underweight.client.$extend().walrus;
+  underweight.client.$extend=()=>({walrus:{...originalWalrus,certificateFromConfirmations:async()=>({signature:new Uint8Array([1]),signers:[0,1],serializedMessage:new Uint8Array([2])})}});
+  await assert.rejects(upload.uploadToFleetStorage(underweight.client,target,new Uint8Array(5),underweight.execute),/shard-weight/);
+  assert(!underweight.calls.some(c=>c.includes('fleet_storage::certify_blob')),'underweight certificate must fail before asking wallet to certify');
   const failing = stub();
   const write = failing.client.$extend().walrus;
   failing.client.$extend = () => ({ walrus: { ...write, writeEncodedBlobToNodes: async () => { throw new Error("NotEnoughBlobConfirmationsError"); } } });

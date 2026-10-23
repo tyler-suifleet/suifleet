@@ -203,7 +203,20 @@ pub async fn tick(task: &Task) -> anyhow::Result<()> {
         pending.certificate = Some(serde_json::from_value(result)?); atomic(&pending_path,&serde_json::to_vec(&pending)?)?;
     }
     if pending.certification_digest.is_none() {
-        pending.certification_digest=Some(task.sui.certify_archive(&task.config,config,blob,pending.certificate.as_ref().unwrap(),&dir.join("certify.bcs")).await?);
+        match task.sui.certify_archive(&task.config,config,blob,pending.certificate.as_ref().unwrap(),&dir.join("certify.bcs")).await {
+            Ok(digest) => pending.certification_digest=Some(digest),
+            Err(error) => {
+                // Missing signed intent means simulation failed before signing,
+                // or effects proved a failed execution. Refresh confirmations
+                // for this same blob, never registration or ciphertext. Unknown
+                // signed transactions keep their exact certificate/bytes.
+                if !dir.join("certify.bcs").try_exists()? {
+                    pending.certificate=None;
+                    atomic(&pending_path,&serde_json::to_vec(&pending)?)?;
+                }
+                return Err(error);
+            }
+        }
         atomic(&pending_path,&serde_json::to_vec(&pending)?)?;
     }
     if pending.anchor_digest.is_none() {

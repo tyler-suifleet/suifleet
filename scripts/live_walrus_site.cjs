@@ -12,7 +12,8 @@ const {SuiGrpcClient}=appRequire('@mysten/sui/grpc'),{Transaction}=appRequire('@
  const {Blob}=await import(pathToFileURL(path.join(path.dirname(appRequire.resolve('@mysten/walrus')),'contracts/walrus/blob.mjs')));
  const blobOrigin=(await client.movePackageService.getDatatype({packageId:request.walrusPackage,moduleName:'blob',name:'Blob'})).response.datatype.definingId;
  async function freshBlob(objectId){const o=(await client.getObject({objectId,include:{content:true}})).object;assert.equal(normalizeStructTag(o.type),normalizeStructTag(`${blobOrigin}::blob::Blob`));const v=Blob.parse(o.content);assert.equal(v.id,id(objectId));return v;}
- const {writeBounded}=await import('../dapp/scripts/walrus-node-writes.mjs');storage.writeEncodedBlobToNodes=opts=>writeBounded(storage,opts,opts.objectId);
+ const {writeBounded,requireWeightedQuorum}=await import('../dapp/scripts/walrus-node-writes.mjs');storage.writeEncodedBlobToNodes=opts=>writeBounded(storage,opts,opts.objectId);
+ const certificate=storage.certificateFromConfirmations.bind(storage);storage.certificateFromConfirmations=async opts=>{const result=await certificate(opts);requireWeightedQuorum((await storage.systemState()).committee,result.signers);return result;};
  let state;try{state=JSON.parse(await fs.readFile(journal,'utf8'));}catch(e){if(e.code!=='ENOENT')throw e;state={schema:1,owner:request.owner,used:request.initialUsed,limit:request.allowance,intents:{},blobs:{},phases:[]};}
  assert.equal(state.owner,request.owner);
  if(state.limit!==request.allowance){const e=request.expansion;assert(e && state.limit+e.amount===request.allowance && !state.expansions?.includes(e.digest));

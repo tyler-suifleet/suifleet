@@ -30,7 +30,7 @@ def raw(id,kind,fields,contents):
         'bcs':{'dataType':'moveObject','type':kind,'bcsBytes':contents.hex()}}}
 class Simulator(budget.BudgetSimulator):
     def __init__(self):
-        super().__init__();self.gas=100_000_000;self.seq=0;self.at=0;self.message=b'';self.signature=b'';self.clock=int(time.time()*1000);self.health=[];self.fail_once=True;self.batchseq=0;self.batch_at=None;self.emergency_at=None;self.anchors=[];self.registered={};self.certified=set();self.tx_results={};self.uploads_paused=True;self.certify_outage=True;self.request_seq=0;self.upload_dir=None;self.key_objects={};self.gas_version=1;self.register_reply_outage=True;self.history_pruned=False;self.status_reads={}
+        super().__init__();self.gas=100_000_000;self.seq=0;self.at=0;self.message=b'';self.signature=b'';self.clock=int(time.time()*1000);self.health=[];self.fail_once=True;self.batchseq=0;self.batch_at=None;self.emergency_at=None;self.anchors=[];self.registered={};self.certified=set();self.tx_results={};self.uploads_paused=True;self.certify_outage=True;self.request_seq=0;self.upload_dir=None;self.key_objects={};self.gas_version=1;self.register_reply_outage=True;self.history_pruned=False;self.status_reads={};self.stale_certificate_rejections=0
     def fleet(self):
         return dict(id=object_id(FLEET),version='1',budget_id=object_id(budget.BUDGET),storage_id=object_id(STORAGE),registry_id=object_id(ota.REGISTRY),
             chain_identifier=self.chain,key_epoch='0',support=[],health_interval_ms='60000',batch_interval_ms='86400000',emergency_interval_ms='60000',device_count='1')
@@ -67,6 +67,9 @@ class Simulator(budget.BudgetSimulator):
         if method=='suix_getDynamicFieldObject' and params[0]==FLEET:return {'data':{'content':{'fields':{'value':object_id(WRITER)}}}}
         if method=='unsafe_moveCall' and params[2] in ['fleet_data','fleet_storage'] and params[3]!='report_health':
             if self.uploads_paused:raise ConnectionError('prepaid storage unavailable')
+            if params[3]=='certify_blob' and unvec(base64.b64decode(params[5][3]['bcs']))[0]==1:
+                self.stale_certificate_rejections+=1
+                raise ConnectionError('certificate lacks stake before signing; refresh same blob')
             return {}
         if method=='unsafe_moveCall' and params[2]=='fleet_data':
             assert params[1]==object_id(PACKAGE) and params[3]=='report_health'
@@ -155,7 +158,8 @@ def run(binary,shim_binary):
                 " with urllib.request.urlopen(q) as response: print(json.dumps(json.load(response)['result']))\n"
                 "elif r['operation']=='write':\n"
                 f" shutil.copyfile(r['ciphertext_path'],str(pathlib.Path({str(sim.upload_dir)!r})/(r['blob_object_id']+'.bin')))\n"
-                " print(json.dumps({'signature':base64.b64encode(bytes(96)).decode(),'bitmap':'AQ==','message':'Zml4dHVyZQ=='}))\n")
+                " p=pathlib.Path(r['ciphertext_path']).parent/'write-count'; n=int(p.read_text())+1 if p.exists() else 1; p.write_text(str(n))\n"
+                " print(json.dumps({'signature':base64.b64encode(bytes([1 if n==1 else 2])+bytes(95)).decode(),'bitmap':'AQ==','message':'Zml4dHVyZQ=='}))\n")
             archive_config=(f'[components]\nconfiguration_overlay_dir={json.dumps(str(root/"state"/"overlays"))}\n[logs]\ninterval_seconds=10\nmax_lines_per_interval=128\nbuffer_max=16\n'
                 f'[fleet_data.archives]\nstorage_package="0xf6"\nstorage_type_origin="0xf6"\nsystem_id="0xf4"\nwalrus_package="0xf7"\nkey_server_package="0xf5"\n'
                 f'key_servers = '+json.dumps([{'object_id':s['object_id'],'weight':1} for s in vectors['servers']]).replace(': ', ' = ')+ '\n'
@@ -187,6 +191,7 @@ def run(binary,shim_binary):
                 sim.history_pruned=False;wait(lambda:len(sim.anchors)==1)
                 wait(lambda:not (root/'state'/'fleet-data'/'pending.json').exists())
                 assert len(sim.registered)==1,'restart must resume the existing purchase'
+                assert sim.stale_certificate_rejections>=1,'rejected pre-sign certificate must be refreshed without a second registration'
                 time.sleep(2);assert len(sim.anchors)==1,'periodic batch cadence persists'
                 sim.request_seq=1;wait(lambda:len(sim.anchors)==2);assert sim.anchors[-1]['kind']==1
                 wait(lambda:not (root/'state'/'fleet-data'/'pending.json').exists())
