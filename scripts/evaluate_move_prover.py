@@ -20,6 +20,10 @@ PIN = json.loads((ROOT / "contracts/security-specs/toolchain.json").read_text())
 
 # Mutations affect only a disposable copy of the actual release implementation.
 MUTATIONS = {
+    "return-omit-custody": ("device_registry", "return_device", "dof::add(&mut registry.id, CustodyKey { device_id }, device);", "transfer::public_freeze_object(device);"),
+    "enrollment-claim": ("enrollment", "enroll", "policy.claims.remove(claim);", "let _ = policy.claims.borrow(claim);"),
+    "enrollment-quota": ("enrollment", "enroll", "policy.remaining = policy.remaining - 1;", ""),
+    "init-untyped-identity": ("device_registry", "security_actual_init", "        transfer::share_object(registry);", "        let mut registry = registry;\n        let device_id = object::id(&registry);\n        df::add(&mut registry.id, IdentityKey { device_id }, false);\n        transfer::share_object(registry);"),
     "binding-legacy-status": ("deployment_manager", "make_deployment", "df::add(&mut record.id, ReceiptsKey {},      new_receipts());", "df::add(&mut record.id, ReceiptsKey {},      new_receipts());\n        df::add(&mut record.id, StatusesKey {}, vec_map::empty<ID, u8>());"),
     "close-authority": ("enrollment", "close", "assert_operator(policy, ctx);", ""),
     "close-state": ("enrollment", "close", "policy.open = false;", ""),
@@ -73,6 +77,7 @@ def main():
     parser.add_argument("--include-carrier-fixtures", action="store_true", help="Reproduce existing-UID carrier reconstruction boundary")
     parser.add_argument("--include-raw-fixtures", action="store_true", help="Run executable raw native conformance fixtures and actual-function specifications")
     parser.add_argument("--artifacts", type=Path, help="Copy proof-only generated solver artifacts to a new private directory")
+    parser.add_argument("--include-registry-induction", action="store_true", help="Prove closed-writer registry representation invariant, including actual initializer")
     parser.add_argument("--include-pending-enrollment", action="store_true", help="Run the unverified full enrollment obligation")
     parser.add_argument("--include-name-absence", action="store_true", help="Legacy flag: name absence is now required by the default role specification")
     parser.add_argument("--timeout", type=int, default=30, help="Per-obligation hard solver timeout in seconds")
@@ -141,8 +146,20 @@ def main():
                                ("enrollment", "enrollment"), ("device_group", "group")):
             implementation = package / f"sources/{module}.move"
             body = implementation.read_text()
+            if module == "device_registry" and args.include_registry_induction:
+                if body.count("    fun init(ctx: &mut TxContext)") != 1:
+                    raise SystemExit("Expected exactly one actual registry initializer")
+                body = body.replace("    fun init(ctx: &mut TxContext)", "    fun security_actual_init(ctx: &mut TxContext)")
+                body = body.replace("        init(ctx);", "        security_actual_init(ctx);")
             end = body.rindex("}")
             additions = (overlay / f"{helper}-spec-helpers.move").read_text()
+            if module == "device_registry" and args.include_registry_induction:
+                additions += (overlay / "registry-induction.move").read_text()
+            if module == "roles" and args.include_registry_induction:
+                update = "df::add(device_registry::uid_mut(registry), RoleKey { role_id }, operator);"
+                if body.count(update) != 1:
+                    raise SystemExit("Role grant storage frame no longer matches its actual sole mutation")
+                additions += (overlay / "roles-induction.move").read_text()
             if module == "device_registry" and args.include_pending_custody:
                 additions += (overlay / "registry-custody-pending.move").read_text()
             if module == "enrollment" and args.include_pending_enrollment:

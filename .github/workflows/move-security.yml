@@ -9,6 +9,7 @@ on:
       - 'scripts/check_move_proofs.py'
       - 'scripts/check_move_native_proofs.py'
       - 'scripts/check_move_object_proofs.py'
+      - 'scripts/check_move_registry_proofs.py'
       - 'scripts/check_move_native_vm.py'
       - 'scripts/move_native_model_control.py'
       - 'scripts/evaluate_move_prover.py'
@@ -23,6 +24,7 @@ on:
       - 'scripts/check_move_proofs.py'
       - 'scripts/check_move_native_proofs.py'
       - 'scripts/check_move_object_proofs.py'
+      - 'scripts/check_move_registry_proofs.py'
       - 'scripts/check_move_native_vm.py'
       - 'scripts/move_native_model_control.py'
       - 'scripts/evaluate_move_prover.py'
@@ -94,4 +96,5 @@ jobs:
               python3 scripts/check_move_proofs.py --tools /proof-tools
               python3 scripts/check_move_native_proofs.py --tools /proof-tools
               python3 scripts/check_move_object_proofs.py --tools /proof-tools
+              python3 scripts/check_move_registry_proofs.py --tools /proof-tools
             '

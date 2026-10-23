@@ -7,7 +7,7 @@
 
 
 
-    #[mode(spec), ext(spec(prove, target = set_identity))]
+    #[mode(spec), ext(spec(prove, target = set_identity, no_opaque))]
     fun set_identity_security_spec(registry: &mut DeviceRegistry, device_id: ID, identity: Identity) {
         prover::prover::asserts(!df::exists(&registry.id, IdentityKey { device_id })
             || spec_typed_identity(registry, device_id));
@@ -49,7 +49,7 @@
         prover::prover::ensures(identity_of(registry, device_id).signer == new_address);
     }
 
-    #[mode(spec), ext(spec(prove, target = borrow_device))]
+    #[mode(spec), ext(spec(prove, target = borrow_device, no_opaque))]
     fun borrow_device_security_spec(registry: &mut DeviceRegistry, cap: &DeviceOwnerCap): (Device, DeviceLoan) {
         let device_id = cap.device_id;
         prover::prover::asserts(dof::exists_with_type<CustodyKey, Device>(&registry.id, CustodyKey { device_id }));

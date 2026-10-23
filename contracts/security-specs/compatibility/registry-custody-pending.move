@@ -1,4 +1,4 @@
-    #[mode(spec), ext(spec(prove, target = activate_device))]
+    #[mode(spec), ext(spec(prove, target = activate_device, boogie_opt = b"vcsMaxKeepGoingSplits:2 vcsSplitOnEveryAssert vcsFinalAssertTimeout:30"))]
     fun activate_device_security_spec(registry: &mut DeviceRegistry, device: Device, ctx: &mut TxContext): DeviceOwnerCap {
         let device_id = object::id(&device);
         prover::prover::asserts(!df::exists(&registry.id, IdentityKey { device_id })
@@ -12,7 +12,7 @@
         cap
     }
 
-    #[mode(spec), ext(spec(prove, target = return_device))]
+    #[mode(spec), ext(spec(prove, target = return_device, boogie_opt = b"vcsMaxKeepGoingSplits:2 vcsSplitOnEveryAssert vcsFinalAssertTimeout:30"))]
     fun return_device_security_spec(registry: &mut DeviceRegistry, device: Device, loan: DeviceLoan) {
         let device_id = loan.device_id;
         prover::prover::asserts(object::id(&device) == device_id);
