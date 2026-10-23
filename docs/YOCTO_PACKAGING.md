@@ -18,12 +18,14 @@ Other hosts/architectures need a deliberate profile change and validation.
 The local SuiFleet layer comes from this checkout. Archive its commit ID and
 any diff alongside the kas configuration and build artifacts. The daemon source
 is fetched independently at the recipe's fixed `SRCREV`
-`d616fa16e1d3e90eb0f97a669f693dec99546d3c`: reviewed main with the SF-026
-launcher/daemon-update integration, the SF-053 device signing service, SF-022
-Seal sessions and current telemetry, so the packaged `suifleet-signer` units,
-`signer.toml` and the provisioning script's `--key-holder` call match the
-binary. The SF-066 image built from it is recorded in
-[PI_IMAGE_REFRESH.md](PI_IMAGE_REFRESH.md); earlier pins are described in
+`2d231cadf3c0c8e58b48dc9f48dd7890faaafa1f`: merged main with SF-082 encrypted
+fleet archives and SF-084 dashboard telemetry, on top of the SF-026
+launcher/daemon-update integration, the SF-053 device signing service and
+SF-022 Seal sessions, so the packaged `suifleet-signer` units, `signer.toml`,
+the provisioning script's `--key-holder` call and the archive codec match the
+binary. The SF-120 image built from it is recorded in
+[PI_IMAGE_REFRESH.md](PI_IMAGE_REFRESH.md); the SF-066 image used the earlier
+pin `d616fa16`, and older pins are described in
 [the SF-053 package rebuild](#sf053-package-rebuild). `nobranch=1` selects this exact immutable revision, never AUTOREV.
 The daemon crate version is `0.2.1`. It requires indexed gRPC `ListEvents`
 (Sui ≥ 1.81 in SF-004 tests). Packaging/offline checks do not establish
@@ -174,8 +176,10 @@ checkout and refuses tracked modifications or another revision. It copies
 the license file of every npm package that esbuild compiled into the bundle
 into `THIRD_PARTY_LICENSES.txt`. It refuses any package without license
 metadata unless that package has a reviewed undeclared entry. Two
-builds of `ca002d3934bf4e53398ed6d57024cc95b467202c` produced byte-identical
-artifacts. The bundle contains 13 package versions: `@mysten/sui`, `bcs`, `utils` (0.4.1 and 0.4.2),
+builds of the pinned revision `2d231cadf3c0c8e58b48dc9f48dd7890faaafa1f`
+produced byte-identical artifacts. Its bundle, WASM, manifest and license
+texts are byte-identical to those built from the earlier published SF-082
+revision `ca002d39`; only `provenance.json` differs. The bundle contains 13 package versions: `@mysten/sui`, `bcs`, `utils` (0.4.1 and 0.4.2),
 `walrus`, `walrus-wasm`, `@noble/hashes`, `@scure/base`, three
 `@protobuf-ts` packages, `dataloader` and `valibot`, with the Apache-2.0, MIT
 and BSD-3-Clause licenses.
@@ -194,14 +198,14 @@ and provenance from `SUIFLEET_CODEC_SOURCE_REV`. A tampered file fails that
 task. A missing artifact directory fails parsing for every target in the build,
 because the `file://` checksums cannot be computed. `inspect_pi_image.py` also
 requires the codec's provenance revision to equal the daemon's `build-info`.
-`make test-yocto-packaging` covers these rules offline. Its
-`test_codec_and_daemon_share_source_revision` is an expected failure until
-`SRCREV` advances to the merged SF-082/SF-084 source; remove the decorator in
-that commit.
+`make test-yocto-packaging` covers these rules offline, including
+`test_codec_and_daemon_share_source_revision`.
 
-### Final source pin (after SF-082 and SF-084 merge)
+### Updating the source pin
 
-1. Select the merged main revision containing both, and set `SRCREV` and
+The current pin is merged main after SF-082 and SF-084. To move it:
+
+1. Select a reviewed main revision, and set `SRCREV` and
    `SUIFLEET_CRATE_VERSION` (checked against `suifleet-edge/Cargo.toml`).
 2. Run `bitbake -c update_crates suifleet`. Commit the regenerated
    `suifleet-crates.inc` with `SUIFLEET_LOCK_SHA256` from that revision's
