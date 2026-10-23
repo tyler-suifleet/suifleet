@@ -14,8 +14,8 @@ from test_desired_state import manifest
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def run():
-    for fault in (429, 408, 503, 'wrong-chain'):
+def run(faults=(429, 408, 503, 'wrong-chain', 'discovery-outage')):
+    for fault in faults:
         sim = Simulator()
         sim.allow_reports = True
         sim.fail_execution = False
@@ -25,6 +25,12 @@ def run():
         sim.controls['0x901'] = dict(revision=1, state=0, not_before_ms=now+8000,
             expires_ms=0, window_start_ms=now+8000, window_end_ms=now+18000, notice_ms=0)
         counts = [0, 0]
+        outages = [0]
+        applied = None
+        if fault == 'discovery-outage':
+            sim.add('0x902')
+            sim.controls['0x902'] = dict(revision=1, state=0, not_before_ms=now+86400000,
+                expires_ms=0, window_start_ms=0, window_end_ms=0, notice_ms=0)
 
         def handler(primary):
             class Handler(BaseHTTPRequestHandler):
@@ -41,9 +47,14 @@ def run():
                 def do_POST(self):
                     req = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
                     counts[0 if primary else 1] += 1
-                    if primary and fault == 'wrong-chain' and req['method'] == 'sui_getChainIdentifier':
+                    if (fault == 'discovery-outage' and applied is not None and applied.exists()
+                            and req['method'] == 'sui_getObject'
+                            and int(req['params'][0], 16) == 0x902):
+                        outages[0] += 1
+                        reply = {'error': {'code': 503, 'message': 'later discovery unavailable'}}
+                    elif primary and fault == 'wrong-chain' and req['method'] == 'sui_getChainIdentifier':
                         reply = {'result': 'deadbeef'}
-                    elif primary and fault != 'wrong-chain' and req['method'] != 'sui_getChainIdentifier' and req['method'] != 'shim_height':
+                    elif primary and isinstance(fault, int) and req['method'] != 'sui_getChainIdentifier' and req['method'] != 'shim_height':
                         reply = {'error': {'code': fault, 'message': 'injected endpoint failure'}}
                     else:
                         try:
@@ -110,6 +121,8 @@ def run():
                             raise
                         assert applied.exists() and sim.reports and counts[1] > 0
                         assert not sim.errors, sim.errors
+                        if fault == 'discovery-outage':
+                            assert outages[0] > 0, 'report must survive a later read failure'
                     print(f'PASS: endpoint {fault}; chain rejection or default-cadence timer/restart/apply/report')
         finally:
             if process and process.poll() is None:

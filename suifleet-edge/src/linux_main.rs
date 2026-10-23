@@ -795,6 +795,11 @@ async fn poll(
             Err(error) => warn!(%error, "Gas top-up check failed; retrying next poll"),
         }
     }
+    // A later page/control read can fail repeatedly. Retry existing receipts
+    // first, while still allowing discovery during temporary reporting outages.
+    if let Some(error) = flush_reports(sui, journal, &cfg.device.device_cap_id).await? {
+        warn!(%error, "Reports queued; discovery continues before the final retry");
+    }
     loop {
         let page = sui.deployments(&journal.state.cursor).await?;
         for (event, cursor) in page.events {
@@ -854,9 +859,16 @@ async fn poll(
         cfg, sui, walrus, runner, store, configs, supervisor, journal,
     )
     .await?;
-    // Flush newly produced receipts in this cycle. Waiting until the next
-    // normal check would delay rollout health by up to thirty minutes.
-    // Reports remain queued across network failures and daemon restarts.
+    // Report new outcomes before the long normal sleep.
+    match flush_reports(sui, journal, &cfg.device.device_cap_id).await? {
+        Some(error) => Err(error.context("Status report remains queued")),
+        None => Ok(()),
+    }
+}
+/// Keep durable receipt retries independent of later discovery/reconciliation.
+/// Report failures remain queued; journal I/O failures abort the cycle immediately.
+async fn flush_reports(sui: &SuiClient, journal: &mut Journal, cap: &str)
+    -> anyhow::Result<Option<anyhow::Error>> {
     let pending: Vec<_> = journal
         .state
         .deployments
@@ -867,7 +879,7 @@ async fn poll(
     let mut report_error = None;
     for (id, status) in pending {
         match sui
-            .report_status(&id, &cfg.device.device_cap_id, status)
+            .report_status(&id, cap, status)
             .await
         {
             Ok(_) => {
@@ -880,10 +892,7 @@ async fn poll(
             }
         }
     }
-    match report_error {
-        Some(error) => Err(error.context("Status report remains queued")),
-        None => Ok(()),
-    }
+    Ok(report_error)
 }
 
 /// Commit, keep or discard the configuration each interrupted or finished
