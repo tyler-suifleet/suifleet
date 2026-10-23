@@ -4,11 +4,21 @@ import json
 import os
 import re
 import subprocess
+import sys
+import time
+from http.client import HTTPException
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 CONTEXT = 'testnet/package-upgrade'
 SHA = re.compile(r'^[0-9a-f]{40}$')
+# The keyless preflight job has a 5-minute timeout; keep all retry waiting
+# well inside it so an exhausted budget fails with a diagnostic, not a kill.
+PUBLIC_RETRY_BUDGET = 150
+PUBLIC_MAX_ATTEMPTS = 6
+TRANSIENT_STATUS = (500, 502, 503, 504)
+RATE_HEADERS = ('retry-after', 'x-ratelimit-limit', 'x-ratelimit-remaining',
+                'x-ratelimit-reset', 'x-ratelimit-used', 'x-ratelimit-resource')
 
 
 def api(path, payload=None):
@@ -30,27 +40,87 @@ def api(path, payload=None):
     return json.loads(result.stdout)
 
 
-def public_api(path, opener=urlopen):
+def rate_facts(error):
+    """Whitelisted rate-limit headers only; values must be short tokens."""
+    headers = error.headers or {}
+    facts = {}
+    for name in RATE_HEADERS:
+        value = headers.get(name)
+        if value is not None and re.fullmatch(r'[A-Za-z0-9_.-]{1,32}', str(value).strip()):
+            facts[name] = str(value).strip()
+    return facts
+
+
+def retry_delay(error, now):
+    """Seconds to wait before retrying `error`, or None when it is not transient.
+
+    Only confirmed rate limits (429, or 403 with exhausted quota, Retry-After or
+    a rate-limit message) and transient 5xx responses are retryable. Any other
+    403 is a real denial and fails immediately.
+    """
+    facts = rate_facts(error)
+    code = error.code
+    if code in TRANSIENT_STATUS:
+        return 0.0
+    if code not in (403, 429):
+        return None
+    if code == 403 and not ('retry-after' in facts or facts.get('x-ratelimit-remaining') == '0'):
+        try:
+            body = error.read(4096).decode('utf-8', 'replace').lower()
+        except (OSError, ValueError, AttributeError):
+            body = ''
+        if 'rate limit' not in body:
+            return None
+    if facts.get('retry-after', '').isdigit():
+        return float(facts['retry-after'])
+    if facts.get('x-ratelimit-remaining') == '0' and facts.get('x-ratelimit-reset', '').isdigit():
+        return max(0.0, int(facts['x-ratelimit-reset']) - now + 1)
+    return 0.0
+
+
+def public_api(path, opener=urlopen, sleep=time.sleep, clock=time.monotonic, wall=time.time,
+               budget=PUBLIC_RETRY_BUDGET, attempts=PUBLIC_MAX_ATTEMPTS, log=None):
     """Read public metadata without forwarding the workflow token.
 
     GitHub documents deployment branch policies as public-readable. The
     Actions installation token is rejected by this endpoint in observed CI;
     no administrator credential is needed for a public repository.
+
+    Anonymous reads share a per-runner-IP quota, so confirmed rate limits and
+    transient transport/5xx failures are retried with header-aware backoff,
+    bounded by `attempts` and `budget` seconds of total elapsed time. Every
+    attempt fetches fresh metadata; exhaustion fails closed.
     """
     if not re.fullmatch(r'repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/environments/live-package-upgrade/deployment-branch-policies', path):
         raise ValueError('public metadata path is outside the dedicated environment')
-    request = Request('https://api.github.com/' + path + '?per_page=100', headers={
-        'Accept': 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2026-03-10',
-        'User-Agent': 'suifleet-testnet-preflight',
-    })
-    try:
-        with opener(request, timeout=30) as response:
-            return json.load(response)
-    except HTTPError as error:
-        raise RuntimeError(f'Public environment policy metadata: HTTP {error.code}') from error
-    except URLError as error:
-        raise RuntimeError('Public environment policy metadata is unavailable') from error
+    log = log or (lambda line: print(line, file=sys.stderr))
+    start = clock()
+    for attempt in range(1, attempts + 1):
+        request = Request('https://api.github.com/' + path + '?per_page=100', headers={
+            'Accept': 'application/vnd.github+json',
+            'X-GitHub-Api-Version': '2026-03-10',
+            'User-Agent': 'suifleet-testnet-preflight',
+        })
+        try:
+            with opener(request, timeout=30) as response:
+                return json.load(response)
+        except HTTPError as error:
+            delay = retry_delay(error, wall())
+            facts = rate_facts(error)
+            reason = f'HTTP {error.code}' + (f' {json.dumps(facts, sort_keys=True)}' if facts else '')
+            if delay is None:
+                raise RuntimeError(f'Public environment policy metadata: {reason}') from error
+            failure = error
+        except (URLError, HTTPException, OSError) as error:
+            reason, delay, failure = f'transport {type(error).__name__}', 0.0, error
+        delay = max(delay, min(2.0 ** attempt, 30.0))
+        elapsed = clock() - start
+        if attempt == attempts or elapsed + delay > budget:
+            raise RuntimeError(
+                f'Public environment policy metadata unavailable after {attempt} attempt(s) '
+                f'in {elapsed:.0f}s (retry budget {budget}s, next wait {delay:.0f}s): {reason}') from failure
+        log(f'testnet preflight: public policy read attempt {attempt} failed ({reason}); retrying in {delay:.0f}s')
+        sleep(delay)
 
 
 def verify_environment(repo, get=api, read_public=public_api):
