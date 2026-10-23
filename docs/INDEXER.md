@@ -72,7 +72,7 @@ suifleet-indexer serve --manifest deployment.json --db /var/lib/suifleet-indexer
 | `GET /v1/status` | Chain, call package, tip and lowest retained checkpoint, last change sequence, per-stream checkpoint and lag |
 | `GET /v1/devices?owner=&group=` | Devices (operator as `owner`, key address, arch, `activated`, `revoked`, `signer`, `owner_cap`, current groups) |
 | `GET /v1/groups?admin=&device=` | Groups and members |
-| `GET /v1/deployments?creator=&component=&group=&device=` | Deployments. `device=` matches direct targets and groups whose admin created the deployment, the same rule devices apply |
+| `GET /v1/deployments?creator=&component=&group=&device=` | Deployments. `device=` requires the current indexed operator to be the deployment creator, then matches direct targets or groups administered by that creator. Delegated deployments remain attributed to the operator, the same rule devices apply |
 | `GET /v1/{devices,groups,deployments}/{id}` | One item. A deployment adds `resolved_devices` and authoritative `receipts`. Deployments carry `catalog_version` (see above) |
 | `GET /v1/changes?after=SEQ&limit=&wait=SECONDS` | Integration feed: `{seq, kind, object_id, checkpoint, payload}` in order. Long-polls up to 30 s. Resume with `after=next` |
 | `POST /v1/telemetry` | Signed device telemetry ingress (SF-019). It takes no token, because each snapshot carries the device's own signature. See [TELEMETRY.md](TELEMETRY.md) |
