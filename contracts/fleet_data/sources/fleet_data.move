@@ -11,6 +11,7 @@ module fleet_data::fleet_data {
     use sui_edge::device_registry::DeviceRegistry;
     use sui_edge::fleet_budget::{Self, FleetBudget, BudgetOwnerCap, GasAccount};
     use fleet_storage::fleet_storage::{Self, FleetStorage};
+    use walrus::system::System;
 
     const VERSION: u64 = 1;
     const EBinding: u64 = 0;
@@ -21,6 +22,10 @@ module fleet_data::fleet_data {
     const EBlob: u64 = 5;
     const EAccess: u64 = 6;
     const EExists: u64 = 7;
+    const EUnexpired: u64 = 8;
+    const ENotFound: u64 = 9;
+    /// Bounds one reclaim transaction; callers page larger histories.
+    const MAX_RECLAIM: u64 = 64;
 
     public struct FleetData has key {
         id: UID,
@@ -70,6 +75,14 @@ module fleet_data::fleet_data {
     }
     public struct DataAnchored has copy, drop {
         fleet_id: ID, device_id: ID, index: u64, anchor: Anchor,
+    }
+    /// SF-129. `burned` lists blobs this call released from fleet storage and
+    /// burned; the remaining indices referenced blobs already released.
+    public struct AnchorsPruned has copy, drop {
+        fleet_id: ID, device_id: ID, indices: vector<u64>, burned: vector<ID>, epoch: u32,
+    }
+    public struct ExpiredBlobsBurned has copy, drop {
+        fleet_id: ID, blob_object_ids: vector<ID>, epoch: u32,
     }
 
     public fun create(budget: &FleetBudget, cap: &BudgetOwnerCap,
@@ -240,6 +253,73 @@ module fleet_data::fleet_data {
         event::emit(DataAnchored { fleet_id: object::id(fleet), device_id: writer.device_id, index, anchor });
     }
 
+    /// SF-129 owner reclaim of expired archive history. Removes each indexed
+    /// anchor and its reuse marker, returning their storage rebate. A blob the
+    /// fleet still holds must have actually expired (its current Walrus end
+    /// epoch, including any extension) and is released and burned here, which
+    /// also returns the Blob and fleet record deposits. A blob released earlier
+    /// is no longer anchorable, so its anchor needs only its recorded expiry.
+    /// Readers treat a missing index below `anchor_count` as pruned; indices
+    /// are never reused. Unexpired history is refused, never truncated.
+    public fun prune_expired_anchors(fleet: &FleetData, writer: &mut DeviceData,
+        budget: &FleetBudget, cap: &BudgetOwnerCap, storage: &mut FleetStorage,
+        system: &System, indices: vector<u64>) {
+        prune_at(fleet, writer, budget, cap, storage, system.epoch(), indices)
+    }
+
+    /// SF-129 owner burn of expired fleet blobs that no legacy anchor indexes,
+    /// such as unanchored uploads or bounded-history archives. An anchored
+    /// blob burned here leaves its anchor prunable by `prune_expired_anchors`.
+    public fun burn_expired_blobs(fleet: &FleetData, budget: &FleetBudget,
+        cap: &BudgetOwnerCap, storage: &mut FleetStorage, system: &System,
+        blob_object_ids: vector<ID>) {
+        burn_at(fleet, budget, cap, storage, system.epoch(), blob_object_ids)
+    }
+
+    fun prune_at(fleet: &FleetData, writer: &mut DeviceData, budget: &FleetBudget,
+        cap: &BudgetOwnerCap, storage: &mut FleetStorage, epoch: u32, indices: vector<u64>) {
+        owner(fleet, budget, cap);
+        assert!(writer.version == VERSION && writer.fleet_id == object::id(fleet), EBinding);
+        assert!(object::id(storage) == fleet.storage_id, EBinding);
+        assert!(!indices.is_empty() && indices.length() <= MAX_RECLAIM, EBounds);
+        let mut burned = vector[];
+        indices.do_ref!(|index| {
+            let key = AnchorKey { index: *index };
+            assert!(df::exists(&writer.id, key), ENotFound);
+            let anchor: Anchor = df::remove(&mut writer.id, key);
+            let blob_object_id = anchor.blob_object_id;
+            if (fleet_storage::has_blob(storage, blob_object_id)) {
+                burn_expired(storage, budget, cap, epoch, blob_object_id);
+                burned.push_back(blob_object_id);
+            } else assert!(anchor.end_epoch <= epoch, EUnexpired);
+            if (df::exists(&writer.id, blob_object_id)) {
+                let _: bool = df::remove(&mut writer.id, blob_object_id);
+            };
+        });
+        event::emit(AnchorsPruned { fleet_id: object::id(fleet), device_id: writer.device_id,
+            indices, burned, epoch });
+    }
+
+    fun burn_at(fleet: &FleetData, budget: &FleetBudget, cap: &BudgetOwnerCap,
+        storage: &mut FleetStorage, epoch: u32, blob_object_ids: vector<ID>) {
+        owner(fleet, budget, cap);
+        assert!(object::id(storage) == fleet.storage_id, EBinding);
+        assert!(!blob_object_ids.is_empty() && blob_object_ids.length() <= MAX_RECLAIM, EBounds);
+        blob_object_ids.do_ref!(|id| {
+            assert!(fleet_storage::has_blob(storage, *id), ENotFound);
+            burn_expired(storage, budget, cap, epoch, *id);
+        });
+        event::emit(ExpiredBlobsBurned { fleet_id: object::id(fleet), blob_object_ids, epoch });
+    }
+
+    /// Walrus storage covers epochs before `end_epoch`; `blob::burn` itself
+    /// does not check expiry, so this is the only guard against early loss.
+    fun burn_expired(storage: &mut FleetStorage, budget: &FleetBudget,
+        cap: &BudgetOwnerCap, epoch: u32, blob_object_id: ID) {
+        assert!(fleet_storage::blob(storage, blob_object_id).end_epoch() <= epoch, EUnexpired);
+        fleet_storage::release_blob(storage, budget, cap, blob_object_id).burn();
+    }
+
     /// Seal accounts only. There is deliberately no device/group approval.
     /// The owner proves current capability custody, so transferring the budget
     /// cap does not leave an implicit grant for the original owner's address.
@@ -286,6 +366,21 @@ module fleet_data::fleet_data {
     public fun identity_prefix(fleet: &FleetData): vector<u8> {
         let mut prefix = object::id(fleet).to_bytes();
         prefix.append(bcs::to_bytes(&fleet.key_epoch)); prefix
+    }
+    /// False for an index at or beyond `anchor_count` or one pruned by SF-129.
+    public fun has_anchor(writer: &DeviceData, index: u64): bool { df::exists(&writer.id, AnchorKey { index }) }
+    public fun anchored_blob(writer: &DeviceData, index: u64): ID {
+        df::borrow<AnchorKey, Anchor>(&writer.id, AnchorKey { index }).blob_object_id
+    }
+    #[test_only]
+    public fun prune_at_epoch_for_testing(fleet: &FleetData, writer: &mut DeviceData, budget: &FleetBudget,
+        cap: &BudgetOwnerCap, storage: &mut FleetStorage, epoch: u32, indices: vector<u64>) {
+        prune_at(fleet, writer, budget, cap, storage, epoch, indices)
+    }
+    #[test_only]
+    public fun burn_at_epoch_for_testing(fleet: &FleetData, budget: &FleetBudget, cap: &BudgetOwnerCap,
+        storage: &mut FleetStorage, epoch: u32, blob_object_ids: vector<ID>) {
+        burn_at(fleet, budget, cap, storage, epoch, blob_object_ids)
     }
     #[test_only]
     public fun approve_support_for_testing(id: vector<u8>, fleet: &FleetData, ctx: &TxContext) {
