@@ -17,6 +17,18 @@ from check_contract_interfaces import ROOT, summarize, read_summary
 
 CATALOG = ROOT / "interfaces/fleet-v1.json"
 RECIPE = ROOT / "interfaces/recipe.schema.json"
+MANAGED = ROOT / "interfaces/compat/managed-components.json"
+
+
+def managed_ts(header):
+    """The SF-038 managed-component fields the SF-037 recipe translator classifies by."""
+    managed = json.loads(MANAGED.read_text())
+    components = [{key: row[key] for key in ("name", "disposition", "tickets", "adapter", "discontinued") if key in row}
+                  for row in managed["components"]]
+    adapters = [{key: row[key] for key in ("id", "specification", "implementation_ticket", "replaces", "depends_on")}
+                for row in managed["adapters"]]
+    catalog = {"components": components, "adapters": adapters}
+    return header + "export const MANAGED_CATALOG = " + json.dumps(catalog, indent=2) + " as const;\n"
 
 
 def move_type(value):
@@ -95,6 +107,8 @@ def bcs_type(value):
     if base == "sui::table::Table":
         # Entries live in dynamic fields; the struct itself is its UID and size.
         return 'bcs.struct("Table", { id: bcs.Address, size: bcs.u64() })'
+    if base == "sui::balance::Balance":
+        return 'bcs.struct("Balance", { value: bcs.u64() })'
     if base in ["bool", "u8", "u16", "u32", "u64", "u128", "u256"]:
         return f"bcs.{base}()"
     if base.startswith("sui_edge::"):
@@ -114,6 +128,8 @@ def rust_type(value):
         return f"super::VecMap<{rust_type(args[0])}, {rust_type(args[1])}>"
     if base == "sui::table::Table":
         return "super::Table"
+    if base == "sui::balance::Balance":
+        return "super::Balance"
     if base in ["bool", "u8", "u16", "u32", "u64", "u128"]:
         return base
     if base.startswith("sui_edge::"):
@@ -128,8 +144,14 @@ def recipe_ts_type(schema):
         return " | ".join(json.dumps(value) for value in schema["enum"])
     if isinstance(schema["type"], list):
         return " | ".join("null" if t == "null" else t for t in schema["type"])
+    if schema["type"] in ("integer", "number"):
+        return "number"
+    if schema["type"] == "boolean":
+        return "boolean"
     if schema["type"] == "string":
         return "string"
+    if schema["type"] == "array":
+        return f"{recipe_ts_type(schema['items'])}[]"
     if schema["type"] == "object":
         if schema.get("additionalProperties") is True:
             return "Record<string, unknown>"
@@ -147,30 +169,49 @@ def recipe_rust_fields(schema, top=False):
         if name == "description":
             rust_name = "_description"
         required = name in schema.get("required", [])
-        if name == "componentDependencies":
+        if name == "services":
+            datatype = "crate::services::Services"
+        elif name == "componentDependencies":
             datatype = "std::collections::BTreeMap<String, ComponentDependency>"
+        elif field["type"] == "object" and field.get("additionalProperties") is True:
+            datatype = "serde_json::Map<String, serde_json::Value>"
         elif field["type"] == "object":
-            datatype = "serde_json::Map<String, serde_json::Value>" if name == "configuration" else "Lifecycle"
+            datatype = {"configuration": "Configuration", "lifecycle": "Lifecycle"}[name]
+            # serde would also read these structs from a JSON array.
+            result += ['    #[serde(deserialize_with = "object")]']
+        elif field["type"] == "array" and field["items"]["type"] == "string":
+            datatype = "Vec<String>"
         elif field["type"] == "string" or field["type"] == ["string", "null"]:
             datatype = "String"
         else:
             raise ValueError("unsupported recipe field")
         result += [f'    #[serde(rename = "{name}")]']
         if not required:
-            result += ["    #[serde(default)]"]
+            # As in the schema, only a nullable field may be null when present.
+            nullable = isinstance(field["type"], list) and "null" in field["type"]
+            result += ["    #[serde(default)]" if nullable else '    #[serde(default, deserialize_with = "present")]']
             datatype = f"Option<{datatype}>"
         result += [f"    pub {rust_name}: {datatype},"]
     return result
 
 
 TS_VALIDATOR = '''
-type Schema = { $schema?: string; $id?: string; type: string | string[]; const?: string | null; enum?: string[]; pattern?: string; required?: string[]; properties?: Record<string, Schema>; propertyNames?: Schema; additionalProperties?: boolean | Schema };
+type Schema = { $schema?: string; $id?: string; type: string | string[]; const?: string | number | null; minimum?: number; maximum?: number; enum?: string[]; pattern?: string; maxLength?: number; items?: Schema; maxItems?: number; required?: string[]; properties?: Record<string, Schema>; propertyNames?: Schema; additionalProperties?: boolean | Schema };
 function validate(schema: Schema, value: unknown, path: string): void {
   const type = value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
-  if (!(Array.isArray(schema.type) ? schema.type : [schema.type]).includes(type)) throw new Error(`${path}: invalid type`);
+  if (schema.type === "integer" && (!Number.isSafeInteger(value))) throw new Error(`${path}: expected integer`);
+  if (schema.minimum !== undefined && (value as number) < schema.minimum) throw new Error(`${path}: below minimum`);
+  if (schema.maximum !== undefined && (value as number) > schema.maximum) throw new Error(`${path}: above maximum`);
+  if (!(Array.isArray(schema.type) ? schema.type : [schema.type]).includes(schema.type === "integer" && type === "number" ? "integer" : type)) throw new Error(`${path}: invalid type`);
   if (Object.prototype.hasOwnProperty.call(schema, "const") && value !== schema.const) throw new Error(`${path}: unsupported version`);
   if (schema.enum && !schema.enum.includes(value as string)) throw new Error(`${path}: unsupported value`);
   if (schema.pattern && (typeof value !== "string" || new RegExp(schema.pattern).exec(value)?.[0] !== value)) throw new Error(`${path}: invalid encoding`);
+  if (schema.maxLength !== undefined && (value as string).length > schema.maxLength) throw new Error(`${path}: too long`);
+  if (schema.type === "array") {
+    const items = value as unknown[];
+    if (schema.maxItems !== undefined && items.length > schema.maxItems) throw new Error(`${path}: too many items`);
+    items.forEach((item, index) => validate(schema.items as Schema, item, `${path}[${index}]`));
+  }
   if (schema.type === "object") {
     const object = value as Record<string, unknown>;
     for (const name of schema.required || []) if (!(name in object)) throw new Error(`${path}.${name}: required`);
@@ -189,6 +230,37 @@ export function assertComponentRecipe(value: unknown): asserts value is Componen
   // Dependencies were introduced by schema 1.1; a 1.0 consumer would reject the field.
   const recipe = value as ComponentRecipe;
   if (recipe.schemaVersion === "1.0" && recipe.componentDependencies !== undefined) throw new Error("recipe.componentDependencies: requires schemaVersion 1.1");
+  if (recipe.services !== undefined && recipe.schemaVersion !== "1.3") throw new Error("recipe.services: requires schemaVersion 1.3");
+  assertRecipeConfiguration(recipe);
+}
+/** Configuration rules shared with the daemon (suifleet-edge/src/configuration.rs). */
+export const CONFIGURATION_LIMITS = { depth: 32, values: 4096 } as const;
+function assertRecipeConfiguration(recipe: ComponentRecipe): void {
+  const configuration = recipe.configuration as { defaults?: Record<string, unknown>; merge?: Record<string, unknown>; reset?: string[]; confidential?: string[] };
+  const used = Object.keys(configuration).length > 0 || (recipe.lifecycle as { validate?: unknown }).validate !== undefined;
+  // Older daemons reject these fields: they need a 1.2 consumer.
+  if (used && !["1.2", "1.3"].includes(recipe.schemaVersion)) throw new Error("recipe.configuration: requires schemaVersion 1.2");
+  if (used && !recipe.lifecycle.install && !recipe.lifecycle.run) throw new Error("recipe.configuration: needs an install or run command to receive it");
+  for (const name of ["defaults", "merge"] as const) {
+    const document = configuration[name];
+    if (document === undefined) continue;
+    let values = 0;
+    const walk = (value: unknown, depth: number): void => {
+      if (++values > CONFIGURATION_LIMITS.values || depth > CONFIGURATION_LIMITS.depth) throw new Error(`recipe.configuration.${name}: exceeds ${CONFIGURATION_LIMITS.values} values or depth ${CONFIGURATION_LIMITS.depth}`);
+      if (value !== null && typeof value === "object") for (const child of Object.values(value)) walk(child, depth + 1);
+    };
+    walk(document, 1);
+    // Recipes are public: a confidential value only ever comes from the device.
+    for (const pointer of configuration.confidential || []) {
+      let node: unknown = document;
+      for (const token of pointer.split("/").slice(1).map(t => t.replace(/~1/g, "/").replace(/~0/g, "~"))) {
+        if (node === null || typeof node !== "object" || Array.isArray(node)) throw new Error(`recipe.configuration.${name}: confidential ${pointer} is inside a non-object value`);
+        if (!Object.prototype.hasOwnProperty.call(node, token)) { node = undefined; break; }
+        node = (node as Record<string, unknown>)[token];
+      }
+      if (node !== undefined) throw new Error(`recipe.configuration.${name}: confidential ${pointer} must not have a value in a public recipe`);
+    }
+  }
 }
 '''
 
@@ -202,6 +274,9 @@ def generate(catalog, recipe):
           f'export const DEPLOYMENT_SCHEMA_VERSION = {catalog["deployment_schema_version"]} as const;',
           f'export const SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS = {json.dumps(catalog["supported_deployment_schema_versions"])} as const;',
           f'export const CATALOG_TYPES = {json.dumps(catalog["optional_type_origins"]["component_catalog"])} as const;',
+          f'export const HANDOVER_TYPES = {json.dumps(catalog["optional_type_origins"]["fleet_handover"])} as const;',
+          f'export const SEAL_POLICY_TYPES = {json.dumps(catalog["optional_type_origins"]["seal_policy"])} as const;',
+          f'export const BUDGET_TYPES = {json.dumps(catalog["optional_type_origins"]["fleet_budget"])} as const;',
           f'export const STATUS = {json.dumps(catalog["statuses"])} as const;',
           f'export const RECIPE_VERSION = {json.dumps(recipe["properties"]["schemaVersion"]["enum"][0])} as const;',
           f'export const RECIPE_VERSIONS = {json.dumps(recipe["properties"]["schemaVersion"]["enum"])} as const;',
@@ -215,6 +290,8 @@ def generate(catalog, recipe):
             f'pub const DEPLOYMENT_SCHEMA_VERSION: u64 = {catalog["deployment_schema_version"]};',
             f'pub const SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS: &[u64] = &{json.dumps(catalog["supported_deployment_schema_versions"])};',
             'pub const CATALOG_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["component_catalog"]) + '];',
+            'pub const SEAL_POLICY_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["seal_policy"]) + '];',
+            'pub const BUDGET_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["fleet_budget"]) + '];',
             f'pub const RECIPE_VERSION: &str = {json.dumps(recipe["properties"]["schemaVersion"]["enum"][0])};',
             'pub const RECIPE_VERSIONS: &[&str] = &[' + ', '.join(json.dumps(v) for v in recipe["properties"]["schemaVersion"]["enum"]) + '];',
             *[f"pub const STATUS_{name.upper()}: u8 = {value};" for name, value in catalog["statuses"].items()],
@@ -223,7 +300,9 @@ def generate(catalog, recipe):
             '#[derive(Debug, Clone, Deserialize, Serialize)]\npub struct Entry<K, V> { pub key: K, pub value: V }',
             '#[derive(Debug, Clone, Deserialize, Serialize)]\npub struct VecMap<K, V> { pub contents: Vec<Entry<K, V>> }',
             '/// sui::table::Table: entries are dynamic fields; the struct is its UID and size.',
-            '#[derive(Debug, Clone, Deserialize, Serialize)]\npub struct Table { pub id: [u8; 32], pub size: u64 }']
+            '#[derive(Debug, Clone, Deserialize, Serialize)]\npub struct Table { pub id: [u8; 32], pub size: u64 }',
+            '/// sui::balance::Balance<T>: its value.',
+            '#[derive(Debug, Clone, Deserialize, Serialize)]\npub struct Balance { pub value: u64 }']
     calls = []
     move_types = []
     for module, contents in abi.items():
@@ -235,7 +314,7 @@ def generate(catalog, recipe):
             for index, datatype in enumerate(params):
                 arg = f"a{index}"
                 base = datatype.removeprefix("&mut ").removeprefix("&")
-                if base.startswith("sui_edge::") or base == "sui::clock::Clock":
+                if base.startswith("sui_edge::") or base == "sui::clock::Clock" or base.startswith("sui::coin::Coin<"):
                     types += [f'{arg}: Parameters<Transaction["object"]>[0]']
                     arguments += [f"tx.object({arg})"]
                 elif base == "std::string::String":
@@ -246,8 +325,14 @@ def generate(catalog, recipe):
                     types += [f"{arg}: string[]"]; arguments += [f"tx.pure(bcs.vector(bcs.string()).serialize({arg}))"]
                 elif base in ["vector<sui::object::ID>", "vector<address>"]:
                     types += [f"{arg}: string[]"]; arguments += [f"tx.pure(bcs.vector(bcs.Address).serialize({arg}))"]
+                elif base == "vector<u64>":
+                    types += [f"{arg}: (number | bigint | string)[]"]; arguments += [f"tx.pure(bcs.vector(bcs.u64()).serialize({arg}))"]
                 elif base == "u8":
                     types += [f"{arg}: number"]; arguments += [f"tx.pure.u8({arg})"]
+                elif base == "bool":
+                    types += [f"{arg}: boolean"]; arguments += [f"tx.pure.bool({arg})"]
+                elif base == "vector<u8>":
+                    types += [f"{arg}: Uint8Array | number[]"]; arguments += [f'tx.pure.vector("u8", {arg})']
                 elif base == "u64":
                     types += [f"{arg}: number | bigint | string"]; arguments += [f"tx.pure.u64({arg})"]
                 else:
@@ -255,7 +340,25 @@ def generate(catalog, recipe):
             calls += [f'  {module}_{name}: (tx: Transaction, packageId: string{", " if types else ""}{", ".join(types)}) => tx.moveCall({{ target: `${{packageId}}::{module}::{name}`, arguments: [{", ".join(arguments)}] }}),']
         rust += [f"pub mod {module} {{", "    use super::*;", f'    pub const MODULE: &str = "{module}";']
         rust += [f'    pub const {name.upper()}: &str = "{name}";' for name in contents["functions"]]
-        for name, struct in contents["structs"].items():
+        # BCS constants are evaluated eagerly. Emit nested local structs before
+        # their users even when the reviewed ABI is alphabetically ordered.
+        ordered = []
+        visiting = set()
+        def emit_struct(name):
+            if name in ordered:
+                return
+            if name in visiting:
+                raise ValueError("recursive struct layout")
+            visiting.add(name)
+            for _, datatype in contents["structs"][name]["fields"]:
+                for dependency in re.findall(r"sui_edge::" + module + r"::([A-Za-z_][A-Za-z_0-9]*)", datatype):
+                    emit_struct(dependency)
+            visiting.remove(name)
+            ordered.append(name)
+        for name in contents["structs"]:
+            emit_struct(name)
+        for name in ordered:
+            struct = contents["structs"][name]
             if struct["type_parameters"]:
                 raise ValueError("generic contract structs require explicit support")
             fields = ", ".join(f"{name}: {bcs_type(t)}" for name, t in struct["fields"])
@@ -272,8 +375,17 @@ def generate(catalog, recipe):
     for name, datatype in event["fields"]:
         t = "Vec<String>" if datatype.startswith("vector<") else "String" if datatype in ["address", "sui::object::ID", "std::string::String"] else rust_type(datatype)
         rust += [f"    pub {name}: {t},"]
-    rust += ["}", "#[derive(Debug, Deserialize)]", "#[serde(deny_unknown_fields)]", "pub struct Recipe {", *recipe_rust_fields(recipe), "}",
+    rust += ["}", "/// A present optional field; null is rejected like any other wrong type.",
+             "fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Option<T>, D::Error> { T::deserialize(d).map(Some) }",
+             "/// A JSON object only, as the schema says; never an array of fields.",
+             "fn object<'de, D: serde::Deserializer<'de>, T: serde::de::DeserializeOwned>(d: D) -> Result<T, D::Error> {",
+             "    let value = serde_json::Value::deserialize(d)?;",
+             "    if !value.is_object() { return Err(serde::de::Error::custom(\"expected a JSON object\")); }",
+             "    serde_json::from_value(value).map_err(serde::de::Error::custom)",
+             "}",
+             "#[derive(Debug, Deserialize)]", "#[serde(deny_unknown_fields)]", "pub struct Recipe {", *recipe_rust_fields(recipe), "}",
              "#[derive(Debug, Default, Deserialize)]", "#[serde(deny_unknown_fields)]", "pub struct Lifecycle {", *recipe_rust_fields(recipe["properties"]["lifecycle"]), "}",
+             "#[derive(Debug, Clone, Default, Deserialize)]", "#[serde(deny_unknown_fields)]", "pub struct Configuration {", *recipe_rust_fields(recipe["properties"]["configuration"]), "}",
              "#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]", "#[serde(deny_unknown_fields)]", "pub struct ComponentDependency {",
              *recipe_rust_fields(recipe["properties"]["componentDependencies"]["additionalProperties"]), "}"]
     recipe_ts = [header, f"export type ComponentRecipe = {recipe_ts_type(recipe)};",
@@ -285,6 +397,7 @@ def generate(catalog, recipe):
         ROOT / "dapp/src/lib/fleet-protocol.ts": "\n".join(ts) + "\n",
         ROOT / "dapp/src/lib/recipe-schema.ts": "\n".join(recipe_ts).rstrip() + "\n",
         ROOT / "dapp/src/lib/protocol-version.ts": "\n".join(metadata) + "\n",
+        ROOT / "dapp/src/lib/greengrass-managed.ts": managed_ts(header),
         ROOT / "suifleet-edge/src/protocol.rs": "\n".join(rust) + "\n",
         ROOT / "contracts/tests/protocol_value_tests.move": "\n".join(move) + "\n",
     }

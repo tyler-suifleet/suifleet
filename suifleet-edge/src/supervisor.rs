@@ -11,7 +11,15 @@
 //!   (and whatever its install step wrote). The active and previous versions
 //!   are kept for rollback; older ones are removed.
 //! - `<name>/work/`: the component's working directory and HOME, kept across
-//!   versions; `<name>/component.log`: its stdout/stderr.
+//!   versions; `<name>/component.log` (0600): the stdout/stderr of all its
+//!   commands (install and validate too, also for an install-only component),
+//!   which see its configuration and so stay out of the daemon's output.
+//! - In a version's workspace, `configuration-state.json`: the public
+//!   configuration record it was deployed with (SF-015), and
+//!   `configuration.json` (0600): that configuration with the device overlay,
+//!   rewritten before every start so overlay changes apply on restart. Its
+//!   commands see it as `{configuration}` and `$SUIFLEET_CONFIGURATION`; a
+//!   rollback restores the previous version with its own configuration.
 //!
 //! Run commands must stay in the foreground. Each runs in its own process
 //! group, which is killed when it exits or stops; the daemon is also a child
@@ -23,10 +31,15 @@
 //! process (install or run). A daemon that finds the marked record of one that
 //! did not stop them, and cannot prove that none of its processes survived (a
 //! sealed cgroup with nothing left in it, or a reboot), refuses to start.
-use crate::apply::{self, ApplyRunner};
+use crate::{
+    apply::{self, ApplyRunner},
+    configuration,
+    platform::{processes, start_time, Proc},
+};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
+    os::unix::fs::{OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
     process::ExitStatus,
     sync::{Arc, Mutex},
@@ -150,7 +163,12 @@ pub struct Settings {
     /// Restarts allowed within ten minutes before the component is Broken.
     pub max_restarts: u32,
     pub max_memory_bytes: Option<u64>,
+    /// Device-local configuration values (configuration.rs).
+    pub overlay_dir: PathBuf,
 }
+
+const CONFIGURATION_STATE: &str = "configuration-state.json";
+const CONFIGURATION: &str = "configuration.json";
 
 struct Handle {
     stop: watch::Sender<bool>,
@@ -212,12 +230,16 @@ impl Supervisor {
                 root.display()
             );
         }
+        crate::oci::clean_at_open(&root)?;
         let previous_status: BTreeMap<String, Status> = std::fs::read(root.join("status.json"))
             .ok()
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
             .unwrap_or_default();
-        contain_descendants()?;
-        let left = reap_previous_runs(&root, &previous_status)?;
+        contain_descendants(&root)?;
+        // A sealed coalition recorded by the previous instance (macOS) holds
+        // all of its descendants, wherever they went.
+        let previous_coalition = previous.as_ref().filter(|previous| previous.same_boot(&current)).and_then(|previous| previous.coalition);
+        let left = reap_previous_runs(&root, &previous_status, previous_coalition)?;
         if left > 0 {
             warn!(left, "Killed component runs left by a previous daemon instance");
         }
@@ -244,6 +266,15 @@ impl Supervisor {
                 "Previous daemon instance ended without stopping its components; none of its processes can remain"
             );
         }
+        // Only now that no leftover remains can this instance's coalition be
+        // its own.
+        let current = Instance { coalition: dedicated_coalition(), ..current };
+        set_sweep_coalition(current.coalition);
+        if cfg!(target_os = "macos") && current.coalition.is_none() {
+            warn!("Not the only process of a sealed launchd coalition: descendants that leave their \
+                   process group and clear their environment cannot be contained, and a crash of this \
+                   daemon cannot be recovered from without a reboot");
+        }
         let record = Record {
             path: root.join(INSTANCE),
             instance: Arc::new(Mutex::new(current)),
@@ -266,6 +297,14 @@ impl Supervisor {
 
     pub fn configure_recovery(&mut self, commands: BTreeMap<String, String>) {
         self.recovery_commands = commands;
+    }
+
+    /// Completed recovery receipts whose committed active specs agree. At
+    /// startup no process is running yet; use these only to settle durable
+    /// configuration before bootstrap, never as evidence of current health.
+    pub fn recoveries_for_start(&self) -> BTreeMap<String,String> {
+        self.recovered.iter().filter(|(name,deployment)| self.active.get(*name).is_some_and(|s| &s.deployment == *deployment))
+            .map(|(name,deployment)| (name.clone(),deployment.clone())).collect()
     }
 
     /// Only confirmed, running previous versions can restore the component journal.
@@ -320,13 +359,17 @@ impl Supervisor {
         // application state requiring inspection instead of a silent bootstrap.
         let intent = self.root.join("recovery-intent.json");
         atomic_write(&intent, &serde_json::to_vec(&serde_json::json!({"previous": previous, "command": command}))?)?;
-        self.stop(&previous.name).await;
+        self.stop(&previous.name).await?;
         let workspace = self.workspace(previous);
         let expected = std::fs::read_to_string(workspace.join("artifact.sha256"))?;
         anyhow::ensure!(crate::walrus_client::sha256_file(&workspace.join("artifact"))? == expected,
             "previous application artifact digest mismatch; recovery refused");
+        // Like the version's other commands, it may see its configuration,
+        // so its output goes to the private component log.
+        let materialized = materialize(&self.root, &self.settings.overlay_dir, &previous.name, &workspace)?;
+        let output = self.component_log(&previous.name)?;
         self.record.arm()?;
-        runner.apply(&self.workspace(previous).join("artifact"), Some(&command), request).await
+        runner.apply(&workspace.join("artifact"), Some(&command), request, materialized.as_deref(), Some(output)).await
             .map_err(|e| e.context("application recovery failed; operator inspection required"))?;
         Ok(())
     }
@@ -356,6 +399,7 @@ impl Supervisor {
     /// Install `artifact` as a new version, replace the running one and wait
     /// until it is ready. On failure the previous version is restored and the
     /// error says so; the new version is never committed.
+    /// `configuration` is the version's public configuration record.
     pub async fn deploy(
         &mut self,
         spec: Spec,
@@ -363,6 +407,7 @@ impl Supervisor {
         install: Option<&str>,
         runner: &ApplyRunner,
         request_id: &str,
+        configuration: &configuration::Record,
     ) -> anyhow::Result<()> {
         anyhow::ensure!(!self.root.join("recovery-intent.json").exists(),
             "application recovery requires operator inspection");
@@ -371,19 +416,28 @@ impl Supervisor {
         // A prior runtime recovery cannot confirm the outcome of this new
         // deployment. Persist invalidation before any workspace/install work,
         // including paths that return early or are interrupted.
+        if spec.run == crate::oci::RUN {
+            anyhow::ensure!(install.is_none() && spec.shutdown.is_none() && spec.readiness.is_none(), "OCI lifecycle is adapter-owned");
+            crate::oci::prepare(artifact).await?;
+        }
         self.begin_install(&spec.name)?;
         let workspace = self.workspace(&spec);
         let _ = std::fs::remove_dir_all(&workspace);
-        std::fs::create_dir_all(&workspace)?;
+        // Durable before the install starts: a restart must find the version
+        // and the configuration record it was installed with.
+        configuration::create_dir_durable(self.root.parent().unwrap_or(&self.root), &workspace)?;
         let installed = workspace.join("artifact");
         std::fs::rename(artifact, &installed)?;
         std::fs::File::open(&installed)?.sync_all()?;
         atomic_write(&workspace.join("artifact.sha256"), crate::walrus_client::sha256_file(&installed)?.as_bytes())?;
+        configuration::write_private(&workspace.join(CONFIGURATION_STATE), configuration)?;
+        let materialized = materialize(&self.root, &self.settings.overlay_dir, &spec.name, &workspace)?;
         let previous = self.active.get(&spec.name).cloned();
         if let Some(script) = install {
             self.record.arm().map_err(|error| error.context("install not started"))?;
             // The old version keeps running until the new one is installed.
-            if let Err(error) = runner.apply(&installed, Some(script), request_id).await {
+            let output = self.component_log(&spec.name)?;
+            if let Err(error) = runner.apply(&installed, Some(script), request_id, materialized.as_deref(), Some(output)).await {
                 if error.downcast_ref::<crate::firmware::Indeterminate>().is_some() {
                     // No destructive recovery after an ambiguous installer result.
                     return Err(error);
@@ -401,7 +455,7 @@ impl Supervisor {
                 return Err(error.context("install failed; previous application retained"));
             }
         }
-        self.stop(&spec.name).await;
+        self.stop(&spec.name).await?;
         self.start(spec.clone());
         match self.wait_ready(&spec.name).await {
             Ok(()) => {
@@ -420,7 +474,7 @@ impl Supervisor {
                 Ok(())
             }
             Err(error) => {
-                self.stop(&spec.name).await;
+                self.stop(&spec.name).await?;
                 let _ = std::fs::remove_dir_all(&workspace);
                 let Some(previous) = previous else {
                     return Err(error);
@@ -440,6 +494,79 @@ impl Supervisor {
         }
     }
 
+    /// Run a version's validate command against a candidate configuration
+    /// file, before anything is installed: `Ok(true)` accepts it, `Ok(false)`
+    /// defers it (exit 75), and any other end rejects it. It runs like the
+    /// component's other commands, in its work directory, with its output in
+    /// the component log rather than the daemon's.
+    pub async fn validate(
+        &self,
+        name: &str,
+        version: &str,
+        command: &str,
+        artifact: &Path,
+        configuration: &Path,
+        timeout: Duration,
+    ) -> anyhow::Result<bool> {
+        anyhow::ensure!(safe_segment(name), "component name is not a safe path segment");
+        let component = self.root.join(name);
+        let work = component.join("work");
+        std::fs::create_dir_all(&work)?;
+        let script = command
+            .replace("{artifact}", &quote(artifact))
+            .replace("{artifacts}", &quote(artifact.parent().unwrap_or(Path::new("/"))))
+            .replace("{work}", &quote(&work))
+            .replace("{configuration}", &quote(configuration));
+        let mut command = tokio::process::Command::new("/bin/sh");
+        command.arg("-c").arg(script);
+        apply::harden(&mut command, &work, self.settings.max_memory_bytes);
+        let log = self.component_log(name)?;
+        command
+            .env(MARKER, marker(&self.root))
+            .env("SUIFLEET_COMPONENT", name)
+            .env("SUIFLEET_COMPONENT_VERSION", version)
+            .env("SUIFLEET_CONFIGURATION", configuration)
+            .stdout(log.try_clone()?)
+            .stderr(log);
+        self.record.arm().map_err(|error| error.context("validate not started"))?;
+        let status = apply::run_status(command, timeout)
+            .await
+            .map_err(|error| error.context("configuration validate command"))?;
+        if status.code() == Some(configuration::DEFER_EXIT) {
+            return Ok(false);
+        }
+        apply::exit_result(status).map_err(|error| error.context("configuration rejected by the component's validate command"))?;
+        Ok(true)
+    }
+
+    /// `name`'s component log (0600), which receives the output of all its
+    /// commands, install included: they see its materialized configuration,
+    /// so their output must stay out of the daemon's diagnostics.
+    pub fn component_log(&self, name: &str) -> anyhow::Result<std::fs::File> {
+        anyhow::ensure!(safe_segment(name), "component name is not a safe path segment");
+        let component = self.root.join(name);
+        std::fs::create_dir_all(&component)?;
+        Ok(open_log(&component.join("component.log"))?)
+    }
+
+    /// The deployment of `name`'s committed version, if it is supervised.
+    pub fn committed(&self, name: &str) -> Option<&str> {
+        self.active.get(name).map(|spec| spec.deployment.as_str())
+    }
+
+    /// The public configuration record `name`'s committed version was
+    /// deployed with; none for a version predating configuration management.
+    pub fn configuration(&self, name: &str) -> anyhow::Result<Option<configuration::Record>> {
+        let Some(spec) = self.active.get(name) else { return Ok(None) };
+        let record = match std::fs::read(self.workspace(spec).join(CONFIGURATION_STATE)) {
+            Ok(bytes) => serde_json::from_slice::<configuration::Record>(&bytes)?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        anyhow::ensure!(record.deployment == spec.deployment, "configuration record of {name} belongs to another deployment");
+        Ok(Some(record))
+    }
+
     /// Whether `name` is a committed or running supervised component.
     pub fn supervises(&self, name: &str) -> bool {
         self.active.contains_key(name) || self.running.contains_key(name)
@@ -449,9 +576,13 @@ impl Supervisor {
     /// command): stop it with its descendants and uncommit it, so no later
     /// daemon start brings it back. Its work directory and log are kept.
     pub async fn retire(&mut self, name: &str) -> anyhow::Result<()> {
-        self.stop(name).await;
+        self.stop(name).await?;
         if self.active.remove(name).is_some() {
             self.save_active()?;
+        }
+        if self.root.join(name).join("oci-engine").exists() {
+            std::fs::remove_file(self.root.join(name).join("oci-engine"))?;
+            crate::oci::release_if_unused(&self.root).await?;
         }
         self.previous.remove(name);
         self.recovered.remove(name);
@@ -472,13 +603,19 @@ impl Supervisor {
         let mut names: Vec<String> = start_order(&self.active).into_iter().rev().map(|spec| spec.name).collect();
         names.extend(self.running.keys().filter(|name| !self.active.contains_key(*name)).cloned());
         for name in names {
-            self.stop(&name).await;
+            if let Err(error) = self.stop(&name).await {
+                warn!(component = name, %error, "Component stop not confirmed");
+            }
         }
         // The sweeper thread ends with the daemon: collect descendants that
         // were orphaned by these stops now.
         for _ in 0..3 {
             sweep_orphans();
             tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        if let Err(error) = crate::oci::clean(&self.root).await {
+            warn!(%error, "Engine cleanup not confirmed; retaining daemon instance receipt");
+            return;
         }
         // Everything stopped: the next daemon start needs no proof of that.
         if let Err(error) = std::fs::remove_file(self.root.join(INSTANCE)) {
@@ -488,9 +625,56 @@ impl Supervisor {
         }
     }
 
-    #[cfg(test)]
     pub fn status(&self) -> BTreeMap<String, Status> {
         self.status.lock().unwrap().clone()
+    }
+
+    /// Local control retains the committed version. Stops last until an explicit
+    /// start/restart, deployment replacement or daemon restart.
+    pub async fn local_control(&mut self, name: &str, operation: &str) -> anyhow::Result<()> {
+        let spec = self.active.get(name).cloned()
+            .ok_or_else(|| anyhow::anyhow!("component is not supervised"))?;
+        if operation == "stop" || operation == "restart" {
+            anyhow::ensure!(!self.active.values().any(|s| s.name != name &&
+                s.after.iter().any(|d| d == name) && self.running.contains_key(&s.name)),
+                "stop dependents first");
+            self.stop(name).await?;
+            // An already-finished Broken/Exited task cannot observe the stop
+            // signal. Record explicit intent so the next poll does not recover
+            // and restart a component the operator just stopped.
+            if let Some(status) = self.status.lock().unwrap().get_mut(name) {
+                status.phase = Phase::Stopped;
+                status.pid = None;
+                status.pid_start = None;
+                status.since = SystemTime::now().duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_secs()).unwrap_or(0);
+            }
+            write_status(&self.root, &self.status)?;
+        }
+        if operation == "start" || operation == "restart" {
+            let status = self.status();
+            anyhow::ensure!(spec.after.iter().all(|d| status.get(d)
+                .is_some_and(|s| s.phase == Phase::Running)), "dependency is not ready");
+            if self.running.get(name).is_some_and(|h| h.task.is_finished()) {
+                self.stop(name).await?;
+            }
+            if !self.running.contains_key(name) { self.start(spec); }
+            self.wait_ready(name).await?;
+        }
+        Ok(())
+    }
+
+    pub fn local_logs(&self, name: &str) -> anyhow::Result<String> {
+        use std::io::{Read, Seek, SeekFrom};
+        anyhow::ensure!(safe_segment(name) && self.active.contains_key(name), "unknown component");
+        let mut file = std::fs::OpenOptions::new().read(true)
+            .custom_flags(libc::O_NOFOLLOW).open(self.root.join(name).join("component.log"))?;
+        let size = file.metadata()?.len();
+        file.seek(SeekFrom::Start(size.saturating_sub(8 * 1024)))?;
+        let mut bytes = Vec::new();
+        // Worst-case JSON escaping costs six bytes per input byte.
+        file.take(8 * 1024).read_to_end(&mut bytes)?;
+        Ok(String::from_utf8_lossy(&bytes).into_owned())
     }
 
     fn workspace(&self, spec: &Spec) -> PathBuf {
@@ -518,11 +702,24 @@ impl Supervisor {
         self.running.insert(spec.name, Handle { stop, phase, task });
     }
 
-    async fn stop(&mut self, name: &str) {
+    async fn stop(&mut self, name: &str) -> anyhow::Result<()> {
         if let Some(handle) = self.running.remove(name) {
             let _ = handle.stop.send(true);
-            let _ = handle.task.await;
+            handle.task.await?;
         }
+        let component = self.root.join(name);
+        if component.join("oci-engine").exists() {
+            // Confirmation is required even if the attached client/task ended:
+            // the engine can retain its container independently.
+            crate::oci::clean_component(&component).await?;
+            if let Some(status) = self.status.lock().unwrap().get_mut(name) {
+                status.phase = Phase::Stopped;
+                status.pid = None;
+                status.pid_start = None;
+            }
+            write_status(&self.root, &self.status)?;
+        }
+        Ok(())
     }
 
     /// Ready once the run reaches Running; any earlier end is a failure.
@@ -642,10 +839,12 @@ impl Context {
 
     fn command(&self, template: &str, pid: Option<u32>) -> tokio::process::Command {
         let work = self.component.join("work");
+        let configuration = self.workspace.join(CONFIGURATION);
         let mut script = template
             .replace("{artifact}", &quote(&self.workspace.join("artifact")))
             .replace("{artifacts}", &quote(&self.workspace))
-            .replace("{work}", &quote(&work));
+            .replace("{work}", &quote(&work))
+            .replace("{configuration}", &quote(&configuration));
         if let Some(pid) = pid {
             script = script.replace("{pid}", &pid.to_string());
         }
@@ -656,17 +855,39 @@ impl Context {
             .env(MARKER, marker(&self.root))
             .env("SUIFLEET_COMPONENT", &self.spec.name)
             .env("SUIFLEET_COMPONENT_VERSION", &self.spec.version);
+        // Versions deployed before configuration management have none.
+        if self.workspace.join(CONFIGURATION_STATE).exists() {
+            command.env("SUIFLEET_CONFIGURATION", &configuration);
+        }
         command
     }
 
     /// A bounded helper command (readiness check or shutdown).
     /// Hardened once, by [`Context::command`], so it keeps the component's
-    /// environment and recovery marker.
+    /// environment and recovery marker. It sees the materialized
+    /// configuration, so its output goes to the private component log like
+    /// every other lifecycle command, never to the daemon's diagnostics.
     async fn helper(&self, template: &str, pid: u32, timeout: Duration) -> anyhow::Result<()> {
-        apply::run_hardened(self.command(template, Some(pid)), timeout).await
+        let log = open_log(&self.component.join("component.log"))?;
+        let mut command = self.command(template, Some(pid));
+        command.stdout(log.try_clone()?).stderr(log);
+        apply::run_hardened(command, timeout).await
     }
 
     async fn ready(&self, pid: u32) -> Result<(), String> {
+        if self.spec.run == crate::oci::RUN {
+            let deadline = Instant::now() + self.settings.ready_timeout;
+            loop {
+                match crate::oci::ready(&self.workspace).await {
+                    Ok(()) => {
+                        tokio::time::sleep(self.settings.startup).await;
+                        return crate::oci::ready(&self.workspace).await.map_err(|e| e.to_string());
+                    }
+                    Err(error) if Instant::now() >= deadline => return Err(error.to_string()),
+                    Err(_) => tokio::time::sleep(Duration::from_millis(100)).await,
+                }
+            }
+        }
         let Some(check) = &self.spec.readiness else {
             tokio::time::sleep(self.settings.startup).await;
             return Ok(());
@@ -688,22 +909,35 @@ impl Context {
         }
     }
 
-    fn spawn(&self) -> anyhow::Result<Tracked> {
+    async fn spawn(&self) -> anyhow::Result<Tracked> {
         let work = self.component.join("work");
         std::fs::create_dir_all(&work)?;
+        // Every start reads the overlay again: a provisioned or rotated
+        // device-local value applies on the next restart.
+        materialize(&self.root, &self.settings.overlay_dir, &self.spec.name, &self.workspace)?;
         self.record.arm()?;
         let log = open_log(&self.component.join("component.log"))?;
-        let mut command = self.command(&self.spec.run, None);
+        let mut command = if self.spec.run == crate::oci::RUN {
+            let mut command = crate::oci::start(&self.root, &self.workspace).await?;
+            command.env(MARKER, marker(&self.root));
+            command
+        } else { self.command(&self.spec.run, None) };
         command.stdout(log.try_clone()?).stderr(log);
         Ok(spawn_tracked(&mut command)?)
     }
 
     /// Graceful stop: the shutdown command, then SIGTERM, then SIGKILL, always
     /// ending with the whole process group killed and the run reaped.
-    async fn terminate(&self, child: &mut Tracked) {
+    async fn terminate(&self, child: &mut Tracked) -> anyhow::Result<()> {
         let pid = child.pid();
         let wait = self.settings.stop_timeout;
-        if let Some(shutdown) = &self.spec.shutdown {
+        let mut engine_result = Ok(());
+        if self.spec.run == crate::oci::RUN {
+            if let Err(error) = crate::oci::stop(&self.workspace, wait.as_secs()).await {
+                warn!(component = self.spec.name, %error, "OCI stop failed; next start requires engine cleanup");
+                engine_result = Err(error);
+            }
+        } else if let Some(shutdown) = &self.spec.shutdown {
             if let Err(error) = self.helper(shutdown, pid, wait).await {
                 warn!(component = self.spec.name, %error, "Shutdown command failed");
             }
@@ -719,6 +953,7 @@ impl Context {
         // Descendants that left the group were orphaned into this process by
         // the run's exit: remove them now, not on the sweeper's next pass.
         sweep_orphans();
+        engine_result
     }
 }
 
@@ -728,6 +963,66 @@ enum End {
     Stop,
 }
 
+// Apply the run policy only to its outcome, never to cleanup failures.
+async fn restart_after(
+    context: &Context,
+    stop: &mut watch::Receiver<bool>,
+    failed: bool,
+    reason: String,
+    restarts: u32,
+    recent: &mut VecDeque<Instant>,
+    backoff: &mut Duration,
+) -> bool {
+    let restart = match context.spec.restart {
+        Restart::Never => false,
+        Restart::OnFailure => failed,
+        Restart::Always => true,
+    };
+    if !restart {
+        context.set(if failed && context.spec.run == crate::oci::RUN { Phase::Broken } else { Phase::Exited }, None, restarts, Some(reason));
+        return false;
+    }
+    retry_after(context, stop, reason, restarts, recent, backoff).await
+}
+
+// Cleanup retries share the bounded budget and stop handling, but cannot
+// authorize another run or change the outcome of the completed run.
+async fn retry_after(
+    context: &Context,
+    stop: &mut watch::Receiver<bool>,
+    reason: String,
+    restarts: u32,
+    recent: &mut VecDeque<Instant>,
+    backoff: &mut Duration,
+) -> bool {
+    let now = Instant::now();
+    recent.push_back(now);
+    while recent.front().is_some_and(|at| now.duration_since(*at) > RESTART_WINDOW) {
+        recent.pop_front();
+    }
+    if recent.len() as u32 > context.settings.max_restarts {
+        context.set(Phase::Broken, None, restarts, Some(format!("{reason}; restart budget exhausted")));
+        return false;
+    }
+    context.set(Phase::Backoff, None, restarts, Some(reason));
+    let stopped = tokio::select! {
+        _ = tokio::time::sleep(*backoff) => false,
+        _ = stop.wait_for(|stop| *stop) => true,
+    };
+    if stopped {
+        let cleanup = if context.spec.run == crate::oci::RUN {
+            crate::oci::clean_component(context.workspace.parent().and_then(Path::parent).expect("component workspace")).await
+        } else { Ok(()) };
+        match cleanup {
+            Ok(()) => context.set(Phase::Stopped, None, restarts, None),
+            Err(error) => context.set(Phase::Broken, None, restarts, Some(format!("OCI stop not confirmed: {error:#}"))),
+        }
+        return false;
+    }
+    *backoff = (*backoff * 2).min(MAX_BACKOFF);
+    true
+}
+
 async fn supervise(context: Context, mut stop: watch::Receiver<bool>) {
     let name = context.spec.name.clone();
     let mut restarts = 0u32;
@@ -735,10 +1030,16 @@ async fn supervise(context: Context, mut stop: watch::Receiver<bool>) {
     let mut backoff = Duration::from_secs(1);
     loop {
         context.set(Phase::Starting, None, restarts, None);
-        let mut child = match context.spawn() {
+        let mut child = match context.spawn().await {
             Ok(child) => child,
             Err(error) => {
-                context.set(Phase::Broken, None, restarts, Some(format!("cannot start: {error:#}")));
+                if context.spec.run == crate::oci::RUN && restart_after(&context, &mut stop, true, format!("cannot start: {error:#}"), restarts, &mut recent, &mut backoff).await {
+                    restarts += 1;
+                    continue;
+                }
+                if context.spec.run != crate::oci::RUN {
+                    context.set(Phase::Broken, None, restarts, Some(format!("cannot start: {error:#}")));
+                }
                 return;
             }
         };
@@ -765,8 +1066,10 @@ async fn supervise(context: Context, mut stop: watch::Receiver<bool>) {
         let (failed, reason) = match end {
             End::Stop => {
                 context.set(Phase::Stopping, Some(pid), restarts, None);
-                context.terminate(&mut child).await;
-                context.set(Phase::Stopped, None, restarts, Some("stopped by the supervisor".into()));
+                match context.terminate(&mut child).await {
+                    Ok(()) => context.set(Phase::Stopped, None, restarts, Some("stopped by the supervisor".into())),
+                    Err(error) => context.set(Phase::Broken, None, restarts, Some(format!("OCI stop not confirmed: {error:#}"))),
+                }
                 return;
             }
             End::NotReady(reason) => (true, reason),
@@ -779,37 +1082,24 @@ async fn supervise(context: Context, mut stop: watch::Receiver<bool>) {
         apply::kill_group(pid as i32);
         let _ = child.wait().await;
         sweep_orphans();
+        if context.spec.run == crate::oci::RUN {
+            while let Err(error) = crate::oci::remove(&context.workspace).await {
+                if !retry_after(&context, &mut stop, format!("OCI cleanup failed: {error:#}"), restarts, &mut recent, &mut backoff).await {
+                    return;
+                }
+            }
+        }
         warn!(component = name, %reason, "Component run ended");
-        let restart = match context.spec.restart {
-            Restart::Never => false,
-            Restart::OnFailure => failed,
-            Restart::Always => true,
-        };
-        if !restart {
+        if matches!(context.spec.restart, Restart::Never) || (matches!(context.spec.restart, Restart::OnFailure) && !failed) {
             context.set(Phase::Exited, None, restarts, Some(reason));
             return;
         }
         if started.elapsed() >= STABLE_RUN {
             backoff = Duration::from_secs(1);
         }
-        let now = Instant::now();
-        recent.push_back(now);
-        while recent.front().is_some_and(|at| now.duration_since(*at) > RESTART_WINDOW) {
-            recent.pop_front();
-        }
-        if recent.len() as u32 > context.settings.max_restarts {
-            context.set(Phase::Broken, None, restarts, Some(format!("{reason}; restart budget exhausted")));
+        if !restart_after(&context, &mut stop, failed, reason, restarts, &mut recent, &mut backoff).await {
             return;
         }
-        context.set(Phase::Backoff, None, restarts, Some(reason));
-        tokio::select! {
-            _ = tokio::time::sleep(backoff) => {}
-            _ = stop.wait_for(|stop| *stop) => {
-                context.set(Phase::Stopped, None, restarts, None);
-                return;
-            }
-        }
-        backoff = (backoff * 2).min(MAX_BACKOFF);
         restarts += 1;
     }
 }
@@ -827,6 +1117,26 @@ fn signal_group(pid: u32, signal: i32) {
     unsafe {
         libc::kill(-(pid as i32), signal);
     }
+}
+
+/// Write a workspace's `configuration.json` from its public record and the
+/// device overlay; returns its path, or nothing for a version deployed
+/// without configuration management. The overlay's values are recorded for
+/// log redaction first (`root` is `<state_dir>/supervised`).
+fn materialize(root: &Path, overlay_dir: &Path, name: &str, workspace: &Path) -> anyhow::Result<Option<PathBuf>> {
+    let Some(record) = std::fs::read(workspace.join(CONFIGURATION_STATE))
+        .ok()
+        .map(|bytes| serde_json::from_slice::<configuration::Record>(&bytes))
+        .transpose()?
+    else {
+        return Ok(None);
+    };
+    let overlay = configuration::overlay(overlay_dir, name)?;
+    crate::logs::remember(root.parent().unwrap_or(root), &overlay)?;
+    let value = configuration::materialize(&record, &overlay)?;
+    let path = workspace.join(CONFIGURATION);
+    configuration::write_private(&path, &value)?;
+    Ok(Some(path))
 }
 
 fn quote(path: &Path) -> String {
@@ -847,7 +1157,17 @@ fn open_log(path: &Path) -> std::io::Result<std::fs::File> {
     if std::fs::metadata(path).is_ok_and(|meta| meta.len() > LOG_ROTATE_BYTES) {
         let _ = std::fs::rename(path, path.with_extension("log.1"));
     }
-    std::fs::OpenOptions::new().create(true).append(true).open(path)
+    let file = std::fs::OpenOptions::new().create(true).append(true).mode(0o600).open(path)?;
+    // Also tightens a log created before it held configured output. With
+    // `[runtime] log_group_read`, the daemon's group may read it (SF-060).
+    file.set_permissions(std::fs::Permissions::from_mode(crate::logs::private_mode()))?;
+    if let Some(component) = path.parent() {
+        crate::logs::share_dir(component)?;
+        if let Some(root) = component.parent() {
+            crate::logs::share_dir(root)?;
+        }
+    }
+    Ok(file)
 }
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
@@ -873,16 +1193,6 @@ fn write_status(root: &Path, status: &Mutex<BTreeMap<String, Status>>) -> anyhow
 
 // --- Descendant containment -------------------------------------------------
 
-/// Kernel start time of a live (non-zombie) process, from /proc.
-fn start_time(pid: u32) -> Option<u64> {
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    let rest = stat.rsplit_once(')')?.1;
-    let fields: Vec<&str> = rest.split_whitespace().collect();
-    // Fields 3.. follow the command; starttime is field 22.
-    (fields.first() != Some(&"Z")).then_some(())?;
-    fields.get(19)?.parse().ok()
-}
-
 /// Environment variable naming the supervisor that started a process. Every
 /// component process inherits it (across setsid too), so a later daemon can
 /// find runs left behind even after they were reparented away from it.
@@ -893,39 +1203,8 @@ fn marker(root: &Path) -> String {
     hex::encode(&crate::identity::hash(root.as_os_str().as_encoded_bytes())[..16])
 }
 
-struct Proc {
-    pid: u32,
-    ppid: u32,
-    pgrp: u32,
-}
-
-/// Every live (non-zombie) process, from /proc.
-fn processes() -> Vec<Proc> {
-    let Ok(entries) = std::fs::read_dir("/proc") else {
-        return Vec::new();
-    };
-    entries
-        .flatten()
-        .filter_map(|entry| {
-            let pid = entry.file_name().to_str()?.parse::<u32>().ok()?;
-            let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-            // Fields after the parenthesised command: state ppid pgrp ...
-            let fields: Vec<&str> = stat.rsplit_once(')')?.1.split_whitespace().collect();
-            (fields.first() != Some(&"Z")).then_some(())?;
-            Some(Proc {
-                pid,
-                ppid: fields.get(1)?.parse().ok()?,
-                pgrp: fields.get(2)?.parse().ok()?,
-            })
-        })
-        .collect()
-}
-
 fn carries(pid: u32, marker: &str) -> bool {
-    let entry = format!("{MARKER}={marker}");
-    std::fs::read(format!("/proc/{pid}/environ"))
-        .map(|environ| environ.split(|b| *b == 0).any(|var| var == entry.as_bytes()))
-        .unwrap_or(false)
+    crate::platform::carries(pid, format!("{MARKER}={marker}").as_bytes())
 }
 
 /// A daemon that died without stopping its components (crash, SIGKILL)
@@ -936,7 +1215,7 @@ fn carries(pid: u32, marker: &str) -> bool {
 /// descendants (including ones that cleared their environment). They are
 /// frozen with SIGSTOP until the set is closed, so none can fork away, then
 /// killed. Fails if any survives: no component may run twice.
-fn reap_previous_runs(root: &Path, previous: &BTreeMap<String, Status>) -> anyhow::Result<usize> {
+fn reap_previous_runs(root: &Path, previous: &BTreeMap<String, Status>, coalition: Option<u64>) -> anyhow::Result<usize> {
     let me = std::process::id();
     let marker = marker(root);
     let mut runs = BTreeSet::new();
@@ -960,7 +1239,7 @@ fn reap_previous_runs(root: &Path, previous: &BTreeMap<String, Status>) -> anyho
         let mut found: BTreeSet<u32> = table
             .iter()
             .filter(|p| p.pid != me)
-            .filter(|p| runs.contains(&p.pid) || groups.contains(&p.pgrp) || carries(p.pid, &marker))
+            .filter(|p| runs.contains(&p.pid) || groups.contains(&p.pgrp) || carries(p.pid, &marker) || in_coalition(p.pid, coalition))
             .map(|p| p.pid)
             .collect();
         loop {
@@ -1033,6 +1312,10 @@ struct Instance {
     boot_id: Option<String>,
     /// Its cgroup v2 path, when known.
     cgroup: Option<String>,
+    /// Its resource coalition (macOS), recorded only when it was the sole
+    /// member and could not leave it: every process it started is in it.
+    #[serde(default)]
+    coalition: Option<u64>,
     /// Recorded before it started any component process: none can remain.
     /// Missing (or an unreadable record) proves nothing.
     #[serde(default)]
@@ -1044,14 +1327,13 @@ impl Instance {
         Self {
             pid,
             pid_start: start_time(pid),
-            boot_id: std::fs::read_to_string("/proc/sys/kernel/random/boot_id")
-                .ok()
-                .map(|id| id.trim().to_owned()),
+            boot_id: crate::platform::boot_id(),
             cgroup: std::fs::read_to_string("/proc/self/cgroup").ok().and_then(|text| {
                 text.lines()
                     .find_map(|line| line.strip_prefix("0::"))
                     .map(str::to_owned)
             }),
+            coalition: None,
             idle: true,
         }
     }
@@ -1088,6 +1370,32 @@ impl Instance {
         if !self.same_boot(current) {
             return Ok(());
         }
+        #[cfg(target_os = "macos")]
+        {
+            let _ = (cgroups, writable);
+            self.coalition_left_nothing(current, crate::platform::coalition_members)
+        }
+        #[cfg(not(target_os = "macos"))]
+        self.cgroup_left_nothing(current, cgroups, writable)
+    }
+
+    /// The macOS equivalent of a sealed cgroup: the sealed coalition it
+    /// recorded holds no process but this one.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    fn coalition_left_nothing(&self, current: &Self, members: impl Fn(u64) -> Vec<u32>) -> Result<(), String> {
+        let Some(id) = self.coalition else {
+            return Err("it recorded no sealed coalition of its own".into());
+        };
+        let others = members(id).into_iter().filter(|&pid| pid != current.pid).count();
+        if others == 0 {
+            Ok(())
+        } else {
+            Err(format!("its coalition {id} still holds {others} other process(es)"))
+        }
+    }
+
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    fn cgroup_left_nothing(&self, current: &Self, cgroups: &Path, writable: impl Fn(&Path) -> bool) -> Result<(), String> {
         let Some(path) = &self.cgroup else {
             return Err("its cgroup is unknown".into());
         };
@@ -1176,6 +1484,9 @@ impl Tracked {
     pub fn pid(&self) -> u32 {
         self.pid
     }
+    pub fn take_stdout(&mut self) -> Option<tokio::process::ChildStdout> {
+        self.child.stdout.take()
+    }
     pub async fn wait(&mut self) -> std::io::Result<ExitStatus> {
         let status = self.child.wait().await;
         if status.is_ok() {
@@ -1204,26 +1515,46 @@ pub fn spawn_tracked(command: &mut tokio::process::Command) -> std::io::Result<T
     Ok(Tracked { child, pid })
 }
 
-/// Become a child subreaper and kill orphans as they arrive.
-fn contain_descendants() -> anyhow::Result<()> {
+/// Tests elsewhere: spawn a plain child registered as known, so the orphan
+/// sweep of a concurrently running supervisor test leaves it alone. Pass the
+/// PID to [`forget_std_tracked`] once reaped.
+#[cfg(test)]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn spawn_std_tracked(command: &mut std::process::Command) -> std::io::Result<std::process::Child> {
+    let mut children = CHILDREN.lock().unwrap();
+    let child = command.spawn()?;
+    children.insert(child.id());
+    Ok(child)
+}
+#[cfg(test)]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn forget_std_tracked(pid: u32) {
+    CHILDREN.lock().unwrap().remove(&pid);
+}
+
+/// Become a child subreaper (Linux) and kill orphans as they arrive.
+fn contain_descendants(root: &Path) -> anyhow::Result<()> {
     #[cfg(target_os = "linux")]
     {
-        static STARTED: std::sync::Once = std::sync::Once::new();
+        let _ = root;
         // SAFETY: plain prctl on this process.
         if unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) } != 0 {
             return Err(std::io::Error::last_os_error().into());
         }
-        // A plain thread: independent of any one async runtime.
-        STARTED.call_once(|| {
-            std::thread::spawn(|| loop {
-                let killed = sweep_orphans();
-                if killed > 0 {
-                    warn!(killed, "Killed unmanaged descendants orphaned into the supervisor");
-                }
-                std::thread::sleep(Duration::from_secs(1));
-            });
-        });
     }
+    #[cfg(target_os = "macos")]
+    MARKERS.lock().unwrap().insert(marker(root));
+    static STARTED: std::sync::Once = std::sync::Once::new();
+    // A plain thread: independent of any one async runtime.
+    STARTED.call_once(|| {
+        std::thread::spawn(|| loop {
+            let killed = sweep_orphans();
+            if killed > 0 {
+                warn!(killed, "Killed unmanaged descendants orphaned into the supervisor");
+            }
+            std::thread::sleep(Duration::from_secs(1));
+        });
+    });
     Ok(())
 }
 
@@ -1267,7 +1598,97 @@ pub fn sweep_orphans() -> usize {
     }
     killed
 }
-#[cfg(not(target_os = "linux"))]
+
+/// Markers of the state roots this process supervises (macOS orphan sweep).
+#[cfg(target_os = "macos")]
+static MARKERS: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
+/// This daemon's sealed coalition, when it has one (macOS orphan sweep).
+#[cfg(target_os = "macos")]
+static COALITION: Mutex<Option<u64>> = Mutex::new(None);
+
+fn set_sweep_coalition(coalition: Option<u64>) {
+    #[cfg(target_os = "macos")]
+    {
+        *COALITION.lock().unwrap() = coalition;
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = coalition;
+}
+
+/// Whether a process belongs to the given coalition (macOS only).
+fn in_coalition(pid: u32, coalition: Option<u64>) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        coalition.is_some() && crate::platform::coalition(pid) == coalition
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (pid, coalition);
+        false
+    }
+}
+
+/// This process's coalition, when it is a sealed one of its own (macOS): it
+/// is the only member, so a launchd job's, and it is not root, so neither it
+/// nor anything it starts can spawn into another coalition. Then every
+/// descendant, however detached, stays a member.
+fn dedicated_coalition() -> Option<u64> {
+    #[cfg(target_os = "macos")]
+    {
+        // SAFETY: plain geteuid.
+        if unsafe { libc::geteuid() } == 0 {
+            return None;
+        }
+        let me = std::process::id();
+        let id = crate::platform::coalition(me)?;
+        (crate::platform::coalition_members(id) == [me]).then_some(id)
+    }
+    #[cfg(not(target_os = "macos"))]
+    None
+}
+
+/// macOS has no subreaper: an orphan is reparented to launchd. Kill every
+/// process that is not this one or its descendant, yet is a member of this
+/// daemon's sealed coalition (it descended from a component, however it
+/// detached), or is an orphan of this user still carrying a supervised state
+/// root's marker (without a sealed coalition, a descendant that cleared its
+/// environment escapes this). Returns how many were killed.
+#[cfg(target_os = "macos")]
+pub fn sweep_orphans() -> usize {
+    let me = std::process::id();
+    // Held across the scan, so no child is spawned and registered meanwhile.
+    let _known = CHILDREN.lock().unwrap();
+    let coalition = *COALITION.lock().unwrap();
+    let markers: Vec<String> = MARKERS.lock().unwrap().iter().map(|m| format!("{MARKER}={m}")).collect();
+    // SAFETY: plain getuid.
+    let uid = unsafe { libc::getuid() };
+    let table = processes();
+    let mut mine = BTreeSet::from([me]);
+    loop {
+        let more: Vec<u32> = table.iter().filter(|p| !mine.contains(&p.pid) && mine.contains(&p.ppid)).map(|p| p.pid).collect();
+        if more.is_empty() {
+            break;
+        }
+        mine.extend(more);
+    }
+    let mut killed = 0;
+    for p in table.iter().filter(|p| !mine.contains(&p.pid)) {
+        let orphan = in_coalition(p.pid, coalition)
+            || (p.ppid == 1
+                && crate::platform::owner(p.pid) == Some(uid)
+                && markers.iter().any(|entry| crate::platform::carries(p.pid, entry.as_bytes())));
+        if orphan {
+            // SAFETY: plain kill of a process of this user.
+            unsafe {
+                libc::kill(p.pid as i32, libc::SIGKILL);
+            }
+            killed += 1;
+        }
+    }
+    killed
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 pub fn sweep_orphans() -> usize {
     0
 }
@@ -1288,7 +1709,7 @@ mod tests {
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(&dir).unwrap();
             let runner = ApplyRunner::new(ApplyConfig {
-                command: "/bin/true".into(),
+                command: "/usr/bin/true".into(),
                 timeout_seconds: 5,
                 allow_recipe_commands: true,
                 mode: ApplyMode::Direct,
@@ -1309,6 +1730,7 @@ mod tests {
                     stop_timeout: Duration::from_secs(2),
                     max_restarts,
                     max_memory_bytes: None,
+                    overlay_dir: self.dir.join("overlay"),
                 },
             )
             .unwrap()
@@ -1327,9 +1749,19 @@ mod tests {
             }
         }
         async fn deploy(&self, supervisor: &mut Supervisor, spec: Spec, install: Option<&str>) -> anyhow::Result<()> {
+            let record = configuration::Record { deployment: spec.deployment.clone(), version: spec.version.clone(), ..Default::default() };
+            self.deploy_configured(supervisor, spec, install, &record).await
+        }
+        async fn deploy_configured(
+            &self,
+            supervisor: &mut Supervisor,
+            spec: Spec,
+            install: Option<&str>,
+            record: &configuration::Record,
+        ) -> anyhow::Result<()> {
             let artifact = self.dir.join(format!("download-{}", spec.deployment));
             std::fs::write(&artifact, format!("artifact {}", spec.version)).unwrap();
-            supervisor.deploy(spec, &artifact, install, &self.runner, "test").await
+            supervisor.deploy(spec, &artifact, install, &self.runner, "test", record).await
         }
         fn work(&self, file: &str) -> PathBuf {
             self.dir.join("supervised/app/work").join(file)
@@ -1345,11 +1777,11 @@ mod tests {
     }
 
     fn alive(pid: u32) -> bool {
-        std::fs::read_to_string(format!("/proc/{pid}/stat"))
-            .ok()
-            .and_then(|stat| stat.rsplit_once(')').map(|(_, rest)| rest.split_whitespace().next() != Some("Z")))
-            .unwrap_or(false)
+        start_time(pid).is_some()
     }
+
+    /// Run a command in a new session (macOS has no setsid(1)).
+    const SETSID: &str = if cfg!(target_os = "macos") { "/usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV'" } else { "setsid" };
 
     async fn until(what: &str, mut condition: impl FnMut() -> bool) {
         for _ in 0..100 {
@@ -1366,13 +1798,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn local_management_preserves_dependency_order_and_committed_versions() {
+        let mut f = Fixture::new("local-control");
+        let mut s = f.open();
+        let dependency = f.spec("1.0.0", "echo dependency; exec sleep 300");
+        f.deploy(&mut s, dependency, None).await.unwrap();
+        let mut dependent = f.spec("1.0.0", "exec sleep 300");
+        dependent.name = "consumer".into();
+        dependent.after = vec!["app".into()];
+        f.deploy(&mut s, dependent, None).await.unwrap();
+        let before = s.status()["app"].pid;
+        assert!(s.local_control("app", "stop").await.is_err());
+        assert!(s.local_control("app", "restart").await.is_err());
+        assert_eq!(s.status()["app"].pid, before);
+        s.local_control("consumer", "stop").await.unwrap();
+        s.local_control("app", "stop").await.unwrap();
+        assert!(s.local_control("consumer", "start").await.is_err());
+        s.local_control("app", "start").await.unwrap();
+        s.local_control("consumer", "start").await.unwrap();
+        assert!(s.local_control("missing", "start").await.is_err());
+        assert!(s.local_logs("../app").is_err());
+        assert_eq!(f.active().len(), 2);
+        s.stop_all().await;
+    }
+
+    #[tokio::test]
     async fn starts_ready_and_stops_with_its_descendants() {
         let mut f = Fixture::new("lifecycle");
         let mut s = f.open();
         // A background child in the group and one that escapes it with setsid.
         let spec = f.spec(
             "1.0.0",
-            "sleep 300 & echo $! > {work}/grouped; setsid sleep 300 & echo $! > {work}/escaped; cat {artifact} > {work}/seen; exec sleep 300",
+            &format!("sleep 300 & echo $! > {{work}}/grouped; {SETSID} sleep 300 & echo $! > {{work}}/escaped; cat {{artifact}} > {{work}}/seen; exec sleep 300"),
         );
         f.deploy(&mut s, spec, None).await.unwrap();
         let status = s.status()["app"].clone();
@@ -1517,7 +1974,7 @@ mod tests {
         let current = quote(&state.join("current"));
         let config = quote(&state.join("config"));
         s.configure_recovery(BTreeMap::from([("app".into(), format!(
-            "cp {{artifact}} {current}; cp {{artifacts}}/config {config}"
+            "cp {{artifact}} {current}; cp {{artifacts}}/config {config}; cat {{configuration}}; echo recovery-output >&2"
         ))]));
         let mut v1 = f.spec("1.0.0", "exec sleep 300");
         v1.readiness = Some(format!("test \"$(cat {current})\" = 'artifact 1.0.0'; test \"$(cat {config})\" = stable"));
@@ -1530,6 +1987,10 @@ mod tests {
         assert_eq!(std::fs::read_to_string(state.join("current")).unwrap(), "artifact 1.0.0");
         assert_eq!(std::fs::read_to_string(state.join("config")).unwrap().trim(), "stable");
         assert!(s.restored("app", &v1.deployment));
+        // The recovery command receives the previous version's configuration,
+        // and its output goes to the private component log.
+        let log = std::fs::read_to_string(f.dir.join("supervised/app/component.log")).unwrap();
+        assert!(log.contains("{}") && log.contains("recovery-output"), "{log}");
         // A readiness/health failure invokes the same explicit recovery.
         let mut v3 = f.spec("3.0.0", "exec sleep 300");
         v3.readiness = Some("exit 1".into());
@@ -1543,6 +2004,27 @@ mod tests {
         let mut s = f.open();
         s.bootstrap().await;
         assert!(s.restored("app", &v1.deployment));
+        s.stop_all().await;
+    }
+
+    #[tokio::test]
+    async fn explicit_local_stop_of_broken_component_prevents_recovery() {
+        let mut f = Fixture::new("local-stop-broken");
+        let mut s = f.open_with(0);
+        let v1 = f.spec("1.0.0", "exec sleep 300");
+        f.deploy(&mut s, v1, None).await.unwrap();
+        let trigger = f.dir.join("crash");
+        let v2 = f.spec("2.0.0", &format!("while test ! -e {}; do sleep 0.05; done; exit 9", quote(&trigger)));
+        f.deploy(&mut s, v2.clone(), None).await.unwrap();
+        let marker = f.dir.join("must-not-recover");
+        s.configure_recovery(BTreeMap::from([("app".into(), format!("touch {}", quote(&marker)))]));
+        std::fs::write(trigger, "crash").unwrap();
+        until("runtime failure", || phase(&s) == Phase::Broken).await;
+        s.local_control("app", "stop").await.unwrap();
+        assert_eq!(phase(&s), Phase::Stopped);
+        s.recover_broken(&f.runner, |_| true).await.unwrap();
+        assert!(!marker.exists());
+        assert_eq!(s.committed("app"), Some(v2.deployment.as_str()));
         s.stop_all().await;
     }
 
@@ -1643,7 +2125,7 @@ mod tests {
                 s.begin_install("app").unwrap();
                 let artifact = f.dir.join("direct-artifact");
                 std::fs::write(&artifact, "v3").unwrap();
-                f.runner.apply(&artifact, Some(install), "test").await.unwrap_err()
+                f.runner.apply(&artifact, Some(install), "test", None, None).await.unwrap_err()
             };
             assert_eq!(error.downcast_ref::<crate::firmware::Indeterminate>().is_some(), indeterminate);
             assert!(error.downcast_ref::<Recovered>().is_none());
@@ -1691,7 +2173,7 @@ mod tests {
         s.stop_all().await;
         drop(s);
         for _ in 0..2 {
-            let settings = Settings { startup: Duration::ZERO, ready_timeout: Duration::from_secs(1), stop_timeout: Duration::from_secs(1), max_restarts: 0, max_memory_bytes: None };
+            let settings = Settings { startup: Duration::ZERO, ready_timeout: Duration::from_secs(1), stop_timeout: Duration::from_secs(1), max_restarts: 0, max_memory_bytes: None, overlay_dir: f.dir.join("overlay") };
             let error = Supervisor::open(&f.dir, settings).err().expect("restarted over ambiguous recovery");
             assert!(error.to_string().contains("recovery was interrupted or failed"));
         }
@@ -1754,23 +2236,54 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         // A leftover run (no status.json records it) with a setsid-escaped
         // child and one that cleared its environment; and an unrelated process.
-        let script = "setsid sleep 300 & echo $! > escaped; env -i sleep 300 & echo $! > cleared; exec sleep 300";
+        let script = format!(
+            "{SETSID} /bin/sh -c 'echo $$ > escaped.ready; exec sleep 300' & echo $! > escaped; \
+             env -i /bin/sh -c 'echo $$ > cleared.ready; exec sleep 300' & echo $! > cleared; exec sleep 300"
+        );
         let mut leftover = tokio::process::Command::new("/bin/sh");
-        leftover.arg("-c").arg(script).current_dir(&f.dir).env(MARKER, marker(&root));
+        leftover
+            .arg("-c")
+            .arg(script)
+            .current_dir(&f.dir)
+            .env(MARKER, marker(&root));
         let mut leftover = spawn_tracked(&mut leftover).unwrap();
         let mut other = tokio::process::Command::new("sleep");
         other.arg("300").env(MARKER, "another-supervisor");
         let mut other = spawn_tracked(&mut other).unwrap();
-        let read = |file: &str| -> u32 { std::fs::read_to_string(f.dir.join(file)).unwrap_or_default().trim().parse().unwrap_or(0) };
-        until("the leftover's children to start", || read("escaped") > 0 && read("cleared") > 0).await;
+        let read = |file: &str| -> u32 {
+            std::fs::read_to_string(f.dir.join(file))
+                .unwrap_or_default()
+                .trim()
+                .parse()
+                .unwrap_or(0)
+        };
+        until("the leftover's children to start", || {
+            read("escaped") > 0 && read("cleared") > 0
+        })
+        .await;
         let (escaped, cleared) = (read("escaped"), read("cleared"));
-        until("the children to exec", || carries(escaped, &marker(&root)) && alive(cleared)).await;
+        // Parent-written PIDs prove fork, not exec. Each child signals only
+        // after setsid/env clearing, so slow CI cannot race the assertion.
+        until("the children to exec", || {
+            read("escaped.ready") == escaped
+                && read("cleared.ready") == cleared
+                && carries(escaped, &marker(&root))
+                && alive(cleared)
+                && !carries(cleared, &marker(&root))
+        })
+        .await;
         assert!(!carries(cleared, &marker(&root)));
 
-        assert!(reap_previous_runs(&root, &BTreeMap::new()).unwrap() >= 3);
-        assert!(!alive(leftover.pid()) && !alive(escaped) && !alive(cleared), "a leftover survived recovery");
+        assert!(reap_previous_runs(&root, &BTreeMap::new(), None).unwrap() >= 3);
+        assert!(
+            !alive(leftover.pid()) && !alive(escaped) && !alive(cleared),
+            "a leftover survived recovery"
+        );
         let _ = leftover.wait().await;
-        assert!(alive(other.pid()), "recovery killed another supervisor's process");
+        assert!(
+            alive(other.pid()),
+            "recovery killed another supervisor's process"
+        );
         unsafe {
             libc::kill(other.pid() as i32, libc::SIGKILL);
         }
@@ -1833,6 +2346,7 @@ mod tests {
         assert!(!record.exists(), "a clean stop kept the instance record");
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn leftovers_are_ruled_out_only_by_a_sealed_empty_cgroup_or_a_reboot() {
         let cgroups = std::env::temp_dir().join(format!("suifleet-cgroups-{}", std::process::id()));
@@ -1842,7 +2356,7 @@ mod tests {
         for dir in [&cgroups, &cgroups.join("system.slice")] {
             std::fs::write(dir.join("cgroup.procs"), "1\n2\n").unwrap();
         }
-        let current = Instance { pid: 40, pid_start: Some(1), boot_id: Some("b".into()), cgroup: Some("/system.slice/suifleet.service".into()), idle: false };
+        let current = Instance { pid: 40, pid_start: Some(1), boot_id: Some("b".into()), cgroup: Some("/system.slice/suifleet.service".into()), coalition: None, idle: false };
         let previous = Instance { pid: 30, ..current.clone() };
         let sealed = |_: &Path| false;
         let procs = |dir: &Path, pids: &str| std::fs::write(dir.join("cgroup.procs"), pids).unwrap();
@@ -1874,6 +2388,30 @@ mod tests {
         let _ = std::fs::remove_dir_all(&cgroups);
     }
 
+    #[test]
+    fn leftovers_are_ruled_out_only_by_a_sealed_empty_coalition() {
+        let current = Instance { pid: 40, pid_start: Some(1), boot_id: Some("b".into()), cgroup: None, coalition: Some(7), idle: false };
+        let previous = Instance { pid: 30, ..current.clone() };
+        // Only the new instance left in the old one's coalition (launchd reuses
+        // a job's coalition), or nothing at all in it.
+        assert_eq!(previous.coalition_left_nothing(&current, |id| if id == 7 { vec![40] } else { vec![] }), Ok(()));
+        assert_eq!(previous.coalition_left_nothing(&current, |_| vec![]), Ok(()));
+        // A survivor, however detached.
+        let error = previous.coalition_left_nothing(&current, |_| vec![40, 77]).unwrap_err();
+        assert!(error.contains("1 other process"), "{error}");
+        // No sealed coalition of its own (shared, or running as root) proves nothing.
+        let unsealed = Instance { coalition: None, ..previous.clone() };
+        assert!(unsealed.coalition_left_nothing(&current, |_| vec![]).is_err());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_test_process_has_no_sealed_coalition_of_its_own() {
+        // The test runner shares its coalition with its parents: never one to
+        // sweep or to prove anything with.
+        assert_eq!(dedicated_coalition(), None);
+    }
+
     #[tokio::test]
     async fn readiness_and_shutdown_keep_the_component_environment() {
         std::env::set_var("SUIFLEET_TEST_SECRET", "leak");
@@ -1897,7 +2435,7 @@ mod tests {
     async fn retired_component_is_stopped_and_not_restarted() {
         let mut f = Fixture::new("retire");
         let mut s = f.open();
-        let v1 = f.spec("1.0.0", "echo run >> {work}/runs; setsid sleep 300 & echo $! > {work}/escaped; exec sleep 300");
+        let v1 = f.spec("1.0.0", &format!("echo run >> {{work}}/runs; {SETSID} sleep 300 & echo $! > {{work}}/escaped; exec sleep 300"));
         f.deploy(&mut s, v1, None).await.unwrap();
         let main = s.status()["app"].pid.unwrap();
         let escaped: u32 = f.read("escaped").trim().parse().unwrap();
@@ -1947,4 +2485,336 @@ mod tests {
         spec.name = "a/b".into();
         assert!(f.deploy(&mut s, spec, None).await.is_err());
     }
+
+    fn configured(spec: &Spec, effective: serde_json::Value, confidential: &[&str]) -> configuration::Record {
+        configuration::Record {
+            deployment: spec.deployment.clone(),
+            version: spec.version.clone(),
+            effective: effective.as_object().unwrap().clone(),
+            confidential: confidential.iter().map(|p| p.to_string()).collect(),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn runs_with_its_configuration_across_restarts_and_rollback() {
+        use std::os::unix::fs::PermissionsExt;
+        let mut f = Fixture::new("configuration");
+        let overlay = f.dir.join("overlay");
+        std::fs::create_dir_all(&overlay).unwrap();
+        let secret = overlay.join("app.json");
+        std::fs::write(&secret, r#"{"/db/password": "one"}"#).unwrap();
+        std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let mut s = f.open();
+        let run = "cp {configuration} {work}/seen.json; echo \"$SUIFLEET_CONFIGURATION\" > {work}/env; exec sleep 300";
+        let v1 = f.spec("1.0.0", run);
+        let record = configured(&v1, serde_json::json!({"port": 1, "db": {}}), &["/db/password"]);
+        // Each install script also receives it.
+        // Its output, which here prints the configuration, goes to the private
+        // component log, never to the daemon's own stdout/stderr.
+        let install = "cp {configuration} {artifacts}/installed.json; cat {configuration}; cat {configuration} >&2";
+        f.deploy_configured(&mut s, v1.clone(), Some(install), &record).await.unwrap();
+        let log = f.dir.join("supervised/app/component.log");
+        assert_eq!(std::fs::read_to_string(&log).unwrap().matches("\"one\"").count(), 2);
+        assert_eq!(std::fs::metadata(&log).unwrap().permissions().mode() & 0o777, 0o600);
+        let seen = |f: &Fixture, file| serde_json::from_str::<serde_json::Value>(&f.read(file)).unwrap();
+        until("configuration seen", || f.work("seen.json").exists() && f.work("env").exists()).await;
+        assert_eq!(seen(&f, "seen.json"), serde_json::json!({"port": 1, "db": {"password": "one"}}));
+        let file = PathBuf::from(f.read("env").trim());
+        assert!(file.starts_with(f.dir.join("supervised/app/versions")), "{}", file.display());
+        let installed: serde_json::Value = serde_json::from_slice(&std::fs::read(file.with_file_name("installed.json")).unwrap()).unwrap();
+        assert_eq!(installed, serde_json::json!({"port": 1, "db": {"password": "one"}}));
+        assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
+        // The public record holds no confidential value.
+        let state = std::fs::read_to_string(file.with_file_name(CONFIGURATION_STATE)).unwrap();
+        assert!(!state.contains("one"), "{state}");
+
+        // A version without the confidential value provisioned never starts;
+        // the running version, with its own configuration, is restored.
+        let v2 = f.spec("2.0.0", run);
+        let missing = configured(&v2, serde_json::json!({"port": 2}), &["/api/token"]);
+        let error = f.deploy_configured(&mut s, v2, None, &missing).await.unwrap_err().to_string();
+        assert!(error.contains("/api/token") && error.contains("not provisioned"), "{error}");
+        assert_eq!(f.active()["app"], v1);
+        assert_eq!(seen(&f, "seen.json")["port"], 1);
+
+        // A replacement that fails to start rolls back to v1 and its configuration.
+        let v3 = f.spec("3.0.0", "cp {configuration} {work}/seen.json; exit 3");
+        let error = f.deploy_configured(&mut s, v3.clone(), None, &configured(&v3, serde_json::json!({"port": 3}), &[])).await.unwrap_err();
+        assert!(error.to_string().contains("rolled back to 1.0.0"), "{error}");
+        until("v1 restarted", || f.work("seen.json").exists() && seen(&f, "seen.json")["port"] == 1).await;
+
+        // A daemon restart starts it again with the rotated overlay value.
+        s.stop_all().await;
+        std::fs::write(&secret, r#"{"/db/password": "two"}"#).unwrap();
+        std::fs::remove_file(f.work("seen.json")).unwrap();
+        let mut s = f.open();
+        s.bootstrap().await;
+        until("restarted", || f.work("seen.json").exists()).await;
+        assert_eq!(seen(&f, "seen.json"), serde_json::json!({"port": 1, "db": {"password": "two"}}));
+        s.stop_all().await;
+        // Each value was recorded for log redaction before a component got it.
+        let retained: serde_json::Value = serde_json::from_slice(&std::fs::read(f.dir.join("logs/confidential.json")).unwrap()).unwrap();
+        let values: Vec<_> = retained["values"].as_object().unwrap().keys().cloned().collect();
+        assert_eq!(values, ["one", "two"]);
+    }
+
+    #[tokio::test]
+    async fn first_deployment_after_validation_syncs_its_workspace_path_before_install() {
+        let mut f = Fixture::new("durable-workspace");
+        let mut s = f.open();
+        let artifact = f.dir.join("candidate-artifact");
+        std::fs::write(&artifact, "artifact").unwrap();
+        let candidate = f.dir.join("candidate.json");
+        std::fs::write(&candidate, "{}").unwrap();
+        // Validation creates supervised/app (its work directory and log)
+        // before deploy, without making it durable.
+        assert!(s.validate("app", "1.0.0", "true", &artifact, &candidate, Duration::from_secs(5)).await.unwrap());
+        assert!(f.dir.join("supervised/app").is_dir());
+        configuration::SYNCED.with(|synced| synced.borrow_mut().clear());
+        // A failing install returns right after it ran: every sync recorded
+        // happened before it.
+        let v1 = f.spec("1.0.0", "exec sleep 300");
+        let record = configured(&v1, serde_json::json!({}), &[]);
+        assert!(f.deploy_configured(&mut s, v1, Some("exit 1"), &record).await.is_err());
+        let synced = configuration::SYNCED.with(|synced| synced.take());
+        let root = f.dir.join("supervised");
+        for dir in [f.dir.clone(), root.clone(), root.join("app"), root.join("app/versions")] {
+            assert!(synced.contains(&dir), "{} not synced before install: {synced:?}", dir.display());
+        }
+    }
+
+    #[tokio::test]
+    async fn validate_accepts_defers_or_rejects_without_side_effects() {
+        let f = Fixture::new("validate");
+        let s = f.open();
+        let artifact = f.dir.join("candidate-artifact");
+        std::fs::write(&artifact, "artifact").unwrap();
+        let candidate = f.dir.join("candidate.json");
+        std::fs::write(&candidate, r#"{"port": 80}"#).unwrap();
+        let check = |command: &'static str| s.validate("app", "1.0.0", command, &artifact, &candidate, Duration::from_secs(5));
+        let script = "test \"$SUIFLEET_CONFIGURATION\" = {configuration} && test -f {artifact} && grep -q 80 {configuration}";
+        assert!(check(script).await.unwrap());
+        assert!(!check("exit 75").await.unwrap(), "exit 75 defers");
+        let error = check("echo 'port 80 is reserved' >&2; exit 1").await.unwrap_err();
+        assert!(format!("{error:#}").contains("rejected"), "{error:#}");
+        // Its output goes to the component log, not into diagnostics.
+        assert!(!format!("{error:#}").contains("reserved"));
+        let log = std::fs::read_to_string(f.dir.join("supervised/app/component.log")).unwrap();
+        assert!(log.contains("port 80 is reserved"), "{log}");
+        let hung = s.validate("app", "1.0.0", "exec sleep 30", &artifact, &candidate, Duration::from_secs(1)).await;
+        assert!(format!("{:#}", hung.unwrap_err()).contains("timed out"));
+        assert!(s.validate("../x", "1", "true", &artifact, &candidate, Duration::from_secs(1)).await.is_err());
+        assert!(s.active.is_empty(), "nothing was installed or committed");
+    }
+    #[tokio::test]
+    #[ignore = "requires local Docker Engine and SF_OCI_TEST_IMAGE"]
+    async fn oci_real_engine_successful_exit_retries_cleanup_without_rerun() {
+        let image = std::env::var("SF_OCI_TEST_IMAGE").unwrap();
+        for restart in [Restart::OnFailure, Restart::Never] {
+            let mut f = Fixture::new("oci-cleanup-success");
+            let mut s = f.open();
+            let mut spec = f.spec("1", crate::oci::RUN);
+            spec.restart = restart;
+            let artifact = f.dir.join("oci-artifact");
+            let descriptor = serde_json::json!({
+                "version":1, "image":image, "platform":crate::oci::host_platform(), "user":"1000:1000",
+                "memoryBytes":67108864u64, "cpus":1, "pidsLimit":32, "network":"none", "tmpfsBytes":1048576,
+                "command":["sh","-c","while ! test -f /tmp/exit; do sleep 0.1; done; exit 0"]
+            });
+            std::fs::write(&artifact, serde_json::to_vec(&descriptor).unwrap()).unwrap();
+            s.deploy(spec.clone(), &artifact, None, &f.runner, "oci", &configuration::Record::default()).await.unwrap();
+            let workspace = s.workspace(&spec);
+            let name = { use sha2::Digest; format!("suifleet-{}", hex::encode(sha2::Sha256::digest(workspace.as_os_str().as_encoded_bytes()))) };
+            let outage = f.dir.join("supervised/app/test-engine-unavailable");
+            std::fs::write(&outage, b"test-only mutation failure").unwrap();
+            let mut command = std::process::Command::new("/usr/bin/docker");
+            command.args(["--host", "unix:///var/run/docker.sock", "exec", &name, "touch", "/tmp/exit"])
+                .stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
+            let child = spawn_std_tracked(&mut command).unwrap();
+            let pid = child.id();
+            let result = child.wait_with_output().unwrap();
+            forget_std_tracked(pid);
+            assert!(result.status.success(), "{result:?}");
+            tokio::time::timeout(Duration::from_secs(10), async {
+                while phase(&s) != Phase::Backoff { tokio::time::sleep(Duration::from_millis(50)).await; }
+            }).await.unwrap();
+            // Keep cleanup unavailable through at least one retry.
+            tokio::time::sleep(Duration::from_millis(1500)).await;
+            assert_eq!(phase(&s), Phase::Backoff);
+            assert_eq!(s.status()["app"].restarts, 0);
+            std::fs::remove_file(outage).unwrap();
+            tokio::time::timeout(Duration::from_secs(10), async {
+                while phase(&s) != Phase::Exited { tokio::time::sleep(Duration::from_millis(50)).await; }
+            }).await.unwrap();
+            assert_eq!(s.status()["app"].restarts, 0);
+            assert_eq!(s.status()["app"].last_exit.as_deref(), Some("exited with code 0"));
+            assert!(!f.dir.join("supervised/recovery-intent.json").exists());
+            assert!(crate::oci::ready(&workspace).await.is_err());
+            s.stop_all().await;
+        }
+    }
+
+    /// Requires a local Linux Docker Engine and a pre-cached immutable Alpine
+    /// image; does not pull, build, contact a registry or use chain credentials.
+    #[tokio::test]
+    #[ignore = "requires local Docker Engine and SF_OCI_TEST_IMAGE"]
+    async fn oci_real_engine_restarts_limits_rollback_and_offline_bootstrap() {
+        let image = std::env::var("SF_OCI_TEST_IMAGE").expect("set fully qualified cached Alpine digest");
+        let mut f = Fixture::new("oci-real");
+        let mut s = f.open();
+        let descriptor = |ready: &[&str]| serde_json::json!({
+            "version":1, "image":image, "platform":crate::oci::host_platform(), "user":"1000:1000",
+            "memoryBytes":67108864u64, "cpus":1, "pidsLimit":32, "network":"none", "tmpfsBytes":1048576,
+            "command":["sh","-c","echo ready >/tmp/ready; exec sleep 300"], "readiness":ready
+        });
+        let spec = f.spec("1", crate::oci::RUN);
+        let artifact = f.dir.join("oci-artifact");
+        std::fs::write(&artifact, serde_json::to_vec(&descriptor(&["test", "-f", "/tmp/ready"])).unwrap()).unwrap();
+        let record = configuration::Record::default();
+        s.deploy(spec.clone(), &artifact, None, &f.runner, "oci", &record).await.unwrap();
+        assert_eq!(phase(&s), Phase::Running);
+        let workspace = s.workspace(&spec);
+        crate::oci::release_if_unused(&f.dir.join("supervised")).await.unwrap();
+        assert!(crate::oci::ready(&workspace).await.is_ok(), "another component's retirement must preserve this run");
+        let engine = |args: &[&str]| {
+            let mut c = std::process::Command::new("/usr/bin/docker");
+            c.args(["--host", "unix:///var/run/docker.sock"]).args(args)
+                .stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
+            let child = spawn_std_tracked(&mut c).unwrap();
+            let pid = child.id();
+            let result = child.wait_with_output().unwrap();
+            forget_std_tracked(pid);
+            assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+            result
+        };
+        let ids = engine(&["ps", "-q", "--filter", &format!("name=suifleet-{}", { use sha2::Digest; hex::encode(sha2::Sha256::digest(workspace.as_os_str().as_encoded_bytes())) })]);
+        let id = String::from_utf8(ids.stdout).unwrap().trim().to_owned();
+        assert!(!id.is_empty());
+        let inspect: serde_json::Value = serde_json::from_slice(&engine(&["inspect", &id]).stdout).unwrap();
+        let host = &inspect[0]["HostConfig"];
+        assert_eq!(host["Memory"], 67108864u64);
+        assert_eq!(host["MemorySwap"], 67108864u64);
+        assert_eq!(host["NanoCpus"], 1000000000u64);
+        assert_eq!(host["PidsLimit"], 32);
+        assert_eq!(host["ReadonlyRootfs"], true);
+        assert_eq!(host["NetworkMode"], "none");
+        assert_eq!(host["RestartPolicy"]["Name"], "no");
+        assert!(engine(&["exec", &id, "sh", "-c", "! touch /forbidden && grep -Eq '^CapEff:[[:space:]]+0+$' /proc/self/status"]).status.success());
+        assert!(engine(&["exec", &id, "sh", "-c", "test $(cat /sys/fs/cgroup/memory.max) = 67108864 && test $(cat /sys/fs/cgroup/pids.max) = 32"]).status.success());
+        assert!(engine(&["exec", &id, "sh", "-c", "if dd if=/dev/zero of=/tmp/full bs=1048576 count=2 2>/dev/null; then exit 1; fi; rm /tmp/full"]).status.success());
+        // A tampered retained descriptor must fail before a new engine run.
+        let saved = std::fs::read(workspace.join("artifact")).unwrap();
+        let mut tampered = descriptor(&[]);
+        tampered["memoryBytes"] = serde_json::json!(33554432u64);
+        std::fs::write(workspace.join("artifact"), serde_json::to_vec(&tampered).unwrap()).unwrap();
+        assert!(crate::oci::start(&f.dir.join("supervised"), &workspace).await.err().unwrap().to_string().contains("descriptor digest mismatch"));
+        std::fs::write(workspace.join("artifact"), saved).unwrap();
+        assert!(engine(&["kill", &id]).status.success());
+        tokio::time::timeout(Duration::from_secs(15), async {
+            loop {
+                if s.status()["app"].restarts > 0 && phase(&s) == Phase::Running { break; }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }).await.unwrap();
+        // A transient cleanup failure must consume backoff without creating
+        // a second container or recovery intent before cleanup is confirmed.
+        let outage = f.dir.join("supervised/app/test-engine-unavailable");
+        std::fs::write(&outage, b"test-only mutation failure").unwrap();
+        let current = engine(&["ps", "-q", "--filter", &format!("label=io.suifleet.component={}", {
+            use sha2::Digest; hex::encode(sha2::Sha256::digest(f.dir.join("supervised/app").as_os_str().as_encoded_bytes()))
+        })]);
+        let current = String::from_utf8(current.stdout).unwrap().trim().to_owned();
+        engine(&["kill", &current]);
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let status = s.status();
+                if status["app"].phase == Phase::Backoff { break; }
+                assert_ne!(status["app"].phase, Phase::Broken);
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        }).await.unwrap();
+        assert!(!f.dir.join("supervised/recovery-intent.json").exists());
+        assert!(engine(&["ps", "-q", "--filter", &format!("id={current}")]).stdout.is_empty());
+        std::fs::remove_file(&outage).unwrap();
+        tokio::time::timeout(Duration::from_secs(15), async {
+            while phase(&s) != Phase::Running { tokio::time::sleep(Duration::from_millis(100)).await; }
+        }).await.unwrap();
+        // Mutation-outage injection keeps a real engine container alive. An
+        // unconfirmed stop must stay Broken and must not uncommit ownership.
+        let outage = f.dir.join("supervised/app/test-engine-unavailable");
+        std::fs::write(&outage, b"test-only mutation failure").unwrap();
+        assert!(s.local_control("app", "stop").await.is_err());
+        assert_eq!(phase(&s), Phase::Broken);
+        assert!(crate::oci::ready(&workspace).await.is_ok());
+        assert!(s.retire("app").await.is_err());
+        assert!(s.active.contains_key("app"));
+        std::fs::remove_file(outage).unwrap();
+        s.local_control("app", "restart").await.unwrap();
+        assert_eq!(phase(&s), Phase::Running);
+        // Registry rejection and missing credential profiles fail preparation
+        // while the known-good container is still running.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let requests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (count, stop) = (requests.clone(), done.clone());
+        let registry = std::thread::spawn(move || {
+            use std::io::{Read, Write};
+            while !stop.load(std::sync::atomic::Ordering::SeqCst) {
+                if let Ok((mut stream, _)) = listener.accept() {
+                    stream.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+                    let _ = stream.read(&mut [0u8; 8192]);
+                    count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let _ = stream.write_all(b"HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"test\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                } else { std::thread::sleep(Duration::from_millis(10)); }
+            }
+        });
+        let mut denied = descriptor(&[]);
+        denied["image"] = serde_json::json!(format!("127.0.0.1:{port}/test/app@sha256:{}", "a".repeat(64)));
+        std::fs::write(&artifact, serde_json::to_vec(&denied).unwrap()).unwrap();
+        let failure = s.deploy(f.spec("auth-denied", crate::oci::RUN), &artifact, None, &f.runner, "denied", &record).await;
+        done.store(true, std::sync::atomic::Ordering::SeqCst);
+        registry.join().unwrap();
+        assert!(failure.is_err());
+        assert!(requests.load(std::sync::atomic::Ordering::SeqCst) > 0, "registry fixture was not contacted");
+        assert_eq!(s.status()["app"].version, "1");
+        denied["registryAuth"] = serde_json::json!("sf036-missing-test-profile");
+        std::fs::write(&artifact, serde_json::to_vec(&denied).unwrap()).unwrap();
+        assert!(s.deploy(f.spec("auth-missing", crate::oci::RUN), &artifact, None, &f.runner, "missing", &record).await.is_err());
+        assert_eq!(phase(&s), Phase::Running);
+        // A cached but unready replacement must restore the known-good image.
+        let bad = f.spec("2", crate::oci::RUN);
+        std::fs::write(&artifact, serde_json::to_vec(&descriptor(&["false"])).unwrap()).unwrap();
+        let error = s.deploy(bad, &artifact, None, &f.runner, "oci-bad", &record).await.unwrap_err();
+        assert!(error.downcast_ref::<Recovered>().is_some(), "{error:#}");
+        assert_eq!(s.status()["app"].version, "1");
+        assert_eq!(phase(&s), Phase::Running);
+        s.stop_all().await;
+        // An engine-owned container outlives a killed attached client. The
+        // next open must remove that orphan before bootstrap can start again.
+        let mut command = crate::oci::start(&f.dir.join("supervised"), &workspace).await.unwrap();
+        let mut abandoned = spawn_tracked(&mut command).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while crate::oci::ready(&workspace).await.is_err() { tokio::time::sleep(Duration::from_millis(100)).await; }
+        }).await.unwrap();
+        apply::kill_group(abandoned.pid() as i32);
+        abandoned.wait().await.unwrap();
+        assert!(crate::oci::ready(&workspace).await.is_ok(), "engine container must outlive its client in this fixture");
+        let mut s = f.open();
+        assert!(crate::oci::ready(&workspace).await.is_err(), "startup retained an orphan container");
+        s.bootstrap().await;
+        assert_eq!(phase(&s), Phase::Running);
+        s.stop_all().await;
+        crate::oci::clean(&f.dir.join("supervised")).await.unwrap();
+        assert!(f.dir.join("supervised/@oci-engine").exists());
+        s.retire("app").await.unwrap();
+        assert!(!f.dir.join("supervised/app/oci-engine").exists());
+        assert!(!f.dir.join("supervised/@oci-engine").exists());
+        // With no engine obligation left, open is engine-independent.
+        let _s = f.open();
+
+    }
+
 }

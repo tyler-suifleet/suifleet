@@ -3,18 +3,29 @@
 //!   suifleet-indexer serve --manifest deployment.json --db fleet.db
 //!                          [--listen 127.0.0.1:8650] (--tokens FILE | --public-read)
 //!                          [--interval-seconds 2] [--reconcile-batch 500] [--reset]
+//!                          [--telemetry-db telemetry.db [--telemetry-retain 1000]]
+//!                          [--cors-origin https://dapp.example]
 //!   suifleet-indexer index --manifest deployment.json --db fleet.db [--reconcile-batch 500]
 //!                          [--reset] [--rebuild-from-objects]
 //!   suifleet-indexer ctl ...   (see `suifleet-indexer ctl help`)
+//!   suifleet-indexer telemetry-alerts ENVELOPES.json   (offline: service-health alerts
+//!                          of signed telemetry; docs/TELEMETRY.md)
 //!
 //! docs/INDEXER.md covers deployment, auth, storage, retention and recovery.
+mod alerts;
 mod api;
 mod chain;
 mod ctl;
 mod devices;
 mod indexer;
+mod logs;
 mod manifest;
+// The daemon's own redaction rules (one implementation for both sides).
+#[path = "../../suifleet-edge/src/redact.rs"]
+mod redact;
+mod services;
 mod store;
+mod telemetry;
 mod txbuild;
 
 use std::collections::BTreeMap;
@@ -22,7 +33,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::info;
 
-const USAGE: &str = "usage: suifleet-indexer serve|index|ctl ... (see the header of src/main.rs or docs/INDEXER.md)";
+const USAGE: &str = "usage: suifleet-indexer serve|index|ctl|telemetry-alerts ... (see the header of src/main.rs or docs/INDEXER.md)";
 
 fn options(args: &[String]) -> anyhow::Result<(BTreeMap<String, String>, Vec<String>)> {
     let switches = ["--reset", "--public-read", "--rebuild-from-objects"];
@@ -59,6 +70,10 @@ async fn main() -> anyhow::Result<()> {
     };
     if command == "ctl" {
         return ctl::main(rest).await;
+    }
+    if command == "telemetry-alerts" {
+        let [file] = rest else { anyhow::bail!("usage: suifleet-indexer telemetry-alerts ENVELOPES.json") };
+        return services::explain_file(std::path::Path::new(file));
     }
     let (values, flags) = options(rest)?;
     let required = |name: &str| {
@@ -98,15 +113,52 @@ async fn main() -> anyhow::Result<()> {
             };
             let chain = chain::Chain::new(&manifest.rpc_url)?;
             let types = manifest.verify(&chain).await?;
+            let registry = chain::normalize(&manifest.shared_objects.registry.id).unwrap_or_default();
+            let telemetry = match values.get("--telemetry-db") {
+                Some(path) => {
+                    let binding = telemetry::Binding {
+                        chain_identifier: manifest.chain_identifier.clone(),
+                        registry: registry.clone(),
+                    };
+                    let retain: usize = values
+                        .get("--telemetry-retain")
+                        .map(|s| s.parse())
+                        .transpose()?
+                        .unwrap_or(1000);
+                    anyhow::ensure!(retain > 0, "--telemetry-retain must be positive");
+                    let path = PathBuf::from(path);
+                    let writer = telemetry::open(&path, &binding, flags.iter().any(|f| f == "--reset"))?;
+                    Some(Arc::new(telemetry::Service { path, binding, retain, writer: std::sync::Mutex::new(writer) }))
+                }
+                None => None,
+            };
             let state = api::AppState {
                 readers: store::Readers::new(&db_path),
                 tokens,
                 public_read,
                 chain,
                 call_package: chain::normalize(&manifest.call_package_id).unwrap_or_default(),
-                registry: chain::normalize(&manifest.shared_objects.registry.id).unwrap_or_default(),
+                registry,
                 types: Arc::new(types),
+                telemetry: telemetry.clone(),
+                cors_origin: values.get("--cors-origin").cloned(),
+                logs_retain: values.get("--logs-retain").map(|s| s.parse()).transpose()?.unwrap_or(logs::DEFAULT_RETAIN),
+                stuck_after_ms: values
+                    .get("--stuck-after-minutes")
+                    .map(|s| s.parse::<u64>())
+                    .transpose()?
+                    .map(|m| m * 60_000)
+                    .unwrap_or(alerts::DEFAULT_STUCK_AFTER_MS),
             };
+            anyhow::ensure!(state.logs_retain > 0, "--logs-retain must be positive");
+            if let Some(url) = values.get("--alert-webhook") {
+                let service = telemetry.clone().ok_or_else(|| anyhow::anyhow!("--alert-webhook needs --telemetry-db"))?;
+                let url = reqwest::Url::parse(url)?;
+                anyhow::ensure!(matches!(url.scheme(), "https" | "http") && url.username().is_empty() && url.password().is_none(),
+                    "--alert-webhook must be an http(s) URL without credentials");
+                let every = std::time::Duration::from_secs(values.get("--alert-interval-seconds").map(|s| s.parse()).transpose()?.unwrap_or(60));
+                tokio::spawn(alerts::notify_loop(state.readers.clone(), service, url, every, state.stuck_after_ms));
+            }
             let interval = std::time::Duration::from_secs(
                 values
                     .get("--interval-seconds")

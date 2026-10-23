@@ -24,6 +24,12 @@ Inventory uses `listOwnedObjects`; groups and deployment history use `listEvents
 
 On-chain deployment group targets are arbitrary IDs. History resolves only supported `DeviceGroup` objects administered by that deployment's creator; wrong types, malformed layouts, unsupported group schemas and deleted groups do not hide other deployments. Transport errors remain visible. Each unique group is read once per history query, and administrator checks apply separately per deployment. Package, UpgradeCap and registry proofs run concurrently after fresh chain verification. Wallet guards compare snapshots of the signer address and supported chain set, accepting equivalent rebuilt account objects while rejecting actual changes before signing.
 
+## Component publishing
+
+The [component software library](COMPONENT_LIBRARY.md) separates browsing and
+guided immutable version publishing from target selection/deployment. It retains
+the wallet/network/effects boundary described above.
+
 ## Verification
 
 ```bash
@@ -51,3 +57,9 @@ This test refuses public endpoints, uses fresh in-memory signers and an explicit
 The verified test-node release asset was `sui-testnet-v1.82.1-ubuntu-x86_64.tgz`, SHA-256 `112bf204fab6927b135edfb316cddac07bdba754434b5f12d021ca7e8a72858c` from the official [release](https://github.com/MystenLabs/sui/releases/tag/testnet-v1.82.1). The node ran in a disposable dev-image container, with only its binary supplied separately; normal pinned images, wallets and named volumes were not replaced.
 
 A fixture wallet is not a real extension acceptance run. Before marking SF-003 Done, use a supported extension wallet with an explicitly authorized deployment/network: connect/reconnect, select/change accounts, reject signing, submit a successful and deliberately aborting transaction, verify resulting effects and inventory/group/deployment pagination, and check account/chain mismatch rejection. Record wallet/version, network/chain/package IDs and results without secrets. Physical Pi wallet-to-device execution remains SF-031.
+
+## First-time wallet onboarding
+
+See [wallet onboarding](WALLET_ONBOARDING.md) for Google zkLogin/Enoki configuration,
+Slush web, session custody, recovery, first registration and device-owner transfer.
+The existing manifest, authority and effects checks apply to every wallet type.

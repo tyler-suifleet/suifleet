@@ -18,7 +18,7 @@ Direct reports require a targeted DeviceCap. Group reports additionally require 
 
 ## Access and confidential delivery
 
-See [wallet delegation, edge identity and encryption](docs/ACCESS_AND_ENCRYPTION.md). Current OTA uploads are unencrypted. Seal-encrypted proprietary delivery is a required customer-readiness gate tracked in SF-022; public-artifact smoke tests do not establish confidentiality.
+See [wallet delegation, edge identity and encryption](docs/ACCESS_AND_ENCRYPTION.md) and [confidential delivery](docs/CONFIDENTIAL_DELIVERY.md). Uploads are Seal-encrypted in the browser by default (SF-022), with on-chain access policies for accounts, devices and groups; devices decrypt with their own identity. Explicitly public uploads remain for public content. Real extension-wallet and Pi acceptance remain SF-010/SF-031.
 
 ## Business model
 
@@ -82,7 +82,7 @@ offline_candidates = "never"   # or "cached"; see docs/COMPONENT_DEPENDENCIES.md
 
 Fresh enrollment skips historical events; an existing journal always catches up from its cursor. `replay_history = true` is only for deliberate historical job replay. Use separate state directories for different networks/packages/devices. Never remove the journal to fix a reporting error: that can lose recovery information.
 
-The command is parsed as executable plus quoted arguments, with the artifact path appended. It does not implicitly invoke a shell. Optional recipe `install` commands use `/bin/sh` only when explicitly enabled. `{artifact}` is the downloaded file and `{artifacts}` its directory. Recipes with `run`, `shutdown` or nonempty configuration are rejected until a supervisor/configuration service exists.
+The command is parsed as executable plus quoted arguments, with the artifact path appended. It does not implicitly invoke a shell. Optional recipe `install` commands use `/bin/sh` only when explicitly enabled. `{artifact}` is the downloaded file and `{artifacts}` its directory. Supervised `run`/`shutdown` commands (SF-014) and component configuration with defaults, reset/merge, validation and device-local confidential values (recipe 1.2, SF-015) are described in [the operations runbook](docs/OPERATIONS.md#component-configuration-sf-015).
 
 An updater exit code of zero is reported as Applied. This does not establish post-reboot health or A/B rollback. Interrupted work becomes Failed with an inspection message and is not automatically applied again.
 

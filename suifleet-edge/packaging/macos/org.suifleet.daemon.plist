@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  SuiFleet edge daemon as a macOS LaunchDaemon (SF-075; docs/MACOS_RUNTIME.md).
+  install.sh puts it in /Library/LaunchDaemons (root:wheel 0644); start it with
+  `launchctl bootstrap system /Library/LaunchDaemons/org.suifleet.daemon.plist`
+  and stop it with `launchctl bootout system/org.suifleet.daemon`.
+
+  launchd starts the job in a resource coalition of its own. The daemon runs
+  as the unprivileged _suifleet user, so neither it nor any component process
+  can leave that coalition: it is the boundary the daemon uses to contain and
+  recover every descendant (the role systemd's cgroup has on Linux).
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>org.suifleet.daemon</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/usr/local/bin/suifleet</string>
+	</array>
+	<key>UserName</key>
+	<string>_suifleet</string>
+	<key>GroupName</key>
+	<string>_suifleet</string>
+	<key>Umask</key>
+	<integer>63</integer>
+	<key>RunAtLoad</key>
+	<true/>
+	<!-- Restarted after a crash or a failure exit, not after a clean stop. -->
+	<key>KeepAlive</key>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
+	<key>ThrottleInterval</key>
+	<integer>5</integer>
+	<!-- SIGTERM lets the daemon run component shutdown commands (dependents
+	     first) and stop every descendant; SIGKILL follows after this long. -->
+	<key>ExitTimeOut</key>
+	<integer>60</integer>
+	<key>ProcessType</key>
+	<string>Standard</string>
+	<key>StandardOutPath</key>
+	<string>/var/log/suifleet/daemon.log</string>
+	<key>StandardErrorPath</key>
+	<string>/var/log/suifleet/daemon.log</string>
+	<key>SoftResourceLimits</key>
+	<dict>
+		<key>Core</key>
+		<integer>0</integer>
+		<key>NumberOfFiles</key>
+		<integer>4096</integer>
+	</dict>
+	<key>HardResourceLimits</key>
+	<dict>
+		<key>Core</key>
+		<integer>0</integer>
+	</dict>
+</dict>
+</plist>

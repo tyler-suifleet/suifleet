@@ -64,8 +64,8 @@ def scanned(count):
     return {"after": base64.b64encode(count.to_bytes(8, "little")).decode()}
 
 
-def wait_for(condition, message, process=None):
-    deadline = time.monotonic() + 25
+def wait_for(condition, message, process=None, timeout=25):
+    deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if condition():
             return
@@ -76,7 +76,8 @@ def wait_for(condition, message, process=None):
 
 
 class Simulator:
-    def __init__(self):
+    def __init__(self, device=DEVICE, cap=CAP):
+        self.device, self.cap = device, cap
         self.latest_package = PACKAGE
         self.chain = "1234abcd"
         self.events = []
@@ -95,21 +96,23 @@ class Simulator:
         self.ranges = []
         # Desired state (SF-013): group objects, DeviceAddedToGroup events,
         # per-group desired components and records marked managed.
-        self.groups = {GROUP: {"admin": OPERATOR, "device_ids": [DEVICE]}}
+        self.groups = {GROUP: {"admin": OPERATOR, "device_ids": [self.device]}}
         self.memberships = []
         self.desired = {}
         self.managed = set()
         self.controls = {}
 
-    def add(self, id, *, creator=OPERATOR, groups=None, direct=True, bad_hash=False, run=False, expired=False):
+    def add(self, id, *, creator=OPERATOR, groups=None, direct=True, bad_hash=False, run=False, expired=False, event=None, recipe=None):
+        """Publish deployment `id`. `event`/`recipe` override fields before
+        publication: a polling daemon must never see a half-built deployment."""
         digest = "f" * 64 if bad_hash else HASH
-        event = dict(deployment_id=id, component_name=f"app-{id}", version="1.0.0",
+        fields = dict(deployment_id=id, component_name=f"app-{id}", version="1.0.0",
             recipe_blob_id=f"recipe-{id}", artifact_sha256=digest,
-            target_groups=groups or [], target_devices=[DEVICE] if direct else [], creator=creator)
-        recipe = dict(schemaVersion=_PROTOCOL_RECIPE_VERSION, componentName=event["component_name"], componentVersion="1.0.0",
-            artifactBlobId="expired" if expired else "artifact", artifactSha256=digest, lifecycle={"run": "sleep 10"} if run else {}, configuration={})
-        self.recipes[event["recipe_blob_id"]] = recipe
-        self.events.append(dict(id={"txDigest":f"event-{len(self.events)}", "eventSeq":"0"}, parsedJson=event))
+            target_groups=groups or [], target_devices=[self.device] if direct else [], creator=creator) | (event or {})
+        self.recipes[fields["recipe_blob_id"]] = dict(schemaVersion=_PROTOCOL_RECIPE_VERSION, componentName=fields["component_name"],
+            componentVersion=fields["version"], artifactBlobId="expired" if expired else "artifact", artifactSha256=fields["artifact_sha256"],
+            lifecycle={"run": "sleep 10"} if run else {}, configuration={}) | (recipe or {})
+        self.events.append(dict(id={"txDigest":f"event-{len(self.events)}", "eventSeq":"0"}, parsedJson=fields))
 
     def obj(self, id):
         if id in self.deleted:
@@ -118,12 +121,12 @@ class Simulator:
             return {"data":{"content":{"type":"0x2::package::UpgradeCap","fields":{"package":self.latest_package,"version":"3"}}}}
         if id == REGISTRY:
             type, fields, owner = "device_registry::DeviceRegistry", {}, None
-        elif id == DEVICE:  # Activated: held by the registry, operated through OWNER_CAP.
+        elif id == self.device:  # Activated: held by the registry, operated through OWNER_CAP.
             type, fields, owner = "device_registry::Device", {"device_address":ADDRESS}, {"ObjectOwner":CUSTODY_FIELD}
         elif id == OWNER_CAP:
-            type, fields, owner = "device_registry::DeviceOwnerCap", {"device_id":DEVICE}, OPERATOR
-        elif id == CAP:
-            type, fields, owner = "device_cap::DeviceCap", {"device_id":DEVICE}, ADDRESS
+            type, fields, owner = "device_registry::DeviceOwnerCap", {"device_id":self.device}, OPERATOR
+        elif id == self.cap:
+            type, fields, owner = "device_cap::DeviceCap", {"device_id":self.device}, ADDRESS
         elif id in self.groups:
             type, fields, owner = "device_group::DeviceGroup", dict(self.groups[id]), None
         else:
@@ -148,8 +151,8 @@ class Simulator:
         if method == "shim_fields":
             key = lambda name: f"{TYPE_ORIGINS[name]}::{name}"
             empty = "00"  # An empty key struct is one `false` dummy byte.
-            fields = [[CAP, key("device_cap::DeviceAddressKey"), empty],
-                      [REGISTRY, key("device_registry::IdentityKey"), object_id(DEVICE)[2:]]]
+            fields = [[self.cap, key("device_cap::DeviceAddressKey"), empty],
+                      [REGISTRY, key("device_registry::IdentityKey"), object_id(self.device)[2:]]]
             fields += [[group, key("desired_state::DesiredKey"), empty] for group in self.groups]
             for event in self.events:
                 parent = event["parsedJson"]["deployment_id"]
@@ -181,7 +184,7 @@ class Simulator:
             if params[0] == REGISTRY:
                 assert params[1]["type"] == f"{PACKAGE}::device_registry::IdentityKey"
                 return {"data":{"content":{"fields":{"value":self.identity}}}}
-            if params[0] == CAP:
+            if params[0] == self.cap:
                 assert params[1]["type"] == f"{PACKAGE}::device_cap::DeviceAddressKey"
                 return {"data":{"content":{"fields":{"value":ADDRESS}}}}
             if params[1]["type"].endswith("::desired_state::DesiredKey"):
@@ -208,7 +211,7 @@ class Simulator:
             assert params[0] == ADDRESS and params[1] == PACKAGE
             assert params[2] == "deployment_manager"
             args = params[5]
-            assert args[1] == REGISTRY and args[2] == CAP
+            assert args[1] == REGISTRY and args[2] == self.cap
             assert (params[3] == "report_verified_status" and len(args) == 4) or (params[3] == "report_verified_status_for_group" and args[3] in self.groups and len(args) == 5)
             if not self.allow_reports:
                 raise ConnectionError("simulated unavailable transaction service")
@@ -375,7 +378,7 @@ def run(binary, firmware_helper=False, daemon_user=None, platform_installer=Fals
                 sim.add("0x103", creator="0xbad")
                 # Unsupported records must fail individually, with no downloads,
                 # and must not poison discovery of the valid group deployment.
-                for id, version in (("0x10b", "3"), ("0x10c", None), ("0x10d", "invalid")):
+                for id, version in (("0x10b", "4"), ("0x10c", None), ("0x10d", "invalid")):
                     sim.schema_fields[id] = {"schema_version": version}
                     sim.add(id)
                 sim.add("0x104", groups=[GROUP], direct=False)

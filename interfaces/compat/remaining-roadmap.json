@@ -1,0 +1,202 @@
+{
+  "format_version": 1,
+  "parity_claim": false,
+  "semantics": "SuiFleet proposed clean-room functional contracts, not AWS wire/API compatibility or runtime evidence. Unknown contract versions are rejected before any action.",
+  "scopes": [
+    {
+      "id": "lambda",
+      "contract_version": 1,
+      "implementation_ticket": "SF-069",
+      "issue": "https://github.com/tyler-suifleet/suifleet/issues/123",
+      "depends_on": [
+        "SF-014",
+        "SF-027",
+        "SF-032",
+        "SF-037"
+      ],
+      "components": [
+        "aws.greengrass.LambdaManager",
+        "aws.greengrass.LambdaLauncher",
+        "aws.greengrass.LambdaRuntimes",
+        "aws.greengrass.LegacySubscriptionRouter"
+      ],
+      "runtime_execution": "passed",
+      "live_execution": "pending",
+      "acceptance": "Function invocation, payload/error/timeout, duplicate/subscription, permissions and process-restart fixtures; clean-room licensing boundary.",
+      "runtime_evidence": "docs/validation/sf069-lambda.json"
+    },
+    {
+      "id": "industrial",
+      "contract_version": 1,
+      "implementation_ticket": "SF-070",
+      "issue": "https://github.com/tyler-suifleet/suifleet/issues/124",
+      "depends_on": [
+        "SF-027",
+        "SF-032",
+        "SF-034"
+      ],
+      "components": [
+        "aws.greengrass.Modbus",
+        "aws.iot.SiteWiseEdgeCollectorOpcua",
+        "aws.iot.SiteWiseEdgeOpcuaDataSourceSimulator"
+      ],
+      "runtime_execution": "pending",
+      "live_execution": "pending",
+      "acceptance": "Actual collector-to-simulator interoperability, wrong credentials, malformed data, disconnect, resubscription and durable stream tests."
+    },
+    {
+      "id": "sitewise",
+      "contract_version": 1,
+      "implementation_ticket": "SF-071",
+      "issue": "https://github.com/tyler-suifleet/suifleet/issues/125",
+      "depends_on": [
+        "SF-070",
+        "SF-034",
+        "SF-057"
+      ],
+      "components": [
+        "aws.iot.SiteWiseEdgePublisher",
+        "aws.iot.SiteWiseEdgeProcessor"
+      ],
+      "runtime_execution": "pending",
+      "live_execution": "pending",
+      "acceptance": "Transformation/quality/time tests, partial failures, rejected records, restart/checkpoints and request-checking emulator evidence; live AWS acceptance separate."
+    },
+    {
+      "id": "video",
+      "contract_version": 1,
+      "implementation_ticket": "SF-072",
+      "issue": "https://github.com/tyler-suifleet/suifleet/issues/126",
+      "depends_on": [
+        "SF-034",
+        "SF-057"
+      ],
+      "components": [
+        "aws.iot.EdgeConnectorForKVS"
+      ],
+      "runtime_execution": "passed",
+      "live_execution": "pending",
+      "acceptance": "Deterministic media source and local protocol emulator verifying fragments/timestamps, interruption, expiry, rejection and replay semantics.",
+      "runtime_evidence": "docs/validation/sf072-video.json"
+    },
+    {
+      "id": "ml",
+      "contract_version": 1,
+      "implementation_ticket": "SF-073",
+      "issue": "https://github.com/tyler-suifleet/suifleet/issues/127",
+      "depends_on": [
+        "SF-011",
+        "SF-023"
+      ],
+      "components": [
+        "variant.DLR",
+        "variant.TensorFlowLite",
+        "aws.greengrass.DLRImageClassification",
+        "aws.greengrass.DLRObjectDetection",
+        "aws.greengrass.TensorFlowLiteImageClassification",
+        "aws.greengrass.TensorFlowLiteObjectDetection",
+        "variant.DLR.ImageClassification.ModelStore",
+        "variant.DLR.ObjectDetection.ModelStore",
+        "variant.TensorFlowLite.ImageClassification.ModelStore",
+        "variant.TensorFlowLite.ObjectDetection.ModelStore"
+      ],
+      "runtime_execution": "pending",
+      "live_execution": "pending",
+      "acceptance": "Actual inference on committed redistributable fixtures with expected outputs/tolerances, wrong-digest/model/version/input and unsupported-platform tests; no physical Pi required."
+    },
+    {
+      "id": "windows",
+      "contract_version": 1,
+      "implementation_ticket": "SF-074",
+      "issue": "https://github.com/tyler-suifleet/suifleet/issues/128",
+      "depends_on": [
+        "SF-014",
+        "SF-025",
+        "SF-027"
+      ],
+      "components": [],
+      "runtime_execution": "passed",
+      "runtime_evidence": "docs/validation/sf074-windows.json",
+      "live_execution": "pending",
+      "acceptance": "Windows software VM/CI tests for real service start/stop/restart, descendant containment, ACL/caller denial, component install and interrupted lifecycle; physical target tests deferred."
+    },
+    {
+      "id": "macos",
+      "contract_version": 1,
+      "implementation_ticket": "SF-075",
+      "issue": "https://github.com/tyler-suifleet/suifleet/issues/129",
+      "depends_on": [
+        "SF-014",
+        "SF-025",
+        "SF-027"
+      ],
+      "components": [],
+      "runtime_execution": "pending",
+      "live_execution": "pending",
+      "acceptance": "macOS software-runner tests for actual service lifecycle, descendant containment, permissions/caller negatives, install and restart recovery; physical target tests deferred."
+    },
+    {
+      "id": "linux-x86",
+      "contract_version": 1,
+      "implementation_ticket": "SF-076",
+      "issue": "https://github.com/tyler-suifleet/suifleet/issues/130",
+      "depends_on": [
+        "SF-023",
+        "SF-025"
+      ],
+      "components": [],
+      "runtime_execution": "pending",
+      "live_execution": "pending",
+      "acceptance": "Actual 32-bit binary/package build, software runtime lifecycle/IPC/identity/OTA fixtures, incompatible artifact rejection and documented limitations."
+    },
+    {
+      "id": "firehose",
+      "contract_version": 1,
+      "implementation_ticket": "SF-077",
+      "issue": "https://github.com/tyler-suifleet/suifleet/issues/131",
+      "depends_on": [
+        "SF-034",
+        "SF-057"
+      ],
+      "components": [
+        "aws.greengrass.KinesisFirehose"
+      ],
+      "runtime_execution": "pending",
+      "live_execution": "pending",
+      "acceptance": "Actual exporter/local emulator request assertions, partial failures, outage, credential expiry and restart/checkpoint tests; live AWS acceptance separate."
+    },
+    {
+      "id": "sns",
+      "contract_version": 1,
+      "implementation_ticket": "SF-078",
+      "issue": "https://github.com/tyler-suifleet/suifleet/issues/132",
+      "depends_on": [
+        "SF-032",
+        "SF-057"
+      ],
+      "components": [
+        "aws.greengrass.SNS"
+      ],
+      "runtime_execution": "pending",
+      "live_execution": "pending",
+      "acceptance": "Actual publisher/local emulator tests for messages/attributes, caller/topic denial, throttling, lost responses, retry/duplicate behavior and restart; live AWS acceptance separate."
+    },
+    {
+      "id": "console",
+      "contract_version": 1,
+      "implementation_ticket": "SF-079",
+      "issue": "https://github.com/tyler-suifleet/suifleet/issues/133",
+      "depends_on": [
+        "SF-019",
+        "SF-027",
+        "SF-053"
+      ],
+      "components": [
+        "aws.greengrass.LocalDebugConsole"
+      ],
+      "runtime_execution": "pending",
+      "live_execution": "pending",
+      "acceptance": "Actual console/API auth, CSRF/origin where applicable, role/caller denial, redaction, bounded queries and audit tests; no production exposure or credentials provisioned."
+    }
+  ]
+}

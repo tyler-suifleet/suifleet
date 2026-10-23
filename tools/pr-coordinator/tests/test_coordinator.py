@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 import threading
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 spec = importlib.util.spec_from_file_location('coordinator',Path(__file__).resolve().parents[1]/'coordinator.py')
 c = importlib.util.module_from_spec(spec);spec.loader.exec_module(c)
@@ -29,6 +29,78 @@ class Gates(unittest.TestCase):
         for field,value in [('network','mainnet'),('chain_identifier','35834a8a'),('lock_resource','')]:
             with self.subTest(field=field),self.assertRaises(ValueError):
                 c.network_authorization({'testnet_authorization':{**grant,field:value}})
+
+    def test_stopped_quarantine_frees_family_but_preserves_pr_exclusion(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store=c.Store(Path(directory)/'jobs.sqlite3')
+            pr=fixture()[0]
+            first=store.reserve('project',pr,'Codex','fix',Path(directory))
+            store.db.execute("UPDATE jobs SET status='quarantined' WHERE id=?",(first,))
+            self.assertIsNone(store.reserve('project',pr,'Claude','review',Path(directory)))
+            self.assertIsNotNone(store.reserve('project',{**pr,'number':50},'Codex','fix',Path(directory)))
+
+    def test_collect_quarantines_only_proven_stopped_orphan(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store=c.Store(Path(directory)/'jobs.sqlite3')
+            job=store.reserve('project',fixture()[0],'Codex','fix',Path(directory))
+            store.db.execute("UPDATE jobs SET status='orphaned',pid=123,started='old' WHERE id=?",(job,))
+            coordinator=c.Coordinator.__new__(c.Coordinator)
+            coordinator.store=store; coordinator.children={}; coordinator.publish_results=Mock()
+            with patch.object(c,'worker_stopped',return_value=False):
+                coordinator.collect({'id':'project'},[])
+            self.assertEqual(store.db.execute('SELECT status FROM jobs').fetchone()[0],'orphaned')
+            with patch.object(c,'worker_stopped',return_value=True):
+                coordinator.collect({'id':'project'},[])
+            self.assertEqual(store.db.execute('SELECT status FROM jobs').fetchone()[0],'quarantined')
+
+    def test_stopped_orphans_back_off_and_cap_cross_pr_cascade(self):
+        for kind in ('fix', 'review'):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory)/'jobs.sqlite3'
+                store = c.Store(path)
+                coordinator = c.Coordinator.__new__(c.Coordinator)
+                coordinator.store=store; coordinator.children={}; coordinator.publish_results=Mock()
+                claims = []
+                with patch.object(c.time,'time') as now, patch.object(c,'worker_stopped',return_value=True):
+                    for tick in range(20):
+                        now.return_value = tick*10000
+                        job = store.reserve('project',{**fixture()[0],'number':tick},'Codex',kind,Path(directory))
+                        if job is None: continue
+                        claims.append(job)
+                        store.db.execute("UPDATE jobs SET status='orphaned',pid=123,started='old' WHERE id=?", (job,))
+                        coordinator.collect({'id':'project'}, [])
+                        self.assertIsNone(store.reserve('other',{**fixture()[0],'number':100+tick},'Codex',kind,Path(directory)))
+                        attempts, deadline = store.db.execute('SELECT attempts,retry_after FROM quarantine_backoff').fetchone()
+                        self.assertEqual(attempts, len(claims))
+                        self.assertEqual(deadline, tick*10000 + 300*2**(len(claims)-1))
+                    self.assertEqual(len(claims), 3)
+                    self.assertIsNone(c.Store(path).reserve('other',{**fixture()[0],'number':999},'Codex',kind,Path(directory)))
+                    # The other family/category can still make progress.
+                    self.assertIsNotNone(store.reserve('other',fixture()[0],'Claude',kind,Path(directory)))
+
+    def test_worker_stopped_requires_identity_and_complete_session_scan(self):
+        self.assertFalse(c.worker_stopped(None,None))
+        with patch.object(c,'runnable_identity',return_value='same'):
+            self.assertFalse(c.worker_stopped(999,'same'))
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            child=root/'123'; child.mkdir()
+            (child/'stat').write_text('123 (child) S 1 999 999 '+'0 '*16)
+            with patch.object(c,'runnable_identity',return_value=None),patch.object(c.Path,'iterdir',return_value=iter([child])):
+                self.assertFalse(c.worker_stopped(999,'old'))
+            (child/'stat').write_text('123 (child) Z 1 999 999 '+'0 '*16)
+            with patch.object(c,'runnable_identity',return_value=None),patch.object(c.Path,'iterdir',return_value=iter([child])):
+                self.assertTrue(c.worker_stopped(999,'old'))
+        with patch.object(c,'runnable_identity',return_value=None),patch.object(c.Path,'iterdir',side_effect=PermissionError):
+            self.assertFalse(c.worker_stopped(999,'old'))
+        # An unreaped zombie wrapper keeps its identity but never runs again.
+        with tempfile.TemporaryDirectory() as directory:
+            leader=Path(directory)/'999'; leader.mkdir()
+            (leader/'stat').write_text('999 (wrapper) Z 1 999 999 '+'0 '*15+'same 0 0')
+            real=c.Path
+            with patch.object(c,'Path',side_effect=lambda value: real(str(value).replace('/proc',directory))):
+                self.assertEqual(c.process_identity(999),'same')
+                self.assertIsNone(c.runnable_identity(999))
 
     def test_long_feedback_build_does_not_occupy_readonly_review_slot(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -190,9 +262,155 @@ class IntegrationRaces(unittest.TestCase):
                     coordinator.merge({'id':'test','root':d},pr,owner,review)
                 self.assertFalse(any('merge' in call.args[0] or 'push' in call.args[0] for call in command.call_args_list))
 
+    def check_failed_resume_recovery(self, change=None):
+        with tempfile.TemporaryDirectory() as d:
+            coordinator=self.coordinator(d)
+            coordinator.config={'workers':{'Codex':['worker']}}
+            coordinator.children={}
+            pr,owner,_=fixture()
+            owner.update(key='T1',token='private',worktree=d,branch='owner',model='test',evidence='',spec={})
+            state=copy.deepcopy(owner)
+            calls=[]
+            def ticket(project,command,*args):
+                calls.append(command)
+                if command == 'show': return json.dumps(state)
+                if command == 'resume':
+                    state.update(status='in_progress',publish_pending=True)
+                    raise RuntimeError('mirror unavailable')
+                if command == 'publish': state['publish_pending']=False
+                return ''
+            coordinator.ticket=ticket
+            coordinator.pr=Mock(return_value=pr)
+            coordinator.publish_results=Mock()
+            coordinator.prompt=Mock(return_value='test prompt')
+            def run(args,**kwargs):
+                if args[:2] == ['git','status']: return ''
+                if args[:2] == ['git','branch']: return 'owner'
+                if args[:2] == ['git','rev-parse']: return pr['headRefOid']
+                return 'test-auth'
+            with patch.object(c,'run',side_effect=run),patch.object(c.subprocess,'Popen') as popen,patch.object(c,'process_identity',return_value='identity'):
+                with self.assertRaisesRegex(RuntimeError,'mirror unavailable'):
+                    coordinator.launch({'id':'test','github_account':'test'},pr,owner,'fix')
+                row=coordinator.store.db.execute('SELECT * FROM jobs').fetchone()
+                self.assertEqual(row['status'],'reserved')
+                self.assertNotIn('private',row['launch_intent'])
+                self.assertEqual(calls.count('resume'),1)
+                popen.assert_not_called()
+                # An unrelated reservation cannot overlap the pending launch.
+                self.assertIsNone(coordinator.store.reserve('test',pr,'Claude','review',Path(d)))
+                original_directory=Path(row['directory'])
+                original_feedback=row['feedback']
+                if change == 'base': pr['baseRefOid']='c'*40
+                if change == 'checks': pr['statusCheckRollup'][0]['conclusion']='FAILURE'
+                if change in ('comment','collision'): pr['comments'].append(dict(id='new',body='new feedback',updatedAt='now'))
+                if change == 'collision':
+                    coordinator.store.db.execute("INSERT INTO jobs(project,pr,family,kind,head,feedback,status,directory,created) VALUES(?,?,?,?,?,?,'done',?,0)",('test',pr['number'],'Codex','fix',pr['headRefOid'],c.feedback(pr),str(Path(d)/'terminal')))
+
+                coordinator.store.db.execute('UPDATE jobs SET retry_after=0')
+                popen.return_value.pid=123
+                coordinator.collect({'id':'test','github_account':'test'},[])
+                self.assertEqual(json.loads((original_directory/'snapshot.json').read_text())['baseRefOid'],pr['baseRefOid'])
+                recovered=coordinator.store.db.execute('SELECT * FROM jobs').fetchone()
+                self.assertEqual(recovered['directory'],str(original_directory))
+                self.assertEqual(recovered['feedback'],original_feedback)
+                self.assertEqual(json.loads((original_directory/'snapshot.json').read_text())['statusCheckRollup'],pr['statusCheckRollup'])
+                self.assertEqual(json.loads((original_directory/'snapshot.json').read_text())['comments'],pr['comments'])
+                self.assertEqual(calls.count('resume'),1)
+                self.assertEqual(calls.count('publish'),1)
+                popen.assert_called_once()
+                self.assertEqual(coordinator.store.db.execute('SELECT status FROM jobs WHERE id=?',(row['id'],)).fetchone()[0],'running')
+                coordinator.collect({'id':'test','github_account':'test'},[])
+                popen.assert_called_once()
+
+    def test_failed_resume_mirror_recovers_without_replaying_mutation(self):
+        self.check_failed_resume_recovery()
+
+    def test_pending_resume_recovers_with_fresh_base_checks_and_feedback(self):
+        for change in ('base','checks','comment','collision'):
+            with self.subTest(change=change):
+                self.check_failed_resume_recovery(change)
+
+    def test_pending_collection_retains_sanitized_recovery_reason(self):
+        for changed_head in (False,True):
+            with self.subTest(changed_head=changed_head),tempfile.TemporaryDirectory() as d:
+                coordinator=self.coordinator(d)
+                pr,owner,_=fixture()
+                job=coordinator.store.reserve('test',pr,'Codex','fix',Path(d))
+                coordinator.store.db.execute('UPDATE jobs SET launch_intent=? WHERE id=?',
+                                             (json.dumps({'key':'T1'}),job))
+                coordinator.ticket=Mock(return_value=json.dumps(owner))
+                fresh=copy.deepcopy(pr)
+                if changed_head: fresh['headRefOid']='c'*40
+                coordinator.pr=Mock(return_value=fresh)
+                coordinator.launch=Mock(side_effect=RuntimeError('secret remote diagnostic'))
+                coordinator.publish_results=Mock()
+                coordinator.collect({'id':'test'},[])
+                row=coordinator.store.db.execute('SELECT * FROM jobs').fetchone()
+                self.assertEqual(row['status'],'reserved')
+                self.assertNotIn('secret',row['error'])
+                if changed_head:
+                    coordinator.launch.assert_not_called()
+                    self.assertIn('pending launch head changed',row['error'])
+                else:
+                    coordinator.launch.assert_called_once()
+                    self.assertEqual(row['error'],'collection deferred: RuntimeError')
+
+    def test_uncertain_spawn_is_never_automatically_repeated(self):
+        with tempfile.TemporaryDirectory() as d:
+            coordinator=self.coordinator(d)
+            pr,owner,_=fixture()
+            owner.update(key='T1',token='private',worktree=d,branch='owner',model='test',evidence='',spec={})
+            coordinator.ticket=Mock(return_value=json.dumps(owner))
+            coordinator.prompt=Mock(return_value='test')
+            def run(args,**kwargs):
+                if args[:2] == ['git','status']: return ''
+                if args[:2] == ['git','branch']: return 'owner'
+                if args[:2] == ['git','rev-parse']: return pr['headRefOid']
+                return 'test-auth'
+            with patch.object(c,'run',side_effect=run),patch.object(c.subprocess,'Popen',side_effect=OSError('uncertain spawn')) as popen:
+                with self.assertRaises(OSError):
+                    coordinator.launch({'id':'test','github_account':'test'},pr,owner,'fix')
+                row=coordinator.store.db.execute('SELECT * FROM jobs').fetchone()
+                self.assertEqual(row['status'],'orphaned')
+                self.assertIsNone(row['launch_intent'])
+                proof = json.loads(row['repair_claim'])
+                self.assertEqual(proof['claim'],c.hashlib.sha256(b'private').hexdigest())
+                self.assertEqual(proof['head'],pr['headRefOid'])
+                self.assertNotIn('private',row['repair_claim'])
+                coordinator.launch({'id':'test','github_account':'test'},pr,owner,'fix')
+                popen.assert_called_once()
+
+    def test_pending_launch_rejects_changed_claim_and_worker_evidence(self):
+        for change in ('token','branch','worktree','dirty','head','receipt','pid'):
+            with self.subTest(change=change),tempfile.TemporaryDirectory() as d:
+                coordinator=self.coordinator(d)
+                pr,owner,_=fixture()
+                owner.update(key='T1',token='private',worktree=d,branch='owner')
+                intent=dict(claim=c.hashlib.sha256(b'private').hexdigest(),key='T1',branch='owner',worktree=d,head=pr['headRefOid'])
+                directory=coordinator.state/'test'/f"pr-{pr['number']}-fix-{pr['headRefOid'][:12]}-{c.feedback(pr)[:12]}"
+                job=coordinator.store.reserve('test',pr,'Codex','fix',directory)
+                coordinator.store.db.execute('UPDATE jobs SET launch_intent=? WHERE id=?',(json.dumps(intent),job))
+                row=dict(coordinator.store.db.execute('SELECT * FROM jobs').fetchone())
+                # launch derives its private directory from the exact snapshot.
+                directory=coordinator.state/'test'/f"pr-{pr['number']}-fix-{pr['headRefOid'][:12]}-{c.feedback(pr)[:12]}"
+                directory.mkdir(parents=True)
+                if change in ('token','branch','worktree'): owner[change]='changed'
+                if change == 'receipt': (directory/'process.json').write_text('{}')
+                if change == 'pid': row['pid']=123
+                coordinator.ticket=Mock(return_value=json.dumps({**owner,'status':'in_progress'}))
+                def run(args,**kwargs):
+                    if args[:2] == ['git','status']: return 'dirty' if change == 'dirty' else ''
+                    if args[:2] == ['git','branch']: return 'owner'
+                    return 'changed' if change == 'head' else pr['headRefOid']
+                with patch.object(c,'run',side_effect=run),patch.object(c.subprocess,'Popen') as popen:
+                    with self.assertRaises(RuntimeError):
+                        coordinator.launch({'id':'test'},pr,owner,'fix',recovery=row)
+                    popen.assert_not_called()
+                    self.assertEqual([x.args[1] for x in coordinator.ticket.call_args_list],['show'])
+
     def test_dirty_owner_is_not_resumed(self):
         with tempfile.TemporaryDirectory() as d:
-            coordinator=self.coordinator(d);pr,owner,review=fixture();owner.update(key='T1',token='local',worktree=d)
+            coordinator=self.coordinator(d);pr,owner,review=fixture();owner.update(key='T1',token='local',worktree=d,branch='owner')
             with patch.object(coordinator,'ticket',return_value=json.dumps(owner)) as ticket,patch.object(c,'run',return_value='dirty'):
                 with self.assertRaisesRegex(RuntimeError,'dirty'):
                     coordinator.launch({'id':'test'},pr,owner,'fix')
@@ -431,6 +649,7 @@ class PublicationTests(unittest.TestCase):
                 coordinator.store.db.execute("UPDATE jobs SET status='running',pid=999999,started='old' WHERE id=?",(job,))
                 (directory/'exit.json').write_text('{"returncode":0}')
                 (directory/'result.json').write_text(json.dumps(review['result']))
+                (directory/'snapshot.json').write_text(json.dumps(pr))
                 comments=[];reviews=[]
                 def gh(project,args):
                     body=next(a[5:] for a in args if a.startswith('body='))
@@ -439,7 +658,7 @@ class PublicationTests(unittest.TestCase):
                     reviews.append(body)
                     if len(reviews)<=failures:raise RuntimeError('formal review unavailable')
                     return json.dumps({'node_id':'review','body':body,'state':'APPROVED','commit_id':pr['headRefOid']})
-                with patch.object(coordinator,'pr',return_value=pr),patch.object(coordinator,'gh',side_effect=gh),patch.object(c,'process_identity',return_value=None):
+                with patch.object(coordinator,'pr',return_value=pr),patch.object(coordinator,'gh',side_effect=gh),patch.object(c,'process_identity',return_value=None),patch.object(c,'worker_stopped',return_value=True):
                     coordinator.collect(project,[])
                     for attempt in range(failures):
                         row=coordinator.store.db.execute('SELECT * FROM jobs').fetchone()
@@ -484,7 +703,7 @@ class PublicationTests(unittest.TestCase):
             job=coordinator.store.reserve('test',fixture()[0],'Claude','review',directory)
             coordinator.store.db.execute("UPDATE jobs SET status='running',pid=123,started='old' WHERE id=?",(job,))
             (directory/'exit.json').write_text('{"returncode":1}')
-            with patch.object(c,'process_identity',return_value='reused'):coordinator.collect({'id':'test'},[])
+            with patch.object(c,'process_identity',return_value='reused'),patch.object(c,'worker_stopped',return_value=True):coordinator.collect({'id':'test'},[])
             self.assertEqual(coordinator.store.db.execute('SELECT status FROM jobs').fetchone()[0],'retry')
 
     def test_external_old_merge_does_not_complete_reused_branch(self):
@@ -569,7 +788,7 @@ class CheckFreshnessTests(unittest.TestCase):
             self.assertEqual(len(launched),1)
             self.assertEqual(engine.store.db.execute('SELECT COUNT(*) FROM jobs').fetchone()[0],2)
 
-    def test_unready_checks_wait_but_actionable_repairs_still_run(self):
+    def test_unready_checks_start_source_review_and_actionable_repairs(self):
         cases=[
             [],[{'__typename':'CheckRun','status':'IN_PROGRESS','conclusion':None}],
             [{'__typename':'CheckRun','status':'COMPLETED','conclusion':'FAILURE'}],
@@ -581,10 +800,10 @@ class CheckFreshnessTests(unittest.TestCase):
             with self.subTest(checks=checks),tempfile.TemporaryDirectory() as directory:
                 pr=fixture()[0];pr['statusCheckRollup']=checks
                 engine,project,owner=self.setup_scan(directory,pr)
-                # Force stale feedback: no expensive review until checks succeed.
+                # Source feedback changes require independent review even while CI is unready.
                 pr['comments'].append({'id':'request','body':'recheck','updatedAt':'now'})
                 with patch.object(engine,'launch') as launch:
-                    engine.tick(True);launch.assert_not_called()
+                    engine.tick(True);self.assertEqual(launch.call_args.args[-1],'review')
                     pr['baseIncluded']=False
                     engine.tick(True);self.assertEqual(launch.call_args.args[-1],'fix')
                 pr['baseIncluded']=True

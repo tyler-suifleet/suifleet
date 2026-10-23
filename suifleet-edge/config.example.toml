@@ -60,6 +60,12 @@ replay_history = false
 # component_stop_timeout_seconds = 10  # grace for shutdown/SIGTERM before SIGKILL
 # component_max_restarts = 5           # within ten minutes, then Broken
 
+# Let the daemon's group read its own and its components' logs and the
+# retained confidential values (0640, directories 0750), for a separate log
+# reader such as the CloudWatch Logs adapter (docs/CLOUDWATCH_LOGS.md).
+# Changing it applies to existing files at the next daemon start.
+# log_group_read = false
+
 # Dependency candidates: "never" (default) uses only the live catalog and
 # Walrus; "cached" keeps authenticated versions/recipes/artifacts under
 # state_dir/components for reuse and offline resolution.
@@ -67,6 +73,11 @@ replay_history = false
 # [components]
 # offline_candidates = "never"
 # cache_max_bytes = 536870912
+# Component configuration (recipe 1.2; see docs/OPERATIONS.md). Confidential
+# values come only from <configuration_overlay_dir>/<name>.json, an object of
+# JSON pointer -> value that must not be accessible to other users.
+# configuration_overlay_dir = "/etc/suifleet/component-config"
+# configuration_defer_max_seconds = 86400  # then a deferring validate fails
 
 # Daemon self-update (docs/DAEMON_UPDATE.md); requires ExecStart=suifleet --launch.
 # [daemon_update]
@@ -74,3 +85,108 @@ replay_history = false
 # component = "suifleet-daemon"
 # max_start_attempts = 3
 # preflight_timeout_seconds = 60
+
+# Heartbeat, installed inventory and health (SF-019; docs/TELEMETRY.md):
+# signed snapshots to the fleet indexer, spooled under state_dir/telemetry
+# while it is unreachable. Off-chain; on-chain receipts are unchanged.
+# Local support console (docs/LOCAL_CONSOLE.md): loopback only, authenticated,
+# audited. Tokens come from `suifleet --console-token`; store only the hash.
+# [console]
+# listen = "127.0.0.1:1441"
+# support_operations = ["restart"]   # subset of start, stop, restart
+# [console.users.support]
+# token_sha256 = "<token_sha256>"
+# grants = ["inventory", "health", "deployments", "logs", "configuration", "audit", "restart"]
+
+# [telemetry]
+# url = "https://fleet.example"   # indexer base URL (POST {url}/v1/telemetry)
+# interval_seconds = 60           # 10..=3600
+# buffer_max = 1024               # snapshots kept offline; oldest dropped beyond
+
+# Prepaid network costs (docs/FLEET_BUDGET.md): top up this device's gas from
+# the owner's on-chain fleet budget. The contract bounds every draw (float cap,
+# period allowance, rate); these only choose when. Needs a manifest with the
+# fleet budget type origins; with the service signer, also [budget] in signer.toml.
+# [budget]
+# budget_id = "0x<FleetBudget object ID>"
+# low_water_mist = 20000000   # draw below 0.02 SUI; keep above one draw's gas
+# draw_mist = 50000000        # asked per draw
+
+# Confidential delivery (docs/CONFIDENTIAL_DELIVERY.md): decrypt Seal-encrypted
+# recipes and artifacts with this device's own identity. "required" refuses
+# unencrypted ones. Key servers are trusted by object ID; their URL and public
+# key come from chain. Testnet values shown (Mysten's open key servers).
+# [seal]
+# mode = "required"
+# key_server_package = "0x0f16e84a49dec8425e6900cfdfe3730aaf1e8bc608d9f0500fcfa2c2267abfb4"
+# key_servers = [
+#   { object_id = "0x73d05d62c18d9374e3ea529e8e0ed6161da1a141a94d3f76ae3fe4e99356db75" },
+#   { object_id = "0xf5d14a81a982144ae441cd7d64b09027f116a468bd36e7eca494f750591623c8" },
+# ]
+# min_threshold = 2
+# session_ttl_minutes = 10   # with [device.signer] kind = "service", set in signer.toml instead
+# key_cache_seconds = 120    # fetched keys stay in memory only this long
+# max_plaintext_bytes = 134217728
+# A provider credential (not device identity): api_key_name = "X-API-Key",
+# api_key_file = "/etc/suifleet/seal-api-key" inside a key server's entry.
+
+# Durable local pub/sub and the local MQTT bridge (SF-032; docs/MESSAGING.md).
+# Components need pubsub_policies under [ipc.components.NAME].
+# [pubsub]
+# max_messages_per_subscription = 1000
+# max_bytes_per_subscription = 4194304
+# qos0_messages_per_subscription = 100
+# [pubsub.bridge]
+# broker = "127.0.0.1:1883"
+# [[pubsub.bridge.mappings]]
+# topic = "sensors/#"
+# source = "Pubsub"
+# target = "LocalMqtt"
+# target_topic_prefix = "device1/"
+
+# LAN client devices: a local CA, mutual TLS and an authorizing MQTT proxy in
+# front of a loopback-only broker (SF-035; docs/CLIENT_DEVICES.md). Needs [ipc]
+# administrators, who enroll things from CSRs with the client_devices operation.
+# [client_devices]
+# device_groups_file = "client-device-groups.json"   # AWS deviceGroups JSON
+# broker = "127.0.0.1:1883"
+# broker_username = "gateway"
+# broker_password_file = "/etc/suifleet/gateway-mqtt-password"
+# mqtt_listen = "0.0.0.0:8883"
+# https_listen = "0.0.0.0:8443"
+# udp_discovery = "0.0.0.0:8442"
+# certificate_validity_seconds = 604800
+# rotation_grace_seconds = 300
+
+# Redacted remote logs to the fleet indexer (needs [telemetry]; docs/LOGS.md).
+# [logs]
+# interval_seconds = 60
+# max_lines_per_interval = 512
+# buffer_max = 256
+
+# Durable local streams and export (SF-034; docs/STREAMS.md). Components need
+# stream operations and a `streams` glob under [ipc.components.NAME].
+# [streams]
+# max_streams = 32
+# max_total_bytes = 67108864        # sum of all streams' max_size
+# [[streams.definitions]]
+# name = "telemetry"
+# max_size = 16777216               # each message costs its bytes + 64
+# strategy_on_full = "RejectNewData"  # or "OverwriteOldestData"
+# [streams.definitions.export]
+# url = "https://ingest.example/v1/streams"
+# bearer_token_file = "/etc/suifleet/stream-export.token"
+
+# Local device shadows and cloud sync (SF-033; docs/SHADOWS.md). Components need
+# shadow operations and shadow_policies under [ipc.components.NAME]; change
+# notifications need [pubsub].
+# [shadows]
+# thing_name = "device1"            # in $aws/things/<thing>/shadow resources and topics
+# max_shadows = 64                  # 1..=128 existing shadows
+# [shadows.sync]
+# url = "https://shadows.example/v1/sync"
+# bearer_token_file = "/etc/suifleet/shadow-sync.token"
+# shadows = ["", "config"]          # "" is the classic shadow
+# interval_seconds = 30
+# desired_conflict = "cloud"        # who wins a key both sides changed
+# reported_conflict = "device"

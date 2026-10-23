@@ -137,6 +137,26 @@ impl Store {
         write_atomic(&self.root.join("recipes").join(sha256), bytes)
     }
 
+    /// Persist recency in mtimes across store reopen/restart. Advancing beyond
+    /// every entry avoids ties for rapid accesses on coarse-resolution filesystems.
+    /// These are logical ordering timestamps and may run ahead of wall time.
+    fn touch_artifact(&self, path: &Path) -> anyhow::Result<()> {
+        let mut latest = std::time::SystemTime::now();
+        for entry in std::fs::read_dir(self.root.join("artifacts"))? {
+            latest = latest.max(entry?.metadata()?.modified()?);
+        }
+        let next = latest
+            .checked_add(std::time::Duration::from_secs(2))
+            .ok_or_else(|| anyhow::anyhow!("cache recency timestamp overflow"))?;
+        let file = std::fs::File::options().append(true).open(path)?;
+        file.set_modified(next)?;
+        anyhow::ensure!(
+            file.metadata()?.modified()? > latest,
+            "filesystem cannot preserve cache recency ordering"
+        );
+        Ok(())
+    }
+
     /// Copy a cached artifact to `dest` if one with this digest verifies.
     /// The copy is held to the download size limit and free-space reserve.
     fn artifact(&self, walrus: &WalrusClient, sha256: &str, dest: &Path) -> anyhow::Result<bool> {
@@ -154,10 +174,7 @@ impl Store {
             return Ok(false);
         }
         // Recently used entries are evicted last.
-        std::fs::File::options()
-            .append(true)
-            .open(&source)?
-            .set_modified(std::time::SystemTime::now())?;
+        self.touch_artifact(&source)?;
         Ok(true)
     }
 
@@ -174,8 +191,8 @@ impl Store {
         let temporary = target.with_extension("tmp");
         copy_or_remove(path, &temporary)?;
         std::fs::File::open(&temporary)?.sync_all()?;
-        std::fs::rename(temporary, target)?;
-        Ok(())
+        std::fs::rename(temporary, &target)?;
+        self.touch_artifact(&target)
     }
 
     /// Evict cached artifacts oldest first beyond `max_bytes`, never those in `keep`.
@@ -204,28 +221,87 @@ impl Store {
     }
 }
 
-/// Authenticated recipe bytes: a verified cached copy when permitted,
-/// otherwise Walrus.
+/// An authenticated, parsed recipe, and whether it was Seal-encrypted.
+pub struct Authentic {
+    pub recipe: Recipe,
+    pub confidential: bool,
+}
+
+impl Authentic {
+    /// Check the recipe; a confidential recipe's error names only `stage`.
+    pub fn check<T>(&self, stage: &str, check: impl FnOnce(&Recipe) -> anyhow::Result<T>) -> anyhow::Result<T> {
+        withhold(self.confidential, stage, check(&self.recipe))
+    }
+}
+
+/// Parse and validation errors quote recipe values (commands, configuration,
+/// dependency requirements). For confidential content keep only the stage,
+/// so its plaintext never reaches logs, the journal or telemetry.
+pub fn withhold<T>(confidential: bool, stage: &str, result: anyhow::Result<T>) -> anyhow::Result<T> {
+    result.map_err(|error| if confidential { withheld(stage) } else { error })
+}
+
+fn withheld(stage: &str) -> anyhow::Error {
+    anyhow::anyhow!("confidential recipe rejected at {stage} (details withheld)")
+}
+
+/// Authenticated recipe: a verified cached copy when permitted, otherwise
+/// Walrus. A Seal-encrypted recipe is decrypted and parsed in memory and never
+/// cached; with `[seal] mode = "required"` an unencrypted one is refused and
+/// the (plaintext-only) cache is not consulted.
 pub async fn recipe(
     walrus: &WalrusClient,
     store: Option<&Store>,
     blob_id: &str,
     sha256: &str,
-) -> anyhow::Result<Vec<u8>> {
+) -> anyhow::Result<Authentic> {
+    let plain = |bytes: &[u8]| Ok(Authentic { recipe: serde_json::from_slice(bytes)?, confidential: false });
+    let store = store.filter(|_| !walrus.confidential_only());
     if let Some(bytes) = store.and_then(|s| s.recipe(sha256)) {
-        return Ok(bytes);
+        return plain(&bytes);
     }
     let bytes = walrus.recipe_bytes(blob_id).await?;
+    if crate::seal::is_envelope(&bytes) {
+        let plaintext = walrus.open(bytes, crate::seal::Kind::Recipe, sha256).await?;
+        let recipe = serde_json::from_slice(&plaintext).map_err(|error| {
+            // Its category and position are content-free; its message is not.
+            withheld(&format!("parsing ({:?} error at line {} column {})", error.classify(), error.line(), error.column()))
+        })?;
+        return Ok(Authentic { recipe, confidential: true });
+    }
+    anyhow::ensure!(!walrus.confidential_only(), "unencrypted recipe refused: [seal] mode = \"required\" accepts only confidential delivery");
     anyhow::ensure!(hex::encode(Sha256::digest(&bytes)) == sha256, "recipe SHA-256 mismatch");
     if let Some(store) = store {
         if let Err(error) = store.save_recipe(sha256, &bytes) {
             warn!(%error, "Cannot cache recipe");
         }
     }
-    Ok(bytes)
+    plain(&bytes)
+}
+
+/// Write decrypted plaintext beside `dest` (owner-only) and move it into place.
+fn replace_private(dest: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut name = dest.file_name().unwrap_or_default().to_os_string();
+    name.push(".plain");
+    let staging = dest.with_file_name(name);
+    let _ = std::fs::remove_file(&staging);
+    let written = (|| -> anyhow::Result<()> {
+        let mut file = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&staging)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        std::fs::rename(&staging, dest)?;
+        Ok(())
+    })();
+    if written.is_err() {
+        let _ = std::fs::remove_file(&staging);
+    }
+    written
 }
 
 /// A verified artifact at `dest`: a cached copy when permitted, otherwise Walrus.
+/// A Seal-encrypted artifact is decrypted in memory, checked against the
+/// on-chain digest and only then written (owner-only); it is never cached.
 pub async fn artifact(
     walrus: &WalrusClient,
     store: Option<&Store>,
@@ -233,24 +309,42 @@ pub async fn artifact(
     sha256: &str,
     dest: &Path,
 ) -> anyhow::Result<()> {
+    let store = store.filter(|_| !walrus.confidential_only());
     if let Some(store) = store {
         if store.artifact(walrus, sha256, dest)? {
             return Ok(());
         }
     }
     let actual = walrus.download(blob_id, dest).await?;
+    if actual != sha256 && is_envelope_file(dest)? {
+        let ciphertext = std::fs::read(dest)?;
+        let _ = std::fs::remove_file(dest);
+        let plaintext = walrus.open(ciphertext, crate::seal::Kind::Artifact, sha256).await?;
+        return replace_private(dest, &plaintext);
+    }
     anyhow::ensure!(
         actual == sha256,
         "SHA-256 mismatch: expected {} got {}",
         sha256,
         actual
     );
+    if walrus.confidential_only() {
+        let _ = std::fs::remove_file(dest);
+        anyhow::bail!("unencrypted artifact refused: [seal] mode = \"required\" accepts only confidential delivery");
+    }
     if let Some(store) = store {
         if let Err(error) = store.save_artifact(walrus, sha256, dest) {
             warn!(%error, "Cannot cache artifact");
         }
     }
     Ok(())
+}
+
+fn is_envelope_file(path: &Path) -> anyhow::Result<bool> {
+    use std::io::Read;
+    let mut head = vec![0u8; crate::seal::MAGIC.len()];
+    let mut file = std::fs::File::open(path)?;
+    Ok(file.read_exact(&mut head).is_ok() && crate::seal::is_envelope(&head))
 }
 
 /// An authenticated dependency candidate selected for this platform.
@@ -263,6 +357,10 @@ pub struct Loaded {
     pub install: Option<String>,
     /// Present for a supervised (run) dependency.
     pub supervised: Option<crate::supervisor::Lifecycle>,
+    pub configuration: crate::protocol::Configuration,
+    pub validate: Option<String>,
+    /// Its recipe was Seal-encrypted (see `withhold`).
+    pub confidential: bool,
 }
 
 pub struct Loader<'a> {
@@ -275,6 +373,8 @@ pub struct Loader<'a> {
     offline: bool,
     ids: BTreeMap<(String, String), String>,
     pub loaded: BTreeMap<(String, String), Loaded>,
+    /// A confidential recipe was loaded: resolution errors may quote it.
+    pub confidential: bool,
 }
 
 impl<'a> Loader<'a> {
@@ -295,6 +395,7 @@ impl<'a> Loader<'a> {
             offline: false,
             ids: BTreeMap::new(),
             loaded: BTreeMap::new(),
+            confidential: false,
         }
     }
 
@@ -359,19 +460,26 @@ impl<'a> Loader<'a> {
         let Some(i) = value.platform(os, arch) else {
             return Ok(deps::Detail::Unavailable(format!("no {os}/{arch} manifest")));
         };
-        let bytes = recipe(self.walrus, self.store, &value.recipe_blob_ids[i], &value.recipe_sha256s[i]).await?;
-        let parsed: Recipe = serde_json::from_slice(&bytes)?;
-        let dependencies =
-            parsed.validate_component(name, version, &value.artifact_sha256s[i], self.allow_commands)?;
+        let authentic = recipe(self.walrus, self.store, &value.recipe_blob_ids[i], &value.recipe_sha256s[i]).await?;
+        self.confidential |= authentic.confidential;
+        let (dependencies, supervised) = authentic.check("validation", |recipe| {
+            anyhow::ensure!(recipe.services.is_none(), "dependency recipes cannot own deployment services; declare them in the authenticated root recipe");
+            let dependencies = recipe.validate_component(name, version, &value.artifact_sha256s[i], self.allow_commands)?;
+            Ok((dependencies, crate::supervisor::Lifecycle::of(&recipe.lifecycle)?))
+        })?;
+        let Authentic { recipe: parsed, confidential } = authentic;
         self.loaded.insert(
             (name.to_owned(), version.to_owned()),
             Loaded {
                 version_id: id,
                 recipe_sha256: value.recipe_sha256s[i].clone(),
                 artifact_sha256: value.artifact_sha256s[i].clone(),
-                supervised: crate::supervisor::Lifecycle::of(&parsed.lifecycle)?,
+                supervised,
                 artifact_blob_id: parsed.artifact_blob_id,
                 install: parsed.lifecycle.install,
+                configuration: parsed.configuration,
+                validate: parsed.lifecycle.validate,
+                confidential,
             },
         );
         Ok(deps::Detail::Ready(dependencies))
@@ -445,6 +553,22 @@ mod tests {
     }
 
     #[test]
+    fn confidential_recipe_errors_withhold_their_content() {
+        let value = serde_json::json!({"schemaVersion":"1.1","componentName":"app","componentVersion":"1",
+            "artifactBlobId":"blob","artifactSha256":"a".repeat(64),"lifecycle":{},"configuration":{},
+            "componentDependencies":{"helper":{"versionRequirement":"SECRET-requirement"}}});
+        let validate = |recipe: &Recipe| recipe.validate_component("app", "1", &"a".repeat(64), false);
+        let plain = Authentic { recipe: serde_json::from_value(value.clone()).unwrap(), confidential: false };
+        assert!(format!("{:#}", plain.check("validation", validate).unwrap_err()).contains("SECRET-requirement"));
+        let sealed = Authentic { recipe: serde_json::from_value(value).unwrap(), confidential: true };
+        let error = format!("{:#}", sealed.check("validation", validate).unwrap_err());
+        assert_eq!(error, "confidential recipe rejected at validation (details withheld)");
+        assert_eq!(withhold(true, "configuration merge", Ok(7)).unwrap(), 7);
+        let failed: anyhow::Result<()> = Err(anyhow::anyhow!("pointer \"/SECRET\""));
+        assert!(!format!("{:#}", withhold(true, "configuration merge", failed).unwrap_err()).contains("SECRET"));
+    }
+
+    #[test]
     fn cached_versions_are_listed_by_catalog_and_name() {
         let (dir, store) = store("versions", 0);
         store.save_version("0x10", &version("lib", "1.0.0")).unwrap();
@@ -481,8 +605,18 @@ mod tests {
             std::fs::write(&path, content).unwrap();
             let sha = sha256_file(&path).unwrap();
             store.save_artifact(&walrus, &sha, &path).unwrap();
+            // Whole-second, widely spaced mtimes: no scheduling or sub-second
+            // filesystem resolution assumption. The cache hit below must move
+            // the first entry after even these future timestamps.
+            let modified = std::time::UNIX_EPOCH
+                + std::time::Duration::from_secs(2_000_000_000 + i as u64 * 60);
+            std::fs::File::options()
+                .append(true)
+                .open(store.root.join("artifacts").join(&sha))
+                .unwrap()
+                .set_modified(modified)
+                .unwrap();
             digests.push(sha);
-            std::thread::sleep(std::time::Duration::from_millis(20));
         }
         let out = work.join("out");
         assert!(store.artifact(&walrus, &digests[0], &out).unwrap());
@@ -495,6 +629,49 @@ mod tests {
         std::fs::write(store.root.join("artifacts").join(&digests[0]), b"corrupt").unwrap();
         assert!(!store.artifact(&walrus, &digests[0], &out).unwrap(), "corrupt cache entries are discarded");
         assert!(!store.root.join("artifacts").join(&digests[0]).exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn artifact_recency_survives_rapid_writes_and_store_reopen() {
+        let (dir, store) = store("recency", 5);
+        let walrus = limits(1 << 20, 0);
+        let input = dir.join("input");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut entries = Vec::new();
+        for content in [b"12345", b"abcde", b"vwxyz"] {
+            std::fs::write(&input, content).unwrap();
+            let sha = sha256_file(&input).unwrap();
+            store.save_artifact(&walrus, &sha, &input).unwrap();
+            let path = store.root.join("artifacts").join(sha);
+            let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+            if let Some((_, previous)) = entries.last() {
+                assert!(modified > *previous, "rapid writes have distinct recency");
+            }
+            entries.push((path, modified));
+        }
+        // Reopen: recency must not rely on an in-memory counter.
+        let reopened = Store::open(
+            &dir,
+            &ComponentsConfig {
+                offline_candidates: OfflinePolicy::Cached,
+                cache_max_bytes: 5,
+                ..ComponentsConfig::default()
+            },
+        )
+        .unwrap();
+        let sha = entries[0].0.file_name().unwrap().to_str().unwrap();
+        assert!(reopened.artifact(&walrus, sha, &input).unwrap());
+        assert!(
+            std::fs::metadata(&entries[0].0)
+                .unwrap()
+                .modified()
+                .unwrap()
+                > entries[2].1
+        );
+        assert_eq!(reopened.evict(&BTreeSet::new()).unwrap(), 10);
+        assert!(entries[0].0.exists());
+        assert!(!entries[1].0.exists() && !entries[2].0.exists());
         std::fs::remove_dir_all(dir).unwrap();
     }
 

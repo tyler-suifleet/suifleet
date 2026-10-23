@@ -1,0 +1,21 @@
+{
+  "enabled": false,
+  "region": "us-east-1",
+  "proxy": "/usr/libexec/suifleet-localproxy",
+  "proxy_sha256": "REPLACE_WITH_PACKAGED_BINARY_SHA256",
+  "working_directory": "/usr/share/suifleet-tunnel/empty",
+  "destinations": {
+    "SSH": "127.0.0.1:22"
+  },
+  "max_concurrent_tunnels": 1,
+  "tunnel_timeout_seconds": 300,
+  "aws_iot": {
+    "endpoint": "REPLACE-ats.iot.us-east-1.amazonaws.com",
+    "thing_name": "REPLACE",
+    "client_id": "REPLACE-tunnel",
+    "ca_file": "/etc/suifleet-tunnel/ca.pem",
+    "certificate_file": "/etc/suifleet-tunnel/cert.pem",
+    "private_key_file": "/etc/suifleet-tunnel/key.pem"
+  },
+  "proxy_settings": "/usr/share/suifleet-tunnel/proxy-settings.json"
+}

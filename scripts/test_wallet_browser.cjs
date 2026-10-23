@@ -31,12 +31,15 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
       const outcome = await page.locator("#outcome").textContent(); assert.match(outcome, expected);
     }
     await sign(/^success$/);
+    assert.deepEqual(await page.evaluate(() => window.acceptance.phases()), ["validating", "wallet", "confirming"]);
     await page.evaluate(() => window.acceptance.reject()); await sign(/User rejected signing/);
+    assert.deepEqual(await page.evaluate(() => window.acceptance.phases()), ["validating", "wallet"]);
     await page.evaluate(() => window.acceptance.effectsFail()); await sign(/error:/);
     await page.evaluate(() => window.acceptance.reset());
     const before = await page.evaluate(() => window.acceptance.signCalls());
     await page.evaluate(() => window.acceptance.wrongChain()); await sign(/chain identifier mismatch/);
     assert.equal(await page.evaluate(() => window.acceptance.signCalls()), before);
+    assert.deepEqual(await page.evaluate(() => window.acceptance.phases()), ["validating"]);
     await page.evaluate(() => window.acceptance.reset());
     await page.evaluate(() => window.acceptance.unsupportedChain()); await sign(/does not support/);
     assert.equal(await page.evaluate(() => window.acceptance.signCalls()), before);

@@ -49,11 +49,12 @@ suifleet-indexer serve --manifest deployment.json --db /var/lib/suifleet-indexer
 
 **Limits.**
 - No hosted instance exists. A systemd unit and packaging are not provided yet.
-- The dApp still reads the chain directly. Switching it to the API is follow-up work.
+- The dApp still reads the chain directly. Switching it to the API is follow-up work. Device health is the exception: the dApp reads it from `/v1/health` and verifies each report against the chain ([TELEMETRY.md](TELEMETRY.md)).
+- `--cors-origin ORIGIN` lets one browser origin, such as the dApp, call the API.
 
 ## Auth
 
-**Token file.** `--tokens FILE` holds one `read|operate TOKEN` per line. Tokens must be at least 32 characters, are compared in constant time, and `#` starts a comment. Generate them with, for example, `openssl rand -hex 32`. Keep the file `0600`, owned by the service user.
+**Token file.** `--tokens FILE` holds one `read|support|operate TOKEN` per line. `support` adds device log search and diagnostic bundles, each access audited ([LOGS.md](LOGS.md)); `operate` covers both. Tokens must be at least 32 characters, are compared in constant time, and `#` starts a comment. Generate them with, for example, `openssl rand -hex 32`. Keep the file `0600`, owned by the service user.
 
 **Scopes.** Clients send `Authorization: Bearer TOKEN`.
 - `read` covers `GET`.
@@ -74,6 +75,9 @@ suifleet-indexer serve --manifest deployment.json --db /var/lib/suifleet-indexer
 | `GET /v1/deployments?creator=&component=&group=&device=` | Deployments. `device=` matches direct targets and groups whose admin created the deployment, the same rule devices apply |
 | `GET /v1/{devices,groups,deployments}/{id}` | One item. A deployment adds `resolved_devices` and authoritative `receipts`. Deployments carry `catalog_version` (see above) |
 | `GET /v1/changes?after=SEQ&limit=&wait=SECONDS` | Integration feed: `{seq, kind, object_id, checkpoint, payload}` in order. Long-polls up to 30 s. Resume with `after=next` |
+| `POST /v1/telemetry` | Signed device telemetry ingress (SF-019). It takes no token, because each snapshot carries the device's own signature. See [TELEMETRY.md](TELEMETRY.md) |
+| `GET /v1/health`, `/v1/health/summary`, `/v1/devices/{id}/telemetry` | Device status, last seen and inventory; fleet counts; stored signed reports ([TELEMETRY.md](TELEMETRY.md)). Need `--telemetry-db` |
+| `POST /v1/logs`; `GET /v1/devices/{id}/logs`, `/v1/devices/{id}/diagnostics` (support); `/v1/support/audit` (operate); `/v1/alerts` | Signed device log ingress, log search, diagnostic bundles, the support audit log and actionable alerts ([LOGS.md](LOGS.md)). Need `--telemetry-db` |
 | `POST /v1/transactions/{add-devices,remove-devices,create-deployment}` | `{transaction, digest, sender, summary}`: base64 BCS of the sign-ready transaction, with gas and versions resolved by node simulation |
 
 **Pagination.**
@@ -103,6 +107,8 @@ suifleet-indexer ctl --token-file operate.token add-devices --sender 0xOPERATOR 
 ```
 
 `SUIFLEET_API_TOKEN` can replace `--token-file`.
+
+`suifleet-indexer telemetry-alerts ENVELOPES.json` needs no API or database: it verifies signed telemetry envelopes (a JSON array, or the ingress body `{"messages": [...]}`) and prints each report's judgement, services section and the service-health alerts it raises ([TELEMETRY.md](TELEMETRY.md#service-health-sf-085)). It does not check the signer's registry identity.
 
 **The API is not trusted with the operator's intent.** With `--manifest`, which `--key` requires, the CLI verifies the manifest against the chain, reads the requested devices itself (custody and owner caps), rebuilds the exact calls from its own command line and checks the returned transaction against them before signing (or before writing `--out`). It refuses unless all of these hold:
 - the key is the `--sender`'s key, and the transaction's sender;

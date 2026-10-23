@@ -1,0 +1,167 @@
+{
+  "reference_component": "aws.greengrass.DeviceDefender",
+  "reference_version": "4.0.0",
+  "schema_version": "1.0",
+  "sources": [
+    "https://docs.aws.amazon.com/greengrass/v2/developerguide/device-defender-component.html",
+    "https://docs.aws.amazon.com/iot-device-defender/latest/devguide/detect-device-side-metrics.html",
+    "https://aws.amazon.com/jp/blogs/news/detect-anomalies-connected-devices/"
+  ],
+  "topic": "$aws/things/thing1/defender/metrics/json",
+  "filters": [
+    "$aws/things/thing1/defender/metrics/json/accepted",
+    "$aws/things/thing1/defender/metrics/json/rejected"
+  ],
+  "report": {
+    "header": {
+      "report_id": 2,
+      "version": "1.0"
+    },
+    "metrics": {
+      "listening_tcp_ports": {
+        "ports": [
+          {
+            "port": 22
+          }
+        ],
+        "total": 1
+      },
+      "listening_udp_ports": {
+        "ports": [
+          {
+            "port": 53
+          }
+        ],
+        "total": 1
+      },
+      "tcp_connections": {
+        "established_connections": {
+          "connections": [
+            {
+              "local_port": 8080,
+              "remote_addr": "127.0.0.2:443"
+            }
+          ],
+          "total": 1
+        }
+      },
+      "network_stats": {
+        "bytes_in": 30,
+        "bytes_out": 0,
+        "packets_in": 0,
+        "packets_out": 0
+      }
+    }
+  },
+  "responses": [
+    {
+      "suffix": "accepted",
+      "body": {
+        "thingName": "thing1",
+        "reportId": 2,
+        "status": "ACCEPTED"
+      },
+      "outcome": "accepted"
+    },
+    {
+      "suffix": "rejected",
+      "body": {
+        "thingName": "thing1",
+        "reportId": 2,
+        "status": "REJECTED",
+        "statusDetails": {
+          "ErrorCode": "InvalidPayload"
+        }
+      },
+      "outcome": "rejected"
+    },
+    {
+      "suffix": "accepted",
+      "body": {
+        "thingName": "other",
+        "reportId": 2,
+        "status": "ACCEPTED"
+      },
+      "outcome": "pending"
+    },
+    {
+      "suffix": "accepted",
+      "body": {
+        "thingName": "thing1",
+        "reportId": 1,
+        "status": "ACCEPTED"
+      },
+      "outcome": "pending"
+    },
+    {
+      "suffix": "accepted",
+      "body": {
+        "thingName": "thing1",
+        "reportId": 2,
+        "status": "REJECTED"
+      },
+      "outcome": "pending"
+    },
+    {
+      "suffix": "rejected",
+      "body": {
+        "thingName": "thing1",
+        "status": "REJECTED"
+      },
+      "outcome": "pending"
+    }
+  ],
+  "invalid_reports": [
+    {
+      "path": [
+        "header",
+        "version"
+      ],
+      "value": "2.0"
+    },
+    {
+      "path": [
+        "header",
+        "report_id"
+      ],
+      "value": true
+    },
+    {
+      "path": [
+        "metrics",
+        "listening_tcp_ports",
+        "ports",
+        0,
+        "port"
+      ],
+      "value": 0
+    },
+    {
+      "path": [
+        "metrics",
+        "network_stats",
+        "bytes_in"
+      ],
+      "value": -1
+    },
+    {
+      "path": [
+        "metrics",
+        "listening_udp_ports",
+        "total"
+      ],
+      "value": 2
+    },
+    {
+      "path": [
+        "metrics",
+        "tcp_connections",
+        "established_connections",
+        "connections",
+        0,
+        "remote_addr"
+      ],
+      "value": "garbage"
+    }
+  ]
+}

@@ -11,6 +11,14 @@ from testnet_ci import trusted_pr, plan
 
 
 class TrustTests(unittest.TestCase):
+    def test_lower_ptb_budget_does_not_raise_existing_transaction_cap(self):
+        from live_package_upgrade import transaction_gas_budget
+        self.assertEqual(transaction_gas_budget(40_000_000), 40_000_000)
+        self.assertEqual(transaction_gas_budget(200_000_000), 200_000_000)
+        for value in [0, 1_999_999, 200_000_001, True, "40000000"]:
+            with self.assertRaises(ValueError):
+                transaction_gas_budget(value)
+
     def test_checkout_must_match_immutable_authenticated_commit(self):
         from testnet_ci import verify_checkout
         run = Mock(return_value=type('Result', (), {'stdout': 'a'*40 + '\n'})())
@@ -133,7 +141,93 @@ class TrustTests(unittest.TestCase):
                 self.assertEqual(stat.S_IMODE((Path(root)/'client.yaml').stat().st_mode), 0o600)
                 self.assertEqual(sorted(p.name for p in Path(root).iterdir()), ['client.yaml', 'sui.keystore'])
                 return type('Result', (), {'returncode': 0})()
-            self.assertEqual(execute(root, '/state', 'a'*40, b'offline-test-keystore', child), 0)
+            self.assertEqual(execute(root, '/state', 'a'*40, b'offline-test-keystore', child, lambda base: False), 0)
+
+    def suite_run(self, root, state, codes, relevant=True):
+        from ci_testnet_wallet import execute
+        calls = []
+        def child(command, check):
+            calls.append(command)
+            if 'live_wallet_gate.py' in command[1]:  # A failed sweep leaves its key.
+                (Path(root)/'live-browser-key.hex').write_text('cd'*32 + '\n')
+            return type('Result', (), {'returncode': codes.get(Path(command[1]).name, 0)})()
+        return execute(root, state, 'a'*40, b'offline-test-keystore', child, lambda base: relevant), calls
+
+    def test_sf010_suites_follow_package_upgrade_with_their_own_ceilings(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as root:
+            state = str(Path(root)/'state.json')
+            code, calls = self.suite_run(root, state, {})
+            self.assertEqual(code, 0)
+            self.assertEqual([Path(c[1]).name for c in calls],
+                             ['live_package_upgrade.py', 'live_upgrade_security.py', 'live_wallet_gate.py'])
+            for command, ceiling, evidence in ((calls[1], '700000000', 'evidence/upgrade-security.json'),
+                                               (calls[2], '150000000', 'evidence/wallet.json')):
+                self.assertEqual(command[command.index('--max-spend-mist') + 1], ceiling)
+                self.assertEqual(command[command.index('--state') + 1], state)
+                self.assertEqual(command[command.index('--evidence') + 1], evidence)
+                self.assertNotIn('--faucet-tool', command)  # One faucet request per run, package gate only.
+
+    def test_sf010_suites_skip_when_irrelevant_or_after_package_failure(self):
+        import tempfile
+        for codes, relevant, expected in (({}, False, (0, 1)), ({'live_package_upgrade.py': 3}, True, (3, 1)),
+                                          ({'live_upgrade_security.py': 4}, True, (4, 2))):
+            with tempfile.TemporaryDirectory() as root:
+                code, calls = self.suite_run(root, str(Path(root)/'state.json'), codes, relevant)
+                self.assertEqual((code, len(calls)), expected)
+
+    def test_sf010_unswept_keys_persist_in_the_encrypted_state(self):
+        import os
+        import stat
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp)/'state.json'
+            state.write_text(json.dumps({'chain': '4c78adac', 'fixtures': {'k': 1},
+                                         'pending_keys': {'live-security-device.key': 'ab'*32, '../escape': 'ef'}}))
+            root = Path(tmp)/'run'
+            root.mkdir()
+            restored = {}
+            from ci_testnet_wallet import execute
+            def child(command, check):
+                if 'live_upgrade_security.py' in command[1]:
+                    key = root/'live-security-device.key'
+                    restored.update(seed=key.read_text().strip(), mode=stat.S_IMODE(key.stat().st_mode))
+                    key.unlink()  # Recovered by this run.
+                if 'live_wallet_gate.py' in command[1]:
+                    (root/'live-browser-key.hex').write_text('cd'*32 + '\n')
+                    return type('Result', (), {'returncode': 1})()
+                return type('Result', (), {'returncode': 0})()
+            self.assertEqual(execute(str(root), str(state), 'a'*40, b'k', child, lambda base: True), 1)
+            self.assertEqual(restored, {'seed': 'ab'*32, 'mode': 0o600})
+            self.assertFalse((Path(tmp)/'escape').exists())
+            saved = json.loads(state.read_text())
+            self.assertEqual(saved['pending_keys'], {'live-browser-key.hex': 'cd'*32})
+            self.assertEqual(saved['fixtures'], {'k': 1})
+            self.assertEqual(stat.S_IMODE(state.stat().st_mode), 0o600)
+
+    def test_sf010_suite_relevance(self):
+        import os
+        from unittest import mock
+        from ci_testnet_wallet import suites_relevant
+        def git(names):
+            return lambda *a, **k: type('Result', (), {'stdout': names})()
+        with mock.patch.dict(os.environ, {'GITHUB_EVENT_NAME': 'workflow_run'}):
+            self.assertTrue(suites_relevant('b', git('docs/x.md\ncontracts/sources/a.move\n')))
+            self.assertTrue(suites_relevant('b', git('scripts/live_common.py\n')))
+            self.assertTrue(suites_relevant('b', git('scripts/sui_toolchain.py\n')))  # Their transaction CLI.
+            self.assertFalse(suites_relevant('b', git('docs/x.md\nscripts/tracking.py\n')))
+            self.assertFalse(suites_relevant('b', git('')))
+        with mock.patch.dict(os.environ, {'GITHUB_EVENT_NAME': 'workflow_dispatch'}):
+            self.assertTrue(suites_relevant('b', git('')))
+
+    def test_wallet_live_gate_uses_the_serialized_ci_wallet_controller(self):
+        workflow = (Path(__file__).resolve().parents[2]/'.github/workflows/live-gates.yml').read_text()
+        self.assertIn("inputs.gate != 'hardware' && 'suifleet-testnet-ci-wallet'", workflow)
+        self.assertIn('[ "$GATE" = wallet ]', workflow)
+        self.assertIn("if: inputs.gate == 'hardware'", workflow)
+        testnet = (Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml').read_text()
+        self.assertIn('-e GITHUB_EVENT_NAME', testnet)
+        self.assertIn('path: evidence/*.json', testnet)
 
     def test_unchanged_custodied_fixture_reuses_state_without_mutation(self):
         import live_package_upgrade as live

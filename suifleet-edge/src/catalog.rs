@@ -79,10 +79,11 @@ impl Version {
         let mut pairs = std::collections::BTreeSet::new();
         for i in 0..n {
             anyhow::ensure!(
-                matches!(self.platform_os[i].as_str(), "linux" | "*")
+                matches!(self.platform_os[i].as_str(), "linux" | "macos" | "*")
                     && matches!(
                         self.platform_arch[i].as_str(),
-                        "x86_64" | "aarch64" | "arm" | "*"
+                        // Rust `std::env::consts::ARCH` names; `x86` is 32-bit i686.
+                        "x86_64" | "aarch64" | "arm" | "x86" | "*"
                     ),
                 "unsupported manifest platform"
             );
@@ -187,14 +188,17 @@ pub async fn resolve(
         fields["schema_version"] == "1"
             || fields["schema_version"] == 1
             || fields["schema_version"] == "2"
-            || fields["schema_version"] == 2,
+            || fields["schema_version"] == 2
+            || fields["schema_version"] == "3"
+            || fields["schema_version"] == 3,
         "unsupported DeploymentRecord schema version"
     );
     anyhow::ensure!(
         fields["component_name"] == event.component_name && fields["version"] == event.version,
         "deployment identity mismatch"
     );
-    if fields["schema_version"] == "1" || fields["schema_version"] == 1 {
+    if fields["schema_version"] == "1" || fields["schema_version"] == 1
+        || fields["schema_version"] == "3" || fields["schema_version"] == 3 {
         let digest = sui
             .dynamic_field(&event.deployment_id, "deployment_manager::RecipeDigestKey")
             .await?;

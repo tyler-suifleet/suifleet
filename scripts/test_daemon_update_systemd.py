@@ -84,13 +84,10 @@ def inside(args):
                 self.respond(b"not found", 404)
 
     def deploy(id, version, payload):
-        sim.add(id)
-        event = sim.events[-1]["parsedJson"]
         digest = hashlib.sha256(payload).hexdigest()
         blobs[f"artifact-{id}"] = payload
-        event.update(component_name=COMPONENT, version=version, artifact_sha256=digest)
-        sim.recipes[event["recipe_blob_id"]].update(componentName=COMPONENT, componentVersion=version,
-                                                     artifactBlobId=f"artifact-{id}", artifactSha256=digest, lifecycle={})
+        sim.add(id, event=dict(component_name=COMPONENT, version=version, artifact_sha256=digest),
+                recipe=dict(artifactBlobId=f"artifact-{id}"))
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()

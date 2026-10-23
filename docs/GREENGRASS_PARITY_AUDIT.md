@@ -30,7 +30,7 @@ The immediate platform blocker is transport. The daemon now uses the supported g
 - Artifact downloads buffered whole firmware in memory. They now stream, with a 1 GiB limit; recipes have a 1 MiB limit. HTTP and apply timeouts are bounded.
 - The deployments page did not load/display per-device status. It now reads the live dynamic status field, expands current group members, and omits deleted records. Queries paginate instead of truncating the fleet at 50 records.
 - Provisioning/address CLI commands were documented but absent. Software provisioning is now idempotent, creates a 0600 key, and runs before daemon startup under systemd.
-- The UI advertised run/shutdown that no daemon executed. SF-014 added the supervisor; the run/readiness/shutdown/restart controls are enabled again now that the behavior is tested. Configuration still fails explicitly, and install and run commands both require device-side opt-in.
+- The UI advertised run/shutdown that no daemon executed. SF-014 added the supervisor; the run/readiness/shutdown/restart controls are enabled again now that the behavior is tested. Install and run commands both require device-side opt-in. SF-015 replaced the explicit configuration rejection with recipe 1.2 configuration management.
 - Tests had a stale function signature and invalid shared-object test timing. Those are corrected. Frontend SDK version skew is pinned to the wallet library's compatible version.
 
 ## Tracking coverage
@@ -55,7 +55,7 @@ AWS provides device/group targets, component dependency resolution, deployment r
 | Desired fleet state and revisions | Implemented for groups, locally tested (SF-013): revisioned component → deployment map per group; supersession; cross-group conflicts left as installed | Device-level desired state (after SF-008 custody); public-network/hardware acceptance | P1 |
 | Newly joined devices receive desired state | Implemented, locally tested (SF-013): membership from DeviceAddedToGroup events, verified against the group object each poll | Event retention for long-lived fleets; public-network acceptance | P1 |
 | Multi-component atomic deployments | Partial (SF-013): one revision commits several components atomically on chain; devices run an ordered, journaled plan that stops at the first failed step; each step installs its dependencies first (SF-012) | Ordering across desired components by dependency (steps run in name order), device-side rollback and lifecycle supervision (SF-014) | P1 |
-| Staged/canary rollout | Missing | Cohorts, concurrency/rate limits, bake period and release gates | P1 |
+| Staged/canary rollout | SF-017 implementation awaiting review | [Creator-coordinated durable cohorts, grant/rate/concurrency/bake gates and failure abort](STAGED_ROLLOUTS.md); physical acceptance remains SF-031 | P1 |
 | Failure-threshold abort | Missing | Fleet aggregation, minimum sample size and threshold evaluation | P1 |
 | Pause/resume/cancel | Missing | Durable state transitions; deletion is not cancellation | P1 |
 | Device update timeout | Partial: bounded command/download | End-to-end deadline, offline expiry, retry policy and backoff | P1 |
@@ -77,7 +77,7 @@ AWS components define recipes, lifecycle, dependencies and platform selection. S
 | Run/startup/shutdown/bootstrap/recover | Partial (SF-014): supervised run with readiness, restart policy and budget, graceful shutdown, rollback of an unready replacement, dependency-ordered restart of committed versions on daemon start and after a daemon crash, no unmanaged descendants; simulator-tested | Configured component bootstrap, dependency failure coupling, health reporting on chain and physical validation of supervision restoration after platform-controlled restart; platform scripts own system reboot | P1 |
 | Dependency resolution | Partial: recipe 1.1 SemVer requirements, hard/soft dependencies, deterministic dependency-first installs, and cycle/conflict rejection before changes ([SF-012](COMPONENT_DEPENDENCIES.md)) | Dependency lifecycle state coupling, rollback, and public-network/hardware acceptance | P1 |
 | Platform manifests | Missing | OS/arch/platform selectors and multiple artifacts | P1 |
-| Configuration merge/reset/validation | Missing; nonempty config rejected | Persisted defaults, JSON-pointer reset, merge policy, validation and notification | P1 |
+| Configuration merge/reset/validation | Partial (SF-015): recipe 1.2 defaults, JSON-pointer reset then recursive merge, persisted per component with rollback, validate-command accept/defer/reject before apply, device-local confidential overlay; locally tested | Per-deployment updates for catalog versions (on-chain field), in-place reload notification over IPC (SF-027), public-network/hardware acceptance | P1 |
 | Runtime isolation | Partial (SF-053): device key and PIN held by a separate signing-service user with an intent-checked, caller-checked socket; component processes cannot read or use it ([KEY_ISOLATION.md](KEY_ISOLATION.md)); components still share the daemon user | Per-component users, environment, resource limits and IPC ACLs | P0 |
 | Local deployment/component CLI | Partial: provisioning/address CLI | Install/list/start/stop/restart/status/logs and offline local recipes | P2 |
 | Container component adapters | External command possible | OCI pull/auth, digest pinning, supervision and recovery | P2 |
@@ -93,13 +93,13 @@ AWS includes device/component health, operational telemetry, logs and provisioni
 | Software key provisioning | Implemented, locally tested (SF-021): claim-sponsored self-enrollment (`suifleet --enroll`), operator ownership via DeviceOwnerCap, bulk claims funded in one PTB, quota/expiry/revocation | Image/first-boot integration (SF-025/029), public-network acceptance | P1 |
 | Hardware identity/TPM/HSM | Partial (SF-021): signer abstraction; PKCS#11 P-256 (Sui secp256r1) backend tested with SoftHSM2 | Real TPM/HSM validation, ed25519 tokens, attestation | P1 |
 | Key rotation/revocation | Missing | Revocable capability tied to active identity, migration and recovery | P0 |
-| Online/last-seen/heartbeat | Missing | Telemetry ingress with bounded offline buffering | P1 |
-| Installed component and device health | Missing | Structured health/status service and fleet aggregate API | P1 |
-| Diagnostics and remote logs | Partial: local tracing/systemd logs | Collection/rotation, upload, queries, redaction, alerts and remote support | P1 |
+| Online/last-seen/heartbeat | Partial (SF-019): signed heartbeat snapshots, bounded offline spool, indexer ingress checked against the registry identity, online/offline/last-seen in the API and dApp; locally and localnet-tested ([TELEMETRY.md](TELEMETRY.md)) | Hosted ingress, alerts, public-network and hardware acceptance | P1 |
+| Installed component and device health | Partial (SF-019): installed versions, supervised phases and sync health per device; healthy/degraded/offline/unreported status, fleet summary API, dashboard independently verifying each report | Component-defined health checks and metrics, alerts, hosted service | P1 |
+| Diagnostics and remote logs | Partial (SF-020): bounded rotation and rotation-safe shipping of daemon and component logs, on-device redaction (secrets, keys, phrases, confidential configuration), signed batches with offline spool, support-scoped audited search and diagnostic bundles, actionable alerts with webhook; locally and localnet-tested ([LOGS.md](LOGS.md)). CloudWatch Logs export adapter (SF-060, LogManager 2.3.14 naming/levels/limits) tested against a local emulator only ([CLOUDWATCH_LOGS.md](CLOUDWATCH_LOGS.md)) | Hosted service, dApp log search, per-component log levels, hardware acceptance | P1 |
 | Fleet API/CLI and automation | Partial (SF-024): versioned `/v1` API with filters/keyset pagination, unsigned bulk-operation transactions, long-poll change feed and `ctl` CLI | Webhook push delivery, CI integration examples, more bulk operations | P1 |
 | Operator RBAC and delegation | Partial (SF-021): revocable group-scoped deployer roles with on-chain delegate audit | Further roles (enrollment/lifecycle managers), multisig/change approvals | P1 |
 | Production indexer | Implemented, locally tested (SF-024): `suifleet-indexer` materializes events/objects into SQLite with durable cursors; versioned API, change feed, CLI | Hosted deployment, dApp migration onto the API, archival-node retention on public networks | P1 |
-| Secrets and confidential configuration | Missing | Encrypted distribution, policy-controlled local cache and rotation; never plaintext on public chain/Walrus | P1 |
+| Secrets and confidential configuration | Partial (SF-022): Seal-encrypted artifacts/recipes, on-chain account/device/group policies, device-certified sessions, key-epoch rotation, no plaintext cache; locally and public-testnet tested ([CONFIDENTIAL_DELIVERY.md](CONFIDENTIAL_DELIVERY.md)) | Encrypted per-device secret values (configuration secrets still come from the device overlay), mainnet providers, wallet/Pi acceptance | P1 |
 | Cost/network policy | Missing | Gas funding/sponsorship, storage budgets, renewal alerts and network quotas | P1 |
 | Packaging/provisioning lifecycle | Partial: systemd and OE recipe | Pinned source, Yocto cargo dependency support and actual image/device test | P1 |
 | Publish/upgrade tooling | Partial: development script | Scope metadata to active TOML environment and stop masking publish/parse failures; validate upgrades against a deployed package | P0 |
@@ -113,14 +113,14 @@ The [compatibility specification](GREENGRASS_COMPATIBILITY.md) (SF-028) separate
 
 | Capability | Status | Required direction | Priority |
 |---|---|---|---|
-| Component IPC and SDK | Missing | Authenticated local API for config, lifecycle, health and messaging | P2 |
-| Local pub/sub and MQTT bridge | Missing | Broker/bridge adapters, permissions and offline delivery | P2 |
-| Device shadows | Missing | Desired/reported state with version/conflict semantics and local sync | P2 |
-| Stream manager/store-and-forward | Missing | Bounded durable streams, export adapters and recovery | P2 |
-| Client-device discovery/authentication | Missing | Local device discovery, credentials, certificates and gateway authorization | P2 |
-| Token exchange/cloud credentials | Missing | Scoped credential provider or equivalent decentralized service credentials | P2 |
-| ML inference/industrial/cloud integrations | Missing | Optional component ecosystem/adapters and compatibility tests | P2 |
-| Windows/macOS runtime | Missing: Linux-oriented | Explicit OS support matrix and implementation/testing | P2 |
+| Component IPC and SDK | Native v1: Unix UID ACLs, Python SDK/CLI, authenticated deployment install and supervised management, public config reads, health and messaging ([COMPONENT_IPC.md](COMPONENT_IPC.md)) | Per-component execution users for shared-user supervised components; AWS wire compatibility remains separate | P2 |
+| Local pub/sub and MQTT bridge | Durable on-disk pub/sub with MQTT filters, QoS 0/1 and acknowledgement, AWS-shaped policies, and a LocalMqtt/Pubsub bridge to a standard local broker with bounded spooling and counted backpressure ([MESSAGING.md](MESSAGING.md)); Pubsub/IotCore mappings over a mutual-TLS AWS IoT Core connection ([AWS_IOT.md](AWS_IOT.md)) | Real AWS account acceptance, AWS IPC wire protocol, MQTT 5 LAN clients | P2 |
+| Device shadows | Persistent named desired/reported documents with versions, AWS-shaped policies and delta notifications, and three-way-merge sync with per-section conflict owners to a device-signed HTTP(S) service or AWS IoT Device Shadow ([SHADOWS.md](SHADOWS.md), [AWS_IOT.md](AWS_IOT.md)) | Real AWS account acceptance, AWS IPC wire protocol | P2 |
+| Stream manager/store-and-forward | Bounded durable streams over native IPC: crash-safe segment files, reject/overwrite, time-to-live, quotas, and signed resumable HTTP(S) export with checkpoints ([STREAMS.md](STREAMS.md)) | Live AWS-account Kinesis/S3 acceptance ([exporters](STREAM_EXPORTERS.md), SF-058); SiteWise (SF-064), Stream Manager SDK wire protocol | P2 |
+| Client-device discovery/authentication | Local CA with CSR enrollment, rotation with a grace period and revocation; mutual-TLS MQTT 3.1.1 proxy enforcing AWS-shaped device-group policies on live sessions; UDP and HTTPS discovery with a device-signed CA binding ([CLIENT_DEVICES.md](CLIENT_DEVICES.md)) | Physical Pi/second-device acceptance (#32), MQTT 5, AWS discovery API and IoT-issued certificates, CA rotation | P2 |
+| Token exchange/cloud credentials | Opt-in Linux SDK endpoint and IoT X.509 adapter; local mTLS/SDK evidence in [AWS_CREDENTIALS.md](AWS_CREDENTIALS.md) | Separately provisioned AWS identity and IAM policy; platform-managed distinct UIDs; live AWS account/service acceptance remains unrun | P2 |
+| ML inference/industrial/cloud integrations | Industrial: native Modbus/OPC UA collector into durable streams with simulators ([INDUSTRIAL.md](INDUSTRIAL.md)); ML: native TF Lite components ([ML_COMPONENTS.md](ML_COMPONENTS.md)); Firehose: native exporter ([FIREHOSE.md](FIREHOSE.md)). Others missing | SiteWise processing/publishing (SF-071), video, SNS; AWS-named component compatibility; physical/PLC acceptance | P2 |
+| Windows/macOS runtime | macOS: native LaunchDaemon with coalition containment, peer-UID IPC, private key checks and `macos` catalog selection, tested on a hosted macOS 15 arm64 runner ([MACOS_RUNTIME.md](MACOS_RUNTIME.md)). Windows: local operator executable SCM runtime with Jobs, SID/ACL enforcement and interrupted recovery ([WINDOWS_RUNTIME.md](WINDOWS_RUNTIME.md), SF-074) | Windows catalog/chain/rich IPC support; macOS sandboxing, service signer, daemon self-update, Intel/physical Mac acceptance | P2 |
 
 ## Release gates and sequencing
 
@@ -154,3 +154,5 @@ For each feature, completion requires contract/API semantics, daemon behavior, o
 ## Validation evidence
 
 See [validation results and limits](VALIDATION.md) for the exact checks run, tested failure paths and enrollment/upgrade requirements.
+
+SF-071 adds the native [SiteWise TQV processing/publisher](SITEWISE.md) over SF-070 records and SF-034 lossless external streams with SF-057 credentials. Its local request/checkpoint tests establish the documented native subset; live AWS and physical acceptance remain unrun. Historical reference fixtures above remain specification-only.

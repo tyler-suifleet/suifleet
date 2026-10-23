@@ -22,6 +22,8 @@ jobs:
     runs-on: ubuntu-22.04
     environment: live-package-upgrade
     timeout-minutes: 90
+    outputs:
+      run: ${{ steps.plan.outputs.run }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -103,8 +105,8 @@ jobs:
           BASE_REF: ${{ steps.plan.outputs.base }}
         run: |
           mkdir -p evidence encrypted-live-state
-          docker run --rm -e SUIFLEET_TESTNET_KEY -e SUIFLEET_TESTNET_ADDRESS -e BASE_REF \
-            -e SUIFLEET_FAUCET_TOOL=/tmp/sui-faucet/sui \
+          docker run --rm -e SUIFLEET_TESTNET_KEY -e SUIFLEET_TESTNET_ADDRESS -e BASE_REF -e GITHUB_EVENT_NAME \
+            -e SUIFLEET_FAUCET_TOOL=/opt/sui-network/sui \
             -v "$PWD:/workspace" -w /workspace suifleet-dev:testnet bash -ec '
               git config --global --add safe.directory /workspace
               node scripts/ci_testnet.cjs'
@@ -121,7 +123,7 @@ jobs:
         if: always() && steps.plan.outputs.run == 'true'
         with:
           name: testnet-effects-${{ steps.plan.outputs.head }}
-          path: evidence/package-upgrade.json
+          path: evidence/*.json
           retention-days: 90
       - name: Publish final exact-head status
         if: always() && steps.plan.outputs.run == 'true'
@@ -131,3 +133,23 @@ jobs:
           BASE_REF: ${{ steps.plan.outputs.base }}
           RESULT: ${{ job.status == 'success' && 'success' || 'failure' }}
         run: python3 "$RUNNER_TEMP/testnet_ci.py" --status "$RESULT"
+  # Bounded retention of this workflow's own fixture snapshots. Only this job
+  # can delete artifacts; it runs main-sourced code, no test revision or secret,
+  # inside the same serialized concurrency group as restore and upload.
+  prune-fixture-history:
+    needs: validate
+    if: github.ref == 'refs/heads/main' && needs.validate.result == 'success' && needs.validate.outputs.run == 'true'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Delete encrypted fixture snapshots beyond retained trusted history
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/testnet_fixture_cache.py --prune

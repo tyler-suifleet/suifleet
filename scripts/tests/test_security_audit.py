@@ -67,7 +67,8 @@ class SecurityGateTests(unittest.TestCase):
     def test_clean_dependency_and_dockerfile_coverage_passes(self):
         self.assertEqual(set(audit.REQUIRED_TARGETS), {
             'dapp/pnpm-lock.yaml', 'suifleet-edge/Cargo.lock',
-            'suifleet-indexer/Cargo.lock', 'Dockerfile', 'docker/release.Dockerfile'})
+            'suifleet-indexer/Cargo.lock', 'Dockerfile', 'docker/release.Dockerfile',
+            'docker/linux-x86.Dockerfile', 'suifleet-edge/packaging/tunneling/localproxy.Dockerfile'})
         self.assertEqual(self.run_gate('trivy', trivy()), (0, {
             'scanner': 'trivy', 'blocking_findings': 0, 'findings': []}))
 

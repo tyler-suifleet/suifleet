@@ -14,11 +14,17 @@ impl ApplyRunner {
     }
     /// `request_id` names the firmware-helper request; it must be stable for
     /// the deployment so a late helper result can still be collected.
+    /// `configuration` is the component's materialized configuration file,
+    /// substituted for `{configuration}` in an install script. `output`
+    /// receives that script's stdout/stderr instead of the daemon's own,
+    /// since it may print the configuration it was given.
     pub async fn apply(
         &self,
         artifact: &Path,
         install: Option<&str>,
         request_id: &str,
+        configuration: Option<&Path>,
+        output: Option<std::fs::File>,
     ) -> anyhow::Result<()> {
         let workdir = artifact
             .parent()
@@ -37,11 +43,17 @@ impl ApplyRunner {
             let parent = workdir
                 .to_str()
                 .ok_or_else(|| anyhow::anyhow!("non-UTF8 artifact directory"))?;
-            let script = script
+            let mut script = script
                 .replace("{artifact}", &shell_words::quote(path))
                 .replace("{artifacts}", &shell_words::quote(parent));
+            if let Some(configuration) = configuration {
+                script = script.replace("{configuration}", &shell_words::quote(&configuration.to_string_lossy()));
+            }
             let mut cmd = tokio::process::Command::new("/bin/sh");
             cmd.arg("-c").arg(script);
+            if let Some(output) = output {
+                cmd.stdout(output.try_clone()?).stderr(output);
+            }
             return run_bounded(cmd, workdir, timeout, self.config.max_memory_bytes).await;
         }
         match self.config.mode {
@@ -85,9 +97,17 @@ pub async fn run_bounded(
 /// [`run_bounded`] for a command already passed through [`harden`] (and
 /// possibly given deliberate environment variables afterwards).
 pub async fn run_hardened(
-    mut command: tokio::process::Command,
+    command: tokio::process::Command,
     timeout: Duration,
 ) -> anyhow::Result<()> {
+    exit_result(run_status(command, timeout).await?)
+}
+
+/// [`run_hardened`], returning how the command exited instead of judging it.
+pub async fn run_status(
+    mut command: tokio::process::Command,
+    timeout: Duration,
+) -> anyhow::Result<std::process::ExitStatus> {
     let mut child = crate::supervisor::spawn_tracked(&mut command).map_err(spawn_error)?;
     #[cfg(unix)]
     let _group = ProcessGroup(child.pid() as i32);
@@ -106,7 +126,7 @@ pub async fn run_hardened(
             )).into());
         }
     };
-    exit_result(status)
+    Ok(status)
 }
 
 /// The confinement every updater, recipe and component child gets: a cleared
@@ -177,7 +197,11 @@ pub fn exit_result(status: std::process::ExitStatus) -> anyhow::Result<()> {
 
 #[cfg(unix)]
 fn limit_child(max_memory_bytes: Option<u64>) -> std::io::Result<()> {
-    fn set(resource: libc::__rlimit_resource_t, limit: u64) -> std::io::Result<()> {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    type Resource = libc::__rlimit_resource_t;
+    #[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+    type Resource = libc::c_int;
+    fn set(resource: Resource, limit: u64) -> std::io::Result<()> {
         let mut current = libc::rlimit {
             rlim_cur: 0,
             rlim_max: 0,
@@ -243,8 +267,8 @@ mod tests {
     #[tokio::test]
     async fn propagates_apply_failure() {
         let (_dir, artifact) = workdir("false");
-        let error = runner("/bin/false", false)
-            .apply(&artifact, None, "test")
+        let error = runner("/usr/bin/false", false)
+            .apply(&artifact, None, "test", None, None)
             .await
             .unwrap_err();
         assert!(error.to_string().contains("exit code 1"), "{error}");
@@ -253,8 +277,8 @@ mod tests {
     #[tokio::test]
     async fn times_out_hung_apply() {
         let (_dir, artifact) = workdir("hung");
-        let error = runner("/bin/true", true)
-            .apply(&artifact, Some("exec sleep 10"), "test")
+        let error = runner("/usr/bin/true", true)
+            .apply(&artifact, Some("exec sleep 10"), "test", None, None)
             .await
             .unwrap_err();
         assert!(error.to_string().contains("timed out"), "{error}");
@@ -266,8 +290,8 @@ mod tests {
         let (dir, artifact) = workdir("descendants");
         let marker = dir.join("survivor");
         let script = format!("(sleep 2; touch {}) & exec sleep 10", marker.display());
-        assert!(runner("/bin/true", true)
-            .apply(&artifact, Some(&script), "test")
+        assert!(runner("/usr/bin/true", true)
+            .apply(&artifact, Some(&script), "test", None, None)
             .await
             .is_err());
         tokio::time::sleep(Duration::from_secs(3)).await;
@@ -283,7 +307,7 @@ mod tests {
         let updater = dir.join("updater");
         std::fs::write(&updater, "#!/bin/sh\nexit 0\n").unwrap(); // mode 0644: not executable
         let error = runner(updater.to_str().unwrap(), false)
-            .apply(&artifact, None, "test")
+            .apply(&artifact, None, "test", None, None)
             .await
             .unwrap_err();
         assert!(
@@ -296,8 +320,8 @@ mod tests {
     async fn denied_system_write_inside_updater_fails() {
         let (_dir, artifact) = workdir("denied");
         // An unprivileged updater cannot change kernel settings; the denial must surface.
-        let error = runner("/bin/true", true)
-            .apply(&artifact, Some("echo suifleet > /proc/sys/kernel/hostname"), "test")
+        let error = runner("/usr/bin/true", true)
+            .apply(&artifact, Some("echo suifleet > /proc/sys/kernel/hostname"), "test", None, None)
             .await
             .unwrap_err();
         assert!(error.to_string().contains("exit code"), "{error}");
@@ -306,14 +330,40 @@ mod tests {
     #[tokio::test]
     async fn exit_126_is_reported_as_privilege_failure() {
         let (_dir, artifact) = workdir("exit126");
-        let error = runner("/bin/true", true)
-            .apply(&artifact, Some("exit 126"), "test")
+        let error = runner("/usr/bin/true", true)
+            .apply(&artifact, Some("exit 126"), "test", None, None)
             .await
             .unwrap_err();
         assert!(
             error.to_string().starts_with("privilege failure"),
             "{error}"
         );
+    }
+
+    #[tokio::test]
+    async fn install_receives_the_configuration_path() {
+        let (dir, artifact) = workdir("configuration");
+        let configuration = dir.join("my config.json");
+        std::fs::write(&configuration, b"{\"port\":1}").unwrap();
+        runner("/usr/bin/true", true)
+            .apply(&artifact, Some("cp {configuration} seen.json"), "test", Some(&configuration), None)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(dir.join("seen.json")).unwrap(), b"{\"port\":1}");
+    }
+
+    #[tokio::test]
+    async fn install_output_goes_to_the_given_file() {
+        let (dir, artifact) = workdir("output");
+        let configuration = dir.join("configuration.json");
+        std::fs::write(&configuration, b"{\"port\":1}").unwrap();
+        let log = dir.join("component.log");
+        let output = std::fs::File::create(&log).unwrap();
+        runner("/usr/bin/true", true)
+            .apply(&artifact, Some("cat {configuration}; echo; cat {configuration} >&2"), "test", Some(&configuration), Some(output))
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), "{\"port\":1}\n{\"port\":1}");
     }
 
     #[tokio::test]
@@ -325,8 +375,8 @@ mod tests {
             "{{ env; echo core=$(ulimit -c); echo files=$(ulimit -n); echo cwd=$(pwd); }} > {}",
             out.display()
         );
-        runner("/bin/true", true)
-            .apply(&artifact, Some(&script), "test")
+        runner("/usr/bin/true", true)
+            .apply(&artifact, Some(&script), "test", None, None)
             .await
             .unwrap();
         let seen = std::fs::read_to_string(out).unwrap();
@@ -336,6 +386,7 @@ mod tests {
             "{seen}"
         );
         assert!(seen.contains(&format!("HOME={}", dir.display())), "{seen}");
-        assert!(seen.contains(&format!("cwd={}", dir.display())), "{seen}");
+        // (pwd prints the resolved path: on macOS /var is /private/var.)
+        assert!(seen.contains(&format!("cwd={}", dir.canonicalize().unwrap().display())), "{seen}");
     }
 }

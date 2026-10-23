@@ -1,7 +1,11 @@
 import { WALRUS_AGGREGATOR, WALRUS_EPOCHS, WALRUS_MAX_COST_FROST, WALRUS_PUBLISHER } from "./constants";
 
-/** Who can renew the stored blob: only the owner of its Sui `Blob` object can extend it. */
-export type StorageOwner = "you" | "publisher" | "unknown";
+/**
+ * Who can renew the stored blob: only the owner of its Sui `Blob` object can
+ * extend it. "fleet": held by the fleet's prepaid storage (SF-083), renewable
+ * only with the fleet budget's owner capability.
+ */
+export type StorageOwner = "you" | "fleet" | "publisher" | "unknown";
 
 export interface StorageInfo {
   blobId: string;
@@ -18,12 +22,38 @@ export interface StorageInfo {
 
 export interface UploadResult {
   blobId: string;
+  /** SHA-256 of the plaintext, which deployments record and devices verify. */
   sha256: string;
   storage: StorageInfo;
+  /** True when the stored blob is a Seal-encrypted envelope. */
+  confidential: boolean;
 }
+
+export interface UploadProgress {
+  phase: "preparing" | "uploading" | "processing" | "complete";
+  loaded: number;
+  total?: number;
+}
+export type UploadObserver = (progress: UploadProgress) => void;
+
+/**
+ * Stores already protected bytes somewhere other than the publisher: the
+ * fleet's prepaid storage (lib/fleet-upload.ts). Never a fallback: when
+ * given, it is the only path.
+ */
+export type BlobStore = (body: Uint8Array, progress?: UploadObserver) => Promise<StorageInfo>;
 
 export type { ComponentRecipe } from "./recipe-schema";
 import { ComponentRecipe, assertComponentRecipe } from "./recipe-schema";
+import { isEnvelope, type BlobKind, type Sealer } from "./seal";
+
+/**
+ * How a blob is stored (SF-022). Confidential is the customer path: the bytes
+ * are Seal-encrypted in this browser before any upload. Public stores the
+ * plaintext and is only for deliberately public or open-source content.
+ * There is no default and no fallback from one to the other.
+ */
+export type Protection = { kind: "confidential"; seal: Sealer } | { kind: "public" };
 
 type PublisherResponse = {
   newlyCreated?: {
@@ -70,7 +100,7 @@ export function storageWarnings(storage: StorageInfo): string[] {
       "These bytes were already stored by another upload. You do not own that Blob object, so you cannot renew it; " +
         "devices fail once its storage period ends.",
     );
-  } else if (storage.owner !== "you") {
+  } else if (storage.owner !== "you" && storage.owner !== "fleet") {
     warnings.push("The Blob object was kept by the publisher, so you cannot renew it. Connect a wallet before uploading.");
   }
   if (WALRUS_MAX_COST_FROST !== null && storage.costFrost !== undefined && storage.costFrost > WALRUS_MAX_COST_FROST) {
@@ -81,43 +111,90 @@ export function storageWarnings(storage: StorageInfo): string[] {
 
 /** Command an owner runs to keep a blob available beyond its end epoch. */
 export function renewalCommand(storage: StorageInfo): string | null {
+  // Fleet blobs are wrapped in fleet storage: extend them with fleet_storage::extend_blob.
+  if (storage.owner === "fleet") return null;
   return storage.blobObjectId ? `walrus extend --blob-obj-id ${storage.blobObjectId} --epochs-extended ${WALRUS_EPOCHS}` : null;
 }
 
-async function uploadBlob(body: ArrayBuffer | string, contentType: string, owner: string | null): Promise<StorageInfo> {
+/** The bytes to upload: an encrypted envelope, or the plaintext when explicitly public. */
+export async function protect(plaintext: Uint8Array, kind: BlobKind, sha256: string, protection: Protection): Promise<Uint8Array> {
+  if (protection.kind === "public") return plaintext;
+  if (protection.kind !== "confidential") throw new Error("Choose confidential or explicitly public delivery");
+  // Any failure here aborts the upload: never retry or fall back as plaintext.
+  const sealed = await protection.seal(plaintext, kind, sha256);
+  if (!isEnvelope(sealed) || sealed.length <= plaintext.length) throw new Error("Encryption did not produce a Seal envelope; nothing was uploaded");
+  return sealed;
+}
+
+async function uploadBlob(body: Uint8Array, contentType: string, owner: string | null, progress?: UploadObserver): Promise<StorageInfo> {
   const params = new URLSearchParams({ epochs: String(WALRUS_EPOCHS) });
   // Send the Blob object to the operator so they, not the publisher, can extend it.
   if (owner) params.set("send_object_to", owner);
+  // Fetch does not expose request-body progress. Use browser upload events,
+  // never a timer estimating storage/certification completion.
+  if (progress && typeof XMLHttpRequest !== "undefined") {
+    return new Promise((resolve, reject) => {
+      const request = new XMLHttpRequest();
+      request.upload.addEventListener("progress", (event) => progress({
+        phase: "uploading", loaded: event.loaded,
+        total: event.lengthComputable ? event.total : undefined,
+      }));
+      request.upload.addEventListener("load", () => progress({ phase: "processing", loaded: body.byteLength }));
+      request.onerror = () => reject(new Error("Walrus upload failed: network error"));
+      request.onabort = () => reject(new Error("Walrus upload cancelled"));
+      request.ontimeout = () => reject(new Error("Walrus upload timed out"));
+      request.onload = () => {
+        try {
+          if (request.status < 200 || request.status >= 300) throw new Error(`Walrus upload failed: ${request.status} ${request.responseText}`);
+          const storage = parseStorage(JSON.parse(request.responseText), owner);
+          progress({ phase: "complete", loaded: body.byteLength, total: body.byteLength });
+          resolve(storage);
+        } catch (error) { reject(error); }
+      };
+      request.open("PUT", `${WALRUS_PUBLISHER}/v1/blobs?${params}`);
+      request.setRequestHeader("Content-Type", contentType);
+      progress({ phase: "uploading", loaded: 0, total: body.byteLength });
+      request.send(new Blob([body as BlobPart]));
+    });
+  }
+  progress?.({ phase: "processing", loaded: 0 });
   const res = await fetch(`${WALRUS_PUBLISHER}/v1/blobs?${params}`, {
     method: "PUT",
     headers: { "Content-Type": contentType },
-    body,
+    body: new Blob([body as BlobPart]),
   });
 
   if (!res.ok) {
     throw new Error(`Walrus upload failed: ${res.status} ${await res.text()}`);
   }
-  return parseStorage(await res.json(), owner);
+  const storage = parseStorage(await res.json(), owner);
+  progress?.({ phase: "complete", loaded: body.byteLength, total: body.byteLength });
+  return storage;
 }
 
-async function sha256Hex(bytes: BufferSource): Promise<string> {
-  const hash = await crypto.subtle.digest("SHA-256", bytes);
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const hash = await crypto.subtle.digest("SHA-256", bytes as BufferSource);
   return Array.from(new Uint8Array(hash)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export async function uploadArtifact(file: File, owner: string | null): Promise<UploadResult> {
-  const buffer = await file.arrayBuffer();
-  const sha256 = await sha256Hex(buffer);
-  const storage = await uploadBlob(buffer, "application/octet-stream", owner);
-  return { blobId: storage.blobId, sha256, storage };
+export async function uploadArtifact(file: File, owner: string | null, protection: Protection, progress?: UploadObserver, store?: BlobStore): Promise<UploadResult> {
+  progress?.({ phase: "preparing", loaded: 0 });
+  const plaintext = new Uint8Array(await file.arrayBuffer());
+  const sha256 = await sha256Hex(plaintext);
+  const body = await protect(plaintext, "artifact", sha256, protection);
+  const storage = store ? await store(body, progress) : await uploadBlob(body, "application/octet-stream", owner, progress);
+  return { blobId: storage.blobId, sha256, storage, confidential: protection.kind === "confidential" };
 }
 
-export async function uploadRecipe(recipe: ComponentRecipe, owner: string | null): Promise<UploadResult> {
+export async function uploadRecipe(recipe: ComponentRecipe, owner: string | null, protection: Protection, progress?: UploadObserver, store?: BlobStore): Promise<UploadResult> {
+  progress?.({ phase: "preparing", loaded: 0 });
   assertComponentRecipe(recipe);
-  const text = JSON.stringify(recipe, null, 2);
-  const sha256 = await sha256Hex(new TextEncoder().encode(text));
-  const storage = await uploadBlob(text, "application/json", owner);
-  return { blobId: storage.blobId, sha256, storage };
+  const plaintext = new TextEncoder().encode(JSON.stringify(recipe, null, 2));
+  const sha256 = await sha256Hex(plaintext);
+  const body = await protect(plaintext, "recipe", sha256, protection);
+  const storage = store ? await store(body, progress)
+    : await uploadBlob(body, protection.kind === "public" ? "application/json" : "application/octet-stream", owner, progress);
+  return { blobId: storage.blobId, sha256, storage, confidential: protection.kind === "confidential" };
 }
 
 export function blobDownloadUrl(blobId: string): string {
@@ -141,6 +218,8 @@ export async function probeBlob(blobId: string): Promise<Availability> {
 export interface DeploymentStorage {
   recipe: Availability;
   artifact: Availability;
+  /** The recipe is Seal-encrypted, so the artifact it names is not visible here. */
+  confidential?: boolean;
 }
 
 /** Whether devices can still fetch a deployment's recipe and the artifact it names. */
@@ -149,9 +228,11 @@ export async function probeDeploymentStorage(recipeBlobId: string): Promise<Depl
     const res = await fetch(blobDownloadUrl(recipeBlobId));
     if (res.status === 404 || res.status === 410) return { recipe: "unavailable", artifact: "unknown" };
     if (!res.ok) return { recipe: "unknown", artifact: "unknown" };
-    const recipe = (await res.json()) as Partial<ComponentRecipe>;
-    if (!recipe.artifactBlobId) return { recipe: "available", artifact: "unknown" };
-    return { recipe: "available", artifact: await probeBlob(recipe.artifactBlobId) };
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    if (isEnvelope(bytes)) return { recipe: "available", artifact: "unknown", confidential: true };
+    const recipe: unknown = JSON.parse(new TextDecoder().decode(bytes));
+    assertComponentRecipe(recipe);
+    return { recipe: "available", artifact: await probeBlob(recipe.artifactBlobId), confidential: false };
   } catch {
     return { recipe: "unknown", artifact: "unknown" };
   }

@@ -1,15 +1,19 @@
 //! Versioned HTTP API (`/v1`) over the materialized fleet state, plus
 //! unsigned bulk-operation transactions. The service never holds keys.
 //!
-//! Auth: bearer tokens from a file of `read|operate TOKEN` lines, compared in
-//! constant time. `operate` covers `read`. With `public_read`, GET requests
-//! need no token (for local use only).
+//! Auth: bearer tokens from a file of `read|support|operate TOKEN` lines,
+//! compared in constant time. `support` covers `read` and adds device log
+//! search and diagnostic bundles (SF-020, each access audited); `operate`
+//! covers both. With `public_read`, GET requests need no token, except the
+//! support routes (for local use only). Device telemetry ingress
+//! (`POST /v1/telemetry`, SF-019) takes no token: each snapshot carries the
+//! device's own signature, checked against its registry identity.
 use crate::chain::Chain;
 use crate::store::{self, Filter, Readers};
 use crate::txbuild;
 use axum::{
-    extract::{Path, Query, Request, State},
-    http::{header, Method, StatusCode},
+    extract::{DefaultBodyLimit, Path, Query, Request, State},
+    http::{header, HeaderValue, Method, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -22,7 +26,16 @@ use std::sync::Arc;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Scope {
     Read,
+    Support,
     Operate,
+}
+
+/// The caller's scope and token fingerprint, set by [`auth`] for handlers.
+#[derive(Debug, Clone)]
+pub struct Granted {
+    pub scope: Option<Scope>,
+    /// First 16 hex digits of the token's Blake2b-256 digest (for the audit log).
+    pub fingerprint: String,
 }
 
 #[derive(Clone)]
@@ -38,12 +51,13 @@ impl Tokens {
             }
             let (scope, token) = line.split_once(char::is_whitespace).ok_or_else(|| {
                 anyhow::anyhow!(
-                    "token file line {}: expected `read|operate TOKEN`",
+                    "token file line {}: expected `read|support|operate TOKEN`",
                     number + 1
                 )
             })?;
             let scope = match scope {
                 "read" => Scope::Read,
+                "support" => Scope::Support,
                 "operate" => Scope::Operate,
                 other => anyhow::bail!("token file line {}: unknown scope {other}", number + 1),
             };
@@ -85,6 +99,14 @@ pub struct AppState {
     pub call_package: String,
     pub registry: String,
     pub types: Arc<std::collections::BTreeMap<String, String>>,
+    /// Telemetry ingress and health (`--telemetry-db`); disabled when none.
+    pub telemetry: Option<Arc<crate::telemetry::Service>>,
+    /// Browser origin (the dApp) allowed to call the API (`--cors-origin`).
+    pub cors_origin: Option<String>,
+    /// Log lines kept per device (`--logs-retain`, SF-020).
+    pub logs_retain: usize,
+    /// An online device's unreported deployment alerts after this (`--stuck-after-minutes`).
+    pub stuck_after_ms: u64,
 }
 
 pub struct ApiError(StatusCode, String);
@@ -106,7 +128,7 @@ impl From<anyhow::Error> for ApiError {
 
 type ApiResult<T> = Result<T, ApiError>;
 
-async fn auth(State(state): State<AppState>, request: Request, next: Next) -> Response {
+async fn auth(State(state): State<AppState>, mut request: Request, next: Next) -> Response {
     let needed = if request.method() == Method::GET {
         Scope::Read
     } else {
@@ -126,6 +148,11 @@ async fn auth(State(state): State<AppState>, request: Request, next: Next) -> Re
         None => presented.is_none() && needed == Scope::Read && state.public_read,
     };
     if allowed {
+        let fingerprint = presented
+            .as_deref()
+            .map(|t| hex::encode(&token_digest(t)[..8]))
+            .unwrap_or_else(|| "public".into());
+        request.extensions_mut().insert(Granted { scope: granted, fingerprint });
         return next.run(request).await;
     }
     let status = if presented.is_none() || granted.is_none() {
@@ -359,7 +386,273 @@ async fn transaction(
     Ok(Json(built))
 }
 
+/// Answer CORS preflights and mark responses for the one configured origin;
+/// other origins get no CORS headers, so browsers keep blocking them.
+async fn cors(State(state): State<AppState>, request: Request, next: Next) -> Response {
+    let allowed = state.cors_origin.as_deref().filter(|origin| {
+        request.headers().get(header::ORIGIN).and_then(|o| o.to_str().ok()) == Some(*origin)
+    });
+    let Some(origin) = allowed.and_then(|o| HeaderValue::from_str(o).ok()) else {
+        return next.run(request).await;
+    };
+    let mut response = if request.method() == Method::OPTIONS {
+        let mut response = StatusCode::NO_CONTENT.into_response();
+        let headers = response.headers_mut();
+        headers.insert(header::ACCESS_CONTROL_ALLOW_METHODS, HeaderValue::from_static("GET, POST"));
+        headers.insert(header::ACCESS_CONTROL_ALLOW_HEADERS, HeaderValue::from_static("authorization, content-type"));
+        headers.insert(header::ACCESS_CONTROL_MAX_AGE, HeaderValue::from_static("600"));
+        response
+    } else {
+        next.run(request).await
+    };
+    response.headers_mut().insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, origin);
+    response.headers_mut().insert(header::VARY, HeaderValue::from_static("origin"));
+    response
+}
+
+fn telemetry_service(state: &AppState) -> ApiResult<Arc<crate::telemetry::Service>> {
+    state.telemetry.clone().ok_or_else(|| {
+        ApiError(StatusCode::NOT_FOUND, "telemetry is not enabled on this indexer (--telemetry-db)".into())
+    })
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Ingress {
+    messages: Vec<crate::telemetry::Envelope>,
+}
+
+/// Signed device snapshots; one verdict per envelope, in order.
+async fn telemetry_ingest(State(state): State<AppState>, Json(body): Json<Ingress>) -> ApiResult<Json<Value>> {
+    let service = telemetry_service(&state)?;
+    if body.messages.len() > crate::telemetry::MAX_BATCH {
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            format!("at most {} snapshots per request", crate::telemetry::MAX_BATCH),
+        ));
+    }
+    let results = blocking(&state.readers, move |index| {
+        let writer = service.writer.lock().unwrap();
+        let now = crate::telemetry::now_ms();
+        body.messages
+            .iter()
+            .map(|envelope| {
+                crate::telemetry::ingest(&writer, &service.binding, service.retain,
+                    |id| store::read_device(index, id), envelope, now)
+            })
+            .collect::<anyhow::Result<Vec<_>>>()
+    })
+    .await?;
+    Ok(Json(json!({ "results": results })))
+}
+
+/// Status, last seen time and inventory of each device the filter selects.
+async fn health(State(state): State<AppState>, Query(query): Query<ListQuery>) -> ApiResult<Json<Value>> {
+    let service = telemetry_service(&state)?;
+    let filter = query.filter(&query.owner)?;
+    let (cursor, limit) = (query.cursor()?, query.limit);
+    let body = blocking(&state.readers, move |db| {
+        let page = store::list_devices(db, &filter, cursor.as_deref(), limit)?;
+        let telemetry = service.reader()?;
+        let now = crate::telemetry::now_ms();
+        let items = page
+            .items
+            .iter()
+            .map(|device| crate::telemetry::device_health(&telemetry, device, now))
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        Ok(json!({ "items": items, "next": page.next, "server_time_ms": now }))
+    })
+    .await?;
+    Ok(Json(body))
+}
+
+/// Fleet aggregate: how many selected devices are in each status.
+async fn health_summary(State(state): State<AppState>, Query(query): Query<ListQuery>) -> ApiResult<Json<Value>> {
+    let service = telemetry_service(&state)?;
+    let filter = query.filter(&query.owner)?;
+    let body = blocking(&state.readers, move |db| {
+        let telemetry = service.reader()?;
+        let now = crate::telemetry::now_ms();
+        let mut counts = std::collections::BTreeMap::<String, u64>::new();
+        for status in ["healthy", "degraded", "offline", "unreported"] {
+            counts.insert(status.into(), 0);
+        }
+        let mut cursor = None;
+        loop {
+            let page = store::list_devices(db, &filter, cursor.as_deref(), Some(store::MAX_LIMIT))?;
+            for device in &page.items {
+                let status = crate::telemetry::device_health(&telemetry, device, now)?.assessment.status;
+                let name = serde_json::to_value(status)?.as_str().unwrap_or_default().to_owned();
+                *counts.entry(name).or_default() += 1;
+            }
+            match page.next {
+                Some(next) => cursor = Some(next),
+                None => break,
+            }
+        }
+        let total: u64 = counts.values().sum();
+        Ok(json!({ "total": total, "counts": counts, "server_time_ms": now }))
+    })
+    .await?;
+    Ok(Json(body))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct HistoryQuery {
+    before: Option<u64>,
+    limit: Option<usize>,
+}
+
+/// A device's stored snapshots (signed, as received), newest first.
+async fn telemetry_history(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(query): Query<HistoryQuery>,
+) -> ApiResult<Json<Value>> {
+    let service = telemetry_service(&state)?;
+    let id = id_param(&Some(id), "device")?.unwrap();
+    let limit = query.limit.unwrap_or(50).clamp(1, store::MAX_LIMIT);
+    let items = blocking(&state.readers, move |_| {
+        crate::telemetry::history(&service.reader()?, &id, query.before, limit)
+    })
+    .await?;
+    let next = (items.len() == limit).then(|| items.last().map(|r| r.seq)).flatten();
+    Ok(Json(json!({ "items": items, "next": next })))
+}
+
+fn token_digest(bytes: &[u8]) -> [u8; 32] {
+    *sui_sdk_types::hash::Hasher::digest(bytes).inner()
+}
+
+/// Signed device log batches (SF-020); one verdict per envelope, in order.
+async fn logs_ingest(State(state): State<AppState>, Json(body): Json<Ingress>) -> ApiResult<Json<Value>> {
+    let service = telemetry_service(&state)?;
+    if body.messages.len() > crate::telemetry::MAX_BATCH {
+        return Err(ApiError(StatusCode::BAD_REQUEST, format!("at most {} batches per request", crate::telemetry::MAX_BATCH)));
+    }
+    let retain = state.logs_retain;
+    let results = blocking(&state.readers, move |index| {
+        let writer = service.writer.lock().unwrap();
+        let now = crate::telemetry::now_ms();
+        body.messages
+            .iter()
+            .map(|envelope| crate::logs::ingest(&writer, &service.binding, retain, |id| store::read_device(index, id), envelope, now))
+            .collect::<anyhow::Result<Vec<_>>>()
+    })
+    .await?;
+    Ok(Json(json!({ "results": results })))
+}
+
+/// Support routes: a `support` (or `operate`) token, never public, audited.
+fn support(granted: &Granted) -> ApiResult<()> {
+    if granted.scope.is_some_and(|s| s >= Scope::Support) {
+        Ok(())
+    } else {
+        Err(ApiError(StatusCode::FORBIDDEN, "device logs and diagnostics need a support token".into()))
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LogQuery {
+    q: Option<String>,
+    source: Option<String>,
+    since_ms: Option<u64>,
+    /// `SEQ:IDX` from a previous page's `next`.
+    before: Option<String>,
+    limit: Option<usize>,
+}
+
+/// A device's redacted log lines, newest first.
+async fn device_logs(
+    State(state): State<AppState>,
+    axum::Extension(granted): axum::Extension<Granted>,
+    Path(id): Path<String>,
+    Query(query): Query<LogQuery>,
+) -> ApiResult<Json<Value>> {
+    support(&granted)?;
+    let service = telemetry_service(&state)?;
+    let id = id_param(&Some(id), "device")?.unwrap();
+    let before = match &query.before {
+        Some(text) => {
+            let (seq, idx) = text.split_once(':').ok_or_else(|| ApiError(StatusCode::BAD_REQUEST, "before must be SEQ:IDX".into()))?;
+            Some((seq.parse().map_err(|_| ApiError(StatusCode::BAD_REQUEST, "bad before".into()))?,
+                  idx.parse().map_err(|_| ApiError(StatusCode::BAD_REQUEST, "bad before".into()))?))
+        }
+        None => None,
+    };
+    let search = crate::logs::Search {
+        q: query.q.clone().filter(|q| !q.is_empty()).map(|q| q.chars().take(200).collect()),
+        source: query.source.clone(),
+        since_ms: query.since_ms,
+        before,
+        limit: query.limit.unwrap_or(200).clamp(1, store::MAX_LIMIT),
+    };
+    let detail = json!({ "q": search.q, "source": search.source, "since_ms": search.since_ms, "limit": search.limit });
+    let limit = search.limit;
+    let items = blocking(&state.readers, move |_| {
+        let now = crate::telemetry::now_ms();
+        crate::logs::audit(&service.writer.lock().unwrap(), &granted.fingerprint, "logs", Some(&id), &detail, now)?;
+        crate::logs::search(&service.reader()?, &id, &search)
+    })
+    .await?;
+    let next = (items.len() == limit).then(|| items.last().map(|l| format!("{}:{}", l.seq, l.idx))).flatten();
+    Ok(Json(json!({ "items": items, "next": next })))
+}
+
+/// A device's diagnostic bundle, assembled from stored data.
+async fn device_diagnostics(
+    State(state): State<AppState>,
+    axum::Extension(granted): axum::Extension<Granted>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Value>> {
+    support(&granted)?;
+    let service = telemetry_service(&state)?;
+    let id = id_param(&Some(id), "device")?.unwrap();
+    let stuck = state.stuck_after_ms;
+    let body = blocking(&state.readers, move |index| {
+        let device = store::read_device(index, &id)?.ok_or_else(|| anyhow::anyhow!("unknown device {id}"))?;
+        let now = crate::telemetry::now_ms();
+        crate::logs::audit(&service.writer.lock().unwrap(), &granted.fingerprint, "diagnostics", Some(&id), &json!({}), now)?;
+        crate::logs::bundle(index, &service.reader()?, &device, now, stuck)
+    })
+    .await?;
+    Ok(Json(body))
+}
+
+/// The support audit log (an `operate` token).
+async fn support_audit(
+    State(state): State<AppState>,
+    axum::Extension(granted): axum::Extension<Granted>,
+    Query(query): Query<HistoryQuery>,
+) -> ApiResult<Json<Value>> {
+    if granted.scope != Some(Scope::Operate) {
+        return Err(ApiError(StatusCode::FORBIDDEN, "the support audit log needs an operate token".into()));
+    }
+    let service = telemetry_service(&state)?;
+    let limit = query.limit.unwrap_or(100).clamp(1, store::MAX_LIMIT);
+    let items = blocking(&state.readers, move |_| crate::logs::audit_log(&service.reader()?, limit)).await?;
+    Ok(Json(json!({ "items": items })))
+}
+
+/// Actionable alerts for the devices the filter selects.
+async fn alerts(State(state): State<AppState>, Query(query): Query<ListQuery>) -> ApiResult<Json<Value>> {
+    let service = telemetry_service(&state)?;
+    let filter = query.filter(&query.owner)?;
+    let stuck = state.stuck_after_ms;
+    let body = blocking(&state.readers, move |index| {
+        let now = crate::telemetry::now_ms();
+        let items = crate::alerts::fleet(index, &service.reader()?, &filter, now, stuck)?;
+        Ok(json!({ "items": items, "server_time_ms": now }))
+    })
+    .await?;
+    Ok(Json(body))
+}
+
 pub fn router(state: AppState) -> Router {
+    // Signature-authenticated, so outside the bearer-token layer.
+    let ingress = Router::new()
+        .route("/v1/telemetry", post(telemetry_ingest))
+        .route("/v1/logs", post(logs_ingest))
+        .layer(DefaultBodyLimit::max(2 * 1024 * 1024));
     Router::new()
         .route("/v1/status", get(status))
         .route("/v1/devices", get(devices))
@@ -370,13 +663,130 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/deployments/{id}", get(deployment))
         .route("/v1/changes", get(changes))
         .route("/v1/transactions/{operation}", post(transaction))
+        .route("/v1/health", get(health))
+        .route("/v1/health/summary", get(health_summary))
+        .route("/v1/devices/{id}/telemetry", get(telemetry_history))
+        .route("/v1/devices/{id}/logs", get(device_logs))
+        .route("/v1/devices/{id}/diagnostics", get(device_diagnostics))
+        .route("/v1/support/audit", get(support_audit))
+        .route("/v1/alerts", get(alerts))
         .layer(middleware::from_fn_with_state(state.clone(), auth))
+        .merge(ingress)
+        .layer(middleware::from_fn_with_state(state.clone(), cors))
         .with_state(state)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::telemetry::tests as fixture;
+    use tower::ServiceExt;
+
+    const READ: &str = "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr";
+    const SUPPORT: &str = "ssssssssssssssssssssssssssssssss";
+    const OPERATE: &str = "oooooooooooooooooooooooooooooooo";
+
+    fn app(dir: &std::path::Path, telemetry: bool) -> Router {
+        let index = dir.join("fleet.db");
+        let mut db = store::open(&index).unwrap();
+        let tx = db.transaction().unwrap();
+        store::put_device(&tx, &fixture::device(&fixture::address(&fixture::KEY)), None).unwrap();
+        tx.commit().unwrap();
+        let service = telemetry.then(|| {
+            let path = dir.join("telemetry.db");
+            let writer = crate::telemetry::open(&path, &fixture::binding(), false).unwrap();
+            Arc::new(crate::telemetry::Service { path, binding: fixture::binding(), retain: 10, writer: std::sync::Mutex::new(writer) })
+        });
+        router(AppState {
+            readers: Readers::new(&index),
+            tokens: Tokens::parse(&format!("read {READ}\nsupport {SUPPORT}\noperate {OPERATE}\n")).unwrap(),
+            public_read: false,
+            chain: Chain::new("http://127.0.0.1:9").unwrap(),
+            call_package: String::new(),
+            registry: fixture::binding().registry,
+            types: Arc::new(Default::default()),
+            telemetry: service,
+            cors_origin: Some("https://dapp.example".into()),
+            logs_retain: 100,
+            stuck_after_ms: crate::alerts::DEFAULT_STUCK_AFTER_MS,
+        })
+    }
+
+    async fn call(app: &Router, method: &str, uri: &str, headers: &[(&str, &str)], body: Option<Value>) -> (StatusCode, axum::http::HeaderMap, Value) {
+        let mut request = axum::http::Request::builder().method(method).uri(uri);
+        for (name, value) in headers {
+            request = request.header(*name, *value);
+        }
+        let request = match body {
+            Some(body) => request.header("content-type", "application/json").body(axum::body::Body::from(body.to_string())),
+            None => request.body(axum::body::Body::empty()),
+        }
+        .unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        let (status, headers) = (response.status(), response.headers().clone());
+        let bytes = axum::body::to_bytes(response.into_body(), 1 << 20).await.unwrap();
+        (status, headers, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    }
+
+    #[tokio::test]
+    async fn telemetry_routes_authenticate_by_signature_and_token() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(dir.path(), true);
+        let now = crate::telemetry::now_ms();
+        let bearer = format!("Bearer {READ}");
+        // Ingress needs no token: the signature authenticates.
+        let envelope = fixture::sign(&fixture::snapshot(now, now), &fixture::KEY);
+        let (status, _, body) = call(&app, "POST", "/v1/telemetry", &[], Some(json!({ "messages": [envelope.clone(), envelope] }))).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["results"][0]["status"], "accepted");
+        assert_eq!(body["results"][1]["status"], "duplicate");
+        let forged = fixture::sign(&fixture::snapshot(now + 1, now), &[8; 32]);
+        let (_, _, body) = call(&app, "POST", "/v1/telemetry", &[], Some(json!({ "messages": [forged] }))).await;
+        assert_eq!(body["results"][0]["status"], "rejected");
+        let many = vec![fixture::sign(&fixture::snapshot(now, now), &fixture::KEY); crate::telemetry::MAX_BATCH + 1];
+        assert_eq!(call(&app, "POST", "/v1/telemetry", &[], Some(json!({ "messages": many }))).await.0, StatusCode::BAD_REQUEST);
+        // A token does not replace the signature check, and reads still need one.
+        assert_eq!(call(&app, "GET", "/v1/health", &[], None).await.0, StatusCode::UNAUTHORIZED);
+        let (status, _, body) = call(&app, "GET", "/v1/health", &[("authorization", &bearer)], None).await;
+        assert_eq!(status, StatusCode::OK);
+        let item = &body["items"][0];
+        assert_eq!((item["status"].as_str(), item["codes"].as_array().map(Vec::len)), (Some("healthy"), Some(0)), "{item}");
+        assert_eq!(item["report"]["seq"], now);
+        assert!(item["report"]["message"].is_string() && item["report"]["signature"].is_string());
+        assert_eq!(item["components"][0]["name"], "fw");
+        assert!(body["server_time_ms"].as_u64().unwrap() >= now);
+        let owner = crate::chain::normalize("0x0a").unwrap();
+        let (_, _, summary) = call(&app, "GET", &format!("/v1/health/summary?owner={owner}"), &[("authorization", &bearer)], None).await;
+        assert_eq!((summary["total"].as_u64(), summary["counts"]["healthy"].as_u64()), (Some(1), Some(1)), "{summary}");
+        let (_, _, summary) = call(&app, "GET", "/v1/health/summary?owner=0x0b", &[("authorization", &bearer)], None).await;
+        assert_eq!(summary["total"], 0);
+        let device = crate::chain::normalize("0xd1").unwrap();
+        let (_, _, history) = call(&app, "GET", &format!("/v1/devices/{device}/telemetry"), &[("authorization", &bearer)], None).await;
+        assert_eq!(history["items"].as_array().unwrap().len(), 1);
+        assert_eq!(history["next"], Value::Null);
+        // CORS only for the configured origin; preflight answered before auth.
+        let (status, headers, _) = call(&app, "OPTIONS", "/v1/health", &[("origin", "https://dapp.example")], None).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        assert_eq!(headers[header::ACCESS_CONTROL_ALLOW_ORIGIN], "https://dapp.example");
+        let (_, headers, _) = call(&app, "GET", "/v1/health", &[("origin", "https://dapp.example"), ("authorization", &bearer)], None).await;
+        assert_eq!(headers[header::ACCESS_CONTROL_ALLOW_ORIGIN], "https://dapp.example");
+        let (status, headers, _) = call(&app, "OPTIONS", "/v1/health", &[("origin", "https://evil.example")], None).await;
+        assert!(status != StatusCode::NO_CONTENT && !headers.contains_key(header::ACCESS_CONTROL_ALLOW_ORIGIN));
+        // Without a telemetry database the routes say so.
+        let disabled = self::app(&dir.path().join("off").tap_dir(), false);
+        assert_eq!(call(&disabled, "POST", "/v1/telemetry", &[], Some(json!({ "messages": [] }))).await.0, StatusCode::NOT_FOUND);
+        assert_eq!(call(&disabled, "GET", "/v1/health", &[("authorization", &bearer)], None).await.0, StatusCode::NOT_FOUND);
+    }
+
+    trait TapDir {
+        fn tap_dir(self) -> Self;
+    }
+    impl TapDir for std::path::PathBuf {
+        fn tap_dir(self) -> Self {
+            std::fs::create_dir_all(&self).unwrap();
+            self
+        }
+    }
 
     #[test]
     fn token_scopes_and_file_validation() {
@@ -412,5 +822,42 @@ mod tests {
         assert!(Tokens::parse("admin abc").is_err());
         assert!(Tokens::parse("read short").is_err());
         assert!(Tokens::parse("read").is_err());
+    }
+
+    #[tokio::test]
+    async fn logs_need_a_support_token_and_every_access_is_audited() {
+        use crate::logs::tests::{batch, sign};
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(dir.path(), true);
+        let envelope = sign(&batch(1, &[("daemon", "apply failed: token=abc"), ("component:app", "ready")]), &fixture::KEY);
+        let (status, _, body) = call(&app, "POST", "/v1/logs", &[], Some(json!({ "messages": [envelope] }))).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["results"][0]["status"], "accepted", "{body}");
+        let device = crate::chain::normalize("0xd1").unwrap();
+        let logs = format!("/v1/devices/{device}/logs?q=failed");
+        assert_eq!(call(&app, "GET", &logs, &[], None).await.0, StatusCode::UNAUTHORIZED);
+        let read = format!("Bearer {READ}");
+        assert_eq!(call(&app, "GET", &logs, &[("authorization", &read)], None).await.0, StatusCode::FORBIDDEN);
+        let support = format!("Bearer {SUPPORT}");
+        let (status, _, body) = call(&app, "GET", &logs, &[("authorization", &support)], None).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["items"].as_array().unwrap().len(), 1);
+        assert_eq!(body["items"][0]["line"], "apply failed: token=[REDACTED]");
+        let (status, _, bundle) = call(&app, "GET", &format!("/v1/devices/{device}/diagnostics"), &[("authorization", &support)], None).await;
+        assert_eq!(status, StatusCode::OK, "{bundle}");
+        assert_eq!(bundle["log_stats"]["lines"], 2);
+        assert!(bundle["health"]["status"].is_string() && bundle["deployments"].is_array() && bundle["alerts"].is_array());
+        // The audit log names the token fingerprint, never the token.
+        assert_eq!(call(&app, "GET", "/v1/support/audit", &[("authorization", &support)], None).await.0, StatusCode::FORBIDDEN);
+        let operate = format!("Bearer {OPERATE}");
+        let (status, _, audit) = call(&app, "GET", "/v1/support/audit", &[("authorization", &operate)], None).await;
+        assert_eq!(status, StatusCode::OK);
+        let routes: Vec<_> = audit["items"].as_array().unwrap().iter().map(|e| e["route"].as_str().unwrap().to_owned()).collect();
+        assert_eq!(routes, ["diagnostics", "logs"]);
+        assert!(!audit.to_string().contains(SUPPORT) && audit["items"][0]["token"].as_str().unwrap().len() == 16);
+        // Alerts: a read token.
+        let (status, _, alerts) = call(&app, "GET", "/v1/alerts", &[("authorization", &read)], None).await;
+        assert_eq!(status, StatusCode::OK, "{alerts}");
+        assert!(alerts["items"].is_array());
     }
 }

@@ -1,4 +1,10 @@
-# SF-029 completed SD-image build evidence
+# SF-029 older public smoke baseline
+
+**Historical artifact:** this image predates the reviewed signer-service,
+launcher and Seal-session release. It remains an older public smoke baseline,
+not evidence of current customer-ready security. Its files and hashes are kept
+for comparison; do not attribute newer source or key-isolation guarantees to
+it. The current image is described in [PI_IMAGE_REFRESH.md](PI_IMAGE_REFRESH.md).
 
 The `raspberrypi3-64` SD image completed through BitBake on 2026-10-16 UTC
 (2026-10-15 Pacific). This is a development image for the Pi 3 Model B+.

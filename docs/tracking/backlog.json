@@ -756,7 +756,8 @@
         "SF-005",
         "SF-006",
         "SF-029",
-        "SF-030"
+        "SF-030",
+        "SF-065"
       ],
       "paths": [
         "scripts/",
@@ -1325,6 +1326,791 @@
         "Publish per-release/per-device workload tables and break-even comparisons against matched AWS pricing, retention and availability. State exactly which data is measured, simulated, estimated, excluded or blocked. A partial subtotal cannot be a full bill."
       ],
       "validation": "Offline cost arithmetic/fixture tests, exact transaction effects and token-accounting evidence, independently checked read-only Mainnet rates, reproducible results and peer review. Testnet mutation only with standing wallet locks/allowances; no unauthorized Mainnet spend."
+    },
+    {
+      "key": "SF-055",
+      "title": "Reconcile implementation acceptance and publish missing compatibility work",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "baseline",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "docs",
+        "AGENTS.md"
+      ],
+      "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
+      "description": "Reconcile implementation acceptance and publish missing compatibility work. Apply the standing implementation/integration acceptance split to SF-015 and SF-019: physical Pi, actual extension-wallet and provisioned hosted-service acceptance stay in SF-010/SF-031; preserve source/security/regression/local compatibility and relevant automatic testnet CI gates.",
+      "acceptance": [
+        "Apply the standing implementation/integration acceptance split to SF-015 and SF-019: physical Pi, actual extension-wallet and provisioned hosted-service acceptance stay in SF-010/SF-031; preserve source/security/regression/local compatibility and relevant automatic testnet CI gates.",
+        "Publish and link actual AWS adapter implementation scopes for SF-038 without claiming proposed interfaces are implemented; Linux-first is a prototype phase, not a permanent exclusion of the full parity roadmap.",
+        "Reconcile stopped worker dispatch receipts with verified process/exit/owner evidence and preserve valid Review/Blocked claims; do not fabricate completion or steal claims.",
+        "Persist scoped policy and tracker changes, obtain fresh independent exact-head/base/policy reviews and leave merges to sole coordinator. Keep production signing held and physical programming unauthorized."
+      ],
+      "validation": "Offline tracking/policy/coordinator checks, source/link consistency and independently reviewed documentation. No hardware or Mainnet mutation.",
+      "resources": []
+    },
+    {
+      "key": "SF-056",
+      "title": "Repair live Sui tooling compatibility for current public testnet protocol",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "baseline",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "Dockerfile",
+        ".github/workflows",
+        "scripts",
+        "docs/TESTNET.md"
+      ],
+      "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
+      "description": "Repair live Sui tooling compatibility for current public testnet protocol. Reproduce the fresh-fixture protocol139 versus pinned CLI138 failure without assuming all cached testnet runs fail; identify and checksum-pin a compatible supported transaction CLI with explicit version/protocol evidence.",
+      "acceptance": [
+        "Reproduce the fresh-fixture protocol139 versus pinned CLI138 failure without assuming all cached testnet runs fail; identify and checksum-pin a compatible supported transaction CLI with explicit version/protocol evidence.",
+        "Add cheap read-only chain/protocol/account compatibility preflight before writes. Preserve dedicated wallets, serialized mutations, non-replenishing allowance, failure charging, encrypted state and protected CI authority.",
+        "Separate release compilation from live network submission explicitly, or deliberately upgrade the shared toolchain with bytecode/ABI/origin/lockfile regressions. test-publish/test-upgrade compile as well as submit: changing PATH must not silently change the framework or fixtures.",
+        "Include actual build/network CLI and framework provenance in evidence/fixture compatibility where required; never reuse a fixture for a different base-to-head upgrade. Verify cached and fresh-fixture acceptance with actual effects under bounded spending.",
+        "Update relevant pinned downloads/checksums, docs and regression tests; do not disable mandatory testnet statuses, inflate spend to hide faults or use the funding-only CLI as unsupported proof of compatibility."
+      ],
+      "validation": "Offline preflight/cache/toolchain regressions, real cheap protocol probes, fresh and cached public-testnet acceptance/effects and exact-head CI. No Mainnet spending.",
+      "resources": []
+    },
+    {
+      "key": "SF-057",
+      "title": "Implement scoped AWS component credential exchange",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-021",
+        "SF-027",
+        "SF-053"
+      ],
+      "paths": [
+        "suifleet-edge/src",
+        "scripts",
+        "docs"
+      ],
+      "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
+      "description": "Implement scoped AWS component credential exchange. Implement the declared SDK-compatible local credential endpoint backed by an explicitly configured separately provisioned AWS X.509 identity/provider; a Sui/Seal identity does not create AWS credentials.",
+      "acceptance": [
+        "Implement the declared SDK-compatible local credential endpoint backed by an explicitly configured separately provisioned AWS X.509 identity/provider; a Sui/Seal identity does not create AWS credentials.",
+        "Enforce deny-by-default component grants, bounded per-start tokens, caller identity, refresh/expiry/backoff and no secret logging/journaling or sibling-process access. Use SF-022 when protected distribution is selected; mock-backed adapter work need not await live AWS accounts.",
+        "Execute declared credential-provider fixtures against the actual process and unmodified supported AWS SDK clients plus a local mTLS upstream. Distinguish semantic compatibility and reference-model checks from actual adapter execution.",
+        "Retain live AWS account/service acceptance explicitly pending until authorized. No silently purchased services, production credentials or unsupported HSM/regulated-data claims."
+      ],
+      "validation": "Actual adapter/local TLS and SDK-client integration tests, wrong-caller/expiry/rotation/outage cases, scoped Rust/IPC regressions and documented live acceptance boundary.",
+      "resources": []
+    },
+    {
+      "key": "SF-058",
+      "title": "Implement Kinesis and S3 durable stream exporters",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-034",
+        "SF-057"
+      ],
+      "paths": [
+        "suifleet-edge/src",
+        "scripts",
+        "docs"
+      ],
+      "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
+      "description": "Implement Kinesis and S3 durable stream exporters. Implement explicitly configured Kinesis and S3 exporters over durable stream storage and scoped credentials using actual request/response semantics.",
+      "acceptance": [
+        "Implement explicitly configured Kinesis and S3 exporters over durable stream storage and scoped credentials using actual request/response semantics.",
+        "Handle partial success, retry/backoff, lost responses and crash-safe export checkpoints; support multipart resume/abort cleanup and configured bandwidth/batch limits without silently losing or advancing unexported data.",
+        "Run reference fixtures against the real exporter and local API emulators, including actual payload assertions and restart/failure cases. Keep SiteWise/other service exports visible as remaining roadmap work.",
+        "Record authorized live AWS service acceptance separately; emulators do not establish AWS-account behavior or complete StreamManager parity."
+      ],
+      "validation": "Actual exporter/emulator, partial-batch/multipart/crash/checkpoint/permissions tests and supported SDK/recipe integration.",
+      "resources": []
+    },
+    {
+      "key": "SF-059",
+      "title": "Implement CloudWatch component and device metrics export",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-019",
+        "SF-032",
+        "SF-057"
+      ],
+      "paths": [
+        "suifleet-edge/src",
+        "scripts",
+        "docs"
+      ],
+      "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
+      "description": "Implement CloudWatch component and device metrics export. Implement version-pinned AWS component metrics semantics with explicitly configured CloudWatch PutMetricData export using scoped credentials.",
+      "acceptance": [
+        "Implement version-pinned AWS component metrics semantics with explicitly configured CloudWatch PutMetricData export using scoped credentials.",
+        "Validate granted publishers, schema/dimensions/units, batching, timestamps, bounded durable queues and declared retry/drop behavior.",
+        "Execute metrics fixtures against the actual adapter and emulator-observed requests; demonstrate unauthorized publication, outage/restart, over-limit and rejected-record behavior.",
+        "Keep actual AWS metrics delivery pending explicit account authorization and evidence; existing Sui telemetry and fixture-only reference checks are prerequisites, not implementation proof."
+      ],
+      "validation": "Real adapter/emulator assertions, messaging/telemetry regressions and quota/restart/redaction/permission cases.",
+      "resources": []
+    },
+    {
+      "key": "SF-060",
+      "title": "Implement CloudWatch Logs export for managed components",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-020",
+        "SF-057"
+      ],
+      "paths": [
+        "suifleet-edge/src",
+        "scripts",
+        "docs"
+      ],
+      "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
+      "description": "Implement CloudWatch Logs export for managed components. Implement the declared LogManager-compatible file selection/naming and CloudWatch upload path with scoped credentials.",
+      "acceptance": [
+        "Implement the declared LogManager-compatible file selection/naming and CloudWatch upload path with scoped credentials.",
+        "Redact before durable spool, apply Unicode-safe splitting and request limits, and preserve explicit at-least-once checkpoint behavior through restart, rejection and lost responses.",
+        "Execute declared log fixtures against the actual adapter and request-checking emulator; test sibling access denial, rollover, oversize events, outage and disk limits.",
+        "Do not claim end-to-end AWS LogManager/live-service parity from local file collection or fixtures; track authorized real account acceptance explicitly."
+      ],
+      "validation": "Actual adapter, spool/checkpoint, request-shape and failure-path tests plus diagnostics/permissions regressions.",
+      "resources": []
+    },
+    {
+      "key": "SF-061",
+      "title": "Implement AWS IoT Core bridge and shadow connection",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-032",
+        "SF-033",
+        "SF-021"
+      ],
+      "paths": [
+        "suifleet-edge/src",
+        "scripts",
+        "docs"
+      ],
+      "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
+      "description": "Implement AWS IoT Core bridge and shadow connection. Implement the declared AWS IoT connection using explicitly configured separate AWS thing certificates/keys and endpoints; retain Sui device identity as a separate trust domain.",
+      "acceptance": [
+        "Implement the declared AWS IoT connection using explicitly configured separate AWS thing certificates/keys and endpoints; retain Sui device identity as a separate trust domain.",
+        "Support mTLS/ALPN where required, ACL enforcement, connection recovery, certificate rotation, IotCore topic routes and version/conflict-aware shadow reconciliation.",
+        "Run actual adapter against a local TLS broker and AWS-shaped shadow harness, including unauthorized identities/topics, reconnect/outage and credential rotation.",
+        "Record service/account-specific AWS acceptance separately; Linux-first implementation is phased support rather than a permanent platform exclusion."
+      ],
+      "validation": "Actual broker/bridge/shadow adapter tests, TLS identity/ACL/rotation/recovery regressions and explicit unrun live-account cases.",
+      "resources": []
+    },
+    {
+      "key": "SF-062",
+      "title": "Implement Device Defender device-side metrics export",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-019",
+        "SF-061"
+      ],
+      "paths": [
+        "suifleet-edge/src",
+        "scripts",
+        "docs"
+      ],
+      "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
+      "description": "Implement Device Defender device-side metrics export. Implement a version/schema-pinned Device Defender device-side metrics component and AWS topic export using the configured IoT connection.",
+      "acceptance": [
+        "Implement a version/schema-pinned Device Defender device-side metrics component and AWS topic export using the configured IoT connection.",
+        "Enforce bounded configured sampling, correct accepted/rejected handling, authorization and disconnected buffering/retry behavior.",
+        "Run executable schema/topic fixtures against the real adapter; do not present the AWS server-side Detect service as locally replicated or covered by this device component."
+      ],
+      "validation": "Actual metrics/topic adapter, sampling/rejection/disconnection tests and explicit authorized live AWS acceptance gaps.",
+      "resources": []
+    },
+    {
+      "key": "SF-063",
+      "title": "Package and supervise a configured secure-tunneling destination adapter",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-025",
+        "SF-014",
+        "SF-027",
+        "SF-061"
+      ],
+      "paths": [
+        "suifleet-edge/src",
+        "scripts",
+        "docs"
+      ],
+      "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
+      "description": "Package and supervise a configured secure-tunneling destination adapter. Provide explicitly enabled, allow-listed local-service destination proxy lifecycle using the selected platform tunnel configuration and AWS-shaped notifications.",
+      "acceptance": [
+        "Provide explicitly enabled, allow-listed local-service destination proxy lifecycle using the selected platform tunnel configuration and AWS-shaped notifications.",
+        "Protect ephemeral tokens, restrict destinations/callers, bound sessions/concurrency/timeouts, and stop/revoke/clean up correctly after failures or component replacement. Platform scripts/admins own SSH daemon, firewall and service configuration.",
+        "Exercise actual supervised proxy/process with stub notifications/tunnel endpoint, denied targets, token leakage negatives and connection failures. This does not authorize arbitrary remote commands or SuiFleet-driven platform reboot.",
+        "Record real AWS tunnel acceptance separately until account/network authorization exists. Do not permanently exclude remote-access components merely because platform configuration remains platform-owned."
+      ],
+      "validation": "Actual process supervision/proxy, token/ACL/timeout/restart/cleanup tests and separately evidenced live service integration.",
+      "resources": []
+    },
+    {
+      "key": "SF-064",
+      "title": "Complete remaining managed-component functional compatibility roadmap",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-038"
+      ],
+      "paths": [
+        "docs",
+        "interfaces/compat",
+        "scripts"
+      ],
+      "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
+      "description": "Complete remaining managed-component functional compatibility roadmap. Keep Lambda invocation/subscriptions, industrial/SiteWise/Kinesis-video functions, ML example-equivalent packaging and platform expansion visible as missing functional work, not user-approved permanent exclusions.",
+      "acceptance": [
+        "Keep Lambda invocation/subscriptions, industrial/SiteWise/Kinesis-video functions, ML example-equivalent packaging and platform expansion visible as missing functional work, not user-approved permanent exclusions.",
+        "Define versioned executable semantics and split each selected implementation scope into concrete Codex-published issues with dependencies and acceptance before claiming roadmap closure. Reuse existing tickets where actual implementation scope already exists.",
+        "Linux x86_64/aarch64/arm is the initial prototype phase; other platforms remain tracked gaps unless the user explicitly changes the full parity goal. Respect upstream licensing through clean-room functional alternatives without relabeling native wrappers as existing compatibility.",
+        "Preserve separate reference-model, actual-adapter and authorized live service/hardware evidence; no whole-catalog parity claim from seven adapter tickets or fixture checks."
+      ],
+      "validation": "Reviewed capability-to-ticket matrix and executable specifications, no false implemented/runtime/full-parity claims.",
+      "resources": []
+    },
+    {
+      "key": "SF-065",
+      "title": "Implement offline wallet-to-edge acceptance harness",
+      "priority": "P1",
+      "area": "clients",
+      "phase": "baseline",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-030"
+      ],
+      "paths": [
+        "scripts",
+        "tests",
+        "docs"
+      ],
+      "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
+      "description": "Implement offline wallet-to-edge acceptance harness. Implement the missing SF-031 harness and deterministic local-network/Testnet profiles without requiring a physical Pi to write or test the runner. Physical Pi hardware, bootable target image and target acceptance are deferred separately and do not block this offline software harness.",
+      "acceptance": [
+        "Implement the missing SF-031 harness and deterministic local-network/Testnet profiles without requiring a physical Pi to write or test the runner.",
+        "Validate explicit device/SSH/manifest/accounts/endpoints, preserve keys/journals, generate isolated test-component artifacts and verify digests and reported results. Support offline harness tests and an explicit hardware execution mode with hardware lock only while actually used.",
+        "Support public-artifact baseline and a clearly pending SF-022 encrypted profile; separate real extension-wallet steps from scripted wallet/test-account automation. Missing physical or extension evidence cannot become a fake pass.",
+        "Keep SF-031/#32 open for actual physical/wallet/network acceptance after this implementation merges; no disk flashing, guessed target, unapproved Mainnet or production credential use."
+      ],
+      "validation": "Offline runner/protocol/command/failure-path tests and local simulator execution; exact public-testnet checks where relevant/available. Physical Pi and extension acceptance explicitly remain in SF031.",
+      "resources": []
+    },
+    {
+      "key": "SF-066",
+      "title": "Refresh the Pi image to a coherent reviewed signer-service release",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "baseline",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-029",
+        "SF-053",
+        "SF-026"
+      ],
+      "paths": [
+        "kas",
+        "suifleet-edge/meta-suifleet",
+        "scripts",
+        "docs"
+      ],
+      "evidence": "User requests restoring progress; tracker/specification audit identified this missing executable scope. Existing implementation foundations do not establish this acceptance.",
+      "description": "Refresh the Pi image to a coherent reviewed signer-service release. Update the fixed daemon source revision, crate include and Cargo.lock digest together to a coherent reviewed release containing the signer-service and self-update integration. Preserve the existing image as a labeled older public smoke baseline, not evidence of current customer-ready security.",
+      "acceptance": [
+        "Update the fixed daemon source revision, crate include and Cargo.lock digest together to a coherent reviewed release containing the signer-service and self-update integration. Preserve the existing image as a labeled older public smoke baseline, not evidence of current customer-ready security.",
+        "Build the actual raspberrypi3-64 BitBake SD image using pinned layers/toolchains, include all required launcher/signer/service binaries and permissions, and inspect identity/session credential separation and public-key SSH/DHCP first-boot state.",
+        "Publish new checksum/package manifest/build provenance and version compatibility checks; no device keys/enrollment secrets in image. Actual build and filesystem checks are required, not an SSH binary copy.",
+        "No physical Pi is needed to build; preserve physical flashing/boot/network/recovery acceptance in SF031. Do not program a device or silently override platform reboot/updater ownership."
+      ],
+      "validation": "Real BitBake image build, artifact/rootfs/service/permissions and manifest/client compatibility inspection; exact source/image/binary hashes and explicit deferred physical tests.",
+      "resources": []
+    },
+    {
+      "key": "SF-067",
+      "title": "Recover stopped automation capacity without losing ticket ownership",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "baseline",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator",
+        "docs/PR_COORDINATION.md",
+        "AGENTS.md"
+      ],
+      "resources": [],
+      "description": "Make implementation and review automation robust to stopped workers and blocked work so eligible tickets keep progressing.",
+      "evidence": "User requests robust automation and no unused workers; expired/orphaned reservations currently consume family capacity despite stopped processes.",
+      "acceptance": [
+        "Separate verified stopped blocked jobs from active worker capacity while preserving their ticket reservations and evidence.",
+        "Reconcile durable completed handoffs after service restarts and revisit orphan records safely; process identity and live-worker checks must prevent duplicate mutation workers.",
+        "Keep ambiguous claims isolated and visible without permanently consuming unrelated implementation capacity; bound concurrency for genuinely running workers and never auto-reclaim uncertain ownership.",
+        "Provide regression tests for dead/live/PID-reused wrappers, blocked results, restart reconciliation and ownership changes; document diagnostics and deploy reviewed automation changes."
+      ],
+      "validation": "Dispatcher/coordinator regression tests, offline tracking validation, service status and operational capacity evidence; no relaxed review or acceptance gates."
+    },
+    {
+      "key": "SF-068",
+      "title": "Defer physical Pi and target-image acceptance without blocking software delivery",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "baseline",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "AGENTS.md",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Apply the user instruction that Pi work must not block software progress; target issues can be resolved later.",
+      "evidence": "User explicitly requests no Pi blocking and allows working through target issues later.",
+      "acceptance": [
+        "Keep physical Pi boot, networking, power-loss and target-only integration acceptance open in SF031 without blocking unrelated software implementation or merge.",
+        "Place refreshed target-image build SF066 on hold and retain its incomplete build evidence; do not claim a new image exists or remove real software API dependencies.",
+        "Apply physical-target-only deferrals to existing and future software implementation tickets in checked-in and running acceptance policy, retaining source/security/local tests and normal automatic testnet gates.",
+        "Remove target-image prerequisites from the offline harness specification; preserve real fixture/component requirements and publish policy notes on affected PRs."
+      ],
+      "validation": "Offline tracking and policy consistency checks, dependency audit, independent documentation review; no physical hardware or new image required."
+    },
+    {
+      "key": "SF-069",
+      "title": "Implement clean-room Lambda invocation and legacy subscriptions",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-014",
+        "SF-027",
+        "SF-032",
+        "SF-037"
+      ],
+      "paths": [
+        "suifleet-edge",
+        "scripts",
+        "interfaces/compat",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Version invocation envelopes, long-lived versus on-demand lifecycle, event subscriptions, timeout/concurrency/isolation and error responses. Execute real function processes and subscription routing; generic run wrappers alone do not establish Lambda compatibility.",
+      "evidence": "SF-064 audit identifies this remaining Greengrass functional scope; existing native foundations and reference fixtures are not runtime implementation evidence.",
+      "acceptance": [
+        "Version invocation envelopes, long-lived versus on-demand lifecycle, event subscriptions, timeout/concurrency/isolation and error responses. Execute real function processes and subscription routing; generic run wrappers alone do not establish Lambda compatibility.",
+        "Pin and review exact upstream semantic/version references before implementation; preserve clean-room licensing and distinguish specification/reference models from actual component execution.",
+        "Provide meaningful local/emulator/software-runner failure and recovery evidence. Physical Pi/target acceptance is deferred under user direction; normal authorized testnet CI remains required where relevant.",
+        "Track authorized live AWS acceptance separately. No AWS account mutations, paid services, production credentials, physical programming or unsupported full-parity claims are authorized."
+      ],
+      "validation": "Function invocation, payload/error/timeout, duplicate/subscription, permissions and process-restart fixtures; clean-room licensing boundary."
+    },
+    {
+      "key": "SF-070",
+      "title": "Implement industrial Modbus and OPC UA collection with a simulator",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-027",
+        "SF-032",
+        "SF-034"
+      ],
+      "paths": [
+        "suifleet-edge",
+        "scripts",
+        "interfaces/compat",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Implement versioned configured polling/subscription, data typing/timestamps/quality and authenticated collector output. Provide deterministic local Modbus and OPC UA server simulators; bound polling/reconnect/backpressure and preserve configured protocol security.",
+      "evidence": "SF-064 audit identifies this remaining Greengrass functional scope; existing native foundations and reference fixtures are not runtime implementation evidence.",
+      "acceptance": [
+        "Implement versioned configured polling/subscription, data typing/timestamps/quality and authenticated collector output. Provide deterministic local Modbus and OPC UA server simulators; bound polling/reconnect/backpressure and preserve configured protocol security.",
+        "Pin and review exact upstream semantic/version references before implementation; preserve clean-room licensing and distinguish specification/reference models from actual component execution.",
+        "Provide meaningful local/emulator/software-runner failure and recovery evidence. Physical Pi/target acceptance is deferred under user direction; normal authorized testnet CI remains required where relevant.",
+        "Track authorized live AWS acceptance separately. No AWS account mutations, paid services, production credentials, physical programming or unsupported full-parity claims are authorized."
+      ],
+      "validation": "Actual collector-to-simulator interoperability, wrong credentials, malformed data, disconnect, resubscription and durable stream tests."
+    },
+    {
+      "key": "SF-071",
+      "title": "Implement SiteWise-compatible edge processing and publishing",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-070",
+        "SF-034",
+        "SF-057"
+      ],
+      "paths": [
+        "suifleet-edge",
+        "scripts",
+        "interfaces/compat",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Define independently reviewed SiteWise measurement/property/alias mapping, processing and buffering semantics, and implement configured publishing with bounded credentials. Validate actual request bodies and checkpoints against a local service emulator; collectors alone are not SiteWise delivery.",
+      "evidence": "SF-064 audit identifies this remaining Greengrass functional scope; existing native foundations and reference fixtures are not runtime implementation evidence.",
+      "acceptance": [
+        "Define independently reviewed SiteWise measurement/property/alias mapping, processing and buffering semantics, and implement configured publishing with bounded credentials. Validate actual request bodies and checkpoints against a local service emulator; collectors alone are not SiteWise delivery.",
+        "Pin and review exact upstream semantic/version references before implementation; preserve clean-room licensing and distinguish specification/reference models from actual component execution.",
+        "Provide meaningful local/emulator/software-runner failure and recovery evidence. Physical Pi/target acceptance is deferred under user direction; normal authorized testnet CI remains required where relevant.",
+        "Track authorized live AWS acceptance separately. No AWS account mutations, paid services, production credentials, physical programming or unsupported full-parity claims are authorized."
+      ],
+      "validation": "Transformation/quality/time tests, partial failures, rejected records, restart/checkpoints and request-checking emulator evidence; live AWS acceptance separate."
+    },
+    {
+      "key": "SF-072",
+      "title": "Implement Kinesis Video edge ingestion and durable upload",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-034",
+        "SF-057"
+      ],
+      "paths": [
+        "suifleet-edge",
+        "scripts",
+        "interfaces/compat",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Version the configured media ingestion, stream credentials and fragment/session semantics. Implement actual media path with bounded buffering, reconnect/backpressure and restart recovery; generic file streaming is not Kinesis Video compatibility.",
+      "evidence": "SF-064 audit identifies this remaining Greengrass functional scope; existing native foundations and reference fixtures are not runtime implementation evidence.",
+      "acceptance": [
+        "Version the configured media ingestion, stream credentials and fragment/session semantics. Implement actual media path with bounded buffering, reconnect/backpressure and restart recovery; generic file streaming is not Kinesis Video compatibility.",
+        "Pin and review exact upstream semantic/version references before implementation; preserve clean-room licensing and distinguish specification/reference models from actual component execution.",
+        "Provide meaningful local/emulator/software-runner failure and recovery evidence. Physical Pi/target acceptance is deferred under user direction; normal authorized testnet CI remains required where relevant.",
+        "Track authorized live AWS acceptance separately. No AWS account mutations, paid services, production credentials, physical programming or unsupported full-parity claims are authorized."
+      ],
+      "validation": "Deterministic media source and local protocol emulator verifying fragments/timestamps, interruption, expiry, rejection and replay semantics."
+    },
+    {
+      "key": "SF-073",
+      "title": "Package reproducible ML inference runtimes and classifier/detector examples",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-011",
+        "SF-023"
+      ],
+      "paths": [
+        "suifleet-edge",
+        "scripts",
+        "interfaces/compat",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Provide authenticated model/runtime components and executable classification/detection examples with pinned model/runtime versions, declared preprocessing/output tolerances and per-platform selection. Verify digests and licenses; no unsupported SageMaker service or generic-wrapper compatibility claim.",
+      "evidence": "SF-064 audit identifies this remaining Greengrass functional scope; existing native foundations and reference fixtures are not runtime implementation evidence.",
+      "acceptance": [
+        "Provide authenticated model/runtime components and executable classification/detection examples with pinned model/runtime versions, declared preprocessing/output tolerances and per-platform selection. Verify digests and licenses; no unsupported SageMaker service or generic-wrapper compatibility claim.",
+        "Pin and review exact upstream semantic/version references before implementation; preserve clean-room licensing and distinguish specification/reference models from actual component execution.",
+        "Provide meaningful local/emulator/software-runner failure and recovery evidence. Physical Pi/target acceptance is deferred under user direction; normal authorized testnet CI remains required where relevant.",
+        "Track authorized live AWS acceptance separately. No AWS account mutations, paid services, production credentials, physical programming or unsupported full-parity claims are authorized."
+      ],
+      "validation": "Actual inference on committed redistributable fixtures with expected outputs/tolerances, wrong-digest/model/version/input and unsupported-platform tests; no physical Pi required."
+    },
+    {
+      "key": "SF-074",
+      "title": "Implement Windows runtime and service integration",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-014",
+        "SF-025",
+        "SF-027"
+      ],
+      "paths": [
+        "suifleet-edge",
+        "scripts",
+        "interfaces/compat",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Specify and implement Windows process/service lifecycle, IPC authentication, filesystem/secret ACLs and component selection with supported software-runner acceptance. Preserve platform-owned reboot/OS installation and explicitly enumerate unsupported APIs.",
+      "evidence": "SF-064 audit identifies this remaining Greengrass functional scope; existing native foundations and reference fixtures are not runtime implementation evidence.",
+      "acceptance": [
+        "Specify and implement Windows process/service lifecycle, IPC authentication, filesystem/secret ACLs and component selection with supported software-runner acceptance. Preserve platform-owned reboot/OS installation and explicitly enumerate unsupported APIs.",
+        "Pin and review exact upstream semantic/version references before implementation; preserve clean-room licensing and distinguish specification/reference models from actual component execution.",
+        "Provide meaningful local/emulator/software-runner failure and recovery evidence. Physical Pi/target acceptance is deferred under user direction; normal authorized testnet CI remains required where relevant.",
+        "Track authorized live AWS acceptance separately. No AWS account mutations, paid services, production credentials, physical programming or unsupported full-parity claims are authorized."
+      ],
+      "validation": "Windows software VM/CI tests for real service start/stop/restart, descendant containment, ACL/caller denial, component install and interrupted lifecycle; physical target tests deferred."
+    },
+    {
+      "key": "SF-075",
+      "title": "Implement macOS runtime and service integration",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-014",
+        "SF-025",
+        "SF-027"
+      ],
+      "paths": [
+        "suifleet-edge",
+        "scripts",
+        "interfaces/compat",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Specify and implement macOS process/service lifecycle, IPC authentication, secret permissions and component selection on a supported software runner. Preserve platform-owned reboot/OS installation and enumerate unsupported platform APIs.",
+      "evidence": "SF-064 audit identifies this remaining Greengrass functional scope; existing native foundations and reference fixtures are not runtime implementation evidence.",
+      "acceptance": [
+        "Specify and implement macOS process/service lifecycle, IPC authentication, secret permissions and component selection on a supported software runner. Preserve platform-owned reboot/OS installation and enumerate unsupported platform APIs.",
+        "Pin and review exact upstream semantic/version references before implementation; preserve clean-room licensing and distinguish specification/reference models from actual component execution.",
+        "Provide meaningful local/emulator/software-runner failure and recovery evidence. Physical Pi/target acceptance is deferred under user direction; normal authorized testnet CI remains required where relevant.",
+        "Track authorized live AWS acceptance separately. No AWS account mutations, paid services, production credentials, physical programming or unsupported full-parity claims are authorized."
+      ],
+      "validation": "macOS software-runner tests for actual service lifecycle, descendant containment, permissions/caller negatives, install and restart recovery; physical target tests deferred."
+    },
+    {
+      "key": "SF-076",
+      "title": "Implement and validate Linux x86 32-bit runtime packaging",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-023",
+        "SF-025"
+      ],
+      "paths": [
+        "suifleet-edge",
+        "scripts",
+        "interfaces/compat",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Declare supported 32-bit Linux ABI/toolchain and implement build/packaging and component platform selection. Exercise actual 32-bit runtime under a software runner/emulator without claiming x86_64 tests establish 32-bit compatibility.",
+      "evidence": "SF-064 audit identifies this remaining Greengrass functional scope; existing native foundations and reference fixtures are not runtime implementation evidence.",
+      "acceptance": [
+        "Declare supported 32-bit Linux ABI/toolchain and implement build/packaging and component platform selection. Exercise actual 32-bit runtime under a software runner/emulator without claiming x86_64 tests establish 32-bit compatibility.",
+        "Pin and review exact upstream semantic/version references before implementation; preserve clean-room licensing and distinguish specification/reference models from actual component execution.",
+        "Provide meaningful local/emulator/software-runner failure and recovery evidence. Physical Pi/target acceptance is deferred under user direction; normal authorized testnet CI remains required where relevant.",
+        "Track authorized live AWS acceptance separately. No AWS account mutations, paid services, production credentials, physical programming or unsupported full-parity claims are authorized."
+      ],
+      "validation": "Actual 32-bit binary/package build, software runtime lifecycle/IPC/identity/OTA fixtures, incompatible artifact rejection and documented limitations."
+    },
+    {
+      "key": "SF-077",
+      "title": "Implement Firehose durable stream export",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-034",
+        "SF-057"
+      ],
+      "paths": [
+        "suifleet-edge",
+        "scripts",
+        "interfaces/compat",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Implement versioned Firehose export over configured durable streams and scoped credentials, including batch request limits, per-record partial results and checkpoint/retry semantics. Reuse stream foundations without presenting Kinesis Data Streams as Firehose.",
+      "evidence": "SF-064 audit identifies this remaining Greengrass functional scope; existing native foundations and reference fixtures are not runtime implementation evidence.",
+      "acceptance": [
+        "Implement versioned Firehose export over configured durable streams and scoped credentials, including batch request limits, per-record partial results and checkpoint/retry semantics. Reuse stream foundations without presenting Kinesis Data Streams as Firehose.",
+        "Pin and review exact upstream semantic/version references before implementation; preserve clean-room licensing and distinguish specification/reference models from actual component execution.",
+        "Provide meaningful local/emulator/software-runner failure and recovery evidence. Physical Pi/target acceptance is deferred under user direction; normal authorized testnet CI remains required where relevant.",
+        "Track authorized live AWS acceptance separately. No AWS account mutations, paid services, production credentials, physical programming or unsupported full-parity claims are authorized."
+      ],
+      "validation": "Actual exporter/local emulator request assertions, partial failures, outage, credential expiry and restart/checkpoint tests; live AWS acceptance separate."
+    },
+    {
+      "key": "SF-078",
+      "title": "Implement SNS publication and event routing",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-032",
+        "SF-057"
+      ],
+      "paths": [
+        "suifleet-edge",
+        "scripts",
+        "interfaces/compat",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Implement explicitly configured versioned SNS topic publication and event routing using scoped credentials, declared payload/attribute semantics, backpressure and bounded delivery/retry behavior. Enforce per-component/topic grants; do not imply SNS server-side service replication.",
+      "evidence": "SF-064 audit identifies this remaining Greengrass functional scope; existing native foundations and reference fixtures are not runtime implementation evidence.",
+      "acceptance": [
+        "Implement explicitly configured versioned SNS topic publication and event routing using scoped credentials, declared payload/attribute semantics, backpressure and bounded delivery/retry behavior. Enforce per-component/topic grants; do not imply SNS server-side service replication.",
+        "Pin and review exact upstream semantic/version references before implementation; preserve clean-room licensing and distinguish specification/reference models from actual component execution.",
+        "Provide meaningful local/emulator/software-runner failure and recovery evidence. Physical Pi/target acceptance is deferred under user direction; normal authorized testnet CI remains required where relevant.",
+        "Track authorized live AWS acceptance separately. No AWS account mutations, paid services, production credentials, physical programming or unsupported full-parity claims are authorized."
+      ],
+      "validation": "Actual publisher/local emulator tests for messages/attributes, caller/topic denial, throttling, lost responses, retry/duplicate behavior and restart; live AWS acceptance separate."
+    },
+    {
+      "key": "SF-079",
+      "title": "Implement authenticated local support debug console",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-019",
+        "SF-027",
+        "SF-053"
+      ],
+      "paths": [
+        "suifleet-edge",
+        "scripts",
+        "interfaces/compat",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Implement a versioned local diagnostic console with authenticated authorization-scoped inventory, health and configured support operations. Default to loopback/local access, redact secrets before output and audit operations; a public unauthenticated admin console is forbidden.",
+      "evidence": "SF-064 audit identifies this remaining Greengrass functional scope; existing native foundations and reference fixtures are not runtime implementation evidence.",
+      "acceptance": [
+        "Implement a versioned local diagnostic console with authenticated authorization-scoped inventory, health and configured support operations. Default to loopback/local access, redact secrets before output and audit operations; a public unauthenticated admin console is forbidden.",
+        "Pin and review exact upstream semantic/version references before implementation; preserve clean-room licensing and distinguish specification/reference models from actual component execution.",
+        "Provide meaningful local/emulator/software-runner failure and recovery evidence. Physical Pi/target acceptance is deferred under user direction; normal authorized testnet CI remains required where relevant.",
+        "Track authorized live AWS acceptance separately. No AWS account mutations, paid services, production credentials, physical programming or unsupported full-parity claims are authorized."
+      ],
+      "validation": "Actual console/API auth, CSRF/origin where applicable, role/caller denial, redaction, bounded queries and audit tests; no production exposure or credentials provisioned."
+    },
+    {
+      "key": "SF-099",
+      "title": "Make deployment history searchable by device and group with named drill-downs",
+      "priority": "P1",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "area": "frontend",
+      "resources": [],
+      "depends_on": [],
+      "paths": [
+        "dapp/src/app/deployments",
+        "dapp/src/app/devices",
+        "dapp/src/lib",
+        "scripts"
+      ],
+      "description": "Replace address-first deployment presentation with device-oriented history. Users search/sort by device name or group name, see group membership and successful/failed component updates for each device, then click its name for deeper details. Keep raw object IDs as secondary support metadata.",
+      "evidence": "Human physical Pi acceptance #32: deployments screen leads with meaningless long addresses. User explicitly requests device-name sorting/search, searchable group filter, group membership display and clickable device detail with update outcomes. Existing chain-backed device/group/deployment hooks provide the required facts; this presentation work does not depend on SF-082 hosting/payments. SF-084 remains broader services/logs/rollout views.",
+      "acceptance": [
+        "Deployment history prominently shows meaningful device and group names, component/version/date and per-device verified Applied/Failed/pending-or-unverified outcomes. Do not label transaction creation or absent/unverified receipts as successful installation.",
+        "Support case-insensitive device-name search, searchable group-name filtering and deterministic device-name sorting. Show clear no-match/loading/unavailable states; do not hide failed updates from the history.",
+        "Display current device group memberships, including devices in multiple/no groups. Distinguish current membership from historical deployment targets; do not infer historical success from current group membership.",
+        "Device names link to a stable detail view exposing installed component versions from verified signed telemetry, supervised running state when present, current groups and update history. Historical receipt-only data must not masquerade as live installed/running version.",
+        "Retain deployment control/storage/permission behavior and expose IDs as secondary details. Missing, revoked or renamed targets and duplicate names must not crash, misattribute receipts or merge distinct devices.",
+        "Verify search/filter/sort/drill-down and mixed success/failure/unknown data in a real browser, plus typecheck/production build and applicable parsing/receipt regressions. Stage tested changes in the local acceptance dApp without making mainnet/hardware mutations."
+      ],
+      "validation": "Offline receipt/history derivation tests and real browser UI regression for device/group search, sorting and detail navigation, pinned frontend typecheck/build; validate read-only against existing real testnet+Pi acceptance records. Preserve independent review/CI. No artificial SF-082 or physical-hardware blocker."
+    },
+    {
+      "key": "SF-097",
+      "title": "Show real Walrus upload progress and prevent duplicate deployment submissions",
+      "priority": "P1",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "area": "frontend",
+      "resources": [],
+      "depends_on": [],
+      "paths": [
+        "dapp/src/lib/walrus.ts",
+        "dapp/src/app/firmware/page.tsx",
+        "dapp/src/components",
+        "scripts"
+      ],
+      "description": "The user explicitly requests a progress bar overlaying Uploading to Walrus so artifact uploads show observable progress. Live Chrome/Slush acceptance also exposed an idle-looking Deploy button during recipe upload that allows duplicate wallet requests. Provide truthful upload progress and single-flight deployment preparation without fake percent completion.",
+      "evidence": "Live acceptance in #32: real Walrus uploads work, but long recipe upload appears unresponsive and repeated invocations queue additional Slush transaction requests. FirmwarePage lacks busy state until the wallet mutation begins. The artifact upload currently renders only Uploading to Walrus text. React also reports an unkeyed mapped step fragment.",
+      "acceptance": [
+        "Render an accessible progress bar with the Uploading to Walrus label for artifact and recipe uploads. Show actual byte transfer progress when available, distinguish awaiting Walrus certification/response from completed upload, and use indeterminate progress when total is unknown; never report processing as fully complete before a successful response.",
+        "Preserve the upload request body, content types, storage metadata parsing, explicit public/confidential protection, encrypted-before-upload behavior and error propagation. Upload failures retain retryable form state and cannot submit a transaction.",
+        "Acquire a synchronous single-flight guard before asynchronous deployment preparation; show upload/awaiting-wallet/confirmation states and disable duplicate submissions throughout. Release on cancellation/failure and retain success gating without automatically retrying wallet mutations.",
+        "Fix the mapped step fragment key as a contained correction to this same upload/deployment UI.",
+        "Add meaningful transport/UI regressions for measured and unknown-total progress, slow response, failure and duplicate clicks. Run frontend typecheck/production build and relevant existing upload/encryption/browser tests; keep physical Pi/mainnet external acceptance separate."
+      ],
+      "validation": "Pinned-toolchain frontend typecheck/build, targeted upload transport and browser regressions with delayed response and repeated clicks; preserve existing Walrus/Seal tests. Public testnet only if transaction behavior changes; no production/hardware operations."
+    },
+    {
+      "key": "SF-107",
+      "title": "Reconcile fleet-status counts with GitHub issues and pull requests",
+      "priority": "P1",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "area": "infra",
+      "resources": [],
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator",
+        "docs"
+      ],
+      "description": "The installed fleet-status prototype mixes worker activity with ticket status and omits open PR totals, making matching GitHub difficult. Install the reviewed dashboard under the expected command and clearly label counts and freshness.",
+      "evidence": "User observed GitHub 17 open issues and 10 PRs versus dashboard 4 running and a status breakdown totaling 17; installed fleet-status is an obsolete prototype.",
+      "acceptance": [
+        "Show open tracked issue total with an additive status breakdown; show running workers separately and explain overlap. Completed tickets are separate from open issues.",
+        "Show cached GitHub open issues and PR counts with source timestamp and unavailable/stale states; distinguish PRs from issues and identify inventory discrepancies without treating missing data as zero.",
+        "Normal live refresh must remain local and read-only without consuming GitHub quota. Provide an explicit bounded GitHub snapshot refresh for matching the remote inventory.",
+        "Install fleet-status as the supported dashboard alias without restarting services or workers; verify counting, project filtering, stale/missing snapshots, secret redaction and existing dashboard tests."
+      ],
+      "validation": "Dashboard and installer regression tests; compare local output with an explicit GitHub snapshot; no service restarts."
+    },
+    {
+      "key": "SF-117",
+      "title": "Automatically retry stopped implementation workers after transient model-capacity errors",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "baseline",
+      "kind": "type:infrastructure",
+      "depends_on": [],
+      "paths": [
+        "repositories/suifleet/tools/pr-coordinator",
+        "repositories/suifleet/docs/PR_COORDINATION.md"
+      ],
+      "resources": [],
+      "description": "User requests automatic recovery after SF-082 exited with Selected model is at capacity and remained quarantined. Preserve its same atomic claim, branch, worktree and partial work; never start a duplicate editor or silently switch models. Apply the reusable mechanism to configured projects/families.",
+      "evidence": "SF-082 wrapper exited1 at 2026-10-23T02:10:26Z after provider model-capacity errors, with no result handoff. Operator verified complete stop and manually resumed same claim. Installed SF-116 handles active CI failures but reconcile still quarantines every missing handoff.",
+      "acceptance": [
+        "Classify explicit provider model-capacity failures conservatively from bounded CLI output/structured terminal errors; unrelated crashes, malformed receipts, usage/auth errors and uncertain exits must not be mistaken for retryable capacity.",
+        "Only retry after durable nonzero exit, original PID/start/session descendants and detached claim helpers all verified stopped, unchanged valid In Progress claim, same claimed worktree/branch, and no owner-held shared-resource leases. Preserve all dirty/staged/untracked work and original evidence.",
+        "Persist per-claim bounded exponential backoff and retry budget across scans/restarts, heartbeat retained claims during waits, honor configured family/project execution capacity, and launch at most one replacement with the same configured model and ownership. Exhaustion is visible and retains the claim.",
+        "Expose capacity backoff, next retry and exhaustion in fleet-status without duplicate counts or tokens. Coordinate with dependency-resume/CI-redirect states and do not restart Review/Done/Blocked/expired/changed owners.",
+        "Add meaningful classifier, restart/idempotency, live-descendant/resource/ownership refusal, retry-budget/capacity and real-process exit-to-replacement regressions. Document behavior and exact operational rollout evidence."
+      ],
+      "validation": "Offline coordinator/tracking tests and real fake-CLI process tests, fresh exact-head CI/review, then merged-only automatic runtime activation and live service/dashboard checks; no induced real wallet/hardware writes."
     }
   ]
 }

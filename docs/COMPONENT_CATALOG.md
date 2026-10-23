@@ -6,6 +6,11 @@ artifacts and authenticated schema-1.0 recipes, registers versions, and discover
 versions for deployment through the existing target selector. Direct verified
 OTA remains available at `/firmware`.
 
+The same page imports an AWS Greengrass V2 recipe (SF-037). It translates the
+supported subset into these manifests, or rejects the recipe with guidance. It
+publishes only after the operator acknowledges the reported differences. See
+[GREENGRASS_COMPATIBILITY.md](GREENGRASS_COMPATIBILITY.md#aws-recipe-translation-sf-037).
+
 A shared catalog belongs to its creating publisher address. Only that address
 can register versions. Names contain 1–128 ASCII letters, digits, `.`, `_`, or
 `-`; `@` is excluded so the index `name@fullVersion` is unambiguous. Each full
@@ -27,8 +32,11 @@ binds exact recipe bytes and artifact bytes with separate SHA-256 digests.
 
 Selection uses the first manifest whose OS and architecture match the daemon's
 Rust `std::env::consts::OS` and `ARCH`, or whose corresponding field is `*`.
-Supported catalog values are OS `linux`/`*`, architecture
-`x86_64`/`aarch64`/`arm`/`*`. Rust `arm` does not imply armv7. Put specific entries
+Supported catalog values are OS `linux`/`macos`/`*`, architecture
+`x86_64`/`aarch64`/`arm`/`x86`/`*`. Rust `arm` does not imply armv7; `x86` is
+32-bit i686 ([LINUX_X86.md](LINUX_X86.md)), never an alias of `x86_64`. `macos`
+(SF-075) needs the upgraded package and a current daemon; see
+[MACOS_RUNTIME.md](MACOS_RUNTIME.md#component-selection) for mixed-version use. Put specific entries
 before wildcards if they should take precedence. The selection order follows
 the first-matching-platform principle described in the
 [AWS recipe reference](https://docs.aws.amazon.com/greengrass/v2/developerguide/component-recipe-reference.html).

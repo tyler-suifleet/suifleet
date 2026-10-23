@@ -1,10 +1,14 @@
 # Greengrass capability-to-ticket coverage
 
+The [SF-064 remaining functional roadmap](GREENGRASS_REMAINING_ROADMAP.md) defines versioned executable subcontracts and maps every selected remaining scope to published implementation tickets SF-069–SF-079. These remain pending implementations, not runtime or live acceptance.
+
 The 51-capability audit is a functional OTA/fleet and broader-runtime roadmap, not proof of complete AWS API or managed-component compatibility. All rows have a tracked owner scope below; [SF-038](https://github.com/tyler-suifleet/suifleet/issues/39) remains a specification epic that must produce separate implementation tickets for selected managed adapters and platform support. AWS-managed components span many service-specific integrations; no finite seed backlog guarantees every future feature is covered.
 
 Reference: [AWS Greengrass V2 overview](https://docs.aws.amazon.com/greengrass/v2/developerguide/what-is-iot-greengrass.html) and [AWS-provided components](https://docs.aws.amazon.com/greengrass/v2/developerguide/public-components.html), checked 2026-10-13.
 
-[GREENGRASS_COMPATIBILITY.md](GREENGRASS_COMPATIBILITY.md) (SF-028) defines the functional, AWS-recipe and AWS-API compatibility levels, the supported platforms and the proposed adapter fixtures for SF-032–SF-035 and SF-037. Its runtime suites remain pending until those tickets execute them.
+[GREENGRASS_MANAGED_COMPONENTS.md](GREENGRASS_MANAGED_COMPONENTS.md) (SF-038) maps all 46 AWS-provided components to native equivalents, scoped adapters ([SF-057](https://github.com/tyler-suifleet/suifleet/issues/102) to [SF-063](https://github.com/tyler-suifleet/suifleet/issues/108)) or roadmap gaps ([SF-064](https://github.com/tyler-suifleet/suifleet/issues/109)). Scoped local adapter implementations and receipts are listed in that catalog; SF-063 adds the actual tunnel proxy/systemd forwarding harness. No live AWS check has run.
+
+[GREENGRASS_COMPATIBILITY.md](GREENGRASS_COMPATIBILITY.md) (SF-028) defines the functional, AWS-recipe and AWS-API compatibility levels, the supported platforms and the proposed adapter fixtures for SF-032–SF-035 and SF-037. SF-037 has executed the recipe and managed-dependency suites against its translator; the other runtime suites remain pending until their tickets execute them.
 
 P2 means broader compatibility, not optional for a full-parity claim. Each row needs executable acceptance evidence, including failures and recovery, before completion. See [the audit](GREENGRASS_PARITY_AUDIT.md).
 
@@ -37,7 +41,7 @@ P2 means broader compatibility, not optional for a full-parity claim. Each row n
 | Runtime isolation | [SF-009](https://github.com/tyler-suifleet/suifleet/issues/4) |
 | Local deployment/component CLI | [SF-027](https://github.com/tyler-suifleet/suifleet/issues/27) |
 | Container component adapters | [SF-036](https://github.com/tyler-suifleet/suifleet/issues/35) |
-| Lambda/AWS-managed component compatibility | [SF-038](https://github.com/tyler-suifleet/suifleet/issues/39) |
+| Lambda/AWS-managed component compatibility | [SF-038](https://github.com/tyler-suifleet/suifleet/issues/39), [SF-064](https://github.com/tyler-suifleet/suifleet/issues/109) |
 | Inventory and groups | [SF-013](https://github.com/tyler-suifleet/suifleet/issues/13), [SF-019](https://github.com/tyler-suifleet/suifleet/issues/22), [SF-024](https://github.com/tyler-suifleet/suifleet/issues/15) |
 | Software key provisioning | [SF-021](https://github.com/tyler-suifleet/suifleet/issues/14), [SF-029](https://github.com/tyler-suifleet/suifleet/issues/29) |
 | Hardware identity/TPM/HSM | [SF-021](https://github.com/tyler-suifleet/suifleet/issues/14) |
@@ -56,11 +60,12 @@ P2 means broader compatibility, not optional for a full-parity claim. Each row n
 | Component IPC and SDK | [SF-027](https://github.com/tyler-suifleet/suifleet/issues/27) |
 | Local pub/sub and MQTT bridge | [SF-032](https://github.com/tyler-suifleet/suifleet/issues/33) |
 | Device shadows | [SF-033](https://github.com/tyler-suifleet/suifleet/issues/37) |
+| AWS IoT Core bridge and shadow connection | [SF-061](https://github.com/tyler-suifleet/suifleet/issues/106) |
 | Stream manager/store-and-forward | [SF-034](https://github.com/tyler-suifleet/suifleet/issues/34) |
 | Client-device discovery/authentication | [SF-035](https://github.com/tyler-suifleet/suifleet/issues/38) |
-| Token exchange/cloud credentials | [SF-022](https://github.com/tyler-suifleet/suifleet/issues/25), [SF-038](https://github.com/tyler-suifleet/suifleet/issues/39) |
-| ML inference/industrial/cloud integrations | [SF-038](https://github.com/tyler-suifleet/suifleet/issues/39) |
-| Windows/macOS runtime | [SF-038](https://github.com/tyler-suifleet/suifleet/issues/39) |
+| Token exchange/cloud credentials | [SF-022](https://github.com/tyler-suifleet/suifleet/issues/25), [SF-038](https://github.com/tyler-suifleet/suifleet/issues/39), [SF-057](https://github.com/tyler-suifleet/suifleet/issues/102) |
+| ML inference/industrial/cloud integrations | [SF-038](https://github.com/tyler-suifleet/suifleet/issues/39), [SF-058](https://github.com/tyler-suifleet/suifleet/issues/103) to [SF-063](https://github.com/tyler-suifleet/suifleet/issues/108), [SF-064](https://github.com/tyler-suifleet/suifleet/issues/109), [SF-070](https://github.com/tyler-suifleet/suifleet/issues/124) (industrial collector) |
+| Windows/macOS runtime | [SF-064](https://github.com/tyler-suifleet/suifleet/issues/109) (roadmap; SF-038 defines the initial Linux phase), [SF-074](https://github.com/tyler-suifleet/suifleet/issues/128) (Windows), [SF-075](https://github.com/tyler-suifleet/suifleet/issues/129) (macOS) |
 
 ## Hardware acceptance
 

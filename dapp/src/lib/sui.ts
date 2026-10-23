@@ -12,9 +12,21 @@ import { PACKAGE_ID, REGISTRY_ID, DEVICE_TYPE, DEVICE_OWNER_CAP_TYPE, DEVICE_GRO
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+/**
+ * Operator-set Device metadata (SF-100). Bulk enrollment writes these after a
+ * device has enrolled under the operator's claim; the on-chain `name` is the
+ * device-chosen name and stays visible as `chainName`.
+ */
+export const ALIAS_META_KEY = "suifleet.alias";
+export const SERIAL_META_KEY = "suifleet.serial";
+
 export interface DeviceObject {
   objectId: string;
+  /** The operator's alias when set, otherwise the registered name. */
   name: string;
+  chainName: string;
+  serial?: string;
+  meta: Record<string, string>;
   deviceAddress: string;
   arch: string;
   registeredAt: number;
@@ -208,16 +220,17 @@ export function buildCreateDeploymentTx(
 
 export function buildDeleteDeploymentTx(deploymentObjectId: string, schemaVersion = "1"): Transaction {
   requireManifest();
-  if (schemaVersion !== "1" && schemaVersion !== "2") throw new Error("Unsupported DeploymentRecord schema");
+  if (schemaVersion !== "1" && schemaVersion !== "2" && schemaVersion !== "3") throw new Error("Unsupported DeploymentRecord schema");
   const tx = new Transaction();
   if (schemaVersion === "2") calls.component_catalog_delete_deployment(tx, PACKAGE_ID, deploymentObjectId);
+  else if (schemaVersion === "3") calls.deployment_manager_delete_rollout(tx, PACKAGE_ID, deploymentObjectId);
   else calls.deployment_manager_delete_deployment(tx, PACKAGE_ID, deploymentObjectId);
   return tx;
 }
 
 // ── Queries ───────────────────────────────────────────────────────────────────
 
-async function allOwned(client: SuiGrpcClient, owner: string, type: string) {
+export async function allOwned(client: SuiGrpcClient, owner: string, type: string) {
   let page = await client.listOwnedObjects({ owner, type, include: { content: true }, limit: 50 });
   const data = [...page.objects];
   while (page.hasNextPage) {
@@ -241,8 +254,9 @@ export async function fetchDevices(client: SuiGrpcClient, owner: string): Promis
   return devices.map((object) => {
     const fields = DeviceBcs.parse(object.content);
     if (fields.schema_version !== "1") throw new Error("Unsupported Device schema");
-    return { objectId: object.objectId, name: fields.name, deviceAddress: fields.device_address,
-      arch: fields.arch, registeredAt: Number(fields.registered_at), ownerCapId: ownerCaps.get(object.objectId) };
+    const meta = Object.fromEntries(fields.meta.contents.map((entry) => [entry.key, entry.value]));
+    return { objectId: object.objectId, name: meta[ALIAS_META_KEY] || fields.name, chainName: fields.name, serial: meta[SERIAL_META_KEY] || undefined,
+      meta, deviceAddress: fields.device_address, arch: fields.arch, registeredAt: Number(fields.registered_at), ownerCapId: ownerCaps.get(object.objectId) };
   });
 }
 
@@ -250,14 +264,14 @@ export async function fetchGroups(client: SuiGrpcClient, owner: string): Promise
   await verifyDeployment(client);
   const events = await allEvents(client, moveType("device_group::GroupCreated"));
   const ids = events.map((event) => GroupCreatedBcs.parse(event.bcs))
-    .filter((event) => event.admin === owner).map((event) => event.group_id);
+    .map((event) => event.group_id);
   const objects = await objectsInBatches(client, [...new Set(ids)]);
   return objects.map((object) => {
     const fields = GroupBcs.parse(object.content);
     if (fields.schema_version !== "1") throw new Error("Unsupported DeviceGroup schema");
     return { objectId: object.objectId, name: fields.name, description: fields.description,
       admin: fields.admin, deviceIds: fields.device_ids };
-  });
+  }).filter((group) => group.admin === owner);
 }
 
 export async function allEvents(client: SuiGrpcClient, type: string) {
@@ -274,7 +288,7 @@ export async function allEvents(client: SuiGrpcClient, type: string) {
   return events;
 }
 
-async function objectsInBatches(client: SuiGrpcClient, ids: string[]) {
+export async function objectsInBatches(client: SuiGrpcClient, ids: string[]) {
   const objects = [];
   for (let index = 0; index < ids.length; index += 50) {
     const batch = await client.getObjects({ objectIds: ids.slice(index, index + 50), include: { content: true } });
@@ -301,11 +315,13 @@ function supportedTargetGroup(group: { type: string; content: Uint8Array }) {
 
 export async function fetchDeploymentEvents(client: SuiGrpcClient, owner?: string): Promise<DeploymentEvent[]> {
   await verifyDeployment(client);
-  const events = (await allEvents(client, DEPLOYMENT_CREATED_EVENT)).map((event) => DeploymentCreatedBcs.parse(event.bcs))
-    .filter((event) => !owner || event.creator === owner);
+  const events = (await allEvents(client, DEPLOYMENT_CREATED_EVENT)).map((event) => DeploymentCreatedBcs.parse(event.bcs));
   const objects = await objectsInBatches(client, [...new Set(events.map((event) => event.deployment_id))]);
   const live = new Map(objects.map((object) => [object.objectId, DeploymentBcs.parse(object.content)]));
-  const liveEvents = events.filter((event) => live.has(event.deployment_id));
+  const liveEvents = events.filter((event) => {
+    const record = live.get(event.deployment_id);
+    return record && (!owner || record.creator === owner);
+  });
   const groups = await objectsInBatches(client, [...new Set(liveEvents.flatMap((event) => event.target_groups))]);
   const groupsById = new Map(groups.map((group) => [group.objectId, supportedTargetGroup(group)]));
   return Promise.all(liveEvents.map(async (event) => {

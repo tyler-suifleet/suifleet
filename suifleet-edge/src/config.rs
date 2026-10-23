@@ -1,9 +1,66 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+
+/// `[pubsub]` (docs/MESSAGING.md).
+#[derive(Deserialize, Serialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct PubsubConfig {
+    #[serde(default = "default_pubsub_messages")]
+    pub max_messages_per_subscription: usize,
+    #[serde(default = "default_pubsub_bytes")]
+    pub max_bytes_per_subscription: u64,
+    #[serde(default = "default_pubsub_qos0")]
+    pub qos0_messages_per_subscription: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bridge: Option<crate::bridge::BridgeConfig>,
+}
+fn default_pubsub_messages() -> usize {
+    1000
+}
+fn default_pubsub_bytes() -> u64 {
+    4 * 1024 * 1024
+}
+fn default_pubsub_qos0() -> usize {
+    100
+}
+impl PubsubConfig {
+    pub fn limits(&self) -> crate::pubsub::Limits {
+        crate::pubsub::Limits {
+            max_messages: self.max_messages_per_subscription,
+            max_bytes: self.max_bytes_per_subscription,
+            qos0_messages: self.qos0_messages_per_subscription,
+        }
+    }
+    /// `aws_iot`: whether the `[aws_iot]` connection is configured.
+    pub fn validate(&self, aws_iot: bool) -> anyhow::Result<()> {
+        anyhow::ensure!((1..=100_000).contains(&self.max_messages_per_subscription), "pubsub.max_messages_per_subscription must be 1..=100000");
+        anyhow::ensure!((4096..=1 << 30).contains(&self.max_bytes_per_subscription), "pubsub.max_bytes_per_subscription must be 4 KiB..=1 GiB");
+        anyhow::ensure!((1..=10_000).contains(&self.qos0_messages_per_subscription), "pubsub.qos0_messages_per_subscription must be 1..=10000");
+        if let Some(bridge) = &self.bridge {
+            bridge.validate(aws_iot)?;
+            // Inbound copies of one MQTT message are stored together, so a
+            // queue must hold them all or the message could never be accepted.
+            let copies = bridge.max_inbound_copies();
+            anyhow::ensure!(copies <= self.max_messages_per_subscription,
+                "pubsub.max_messages_per_subscription must be at least {copies}, the most overlapping inbound mappings from one broker");
+        }
+        Ok(())
+    }
+}
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Config {
+    #[serde(skip)]
+    pub services: Option<std::sync::Arc<std::sync::Mutex<crate::services::Runtime>>>,
+    /// Operator-only authorization of fleet credential paths and destinations.
+    #[serde(default)]
+    pub service_credentials: Vec<crate::services::CredentialAuthorization>,
     pub sui: SuiConfig,
+    #[serde(default)]
+    pub ipc: Option<crate::ipc::Settings>,
+    /// Durable pub/sub and the local MQTT bridge (SF-032); none when omitted.
+    #[serde(default)]
+    pub pubsub: Option<PubsubConfig>,
     pub device: DeviceConfig,
     #[serde(default)]
     pub walrus: WalrusConfig,
@@ -12,11 +69,172 @@ pub struct Config {
     pub runtime: RuntimeConfig,
     #[serde(default)]
     pub components: ComponentsConfig,
+    /// Heartbeat and health telemetry (SF-019); none when omitted.
+    #[serde(default)]
+    pub telemetry: Option<TelemetryConfig>,
+    /// Redacted remote logs (SF-020); needs `[telemetry]` for the indexer URL.
+    #[serde(default)]
+    pub logs: Option<LogsConfig>,
     #[serde(default)]
     pub daemon_update: DaemonUpdateConfig,
+    /// Confidential delivery (SF-022); without it, Seal-encrypted recipes and
+    /// artifacts are refused and public ones applied as before.
+    #[serde(default)]
+    pub seal: Option<SealConfig>,
+    /// Durable local streams and exports (SF-034); none when omitted.
+    #[serde(default)]
+    pub streams: Option<StreamsConfig>,
+    /// Local device shadows and cloud sync (SF-033); none when omitted.
+    #[serde(default)]
+    pub shadows: Option<ShadowsConfig>,
+    /// Local support console (SF-079, docs/LOCAL_CONSOLE.md); none when omitted.
+    #[serde(default)]
+    pub console: Option<crate::console::Settings>,
+    /// The AWS IoT Core connection (SF-061); none when omitted.
+    #[serde(default)]
+    pub aws_iot: Option<crate::iotcore::IotConfig>,
+    /// Operator-only Device Defender device metrics (SF-062).
+    #[serde(default)]
+    pub device_defender: Option<crate::defender::Settings>,
+    /// LAN client-device authentication and discovery (SF-035); none when omitted.
+    #[serde(default)]
+    pub client_devices: Option<crate::clientdevices::Settings>,
+    /// Gas top-ups from the owner's prepaid fleet budget (SF-083); none when
+    /// omitted, and the device pays its own gas as before.
+    #[serde(default)]
+    pub budget: Option<crate::funding::BudgetConfig>,
     /// The file this configuration was loaded from (for the update preflight).
     #[serde(skip)]
     pub path: PathBuf,
+}
+
+/// `[streams]`: durable local streams (docs/STREAMS.md). Streams with an
+/// export are declared here only: components cannot direct device-signed
+/// data to a destination.
+#[derive(Deserialize, Serialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct StreamsConfig {
+    #[serde(default = "default_max_streams")]
+    pub max_streams: usize,
+    /// Sum of all streams' max_size (their disk/memory reservation).
+    #[serde(default = "default_streams_bytes")]
+    pub max_total_bytes: u64,
+    #[serde(default)]
+    pub definitions: Vec<crate::streams::Definition>,
+}
+fn default_max_streams() -> usize {
+    32
+}
+fn default_streams_bytes() -> u64 {
+    64 << 20
+}
+impl StreamsConfig {
+    pub fn quota(&self) -> crate::streams::Quota {
+        crate::streams::Quota { max_streams: self.max_streams, max_total_bytes: self.max_total_bytes }
+    }
+    pub fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!((1..=1024).contains(&self.max_streams), "streams.max_streams must be 1..=1024");
+        anyhow::ensure!((1024..=64 << 30).contains(&self.max_total_bytes), "streams.max_total_bytes must be 1 KiB..=64 GiB");
+        anyhow::ensure!(self.definitions.len() <= self.max_streams, "more stream definitions than streams.max_streams");
+        let mut names = std::collections::BTreeSet::new();
+        for def in &self.definitions {
+            def.validate().map_err(|e| anyhow::anyhow!("stream {:?}: {e}", def.name))?;
+            anyhow::ensure!(names.insert(&def.name), "stream {:?} is defined twice", def.name);
+        }
+        anyhow::ensure!(self.definitions.iter().map(|d| d.max_size).sum::<u64>() <= self.max_total_bytes,
+            "stream definitions exceed streams.max_total_bytes");
+        Ok(())
+    }
+}
+
+/// `[shadows]`: local device shadows (docs/SHADOWS.md).
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct ShadowsConfig {
+    /// The AWS-style thing name in shadow resources and notification topics.
+    pub thing_name: String,
+    #[serde(default = "default_max_shadows")]
+    pub max_shadows: usize,
+    /// The cloud sync adapter; none when omitted.
+    #[serde(default)]
+    pub sync: Option<crate::shadows::SyncConfig>,
+    /// Synchronization with AWS IoT Device Shadow over `[aws_iot]`.
+    #[serde(default)]
+    pub aws_iot: Option<crate::shadows::AwsSyncConfig>,
+}
+fn default_max_shadows() -> usize {
+    64
+}
+impl ShadowsConfig {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(crate::shadows::valid_thing(&self.thing_name), "shadows.thing_name must be 1-128 of [A-Za-z0-9:_-]");
+        anyhow::ensure!((1..=crate::shadows::MAX_SHADOWS).contains(&self.max_shadows), "shadows.max_shadows must be 1..=256");
+        if let Some(sync) = &self.sync {
+            sync.validate(self.max_shadows)?;
+        }
+        if let Some(sync) = &self.aws_iot {
+            anyhow::ensure!(self.sync.is_none(), "a shadow synchronizes with one cloud: configure [shadows.sync] or [shadows.aws_iot], not both");
+            sync.validate(self.max_shadows)?;
+        }
+        Ok(())
+    }
+}
+
+/// `[telemetry]`: signed snapshots to the fleet indexer (docs/TELEMETRY.md).
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct TelemetryConfig {
+    /// Fleet indexer base URL; snapshots go to `{url}/v1/telemetry`.
+    pub url: String,
+    #[serde(default = "default_telemetry_interval")]
+    pub interval_seconds: u64,
+    /// Snapshots kept while the indexer is unreachable; the oldest beyond
+    /// this are dropped (and counted in later snapshots).
+    #[serde(default = "default_telemetry_buffer")]
+    pub buffer_max: usize,
+}
+
+/// `[logs]`: redacted, signed log batches to the fleet indexer (docs/LOGS.md).
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct LogsConfig {
+    #[serde(default = "default_telemetry_interval")]
+    pub interval_seconds: u64,
+    /// Lines read per interval; the rest waits for later intervals.
+    #[serde(default = "default_logs_lines")]
+    pub max_lines_per_interval: usize,
+    /// Batches kept while the indexer is unreachable.
+    #[serde(default = "default_logs_buffer")]
+    pub buffer_max: usize,
+}
+fn default_logs_lines() -> usize {
+    512
+}
+fn default_logs_buffer() -> usize {
+    256
+}
+
+impl LogsConfig {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        use crate::telemetry::{MAX_BUFFER, MAX_INTERVAL_SECONDS, MIN_INTERVAL_SECONDS};
+        anyhow::ensure!(
+            (MIN_INTERVAL_SECONDS..=MAX_INTERVAL_SECONDS).contains(&self.interval_seconds),
+            "logs.interval_seconds must be {MIN_INTERVAL_SECONDS}..={MAX_INTERVAL_SECONDS}"
+        );
+        anyhow::ensure!(
+            (1..=crate::logs::MAX_LINES_PER_INTERVAL).contains(&self.max_lines_per_interval),
+            "logs.max_lines_per_interval must be 1..={}", crate::logs::MAX_LINES_PER_INTERVAL
+        );
+        anyhow::ensure!((1..=MAX_BUFFER).contains(&self.buffer_max), "logs.buffer_max must be 1..={MAX_BUFFER}");
+        Ok(())
+    }
+}
+
+fn default_telemetry_interval() -> u64 {
+    60
+}
+fn default_telemetry_buffer() -> usize {
+    1024
 }
 
 /// Daemon self-update (SF-026; docs/DAEMON_UPDATE.md). Off unless enabled; the
@@ -66,6 +284,12 @@ pub struct ComponentsConfig {
     /// Cached artifacts beyond this are evicted oldest first, except those
     /// of installed versions.
     pub cache_max_bytes: u64,
+    /// Device-local configuration values (`<name>.json`, JSON pointer →
+    /// value), the only source of confidential ones. Not readable by others.
+    pub configuration_overlay_dir: PathBuf,
+    /// How long a component's validate command may keep deferring one
+    /// deployment's configuration update before the deployment fails.
+    pub configuration_defer_max_seconds: u64,
     /// Operator-owned application recovery scripts, keyed by component name.
     /// Run in the previous committed version workspace, never for platform installers.
     #[serde(default)]
@@ -76,6 +300,8 @@ impl Default for ComponentsConfig {
         Self {
             offline_candidates: OfflinePolicy::Never,
             cache_max_bytes: 512 * 1024 * 1024,
+            configuration_overlay_dir: "/etc/suifleet/component-config".into(),
+            configuration_defer_max_seconds: 86_400,
             recovery_commands: Default::default(),
         }
     }
@@ -190,9 +416,15 @@ impl DeploymentManifest {
             crate::sui_client::same_id(&self.call_package_id, &self.call_package_id),
             "invalid call package ID"
         );
-        let catalog_count = crate::catalog::TYPES.iter().filter(|name| self.type_origins.contains_key(**name)).count();
-        anyhow::ensure!(catalog_count == 0 || catalog_count == crate::catalog::TYPES.len(), "partial catalog type origins");
-        for name in REQUIRED_TYPES.iter().chain(crate::catalog::TYPES.iter().filter(|name| self.type_origins.contains_key(**name))) {
+        for (label, group) in [
+            ("catalog", crate::catalog::TYPES),
+            ("seal policy", crate::protocol::SEAL_POLICY_TYPES),
+            ("fleet budget", crate::protocol::BUDGET_TYPES),
+        ] {
+            let count = group.iter().filter(|name| self.type_origins.contains_key(**name)).count();
+            anyhow::ensure!(count == 0 || count == group.len(), "partial {label} type origins");
+        }
+        for name in REQUIRED_TYPES.iter().chain(self.optional_types()) {
             let origin = self
                 .type_origins
                 .get(*name)
@@ -222,6 +454,14 @@ impl DeploymentManifest {
             "unsupported edge client version"
         );
         Ok(())
+    }
+    /// Optional type-origin groups present in this manifest (all or none of each).
+    pub fn optional_types(&self) -> impl Iterator<Item = &&'static str> {
+        crate::catalog::TYPES
+            .iter()
+            .chain(crate::protocol::SEAL_POLICY_TYPES)
+            .chain(crate::protocol::BUDGET_TYPES)
+            .filter(|name| self.type_origins.contains_key(**name))
     }
     pub fn move_type(&self, name: &str) -> String {
         // Called only after validating every required type; no first-package fallback.
@@ -310,6 +550,119 @@ pub struct SignerConfig {
     /// pkcs11: file holding the user PIN (readable only by the key's user).
     #[serde(default)]
     pub pin_file: PathBuf,
+}
+
+/// Whether unencrypted recipes and artifacts may still be applied.
+#[derive(Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum SealMode {
+    /// Decrypt confidential blobs; also apply explicitly public ones.
+    #[default]
+    Optional,
+    /// Refuse any recipe or artifact that is not Seal-encrypted.
+    Required,
+}
+
+/// `[seal]`: Seal key servers and limits for confidential delivery (SF-022,
+/// docs/CONFIDENTIAL_DELIVERY.md).
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct SealConfig {
+    #[serde(default)]
+    pub mode: SealMode,
+    /// The Seal package whose `key_server::KeyServer` objects are trusted.
+    pub key_server_package: String,
+    pub key_servers: Vec<KeyServerConfig>,
+    /// Ciphertexts needing fewer key servers are refused.
+    #[serde(default = "default_min_threshold")]
+    pub min_threshold: u8,
+    /// Require each key server's proof of possession (`/v1/service`).
+    #[serde(default = "default_true")]
+    pub verify_key_servers: bool,
+    /// Session certificate lifetime (Seal allows 1 to 30 minutes).
+    #[serde(default = "default_session_ttl_minutes")]
+    pub session_ttl_minutes: u16,
+    /// Certificates are dated this far back for key servers' clocks.
+    #[serde(default = "default_clock_skew_seconds")]
+    pub clock_skew_seconds: u64,
+    /// Fetched decryption keys stay in memory (never on disk) this long; 0
+    /// fetches for every blob.
+    #[serde(default = "default_key_cache_seconds")]
+    pub key_cache_seconds: u64,
+    #[serde(default = "default_seal_timeout_seconds")]
+    pub request_timeout_seconds: u64,
+    /// Confidential blobs are decrypted in memory, so this bounds memory use.
+    #[serde(default = "default_max_plaintext_bytes")]
+    pub max_plaintext_bytes: u64,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct KeyServerConfig {
+    pub object_id: String,
+    #[serde(default = "default_weight")]
+    pub weight: u8,
+    /// Provider API credential header (e.g. "X-API-Key") and the file holding
+    /// it. A provider credential is not device identity or decryption authority.
+    #[serde(default)]
+    pub api_key_name: Option<String>,
+    #[serde(default)]
+    pub api_key_file: Option<PathBuf>,
+}
+
+fn default_true() -> bool {
+    true
+}
+fn default_min_threshold() -> u8 {
+    1
+}
+fn default_weight() -> u8 {
+    1
+}
+fn default_session_ttl_minutes() -> u16 {
+    10
+}
+fn default_clock_skew_seconds() -> u64 {
+    60
+}
+fn default_key_cache_seconds() -> u64 {
+    120
+}
+fn default_seal_timeout_seconds() -> u64 {
+    10
+}
+fn default_max_plaintext_bytes() -> u64 {
+    128 * 1024 * 1024
+}
+
+impl SealConfig {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(crate::sui_client::same_id(&self.key_server_package, &self.key_server_package), "invalid key_server_package");
+        anyhow::ensure!(!self.key_servers.is_empty(), "[seal] needs at least one key server");
+        let mut seen = std::collections::BTreeSet::new();
+        for server in &self.key_servers {
+            anyhow::ensure!(crate::sui_client::same_id(&server.object_id, &server.object_id), "invalid key server object ID");
+            anyhow::ensure!(seen.insert(server.object_id.to_ascii_lowercase()), "duplicate key server {}", server.object_id);
+            anyhow::ensure!(server.weight > 0, "key server weight must be positive");
+        }
+        let total: u32 = self.key_servers.iter().map(|s| u32::from(s.weight)).sum();
+        anyhow::ensure!(self.min_threshold >= 1 && u32::from(self.min_threshold) <= total, "min_threshold must be between 1 and the total key server weight");
+        anyhow::ensure!((1..=crate::seal_client::MAX_SESSION_MINUTES).contains(&self.session_ttl_minutes), "session_ttl_minutes must be 1 to 30");
+        anyhow::ensure!(self.clock_skew_seconds * 2 < u64::from(self.session_ttl_minutes) * 60, "clock_skew_seconds must be under half the session lifetime");
+        anyhow::ensure!(self.request_timeout_seconds > 0 && self.max_plaintext_bytes > 0, "request_timeout_seconds and max_plaintext_bytes must be positive");
+        Ok(())
+    }
+}
+
+/// A secret from a file that other users cannot read.
+pub fn read_secret(path: &Path) -> anyhow::Result<String> {
+    use anyhow::Context;
+    use std::os::unix::fs::PermissionsExt;
+    let mode = std::fs::metadata(path).with_context(|| format!("reading {}", path.display()))?.permissions().mode();
+    anyhow::ensure!(mode & 0o007 == 0, "{} must not be accessible to other users", path.display());
+    let value = std::fs::read_to_string(path)?.trim().to_owned();
+    anyhow::ensure!(!value.is_empty(), "{} is empty", path.display());
+    Ok(value)
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -425,6 +778,9 @@ impl Config {
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         let raw = std::fs::read_to_string(path)?;
         let mut cfg: Self = toml::from_str(&raw)?;
+        if let Some(ipc) = &cfg.ipc { ipc.validate()?; }
+        if let Some(pubsub) = &cfg.pubsub { pubsub.validate(cfg.aws_iot.is_some())?; }
+        if let Some(console) = &cfg.console { console.validate()?; }
         cfg.path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
         anyhow::ensure!(
             !cfg.daemon_update.enabled
@@ -442,12 +798,22 @@ impl Config {
             "daemon_update cannot be enabled with the service signer ([device.signer] kind = \"service\"): \
              components could replace the daemon the signing service trusts"
         );
+        if let Some(reason) = unsupported_on(std::env::consts::OS, &cfg) {
+            anyhow::bail!("{reason} (docs/MACOS_RUNTIME.md)");
+        }
         anyhow::ensure!(
             cfg.components.recovery_commands.iter().all(|(name, command)| crate::deps::valid_name(name) && !command.trim().is_empty()),
             "application recovery needs valid component names and nonempty commands"
         );
         anyhow::ensure!(cfg.components.recovery_commands.is_empty() || cfg.apply.allow_recipe_commands,
             "application recovery commands require apply.allow_recipe_commands");
+        if let Some(seal) = &cfg.seal {
+            seal.validate()?;
+            anyhow::ensure!(
+                seal.max_plaintext_bytes <= cfg.walrus.max_artifact_bytes,
+                "seal.max_plaintext_bytes cannot exceed walrus.max_artifact_bytes"
+            );
+        }
         let manifest_path = if cfg.sui.manifest_path.is_absolute() {
             cfg.sui.manifest_path.clone()
         } else {
@@ -487,12 +853,106 @@ impl Config {
             cfg.walrus.download_timeout_seconds > 0,
             "walrus.download_timeout_seconds must be positive"
         );
+        if let Some(telemetry) = &cfg.telemetry {
+            telemetry.validate()?;
+        }
+        if let Some(logs) = &cfg.logs {
+            anyhow::ensure!(cfg.telemetry.is_some(), "[logs] needs [telemetry] (the fleet indexer URL)");
+            logs.validate()?;
+        }
+        if let Some(streams) = &cfg.streams {
+            streams.validate()?;
+        }
+        if let Some(shadows) = &cfg.shadows {
+            shadows.validate()?;
+        }
+        validate_aws_iot(&cfg)?;
+        if let Some(budget) = &cfg.budget {
+            budget.validate(cfg.sui.manifest.as_ref().expect("validated manifest"))?;
+        }
+        if let Some(client_devices) = &mut cfg.client_devices {
+            if client_devices.device_groups_file.is_relative() {
+                client_devices.device_groups_file = path.parent().unwrap_or(Path::new(".")).join(&client_devices.device_groups_file);
+            }
+            client_devices.validate()?;
+            anyhow::ensure!(cfg.ipc.as_ref().is_some_and(|ipc| !ipc.administrators.is_empty()),
+                "[client_devices] needs [ipc] administrators: enrollment and revocation are operator IPC requests");
+        }
         Ok(cfg)
     }
 }
 
 fn default_timeout() -> u64 {
     600
+}
+
+/// `[aws_iot]` and what uses it: the connection runs in the pub/sub bridge,
+/// with its own credentials, within AWS IoT Core subscription quotas.
+pub fn validate_aws_iot(cfg: &Config) -> anyhow::Result<()> {
+    if let Some(settings) = &cfg.device_defender {
+        settings.validate()?;
+        anyhow::ensure!(cfg.aws_iot.is_some(), "[device_defender] needs [aws_iot]");
+    }
+    let aws_sync = cfg.shadows.as_ref().and_then(|s| s.aws_iot.as_ref().map(|sync| (s, sync)));
+    let Some(iot) = &cfg.aws_iot else {
+        anyhow::ensure!(aws_sync.is_none(), "[shadows.aws_iot] needs the [aws_iot] connection");
+        return Ok(());
+    };
+    iot.validate()?;
+    iot.check_separate(&cfg.device.keypair_path)?;
+    anyhow::ensure!(cfg.pubsub.is_some(), "[aws_iot] runs in the pub/sub bridge: add [pubsub]");
+    let mut subscriptions = if cfg.device_defender.is_some() { 2 } else { 0 };
+    subscriptions += cfg.pubsub.as_ref().and_then(|p| p.bridge.as_ref())
+        .map_or(0, |b| b.mappings.iter().filter(|m| m.source == crate::bridge::Endpoint::IotCore).count());
+    if let Some((shadows, sync)) = aws_sync {
+        anyhow::ensure!(shadows.thing_name == iot.thing_name, "shadows.thing_name must equal aws_iot.thing_name to synchronize with AWS IoT Device Shadow");
+        subscriptions += crate::iotcore::shadow_filters(&iot.thing_name, &sync.shadows).len();
+    }
+    anyhow::ensure!(subscriptions <= crate::iotcore::MAX_SUBSCRIPTIONS,
+        "AWS IoT Core allows {} subscriptions per connection; IotCore mappings plus 3 per synchronized shadow need {subscriptions}",
+        crate::iotcore::MAX_SUBSCRIPTIONS);
+    Ok(())
+}
+
+/// A configured feature this platform cannot provide as specified. On macOS
+/// (SF-075) these rest on Linux/systemd mechanisms with no validated
+/// equivalent, so they are refused rather than silently weakened.
+pub fn unsupported_on(os: &str, cfg: &Config) -> Option<&'static str> {
+    if os != "macos" {
+        return None;
+    }
+    if cfg.device.signer.as_ref().is_some_and(|signer| signer.kind == "service") {
+        return Some("the device signing service needs systemd unit/cgroup caller identity; it is not supported on macOS");
+    }
+    if matches!(cfg.apply.mode, ApplyMode::PrivilegedHelper) {
+        return Some("the privileged firmware helper is a systemd path-activated unit; it is not supported on macOS");
+    }
+    if cfg.apply.max_memory_bytes.is_some() {
+        return Some("apply.max_memory_bytes is not enforced by macOS (RLIMIT_AS); it is not supported on macOS");
+    }
+    if cfg.daemon_update.enabled {
+        return Some("daemon self-update has not been validated under launchd; it is not supported on macOS");
+    }
+    if cfg.aws_iot.is_some() {
+        return Some("the AWS IoT Core connection is validated on Linux first (SF-061); it is not yet supported on macOS");
+    }
+    None
+}
+
+impl TelemetryConfig {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        use crate::telemetry::{MAX_BUFFER, MAX_INTERVAL_SECONDS, MIN_INTERVAL_SECONDS};
+        endpoint(&self.url).map_err(|e| e.context("invalid telemetry.url"))?;
+        anyhow::ensure!(
+            (MIN_INTERVAL_SECONDS..=MAX_INTERVAL_SECONDS).contains(&self.interval_seconds),
+            "telemetry.interval_seconds must be {MIN_INTERVAL_SECONDS}..={MAX_INTERVAL_SECONDS}"
+        );
+        anyhow::ensure!(
+            (1..=MAX_BUFFER).contains(&self.buffer_max),
+            "telemetry.buffer_max must be 1..={MAX_BUFFER}"
+        );
+        Ok(())
+    }
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -510,6 +970,10 @@ pub struct RuntimeConfig {
     pub component_stop_timeout_seconds: u64,
     /// Restarts allowed within ten minutes before a component is Broken.
     pub component_max_restarts: u32,
+    /// Let the daemon's group read its own and its components' logs and the
+    /// retained confidential values, for a separate log reader such as the
+    /// CloudWatch Logs adapter (SF-060). Also writes the daemon's own log.
+    pub log_group_read: bool,
 }
 impl Default for RuntimeConfig {
     fn default() -> Self {
@@ -521,6 +985,7 @@ impl Default for RuntimeConfig {
             component_ready_timeout_seconds: 60,
             component_stop_timeout_seconds: 10,
             component_max_restarts: 5,
+            log_group_read: false,
         }
     }
 }
@@ -530,6 +995,22 @@ mod tests {
     use super::*;
     fn fixture() -> DeploymentManifest {
         serde_json::from_str(include_str!("../../manifests/fixture.localnet.json")).unwrap()
+    }
+    #[test]
+    fn shadows_need_a_thing_name_and_bounded_limits() {
+        for (text, valid) in [
+            ("thing_name = \"dev-1:a_b\"", true),
+            ("thing_name = \"\"", false),
+            ("thing_name = \"a b\"", false),
+            ("thing_name = \"d\"\nmax_shadows = 0", false),
+            ("thing_name = \"d\"\nmax_shadows = 129", false),
+            ("thing_name = \"d\"\nmax_shadows = 2\n[sync]\nurl = \"https://x\"\nshadows = [\"\", \"b\"]", true),
+            ("thing_name = \"d\"\nmax_shadows = 2\n[sync]\nurl = \"https://x\"\nshadows = [\"a\", \"b\", \"c\"]", false),
+        ] {
+            let cfg: ShadowsConfig = toml::from_str(text).unwrap();
+            assert_eq!(cfg.validate().is_ok(), valid, "{text}");
+        }
+        assert!(toml::from_str::<ShadowsConfig>("thing_name = \"d\"\nunknown = 1").is_err());
     }
     #[test]
     fn mixed_origins_and_compatibility() {
@@ -563,6 +1044,46 @@ mod tests {
         }
     }
     #[test]
+    fn pubsub_queues_must_hold_every_inbound_copy_of_a_message() {
+        let bridge = "[bridge]\nbroker='127.0.0.1:1883'\n\
+            [[bridge.mappings]]\ntopic='lan/#'\nsource='LocalMqtt'\ntarget='Pubsub'\ntarget_topic_prefix='a/'\n\
+            [[bridge.mappings]]\ntopic='lan/+'\nsource='LocalMqtt'\ntarget='Pubsub'\ntarget_topic_prefix='b/'\n";
+        for (messages, valid) in [(1, false), (2, true)] {
+            let pubsub: PubsubConfig = toml::from_str(&format!("max_messages_per_subscription={messages}\n{bridge}")).unwrap();
+            assert_eq!(pubsub.validate(false).is_ok(), valid, "{messages}");
+        }
+    }
+    #[test]
+    fn aws_iot_needs_pubsub_its_own_key_and_fits_aws_quotas() {
+        let base = "[sui]\nmanifest_path='deployment.json'\n[device]\nkeypair_path='/etc/suifleet/device.key'\n\
+            device_object_id='0x1'\ndevice_cap_id='0x2'\n[apply]\ncommand='true'\n";
+        let iot = "[aws_iot]\nendpoint='abc-ats.iot.us-east-1.amazonaws.com'\nthing_name='dev1'\nca_file='/etc/aws/ca.pem'\n\
+            certificate_file='/etc/aws/cert.pem'\nprivate_key_file='/etc/aws/key.pem'\n";
+        let names = |n: usize| (0..n).map(|i| format!("'s{i}'")).collect::<Vec<_>>().join(",");
+        let check = |text: String| validate_aws_iot(&toml::from_str::<Config>(&text).unwrap()).map_err(|e| e.to_string());
+        check(format!("{base}[pubsub]\n{iot}")).unwrap();
+        check(format!("{base}[device_defender]\n[pubsub]\n{iot}")).unwrap();
+        assert!(check(format!("{base}[device_defender]\n[pubsub]\n")).unwrap_err().contains("needs [aws_iot]"));
+        assert!(check(format!("{base}[device_defender]\n[pubsub]\n[shadows]\nthing_name='dev1'\nmax_shadows=32\n[shadows.aws_iot]\nshadows=[{}]\n{iot}", names(16))).is_ok());
+        assert!(check(format!("{base}[device_defender]\n[pubsub]\n[shadows]\nthing_name='dev1'\nmax_shadows=32\n[shadows.aws_iot]\nshadows=[{}]\n{iot}", names(17))).is_err());
+        check(format!("{base}[pubsub]\n[shadows]\nthing_name='dev1'\nmax_shadows=32\n[shadows.aws_iot]\nshadows=[{}]\n{iot}", names(16))).unwrap();
+        for (text, error) in [
+            (format!("{base}{iot}"), "add [pubsub]"),
+            (format!("{base}[pubsub]\n[shadows]\nthing_name='dev1'\n[shadows.aws_iot]\nshadows=['']\n"), "needs the [aws_iot] connection"),
+            (format!("{base}[pubsub]\n[shadows]\nthing_name='other'\n[shadows.aws_iot]\nshadows=['']\n{iot}"), "must equal aws_iot.thing_name"),
+            (format!("{base}[pubsub]\n[shadows]\nthing_name='dev1'\nmax_shadows=32\n[shadows.aws_iot]\nshadows=[{}]\n{iot}", names(17)), "subscriptions per connection"),
+            (format!("{base}[pubsub]\n{}", iot.replace("/etc/aws/key.pem", "/etc/suifleet/device.key")), "Sui device key"),
+        ] {
+            let message = check(text.clone()).err().unwrap_or_else(|| panic!("accepted: {text}"));
+            assert!(message.contains(error), "{message}");
+        }
+        let both: ShadowsConfig = toml::from_str("thing_name='dev1'\n[sync]\nurl='https://x'\nshadows=['']\n[aws_iot]\nshadows=['']\n").unwrap();
+        assert!(both.validate().unwrap_err().to_string().contains("not both"));
+        let cfg: Config = toml::from_str(&format!("{base}[pubsub]\n{iot}")).unwrap();
+        assert!(unsupported_on("macos", &cfg).is_some_and(|r| r.contains("AWS IoT Core")));
+        assert!(unsupported_on("linux", &cfg).is_none());
+    }
+    #[test]
     fn walrus_limits_default_when_omitted_or_partial() {
         let base = "[sui]\nmanifest_path='deployment.json'\n[device]\nkeypair_path='k'\n\
             device_object_id='0x1'\ndevice_cap_id='0x2'\n[apply]\ncommand='true'\n";
@@ -579,6 +1100,10 @@ mod tests {
         let cached: Config = toml::from_str(&format!("{base}[components]\noffline_candidates='cached'\ncache_max_bytes=10\n")).unwrap();
         assert_eq!(cached.components.offline_candidates, OfflinePolicy::Cached);
         assert_eq!(cached.components.cache_max_bytes, 10);
+        assert_eq!(omitted.components.configuration_overlay_dir, PathBuf::from("/etc/suifleet/component-config"));
+        let overlay: Config = toml::from_str(&format!("{base}[components]\nconfiguration_overlay_dir='/run/x'\nconfiguration_defer_max_seconds=5\n")).unwrap();
+        assert_eq!(overlay.components.configuration_overlay_dir, PathBuf::from("/run/x"));
+        assert_eq!(overlay.components.configuration_defer_max_seconds, 5);
         assert!(toml::from_str::<Config>(&format!("{base}[components]\noffline_candidates='always'\n")).is_err());
         assert!(toml::from_str::<Config>(&format!("{base}[components]\noffline='cached'\n")).is_err());
         assert_eq!(partial.walrus.download_attempts, 2);
@@ -592,6 +1117,45 @@ mod tests {
         m.validate().unwrap();
         m.type_origins.insert(crate::catalog::TYPES[0].into(), "bad".into());
         assert!(m.validate().is_err());
+    }
+    #[test]
+    fn telemetry_is_optional_and_bounded() {
+        let base = "[sui]\nmanifest_path='deployment.json'\n[device]\nkeypair_path='k'\n\
+            device_object_id='0x1'\ndevice_cap_id='0x2'\n[apply]\ncommand='true'\n";
+        assert!(toml::from_str::<Config>(base).unwrap().telemetry.is_none());
+        let parsed: Config = toml::from_str(&format!("{base}[telemetry]\nurl='https://fleet.example'\n")).unwrap();
+        let telemetry = parsed.telemetry.unwrap();
+        assert_eq!((telemetry.interval_seconds, telemetry.buffer_max), (60, 1024));
+        telemetry.validate().unwrap();
+        for bad in ["url='ftp://fleet.example'", "url='https://u:p@fleet.example'",
+                    "url='https://fleet.example'\ninterval_seconds=5", "url='https://fleet.example'\ninterval_seconds=3601",
+                    "url='https://fleet.example'\nbuffer_max=0", "url='https://fleet.example'\nbuffer_max=10001"] {
+            let parsed: Config = toml::from_str(&format!("{base}[telemetry]\n{bad}\n")).unwrap();
+            assert!(parsed.telemetry.unwrap().validate().is_err(), "{bad}");
+        }
+        assert!(toml::from_str::<Config>(&format!("{base}[telemetry]\nurl='https://x'\ntoken='t'\n")).is_err());
+    }
+    #[test]
+    fn logs_are_optional_bounded_and_need_telemetry() {
+        let base = "[sui]\nmanifest_path='deployment.json'\n[device]\nkeypair_path='k'\n\
+            device_object_id='0x1'\ndevice_cap_id='0x2'\n[apply]\ncommand='true'\n";
+        assert!(toml::from_str::<Config>(base).unwrap().logs.is_none());
+        let parsed: Config = toml::from_str(&format!("{base}[logs]\n")).unwrap();
+        let logs = parsed.logs.unwrap();
+        assert_eq!((logs.interval_seconds, logs.max_lines_per_interval, logs.buffer_max), (60, 512, 256));
+        logs.validate().unwrap();
+        for bad in ["interval_seconds=5", "max_lines_per_interval=0", "max_lines_per_interval=10001", "buffer_max=0"] {
+            let parsed: Config = toml::from_str(&format!("{base}[logs]\n{bad}\n")).unwrap();
+            assert!(parsed.logs.unwrap().validate().is_err(), "{bad}");
+        }
+        assert!(toml::from_str::<Config>(&format!("{base}[logs]\nurl='https://x'\n")).is_err(), "logs take their URL from [telemetry]");
+        // Config::load refuses [logs] without [telemetry].
+        let dir = std::env::temp_dir().join(format!("suifleet-config-logs-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("deployment.json"), include_str!("../../manifests/fixture.localnet.json")).unwrap();
+        std::fs::write(dir.join("config.toml"), format!("{base}[logs]\n")).unwrap();
+        let error = Config::load(&dir.join("config.toml")).unwrap_err();
+        assert!(format!("{error:#}").contains("[logs] needs [telemetry]"), "{error:#}");
     }
     #[test]
     fn daemon_update_is_refused_with_the_service_signer() {
@@ -608,6 +1172,24 @@ mod tests {
         let error = format!("{:#}", Config::load(&path).unwrap_err());
         assert!(!error.contains("daemon_update"), "{error}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+    #[test]
+    fn linux_only_features_are_refused_on_macos() {
+        let base = "[sui]\nmanifest_path='deployment.json'\n[device]\nkeypair_path='/k'\ndevice_object_id='0x1'\ndevice_cap_id='0x2'\n";
+        let parse = |extra: &str| -> Config { toml::from_str(&format!("{base}{extra}")).unwrap() };
+        let plain = parse("[apply]\ncommand='/usr/bin/true'\n");
+        assert_eq!(unsupported_on("macos", &plain), None);
+        for (extra, needle) in [
+            ("[device.signer]\nkind='service'\nsocket='/s'\n[apply]\ncommand='/usr/bin/true'\n", "signing service"),
+            ("[apply]\ncommand='/usr/bin/true'\nmode='privileged-helper'\n", "firmware helper"),
+            ("[apply]\ncommand='/usr/bin/true'\nmax_memory_bytes=1000000\n", "max_memory_bytes"),
+            ("[apply]\ncommand='/usr/bin/true'\n[daemon_update]\nenabled=true\ncomponent='suifleet'\n", "self-update"),
+        ] {
+            let cfg = parse(extra);
+            assert!(unsupported_on("macos", &cfg).is_some_and(|reason| reason.contains(needle)), "{extra}");
+            // Linux keeps every one of them.
+            assert_eq!(unsupported_on("linux", &cfg), None, "{extra}");
+        }
     }
     #[test]
     fn legacy_network_config_rejected() {

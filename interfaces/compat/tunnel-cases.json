@@ -1,0 +1,434 @@
+{
+  "schema_version": 1,
+  "reference": "aws.greengrass.SecureTunneling 2.0.1 / AWS Local Proxy 3.3.1",
+  "settings": {
+    "enabled": true,
+    "region": "us-east-1",
+    "proxy": "/usr/libexec/suifleet-localproxy",
+    "proxy_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "working_directory": "/usr/share/suifleet-tunnel/empty",
+    "destinations": {
+      "SSH": "127.0.0.1:22",
+      "HTTP": "127.0.0.1:8080"
+    },
+    "max_concurrent_tunnels": 1,
+    "tunnel_timeout_seconds": 60,
+    "aws_iot": {
+      "endpoint": "localhost",
+      "thing_name": "thing1",
+      "ca_file": "/ca",
+      "certificate_file": "/cert",
+      "private_key_file": "/key"
+    },
+    "proxy_settings": "/settings.json"
+  },
+  "notifications": [
+    {
+      "id": "ssh",
+      "topic": "$aws/things/thing1/tunnels/notify",
+      "retain": false,
+      "payload": {
+        "clientAccessToken": "fixture-token",
+        "clientMode": "destination",
+        "region": "us-east-1",
+        "services": [
+          "SSH"
+        ]
+      },
+      "accepted": true
+    },
+    {
+      "id": "two-services",
+      "topic": "$aws/things/thing1/tunnels/notify",
+      "retain": false,
+      "payload": {
+        "clientAccessToken": "fixture-token",
+        "clientMode": "destination",
+        "region": "us-east-1",
+        "services": [
+          "SSH",
+          "HTTP"
+        ]
+      },
+      "accepted": true
+    },
+    {
+      "id": "other-thing",
+      "topic": "$aws/things/other/tunnels/notify",
+      "retain": false,
+      "payload": {
+        "clientAccessToken": "fixture-token",
+        "clientMode": "destination",
+        "region": "us-east-1",
+        "services": [
+          "SSH"
+        ]
+      },
+      "accepted": false
+    },
+    {
+      "id": "local-topic",
+      "topic": "tunnels/notify",
+      "retain": false,
+      "payload": {
+        "clientAccessToken": "fixture-token",
+        "clientMode": "destination",
+        "region": "us-east-1",
+        "services": [
+          "SSH"
+        ]
+      },
+      "accepted": false
+    },
+    {
+      "id": "retained",
+      "topic": "$aws/things/thing1/tunnels/notify",
+      "retain": true,
+      "payload": {
+        "clientAccessToken": "fixture-token",
+        "clientMode": "destination",
+        "region": "us-east-1",
+        "services": [
+          "SSH"
+        ]
+      },
+      "accepted": false
+    },
+    {
+      "id": "source-mode",
+      "topic": "$aws/things/thing1/tunnels/notify",
+      "retain": false,
+      "payload": {
+        "clientAccessToken": "fixture-token",
+        "clientMode": "source",
+        "region": "us-east-1",
+        "services": [
+          "SSH"
+        ]
+      },
+      "accepted": false
+    },
+    {
+      "id": "region-mismatch",
+      "topic": "$aws/things/thing1/tunnels/notify",
+      "retain": false,
+      "payload": {
+        "clientAccessToken": "fixture-token",
+        "clientMode": "destination",
+        "region": "us-west-2",
+        "services": [
+          "SSH"
+        ]
+      },
+      "accepted": false
+    },
+    {
+      "id": "region-injection",
+      "topic": "$aws/things/thing1/tunnels/notify",
+      "retain": false,
+      "payload": {
+        "clientAccessToken": "fixture-token",
+        "clientMode": "destination",
+        "region": "us-east-1 -s 22",
+        "services": [
+          "SSH"
+        ]
+      },
+      "accepted": false
+    },
+    {
+      "id": "unknown-service",
+      "topic": "$aws/things/thing1/tunnels/notify",
+      "retain": false,
+      "payload": {
+        "clientAccessToken": "fixture-token",
+        "clientMode": "destination",
+        "region": "us-east-1",
+        "services": [
+          "RDP"
+        ]
+      },
+      "accepted": false
+    },
+    {
+      "id": "empty-services",
+      "topic": "$aws/things/thing1/tunnels/notify",
+      "retain": false,
+      "payload": {
+        "clientAccessToken": "fixture-token",
+        "clientMode": "destination",
+        "region": "us-east-1",
+        "services": []
+      },
+      "accepted": false
+    },
+    {
+      "id": "duplicate-services",
+      "topic": "$aws/things/thing1/tunnels/notify",
+      "retain": false,
+      "payload": {
+        "clientAccessToken": "fixture-token",
+        "clientMode": "destination",
+        "region": "us-east-1",
+        "services": [
+          "SSH",
+          "SSH"
+        ]
+      },
+      "accepted": false
+    },
+    {
+      "id": "service-injection",
+      "topic": "$aws/things/thing1/tunnels/notify",
+      "retain": false,
+      "payload": {
+        "clientAccessToken": "fixture-token",
+        "clientMode": "destination",
+        "region": "us-east-1",
+        "services": [
+          "SSH=192.0.2.1:22"
+        ]
+      },
+      "accepted": false
+    },
+    {
+      "id": "unknown-field",
+      "topic": "$aws/things/thing1/tunnels/notify",
+      "retain": false,
+      "payload": {
+        "clientAccessToken": "fixture-token",
+        "clientMode": "destination",
+        "region": "us-east-1",
+        "services": [
+          "SSH"
+        ],
+        "command": "reboot"
+      },
+      "accepted": false
+    },
+    {
+      "id": "token-empty",
+      "topic": "$aws/things/thing1/tunnels/notify",
+      "retain": false,
+      "payload": {
+        "clientAccessToken": "",
+        "clientMode": "destination",
+        "region": "us-east-1",
+        "services": [
+          "SSH"
+        ]
+      },
+      "accepted": false
+    },
+    {
+      "id": "token-newline",
+      "topic": "$aws/things/thing1/tunnels/notify",
+      "retain": false,
+      "payload": {
+        "clientAccessToken": "x\ny",
+        "clientMode": "destination",
+        "region": "us-east-1",
+        "services": [
+          "SSH"
+        ]
+      },
+      "accepted": false
+    },
+    {
+      "id": "token-nul",
+      "topic": "$aws/things/thing1/tunnels/notify",
+      "retain": false,
+      "payload": {
+        "clientAccessToken": "x\u0000y",
+        "clientMode": "destination",
+        "region": "us-east-1",
+        "services": [
+          "SSH"
+        ]
+      },
+      "accepted": false
+    },
+    {
+      "id": "token-oversize",
+      "topic": "$aws/things/thing1/tunnels/notify",
+      "retain": false,
+      "payload": {
+        "clientAccessToken": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "clientMode": "destination",
+        "region": "us-east-1",
+        "services": [
+          "SSH"
+        ]
+      },
+      "accepted": false
+    },
+    {
+      "id": "not-json",
+      "topic": "$aws/things/thing1/tunnels/notify",
+      "retain": false,
+      "payload": {
+        "clientAccessToken": "fixture-token",
+        "clientMode": "destination",
+        "region": "us-east-1",
+        "services": [
+          "SSH"
+        ]
+      },
+      "accepted": false,
+      "raw": "{token"
+    },
+    {
+      "id": "missing-token",
+      "topic": "$aws/things/thing1/tunnels/notify",
+      "retain": false,
+      "payload": {
+        "clientMode": "destination",
+        "region": "us-east-1",
+        "services": [
+          "SSH"
+        ]
+      },
+      "accepted": false
+    },
+    {
+      "id": "wrong-type",
+      "topic": "$aws/things/thing1/tunnels/notify",
+      "retain": false,
+      "payload": {
+        "clientAccessToken": "fixture-token",
+        "clientMode": "destination",
+        "region": "us-east-1",
+        "services": "SSH"
+      },
+      "accepted": false
+    },
+    {
+      "id": "oversize-payload",
+      "topic": "$aws/things/thing1/tunnels/notify",
+      "retain": false,
+      "payload": {
+        "clientAccessToken": "fixture-token",
+        "clientMode": "destination",
+        "region": "us-east-1",
+        "services": [
+          "SSH"
+        ]
+      },
+      "accepted": false,
+      "raw": "                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 "
+    }
+  ],
+  "configuration": [
+    {
+      "id": "valid",
+      "patch": {},
+      "accepted": true
+    },
+    {
+      "id": "disabled",
+      "patch": {
+        "enabled": false
+      },
+      "accepted": false
+    },
+    {
+      "id": "remote-destination",
+      "patch": {
+        "destinations": {
+          "SSH": "192.0.2.1:22"
+        }
+      },
+      "accepted": false
+    },
+    {
+      "id": "dns-destination",
+      "patch": {
+        "destinations": {
+          "SSH": "localhost:22"
+        }
+      },
+      "accepted": false
+    },
+    {
+      "id": "zero-port",
+      "patch": {
+        "destinations": {
+          "SSH": "127.0.0.1:0"
+        }
+      },
+      "accepted": false
+    },
+    {
+      "id": "no-destinations",
+      "patch": {
+        "destinations": {}
+      },
+      "accepted": false
+    },
+    {
+      "id": "service-delimiter",
+      "patch": {
+        "destinations": {
+          "SSH,HTTP": "127.0.0.1:22"
+        }
+      },
+      "accepted": false
+    },
+    {
+      "id": "no-slots",
+      "patch": {
+        "max_concurrent_tunnels": 0
+      },
+      "accepted": false
+    },
+    {
+      "id": "too-many-slots",
+      "patch": {
+        "max_concurrent_tunnels": 17
+      },
+      "accepted": false
+    },
+    {
+      "id": "zero-timeout",
+      "patch": {
+        "tunnel_timeout_seconds": 0
+      },
+      "accepted": false
+    },
+    {
+      "id": "long-timeout",
+      "patch": {
+        "tunnel_timeout_seconds": 43201
+      },
+      "accepted": false
+    },
+    {
+      "id": "relative-proxy",
+      "patch": {
+        "proxy": "localproxy"
+      },
+      "accepted": false
+    },
+    {
+      "id": "bad-digest",
+      "patch": {
+        "proxy_sha256": "x"
+      },
+      "accepted": false
+    },
+    {
+      "id": "relative-working-dir",
+      "patch": {
+        "working_directory": "."
+      },
+      "accepted": false
+    },
+    {
+      "id": "region-injection",
+      "patch": {
+        "region": "--config=x"
+      },
+      "accepted": false
+    }
+  ]
+}

@@ -9,6 +9,7 @@ tmp-swu/
 
 # ── Move build artifacts ──────────────────────────────────────────────────────
 contracts/build/
+contracts/fleet_storage/build/
 
 # ── Rust build artifacts ──────────────────────────────────────────────────────
 suifleet-edge/target/
@@ -49,3 +50,7 @@ live-evidence.json
 
 # Sanitized local security reports (raw reports belong outside the checkout)
 security-reports/
+
+# Windows native runtime build and sanitized runner evidence
+suifleet-edge/windows-runtime/target/
+windows-evidence.json

@@ -417,6 +417,9 @@ module sui_edge::deployment_manager {
         assert!(status == STATUS_APPLIED || status == STATUS_FAILED, EInvalidStatus);
 
         let device_id = device_cap::device_id(cap);
+        if (deployment.schema_version == 3) {
+            record_rollout_outcome(deployment, device_id, status);
+        };
         // Legacy StatusesKey entries are never copied: old entry points may
         // have forged them. They stay on the record as unverified history.
         let statuses = &mut receipts_mut(deployment).statuses;
@@ -486,6 +489,17 @@ module sui_edge::deployment_manager {
         let DeploymentRecord { id, creator, component_name: _, version: _, recipe_blob_id: _, artifact_sha256: _, created_at: _, schema_version: _ } = deployment;
         event::emit(DeploymentDeleted { deployment_id: id.to_inner(), creator });
         id.delete();
+    }
+
+    /// Authority changes in place so every still-callable package checks the
+    /// recipient as creator. Preserve payload, targets, receipts and controls.
+    public(package) fun handover(d: &mut DeploymentRecord, recipient: address, ctx: &TxContext) {
+        assert!(ctx.sender() == d.creator, ENotCreator);
+        // Catalog-bound records resolve dependencies through the original
+        // publisher index. Supersede them under a recipient-owned catalog;
+        // changing only creator would retain the old publisher as an authority.
+        assert!(d.schema_version != 2, EPackageOutdated);
+        d.creator = recipient;
     }
 
     // ── Read helpers ──────────────────────────────────────────────────────────
@@ -612,4 +626,209 @@ module sui_edge::deployment_manager {
     public fun artifact_sha256(d: &DeploymentRecord): &String { &d.artifact_sha256 }
     public fun status_applied(): u8 { STATUS_APPLIED }
     public fun status_failed(): u8 { STATUS_FAILED }
+    // SF-017: creator-coordinated, durable staged rollout. Schema 3 makes
+    // older clients fail closed rather than ignore this admission policy.
+    public struct RolloutKey has copy, drop, store {}
+    public struct RolloutPolicy has copy, drop, store {
+        concurrency: u64, rate_count: u64, rate_window_ms: u64,
+        bake_ms: u64, minimum_samples: u64, failure_bps: u64,
+        offline_timeout_ms: u64,
+    }
+    public struct Rollout has copy, drop, store {
+        policy: RolloutPolicy,
+        members: vector<ID>, cohorts: vector<u64>,
+        admitted_at: vector<u64>, outcomes: vector<u8>, skipped: vector<bool>,
+        cohort: u64, state: u8, // 0 active, 1 paused, 2 aborted, 3 complete
+        bake_started_ms: u64, progress_ms: u64, revision: u64,
+    }
+    public struct RolloutDecision has copy, drop {
+        deployment_id: ID, revision: u64, cohort: u64, state: u8,
+        reason: String, at_ms: u64, admitted: vector<ID>,
+    }
+    const ERolloutPolicy: u64 = 12;
+    const ERolloutState: u64 = 13;
+
+    public fun rollout_policy(concurrency: u64, rate_count: u64, rate_window_ms: u64,
+        bake_ms: u64, minimum_samples: u64, failure_bps: u64, offline_timeout_ms: u64,
+    ): RolloutPolicy {
+        assert!(concurrency > 0 && concurrency <= 512 && rate_count > 0 && rate_count <= 512,
+            ERolloutPolicy);
+        assert!(rate_window_ms > 0 && rate_window_ms <= 604800000 && bake_ms <= 604800000 &&
+            minimum_samples > 0 && minimum_samples <= 512 && failure_bps > 0 && failure_bps <= 10000 &&
+            offline_timeout_ms > 0 && offline_timeout_ms <= 604800000, ERolloutPolicy);
+        RolloutPolicy { concurrency, rate_count, rate_window_ms, bake_ms, minimum_samples,
+            failure_bps, offline_timeout_ms }
+    }
+
+    /// Snapshot cohorts are ordered 0..N with at least minimum_samples in
+    /// each cohort. Group membership/ownership is still checked by devices.
+    /// A cohort snapshot never silently expands when group membership changes.
+    public fun new_rollout_verified(component_name: String, version: String,
+        recipe_blob_id: String, artifact_sha256: String, recipe_sha256: String,
+        target_groups: vector<ID>, members: vector<ID>, cohorts: vector<u64>,
+        policy: RolloutPolicy, clock: &Clock, ctx: &mut TxContext,
+    ): DeploymentRecord {
+        let n = members.length();
+        assert!(n > 0 && n <= 512 && cohorts.length() == n && cohorts[0] == 0, ERolloutPolicy);
+        let mut i = 0; let mut count = 0; let mut current = 0;
+        while (i < n) {
+            let mut j = 0;
+            while (j < i) { assert!(members[j] != members[i], ERolloutPolicy); j = j + 1; };
+            if (cohorts[i] != current) {
+                assert!(cohorts[i] == current + 1 && count >= policy.minimum_samples, ERolloutPolicy);
+                current = cohorts[i]; count = 0;
+            };
+            count = count + 1; i = i + 1;
+        };
+        assert!(count >= policy.minimum_samples, ERolloutPolicy);
+        // Direct targets bind the snapshot even if there are no groups. The
+        // operator check in the daemon remains mandatory for every member.
+        let mut d = new_deployment_verified(component_name, version, recipe_blob_id, artifact_sha256,
+            recipe_sha256, target_groups, members, clock, ctx);
+        d.schema_version = 3;
+        let mut admitted_at = vector[]; let mut outcomes = vector[]; let mut skipped = vector[];
+        i = 0;
+        while (i < n) { admitted_at.push_back(0); outcomes.push_back(0); skipped.push_back(false); i = i + 1; };
+        let r = Rollout { policy, members, cohorts, admitted_at, outcomes, skipped, cohort: 0,
+            state: 0, bake_started_ms: 0, progress_ms: clock.timestamp_ms(), revision: 0 };
+        df::add(&mut d.id, RolloutKey {}, r);
+        audit_rollout(&mut d, std::string::utf8(b"created; no members admitted"), vector[], clock);
+        d
+    }
+
+    public fun rollout(d: &DeploymentRecord): Rollout {
+        assert!(d.schema_version == 3, ERolloutState);
+        *df::borrow(&d.id, RolloutKey {})
+    }
+    public fun rollout_progress(d: &DeploymentRecord): (u8, u64) {
+        let r = rollout(d); (r.state, r.cohort)
+    }
+    #[test_only]
+    public fun rollout_receipt_for_testing(d: &mut DeploymentRecord, device: ID, status: u8) {
+        record_rollout_outcome(d, device, status);
+    }
+
+    // Only this introduction package knows this field. Older callable report
+    // paths can still write ordinary receipts, but cannot settle rollout grants.
+    // Paused/aborted inflight work may truthfully finish; failure stays sticky.
+    fun record_rollout_outcome(d: &mut DeploymentRecord, device: ID, status: u8) {
+        assert!(status == STATUS_APPLIED || status == STATUS_FAILED, EInvalidStatus);
+        let r: &mut Rollout = df::borrow_mut(&mut d.id, RolloutKey {});
+        let (found, i) = r.members.index_of(&device);
+        assert!(found && r.admitted_at[i] != 0 && !r.skipped[i], ENotTargeted);
+        if (r.outcomes[i] != STATUS_FAILED) { *(&mut r.outcomes[i]) = status; };
+    }
+
+    public fun rollout_eligible(d: &DeploymentRecord, device: ID): bool {
+        let r = rollout(d);
+        let (found, i) = r.members.index_of(&device);
+        found && r.admitted_at[i] != 0 && r.outcomes[i] == 0 && !r.skipped[i] && r.state == 0
+    }
+
+    /// Tick by the creator, after checking current identity-bound telemetry.
+    /// `healthy` must name fresh, verified reports of this deployment installed;
+    /// `unhealthy` names verified degraded applied members. This is an explicit
+    /// operator attestation, not a claim that Move verified off-chain signatures.
+    /// Missing/offline/unverified telemetry never passes a health gate.
+    public fun advance_rollout(d: &mut DeploymentRecord, online: vector<ID>,
+        healthy: vector<ID>, unhealthy: vector<ID>, clock: &Clock, ctx: &TxContext,
+    ) {
+        assert!(ctx.sender() == d.creator, ENotCreator);
+        assert!(d.schema_version == 3, ERolloutState);
+        let control = control(d);
+        let r: &mut Rollout = df::borrow_mut(&mut d.id, RolloutKey {});
+        assert!(r.state == 0, ERolloutState);
+        let now = clock.timestamp_ms();
+        assert!(now > 0 && now >= r.progress_ms, ERolloutState);
+        let mut samples = 0; let mut failures = 0; let mut inflight = 0;
+        let mut recent = 0; let mut all_done = true; let mut all_healthy = true;
+        let mut cohort_samples = 0; let mut i = 0;
+        while (i < r.members.length()) {
+            let id = r.members[i];
+            if (r.admitted_at[i] != 0) {
+                // A verified health regression is sticky, including when a
+                // device later overwrites its ordinary deployment receipt.
+                if (r.outcomes[i] == STATUS_APPLIED && unhealthy.contains(&id)) {
+                    *(&mut r.outcomes[i]) = STATUS_FAILED; r.progress_ms = now;
+                };
+                if (r.outcomes[i] != 0) {
+                    samples = samples + 1;
+                    if (r.outcomes[i] == STATUS_FAILED) { failures = failures + 1; };
+                } else { inflight = inflight + 1; };
+                if (now - r.admitted_at[i] < r.policy.rate_window_ms) { recent = recent + 1; };
+            };
+            if (r.cohorts[i] == r.cohort && !r.skipped[i]) {
+                if (r.outcomes[i] == 0) { all_done = false; } else { cohort_samples = cohort_samples + 1; };
+                if (r.outcomes[i] == STATUS_APPLIED && !healthy.contains(&id)) { all_healthy = false; };
+            };
+            i = i + 1;
+        };
+        let mut reason = std::string::utf8(b"waiting for receipts, health or rate capacity");
+        let mut admitted = vector[];
+        if (samples >= r.policy.minimum_samples && failures * 10000 >= samples * r.policy.failure_bps) {
+            r.state = 2; reason = std::string::utf8(b"failure threshold reached; permanently aborted");
+        } else if (control.state != 0 || (control.expires_ms != 0 && now >= control.expires_ms)) {
+            reason = std::string::utf8(b"deployment paused, cancelled or expired; no new grants");
+        } else if (all_done && cohort_samples >= r.policy.minimum_samples && all_healthy) {
+            if (r.bake_started_ms == 0) { r.bake_started_ms = now; r.progress_ms = now; };
+            if (now - r.bake_started_ms >= r.policy.bake_ms) {
+                if (r.cohort == r.cohorts[r.cohorts.length() - 1]) { r.state = 3; reason = std::string::utf8(b"rollout complete"); }
+                else { r.cohort = r.cohort + 1; r.bake_started_ms = 0; r.progress_ms = now;
+                    reason = std::string::utf8(b"bake and health gate passed; next cohort"); };
+            } else { reason = std::string::utf8(b"baking completed cohort"); };
+        } else {
+            // Fresh health must be present at every tick during the bake.
+            r.bake_started_ms = 0;
+            i = 0;
+            while (i < r.members.length() && inflight < r.policy.concurrency && recent < r.policy.rate_count) {
+                let id = r.members[i];
+                if (r.cohorts[i] == r.cohort && !r.skipped[i] && r.admitted_at[i] == 0 && online.contains(&id)) {
+                    *(&mut r.admitted_at[i]) = now; inflight = inflight + 1; recent = recent + 1;
+                    admitted.push_back(id); r.progress_ms = now;
+                };
+                i = i + 1;
+            };
+            if (!admitted.is_empty()) { reason = std::string::utf8(b"admitted online cohort members"); }
+            else if (now - r.progress_ms >= r.policy.offline_timeout_ms) {
+                r.state = 1; reason = std::string::utf8(b"offline or ambiguous cohort stalled; capacity retained");
+            };
+        };
+        audit_rollout(d, reason, admitted, clock);
+    }
+
+    /// Audited operator recovery. Aborts cannot resume; skips apply only to
+    /// never-admitted members. Never release a possibly executing offline slot.
+    public fun control_rollout(d: &mut DeploymentRecord, state: u8, skip: vector<ID>,
+        reason: String, clock: &Clock, ctx: &TxContext,
+    ) {
+        assert!(ctx.sender() == d.creator, ENotCreator);
+        assert!(reason.length() > 0 && reason.length() <= 256 && state <= 2, ERolloutPolicy);
+        let r: &mut Rollout = df::borrow_mut(&mut d.id, RolloutKey {});
+        assert!(r.state < 2, ERolloutState);
+        let mut i = 0;
+        while (i < skip.length()) {
+            let (found, index) = r.members.index_of(&skip[i]);
+            assert!(found && r.admitted_at[index] == 0, ERolloutState);
+            *(&mut r.skipped[index]) = true; i = i + 1;
+        };
+        r.state = state; r.bake_started_ms = 0; r.progress_ms = clock.timestamp_ms();
+        audit_rollout(d, reason, vector[], clock);
+    }
+
+    fun audit_rollout(d: &mut DeploymentRecord, reason: String, admitted: vector<ID>, clock: &Clock) {
+        let id = object::id(d);
+        let r: &mut Rollout = df::borrow_mut(&mut d.id, RolloutKey {});
+        r.revision = r.revision + 1;
+        event::emit(RolloutDecision { deployment_id: id, revision: r.revision,
+            cohort: r.cohort, state: r.state, reason, at_ms: clock.timestamp_ms(), admitted });
+    }
+
+    public fun delete_rollout(mut d: DeploymentRecord, ctx: &TxContext) {
+        assert!(ctx.sender() == d.creator, ENotCreator);
+        assert!(d.schema_version == 3, ERolloutState);
+        let _: Rollout = df::remove(&mut d.id, RolloutKey {});
+        d.schema_version = SCHEMA_VERSION;
+        delete_deployment(d, ctx);
+    }
+
 }

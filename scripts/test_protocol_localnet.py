@@ -4,6 +4,7 @@
 Run in a disposable dev container, preferably with --network none. This starts
 only loopback services, uses temporary keys/state and never modifies wallets.
 """
+import argparse
 import json
 import os
 from pathlib import Path
@@ -14,7 +15,7 @@ import time
 from urllib.request import Request, urlopen
 
 
-def main():
+def main(script="scripts/test_protocol_live.cjs"):
     if not Path("/.dockerenv").exists() or {p.name for p in Path("/sys/class/net").iterdir()} != {"lo"}:
         raise SystemExit("Use a disposable Docker container with --network none; existing local/public chains are not permitted")
     for port in (9000, 9123):
@@ -40,7 +41,7 @@ def main():
                         time.sleep(0.5)
                 else:
                     raise RuntimeError("localnet startup timeout")
-                subprocess.run(["node", "scripts/test_protocol_live.cjs"], check=True, env=env)
+                subprocess.run(["node", script], check=True, env=env)
             finally:
                 node.terminate()
                 try:
@@ -50,4 +51,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--handover-upgrade", action="store_true")
+    parser.add_argument("--retention-upgrade", action="store_true")
+    parser.add_argument("--budget-upgrade", action="store_true", help="SF-083 fleet budget upgrade, attacks and daemon draws")
+    args = parser.parse_args()
+    main("scripts/test_retention_upgrade.cjs" if args.retention_upgrade else "scripts/test_handover_upgrade.cjs" if args.handover_upgrade
+         else "scripts/test_budget_upgrade.cjs" if args.budget_upgrade else "scripts/test_protocol_live.cjs")

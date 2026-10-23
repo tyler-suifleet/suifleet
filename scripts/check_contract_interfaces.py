@@ -6,8 +6,9 @@ reference to this package in the dApp, daemon and deployment-manifest sources.
 A reference belongs to this package when it follows a package placeholder
 (`${PACKAGE_ID}::`, `{}::`, `"...::`) or is an address-free string such as
 `"device_cap::DeviceAddressKey"` (manifest type-origin keys, `moveType(...)`).
-Address-free strings naming a Sui/Move framework module are skipped; any other
-unknown module is drift, never silently ignored.
+Address-free strings naming a Sui/Move framework module, or one of the reviewed
+EXTERNAL types of other packages, are skipped; any other unknown module is
+drift, never silently ignored.
 
 - modules must exist in the contracts;
 - functions must exist and be callable from a transaction (public or entry);
@@ -89,6 +90,15 @@ def top_level_items(text, start):
     return count + (1 if saw_item else 0)
 
 
+# Reviewed types and calls of other packages, matched exactly. Clients verify
+# their package at runtime (Seal's key servers: the configured
+# key_server_package; Walrus: the pinned Testnet objects in fleet-budget.ts).
+EXTERNAL = frozenset({"key_server::KeyServer",
+                      "wal_exchange::exchange_all_for_wal", "wal_exchange::Exchange"})
+# Separately published packages of this repository, checked like the core one.
+EXTRA_PACKAGES = {"fleet_storage": ROOT / "contracts/fleet_storage"}
+
+
 def check(modules, framework=frozenset(), sources=None):
     errors, checked = [], 0
     for path in CLIENT_SOURCES if sources is None else sources:
@@ -102,7 +112,7 @@ def check(modules, framework=frozenset(), sources=None):
         references += [(match, True) for match in BARE_REFERENCE.finditer(text)]
         for match, bare in references:
             module, name = match.groups()
-            if bare and module not in modules and module in framework:
+            if module not in modules and ((bare and module in framework) or f"{module}::{name}" in EXTERNAL):
                 continue  # e.g. "package::UpgradeCap" from the Sui framework.
             checked += 1
             if module not in modules:
@@ -152,6 +162,11 @@ def main():
     with tempfile.TemporaryDirectory(prefix="move-summary-") as summary_dir:
         try:
             modules, framework = summarize(args.contracts, Path(summary_dir))
+            for name, package in EXTRA_PACKAGES.items():
+                extra = Path(summary_dir) / name
+                subprocess.run(["sui", "move", "summary", "--path", str(package), "--output-directory", str(extra)],
+                               check=True, capture_output=True, text=True)
+                modules.update({path.stem: json.loads(path.read_text()) for path in (extra / name).glob("*.json")})
         except subprocess.CalledProcessError as error:
             sys.exit(f"sui move summary failed:\n{error.stdout}\n{error.stderr}")
     errors, checked = check(modules, framework)

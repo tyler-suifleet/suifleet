@@ -49,6 +49,8 @@ Use an auditable usage model: network fees + separately metered selected infrast
 
 Before quoting a production fleet, measure a representative release end to end; count actual transactions/bytes and successful/failed effects; capture storage deposits/refunds, renewal and upload fees; verify delivery at expected concurrency; account for selected service charges; and compare the same workload, retention, security and availability against the customer's actual AWS configuration. Test Mainnet simulation/estimation without publication where possible; live Mainnet spend still requires explicit user authorization. Validate purchasing demand alongside the technical prototype.
 
+**Prepaid network costs (SF-083).** The dApp's fleet budget collects network costs up front and charges no SuiFleet fee. Whether any service fee applies is an **open business decision**; until the user decides, deposits cover network costs only. Sponsored transactions through a gas station, and Nautilus-enclave sponsorship, are recorded as future options, not the current design: both need an always-on signer or self-managed enclave hosting. See [FLEET_BUDGET.md](FLEET_BUDGET.md).
+
 ## Adjacent opportunities, reconsidered
 
 Rank by avoidable customer charges, network fit and implementation burden, not invented AWS service margins. Each row is a product hypothesis requiring its own measured bill and acceptance scope.
@@ -82,3 +84,7 @@ At this snapshot's 0.0001 SUI minimum computation component, one million separat
 AWS reports segment finances, not a dependable product-by-product profit ranking. Its FY2025 AWS revenue was about $128.7 billion with $45.6 billion operating income; Q2 2026 was $42.2 billion and $16.6 billion, respectively. Neither establishes which individual service has the highest margin. [FY2025 results](https://ir.aboutamazon.com/news-release/news-release-details/2026/Amazon-com-Announces-Fourth-Quarter-Results/default.aspx), [Q2 2026 results](https://ir.aboutamazon.com/news-release/news-release-details/2026/Amazon-com-Announces-Second-Quarter-Results/default.aspx).
 
 Compute/AI, database, storage, security and operations have different addressable buyers; AWS's total revenue is not our market size. The next decision is to validate SuiFleet's full network bill and demand, then benchmark configuration-history/approval and encrypted configuration distribution using the same cost-first method. Artifact distribution is the closest reusable product extension. Do not start a broad AWS clone or open unrelated implementation scope merely because this document lists hypotheses.
+
+## Manufacturer prospect research
+
+The [50-company discovery shortlist](business/prospects/README.md) supplies a sourced CSV, ranked readable report, explicit migration/safety caveats and prioritized discovery questions (SF-105). It is research only: fleet size, budget and buyer interest remain unknown, and no outreach or pilot has occurred.

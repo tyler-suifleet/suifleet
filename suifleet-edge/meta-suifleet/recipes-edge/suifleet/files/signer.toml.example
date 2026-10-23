@@ -18,3 +18,18 @@ caller_unit = "suifleet.service"
 # token_label = "suifleet"
 # key_label = "device"
 # pin_file = "/etc/suifleet/pkcs11.pin"   # suifleet-signer 0600
+
+# Seal sessions for confidential delivery (SF-022, CONFIDENTIAL_DELIVERY.md):
+# the service certifies an in-memory session key with the device key and signs
+# only fleet seal_approve* key requests for the daemon's main process.
+# [seal]
+# session_ttl_minutes = 10
+# clock_skew_seconds = 60
+
+# Gas draws from the owner's fleet budget (SF-083, FLEET_BUDGET.md): only
+# fleet_budget::draw_gas on this budget, for at most max_draw_mist, for the
+# daemon's main process. Match [budget] in config.toml; the contract's own
+# float cap and period allowance still bound every draw.
+# [budget]
+# budget_id = "0x<FleetBudget object ID>"
+# max_draw_mist = 50000000

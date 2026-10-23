@@ -1,0 +1,166 @@
+{
+  "schema_version": 1,
+  "ticket": "SF-092",
+  "status": "local_and_testnet_implementation_evidence",
+  "model": "gpt-6.1-sol",
+  "model_version_note": "Configured running model; no finer runtime build identifier exposed",
+  "implementation_commit": "c50dc39349ff7fcdb3c4c6e3fd7a2b95e89f1d3b",
+  "recorded_at": "2026-10-22T22:18:32.504858+00:00",
+  "dependency": {
+    "original_pin": "57cd3bc1aec364d302b7192c8c19eb550c10aa23",
+    "merged_sf083": "3e796f7c2a91e88734970b0d3956469e3a86c7ed",
+    "main_integration": "6db2ee90eb05605e445034097903f0680e30898a"
+  },
+  "environment": {
+    "image": "suifleet-dev:sf035",
+    "image_id": "31f727258ccd",
+    "rust": "1.94.0",
+    "sui_build": "1.81.1-e04cf9aa915c",
+    "sui_network": "1.82.1-987123842623",
+    "network_binary_sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b"
+  },
+  "verification": [
+    {
+      "command": "/tmp/sf092-tools/sui-build move test --path contracts/fleet_storage --build-env testnet",
+      "result": "passed",
+      "tests": 53,
+      "scope": "Actual prepaid capacity, stale quote rejection, gas/WAL period limits, serialized/duplicate execution, authority, owner override, expired admission and legacy mutation behavior"
+    },
+    {
+      "command": "make test-contracts (within pinned make check)",
+      "result": "passed",
+      "core_move_tests": 168,
+      "storage_move_tests": 51,
+      "note": "The separate final storage run adds two period-limit tests for 53 total; contract source is unchanged"
+    },
+    {
+      "command": "cargo test --locked --manifest-path suifleet-edge/Cargo.toml (within make check)",
+      "result": "passed",
+      "passed": 384,
+      "ignored": 4
+    },
+    {
+      "command": "cargo test --locked --manifest-path suifleet-edge/Cargo.toml --features pkcs11 (within make check)",
+      "result": "passed",
+      "passed": 386,
+      "ignored": 4
+    },
+    {
+      "command": "python3 -m unittest discover -s scripts/tests -p 'test_retention*.py' -v",
+      "result": "passed",
+      "tests": 9,
+      "scope": "Eight durable worker/notifier cases including actual local HTTPS/HMAC/acknowledgment/dedup and unsafe-secret negatives; one bytecode-cache integrity test"
+    },
+    {
+      "command": "PYTHONPATH=scripts python3 -m unittest discover -s scripts/tests -p test_live_common.py",
+      "result": "passed",
+      "tests": 35
+    },
+    {
+      "command": "node scripts/test_retention.cjs",
+      "result": "passed",
+      "scope": "SDK/BCS/builders, real private executor key and symlink/public-permission negatives"
+    },
+    {
+      "command": "node scripts/test_fleet_budget.cjs",
+      "result": "passed",
+      "scope": "Funding/usage/authority/alerts and browser upload confirmation, including distinct storage introduction/call origins"
+    },
+    {
+      "command": "cd dapp && ./node_modules/.bin/tsc --noEmit",
+      "result": "passed"
+    },
+    {
+      "command": "python3 scripts/test_protocol_localnet.py --retention-upgrade",
+      "result": "passed",
+      "environment": "suifleet-dev:sf035, Docker network none, pinned warm Move cache, read-only Git history",
+      "scope": "Instrumented local Walrus initialization only; exact merged v1 storage, actual WAL pool/blob population, compatible v2 upgrade/migration, preserved layouts/fields/origins, actual v2 registration parsed by browser helper, actual old-package withdrawal abort",
+      "receipt": {
+        "check": "populated-object compatible storage upgrade and old-package retirement",
+        "receipts": [
+          {
+            "label": "publish wal",
+            "digest": "GUbp6ytFX5ywzCG6z9VRzo6okfUWFLYWq6x95piX1vpr"
+          },
+          {
+            "label": "publish walrus",
+            "digest": "DcZZkJzkjiZHVamK88rPN2ezzPu7MwaY6dPtwSDJAuKz"
+          },
+          {
+            "label": "initialize isolated Walrus fixture",
+            "digest": "wuDvhUbqjArkb31KcznS2wFWZ5PCRUWm2mTDULp8f5d"
+          },
+          {
+            "label": "publish contracts",
+            "digest": "5e3eudnYXaxYicxqEd3AVcmaSWMciMoqcQ1BBeWo2aNh"
+          },
+          {
+            "label": "publish fleet_storage",
+            "digest": "CuqRLxFDW6JcLEKgwnzNuKGRai5rXDMi3LFU3B29FcoL"
+          },
+          {
+            "label": "create budget",
+            "digest": "A4fpjep5bzwSzMcmFrjb5wLnq1YXQh4tCxvJUMm3iEbH"
+          },
+          {
+            "label": "create v1 storage",
+            "digest": "8G6w8SPrF17xynGAc8bAvrppqA79M2HAhSQoFpr4QLqX"
+          },
+          {
+            "label": "populate v1 pool and wrapped blob with real registration",
+            "digest": "EAqaphhYurrfWDuggneu9DqJF6nB9mLe7Qg28JSTLmij"
+          },
+          {
+            "label": "compatible storage upgrade",
+            "digest": "7SXtnxzDUaQqDTmJWpAKkPaE4EkjH3KhijMBDXHQbdJe"
+          },
+          {
+            "label": "migrate existing storage",
+            "digest": "8V7ve5tB4TphTFtPvzoBU7K4DunnAyWiZAQhWJ1zuTy5"
+          },
+          {
+            "label": "v2 registration on migrated pool with v1-origin event",
+            "digest": "HTTeeHiF26KUqXDVMrfSAaJbCr1eV4m9ZZqUBoUHtShg"
+          },
+          {
+            "label": "configure on existing object",
+            "digest": "BHaf8dxUswvkWuHLzuU1r7EFgGLYyqnpe1hWqThVV8K8"
+          },
+          {
+            "label": "old-package withdrawal rejected after migration",
+            "digest": "dyerQDANtLnmiHwfjnbKDqAFzbz5MHzKfqid5SUtCDP"
+          }
+        ]
+      }
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    },
+    {
+      "command": "make check in suifleet-dev:sf035 with locked dependencies",
+      "result": "all_application_targets_passed_final_git_command_required_mount_repair",
+      "scope": "Indexer45; coreMove168/storage51; generated interfaces/manifest/frontend regressions; Rust384/PKCS11386 with4ignored each; complete real-daemon OTA and funding/verified-copy restoration simulators; component/edge acceptance; frontend typecheck and static production build",
+      "limitations": "Initial network-none invocation stopped at an uncached rusqlite dependency. Network-enabled dependency-cache retry passed every application target, then exited128 only at final git diff --check because the linked worktree common Git directory was not mounted. No failing application test was ignored."
+    },
+    {
+      "command": "git diff --check inside the same pinned network-none image with the linked common Git directory mounted read-only",
+      "result": "passed",
+      "scope": "Corrected the final make-check Git mount failure; host git diff --check also passed"
+    },
+    {
+      "command": "make dapp-typecheck && make dapp-build (within application targets above)",
+      "result": "passed"
+    }
+  ],
+  "public_testnet": {
+    "result": "passed",
+    "receipt": "sf092-testnet.json",
+    "scope": "Full cached funding/daemon/certification/readback/restricted-renewal workflow and separate original-signed-intent restart; failed preparatory attempts and gas costs remain failed evidence"
+  },
+  "deferred_unrun": [
+    "SF-031/#32 physical/manual real-wallet acceptance",
+    "SF-087/#159 production-provider/accounts/credentials, manual wallet and actual-mainnet acceptance"
+  ],
+  "limitations": "Finite owner-configured targets and prepaid resources, bounded executor float/rewards/retries and optional notifier with explicit setup/liveness dependency; no indefinite retention/alert guarantee. Actual expired-binary restoration is established by the real-daemon simulator with retained verified bytes and authorized new reference, alongside actual live Walrus publication/certification; no claim of waiting for a public blob to expire. Commands exercised workspace source during completion; startup commit IDs are preserved. Fresh final-head CI and independent review are separate mandatory gates linked in PR232/#179."
+}

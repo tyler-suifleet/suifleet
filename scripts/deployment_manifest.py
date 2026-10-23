@@ -12,12 +12,19 @@ from urllib.parse import urlparse
 _PROTOCOL = json.loads((Path(__file__).resolve().parents[1] / "interfaces/fleet-v1.json").read_text())
 REQUIRED_TYPES = tuple(_PROTOCOL["required_type_origins"])
 CATALOG_TYPES = tuple(_PROTOCOL["optional_type_origins"]["component_catalog"])
+SEAL_POLICY_TYPES = tuple(_PROTOCOL["optional_type_origins"]["seal_policy"])
+HANDOVER_TYPES = tuple(_PROTOCOL["optional_type_origins"]["fleet_handover"])
+BUDGET_TYPES = tuple(_PROTOCOL["optional_type_origins"]["fleet_budget"])
+OPTIONAL_GROUPS = {"catalog": CATALOG_TYPES, "seal policy": SEAL_POLICY_TYPES, "fleet budget": BUDGET_TYPES}
 
 def manifest_types(manifest):
-    present = [name for name in CATALOG_TYPES if name in manifest["type_origins"]]
-    if present and len(present) != len(CATALOG_TYPES):
-        raise ValueError("partial catalog type origins")
-    return REQUIRED_TYPES + tuple(present)
+    types = REQUIRED_TYPES
+    for label, group in OPTIONAL_GROUPS.items():
+        present = [name for name in group if name in manifest["type_origins"]]
+        if present and len(present) != len(group):
+            raise ValueError(f"partial {label} type origins")
+        types += tuple(present)
+    return types + tuple(n for n in HANDOVER_TYPES if n in manifest["type_origins"])
 
 CLIENT_VERSIONS = {"dapp": "0.1.0", "edge": "0.2.1"}
 
@@ -170,7 +177,7 @@ def resolve(args, read=chain_facts):
     manifest = dict(schema_version=_PROTOCOL["manifest_schema_version"], protocol_version=_PROTOCOL["protocol_version"], network=args.network,
         chain_identifier=args.chain_identifier, rpc_url=args.rpc,
         call_package_id=package_id, upgrade_cap_id=object_id(args.upgrade_cap), package_version=str(package["version"]),
-        type_origins={name: table[name] for name in REQUIRED_TYPES + tuple(n for n in CATALOG_TYPES if n in table)},
+        type_origins={name: table[name] for name in REQUIRED_TYPES + tuple(n for n in CATALOG_TYPES + SEAL_POLICY_TYPES + HANDOVER_TYPES + BUDGET_TYPES if n in table)},
         shared_objects={"registry": {"id": object_id(args.registry),
             "initial_shared_version": shared_version(registry, table["device_registry::DeviceRegistry"])}},
         supported_clients={"dapp": {"min": "0.1.0" if all(n in table for n in CATALOG_TYPES) else "0.0.2", "max_exclusive": "0.2.0"}, "edge": {"min": "0.2.1", "max_exclusive": "0.3.0"}},
@@ -187,8 +194,10 @@ def generate(manifest, output, device_template):
     # Device templates deliberately permit simple top-level sections only. Their
     # values are parsed by the daemon's TOML parser, never merged with network IDs.
     sections = re.findall(r"^\s*\[([^\]\n]+)\]\s*(?:#.*)?$", template, re.MULTILINE)
-    if any(section not in ("device", "device.signer", "apply", "runtime") for section in sections):
-        raise ValueError("device template permits only device, device.signer, apply and runtime sections")
+    if re.search(r"^\s*\[\[", template, re.MULTILINE):
+        raise ValueError("device template permits no arrays of tables; use inline arrays")
+    if any(section not in ("device", "device.signer", "apply", "runtime", "seal", "budget") for section in sections):
+        raise ValueError("device template permits only device, device.signer, apply, runtime, seal and budget sections")
     if len(set(sections)) != len(sections) or not {"device", "apply"} <= set(sections):
         raise ValueError("missing or duplicate device template sections")
     encoded = json.dumps(manifest, separators=(",", ":"))

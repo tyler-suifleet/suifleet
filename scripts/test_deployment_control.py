@@ -82,8 +82,7 @@ def run(binary):
                 wait(lambda: sim.chain_checks >= baseline + 3, "daemon did not finish polls")
                 time.sleep(.2)
             def add(id, **kw):
-                control(id, **kw); sim.add(id)
-                sim.recipes[f"recipe-{id}"]["artifactBlobId"] = f"artifact-{id}"
+                control(id, **kw); sim.add(id, recipe=dict(artifactBlobId=f"artifact-{id}"))
             def now(): return int(time.time() * 1000)
             try:
                 add("0x501", state=1)

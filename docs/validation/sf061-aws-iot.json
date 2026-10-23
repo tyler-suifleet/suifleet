@@ -1,0 +1,30 @@
+{
+  "ticket": "SF-061",
+  "head": "1865d9c5ca2ef745048649a6e1e0fd46a33a0ecc",
+  "broker": "eclipse-mosquitto:2.0.20@sha256:21421af7b32bf9ce508e9090c8eb13bb81f410ca778dc205506180a6f862d0eb",
+  "broker_version": "mosquitto version 2.0.20",
+  "aws_endpoint": "scripts/aws_iot_harness.py (AWS-shaped, local)",
+  "checks": [
+    "trust domains: --check-config refuses the Sui device key as aws_iot.private_key_file; the separate AWS thing certificate/key configuration verifies",
+    "Mosquitto mosquitto version 2.0.20 mutual TLS (client identity = certificate CN, ACL file, CRL): component -> cloud under dt/thing1/ and cloud -> component at QoS 1; an ACL-denied publication is dropped by the broker (MQTT 3.1.1 PUBACK) and never delivered; the ACL-denied subscription cmd/other/# receives nothing (Mosquitto grants it at SUBACK for MQTT 3.1.1)",
+    "Mosquitto outage: 5 publications spooled on disk while the broker was stopped, delivered in order after reconnect",
+    "Mosquitto rotation: a half-installed set (new key, old certificate) is reported and ignored while the old connection continues; the complete set reconnects with the new certificate (RSA -> P-256); with the old certificate revoked by CRL and the broker restarted, traffic continues on the new identity",
+    "Mosquitto revoked identity: rotating to the CRL-revoked certificate is refused by the broker and reported; the publication waits in the spool and is delivered once valid credentials are installed",
+    "untrusted endpoint: a server certificate from another CA is refused (TLS handshake with iot.test.local failed: invalid peer certificate: UnknownIssuer)",
+    "port 443: ALPN x-amzn-mqtt-ca negotiated by default, client id = thing name, thing certificate accepted; a client without ALPN is refused there",
+    "AWS-shaped endpoint: component -> dt/thing1/ and cloud -> component at QoS 1; the policy-denied subscription cmd/forbidden/# gets SUBACK 0x80, is reported, and the other subscriptions work",
+    "policy-denied publication: an AWS-style disconnect (TLS truncated, no close_notify) on each attempt holds the message in the spool and reports it (never discarded); retried until the policy allows it, then delivered with the telemetry queued behind it",
+    "reject_denied_publications = true: after 3 such disconnects the message is rejected and counted, and the following telemetry is delivered",
+    "Device Shadow: a local report is pushed; a cloud desired change is pulled within seconds although the poll interval is 3600 s (update/documents notification) and announced as a local delta",
+    "outage: offline local and cloud shadow edits reconciled by three-way merge (desired.x -> cloud owner, reported.mode -> device owner, one-sided keys kept on both sides); 3 spooled publications delivered in order and a cloud command queued by the persistent session delivered after reconnect",
+    "version race: the device's update is refused with 409 after a concurrent cloud write; it re-reads, merges and stores, keeping both changes",
+    "deletion: a local deletion deletes the AWS shadow; a cloud recreation and a cloud deletion are pulled",
+    "identities: unknown CA (TLS refused), deactivated certificate (closed after handshake) and another thing's certificate (CONNACK 5, client id must be its thing) are each refused; publications wait in the spool and arrive in order once valid rotated credentials are installed (rogue-thing1: tls-refused; thing1a: certificate-not-active; thing2: connect-refused)",
+    "kill -9 during an outage: spooled publications delivered in order after restart; the persisted sync base means no redundant shadow writes",
+    "no private key material in the daemon log or state directory (bridge.json, spools, shadows)"
+  ],
+  "unrun": [
+    "Real AWS IoT Core endpoint, account policy and Device Shadow service; needs separate user authorization",
+    "Physical Pi/target operation (#32)"
+  ]
+}

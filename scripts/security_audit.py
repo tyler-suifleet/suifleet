@@ -14,7 +14,8 @@ class ReportError(ValueError):
 
 REQUIRED_TARGETS = {'dapp/pnpm-lock.yaml': 'pnpm', 'suifleet-edge/Cargo.lock': 'cargo',
                     'suifleet-indexer/Cargo.lock': 'cargo', 'Dockerfile': 'dockerfile',
-                    'docker/release.Dockerfile': 'dockerfile'}
+                    'docker/release.Dockerfile': 'dockerfile', 'docker/linux-x86.Dockerfile': 'dockerfile',
+                    'suifleet-edge/packaging/tunneling/localproxy.Dockerfile': 'dockerfile'}
 
 
 def identifier(value):

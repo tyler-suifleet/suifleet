@@ -11,6 +11,61 @@ pub fn load(path: &Path) -> anyhow::Result<SigningKey> {
     Ok(SigningKey::from_bytes(&key))
 }
 
+/// Refuse a key file anyone but its owner, the daemon user, can reach. On
+/// macOS (SF-075) no service unit or provisioning script guards it at start.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn ensure_private(path: &Path) -> anyhow::Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = std::fs::symlink_metadata(path)?;
+    anyhow::ensure!(metadata.is_file(), "{} is not a regular file", path.display());
+    anyhow::ensure!(
+        metadata.mode() & 0o077 == 0,
+        "{} is accessible to its group or others; make it 0600",
+        path.display()
+    );
+    // SAFETY: plain geteuid.
+    anyhow::ensure!(metadata.uid() == unsafe { libc::geteuid() }, "{} is not owned by the daemon user", path.display());
+    #[cfg(target_os = "macos")]
+    anyhow::ensure!(
+        !has_extended_acl(path)?,
+        "{} has an access control list, which can grant other users access whatever its mode; remove it with chmod -N",
+        path.display()
+    );
+    Ok(())
+}
+
+/// Whether a file (not followed if a symlink) carries any extended ACL entry.
+/// macOS evaluates ACL entries before the mode bits, so an allow entry can
+/// grant another user a 0600 file. Any entry is refused, deny entries too:
+/// the key needs none.
+#[cfg(target_os = "macos")]
+fn has_extended_acl(path: &Path) -> anyhow::Result<bool> {
+    use std::{ffi::CString, os::unix::ffi::OsStrExt};
+    // <sys/acl.h>, in libSystem.
+    const ACL_TYPE_EXTENDED: libc::c_int = 0x0000_0100;
+    const ACL_FIRST_ENTRY: libc::c_int = 0;
+    extern "C" {
+        fn acl_get_link_np(path: *const libc::c_char, kind: libc::c_int) -> *mut libc::c_void;
+        fn acl_get_entry(acl: *mut libc::c_void, entry_id: libc::c_int, entry: *mut *mut libc::c_void) -> libc::c_int;
+        fn acl_free(object: *mut libc::c_void) -> libc::c_int;
+    }
+    let c_path = CString::new(path.as_os_str().as_bytes())?;
+    // SAFETY: a NUL-terminated path; the returned ACL is freed below.
+    let acl = unsafe { acl_get_link_np(c_path.as_ptr(), ACL_TYPE_EXTENDED) };
+    if acl.is_null() {
+        let error = std::io::Error::last_os_error();
+        // ENOENT: the file exists (checked above) but has no extended ACL.
+        anyhow::ensure!(error.raw_os_error() == Some(libc::ENOENT), "cannot read the ACL of {}: {error}", path.display());
+        return Ok(false);
+    }
+    let mut entry = std::ptr::null_mut();
+    // SAFETY: a valid ACL from acl_get_link_np and an out pointer it fills.
+    let found = unsafe { acl_get_entry(acl, ACL_FIRST_ENTRY, &mut entry) } == 0;
+    // SAFETY: freed once; the entry pointer is not used afterwards.
+    unsafe { acl_free(acl) };
+    Ok(found)
+}
+
 pub fn hash(bytes: &[u8]) -> Vec<u8> {
     Blake2b::<U32>::digest(bytes).to_vec()
 }
@@ -21,9 +76,14 @@ pub fn address(key: &SigningKey) -> String {
     format!("0x{}", hex::encode(hash(&bytes)))
 }
 
+#[cfg(test)]
 pub fn signature(key: &SigningKey, tx: &[u8]) -> Vec<u8> {
+    digest_signature(key, &intent_digest(tx))
+}
+
+fn digest_signature(key: &SigningKey, digest: &[u8]) -> Vec<u8> {
     let mut out = vec![0];
-    out.extend_from_slice(&key.sign(&intent_digest(tx)).to_bytes());
+    out.extend_from_slice(&key.sign(digest).to_bytes());
     out.extend_from_slice(&key.verifying_key().to_bytes());
     out
 }
@@ -36,13 +96,35 @@ pub fn intent_digest(tx: &[u8]) -> Vec<u8> {
     hash(&intent)
 }
 
+/// The digest a Sui personal-message signature commits to: Blake2b-256 of the
+/// intent prefix (personal message, v0, Sui) and the BCS `vector<u8>`. It can
+/// never be valid as a transaction signature (SF-019 telemetry).
+pub fn personal_message_digest(message: &[u8]) -> Vec<u8> {
+    let mut intent = vec![3, 0, 0];
+    intent.extend(bcs::to_bytes(message).expect("bytes serialize"));
+    hash(&intent)
+}
+
+#[cfg(test)]
+pub fn personal_message_signature(key: &SigningKey, message: &[u8]) -> Vec<u8> {
+    digest_signature(key, &personal_message_digest(message))
+}
+
 /// Whatever signs this device's transactions (SF-021): a key file, or a
 /// key held in a PKCS#11 token (HSM, TPM via a PKCS#11 provider).
 pub trait TxSigner: Send + Sync {
     /// The Sui address of the signing key.
     fn address(&self) -> String;
     /// A serialized Sui `UserSignature` over BCS transaction data.
-    fn sign(&self, tx: &[u8]) -> anyhow::Result<Vec<u8>>;
+    fn sign(&self, tx: &[u8]) -> anyhow::Result<Vec<u8>> {
+        self.sign_digest(&intent_digest(tx))
+    }
+    /// A serialized Sui `UserSignature` over a personal message.
+    fn sign_personal_message(&self, message: &[u8]) -> anyhow::Result<Vec<u8>> {
+        self.sign_digest(&personal_message_digest(message))
+    }
+    /// A serialized Sui `UserSignature` over an intent digest.
+    fn sign_digest(&self, digest: &[u8]) -> anyhow::Result<Vec<u8>>;
 }
 
 /// An ed25519 key in a hex file (the default, `[device] keypair_path`).
@@ -52,8 +134,8 @@ impl TxSigner for Ed25519File {
     fn address(&self) -> String {
         address(&self.0)
     }
-    fn sign(&self, tx: &[u8]) -> anyhow::Result<Vec<u8>> {
-        Ok(signature(&self.0, tx))
+    fn sign_digest(&self, digest: &[u8]) -> anyhow::Result<Vec<u8>> {
+        Ok(digest_signature(&self.0, digest))
     }
 }
 
@@ -99,7 +181,12 @@ pub mod secp256r1 {
     /// The 32 bytes a raw-ECDSA (prehashed) signer must sign: Sui signs the
     /// intent digest with ECDSA-SHA256, i.e. ECDSA over SHA-256(digest).
     pub fn prehash(tx: &[u8]) -> [u8; 32] {
-        Sha256::digest(super::intent_digest(tx)).into()
+        prehash_digest(&super::intent_digest(tx))
+    }
+
+    /// The same for any intent digest (a personal message's, for example).
+    pub fn prehash_digest(digest: &[u8]) -> [u8; 32] {
+        Sha256::digest(digest).into()
     }
 
     /// Serialize a raw r||s signature as a Sui `UserSignature`, normalizing S
@@ -185,7 +272,7 @@ pub mod pkcs11 {
         fn address(&self) -> String {
             super::secp256r1::address(&self.compressed)
         }
-        fn sign(&self, tx: &[u8]) -> anyhow::Result<Vec<u8>> {
+        fn sign_digest(&self, digest: &[u8]) -> anyhow::Result<Vec<u8>> {
             let session = self.context.open_ro_session(self.slot)?;
             session.login(UserType::User, Some(&AuthPin::new(self.pin.clone())))?;
             let private = session
@@ -193,7 +280,7 @@ pub mod pkcs11 {
                 .into_iter()
                 .next()
                 .ok_or_else(|| anyhow::anyhow!("no private key labelled {:?} in the token", self.key_label))?;
-            let rs = session.sign(&Mechanism::Ecdsa, private, &super::secp256r1::prehash(tx))?;
+            let rs = session.sign(&Mechanism::Ecdsa, private, &super::secp256r1::prehash_digest(digest))?;
             super::secp256r1::serialize(&rs, &self.compressed)
         }
     }
@@ -261,6 +348,48 @@ fn publish_key(
 mod tests {
     use super::*;
     use ed25519_dalek::{Signature, Verifier};
+
+    #[test]
+    fn only_a_private_key_file_of_the_daemon_user_is_accepted() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!("suifleet-private-{}", rand::random::<u128>()));
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("device.key");
+        provision(&path).unwrap();
+        ensure_private(&path).unwrap();
+        for mode in [0o640, 0o604, 0o660] {
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
+            assert!(ensure_private(&path).is_err(), "{mode:o}");
+        }
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let link = root.join("link.key");
+        std::os::unix::fs::symlink(&path, &link).unwrap();
+        assert!(ensure_private(&link).is_err(), "a symlink was followed");
+        assert!(ensure_private(&root.join("missing.key")).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_key_with_an_access_control_list_is_refused_despite_mode_0600() {
+        let root = std::env::temp_dir().join(format!("suifleet-acl-{}", rand::random::<u128>()));
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("device.key");
+        provision(&path).unwrap();
+        ensure_private(&path).unwrap();
+        for ace in ["user:nobody allow read", "everyone deny write"] {
+            let chmod = |args: &[&str]| {
+                let status = std::process::Command::new("/bin/chmod").args(args).arg(&path).status().unwrap();
+                assert!(status.success(), "chmod {args:?}");
+            };
+            chmod(&["+a", ace]);
+            let error = ensure_private(&path).unwrap_err().to_string();
+            assert!(error.contains("access control list"), "{ace}: {error}");
+            chmod(&["-N"]);
+            ensure_private(&path).unwrap();
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn interrupted_key_write_leaves_no_published_key_and_can_retry() {
@@ -368,6 +497,39 @@ mod tests {
         let mut other = transaction.clone();
         other.gas_payment.budget += 1;
         assert!(sui_crypto::UserSignatureVerifier::new().verify_transaction(&other, &signature).is_err());
+    }
+
+    #[test]
+    fn personal_messages_verify_with_mystens_verifier_and_never_as_transactions() {
+        use sui_crypto::SuiVerifier;
+        let signer = Ed25519File(SigningKey::from_bytes(&[7; 32]));
+        let message = br#"{"schema":1}"#;
+        let signed = signer.sign_personal_message(message).unwrap();
+        let signature = sui_sdk_types::UserSignature::from_bytes(&signed).unwrap();
+        let verifier = sui_crypto::UserSignatureVerifier::new();
+        let personal = sui_sdk_types::PersonalMessage(message.as_slice().into());
+        verifier.verify_personal_message(&personal, &signature).unwrap();
+        let other = sui_sdk_types::PersonalMessage(br#"{"schema":2}"#.as_slice().into());
+        assert!(verifier.verify_personal_message(&other, &signature).is_err());
+        // The same bytes signed as a transaction give another signature.
+        assert_ne!(signer.sign(message).unwrap(), signed);
+        assert_ne!(personal_message_digest(message), intent_digest(message));
+    }
+
+    #[cfg(feature = "pkcs11")]
+    #[test]
+    fn secp256r1_personal_messages_verify_with_mystens_verifier() {
+        use p256::ecdsa::{signature::hazmat::PrehashSigner, SigningKey as P256Key};
+        use sui_crypto::SuiVerifier;
+        let key = P256Key::from_slice(&[9; 32]).unwrap();
+        let compressed = secp256r1::compress(key.verifying_key().to_encoded_point(false).as_bytes()).unwrap();
+        let message = b"telemetry";
+        let digest = personal_message_digest(message);
+        let rs: p256::ecdsa::Signature = key.sign_prehash(&secp256r1::prehash_digest(&digest)).unwrap();
+        let serialized = secp256r1::serialize(&rs.to_bytes(), &compressed).unwrap();
+        let signature = sui_sdk_types::UserSignature::from_bytes(&serialized).unwrap();
+        let personal = sui_sdk_types::PersonalMessage(message.as_slice().into());
+        sui_crypto::UserSignatureVerifier::new().verify_personal_message(&personal, &signature).unwrap();
     }
 
     #[test]

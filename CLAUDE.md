@@ -19,3 +19,17 @@ User-authorized implementation/integration acceptance split: follow [IMPLEMENTAT
 The user explicitly authorizes automatic public Sui testnet acceptance using the dedicated testnet agent/CI wallets described in PR #63 and SF-010/#11. Verify chain/account/authority, preserve keys, honor run spend limits and acquire `network:suifleet-testnet` only during machine-session mutations; coordinate with Claude before using shared state. Mainnet, other wallets, physical programming and production credential operations remain outside this grant. Testnet availability does not reinstate blanket external-acceptance merge blockers.
 
 Public testnet is a normal automated test target under the standing user grant, without a human approval per run. Follow [TESTNET.md](docs/TESTNET.md) for main-only trusted CI, dedicated wallets, exact-head effects evidence, strict spending, encrypted device-state caching and bounded automatic faucet funding. Keep other environment approvals and deferred wallet/Pi/public-Walrus acceptance intact.
+
+Continuous-development standing authorization is in AGENTS.md. Do not wait for the
+user to request another review, feedback repair or eligible successor. The existing
+services dispatch that work; do not spawn recursive workers. For current and future
+software tickets, physical-hardware and actual-mainnet acceptance may wait until
+development is complete under the shared policy. Preserve those acceptance records,
+all local/security/testnet/review gates and the Codex-only ticket-creation rule.
+
+Latest user direction (2026-10-21): finish implementation before final external
+acceptance. Production Seal-provider validation and manual real-wallet/IdP/prover
+acceptance no longer block implementation merges; preserve them explicitly in
+SF-087/#159 and SF-031/#32 under the shared policy. Do not waive actionable code or
+security findings, software tests, applicable automated testnet or independent
+review. Do not provision production credentials or claim deferred checks passed.

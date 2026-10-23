@@ -44,6 +44,7 @@ Critical known gaps:
 | `dapp/src` | Wallet UI, transaction builders, queries and Walrus uploads |
 | `suifleet-edge/src` | Identity, chain adapter, recipes, updater and durable journal |
 | `suifleet-edge/meta-suifleet` | Yocto recipe and systemd service |
+| `suifleet-edge/packaging/macos` | macOS LaunchDaemon plist and installer; see [MACOS_RUNTIME.md](docs/MACOS_RUNTIME.md) |
 | `scripts/redeploy.sh`, `scripts/publish.py` | Verified publish/upgrade; records releases and generates both client configs |
 | `scripts/test_ota.py` | Real daemon against local chain/Walrus simulators |
 | `Dockerfile`, `docker-compose.yml`, `Makefile` | Development environment and build/test entry points |
@@ -131,7 +132,9 @@ The user authorized agents to spend **testnet** SUI from two dedicated accounts 
 - Public testnet is normal automated relevant validation, with standing authorization and no approval per run. Preserve preflight and the strict non-replenishing spending allowance (including failed transactions and device gas).
 - Record digests and evidence in the PR or issue.
 
-**Funding.** Use `sui client faucet --address …` with Sui ≥ 1.82.1, which solves a proof of work. The pinned CLI cannot.
+**Funding.** Use `sui client faucet --address …` with Sui ≥ 1.82.1, which solves a proof of work. The pinned 1.81.1 compiler CLI cannot.
+
+**Two CLIs.** Live runs compile with the pinned release compiler (`sui`, 1.81.1). They read, sign and submit with the checksum-pinned transaction CLI at `/opt/sui-network/sui` (1.82.1), which must support the network's protocol version (138 and 139 respectively). Package bytecode is verified in the unsigned transaction before signing. See [TESTNET.md](docs/TESTNET.md#toolchain-release-compiler-and-transaction-cli).
 
 **No JSON-RPC.** Public fullnodes no longer serve JSON-RPC, so live checks must use gRPC or the Sui CLI.
 
@@ -145,11 +148,11 @@ The user authorized agents to spend **testnet** SUI from two dedicated accounts 
 - **The gas budget is not the cost, but it must not exceed the balance.** Gas selection fails before execution otherwise, and a failed execution still charges. Keep budgets near real cost (0.4 SUI is ample for a publish).
 - **Upgrades only chain from the latest version.** To test a base→head upgrade, key the fixture by the (base, head) pair. Never test X→Y in place of base→Y.
 - **Reuse funded test identities.** For example, keep the test device's key and gas, and top it up only when low.
-- **Record each transaction's net gas** in the run's evidence. A cached package-upgrade run costs about 0.0025 SUI; a fresh fixture about 0.18 SUI.
+- **Record each transaction's net gas** in the run's evidence. A cached package-upgrade run costs about 0.0025 SUI; a fresh fixture whose base and head differ costs about 0.41 SUI.
 
 CI uses a main-sourced controller, successful originating CI and server-side write-authority/exact-head checks before executing trusted same-repository revisions; forks remain offline. Dedicated testnet environment protection is main-only without reviewers. Never weaken live-wallet, live-hardware or release protections. All CI testnet paths share one serialized wallet concurrency group. Cache device signing state only as authenticated ciphertext derived from the protected CI secret; plaintext belongs only in a private temporary runtime directory and never in public caches/artifacts. Evidence contains no keys.
 
-Machine sessions must acquire/assert/renew `network:suifleet-testnet` only during shared-wallet mutations, coordinate in #11/#63, and unlock promptly. Funding is automatic when needed, at most one faucet request per run with a separately checksum-verified Sui 1.82.1 tool; faucet credits and storage refunds never replenish the run allowance. Testnet availability does not add external-acceptance blockers to unrelated implementation tickets.
+Machine sessions must acquire/assert/renew `network:suifleet-testnet` only during shared-wallet mutations, coordinate in #11/#63, and unlock promptly. Funding is automatic when needed, at most one faucet request per run through the checksum-pinned transaction CLI; faucet credits and storage refunds never replenish the run allowance. Testnet availability does not add external-acceptance blockers to unrelated implementation tickets.
 
 **Mainnet** and any other account still need explicit user authorization.
 
@@ -171,8 +174,46 @@ Unattended reciprocal reviews and feedback repair are coordinated by [the PR ser
 
 User merge-completion policy: owned implementation PRs must include `Closes #ISSUE`, not only `Refs`. A verified merge closes the linked GitHub implementation issue and reconciles the atomic ticket and Project to Done, including external merges and retrying missed notifications. Preserve unfulfilled live/hardware validation in an acceptance ticket or follow-up; issue closure does not establish those test results. The PR service's automatic merge acceptance gates still apply.
 
-Automatic implementation dispatch is described in [PR coordination](docs/PR_COORDINATION.md). When enabled, `ticket-dispatcher.service` refreshes and atomically claims the next eligible ticket for an available configured model slot. Workers must finish their assigned implementation, provide evidence, hand off to Review and exit; they must not claim successors themselves. Failed or uncertain workers retain reservations and stop their slot until explicit recovery. Review/merge checks and deployment authorization still apply.
+Automatic implementation dispatch is described in [PR coordination](docs/PR_COORDINATION.md). When enabled, `ticket-dispatcher.service` refreshes and atomically claims the next eligible ticket for an available configured model slot. Workers must finish their assigned implementation, provide evidence, hand off to Review and exit; they must not claim successors themselves. Failed or uncertain workers retain reservations. Verified stopped workers may be parked/quarantined to free execution capacity for unrelated tickets; their existing ticket/PR remains reserved for explicit recovery. Missing process identity or surviving worker subprocesses still consume capacity. Review/merge checks and deployment authorization still apply.
 
 User-authorized implementation/integration acceptance split: follow [IMPLEMENTATION_ACCEPTANCE.md](docs/IMPLEMENTATION_ACCEPTANCE.md) and its per-ticket tracked scope. Reviewed implementations may merge before the explicitly deferred Pi, real-wallet, public-network or production-release integration checks. Keep code findings, local compatibility/regression evidence and CI as merge gates; retain the linked acceptance tickets and never claim deferred tests ran.
 
 The user explicitly authorizes automatic public Sui testnet acceptance using the dedicated testnet agent/CI wallets described in PR #63 and SF-010/#11. Verify chain/account/authority, preserve keys, honor run spend limits and acquire `network:suifleet-testnet` only during machine-session mutations; coordinate with Claude before using shared state. Mainnet, other wallets, physical programming and production credential operations remain outside this grant. Testnet availability does not reinstate blanket external-acceptance merge blockers.
+
+
+## Physical target acceptance — current user direction
+
+Physical Pi work must not block software implementation, review or merge. The user explicitly permits resolving target issues later. Apply this rule to future tickets too: physical boot/networking, target reboot/power-loss, hardware-only isolation/performance and device-specific integration stay in SF-031/#32. The unfinished refreshed SD image SF-066/#111 is on hold; do not require that image for an offline software harness or unrelated feature. Do not claim a new image or physical result exists.
+
+Preserve real software/API dependencies, source/security review, meaningful unit/simulator/host integration checks and normal authorized automatic testnet CI. This deferral grants no hardware programming authority and does not waive failing software tests. Packaging/image work must still produce actual artifacts before its own completion; an on-hold target ticket is not Done. Platform scripts remain responsible for reboot and firmware recovery.
+
+## Standing authorization for continuous development
+
+Keep eligible implementation, reciprocal review, feedback repair and gated integration
+moving without asking the user to say "continue" or restart workers. The installed
+services own successor dispatch and serial merges; individual workers finish their
+assigned task and exit. Recover verified transient failures within the existing
+claim, reconcile uncertain remote outcomes and preserve reservations when a worker
+might still be alive. A real blocker pauses only its affected ticket: record the
+reason and next action in the tracker/local status report, then use other eligible
+capacity. Never manufacture work, tests or approvals to fill slots.
+
+The user explicitly permits **physical-hardware and actual-mainnet testing to wait
+until software development is complete**. Apply the shared development defaults in
+`docs/tracking/acceptance-policy.json` to current and future software tickets, even
+when an older issue or review bundles implementation with those checks. Keep
+SF-031, SF-042, SF-066 and SF-087 open for their own acceptance; add future
+acceptance-only tickets to the explicit exclusion list. Do not mark deferred checks
+passed or delete genuine software dependencies. Mainnet writes and physical
+programming remain unauthorized unless the user later explicitly authorizes them.
+
+Local/simulator/isolated-chain tests, relevant automatic public-testnet validation,
+security findings, exact-head CI and independent review remain required. The latest user direction (2026-10-21) also defers final production-provider and
+manual real-wallet acceptance until implementation is complete. Keep production
+Seal provider selection/authentication/fees/availability/recovery validation in
+SF-087/#159, and real IdP/prover/Slush/extension-wallet acceptance in SF-031/#32
+and SF-087/#159. Software-facing authentication, encryption, authority, session,
+network-mismatch and failure-path checks remain implementation gates. This grants
+no production credential provisioning, service purchases or mainnet writes. Maintain the existing periodic local status report with feature
+progress, verified active workers and honest blockers. Services continue while WSL
+is running; a stopped host is not evidence that unattended work is still executing.

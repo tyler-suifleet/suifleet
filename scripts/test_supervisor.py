@@ -101,12 +101,11 @@ def run(binary):
             else:
                 self.respond(b"not found", 404)
 
-    def deploy(id, version, **lifecycle):
-        sim.add(id)
-        event = sim.events[-1]["parsedJson"]
-        event["component_name"], event["version"] = "svc", version
-        recipe = sim.recipes[event["recipe_blob_id"]]
-        recipe.update(componentName="svc", componentVersion=version, lifecycle=lifecycle)
+    def deploy(id, version, configuration=None, **lifecycle):
+        recipe = dict(lifecycle=lifecycle)
+        if configuration is not None:
+            recipe.update(schemaVersion="1.2", configuration=configuration)
+        sim.add(id, event=dict(component_name="svc", version=version), recipe=recipe)
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -142,6 +141,7 @@ def run(binary):
                 output.write('\n[components.recovery_commands]\nsvc = ' + json.dumps(recovery) + '\n')
             components = state_dir / "supervised"
             work = components / "svc" / "work"
+            committed = state_dir / "configuration" / "svc" / "committed.json"
 
             def journal():
                 path = state_dir / "state.json"
@@ -167,9 +167,14 @@ def run(binary):
                 seen.update(pids)
                 return pids
 
-            def running(version):
+            def running(version, check=lambda current: True):
+                # One status.json snapshot: separate reads can pair a stale
+                # Running phase with the pid/restarts of a later transition.
                 current = status()
-                return current.get("phase") == "running" and current.get("version") == version
+                return current.get("phase") == "running" and current.get("version") == version and check(current)
+
+            def new_pid(old):
+                return lambda current: current.get("pid") is not None and current["pid"] not in old
 
             with (root / "daemon.log").open("w") as log:
                 def start():
@@ -179,7 +184,8 @@ def run(binary):
                 wait_for(lambda: journal().get("initialized"), "daemon did not establish its cursor", process)
 
                 # Start and readiness.
-                deploy("0x401", "1.0.0", install="echo stable > {artifacts}/configuration", run=RUN, readiness=READY, shutdown="kill -TERM {pid}")
+                deploy("0x401", "1.0.0", {"defaults": {"selected": "1.0.0"}},
+                       install="echo stable > {artifacts}/configuration", run=RUN, readiness=READY, shutdown="kill -TERM {pid}")
                 wait_for(lambda: outcome("0x401").get("status") == 1, "v1 was not applied", process)
                 assert running("1.0.0"), status()
                 first = recorded()
@@ -188,7 +194,7 @@ def run(binary):
 
                 # Crash: the on-failure policy restarts the run.
                 os.kill(first[0], signal.SIGKILL)
-                wait_for(lambda: running("1.0.0") and status().get("restarts") == 1, "crashed run was not restarted", process)
+                wait_for(lambda: running("1.0.0", lambda current: current.get("restarts") == 1), "crashed run was not restarted", process)
                 assert read("runs").splitlines() == ["1.0.0", "1.0.0"], read("runs")
                 assert not alive(first[1]), "the crashed run's grouped child survived"
                 wait_for(lambda: not any(map(alive, first)), "a descendant of the crashed run survived", process)
@@ -208,8 +214,11 @@ def run(binary):
 
                 # Successful replacement.
                 before = recorded()
-                deploy("0x403", "3.0.0", run=RUN, readiness=READY, shutdown="kill -TERM {pid}")
+                deploy("0x403", "3.0.0", {"defaults": {"selected": "3.0.0"}, "reset": [""]},
+                       run=RUN, readiness=READY, shutdown="kill -TERM {pid}")
                 wait_for(lambda: outcome("0x403").get("status") == 1, "v3 was not applied", process)
+                wait_for(lambda: json.loads(committed.read_text())["deployment"] == "0x403",
+                         "v3's configuration was not committed", process)
                 assert running("3.0.0"), status()
                 assert not any(map(alive, before)), "v1's processes survived its replacement"
                 assert read("stopped") == "graceful", "v1 was not stopped through its shutdown command"
@@ -221,9 +230,10 @@ def run(binary):
                 # recovery restores the retained v1 and journal identity.
                 for crash in range(4):
                     pid = status()["pid"]
+                    assert isinstance(pid, int), status()
                     os.kill(pid, signal.SIGKILL)
                     if crash < 3:
-                        wait_for(lambda: running("3.0.0") and status().get("pid") != pid,
+                        wait_for(lambda: running("3.0.0", new_pid([pid])),
                                  "v3 did not restart before its budget was exhausted", process)
                 wait_for(lambda: running("1.0.0") and journal().get("components", {}).get("svc", {}).get("version") == "1.0.0",
                          "runtime recovery did not restore v1 and its journal", process)
@@ -231,10 +241,19 @@ def run(binary):
                 assert outcome("0x403")["status"] == 1, "historical command completion was rewritten"
                 assert (root / "application-config").read_text().strip() == "stable"
                 assert (root / "recovered-artifact").read_bytes() == test_ota.ARTIFACT
-                print("PASS: runtime crash budget exhaustion restored v1 artifact/configuration and journal without rewriting command receipt")
-                # A fresh deployment installs v3 for the remaining containment tests.
-                deploy("0x406", "3.0.0", run=RUN, readiness=READY, shutdown="kill -TERM {pid}")
+                wait_for(lambda: json.loads(committed.read_text())["deployment"] == "0x401",
+                         "runtime recovery did not restore v1's committed configuration", process)
+                assert json.loads(committed.read_text())["effective"] == {"selected": "1.0.0"}, committed.read_text()
+                print("PASS: runtime crash budget exhaustion restored v1 artifact/configuration, committed configuration "
+                      "and journal without rewriting command receipt")
+                # A fresh deployment installs v3 for the remaining containment
+                # tests; its merge-only update builds on v1's configuration.
+                deploy("0x406", "3.0.0", {"merge": {"extra": 1}}, run=RUN, readiness=READY, shutdown="kill -TERM {pid}")
                 wait_for(lambda: outcome("0x406").get("status") == 1, "fresh v3 did not apply", process)
+                wait_for(lambda: json.loads(committed.read_text())["deployment"] == "0x406",
+                         "fresh v3's configuration was not committed", process)
+                assert json.loads(committed.read_text())["effective"] == {"selected": "1.0.0", "extra": 1}, committed.read_text()
+                print("PASS: a merge-only update after the recovery built on the recovered v1 configuration")
 
                 # Daemon stop: the component goes with it, descendants included.
                 (work / "stopped").unlink()
@@ -249,7 +268,7 @@ def run(binary):
 
                 # Reboot stage: the committed version starts again.
                 process = start()
-                wait_for(lambda: running("3.0.0") and status().get("pid") not in third, "v3 did not start on daemon start", process)
+                wait_for(lambda: running("3.0.0", new_pid(third)), "v3 did not start on daemon start", process)
                 wait_for(lambda: recorded()[0] == status()["pid"], "the restarted run did not record itself", process)
                 print("PASS: daemon start (reboot stage) restarted the committed v3")
 
@@ -280,7 +299,7 @@ def run(binary):
                 os.kill(detached, signal.SIGKILL)
                 (components / "instance.json").unlink()
                 process = start()
-                wait_for(lambda: running("3.0.0") and status().get("pid") != orphan[0], "v3 did not restart after a daemon kill", process)
+                wait_for(lambda: running("3.0.0", new_pid([orphan[0]])), "v3 did not restart after a daemon kill", process)
                 assert not any(map(alive, orphan)), ("a pre-crash descendant survived daemon recovery",
                                                      dict(zip(RECORDED, map(alive, orphan))))
                 instances = [pid for pid in map(int, filter(str.isdigit, os.listdir("/proc")))

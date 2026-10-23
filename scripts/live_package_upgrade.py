@@ -19,6 +19,12 @@ never reads a default wallet, never prints keys. Each run:
      tool versions, chain, packages, every transaction digest and status,
      receipts and the SUI actually spent.
 
+Toolchain (scripts/sui_toolchain.py): the pinned release compiler builds the
+bytecode offline; the pinned transaction CLI, which must support the chain's
+protocol version (checked read-only before any write), builds, signs and
+submits. Package bytecode is verified byte-for-byte in the unsigned
+transaction before signing, and the evidence and fixture record both CLIs.
+
 Cost: package storage is never refunded, so the published fixture (base
 package, its upgrade, device, cap and group) is cached in --state, keyed by
 the content of the base and head contracts, and re-verified on chain before
@@ -41,14 +47,14 @@ import signal
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 import uuid
 from urllib.parse import urlparse
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
 
 import deployment_manifest as dm
+import live_common
+import sui_toolchain as toolchain
 import test_component as component
 from testnet_budget import Budget, Spent
 
@@ -89,6 +95,20 @@ def save_state(path, state):
     temporary.write_text(json.dumps(state, indent=2) + "\n")
     temporary.chmod(0o600)  # Holds the throwaway test device's key.
     os.replace(temporary, path)
+
+
+def fixture_key(base_tree, head_tree):
+    """Contract pair plus the release compiler that produced its bytecode.
+    A fixture is never reused for a different base-to-head pair or compiler."""
+    trees = base_tree if base_tree == head_tree else f"{base_tree}..{head_tree}"
+    return f"{trees}@{toolchain.BUILD['version'].split()[1]}"
+
+
+def provenance(tools, compatibility, framework, built, base, head):
+    return {"base_commit": base, "head_commit": head,
+            "build_cli": tools["build"]["version"], "network_cli": tools["network"]["version"],
+            "network_cli_sha256": tools["network"]["sha256"], "protocol_version": compatibility["protocol_version"],
+            "framework": framework, "verified_transactions": built}
 
 
 def owner_of(client, object_id):
@@ -145,7 +165,16 @@ def wait_for(condition, message, process=None, timeout=240):
     raise AssertionError(message)
 
 
+def transaction_gas_budget(value):
+    # Operators may lower ordinary PTB budgets to fit separate address/coin
+    # funding pools; this never raises the existing cap or run allowance.
+    if type(value) is not int or not 2_000_000 <= value <= 200_000_000:
+        raise ValueError("transaction gas budget must be 2000000..200000000 MIST")
+    return value
+
+
 def run(args):
+    ptb_budget = transaction_gas_budget(getattr(args, "transaction_gas_budget", 200_000_000))
     os.umask(0o077)
     evidence = {"started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "network": args.network,
                 "transactions": [], "checks": []}
@@ -153,9 +182,12 @@ def run(args):
         Path(args.evidence).write_text(json.dumps(evidence) + '\n')
     ledger = Budget(args.max_spend_mist, evidence['transactions'])
     wallet = Path(args.wallet).resolve()
+    # Pinned release compiler and transaction CLI, never PATH substitutes.
+    tools = toolchain.check_tools(args.build_sui, args.network_sui)
+    network_sui = tools["network"]["path"]
 
     def client(*command, json_output=True, check=True):
-        full = ["sui", "client", "--client.config", str(wallet), *map(str, command)]
+        full = [network_sui, "client", "--client.config", str(wallet), *map(str, command)]
         if json_output:
             full.append("--json")
         result = subprocess.run(full, text=True, capture_output=True, timeout=600)
@@ -174,12 +206,16 @@ def run(args):
     envs, active_env = client("envs")
     rpc_url = next(e["rpc"] for e in envs if e["alias"] == active_env)
     operator = dm.object_id(client("active-address", json_output=False).stdout.strip().split()[-1])
-    chain = dm.chain_facts(rpc_url)["chain_identifier"]
+    facts = dm.chain_facts(rpc_url)
+    chain = facts["chain_identifier"]
     expected = CHAINS.get(args.network)
     if args.network == "localnet":
         assert urlparse(rpc_url).hostname in ("127.0.0.1", "localhost", "::1"), "localnet profile needs a loopback node"
     else:
         assert chain == expected, f"active env {active_env} is chain {chain}, not {args.network} ({expected})"
+    # Read-only protocol gate before any faucet request or transaction.
+    compatibility = toolchain.preflight(tools, facts, expected)
+    evidence["toolchain"] = dict(tools, compatibility=compatibility)
     if args.network == 'testnet':
         assert operator in {
             '0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965',
@@ -188,11 +224,10 @@ def run(args):
     start_balance = balance()
     if start_balance < args.max_spend_mist and args.faucet_tool:
         assert args.network == 'testnet', 'faucet only on testnet'
-        if not Path(args.faucet_tool).is_file():
-            subprocess.run(['bash', str(ROOT / 'scripts/install_faucet.sh'),
-                            str(Path(args.faucet_tool).parent)], capture_output=True, check=True, timeout=600)
+        # Only the verified, checksum-pinned transaction CLI requests funds.
+        assert toolchain.resolve(args.faucet_tool) == network_sui, 'faucet tool must be the pinned network CLI'
         # At most one request; never reset the spending ledger from a faucet credit.
-        funded = ledger.faucet(lambda: subprocess.run([args.faucet_tool, 'client', '--client.config', str(wallet),
+        funded = ledger.faucet(lambda: subprocess.run([network_sui, 'client', '--client.config', str(wallet),
                                  'faucet', '--address', operator], capture_output=True, timeout=180))
         start_balance = balance()
         evidence['faucet'] = {'attempts': 1, 'cli_returncode': funded.returncode,
@@ -202,13 +237,12 @@ def run(args):
     assert start_balance >= args.max_spend_mist, (
         f"{operator} holds {start_balance} MIST; this run may spend up to {args.max_spend_mist}. Fund it first "
         f"(docs/TESTNET.md)")
-    sui_version = subprocess.run(["sui", "--version"], capture_output=True, text=True).stdout.strip()
     head = subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "HEAD"], text=True).strip()
     base = args.base_ref or subprocess.check_output(
         ["git", "-C", str(ROOT), "merge-base", "HEAD", "origin/main"], text=True).strip()
     base = subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", base], text=True).strip()
-    evidence.update(chain=chain, rpc=rpc_url, operator=operator, sui=sui_version, head=head, base=base,
-                    start_balance_mist=start_balance)
+    evidence.update(chain=chain, rpc=rpc_url, operator=operator, sui={k: tools[k]["version"] for k in tools},
+                    head=head, base=base, start_balance_mist=start_balance)
     print(f"{args.network} chain {chain}, operator {operator}, balance {start_balance / 1e9:.3f} SUI; "
           f"base {base[:12]} -> head {head[:12]}")
 
@@ -218,8 +252,8 @@ def run(args):
                             '--lock-token', os.environ['SUIFLEET_TESTNET_LOCK_TOKEN']], check=True, stdout=subprocess.DEVNULL)
         return ledger.execute(client, label, command, **kwargs)
 
-    def transaction(label, *ptb, budget=200_000_000, funding=0):
-        return mutate(label, ['ptb', *ptb], gas=budget, funding=funding)
+    def transaction(label, *ptb, budget=None, funding=0):
+        return mutate(label, ['ptb', *ptb], gas=ptb_budget if budget is None else budget, funding=funding)
 
     def created(result, suffix):
         return [c["objectId"] for c in result["objectChanges"] if c["type"] == "created" and c["objectType"].endswith(suffix)]
@@ -231,22 +265,10 @@ def run(args):
         evidence["checks"].append(label)
         print("PASS:", label)
 
-    blobs = {}
-
-    class Walrus(BaseHTTPRequestHandler):
-        def log_message(self, *a):
-            pass
-
-        def do_GET(self):
-            body = blobs.get(self.path.removeprefix("/v1/blobs/"))
-            self.send_response(200 if body is not None else 404)
-            self.send_header("Content-Length", str(len(body or b"")))
-            self.end_headers()
-            self.wfile.write(body or b"")
-
-    walrus = ThreadingHTTPServer(("127.0.0.1", 0), Walrus)
-    threading.Thread(target=walrus.serve_forever, daemon=True).start()
-    aggregator = f"http://127.0.0.1:{walrus.server_port}"
+    # Recipe and artifact storage: a local stand-in (default) or real Walrus testnet.
+    walrus = live_common.Walrus(args.walrus)
+    aggregator = walrus.aggregator
+    evidence["walrus"] = walrus.mode
     process = None
     cleanup = []
     cleanup_package = None
@@ -258,7 +280,10 @@ def run(args):
             archive = subprocess.run(["git", "-C", str(ROOT), "archive", base, "contracts"], check=True, capture_output=True).stdout
             subprocess.run(["tar", "-x", "-C", str(staging)], input=archive, check=True)
             base_tree, head_tree = contracts_digest(staging / "contracts"), contracts_digest(ROOT / "contracts")
-            key_name = base_tree if base_tree == head_tree else f"{base_tree}..{head_tree}"
+            key_name = fixture_key(base_tree, head_tree)
+            evidence["toolchain"]["framework"] = {
+                "base": toolchain.framework_pins(staging / "contracts/Move.lock"),
+                "head": toolchain.framework_pins(ROOT / "contracts/Move.lock")}
             state_path = Path(args.state) if args.state else wallet.parent / "live-state.json"
             state = load_state(state_path, chain, operator)
             common = ["--build-env", "testnet", "--pubfile-path", pubfile, "--silence-warnings"]
@@ -268,6 +293,7 @@ def run(args):
                 print("Cached fixture is no longer intact on chain; publishing a new one")
                 fixture = None
             if fixture:
+                evidence["fixture_provenance"] = fixture.get("provenance")
                 key.write_text(fixture["device_key"] + "\n"); key.chmod(0o600)
                 derived = subprocess.check_output([str(DAEMON), "--derive-address", str(key)], text=True).strip()
                 assert dm.object_id(derived) == dm.object_id(fixture["device_address"]), "cached device key does not match"
@@ -276,10 +302,17 @@ def run(args):
             else:
                 # 1. Base package and live state.
                 shutil.copytree(staging / "contracts", package_dir, ignore=shutil.ignore_patterns("build", "Published.toml"))
-                first = mutate("publish base", ["test-publish", package_dir, *common], gas=400_000_000)
+                built = {}
+                first = mutate("publish base", toolchain.package_submitter(
+                    client, tools["build"]["path"], package_dir, common, sender=operator,
+                    record=built.setdefault("publish", {})),
+                    gas=400_000_000)
                 old = published(first)
                 registry = created(first, "::device_registry::DeviceRegistry")[0]
                 upgrade_cap = created(first, "::package::UpgradeCap")[0]
+                toolchain.write_pubfile(pubfile, chain, package_dir, old, upgrade_cap)
+                check(f"base bytecode compiled by {tools['build']['version']}, verified in the unsigned transaction "
+                      f"and submitted by {tools['network']['version']}")
                 device_address = subprocess.check_output([str(DAEMON), "--provision", str(key)], text=True).strip()
                 registered = transaction("register device + issue cap (base)",
                     "--move-call", f"{old}::device_registry::register_device", f"@{registry}", '"live-pi"',
@@ -297,8 +330,13 @@ def run(args):
                     # 2. Upgrade in place.
                     shutil.rmtree(package_dir)
                     shutil.copytree(ROOT / "contracts", package_dir, ignore=shutil.ignore_patterns("build", "Published.toml"))
-                    upgraded = mutate("upgrade to head", ["test-upgrade", package_dir, "--upgrade-capability", upgrade_cap, *common], gas=400_000_000)
+                    upgraded = mutate("upgrade to head", toolchain.package_submitter(
+                        client, tools["build"]["path"], package_dir, common, sender=operator,
+                        upgrade={"cap": upgrade_cap, "package": old}, record=built.setdefault("upgrade", {})),
+                        gas=400_000_000)
                     new = published(upgraded)
+                    check(f"head upgrade bytecode and digest from the release compiler passed "
+                          f"{tools['network']['version']}'s compatibility check on protocol {compatibility['protocol_version']}")
                 else:
                     check("head contracts equal the base contracts; no upgrade to test")
                 activated = transaction("activate identity in registry custody",
@@ -307,7 +345,9 @@ def run(args):
                 owner_cap = created(activated, "::device_registry::DeviceOwnerCap")[0]
                 fixture = dict(owner_cap=owner_cap, base_package=old, head_package=new, registry=registry, upgrade_cap=upgrade_cap,
                                device=device, device_cap=device_cap, group=group, device_address=device_address,
-                               device_key=key.read_text().strip(), created=evidence["started"])
+                               device_key=key.read_text().strip(), created=evidence["started"],
+                               provenance=provenance(tools, compatibility, evidence["toolchain"]["framework"], built,
+                                                     base, head))
                 state["fixtures"][key_name] = fixture
                 save_state(state_path, state)
             old, new, registry, upgrade_cap = (fixture[k] for k in ("base_package", "head_package", "registry", "upgrade_cap"))
@@ -322,7 +362,7 @@ def run(args):
             # 3. Manifest over gRPC.
             manifest = dm.resolve(SimpleNamespace(chain_identifier=chain, rpc=rpc_url, package=new, upgrade_cap=upgrade_cap,
                                                   registry=registry, network=args.network,
-                                                  publisher=aggregator, aggregator=aggregator))
+                                                  publisher=walrus.publisher, aggregator=aggregator))
             evidence.update(base_package=old, head_package=new, registry=registry, upgrade_cap=upgrade_cap,
                             fixture=key_name, type_origins=manifest["type_origins"])
             check(f"head package {new} (package version {manifest['package_version']}); manifest verified over gRPC")
@@ -343,17 +383,10 @@ def run(args):
             run_id = "live-" + uuid.uuid4().hex[:10]
 
             def call(package, version, *, groups=(), devices=(), fail="none"):
-                """PTB arguments creating one verified deployment, with its blobs served."""
-                artifact = component.build(version, run_id, fail)
-                tag = version.replace(".", "-")
-                artifact_blob, recipe_blob = f"artifact-{tag}", f"recipe-{tag}"
-                recipe = component.recipe(artifact, artifact_blob)
-                blobs[artifact_blob], blobs[recipe_blob] = artifact, recipe
-                ids = lambda values: "[" + ", ".join(f"@{v}" for v in values) + "]"
+                """PTB arguments creating one verified deployment, its recipe and artifact stored in Walrus."""
                 return ["--move-call", f"{package}::deployment_manager::create_deployment_verified",
-                        f'"{component.DEFAULT_COMPONENT}"', f'"{version}"', f'"{recipe_blob}"',
-                        f'"{hashlib.sha256(artifact).hexdigest()}"', f'"{hashlib.sha256(recipe).hexdigest()}"',
-                        f"vector{ids(groups)}", f"vector{ids(devices)}", CLOCK]
+                        *live_common.deployment_args(walrus, version, run_id, fail=fail),
+                        live_common.ids(groups), live_common.ids(devices), CLOCK]
 
             def receipts(deployment):
                 """Authoritative statuses read with the Sui CLI, independent of the daemon."""
@@ -395,7 +428,8 @@ def run(args):
             settled(via_group, 1)
             check("head-package deployment to the pre-upgrade group: applied via report_status_for_group")
             settled(via_old, 1)
-            check("deployment created through the OLD package's entry point: applied and receipted (mixed versions)")
+            check("deployment created through the OLD package's entry point: applied and receipted (mixed versions)" if old != new
+                  else "deployment through the base package (no upgrade in this run): applied and receipted")
             settled(failed, 2)
             check("injected health failure reported Failed on chain")
             assert sorted(history()) == ["1.0.0", "2.0.0", "3.0.0", "4.0.0"], history()
@@ -430,7 +464,7 @@ def run(args):
                 transaction("bounded abort cleanup", *deletes)
             except Exception as error:
                 evidence['cleanup_error'] = str(error)
-        walrus.shutdown()
+        walrus.close()
         try:
             end = balance()
         except Exception:
@@ -448,11 +482,21 @@ if __name__ == "__main__":
     parser.add_argument("--wallet", required=True, help="client.yaml of the funded wallet to spend from")
     parser.add_argument("--network", default="testnet", choices=["testnet", "localnet"])
     parser.add_argument("--base-ref", help="contracts to publish first (default: merge base with origin/main)")
-    parser.add_argument("--max-spend-mist", type=int, default=600_000_000)
+    # A fresh base->head fixture with the SF-083 budget costs about 0.58 SUI
+    # (base publish 0.265 + head upgrade 0.316, run 39720082567).
+    parser.add_argument("--max-spend-mist", type=int, default=800_000_000)
     parser.add_argument("--evidence", help="write evidence JSON here")
     parser.add_argument("--state", help="fixture cache (default: live-state.json beside the wallet)")
-    parser.add_argument("--faucet-tool", help="checksum-verified Sui 1.82.1 funding-only executable; at most one request")
+    parser.add_argument("--faucet-tool", help="request testnet funds (at most once) with this tool; must be the "
+                        "pinned network CLI")
+    parser.add_argument("--build-sui", default="sui", help="pinned release compiler (Dockerfile SUI_VERSION)")
+    parser.add_argument("--network-sui", default=os.environ.get("SUIFLEET_NETWORK_SUI", toolchain.NETWORK_DEFAULT),
+                        help="pinned transaction CLI (Dockerfile SUI_NETWORK_VERSION)")
+    parser.add_argument("--transaction-gas-budget", type=int, default=200_000_000,
+                        help="lower ordinary PTB gas budgets for available gas funding pools (2000000..200000000 MIST); the run ceiling still applies")
     parser.add_argument("--fresh", action="store_true", help="ignore the cache and publish a new fixture")
+    parser.add_argument("--walrus", default="local", choices=["local", "testnet"],
+                        help="recipe/artifact storage: a local stand-in (default) or real Walrus testnet")
     args = parser.parse_args()
     try:
         run(args)

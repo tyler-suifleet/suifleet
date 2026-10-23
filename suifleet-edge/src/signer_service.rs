@@ -11,13 +11,31 @@
 //!   production, the main process of `suifleet.service`, by the PID and start
 //!   time the unit records as root when it starts, see [`is_daemon`]);
 //! - enrollment: exactly `enrollment::enroll` with the manifest's registry,
-//!   sponsored by another address; only from root (provisioning).
+//!   sponsored by another address; only from root (provisioning);
+//! - telemetry (SF-019): a personal message that is exactly one canonical,
+//!   bounded telemetry snapshot of the manifest's chain and registry, signed
+//!   by this key; only from the daemon's main process, like status reports.
+//!   A personal-message signature is never valid as a transaction. Log
+//!   batches, stream-export manifests and the client-device CA binding are
+//!   checked the same way (canonical, this chain, registry and key).
+//!
+//! - gas draws (SF-083, only with `[budget]`): exactly one
+//!   `fleet_budget::draw_gas` call on the manifest's package with the
+//!   configured budget as an immutable input, a shared gas account, the
+//!   manifest's registry, this device's cap and the Clock, for at most
+//!   `max_draw_mist`, paid by the device within the gas ceiling; only from
+//!   the daemon's main process. The contract binds the account to this
+//!   device and budget, and bounds draws again, so a compromised daemon is
+//!   still limited to its device's float and period allowance.
 //!
 //! Any process may ask for the device's public address. Everything else is
 //! refused. Component processes run as the daemon user and may reach the
 //! socket, but they are not the unit's main process.
+// Only the client side exists elsewhere: it refuses to connect.
+#![cfg_attr(not(target_os = "linux"), allow(dead_code, unused_imports))]
 use crate::identity::TxSigner;
-use crate::protocol::{deployment_manager as dm, enrollment};
+use crate::protocol::{deployment_manager as dm, enrollment, fleet_budget};
+use crate::seal_client::{check_approval, Authority, Certificate, SessionPolicy, Sessions};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -32,7 +50,8 @@ use std::{
 use sui_sdk_types::{Address, Argument, Command, Input, Transaction};
 
 pub const MAX_ENROLL_BUDGET: u64 = 50_000_000;
-const MAX_REQUEST_BYTES: u64 = 64 * 1024;
+/// Room for a base64 telemetry snapshot of [`crate::telemetry::MAX_MESSAGE_BYTES`].
+const MAX_REQUEST_BYTES: u64 = 128 * 1024;
 const IO_TIMEOUT: Duration = Duration::from_secs(10);
 
 fn default_socket() -> PathBuf {
@@ -72,6 +91,38 @@ pub struct ServiceConfig {
     pub caller_uid: Option<u32>,
     #[serde(default = "default_budget")]
     pub max_gas_budget: u64,
+    /// Seal sessions for confidential delivery (SF-022). Absent: refused.
+    #[serde(default)]
+    pub seal: Option<SealSessions>,
+    /// Gas draws from the fleet budget (SF-083). Absent: refused.
+    #[serde(default)]
+    pub budget: Option<BudgetDraws>,
+}
+
+/// `[budget]` in `signer.toml`: the one budget draws may name, and the most
+/// one draw may ask for (the contract's own limits apply as well).
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct BudgetDraws {
+    pub budget_id: String,
+    pub max_draw_mist: u64,
+}
+
+/// `[seal]` in `signer.toml`: the service certifies session keys with the
+/// device key and signs key requests; the session key never leaves it.
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct SealSessions {
+    #[serde(default = "default_session_minutes")]
+    pub session_ttl_minutes: u16,
+    #[serde(default = "default_skew")]
+    pub clock_skew_seconds: u64,
+}
+fn default_session_minutes() -> u16 {
+    10
+}
+fn default_skew() -> u64 {
+    60
 }
 
 impl ServiceConfig {
@@ -94,11 +145,35 @@ impl ServiceConfig {
         let policy = Policy {
             device: Address::ZERO,
             package: Address::from_str(&manifest.call_package_id)?,
+            namespace: Address::from_str(&manifest.type_origins["device_registry::DeviceRegistry"])?,
             registry: Address::from_str(&manifest.shared_objects.registry.id)?,
             cap: Address::from_str(&config.device_cap_id)?,
             max_budget: config.max_gas_budget,
+            chain_identifier: manifest.chain_identifier.clone(),
+            budget: config
+                .budget
+                .as_ref()
+                .map(|budget| {
+                    anyhow::ensure!(budget.max_draw_mist > 0, "budget.max_draw_mist must be positive");
+                    Ok((Address::from_str(&budget.budget_id)?, budget.max_draw_mist))
+                })
+                .transpose()?,
         };
         Ok((config, policy))
+    }
+
+    /// Seal sessions certified by `key` for this fleet's package, if enabled.
+    pub fn sessions(&self, key: Arc<dyn TxSigner>, policy: &Policy) -> anyhow::Result<Option<Sessions>> {
+        self.seal
+            .as_ref()
+            .map(|seal| {
+                Sessions::new(key, SessionPolicy {
+                    package: policy.namespace,
+                    ttl_min: seal.session_ttl_minutes,
+                    clock_skew_ms: seal.clock_skew_seconds * 1000,
+                })
+            })
+            .transpose()
     }
 
     fn key(&self) -> anyhow::Result<Arc<dyn TxSigner>> {
@@ -118,15 +193,22 @@ impl ServiceConfig {
 pub enum Intent {
     Report,
     Enroll,
+    Draw,
 }
 
 #[derive(Debug, Clone)]
 pub struct Policy {
     pub device: Address,
     pub package: Address,
+    /// The package's original ID: the Seal key namespace.
+    pub namespace: Address,
     pub registry: Address,
     pub cap: Address,
     pub max_budget: u64,
+    /// The manifest's chain; telemetry snapshots must name it.
+    pub chain_identifier: String,
+    /// The fleet budget gas draws may name and the most one draw may take.
+    pub budget: Option<(Address, u64)>,
 }
 
 fn input<'a>(inputs: &'a [Input], argument: &Argument) -> anyhow::Result<&'a Input> {
@@ -177,6 +259,36 @@ pub fn check(policy: &Policy, bytes: &[u8]) -> anyhow::Result<Intent> {
             );
             Ok(Intent::Report)
         }
+        (fleet_budget::MODULE, fleet_budget::DRAW_GAS) => {
+            let Some((budget, max_draw)) = policy.budget else {
+                anyhow::bail!("gas draws are not enabled in signer.toml");
+            };
+            anyhow::ensure!(tx.gas_payment.owner == policy.device, "a gas draw must be paid by the device");
+            anyhow::ensure!(tx.gas_payment.budget <= policy.max_budget, "gas budget {} exceeds {}", tx.gas_payment.budget, policy.max_budget);
+            anyhow::ensure!(args.len() == 6, "unexpected argument count");
+            anyhow::ensure!(shared(args[0])? == budget, "not this fleet's budget");
+            // Draws only read the fleet budget; a mutable budget input would
+            // contend with every other device and the owner.
+            anyhow::ensure!(
+                matches!(args[0], Input::Shared(input) if !input.mutability().is_mutable()),
+                "a gas draw must not take the fleet budget mutably"
+            );
+            // The device's GasAccount; the contract binds it to the cap and budget.
+            shared(args[1])?;
+            anyhow::ensure!(shared(args[2])? == policy.registry, "not this fleet's registry");
+            anyhow::ensure!(
+                matches!(args[3], Input::ImmutableOrOwned(reference) if *reference.object_id() == policy.cap),
+                "not this device's cap"
+            );
+            let Input::Pure(amount) = args[4] else {
+                anyhow::bail!("draw amount is not a pure value");
+            };
+            let amount: [u8; 8] = amount.as_slice().try_into().map_err(|_| anyhow::anyhow!("draw amount is not a u64"))?;
+            let amount = u64::from_le_bytes(amount);
+            anyhow::ensure!(amount > 0 && amount <= max_draw, "draw of {amount} MIST exceeds {max_draw}");
+            anyhow::ensure!(shared(args[5])? == Address::from_str("0x6")?, "not the Clock");
+            Ok(Intent::Draw)
+        }
         (enrollment::MODULE, enrollment::ENROLL) => {
             anyhow::ensure!(tx.gas_payment.owner != policy.device, "enrollment must be sponsored by the claim key");
             anyhow::ensure!(tx.gas_payment.budget <= MAX_ENROLL_BUDGET, "gas budget exceeds the enrollment ceiling");
@@ -186,6 +298,54 @@ pub fn check(policy: &Policy, bytes: &[u8]) -> anyhow::Result<Intent> {
             Ok(Intent::Enroll)
         }
         (module, function) => anyhow::bail!("{module}::{function} is not a permitted signing intent"),
+    }
+}
+
+/// Check a telemetry personal message: exactly the canonical JSON of one
+/// bounded snapshot, of this chain and registry, naming this key as signer.
+/// Its content is otherwise the daemon's own report, like a status report's.
+pub fn check_telemetry(policy: &Policy, message: &[u8]) -> anyhow::Result<()> {
+    use crate::telemetry::{Snapshot, MAX_MESSAGE_BYTES};
+    anyhow::ensure!(message.len() <= MAX_MESSAGE_BYTES, "telemetry snapshot exceeds {MAX_MESSAGE_BYTES} bytes");
+    let snapshot: Snapshot = serde_json::from_slice(message).map_err(|e| anyhow::anyhow!("not a telemetry snapshot: {e}"))?;
+    anyhow::ensure!(serde_json::to_vec(&snapshot)? == message, "telemetry snapshot is not in canonical form");
+    // Schema 2 exactly when a services section (SF-085) is present.
+    anyhow::ensure!(snapshot.schema == Snapshot::schema_for(snapshot.services.is_some()), "unsupported telemetry schema {}", snapshot.schema);
+    // Service errors leave the device only as categories, never as texts.
+    anyhow::ensure!(snapshot.services.as_ref().is_none_or(|s| s.errors_are_categories()), "telemetry service error is not a category");
+    anyhow::ensure!(snapshot.chain_identifier == policy.chain_identifier, "telemetry snapshot is for another chain");
+    anyhow::ensure!(Address::from_str(&snapshot.registry).ok() == Some(policy.registry), "telemetry snapshot is not for this fleet's registry");
+    anyhow::ensure!(Address::from_str(&snapshot.signer).ok() == Some(policy.device), "telemetry snapshot names another signer");
+    Ok(())
+}
+
+/// Check a log-batch personal message (SF-020): exactly the canonical JSON of
+/// one bounded schema-1 batch, of this chain and registry, naming this key.
+/// Its lines are the daemon's own redacted log text, like telemetry content.
+pub fn check_logs(policy: &Policy, message: &[u8]) -> anyhow::Result<()> {
+    use crate::logs::{validate, Batch, MAX_MESSAGE_BYTES};
+    anyhow::ensure!(message.len() <= MAX_MESSAGE_BYTES, "log batch exceeds {MAX_MESSAGE_BYTES} bytes");
+    let batch: Batch = serde_json::from_slice(message).map_err(|e| anyhow::anyhow!("not a log batch: {e}"))?;
+    anyhow::ensure!(serde_json::to_vec(&batch)? == message, "log batch is not in canonical form");
+    validate(&batch)?;
+    anyhow::ensure!(batch.chain_identifier == policy.chain_identifier, "log batch is for another chain");
+    anyhow::ensure!(Address::from_str(&batch.registry).ok() == Some(policy.registry), "log batch is not for this fleet's registry");
+    anyhow::ensure!(Address::from_str(&batch.signer).ok() == Some(policy.device), "log batch names another signer");
+    Ok(())
+}
+
+/// A personal message the service signs: a telemetry snapshot, a log batch,
+/// a stream export manifest, a shadow sync manifest or a client-device CA
+/// binding (SF-035).
+pub fn check_personal(policy: &Policy, message: &[u8]) -> anyhow::Result<()> {
+    let kind = serde_json::from_slice::<serde_json::Value>(message).ok().and_then(|v| v.get("kind").and_then(|k| k.as_str()).map(str::to_owned));
+    match kind.as_deref() {
+        Some(crate::logs::KIND) => check_logs(policy, message),
+        Some(crate::streams::MANIFEST_KIND) => crate::streams::check_manifest(message, &policy.chain_identifier, &policy.registry.to_string(), &policy.device.to_string()),
+        Some(crate::shadows::MANIFEST_KIND) => crate::shadows::check_manifest(message, &policy.chain_identifier, &policy.registry.to_string(), &policy.device.to_string()),
+        Some(crate::clientdevices::CA_BINDING_KIND) => crate::clientdevices::check_ca_binding(message, &policy.chain_identifier,
+            &policy.registry.to_string(), &policy.device.to_string()),
+        _ => check_telemetry(policy, message),
     }
 }
 
@@ -250,6 +410,7 @@ fn proc_start(stat: &str) -> Option<u64> {
     stat.rsplit_once(')')?.1.split_whitespace().nth(19)?.parse().ok()
 }
 
+#[cfg(target_os = "linux")]
 fn proc_process(pid: u32) -> Option<Process> {
     let start = proc_start(&std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?)?;
     let cgroup = std::fs::read_to_string(format!("/proc/{pid}/cgroup")).ok()?;
@@ -266,6 +427,7 @@ fn proc_process(pid: u32) -> Option<Process> {
 /// be an executable a component chose. Any other main process (a daemon
 /// update, which the service signer does not allow) leaves no record, so the
 /// signing service trusts nobody; the unit itself keeps running.
+#[cfg(target_os = "linux")]
 pub fn record_main_process(path: &Path) -> anyhow::Result<()> {
     use anyhow::Context;
     let pid: u32 = std::env::var("MAINPID").context("MAINPID is not set (run as the unit's ExecStartPost=)")?.parse()?;
@@ -276,6 +438,7 @@ pub fn record_main_process(path: &Path) -> anyhow::Result<()> {
 }
 
 /// Whether two paths name the same file (device and inode), following links.
+#[cfg(target_os = "linux")]
 fn same_file(a: &Path, b: &Path) -> std::io::Result<bool> {
     use std::os::unix::fs::MetadataExt;
     let (a, b) = (std::fs::metadata(a)?, std::fs::metadata(b)?);
@@ -284,6 +447,7 @@ fn same_file(a: &Path, b: &Path) -> std::io::Result<bool> {
 
 /// Records `pid` if it runs `base`; otherwise removes any earlier record and
 /// returns false.
+#[cfg(target_os = "linux")]
 fn record(path: &Path, pid: u32, base: &Path) -> anyhow::Result<bool> {
     use anyhow::Context;
     use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
@@ -342,6 +506,7 @@ pub fn key_holder(config: &Path) -> anyhow::Result<&'static str> {
 
 /// The peer's process as a pidfd (Linux 6.5+), so a request is never
 /// attributed to a later process reusing the peer's PID.
+#[cfg(target_os = "linux")]
 fn peer_pidfd(stream: &UnixStream) -> Option<std::os::fd::OwnedFd> {
     use std::os::fd::{AsRawFd, FromRawFd};
     let mut fd: libc::c_int = -1;
@@ -355,12 +520,14 @@ fn peer_pidfd(stream: &UnixStream) -> Option<std::os::fd::OwnedFd> {
 }
 
 /// The PID a pidfd refers to, or None once that process has exited.
+#[cfg(target_os = "linux")]
 fn pidfd_pid(pidfd: &std::os::fd::OwnedFd) -> Option<u32> {
     use std::os::fd::AsRawFd;
     let info = std::fs::read_to_string(format!("/proc/self/fdinfo/{}", pidfd.as_raw_fd())).ok()?;
     info.lines().find_map(|line| line.strip_prefix("Pid:"))?.trim().parse().ok()
 }
 
+#[cfg(target_os = "linux")]
 fn peer(stream: &UnixStream) -> std::io::Result<Peer> {
     use std::os::fd::AsRawFd;
     let mut credentials = libc::ucred { pid: 0, uid: 0, gid: 0 };
@@ -381,17 +548,38 @@ fn peer(stream: &UnixStream) -> std::io::Result<Peer> {
     Ok(Peer { pid: credentials.pid as u32, uid: credentials.uid })
 }
 
+/// A Seal key request: an approval transaction on this fleet's package and
+/// a well-formed ElGamal response key, signed by the current session.
+fn seal_request(request: &Value, policy: &Policy, sessions: &Sessions) -> anyhow::Result<Value> {
+    let field = |name: &str| STANDARD.decode(request[name].as_str().unwrap_or(""));
+    let ptb = field("ptb")?;
+    let decoded: sui_sdk_types::ProgrammableTransaction =
+        bcs::from_bytes(&ptb).map_err(|e| anyhow::anyhow!("not a programmable transaction: {e}"))?;
+    check_approval(&decoded, &policy.package)?;
+    let enc_key = field("enc_key")?;
+    let enc_verification_key = field("enc_verification_key")?;
+    anyhow::ensure!(crate::seal::elgamal_pair_valid(&enc_key, &enc_verification_key), "invalid response encryption key");
+    let (certificate, signature) = sessions.authorize(&ptb, &enc_key, &enc_verification_key)?;
+    Ok(json!({ "certificate": certificate.to_json(), "signature": STANDARD.encode(signature) }))
+}
+
 /// One request: authorize the caller, then the transaction, then sign.
 pub fn handle(
     request: &Value,
     peer: Peer,
     key: &dyn TxSigner,
     policy: &Policy,
+    sessions: Option<&Sessions>,
     daemon: impl FnOnce() -> bool,
 ) -> Value {
     let result = (|| -> anyhow::Result<Value> {
         match request["op"].as_str() {
             Some("address") => Ok(json!({ "address": key.address() })),
+            Some("seal") => {
+                let sessions = sessions.ok_or_else(|| anyhow::anyhow!("Seal sessions are not enabled in signer.toml"))?;
+                anyhow::ensure!(daemon(), "caller pid {} uid {} may not use Seal sessions (only the daemon's main process)", peer.pid, peer.uid);
+                seal_request(request, policy, sessions)
+            }
             Some("sign") => {
                 let daemon = daemon();
                 let root = peer.uid == 0;
@@ -404,9 +592,21 @@ pub fn handle(
                 let bytes = STANDARD.decode(request["tx"].as_str().unwrap_or(""))?;
                 match check(policy, &bytes)? {
                     Intent::Report => anyhow::ensure!(daemon, "status reports are signed only for the daemon's main process"),
+                    Intent::Draw => anyhow::ensure!(daemon, "gas draws are signed only for the daemon's main process"),
                     Intent::Enroll => anyhow::ensure!(root, "enrollment is signed only for root at provisioning"),
                 }
                 Ok(json!({ "signature": STANDARD.encode(key.sign(&bytes)?) }))
+            }
+            Some("sign_telemetry") => {
+                anyhow::ensure!(
+                    daemon(),
+                    "caller pid {} uid {} may not request telemetry signatures (only the daemon's main process)",
+                    peer.pid,
+                    peer.uid
+                );
+                let message = STANDARD.decode(request["message"].as_str().unwrap_or(""))?;
+                check_personal(policy, &message)?;
+                Ok(json!({ "signature": STANDARD.encode(key.sign_personal_message(&message)?) }))
             }
             _ => anyhow::bail!("unknown request"),
         }
@@ -415,10 +615,12 @@ pub fn handle(
 }
 
 /// `suifleet --signer-service CONFIG`: serve until stopped.
+#[cfg(target_os = "linux")]
 pub fn serve(path: &Path) -> anyhow::Result<()> {
     let (config, mut policy) = ServiceConfig::load(path)?;
     let key = config.key()?;
     policy.device = Address::from_str(&key.address())?;
+    let sessions = config.sessions(key.clone(), &policy)?;
     let callers = match (&config.caller_unit, config.caller_uid) {
         (Some(unit), _) => Callers::Unit { unit: unit.clone(), record: config.caller_record.clone() },
         (None, Some(uid)) => Callers::Uid(uid),
@@ -448,7 +650,7 @@ pub fn serve(path: &Path) -> anyhow::Result<()> {
                         }
                     })
                 };
-                let response = handle(&request, peer, key.as_ref(), &policy, daemon);
+                let response = handle(&request, peer, key.as_ref(), &policy, sessions.as_ref(), daemon);
                 if let Some(error) = response["error"].as_str() {
                     tracing::warn!(pid = peer.pid, uid = peer.uid, error, "Signing request refused");
                 }
@@ -461,6 +663,7 @@ pub fn serve(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 fn read_request(stream: &UnixStream) -> std::io::Result<Value> {
     let mut line = String::new();
     BufReader::new(stream.take(MAX_REQUEST_BYTES)).read_line(&mut line)?;
@@ -468,6 +671,7 @@ fn read_request(stream: &UnixStream) -> std::io::Result<Value> {
 }
 
 /// The systemd-activated socket (LISTEN_FDS), or the configured path.
+#[cfg(target_os = "linux")]
 fn listener(path: &Path) -> anyhow::Result<UnixListener> {
     use std::os::fd::FromRawFd;
     let ours = std::env::var("LISTEN_PID").ok().and_then(|p| p.parse::<u32>().ok()) == Some(std::process::id());
@@ -479,6 +683,17 @@ fn listener(path: &Path) -> anyhow::Result<UnixListener> {
     Ok(UnixListener::bind(path)?)
 }
 
+/// The signing service trusts the daemon by its systemd unit and cgroup, so
+/// it exists only on Linux.
+#[cfg(not(target_os = "linux"))]
+pub fn serve(_: &Path) -> anyhow::Result<()> {
+    anyhow::bail!("the device signing service is not supported on {}", std::env::consts::OS)
+}
+#[cfg(not(target_os = "linux"))]
+pub fn record_main_process(_: &Path) -> anyhow::Result<()> {
+    anyhow::bail!("recording a systemd main process is not supported on {}", std::env::consts::OS)
+}
+
 /// The daemon side: `[device.signer] kind = "service"`.
 pub struct ServiceSigner {
     socket: PathBuf,
@@ -487,6 +702,7 @@ pub struct ServiceSigner {
 
 impl ServiceSigner {
     pub fn connect(socket: &Path) -> anyhow::Result<Self> {
+        anyhow::ensure!(cfg!(target_os = "linux"), "the device signing service is not supported on {}", std::env::consts::OS);
         let response = request(socket, &json!({ "op": "address" }))?;
         let address = response["address"].as_str().ok_or_else(|| anyhow::anyhow!("signer returned no address"))?.to_owned();
         Ok(Self { socket: socket.to_owned(), address })
@@ -500,6 +716,37 @@ impl TxSigner for ServiceSigner {
     fn sign(&self, tx: &[u8]) -> anyhow::Result<Vec<u8>> {
         let response = request(&self.socket, &json!({ "op": "sign", "tx": STANDARD.encode(tx) }))?;
         Ok(STANDARD.decode(response["signature"].as_str().ok_or_else(|| anyhow::anyhow!("signer returned no signature"))?)?)
+    }
+    fn sign_personal_message(&self, message: &[u8]) -> anyhow::Result<Vec<u8>> {
+        let response = request(&self.socket, &json!({ "op": "sign_telemetry", "message": STANDARD.encode(message) }))?;
+        Ok(STANDARD.decode(response["signature"].as_str().ok_or_else(|| anyhow::anyhow!("signer returned no signature"))?)?)
+    }
+    fn sign_digest(&self, _: &[u8]) -> anyhow::Result<Vec<u8>> {
+        anyhow::bail!("the signing service signs only requests it can check, never a bare digest")
+    }
+}
+
+/// The daemon side of Seal sessions with `kind = "service"`: the service
+/// holds the session key and certifies it with the device key.
+pub struct ServiceSessions {
+    socket: PathBuf,
+}
+
+impl ServiceSessions {
+    pub fn new(socket: &Path) -> Self {
+        Self { socket: socket.to_owned() }
+    }
+}
+
+impl Authority for ServiceSessions {
+    fn authorize(&self, ptb: &[u8], enc_key: &[u8], enc_verification_key: &[u8]) -> anyhow::Result<(Certificate, Vec<u8>)> {
+        let response = request(
+            &self.socket,
+            &json!({ "op": "seal", "ptb": STANDARD.encode(ptb), "enc_key": STANDARD.encode(enc_key),
+                     "enc_verification_key": STANDARD.encode(enc_verification_key) }),
+        )?;
+        let certificate = Certificate::from_json(&response["certificate"])?;
+        Ok((certificate, STANDARD.decode(response["signature"].as_str().unwrap_or(""))?))
     }
 }
 
@@ -528,10 +775,97 @@ mod tests {
         Policy {
             device: Address::from_str("0xa0").unwrap(),
             package: Address::from_str("0x3").unwrap(),
+            namespace: Address::from_str("0x2a").unwrap(),
             registry: Address::from_str("0x13").unwrap(),
             cap: Address::from_str("0x11").unwrap(),
             max_budget: 50_000_000,
+            chain_identifier: "4c78adac".into(),
+            budget: Some((Address::from_str("0xb0").unwrap(), 100_000_000)),
         }
+    }
+
+    struct Draw {
+        package: &'static str,
+        budget: &'static str,
+        budget_mutable: bool,
+        account: &'static str,
+        account_owned: bool,
+        registry: &'static str,
+        cap: &'static str,
+        clock: &'static str,
+        amount: Vec<u8>,
+        sender: &'static str,
+        gas_owner: &'static str,
+        gas_budget: u64,
+        extra_command: bool,
+    }
+    impl Default for Draw {
+        fn default() -> Self {
+            Draw { package: "0x3", budget: "0xb0", budget_mutable: false, account: "0xac", account_owned: false, registry: "0x13", cap: "0x11", clock: "0x6", amount: 50_000_000u64.to_le_bytes().to_vec(),
+                   sender: "0xa0", gas_owner: "0xa0", gas_budget: 10_000_000, extra_command: false }
+        }
+    }
+    impl Draw {
+        fn bytes(&self) -> Vec<u8> {
+            let a = |s: &str| Address::from_str(s).unwrap();
+            let mut b = TransactionBuilder::new();
+            let args = vec![
+                b.object(ObjectInput::shared(a(self.budget), 1, self.budget_mutable)),
+                b.object(if self.account_owned { ObjectInput::owned(a(self.account), 2, Digest::ZERO) } else { ObjectInput::shared(a(self.account), 1, true) }),
+                b.object(ObjectInput::shared(a(self.registry), 1, false)),
+                b.object(ObjectInput::owned(a(self.cap), 2, Digest::ZERO)),
+                b.pure_bytes(self.amount.clone()),
+                b.object(ObjectInput::shared(a(self.clock), 1, false)),
+            ];
+            let function = || Function::new(a(self.package), fleet_budget::MODULE.parse().unwrap(), fleet_budget::DRAW_GAS.parse().unwrap());
+            b.move_call(function(), args.clone());
+            if self.extra_command {
+                b.move_call(function(), args);
+            }
+            b.set_sender(a(self.sender));
+            b.set_sponsor(a(self.gas_owner));
+            b.set_gas_budget(self.gas_budget);
+            b.set_gas_price(1000);
+            b.add_gas_objects([ObjectInput::owned(a("0x12"), 3, Digest::ZERO)]);
+            bcs::to_bytes(&b.try_build().unwrap()).unwrap()
+        }
+    }
+
+    #[test]
+    fn signs_only_bounded_draws_from_this_fleets_budget() {
+        let p = policy();
+        assert_eq!(check(&p, &Draw::default().bytes()).unwrap(), Intent::Draw);
+        assert_eq!(check(&p, &Draw { amount: 100_000_000u64.to_le_bytes().to_vec(), ..Draw::default() }.bytes()).unwrap(), Intent::Draw);
+        for (label, bad) in [
+            ("over the configured amount", Draw { amount: 100_000_001u64.to_le_bytes().to_vec(), ..Draw::default() }),
+            ("zero", Draw { amount: 0u64.to_le_bytes().to_vec(), ..Draw::default() }),
+            ("not a u64", Draw { amount: vec![1, 2, 3], ..Draw::default() }),
+            ("other budget", Draw { budget: "0xb1", ..Draw::default() }),
+            ("budget taken mutably", Draw { budget_mutable: true, ..Draw::default() }),
+            ("account not shared", Draw { account_owned: true, ..Draw::default() }),
+            ("other registry", Draw { registry: "0x99", ..Draw::default() }),
+            ("other cap", Draw { cap: "0x98", ..Draw::default() }),
+            ("not the clock", Draw { clock: "0x7", ..Draw::default() }),
+            ("other package", Draw { package: "0x4", ..Draw::default() }),
+            ("other sender", Draw { sender: "0xbad", gas_owner: "0xbad", ..Draw::default() }),
+            ("sponsored", Draw { gas_owner: "0xbad", ..Draw::default() }),
+            ("gas budget", Draw { gas_budget: 50_000_001, ..Draw::default() }),
+            ("two commands", Draw { extra_command: true, ..Draw::default() }),
+        ] {
+            assert!(check(&p, &bad.bytes()).is_err(), "{label} was accepted");
+        }
+        let disabled = Policy { budget: None, ..policy() };
+        assert!(check(&disabled, &Draw::default().bytes()).unwrap_err().to_string().contains("not enabled"));
+    }
+
+    #[test]
+    fn draw_signatures_only_for_the_daemon() {
+        let p = policy();
+        let sign = json!({ "op": "sign", "tx": STANDARD.encode(Draw::default().bytes()) });
+        assert_eq!(handle(&sign, Peer { pid: 100, uid: 990 }, &Key, &p, None, || true)["signature"], STANDARD.encode([7]));
+        // A component (same UID, not the main process) and root get nothing.
+        assert!(handle(&sign, Peer { pid: 101, uid: 990 }, &Key, &p, None, || false)["error"].as_str().unwrap().contains("may not request signatures"));
+        assert!(handle(&sign, Peer { pid: 1, uid: 0 }, &Key, &p, None, || false)["error"].as_str().unwrap().contains("only for the daemon"));
     }
 
     struct Tx {
@@ -615,6 +949,146 @@ mod tests {
         fn sign(&self, _: &[u8]) -> anyhow::Result<Vec<u8>> {
             Ok(vec![7])
         }
+        fn sign_digest(&self, _: &[u8]) -> anyhow::Result<Vec<u8>> {
+            Ok(vec![8])
+        }
+    }
+
+    fn telemetry(edit: impl FnOnce(&mut crate::telemetry::Snapshot)) -> Vec<u8> {
+        use crate::telemetry::*;
+        let binding = Binding {
+            chain_identifier: "4c78adac".into(),
+            registry: "0x13".into(),
+            device_id: "0x10".into(),
+            interval_seconds: 60,
+            poll_seconds: 30,
+            started_ms: 1,
+            boot_id: None,
+        };
+        let mut snapshot = snapshot(&binding, "0xa0", 1, 0, SyncHealth::default(), Inventory::default(), 2);
+        edit(&mut snapshot);
+        serde_json::to_vec(&snapshot).unwrap()
+    }
+
+    fn log_batch(edit: impl FnOnce(&mut crate::logs::Batch)) -> Vec<u8> {
+        let mut batch = crate::logs::Batch {
+            schema: 1,
+            kind: "logs".into(),
+            chain_identifier: "4c78adac".into(),
+            registry: "0x13".into(),
+            device_id: "0x10".into(),
+            signer: "0xa0".into(),
+            seq: 7,
+            observed_ms: 2,
+            dropped_lines: 0,
+            redactions: 1,
+            records: vec![crate::logs::Record { source: "component:app".into(), line: "started".into() }],
+        };
+        edit(&mut batch);
+        serde_json::to_vec(&batch).unwrap()
+    }
+
+    #[test]
+    fn signs_only_this_devices_client_device_ca_binding() {
+        let binding = |signer: &str, kind: &str| serde_json::to_vec(&crate::clientdevices::CaBinding {
+            schema: 1, kind: kind.into(), chain_identifier: "4c78adac".into(), registry: "0x13".into(), device_id: "0x10".into(),
+            signer: signer.into(), ca_sha256: "ab".repeat(32), created_ms: 1,
+        }).unwrap();
+        let p = policy();
+        check_personal(&p, &binding("0xa0", crate::clientdevices::CA_BINDING_KIND)).unwrap();
+        assert!(check_personal(&p, &binding("0xa1", crate::clientdevices::CA_BINDING_KIND)).is_err(), "another signer");
+        assert!(check_personal(&p, &binding("0xa0", "client-device-ca2")).is_err(), "unknown kind falls to telemetry");
+        assert!(check(&p, &binding("0xa0", crate::clientdevices::CA_BINDING_KIND)).is_err(), "never a transaction");
+    }
+
+    #[test]
+    fn signs_only_this_devices_canonical_log_batches() {
+        let p = policy();
+        check_personal(&p, &log_batch(|_| {})).unwrap();
+        for (label, bad) in [
+            ("another chain", log_batch(|b| b.chain_identifier = "35834a8a".into())),
+            ("another registry", log_batch(|b| b.registry = "0x14".into())),
+            ("another signer", log_batch(|b| b.signer = "0xa1".into())),
+            ("no records", log_batch(|b| b.records.clear())),
+            ("overlong line", log_batch(|b| b.records[0].line = "x".repeat(crate::logs::MAX_LINE + 1))),
+            ("bad source", log_batch(|b| b.records[0].source = "root".into())),
+            ("schema", log_batch(|b| b.schema = 2)),
+        ] {
+            assert!(check_personal(&p, &bad).is_err(), "{label} was accepted");
+        }
+        let mut spaced = log_batch(|_| {});
+        spaced.insert(1, b' ');
+        assert!(check_personal(&p, &spaced).is_err(), "non-canonical batch was accepted");
+        // A transaction is never signed as a log batch, nor vice versa.
+        assert!(check_personal(&p, &Tx::default().bytes()).is_err());
+        assert!(check(&p, &log_batch(|_| {})).is_err());
+    }
+
+    #[test]
+    fn signs_only_this_devices_canonical_telemetry() {
+        let p = policy();
+        check_telemetry(&p, &telemetry(|_| {})).unwrap();
+        // The registry may be written in any address form.
+        check_telemetry(&p, &telemetry(|s| s.registry = format!("0x{}", "0".repeat(62) + "13"))).unwrap();
+        // Schema 2 carries a services section (SF-085), and only it does.
+        let services = || Some(crate::service_health::Services { version: 1, ..Default::default() });
+        check_telemetry(&p, &telemetry(|s| (s.schema, s.services) = (2, services()))).unwrap();
+        let mut null_services: serde_json::Value = serde_json::from_slice(&telemetry(|_| {})).unwrap();
+        null_services["services"] = json!(null);
+        for (label, bad) in [
+            ("services without schema 2", telemetry(|s| s.services = services())),
+            ("services: null (not canonical)", serde_json::to_vec(&null_services).unwrap()),
+            ("unknown services field", {
+                let mut v: serde_json::Value = serde_json::from_slice(&telemetry(|s| (s.schema, s.services) = (2, services()))).unwrap();
+                v["services"]["payloads"] = json!([]);
+                serde_json::to_vec(&v).unwrap()
+            }),
+            ("a service error text", telemetry(|s| {
+                let bridge = crate::service_health::BridgeHealth { last_error: Some("subscriber queue full: sub confidential/#".into()), ..Default::default() };
+                (s.schema, s.services) = (2, Some(crate::service_health::Services { version: 1, bridge: Some(bridge), ..Default::default() }));
+            })),
+            ("another chain", telemetry(|s| s.chain_identifier = "35834a8a".into())),
+            ("another registry", telemetry(|s| s.registry = "0x14".into())),
+            ("another signer", telemetry(|s| s.signer = "0xa1".into())),
+            ("unparsable signer", telemetry(|s| s.signer = "me".into())),
+            ("another schema", telemetry(|s| s.schema = 2)),
+        ] {
+            assert!(check_telemetry(&p, &bad).is_err(), "{label} was accepted");
+        }
+        let canonical = telemetry(|_| {});
+        let mut padded = canonical.clone();
+        padded.push(b' ');
+        let mut extra: serde_json::Value = serde_json::from_slice(&canonical).unwrap();
+        extra["extra"] = json!(1);
+        let oversized = telemetry(|s| s.reasons = vec!["x".repeat(crate::telemetry::MAX_MESSAGE_BYTES)]);
+        for (label, bad) in [
+            ("trailing whitespace", padded),
+            ("unknown field", serde_json::to_vec(&extra).unwrap()),
+            ("oversized", oversized),
+            ("a transaction", Tx::default().bytes()),
+            ("garbage", b"not telemetry".to_vec()),
+        ] {
+            assert!(check_telemetry(&p, &bad).is_err(), "{label} was accepted");
+        }
+    }
+
+    #[test]
+    fn telemetry_signatures_only_for_the_daemon() {
+        let p = policy();
+        let sign = json!({ "op": "sign_telemetry", "message": STANDARD.encode(telemetry(|_| {})) });
+        let daemon = Peer { pid: 100, uid: 990 };
+        assert_eq!(handle(&sign, daemon, &Key, &p, None, || true)["signature"], STANDARD.encode([8]));
+        let refused = handle(&sign, Peer { pid: 101, uid: 990 }, &Key, &p, None, || false);
+        assert!(refused["error"].as_str().unwrap().contains("only the daemon's main process"), "{refused}");
+        // Root (provisioning) gets no telemetry signatures either.
+        assert!(handle(&sign, Peer { pid: 1, uid: 0 }, &Key, &p, None, || false)["error"].is_string());
+        let forged = json!({ "op": "sign_telemetry", "message": STANDARD.encode(telemetry(|s| s.registry = "0x14".into())) });
+        assert!(handle(&forged, daemon, &Key, &p, None, || true)["error"].as_str().unwrap().contains("registry"));
+        // A transaction is never signed as a personal message, nor telemetry as a transaction.
+        let tx = json!({ "op": "sign_telemetry", "message": STANDARD.encode(Tx::default().bytes()) });
+        assert!(handle(&tx, daemon, &Key, &p, None, || true)["error"].is_string());
+        let swapped = json!({ "op": "sign", "tx": STANDARD.encode(telemetry(|_| {})) });
+        assert!(handle(&swapped, daemon, &Key, &p, None, || true)["error"].is_string());
     }
 
     #[test]
@@ -654,14 +1128,68 @@ mod tests {
         let sign = json!({ "op": "sign", "tx": STANDARD.encode(Tx::default().bytes()) });
         let daemon = Peer { pid: 100, uid: 990 };
         let component = Peer { pid: 101, uid: 990 };
-        assert_eq!(handle(&sign, daemon, &Key, &p, || true)["signature"], STANDARD.encode([7]));
-        let refused = handle(&sign, component, &Key, &p, || false);
+        assert_eq!(handle(&sign, daemon, &Key, &p, None, || true)["signature"], STANDARD.encode([7]));
+        let refused = handle(&sign, component, &Key, &p, None, || false);
         assert!(refused["error"].as_str().unwrap().contains("may not request signatures"), "{refused}");
         // Root is not the daemon: no report signatures, only enrollment.
-        assert!(handle(&sign, Peer { pid: 1, uid: 0 }, &Key, &p, || false)["error"].as_str().unwrap().contains("only for the daemon"));
+        assert!(handle(&sign, Peer { pid: 1, uid: 0 }, &Key, &p, None, || false)["error"].as_str().unwrap().contains("only for the daemon"));
         // The public address is not a secret.
-        assert_eq!(handle(&json!({ "op": "address" }), component, &Key, &p, || false)["address"], "0xa0");
-        assert!(handle(&json!({ "op": "export" }), daemon, &Key, &p, || true)["error"].is_string());
+        assert_eq!(handle(&json!({ "op": "address" }), component, &Key, &p, None, || false)["address"], "0xa0");
+        assert!(handle(&json!({ "op": "export" }), daemon, &Key, &p, None, || true)["error"].is_string());
+    }
+
+    #[test]
+    fn seal_sessions_sign_only_fleet_approvals_for_the_daemon() {
+        use ed25519_dalek::Verifier;
+        use sui_sdk_types::{Identifier, MoveCall, ProgrammableTransaction, SharedInput};
+        let p = policy();
+        let device = ed25519_dalek::SigningKey::from_bytes(&[5; 32]);
+        let sessions = Sessions::new(
+            Arc::new(crate::identity::Ed25519File(device.clone())),
+            SessionPolicy { package: p.namespace, ttl_min: 10, clock_skew_ms: 60_000 },
+        )
+        .unwrap();
+        let approval = |package: &str, function: &str| {
+            let inputs = vec![
+                Input::Pure(bcs::to_bytes(&vec![7u8; 56]).unwrap()),
+                Input::Shared(SharedInput::new(Address::from_str("0x40").unwrap(), 3, false)),
+            ];
+            let call = MoveCall {
+                package: Address::from_str(package).unwrap(),
+                module: Identifier::from_str("seal_policy").unwrap(),
+                function: Identifier::from_str(function).unwrap(),
+                type_arguments: vec![],
+                arguments: vec![Argument::Input(0), Argument::Input(1)],
+            };
+            STANDARD.encode(bcs::to_bytes(&ProgrammableTransaction { inputs, commands: vec![Command::MoveCall(call)] }).unwrap())
+        };
+        let (enc_key, enc_vk) = crate::seal::elgamal_keys(&crate::seal::random_scalar());
+        let request = |ptb: String, vk: &[u8]| json!({ "op": "seal", "ptb": ptb, "enc_key": STANDARD.encode(enc_key), "enc_verification_key": STANDARD.encode(vk) });
+        let good = request(approval("0x3", "seal_approve_device"), &enc_vk);
+        let daemon = Peer { pid: 100, uid: 990 };
+        let response = handle(&good, daemon, &Key, &p, Some(&sessions), || true);
+        let certificate = Certificate::from_json(&response["certificate"]).unwrap();
+        // Certified by the device's own key, for the fleet package's namespace.
+        assert_eq!(certificate.user, crate::identity::address(&device));
+        let message = crate::seal_client::session_message(&p.namespace, 10, certificate.creation_ms, &certificate.session_key);
+        assert_eq!(certificate.signature, crate::identity::personal_message_signature(&device, message.as_bytes()));
+        let ptb = STANDARD.decode(good["ptb"].as_str().unwrap()).unwrap();
+        let signature = ed25519_dalek::Signature::from_slice(&STANDARD.decode(response["signature"].as_str().unwrap()).unwrap()).unwrap();
+        ed25519_dalek::VerifyingKey::from_bytes(&certificate.session_key)
+            .unwrap()
+            .verify(&crate::seal_client::request_message(&ptb, &enc_key, &enc_vk), &signature)
+            .unwrap();
+        assert!(response.get("session_key").is_none() && !response.to_string().contains(&hex::encode(device.to_bytes())));
+        let refused = |request: &Value, daemon: bool, sessions: Option<&Sessions>| {
+            handle(request, Peer { pid: 101, uid: 990 }, &Key, &p, sessions, || daemon)["error"].as_str().unwrap_or("").to_owned()
+        };
+        assert!(refused(&good, false, Some(&sessions)).contains("only the daemon"));
+        assert!(refused(&good, true, None).contains("not enabled"));
+        assert!(refused(&request(approval("0x4", "seal_approve_device"), &enc_vk), true, Some(&sessions)).contains("not a SuiFleet Seal approval"));
+        assert!(refused(&request(approval("0x3", "grant_account"), &enc_vk), true, Some(&sessions)).contains("not a SuiFleet Seal approval"));
+        let other_vk = crate::seal::elgamal_keys(&crate::seal::random_scalar()).1;
+        assert!(refused(&request(approval("0x3", "seal_approve_device"), &other_vk), true, Some(&sessions)).contains("response encryption key"));
+        assert!(refused(&request(STANDARD.encode(Tx::default().bytes()), &enc_vk), true, Some(&sessions)).contains("not a programmable transaction"));
     }
 
     #[test]
@@ -687,12 +1215,16 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn records_and_pins_a_live_process() {
         let dir = std::env::temp_dir().join(format!("suifleet-record-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("daemon.main");
-        let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        // Registered, or a concurrently running supervisor test's orphan sweep
+        // kills it (the test process is a subreaper there).
+        use crate::supervisor::{forget_std_tracked, spawn_std_tracked};
+        let mut child = spawn_std_tracked(std::process::Command::new("sleep").arg("30")).unwrap();
         let sleep = std::fs::read_link(format!("/proc/{}/exe", child.id())).unwrap();
         assert!(record(&path, child.id(), &sleep).unwrap());
         let main = MainProcess::parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
@@ -714,18 +1246,21 @@ mod tests {
             child.kill().unwrap();
             child.wait().unwrap();
         }
+        forget_std_tracked(child.id());
         // A main process not running the base binary (here: sleep, against
         // this test binary) is not recorded, and an earlier record is removed.
-        let mut other = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let mut other = spawn_std_tracked(std::process::Command::new("sleep").arg("30")).unwrap();
         assert!(path.exists());
         assert!(!record(&path, other.id(), Path::new("/proc/self/exe")).unwrap());
         assert!(!path.exists(), "a stale record survived");
         assert!(!record(&path, other.id(), Path::new("/proc/self/exe")).unwrap());
         other.kill().unwrap();
         other.wait().unwrap();
+        forget_std_tracked(other.id());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn service_round_trip_over_a_socket() {
         let dir = std::env::temp_dir().join(format!("suifleet-signer-{}", std::process::id()));
@@ -736,11 +1271,11 @@ mod tests {
         let uid = unsafe { libc::getuid() };
         std::thread::spawn(move || {
             let p = policy();
-            for stream in listener.incoming().take(3) {
+            for stream in listener.incoming().take(5) {
                 let mut stream = stream.unwrap();
                 let request = read_request(&stream).unwrap();
                 let peer = peer(&stream).unwrap();
-                let response = handle(&request, peer, &Key, &p, || is_daemon(&Callers::Uid(uid), peer, None, |_| None));
+                let response = handle(&request, peer, &Key, &p, None, || is_daemon(&Callers::Uid(uid), peer, None, |_| None));
                 writeln!(stream, "{response}").unwrap();
             }
         });
@@ -749,5 +1284,14 @@ mod tests {
         assert_eq!(signer.sign(&Tx::default().bytes()).unwrap(), vec![7]);
         let refused = signer.sign(&Tx { function: dm::DELETE_DEPLOYMENT, ..Tx::default() }.bytes()).unwrap_err();
         assert!(format!("{refused:#}").contains("not a permitted signing intent"), "{refused:#}");
+        // A full-size telemetry snapshot fits in one request.
+        let large = telemetry(|s| {
+            s.reasons = vec![];
+            s.boot_id = Some("b".repeat(crate::telemetry::MAX_MESSAGE_BYTES - 400));
+        });
+        assert!(large.len() > crate::telemetry::MAX_MESSAGE_BYTES - 200, "{}", large.len());
+        assert_eq!(signer.sign_personal_message(&large).unwrap(), vec![8]);
+        let refused = signer.sign_personal_message(b"anything").unwrap_err();
+        assert!(format!("{refused:#}").contains("not a telemetry snapshot"), "{refused:#}");
     }
 }
