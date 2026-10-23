@@ -2136,6 +2136,34 @@
       "validation": "Run the relevant disposable localnet daemon suite and meaningful failure control plus scoped offline harness checks; normal exact-head CI/testnet and independent review.",
       "legacy_pr": 53,
       "legacy_head": "09bcdc9f0873d96c64f14dac5d5af4efd8b7fa19"
+    },
+    {
+      "key": "SF-087",
+      "title": "Rehearse mainnet deployment and package upgrade",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "baseline",
+      "kind": "type:infrastructure",
+      "depends_on": [
+        "SF-010",
+        "SF-042",
+        "SF-050"
+      ],
+      "paths": [
+        "scripts",
+        "manifests",
+        "docs",
+        ".github"
+      ],
+      "resources": [],
+      "description": "Prepare and rehearse the production path on mainnet: publish under the proper UpgradeCap custody, record the deployment manifest and type origins, build both client configurations, publish the dApp, and rehearse a compatible upgrade and migration with old-package attack checks, as OPERATIONS.md requires for a release.",
+      "evidence": "SF-010 covers testnet only; OPERATIONS.md lists the release steps but no ticket runs them on mainnet. Found 2026-10-19 gap review.",
+      "acceptance": [
+        "A scripted, reviewed mainnet runbook with dry runs: chain and account verification, gas and storage estimates, UpgradeCap custody, effects-checked publication and upgrade, manifest and type-origin recording, client config generation.",
+        "A full rehearsal on an isolated network or testnet using the exact mainnet scripts and artifacts.",
+        "Actual mainnet spending, publication or UpgradeCap transfer happens only after explicit user authorization for that run; record exact IDs, digests, effects and costs."
+      ],
+      "validation": "Script tests and dry runs; rehearsal evidence with effects checked; mainnet evidence only under explicit authorization."
     }
   ]
 }
