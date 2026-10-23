@@ -19,6 +19,7 @@ mod deps;
 mod firmware;
 mod funding;
 mod fleet_data;
+mod fleet_settings;
 mod fleet_archive;
 mod handoff;
 mod identity;
@@ -453,6 +454,7 @@ async fn main() -> anyhow::Result<()> {
             address = sui.address(),
             "Daemon started with durable deployment polling"
         );
+        let mut fleet_settings = fleet_settings::Applied::new("checks");
         loop {
             let cycle = poll(&cfg, &sui, &walrus, &runner, store.as_ref(), &configs, &mut supervisor, &mut journal);
             tokio::select! {
@@ -474,7 +476,17 @@ async fn main() -> anyhow::Result<()> {
                 },
                 _ = &mut shutdown => { info!("Stopping; interrupted apply requires inspection on restart"); break; }
             }
-            let delay = tokio::time::sleep(Duration::from_secs(cfg.runtime.poll_seconds));
+            // The fleet's settings (SF-130) choose when to check next, so an
+            // owner's change applies within one interval.
+            if let Some(budget) = fleet_settings::budget_id(&cfg) {
+                tokio::select! {
+                    read = fleet_settings::read(&sui, budget) => { fleet_settings.update(read); }
+                    _ = &mut shutdown => { info!("Stopping; interrupted apply requires inspection on restart"); break; }
+                }
+            }
+            let wait = fleet_settings::schedule(cfg.runtime.poll_seconds, fleet_settings.current())
+                .next(fleet_settings::rollout_active(&journal.state));
+            let delay = tokio::time::sleep(wait);
             tokio::pin!(delay);
             let mut stopped = false;
             loop {

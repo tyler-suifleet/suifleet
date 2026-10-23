@@ -142,14 +142,15 @@ pub struct Task {
     pub log_settings: Option<crate::config::LogsConfig>,
 }
 impl Task {
-    async fn beat(&self, tracker: &mut crate::service_health::Tracker) -> anyhow::Result<()> {
+    async fn beat(&self, tracker: &mut crate::service_health::Tracker, settings: Option<&crate::fleet_settings::Settings>) -> anyhow::Result<()> {
         self.sui.validate_cap(&self.cap, &self.device_id).await?;
         let (fleet, writer) = self.config.read(&self.sui, &self.device_id).await?;
         // Cadence uses chain time, never the device's possibly fast clock.
         let clock = self.sui.object("0x6").await?;
         let now = clock.fields["timestamp_ms"].as_str().and_then(|s| s.parse::<u64>().ok())
             .or_else(|| clock.fields["timestamp_ms"].as_u64()).ok_or_else(|| anyhow::anyhow!("invalid chain clock"))?;
-        if writer.health_seq != 0 && now < writer.health_at_ms.saturating_add(fleet.health_interval_ms) { return Ok(()); }
+        let interval = crate::fleet_settings::health_interval_ms(fleet.health_interval_ms, settings);
+        if writer.health_seq != 0 && now < writer.health_at_ms.saturating_add(interval) { return Ok(()); }
         let seq = writer.health_seq.checked_add(1).filter(|n| *n <= 9_007_199_254_740_991).ok_or_else(|| anyhow::anyhow!("health sequence exhausted"))?;
         let binding = telemetry::Binding { chain_identifier: fleet.chain_identifier,
             registry: fleet.registry_id.to_string(), device_id: self.device_id.clone(), interval_seconds: 60,
@@ -168,18 +169,27 @@ impl Task {
     }
     pub async fn run(self) {
         let mut tracker = crate::service_health::Tracker::default();
+        let mut applied = crate::fleet_settings::Applied::new("fleet data");
         loop {
-            if let Err(error) = self.beat(&mut tracker).await {
+            // SF-130: the fleet's cadences, read once per round.
+            applied.update(crate::fleet_settings::read(&self.sui, &self.config.budget_id).await);
+            let settings = applied.current().copied();
+            if let Err(error) = self.beat(&mut tracker, settings.as_ref()).await {
                 tracing::warn!(%error, "Direct-chain health pending; will re-read authority/cadence before retry");
             }
             if self.config.archives.is_some() {
-                let result = crate::fleet_archive::tick(&self).await;
+                let result = crate::fleet_archive::tick(&self, settings.as_ref()).await;
                 if let Err(error) = &result { tracing::warn!(%error, "Encrypted fleet archive pending; retained for retry"); }
                 if let Err(error) = crate::fleet_archive::status(&self.state_dir, result.is_err()) {
                     tracing::warn!(%error, "Archive publication status could not be persisted");
                 }
             }
-            tokio::time::sleep(Duration::from_secs(self.poll_seconds.clamp(1,60))).await;
+            // Without fleet settings, at least every minute; with them, at the fleet's check interval.
+            let wait = match &settings {
+                Some(s) => crate::fleet_settings::schedule(self.poll_seconds, Some(s)).check,
+                None => Duration::from_secs(self.poll_seconds.clamp(1, 60)),
+            };
+            tokio::time::sleep(wait).await;
         }
     }
 }
