@@ -640,6 +640,15 @@ test-prospects:
 .PHONY: test-fleet-data-upgrade-localnet
 test-fleet-data-upgrade-localnet:
 	$(RUN) python3 scripts/test_protocol_localnet.py --fleet-data-upgrade
+
+# Read-only public-Testnet confirmation from a clean operator state: restore,
+# discovery, health and ciphertext availability; with SUIFLEET_WALLET, owner
+# policy decryption by a signed Seal session. No transaction or gas.
+.PHONY: live-fleet-recovery
+live-fleet-recovery:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --example sign_seal_session
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/live_fleet_recovery.py $(if $(SUIFLEET_WALLET),--wallet "$(SUIFLEET_WALLET)") --evidence "$${SUIFLEET_RECOVERY_EVIDENCE:-/tmp/sf091-testnet-recovery.json}"
+
 .PHONY: test-retention
 test-retention:
 	$(RUN) python3 -m unittest discover -s scripts/tests -p 'test_retention*.py' -v
