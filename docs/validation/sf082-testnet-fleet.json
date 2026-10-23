@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "chainIdentifier": "4c78adac",
+  "registryId": "0xd3afc908876326367294ba95d13cbac5775dd1370a23fb3ba8ba29b25daeaf41",
+  "packageId": "0xc841f6f5232e60602d4b951d1a6914e1e3b567fc71fbc57f2b98e5ee4a8e4b50",
+  "typeOrigin": "0xc841f6f5232e60602d4b951d1a6914e1e3b567fc71fbc57f2b98e5ee4a8e4b50",
+  "fleetId": "0xa5f27d3da27897b199da566f991b01aafc9ed26595ecd6b214ba4aa9f09fbd87",
+  "budgetId": "0x89fe6ffe6dac3a95e799e86125b1a67ad125ebd9816f4087f14a3db4e2098049",
+  "storageId": "0x8589adcc7d60ab4ea092280142ef33e04009d94b87d7c15061a5aa8ccfe628b1"
+}

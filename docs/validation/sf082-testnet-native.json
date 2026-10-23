@@ -1,0 +1,341 @@
+{
+  "started": "2026-10-22T23:21:21Z",
+  "network": "testnet",
+  "transactions": [
+    {
+      "label": "remove test device account",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "2NRr1DfTmWnUxdgSkW1mTaDX2p72EvVnpyBweUet7Rmc",
+      "gas_mist": 0,
+      "allowance_used_mist": 52351161
+    },
+    {
+      "label": "withdraw unused test budget",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "35s6jVMpLNfb9LCtUH3WuxmVms5LMYfwy6xFkwPX7H57",
+      "gas_mist": 1988435,
+      "allowance_used_mist": 54339596
+    },
+    {
+      "label": "sweep the test key",
+      "gas_budget_mist": 3000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "FzS9R7rs7xscfoKMRk6yVq8GYGUG8uP3puxzzt8X29zu",
+      "gas_mist": 1000099,
+      "allowance_used_mist": 1000099
+    }
+  ],
+  "checks": [
+    "reused immutable SF083 core, exact source/lock/compiler inputs; chain, account and UpgradeCap reverified",
+    "native hourly-cadence health path and prepaid encrypted logs/diagnostics certified and anchored; restart made no duplicate upload",
+    "real browser modules discovered and verified/decrypted certified native archives with owner signed Seal session"
+  ],
+  "toolchain": {
+    "build": {
+      "role": "build",
+      "release": "testnet-v1.81.1",
+      "version": "sui 1.81.1-e04cf9aa915c",
+      "max_protocol": 138,
+      "path": "/usr/local/bin/sui"
+    },
+    "network": {
+      "role": "network",
+      "release": "testnet-v1.82.1",
+      "version": "sui 1.82.1-987123842623",
+      "max_protocol": 139,
+      "archive_sha256": "112bf204fab6927b135edfb316cddac07bdba754434b5f12d021ca7e8a72858c",
+      "binary_sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b",
+      "path": "/opt/sui-network/sui",
+      "sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b"
+    },
+    "compatibility": {
+      "chain": "4c78adac",
+      "epoch": 1261,
+      "protocol_version": 139,
+      "network_cli_max_protocol": 139,
+      "build_cli_max_protocol": 138,
+      "build_cli_offline": true
+    }
+  },
+  "chain": "4c78adac",
+  "rpc": "https://fullnode.testnet.sui.io:443",
+  "operator": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+  "start_balance_mist": 998387417,
+  "max_spend_mist": 800000000,
+  "sui": {
+    "build": "sui 1.81.1-e04cf9aa915c",
+    "network": "sui 1.82.1-987123842623"
+  },
+  "head": "53d53d4e7bad0b24ee60785a6b26c54c5364ffda",
+  "manifest": {
+    "schema_version": 1,
+    "protocol_version": 1,
+    "network": "testnet",
+    "chain_identifier": "4c78adac",
+    "rpc_url": "https://fullnode.testnet.sui.io:443",
+    "call_package_id": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+    "upgrade_cap_id": "0x400dda2c3b0788a08841c0a81a4bdc444c6e399268d60f352eb37f04066d0983",
+    "package_version": "1",
+    "type_origins": {
+      "device_registry::DeviceRegistry": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "device_registry::Device": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "device_group::DeviceGroup": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "device_group::GroupCreated": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "device_cap::DeviceCap": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "device_cap::DeviceAddressKey": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "deployment_manager::DeploymentRecord": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "deployment_manager::DeploymentCreated": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "deployment_manager::DeviceStatusUpdated": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "deployment_manager::TargetGroupsKey": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "deployment_manager::TargetDevicesKey": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "deployment_manager::StatusesKey": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "deployment_manager::RecipeDigestKey": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "deployment_manager::ReceiptsKey": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "deployment_manager::Receipts": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "deployment_manager::DeviceStatusReported": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "device_registry::IdentityKey": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "device_registry::Identity": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "device_registry::DeviceIdentityChanged": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "device_registry::CustodyKey": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "device_registry::DeviceOwnerCap": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "deployment_manager::DelegateKey": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "enrollment::EnrollmentPolicy": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "enrollment::DeviceEnrolled": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "roles::DeployerRole": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "roles::RoleKey": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "roles::RoleGranted": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "device_group::DeviceAddedToGroup": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "deployment_manager::ManagedKey": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "desired_state::DesiredKey": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "desired_state::DesiredState": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "desired_state::DesiredStateChanged": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "deployment_manager::ControlKey": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "deployment_manager::Control": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "deployment_manager::RolloutKey": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "deployment_manager::Rollout": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "deployment_manager::RolloutPolicy": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "deployment_manager::RolloutDecision": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "component_catalog::ComponentCatalog": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "component_catalog::ComponentVersion": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "component_catalog::CatalogCreated": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "component_catalog::VersionPublished": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "component_catalog::CatalogBindingKey": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "component_catalog::CatalogBinding": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "seal_policy::AccessPolicy": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "seal_policy::AccessAdminCap": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "seal_policy::PolicyCreated": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "seal_policy::AccessChanged": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "seal_policy::KeyEpochRotated": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "seal_policy::PolicyMigrated": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "fleet_handover::Handover": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "fleet_budget::FleetBudget": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "fleet_budget::BudgetOwnerCap": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "fleet_budget::Limits": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "fleet_budget::DeviceKey": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "fleet_budget::GasAccount": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "fleet_budget::BudgetCreated": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "fleet_budget::Deposited": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "fleet_budget::Withdrawn": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "fleet_budget::DeviceFunded": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "fleet_budget::ReserveChanged": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "fleet_budget::GasDrawn": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "fleet_budget::BudgetLow": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "fleet_budget::DeviceStateChanged": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "fleet_budget::BudgetPaused": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "fleet_budget::BudgetConfigured": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2"
+    },
+    "shared_objects": {
+      "registry": {
+        "id": "0xd3afc908876326367294ba95d13cbac5775dd1370a23fb3ba8ba29b25daeaf41",
+        "initial_shared_version": "1"
+      }
+    },
+    "supported_clients": {
+      "dapp": {
+        "min": "0.1.0",
+        "max_exclusive": "0.2.0"
+      },
+      "edge": {
+        "min": "0.2.1",
+        "max_exclusive": "0.3.0"
+      }
+    },
+    "walrus": {
+      "publisher_url": "https://publisher.walrus-testnet.walrus.space",
+      "aggregator_url": "https://aggregator.walrus-testnet.walrus.space"
+    }
+  },
+  "packages": {
+    "storage": {
+      "package": "0x2c9382fd49ee2f09e3aeddcfc470fbbf922ba0cc30862b72dd3528e668ffb370",
+      "cap": "0x56e4e431ec84acaad145791438c0d7f880e85468afd29cfdd3211afebbee9cc7"
+    },
+    "data": {
+      "package": "0xc841f6f5232e60602d4b951d1a6914e1e3b567fc71fbc57f2b98e5ee4a8e4b50",
+      "cap": "0xa443af53cd1c16865a43d3a4d910c0aa650008469b4572afd8c9580a8eb62183"
+    }
+  },
+  "fleet_data": {
+    "schema": 1,
+    "chainIdentifier": "4c78adac",
+    "registryId": "0xd3afc908876326367294ba95d13cbac5775dd1370a23fb3ba8ba29b25daeaf41",
+    "packageId": "0xc841f6f5232e60602d4b951d1a6914e1e3b567fc71fbc57f2b98e5ee4a8e4b50",
+    "typeOrigin": "0xc841f6f5232e60602d4b951d1a6914e1e3b567fc71fbc57f2b98e5ee4a8e4b50",
+    "fleetId": "0xa5f27d3da27897b199da566f991b01aafc9ed26595ecd6b214ba4aa9f09fbd87",
+    "budgetId": "0x89fe6ffe6dac3a95e799e86125b1a67ad125ebd9816f4087f14a3db4e2098049",
+    "storageId": "0x8589adcc7d60ab4ea092280142ef33e04009d94b87d7c15061a5aa8ccfe628b1",
+    "writerId": "0x22e2f9adf0ed714942960c694aaf5e6398c59c6322d936d26f45ebf7c5221c02",
+    "deviceId": "0x6b51f6877e3e4cebe225bb7a8dfa0a66531776d5ca08f842bbeb49e9d2f8b993",
+    "accountId": "0xc92785c8cd147d1fc667c008c6f8f6ead2367079de2eea64bbb8547a735e422e",
+    "storagePackage": "0x2c9382fd49ee2f09e3aeddcfc470fbbf922ba0cc30862b72dd3528e668ffb370"
+  },
+  "resumed_from": "/runtime/evidence-retry3.json",
+  "precharged_cached_device_mist": 14696728,
+  "precharged_reserve_mist": 0,
+  "resumed_diagnostic_request": true,
+  "native_transactions": [
+    {
+      "label": "funding-0",
+      "digest": "FVZxyhNHf4W55SPqf6vBJuWWxNCPAjpFDhqwoBTWgt9T",
+      "net_gas_mist": 1988540,
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "6391600",
+        "storageRebate": "5403060",
+        "nonRefundableStorageFee": "540"
+      }
+    },
+    {
+      "label": "health-11",
+      "digest": "98MBhAnxtPGHK5rLyh5KLo2qPxeTZgqovT9LaNfdM6L1",
+      "net_gas_mist": -1802881,
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "12388000",
+        "storageRebate": "15190881",
+        "nonRefundableStorageFee": "1519"
+      }
+    },
+    {
+      "label": "health-12",
+      "digest": "43FrFtxQs2SPfbfgJV2Vfr1tEPQnk6LmpXwXyMw1BGXi",
+      "net_gas_mist": 1654839,
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "13041600",
+        "storageRebate": "12386761",
+        "nonRefundableStorageFee": "1239"
+      }
+    },
+    {
+      "label": "periodic-registration",
+      "digest": "6zw8xuyLC19Me9vhEHVz7mC9uqn6mZNQULPdMd7M1Amw",
+      "net_gas_mist": 12297664,
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "127923200",
+        "storageRebate": "116625536",
+        "nonRefundableStorageFee": "11664"
+      }
+    },
+    {
+      "label": "periodic-certification",
+      "digest": "9LkjrzwTWS9HFTb3ugkmjKxoPBcTEPJiS28YZsEoLZm4",
+      "net_gas_mist": 1030957,
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "5601200",
+        "storageRebate": "5570243",
+        "nonRefundableStorageFee": "557"
+      }
+    },
+    {
+      "label": "periodic-anchor",
+      "digest": "9JBGASEVELWSNzESNRmKcaR4yvteYgKmRV8k4GW6b4NL",
+      "net_gas_mist": 6389868,
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "20071600",
+        "storageRebate": "14681732",
+        "nonRefundableStorageFee": "1468"
+      }
+    },
+    {
+      "label": "diagnostic-registration",
+      "digest": "Qzrk55CuCjTCcdhzHU9jci4QZTzAENpft34A2pLUicb",
+      "net_gas_mist": 7859671,
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "127558400",
+        "storageRebate": "120698729",
+        "nonRefundableStorageFee": "12071"
+      }
+    },
+    {
+      "label": "diagnostic-certification",
+      "digest": "DRtu9j2DEYziht3oFdmoHDeUPS1Q7nsMHSMiV53Zz7Vn",
+      "net_gas_mist": 43019,
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "5236400",
+        "storageRebate": "6193381",
+        "nonRefundableStorageFee": "619"
+      }
+    },
+    {
+      "label": "diagnostic-anchor",
+      "digest": "3CrksXm8MWsi2dNbHGzBuPDvuk1bHNKV8yAjkdUd1VCD",
+      "net_gas_mist": 6389875,
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "20140000",
+        "storageRebate": "14750125",
+        "nonRefundableStorageFee": "1475"
+      }
+    }
+  ],
+  "precharged_device_allowance_mist": 40000000,
+  "browser": {
+    "verified": true,
+    "chain": "4c78adac",
+    "health": "degraded",
+    "healthSeq": "12",
+    "archives": [
+      {
+        "seq": 1,
+        "reason": "logs",
+        "records": 52,
+        "blobObjectId": "0x23777bbaa16061aec3dffd5e2b9cb790c2769ace2d64264dffa0075a21fd8bb2",
+        "blobId": "10647782198827440518491059952530427774809106685005161211653178724691700868154",
+        "endEpoch": 562
+      },
+      {
+        "seq": 2,
+        "reason": "diagnostics",
+        "records": 64,
+        "blobObjectId": "0x3dbf44a129333f07ce8db8b4eb774e2178547fb5a994b6999593e4bd1700c93b",
+        "blobId": "103367873365404944936497952718719850762755174559761783057308572550842806788438",
+        "endEpoch": 562
+      }
+    ],
+    "ownerSession": true,
+    "threshold": 2,
+    "indexed": true,
+    "keyEpoch": "0"
+  },
+  "device_swept_mist": 13041889,
+  "limits": [
+    "Testnet fixture and open Testnet Seal providers only; no production-provider availability/fees/recovery acceptance.",
+    "No manual extension/IdP wallet, physical target or Mainnet acceptance.",
+    "Certified non-deletable blobs retain purchased epochs; owner metadata remains for readback."
+  ],
+  "end_balance_mist": 1040023795,
+  "spent_mist": -41636378,
+  "allowance_used_mist": 54339596,
+  "finished": "2026-10-22T23:21:49Z"
+}
