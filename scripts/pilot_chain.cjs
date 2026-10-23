@@ -106,7 +106,11 @@ public fun pilot_fixture(ctx: &mut TxContext) {
    const message=Buffer.from(JSON.stringify(snapshot)),signed=await d.key.signPersonalMessage(message);
    await measure('health_anchor',async()=>{const tx=new Transaction();tx.moveCall({target:`${dataPackage.pkg}::fleet_data::report_health`,arguments:[tx.object(fleet),tx.object(d.writer),tx.object(budget),tx.object(d.account),tx.object(registry),tx.object(d.cap),tx.pure.u64(1),tx.pure.vector('u8',message),tx.pure.vector('u8',Buffer.from(signed.signature,'base64')),tx.object('0x6')]});await execute(`health ${d.deviceId}`,tx,d.key);});
    await measure('telemetry_visibility',async()=>{const health=await data.fetchChainHealth(client,config,[d.deviceId]);assert.equal(health[d.deviceId].observedMs,now,JSON.stringify(health));});
-   await encrypted.apply(d);
+   const expected=load('lib/move-bcs.ts').DeploymentBcs.parse((await client.getObject({objectId:deployment,include:{content:true}})).object.content);
+   const recipeField=await client.getDynamicField({parentId:deployment,name:{type:`${core.pkg}::deployment_manager::RecipeDigestKey`,bcs:new Uint8Array([0])}});
+   expected.recipe_digest=bcs.string().parse(recipeField.dynamicField.value.bcs);
+   await encrypted.apply(d,expected);
+   await encrypted.apply(d,expected); // repeat selection must not apply the file twice
    await measure('receipt_finalization',async()=>{const tx=new Transaction();tx.moveCall({target:`${core.pkg}::deployment_manager::report_verified_status`,arguments:[tx.object(deployment),tx.object(registry),tx.object(d.cap),tx.pure.u8(1)]});await execute(`receipt ${d.deviceId}`,tx,d.key);});
   });
   const receipts=await sui.readReceipts(client,deployment);assert.equal(receipts.verified,true);assert.equal(Object.keys(receipts.statuses).length,devices.length);for(const d of devices)assert.equal(receipts.statuses[d.deviceId],1);

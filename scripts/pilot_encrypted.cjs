@@ -8,7 +8,7 @@ const {randomBytes, createHash} = require('node:crypto');
 const {appRequire, loader} = require('./frontend_test_utils.cjs');
 const {Transaction} = appRequire('@mysten/sui/transactions');
 const {SealClient, SessionKey, EncryptedObject} = appRequire('@mysten/seal');
-const {pool, retry} = require('./pilot_load.cjs');
+const {retry} = require('./pilot_load.cjs');
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 async function listen(server) {
  await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
@@ -75,11 +75,12 @@ async function start({client,rpc,core,registry,devices,owner,execute,created,pub
   await assert.rejects(open(devices[0],'artifact'));assert.equal(applies.size,0);
   for(const spec of providerSpecs.slice(0,2))await launch(spec);
   return {artifactHash,recipeHash,blobId:'isolated-encrypted-pilot',close,
-   async apply(d) {
+   async apply(d,expected) {
+    assert.equal(expected.artifact_sha256,artifactHash);assert.equal(expected.recipe_digest,recipeHash);
     if(applies.has(d.deviceId))return; // one process-local synthetic application, not daemon restart recovery
     const [a,r]=await measure('encrypted_fetch',()=>Promise.all([open(d,'artifact'),open(d,'recipe')]));
     assert.equal(JSON.parse(Buffer.from(r)).artifact_sha256,digest(a));
-    const destination=`${tmp}/applied-${d.deviceId}`;await fs.writeFile(destination,a,{flag:'wx',mode:0o600});assert.equal(digest(await fs.readFile(destination)),artifactHash);applies.set(d.deviceId,1);
+    await measure('synthetic_apply',async()=>{const destination=`${tmp}/applied-${d.deviceId}`;await fs.writeFile(destination,a,{flag:'wx',mode:0o600});assert.equal(digest(await fs.readFile(destination)),expected.artifact_sha256);applies.set(d.deviceId,1);});
    },
    async verify() {
     assert.equal(applies.size,devices.length);for(const n of applies.values())assert.equal(n,1);
