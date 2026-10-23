@@ -572,7 +572,7 @@ pub(crate) mod tests {
     #[test]
     fn shared_vector_verifies_and_is_ingested() {
         let cases = cases();
-        for case in ["signed", "signed_services"] {
+        for case in ["signed", "signed_services", "signed_services_v2"] {
             let vector: Envelope = serde_json::from_value(cases[case]["envelope"].clone()).unwrap();
             let (snapshot, signer) = verify(&vector).unwrap();
             assert_eq!(signer, chain::normalize(cases[case]["signer"].as_str().unwrap()).unwrap());
@@ -652,9 +652,12 @@ pub(crate) mod tests {
         let mut with = snapshot(17, now);
         with.services = Some(crate::services::tests::services());
         assert_eq!(run(&sign(&with, &KEY), Some(device(&me))).error.unwrap(), "schema 2, and only schema 2, has a services section");
-        with.services.as_mut().unwrap().version = 2;
+        with.services.as_mut().unwrap().version = 3;
         with.schema = SCHEMA_SERVICES;
-        assert_eq!(run(&sign(&with, &KEY), Some(device(&me))).error.unwrap(), "unsupported services section version 2");
+        assert_eq!(run(&sign(&with, &KEY), Some(device(&me))).error.unwrap(), "unsupported services section version 3");
+        // Version 2 (SF-084) needs each stream's range and checkpoint.
+        with.services.as_mut().unwrap().version = 2;
+        assert_eq!(run(&sign(&with, &KEY), Some(device(&me))).error.unwrap(), "services.streams exceeds its bounds");
         with.services.as_mut().unwrap().version = 1;
         assert_eq!(run(&sign(&with, &KEY), Some(device(&me))).status, "accepted");
         let mut unknown = serde_json::to_value(snapshot(17, now)).unwrap();

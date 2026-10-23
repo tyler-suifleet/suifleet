@@ -347,8 +347,11 @@ def run(evidence=None):
             # Healthy baseline: the bridge is connected and nothing alerts.
             base = snapshot_after(0, lambda r: r["services"]["bridge"]["connected"] and r["health"] == "healthy",
                                   "no healthy schema-2 snapshot with a connected bridge")
-            assert base["schema"] == 2 and base["services"]["version"] == 1 and not base["alerts"], base
-            assert base["services"]["streams"]["streams"][0]["export"]["consecutive_failures"] == 0
+            assert base["schema"] == 2 and base["services"]["version"] == 2 and not base["alerts"], base
+            metrics = base["services"]["streams"]["streams"][0]
+            assert metrics["export"]["consecutive_failures"] == 0
+            # SF-084 version 2: an empty stream has no range and nothing exported yet.
+            assert (metrics["messages"], metrics["oldest"], metrics["newest"], metrics["export"]["checkpoint"]) == (0, None, None, None), metrics
             print(f"PASS: healthy baseline: signed schema-2 snapshot (seq {base['seq']}), bridge connected, no alerts")
 
             # Inbound MQTT into a full queue: the bridge's refusal names the
@@ -404,6 +407,10 @@ def run(evidence=None):
             assert (queue["queued"], queue["fill_percent"], queue["refused"]) == (QUEUE_LIMIT, 100, 1), queue
             exported = degraded["services"]["streams"]["streams"][0]
             assert exported["export"]["lost"] > 0 and exported["export"]["batches"] == 0, exported
+            # The retained range moved past the overwritten messages; none was exported.
+            assert exported["newest"] == 39 and 0 < exported["oldest"] <= 39, exported
+            assert exported["messages"] == exported["newest"] - exported["oldest"] + 1, exported
+            assert exported["export"]["checkpoint"] is None, exported
             alerts = {a["kind"]: a for a in degraded["alerts"]}
             assert alerts["export-failing"]["severity"] == "critical" and "http-server-error" in alerts["export-failing"]["message"], alerts
             assert all(a["action"] for a in degraded["alerts"])
@@ -439,9 +446,13 @@ def run(evidence=None):
             # The bridge reconnects within its backoff (at most 60 s).
             healthy = snapshot_after(recovered_from, lambda r: r["health"] == "healthy" and not r["alerts"],
                                      "the alerts did not resolve after recovery", timeout=12 * INTERVAL)
-            assert healthy["services"]["bridge"]["connected"] and healthy["services"]["streams"]["streams"][0]["export"]["lag"] == 0
+            recovered = healthy["services"]["streams"]["streams"][0]
+            assert healthy["services"]["bridge"]["connected"] and recovered["export"]["lag"] == 0
+            # The checkpoint is the acknowledged sequence: everything retained is exported.
+            assert recovered["export"]["checkpoint"] == recovered["newest"] == 39, recovered
             assert export["batches"] > 0 and broker.connects >= 2
-            print(f"PASS: recovery: broker back, queue drained, export and sync succeed; seq {healthy['seq']} is healthy with no alerts")
+            print(f"PASS: recovery: broker back, queue drained, export and sync succeed; seq {healthy['seq']} is healthy with no alerts; "
+                  f"stream range {recovered['oldest']}-{recovered['newest']} exported through checkpoint {recovered['export']['checkpoint']}")
 
             # Nothing private in any envelope; all verify with the dApp's verifier.
             with lock:

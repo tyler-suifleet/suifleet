@@ -2,7 +2,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs');
 const {loader,appRequire}=require('./frontend_test_utils.cjs');
 const f=JSON.parse(fs.readFileSync(process.argv[2]));process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST=JSON.stringify(f.manifest);
 const {bcs}=appRequire('@mysten/sui/bcs'),{toBase58,normalizeSuiAddress:id}=appRequire('@mysten/sui/utils');
-const load=loader(),data=load('lib/fleet-data.ts'),protocol=load('lib/fleet-protocol.ts'),bulk=load('lib/fleet-bulk.ts');
+const load=loader(),data=load('lib/fleet-data.ts'),protocol=load('lib/fleet-protocol.ts'),bulk=load('lib/fleet-bulk.ts'),shadows=load('lib/shadow-documents.ts');
 const writer=f.writer,budget=load('lib/fleet-budget.ts'),storageOrigin=id('0xf6');
 const chain={ledgerService:{async getServiceInfo(){return {response:{chainId:toBase58(Buffer.concat([Buffer.from(f.manifest.chain_identifier,'hex'),Buffer.alloc(28)]))}};}},
  async getObject({objectId}){if(objectId===f.config.storageId)return {object:{owner:{$kind:'Shared'},type:`${storageOrigin}::fleet_storage::FleetStorage`,content:budget.FleetStorageBcs.serialize({id:f.config.storageId,version:'1',budget_id:f.config.budgetId,pool:null,wal:{value:'0'},default_quota:{period_ms:'1',encoded_bytes_per_period:'1',uploads_per_period:'1',max_blob_size:'1',write_fees_per_period:'1'},blob_count:String(f.anchors.length),total_encoded_bytes:'1',total_write_fees:'1'}).toBytes()}};return {object:{owner:{$kind:'Shared'},type:`${f.config.typeOrigin}::fleet_data::${objectId===f.config.fleetId?'FleetData':'DeviceData'}`,
@@ -33,10 +33,20 @@ const chain={ledgerService:{async getServiceInfo(){return {response:{chainId:toB
      const archive=await bulk.fetchVerifiedArchive(chain,{systemState:async()=>({committee:{epoch:1}})},f.config,f.device,index,'https://fixture.invalid',open,fetcher);
      assert.equal(archive.reason,['logs','diagnostics','crash'][anchor.kind]);
      assert(!JSON.stringify(archive).includes('fixture-confidential-value'),'collector must redact before signing and encryption');
+     if(f.shadows){
+       // SF-084: every archive carries the device's shadow documents (schema 2).
+       assert.equal(archive.schema,2);
+       assert.deepEqual(Object.fromEntries(archive.shadows.documents.map(d=>[d.name,d.version])),f.shadows[index]);
+       const view=shadows.shadowDocumentsView(archive,index,f.anchors.length);
+       assert.equal(view.newest,index===f.anchors.length-1);
+       const classic=view.documents.find(d=>d.name==='');
+       assert.deepEqual(classic.delta,index===f.anchors.length-1?{}:{fan:{speed:2}},'delta as the daemon computed and signed it');
+       if(index<f.anchors.length-1) assert.equal(classic.reported.secret_key,'shadow-private-value','authorized readers see the device document');
+     }
      const bad=Uint8Array.from(ciphertext);bad[bad.length-1]^=1;
      await assert.rejects(bulk.openArchive(bad,f.config,f.device,anchor,open),/digest/);
    }
-   console.log('Native encrypted logs/diagnostics -> simulated prepaid anchors -> real SDK threshold decrypt -> browser signature/binding verification; redaction/tamper checked');
+   console.log('Native encrypted logs/diagnostics'+(f.shadows?'/shadow documents':'')+' -> simulated prepaid anchors -> real SDK threshold decrypt -> browser signature/binding verification; redaction/tamper checked');
  }
  const original=writer.message.slice();writer.message[writer.message.length-2]^=1;
  assert.equal((await data.fetchChainHealth(chain,f.config,[f.device],f.now))[f.device].status,'unavailable');writer.message=original;

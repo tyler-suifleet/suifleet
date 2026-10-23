@@ -331,6 +331,8 @@ test-manifest:
 	$(RUN) node scripts/test_pilot_load.cjs
 	$(RUN) node scripts/test_alerts.cjs
 	$(RUN) node scripts/test_chain_alerts.cjs
+	$(RUN) node scripts/test_dashboard_views.cjs
+	$(RUN) node scripts/test_shadow_documents.cjs
 	$(RUN) node scripts/test_fleet_relay.cjs
 	$(RUN) node scripts/test_walrus_node_writes.cjs
 	$(RUN) node scripts/test_walrus_site_protocol.cjs

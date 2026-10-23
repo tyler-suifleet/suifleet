@@ -19,7 +19,9 @@ export const TELEMETRY_URL = process.env.NEXT_PUBLIC_SUIFLEET_TELEMETRY_URL ?? "
 export const TELEMETRY_SCHEMA = 1;
 /** A snapshot with a services section (SF-085); without one it stays schema 1. */
 export const TELEMETRY_SCHEMA_SERVICES = 2;
-export const SERVICES_VERSION = 1;
+/** Version 2 (SF-084) adds each stream's retained sequence range and export checkpoint. */
+export const SERVICES_VERSION = 2;
+export const SERVICES_VERSIONS: readonly number[] = [1, 2];
 const MAX_SERVICE_ENTRIES = 32;
 export const MIN_INTERVAL_SECONDS = 10;
 export const MAX_INTERVAL_SECONDS = 3600;
@@ -47,11 +49,16 @@ export interface BridgeHealth {
   rejected: number; rejected_recent: number; last_error: string | null;
 }
 export interface ExportHealth {
+  /** Version 2: the last acknowledged sequence; null before the first acknowledgement. */
+  checkpoint?: number | null;
   lag: number; lost: number; lost_recent: number; batches: number; failures: number; consecutive_failures: number;
   last_success_ms: number | null; last_error: string | null;
 }
 export interface StreamHealth {
-  name: string; bytes: number; max_size: number; fill_percent: number; messages: number; overwrite: boolean;
+  name: string; bytes: number; max_size: number; fill_percent: number; messages: number;
+  /** Version 2: first and last retained sequence; both null exactly when empty. */
+  oldest?: number | null; newest?: number | null;
+  overwrite: boolean;
   rejected: number; rejected_recent: number; export: ExportHealth | null;
 }
 export interface ShadowSyncHealth {
@@ -108,25 +115,40 @@ function shaped(value: unknown, fields: Record<string, Field>): boolean {
 const list = (fields: Record<string, Field>) => (v: unknown) => Array.isArray(v) && v.length <= MAX_SERVICE_ENTRIES && v.every((e) => shaped(e, fields));
 const orNull = (fields: Record<string, Field>) => (v: unknown) => v === null || shaped(v, fields);
 
-const SERVICES: Record<string, Field> = {
-  version: (v) => v === SERVICES_VERSION,
+const STREAM_V1: Record<string, Field> = { name: "name", bytes: "count", max_size: "count", fill_percent: "percent",
+  messages: "count", overwrite: "bool", rejected: "count", rejected_recent: "count",
+  export: orNull({ lag: "count", lost: "count", lost_recent: "count", batches: "count", failures: "count",
+    consecutive_failures: "count", last_success_ms: "time?", last_error: "error" }) };
+const STREAM_V2: Record<string, Field> = { ...STREAM_V1, oldest: "time?", newest: "time?",
+  export: orNull({ checkpoint: "time?", lag: "count", lost: "count", lost_recent: "count", batches: "count", failures: "count",
+    consecutive_failures: "count", last_success_ms: "time?", last_error: "error" }) };
+/** Version 2 ranges: set exactly when there are messages, ordered, with room
+ * for every message (sequences skipped by a crash leave gaps). */
+function positioned(stream: StreamHealth): boolean {
+  const { oldest, newest, messages } = stream;
+  if (oldest === null || newest === null) return oldest === newest && messages === 0;
+  return oldest! <= newest! && messages >= 1 && messages - 1 <= newest! - oldest!;
+}
+
+const servicesFields = (version: 1 | 2): Record<string, Field> => ({
+  version: (v) => v === version,
   messaging: orNull({ subscriptions: "count", queued: "count", refused: "count", dropped: "count", omitted: "count",
     queues: list({ principal: "name", subscriptions: "count", queued: "count", fill_percent: "percent", full_since_ms: "time?",
       refused: "count", refused_recent: "count", dropped: "count", dropped_recent: "count" }) }),
   bridge: orNull({ connected: "bool", since_ms: "count", connects: "count", refused: "count", refused_recent: "count",
     rejected: "count", rejected_recent: "count", last_error: "error" }),
-  streams: orNull({ omitted: "count", streams: list({ name: "name", bytes: "count", max_size: "count", fill_percent: "percent",
-    messages: "count", overwrite: "bool", rejected: "count", rejected_recent: "count",
-    export: orNull({ lag: "count", lost: "count", lost_recent: "count", batches: "count", failures: "count",
-      consecutive_failures: "count", last_success_ms: "time?", last_error: "error" }) }) }),
+  streams: orNull({ omitted: "count", streams: version === 1 ? list(STREAM_V1)
+    : (v) => list(STREAM_V2)(v) && (v as StreamHealth[]).every(positioned) }),
   shadows: orNull({ shadows: "count", notifications_refused: "count", notifications_refused_recent: "count", omitted: "count",
     sync: list({ name: "name", conflicts: "count", conflicts_recent: "count", failures: "count", consecutive_failures: "count",
       last_success_ms: "time?", last_error: "error" }) }),
-};
+});
+const SERVICES = { 1: servicesFields(1), 2: servicesFields(2) };
 
-/** Whether a signed services section has exactly the version-1 shape and bounds. */
+/** Whether a signed services section has exactly the version-1 or version-2 shape and bounds. */
 export function validServices(value: unknown): value is ServicesHealth {
-  return shaped(value, SERVICES);
+  const version = (value as { version?: unknown } | null)?.version;
+  return (version === 1 || version === 2) && shaped(value, SERVICES[version]);
 }
 
 /** A device-reported UTC time; out-of-range values are shown raw, never thrown on. */
@@ -156,8 +178,10 @@ export function describeServices(services: ServicesHealth): string[] {
   if (services.streams) {
     for (const st of services.streams.streams) {
       const e = st.export;
-      lines.push(`Stream ${st.name}: ${st.fill_percent}% of ${st.max_size} bytes, ${st.messages} messages, ${st.rejected} appends rejected`
-        + (e ? `; export ${e.lag} behind, ${e.lost} lost before export, ${e.consecutive_failures} consecutive failures${e.last_error ? ` (${e.last_error})` : ""}` : ""));
+      const range = st.oldest === undefined ? "" : st.oldest === null ? " (empty)" : ` (sequences ${st.oldest}–${st.newest})`;
+      const checkpoint = e?.checkpoint === undefined ? "" : e.checkpoint === null ? ", nothing exported yet" : `, checkpoint ${e.checkpoint}`;
+      lines.push(`Stream ${st.name}: ${st.fill_percent}% of ${st.max_size} bytes, ${st.messages} messages${range}, ${st.rejected} appends rejected`
+        + (e ? `; export ${e.lag} behind${checkpoint}, ${e.lost} lost before export, ${e.consecutive_failures} consecutive failures${e.last_error ? ` (${e.last_error})` : ""}` : ""));
     }
     lines.push(...more(services.streams.omitted));
   }

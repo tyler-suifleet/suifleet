@@ -22,8 +22,9 @@ use std::{
     sync::{Arc, Mutex, Weak},
 };
 
-/// Version of the `services` section.
-pub const VERSION: u64 = 1;
+/// Version of the `services` section. Version 2 (SF-084) adds each stream's
+/// retained sequence range and export checkpoint.
+pub const VERSION: u64 = 2;
 /// Entries per list (queues, streams, synchronized shadows).
 pub const MAX_ENTRIES: usize = 32;
 /// A queue or stream at least this full (percent) is near its limit.
@@ -109,6 +110,11 @@ pub struct StreamHealth {
     pub max_size: u64,
     pub fill_percent: u8,
     pub messages: u64,
+    /// First and last retained sequence numbers; both `None` exactly when the
+    /// stream holds no messages. Sequences skipped by a crash leave gaps, so
+    /// `messages` can be below `newest - oldest + 1`.
+    pub oldest: Option<u64>,
+    pub newest: Option<u64>,
     /// `OverwriteOldestData`: a full stream evicts instead of rejecting.
     pub overwrite: bool,
     /// Appends rejected because the stream was full (since daemon start).
@@ -120,6 +126,10 @@ pub struct StreamHealth {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExportHealth {
+    /// The last sequence number the export acknowledged; `None` before the
+    /// first acknowledgement. It can lie below `oldest - 1` (messages lost
+    /// before export) or remain after exported messages were discarded.
+    pub checkpoint: Option<u64>,
     /// Retained messages not exported yet.
     pub lag: u64,
     /// Messages retired (evicted or expired) before they were exported.
@@ -165,6 +175,10 @@ pub struct StreamFacts {
     pub bytes: u64,
     pub max_size: u64,
     pub messages: u64,
+    pub oldest: Option<u64>,
+    pub newest: Option<u64>,
+    /// The acknowledged export checkpoint, if any.
+    pub checkpoint: Option<u64>,
     pub overwrite: bool,
     pub rejected: u64,
     pub lost: u64,
@@ -407,6 +421,7 @@ pub fn collect(sources: &Sources, tracker: &mut Tracker, first_ms: u64, now: u64
                     fill_percent: percent(f.bytes, f.max_size),
                     rejected_recent: tracker.recent(format!("{key}:rejected"), f.rejected, false),
                     export: f.export.map(|(lag, status)| ExportHealth {
+                        checkpoint: f.checkpoint,
                         lag,
                         lost: f.lost,
                         lost_recent: tracker.recent(format!("{key}:lost"), f.lost, false),
@@ -420,6 +435,8 @@ pub fn collect(sources: &Sources, tracker: &mut Tracker, first_ms: u64, now: u64
                     bytes: f.bytes,
                     max_size: f.max_size,
                     messages: f.messages,
+                    oldest: f.oldest,
+                    newest: f.newest,
                     overwrite: f.overwrite,
                     rejected: f.rejected,
                 }

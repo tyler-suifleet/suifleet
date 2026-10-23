@@ -247,7 +247,18 @@ The archive plaintext is the exact JSON envelope `{message, signature}`;
 `message` is base64 of signed schema-1 JSON with `kind: "fleet-data"`,
 `chain_identifier`, `registry`, `fleet_id`, `device_id`, `signer`, `seq`,
 `observed_ms`, `reason` (`logs`, `diagnostics`, `crash`), `dropped_lines` and
-`records` (`source`, `line`). The daemon produces this envelope and the signing service validates its
+`records` (`source`, `line`). Schema 2 (SF-084) adds a required `shadows` field: the
+device's shadow documents when it archived, `{documents: [{name, version, updated_ms,
+desired, reported, delta}], omitted}`, sorted by name, at most 128 documents and
+512 KiB. Each document passes the shadow store's own checks, and its `delta` must be
+exactly the one computed from `desired` and `reported`. A daemon with `[shadows]`
+enabled writes schema 2 for every archive. A change in its shadows makes a routine
+(kind 0) archive on the normal batch cadence, even without new log lines; the line
+`Shadow state snapshot` keeps the records non-empty. Daemons without shadows keep
+writing schema 1, byte for byte. The snapshot shares the 2 MiB plaintext budget
+with the log records. The browser accepts schema 1 without the field and schema 2
+with it, and nothing else. The shared cases are in
+`interfaces/compat/archive-shadow-cases.json`. The daemon produces this envelope and the signing service validates its
 shape and configured binding before signing. AAD is UTF-8
 `suifleet/fleet-data/v1/<chain>/<fleet-id>/<seq>/<kind-number>`; the Seal identity
 uses the existing fleet-ID/epoch/nonce layout. This changes no SF-083 API/layout.
@@ -265,6 +276,9 @@ signed, five-minute Seal session. Account/network changes discard sessions and
 in-flight plaintext. SF-020 health, deployment and service alert rules run in
 `chain-alerts.ts`, using verified health and authoritative receipts. Failures are
 unavailable; an outage never resolves an incident.
+
+The [dashboard views](DASHBOARD_VIEWS.md) (SF-084) build per-device service,
+alert drill-down, archive search and rollout progress pages on this verified path.
 
 Sui/Walrus do not initiate push webhooks, background email or off-browser alert
 polling. `scripts/fleet_alert_relay.cjs OWNER HTTPS_WEBHOOK PRIVATE_STATE_FILE`

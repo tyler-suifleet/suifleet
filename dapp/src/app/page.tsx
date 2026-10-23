@@ -6,6 +6,7 @@ import { useGroups } from "@/hooks/useGroups";
 import { useFleetHealth } from "@/hooks/useFleetHealth";
 import { useFleetAlerts } from "@/hooks/useFleetAlerts";
 import { historicalFailures } from "@/lib/alerts";
+import { deviceHref } from "@/lib/device-services";
 import Link from "next/link";
 import { PageHeader, Section, StatusDot } from "@/components/ui";
 
@@ -48,7 +49,7 @@ export default function DashboardPage() {
                 <span className={`mr-2 rounded px-1.5 py-0.5 text-xs font-medium ${a.severity === "critical" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"}`}>
                   {a.severity}
                 </span>
-                <Link href="/devices" className="font-medium hover:underline">{a.deviceName}</Link>
+                <Link href={deviceHref("/services/", a.deviceId)} className="font-medium hover:underline">{a.deviceName}</Link>
                 <span className="text-gray-600"> — {a.message}</span>
                 <p className="text-xs text-gray-400 mt-0.5">{a.action}</p>
               </li>

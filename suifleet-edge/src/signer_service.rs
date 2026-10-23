@@ -1447,7 +1447,7 @@ mod fleet_intent_tests {
         let p = archive_policy();
         let mut archive = crate::fleet_data::Archive { schema: 1, kind: "fleet-data".into(), chain_identifier: p.chain_identifier.clone(), registry: p.registry.to_string(),
             fleet_id: "0xf1".into(), device_id: "0xd0".into(), signer: p.device.to_string(), seq: 1, observed_ms: 100,
-            reason: "diagnostics".into(), dropped_lines: 0, records: vec![] };
+            reason: "diagnostics".into(), dropped_lines: 0, records: vec![], shadows: None };
         let bytes = serde_json::to_vec(&archive).unwrap(); check_personal(&p,&bytes).unwrap();
         assert!(check_personal(&Policy { fleet_data: None, ..p.clone() },&bytes).is_err());
         for field in ["chain_identifier","registry","fleet_id","signer"] {

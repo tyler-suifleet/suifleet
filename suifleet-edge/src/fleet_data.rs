@@ -76,16 +76,56 @@ impl Config {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Record { pub source: String, pub line: String }
+/// Schema 2 (SF-084): the device's shadow documents when it archived, for the
+/// fleet owner and support roles only. Shadow contents never enter public health.
+pub const MAX_SHADOW_SNAPSHOT: usize = 512 * 1024;
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ShadowDocument {
+    /// `""` is the classic shadow.
+    pub name: String, pub version: u64, pub updated_ms: u64,
+    pub desired: Option<serde_json::Map<String, serde_json::Value>>,
+    pub reported: Option<serde_json::Map<String, serde_json::Value>>,
+    /// The desired keys that differ from reported (the shadow store's `delta` function).
+    pub delta: serde_json::Map<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ShadowSnapshot {
+    /// Existing shadows by name; those beyond the size limit are only counted.
+    pub documents: Vec<ShadowDocument>, pub omitted: u64,
+}
+impl ShadowSnapshot {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        let safe = |n: u64| n <= 9_007_199_254_740_991;
+        anyhow::ensure!(self.documents.len() <= crate::shadows::MAX_SHADOWS && safe(self.omitted)
+            && serde_json::to_vec(self)?.len() <= MAX_SHADOW_SNAPSHOT, "shadow snapshot limit");
+        anyhow::ensure!(self.documents.windows(2).all(|w| w[0].name < w[1].name), "shadow snapshot order");
+        for d in &self.documents {
+            let mut document = serde_json::Map::new();
+            if let Some(v) = &d.desired { document.insert("desired".into(), v.clone().into()); }
+            if let Some(v) = &d.reported { document.insert("reported".into(), v.clone().into()); }
+            anyhow::ensure!(crate::shadows::valid_name(&d.name) && safe(d.version) && safe(d.updated_ms)
+                && crate::shadows::check_document(&document).is_ok()
+                && d.delta == crate::shadows::delta(d.desired.as_ref(), d.reported.as_ref()), "invalid shadow document");
+        }
+        Ok(())
+    }
+}
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Archive {
     pub schema: u8, pub kind: String, pub chain_identifier: String, pub registry: String,
     pub fleet_id: String, pub device_id: String, pub signer: String, pub seq: u64,
     pub observed_ms: u64, pub reason: String, pub dropped_lines: u64, pub records: Vec<Record>,
+    /// Present exactly in schema 2; devices without shadows keep schema 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shadows: Option<ShadowSnapshot>,
 }
 impl Archive {
     pub fn validate(&self) -> anyhow::Result<()> {
-        anyhow::ensure!(self.schema == 1 && self.kind == "fleet-data", "unsupported archive schema/kind");
+        anyhow::ensure!(matches!((self.schema, &self.shadows), (1, None) | (2, Some(_))) && self.kind == "fleet-data", "unsupported archive schema/kind");
+        if let Some(shadows) = &self.shadows { shadows.validate()?; }
         anyhow::ensure!(["logs", "diagnostics", "crash"].contains(&self.reason.as_str()), "invalid archive reason");
         anyhow::ensure!(self.seq > 0 && [self.seq, self.observed_ms, self.dropped_lines].iter().all(|n| *n <= 9_007_199_254_740_991), "archive integer out of range");
         anyhow::ensure!(self.records.len() <= 4096 && self.records.iter().all(|r| !r.source.is_empty() && r.source.len() <= crate::logs::MAX_SOURCE && r.line.len() <= crate::logs::MAX_LINE && !r.line.contains(['\n','\r']) && (r.source == "daemon" || (r.source.starts_with("component:") && r.source.len()>10))), "archive record limit");
@@ -151,13 +191,88 @@ mod tests {
     fn archive_shape_rejects_unsafe_integers_unknown_fields_and_oversized_records() {
         let mut a = Archive { schema: 1, kind: "fleet-data".into(), chain_identifier: "4c78adac".into(), registry: "0x1".into(),
             fleet_id: "0x2".into(), device_id: "0x3".into(), signer: "0x4".into(), seq: 1, observed_ms: 1,
-            reason: "logs".into(), dropped_lines: 0, records: vec![Record { source: "daemon".into(), line: "ready".into() }] };
+            reason: "logs".into(), dropped_lines: 0, records: vec![Record { source: "daemon".into(), line: "ready".into() }], shadows: None };
         a.validate().unwrap();
         a.seq = 9_007_199_254_740_992; assert!(a.validate().is_err()); a.seq = 1;
         a.records[0].line = "x".repeat(4097); assert!(a.validate().is_err()); a.records.clear();
         let mut value = serde_json::to_value(a).unwrap(); value["unexpected"] = true.into();
         assert!(serde_json::from_value::<Archive>(value).is_err());
     }
+    #[test]
+    fn schema_two_carries_bounded_consistent_shadow_documents() {
+        use serde_json::json;
+        let doc = |name: &str, desired: serde_json::Value, reported: serde_json::Value| {
+            let (desired, reported) = (desired.as_object().cloned(), reported.as_object().cloned());
+            ShadowDocument { name: name.into(), version: 3, updated_ms: 5, delta: crate::shadows::delta(desired.as_ref(), reported.as_ref()), desired, reported }
+        };
+        let snapshot = ShadowSnapshot { documents: vec![doc("", json!({"mode": "eco", "fan": {"speed": 2}}), json!({"mode": "eco", "fan": {"speed": 1}})),
+            doc("cfg", json!(null), json!({"uptime": 9}))], omitted: 0 };
+        assert_eq!(snapshot.documents[0].delta, json!({"fan": {"speed": 2}}).as_object().cloned().unwrap());
+        let mut a = Archive { schema: 2, kind: "fleet-data".into(), chain_identifier: "4c78adac".into(), registry: "0x1".into(),
+            fleet_id: "0x2".into(), device_id: "0x3".into(), signer: "0x4".into(), seq: 1, observed_ms: 1,
+            reason: "logs".into(), dropped_lines: 0, records: vec![Record { source: "daemon".into(), line: "Shadow state snapshot".into() }],
+            shadows: Some(snapshot.clone()) };
+        a.validate().unwrap();
+        // Round trip, and schema 1 bytes never mention shadows.
+        let bytes = serde_json::to_vec(&a).unwrap();
+        a = serde_json::from_slice(&bytes).unwrap();
+        a.validate().unwrap();
+        let mut one = serde_json::from_slice::<Archive>(&bytes).unwrap(); (one.schema, one.shadows) = (1, None);
+        assert!(!String::from_utf8(serde_json::to_vec(&one).unwrap()).unwrap().contains("shadows"));
+        one.validate().unwrap();
+        // Schema and field must agree.
+        one.schema = 2; assert!(one.validate().is_err());
+        a.schema = 1; assert!(a.validate().is_err()); a.schema = 2;
+        let mut value = serde_json::to_value(&a).unwrap(); value["shadows"] = serde_json::Value::Null;
+        assert!(serde_json::from_value::<Archive>(value).unwrap().validate().is_err());
+        let mut value = serde_json::to_value(&a).unwrap(); value["shadows"]["documents"][0]["extra"] = true.into();
+        assert!(serde_json::from_value::<Archive>(value).is_err());
+        let check = |edit: &dyn Fn(&mut ShadowSnapshot)| { let mut s = snapshot.clone(); edit(&mut s); s.validate() };
+        assert!(check(&|_| ()).is_ok());
+        assert!(check(&|s| s.documents[0].delta = serde_json::Map::new()).is_err(), "inconsistent delta");
+        assert!(check(&|s| s.documents.swap(0, 1)).is_err(), "unsorted");
+        assert!(check(&|s| s.documents[1].name = String::new()).is_err(), "duplicate");
+        assert!(check(&|s| s.documents[1].name = "bad name".into()).is_err());
+        assert!(check(&|s| s.documents[1].version = 9_007_199_254_740_992).is_err());
+        assert!(check(&|s| { s.documents[1].reported.as_mut().unwrap().insert("x".into(), serde_json::Value::Null); }).is_err(), "null value");
+        assert!(check(&|s| { s.documents[1].reported.as_mut().unwrap().insert("x".into(), "y".repeat(8200).into()); }).is_err(), "document size");
+    }
+
+    #[test]
+    fn shared_archive_shadow_cases() {
+        let cases: serde_json::Value = serde_json::from_str(include_str!("../../interfaces/compat/archive-shadow-cases.json")).unwrap();
+        for case in cases["cases"].as_array().unwrap() {
+            let accepted = serde_json::from_value::<ShadowSnapshot>(case["shadows"].clone()).map_err(anyhow::Error::from).and_then(|s| s.validate());
+            assert_eq!(accepted.is_ok(), case["valid"].as_bool().unwrap(), "{}: {accepted:?}", case["name"]);
+        }
+    }
+
+    #[test]
+    fn shadow_store_snapshot_is_ordered_complete_and_bounded() {
+        let dir = std::env::temp_dir().join(format!("suifleet-shadow-snapshot-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut store = crate::shadows::Store::open(&dir, 128, "thing", None).unwrap();
+        assert_eq!(store.snapshot(), ShadowSnapshot::default());
+        store.update("b", &serde_json::json!({"state": {"desired": {"on": true}, "reported": {"on": false}}}), 7).unwrap();
+        store.update("", &serde_json::json!({"state": {"reported": {"t": 1}}}), 8).unwrap();
+        store.update("gone", &serde_json::json!({"state": {"reported": {"t": 1}}}), 8).unwrap();
+        store.delete("gone", &serde_json::json!({}), 9).unwrap();
+        let snapshot = store.snapshot();
+        snapshot.validate().unwrap();
+        assert_eq!(snapshot.documents.iter().map(|d| d.name.as_str()).collect::<Vec<_>>(), ["", "b"], "deleted shadows are not listed");
+        assert_eq!((snapshot.documents[1].version, snapshot.documents[1].updated_ms), (1, 7));
+        assert_eq!(serde_json::Value::Object(snapshot.documents[1].delta.clone()), serde_json::json!({"on": true}));
+        // Large documents: those beyond the limit are counted, never cut.
+        let big = "v".repeat(8000);
+        for i in 0..100 { store.update(&format!("n{i:03}"), &serde_json::json!({"state": {"reported": {"k": big}}}), 10).unwrap(); }
+        let snapshot = store.snapshot();
+        snapshot.validate().unwrap();
+        assert!(snapshot.omitted > 0 && snapshot.documents.len() + snapshot.omitted as usize == 102);
+        assert!(serde_json::to_vec(&snapshot).unwrap().len() <= MAX_SHADOW_SNAPSHOT);
+        drop(store);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn native_encryption_needs_threshold_and_authenticates_ciphertext() {
         use ark_ec::{PrimeGroup, CurveGroup};
