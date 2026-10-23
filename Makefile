@@ -659,3 +659,16 @@ pilot-fixtures:
 	$(RUN) mkdir -p "$(PILOT_EVIDENCE_DIR)"
 	$(RUN) node scripts/test_pilot_load.cjs
 	$(RUN) node scripts/pilot_load.cjs docs/validation/sf090/workload.json "$(PILOT_EVIDENCE_DIR)/fixtures.json"
+
+.PHONY: pilot-browser pilot-localnet pilot-public-read
+pilot-browser:
+	$(RUN) mkdir -p "$(PILOT_EVIDENCE_DIR)"
+	$(RUN) node scripts/test_pilot_browser.cjs "$(PILOT_EVIDENCE_DIR)/browser.json"
+
+pilot-localnet:
+	$(RUN) mkdir -p "$(PILOT_EVIDENCE_DIR)"
+	$(RUN) env SF090_CHAIN_RECEIPT="$(PILOT_EVIDENCE_DIR)/chain.json" python3 scripts/pilot_localnet.py
+
+pilot-public-read:
+	$(RUN) mkdir -p "$(PILOT_EVIDENCE_DIR)"
+	$(RUN) node scripts/pilot_public_read.cjs "$(PILOT_EVIDENCE_DIR)/public-read.json"
