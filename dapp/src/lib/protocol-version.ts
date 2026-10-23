@@ -8,6 +8,7 @@ export const CATALOG_TYPES = ["component_catalog::ComponentCatalog", "component_
 export const HANDOVER_TYPES = ["fleet_handover::Handover"] as const;
 export const SEAL_POLICY_TYPES = ["seal_policy::AccessPolicy", "seal_policy::AccessAdminCap", "seal_policy::PolicyCreated", "seal_policy::AccessChanged", "seal_policy::KeyEpochRotated", "seal_policy::PolicyMigrated"] as const;
 export const BUDGET_TYPES = ["fleet_budget::FleetBudget", "fleet_budget::BudgetOwnerCap", "fleet_budget::Limits", "fleet_budget::DeviceKey", "fleet_budget::GasAccount", "fleet_budget::BudgetCreated", "fleet_budget::Deposited", "fleet_budget::Withdrawn", "fleet_budget::DeviceFunded", "fleet_budget::ReserveChanged", "fleet_budget::GasDrawn", "fleet_budget::BudgetLow", "fleet_budget::DeviceStateChanged", "fleet_budget::BudgetPaused", "fleet_budget::BudgetConfigured"] as const;
+export const INBOX_TYPES = ["fleet_inbox::DeviceInbox", "fleet_inbox::InboxKey", "fleet_inbox::HeadKey", "fleet_inbox::Head", "fleet_inbox::InboxCreated", "fleet_inbox::Announced", "device_group::MemberKey", "device_group::IndexKey", "device_group::GroupIndex", "device_group::GroupIndexed"] as const;
 export const STATUS = {"applied": 1, "failed": 2} as const;
 export const RECIPE_VERSION = "1.0" as const;
 export const RECIPE_VERSIONS = ["1.0", "1.1", "1.2", "1.3"] as const;
