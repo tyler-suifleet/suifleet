@@ -2318,6 +2318,34 @@
         "A guided first-run for the existing flows: sign in, connect, see the network and account state, and register the first device using today's funding model, with clear errors and no partial state left unexplained. Leave a documented extension point where SF-083 inserts its estimate, card funding and deposit steps."
       ],
       "validation": "Frontend typecheck/build and unit tests; browser tests for the sign-in and first-run flow on localnet and testnet; wallet acceptance for zkLogin, Slush web and an extension wallet including expiry, rejection and network-mismatch errors."
+    },
+    {
+      "key": "SF-120",
+      "title": "Package the serverless edge runtime and refresh the Pi image for final testing",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "suifleet-edge/meta-suifleet",
+        "kas",
+        "scripts",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Fix a concrete software deployment gap found during final-test readiness audit: current Yocto recipe and delivered SF066 image pin d616fa16/crate0.2.1 and omit SF082 archive runtime dependencies. Prepare against the published SF082 interface at ca002d3934bf4e53398ed6d57024cc95b467202c now, without physical hardware; final merge/build acceptance must use actual merged SF082 and SF084 daemon source. Physical Pi and mainnet acceptance remain SF031/#32 and SF087/#159, not blockers for this software package/image work.",
+      "evidence": "Read-only audit: current suifleet_1.0.bb pins d616fa16, existing yocto-sf066/artifacts WIC uses that source; cached build BBLAYERS points at old SF066 worktree. SF082 encrypted archives invoke the bundled Walrus Node codec/WASM/manifest, absent from current image. No WSL Next server/listener3000/3010/3100 found.",
+      "acceptance": [
+        "Identify the actual runtime requirements of the SF082 codec; package a pinned checksum-verified supported Node runtime, codec bundle, WASM and manifest with correct paths/permissions and reproducible locked dependencies. Verify runtime constraints from source rather than inventing a version requirement. No host node_modules leakage, unpinned downloads or missing licensing metadata.",
+        "After SF082 and SF084 are verified merged/Done, pin SRCREV to their final merged daemon source; regenerate crate include and lock digest together, verify package version/source and avoid a stale old-layer checkout. No guessed future API or final claim from unmerged pins. Keep PR draft until these merge prerequisites and final build evidence are met.",
+        "Build the relevant BitBake client recipe and bootable raspberrypi3-64 image using the supported pinned profile and existing caches. Ensure cached BBLAYERS references the reviewed refreshed layer. Record exact revisions/toolchains/commands and actual target artifacts, checksums and inspection evidence; do not relabel the old image as current.",
+        "Exercise actual packaged target daemon and codec on an available isolated emulated target/runtime where feasible; verify codec manifest and encryption/decryption compatibility, dependency/path/version failure controls and that target rootfs includes required runtime libraries. Preserve honest limits if physical validation unrun.",
+        "Image and packages contain no device keys, enrollment credentials/config or journals. Device identity remains runtime provisioned. Preserve DHCP/headless SSH/public-key-only development access design without embedding private credentials. No physical programming or device access.",
+        "Provide final-testing handoff: fresh artifact paths/checksums and explicit distinction from old WIC; document how existing target state can be preserved during a later authorized update. Physical end-to-end success, power loss and mainnet remain unclaimed in their open acceptance tickets.",
+        "Scoped Tyler-authored itemized commits, meaningful offline packaging regressions, current-head CI/testnet where relevant and independent review before merge. Existing shared build/cache/resource ownership must be honored only during actual use; cap build concurrency for15GiB host."
+      ],
+      "validation": "Actual pinned BitBake recipe/image build and artifact/rootfs inspection; target-emulation daemon/codec smoke and meaningful missing/tampered runtime controls; package manifest/SRCREV/crate lock consistency; normal CI and independent review. Final physical Pi/mainnet tests excluded."
     }
   ]
 }

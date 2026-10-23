@@ -6,8 +6,9 @@ boot, real-device identity persistence, networking and OTA acceptance remain
 programmed by this build. This writable development image is not a production
 release or a firmware rollback design. SF-042 remains on hold.
 
-The current signer-service image (SF-066), its checksums and exact verification
-are in [PI_IMAGE_REFRESH.md](PI_IMAGE_REFRESH.md). The earlier SF-029 artifact in
+The current image (SF-120: archive runtime, merged SF-082/SF-084 daemon), its
+checksums and exact verification are in [PI_IMAGE_REFRESH.md](PI_IMAGE_REFRESH.md);
+the SF-066 signer-service image recorded there is superseded. The earlier SF-029 artifact in
 [PI_IMAGE_BUILD.md](PI_IMAGE_BUILD.md) is an older public smoke baseline only.
 
 ## Rebuild
@@ -16,11 +17,14 @@ Use the pinned Scarthgap/Rust-mixin layers
 from `kas/packaging.yml` on Ubuntu 22.04. The target is `suifleet-pi-image`, not
 the package-only `suifleet` target. Rust crates are fetched/checksummed by
 BitBake and compiled frozen/offline. Source is commit
-`d616fa16e1d3e90eb0f97a669f693dec99546d3c` (reviewed main with the SF-053
-signing service, SF-026 launcher and SF-022 Seal sessions; the SF-029 baseline
-used `795de747`); its Cargo.lock SHA-256 is
+`2d231cadf3c0c8e58b48dc9f48dd7890faaafa1f` (merged main with SF-082 encrypted
+archives and SF-084, the SF-053 signing service, SF-026 launcher and SF-022 Seal
+sessions; SF-066 used `d616fa16` and the SF-029 baseline `795de747`); its
+Cargo.lock SHA-256 is
 `310102d73d7644815fe05df24917c332136836d64dcff5f7ca35b44c63b2d937`.
 The image includes the cargo-built daemon, first-boot helper, harmless updater,
+the pinned Node.js 22.22.2 runtime and SF-082 Walrus archive codec
+([archive runtime](YOCTO_PACKAGING.md#serverless-archive-runtime-sf-120)),
 CA certificates, the BSP kernel modules/udev rules, OpenSSH, systemd-networkd,
 systemd-resolved, systemd-timesyncd, iproute2 and ethtool.
 
@@ -77,7 +81,7 @@ reflashing. No build command opens a removable device.
 
 Use the delivered `.wic.bz2` and SHA-256 file recorded with the build evidence.
 Windows can access the WSL Linux artifact directory through
-`\\wsl.localhost\<your-distribution>\home\tyler\dev\codex\yocto-sf066\artifacts\`;
+`\\wsl.localhost\<your-distribution>\home\tyler\dev\codex\yocto-sf120\artifacts\`;
 `wsl.exe -l -q` gives the distribution name. You can also open the directory
 with `explorer.exe .` from WSL. Verify `sha256sum -c SHA256SUMS` in the artifact
 directory. Decompress with `bzip2 -dk IMAGE.wic.bz2` if the flashing application

@@ -58,3 +58,12 @@ replay_history = false
 # JSON pointer -> value that must not be accessible to other users.
 # configuration_overlay_dir = "/etc/suifleet/component-config"
 # configuration_defer_max_seconds = 86400  # then a deferring validate fails
+
+# Encrypted fleet archives (docs/SERVERLESS_FLEET_DATA.md): the image ships the
+# pinned Node runtime and keyless Walrus codec (suifleet-node and
+# suifleet-walrus-codec). Add these to the full [fleet_data.archives] section;
+# take codec_sha256 from files."walrus-device-codec.cjs".sha256 in
+# /usr/lib/suifleet/walrus-codec/manifest.json.
+# node = "/usr/lib/suifleet/node/bin/node"
+# codec = "/usr/lib/suifleet/walrus-codec/walrus-device-codec.cjs"
+# codec_sha256 = "<64 hex characters>"

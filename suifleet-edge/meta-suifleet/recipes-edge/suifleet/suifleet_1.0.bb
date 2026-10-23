@@ -17,7 +17,7 @@ SRC_URI = " \
     file://suifleet-signer.socket \
     file://signer.toml.example \
 "
-SRCREV = "d616fa16e1d3e90eb0f97a669f693dec99546d3c"
+SRCREV = "2d231cadf3c0c8e58b48dc9f48dd7890faaafa1f"
 # Preserve core's unpack root; Scarthgap predates UNPACKDIR.
 SUIFLEET_UNPACKDIR = "${@d.getVar('UNPACKDIR') or d.getVar('WORKDIR')}"
 S = "${SUIFLEET_UNPACKDIR}/git"
@@ -25,6 +25,8 @@ S = "${SUIFLEET_UNPACKDIR}/git"
 inherit cargo cargo-update-recipe-crates systemd pkgconfig useradd
 require suifleet-crates.inc
 SUIFLEET_LOCK_SHA256 = "310102d73d7644815fe05df24917c332136836d64dcff5f7ca35b44c63b2d937"
+# The daemon crate version at SRCREV; recorded in build-info and checked below.
+SUIFLEET_CRATE_VERSION = "0.2.1"
 CARGO_LOCK_SRC_DIR = "${S}/suifleet-edge"
 CARGO_BUILD_FLAGS:append = " --bin suifleet --features systemd"
 # Every compile uses the dependency graph fetched and verified by BitBake.
@@ -41,9 +43,15 @@ CARGO_SRC_DIR = "suifleet-edge"
 
 python do_verify_lock() {
     import hashlib
+    import os
+    import re
     lock = open(d.getVar('CARGO_LOCK_PATH'), 'rb').read()
     if hashlib.sha256(lock).hexdigest() != d.getVar('SUIFLEET_LOCK_SHA256'):
         bb.fatal('Cargo.lock differs from the pinned crate graph; regenerate suifleet-crates.inc and its lock checksum')
+    manifest = open(os.path.join(d.getVar('S'), 'suifleet-edge', 'Cargo.toml')).read()
+    match = re.search(r'^\[package\][^\[]*?^version = "([^"]+)"', manifest, re.M | re.S)
+    if not match or match.group(1) != d.getVar('SUIFLEET_CRATE_VERSION'):
+        bb.fatal('suifleet-edge crate version differs from SUIFLEET_CRATE_VERSION; update it with SRCREV')
 }
 addtask verify_lock after do_patch before do_configure
 
@@ -72,7 +80,7 @@ SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 
 do_install:append() {
     install -d ${D}${datadir}/suifleet
-    printf 'source_revision=%s\nlock_sha256=%s\ncrate_version=%s\n' '${SRCREV}' '${SUIFLEET_LOCK_SHA256}' '0.2.1' > ${D}${datadir}/suifleet/build-info
+    printf 'source_revision=%s\nlock_sha256=%s\ncrate_version=%s\n' '${SRCREV}' '${SUIFLEET_LOCK_SHA256}' '${SUIFLEET_CRATE_VERSION}' > ${D}${datadir}/suifleet/build-info
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${SUIFLEET_UNPACKDIR}/suifleet.service ${SUIFLEET_UNPACKDIR}/suifleet-firmware.service ${SUIFLEET_UNPACKDIR}/suifleet-firmware.path \
         ${SUIFLEET_UNPACKDIR}/suifleet-provision.service ${SUIFLEET_UNPACKDIR}/suifleet-enrollment.path \

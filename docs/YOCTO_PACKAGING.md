@@ -18,12 +18,14 @@ Other hosts/architectures need a deliberate profile change and validation.
 The local SuiFleet layer comes from this checkout. Archive its commit ID and
 any diff alongside the kas configuration and build artifacts. The daemon source
 is fetched independently at the recipe's fixed `SRCREV`
-`d616fa16e1d3e90eb0f97a669f693dec99546d3c`: reviewed main with the SF-026
-launcher/daemon-update integration, the SF-053 device signing service, SF-022
-Seal sessions and current telemetry, so the packaged `suifleet-signer` units,
-`signer.toml` and the provisioning script's `--key-holder` call match the
-binary. The SF-066 image built from it is recorded in
-[PI_IMAGE_REFRESH.md](PI_IMAGE_REFRESH.md); earlier pins are described in
+`2d231cadf3c0c8e58b48dc9f48dd7890faaafa1f`: merged main with SF-082 encrypted
+fleet archives and SF-084 dashboard telemetry, on top of the SF-026
+launcher/daemon-update integration, the SF-053 device signing service and
+SF-022 Seal sessions, so the packaged `suifleet-signer` units, `signer.toml`,
+the provisioning script's `--key-holder` call and the archive codec match the
+binary. The SF-120 image built from it is recorded in
+[PI_IMAGE_REFRESH.md](PI_IMAGE_REFRESH.md); the SF-066 image used the earlier
+pin `d616fa16`, and older pins are described in
 [the SF-053 package rebuild](#sf053-package-rebuild). `nobranch=1` selects this exact immutable revision, never AUTOREV.
 The daemon crate version is `0.2.1`. It requires indexed gRPC `ListEvents`
 (Sui ≥ 1.81 in SF-004 tests). Packaging/offline checks do not establish
@@ -99,6 +101,232 @@ install serialization workaround remains in the layer. Shared-library QA stays
 enabled.
 Use a writable persistent root filesystem for these initial profiles.
 Read-only-rootfs/data-partition migration is not implemented here.
+
+## Serverless archive runtime (SF-120)
+
+SF-082 encrypted fleet archives run a keyless Node.js codec from the daemon
+(`[fleet_data.archives]` `node`, `codec`, `codec_sha256`). The daemon executes
+`node codec` with a cleared environment, its state directory as working
+directory and home, the `suifleet.service` sandbox and resource limits, and
+verifies the codec file's SHA-256 before every run. The codec encodes
+ciphertext and talks to Sui/Walrus storage nodes; Seal encryption and every
+signature stay native in the daemon/signer. The layer packages that runtime in
+two recipes; the Pi and both QEMU images install them.
+
+| Package | Installed files | Source and pin |
+|---|---|---|
+| `suifleet-node` 22.22.2 | `/usr/lib/suifleet/node/bin/node` (root 0755), `LICENSE` | Official `node-v22.22.2-linux-arm64.tar.xz`, SHA-256 `e9e1930f…a091fe` from `SHASUMS256.txt` |
+| `suifleet-walrus-codec` 1.0 | `/usr/lib/suifleet/walrus-codec/` bundle, `walrus_wasm_bg.wasm`, `manifest.json`, `THIRD_PARTY_LICENSES.txt`, `provenance.json` (root 0644) | `scripts/package_walrus_codec.py` at `SUIFLEET_CODEC_SOURCE_REV`; all five SHA-256 values pinned in the recipe |
+
+Runtime requirements, taken from the source rather than assumed:
+
+- **Node release.** `scripts/build_walrus_codec.cjs` targets `node22` and writes
+  `"node": "22.22.2"` into the manifest; `config.example.toml` asks for Node
+  22.22.2. The codec recipe requires `suifleet-node (= 22.22.2)` and refuses a
+  manifest naming another release. The packager refuses a builder Node other
+  than the manifest's.
+- **Layout.** The bundle loads `walrus_wasm_bg.wasm` from its own directory
+  (`${__dirname}`), so both files are installed together. No `node_modules`,
+  npm or SDK tree is shipped or needed.
+- **Libraries.** The official binary needs glibc ≥ 2.28 and
+  `libstdc++` (GLIBCXX 3.4.21); BitBake records `glibc`, `libgcc` and
+  `libstdc++` as runtime dependencies. Scarthgap ships glibc 2.39.
+- **Memory.** Measured with the x86-64 Node 22.22.2 build against Testnet,
+  `prepare` peaked at 147 MB RSS for a 1 MiB ciphertext and 177 MB for the
+  4 MiB maximum, with 11 threads. It completed under a 200 MiB cgroup.
+  `suifleet.service` caps the daemon and all children at `MemoryMax=256M` and
+  `TasksMax=64`, so archive encoding fits with little headroom. `write` was not
+  measured. Check memory on the Pi in SF-031 before raising limits.
+  `MemoryDenyWriteExecute` stays unset, as the unit already documents for JIT
+  runtimes.
+
+The Node recipe installs the official binary byte for byte, so the
+`already-stripped` and `ldflags` QA checks are skipped for that one prebuilt
+executable. The fetcher enforces the SHA-256 value. That value comes from
+`SHASUMS256.txt`, whose detached signature was checked against Node.js
+releaser key `890C08DB8579162FEE0DF9DB8BEAB4DFCF555EF4` (Rafael Gonzaga, listed
+in the Node.js README). Verify it the same way before changing the release:
+
+```sh
+curl -fsSLO https://nodejs.org/dist/v22.22.2/SHASUMS256.txt
+curl -fsSLO https://nodejs.org/dist/v22.22.2/SHASUMS256.txt.sig
+gpg --verify SHASUMS256.txt.sig SHASUMS256.txt   # with the releaser key imported
+grep linux-arm64.tar.xz SHASUMS256.txt
+```
+
+### Building the codec artifact
+
+BitBake does not fetch npm packages. Build the codec from the exact daemon
+source revision, using that revision's frozen pnpm lockfile, with Node 22.22.2.
+Put the result where the recipe expects it:
+`${TOPDIR}/suifleet-walrus-codec/<SUIFLEET_CODEC_SOURCE_REV>/`, or set
+`SUIFLEET_WALRUS_CODEC_DIR`. In the dev image (Node 22.22.2, pnpm 11.0.8):
+
+```sh
+git worktree add --detach /tmp/codec-src <SRCREV>
+(cd /tmp/codec-src/dapp && pnpm install --frozen-lockfile)
+python3 scripts/package_walrus_codec.py --source /tmp/codec-src --revision <SRCREV> \
+  --output "$BUILDDIR/suifleet-walrus-codec/<SRCREV>"   # prints the recipe pins
+python3 scripts/package_walrus_codec.py --output "$BUILDDIR/suifleet-walrus-codec/<SRCREV>" \
+  --recipe suifleet-edge/meta-suifleet/recipes-edge/suifleet-walrus-codec/suifleet-walrus-codec_1.0.bb
+```
+
+The packager runs the reviewed, unmodified `build_walrus_codec.cjs` from that
+checkout and refuses tracked modifications or another revision. It copies
+the license file of every npm package that esbuild compiled into the bundle
+into `THIRD_PARTY_LICENSES.txt`. It refuses any package without license
+metadata unless a reviewed license inventory covers it (below). Two builds of
+the pinned revision `2d231cadf3c0c8e58b48dc9f48dd7890faaafa1f` produced
+byte-identical artifacts. Their bundle, WASM and manifest are byte-identical
+to those built from the earlier published SF-082 revision `ca002d39`. The
+bundle contains 13 package versions: `@mysten/sui`, `bcs`, `utils` (0.4.1 and
+0.4.2), `walrus`, `walrus-wasm`, `@noble/hashes`, `@scure/base`, three
+`@protobuf-ts` packages, `dataloader` and `valibot`.
+
+**WASM licensing.** `@mysten/walrus-wasm` 0.3.1 has no `license` field in
+`package.json`, and its repository (MystenLabs/ts-sdks, release commit
+`03fe26bf` from the npm SLSA provenance) has no LICENSE file. Its published
+files (`index.js`, `index.mjs`, `index.d.mts` and others) carry the
+publisher's `Copyright (c) Mysten Labs, Inc.` and
+`SPDX-License-Identifier: Apache-2.0` headers, and its sibling packages declare
+Apache-2.0. Its WASM module compiles Rust crates from the `Cargo.lock` shipped
+in the package. `scripts/resolve_walrus_wasm_licenses.py` resolved them once
+from those sources into the reviewed inventory
+`scripts/walrus_wasm_licenses/0.3.1.json`:
+
+- The package license comes from the publisher headers; all must agree.
+- `cargo metadata --locked --filter-platform wasm32-unknown-unknown` gives the
+  normal-dependency closure of 165 crates. That set includes 22 build-time
+  proc-macro crates, listed for completeness. Every crate declares an SPDX
+  expression.
+- 153 crates ship their own license texts. For the rest, the inventory uses
+  the license file of the crate's repository at the commit in its
+  `.cargo_vcs_info.json` or git checkout (fastcrypto, walrus-core, blst, the
+  rust-bitcoin crates, and walrus-wasm itself with the Mysten walrus
+  repository's Apache-2.0 text); bech32's MIT notice in its source header; or the
+  canonical SPDX text with the declared authors (`convert_case`,
+  `ed25519-consensus`, whose crate and repository ship no text).
+- The inventory is bound to the npm tarball integrity in `pnpm-lock.yaml`, the
+  package's `Cargo.lock` SHA-256 and the SHA-256 of its `nodejs` WASM, which
+  equals the shipped `walrus_wasm_bg.wasm`.
+
+The packager verifies all of these bindings, the publisher headers and every
+text digest offline, and refuses a stale or incomplete inventory. It also
+refuses an inventory for a package that has since added a `license` field.
+`THIRD_PARTY_LICENSES.txt` lists every crate with its expression, source and
+texts. Where a crate offers a choice, SuiFleet elects Apache-2.0, then MIT.
+The union of elected licenses, `Apache-2.0 & BSD-3-Clause & CC0-1.0 & MIT &
+Unicode-3.0`, is recorded in `provenance.json` and must equal the recipe
+`LICENSE`. `Unicode-3.0` is a common license in Wrynose OE-Core and, for
+Scarthgap, in the required meta-lts-mixins Rust layer. This is packaging metadata from the published
+sources, not a legal opinion. Regenerate the inventory whenever
+`@mysten/walrus-wasm` changes:
+
+```sh
+curl -fsSLO https://registry.npmjs.org/@mysten/walrus-wasm/-/walrus-wasm-<V>.tgz
+mkdir pkg && tar -xzf walrus-wasm-<V>.tgz -C pkg   # compare with the lock integrity
+rm pkg/package/rust-toolchain.toml                   # metadata only; any cargo >= 1.85
+git config --global url."https://github.com/".insteadOf ssh://git@github.com/
+CARGO_NET_GIT_FETCH_WITH_CLI=true cargo metadata --locked --format-version 1 \
+  --filter-platform wasm32-unknown-unknown --manifest-path pkg/package/Cargo.toml > metadata.json
+python3 scripts/resolve_walrus_wasm_licenses.py --package pkg/package --tarball walrus-wasm-<V>.tgz \
+  --metadata metadata.json --spdx-dir <poky>/meta/files/common-licenses \
+  --output scripts/walrus_wasm_licenses/<V>.json
+```
+
+The 0.3.1 inventory was generated with cargo 1.87 in the `sui-dev` image and
+read GitHub for the upstream texts. Review the diff before committing it.
+
+The recipe's `do_verify_codec` runs before license population and install. It
+requires exactly the five pinned files, their SHA-256 values, a schema-1
+manifest naming the packaged Node release, recipe pins equal to the manifest's,
+and provenance from `SUIFLEET_CODEC_SOURCE_REV`. A tampered file fails that
+task. A missing artifact directory fails parsing for every target in the build,
+because the `file://` checksums cannot be computed. `inspect_pi_image.py` also
+requires the codec's provenance revision to equal the daemon's `build-info`.
+`make test-yocto-packaging` covers these rules offline, including
+`test_codec_and_daemon_share_source_revision`.
+
+### Updating the source pin
+
+The current pin is merged main after SF-082 and SF-084. To move it:
+
+1. Select a reviewed main revision, and set `SRCREV` and
+   `SUIFLEET_CRATE_VERSION` (checked against `suifleet-edge/Cargo.toml`).
+2. Run `bitbake -c update_crates suifleet`. Commit the regenerated
+   `suifleet-crates.inc` with `SUIFLEET_LOCK_SHA256` from that revision's
+   `Cargo.lock`.
+3. Rebuild the codec artifact at the same revision and update
+   `SUIFLEET_CODEC_SOURCE_REV`, the five SHA-256 values, `LICENSE` (printed
+   by the packager) and the license `md5`. If `@mysten/walrus-wasm` changed,
+   regenerate and review its license inventory first.
+4. Build the image in a build directory whose `bblayers.conf` names this
+   reviewed checkout's `meta-suifleet`. Then run `inspect_pi_image.py`,
+   `test_pi_binary.py`, `test_pi_codec.py` and `test_pi_archive.py`.
+
+### Target codec smoke
+
+`scripts/test_pi_codec.py --qemu …/qemu-aarch64 --rootfs …/rootfs --output codec-test.json`
+runs the image's AArch64 Node 22.22.2 on the image's codec in user-mode QEMU.
+It checks the exact release, the manifest/provenance binding, categorical
+refusal of malformed and foreign-chain requests, and failure when the WASM is
+missing or corrupt. With `--rpc-url https://fullnode.testnet.sui.io:443` it
+runs `prepare` on a deterministic 1 MiB vector. That makes read-only chain and
+Walrus system reads and no transaction. With `--host-node` (official x86-64
+22.22.2) it also requires an identical blob ID and root hash. It does not boot
+the Pi, run systemd, write to storage nodes or exercise the daemon's codec
+checksum refusal.
+
+### Target archive round trip
+
+`scripts/test_pi_archive.py` runs the image's AArch64 daemon with the image's
+Node and codec as its archive helper:
+
+```sh
+python3 scripts/test_pi_archive.py --qemu …/qemu-aarch64 --rootfs …/rootfs \
+  --shim suifleet-edge/target/debug/examples/grpc_sim_shim \
+  --rpc-url https://fullnode.testnet.sui.io:443 --host-node …/node-v22.22.2-linux-x64/bin/node \
+  --output archive-test.json
+```
+
+The daemon runs against the SF-082 fleet-data gRPC simulator with the fixture
+Seal key servers in `interfaces/seal-vectors.json`. It collects and redacts a
+component log, then signs the archive and Seal-encrypts it natively (2 of 3).
+The image's codec, at its rootfs path and with its pinned SHA-256, encodes that
+ciphertext through a read-only Testnet `prepare`. The blob ID and root hash
+must equal those from official x86-64 Node 22.22.2. After simulated
+registration, certification and anchoring, `verify_native_fleet.cjs` decrypts
+the uploaded ciphertext with the fixture keys. It then verifies the device
+signature, chain binding, redaction and tamper refusal. That is the owner-side
+decryption path.
+
+The same daemon first runs six negative controls. Each must leave the archive
+blocked, with no registration and no anchor:
+
+- a tampered bundle, refused by checksum before any execution;
+- a missing codec;
+- a missing Node runtime;
+- a sysroot without `libstdc++`, where Node fails to load;
+- a missing WASM module;
+- a corrupt WASM module.
+
+It needs QEMU user mode 9.0 or later, because the daemon's supervisor sets
+`PR_SET_CHILD_SUBREAPER`. Scarthgap's `qemu-native` is 8.2.7 and returns
+`EINVAL`, so the daemon exits at startup. The recorded run used the static
+`qemu-aarch64` 10.2.1 from Ubuntu's `qemu-user_10.2.1+ds-1ubuntu3_amd64.deb`
+(SHA-256 `e6bdaac0…f55bd8`, from the GPG-verified `resolute` index). That QEMU
+is a test tool only; it is not part of the image.
+
+There is no binfmt handler here, so the configured `node` is a host launcher
+that runs the rootfs `node` under `qemu-aarch64 -L`; on a Pi it is the binary
+itself. The codec serves only Testnet, so the launcher swaps in Testnet's
+chain, RPC and Walrus IDs for `prepare`. `registered` and `write` come from
+the simulator's stand-in, as in `test_fleet_data_ota.py`.
+
+Not covered: storage-node writes and certificates, Pi boot, systemd in the
+guest and memory under `MemoryMax`. The daemon does not check the Node
+version at run time. The exact release is enforced by `RDEPENDS`,
+`do_verify_codec`, image inspection and `test_pi_codec.py`.
 
 ## First boot and enrollment
 

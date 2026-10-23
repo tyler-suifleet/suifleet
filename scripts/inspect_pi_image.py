@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only inspection of an SF-029/SF-066 SD image; never opens a block device."""
+"""Read-only inspection of an SF-029/SF-066/SF-120 SD image; never opens a block device."""
 import argparse
 import bz2
 import hashlib
@@ -58,6 +58,28 @@ def check_build_info(build_info, pins):
         if fields[field] != value:
             raise ValueError(f'image {field} {fields[field]} differs from the recipe pin {value}')
     return fields
+
+
+CODEC_DIR = '/usr/lib/suifleet/walrus-codec'
+CODEC_FILES = ['walrus-device-codec.cjs', 'walrus_wasm_bg.wasm', 'manifest.json', 'THIRD_PARTY_LICENSES.txt', 'provenance.json']
+NODE = '/usr/lib/suifleet/node/bin/node'
+
+
+def check_codec(files, build_fields):
+    """SF-120: the installed codec matches its manifest and the daemon's source."""
+    manifest = json.loads(files['manifest.json'])
+    provenance = json.loads(files['provenance.json'])
+    if manifest.get('schema') != 1:
+        raise ValueError('unsupported codec manifest')
+    for name, entry in manifest['files'].items():
+        if hashlib.sha256(files[name]).hexdigest() != entry['sha256'] or len(files[name]) != entry['bytes']:
+            raise ValueError('installed codec file differs from its manifest: '+name)
+    if provenance.get('manifest_sha256') != hashlib.sha256(files['manifest.json']).hexdigest():
+        raise ValueError('codec provenance does not bind its manifest')
+    if provenance.get('source_revision') != build_fields.get('source_revision'):
+        raise ValueError(f'codec built from {provenance.get("source_revision")}, daemon from {build_fields.get("source_revision")}')
+    return dict(manifest=manifest, source_revision=provenance['source_revision'],
+                sha256={name: hashlib.sha256(data).hexdigest() for name, data in files.items()})
 
 
 def inspect(image, work, mtools_dir, expected_keys=None, debugfs="debugfs", e2fsck=None, pins=None):
@@ -189,7 +211,24 @@ def inspect(image, work, mtools_dir, expected_keys=None, debugfs="debugfs", e2fs
     with (work/'suifleet').open('rb') as stream:
         elf = stream.read(20)
     assert elf[:4] == b'\x7fELF' and elf[4:6] == b'\x02\x01' and struct.unpack_from('<H',elf,18)[0] == 183, 'daemon must be AArch64 ELF64'
-    return dict(image=str(image.resolve()),sha256=sha(image),size=image.stat().st_size,uncompressed_size=disk.stat().st_size,uncompressed_sha256=sha(disk),partitions=parts,boot_files=boot_files,boot_file_sha256=boot_hashes,boot_config=config,boot_command_line=command_line,daemon_build_info=build_fields,build_info_matches_recipe=pins is not None,binaries=binaries,authorized_public_key_count=len(keys),authorized_keys_match_expected=True if expected_keys is not None else None,runtime_state_absent=absent,enabled_services=enabled,ext4_fsck_read_only_passed=fsck_checked,signer_service_separation_inspected=True,physical_boot_tested=False)
+    codec_files = {}
+    for name in CODEC_FILES:
+        path = CODEC_DIR+'/'+name
+        info, _ = debug('stat '+path)
+        assert 'Mode:  0644' in info and re.search(r'User:\s+0\s', info), 'codec file must be root-owned 0644: '+path
+        dest = work/('codec-'+name)
+        debug(f'dump {path} {dest}')
+        codec_files[name] = dest.read_bytes()
+    codec = check_codec(codec_files, build_fields)
+    info, _ = debug('stat '+NODE)
+    assert 'Mode:  0755' in info and re.search(r'User:\s+0\s', info), 'node must be root-owned 0755'
+    debug(f'dump {NODE} {work/"node"}')
+    with (work/'node').open('rb') as stream:
+        elf = stream.read(20)
+    assert elf[:4] == b'\x7fELF' and struct.unpack_from('<H', elf, 18)[0] == 183, 'node must be AArch64'
+    assert exists('/usr/lib/suifleet/node/LICENSE'), 'missing Node license'
+    codec['node'] = dict(path=NODE, sha256=sha(work/'node'), size=(work/'node').stat().st_size)
+    return dict(image=str(image.resolve()),sha256=sha(image),size=image.stat().st_size,uncompressed_size=disk.stat().st_size,uncompressed_sha256=sha(disk),partitions=parts,boot_files=boot_files,boot_file_sha256=boot_hashes,boot_config=config,boot_command_line=command_line,daemon_build_info=build_fields,build_info_matches_recipe=pins is not None,binaries=binaries,authorized_public_key_count=len(keys),authorized_keys_match_expected=True if expected_keys is not None else None,runtime_state_absent=absent,enabled_services=enabled,ext4_fsck_read_only_passed=fsck_checked,signer_service_separation_inspected=True,walrus_codec=codec,physical_boot_tested=False)
 
 
 def main():

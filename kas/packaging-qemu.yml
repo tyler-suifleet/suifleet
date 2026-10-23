@@ -8,7 +8,7 @@ target:
   - qemu-system-native
 local_conf_header:
   suifleet-packaging-emulation: |
-    IMAGE_INSTALL:append = " suifleet suifleet-test-component coreutils"
+    IMAGE_INSTALL:append = " suifleet suifleet-walrus-codec suifleet-test-component coreutils"
     IMAGE_FSTYPES = "ext4"
     EXTRA_IMAGE_FEATURES:append = " debug-tweaks"
     QEMU_TARGETS = "aarch64"

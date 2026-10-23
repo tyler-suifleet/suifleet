@@ -1,4 +1,4 @@
-"""Reject malformed/truncated partition tables before any filesystem inspection."""
+"""Reject malformed partition tables, stale build-info and mismatched codec files."""
 import importlib.util
 from pathlib import Path
 import struct
@@ -64,3 +64,33 @@ class BuildInfoTests(unittest.TestCase):
 
     def test_incomplete_build_info(self):
         with self.assertRaises(ValueError):module.check_build_info('source_revision=abc123\n', None)
+
+
+class CodecTests(unittest.TestCase):
+    def files(self, revision='abc123'):
+        import hashlib, json
+        files = {'walrus-device-codec.cjs': b'bundle', 'walrus_wasm_bg.wasm': b'\0asm'}
+        entries = {n: dict(bytes=len(b), sha256=hashlib.sha256(b).hexdigest()) for n, b in files.items()}
+        files['manifest.json'] = json.dumps(dict(schema=1, node='22.22.2', files=entries)).encode()
+        files['provenance.json'] = json.dumps(dict(source_revision=revision,
+            manifest_sha256=hashlib.sha256(files['manifest.json']).hexdigest())).encode()
+        files['THIRD_PARTY_LICENSES.txt'] = b'licenses'
+        return files
+
+    def test_matching_codec(self):
+        result = module.check_codec(self.files(), dict(source_revision='abc123'))
+        self.assertEqual(result['source_revision'], 'abc123')
+
+    def test_codec_from_another_daemon_source(self):
+        with self.assertRaisesRegex(ValueError, 'codec built from'):
+            module.check_codec(self.files('0ld'), dict(source_revision='abc123'))
+
+    def test_tampered_codec_file(self):
+        files = self.files(); files['walrus_wasm_bg.wasm'] = b'\0asX'
+        with self.assertRaisesRegex(ValueError, 'differs from its manifest'):
+            module.check_codec(files, dict(source_revision='abc123'))
+
+    def test_unbound_manifest(self):
+        files = self.files(); files['manifest.json'] += b' '
+        with self.assertRaises(ValueError):
+            module.check_codec(files, dict(source_revision='abc123'))
