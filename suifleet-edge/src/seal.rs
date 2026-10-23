@@ -211,15 +211,15 @@ pub fn hash_identity(full_id: &[u8]) -> G1Projective {
 }
 
 pub fn g1_bytes(point: &G1Projective) -> [u8; 48] {
-    let mut out = [0u8; 48];
-    point.into_affine().serialize_compressed(&mut out[..]).expect("48 bytes");
-    out
+    let mut out = Vec::with_capacity(48);
+    point.into_affine().serialize_compressed(&mut out).expect("G1 encoding");
+    out.try_into().expect("48-byte G1 encoding")
 }
 
 pub fn g2_bytes(point: &G2Projective) -> [u8; 96] {
-    let mut out = [0u8; 96];
-    point.into_affine().serialize_compressed(&mut out[..]).expect("96 bytes");
-    out
+    let mut out = Vec::with_capacity(96);
+    point.into_affine().serialize_compressed(&mut out).expect("G2 encoding");
+    out.try_into().expect("96-byte G2 encoding")
 }
 
 /// A compressed point, rejected unless on the curve and in the subgroup.
