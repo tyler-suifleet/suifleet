@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 import unittest
+import uuid
 from unittest.mock import patch
 
 from test_ci_redirects import Fixture, ROOT, git, d, REAL_RUN
@@ -46,6 +47,21 @@ class Classification(unittest.TestCase):
 
 
 class Recovery(Fixture):
+    def setUp(self):
+        super().setUp()
+        # Process scans are global to the host. Independent/parallel test runs
+        # must not look like a second live editor holding this fixture's claim.
+        self.claim['token'] = uuid.uuid4().hex
+        self.owner['token'] = self.claim['token']
+
+    def ticket(self, project, *args):
+        if args[0] in ('heartbeat', 'assert'):
+            self.commands.append(args[0])
+            if args[2:] != ('--token', self.claim['token']):
+                raise AssertionError('wrong claim token')
+            return dict(self.owner)
+        return super().ticket(project, *args)
+
     def dispatcher(self):
         if hasattr(self, 'worker'):
             self.old_children = getattr(self, 'old_children', []) + list(self.worker.children.values())
@@ -186,6 +202,14 @@ class Recovery(Fixture):
         self.worker.db.execute("INSERT INTO ci_redirects(claim,fingerprint,state) VALUES(?,?,?)",(digest,'failure','pending'))
         self.run_retry()
         self.assertEqual(self.worker.db.execute('SELECT state FROM capacity_retries').fetchone()[0],'waiting')
+
+    def test_parallel_fixture_token_does_not_block_unrelated_recovery(self):
+        self.stopped();self.recorded();self.due()
+        child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(300)'],
+                               env={**os.environ,'PR_COORDINATOR_CLAIM_TOKEN':uuid.uuid4().hex},start_new_session=True)
+        self.addCleanup(lambda: (child.kill(),child.wait()))
+        self.run_retry()
+        self.assertEqual(self.worker.db.execute('SELECT state FROM capacity_retries').fetchone()[0],'launched')
 
     def test_live_detached_process_with_claim_token_is_discovered(self):
         self.stopped();self.recorded();self.due()
