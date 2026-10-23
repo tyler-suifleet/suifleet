@@ -5,8 +5,11 @@
     "deployment_manager.move::DeviceStatusUpdated:EC09009",
     "deployment_manager.move::DeviceStatusUpdated:EC09009",
     "deployment_manager.move::DeviceStatusUpdated:EC09009",
+    "deployment_manager.move::advance_rollout:ESL06010",
+    "deployment_manager.move::control_rollout:ESL06010",
     "deployment_manager.move::delete_deployment:ESL01011",
     "deployment_manager.move::delete_deployment:ESL06010",
+    "deployment_manager.move::delete_rollout:ESL06010",
     "deployment_manager.move::report_status:ESL06010",
     "deployment_manager.move::report_status_for_group:ESL06010",
     "deployment_manager.move::report_verified_status:ESL06010",
@@ -30,7 +33,24 @@
     "enrollment.move::enroll:ESL06002",
     "enrollment.move::revoke_claim:ESL06010",
     "enrollment.move::set_limits:ESL06010",
+    "fleet_budget.move::assert_may_draw:ESL06010",
+    "fleet_budget.move::draw_gas:ESL06002",
+    "fleet_budget.move::reserved:ESL02013",
+    "fleet_handover.move::cancel:ESL06010",
+    "fleet_handover.move::close_enrollment:ESL06010",
+    "fleet_handover.move::confirm:ESL06010",
+    "fleet_handover.move::deployment:ESL06010",
+    "fleet_handover.move::device:ESL06010",
+    "fleet_handover.move::finish:ESL06010",
+    "fleet_handover.move::group:ESL06010",
+    "fleet_handover.move::revoke_role:ESL06010",
     "roles.move::new_deployer_role:ESL06010",
-    "roles.move::revoke:ESL06010"
-  ]
+    "roles.move::revoke:ESL06010",
+    "seal_policy.move::grant_group:ESL06010"
+  ],
+  "reviewed_additions_2026_10_22": {
+    "ESL06010": "Preserve merged callable immutable TxContext signatures in rollout control, handover, budget authorization and group grants. No ABI edits.",
+    "fleet_budget.move::draw_gas:ESL06002": "The coin is intentionally transferred to the authenticated current device sender after account, identity and allowance checks; it cannot be redirected by the caller.",
+    "fleet_budget.move::reserved:ESL02013": "Compatibility getter intentionally returns zero; reserve balances live in per-device GasAccount objects. Existing public signature is retained."
+  }
 }
