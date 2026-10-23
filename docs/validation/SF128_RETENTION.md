@@ -65,8 +65,13 @@ renewed and released; coordination was posted in #11/#63. No faucet, customer
 object, other wallet or physical/mainnet operation was used.
 
 The first completed revision run spent 257,837,902 MIST, allowance used
-258,037,902 / 500,000,000 MIST. After the finite-target guard, the separate final
-run spent 258,080,108 MIST, allowance used 258,268,302 / 350,000,000 MIST.
+259,037,902 / 500,000,000 MIST. After the finite-target guard, the separate final
+run spent 258,080,108 MIST, allowance used 259,268,302 / 350,000,000 MIST.
+The runner initially omitted each retained 1,000,000 MIST budget deposit from
+funding accounting. Both balances were verified read-only, the original ledger
+values retained alongside explicit reconciliation, and future calls now reserve
+that funding. Five non-replenishing budget regressions pass. The reconciled
+allowances above include the deposits without crediting refunds or changing ceilings.
 Both non-replenishing ledgers are preserved: total actual spend 515,918,010 MIST,
 not a single 0.5 SUI run. Identical core bytecode was reused and reverified.
 Each revised (base, head) pair required its own base fixture because upgrades

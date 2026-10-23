@@ -14,11 +14,13 @@
     {
       "label": "create isolated budget",
       "gas_budget_mist": 200000000,
-      "funding_mist": 0,
+      "funding_mist": 1000000,
       "status": "success",
       "digest": "BM7pURN9wMZopFjfUV89YCqQ5gtNxUiKHnU4Ncghmpu9",
       "gas_mist": 5347200,
-      "allowance_used_mist": 126735200
+      "allowance_used_mist": 127735200,
+      "recorded_funding_mist": 0,
+      "recorded_allowance_used_mist": 126735200
     },
     {
       "label": "create v2 storage",
@@ -27,7 +29,8 @@
       "status": "success",
       "digest": "4on9EvyTWvBD6JvgWVY2412sVZ3RBoKZGqveZZAv4SKM",
       "gas_mist": 3242163,
-      "allowance_used_mist": 129977363
+      "allowance_used_mist": 130977363,
+      "recorded_allowance_used_mist": 129977363
     },
     {
       "label": "configure legacy vector on v2 object",
@@ -36,7 +39,8 @@
       "status": "success",
       "digest": "A5XzvaeZGVTo7RS569R1vLwsaiUJfW6afhbN1kTx8SwG",
       "gas_mist": 8296388,
-      "allowance_used_mist": 138273751
+      "allowance_used_mist": 139273751,
+      "recorded_allowance_used_mist": 138273751
     },
     {
       "label": "compatible v2 to v3 storage upgrade",
@@ -45,7 +49,8 @@
       "status": "success",
       "digest": "DuahTNBgYjuZa7gLEZ7bdSBo61aEhN6hZdvKM12qWmi1",
       "gas_mist": 118994163,
-      "allowance_used_mist": 257267914
+      "allowance_used_mist": 258267914,
+      "recorded_allowance_used_mist": 257267914
     },
     {
       "label": "migrate existing v2 retention storage",
@@ -54,7 +59,8 @@
       "status": "success",
       "digest": "2Fgs9sDP7ZdoCTtQb4anxUcpDrEUJTHvnigycNUg98Pz",
       "gas_mist": 0,
-      "allowance_used_mist": 257267914
+      "allowance_used_mist": 258267914,
+      "recorded_allowance_used_mist": 257267914
     },
     {
       "label": "v2 owner mutation rejected after migration",
@@ -63,12 +69,13 @@
       "status": "failure",
       "digest": "H2LN7fApm8vDF9pBYeS48rFUjZpPnRGhTL9rUriybXpr",
       "gas_mist": 1000388,
-      "allowance_used_mist": 258268302,
+      "allowance_used_mist": 259268302,
       "abort": [
         "fleet_storage",
         "assert_owner",
         "0"
-      ]
+      ],
+      "recorded_allowance_used_mist": 258268302
     }
   ],
   "checks": [
@@ -183,7 +190,7 @@
   },
   "end_balance_mist": 120501122,
   "spent_mist": 258080108,
-  "allowance_used_mist": 258268302,
+  "allowance_used_mist": 259268302,
   "finished": "2026-10-23T20:52:36Z",
   "final_source_sha256": "d5d9bf95028a68bc1879fb5b34370a6deef7ba75625c606d6e992f5b7ddafc45",
   "final_module_sha256": [
@@ -194,7 +201,7 @@
     "started": "2026-10-23T20:47:27Z",
     "finished": "2026-10-23T20:48:05Z",
     "spent_mist": 257849708,
-    "allowance_used_mist": 258037902,
+    "allowance_used_mist": 259037902,
     "max_spend_mist": 500000000,
     "transactions": [
       {
@@ -209,11 +216,13 @@
       {
         "label": "create isolated budget and v2 storage",
         "gas_budget_mist": 200000000,
-        "funding_mist": 0,
+        "funding_mist": 1000000,
         "status": "success",
         "digest": "67nMWZeNEaaDE8eMPEDCRdmSu3vfx74iV4hGek4K9RGB",
         "gas_mist": 5347200,
-        "allowance_used_mist": 126735200
+        "allowance_used_mist": 127735200,
+        "recorded_funding_mist": 0,
+        "recorded_allowance_used_mist": 126735200
       },
       {
         "label": "create v2 storage",
@@ -222,7 +231,8 @@
         "status": "success",
         "digest": "DyzAqYMgQn9iie3sQ3ghBBz855fmvTSCg83GSYweaFKE",
         "gas_mist": 3242163,
-        "allowance_used_mist": 129977363
+        "allowance_used_mist": 130977363,
+        "recorded_allowance_used_mist": 129977363
       },
       {
         "label": "configure legacy vector on v2 object",
@@ -231,7 +241,8 @@
         "status": "success",
         "digest": "51Jhe3JYqFBsaWrM52DaQisp8HCQv5PVjaqEd5c4pijk",
         "gas_mist": 8296388,
-        "allowance_used_mist": 138273751
+        "allowance_used_mist": 139273751,
+        "recorded_allowance_used_mist": 138273751
       },
       {
         "label": "compatible v2 to v3 storage upgrade",
@@ -240,7 +251,8 @@
         "status": "success",
         "digest": "44wpnZfQjm1ekP7PmLeKNxAQquA33rxrNa6wiakUJz24",
         "gas_mist": 118763763,
-        "allowance_used_mist": 257037514
+        "allowance_used_mist": 258037514,
+        "recorded_allowance_used_mist": 257037514
       },
       {
         "label": "migrate existing v2 retention storage",
@@ -249,7 +261,8 @@
         "status": "success",
         "digest": "2JE6ynruE7xuVL7eDxEqej23sv3WsZX9SaVLdbFkenTn",
         "gas_mist": 0,
-        "allowance_used_mist": 257037514
+        "allowance_used_mist": 258037514,
+        "recorded_allowance_used_mist": 257037514
       },
       {
         "label": "v2 owner mutation rejected after migration",
@@ -258,12 +271,13 @@
         "status": "failure",
         "digest": "2UkFW9ktPvBytuamPhgjaDi7SUJy5GWDxPaFi3WZ15kp",
         "gas_mist": 1000388,
-        "allowance_used_mist": 258037902,
+        "allowance_used_mist": 259037902,
         "abort": [
           "fleet_storage",
           "assert_owner",
           "0"
-        ]
+        ],
+        "recorded_allowance_used_mist": 258037902
       }
     ],
     "fixture": {
@@ -278,10 +292,24 @@
       "configured": true,
       "head": "0xf02f94ef20be6171bde6f00f70f0688f3b27a9006b2da59dc06979df2e492b54"
     },
-    "final_source_sha256": "5b8dbbb40d4569d5f179ccb104a4a7e8ad20cdd0a9b66c60a198fe01a530d22a"
+    "final_source_sha256": "5b8dbbb40d4569d5f179ccb104a4a7e8ad20cdd0a9b66c60a198fe01a530d22a",
+    "recorded_allowance_used_mist": 258037902,
+    "funding_reconciliation": {
+      "omitted_retained_budget_deposit_mist": 1000000,
+      "verified_budget_object": "0xc51c00c90f6d189a6ad065327d29ef01c7006aec4b0bbf547071874a0512f4d7",
+      "balance_mist": 1000000,
+      "method": "Read-only current object balance and original signed PTB deposit; add funding without crediting storage rebates or resetting the run ceiling."
+    }
   },
   "limits": [
     "Existing configured v2 object had an empty legacy protection vector on public Testnet; populated real-blob/prepaid migration and 10000-record gas are isolated-chain tests.",
     "No production wallet, physical, mainnet or production-provider acceptance."
-  ]
+  ],
+  "recorded_allowance_used_mist": 258268302,
+  "funding_reconciliation": {
+    "omitted_retained_budget_deposit_mist": 1000000,
+    "verified_budget_object": "0x78454f3d07d921d938f59d4729ea059aeafe28b74ce34283b97168695d5bdb18",
+    "balance_mist": 1000000,
+    "method": "Read-only current object balance and original signed PTB deposit; add funding without crediting storage rebates or resetting the run ceiling."
+  }
 }
