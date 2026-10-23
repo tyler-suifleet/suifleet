@@ -2013,6 +2013,36 @@
       "validation": "Actual console/API auth, CSRF/origin where applicable, role/caller denial, redaction, bounded queries and audit tests; no production exposure or credentials provisioned."
     },
     {
+      "key": "SF-084",
+      "title": "Show device services, logs and rollouts in the dApp dashboard",
+      "priority": "P2",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-020",
+        "SF-032",
+        "SF-033",
+        "SF-034"
+      ],
+      "paths": [
+        "dapp/src",
+        "scripts",
+        "docs"
+      ],
+      "evidence": "Shadows, streams, messaging stats and log search exist on devices and in the indexer CLI (SF-020, SF-032, SF-033, SF-034) but not in the dApp; a prototype is demonstrated mostly through the UI. User approved 2026-10-19.",
+      "acceptance": [
+        "Per-device views for shadows (desired/reported/delta), streams (size, oldest/newest, export checkpoint and failures), messaging/bridge health and recent alerts, sourced from the SF-082 verified data path.",
+        "Log search and diagnostic bundles only for roles authorized to decrypt them, with access recorded; nothing secret rendered or cached beyond the session.",
+        "Fleet-level rollout view: canary stages, grants, failure thresholds and abort state from on-chain records.",
+        "Strict parsing; unavailable or unverifiable data is shown as such, never as stale or partial values.",
+        "Parallel implementation is authorized against SF-082 commit 81a4d2e6e8b94a62b7e1b682ba9bdf115367e634. Keep PR DRAFT until SF-082/#160 is verified merged/Done; integrate actual merged main, rerun relevant compatibility, adversarial and end-to-end tests, and only then allow Ready/Review. Coordinate producer ABI changes in #160. Never claim unmerged pinned fixtures as final integrated acceptance."
+      ],
+      "validation": "Frontend typecheck/build, component and parsing tests, browser tests against localnet data, wallet acceptance for role-gated views.",
+      "description": "Bring the device features that are currently CLI- or API-only into the dashboard: shadows, streams and export status, messaging and bridge health, log search and diagnostic bundles for authorized support roles, alert drill-down, and canary rollout progress.\n\nParallel implementation: develop against SF-082 81a4d2e6e8b94a62b7e1b682ba9bdf115367e634; SF-082 remains a mandatory integration/merge gate, not a claim-blocking prerequisite. Keep the PR draft until the real dependency merges and integrated validation passes.",
+      "resources": []
+    },
+    {
       "key": "SF-099",
       "title": "Make deployment history searchable by device and group with named drill-downs",
       "priority": "P1",
