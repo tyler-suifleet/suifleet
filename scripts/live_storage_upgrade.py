@@ -93,7 +93,7 @@ def run(args):
                     '@' + fixture['registry'], 'funds.0', 'limits', '1u64', '--assign', 'owner',
                     # create returns its owner cap; the shared budget ID is read
                     # from effects, so storage is created in the next PTB.
-                    '--transfer-objects', '[owner]', '@' + live.operator)
+                    '--transfer-objects', '[owner]', '@' + live.operator, funding=1_000_000)
                 fixture.update(budget=live.created(result, '::fleet_budget::FleetBudget')[0],
                                owner=live.created(result, '::fleet_budget::BudgetOwnerCap')[0])
                 save()
