@@ -922,9 +922,12 @@ mod tests {
     fn signs_the_shared_vector_exactly() {
         // interfaces/telemetry-cases.json: signed independently with Mysten's
         // TypeScript SDK; the indexer and the dApp verify the same envelope.
-        // `signed_services` (schema 2) fixes the services section's field order.
+        // `signed_services_v2` (schema 2) fixes the services section's field
+        // order; `signed_services` is its version-1 predecessor, which this
+        // daemon no longer emits.
         let cases: serde_json::Value = serde_json::from_str(include_str!("../../interfaces/telemetry-cases.json")).unwrap();
-        for case in ["signed", "signed_services"] {
+        assert_eq!(cases["signed_services_v2"]["snapshot"]["services"]["version"], crate::service_health::VERSION);
+        for case in ["signed", "signed_services_v2"] {
             let snapshot: Snapshot = serde_json::from_value(cases[case]["snapshot"].clone()).unwrap();
             assert_eq!(snapshot.schema, Snapshot::schema_for(snapshot.services.is_some()), "{case}");
             let expected: Envelope = serde_json::from_value(cases[case]["envelope"].clone()).unwrap();
