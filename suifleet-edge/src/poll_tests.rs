@@ -24,6 +24,7 @@ fn client(url: &str) -> SuiClient {
 struct Node {
     response: Arc<Mutex<proto::BatchGetObjectsResponse>>,
     requests: Arc<Mutex<usize>>,
+    unavailable: Arc<Mutex<bool>>,
 }
 #[tonic::async_trait]
 impl proto::ledger_service_server::LedgerService for Node {
@@ -34,8 +35,14 @@ impl proto::ledger_service_server::LedgerService for Node {
         let request = request.into_inner();
         assert_eq!(request.read_mask.unwrap().paths, ["version"]);
         assert_eq!(request.requests.len(), 1);
-        assert_eq!(request.requests[0].read_mask.as_ref().unwrap().paths, ["version"]);
+        assert_eq!(
+            request.requests[0].read_mask.as_ref().unwrap().paths,
+            ["version"]
+        );
         *self.requests.lock().unwrap() += 1;
+        if *self.unavailable.lock().unwrap() {
+            return Err(tonic::Status::unavailable("fixture outage"));
+        }
         Ok(tonic::Response::new(self.response.lock().unwrap().clone()))
     }
 }
@@ -71,6 +78,7 @@ async fn unchanged_is_one_version_request_and_errors_never_authorize_idle() {
     let node = Node {
         response: Arc::new(Mutex::new(version(Some(1)))),
         requests: Default::default(),
+        unavailable: Default::default(),
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let sui = client(&format!("http://{}", listener.local_addr().unwrap()));
@@ -105,6 +113,10 @@ async fn unchanged_is_one_version_request_and_errors_never_authorize_idle() {
         assert!(sui.poll_changed(&roots, &[], 86400, 60).await.is_err());
     }
     assert_eq!(*node.requests.lock().unwrap(), 6);
+    *node.unavailable.lock().unwrap() = true;
+    assert!(sui.poll_changed(&roots, &[], 86400, 60).await.is_err());
+    assert_eq!(sui.read_stats().0, 7); // Failed transport attempt is counted too.
+    *node.unavailable.lock().unwrap() = false;
 
     *node.response.lock().unwrap() = version(Some(1));
     {

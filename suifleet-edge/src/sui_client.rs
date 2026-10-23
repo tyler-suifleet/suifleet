@@ -420,6 +420,9 @@ impl SuiClient {
             .ledger_client()
             .batch_get_objects(request)
             .await
+            .inspect_err(|_| {
+                self.stats.lock().unwrap().0 += 1;
+            })
             .map_err(status)?
             .read_into_inner(&self.stats);
         anyhow::ensure!(
@@ -500,6 +503,9 @@ impl SuiClient {
             .ledger_client()
             .get_service_info(proto::GetServiceInfoRequest::default())
             .await
+            .inspect_err(|_| {
+                self.stats.lock().unwrap().0 += 1;
+            })
             .map_err(status)?
             .read_into_inner(&self.stats);
         anyhow::ensure!(
@@ -571,6 +577,9 @@ impl SuiClient {
             .ledger_client()
             .get_object(request)
             .await
+            .inspect_err(|_| {
+                self.stats.lock().unwrap().0 += 1;
+            })
             .map_err(status)?
             .read_into_inner(&self.stats)
             .object
@@ -600,6 +609,9 @@ impl SuiClient {
             .ledger_client()
             .get_object(request)
             .await
+            .inspect_err(|_| {
+                self.stats.lock().unwrap().0 += 1;
+            })
             .map_err(|e| status(e).context(format!("object {id}")))?
             .read_into_inner(&self.stats);
         let object = response
@@ -641,16 +653,22 @@ impl SuiClient {
         let mut request = proto::GetObjectRequest::default();
         request.object_id = Some(id.to_owned());
         request.read_mask = Some(mask(&["owner", "object_type", "json", "version"]));
-        let object = match self.rpc.clone().ledger_client().get_object(request).await {
+        let object = match self
+            .rpc
+            .clone()
+            .ledger_client()
+            .get_object(request)
+            .await
+            .inspect_err(|_| {
+                self.stats.lock().unwrap().0 += 1;
+            }) {
             Ok(response) => response.read_into_inner(&self.stats).object,
             // Deleted, wrapped or never created.
             Err(e) if e.code() == tonic::Code::NotFound => {
-                self.stats.lock().unwrap().0 += 1;
                 self.observe(id, None);
                 return Ok(None);
             }
             Err(e) => {
-                self.stats.lock().unwrap().0 += 1;
                 return Err(status(e).context(format!("object {id}")));
             }
         }
@@ -717,6 +735,9 @@ impl SuiClient {
             .ledger_client()
             .get_service_info(proto::GetServiceInfoRequest::default())
             .await
+            .inspect_err(|_| {
+                self.stats.lock().unwrap().0 += 1;
+            })
             .map_err(status)?
             .read_into_inner(&self.stats);
         let tip = info
@@ -809,6 +830,9 @@ impl SuiClient {
             .ledger_client()
             .get_service_info(proto::GetServiceInfoRequest::default())
             .await
+            .inspect_err(|_| {
+                self.stats.lock().unwrap().0 += 1;
+            })
             .map_err(status)?
             .read_into_inner(&self.stats);
         ensure_retained(position, info.lowest_available_checkpoint)
@@ -951,6 +975,9 @@ impl SuiClient {
             .ledger_client()
             .get_transaction(request)
             .await
+            .inspect_err(|_| {
+                self.stats.lock().unwrap().0 += 1;
+            })
             .map_err(status)?
             .read_into_inner(&self.stats)
             .transaction
@@ -1270,6 +1297,9 @@ impl SuiClient {
             .state_client()
             .get_balance(request)
             .await
+            .inspect_err(|_| {
+                self.stats.lock().unwrap().0 += 1;
+            })
             .map_err(status)?
             .read_into_inner(&self.stats)
             .balance
@@ -1379,7 +1409,9 @@ impl SuiClient {
                 .ledger_client()
                 .get_transaction(request)
                 .await
-            {
+                .inspect_err(|_| {
+                    self.stats.lock().unwrap().0 += 1;
+                }) {
                 Ok(response) => {
                     let executed = response
                         .read_into_inner(&self.stats)
@@ -1404,7 +1436,10 @@ impl SuiClient {
                         .clone()
                         .ledger_client()
                         .get_service_info(proto::GetServiceInfoRequest::default())
-                        .await?
+                        .await
+                        .inspect_err(|_| {
+                            self.stats.lock().unwrap().0 += 1;
+                        })?
                         .read_into_inner(&self.stats);
                     anyhow::ensure!(
                         info.lowest_available_checkpoint
@@ -1421,7 +1456,10 @@ impl SuiClient {
                             .clone()
                             .ledger_client()
                             .get_object(request)
-                            .await?
+                            .await
+                            .inspect_err(|_| {
+                                self.stats.lock().unwrap().0 += 1;
+                            })?
                             .read_into_inner(&self.stats)
                             .object
                             .and_then(|o| o.version)
@@ -1446,7 +1484,9 @@ impl SuiClient {
                             .ledger_client()
                             .get_transaction(request)
                             .await
-                        {
+                            .inspect_err(|_| {
+                                self.stats.lock().unwrap().0 += 1;
+                            }) {
                             Ok(response) => {
                                 let executed = response
                                     .read_into_inner(&self.stats)
@@ -1471,7 +1511,10 @@ impl SuiClient {
                                     .clone()
                                     .ledger_client()
                                     .get_service_info(proto::GetServiceInfoRequest::default())
-                                    .await?
+                                    .await
+                                    .inspect_err(|_| {
+                                        self.stats.lock().unwrap().0 += 1;
+                                    })?
                                     .read_into_inner(&self.stats);
                                 anyhow::ensure!(info.lowest_available_checkpoint.is_some_and(|lowest| lowest <= checkpoint), "durable transaction history became unavailable; owner reconciliation required");
                             }
@@ -1491,7 +1534,10 @@ impl SuiClient {
                     .clone()
                     .ledger_client()
                     .get_service_info(proto::GetServiceInfoRequest::default())
-                    .await?
+                    .await
+                    .inspect_err(|_| {
+                        self.stats.lock().unwrap().0 += 1;
+                    })?
                     .read_into_inner(&self.stats);
                 let checkpoint = info
                     .checkpoint_height
