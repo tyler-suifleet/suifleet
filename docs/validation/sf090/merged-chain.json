@@ -3,212 +3,212 @@
   "mode": "isolated-real-chain",
   "result": "PASS",
   "failures": [],
-  "revision": "a187418d3dff48bf0cc73fcea2854db7576d7950",
-  "chain": "5bf49acd",
+  "revision": "ce6096b2e129d97b877b56f07b6f13c4b76c4a80",
+  "chain": "6360317c",
   "devices": 16,
   "peak_concurrency": 4,
-  "elapsed_ms": 74938.590934,
-  "peak_rss_bytes": 334274560,
+  "elapsed_ms": 69484.28854400001,
+  "peak_rss_bytes": 331874304,
   "measurements": {
     "enrollment": {
       "n": 16,
-      "p50_ms": 768.3965639999988,
-      "p95_ms": 1715.0878999999986,
-      "max_ms": 1715.0878999999986
+      "p50_ms": 747.3578449999986,
+      "p95_ms": 1674.436794000001,
+      "max_ms": 1674.436794000001
     },
     "deployment_admission": {
       "n": 1,
-      "p50_ms": 3693.774658000002,
-      "p95_ms": 3693.774658000002,
-      "max_ms": 3693.774658000002
+      "p50_ms": 4884.790566000003,
+      "p95_ms": 4884.790566000003,
+      "max_ms": 4884.790566000003
     },
     "budget_draw": {
       "n": 16,
-      "p50_ms": 1640.666867,
-      "p95_ms": 1717.5630050000036,
-      "max_ms": 1717.5630050000036
+      "p50_ms": 774.3842329999898,
+      "p95_ms": 1670.4125270000077,
+      "max_ms": 1670.4125270000077
     },
     "health_anchor": {
       "n": 16,
-      "p50_ms": 797.9903430000049,
-      "p95_ms": 1649.2472449999914,
-      "max_ms": 1649.2472449999914
+      "p50_ms": 835.8836129999981,
+      "p95_ms": 1719.197469000006,
+      "max_ms": 1719.197469000006
     },
     "telemetry_visibility": {
       "n": 16,
-      "p50_ms": 19.098494999998366,
-      "p95_ms": 248.10466599999927,
-      "max_ms": 248.10466599999927
+      "p50_ms": 13.259468999996898,
+      "p95_ms": 33.90614300000016,
+      "max_ms": 33.90614300000016
     },
     "encrypted_fetch": {
       "n": 16,
-      "p50_ms": 790.158654999992,
-      "p95_ms": 1722.52395599999,
-      "max_ms": 1722.52395599999
+      "p50_ms": 692.5128669999976,
+      "p95_ms": 1786.1992170000012,
+      "max_ms": 1786.1992170000012
     },
     "synthetic_apply": {
       "n": 16,
-      "p50_ms": 11.821240000004764,
-      "p95_ms": 293.1343889999989,
-      "max_ms": 293.1343889999989
+      "p50_ms": 3.9893770000053337,
+      "p95_ms": 9.511668000006466,
+      "max_ms": 9.511668000006466
     },
     "receipt_finalization": {
       "n": 16,
-      "p50_ms": 876.751311999993,
-      "p95_ms": 1699.8700090000057,
-      "max_ms": 1699.8700090000057
+      "p50_ms": 761.1174670000037,
+      "p95_ms": 1687.1950110000034,
+      "max_ms": 1687.1950110000034
     },
     "index_page": {
       "n": 1,
-      "p50_ms": 7.1811109999980545,
-      "p95_ms": 7.1811109999980545,
-      "max_ms": 7.1811109999980545
+      "p50_ms": 6.782145000004675,
+      "p95_ms": 6.782145000004675,
+      "max_ms": 6.782145000004675
     },
     "storage_contention": {
       "n": 4,
-      "p50_ms": 639.7765879999934,
-      "p95_ms": 641.3831389999978,
-      "max_ms": 641.3831389999978
+      "p50_ms": 1663.1553260000073,
+      "p95_ms": 1664.8772089999984,
+      "max_ms": 1664.8772089999984
     }
   },
   "raw_samples_ms": {
     "enrollment": [
-      1664.8047619999998,
-      730.3158239999975,
-      791.8756040000007,
-      763.6036690000001,
-      522.331051000001,
-      732.8755290000008,
-      768.3965639999988,
-      828.4509649999964,
-      723.7587280000007,
-      1627.2933459999986,
-      1680.2293269999936,
-      467.8083269999988,
-      1715.0878999999986,
-      1680.4645880000025,
-      766.6177039999966,
-      1665.101883999996
+      809.0070369999994,
+      1660.235865999999,
+      439.3641209999987,
+      770.7316699999974,
+      731.8850519999978,
+      773.1215960000009,
+      747.3578449999986,
+      1630.4839379999976,
+      428.4236280000041,
+      1659.7835600000035,
+      473.1784439999974,
+      1674.436794000001,
+      746.6407569999938,
+      1649.4698500000013,
+      722.2473249999966,
+      721.6506379999992
     ],
     "deployment_admission": [
-      3693.774658000002
+      4884.790566000003
     ],
     "budget_draw": [
-      1639.0673940000052,
-      1640.666867,
-      1642.3499840000004,
-      1642.5439499999993,
-      1717.5630050000036,
-      1716.6550149999966,
-      1628.2142529999983,
-      1630.5122499999998,
-      741.3451490000007,
-      740.4839369999972,
-      778.6023570000107,
-      781.161122999998,
-      1657.052205999993,
-      1656.6488269999973,
-      1664.0039959999995,
-      1656.3616630000033
+      784.6241739999969,
+      786.7243889999954,
+      830.0775479999938,
+      831.7908909999969,
+      463.0217580000026,
+      750.8853390000004,
+      800.9126060000126,
+      819.2916499999992,
+      1670.4125270000077,
+      774.3842329999898,
+      438.70632399999886,
+      563.8179390000005,
+      558.0511350000015,
+      444.97691500000656,
+      497.6200519999984,
+      931.2911560000066
     ],
     "health_anchor": [
-      792.0055369999973,
-      792.5736249999973,
-      797.9903430000049,
-      800.5980889999992,
-      763.6301759999915,
-      763.4594539999962,
-      862.2653529999952,
-      864.4680829999998,
-      774.0807300000015,
-      777.1173520000011,
-      892.6826710000023,
-      895.0060319999902,
-      746.2613969999948,
-      1649.2472449999914,
-      811.3448670000071,
-      808.102315000011
+      1719.197469000006,
+      1675.0127330000032,
+      1717.9984719999993,
+      1678.5707450000045,
+      749.712824000002,
+      859.3919729999907,
+      1668.9949869999982,
+      835.8836129999981,
+      769.4218230000115,
+      508.0384250000061,
+      592.6661390000081,
+      935.897266,
+      445.73553400000674,
+      565.6909670000023,
+      468.96041099999275,
+      896.590412000005
     ],
     "telemetry_visibility": [
-      31.02835700000287,
-      34.2825879999873,
-      35.77888099999109,
-      37.25083900000027,
-      11.32246799999848,
-      11.855853000000934,
-      245.17662699999346,
-      248.10466599999927,
-      19.747384000002057,
-      20.80292700001155,
-      13.122247999999672,
-      14.382396999993944,
-      8.898894999991171,
-      19.098494999998366,
-      9.691042000005837,
-      11.004842999987886
+      27.661827999996603,
+      28.923606999989715,
+      31.14831000000413,
+      33.90614300000016,
+      17.82825600000797,
+      8.07156899999245,
+      14.167788999999175,
+      8.26251100000809,
+      9.98222099999839,
+      9.942687999995542,
+      7.098199000000022,
+      9.615382999996655,
+      8.269564000001992,
+      14.080664000008255,
+      14.320830999989994,
+      13.259468999996898
     ],
     "encrypted_fetch": [
-      1178.6176299999934,
-      1176.4627189999883,
-      1720.030408000006,
-      1722.52395599999,
-      678.0039649999962,
-      830.0259070000029,
-      540.2112389999966,
-      790.158654999992,
-      590.4608929999958,
-      875.053871000011,
-      579.9514440000057,
-      863.9978220000048,
-      459.5128449999902,
-      460.9761279999948,
-      582.3877249999932,
-      871.2090040000039
+      1142.155648,
+      1624.9770430000062,
+      1625.0526049999899,
+      1786.1992170000012,
+      488.77760000000126,
+      487.052588999999,
+      565.7565960000065,
+      692.5128669999976,
+      495.44145900000876,
+      760.7330819999916,
+      825.5060099999973,
+      486.4348369999934,
+      488.9839030000003,
+      901.5353800000012,
+      899.3449910000054,
+      491.33041900000535
     ],
     "synthetic_apply": [
-      43.34309100000246,
-      43.677407000010135,
-      6.184169000000111,
-      11.58423499998753,
-      19.395774000004167,
-      29.865852999995695,
-      256.9089430000022,
-      5.365059000003384,
-      293.1343889999989,
-      11.821240000004764,
-      288.79105400000117,
-      5.64835000000312,
-      1.8632079999952111,
-      2.4670869999972638,
-      291.41926200001035,
-      3.5723609999986365
+      3.9893770000053337,
+      8.976180999990902,
+      9.511668000006466,
+      5.178201000002446,
+      3.8892940000077942,
+      3.8964889999915613,
+      4.442766000007396,
+      2.4555770000006305,
+      8.100894000002882,
+      2.9841299999970943,
+      6.376980999993975,
+      2.5195759999915026,
+      3.489201000003959,
+      4.475857999990694,
+      4.560228000002098,
+      2.655538000006345
     ],
     "receipt_finalization": [
-      810.5088890000043,
-      810.9268880000018,
-      757.6141090000019,
-      755.7320469999977,
-      925.0356489999976,
-      763.1252640000021,
-      736.6927189999988,
-      737.2346529999922,
-      879.6207730000024,
-      876.751311999993,
-      1646.1025749999972,
-      1653.5911090000009,
-      911.5662849999935,
-      928.3512170000031,
-      1699.8700090000057,
-      1699.2052209999965
+      484.029137000005,
+      456.3745090000011,
+      757.6614439999976,
+      1687.1950110000034,
+      851.2780009999988,
+      1664.8768070000078,
+      773.834824000005,
+      749.7440960000094,
+      930.2659279999934,
+      552.5294049999939,
+      761.1174670000037,
+      763.8981800000038,
+      541.5412849999993,
+      862.5920910000132,
+      861.6599649999989,
+      479.8084269999963
     ],
     "index_page": [
-      7.1811109999980545
+      6.782145000004675
     ],
     "storage_contention": [
-      639.6123519999965,
-      639.7765879999934,
-      640.6099159999867,
-      641.3831389999978
+      1660.8084209999943,
+      1663.1553260000073,
+      1664.2052750000003,
+      1664.8772089999984
     ]
   },
   "encrypted_pipeline": {
@@ -229,7 +229,7 @@
   "transactions": [
     {
       "label": "publish core",
-      "digest": "GPpmrZr8QoJACosXzncPzX47oQfDw15Uc9nGozdRWtSt",
+      "digest": "FQbZ1RyYdbXqzypLLRC4r1BzXxt7NLYvsFF6jcBYRUHQ",
       "gas": {
         "computationCost": "2990000",
         "storageCost": "325226800",
@@ -239,7 +239,7 @@
     },
     {
       "label": "publish WAL",
-      "digest": "83LEE1y2feG4xy4MLcLfR9ekbVj3G65evfv5hzC1vmm",
+      "digest": "7Y7r71y2yEmBYZcHiUmpPKDG3xU8exFT5tYL2mLxyjUT",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "24289600",
@@ -249,7 +249,7 @@
     },
     {
       "label": "publish Walrus",
-      "digest": "6Xd4uMRUfQi3y4FnzUcaPKhSUHHxWhrpUs8ko1zsMUpN",
+      "digest": "6dPTqkLB5i6ZG7irgarTSNGxfD9ofV7pwi83d3Wt5sPg",
       "gas": {
         "computationCost": "6670000",
         "storageCost": "677684400",
@@ -259,7 +259,7 @@
     },
     {
       "label": "initialize synthetic Walrus system",
-      "digest": "BCrCgeWzjd5nyJ7ua8jjdCC8hUJqG9W8wA3rdFKV9qbH",
+      "digest": "H3PgyL75GuZpNUMk2bHaKfUZuq3xnir79dq3q7b9g9r8",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "24791200",
@@ -269,7 +269,7 @@
     },
     {
       "label": "publish storage",
-      "digest": "4bd9SKcPoBriPc1FpheCR7nzLCQm4L2VDiADXryhVQgB",
+      "digest": "4ygnshMdxNA7vHzwQAiwEyg2pXRbTVE9mijYMJjTtmv9",
       "gas": {
         "computationCost": "1090000",
         "storageCost": "121296000",
@@ -279,7 +279,7 @@
     },
     {
       "label": "publish data",
-      "digest": "FNwKRS4xTLpXYCALwt8xWEJEU36KxwGGmjsYFTqTbaVn",
+      "digest": "GbQuqB1AJRWHbrj7CuXndHHLFYXYc5JHrjqKgLyssChp",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "52630000",
@@ -289,7 +289,7 @@
     },
     {
       "label": "create pilot budget",
-      "digest": "9NnyCoXuPxWPejNyMjP6cja2ACiR3XaYcfwKZu3erBkJ",
+      "digest": "Bq8G2u2A8JKWij8Xc9CRWEmEsEaPFCCtz9qVkyx9cYs8",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "5335200",
@@ -299,7 +299,7 @@
     },
     {
       "label": "create pilot storage",
-      "digest": "CSipDG2ETdLTfUsEoc19GqjUfnc3qxxFA9ssGbfwmnLB",
+      "digest": "GRqpvpqnjYRYRFLVQuFbN8oeCnp7UomaQbMecgsfA2Lf",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "4864000",
@@ -309,7 +309,7 @@
     },
     {
       "label": "create pilot fleet",
-      "digest": "DwHk23C1sYFzKJQWSH63SJYBACgdbjR7AfMokCQv4qC5",
+      "digest": "HeYta27sEC4m4tzSXkc9rqtdanFLiv6YP1aEo4qqfxFt",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "5130000",
@@ -319,7 +319,7 @@
     },
     {
       "label": "enroll 0",
-      "digest": "CmBnEsNQEZHqjBGs73D5vzeb5fffAuog2kY2Ph9cxWb7",
+      "digest": "FSbZ4MyAxupfRHBMmLMGBPVHQ4LcFfrKVZwbUVA9AMkW",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "26759600",
@@ -329,7 +329,7 @@
     },
     {
       "label": "enroll writer 0",
-      "digest": "6eT5VEQ8jM2fyi1PGkSEVb4un6bnxTsvJJFJCRbvd8t7",
+      "digest": "A4oq1VwuXsRyjxKTaPSufgVbNYnfYqJx2F5sihavMSuR",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "10108000",
@@ -339,7 +339,7 @@
     },
     {
       "label": "enroll 1",
-      "digest": "J9sH82gK7nBAFQ44ChQQmnb76a5CL6AH3YaV1UdqWVyC",
+      "digest": "4xr881V6G1oZgqMf2WFVjTDXckzxisUE9FjnHfSgBRkj",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "26759600",
@@ -349,7 +349,7 @@
     },
     {
       "label": "enroll writer 1",
-      "digest": "qsFqx2TXpLe5X8JrmN1bXEbriVZ3HSWfASJ8scxcVib",
+      "digest": "6oX4Gz5RrZUvmGp4ZcYSiQCd585faJMraeTByXipcyrb",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "10108000",
@@ -359,7 +359,7 @@
     },
     {
       "label": "enroll 2",
-      "digest": "8ffGzCCJ9xUfKaG3adKmBVG89aDE51nDCTYq1YqhkDm8",
+      "digest": "BvmgkTWiMNT1jMSHqiy3EjQt7Fuf4goia7x1uyhDQnz9",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "26759600",
@@ -369,7 +369,7 @@
     },
     {
       "label": "enroll writer 2",
-      "digest": "AAFQE9yKvrEED3oAwfnhB3JqF3gC5o7kHTFYQgy8h2vq",
+      "digest": "8vM1tcYgJvjFLtNaxn63cJceSX6tX53SvnrzPNyxS4zP",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "10108000",
@@ -379,7 +379,7 @@
     },
     {
       "label": "enroll 3",
-      "digest": "HvKK3Dth8QeLWjT9dYPWXw6sACr7YSZPcCaj2bh9VVLp",
+      "digest": "7iZhUYjJGDPC3dXsQaRGxVzc8JejdXcr7My3mJhmjRdJ",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "26759600",
@@ -389,7 +389,7 @@
     },
     {
       "label": "enroll writer 3",
-      "digest": "9kdct1DN8eDcnkpiFWSmJoyaicskvdfDG6eMhL76uFtM",
+      "digest": "BLJGn63ZeZw8yL67CZYmMGf4bzMWgndYrgE373Zmpsqu",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "10108000",
@@ -399,7 +399,7 @@
     },
     {
       "label": "enroll 4",
-      "digest": "J2BNdoChc8XSgbYuYCGSZAvq2n5XmD2UHqXC6CjmZA87",
+      "digest": "Gq8DcqpzSN8FQrArht5pFvijXqANSLMngMSy3yS8Q4uy",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "26759600",
@@ -409,7 +409,7 @@
     },
     {
       "label": "enroll writer 4",
-      "digest": "86Z74zzbgLMoJMcupjCdJuF9hjD1M2GK9TctGzUPHLcY",
+      "digest": "GypBhme1uG11Arq8xnWwoELcFWNmrkShbafThy3hLoxU",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "10108000",
@@ -419,7 +419,7 @@
     },
     {
       "label": "enroll 5",
-      "digest": "5TWMYBotkyEqzHTx8ueL7xdGqQkn6i1GC625ccmwRHyd",
+      "digest": "9hzUZHbd26Y53BR39yfzfLtP5grea5kAQbMrJ2xmFZkS",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "26759600",
@@ -429,7 +429,7 @@
     },
     {
       "label": "enroll writer 5",
-      "digest": "Fz3rbYcdUaQWXErcEKHsxkFzXQ7iig3xz7yoZw8v2BUW",
+      "digest": "3x1XX5p6rPt6AbyLfAULGrZSrpfGEb3vMKnykBteE4rU",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "10108000",
@@ -439,7 +439,7 @@
     },
     {
       "label": "enroll 6",
-      "digest": "eqEnjJh55ZGYSKAbwzBuipp7BbJT2od7siVtUZb6Bwh",
+      "digest": "J7bayqTd1UHiWF7pm6kefxcVgFq4MgzXpG6qoa3nURZ9",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "26759600",
@@ -449,7 +449,7 @@
     },
     {
       "label": "enroll writer 6",
-      "digest": "8KkC9qBoWpHY1RenJTi8SxhnadK8E5R2ysPJm8ccXsUp",
+      "digest": "BzYsttNfk7VgNXrkjC5SHQsUVmeGM2Ggozp6tdFR7EFr",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "10108000",
@@ -459,7 +459,7 @@
     },
     {
       "label": "enroll 7",
-      "digest": "6oeXv34hu4QUKeWG7V5m5diq7sku397suGXvHmTV41Qu",
+      "digest": "FuPRzZWePssKnL4eHbwUzY9bPfEQHFiKNKtr2nJkrXUP",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "26759600",
@@ -469,7 +469,7 @@
     },
     {
       "label": "enroll writer 7",
-      "digest": "C6ZRi5M6xS9kiPT3kkNHAkrnbtChPxr6dPJKLfx3Y4o2",
+      "digest": "9h7u1xZEkHFjw9Vor3XSeawMkUcKe5H4BxXHR3sZ2nbo",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "10108000",
@@ -479,7 +479,7 @@
     },
     {
       "label": "enroll 8",
-      "digest": "CkMRftsGUwV74pLYvdrMBFCQ8AnQfEdDTKYSVPrZ6Eou",
+      "digest": "QJRbp8VowRv6rN1zspFsmgWkJAmozfTJZk2Udtegpda",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "26759600",
@@ -489,7 +489,7 @@
     },
     {
       "label": "enroll writer 8",
-      "digest": "AHXZ6nHAx7dDv34hDvwWgGMv2BPhkE8gc8RForLoifHB",
+      "digest": "CJNM6mxPUub2jF6AQPckmfCjhM2rX1TDjsQRnZWXKQe2",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "10108000",
@@ -499,7 +499,7 @@
     },
     {
       "label": "enroll 9",
-      "digest": "BMLHcqcTPGb8AXZaTFCrtWu3WMBhJthU79ARHvg1LPGL",
+      "digest": "AMSt983Y5MEmXMmbydP157rVYAzMDpFGJ1wXUVhUgDiZ",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "26759600",
@@ -509,7 +509,7 @@
     },
     {
       "label": "enroll writer 9",
-      "digest": "9xV6Y1iWSRHgN8oWeWTMTtpHJQPLPJYQdt79MdWx2ZbS",
+      "digest": "Frw1m9uVfAivFFKJ7RxC3j7F3G23Tkx8LagvgE5rTT9Z",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "10108000",
@@ -519,7 +519,7 @@
     },
     {
       "label": "enroll 10",
-      "digest": "EcZCH8L9vmnXeyAXYXyM5Q6SrofuGszyvztv8XMf4Yf3",
+      "digest": "2YnfEpUZuZojovqdfTJZ9uwmx7CSq5DRpWHRmJWpRUmS",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "26767200",
@@ -529,7 +529,7 @@
     },
     {
       "label": "enroll writer 10",
-      "digest": "9Qiifrq2dWyqXrr4jjfMPNH4vnwJntQ7HE6wv6S7M77v",
+      "digest": "9CMrUX53PXKSFs1KyJJJt5WEVLHnTj8QfFfmKdiC25qc",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "10108000",
@@ -539,7 +539,7 @@
     },
     {
       "label": "enroll 11",
-      "digest": "Hme5rE6n27fvfZDrCugAemYdcvVwuMsHkT9L6kFzjx3n",
+      "digest": "7AmH9WtU8WDRjuySkdvNAXcM73TkfvHtWP5aWPKNnR7X",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "26767200",
@@ -549,7 +549,7 @@
     },
     {
       "label": "enroll writer 11",
-      "digest": "ACwEu957eFkoogeYSt5CaMwB4D34NRh4DcBqW2NfsWTu",
+      "digest": "FFmEAyaR6eMJuQCTip32oH4AQ2cCfHtsBbdMaSz5D4RL",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "10108000",
@@ -559,7 +559,7 @@
     },
     {
       "label": "enroll 12",
-      "digest": "DfdriDfDttTot4cfHNrVLHe8H6vPBwgavfSS8JbsHxsp",
+      "digest": "4yjSUKn5qA2jCYvdKxBhm9SVDftz79R9gvj44w9yyQcQ",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "26767200",
@@ -569,7 +569,7 @@
     },
     {
       "label": "enroll writer 12",
-      "digest": "53tg6VFinGV5PCwavHe859AJBgRTAYLX9dGqxr4vwphy",
+      "digest": "Es4m1tzgkUsRpZYKpTJToH7hZ5jkdtgTzKWHtNkZtWLZ",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "10108000",
@@ -579,7 +579,7 @@
     },
     {
       "label": "enroll 13",
-      "digest": "7zikAhMxW5oMCfXGTnuyTXTCh4pny6s4bEKRVWsheBer",
+      "digest": "6nmz5mNWZ3Nf77knCAKRRjzPGAGeoedfFgMVHXpeUXhq",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "26767200",
@@ -589,7 +589,7 @@
     },
     {
       "label": "enroll writer 13",
-      "digest": "D24qujVRSiWetnKndqdDnxGF7Pu7Udq1nVv7Y3xNS2b1",
+      "digest": "5QmWj75AP8JByEQiiTGU8ogSahkyGqvRHeaBesaca4jy",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "10108000",
@@ -599,7 +599,7 @@
     },
     {
       "label": "enroll 14",
-      "digest": "DzjAjb47zoBKZUHA97zrmSnJGCfDms5QweQxETEJUCCh",
+      "digest": "DFGVHx4ukqeS6cMBmJeDLpgSCt9RYbZ2dVCzWon1DFkg",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "26767200",
@@ -609,7 +609,7 @@
     },
     {
       "label": "enroll writer 14",
-      "digest": "8KyEg6tqjxPkBmpggFQJBL2JZwmsabVJ1fdqts7d4PSC",
+      "digest": "2eCjLbSFxHgNff1eNShV5Dt497hQDb1xLbUB2Dz5tL7h",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "10108000",
@@ -619,7 +619,7 @@
     },
     {
       "label": "enroll 15",
-      "digest": "67SxhAh1i2ENn2hsJCqF43bLBLzv79tnayQxT6ouj6fX",
+      "digest": "6VMn1D8YPq3N187onySNSFTf53w6bP3DXDPh8TVEvZXU",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "26767200",
@@ -629,7 +629,7 @@
     },
     {
       "label": "enroll writer 15",
-      "digest": "3AvaKbba7ni6KLvSwj7bT3bqJGYosahmLeLWDfUH4Cjz",
+      "digest": "HPiQGgpFTisxSF1C7c6ii9Wb24uGjfLkx1tfHDeZ3RWv",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "10108000",
@@ -639,7 +639,7 @@
     },
     {
       "label": "publish test Seal server objects",
-      "digest": "94FvVJqrf9C2aYp9TebN8gMxsrrtWpwz4LpHjYew8i2h",
+      "digest": "BDHsLEC7gxW5CXbrQpsBrZZ8HqDYvekSen4UDEPkzdF2",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "9196000",
@@ -649,7 +649,7 @@
     },
     {
       "label": "register test Seal server 0",
-      "digest": "CnMDt9hgK6heUcSH1zjWvrFgZLs9ZAd3sgrFXDBVX6ss",
+      "digest": "5C1kRLyf65EGTkcPG5iLWgnWegmd6PKbtUkjfNmmy9je",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "5259200",
@@ -659,7 +659,7 @@
     },
     {
       "label": "register test Seal server 1",
-      "digest": "7wHwHHQZK89cJa6JHFQL2V6BhWZ5H3XSZ8kp7KYr2jnd",
+      "digest": "9aoQYu9AfSjJs2EByWjiiBi6yxpEEi67c3BgWJj6LA9b",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "5259200",
@@ -669,7 +669,7 @@
     },
     {
       "label": "register test Seal server 2",
-      "digest": "tiARi7p7Ehqucb9GzCnEveHE6ATsrKzc68zNJdbRxoQ",
+      "digest": "Ekj5Nri1bviAqaAEu3ubyeMUHikCPHzQfc6st1BF6DGJ",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "5259200",
@@ -679,7 +679,7 @@
     },
     {
       "label": "create encrypted pilot policy",
-      "digest": "EMvPy6V2GAiWfyzH1VC2hif6Trox9dsvkJp9a4h5p9c2",
+      "digest": "8FbHo2e2DYjEA7k3T6532K9aETzt3h9DXow3Hmj2a1az",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "4309200",
@@ -689,7 +689,7 @@
     },
     {
       "label": "authorize enrolled pilot devices",
-      "digest": "DhDR1SJPJERe96Sf9w7TXkxFjGo7rGoH7VxCVSaYwWCL",
+      "digest": "DBLxzXPZJ21XtjRSD5BhJR61yaVBMALdFrpjuiC5MpQo",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "8200400",
@@ -699,7 +699,7 @@
     },
     {
       "label": "pilot deployment admission",
-      "digest": "Gx3X3PP82FmxPXZpqoCFMXuKbFTu3cD6aFWZhxvXAEpv",
+      "digest": "FE6FQdttQatiih6WMZE83X8Gc4UDuFHpCsQ43VkqVjmK",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "16963200",
@@ -708,8 +708,8 @@
       }
     },
     {
-      "label": "draw 0x03446749ab56dc5f9b0665b3f52d95b119177804a81b7590504f8bac0a4d596a",
-      "digest": "8JJxoK87Fhm3iYaRhHx4W5TT3Bz5RQTbboe6Kb6gskhU",
+      "label": "draw 0x83167117d247e7c057db07468d8e55575da70acec2d210c4ae6f08db6e3c89ca",
+      "digest": "9ZURADi6tcNT5WUMEE2bYG7hjX9CGfEzFDUqf4hovDnq",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "6391600",
@@ -718,8 +718,8 @@
       }
     },
     {
-      "label": "draw 0x1854a1b424d7713e3cf70d97e2cb64204459e77194a869f6e7ca06bfe4ffd6c1",
-      "digest": "FboSWGsymuhZsx7Ety7mb4QkxZAa3tAJsFGdcjDeMVSz",
+      "label": "draw 0x99244a1948d5f839cb9dd7521ac02a9f69f68078ac72a3096b1d698315da4aa4",
+      "digest": "DT4QFWUsaUZn4Ui9ZcTPXHvPHQG1drUsGNHNCNhfsvQj",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "6391600",
@@ -728,8 +728,8 @@
       }
     },
     {
-      "label": "draw 0xeecbf3f1453eedc4a063e9ee6df5aadc3527c43030fb32f9ccc6ff7ebf5f176b",
-      "digest": "4cFXngVdUGt9T5YzbgSdedAbLYFHTGg54hBiKDPXJbxi",
+      "label": "draw 0xc640098c9ee32c5dd6d5f0c25b624596efb795e7019cef9dac8959004ade239e",
+      "digest": "DDe1r9DwXgcXVdoN2vjFQv2Vpe8UR5DnJz15oVNUxq3T",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "6391600",
@@ -738,8 +738,8 @@
       }
     },
     {
-      "label": "draw 0x09ed4c2d188f7b336fc5f02b9b3286dd7662b2aefaa1f10047daa16a71d9e76e",
-      "digest": "Cr3Se1VdcUkrMta7AHCA9o49TiKCuy581f7X73WHL5gh",
+      "label": "draw 0xd93e9343ea45cb1dc21b80c651986345e880dfed872e7fc687a873e3038e2b97",
+      "digest": "8P66CQXLeSxzUTQf4HTUZDoMzrhgcuTGzFndGBdyjXeS",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "6391600",
@@ -748,8 +748,8 @@
       }
     },
     {
-      "label": "health 0xeecbf3f1453eedc4a063e9ee6df5aadc3527c43030fb32f9ccc6ff7ebf5f176b",
-      "digest": "44yaeS78ZhHvWMUzHMYfFYuwsEdQxXBLgGjA8U4RoFMT",
+      "label": "health 0x83167117d247e7c057db07468d8e55575da70acec2d210c4ae6f08db6e3c89ca",
+      "digest": "3hy1r4Dkk9UiAzU46nrx7e83AeDzGQMLCkG4VFwAwZpi",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "13163200",
@@ -758,8 +758,8 @@
       }
     },
     {
-      "label": "health 0x09ed4c2d188f7b336fc5f02b9b3286dd7662b2aefaa1f10047daa16a71d9e76e",
-      "digest": "HdyfshMXuKzuSPqMxfHS5KS5v4EyBve8V2Nt78WJhSrN",
+      "label": "health 0xd93e9343ea45cb1dc21b80c651986345e880dfed872e7fc687a873e3038e2b97",
+      "digest": "BmkT7KoEBmE8JewRndfYEHixiVTijaFoGWTYNEu9X4t8",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "13163200",
@@ -768,8 +768,8 @@
       }
     },
     {
-      "label": "health 0x1854a1b424d7713e3cf70d97e2cb64204459e77194a869f6e7ca06bfe4ffd6c1",
-      "digest": "6D2EG7w8eXNPmDaXeWaPmYuxi8sLoLnZBVKLsbiiysYo",
+      "label": "health 0x99244a1948d5f839cb9dd7521ac02a9f69f68078ac72a3096b1d698315da4aa4",
+      "digest": "72TBa3K3CRPybQY1gVdn4EQ2ksvC5DJWk15X49Caey79",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "13163200",
@@ -778,8 +778,8 @@
       }
     },
     {
-      "label": "health 0x03446749ab56dc5f9b0665b3f52d95b119177804a81b7590504f8bac0a4d596a",
-      "digest": "EH17XUfJ2usb9puhNHB5aJTsTaCUoEqXHmV1i732yf3L",
+      "label": "health 0xc640098c9ee32c5dd6d5f0c25b624596efb795e7019cef9dac8959004ade239e",
+      "digest": "413J9HnvFV6TwmFYvj8DdAC8gWfasH4ahCbhybnTi28Q",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "13163200",
@@ -788,8 +788,8 @@
       }
     },
     {
-      "label": "receipt 0xeecbf3f1453eedc4a063e9ee6df5aadc3527c43030fb32f9ccc6ff7ebf5f176b",
-      "digest": "5GdjC4XiLgssgu8Lz2WW3nV1o5PbouxKePUiKAD6NPnS",
+      "label": "receipt 0xd93e9343ea45cb1dc21b80c651986345e880dfed872e7fc687a873e3038e2b97",
+      "digest": "8YrDuP7srK2ggKT4u7jCZCgkUihYX6WawqTB2oPSLtgw",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "7752000",
@@ -798,18 +798,8 @@
       }
     },
     {
-      "label": "receipt 0x09ed4c2d188f7b336fc5f02b9b3286dd7662b2aefaa1f10047daa16a71d9e76e",
-      "digest": "566T7v2JVHc67X5e1oVPk5Bz4evDhyMQH998ZbnBJamC",
-      "gas": {
-        "computationCost": "1000000",
-        "storageCost": "8002800",
-        "storageRebate": "7751225",
-        "nonRefundableStorageFee": "775"
-      }
-    },
-    {
-      "label": "receipt 0x1854a1b424d7713e3cf70d97e2cb64204459e77194a869f6e7ca06bfe4ffd6c1",
-      "digest": "3C6rVCDuuPWSDfFZghm4yCF2jJXcTzwtH4brPrVJaRtB",
+      "label": "receipt 0xc640098c9ee32c5dd6d5f0c25b624596efb795e7019cef9dac8959004ade239e",
+      "digest": "DG5RYNXMjqDXBgmv4bHaSZWZ7SyprNn2ou86uvo9KmN7",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "8253600",
@@ -818,8 +808,58 @@
       }
     },
     {
-      "label": "receipt 0x03446749ab56dc5f9b0665b3f52d95b119177804a81b7590504f8bac0a4d596a",
-      "digest": "2pArKWA1rMidm378ViMz4opicpxGkPmVvodYV2e8iTA2",
+      "label": "draw 0x3b6a9d0a9e78223b6d75aafec0bceb4494cc1dcbae11afec80cd1d4f92186d37",
+      "digest": "7TEX1bUV53Qbxoi1s12Gv1FtwZRHaKBHLXGVuzpzBaXD",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "6391600",
+        "storageRebate": "5403060",
+        "nonRefundableStorageFee": "540"
+      }
+    },
+    {
+      "label": "receipt 0x99244a1948d5f839cb9dd7521ac02a9f69f68078ac72a3096b1d698315da4aa4",
+      "digest": "J5rQiRFhxMmnMHzqCJmN3TUruHgDtzR7soaBbW1XWvd9",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "8002800",
+        "storageRebate": "7751225",
+        "nonRefundableStorageFee": "775"
+      }
+    },
+    {
+      "label": "draw 0xeb4455594bed4ebe9c612bbb73011613d54576991405e49f031c7720f373bbb6",
+      "digest": "AviaqUiuupbx8MDPnkBdeigUTi4vSwoX2zU5qzJKd8h7",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "6391600",
+        "storageRebate": "5403060",
+        "nonRefundableStorageFee": "540"
+      }
+    },
+    {
+      "label": "health 0x3b6a9d0a9e78223b6d75aafec0bceb4494cc1dcbae11afec80cd1d4f92186d37",
+      "digest": "6aqozrjWoVP6sn6qAVh1L7hMkfDVgVh5Dnt2FgUUUnCw",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "13163200",
+        "storageRebate": "5965403",
+        "nonRefundableStorageFee": "597"
+      }
+    },
+    {
+      "label": "draw 0xcbb12cdad9e2562ca50b2f3725b97339c60a14c2aa133ccb796a19ad6a86f91d",
+      "digest": "AUvirhhZmGUPwLne55WR3mDZKVGxCGTmQgYLJCiRCpNa",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "6391600",
+        "storageRebate": "5403060",
+        "nonRefundableStorageFee": "540"
+      }
+    },
+    {
+      "label": "receipt 0x83167117d247e7c057db07468d8e55575da70acec2d210c4ae6f08db6e3c89ca",
+      "digest": "Ha2T7FNH4qwzsZHDfxDg9CM2desyHjx5q1SU7yUC2JpK",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "8504400",
@@ -828,48 +868,8 @@
       }
     },
     {
-      "label": "draw 0x7246dbe21589befbf468e67493e797d770feb6cdc2a80c83fae2b51d254e38fe",
-      "digest": "Fr7NptezxqqYZscG9jipd6Zz9efErYG3mcfxgYoSLMVX",
-      "gas": {
-        "computationCost": "1000000",
-        "storageCost": "6391600",
-        "storageRebate": "5403060",
-        "nonRefundableStorageFee": "540"
-      }
-    },
-    {
-      "label": "draw 0xe942545985df8641c549cefb62f80c7b06ebc099571068d08af6b3f87c0b050d",
-      "digest": "DtTmrYomCkyR9Dgk7uSjxxd5Rixt5DK4KAJ2rKd3Fbwi",
-      "gas": {
-        "computationCost": "1000000",
-        "storageCost": "6391600",
-        "storageRebate": "5403060",
-        "nonRefundableStorageFee": "540"
-      }
-    },
-    {
-      "label": "draw 0x9734192e425d3420e2e9048da114f1b63d17e73f2a959552aee89106c20de18b",
-      "digest": "84u9Y91sRVCuTKcU6tX9hVYRbwDWkZCdU3NaLu94UdDC",
-      "gas": {
-        "computationCost": "1000000",
-        "storageCost": "6391600",
-        "storageRebate": "5403060",
-        "nonRefundableStorageFee": "540"
-      }
-    },
-    {
-      "label": "draw 0xf6d790101bddc0ec201a249c9e1e21d8ab6e11c6cf04daf21d69eb090e3fd186",
-      "digest": "F8xcRhoh5Zw5B63yzP32ekNB6owznaUuMfXzMr8pvLpr",
-      "gas": {
-        "computationCost": "1000000",
-        "storageCost": "6391600",
-        "storageRebate": "5403060",
-        "nonRefundableStorageFee": "540"
-      }
-    },
-    {
-      "label": "health 0x7246dbe21589befbf468e67493e797d770feb6cdc2a80c83fae2b51d254e38fe",
-      "digest": "CCtu6xuzft1ZrmcqvA6DwXFzSN1GQJSV3dM7m7foCCk5",
+      "label": "health 0xeb4455594bed4ebe9c612bbb73011613d54576991405e49f031c7720f373bbb6",
+      "digest": "6SZN74hiuCUC898Pg4b7kh62QSijUm8JYkVXW57rBJ4n",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "13163200",
@@ -878,38 +878,8 @@
       }
     },
     {
-      "label": "health 0xe942545985df8641c549cefb62f80c7b06ebc099571068d08af6b3f87c0b050d",
-      "digest": "GfhSD1qMGQNTC15mkCLMDHXWX2YazpbikvX672LVQB8E",
-      "gas": {
-        "computationCost": "1000000",
-        "storageCost": "13163200",
-        "storageRebate": "5965403",
-        "nonRefundableStorageFee": "597"
-      }
-    },
-    {
-      "label": "health 0xf6d790101bddc0ec201a249c9e1e21d8ab6e11c6cf04daf21d69eb090e3fd186",
-      "digest": "6HSNSovEqyrqdpAGywdKixMmMDK3sWf4doKRMhQJSsMF",
-      "gas": {
-        "computationCost": "1000000",
-        "storageCost": "13163200",
-        "storageRebate": "5965403",
-        "nonRefundableStorageFee": "597"
-      }
-    },
-    {
-      "label": "health 0x9734192e425d3420e2e9048da114f1b63d17e73f2a959552aee89106c20de18b",
-      "digest": "4B9uBMZVfgyKacLpNfSTHuEVWnfLfzsJSRHsR9k5vnFd",
-      "gas": {
-        "computationCost": "1000000",
-        "storageCost": "13163200",
-        "storageRebate": "5965403",
-        "nonRefundableStorageFee": "597"
-      }
-    },
-    {
-      "label": "receipt 0x7246dbe21589befbf468e67493e797d770feb6cdc2a80c83fae2b51d254e38fe",
-      "digest": "2dFPEcjNdvNKAtkNe8tzfciC6EEq9qV4m4owzfzQHoME",
+      "label": "receipt 0x3b6a9d0a9e78223b6d75aafec0bceb4494cc1dcbae11afec80cd1d4f92186d37",
+      "digest": "AMBD2XthJiVU9AvmCySyWBoaZ5DmPKX3uSMYjhva5boQ",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "8755200",
@@ -918,8 +888,38 @@
       }
     },
     {
-      "label": "receipt 0xe942545985df8641c549cefb62f80c7b06ebc099571068d08af6b3f87c0b050d",
-      "digest": "DJ3qzHfAKdyckZp59aoeTrDzuQ9cU9od6Rf5dckpopdR",
+      "label": "draw 0x326de33bc3d8cf02031199b76e240a2197c525006a6960265786c272a2fb399e",
+      "digest": "DwPMfXzZo4iS91XgcgbEgyezobPSP2FWXu2AWfZ5opHY",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "6391600",
+        "storageRebate": "5403060",
+        "nonRefundableStorageFee": "540"
+      }
+    },
+    {
+      "label": "health 0xcbb12cdad9e2562ca50b2f3725b97339c60a14c2aa133ccb796a19ad6a86f91d",
+      "digest": "8wZJquvyGXbogSzcwRyPGndDKft7t8kkwPVGS1bxvZV8",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "13163200",
+        "storageRebate": "5965403",
+        "nonRefundableStorageFee": "597"
+      }
+    },
+    {
+      "label": "health 0x326de33bc3d8cf02031199b76e240a2197c525006a6960265786c272a2fb399e",
+      "digest": "C2hDRDf3ivNWbwzt4KsVh1z5zEby9fVjo2jovamgLHLn",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "13163200",
+        "storageRebate": "5965403",
+        "nonRefundableStorageFee": "597"
+      }
+    },
+    {
+      "label": "receipt 0xeb4455594bed4ebe9c612bbb73011613d54576991405e49f031c7720f373bbb6",
+      "digest": "DXZyJjfTk3wiqYEYyqyPEAYxvw3dP555NdxXA7f9upMi",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "9006000",
@@ -928,8 +928,18 @@
       }
     },
     {
-      "label": "receipt 0xf6d790101bddc0ec201a249c9e1e21d8ab6e11c6cf04daf21d69eb090e3fd186",
-      "digest": "27yoFQKrAyWov9yRsD5MEyx8DxN7RmkK3quR3RFsHa9S",
+      "label": "draw 0x04e3360faea939b635cfbb3b109abeb9ea6cc4a91b1775e5a07118e4e83cdee0",
+      "digest": "DqCyNN3hXmrGgDa18vL6Mdthb8e9iM6MCJASyRgX6vVQ",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "6391600",
+        "storageRebate": "5403060",
+        "nonRefundableStorageFee": "540"
+      }
+    },
+    {
+      "label": "receipt 0xcbb12cdad9e2562ca50b2f3725b97339c60a14c2aa133ccb796a19ad6a86f91d",
+      "digest": "ArB3XsPuzdusmXnSnreKT1gL5gAbubfBn986hKhkAHbf",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "9256800",
@@ -938,28 +948,8 @@
       }
     },
     {
-      "label": "draw 0x19cdb43191db6b8605602fb16e2e4f14a65c3345b1321f0b74850333a4fe9d2c",
-      "digest": "6tXVberQoWEiZN4QESBSb5jfGcARLQ926YpoaeW15ZAD",
-      "gas": {
-        "computationCost": "1000000",
-        "storageCost": "6391600",
-        "storageRebate": "5403060",
-        "nonRefundableStorageFee": "540"
-      }
-    },
-    {
-      "label": "draw 0x7dfa6d5ae6f2f15a0b65a820bc04df23524aa4a19c50519858282e46a323a157",
-      "digest": "6EbAnHRQbt3UTjBgCRjrtMLNcGDTHRcxKdi13NkajBax",
-      "gas": {
-        "computationCost": "1000000",
-        "storageCost": "6391600",
-        "storageRebate": "5403060",
-        "nonRefundableStorageFee": "540"
-      }
-    },
-    {
-      "label": "receipt 0x9734192e425d3420e2e9048da114f1b63d17e73f2a959552aee89106c20de18b",
-      "digest": "AXbqTp78QjR5aC6ghR8Y25R1FivsiyoKaRuiE1d8FYuE",
+      "label": "receipt 0x326de33bc3d8cf02031199b76e240a2197c525006a6960265786c272a2fb399e",
+      "digest": "DKqXSbXCHH5m4KkUkKCp1LTY5ezqX8S7g3SJYLpz8Yx3",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "9507600",
@@ -968,8 +958,8 @@
       }
     },
     {
-      "label": "draw 0x95352bc66fcc1701cd86b75eae411a2271a836add22cf9c2de8da0e0cc6d3e0d",
-      "digest": "Cj8XSd9VMgDsENBwQNe2BoD4ZKcuLc6PJi9Apoygq1v7",
+      "label": "draw 0x580c64fa1acb8886d70ffbc2c05b579e65c2efb5619b9daf0758132a3e53feef",
+      "digest": "2PBoHBEM1yFCTK9HvtmqVVyqKeWzVDpKPLE8AdNbbu6f",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "6391600",
@@ -978,8 +968,18 @@
       }
     },
     {
-      "label": "draw 0x21ee067ad1d72e5f3513a5996d622653e1b3deba6c0bf63cebf7138dd3d5ac85",
-      "digest": "BcnYYFdjw1UfG7AFwddBhwmbGHGkGDAa8kWefk53EGNe",
+      "label": "health 0x04e3360faea939b635cfbb3b109abeb9ea6cc4a91b1775e5a07118e4e83cdee0",
+      "digest": "3GPL1rWda6DPZDRe2thanGJb4jaVLZ9EEt3pGTT68ZQc",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "13163200",
+        "storageRebate": "5965403",
+        "nonRefundableStorageFee": "597"
+      }
+    },
+    {
+      "label": "draw 0x80220144ae674b5df6e076ef0bdf79bd52802aa834eb1d92a2690dcdf59640b6",
+      "digest": "EHnTU7ZUaUS9XnPx5dXCoRDZf6ZEWN9YVc2CLevABBXr",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "6391600",
@@ -988,8 +988,18 @@
       }
     },
     {
-      "label": "health 0x7dfa6d5ae6f2f15a0b65a820bc04df23524aa4a19c50519858282e46a323a157",
-      "digest": "3RArdaXwMWzuEJquhyED3bAWZkhJMzzabTi7mRh4Pyw8",
+      "label": "draw 0x1755684a44da24931acb038f83e6444147459439560204a6ea3704eabd1712a4",
+      "digest": "Zqa7KGqaNTHuR4E4UdJFKSLy4UXdSFcpGZuUaRRcJ1V",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "6391600",
+        "storageRebate": "5403060",
+        "nonRefundableStorageFee": "540"
+      }
+    },
+    {
+      "label": "health 0x580c64fa1acb8886d70ffbc2c05b579e65c2efb5619b9daf0758132a3e53feef",
+      "digest": "6Njh73DNFJWX5TREvgwSWCrTSyXbQqgL9v6eUTcGzMb7",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "13163200",
@@ -998,8 +1008,8 @@
       }
     },
     {
-      "label": "health 0x19cdb43191db6b8605602fb16e2e4f14a65c3345b1321f0b74850333a4fe9d2c",
-      "digest": "Fk3Hnncx1psEeuEvEvpVm9JmNvNPHXa4TpDtgCeG2R4t",
+      "label": "health 0x80220144ae674b5df6e076ef0bdf79bd52802aa834eb1d92a2690dcdf59640b6",
+      "digest": "7ZkSLouYPUHpVkheTNyFvB2pVywddHbZvjuCxnZf7VQW",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "13163200",
@@ -1008,28 +1018,8 @@
       }
     },
     {
-      "label": "health 0x21ee067ad1d72e5f3513a5996d622653e1b3deba6c0bf63cebf7138dd3d5ac85",
-      "digest": "6uf3DkUqqwpRuF2qB22c33E4qfyMHfEsVeUrKd3tirLY",
-      "gas": {
-        "computationCost": "1000000",
-        "storageCost": "13163200",
-        "storageRebate": "5965403",
-        "nonRefundableStorageFee": "597"
-      }
-    },
-    {
-      "label": "health 0x95352bc66fcc1701cd86b75eae411a2271a836add22cf9c2de8da0e0cc6d3e0d",
-      "digest": "GAXrZ3VJKAsPwridS49smJAqHLPurCzRACG45ivE7B4c",
-      "gas": {
-        "computationCost": "1000000",
-        "storageCost": "13163200",
-        "storageRebate": "5965403",
-        "nonRefundableStorageFee": "597"
-      }
-    },
-    {
-      "label": "receipt 0x7dfa6d5ae6f2f15a0b65a820bc04df23524aa4a19c50519858282e46a323a157",
-      "digest": "J8zZ1pKEhXpnDePudcdPemE1CtLkzRCbe9ZDzMsdmsne",
+      "label": "receipt 0x04e3360faea939b635cfbb3b109abeb9ea6cc4a91b1775e5a07118e4e83cdee0",
+      "digest": "CzaSdZjkwy3PXSvo2K7q6ARzKKbiPWncsmn3kHbJYQbY",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "9758400",
@@ -1038,18 +1028,18 @@
       }
     },
     {
-      "label": "receipt 0x19cdb43191db6b8605602fb16e2e4f14a65c3345b1321f0b74850333a4fe9d2c",
-      "digest": "9Qh1txiqRmEn5QqQDHagrZtfmGxnMjW7nnHLcsce1HMv",
+      "label": "health 0x1755684a44da24931acb038f83e6444147459439560204a6ea3704eabd1712a4",
+      "digest": "9VCdp1bYdJnMq1cMk9XHi1ZnNtkz67m6bdR7WHGKB5z6",
       "gas": {
         "computationCost": "1000000",
-        "storageCost": "10009200",
-        "storageRebate": "9757424",
-        "nonRefundableStorageFee": "976"
+        "storageCost": "13163200",
+        "storageRebate": "5965403",
+        "nonRefundableStorageFee": "597"
       }
     },
     {
-      "label": "receipt 0x21ee067ad1d72e5f3513a5996d622653e1b3deba6c0bf63cebf7138dd3d5ac85",
-      "digest": "GBecbrprfzF5JeXf8eUpwtBdNkWVLho3WjZ6GwkedJ3s",
+      "label": "receipt 0x80220144ae674b5df6e076ef0bdf79bd52802aa834eb1d92a2690dcdf59640b6",
+      "digest": "83EcAgkf9FjDgqTeq9ZcFSnnqZ86rAJ5NPGAVMNSBrGD",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "10260000",
@@ -1058,8 +1048,8 @@
       }
     },
     {
-      "label": "draw 0x4c3c332600e6409a321ee23ea5ca252abe96cac261e0ad7322ceef5cc6d3ffa0",
-      "digest": "H7RxYPaZFb1aKqeXbYzEVBETbmCa6zcBp8i3WwkNUBJG",
+      "label": "draw 0x0b53a4082f27dc8a028c87cb047668decfaa4b5d26cb252f96a6f55afa491d62",
+      "digest": "9uwtAgJg3XUzBYmaYg9zUooQ4mrEX6LEvKvhQU9J62sR",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "6391600",
@@ -1068,8 +1058,18 @@
       }
     },
     {
-      "label": "draw 0xa9eb543ecb6ab46dcc237fa4583351e0312e9dc2b3f1bcfe47c30ecde9dad17b",
-      "digest": "4zvd2YexCnbUKKi7dfSvcedLYJ56EhkSTgY8PMQhudD3",
+      "label": "receipt 0x580c64fa1acb8886d70ffbc2c05b579e65c2efb5619b9daf0758132a3e53feef",
+      "digest": "9R2nMTe5DuvV2Dfbhe8bRBtzQZ46c3HNcKbcgMKcBm4Y",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "10009200",
+        "storageRebate": "9757424",
+        "nonRefundableStorageFee": "976"
+      }
+    },
+    {
+      "label": "draw 0xed4df5be859928f4b1aae7bff7c7dc721bda0c00500d226bd78ac5fb12d95a06",
+      "digest": "8xvBFczsN1F9QYh6PmxBz3LoVYW7ZEDjHbeUtTNGRyAt",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "6391600",
@@ -1078,8 +1078,28 @@
       }
     },
     {
-      "label": "receipt 0x95352bc66fcc1701cd86b75eae411a2271a836add22cf9c2de8da0e0cc6d3e0d",
-      "digest": "At1e6322afoj5qxxA8JjFEvTyjBm43QDUk2oG5ViHzyK",
+      "label": "health 0x0b53a4082f27dc8a028c87cb047668decfaa4b5d26cb252f96a6f55afa491d62",
+      "digest": "AGxafZeGjC2kgBibaESdJD7iCgEivhe8wyPYnGh1y8Hx",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "13163200",
+        "storageRebate": "5965403",
+        "nonRefundableStorageFee": "597"
+      }
+    },
+    {
+      "label": "draw 0x6ce50d89dfd770562bbe4172643c59355b4eac74d92a5e3b4755fa8d5e6bcffd",
+      "digest": "7uiUKP97b9odGrGTMYJuR2G6zpk6PC6FgphGQVgzQPFh",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "6391600",
+        "storageRebate": "5403060",
+        "nonRefundableStorageFee": "540"
+      }
+    },
+    {
+      "label": "receipt 0x1755684a44da24931acb038f83e6444147459439560204a6ea3704eabd1712a4",
+      "digest": "DSM11mTU8sj5m5WrQSyE4Rqu7dwAHuLWYTeB3t87nhAf",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "10510800",
@@ -1088,8 +1108,8 @@
       }
     },
     {
-      "label": "health 0xa9eb543ecb6ab46dcc237fa4583351e0312e9dc2b3f1bcfe47c30ecde9dad17b",
-      "digest": "7VsiZgbJivv1uX4xD4V3FTPhMTka58svFMgCidzH8YCB",
+      "label": "health 0xed4df5be859928f4b1aae7bff7c7dc721bda0c00500d226bd78ac5fb12d95a06",
+      "digest": "BPevEpQpvtGE1pauCeyeQmC2MKMmFjgMbpyk5aExgBeE",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "13163200",
@@ -1098,28 +1118,8 @@
       }
     },
     {
-      "label": "draw 0x66042cceb64b54b6bd21a2e23843a928a2d2bfa8973a83a549290dd3ba87cfb3",
-      "digest": "2JUbaUVWFuy2rcbcK3CrdfJzgpfjRt1kYMxdTsEWagLX",
-      "gas": {
-        "computationCost": "1000000",
-        "storageCost": "6391600",
-        "storageRebate": "5403060",
-        "nonRefundableStorageFee": "540"
-      }
-    },
-    {
-      "label": "draw 0xbcaa57762cb9520b47d9a216c68b995159793282f2572987bc1a2a3692d7a783",
-      "digest": "45S4t9MZqcu7BikRZJvFukddbs3xi4H9xgw7Vbrjujhh",
-      "gas": {
-        "computationCost": "1000000",
-        "storageCost": "6391600",
-        "storageRebate": "5403060",
-        "nonRefundableStorageFee": "540"
-      }
-    },
-    {
-      "label": "health 0x4c3c332600e6409a321ee23ea5ca252abe96cac261e0ad7322ceef5cc6d3ffa0",
-      "digest": "G2TpSSRuRXtG1HjknnQr4xGHSSM2qKBVLWy1A26N3qp3",
+      "label": "health 0x6ce50d89dfd770562bbe4172643c59355b4eac74d92a5e3b4755fa8d5e6bcffd",
+      "digest": "BV8f9NfAsBajUgzKdJBWVPhqDZr5C6Z6QPsXbvxcnFcF",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "13163200",
@@ -1128,8 +1128,8 @@
       }
     },
     {
-      "label": "receipt 0xa9eb543ecb6ab46dcc237fa4583351e0312e9dc2b3f1bcfe47c30ecde9dad17b",
-      "digest": "9YyaNNfij9QA91ZbGyQ9jxUYUYKKFC1JMXNQ3acpUJpQ",
+      "label": "receipt 0x0b53a4082f27dc8a028c87cb047668decfaa4b5d26cb252f96a6f55afa491d62",
+      "digest": "86mcAH6iR88q6SHWao9StALWLEKs9MZybvsZFaP1bXsv",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "10761600",
@@ -1138,8 +1138,18 @@
       }
     },
     {
-      "label": "health 0x66042cceb64b54b6bd21a2e23843a928a2d2bfa8973a83a549290dd3ba87cfb3",
-      "digest": "2giytabniXZddjrsaMW8PMMzsXJpbzrefRmk5vmrfxjY",
+      "label": "draw 0xfde93fc789eca9c27541a44ec12c2dd13e09c9d632f5b02b18ebd3681663bf53",
+      "digest": "9twE47SaqP7RPnFcnfwdK3rTHtgPo6wnTLwQaVQ5zpyj",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "6391600",
+        "storageRebate": "5403060",
+        "nonRefundableStorageFee": "540"
+      }
+    },
+    {
+      "label": "health 0xfde93fc789eca9c27541a44ec12c2dd13e09c9d632f5b02b18ebd3681663bf53",
+      "digest": "6UP79xAAFBNGYp5W5UfQ6kLKbiEfXULvE9MaHoAVCU6M",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "13163200",
@@ -1148,18 +1158,8 @@
       }
     },
     {
-      "label": "health 0xbcaa57762cb9520b47d9a216c68b995159793282f2572987bc1a2a3692d7a783",
-      "digest": "8kbdWYonfLkv5PFnveAaLeie4L2xUa29J5NFTjGjg9hy",
-      "gas": {
-        "computationCost": "1000000",
-        "storageCost": "13163200",
-        "storageRebate": "5965403",
-        "nonRefundableStorageFee": "597"
-      }
-    },
-    {
-      "label": "receipt 0x4c3c332600e6409a321ee23ea5ca252abe96cac261e0ad7322ceef5cc6d3ffa0",
-      "digest": "98KbQZaCmGUz4rE17vbKRn58osbThJ6Z6LV5kK9qFS2f",
+      "label": "receipt 0xed4df5be859928f4b1aae7bff7c7dc721bda0c00500d226bd78ac5fb12d95a06",
+      "digest": "2z6Nrcu5xxymkBGUHJfSpea5tZehN9Tgdw7vaJd28ZBW",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "11012400",
@@ -1168,8 +1168,8 @@
       }
     },
     {
-      "label": "receipt 0x66042cceb64b54b6bd21a2e23843a928a2d2bfa8973a83a549290dd3ba87cfb3",
-      "digest": "EvfitVixPVMQEvK1T8yQBTKch1YWPviecPLY9tsroARs",
+      "label": "receipt 0x6ce50d89dfd770562bbe4172643c59355b4eac74d92a5e3b4755fa8d5e6bcffd",
+      "digest": "6QUHzkMne9JALgDkt5WsF12zuevAhHjDfvM2gn6ubFay",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "11263200",
@@ -1178,8 +1178,8 @@
       }
     },
     {
-      "label": "receipt 0xbcaa57762cb9520b47d9a216c68b995159793282f2572987bc1a2a3692d7a783",
-      "digest": "5cMEjBTAkcPAkwYVUsncQ47Bf8yGzT6dKuUvUcfqKKrS",
+      "label": "receipt 0xfde93fc789eca9c27541a44ec12c2dd13e09c9d632f5b02b18ebd3681663bf53",
+      "digest": "8r1dUdPfrR6qKs7RodqhNZFp4ZLqrA8EHawVJ6vtz37L",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "11514000",
@@ -1189,7 +1189,7 @@
     },
     {
       "label": "fund one-blob storage contention pool",
-      "digest": "BnAGGEnnd1FE14w35RmbB29UEAM28Qmkt9TdobhSwqQp",
+      "digest": "DkQqbQFwaTpsFFGafHvcMsFsNRkxUp5HUaMFM65QsWxh",
       "gas": {
         "computationCost": "1000000",
         "storageCost": "27876800",
@@ -1200,17 +1200,17 @@
   ],
   "rejected": [
     {
-      "digest": "CZzfNgXAM9Uu7HiFoB1hNCkm9xhvj4Jw9Lv3SpsLJseu",
+      "digest": "6dTksxyrR89Zuh2Lg3hoLHY5DzcHbD7Gifw3Z3CjAMdi",
       "status": {
         "success": false,
         "error": {
           "$kind": "MoveAbort",
-          "message": "MoveAbort in 1st command, abort code: 10, in '0x7b6f7cb6b375bd1f2bb711d8e71b4d2b0db52212bf0a5186aa8b5831114c90d4::fleet_budget::draw_gas' (instruction 58)",
+          "message": "MoveAbort in 1st command, abort code: 10, in '0xd7afc82c5e86511900d250bbc985ffb4298c6742d704b13c3aba16df8cc3f1b4::fleet_budget::draw_gas' (instruction 58)",
           "command": 0,
           "MoveAbort": {
             "abortCode": "10",
             "location": {
-              "package": "0x7b6f7cb6b375bd1f2bb711d8e71b4d2b0db52212bf0a5186aa8b5831114c90d4",
+              "package": "0xd7afc82c5e86511900d250bbc985ffb4298c6742d704b13c3aba16df8cc3f1b4",
               "module": "fleet_budget",
               "function": 14,
               "instruction": 58,
@@ -1227,17 +1227,17 @@
       }
     },
     {
-      "digest": "6Y1cxDvtvNATmPghnsNKvfN39dW9qb5UvzqYxebHRikq",
+      "digest": "YTajBUZ81xTJq7yJy42bezbyWcTrdwqd8LR1knfx3K2",
       "status": {
         "success": false,
         "error": {
           "$kind": "MoveAbort",
-          "message": "MoveAbort in 1st command, abort code: 10, in '0x7b6f7cb6b375bd1f2bb711d8e71b4d2b0db52212bf0a5186aa8b5831114c90d4::fleet_budget::draw_gas' (instruction 58)",
+          "message": "MoveAbort in 1st command, abort code: 10, in '0xd7afc82c5e86511900d250bbc985ffb4298c6742d704b13c3aba16df8cc3f1b4::fleet_budget::draw_gas' (instruction 58)",
           "command": 0,
           "MoveAbort": {
             "abortCode": "10",
             "location": {
-              "package": "0x7b6f7cb6b375bd1f2bb711d8e71b4d2b0db52212bf0a5186aa8b5831114c90d4",
+              "package": "0xd7afc82c5e86511900d250bbc985ffb4298c6742d704b13c3aba16df8cc3f1b4",
               "module": "fleet_budget",
               "function": 14,
               "instruction": 58,
@@ -1254,17 +1254,17 @@
       }
     },
     {
-      "digest": "4MUQ4HTrzkE9UMud5Dhcqh9JVgJPbFscPqNkZeVCvzWm",
+      "digest": "ANZtDsCA1JyEYaVgBrFtTbWFEeJywCfSYBpBvHbHoriP",
       "status": {
         "success": false,
         "error": {
           "$kind": "MoveAbort",
-          "message": "MoveAbort in 1st command, abort code: 10, in '0x7b6f7cb6b375bd1f2bb711d8e71b4d2b0db52212bf0a5186aa8b5831114c90d4::fleet_budget::draw_gas' (instruction 58)",
+          "message": "MoveAbort in 1st command, abort code: 10, in '0xd7afc82c5e86511900d250bbc985ffb4298c6742d704b13c3aba16df8cc3f1b4::fleet_budget::draw_gas' (instruction 58)",
           "command": 0,
           "MoveAbort": {
             "abortCode": "10",
             "location": {
-              "package": "0x7b6f7cb6b375bd1f2bb711d8e71b4d2b0db52212bf0a5186aa8b5831114c90d4",
+              "package": "0xd7afc82c5e86511900d250bbc985ffb4298c6742d704b13c3aba16df8cc3f1b4",
               "module": "fleet_budget",
               "function": 14,
               "instruction": 58,
@@ -1281,17 +1281,17 @@
       }
     },
     {
-      "digest": "HMsQFMLzGpUKkSKCR8PMkB2X5xohmTvt3S1A8XeVq9TY",
+      "digest": "GDvRijudSeJWPxzEsM5tDeFRv3LitsVDQGMQWQ6RovLz",
       "status": {
         "success": false,
         "error": {
           "$kind": "MoveAbort",
-          "message": "MoveAbort in 1st command, abort code: 10, in '0x7b6f7cb6b375bd1f2bb711d8e71b4d2b0db52212bf0a5186aa8b5831114c90d4::fleet_budget::draw_gas' (instruction 58)",
+          "message": "MoveAbort in 1st command, abort code: 10, in '0xd7afc82c5e86511900d250bbc985ffb4298c6742d704b13c3aba16df8cc3f1b4::fleet_budget::draw_gas' (instruction 58)",
           "command": 0,
           "MoveAbort": {
             "abortCode": "10",
             "location": {
-              "package": "0x7b6f7cb6b375bd1f2bb711d8e71b4d2b0db52212bf0a5186aa8b5831114c90d4",
+              "package": "0xd7afc82c5e86511900d250bbc985ffb4298c6742d704b13c3aba16df8cc3f1b4",
               "module": "fleet_budget",
               "function": 14,
               "instruction": 58,
@@ -1310,8 +1310,8 @@
   ],
   "storage_contention": [
     {
-      "device": "0x1854a1b424d7713e3cf70d97e2cb64204459e77194a869f6e7ca06bfe4ffd6c1",
-      "digest": "5FFKcrMTmnb5VtCBBFHwZSenVuNVKSuZtGbbJQcPNn5V",
+      "device": "0x99244a1948d5f839cb9dd7521ac02a9f69f68078ac72a3096b1d698315da4aa4",
+      "digest": "H1TetrruTQeoptKpejmTd5jrH6kiKXgyBFjEkt5W6uhm",
       "status": "success",
       "gas": {
         "computationCost": "1000000",
@@ -1321,8 +1321,8 @@
       }
     },
     {
-      "device": "0x03446749ab56dc5f9b0665b3f52d95b119177804a81b7590504f8bac0a4d596a",
-      "digest": "3z9eeRwQwvdnnpYxWz3NbbvudU94eaonXWhzdZZP95JE",
+      "device": "0xd93e9343ea45cb1dc21b80c651986345e880dfed872e7fc687a873e3038e2b97",
+      "digest": "9j6GAiZ9XAWMDDFgA5Et64J7mckVRMRX44Y4HMnJSg94",
       "status": "insufficient_storage",
       "gas": {
         "computationCost": "1000000",
@@ -1332,8 +1332,8 @@
       }
     },
     {
-      "device": "0xeecbf3f1453eedc4a063e9ee6df5aadc3527c43030fb32f9ccc6ff7ebf5f176b",
-      "digest": "GrADhnDVbXvuTvZ2JPgKF3TL9nUtQnBuAPZV2geuYHk1",
+      "device": "0x83167117d247e7c057db07468d8e55575da70acec2d210c4ae6f08db6e3c89ca",
+      "digest": "GLfjrJZ2zCa8taD29rqDp1JY7b8Msmjck6q21uP3XzLj",
       "status": "insufficient_storage",
       "gas": {
         "computationCost": "1000000",
@@ -1343,8 +1343,8 @@
       }
     },
     {
-      "device": "0x09ed4c2d188f7b336fc5f02b9b3286dd7662b2aefaa1f10047daa16a71d9e76e",
-      "digest": "GvTU74oGGhrRH1YXs26GrStJGDqtLYAGKkUoCoXNBEy9",
+      "device": "0xc640098c9ee32c5dd6d5f0c25b624596efb795e7019cef9dac8959004ade239e",
+      "digest": "GYpjyGRGKHcJNxH2YGxb7hZmXozq8k75uRRGeFTtmfoH",
       "status": "insufficient_storage",
       "gas": {
         "computationCost": "1000000",

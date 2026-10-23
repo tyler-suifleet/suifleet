@@ -4,16 +4,16 @@ These are measured software boundaries, with public-provider and native-fleet li
 
 | Experiment / stage | n | p50 | p95 |
 |---|---:|---:|---:|
-| chain: enrollment | 16 | 768.40 | 1715.09 |
-| chain: deployment_admission | 1 | 3693.77 | 3693.77 |
-| chain: budget_draw | 16 | 1640.67 | 1717.56 |
-| chain: health_anchor | 16 | 797.99 | 1649.25 |
-| chain: telemetry_visibility | 16 | 19.10 | 248.10 |
-| chain: encrypted_fetch | 16 | 790.16 | 1722.52 |
-| chain: synthetic_apply | 16 | 11.82 | 293.13 |
-| chain: receipt_finalization | 16 | 876.75 | 1699.87 |
-| chain: index_page | 1 | 7.18 | 7.18 |
-| chain: storage_contention | 4 | 639.78 | 641.38 |
+| chain: enrollment | 16 | 747.36 | 1674.44 |
+| chain: deployment_admission | 1 | 4884.79 | 4884.79 |
+| chain: budget_draw | 16 | 774.38 | 1670.41 |
+| chain: health_anchor | 16 | 835.88 | 1719.20 |
+| chain: telemetry_visibility | 16 | 13.26 | 33.91 |
+| chain: encrypted_fetch | 16 | 692.51 | 1786.20 |
+| chain: synthetic_apply | 16 | 3.99 | 9.51 |
+| chain: receipt_finalization | 16 | 761.12 | 1687.20 |
+| chain: index_page | 1 | 6.78 | 6.78 |
+| chain: storage_contention | 4 | 1663.16 | 1664.88 |
 | fixtures: index_page | 2 | 0.61 | 3.46 |
 | fixtures: health_page | 2 | 40.74 | 155.52 |
 | fixtures: sign_encrypt | 384 | 290.83 | 791.00 |
@@ -24,13 +24,13 @@ These are measured software boundaries, with public-provider and native-fleet li
 
 | Receipt | Executed revision |
 |---|---|
-| [merged-chain](merged-chain.json) | `a187418d3dff48bf0cc73fcea2854db7576d7950` |
+| [merged-chain](merged-chain.json) | `ce6096b2e129d97b877b56f07b6f13c4b76c4a80` |
 | [merged-fixtures](merged-fixtures.json) | `ffb1c630e5f69f4003855d79729f6e75f3747cbc` |
 | [merged-browser](merged-browser.json) | `ffb1c630e5f69f4003855d79729f6e75f3747cbc` |
 | [merged-daemon](merged-daemon.json) | `ffb1c630e5f69f4003855d79729f6e75f3747cbc` |
 | [merged-public-read](merged-public-read.json) | `ffb1c630e5f69f4003855d79729f6e75f3747cbc` |
 
-Integrated-chain Node peak RSS: 334,274,560 bytes (excludes child node/compiler/keyservers). Crypto-fixture Node peak RSS: 446,615,552 bytes. Chromium renderer JS-heap peak: 23,176,384 bytes (not browser RSS).
+Integrated-chain Node peak RSS: 331,874,304 bytes (excludes child node/compiler/keyservers). Crypto-fixture Node peak RSS: 446,615,552 bytes. Chromium renderer JS-heap peak: 23,176,384 bytes (not browser RSS).
 
 Four independent native restart drills: 111.31 seconds at concurrency two; not one shared-chain fleet.
 
