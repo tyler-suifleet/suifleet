@@ -101,7 +101,7 @@ gas merely to build a float. Failed writes stay queued with the existing funding
 and durable-transaction recovery behavior.
 
 Each poll logs `read_requests` and `response_bytes` for daemon reads, including
-concurrent fleet producers during that poll. Bytes are encoded protobuf response
+fleet producer reads between polls as well. Bytes are encoded protobuf response
 payloads, excluding request bytes, headers, transport framing/compression and RPC
 error-status payloads; they are not a full network bill. Slow scans, due writes
 and retries cost additional reads.

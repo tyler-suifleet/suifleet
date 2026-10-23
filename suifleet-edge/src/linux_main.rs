@@ -467,8 +467,8 @@ async fn main() -> anyhow::Result<()> {
             address = sui.address(),
             "Daemon started with durable deployment polling"
         );
+        let mut reads_before = sui.read_stats();
         loop {
-            let reads_before = sui.read_stats();
             let cycle = poll(
                 &cfg,
                 &sui,
@@ -494,6 +494,8 @@ async fn main() -> anyhow::Result<()> {
                     result => {
                         let reads_after = sui.read_stats();
                         info!(read_requests = reads_after.0 - reads_before.0, response_bytes = reads_after.1 - reads_before.1, "Chain reads this poll (protobuf payload bytes)");
+                        // Include producer reads made during the preceding sleep.
+                        reads_before = reads_after;
                         sync.lock().unwrap().record(&result);
                         if let Err(error) = result { warn!(%error, "Sync failed; retrying without advancing cursor"); }
                     }
