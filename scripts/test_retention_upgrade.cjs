@@ -342,6 +342,15 @@ public fun sf128_set_epoch(system: &mut System, epoch: u32) {
       await execute('actual device fully-paid archive admission without renewal',tx);
       const paidFields=(await client.listDynamicFields({parentId:oldStorage,include:{value:true}})).dynamicFields;
       assert.ok(paidFields.some(f=>f.name.type===current+'::fleet_storage::FullyPaidArchiveKey'));
+      const transport=require('./retention_transport.cjs');
+      const retentionField=await client.getDynamicField({parentId:oldStorage,name:{type:head+'::fleet_storage::RetentionKey',bcs:Uint8Array.of(0)}});
+      const retention=transport.Retention.parse(retentionField.dynamicField.value.bcs);
+      const snapshots=await transport.snapshotBlobs(client,{storage:oldStorage,storage_origin:base.pkg,retention_origin:head},
+        {committee:{epoch:6},storage_price_per_unit_size:'5'},retention);
+      assert.equal(snapshots.length,3,'fully-paid archive excluded, existing and new renewal policies preserved');
+      const budgetFields=(await client.listDynamicFields({parentId:budget,include:{value:true}})).dynamicFields;
+      assert.equal((await transport.accountPage(client,{budget_origin:corePub.pkg},budget,budgetFields)).length,1);
+      console.log(JSON.stringify({check:'SF128 real gRPC paginated renewal records and batched account bindings',renewals:snapshots.length,accounts:1,fully_paid_excluded:true}));
 
 
     }

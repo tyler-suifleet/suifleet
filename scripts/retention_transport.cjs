@@ -71,6 +71,62 @@ async function renewalReceipt(client, value) {
   }
   return { status: 'unknown' };
 }
+// Read values from the same paginated index instead of issuing one additional
+// RecordKey RPC per renewal. Records may appear before or after their policies.
+async function snapshotBlobs(client, c, ws, r) {
+  const records = new Map(), policies = new Map();
+  let cursor;
+  do {
+    const page = await client.listDynamicFields({ parentId: c.storage, cursor, limit: 100, include: { value: true } });
+    for (const entry of page.dynamicFields) {
+      const type = tag(entry.name.type);
+      if (type === tag(`${c.storage_origin}::fleet_storage::RecordKey`)) {
+        check(tag(entry.valueType) === tag(`${c.storage_origin}::fleet_storage::BlobRecord`));
+        const blob = bcs.Address.parse(entry.name.bcs);
+        check(!records.has(blob) && records.size < 100_000);
+        records.set(blob, Record.parse(entry.value.bcs));
+      } else if (type === tag(`${c.retention_origin}::fleet_storage::RenewalKey`)) {
+        check(tag(entry.valueType) === tag(`${c.retention_origin}::fleet_storage::Renewal`));
+        const blob = bcs.Address.parse(entry.name.bcs);
+        check(!policies.has(blob) && policies.size < 100_000);
+        policies.set(blob, Renewal.parse(entry.value.bcs));
+      }
+    }
+    cursor = page.hasNextPage ? page.cursor : undefined;
+  } while (cursor);
+  const epoch = ws.committee.epoch;
+  const gasSpent = r.epoch === epoch ? BigInt(r.gas_spent) : 0n;
+  return [...policies].map(([blob, p]) => {
+    const record = records.get(blob);
+    check(record);
+    const prepaid = p.last_success_epoch === null && BigInt(p.max_fee) === 0n;
+    const quoted = ((BigInt(record.encoded_size) + 1048575n) / 1048576n) * BigInt(ws.storage_price_per_unit_size) * BigInt(Math.max(0, p.target - record.end_epoch));
+    return { id: blob, end: record.end_epoch, target: p.target,
+      quote: quoted.toString(), prepaid, last_success_epoch: p.last_success_epoch,
+      affordable: prepaid && BigInt(r.gas.value) >= BigInt(r.reward) &&
+        BigInt(r.reward) + gasSpent <= BigInt(r.gas_per_epoch) };
+  });
+}
+
+async function accountPage(client, c, budget, fields) {
+  const entries = fields.filter(e => tag(e.name.type) === tag(`${c.budget_origin}::fleet_budget::DeviceKey`));
+  check(entries.length <= 100);
+  const ids = entries.map(e => {
+    check(tag(e.valueType) === tag('0x2::object::ID'));
+    return bcs.Address.parse(e.value.bcs);
+  });
+  if (!ids.length) return [];
+  const { objects } = await client.getObjects({ objectIds: ids, include: { content: true } });
+  check(objects.length === ids.length);
+  return objects.map((object, i) => {
+    check(object && !(object instanceof Error) && id(object.objectId) === id(ids[i]));
+    check(tag(object.type) === tag(`${c.budget_origin}::fleet_budget::GasAccount`) && object.owner.$kind === 'Shared');
+    const a = Account.parse(object.content);
+    check(id(a.budget_id) === id(budget) && id(a.device_id) === id(bcs.Address.parse(entries[i].name.bcs)));
+    return a;
+  });
+}
+
 async function run({ config: c, action, value }) {
   check(c.chain === '4c78adac' && c.network === 'testnet');
   for (const key of ['storage', 'package', 'storage_origin', 'retention_origin', 'executor']) id(c[key]);
@@ -97,28 +153,7 @@ async function run({ config: c, action, value }) {
     const epoch = ws.committee.epoch;
     const r = await field('RetentionKey', Uint8Array.of(0), Retention);
     check(id(r.executor) === id(c.executor));
-    const blobs = [];
-    let cursor;
-    do {
-      const page = await client.listDynamicFields({ parentId: c.storage, cursor, limit: 100, include: { value: true } });
-      for (const entry of page.dynamicFields) {
-        if (tag(entry.name.type) !== tag(`${c.retention_origin}::fleet_storage::RenewalKey`)) continue;
-        check(blobs.length < 100_000);
-        const blob = bcs.Address.parse(entry.name.bcs);
-        check(tag(entry.valueType) === tag(`${c.retention_origin}::fleet_storage::Renewal`));
-        const p = Renewal.parse(entry.value.bcs);
-        const record = await field('RecordKey', bcs.Address.serialize(blob).toBytes(), Record, c.storage_origin);
-        const ceiling = BigInt(p.max_fee);
-        const prepaid = p.last_success_epoch === null && ceiling === 0n;
-        const quoted = ((BigInt(record.encoded_size) + 1048575n) / 1048576n) * BigInt(ws.storage_price_per_unit_size) * BigInt(Math.max(0, p.target - record.end_epoch));
-        const gasSpent = r.epoch === epoch ? BigInt(r.gas_spent) : 0n;
-        blobs.push({ id: blob, end: record.end_epoch, target: p.target,
-          quote: quoted.toString(), prepaid, last_success_epoch: p.last_success_epoch,
-          affordable: prepaid && BigInt(r.gas.value) >= BigInt(r.reward) &&
-            BigInt(r.reward) + gasSpent <= BigInt(r.gas_per_epoch) });
-      }
-      cursor = page.hasNextPage ? page.cursor : undefined;
-    } while (cursor);
+    const blobs = await snapshotBlobs(client, c, ws, r);
     const warnings = [];
     if (blobs.some((blob) => blob.end < blob.target && !blob.prepaid)) warnings.push('prepayment_required');
     if (BigInt(r.wal.value) < BigInt(r.pending_wal) || BigInt(r.gas.value) < BigInt(r.pending_count) * BigInt(r.reward)) warnings.push('retention_low');
@@ -143,14 +178,8 @@ async function run({ config: c, action, value }) {
       let accountCursor, count = 0;
       do {
         const page = await client.listDynamicFields({ parentId: fleet.budget, cursor: accountCursor, limit: 100, include: { value: true } });
-        for (const entry of page.dynamicFields) {
-          if (tag(entry.name.type) !== tag(`${c.budget_origin}::fleet_budget::DeviceKey`)) continue;
-          check(++count <= 100_000 && tag(entry.valueType) === tag('0x2::object::ID'));
-          const accountId = bcs.Address.parse(entry.value.bcs);
-          const accountObject = (await client.getObject({ objectId: accountId, include: { content: true } })).object;
-          check(tag(accountObject.type) === tag(`${c.budget_origin}::fleet_budget::GasAccount`) && accountObject.owner.$kind === 'Shared');
-          const a = Account.parse(accountObject.content);
-          check(id(a.budget_id) === id(fleet.budget) && id(a.device_id) === id(bcs.Address.parse(entry.name.bcs)));
+        for (const a of await accountPage(client, c, fleet.budget, page.dynamicFields)) {
+          check(++count <= 100_000);
           if (a.closed || a.suspended) continue;
           if (BigInt(a.reserve.value) === 0n) warnings.push('operation_reserve_empty');
           if (clockMs < BigInt(a.period_start_ms) + BigInt(a.limits.period_ms) &&
@@ -201,4 +230,4 @@ if (require.main === module) {
     catch { process.stderr.write('retention transport failed\n'); process.exitCode = 1; }
   });
 }
-module.exports = { renewalReceipt, executorSigner, run, Retention, Renewal, Record, Budget, Account };
+module.exports = { renewalReceipt, executorSigner, snapshotBlobs, accountPage, run, Retention, Renewal, Record, Budget, Account };

@@ -124,3 +124,75 @@ assert.ok(!r.retentionFacts(policy, [{ id: 'paid', end: 7, encodedSize: 50n }], 
   assert.equal(page, 100);
   console.log('PASS: 100-page/10000-blob retention view and fully-paid archive coverage');
 })().catch(e => { console.error(e); process.exitCode = 1; });
+
+(async () => {
+  const { bcs } = appRequire('@mysten/sui/bcs');
+  const { snapshotBlobs, accountPage } = require('./retention_transport.cjs');
+  const c = { storage: id('0x1'), storage_origin: config.storageOrigin, retention_origin: config.packageId, budget_origin: id('0x9') };
+  const fields = [], records = [];
+  for (let n = 1; n <= 10000; n++) {
+    const name = bcs.Address.serialize(id('0x' + n.toString(16))).toBytes();
+    fields.push({ name: { type: c.retention_origin + '::fleet_storage::RenewalKey', bcs: name },
+      valueType: c.retention_origin + '::fleet_storage::Renewal',
+      value: { bcs: Renewal.serialize({ target: 7, max_fee: '0', last_success_epoch: null }).toBytes() } });
+    records.push({ name: { type: c.storage_origin + '::fleet_storage::RecordKey', bcs: name },
+      valueType: c.storage_origin + '::fleet_storage::BlobRecord', value: { bcs: Record.serialize(record).toBytes() } });
+  }
+  // All policies precede all records, spanning page boundaries and origins.
+  fields.push(...records);
+  let pages = 0;
+  const client = {
+    async listDynamicFields({ cursor, limit, include }) {
+      assert.equal(limit, 100); assert.equal(include.value, true); pages++;
+      const start = Number(cursor || 0), end = Math.min(start + limit, fields.length);
+      return { dynamicFields: fields.slice(start, end), hasNextPage: end < fields.length, cursor: String(end) };
+    },
+    async getDynamicField() { throw Error('per-blob record RPC forbidden'); },
+    async getObject() { throw Error('per-account RPC forbidden'); },
+  };
+  const ws = { committee: { epoch: 1 }, storage_price_per_unit_size: '5' };
+  const blobs = await snapshotBlobs(client, c, ws, policy);
+  assert.equal(blobs.length, 10000); assert.equal(pages, 200);
+  assert.ok(blobs.every(b => b.prepaid && b.affordable && b.quote === '10'));
+  const onePage = (entries) => ({ async listDynamicFields() { return { dynamicFields: entries, hasNextPage: false }; } });
+  await assert.rejects(snapshotBlobs(onePage([fields[0]]), c, ws, policy), /mismatch/);
+  await assert.rejects(snapshotBlobs(onePage([fields[0], records[0], records[0]]), c, ws, policy), /mismatch/);
+  await assert.rejects(snapshotBlobs(onePage([fields[0], { ...records[0], valueType: c.retention_origin + '::fleet_storage::Renewal' }]), c, ws, policy), /mismatch/);
+  const entries = [], objects = [];
+  for (let n = 1; n <= 100; n++) {
+    const device = id('0x' + (10000 + n).toString(16)), objectId = id('0x' + (20000 + n).toString(16));
+    entries.push({ name: { type: c.budget_origin + '::fleet_budget::DeviceKey', bcs: bcs.Address.serialize(device).toBytes() },
+      valueType: '0x2::object::ID', value: { bcs: bcs.Address.serialize(objectId).toBytes() } });
+    objects.push({ objectId, type: c.budget_origin + '::fleet_budget::GasAccount', owner: { $kind: 'Shared' },
+      content: Account.serialize({ ...account, id: objectId, device_id: device, budget_id: c.storage }).toBytes() });
+  }
+  let batches = 0;
+  client.getObjects = async ({ objectIds, include }) => {
+    batches++; assert.deepEqual(objectIds, objects.map(o => o.objectId)); assert.equal(include.content, true);
+    return { objects };
+  };
+  assert.equal((await accountPage(client, c, c.storage, entries)).length, 100);
+  assert.equal(batches, 1);
+  // Exercise the pinned SDK's actual protobuf batch adapter as well: it sends
+  // two 50-object RPCs, not 100 individual reads or an assumed single RPC.
+  const { SuiGrpcClient } = appRequire('@mysten/sui/grpc');
+  const grpc = new SuiGrpcClient({ network: 'localnet', baseUrl: 'http://unused.invalid' });
+  let rpcBatches = 0;
+  grpc.ledgerService.batchGetObjects = async ({ requests, readMask }) => {
+    rpcBatches++; assert.equal(requests.length, 50); assert.ok(readMask.paths.includes('contents'));
+    return { response: { objects: requests.map(({ objectId }) => {
+      const object = objects.find(o => o.objectId === objectId);
+      return { result: { oneofKind: 'object', object: { objectId, version: 1n,
+        digest: '11111111111111111111111111111111', objectType: object.type,
+        owner: { kind: 3, version: 1n }, contents: { value: object.content } } } };
+    }) } };
+  };
+  assert.equal((await accountPage(grpc, c, c.storage, entries)).length, 100);
+  assert.equal(rpcBatches, 2);
+  await assert.rejects(accountPage(client, c, id('0xdead'), entries), /mismatch/);
+  client.getObjects = async () => ({ objects: objects.map((o, i) => i ? o : new Error('missing')) });
+  await assert.rejects(accountPage(client, c, c.storage, entries), /mismatch/);
+  client.getObjects = async () => ({ objects: [...objects].reverse() });
+  await assert.rejects(accountPage(client, c, c.storage, entries), /mismatch/);
+  console.log('PASS: 10000 renewal snapshots use 200 page RPCs and no per-blob reads; 100 accounts use two actual SDK batch RPCs; missing/duplicate/foreign/misattributed inputs fail closed');
+})().catch(e => { console.error(e); process.exitCode = 1; });
