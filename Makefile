@@ -166,6 +166,13 @@ test-budget-localnet:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
 	$(RUN) python3 scripts/test_protocol_localnet.py --budget-upgrade
 
+# SF-130 on a disposable localnet (network none): settings added by upgrade to
+# an existing budget, owner-only changes and events, refusals, daemon/dApp reads.
+.PHONY: test-settings-localnet
+test-settings-localnet:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
+	$(RUN) python3 scripts/test_protocol_localnet.py --settings-upgrade
+
 .PHONY: test-catalog-live
 test-catalog-live:
 	$(RUN) python3 scripts/test_catalog_localnet.py
