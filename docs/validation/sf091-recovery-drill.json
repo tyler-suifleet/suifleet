@@ -1,0 +1,269 @@
+{
+  "schema": 1,
+  "ticket": "SF-091",
+  "kind": "isolated-recovery-drill",
+  "recorded_at": "2026-10-23T09:17:08Z",
+  "host": {
+    "python": "3.10.12",
+    "system": "Linux"
+  },
+  "passed": true,
+  "steps": [
+    {
+      "name": "clean-operator restore and frontend rollback",
+      "command": "/usr/bin/python3 -m unittest discover -s scripts/tests -p test_fleet_recovery.py",
+      "passed": true,
+      "seconds": 0.12
+    },
+    {
+      "name": "browser discovery, outages, loss and export",
+      "command": "node scripts/test_fleet_recovery.cjs /tmp/suifleet-drill-nn8pq3n7/browser.json",
+      "passed": true,
+      "seconds": 1.122,
+      "observed": {
+        "scenarios": [
+          {
+            "name": "clean restore and discovery",
+            "devices": 3,
+            "pages": 2,
+            "restoreMs": 582.239037,
+            "discoveryMs": 1.3839029999999184,
+            "health": {
+              "0x00000000000000000000000000000000000000000000000000000000000000d1": "degraded",
+              "0x00000000000000000000000000000000000000000000000000000000000000db": "unreported",
+              "0x00000000000000000000000000000000000000000000000000000000000000dc": "unreported"
+            }
+          },
+          {
+            "name": "baseline archive availability",
+            "a0": {
+              "state": "available",
+              "recovery": "none"
+            },
+            "a1": {
+              "state": "available",
+              "recovery": "none"
+            },
+            "b0": {
+              "state": "device_revoked",
+              "recovery": "not_recoverable"
+            },
+            "c0": {
+              "state": "expired",
+              "recovery": "not_recoverable"
+            },
+            "a9": {
+              "state": "missing",
+              "recovery": "incident"
+            }
+          },
+          {
+            "name": "outage rpc",
+            "during": {
+              "state": "outage",
+              "dependency": "rpc",
+              "recovery": "retry"
+            },
+            "after": "available",
+            "recoveryReadMs": 3.416881000000103,
+            "archivesLost": 0
+          },
+          {
+            "name": "outage walrus",
+            "during": {
+              "state": "outage",
+              "dependency": "walrus",
+              "recovery": "retry"
+            },
+            "after": "available",
+            "recoveryReadMs": 3.0622699999998986,
+            "archivesLost": 0
+          },
+          {
+            "name": "outage aggregator-503",
+            "during": {
+              "state": "outage",
+              "dependency": "aggregator",
+              "recovery": "retry"
+            },
+            "after": "available",
+            "recoveryReadMs": 3.9305919999999333,
+            "archivesLost": 0
+          },
+          {
+            "name": "outage aggregator-network",
+            "during": {
+              "state": "outage",
+              "dependency": "aggregator",
+              "recovery": "retry"
+            },
+            "after": "available",
+            "recoveryReadMs": 2.897850000000062,
+            "archivesLost": 0
+          },
+          {
+            "name": "outage aggregator-404",
+            "during": {
+              "state": "outage",
+              "dependency": "aggregator",
+              "recovery": "retry"
+            },
+            "after": "available",
+            "recoveryReadMs": 2.887707999999975,
+            "archivesLost": 0
+          },
+          {
+            "name": "outage keyserver",
+            "during": {
+              "state": "outage",
+              "dependency": "keyserver",
+              "recovery": "retry"
+            },
+            "after": "available",
+            "recoveryReadMs": 3.128840000000082,
+            "archivesLost": 0
+          },
+          {
+            "name": "outage session",
+            "during": {
+              "state": "outage",
+              "dependency": "session",
+              "recovery": "new_session"
+            },
+            "after": "available",
+            "recoveryReadMs": 2.5764299999998457,
+            "archivesLost": 0
+          },
+          {
+            "name": "key server access denied",
+            "state": "access_denied",
+            "recovery": "grant_access"
+          },
+          {
+            "name": "real decryptor session expiry and provider binding",
+            "expiredSession": {
+              "state": "outage",
+              "recovery": "new_session"
+            },
+            "providerMismatch": {
+              "state": "invalid",
+              "recovery": "incident"
+            }
+          },
+          {
+            "name": "tampered aggregator bytes",
+            "state": "invalid",
+            "recovery": "incident",
+            "keyRequests": 0
+          },
+          {
+            "name": "ciphertext availability without keys",
+            "state": "available",
+            "verified": "ciphertext",
+            "keyRequests": 0
+          },
+          {
+            "name": "payment failure retention",
+            "reserveDepletion": "reported",
+            "failedPurchaseCredit": 0,
+            "extendedBeforeExpiry": "available",
+            "lapsedWithoutRenewal": "expired",
+            "archivesLost": [
+              "device A seq 1 (logs)",
+              "device C seq 1 (logs)"
+            ],
+            "reconstructable": false
+          },
+          {
+            "name": "rotation, revocation and release",
+            "rotated": "key_epoch_rotated",
+            "revoked": "device_revoked",
+            "released": "released"
+          },
+          {
+            "name": "customer public export",
+            "devices": 3,
+            "anchors": 4,
+            "exportMs": 3.2096680000001925
+          },
+          {
+            "name": "resume without duplicate deployments",
+            "present": 2,
+            "missing": 1,
+            "unknownOnChain": 1
+          }
+        ],
+        "passed": true,
+        "boundary": "In-process chain/Walrus/aggregator/key-server fixtures with real signatures and real Seal SDK ciphertext; not provider, public-network or wallet acceptance."
+      }
+    },
+    {
+      "name": "device recovery with the real daemon",
+      "command": "/usr/bin/python3 scripts/test_recovery_ota.py --receipt /tmp/suifleet-drill-nn8pq3n7/device.json",
+      "passed": true,
+      "seconds": 45.365,
+      "observed": {
+        "payment_recovery_seconds": 2.798,
+        "rpc_recovery_seconds": 2.245,
+        "aggregator_outage_outcome": "pending",
+        "aggregator_outage_requires_redeploy": false,
+        "aggregator_recovery_seconds": 3.165,
+        "restart_recovery_seconds": 1.194,
+        "replaced_key_daemon_exit": 1,
+        "replaced_key_refusal": "Error: state belongs to another network/package/device; use a separate state_dir",
+        "replaced_key_fresh_state_exit": null,
+        "replaced_key_fresh_state_refusal": "2026-10-23T09:16:39.324258Z  WARN suifleet: Sync failed; retrying without advancing cursor error=DeviceCap is not owned by device key",
+        "replaced_key_signatures_rejected": 0,
+        "boundary": "Real daemon with local chain/Walrus simulators; no Walrus/Seal/provider, public-network or physical-device acceptance"
+      }
+    },
+    {
+      "name": "SF-092 expired bytes, verified customer copy and new reference",
+      "command": "/usr/bin/python3 scripts/test_budget_ota.py",
+      "passed": true,
+      "seconds": 28.733
+    },
+    {
+      "name": "SF-092 failed funding purchase credits nothing; top-up resumes",
+      "command": "/usr/bin/python3 -m unittest test_retention_worker.RetentionTests.test_purchase_decline_has_no_credit_and_topup_resumes",
+      "passed": true,
+      "seconds": 0.082
+    },
+    {
+      "name": "SF-092 unavailable executor: long submit outage resumes the original intent",
+      "command": "/usr/bin/python3 -m unittest test_retention_worker.RetentionTests.test_long_submit_outage_recovers_original_intent_after_restart",
+      "passed": true,
+      "seconds": 0.161
+    },
+    {
+      "name": "SF-092 unavailable notifier: bounded retries and notifications",
+      "command": "/usr/bin/python3 -m unittest test_retention_worker.RetentionTests.test_retries_and_notifications_are_bounded",
+      "passed": true,
+      "seconds": 0.268
+    },
+    {
+      "name": "SF-092 alert queue backpressure, export and acknowledgment",
+      "command": "/usr/bin/python3 -m unittest test_retention_worker.RetentionTests.test_full_alert_queue_export_acknowledgment_and_restart",
+      "passed": true,
+      "seconds": 0.061
+    },
+    {
+      "name": "SF-092 expired blob never renews or installs",
+      "command": "/usr/bin/python3 -m unittest test_retention_worker.RetentionTests.test_expired_blob_never_renews_or_installs",
+      "passed": true,
+      "seconds": 0.058
+    },
+    {
+      "name": "SF-092 expiry without effects is not success",
+      "command": "/usr/bin/python3 -m unittest test_retention_worker.RetentionTests.test_expiry_without_successful_effects_is_not_success",
+      "passed": true,
+      "seconds": 0.069
+    }
+  ],
+  "boundary": "Isolated local simulators and fixtures only; no public network, wallet, production provider, Pi or Mainnet acceptance.",
+  "model": "Claude claude-opus-5-5",
+  "environment": "suifleet-dev:sf037 (31f727258ccd), docker --network none, uid 1001, debug daemon built with cargo build --locked --bins --examples",
+  "integration_gate": "SF-082/#160 merged (39ea150); drill rerun on the merged main; rerun after PR #248 review fixes (rollback bindings, typed Seal errors)",
+  "integrated_main": "39ea150a19a469c0edbb1b61ad822a80287a6f47",
+  "source_head": "bc047c09291a848c2a1ad3e20033523145305df1"
+}

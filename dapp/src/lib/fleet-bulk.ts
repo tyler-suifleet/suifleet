@@ -5,7 +5,7 @@ import type { WalrusClient } from '@mysten/walrus';
 import { bcs } from '@mysten/sui/bcs';
 import { isValidPersonalMessageSignature } from '@mysten/sui/verify';
 import { fromBase64, normalizeSuiAddress as id, normalizeStructTag, toHex } from '@mysten/sui/utils';
-import { EncryptedObject, SealClient, type SessionKey } from '@mysten/seal';
+import { EncryptedObject, ExpiredSessionKeyError, SealClient, type SessionKey } from '@mysten/seal';
 import { Transaction } from '@mysten/sui/transactions';
 import type { SuiGrpcClient } from '@mysten/sui/grpc';
 import { AnchorBcs, readDeviceData, readFleetData, type FleetDataConfig } from './fleet-data';
@@ -134,9 +134,15 @@ export async function openArchive(ciphertext: Uint8Array, config: FleetDataConfi
   try { return await verifyArchive(plaintext, config, deviceId, anchor); }
   finally { plaintext.fill(0); }
 }
+/** The archive's Seal identity or provider set differs from this deployment's
+ * pinned settings: a configuration or tampering incident, never an outage. */
+export class ArchiveSealBindingError extends Error {
+  name = 'ArchiveSealBindingError';
+}
+
 function decodeHex(value: string): number[] {
   const hex = value.replace(/^0x/, '');
-  if (!/^(?:[0-9a-f]{2})+$/i.test(hex)) throw Error('Invalid Seal identity');
+  if (!/^(?:[0-9a-f]{2})+$/i.test(hex)) throw new ArchiveSealBindingError('Invalid Seal identity');
   return hex.match(/../g)!.map(pair => parseInt(pair, 16));
 }
 
@@ -163,18 +169,20 @@ export async function requireArchiveReadable(client: SuiGrpcClient, config: Flee
     || record.end_epoch < anchor.end_epoch || currentEpoch >= record.end_epoch) throw Error('Archive expired, released or foreign');
 }
 
-/** Build a transaction kind for Seal evaluation only; never submits a chain write. */
+/** Build a transaction kind for Seal evaluation only; never submits a chain write.
+ * A session that expires before use throws Seal's `ExpiredSessionKeyError`, as
+ * a key server would, so callers can ask for a new session rather than retry. */
 export async function archiveDecryptor(client: SuiGrpcClient, config: FleetDataConfig, settings: SealSettings,
   sessionKey: SessionKey, authority: { kind: 'owner'; ownerCapId: string } | { kind: 'support' }) {
   if (sessionKey.isExpired() || id(sessionKey.getPackageId()) !== config.typeOrigin) throw Error('Expired or foreign Seal session');
   const seal = new SealClient({ suiClient: client, serverConfigs: settings.keyServers, verifyKeyServers: true });
   return async (encrypted: Uint8Array) => {
-    if (sessionKey.isExpired()) throw Error('Seal session expired');
+    if (sessionKey.isExpired()) throw new ExpiredSessionKeyError();
     const object = EncryptedObject.parse(encrypted);
     // Refuse a substituted weak or foreign provider set, even if it decrypted.
     const servers = settings.keyServers.flatMap(s => Array(s.weight).fill(id(s.objectId))).sort();
     const actual = object.services.map(([server]) => id(server)).sort();
-    if (object.threshold !== settings.threshold || servers.join() !== actual.join()) throw Error('Archive Seal provider/threshold mismatch');
+    if (object.threshold !== settings.threshold || servers.join() !== actual.join()) throw new ArchiveSealBindingError('Archive Seal provider/threshold mismatch');
     const tx = new Transaction();
     tx.setSender(sessionKey.getAddress());
     if (authority.kind === 'owner') {
