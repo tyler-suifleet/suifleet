@@ -76,7 +76,7 @@ const USD = { sui: { usd: 2.5, last_updated_at: 1792900000 }, "walrus-2": { usd:
       assert.deepEqual(fiveMinutes.slice(2), ["$0", "$0", "$0.0500", "$50.00"]);
       // Testnet's one-day epochs cannot keep archives a year within SF-130's 53-epoch bound.
       assert.ok(await page.locator("#archiveRetentionDays-365").isDisabled());
-      assert.match((await cells("archiveRetentionDays-365"))[1], /archiveRetentionEpochs must be/);
+      assert.match((await cells("archiveRetentionDays-365"))[1], /Unavailable here: needs 365 Walrus epochs of 1 day\(s\); the limit is 53/);
       // Network cost and the SuiFleet price are shown apart.
       assert.match(await text("network-cost"), /paid from your fleet budget/);
       assert.doesNotMatch(await text("network-cost"), /\$50\.00/);
