@@ -36,7 +36,9 @@ const DEVICES = 4;
     // Head tree from the working copy; base sources from the fixed base commit.
     const tree = path.join(tmp, 'contracts'); await fs.cp(path.join(root, 'contracts'), tree, { recursive: true, filter: (p) => !['build', 'Published.toml'].includes(path.basename(p)) });
     const baseTree = path.join(tmp, 'base'); await fs.mkdir(baseTree);
-    execFileSync('sh', ['-c', `git -C "${root}" archive ${BASE} contracts/sources contracts/fleet_data/sources | tar -x -C "${baseTree}"`]);
+    assert.match(BASE, /^[0-9a-f]{40}$/, 'SF129_BASE_REF must be a full commit hash');
+    const archive = execFileSync('git', ['-C', root, 'archive', BASE, 'contracts/sources', 'contracts/fleet_data/sources'], { maxBuffer: 64 * 1024 * 1024 });
+    execFileSync('tar', ['-x', '-C', baseTree], { input: archive });
     const headCore = path.join(tmp, 'head-core-sources'); await fs.cp(path.join(tree, 'sources'), headCore, { recursive: true });
     const headData = await fs.readFile(path.join(tree, 'fleet_data/sources/fleet_data.move'));
     const cache = '/home/dev/.move/git', pin = 'https___github_com_MystenLabs_walrus_git_c68b530e0b1e522b4a3896190d883e4312a1cf0e';
@@ -375,7 +377,8 @@ public fun reclaim_fixture_epoch(system: &mut System, epoch: u32) { system.inner
         'Per-transaction nets include rewrites of shared objects; reclaim returns exceed the write transactions\' own net deposits. Use the lifecycle and returned-deposit figures.'],
     };
     const replacer = (_, v) => typeof v === 'bigint' ? v.toString() : v;
-    await fs.writeFile(process.env.SF129_RECEIPT || '/tmp/sf129-localnet.json', JSON.stringify(result, replacer, 2) + '\n');
+    // Only an explicitly chosen receipt path is written; no shared temporary file.
+    if (process.env.SF129_RECEIPT) await fs.writeFile(process.env.SF129_RECEIPT, JSON.stringify(result, replacer, 2) + '\n', { mode: 0o644 });
     console.log(JSON.stringify({ result: 'PASS', measuredMist: result.measuredMist }, replacer));
   } finally { await fs.rm(tmp, { recursive: true, force: true }); }
 })().catch((e) => { console.error(e.stack); process.exitCode = 1; });
