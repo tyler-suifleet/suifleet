@@ -75,6 +75,7 @@ test-ota:
 	$(RUN) python3 scripts/test_greengrass_runtime.py
 	$(RUN) python3 scripts/test_daemon_update.py
 	$(RUN) python3 scripts/test_desired_state.py
+	$(RUN) python3 scripts/test_inbox_ota.py
 	$(RUN) python3 scripts/test_handover_ota.py
 	$(RUN) python3 scripts/test_deployment_control.py
 	$(RUN) python3 scripts/test_telemetry.py

@@ -75,6 +75,25 @@ impl Shim {
             let field = self
                 .call("suix_getDynamicFieldObject", json!([parent, {"type": key, "value": key_hex}]))
                 .await?;
+            // A derived object (sui::derived_object, e.g. a device inbox) has
+            // the same ID derivation but is a whole object, not a Field.
+            if field["derived"] == true {
+                let data = &field["data"];
+                if data.is_null() {
+                    return Err(Status::not_found(format!("object {id} not found")));
+                }
+                let mut owner = proto::Owner::default();
+                if let Some(shared) = data["owner"].get("Shared") {
+                    owner.kind = Some(proto::owner::OwnerKind::Shared as i32);
+                    owner.version = Some(number(&shared["initial_shared_version"]));
+                }
+                let mut object = proto::Object::default();
+                object.object_id = Some(id.to_string());
+                object.owner = Some(owner);
+                object.object_type = data["content"]["type"].as_str().map(str::to_owned);
+                object.json = Some(Box::new(to_proto(&data["content"]["fields"])));
+                return Ok(Some(object));
+            }
             let value = &field["data"]["content"]["fields"]["value"];
             if value.is_null() {
                 // A known field that does not exist: absent, as a node reports it.
@@ -142,6 +161,12 @@ impl proto::ledger_service_server::LedgerService for Shim {
         let height=self.call("shim_height",json!([])).await?;
         info.checkpoint_height=Some(number(if height.is_object(){&height["height"]}else{&height}));
         info.lowest_available_checkpoint=Some(if height.is_object(){number(&height["lowest"])}else{0});
+        // Checkpoint time: the simulator's chain clock when it has one.
+        let ms = match height.get("timestamp_ms") {
+            Some(ms) => number(ms),
+            None => std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64,
+        };
+        info.timestamp = Some(prost_types::Timestamp { seconds: (ms / 1000) as i64, nanos: ((ms % 1000) * 1_000_000) as i32 });
         Ok(Response::new(info))
     }
 
@@ -302,6 +327,11 @@ impl proto::ledger_service_server::LedgerService for Shim {
             Some(after) => u64::from_le_bytes(after.as_ref().try_into().map_err(|_| Status::invalid_argument("cursor"))?) as usize,
             None => request.start_checkpoint.map(|c| c.saturating_sub(1) as usize).unwrap_or(0),
         };
+        // Like a public node, reject ranges below the retained history.
+        let height = self.call("shim_height", json!([])).await?;
+        if height.is_object() && (start as u64 + 1) < number(&height["lowest"]) {
+            return Err(Status::out_of_range("requested range is below the lowest available checkpoint"));
+        }
         let end = (start + PAGE).min(events.len().max(start));
         let mut frames = Vec::new();
         for (index, parsed) in events.iter().enumerate().take(end).skip(start) {
