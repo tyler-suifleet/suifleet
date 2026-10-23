@@ -113,6 +113,13 @@ test-component:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_component_ota.py
 
+# SF-120 offline Yocto packaging checks: image inspection parsing, codec license
+# collection/artifact pins and Node/codec/daemon recipe consistency. No BitBake.
+.PHONY: test-yocto-packaging
+test-yocto-packaging:
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_inspect_pi_image.py'
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_yocto_runtime_packaging.py'
+
 dapp-typecheck:
 	$(MAKE) test-testnet
 	$(MAKE) test-manifest
@@ -209,7 +216,7 @@ toolchain-versions:
 # CI entry point (run inside the dev image): each step's output is kept under
 # ci-logs/ for failure diagnostics. No step publishes, spends gas or uses secrets.
 ci: SHELL := /bin/bash
-CI_STEPS := test-retention test-prospects indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat test-ml test-industrial edge-test test-ota test-component test-edge-acceptance dapp-typecheck dapp-build
+CI_STEPS := test-retention test-prospects indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat test-ml test-industrial edge-test test-ota test-component test-yocto-packaging test-edge-acceptance dapp-typecheck dapp-build
 ci:
 	@mkdir -p ci-logs
 	@$(MAKE) --no-print-directory toolchain-versions | tee ci-logs/toolchain-versions.txt
@@ -235,6 +242,7 @@ check:
 	$(MAKE) edge-test
 	$(MAKE) test-ota
 	$(MAKE) test-component
+	$(MAKE) test-yocto-packaging
 	$(MAKE) test-edge-acceptance
 	$(MAKE) dapp-typecheck
 	$(MAKE) dapp-build
