@@ -97,7 +97,7 @@ With `fleet_inbox` origins in the manifest, every poll:
    time), the first poll that read heads after an upgrade, or, for a group
    followed later, when it was first seen — matching the event baseline;
 4. runs the `DeploymentCreated` and `DeviceAddedToGroup` scan only every
-   `runtime.event_scan_seconds` (default 3600; 0 scans every poll), as a
+   `runtime.event_scan_seconds` (default 60; 0 scans every poll), so unannounced deployments arrive within a minute, as a
    safety net for unannounced deployments. Without inbox origins the scan runs
    every poll as before.
 

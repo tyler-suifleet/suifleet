@@ -205,7 +205,7 @@ The daemon talks to the manifest's `rpc_url` over the Sui gRPC v2 API only (Myst
 - Objects are read with `GetObject`. Dynamic fields are read by their derived object ID; empty key structs serialize as one `false` byte.
 
 **Discovery:**
-- With `fleet_inbox` origins in the manifest (SF-125), each poll reads the device's inbox and its groups' heads and applies newly announced deployments from objects; the event scan below runs every `runtime.event_scan_seconds` (default 3600) as a safety net for unannounced deployments. See [DEVICE_INBOX.md](DEVICE_INBOX.md).
+- With `fleet_inbox` origins in the manifest (SF-125), each poll reads the device's inbox and its groups' heads and applies newly announced deployments from objects; the event scan below runs every `runtime.event_scan_seconds` (default 60) as a safety net for unannounced deployments. See [DEVICE_INBOX.md](DEVICE_INBOX.md).
 - `ListEvents` is filtered by the manifest's `DeploymentCreated` type.
 - The journal stores the opaque resume cursor, with its checkpoint, after every event and after every scanned page. Enrollment starts after the current checkpoint.
 

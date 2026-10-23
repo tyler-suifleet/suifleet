@@ -996,7 +996,7 @@ impl Default for RuntimeConfig {
             state_dir: "/var/lib/suifleet".into(),
             poll_seconds: 10,
             replay_history: false,
-            event_scan_seconds: 3600,
+            event_scan_seconds: 60,
             component_startup_seconds: 3,
             component_ready_timeout_seconds: 60,
             component_stop_timeout_seconds: 10,

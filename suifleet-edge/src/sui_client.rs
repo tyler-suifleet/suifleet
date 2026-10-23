@@ -191,6 +191,21 @@ pub struct Inbox {
     pub groups: Vec<String>,
 }
 
+/// A device inbox's address: `sui::derived_object` under the registry,
+/// keyed `DerivedObjectKey<InboxKey { device_id }>`.
+fn inbox_id(registry: &str, inbox_key: &str, device: &str) -> anyhow::Result<String> {
+    let inner = StructTag::from_str(inbox_key).map_err(|e| anyhow::anyhow!("invalid inbox key type: {e}"))?;
+    let key = TypeTag::Struct(Box::new(StructTag::new(
+        Address::TWO,
+        sui_sdk_types::Identifier::from_static("derived_object"),
+        sui_sdk_types::Identifier::from_static("DerivedObjectKey"),
+        vec![TypeTag::Struct(Box::new(inner))],
+    )));
+    let registry = Address::from_str(registry).map_err(|e| anyhow::anyhow!("invalid registry ID: {e}"))?;
+    let device = Address::from_str(device).map_err(|e| anyhow::anyhow!("invalid device ID {device}: {e}"))?;
+    Ok(registry.derive_dynamic_child_id(&key, device.inner()).to_string())
+}
+
 fn parse_head(value: &Value) -> anyhow::Result<Head> {
     let value = value.get("fields").unwrap_or(value);
     let seq = number(&value["seq"]).ok_or_else(|| anyhow::anyhow!("head without a sequence: {value}"))?;
@@ -698,19 +713,7 @@ impl SuiClient {
     /// The device's inbox address: derived from the registry and the device
     /// ID by `sui::derived_object` (key DerivedObjectKey<InboxKey>).
     pub fn inbox_id(&self, device: &str) -> anyhow::Result<String> {
-        let inner = StructTag::from_str(&self.move_type("fleet_inbox::InboxKey"))
-            .map_err(|e| anyhow::anyhow!("invalid inbox key type: {e}"))?;
-        let key = TypeTag::Struct(Box::new(StructTag::new(
-            Address::TWO,
-            sui_sdk_types::Identifier::from_static("derived_object"),
-            sui_sdk_types::Identifier::from_static("DerivedObjectKey"),
-            vec![TypeTag::Struct(Box::new(inner))],
-        )));
-        let registry = Address::from_str(&self.manifest().shared_objects.registry.id)
-            .map_err(|e| anyhow::anyhow!("invalid registry ID: {e}"))?;
-        let device = Address::from_str(device)
-            .map_err(|e| anyhow::anyhow!("invalid device ID {device}: {e}"))?;
-        Ok(registry.derive_dynamic_child_id(&key, device.inner()).to_string())
+        inbox_id(&self.manifest().shared_objects.registry.id, &self.move_type("fleet_inbox::InboxKey"), device)
     }
 
     /// The device's inbox, or None until its operator creates it.
@@ -1702,6 +1705,17 @@ mod tests {
         // Past its checkpoint without meeting it: refuse.
         assert!(legacy_boundary(&event(8, "C", 0), "B", 1, 7, &mark).is_err());
         assert!(Cursor::parse(&Some(json!({"txDigest": "D1"}))).is_err(), "eventSeq is required");
+    }
+
+    #[test]
+    fn inbox_addresses_match_the_sdk_derivation() {
+        // The same vector as @mysten/sui deriveObjectID and deployment_manifest.inbox_id.
+        assert_eq!(
+            inbox_id("0x1", "0x125::fleet_inbox::InboxKey", "0xde").unwrap(),
+            "0x0085d65fcfe36c94b1bbe99a04811031070b86693e13140f71a8f27ddfb8dfac"
+        );
+        assert_ne!(inbox_id("0x1", "0x125::fleet_inbox::InboxKey", "0xdf").unwrap(),
+            inbox_id("0x1", "0x125::fleet_inbox::InboxKey", "0xde").unwrap());
     }
 
     #[test]
