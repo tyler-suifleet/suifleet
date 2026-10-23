@@ -1,38 +1,56 @@
 {
-  "started": "2026-10-22T23:21:21Z",
+  "started": "2026-10-23T01:48:20Z",
   "network": "testnet",
   "transactions": [
+    {
+      "label": "request native diagnostics",
+      "gas_budget_mist": 15000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "7tbT2SNG2JFeSrnKEtCnWC9Ads7MBq28FsNPZvXSXZWN",
+      "gas_mist": 3387716,
+      "allowance_used_mist": 571965749
+    },
+    {
+      "label": "apply finite prepaid archive renewals",
+      "gas_budget_mist": 30000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "7zmbU5PFrDLc69BvYWsMgoCUt6HytTxb1YQRZNwpr9M5",
+      "gas_mist": 0,
+      "allowance_used_mist": 629802387
+    },
     {
       "label": "remove test device account",
       "gas_budget_mist": 20000000,
       "funding_mist": 0,
       "status": "success",
-      "digest": "2NRr1DfTmWnUxdgSkW1mTaDX2p72EvVnpyBweUet7Rmc",
+      "digest": "EX78FWMZAcdKzUgs7igCRRx1PeamzMKDVxwGyTvDh9tZ",
       "gas_mist": 0,
-      "allowance_used_mist": 52351161
+      "allowance_used_mist": 629802387
     },
     {
       "label": "withdraw unused test budget",
       "gas_budget_mist": 20000000,
       "funding_mist": 0,
       "status": "success",
-      "digest": "35s6jVMpLNfb9LCtUH3WuxmVms5LMYfwy6xFkwPX7H57",
+      "digest": "ChVo3A9ZNjEEJSqcSRfUUXTYqmvCJtckurbMqqMn2HKS",
       "gas_mist": 1988435,
-      "allowance_used_mist": 54339596
+      "allowance_used_mist": 631790822
     },
     {
       "label": "sweep the test key",
       "gas_budget_mist": 3000000,
       "funding_mist": 0,
       "status": "success",
-      "digest": "FzS9R7rs7xscfoKMRk6yVq8GYGUG8uP3puxzzt8X29zu",
-      "gas_mist": 1000099,
-      "allowance_used_mist": 1000099
+      "digest": "9mTmMJ2qhx2SmGnL2yfqJYbfrou3S2h3eAh4FCCRiKs3",
+      "gas_mist": 12198,
+      "allowance_used_mist": 12198
     }
   ],
   "checks": [
     "reused immutable SF083 core, exact source/lock/compiler inputs; chain, account and UpgradeCap reverified",
-    "native hourly-cadence health path and prepaid encrypted logs/diagnostics certified and anchored; restart made no duplicate upload",
+    "native configured-cadence health path and prepaid encrypted logs/diagnostics certified and anchored; restart made no duplicate upload",
     "real browser modules discovered and verified/decrypted certified native archives with owner signed Seal session"
   ],
   "toolchain": {
@@ -65,13 +83,88 @@
   "chain": "4c78adac",
   "rpc": "https://fullnode.testnet.sui.io:443",
   "operator": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
-  "start_balance_mist": 998387417,
-  "max_spend_mist": 800000000,
+  "start_balance_mist": 704677265,
+  "max_spend_mist": 700000000,
   "sui": {
     "build": "sui 1.81.1-e04cf9aa915c",
     "network": "sui 1.82.1-987123842623"
   },
-  "head": "53d53d4e7bad0b24ee60785a6b26c54c5364ffda",
+  "head": "756b2d2e85e0aed6d2fe91594d2b35e4e1fc77f4",
+  "carried_allowance_mist": 422952054,
+  "setup_transactions": [
+    {
+      "label": "register SF082 device",
+      "gas_budget_mist": 40000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "4A3qdipxR5ydzJkyoippF8AC62okMh8pbAW6sqJAqCFP",
+      "gas_mist": 14322978,
+      "allowance_used_mist": 14322978
+    },
+    {
+      "label": "create SF082 prepaid budget",
+      "gas_budget_mist": 30000000,
+      "funding_mist": 250000000,
+      "status": "success",
+      "digest": "3Yq2ebh2XCVRgrJsfHpyWj3wGUNVrnRRpu6YeToQpDbp",
+      "gas_mist": 1395595,
+      "allowance_used_mist": 265718573
+    },
+    {
+      "label": "enroll SF082 device float and reserve",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "7NQGbTfcJuDWak4EQY5qjfaM8GnyxY2meZ3t8TRM92ve",
+      "gas_mist": 7407400,
+      "allowance_used_mist": 273125973
+    },
+    {
+      "label": "create SF082 fleet storage",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "CWCz6M8YEdWB8Kor4BMPpz7cR4pjEVCa5FkDZUZcfnna",
+      "gas_mist": 3242163,
+      "allowance_used_mist": 276368136
+    },
+    {
+      "label": "SUI-only prepaid storage purchase",
+      "gas_budget_mist": 40000000,
+      "funding_mist": 20000000,
+      "status": "success",
+      "digest": "2TsozbuHoh4xY22Vh4xT7bi1SouEhbG2jtFjuZczFqo2",
+      "gas_mist": 1376517,
+      "allowance_used_mist": 297744653
+    },
+    {
+      "label": "owner approves finite retained device archives",
+      "gas_budget_mist": 40000000,
+      "funding_mist": 5000000,
+      "status": "success",
+      "digest": "BxqWx61kPPbovnYZ7sRkmwUjRS4UmAN4TaFX2saHSXqB",
+      "gas_mist": 10720824,
+      "allowance_used_mist": 313465477
+    },
+    {
+      "label": "create fleet data index",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "EbSnVaHTQEZ3UhzQByKYAPNNQtbHb1V7NjefNN83nbWb",
+      "gas_mist": 3508163,
+      "allowance_used_mist": 316973640
+    },
+    {
+      "label": "enroll indexed device writer",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "7a527sy17vhZyM3EXhmnbasdnGqsoo7xhkvER9GF7Teh",
+      "gas_mist": 5978414,
+      "allowance_used_mist": 322952054
+    }
+  ],
   "manifest": {
     "schema_version": 1,
     "protocol_version": 1,
@@ -172,36 +265,36 @@
   },
   "packages": {
     "storage": {
-      "package": "0x2c9382fd49ee2f09e3aeddcfc470fbbf922ba0cc30862b72dd3528e668ffb370",
-      "cap": "0x56e4e431ec84acaad145791438c0d7f880e85468afd29cfdd3211afebbee9cc7"
+      "package": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8",
+      "cap": "0x6f32c759364d08b812d9a564062e4386793f9c06e7130bb3ab7ee35ee7beb79d"
     },
     "data": {
-      "package": "0xc841f6f5232e60602d4b951d1a6914e1e3b567fc71fbc57f2b98e5ee4a8e4b50",
-      "cap": "0xa443af53cd1c16865a43d3a4d910c0aa650008469b4572afd8c9580a8eb62183"
+      "package": "0xb96ff2bb45d7baf4225329622d4943ca2f60f267aa7cbef83fd01d11bf328673",
+      "cap": "0x6a9318f286763be1d62112104d4218f33a3f86a9b464ece8542d8bfb84746937"
     }
   },
   "fleet_data": {
     "schema": 1,
     "chainIdentifier": "4c78adac",
     "registryId": "0xd3afc908876326367294ba95d13cbac5775dd1370a23fb3ba8ba29b25daeaf41",
-    "packageId": "0xc841f6f5232e60602d4b951d1a6914e1e3b567fc71fbc57f2b98e5ee4a8e4b50",
-    "typeOrigin": "0xc841f6f5232e60602d4b951d1a6914e1e3b567fc71fbc57f2b98e5ee4a8e4b50",
-    "fleetId": "0xa5f27d3da27897b199da566f991b01aafc9ed26595ecd6b214ba4aa9f09fbd87",
-    "budgetId": "0x89fe6ffe6dac3a95e799e86125b1a67ad125ebd9816f4087f14a3db4e2098049",
-    "storageId": "0x8589adcc7d60ab4ea092280142ef33e04009d94b87d7c15061a5aa8ccfe628b1",
-    "writerId": "0x22e2f9adf0ed714942960c694aaf5e6398c59c6322d936d26f45ebf7c5221c02",
-    "deviceId": "0x6b51f6877e3e4cebe225bb7a8dfa0a66531776d5ca08f842bbeb49e9d2f8b993",
-    "accountId": "0xc92785c8cd147d1fc667c008c6f8f6ead2367079de2eea64bbb8547a735e422e",
-    "storagePackage": "0x2c9382fd49ee2f09e3aeddcfc470fbbf922ba0cc30862b72dd3528e668ffb370"
+    "packageId": "0xb96ff2bb45d7baf4225329622d4943ca2f60f267aa7cbef83fd01d11bf328673",
+    "typeOrigin": "0xb96ff2bb45d7baf4225329622d4943ca2f60f267aa7cbef83fd01d11bf328673",
+    "fleetId": "0xffd47b80859847b037e82806c49c3850763e4ba9f7bb755020de98af3dd0f722",
+    "budgetId": "0xc68cbb2d0f071466bc7b8c0a80dc8b49c64068ab7530f7bce66b27a6953da237",
+    "storageId": "0x9afc334986a31043acc5197379bbb742c760ecca6f3f0d3e192817c07353b15b",
+    "writerId": "0x5e6cf2a541bef3ecd20ab14a374c06e4a5fb93f3a5048c89981e9c86a9ca38e4",
+    "deviceId": "0xddab1bfc4b37b3c47037fda79a1582207a54b07be050b68e57ca4e3156df3cc4",
+    "accountId": "0xa54233d1dec94ea02118f68036e7ccb36a7f46d8da82712a87ea1a1d897aa999",
+    "storagePackage": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8"
   },
-  "resumed_from": "/runtime/evidence-retry3.json",
-  "precharged_cached_device_mist": 14696728,
-  "precharged_reserve_mist": 0,
-  "resumed_diagnostic_request": true,
+  "resumed_from": "/runtime/evidence-retained-final.json",
+  "precharged_cached_device_mist": 45625979,
+  "precharged_reserve_mist": 100000000,
+  "resumed_diagnostic_request": false,
   "native_transactions": [
     {
       "label": "funding-0",
-      "digest": "FVZxyhNHf4W55SPqf6vBJuWWxNCPAjpFDhqwoBTWgt9T",
+      "digest": "Cn2W5JgdtjfEGpSy6VPAnSUNBiEcfJQVuuQorM2sxeQK",
       "net_gas_mist": 1988540,
       "gas": {
         "computationCost": "1000000",
@@ -211,41 +304,63 @@
       }
     },
     {
-      "label": "health-11",
-      "digest": "98MBhAnxtPGHK5rLyh5KLo2qPxeTZgqovT9LaNfdM6L1",
-      "net_gas_mist": -1802881,
+      "label": "funding-1",
+      "digest": "BbXErapevcU49EAosGL552uym1AJvLp8yKWE5XgoCT7h",
+      "net_gas_mist": 1988540,
       "gas": {
         "computationCost": "1000000",
-        "storageCost": "12388000",
-        "storageRebate": "15190881",
-        "nonRefundableStorageFee": "1519"
+        "storageCost": "6391600",
+        "storageRebate": "5403060",
+        "nonRefundableStorageFee": "540"
       }
     },
     {
-      "label": "health-12",
-      "digest": "43FrFtxQs2SPfbfgJV2Vfr1tEPQnk6LmpXwXyMw1BGXi",
-      "net_gas_mist": 1654839,
+      "label": "health-5",
+      "digest": "CMexxqtYCXVgbrorhPAZwKVgkctywCS3NAovHvBBH3dd",
+      "net_gas_mist": 1001469,
       "gas": {
         "computationCost": "1000000",
-        "storageCost": "13041600",
-        "storageRebate": "12386761",
-        "nonRefundableStorageFee": "1239"
+        "storageCost": "14690800",
+        "storageRebate": "14689331",
+        "nonRefundableStorageFee": "1469"
+      }
+    },
+    {
+      "label": "health-6",
+      "digest": "D4wcQX7k8jaP8WMx7moqmxVdkBeJTJGC4Ha1BjuucjJL",
+      "net_gas_mist": -1802931,
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "11886400",
+        "storageRebate": "14689331",
+        "nonRefundableStorageFee": "1469"
+      }
+    },
+    {
+      "label": "health-7",
+      "digest": "AvLjWHDNnpTcVxLfRSGqS3CUC1e9qKkYexncwxUjMkPZ",
+      "net_gas_mist": 2156494,
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "14090400",
+        "storageRebate": "12933906",
+        "nonRefundableStorageFee": "1294"
       }
     },
     {
       "label": "periodic-registration",
-      "digest": "6zw8xuyLC19Me9vhEHVz7mC9uqn6mZNQULPdMd7M1Amw",
-      "net_gas_mist": 12297664,
+      "digest": "9o3CUyAdhcZiH6nDymFEbCGD4WvvSeAiW44mAtMyczus",
+      "net_gas_mist": 19655193,
       "gas": {
         "computationCost": "1000000",
-        "storageCost": "127923200",
-        "storageRebate": "116625536",
-        "nonRefundableStorageFee": "11664"
+        "storageCost": "142576000",
+        "storageRebate": "123920807",
+        "nonRefundableStorageFee": "12393"
       }
     },
     {
       "label": "periodic-certification",
-      "digest": "9LkjrzwTWS9HFTb3ugkmjKxoPBcTEPJiS28YZsEoLZm4",
+      "digest": "7HYfgRQv8rbdvH5HeZGTafpmYzC86kV3ewgnWJ8dn3HE",
       "net_gas_mist": 1030957,
       "gas": {
         "computationCost": "1000000",
@@ -256,70 +371,168 @@
     },
     {
       "label": "periodic-anchor",
-      "digest": "9JBGASEVELWSNzESNRmKcaR4yvteYgKmRV8k4GW6b4NL",
-      "net_gas_mist": 6389868,
+      "digest": "H9jpviHYSPPY4fkUFLC4TEaxvdGdFQ5zu7WfM9QDYtKg",
+      "net_gas_mist": 6389589,
       "gas": {
         "computationCost": "1000000",
-        "storageCost": "20071600",
-        "storageRebate": "14681732",
-        "nonRefundableStorageFee": "1468"
+        "storageCost": "17274800",
+        "storageRebate": "11885211",
+        "nonRefundableStorageFee": "1189"
       }
     },
     {
       "label": "diagnostic-registration",
-      "digest": "Qzrk55CuCjTCcdhzHU9jci4QZTzAENpft34A2pLUicb",
-      "net_gas_mist": 7859671,
+      "digest": "CZ19B6pVXHohgGr4tN71MCJFHrPecJGUVfXV8xYPnmsG",
+      "net_gas_mist": 16205126,
       "gas": {
         "computationCost": "1000000",
-        "storageCost": "127558400",
-        "storageRebate": "120698729",
-        "nonRefundableStorageFee": "12071"
+        "storageCost": "142454400",
+        "storageRebate": "127249274",
+        "nonRefundableStorageFee": "12726"
       }
     },
     {
       "label": "diagnostic-certification",
-      "digest": "DRtu9j2DEYziht3oFdmoHDeUPS1Q7nsMHSMiV53Zz7Vn",
-      "net_gas_mist": 43019,
+      "digest": "8W1EwY7jFmXEoHwi3ri9zBR31qThgR81mUu1zH8e8WLf",
+      "net_gas_mist": 1030921,
       "gas": {
         "computationCost": "1000000",
         "storageCost": "5236400",
-        "storageRebate": "6193381",
-        "nonRefundableStorageFee": "619"
+        "storageRebate": "5205479",
+        "nonRefundableStorageFee": "521"
       }
     },
     {
       "label": "diagnostic-anchor",
-      "digest": "3CrksXm8MWsi2dNbHGzBuPDvuk1bHNKV8yAjkdUd1VCD",
-      "net_gas_mist": 6389875,
+      "digest": "BNVnDqkdjk9Hac1EqCzmiuh1NFtzB8QxUqYTUthYWwRu",
+      "net_gas_mist": 6389809,
       "gas": {
         "computationCost": "1000000",
-        "storageCost": "20140000",
-        "storageRebate": "14750125",
-        "nonRefundableStorageFee": "1475"
+        "storageCost": "19478800",
+        "storageRebate": "14088991",
+        "nonRefundableStorageFee": "1409"
       }
     }
   ],
-  "precharged_device_allowance_mist": 40000000,
+  "precharged_device_allowance_mist": 80000000,
+  "retention_policy": {
+    "target": 563,
+    "initial_end": 562,
+    "max_fee_frost": 2000000,
+    "executor": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965"
+  },
+  "retention_execution": {
+    "digest": "7zmbU5PFrDLc69BvYWsMgoCUt6HytTxb1YQRZNwpr9M5",
+    "events": [
+      {
+        "id": {
+          "txDigest": "7zmbU5PFrDLc69BvYWsMgoCUt6HytTxb1YQRZNwpr9M5",
+          "eventSeq": "0"
+        },
+        "packageId": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8",
+        "transactionModule": "fleet_storage",
+        "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+        "type": "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::events::BlobCertified",
+        "parsedJson": {
+          "blob_id": "63612731015090456880541763462812098634278471383749520367233717737718636811558",
+          "deletable": false,
+          "end_epoch": 563.0,
+          "epoch": 559.0,
+          "is_extension": true,
+          "object_id": "0x25d6a1ea30757485e52d57997d50ed797cfcbf324c60154119e527af46c3e4df"
+        },
+        "bcsEncoding": "base64",
+        "bcs": "LwIAACYVoxLy9LuQmxGTSXQhkwN7lHvD9//jEKZAlm6jh6OMMwIAAAAl1qHqMHV0heUtV5l9UO15fPy/MkxgFUEZ5SevRsPk3wE=",
+        "timestampMs": "1792720232295"
+      },
+      {
+        "id": {
+          "txDigest": "7zmbU5PFrDLc69BvYWsMgoCUt6HytTxb1YQRZNwpr9M5",
+          "eventSeq": "1"
+        },
+        "packageId": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8",
+        "transactionModule": "fleet_storage",
+        "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+        "type": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::RenewalCompleted",
+        "parsedJson": {
+          "blob_object_id": "0x25d6a1ea30757485e52d57997d50ed797cfcbf324c60154119e527af46c3e4df",
+          "end_epoch": 563.0,
+          "epoch": 559.0,
+          "fee": "0",
+          "revision": "2",
+          "reward": "1000000",
+          "storage_id": "0x9afc334986a31043acc5197379bbb742c760ecca6f3f0d3e192817c07353b15b"
+        },
+        "bcsEncoding": "base64",
+        "bcs": "mvwzSYajEEOsxRlzebu3Qsdg7MpvPw0+GSgXwHNTsVsl1qHqMHV0heUtV5l9UO15fPy/MkxgFUEZ5SevRsPk3zMCAAAAAAAAAAAAAEBCDwAAAAAALwIAAAIAAAAAAAAA",
+        "timestampMs": "1792720232295"
+      },
+      {
+        "id": {
+          "txDigest": "7zmbU5PFrDLc69BvYWsMgoCUt6HytTxb1YQRZNwpr9M5",
+          "eventSeq": "2"
+        },
+        "packageId": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8",
+        "transactionModule": "fleet_storage",
+        "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+        "type": "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::events::BlobCertified",
+        "parsedJson": {
+          "blob_id": "48754620459249600176821591220912249378094678870638581070168409405301176715034",
+          "deletable": false,
+          "end_epoch": 563.0,
+          "epoch": 559.0,
+          "is_extension": true,
+          "object_id": "0xf2e02cac1a3b8fcf0faa2072b33a86b8b2c90ebcd787b641c4027a8b7aa3aa09"
+        },
+        "bcsEncoding": "base64",
+        "bcs": "LwIAABrHLJh+JB2PitgM4/1Vpxx6ZPFXqTzwt359nNEkI8prMwIAAADy4CysGjuPzw+qIHKzOoa4sskOvNeHtkHEAnqLeqOqCQE=",
+        "timestampMs": "1792720232295"
+      },
+      {
+        "id": {
+          "txDigest": "7zmbU5PFrDLc69BvYWsMgoCUt6HytTxb1YQRZNwpr9M5",
+          "eventSeq": "3"
+        },
+        "packageId": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8",
+        "transactionModule": "fleet_storage",
+        "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+        "type": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::RenewalCompleted",
+        "parsedJson": {
+          "blob_object_id": "0xf2e02cac1a3b8fcf0faa2072b33a86b8b2c90ebcd787b641c4027a8b7aa3aa09",
+          "end_epoch": 563.0,
+          "epoch": 559.0,
+          "fee": "0",
+          "revision": "2",
+          "reward": "1000000",
+          "storage_id": "0x9afc334986a31043acc5197379bbb742c760ecca6f3f0d3e192817c07353b15b"
+        },
+        "bcsEncoding": "base64",
+        "bcs": "mvwzSYajEEOsxRlzebu3Qsdg7MpvPw0+GSgXwHNTsVvy4CysGjuPzw+qIHKzOoa4sskOvNeHtkHEAnqLeqOqCTMCAAAAAAAAAAAAAEBCDwAAAAAALwIAAAIAAAAAAAAA",
+        "timestampMs": "1792720232295"
+      }
+    ],
+    "target": 563
+  },
   "browser": {
     "verified": true,
     "chain": "4c78adac",
     "health": "degraded",
-    "healthSeq": "12",
+    "healthSeq": "7",
     "archives": [
       {
         "seq": 1,
         "reason": "logs",
-        "records": 52,
-        "blobObjectId": "0x23777bbaa16061aec3dffd5e2b9cb790c2769ace2d64264dffa0075a21fd8bb2",
-        "blobId": "10647782198827440518491059952530427774809106685005161211653178724691700868154",
+        "records": 3,
+        "blobObjectId": "0x25d6a1ea30757485e52d57997d50ed797cfcbf324c60154119e527af46c3e4df",
+        "blobId": "63612731015090456880541763462812098634278471383749520367233717737718636811558",
         "endEpoch": 562
       },
       {
         "seq": 2,
         "reason": "diagnostics",
-        "records": 64,
-        "blobObjectId": "0x3dbf44a129333f07ce8db8b4eb774e2178547fb5a994b6999593e4bd1700c93b",
-        "blobId": "103367873365404944936497952718719850762755174559761783057308572550842806788438",
+        "records": 109,
+        "blobObjectId": "0xf2e02cac1a3b8fcf0faa2072b33a86b8b2c90ebcd787b641c4027a8b7aa3aa09",
+        "blobId": "48754620459249600176821591220912249378094678870638581070168409405301176715034",
         "endEpoch": 562
       }
     ],
@@ -328,14 +541,15 @@
     "indexed": true,
     "keyEpoch": "0"
   },
-  "device_swept_mist": 13041889,
+  "device_swept_mist": 70248934,
   "limits": [
-    "Testnet fixture and open Testnet Seal providers only; no production-provider availability/fees/recovery acceptance.",
-    "No manual extension/IdP wallet, physical target or Mainnet acceptance.",
-    "Certified non-deletable blobs retain purchased epochs; owner metadata remains for readback."
+    "Dedicated Testnet and public Testnet Seal providers only; no production/manual wallet/hardware/Mainnet claim",
+    "Native fixture uses an owner-configured 60-second health interval for bounded testing; default hourly cadence and daily/emergency limits are independently tested",
+    "Retained original registered blob after underweight confirmation; original charges carried forward, no faucet or refund replenishment",
+    "Source working tree included weighted-quorum and report-recovery changes subsequently committed as e30af5e/dfa7d64"
   ],
-  "end_balance_mist": 1040023795,
-  "spent_mist": -41636378,
-  "allowance_used_mist": 54339596,
-  "finished": "2026-10-22T23:21:49Z"
+  "end_balance_mist": 889215921,
+  "spent_mist": -184538656,
+  "allowance_used_mist": 631790822,
+  "finished": "2026-10-23T01:50:55Z"
 }
